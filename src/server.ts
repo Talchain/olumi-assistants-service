@@ -57,6 +57,7 @@ import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS, getResolvedTimeouts, validateTimeoutRelationships } from "./config/timeouts.js";
+import { getTurnExecutorBudgets, getHandlerBudgetMs } from "./orchestrator-v5/budgets.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { ceeOrchestratorRouteV1 } from "./orchestrator/route.js";
@@ -266,8 +267,17 @@ export async function build() {
     derived_llm_timeout_ms: DRAFT_LLM_TIMEOUT_MS,
   }, `Request budget: ${DRAFT_REQUEST_BUDGET_MS}ms total, ${DRAFT_LLM_TIMEOUT_MS}ms LLM timeout, ${LLM_POST_PROCESSING_HEADROOM_MS}ms headroom`);
 
-  // Validate timeout relationships (warn about misconfigurations)
-  const timeoutWarnings = validateTimeoutRelationships();
+  // Validate timeout relationships (warn about misconfigurations).
+  // The V5 budget-layer values are injected: `timeouts.ts` is kept import-light
+  // and cannot reach `orchestrator-v5/budgets.ts` (which depends on it) or
+  // `config.proxy.*` without a cycle. Resolving them HERE means the ladder is
+  // checked against the env actually applied to this instance, not repo
+  // defaults — the whole reason these rungs are at boot and not only in CI.
+  const timeoutWarnings = validateTimeoutRelationships({
+    handlerBudgetMs: getHandlerBudgetMs(),
+    turnBudgetMs: getTurnExecutorBudgets().turn_ms,
+    browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+  });
   for (const warning of timeoutWarnings) {
     log.warn({ event: 'config.timeout_relationship' }, warning);
   }

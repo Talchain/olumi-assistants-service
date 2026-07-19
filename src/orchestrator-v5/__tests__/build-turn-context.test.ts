@@ -14,6 +14,15 @@ import { makeMessagePayload } from './fixtures.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { deriveAnalysisFreshness } from '../context/freshness.js';
+import { config } from '../../config/index.js';
+
+/**
+ * Effective default turn budget: the configured 180s default CLAMPED to the
+ * browser-proxy deadline (2026-07-19) so CEE always answers before the proxy
+ * does. Derived rather than restated as a literal — a hard-coded post-clamp
+ * number would be exactly the silent-drift mirror the clamp exists to remove.
+ */
+const EXPECTED_DEFAULT_TURN_MS = Math.min(180_000, config.proxy.browserProxyTimeoutMs - 10_000);
 
 const BASE = makeMessagePayload({
   turn_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -79,7 +88,7 @@ describe('buildTurnContext', () => {
 
   it('uses default budgets when env vars are absent', async () => {
     const ctx = await buildTurnContext(BASE, 'req-1', OPTS);
-    expect(ctx.budgets.turn_ms).toBe(180_000);
+    expect(ctx.budgets.turn_ms).toBe(EXPECTED_DEFAULT_TURN_MS);
     expect(ctx.budgets.llm_narrate_ms).toBe(60_000);
   });
 
@@ -95,7 +104,7 @@ describe('buildTurnContext', () => {
     process.env.TURN_BUDGET_MS = 'not-a-number';
     process.env.LLM_BUDGET_NARRATE_MS = '-1';
     const ctx = await buildTurnContext(BASE, 'req-1', OPTS);
-    expect(ctx.budgets.turn_ms).toBe(180_000);
+    expect(ctx.budgets.turn_ms).toBe(EXPECTED_DEFAULT_TURN_MS);
     expect(ctx.budgets.llm_narrate_ms).toBe(60_000);
   });
 });

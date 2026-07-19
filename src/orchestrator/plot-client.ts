@@ -16,10 +16,23 @@
  * - /v1/validate-patch 422 → structured rejection (not an error — returned as data)
  * - /v1/validate-patch 501 → FEATURE_DISABLED (returned as typed result, not thrown)
  *
- * Retry policy (H.4):
- * - 1 retry for 5xx and timeout errors, 2-second backoff
+ * Retry policy (H.4, revised 2026-07-19):
+ * - 1 retry for FAST-FAILING 5xx and network errors, 2-second backoff
  * - No retry for 4xx (deterministic client errors)
- * - Retry uses remaining turn budget, not a fresh timeout
+ * - NO RETRY ON TIMEOUT for `/v2/run` (FIX 2). CEE's cap (75s) now sits ABOVE
+ *   PLoT's own REQUEST_BUDGET_MS (70s), and PLoT clamps every internal leg to
+ *   its remaining budget — so a timeout observed here means PLoT failed
+ *   INTERNALLY, not that CEE cut it off early. Retrying near-certainly
+ *   repeats the failure at double the PLoT+ISL compute cost. `validate-patch`
+ *   KEEPS its timeout retry: at a 5s cap it is cheap and a timeout there can
+ *   genuinely be transient. See `skipRetryOnTimeout`.
+ * - The retry window is CLAMPED to the caller's remaining budget
+ *   (`min(configured, remaining - backoff - safety)`), never a fresh full
+ *   timeout — previously a retry re-armed the entire cap, so one slow request
+ *   could cost `timeout + backoff + timeout` and put TWO expensive runs in
+ *   flight at once.
+ * - `turnSignal` is combined into the fetch via `AbortSignal.any`, so aborting
+ *   the turn actually cancels PLoT's work instead of leaving it running.
  * - If remaining budget after backoff < 2s, retry is skipped
  * - EXCEPTION (FIX 1/B, brief-bearing runs): a `/v2/run` payload carrying a
  *   non-empty `brief` triggers PLoT's synchronous, LLM-backed decision-review
@@ -36,7 +49,14 @@
 
 import { z } from "zod";
 import { config } from "../config/index.js";
-import { PLOT_RUN_TIMEOUT_MS, PLOT_RUN_BRIEF_TIMEOUT_MS, PLOT_VALIDATE_TIMEOUT_MS } from "../config/timeouts.js";
+import {
+  PLOT_RUN_TIMEOUT_MS,
+  PLOT_RUN_BRIEF_TIMEOUT_MS,
+  PLOT_VALIDATE_TIMEOUT_MS,
+  RETRY_BACKOFF_MS,
+  MIN_RETRY_BUDGET_MS,
+  RETRY_SAFETY_MARGIN_MS,
+} from "../config/timeouts.js";
 import { log } from "../utils/telemetry.js";
 import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
 
@@ -87,16 +107,6 @@ const V2RunResponseMinimal = z.object({
 const ValidatePatchResponseMinimal = z.object({
   graph_hash: z.string().optional(),
 }).passthrough();
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/** Backoff delay before retry (ms) */
-const RETRY_BACKOFF_MS = 2_000;
-
-/** Minimum remaining budget required to attempt a retry (ms) */
-const MIN_RETRY_BUDGET_MS = 2_000;
 
 // ============================================================================
 // Error Types
@@ -418,11 +428,18 @@ class PLoTClientImpl implements PLoTClient {
     const timeoutMs = briefBearing ? PLOT_RUN_BRIEF_TIMEOUT_MS : PLOT_RUN_TIMEOUT_MS;
 
     return this.runWithRetry(
-      () => this.runOnce(payload, requestId, timeoutMs),
+      (attemptTimeoutMs: number) => this.runOnce(payload, requestId, attemptTimeoutMs, opts),
       'run',
       requestId,
       opts,
-      { skipRetryEntirely: briefBearing },
+      {
+        skipRetryEntirely: briefBearing,
+        baseTimeoutMs: timeoutMs,
+        // FIX 2 (this lane): the TIMEOUT class is not retried on /v2/run.
+        // Fast-failing 5xx / network errors still get exactly one clamped
+        // retry — see the carve-out comment in runWithRetry.
+        skipRetryOnTimeout: true,
+      },
     ) as Promise<V2RunResponseEnvelope>;
   }
 
@@ -430,11 +447,17 @@ class PLoTClientImpl implements PLoTClient {
     // H.5: Outbound structural validation
     validatePatchPayload(payload);
 
+    // FIX 2 (this lane): validate-patch carries the SAME two defects as
+    // /v2/run — a retry re-armed the full timeout, and `turnSignal` never
+    // reached `fetch`. It keeps its timeout retry (unlike /v2/run): at a 5s
+    // cap this endpoint is cheap and fast, so a timeout here really can be a
+    // transient blip rather than an internal failure above PLoT's own budget.
     return this.runWithRetry(
-      () => this.validatePatchOnce(payload, requestId),
+      (attemptTimeoutMs: number) => this.validatePatchOnce(payload, requestId, attemptTimeoutMs, opts),
       'validate_patch',
       requestId,
       opts,
+      { baseTimeoutMs: PLOT_VALIDATE_TIMEOUT_MS },
     ) as Promise<ValidatePatchResult>;
   }
 
@@ -443,17 +466,53 @@ class PLoTClientImpl implements PLoTClient {
   // --------------------------------------------------------------------------
 
   private async runWithRetry<T>(
-    fn: () => Promise<T>,
+    fn: (timeoutMs: number) => Promise<T>,
     operation: string,
     requestId: string,
-    opts?: PLoTClientRunOpts,
-    retryConfig?: { skipRetryEntirely?: boolean },
+    // Required-but-nullable: both call sites forward their own `opts` (which
+    // may itself be undefined). Kept positional-required so `retryConfig`
+    // below can be required too.
+    opts: PLoTClientRunOpts | undefined,
+    // `baseTimeoutMs` is REQUIRED. Both call sites pass it explicitly; a
+    // `?? PLOT_RUN_TIMEOUT_MS` fallback would silently size a validate_patch
+    // attempt with the /v2/run window if it were ever omitted.
+    retryConfig: { skipRetryEntirely?: boolean; baseTimeoutMs: number; skipRetryOnTimeout?: boolean },
   ): Promise<T> {
+    const baseTimeoutMs = retryConfig.baseTimeoutMs;
     try {
-      return await fn();
+      return await fn(baseTimeoutMs);
     } catch (firstError) {
       // Only retry 5xx and timeout errors
       if (!isRetryableError(firstError)) {
+        throw firstError;
+      }
+
+      // FIX 2 (this lane): NEVER retry the TIMEOUT class on `/v2/run`.
+      //
+      // CEE's per-attempt cap now sits ABOVE PLoT's own REQUEST_BUDGET_MS
+      // (70s), and PLoT clamps every internal leg (base ISL call, flip
+      // search, threshold analysis) to its REMAINING request budget. So a
+      // timeout observed HERE no longer means "the request was cut off
+      // early and might succeed if given another go" — it means PLoT failed
+      // to complete within its OWN budget, i.e. an internal failure. A
+      // retry near-certainly reproduces it, at double the PLoT+ISL compute
+      // cost and double the wall clock, for a request the user is already
+      // waiting on.
+      //
+      // Deliberately NOT extended to 5xx/network: those fail FAST (measured
+      // staging p95 for a real /v2/run is ~5s), so a clamped second attempt
+      // is cheap and genuinely likely to succeed against a transient blip.
+      // That asymmetry is the whole point — see the positive-control test
+      // `retries once (clamped) on a fast-failing 503`.
+      if (retryConfig.skipRetryOnTimeout && firstError instanceof PLoTTimeoutError) {
+        log.warn(
+          {
+            request_id: requestId,
+            operation,
+            timeout_ms: baseTimeoutMs,
+          },
+          "PLoT retry skipped — timeout above PLoT's own request budget implies internal failure, not a transient cut-off",
+        );
         throw firstError;
       }
 
@@ -469,7 +528,7 @@ class PLoTClientImpl implements PLoTClient {
       // or network) — `firstError` is already confirmed retryable by the
       // `isRetryableError` check above, so no class-specific check is
       // needed here.
-      if (retryConfig?.skipRetryEntirely) {
+      if (retryConfig.skipRetryEntirely) {
         log.warn(
           {
             request_id: requestId,
@@ -507,12 +566,40 @@ class PLoTClientImpl implements PLoTClient {
         throw firstError;
       }
 
+      // FIX 2 (this lane): the retry gets a CLAMPED window, not a fresh full
+      // one. Previously `runOnce` re-armed the ENTIRE configured timeout on
+      // the second attempt regardless of how much turn budget was left, so a
+      // 30s cap could cost 30 + 2 + 30 = 62s of wall clock and put TWO
+      // expensive PLoT+ISL runs in flight. Clamp to what the caller can
+      // actually still wait for.
+      //
+      // `Infinity` (no budget info supplied by the caller) must fall back to
+      // the configured base timeout, never to `Infinity` — an unbounded
+      // fetch has no abort at all.
+      const clampedRetryTimeoutMs = Number.isFinite(remainingBudgetMs)
+        ? Math.min(baseTimeoutMs, remainingBudgetMs - RETRY_BACKOFF_MS - RETRY_SAFETY_MARGIN_MS)
+        : baseTimeoutMs;
+
+      if (clampedRetryTimeoutMs <= 0) {
+        log.warn(
+          {
+            request_id: requestId,
+            operation,
+            remaining_budget_ms: remainingBudgetMs,
+          },
+          "PLoT retry skipped — no positive timeout window remains after backoff and safety margin",
+        );
+        throw firstError;
+      }
+
       log.info(
         {
           request_id: requestId,
           operation,
           remaining_budget_ms: remainingBudgetMs,
           backoff_ms: RETRY_BACKOFF_MS,
+          base_timeout_ms: baseTimeoutMs,
+          retry_timeout_ms: clampedRetryTimeoutMs,
           first_error: firstError instanceof Error ? firstError.message : String(firstError),
         },
         "PLoT retrying after transient failure",
@@ -525,9 +612,9 @@ class PLoTClientImpl implements PLoTClient {
         throw firstError;
       }
 
-      // Retry
+      // Retry — with the CLAMPED window, not a fresh full timeout.
       try {
-        return await fn();
+        return await fn(clampedRetryTimeoutMs);
       } catch (retryError) {
         log.warn(
           {
@@ -552,18 +639,114 @@ class PLoTClientImpl implements PLoTClient {
   }
 
   // --------------------------------------------------------------------------
+  // Per-attempt abort plumbing (shared by both single-attempt operations)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Own the per-attempt abort lifecycle for ONE HTTP operation.
+   *
+   * `runOnce` and `validatePatchOnce` need byte-identical abort behaviour:
+   * a per-attempt timeout controller, that controller combined with the
+   * caller's turn-level signal, a `clearTimeout` on every exit path, and the
+   * turn-abort-vs-timeout discrimination in the catch. Carrying two copies is
+   * how the previous carve-out landed in one method only and had to be
+   * hand-copied into the other; this makes that impossible.
+   *
+   * WHY the signals are combined: previously ONLY `controller.signal` reached
+   * `fetch`, so when the turn was aborted (user navigated away, outer turn
+   * budget tripped) the in-flight PLoT request kept running to its own
+   * timeout — CEE's abort did not cancel PLoT's expensive compute, and the
+   * socket stayed open holding an ISL run nobody was waiting for.
+   *
+   * `AbortSignal.any` is Node >= 20 (engines pin is >= 20; the runtime on
+   * Render staging reports v20.20.2), and it propagates whichever signal
+   * fires first while leaving `controller.signal.aborted` observable for the
+   * timeout-vs-turn-abort discrimination in `classifyAbort`.
+   */
+  private beginAttempt(
+    operation: 'run' | 'validate_patch',
+    timeoutMs: number,
+    requestId: string,
+    opts?: PLoTClientRunOpts,
+  ): {
+    fetchSignal: AbortSignal;
+    clear: () => void;
+    classifyAbort: (error: unknown, elapsedMs: number) => void;
+  } {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    const fetchSignal = opts?.turnSignal
+      ? AbortSignal.any([controller.signal, opts.turnSignal])
+      : controller.signal;
+
+    return {
+      fetchSignal,
+      clear: () => clearTimeout(timeoutId),
+
+      /**
+       * Classify an error thrown by the attempt.
+       *
+       * THROWS for both abort sources (the caller must not swallow them);
+       * RETURNS for anything else, leaving the caller's own handling intact.
+       *
+       * A turn-level abort is NOT a PLoT timeout — PLoT was still within its
+       * budget; the CALLER went away. Classifying it as PLoTTimeoutError
+       * would (a) misattribute the failure to PLoT in telemetry and (b) feed
+       * the timeout class into the retry policy for a turn that is already
+       * over. Rethrown unchanged so the turn executor classifies it as
+       * TURN_BUDGET_EXCEEDED — Paul's constraint 7, BUDGET_EXCEEDED wins over
+       * an inner timeout when both apply.
+       *
+       * Order matters: check the TURN signal first. When the turn aborts, the
+       * per-attempt `controller` has NOT fired, so `controller.signal.aborted`
+       * is false and the timeout branch would not claim it anyway — but an
+       * explicit ordered check keeps that correct even if a future edit adds
+       * a `controller.abort()` to a cleanup path.
+       */
+      classifyAbort: (error: unknown, elapsedMs: number): void => {
+        if (opts?.turnSignal?.aborted && !controller.signal.aborted) {
+          log.warn(
+            { elapsed_ms: elapsedMs, request_id: requestId },
+            `PLoT ${operation} aborted by turn signal — caller went away; not a PLoT timeout`,
+          );
+          throw error;
+        }
+
+        if (error instanceof Error && (error.name === 'AbortError' || controller.signal.aborted)) {
+          log.error(
+            { timeout_ms: timeoutMs, elapsed_ms: elapsedMs, request_id: requestId },
+            `PLoT ${operation} timed out`,
+          );
+          throw new PLoTTimeoutError(
+            `PLoT ${operation} timed out after ${elapsedMs}ms`,
+            operation,
+            timeoutMs,
+            elapsedMs,
+          );
+        }
+      },
+    };
+  }
+
+  // --------------------------------------------------------------------------
   // Core HTTP operations (single attempt)
   // --------------------------------------------------------------------------
 
   private async runOnce(
     payload: Record<string, unknown>,
     requestId: string,
-    timeoutMs: number = PLOT_RUN_TIMEOUT_MS,
+    // REQUIRED, not defaulted. The sole caller (`runWithRetry`) always passes
+    // the per-attempt window explicitly, and the retry path depends on it
+    // being the CLAMPED value. A default here would silently re-arm the full
+    // configured timeout for any future caller that forgot to pass one —
+    // reintroducing exactly the defect this lane removed, invisibly.
+    timeoutMs: number,
+    opts?: PLoTClientRunOpts,
   ): Promise<V2RunResponseEnvelope> {
     const url = `${this.baseUrl}/v2/run`;
     const startTime = Date.now();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const { fetchSignal, clear, classifyAbort } = this.beginAttempt('run', timeoutMs, requestId, opts);
 
     log.info(
       { url: '/v2/run', request_id: requestId, timeout_ms: timeoutMs },
@@ -575,10 +758,10 @@ class PLoTClientImpl implements PLoTClient {
         method: 'POST',
         headers: this.buildHeaders(requestId),
         body: JSON.stringify(payload),
-        signal: controller.signal,
+        signal: fetchSignal,
       });
 
-      clearTimeout(timeoutId);
+      clear();
       const elapsedMs = Date.now() - startTime;
 
       if (response.ok) {
@@ -700,18 +883,14 @@ class PLoTClientImpl implements PLoTClient {
       }
       throw plotErr;
     } catch (error) {
-      clearTimeout(timeoutId);
+      clear();
       const elapsedMs = Date.now() - startTime;
 
       if (error instanceof PLoTError) throw error;
 
-      if (error instanceof Error && (error.name === 'AbortError' || controller.signal.aborted)) {
-        log.error(
-          { timeout_ms: timeoutMs, elapsed_ms: elapsedMs, request_id: requestId },
-          "PLoT run timed out",
-        );
-        throw new PLoTTimeoutError("PLoT run timed out after " + elapsedMs + "ms", 'run', timeoutMs, elapsedMs);
-      }
+      // Throws for either abort source (turn-abort vs per-attempt timeout);
+      // returns for anything else. See `beginAttempt`.
+      classifyAbort(error, elapsedMs);
 
       log.error(
         { error, elapsed_ms: elapsedMs, request_id: requestId },
@@ -721,14 +900,24 @@ class PLoTClientImpl implements PLoTClient {
     }
   }
 
-  private async validatePatchOnce(payload: Record<string, unknown>, requestId: string): Promise<ValidatePatchResult> {
+  private async validatePatchOnce(
+    payload: Record<string, unknown>,
+    requestId: string,
+    // REQUIRED, not defaulted — see the note on `runOnce`.
+    timeoutMs: number,
+    opts?: PLoTClientRunOpts,
+  ): Promise<ValidatePatchResult> {
     const url = `${this.baseUrl}/v1/validate-patch`;
     const startTime = Date.now();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), PLOT_VALIDATE_TIMEOUT_MS);
+    const { fetchSignal, clear, classifyAbort } = this.beginAttempt(
+      'validate_patch',
+      timeoutMs,
+      requestId,
+      opts,
+    );
 
     log.info(
-      { url: '/v1/validate-patch', request_id: requestId, timeout_ms: PLOT_VALIDATE_TIMEOUT_MS },
+      { url: '/v1/validate-patch', request_id: requestId, timeout_ms: timeoutMs },
       "PLoT validate_patch request",
     );
 
@@ -737,10 +926,10 @@ class PLoTClientImpl implements PLoTClient {
         method: 'POST',
         headers: this.buildHeaders(requestId),
         body: JSON.stringify(payload),
-        signal: controller.signal,
+        signal: fetchSignal,
       });
 
-      clearTimeout(timeoutId);
+      clear();
       const elapsedMs = Date.now() - startTime;
 
       // 2xx → success
@@ -816,23 +1005,14 @@ class PLoTClientImpl implements PLoTClient {
         requestId,
       );
     } catch (error) {
-      clearTimeout(timeoutId);
+      clear();
       const elapsedMs = Date.now() - startTime;
 
       if (error instanceof PLoTError) throw error;
 
-      if (error instanceof Error && (error.name === 'AbortError' || controller.signal.aborted)) {
-        log.error(
-          { timeout_ms: PLOT_VALIDATE_TIMEOUT_MS, elapsed_ms: elapsedMs, request_id: requestId },
-          "PLoT validate_patch timed out",
-        );
-        throw new PLoTTimeoutError(
-          "PLoT validate_patch timed out after " + elapsedMs + "ms",
-          'validate_patch',
-          PLOT_VALIDATE_TIMEOUT_MS,
-          elapsedMs,
-        );
-      }
+      // Throws for either abort source (turn-abort vs per-attempt timeout);
+      // returns for anything else. See `beginAttempt`.
+      classifyAbort(error, elapsedMs);
 
       log.error(
         { error, elapsed_ms: elapsedMs, request_id: requestId },
@@ -868,7 +1048,10 @@ class PLoTClientImpl implements PLoTClient {
 
 export { validateRunPayload as _validateRunPayload, validatePatchPayload as _validatePatchPayload };
 export { isRetryableError as _isRetryableError, cancellableSleep as _cancellableSleep };
-export { RETRY_BACKOFF_MS as _RETRY_BACKOFF_MS, MIN_RETRY_BUDGET_MS as _MIN_RETRY_BUDGET_MS };
+// NOTE: RETRY_BACKOFF_MS / MIN_RETRY_BUDGET_MS are no longer re-exported here.
+// They now live in `config/timeouts.ts` (their real home, alongside every other
+// timing constant) and are exported from there, so tests and the derived
+// handler budget import the source directly rather than a test-only alias.
 
 /**
  * Create a PLoT client if configured, or null if PLOT_BASE_URL is not set.

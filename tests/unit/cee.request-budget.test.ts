@@ -56,8 +56,14 @@ describe("Request budget configuration", () => {
 
   it("validateTimeoutRelationships checks budget vs route timeout", async () => {
     const { validateTimeoutRelationships } = await import("../../src/config/timeouts.js");
+    const { getHandlerBudgetMs, getTurnExecutorBudgets } = await import("../../src/orchestrator-v5/budgets.js");
+    const { config } = await import("../../src/config/index.js");
     // Just verify the function runs without throwing and returns an array
-    const warnings = validateTimeoutRelationships();
+    const warnings = validateTimeoutRelationships({
+      handlerBudgetMs: getHandlerBudgetMs(),
+      turnBudgetMs: getTurnExecutorBudgets().turn_ms,
+      browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+    });
     expect(Array.isArray(warnings)).toBe(true);
     // All items should be strings
     for (const w of warnings) {
@@ -79,8 +85,15 @@ describe("Request budget configuration", () => {
     expect(DRAFT_REQUEST_BUDGET_MS).toBeLessThan(ROUTE_TIMEOUT_MS);
     expect(DRAFT_LLM_TIMEOUT_MS).toBe(DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS);
 
+    const { getHandlerBudgetMs, getTurnExecutorBudgets } = await import("../../src/orchestrator-v5/budgets.js");
+    const { config } = await import("../../src/config/index.js");
+
     // No warnings about budget exceeding route timeout
-    const warnings = validateTimeoutRelationships();
+    const warnings = validateTimeoutRelationships({
+      handlerBudgetMs: getHandlerBudgetMs(),
+      turnBudgetMs: getTurnExecutorBudgets().turn_ms,
+      browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+    });
     const budgetVsRouteWarning = warnings.find(w => w.includes("DRAFT_REQUEST_BUDGET_MS") && w.includes("ROUTE_TIMEOUT_MS"));
     expect(budgetVsRouteWarning).toBeUndefined();
   });
