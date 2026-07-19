@@ -235,11 +235,23 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     if (!opts?.onlyLeak && opts?.withDecisionReview !== false) {
       enrichment.decision_review = { narrative_summary: 'ok' };
     }
+    if (!opts?.onlyLeak) {
+      // Wave-2 ask 3 (0.19.0): decision_brief is now a KEPT field whose
+      // internal lineage (`seed` / `graph_hash`) is stripped in transit —
+      // it moved out of the always-dropped leak-carrier set below. The
+      // fixture mirrors the live capture: real content PLUS lineage keys,
+      // so the leak assertions keep their positive control.
+      enrichment.decision_brief = {
+        headline: 'Plan A is the leading option.',
+        options: [{ option_id: 'opt_a', rank: 1 }],
+        seed: 12345,
+        graph_hash: 'ef1aeb36a440854a',
+      };
+    }
     // Leak carriers — always present, always dropped.
     enrichment._meta = { feature_flags_snapshot: { TOKEN_RL_ENABLE: '[REDACTED]' } };
     enrichment.meta = { build: 'cef69b0', feature_flags: { TOKEN_RL_ENABLE: '[REDACTED]' } };
     enrichment.m1_coaching = { assumptions_ledger: { assumptions: [{ source_service: 'isl_engine' }] } };
-    enrichment.decision_brief = { seed: 12345 };
     enrichment.fact_objects = [{ lineage: { seed: 999 } }];
     enrichment.downstream_calls = { isl: [{ request_payload: { graph: { nodes: [] } } }] };
     enrichment.graph = { nodes: [] };
@@ -283,13 +295,20 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const enr = block!.enrichment ?? {};
     // Only panel-aware keep-list fields survive. `flip_thresholds` is now a
     // recovered top-level science field (kept), not a dropped leak carrier.
+    // 0.19.0 (wave-2 ask 3): `decision_brief` joined the keep-list — its
+    // CONTENT ships, its lineage keys are deep-stripped (asserted below).
     expect(Object.keys(enr).sort()).toEqual([
-      'decision_review', 'factor_sensitivity', 'flip_thresholds', 'option_comparison', 'results', 'robustness',
+      'decision_brief', 'decision_review', 'factor_sensitivity', 'flip_thresholds', 'option_comparison', 'results', 'robustness',
     ]);
-    // Leak carriers dropped (flip_thresholds is no longer in this set).
-    for (const k of ['_meta', 'meta', 'm1_coaching', 'decision_brief', 'fact_objects', 'downstream_calls', 'graph', 'critiques']) {
+    // Leak carriers dropped (decision_brief moved to the kept set, 0.19.0).
+    for (const k of ['_meta', 'meta', 'm1_coaching', 'fact_objects', 'downstream_calls', 'graph', 'critiques']) {
       expect(k in enr).toBe(false);
     }
+    // The kept decision_brief ships its content MINUS the lineage keys.
+    const brief = enr.decision_brief as Record<string, unknown>;
+    expect(brief.headline).toBe('Plan A is the leading option.');
+    expect('seed' in brief).toBe(false);
+    expect('graph_hash' in brief).toBe(false);
     // No leak markers survive ANYWHERE in the kept enrichment.
     const enrJson = JSON.stringify(enr);
     expect(enrJson).not.toContain('[REDACTED]');
@@ -303,7 +322,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const block = analysisResultBlockFor(richRunAnalysisFact({ withDecisionReview: false }), { currentTurn: false });
     const enr = block!.enrichment ?? {};
     expect(Object.keys(enr).sort()).toEqual([
-      'factor_sensitivity', 'flip_thresholds', 'option_comparison', 'results', 'robustness',
+      'decision_brief', 'factor_sensitivity', 'flip_thresholds', 'option_comparison', 'results', 'robustness',
     ]);
   });
 

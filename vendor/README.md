@@ -7,75 +7,71 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.18.0.tgz`
+### `talchain-schemas-0.19.0.tgz`
 
-**⚠ PRE-RELEASE — NOT A PUBLISHED ARTEFACT.** This tarball was built from
-the head of olumi-schemas **PR #10** (`claude-schemas/draft-goal-constraints`
-@ `8291ca03d2702a80b0cbd6629857ed92c34a6b26`), which is **open, unmerged and
-Paul-gated**. There is no `v0.18.0` tag and no published 0.18.0 package.
-**This vendored tarball MUST be replaced with the published artefact before
-this branch merges.** Merging olumi-schemas PR #10 to `main` auto-publishes,
-so the publish is Paul's to sequence.
+**RELEASED.** Built from the **MERGED** olumi-schemas main
+(`8088d4e96bdd606a9d86b15ad32f3a18ead08fab`, the squash of PR #11; tag
+`v0.19.0`; published to GitHub Packages by run 29707387512 —
+`Publish to GitHub Packages` step SUCCESS; the run-level red is the
+known `Trigger propagation` missing-PAT failure that occurs on every
+publish). Provenance chain, verified at the bytes: the PR-#11 head
+(`2243599d`) and merged main share git tree
+`7eff3a76838533574e6beee0b4124bdf8b3e573e`, a fresh
+`npm ci && npm test && npm pack` at merged main (966/966 green)
+reproduces this tarball sha256-identically, and the registry artefact's
+raw tar stream is byte-identical to this tarball's
+(`gzcat | shasum -a 256` = `7329ebd43625fe7b01f1ec25e7fcbbd0636b6251cde01d311db058c2aed26185`
+for both; only the gzip wrapper differs, so the registry sha512 differs
+while the content is provably the same).
 
-**Purpose:** consumption of `@talchain/schemas` v0.18.0, which declares an
-optional `goal_constraints` array on `DraftGraphBlockSchema` plus a new
-`DraftGoalConstraintSchema` element type. This is the contract change that
-unblocks CEE emitting the user's extracted hard constraints on the
-`/orchestrate/v2/turn` draft wire: the block is `.strict()`, so before 0.18.0
-an undeclared `goal_constraints` key produced `unrecognized_keys` →
-`validateEgress` failure → an `EGRESS_CONTRACT_VIOLATION` envelope replacing
-every draft response.
+**Purpose:** the wave-2 producer fields (task #13). This re-vendor is what
+lets CEE (a) add `decision_brief` to `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`
+without breaking the contract test that binds the CEE list
+element-for-element to the package's `CEE_UI_ENRICHMENT_KEEP_LIST`
+(11 → 12 keys), and (b) later emit the strict-schema additions (guidance
+`category`/`priority`, `Action.detail`, `framing_question`,
+`decision_classification`) once DGAI has re-vendored — those emissions are
+a SEPARATE PR gated on the DGAI re-vendor merging, because a 0.18.0
+consumer strict-fails a block carrying the new keys.
 
-0.16.0 → 0.18.0 is strictly additive (verified against built dists at both
-refs, 24/24 differential checks incl. positive controls):
+0.18.0 → 0.19.0 is strictly additive (966/966 package tests green at the
+built head, including the maximality ratchet over every new optional
+field; per-change rationale in the package CHANGELOG): optional
+`category`/`priority` on the four Phase-3 block schemas, optional
+`framing_question`/`decision_classification` on `OlumiResponseSchema`,
+optional `detail` on `ActionSchema`, typed `recovery`/`recovery_suggestion`
+on `CeeTypedErrorSchema` (passthrough), typed `edge_e_values[].stability`
+band, `decision_brief` keep-list key + typed-open enrichment field, and
+the `priority_rank`/`Stage` contract statements. Zero exports removed or
+renamed; no schema gained or lost strictness.
 
-- **0.17.0** — new `./fixtures` subpath export only (100 new exports, all
-  behind that subpath; no existing entry point rewired).
-- **0.18.0** — `DraftGraphBlockSchema.goal_constraints?` +
-  `DraftGoalConstraintSchema` / `DraftGoalConstraint` exported from
-  `/boundary`. `.strict()` is RETAINED on the block — the fix for a dropped
-  field at this seam is to DECLARE it, never to loosen the block.
+Source: olumi-schemas main `8088d4e96bdd606a9d86b15ad32f3a18ead08fab`
+(tag `v0.19.0`); built via `npm ci && npm test && npm pack` from a fresh
+clone at that commit (`npm test` runs the tsc build first, so the packed
+dist is the tested dist).
 
-Zero exports removed or renamed across the whole 0.16.0 → 0.18.0 range; no
-pre-existing validator tightened; no schema gained or lost strictness. The
-`OlumiResponseSchema.draft_graph` projection is
-`DraftGraphBlockSchema.omit({ type: true })`, so it inherits the new field
-automatically — that projection is the wire location the UI reads.
-
-Note the new element schema is deliberately NOT the existing
-`boundary/run.ts` `GoalConstraintSchema`: that is a different payload at a
-different seam (V2 run-request; `id` + `bound`, no `node_id`). They are kept
-distinct and differently named on purpose — a same-named twin is a defect
-class this programme has already paid for.
-
-Source: olumi-schemas PR #10 head `8291ca03d2702a80b0cbd6629857ed92c34a6b26`;
-built via `npm ci && npm run build && npm pack` from a fresh blobless clone at
-that commit (918/918 package tests green at that head).
-
-**Checksum verification:** `vendor/talchain-schemas-0.18.0.tgz.sha256`
+**Checksum verification:** `vendor/talchain-schemas-0.19.0.tgz.sha256`
 holds the canonical sha256 hash
-(`86c44b042d5423fcc87041941925beec53a726a439915562195c040f8c97ce7d`).
+(`2ba3ebe99b407372b21ad925872846cb8fd8dbfcb4a00ca26c9398d229d8fc04`).
 The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
-tarball bytes against this manifest on every push. The byte-identical
-tarball is vendored into DecisionGuideAI on branch
-`fix/goal-constraints-ui-surface` — same hash, so the two consumers are
-provably on the same contract.
+tarball bytes against this manifest on every push. DGAI's 0.19.0
+re-vendor should vendor the byte-identical tarball — same hash, so the
+two consumers are provably on the same contract.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
-restores the prior `vendor/talchain-schemas-0.16.0.tgz`, its
+restores the prior `vendor/talchain-schemas-0.18.0.tgz`, its
 `.sha256` manifest, the prior `package.json` `file:` reference, and
-this README's prior state — i.e. the entire pin returns to v0.16.0 in
-one commit. Re-run `pnpm install` after the revert to repopulate
-`node_modules` from the restored tarball.
+this README's prior state — the entire pin returns to v0.18.0 in one
+commit. Re-run `pnpm install` after the revert.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
 0.11.0 at coaching-amendment, 0.12.0 at DL-7 edit-graph fact,
 0.13.0 at V5 Phase 3A block types, 0.14.0 at enrichment-v1 CEE-first
 adoption, 0.15.0 at the reasoning/held_proposal/ui_directive wave,
-0.16.0 at the decision-record additive wave) are
-removed on each bump — only the currently-pinned version lives in
-`vendor/`.
+0.16.0 at the decision-record additive wave, 0.18.0 at the
+draft-goal-constraints wave) are removed on each bump — only the
+currently-pinned version lives in `vendor/`.
 
 **How to update:**
 

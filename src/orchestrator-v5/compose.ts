@@ -427,6 +427,16 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   'inference_warnings',
   'confidence_tier',
   'flip_thresholds',
+  // Wave-2 ask 3 (@talchain/schemas 0.19.0, UI-verified 19 Jul): the PLoT
+  // #200 leader band. The UI consumer (DGAI #291/#292) shipped
+  // contract-pinned and has been dark ever since because this one key was
+  // stripped. The lineage-leak reason for the original omission is already
+  // handled structurally: the persisted brief's `seed` / `graph_hash` /
+  // `lineage` are all in INTERNAL_ENRICHMENT_KEYS, so
+  // `stripInternalKeysDeep` removes them from the kept copy at any depth
+  // (pinned by the cee-to-ui contract test with the persisted staging
+  // capture as its own positive control).
+  'decision_brief',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
