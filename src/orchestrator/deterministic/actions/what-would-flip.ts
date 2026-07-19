@@ -9,6 +9,8 @@ import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult, FlipAnalysisBlockData } from "../types.js";
 import { createFlipAnalysisBlock } from "../../blocks/factory.js";
 import { formatNodeValue, extractRawValue } from "../format-node-value.js";
+import { readRawRobustnessSignals } from "../../../orchestrator-v5/coaching/pick-raw-robustness.js";
+import { nearTieReasonByMargin } from "../../../orchestrator-v5/coaching/robustness-honesty.js";
 
 export const whatWouldFlipAction: ActionDefinition = {
   action_type: 'what_would_flip',
@@ -118,7 +120,35 @@ export const whatWouldFlipAction: ActionDefinition = {
 
     if (summary.runner_up && summary.winner_probability != null && summary.runner_up_probability != null) {
       const margin = (summary.winner_probability - summary.runner_up_probability) * 100;
-      if (margin < 10) {
+      // ---- S4 ROUND 5: NEW SITE — not named by any prior round's review ----
+      //
+      // Found by the inverted search (numeric comparison against a
+      // margin-named variable), not by a caller-grep: this composer holds its
+      // own bare literal `margin < 10` and imports nothing from the SSOT, so
+      // it was unfindable by construction from the round-1..4 method.
+      //
+      // The stakes here are higher than the wording suggests. "a significant
+      // shift would be needed" is a FLIPPABILITY claim, and it is emitted by
+      // the what_would_flip surface — the one surface a user opens precisely
+      // to learn how fragile the result is. On an upstream-flagged tie with a
+      // >10pp projected gap this said "a significant shift would be needed"
+      // while the V5 flip fallback said the leading option "could change
+      // without much shifting". Directly contradictory advice about the same
+      // run, on the same question.
+      const rawRobustness = readRawRobustnessSignals(
+        (ctx.analysis as { robustness?: unknown } | null)?.robustness,
+      );
+      const tieReason = nearTieReasonByMargin(margin, rawRobustness);
+      if (tieReason !== null) {
+        // Tie verdict outranks the local band in BOTH directions. Numbers are
+        // pass-through (F.6) — we still state the real gap, we just refuse to
+        // call it hard to overturn.
+        narrativeParts.push(`The margin is ${margin.toFixed(1)} points, but the analysis treats this as a close call: relatively easy to flip.`);
+      } else if (margin < 10) {
+        // Sub-10pp but above the 1pp SSOT tie boundary — a softer caution tier
+        // layered above the verdict, kept deliberately (see the matching note
+        // in compare-options.ts): narrowing it to 1pp would make this surface
+        // MORE confident at 2-9pp than it is today.
         narrativeParts.push(`The margin is only ${margin.toFixed(1)} points: relatively easy to flip.`);
       } else {
         narrativeParts.push(`The margin is ${margin.toFixed(0)} points: a significant shift would be needed.`);

@@ -13,6 +13,7 @@
  */
 
 import type { GraphV1 } from "../../contracts/plot/engine.js";
+import { nearTieReasonByMargin } from "../../orchestrator-v5/coaching/robustness-honesty.js";
 import {
   sanitiseLabel,
   labelForSentence,
@@ -418,8 +419,37 @@ export function generateKeyInsight(input: KeyInsightInput): KeyInsightOutput {
   // Check if all options have negative outcomes
   const allNegative = sorted.every((a) => a.outcome_quality === "negative");
 
-  // Is this a close race?
-  const isCloseRace = margin < MARGIN_THRESHOLDS.CLOSE;
+  // ---- S4 ROUND 5: closeness routed through the shared verdict ----
+  //
+  // Confirmed target #1 from the round-4 review: this module carried its own
+  // MARGIN_THRESHOLDS (CLOSE = 0.05) and imported nothing from
+  // robustness-honesty, on the unconditionally-registered LIVE
+  // `/assist/v1/key-insight` route (server.ts).
+  //
+  // `margin` is a difference of `expected_utility` values; *100 gives the same
+  // "points out of 100" scale the SSOT threshold is expressed in, which is why
+  // `generateCaveat` already renders it as `${marginPct}%`.
+  //
+  // ⚠ DISCLOSED RESIDUAL — READ BEFORE TRUSTING THIS AS "ROUTED".
+  // `CEEKeyInsightInput` is `.strict()` and carries NO robustness channel
+  // (schemas/cee.ts: graph, ranked_actions, top_drivers, goal_*, goals,
+  // identifiability — that is the complete list). So the raw `near_tie.is_tie`
+  // override is STRUCTURALLY UNREACHABLE here and the call below necessarily
+  // passes `null`. With a null raw signal the shared verdict reduces to
+  // |marginPp| <= 1.0, and EVERY local band in this file is already wider and
+  // therefore stricter — so this routing changes NO output today. Its value is
+  // structural: the site is no longer a local classifier, and it will start
+  // biting the moment the channel exists. I am NOT claiming the override
+  // defect is fixed on this surface; it is not.
+  // UNBLOCK: add an optional robustness passthrough to `CEEKeyInsightInput`
+  // AND a producer that populates it. Deliberately not done here — an
+  // optional field with zero producers is dead machinery that reads as a
+  // guarantee, which is the failure mode this programme keeps paying for.
+  const marginPp = margin * 100;
+  const tieReason = nearTieReasonByMargin(marginPp, null);
+  // Local CLOSE band retained as the SOFTER tier above the tie verdict (it is
+  // wider, i.e. more cautious). The SSOT owns tie/not-tie; this owns "close".
+  const isCloseRace = tieReason !== null || margin < MARGIN_THRESHOLDS.CLOSE;
 
   // Calculate ranking confidence
   const rankingConfidence = calculateRankingConfidence(winner.expected_utility, margin);

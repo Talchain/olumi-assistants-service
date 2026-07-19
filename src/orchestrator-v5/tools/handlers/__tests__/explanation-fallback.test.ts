@@ -1069,7 +1069,12 @@ describe('S4 round-3 — full margin × stability verdict matrix (both modes)', 
     margin_pp: 0,
     robustness_band: null,
     top_drivers: [],
-    staleness_reason: null,
+    // NOTE: no `staleness_reason` here. `AnalysisProjectionSummary` has no such
+    // field, so an excess-property literal is a TS2353 error that the
+    // src-only gate (`tsconfig.build.json` excludes tests) structurally CANNOT
+    // see — only `scripts/ci/typecheck-ratchet.sh` catches it. The field was
+    // inert (nothing in this matrix reads it), so it is dropped rather than
+    // absorbed into the ratchet baseline.
   };
 
   // Margin axis inputs. `indeterminate` = no finite margin and not a near-tie.

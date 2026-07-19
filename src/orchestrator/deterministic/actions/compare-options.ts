@@ -8,6 +8,8 @@
 import type { ActionDefinition } from "./types.js";
 import type { DeterministicTurnContext, ActionResult, ComparisonBlockData } from "../types.js";
 import { createComparisonBlock } from "../../blocks/factory.js";
+import { readRawRobustnessSignals } from "../../../orchestrator-v5/coaching/pick-raw-robustness.js";
+import { nearTieReasonByMargin } from "../../../orchestrator-v5/coaching/robustness-honesty.js";
 
 export const compareOptionsAction: ActionDefinition = {
   action_type: 'compare_options',
@@ -89,8 +91,47 @@ export const compareOptionsAction: ActionDefinition = {
       `${winnerLabel} leads in ${winnerPct.toFixed(0)}% of simulations, ahead of ${runnerUpLabel} at ${runnerUpPct.toFixed(0)}%, a ${margin.toFixed(0)}-point gap.`,
     );
 
-    // Margin context
-    if (margin < 5) {
+    // ---- S4 ROUND 5: closeness verdict comes from the SSOT, not from here ----
+    //
+    // This site was invisible to rounds 1-4 BY CONSTRUCTION: the sweep grepped
+    // for CALLERS of the shared primitives, and a composer that classifies with
+    // its own bare literals (`margin < 5`, `margin > 20`) imports none of them.
+    // Reinventing the classification is exactly what makes a site unfindable by
+    // a caller-grep — see the manifest note on the inverted search.
+    //
+    // `margin` here is already win_probability percentage points (winnerPct -
+    // runnerUpPct), the SAME quantity as `margin_pp` on the V5 projection, so
+    // it feeds the shared classifier directly with no unit conversion.
+    //
+    // The V4 deterministic ctx holds the PLoT envelope at `ctx.analysis`, where
+    // the raw robustness object sits at the TOP level (`analysis.robustness`)
+    // rather than under `enrichment` as it does on a V5 prior fact. Both
+    // addresses now normalise through the one `readRawRobustnessSignals`
+    // reader, so V4 can finally consult the `near_tie.is_tie` override that
+    // was previously unreachable from this pipeline.
+    const rawRobustness = readRawRobustnessSignals(
+      (ctx.analysis as { robustness?: unknown } | null)?.robustness,
+    );
+    const tieReason = nearTieReasonByMargin(margin, rawRobustness);
+
+    // Margin context. The near-tie verdict OUTRANKS the local wide-gap band:
+    // an upstream-flagged tie must never be narrated as "a clear lead" just
+    // because the projected gap happens to exceed 20 points.
+    if (tieReason === 'margin') {
+      narrativeParts.push(`This is a close call: relatively small assumption changes could swap the ranking.`);
+    } else if (tieReason === 'override') {
+      // Wider-than-threshold gap that upstream still calls a tie. State the
+      // real gap (the base line above already did) and attribute the verdict
+      // rather than claiming the options look fractionally apart — the
+      // mirror-image overclaim of a false "clear lead".
+      narrativeParts.push(`Despite that gap, the analysis treats this as a close call: relatively small assumption changes could swap the ranking.`);
+    } else if (margin < 5) {
+      // Sub-5pp but NOT a shared-SSOT near-tie (the SSOT threshold is 1pp).
+      // Retained deliberately as a SOFTER caution tier layered ABOVE the tie
+      // verdict, not as a competing classifier: dropping it would have made
+      // this surface MORE confident at 2-4pp than it is today, which is a
+      // regression in honesty dressed up as unification. The SSOT owns the
+      // tie/not-tie boundary; this owns "worth a sensitivity check".
       narrativeParts.push(`This is a close call: relatively small assumption changes could swap the ranking.`);
     } else if (margin > 20) {
       narrativeParts.push(`${winnerLabel} has a clear lead.`);
@@ -121,7 +162,13 @@ export const compareOptionsAction: ActionDefinition = {
     // "leads" works for mid-range, "clearly leads" for wide gaps — so we
     // don't describe an 80-point sweep as "edges out".
     const topDifferentiator = driverLabels.length > 0 ? driverLabels[0] : null;
-    const verb = margin < 5 ? 'edges out' : margin > 20 ? 'clearly leads' : 'leads';
+    // Verb choice scales with margin, but the SHARED near-tie verdict wins
+    // first: "clearly leads" on an upstream-flagged tie is the single most
+    // damaging sentence this action can emit, and a bare `margin > 20` test
+    // would emit it. Below the tie verdict the local bands still apply.
+    const verb = tieReason !== null
+      ? 'edges out'
+      : margin < 5 ? 'edges out' : margin > 20 ? 'clearly leads' : 'leads';
     const pctCompare = `${winnerPct.toFixed(0)}% vs ${runnerUpPct.toFixed(0)}%`;
     const assistantText = topDifferentiator
       ? `${winnerLabel} ${verb} ${runnerUpLabel} (${pctCompare}); ${topDifferentiator} is the main differentiator.`
