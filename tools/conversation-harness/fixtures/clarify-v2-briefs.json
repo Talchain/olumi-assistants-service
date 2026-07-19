@@ -122,6 +122,12 @@
       "note": "To-cut goal, or-options, number words, within-months horizon."
     },
     {
+      "id": "complete-08-runway-horizon",
+      "brief": "Should we hire a senior engineer or wait, in order to extend our runway? The budget is around £120k and we have 14 months of cash left.",
+      "expected": "silent",
+      "note": "a1/first-message-drafts (19 Jul journey probe): the ONLY timeframe token is the bare runway '14 months' (no 'this year', no 'within…', no year digit). In-order-to goal, or-options, £120k scale. RED-first against the launch battery, which credited only the 'within …' phrasing and asked for a horizon the brief already carried."
+    },
+    {
       "id": "calib-a1-choose-between-success-defined",
       "brief": "We must choose between acquiring CompetitorX and building in-house; success is defined as 30% market share by 2027.",
       "expected": "silent",

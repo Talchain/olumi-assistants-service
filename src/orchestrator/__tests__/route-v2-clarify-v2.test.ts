@@ -329,7 +329,13 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     expect(body.assistant_text).toBe('Drafted the model.');
   });
 
-  it('FLAG ON: explicit-generate with a thin persisted brief clarifies instead of drafting', async () => {
+  it('FLAG ON: explicit-generate RESPECTS the generate instruction and DRAFTS — even on a thin brief (clarifying over Generate is a dead-end class)', async () => {
+    // First-message-drafts doctrine (a1/first-message-drafts, 19 Jul journey
+    // probe): a user who pressed Generate (generate_model) has EXPLICITLY
+    // asked to draft. Clarify v2 must never interrupt that with a question
+    // list — the verified worst-first-impression bug. This inverts the E0-B
+    // launch behaviour (which clarified over explicit-generate on a thin
+    // brief); the rubric still governs every NON-generate draft-shaped turn.
     clarifyV2EnabledForTest = true;
     persistedBriefTextForRead = THIN_BRIEF;
     const res = await app.inject({
@@ -342,9 +348,40 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
       }),
     });
     expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    // Drafts (respects Generate), never clarifies: the draft dispatch runs
+    // with the assembled explicit-generate brief, and no clarify chips ship.
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toBe(THIN_BRIEF);
     const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('?');
+    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).not.toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
+  it('FIRST MESSAGE DRAFTS: the journey probe (fully-specified brief + generate_model on turn 1) DRAFTS, never clarifies (scenario 43238dd6, 19 Jul)', async () => {
+    // The verified worst-first-impression bug: a new user's first message
+    // carried a fully-specified decision AND generate_model:true, yet the
+    // clarify_v2 gate interrupted with goal+timeframe questions — no graph
+    // arrived until a second "go ahead" turn. With the generate flag
+    // respected AND the rubric crediting the already-given runway, turn 1
+    // must draft.
+    clarifyV2EnabledForTest = true;
+    const PROBE_BRIEF =
+      'Should we hire a senior engineer now or wait until after our next funding round? Budget around £120k, current runway 14 months.';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(PROBE_BRIEF, { generate_model: true }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toContain('senior engineer');
+    const body = JSON.parse(res.body);
+    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).not.toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
   });
 
   // ── PR #490 review P1 — over-length round-1 brief must round-trip ───────
@@ -421,8 +458,14 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     expect(String(args.briefOverride).length).toBeLessThanOrEqual(5000);
   });
 
-  // ── PR #490 review P2 — no silent wipe of prior holds ───────────────────
-  it('HOLD SURVIVAL: a live prior pending survives a round-1 clarify commit (explicit-generate continuation arm)', async () => {
+  // ── First-message-drafts doctrine — explicit-generate on a continuation
+  //    with a live hold DRAFTS (never clarifies); hold carry-forward is then
+  //    the draft dispatch's own concern (task_2e1b8c87, pinned in
+  //    draft-graph-dispatch tests). Round-1 clarify-commit hold survival is
+  //    still pinned NON-generate at the dispatch level (clarify-v2.dispatch
+  //    .test.ts "A7 survival control"), which reaches round 1 with
+  //    draftShaped:true directly, bypassing the route's continuation guard.
+  it('EXPLICIT-GENERATE continuation: a live hold present, the turn DRAFTS with the assembled brief (respects Generate; does not clarify)', async () => {
     clarifyV2EnabledForTest = true;
     hasPriorTurnsForRead = true;
     persistedBriefTextForRead = THIN_BRIEF;
@@ -437,13 +480,13 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
       }),
     });
     expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
-    const committed = appendMock.mock.calls[0]![0] as Record<string, unknown>;
-    const kinds = (committed.pending_actions as PendingAction[]).map((p) => p.action.kind);
-    expect(kinds).toContain('clarify_v2_round');
-    // The silent-wipe class (draft path's HOLD-WIPE fix, task_2e1b8c87):
-    // with priorPendingActions: [] the hold vanished here.
-    expect(kinds).toContain('proposed_concept');
+    // Drafts, never clarifies: the explicit-generate instruction is honoured.
+    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(String(args.briefOverride)).toBe(THIN_BRIEF);
+    const body = JSON.parse(res.body);
+    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).not.toContain(CLARIFY_V2_PROCEED_CHIP_ID);
   });
 
   it('HOLD SURVIVAL on RESUME: the follow-up ask supersedes the previous round but CARRIES an unrelated hold', async () => {

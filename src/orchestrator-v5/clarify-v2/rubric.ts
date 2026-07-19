@@ -17,7 +17,8 @@
  *   - `options`    — evidence of ≥2 alternatives ("X or Y", "versus",
  *                    "alternative", "instead of").
  *   - `quantities` — any magnitude signal (digits, currency, number words).
- *   - `timeframe`  — a horizon marker ("this year", "by Q3", "within…").
+ *   - `timeframe`  — a horizon marker ("this year", "by Q3", "within…", or
+ *                    a bare stated duration/runway like "14 months").
  *
  * RELATIONSHIP TO `src/cee/signals/brief-signals.ts` (deliberate seam, not
  * an accidental twin): `computeBriefSignals` answers a DIFFERENT question —
@@ -120,6 +121,20 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
   ],
   timeframe: [
     /\b(?:today|tomorrow|this (?:week|month|quarter|year)|next (?:week|month|quarter|year)|by (?:the )?end of|deadline|timeline|time ?frame|horizon|short[- ]term|long[- ]term|near[- ]term|q[1-4]\b|20\d\d|within (?:a|one|two|three|six|twelve|\d+) ?(?:week|month|quarter|year)s?)\b/i,
+    // A bare stated duration / runway horizon — DIGITS immediately followed
+    // by a time unit, WITHOUT the "within …" opener the arm above requires.
+    // "14 months", "18-month runway", "6 week sprint", "in 9 months". A
+    // runway or stated horizon IS a timeframe signal; the launch battery
+    // credited only the "within …" phrasing and so scored the journey
+    // probe's "current runway 14 months" as timeframe-MISSING — clarify then
+    // asked for a horizon the brief already carried (19 Jul first-message
+    // probe, scenario 43238dd6). Digit-anchored on purpose: the WORD form
+    // ("four-day week", "two-year plan") is a compound adjective / schedule,
+    // not a decision horizon — precision over recall for the "satisfied"
+    // verdict (a false-missing costs one tap-able question; a false-satisfied
+    // silently reproduces the never-asks baseline). The number-word durations
+    // stay reachable only through the "within …" arm above, deliberately.
+    /(?<!\d)\d{1,4}[\s-]*(?:week|month|quarter|year)s?\b/i,
   ],
 };
 
