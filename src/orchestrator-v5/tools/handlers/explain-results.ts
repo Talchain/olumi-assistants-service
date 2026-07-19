@@ -183,6 +183,13 @@ export function createExplainResultsHandler(): HandlerFn {
       rawText = composeExplainResultsFallback(
         invocation.analysisProjection,
         beat?.text ?? null,
+        // Same robustness signal the what_would_flip fallback receives, so the
+        // two composers derive the near-tie verdict (incl. the raw
+        // `near_tie.is_tie` override) from identical inputs and never
+        // contradict. Populated for explanation handlers when the projection is
+        // prior-fact-sourced (turn-executor same-run guard); routed/request
+        // paths pass null and both composers fall back to margin-only.
+        invocation.rawRobustness ?? null,
       );
     }
 

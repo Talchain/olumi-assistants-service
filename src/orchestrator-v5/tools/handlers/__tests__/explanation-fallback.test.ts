@@ -19,9 +19,11 @@ import type {
 } from '../../../context/projection-summaries.js';
 import type { RawRobustnessSignals } from '../../../coaching/pick-raw-robustness.js';
 import type { FlipSummary } from '../../../compose/flip-proposal.js';
+import { NEAR_TIE_PP_THRESHOLD } from '../../../coaching/robustness-honesty.js';
 import {
   composeExplainFromStructureFallback,
   composeExplainResultsFallback,
+  composeRobustnessVerdict,
   composeWhatWouldFlipFallback,
 } from '../explanation-fallback.js';
 
@@ -116,6 +118,49 @@ describe('composeExplainResultsFallback', () => {
     expect(text).toContain('Would you like to');
   });
 
+  // S4 near-tie honesty (V5-WAVE-2 PR-A): a near-zero / sub-threshold margin
+  // must read as a close call, never "meaningful rather than marginal".
+  // Regression for the baseline S4 contradiction where the explain fallback
+  // said "ahead by 0 percentage points, so the lead is meaningful" while the
+  // sibling flip fallback correctly said "effectively tied". Margin-only
+  // near-tie (NEAR_TIE_PP_THRESHOLD = 1.0pp): 0 and 0.4 are near-tie; 12 is
+  // decisive.
+  it('describes a 0pp margin as effectively tied, never "meaningful rather than marginal"', () => {
+    const text = composeExplainResultsFallback({
+      ...ANALYSIS,
+      margin_pp: 0,
+      robustness_band: 'fragile',
+    });
+    expectNaturalProse(text);
+    expect(text).toContain('effectively tied');
+    expect(text).not.toContain('meaningful rather than marginal');
+    // The awkward "0 percentage points" non sequitur must not be cited.
+    expect(text).not.toContain('0 percentage points');
+    // Both option labels are named in the closeness sentence.
+    expect(text).toContain('Hire Senior Engineer');
+    expect(text).toContain('Hire Two Mid-Level');
+  });
+
+  it('treats a sub-1pp margin (0.4) as a near-tie, not a meaningful lead', () => {
+    const text = composeExplainResultsFallback({
+      ...ANALYSIS,
+      margin_pp: 0.4,
+      robustness_band: 'fragile',
+    });
+    expect(text).toContain('effectively tied');
+    expect(text).not.toContain('meaningful rather than marginal');
+  });
+
+  it('keeps the "meaningful rather than marginal" framing for a decisive margin (12pp)', () => {
+    const text = composeExplainResultsFallback({
+      ...ANALYSIS,
+      margin_pp: 12,
+    });
+    expect(text).toContain('12 percentage points');
+    expect(text).toContain('meaningful rather than marginal');
+    expect(text).not.toContain('effectively tied');
+  });
+
   // V5-LANE-B-STRUCTURAL-01: the handler-composed validation beat is placed
   // before the closing nudge; absent/null → byte-identical legacy output.
   it('places validationBeatText before the closing nudge', () => {
@@ -147,6 +192,123 @@ describe('composeExplainResultsFallback', () => {
     });
     expect(text.toLowerCase()).not.toContain('directional');
     expect(text.toLowerCase()).not.toContain('prior run');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-composer near-tie threshold agreement (S4 mechanism-level guard).
+//
+// The explain and flip fallbacks must never contradict each other about
+// whether a result is a near-tie: that contradiction (explain said "the lead
+// is meaningful", flip said "effectively tied") is the exact S4 defect PR #270
+// fixes. Rather than trust the two composers to stay in sync by hand, this
+// pins that BOTH derive the near-tie verdict from the same SSOT threshold
+// (`NEAR_TIE_PP_THRESHOLD` via `isNearTieByMargin`). The boundary value is
+// DERIVED from the exported constant, not hardcoded, so if the threshold ever
+// moves the test moves with it — it cannot silently mirror a stale 1.0.
+//
+// At the boundary (margin == threshold, still `<=` so a near-tie): both say
+// "effectively tied". Just above it: neither does. If one composer ever
+// diverged from the shared predicate, one side of this pair would flip.
+// ---------------------------------------------------------------------------
+describe('explain/flip near-tie agreement at the SSOT threshold boundary', () => {
+  const EPS = 0.1;
+
+  it('BOTH composers say "effectively tied" at exactly NEAR_TIE_PP_THRESHOLD', () => {
+    const atBoundary: AnalysisProjectionSummary = {
+      ...ANALYSIS,
+      margin_pp: NEAR_TIE_PP_THRESHOLD,
+      robustness_band: 'fragile',
+    };
+    const explain = composeExplainResultsFallback(atBoundary);
+    const flip = composeWhatWouldFlipFallback(atBoundary);
+    expect(explain).toContain('effectively tied');
+    expect(explain).not.toContain('meaningful rather than marginal');
+    expect(flip).toContain('effectively tied');
+  });
+
+  it('NEITHER composer says "effectively tied" just above NEAR_TIE_PP_THRESHOLD', () => {
+    const justAbove: AnalysisProjectionSummary = {
+      ...ANALYSIS,
+      margin_pp: NEAR_TIE_PP_THRESHOLD + EPS,
+      robustness_band: 'stable',
+    };
+    const explain = composeExplainResultsFallback(justAbove);
+    const flip = composeWhatWouldFlipFallback(justAbove);
+    expect(explain).not.toContain('effectively tied');
+    expect(explain).toContain('meaningful rather than marginal');
+    expect(flip).not.toContain('effectively tied');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cross-composer near-tie AGREEMENT on the raw `near_tie.is_tie` OVERRIDE path
+// (S4 finisher — PR #270 round 2).
+//
+// Round 1 unified the THRESHOLD but left the CALLS divergent: explain passed a
+// hard-coded `null` raw signal to `isNearTieByMargin` while flip passed the
+// real `rawRobustness`. So on a WIDER-than-threshold margin whose raw signal
+// carries `near_tie.is_tie === true`, flip said "effectively tied" while
+// explain said "the lead is meaningful rather than marginal" — the exact
+// contradiction PR #270 exists to kill, still live on the override path.
+//
+// These pin that BOTH composers, given the SAME projection + SAME raw signal,
+// reach the SAME near-tie verdict via the shared classifier. The wide margin
+// is DERIVED from the exported threshold so ONLY the override can flip it.
+// ---------------------------------------------------------------------------
+describe('explain/flip near-tie agreement on the raw near_tie override path', () => {
+  const WIDE_MARGIN = NEAR_TIE_PP_THRESHOLD + 9;
+  const OVERRIDE_TIE: RawRobustnessSignals = { level: 'moderate', near_tie_is_tie: true };
+
+  const WIDE_OVERRIDE: AnalysisProjectionSummary = {
+    ...ANALYSIS,
+    margin_pp: WIDE_MARGIN,
+    robustness_band: 'stable',
+  };
+
+  it('BOTH composers say "effectively tied" when the raw override fires on a wide margin', () => {
+    const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, OVERRIDE_TIE);
+    const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, OVERRIDE_TIE);
+    expect(flip).toContain('effectively tied');
+    expect(explain).toContain('effectively tied');
+    // The exact overclaim the divergence produced must be gone.
+    expect(explain).not.toContain('meaningful rather than marginal');
+  });
+
+  it('WITHOUT the raw override, the same wide margin is NOT a near-tie in either composer', () => {
+    // Positive control: the wide margin alone must NOT read as tied, so the
+    // agreement above is driven by the override, not by a blanket "always tied".
+    const explain = composeExplainResultsFallback(WIDE_OVERRIDE, null, null);
+    const flip = composeWhatWouldFlipFallback(WIDE_OVERRIDE, null);
+    expect(explain).not.toContain('effectively tied');
+    expect(explain).toContain('meaningful rather than marginal');
+    expect(flip).not.toContain('effectively tied');
+  });
+
+  it('override agreement holds when the margin is ABSENT (null) too', () => {
+    // Override fires with no margin at all: flip reframes to tied; explain must
+    // match rather than fall through to "sits in second place".
+    const nullMargin: AnalysisProjectionSummary = {
+      ...ANALYSIS,
+      margin_pp: null,
+      robustness_band: 'stable',
+    };
+    const explain = composeExplainResultsFallback(nullMargin, null, OVERRIDE_TIE);
+    const flip = composeWhatWouldFlipFallback(nullMargin, OVERRIDE_TIE);
+    expect(explain).toContain('effectively tied');
+    expect(explain).not.toContain('sits in second place');
+    expect(flip).toContain('effectively tied');
+  });
+
+  it('legacy explain callers (no raw arg) keep margin-only near-tie behaviour', () => {
+    // Backward-compat: the third param is optional; omitting it must reduce to
+    // the pre-existing margin-only verdict so existing 2-arg call sites and the
+    // request/routed paths (which pass no raw signal) are unchanged.
+    const legacy = composeExplainResultsFallback(WIDE_OVERRIDE, null);
+    expect(legacy).not.toContain('effectively tied');
+    expect(legacy).toContain('meaningful rather than marginal');
+    expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, undefined)).toBe(legacy);
+    expect(composeExplainResultsFallback(WIDE_OVERRIDE, null, null)).toBe(legacy);
   });
 });
 
@@ -809,5 +971,216 @@ describe('composeWhatWouldFlipFallback — honest flip evidence (V5 P0-B)', () =
     expect(withNone.toLowerCase()).toMatch(/sensitive to small movements/);
     expect(withNone).not.toMatch(NAMES_FRAGILITY);
     expect(withNone).not.toMatch(HONEST_NO_FLIP);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S4 round-3 — the SINGLE robustness verdict composer (PR #270).
+//
+// Round 1 unified the near-tie THRESHOLD; round 2 unified the near-tie INPUTS
+// (shared classifyNearTie). Round 3 kills the SAME contradiction class ONE
+// DIMENSION over: the MARGIN verdict and the STABILITY verdict were built as
+// independent bolt-ons, so a near-tie + stable-band result told the user, in a
+// single message, that the lead is "too close to call" AND "should hold under
+// reasonable variation" — while the flip composer said the result "could
+// change". A near-tie means the MARGIN is within noise; a stable band means
+// each option's OWN score is steady. Those are different axes and must be
+// narrated TOGETHER, never stitched from two unaware sentences.
+//
+// The reviewer's exact case is near_tie × {stable, highly_stable}. These pins
+// fail on the pre-round-3 code (explain emits "should hold under reasonable
+// variation" beside "too close to call").
+// ---------------------------------------------------------------------------
+describe('S4 round-3 — near-tie x stability verdict coherence (reviewer case)', () => {
+  const NEAR_TIE_STABLE: AnalysisProjectionSummary = {
+    ...ANALYSIS,
+    margin_pp: 0.4, // sub-threshold near-tie
+    robustness_band: 'stable',
+  };
+  const NEAR_TIE_HIGHLY_STABLE: AnalysisProjectionSummary = {
+    ...ANALYSIS,
+    margin_pp: 0.4,
+    robustness_band: 'highly_stable',
+  };
+
+  it('explain NEVER says "should hold under reasonable variation" on a near-tie, even when the band is stable', () => {
+    const explain = composeExplainResultsFallback(NEAR_TIE_STABLE);
+    expectNaturalProse(explain);
+    expect(explain).toContain('effectively tied');
+    // THE defect: a near-tie result must not also claim the lead holds.
+    expect(explain).not.toContain('should hold under reasonable variation');
+    // The two clauses must be self-consistent: never assert both "too close
+    // to call" / "tied" and a lead-holds reassurance in the same breath.
+    const saysTooClose = /too close to call|effectively tied/.test(explain);
+    const saysHolds = /should hold under reasonable variation/.test(explain);
+    expect(saysTooClose && saysHolds).toBe(false);
+  });
+
+  it('explain NEVER says "should hold" on a near-tie + highly_stable band either', () => {
+    const explain = composeExplainResultsFallback(NEAR_TIE_HIGHLY_STABLE);
+    expect(explain).toContain('effectively tied');
+    expect(explain).not.toContain('should hold under reasonable variation');
+  });
+
+  it('explain and flip agree on a near-tie + stable result: neither claims the lead holds; both convey it is close', () => {
+    const explain = composeExplainResultsFallback(NEAR_TIE_STABLE);
+    const flip = composeWhatWouldFlipFallback(NEAR_TIE_STABLE);
+    // Cross-composer coherence: no "should hold" on either side.
+    expect(explain).not.toContain('should hold under reasonable variation');
+    expect(flip).not.toContain('should hold');
+    // Both keep the shared near-tie verdict.
+    expect(explain).toContain('effectively tied');
+    expect(flip).toContain('effectively tied');
+    // Neither overclaims fragility on a genuinely stable band (round-1 rule).
+    expect(explain).not.toMatch(/picture appears fragile/i);
+    expect(flip).not.toMatch(/picture appears fragile/i);
+  });
+
+  it('a stable band with a CLEAR (decisive) lead still earns the confident "should hold" copy (positive control)', () => {
+    // Proves the near-tie suppression above is driven by the near-tie verdict,
+    // not by a blanket removal of the stability reassurance.
+    const clearStable: AnalysisProjectionSummary = {
+      ...ANALYSIS,
+      margin_pp: 20,
+      robustness_band: 'stable',
+    };
+    const explain = composeExplainResultsFallback(clearStable);
+    expect(explain).toContain('should hold under reasonable variation');
+    expect(explain).not.toContain('effectively tied');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S4 round-3 — the FULL verdict matrix (near-tie × stability band) enumerated,
+// for BOTH composer modes, through the single composeRobustnessVerdict.
+//
+// This is the mechanism-level guarantee: every cell's margin clause and
+// stability clause were built TOGETHER, so no cell can produce a
+// self-contradictory pair (e.g. "too close to call" + "should hold"), and no
+// cell can claim fragility on a genuinely stable band. Because BOTH composers
+// route through this one function, the table also proves explain and flip
+// agree on the near-tie verdict cell-for-cell.
+// ---------------------------------------------------------------------------
+describe('S4 round-3 — full margin × stability verdict matrix (both modes)', () => {
+  const BASE: AnalysisProjectionSummary = {
+    status: 'complete',
+    leading_option: { label: 'Alpha', probability: 0.52 },
+    runner_up: { label: 'Beta', probability: 0.48 },
+    margin_pp: 0,
+    robustness_band: null,
+    top_drivers: [],
+    // NOTE: no `staleness_reason` here. `AnalysisProjectionSummary` has no such
+    // field, so an excess-property literal is a TS2353 error that the
+    // src-only gate (`tsconfig.build.json` excludes tests) structurally CANNOT
+    // see — only `scripts/ci/typecheck-ratchet.sh` catches it. The field was
+    // inert (nothing in this matrix reads it), so it is dropped rather than
+    // absorbed into the ratchet baseline.
+  };
+
+  // Margin axis inputs. `indeterminate` = no finite margin and not a near-tie.
+  const MARGINS = {
+    near_tie: 0.4, // sub-threshold
+    clear: 20,
+    indeterminate: null as number | null,
+  } as const;
+  // Stability axis inputs (raw signal held null so the band alone drives it).
+  const BANDS = {
+    fragile: 'fragile',
+    stable: 'stable',
+    moderate: 'moderate',
+    unknown: null as string | null,
+  } as const;
+
+  type MarginCat = keyof typeof MARGINS;
+  type BandCat = keyof typeof BANDS;
+
+  const marginCats = Object.keys(MARGINS) as MarginCat[];
+  const bandCats = Object.keys(BANDS) as BandCat[];
+
+  /**
+   * Positive control (memory rule 13): the contradiction predicate must be
+   * able to SEE a contradiction, or every "absent" assertion below is
+   * vacuous. A hand-built string with both halves must trip it.
+   */
+  const saysTied = (t: string) => /effectively tied|too close to call/i.test(t);
+  const saysHolds = (t: string) => /should hold under reasonable variation/i.test(t);
+  const claimsFragile = (t: string) => /picture appears fragile/i.test(t);
+
+  it('POSITIVE CONTROL: the tied+holds contradiction predicate is not vacuous', () => {
+    const contradictory =
+      "Alpha and Beta are effectively tied. This result looks stable, so it should hold under reasonable variation.";
+    expect(saysTied(contradictory) && saysHolds(contradictory)).toBe(true);
+    const fragileString = 'The picture appears fragile, so it could shift.';
+    expect(claimsFragile(fragileString)).toBe(true);
+  });
+
+  for (const m of marginCats) {
+    for (const b of bandCats) {
+      it(`cell ${m} x ${b}: explain and flip clauses are self-consistent and agree on the near-tie verdict`, () => {
+        const projection: AnalysisProjectionSummary = {
+          ...BASE,
+          margin_pp: MARGINS[m],
+          robustness_band: BANDS[b],
+        };
+        const explainV = composeRobustnessVerdict(projection, null, 'explain');
+        const flipV = composeRobustnessVerdict(projection, null, 'flip');
+
+        // headline encodes the exact cell for both modes (same verdict).
+        expect(explainV.headline).toBe(`${m}:${b}`);
+        expect(flipV.headline).toBe(`${m}:${b}`);
+
+        const explainText = [explainV.margin_clause, explainV.stability_clause]
+          .filter(Boolean)
+          .join(' ');
+        const flipText = [flipV.margin_clause, flipV.stability_clause]
+          .filter(Boolean)
+          .join(' ');
+
+        // INVARIANT 1: never assert both "tied / too close to call" and
+        // "should hold under reasonable variation" in the same message.
+        expect(saysTied(explainText) && saysHolds(explainText)).toBe(false);
+        expect(saysTied(flipText) && saysHolds(flipText)).toBe(false);
+
+        // INVARIANT 2: a near-tie never earns the confident "should hold" line.
+        if (m === 'near_tie') {
+          expect(saysHolds(explainText)).toBe(false);
+          expect(saysHolds(flipText)).toBe(false);
+        }
+
+        // INVARIANT 3: a genuinely stable (non-fragile) band never gets a
+        // fragility claim in either mode.
+        if (b === 'stable') {
+          expect(claimsFragile(explainText)).toBe(false);
+          expect(claimsFragile(flipText)).toBe(false);
+        }
+
+        // INVARIANT 4: both modes agree on the near-tie verdict cell-for-cell
+        // (the shared classifier, now also sharing the copy path).
+        expect(saysTied(explainV.margin_clause ?? '')).toBe(
+          saysTied(flipV.margin_clause ?? ''),
+        );
+        expect(saysTied(explainV.margin_clause ?? '')).toBe(m === 'near_tie');
+      });
+    }
+  }
+
+  it('the reviewer cell (near_tie x stable) yields honest dual-axis copy, not a bolt-on contradiction', () => {
+    const projection: AnalysisProjectionSummary = {
+      ...BASE,
+      margin_pp: 0.4,
+      robustness_band: 'stable',
+    };
+    const explainV = composeRobustnessVerdict(projection, null, 'explain');
+    const flipV = composeRobustnessVerdict(projection, null, 'flip');
+
+    expect(explainV.headline).toBe('near_tie:stable');
+    // Margin is tied; stability speaks to each option's OWN score, not the lead.
+    expect(explainV.margin_clause).toContain('effectively tied');
+    expect(explainV.stability_clause).toMatch(/own score is individually stable/);
+    expect(explainV.stability_clause).not.toMatch(/should hold under reasonable variation/);
+    // Flip conveys the same joint truth in its "what could change" voice.
+    expect(flipV.margin_clause).toContain('effectively tied');
+    expect(flipV.stability_clause).toMatch(/sensitive to small movements/);
+    expect(flipV.stability_implies_flippability).toBe(true);
   });
 });

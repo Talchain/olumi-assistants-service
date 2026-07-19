@@ -49,7 +49,12 @@ import {
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
 import { isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
-import { NEAR_TIE_PP_THRESHOLD } from './robustness-honesty.js';
+import { readRawRobustnessSignals } from './pick-raw-robustness.js';
+// NOTE: `NEAR_TIE_PP_THRESHOLD` is deliberately NOT imported any more. Holding
+// the constant was what let this file re-derive the near-tie with its own `<=`
+// and silently skip the raw `is_tie` override (the round-4 residual). Importing
+// only the DECISION FUNCTION makes that regression unrepresentable here.
+import { nearTieReasonByMargin } from './robustness-honesty.js';
 // Two-argument label guard relocated to the lean context module (single
 // source of truth, shared with the projection layer). Distinct from the
 // one-argument `sanitiseLabel` in src/utils/label-sanitiser.ts.
@@ -500,8 +505,35 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     };
   }
 
-  // Stronger cases only fire when probability/margin gates pass.
-  if (hasMeaningfulLead(winner)) {
+  // ---- S4 ROUND 5: the near-tie verdict is decided ONCE, HERE, and it
+  // PREEMPTS the confident-lead gate. ----
+  //
+  // Routing only the inside of the low-margin branch would have been
+  // cosmetic: `hasMeaningfulLead` gates purely on `margin >= MIN_LEAD_MARGIN`
+  // (5pp), so an upstream-flagged tie with (say) an 8pp margin never REACHED
+  // that branch — it took the confident path above and emitted
+  // "{X} currently leads by 8 percentage points", which is precisely the
+  // headline the round-4 review flagged. The override has to be consulted
+  // BEFORE the gate or it cannot bite at all.
+  //
+  // `enrichment.robustness` is the same raw object `pickLatestRawRobustness`
+  // reads out of the prior fact; we already hold the live enrichment here, so
+  // no input-contract change is needed to reach it.
+  const rawRobustness = readRawRobustnessSignals(enrichment['robustness']);
+  const marginPpRounded = winner.runnerUpProb !== null
+    ? Math.round((winner.winnerProb - winner.runnerUpProb) * 100)
+    : null;
+  // Single-option sources (no runner-up) can never be a "tie" — there is
+  // nothing to tie WITH. Pass a null margin AND suppress the override so a
+  // stray upstream flag cannot manufacture a two-option claim out of one
+  // option.
+  const tieReason = winner.runnerUpProb !== null
+    ? nearTieReasonByMargin(marginPpRounded, rawRobustness)
+    : null;
+
+  // Stronger cases only fire when probability/margin gates pass AND the
+  // shared verdict does not call this a near-tie.
+  if (tieReason === null && hasMeaningfulLead(winner)) {
     if (caution !== null) {
       // Caution shapes (priority #3 + #4): a fragility signal exists, so name
       // ONLY that one validation reason and frame the result as provisional —
@@ -579,10 +611,15 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     }
   } else if (winnerProbability >= MIN_LEAD_PROBABILITY && winner.runnerUpProb !== null) {
     // Near-tie / close-call branch: a plurality leader (≥ MIN_LEAD_PROBABILITY)
-    // whose margin to the runner-up is positive but below the meaningful-lead
-    // threshold (< MIN_LEAD_MARGIN, i.e. < 5pp). Never emit a bare confident
-    // "{label} currently leads." — flag the closeness honestly so a near-tie
-    // does not read as a decisive lead.
+    // whose margin to the runner-up is positive but which did NOT clear the
+    // confident-lead gate above. ROUND-5 UPDATE — that is now two populations,
+    // not one:
+    //   (a) margin < MIN_LEAD_MARGIN (5pp) — the original close-call case; and
+    //   (b) ANY margin, however wide, that the shared verdict called a near-tie
+    //       via the raw `near_tie.is_tie` override.
+    // Population (b) is new here: it used to be swallowed by the confident
+    // branch. Never emit a bare confident "{label} currently leads." — flag
+    // the closeness honestly so a near-tie does not read as a decisive lead.
     const marginRaw = winnerProbability - winner.runnerUpProb;
     if (marginRaw <= 0) {
       // The designated leading option is not actually ahead of the runner-up —
@@ -592,14 +629,25 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
         descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
       };
     }
-    // Compare the ROUNDED pp (matching what would be rendered) against the
-    // near-tie threshold so floating-point noise at the boundary (e.g.
-    // 0.41 - 0.40 = 1.0000000000000009) does not flip the verdict.
-    const marginPpRounded = Math.round(marginRaw * 100);
-    if (marginPpRounded <= NEAR_TIE_PP_THRESHOLD) {
-      // Effectively tied (≤ 1pp): no margin number, no lead-strength claim.
-      const caseTied =
-        `${winnerLabel} is currently only fractionally ahead, so the options are effectively tied.${suffix}`;
+    // S4 ROUND 5 — the verdict was decided ONCE above (`tieReason`) and is
+    // only CONSUMED here. Round 4 left this site importing the SSOT
+    // *constant* (NEAR_TIE_PP_THRESHOLD) and doing its own `<=` compare, so
+    // it never consulted the raw `near_tie.is_tie` override. Importing a
+    // constant is not routing; only `nearTieReasonByMargin` owns the truth
+    // table (threshold AND override).
+    if (tieReason !== null) {
+      // Two near-tie shapes, because ONE sentence cannot be true of both —
+      // this mirrors `closenessLead` in the SSOT exactly:
+      //
+      //  - 'margin'   => the gap really is ≤ 1pp. "only fractionally ahead"
+      //                  is literally true; emit no number.
+      //  - 'override' => the raw `near_tie.is_tie` flag fired on a WIDER gap.
+      //                  "only fractionally ahead" would be a FALSE claim
+      //                  (an 8pp gap is not fractional), so state the real
+      //                  margin and let "close call" carry the tie verdict.
+      //                  Overclaiming a tie is the mirror-image dishonesty of
+      //                  overclaiming a lead; neither is acceptable.
+      const caseTied = tieHeadlineText(tieReason, winnerLabel, marginFragment, suffix);
       if (caseTied.length <= lengthCap) {
         return {
           text: caseTied,
@@ -624,6 +672,55 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     // near-tie copy overflows the cap (pathologically long label) or the margin
     // text is unrenderable, return null so the handler uses the neutral locked
     // template (no lead claim) instead of a confident headline.
+    return {
+      text: null,
+      descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
+    };
+  }
+
+  // ---- S4 ROUND 6: the raw near_tie.is_tie OVERRIDE preempts the
+  // soft-confidence branch AND the Case E floor too. ----
+  //
+  // Round 5 routed the confident-lead gate and the >= MIN_LEAD_PROBABILITY
+  // near-tie branch above, but a tie OVERRIDE on a SUB-0.40 winner reached
+  // NEITHER: the meaningful-lead cases require `tieReason === null`, and the
+  // near-tie branch above requires `winnerProbability >= MIN_LEAD_PROBABILITY`.
+  // So an upstream-flagged tie on a soft-confidence [0.30, 0.40) or weaker
+  // plurality — on a margin WIDER than the 1pp near-tie threshold, where the
+  // margin alone would not flag a tie — fell straight through to the
+  // soft-confidence "leads by N points" enrichment (which reaches the wire) or
+  // the Case E "currently leads." floor, both asserting a lead the override
+  // denies. Consult the SAME shared verdict here so neither branch can drop it.
+  //
+  // WHY `'override'` and not `tieReason !== null`: a genuine <= 1pp margin tie
+  // at sub-0.40 confidence classifies as `'margin'`, and the existing design
+  // DELIBERATELY routes that to the bare Case E "currently leads." floor (its
+  // accepted neutral, non-enriching statement for a weak plurality — pinned by
+  // the "never reads a tie as a lead / falls back to Case E" tests). Only the
+  // override — which fires on a wider gap the margin band cannot see — is the
+  // round-5 residual, so ONLY it preempts here; the margin band is untouched.
+  //
+  // Control-flow proof (exhaustive for the sub-0.40 override): to reach this
+  // point with `tieReason === 'override'`, BOTH the meaningful-lead `if`
+  // (requires `tieReason === null`) and the `>= MIN_LEAD_PROBABILITY` near-tie
+  // `else if` must have been skipped; the latter only when
+  // `winnerProbability < MIN_LEAD_PROBABILITY`. `'override'` implies a runner-up
+  // exists (tieReason is null for single-option sources) and a rounded margin
+  // > 1pp, so `marginFragment` is always populated here.
+  if (tieReason === 'override' && winner.runnerUpProb !== null) {
+    const marginRaw = winnerProbability - winner.runnerUpProb;
+    if (marginRaw > 0) {
+      const caseTied = tieHeadlineText(tieReason, winnerLabel, marginFragment, suffix);
+      if (caseTied.length <= lengthCap) {
+        return {
+          text: caseTied,
+          descriptor: buildDescriptor('NT', 'low_margin', { hasDriver, hasFragility, marginBucket }),
+        };
+      }
+    }
+    // A flagged tie must NEVER fall through to the soft-confidence enrichment or
+    // the confident Case E floor — return the neutral locked template (no lead
+    // claim) when the tie copy does not fit or the leader is not actually ahead.
     return {
       text: null,
       descriptor: buildDescriptor(null, 'low_margin', { hasDriver, hasFragility, marginBucket }),
@@ -737,6 +834,35 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     text: null,
     descriptor: buildDescriptor(null, 'length_cap', { hasDriver, hasFragility, marginBucket }),
   };
+}
+
+/**
+ * The two near-tie headline shapes, shared by the >= MIN_LEAD_PROBABILITY
+ * near-tie branch and the sub-0.40 tie-override preemption so the copy can never
+ * drift between the two emission sites (derive, don't mirror). Mirrors
+ * `closenessLead` in the robustness-honesty SSOT:
+ *  - 'margin'   => a genuine <= 1pp gap: "only fractionally ahead … effectively
+ *                  tied" (emits no number — the gap really is fractional).
+ *  - 'override' => a WIDER gap the raw `near_tie.is_tie` flag still calls a tie:
+ *                  state the real margin and ATTRIBUTE the verdict ("… but the
+ *                  analysis treats this as a close call") rather than overclaim a
+ *                  dead heat. Overclaiming a tie is the mirror-image dishonesty
+ *                  of overclaiming a lead; neither is acceptable.
+ *
+ * BOTH shapes are pinned in {@link HEADLINE_GRAMMAR_REGEXES} — the override
+ * shape's grammar was the round-5 residual: the branch routed through the shared
+ * verdict but the egress allowlist did not recognise its copy, so the honest
+ * override headline was silently replaced by the locked template at the wire.
+ */
+function tieHeadlineText(
+  tieReason: 'margin' | 'override',
+  winnerLabel: string,
+  marginFragment: string,
+  suffix: string,
+): string {
+  return tieReason === 'margin'
+    ? `${winnerLabel} is currently only fractionally ahead, so the options are effectively tied.${suffix}`
+    : `${winnerLabel} currently leads${marginFragment}, but the analysis treats this as a close call.${suffix}`;
 }
 
 function buildDescriptor(
@@ -1438,6 +1564,17 @@ const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // Case NT (tied): effectively tied, no margin number.
   new RegExp(
     `^.+? is currently only fractionally ahead, so the options are effectively tied\\.${TAIL_PATTERN}$`,
+  ),
+  // Case NT (override tie): a WIDER gap the raw near_tie.is_tie override still
+  // flagged as a tie — the winner is nominally ahead by N points but the
+  // analysis treats it as a close call. Emitted by both the
+  // >= MIN_LEAD_PROBABILITY near-tie branch and the sub-0.40 tie-override
+  // preemption via tieHeadlineText. The margin fragment is optional so the
+  // rare number-free override form ("… currently leads, but the analysis
+  // treats this as a close call.") also survives the egress allowlist rather
+  // than being silently swapped for the locked template.
+  new RegExp(
+    `^.+? currently leads(?: by \\d{1,3} percentage points?)?, but the analysis treats this as a close call\\.${TAIL_PATTERN}$`,
   ),
   // Doctrine D-W (ROADMAP 2.52): leader-trails-argmax honest disambiguation —
   // "{leader} leads overall, though {runner-up} has marginally better raw

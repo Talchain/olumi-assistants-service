@@ -392,4 +392,92 @@ describe("generatePostAnalysisGuidance", () => {
       expect(JSON.stringify(a)).toBe(JSON.stringify(b));
     });
   });
+
+  // ==========================================================================
+  // S4 ROUND 6 — the closeness classifiers route through the shared near-tie
+  // verdict, so an upstream `near_tie.is_tie` override is honoured even when
+  // the point-margin is WIDE. The old code classified closeness from the local
+  // 10pp literal alone, so a tie override on a >10pp gap was structurally
+  // invisible here (the same defect class round 5 closed on the V5 surfaces).
+  //
+  // Every case is positive-controlled: a WIDE-gap run with NO override must
+  // read as a clear decision (control), and the SAME wide gap WITH the override
+  // must flip to the close-call treatment (fix). An absence assertion that
+  // cannot first see a presence is vacuous (memory rule 13).
+  // ==========================================================================
+  describe("shared near-tie override routing (round 6)", () => {
+    // 40pp gap (0.70 vs 0.30) — far outside the 10pp local band, so absent the
+    // override NONE of PRE_MORTEM / DEVIL_ADVOCATE / evidence-CTA fire.
+    function wideRun(isTie: boolean): V2RunResponseEnvelope {
+      return makeResponse({
+        results: [
+          { option_label: 'A', win_probability: 0.70 },
+          { option_label: 'B', win_probability: 0.30 },
+        ] as any,
+        robustness: { level: 'moderate', near_tie: { is_tie: isTie } } as any,
+      });
+    }
+
+    it("PRE_MORTEM: control silent on a wide gap, override makes it fire", () => {
+      const control = generatePostAnalysisGuidance(wideRun(false), null);
+      expect(
+        control.find((i) => i.signal_code === SIGNAL_CODES.TECHNIQUE_PRE_MORTEM),
+        "control fired PRE_MORTEM on a 40pp gap (10pp band should be silent)",
+      ).toBeUndefined();
+
+      const tied = generatePostAnalysisGuidance(wideRun(true), null);
+      expect(
+        tied.find((i) => i.signal_code === SIGNAL_CODES.TECHNIQUE_PRE_MORTEM),
+        "override tie did not reach PRE_MORTEM",
+      ).toBeDefined();
+    });
+
+    it("DEVIL_ADVOCATE: control silent on a wide gap, override makes it fire — with verdict-driven copy", () => {
+      const control = generatePostAnalysisGuidance(wideRun(false), null);
+      expect(
+        control.find((i) => i.signal_code === SIGNAL_CODES.TECHNIQUE_DEVIL_ADVOCATE),
+      ).toBeUndefined();
+
+      const tied = generatePostAnalysisGuidance(wideRun(true), null);
+      const item = tied.find((i) => i.signal_code === SIGNAL_CODES.TECHNIQUE_DEVIL_ADVOCATE);
+      expect(item, "override tie did not reach DEVIL_ADVOCATE").toBeDefined();
+      // Honesty: on a wide-gap override the copy must NOT assert a false "within
+      // 10%" gap — the mirror-image of overclaiming a lead.
+      expect(item?.detail, "wide-gap override still claimed 'within 10%'").not.toMatch(/within 10%/i);
+    });
+
+    it("CTA_LITE: control offers the brief on a wide clear gap, override flips it to the evidence CTA", () => {
+      const control = generatePostAnalysisGuidance(wideRun(false), null);
+      const controlCta = control.find((i) => i.signal_code === SIGNAL_CODES.CTA_LITE);
+      expect(
+        (controlCta?.primary_action as { type: 'discuss'; prompt: string }).prompt,
+        "wide clear gap should offer the decision brief",
+      ).toBe('Generate the decision brief');
+
+      const tied = generatePostAnalysisGuidance(wideRun(true), null);
+      const tiedCta = tied.find((i) => i.signal_code === SIGNAL_CODES.CTA_LITE);
+      expect(
+        (tiedCta?.primary_action as { type: 'discuss'; prompt: string }).prompt,
+        "override tie did not flip the CTA to the evidence prompt",
+      ).toBe('What evidence would strengthen the model?');
+      expect(tiedCta?.title).toBe('Strengthen the model');
+    });
+
+    it("no override + wide gap is byte-identical to a run with no near_tie field at all", () => {
+      // The routing must be inert absent the override — the pre-round-6 behaviour
+      // on every existing fixture (none of which set near_tie).
+      const withFalseFlag = generatePostAnalysisGuidance(wideRun(false), null);
+      const withoutField = generatePostAnalysisGuidance(
+        makeResponse({
+          results: [
+            { option_label: 'A', win_probability: 0.70 },
+            { option_label: 'B', win_probability: 0.30 },
+          ] as any,
+          robustness: { level: 'moderate' } as any,
+        }),
+        null,
+      );
+      expect(JSON.stringify(withFalseFlag)).toBe(JSON.stringify(withoutField));
+    });
+  });
 });

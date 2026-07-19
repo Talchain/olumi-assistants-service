@@ -33,6 +33,14 @@ import {
   sortGuidanceItems,
 } from "../types/guidance-item.js";
 import type { GuidanceItem, GuidanceCategory } from "../types/guidance-item.js";
+// S4 ROUND 6: the closeness classifiers below route through the SAME near-tie
+// SSOT the V5 coaching surfaces use, so an upstream `near_tie.is_tie` override
+// is honoured here instead of being reinvented from the local 10pp literal.
+import {
+  readRawRobustnessSignals,
+  type RawRobustnessSignals,
+} from "../../orchestrator-v5/coaching/pick-raw-robustness.js";
+import { nearTieReasonByMargin } from "../../orchestrator-v5/coaching/robustness-honesty.js";
 
 // ============================================================================
 // Constants
@@ -124,6 +132,52 @@ function getRobustnessLevel(response: V2RunResponseEnvelope): string {
 
 function getAnalysisHash(response: V2RunResponseEnvelope): string | undefined {
   return response.response_hash ?? response.meta?.response_hash;
+}
+
+/**
+ * S4 ROUND 6: read the RAW robustness signals (level + `near_tie.is_tie`
+ * override) from the V2 envelope so the technique/CTA closeness classifiers can
+ * consult the SAME near-tie verdict the V5 coaching surfaces use, instead of
+ * reinventing closeness from the local 10pp literal alone. The override can sit
+ * at the top-level `robustness` or inside `results[0].robustness`, so we OR the
+ * flag across both addresses (a tie anywhere is a tie) and keep the first level.
+ * Returns null when neither address carries a usable signal — callers then fall
+ * back to the margin-only band exactly as before (byte-identical when upstream
+ * emits no near_tie override, which every pre-round-6 fixture does).
+ */
+function readResponseRawRobustness(
+  response: V2RunResponseEnvelope,
+): RawRobustnessSignals | null {
+  const addresses: unknown[] = [(response as Record<string, unknown>).robustness];
+  const results = getOptionResults(response);
+  if (results.length > 0) addresses.push(results[0].robustness);
+  let level: string | null = null;
+  let override = false;
+  for (const addr of addresses) {
+    const sig = readRawRobustnessSignals(addr);
+    if (sig === null) continue;
+    if (level === null && sig.level !== null) level = sig.level;
+    if (sig.near_tie_is_tie) override = true;
+  }
+  if (level === null && !override) return null;
+  return { level, near_tie_is_tie: override };
+}
+
+/**
+ * The shared near-tie verdict for the guidance closeness classifiers.
+ * `topTwoSeparation` is the top-two win-probability separation in PROBABILITY
+ * space (0-1), so it is scaled to the percentage points the SSOT expects. A
+ * non-finite separation (fewer than two options) yields a null margin — the
+ * override alone can still return a verdict there, but upstream never flags a
+ * single-option run as a tie. Returns 'margin' | 'override' | null exactly as
+ * the SSOT `nearTieReasonByMargin`.
+ */
+function sharedTieReason(
+  response: V2RunResponseEnvelope,
+  topTwoSeparation: number,
+): 'margin' | 'override' | null {
+  const marginPp = Number.isFinite(topTwoSeparation) ? topTwoSeparation * 100 : null;
+  return nearTieReasonByMargin(marginPp, readResponseRawRobustness(response));
 }
 
 /** Build node lookup map from graph */
@@ -442,8 +496,18 @@ function buildTechniqueOffers(
     ? Math.abs(getWinProbability(results[0]) - getWinProbability(results[1]))
     : Infinity;
 
-  // PRE_MORTEM: separation < 10% AND not robust
-  if (topTwoSeparation <= TECHNIQUE_CLOSE_CALL_THRESHOLD && robustnessLevel !== 'robust') {
+  // S4 ROUND 6: the shared near-tie verdict OUTRANKS the local 10pp band — an
+  // upstream-flagged tie (raw `near_tie.is_tie`) must surface a close-call even
+  // when the point-margin exceeds 10pp. Layered ABOVE the local threshold, never
+  // replacing it: the 10pp band still owns "worth a technique" at 2-10pp; the
+  // override adds the wide-gap tie the margin-only classifier structurally
+  // missed (the same defect class round 5 closed on compare_options /
+  // what_would_flip / the run_analysis headline).
+  const tieReason = sharedTieReason(response, topTwoSeparation);
+  const isClose = topTwoSeparation <= TECHNIQUE_CLOSE_CALL_THRESHOLD || tieReason !== null;
+
+  // PRE_MORTEM: close call (local band OR shared tie verdict) AND not robust
+  if (isClose && robustnessLevel !== 'robust') {
     const item_id = computeGuidanceItemId(SIGNAL_CODES.TECHNIQUE_PRE_MORTEM, undefined, 'analysis');
     const item: GuidanceItem = {
       item_id,
@@ -506,9 +570,9 @@ function buildTechniqueOffers(
     items.push(item);
   }
 
-  // DEVIL_ADVOCATE: top two options within 10% win probability
+  // DEVIL_ADVOCATE: top two options close (local 10pp band OR shared tie verdict)
   if (results.length >= 2) {
-    if (topTwoSeparation <= TECHNIQUE_CLOSE_CALL_THRESHOLD) {
+    if (isClose) {
       const item_id = computeGuidanceItemId(SIGNAL_CODES.TECHNIQUE_DEVIL_ADVOCATE, undefined, 'analysis');
       const item: GuidanceItem = {
         item_id,
@@ -516,7 +580,10 @@ function buildTechniqueOffers(
         category: 'technique',
         source: 'analysis',
         title: 'It\'s close. Argue against the top option',
-        detail: 'The top two options are within 10% of each other. A devil\'s advocate exercise can surface factors you might be missing.',
+        // Verdict-driven copy, not a hard "within 10%" claim: the override tier
+        // fires on a WIDER point-margin, so asserting "within 10%" there would
+        // be the mirror-image false claim (a tie narrated with a false gap).
+        detail: 'The top two options are close. A devil\'s advocate exercise can surface factors you might be missing.',
         primary_action: { type: 'run_exercise', exercise: 'devil_advocate' },
         target_object: { type: 'graph' },
         priority: 20,
@@ -567,8 +634,13 @@ export function generatePostAnalysisGuidance(
       ? Math.abs(getWinProbability(results[0]) - getWinProbability(results[1]))
       : Infinity;
 
+    // S4 ROUND 6: fold the shared near-tie verdict into the CTA framing so an
+    // upstream tie override flips "Ready to decide?" → "Strengthen the model"
+    // even at a wide point-margin. `isFragileOrClose` is checked FIRST below, so
+    // an override tie routes to the evidence CTA regardless of `isRobustAndClear`.
+    const tieReason = sharedTieReason(response, topTwoSeparation);
     const isRobustAndClear = robustnessLevel !== 'fragile' && results.length > 0 && getWinProbability(results[0]) > 0.6;
-    const isFragileOrClose = robustnessLevel === 'fragile' || topTwoSeparation <= TECHNIQUE_CLOSE_CALL_THRESHOLD;
+    const isFragileOrClose = robustnessLevel === 'fragile' || topTwoSeparation <= TECHNIQUE_CLOSE_CALL_THRESHOLD || tieReason !== null;
 
     let ctaPrompt: string;
     if (isFragileOrClose) {

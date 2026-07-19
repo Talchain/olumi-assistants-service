@@ -2185,6 +2185,38 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     if (out.matched) {
       expect(out.advice_class).toBe('improvement');
       expect(out.assistant_text).not.toMatch(/smaller adjustments may not move the picture much/i);
+      // S4 ROUND 4 — this pin previously asserted /picture appears fragile/ on a
+      // near_tie x MODERATE cell. That encoded the defect the round-3 review
+      // found: fragility was being read off the MARGIN axis, so a merely-close
+      // result was reported as an unstable one, and the deterministic fallback
+      // narrating the same run disagreed. Fragility is now the stability axis's
+      // word alone (see the raw-fragile case below, which still earns it).
+      // Closeness is still stated — improvement has no closeness line of its
+      // own, so this sentence is where its honesty has to land.
+      expect(out.assistant_text).toMatch(/effectively tied/i);
+      expect(out.assistant_text).not.toMatch(/picture appears fragile/i);
+    }
+  });
+
+  it('composeImprovement on a raw-FRAGILE result still earns the fragility claim', () => {
+    // Positive control for the pin above: the fragility sentence was not
+    // removed, it was moved onto the stability axis where it belongs. Same
+    // near-tie margin, but now the raw signal genuinely reports fragility.
+    const out = tryPostAnalysisAdviceGate({
+      message: 'How can we improve the outcome?',
+      analysis: {
+        status: 'success',
+        leading_option: { label: 'A', probability: 0.5005 },
+        runner_up: { label: 'B', probability: 0.4995 },
+        margin_pp: 0.1,
+        robustness_band: 'moderate',
+        top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
+      },
+      freshness: 'fresh',
+      rawRobustness: { level: 'very_low', near_tie_is_tie: false },
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
       expect(out.assistant_text).toMatch(/picture appears fragile/i);
     }
   });
@@ -2287,9 +2319,16 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     if (out.matched) {
       expect(out.advice_class).toBe('advice');
       const text = out.assistant_text;
-      // Existing opener + neutral margin sentence preserved.
+      // Existing opener preserved.
       expect(text).toContain('currently favours Hire One Tech Lead');
-      expect(text).toMatch(/It sits ahead of Hire Two Developers/);
+      // S4 ROUND 4 — this pin previously required "It sits ahead of Hire Two
+      // Developers" on a 0.05pp gap. Literally true, but it frames a dead heat
+      // as a standing, and the sibling pin directly below already demanded that
+      // composeMeaning REFRAME the very same 0.05pp fixture as a near-tie. Two
+      // surfaces, one analysis, opposite framings — the drift this lane closes.
+      // composeAdvice now takes its margin verdict from the shared composer too.
+      expect(text).toMatch(/It is effectively tied with Hire Two Developers/);
+      expect(text).not.toMatch(/It sits ahead of Hire Two Developers/);
       // No escalation to strong-claim copy.
       assertNoForbidden(text, FORBIDDEN_STRENGTH_PHRASES);
       assertNoForbidden(text, FORBIDDEN_INTERNAL_TERMS);

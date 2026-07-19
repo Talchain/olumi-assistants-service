@@ -63,9 +63,22 @@ describe('phase2 numeric format — explain_results fallback', () => {
 
       // Every probability value must appear in display form (never as raw decimal)
       const expectedLeaderDisplay = formatProbability(fixture.leader_probability);
-      const expectedMarginDisplay = formatPercentagePoints(fixture.margin_pp);
       expect(prose).toContain(expectedLeaderDisplay);
-      expect(prose).toContain(expectedMarginDisplay);
+
+      // Near-tie margins are the same deliberate claim-honesty carve-out that
+      // the what_would_flip block below already asserts (added 2026-07-09):
+      // composeExplainResultsFallback now mirrors it (S4 / PR #270), so a
+      // near-zero / sub-threshold margin reads "effectively tied" with NO
+      // numeric margin cited — "ahead by 0 percentage points, so the lead is
+      // meaningful" was the exact S4 contradiction against the flip composer.
+      // Fixtures under NEAR_TIE_PP_THRESHOLD must assert the qualitative
+      // phrasing, not a percentage-points figure; decisive margins still cite it.
+      if (isNearTieByMargin(fixture.margin_pp, null)) {
+        expect(prose).toContain('effectively tied');
+      } else {
+        const expectedMarginDisplay = formatPercentagePoints(fixture.margin_pp);
+        expect(prose).toContain(expectedMarginDisplay);
+      }
 
       // The raw leader probability must NOT appear in user-facing prose
       // when its display form differs from the raw stringification (e.g.
