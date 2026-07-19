@@ -92,11 +92,52 @@ function findRefs(node: SchemaNode, path: string = "root", results: string[] = [
   return results;
 }
 
+// `minItems` was in this list until 2026-07-19 and the blanket ban was WRONG —
+// a hand-maintained mirror that had drifted from what the API actually accepts.
+// Live-probed against claude-sonnet-4-6 on 2026-07-19:
+//   minItems: 4  -> HTTP 400 "For 'array' type, 'minItems' values other than
+//                   0 or 1 are not supported"
+//   minItems: 0  -> accepted (and a no-op)
+//   minItems: 1  -> accepted AND ENFORCED. Asked a question whose only correct
+//                   answer is an empty list, the model could not emit `[]` and
+//                   returned `[""]`; the same request without minItems, and with
+//                   minItems: 0, both returned `[]`.
+// So the real constraint is not "minItems is unsupported" but "minItems must be
+// 0 or 1". Banning it outright cost us the only grammar-level lever that can
+// stop an empty array — the exact defect behind the 2026-07-19 OPTIONS_IDENTICAL
+// outage (see tests/unit/draft-grammar-option-interventions.test.ts).
+// `maxItems` stays banned: not probed, no use case.
 const UNSUPPORTED_KEYWORDS = [
-  "minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems",
+  "minLength", "maxLength", "minimum", "maximum", "maxItems",
   "pattern", "format", "minProperties", "maxProperties", "uniqueItems",
   "exclusiveMinimum", "exclusiveMaximum", "default", "oneOf",
 ];
+
+/** Collect every `minItems` value in the tree with its path. */
+function findMinItems(
+  node: SchemaNode,
+  path: string = "root",
+  results: { path: string; value: unknown }[] = [],
+): { path: string; value: unknown }[] {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return results;
+  if ("minItems" in node) results.push({ path, value: node.minItems });
+  if (node.properties && typeof node.properties === "object") {
+    for (const [key, val] of Object.entries(node.properties as Record<string, unknown>)) {
+      if (val && typeof val === "object") findMinItems(val as SchemaNode, `${path}.${key}`, results);
+    }
+  }
+  if (node.items && typeof node.items === "object" && !Array.isArray(node.items)) {
+    findMinItems(node.items as SchemaNode, `${path}.items`, results);
+  }
+  for (const combiner of ["anyOf", "allOf"] as const) {
+    if (Array.isArray(node[combiner])) {
+      for (let i = 0; i < (node[combiner] as unknown[]).length; i++) {
+        findMinItems((node[combiner] as SchemaNode[])[i], `${path}.${combiner}[${i}]`, results);
+      }
+    }
+  }
+  return results;
+}
 
 /** Recursively find unsupported keywords. */
 function findUnsupportedKeywords(
@@ -329,6 +370,26 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — prompt contract", () => {
     expect(findRefs(payloadSchema)).toHaveLength(0);
     expect(findUnsupportedKeywords(payloadSchema)).toHaveLength(0);
 
+    // `minItems` is permitted but ONLY with value 0 or 1 — anything else is a
+    // hard 400 from the grammar compiler (live-probed 2026-07-19; see the note
+    // on UNSUPPORTED_KEYWORDS). This check replaces the old blanket ban.
+    for (const { path, value } of findMinItems(payloadSchema)) {
+      expect(
+        [0, 1],
+        `${path}.minItems = ${String(value)} — the API rejects any minItems other than 0 or 1`,
+      ).toContain(value);
+    }
+    // POSITIVE CONTROL (trap #13): the walker must be able to SEE a minItems,
+    // or the loop above is vacuous — it would pass on a schema that has none,
+    // and it would have passed just as happily before the P0 fix added one.
+    expect(
+      findMinItems(payloadSchema).map((m) => m.path),
+      "findMinItems found nothing — the draft grammar's option-interventions guard is gone",
+    ).toContain("root.nodes.items.data.anyOf[0].interventions");
+    expect(
+      findMinItems({ type: "array", minItems: 7 } as unknown as SchemaNode),
+    ).toEqual([{ path: "root", value: 7 }]);
+
     // Print for visual verification
     console.log("\n=== Full serialised draft_graph schema ===");
     console.log(JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA, null, 2));
@@ -402,5 +463,47 @@ describe("OpenAI regression", () => {
     expect(schema).not.toHaveProperty("output_config");
     expect(schema.type).toBe("object");
     expect(schema.properties).toBeDefined();
+  });
+});
+
+// ============================================================================
+// minItems is PARTIALLY supported — the normaliser must discriminate by VALUE
+// ============================================================================
+
+describe("enforceAnthropicSchemaCompliance — minItems value handling", () => {
+  // The keyword was blanket-stripped until 2026-07-19. That blanket ban is what
+  // left the draft grammar unable to stop an option emitting `interventions: []`
+  // — the OPTIONS_IDENTICAL outage. Live-probed limits (claude-sonnet-4-6):
+  // 0 and 1 are accepted, >=2 is a hard 400. See MIN_ITEMS_ALLOWED_VALUES.
+  const wrap = (minItems: number) => ({
+    type: "object",
+    properties: { xs: { type: "array", minItems, items: { type: "string" } } },
+    required: ["xs"],
+    additionalProperties: false,
+  });
+
+  it("KEEPS minItems: 1 — the only lever that makes an empty array ungrammatical", () => {
+    const out = enforceAnthropicSchemaCompliance(wrap(1), "minitems_keep_test") as {
+      properties: { xs: Record<string, unknown> };
+    };
+    expect(out.properties.xs.minItems).toBe(1);
+  });
+
+  it("KEEPS minItems: 0 (accepted by the API, though a no-op)", () => {
+    const out = enforceAnthropicSchemaCompliance(wrap(0), "minitems_zero_test") as {
+      properties: { xs: Record<string, unknown> };
+    };
+    expect(out.properties.xs.minItems).toBe(0);
+  });
+
+  it("STRIPS minItems >= 2 — the API 400s the whole request on those", () => {
+    // Positive control for the strip path: without this the test above could
+    // pass on a normaliser that had simply stopped touching minItems at all.
+    for (const bad of [2, 5, 100]) {
+      const out = enforceAnthropicSchemaCompliance(wrap(bad), "minitems_strip_test") as {
+        properties: { xs: Record<string, unknown> };
+      };
+      expect(out.properties.xs, `minItems: ${bad} must be stripped`).not.toHaveProperty("minItems");
+    }
   });
 });
