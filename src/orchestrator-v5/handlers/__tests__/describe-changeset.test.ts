@@ -414,16 +414,26 @@ describe('all three surfaces render the SAME specific copy (the never-diverge pi
     expect(single).toContain("the change to update 'Marketing'");
   });
 
-  it('chip label and message carry every named operation', () => {
+  it('chip MESSAGE carries every named operation; the LABEL is clamped display copy (wave-2 ask #20)', () => {
+    // 1.134 → #20 doctrine hand-off, stated so this pin's history is
+    // honest: 1.134 required the changeset DESCRIPTION to be complete and
+    // identical on every describing surface (it originally pinned the raw
+    // label too). Ask #20 (R8 live probe: a ~300-char sentence rendered as
+    // one enormous confirm chip) refines WHERE the full description lives:
+    // the hold ask, the chip MESSAGE (routing exact-matches it), the
+    // held_proposal card summary, and the applied receipt. The LABEL alone
+    // becomes clamped display copy — a prefix of the same description,
+    // never a diverging rewrite and never an opaque "N more changes".
     const copy = buildGmHeldPublicCopy(subject());
-    expect(copy.label).toBe(
-      "Add factor 'Wasted time searching for a co-founder', " +
-        "change 'Marketing' to 0.8 and link 'Revenue' to 'Goal'",
-    );
     expect(copy.message).toBe(
       "Yes, add factor 'Wasted time searching for a co-founder', " +
         "change 'Marketing' to 0.8 and link 'Revenue' to 'Goal'.",
     );
+    expect(copy.label.length).toBeLessThanOrEqual(60);
+    // The label is a PREFIX of the capitalised subject (+ ellipsis) — same
+    // description, display-clamped; not a second wording that could drift.
+    const capitalised = subject().charAt(0).toUpperCase() + subject().slice(1);
+    expect(capitalised.startsWith(copy.label.replace(/\.\.\.$/, ''))).toBe(true);
     expect(copy.label).not.toMatch(/\d+\s+more\s+change/i);
   });
 
@@ -471,15 +481,16 @@ describe('all three surfaces render the SAME specific copy (the never-diverge pi
     expect(refereeGateSeam).toBe(describeHeldOperationsSubject);
   });
 
-  it('the three surfaces agree byte-for-byte on the changeset description', () => {
+  it('the describing surfaces agree byte-for-byte on the changeset description', () => {
+    // Post-#20 the DESCRIBING surfaces are the ask, the chip MESSAGE, and
+    // the receipt (the chip label is clamped display copy — see the pin
+    // above; the held_proposal card summary is pinned in
+    // compose/__tests__/held-proposal.test.ts).
     const s = subject();
     const ask = buildGmHeldAssistantText(s, F7_BATCH.length);
     const chip = buildGmHeldPublicCopy(s);
     const receipt = buildGmHeldAppliedReceipt([s]);
     expect(ask).toContain(s);
-    // Chip label capitalises the first character only; the remainder is identical.
-    expect(chip.label.charAt(0)).toBe(s.charAt(0).toUpperCase());
-    expect(chip.label.slice(1)).toBe(s.slice(1));
     expect(chip.message).toBe(`Yes, ${s}.`);
     expect(receipt).toContain(`Confirmed: ${s}.`);
   });

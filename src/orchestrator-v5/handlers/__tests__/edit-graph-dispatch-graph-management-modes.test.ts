@@ -548,10 +548,13 @@ describe('mode=live — held supersession honesty (P0 DGAI #340 req 4)', () => {
 
 describe('mode=live — held_proposal block (unconditional emit)', () => {
   // Ops switched FIELD_OPS → STRUCT_OPS per D-S (tunables no longer hold, so
-  // only structural changes mint held_proposal blocks). The added node's id
-  // is not in the PRE-edit graph, so the label-resolving summary falls back
-  // to the generic template — the builder contract, not a regression.
-  const HELD_SUMMARY = 'A change to the model is held for your confirmation.';
+  // only structural changes mint held_proposal blocks). Wave-2 ask #20: the
+  // card-body summary now carries the FULL changeset description from the
+  // 1.134 seam (the add_node op names its factor from the op payload, so no
+  // pre-edit-graph label resolution is needed) — this pin is the end-to-end
+  // proof the description reaches the wire block on the real dispatch path,
+  // now that the confirm-chip label is clamped short.
+  const HELD_SUMMARY = "Held for your confirmation: add factor 'Cost'.";
 
   function heldProposalBlocksOf(response: unknown): Array<Record<string, unknown>> {
     const blocks = (response as { blocks?: Array<Record<string, unknown>> }).blocks ?? [];

@@ -407,10 +407,19 @@ export function buildHeldSupersessionNotice(
 
 /**
  * Named chip / persisted public copy for a held pending. The label is the
- * capitalised subject; the message is an explicit confirmation naming the
+ * capitalised subject CLAMPED to chip length (wave-2 ask #20 — a multi-op
+ * changeset subject ran ~300 chars and rendered as one enormous confirm
+ * chip; the UI renders producer strings verbatim by doctrine, so only the
+ * producer can shorten it). The FULL description still reaches the user
+ * through the hold ask (`buildGmHeldAssistantText`) and the held_proposal
+ * card body (`buildHeldProposalBlock` summary), so a short label never
+ * hides what a confirm applies — and clamped labels stay distinct across
+ * concurrent holds (the 1.16j identical-chips class), unlike a generic
+ * fixed label. The message is an explicit confirmation naming the FULL
  * subject, so a chip click (which replays the message as user text)
  * resolves via the exact-match pre-route to THIS hold — never ambiguously
- * via a bare "Yes" when several consents are live.
+ * via a bare "Yes" when several consents are live. NEVER clamp the
+ * message: routing depends on it.
  */
 export function buildGmHeldPublicCopy(subject: string | null): {
   label: string;
@@ -419,7 +428,7 @@ export function buildGmHeldPublicCopy(subject: string | null): {
   if (subject === null || !subjectIsSafe(subject)) {
     return { label: GM_HELD_CHIP_LABEL, message: GM_HELD_CHIP_MESSAGE };
   }
-  const label = subject.charAt(0).toUpperCase() + subject.slice(1);
+  const label = clampLabel(subject.charAt(0).toUpperCase() + subject.slice(1));
   return { label, message: `Yes, ${subject}.` };
 }
 
@@ -745,6 +754,13 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       // R8: build the typed held_proposal block on the INITIAL hold only —
       // gm_held_resume re-referees on confirm and must not mint a second
       // block. Builder is fail-closed (unmappable code / class → null).
+      // ONE derivation of the changeset description feeds BOTH the hold ask
+      // and the held_proposal card body (wave-2 ask #20) — the 1.134 seam
+      // guarantees the surfaces can never diverge.
+      const heldChangesetSubject = describeHeldOperationsSubject(
+        input.operations,
+        input.currentGraph,
+      );
       const heldProposalBlock: HeldProposalBlock | null =
         (input.dispatchPath ?? 'edit_graph') === 'edit_graph'
           ? buildHeldProposalBlock({
@@ -754,6 +770,9 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
               blockerCode: gv.blocker?.code ?? null,
               targetKey: held.targetKey,
               graph: input.currentGraph as HeldProposalBlockInput['graph'],
+              // Ask #20: the card body carries the FULL mutation
+              // description now that the chip label is clamped short.
+              changesetDescription: heldChangesetSubject,
             })
           : null;
       // ROADMAP 2.11 / P1-3 — needs-encoding disclosure on the consent ask
@@ -764,7 +783,7 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
         input.currentGraph,
       );
       const heldAsk = buildGmHeldAssistantText(
-        describeHeldOperationsSubject(input.operations, input.currentGraph),
+        heldChangesetSubject,
         input.operations.length,
       );
       return {

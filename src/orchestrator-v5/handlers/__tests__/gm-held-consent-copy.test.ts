@@ -169,3 +169,40 @@ describe('buildHeldAwareDegradeText — the degrade re-ask names the hold', () =
     expect(buildHeldAwareDegradeText(label)).toBe(HELD_AWARE_DEGRADE_TEXT);
   });
 });
+
+describe('buildGmHeldPublicCopy — wave-2 ask #20: the chip label is CLAMPED, the message never is', () => {
+  // The R8 live probe found the confirm chip label was the entire ~300-char
+  // changeset sentence (four edge removals + an option name). The label is
+  // now clamped to chip length; the FULL description still reaches the user
+  // via the hold ask and the held_proposal card summary, and the message
+  // keeps the full subject because chip-click routing exact-matches it.
+  const LONG_SUBJECT =
+    "remove the link from 'Local Talent Market Tightness' to 'Hiring and Staffing Cost', " +
+    "remove the link from 'Engineering Capacity' to 'Onboarding and Ramp-Up Delay', " +
+    "remove the link from 'Offshore Engagement' to 'Budget Overrun Risk', " +
+    "remove the link from 'Team Capability' to 'Roadmap Delivery' and add option 'Hire Two Senior Engineers Locally'";
+
+  it('a multi-op subject yields a label of at most 60 chars, ellipsised', () => {
+    const copy = buildGmHeldPublicCopy(LONG_SUBJECT);
+    expect(LONG_SUBJECT.length).toBeGreaterThan(200); // positive control
+    expect(copy.label.length).toBeLessThanOrEqual(60);
+    expect(copy.label.endsWith('...')).toBe(true);
+    expect(copy.label.charAt(0)).toBe('R'); // still the capitalised subject, not a generic
+  });
+
+  it('the MESSAGE keeps the full subject verbatim (exact-match routing depends on it)', () => {
+    const copy = buildGmHeldPublicCopy(LONG_SUBJECT);
+    expect(copy.message).toBe(`Yes, ${LONG_SUBJECT}.`);
+  });
+
+  it('a short subject is untouched (pre-#20 behaviour preserved byte-for-byte)', () => {
+    const copy = buildGmHeldPublicCopy("update 'Marketing'");
+    expect(copy.label).toBe("Update 'Marketing'");
+    expect(copy.message).toBe("Yes, update 'Marketing'.");
+  });
+
+  it('two different long holds still get DISTINCT labels (1.16j identical-chips class)', () => {
+    const other = LONG_SUBJECT.replace('Local Talent Market Tightness', 'A Completely Different Factor');
+    expect(buildGmHeldPublicCopy(LONG_SUBJECT).label).not.toBe(buildGmHeldPublicCopy(other).label);
+  });
+});
