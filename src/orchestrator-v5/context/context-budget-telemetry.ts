@@ -12,8 +12,9 @@
  *
  *   - `v5.context_truncation` — emitted at the cut site the moment ANY
  *     content is dropped. `disclosed:false` marks a cut the LLM cannot see;
- *     post-S1 (CEE_CONTEXT_DISCLOSURE_V2) that state is a bug the harness
- *     ratchet can enforce.
+ *     with in-band disclosure now unconditional, the turn-path cut sites
+ *     emit `disclosed:true` and a persistent `disclosed:false` is a bug the
+ *     harness ratchet can enforce.
  *
  * S0 discipline: telemetry-additive ONLY. This module never throws, never
  * mutates its inputs, and changes zero prompt bytes. Budgets here are the

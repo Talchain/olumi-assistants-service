@@ -8,12 +8,10 @@
  *     (`truncateGraphJson`, `capConversationText`, window slice, brief
  *     slice), usage-token capture into the events.
  *
- * S0 is telemetry-additive ONLY: no flag, no prompt-byte change, no
- * behaviour change. The tests below pin BOTH halves:
- *   1. the events fire with the exact 03 §2 field sets on fixture packs;
- *   2. the rendered prompt/context output stays byte-identical to the
- *      pre-S0 shape (including today's misreporting graph header — that
- *      fix is S1's, behind CEE_CONTEXT_DISCLOSURE_V2).
+ * The tests below pin the cut-site telemetry field sets (03 §2) AND the
+ * now-unconditional in-band disclosure: the turn-path cut sites emit
+ * `disclosed:true` and the edit-lane graph header reports post-truncation
+ * counts (the pre-disclosure misreporting header is fixed).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -28,6 +26,7 @@ import {
 import {
   serialiseEditContextForLLM,
   truncateGraphJson,
+  truncateGraphJsonWithMeta,
   editCompactGraph,
 } from '../../src/orchestrator/context/serialise.js';
 import {
@@ -263,7 +262,7 @@ describe('emitContextTruncation (v5.context_truncation)', () => {
 // ---------------------------------------------------------------------------
 
 describe('cut site: graph JSON truncation (serialise.ts)', () => {
-  it('emits v5.context_truncation when the graph JSON is cut, output byte-identical to pre-S0', () => {
+  it('emits a DISCLOSED v5.context_truncation when the graph JSON is cut, and the header is honest', () => {
     const graph = bigGraph();
     const context = editContextWith(graph);
 
@@ -274,32 +273,35 @@ describe('cut site: graph JSON truncation (serialise.ts)', () => {
     expect(graphCuts).toHaveLength(1);
     expect(graphCuts[0].site).toBe('serialise.truncateGraphJson');
     expect(graphCuts[0].strategy).toBe('drop_edges_then_nodes');
-    // S0 ships with disclosure OFF (S1's flag is dark) — the cut is real
-    // and NOT disclosed to the LLM. `disclosed:false` here is the honest
-    // pre-S1 baseline the harness ratchet will later flip on.
-    expect(graphCuts[0].disclosed).toBe(false);
+    // Disclosure is now unconditional — the cut is made visible to the LLM.
+    expect(graphCuts[0].disclosed).toBe(true);
     const original = JSON.stringify(editCompactGraph(graph)).length;
     expect(graphCuts[0].original_chars).toBe(original);
-    // DISCOVERY (pre-existing, S0 pins it rather than fixing it): the
-    // 10-iteration reduction loop can exhaust itself shrinking edges and
-    // return MORE than maxBytes (this fixture: ~17.9K for an 8K cap).
-    // kept_chars reports what was actually sent — that honesty is the
-    // whole point of the event. Behaviour change would not be S0's.
+    // DISCOVERY (pre-existing, pinned rather than fixed): the 10-iteration
+    // reduction loop can exhaust itself shrinking edges and return MORE than
+    // maxBytes (this fixture: ~17.9K for an 8K cap). kept_chars reports what
+    // was actually sent — that honesty is the whole point of the event.
     const kept = truncateGraphJson(editCompactGraph(graph), 8_000).length;
     expect(graphCuts[0].kept_chars).toBe(kept);
     expect(kept).toBeLessThan(original);
 
-    // Byte-identity pin: S0 must NOT change the rendered context. Today's
-    // header misreports PRE-truncation counts — that stays until S1 flips.
+    // The rendered header reports POST-truncation counts + the in-section
+    // marker (the misreporting pre-truncation header is gone).
     const compact = editCompactGraph(graph);
-    expect(out).toContain(`## Current Graph (${compact.nodes.length} nodes, ${compact.edges.length} edges)`);
-    const expectedLegacy = [
+    const meta = truncateGraphJsonWithMeta(compact, 8_000);
+    expect(out).toContain(`## Current Graph (${meta.keptNodes} nodes, ${meta.keptEdges} edges)`);
+    expect(out).toContain('(graph truncated: showing');
+    expect(out).not.toContain(
       `## Current Graph (${compact.nodes.length} nodes, ${compact.edges.length} edges)`,
+    );
+    const expectedShape = [
+      `## Current Graph (${meta.keptNodes} nodes, ${meta.keptEdges} edges)`,
+      `(graph truncated: showing ${meta.keptNodes} of ${compact.nodes.length} nodes, ${meta.keptEdges} of ${compact.edges.length} edges)`,
       '```json',
-      truncateGraphJson(compact, 8_000),
+      meta.json,
       '```',
     ].join('\n\n');
-    expect(out).toBe(expectedLegacy);
+    expect(out).toBe(expectedShape);
   });
 
   it('emits nothing when the graph fits', () => {
@@ -387,7 +389,7 @@ function turnFixture(i: number): SessionTurnWithContent {
 }
 
 describe('cut site: window slice (projectConversation)', () => {
-  it('emits an UNDISCLOSED window-slice truncation event when prior turns exceed the cap', () => {
+  it('emits a DISCLOSED window-slice truncation event when prior turns exceed the cap', () => {
     const turns = Array.from({ length: 9 }, (_, i) => turnFixture(i));
     const projected = projectConversation(turns, false);
     expect(projected.recent_turns).toHaveLength(5);
@@ -398,8 +400,8 @@ describe('cut site: window slice (projectConversation)', () => {
     expect(cuts).toHaveLength(1);
     expect(cuts[0].site).toBe('context-pack-assembler.projectConversation');
     expect(cuts[0].strategy).toBe('window_slice');
-    // Silent today (no {shown, available} in the pack until S1 flips).
-    expect(cuts[0].disclosed).toBe(false);
+    // Disclosure is now unconditional — the pack carries {shown, available}.
+    expect(cuts[0].disclosed).toBe(true);
     // Chars accounting: message content of ALL prior turns vs the kept 5.
     const chars = (t: ReturnType<typeof turnFixture>) =>
       (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0);
@@ -418,7 +420,7 @@ describe('cut site: window slice (projectConversation)', () => {
 // ---------------------------------------------------------------------------
 
 describe('cut site: capConversationText (commit.ts)', () => {
-  it('emits an UNDISCLOSED hard-slice event with the exact original length', () => {
+  it('emits a DISCLOSED hard-slice event with the exact original length', () => {
     const long = 'z'.repeat(CONVERSATION_TEXT_CAP + 777);
     const capped = capConversationText(long, 'user_message');
     expect(capped).toHaveLength(CONVERSATION_TEXT_CAP);
@@ -431,7 +433,9 @@ describe('cut site: capConversationText (commit.ts)', () => {
       original_chars: CONVERSATION_TEXT_CAP + 777,
       kept_chars: CONVERSATION_TEXT_CAP,
       strategy: 'hard_slice',
-      disclosed: false,
+      // Disclosure is unconditional — projectConversation marks the at-cap
+      // turn truncated:true, so downstream LLMs can see this cut.
+      disclosed: true,
     });
   });
 

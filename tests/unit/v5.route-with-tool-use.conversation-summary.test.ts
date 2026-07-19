@@ -3,10 +3,11 @@
  * rolling summary (design pack 01 §2, 04 §3.1 [R2], 05 §S4 inject row).
  *
  * Pins:
- *  1. BYTE-IDENTITY (flag off / maintain): with no `conversation_summary`
- *     on the pack, buildUserMessage output is byte-identical to the
- *     pre-S4-inject baseline — pinned by sha256 golden captured on
- *     origin/staging 360b01f34 BEFORE this change.
+ *  1. BYTE-IDENTITY (maintain): with no `conversation_summary` on the pack,
+ *     buildUserMessage output is byte-identical to a pinned sha256 golden.
+ *     The golden was re-captured when context disclosure became
+ *     unconditional (the pack conversation now always carries `window`);
+ *     the rolling-summary section is still absent on this path.
  *  2. Inject-mode adds EXACTLY the block: the serialised prompt is the
  *     baseline prompt with (a) the `conversation_summary` section appended
  *     BELOW the ground-truth `analysis`/`graph` sections in the llmFacing
@@ -90,10 +91,13 @@ function baselinePack(): ContextPack {
   });
 }
 
-/** sha256 of buildUserMessage(baselinePack(), PAYLOAD.message) captured on
- *  origin/staging 360b01f34 (pre-S4-inject). 1,376 chars. */
+/** sha256 of buildUserMessage(baselinePack(), PAYLOAD.message). Re-captured
+ *  when context disclosure became UNCONDITIONAL: projectConversation now
+ *  always emits `window: {shown, available}` on the pack conversation (here
+ *  2 of 2), which is the only delta from the pre-S4-inject golden
+ *  (360b01f34, 1,376 chars). The rolling-summary block is still absent. */
 const PRE_CHANGE_SHA256 =
-  '83ba016d3146507380020171e14c3d96aacce4e07d8edae10eaa33ad4ecd3c2f';
+  '31f3eb091ef8ac382cdae9e19ae0a15390623b6fa4f8df586bf470a4b5eb03d4';
 
 const SECTION: ContextPackConversationSummary = {
   text: [
@@ -114,7 +118,7 @@ function withSummary(pack: ContextPack): ContextPack {
 describe('buildUserMessage — conversation_summary (S4-inject)', () => {
   it('no section on the pack → byte-identical to the pre-change baseline (off + maintain)', () => {
     const out = buildUserMessage(baselinePack(), PAYLOAD.message);
-    expect(out.length).toBe(1376);
+    expect(out.length).toBe(1438);
     expect(createHash('sha256').update(out).digest('hex')).toBe(PRE_CHANGE_SHA256);
     expect(out).not.toContain('conversation_summary');
     expect(out).not.toContain(SUMMARY_PRECEDENCE_INSTRUCTION);

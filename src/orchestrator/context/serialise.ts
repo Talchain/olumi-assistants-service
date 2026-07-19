@@ -12,7 +12,6 @@ import {
   emitContextTruncation,
   type ContextTruncationRecord,
 } from "../../orchestrator-v5/context/context-budget-telemetry.js";
-import { config } from "../../config/index.js";
 
 // ============================================================================
 // Robustness Band Mapping
@@ -98,8 +97,8 @@ export function editCompactGraph(graph: GraphV3T): EditCompactGraph {
 // ============================================================================
 
 /**
- * Result of a graph-JSON truncation with enough metadata for disclosure
- * (S1, CEE_CONTEXT_DISCLOSURE_V2) and cut-site telemetry (S0).
+ * Result of a graph-JSON truncation with enough metadata for in-band
+ * disclosure (now unconditional) and cut-site telemetry (S0).
  */
 export interface TruncateGraphJsonResult {
   readonly json: string;
@@ -305,30 +304,12 @@ export interface SerialisedEditContext {
   readonly truncations: readonly ContextTruncationRecord[];
 }
 
-/**
- * Rendering options for {@link serialiseEditContextForLLMWithMeta}.
- *
- * `discloseTruncations` — Context v2 S1 (CEE_CONTEXT_DISCLOSURE_V2,
- * 02 §Disclosure): when true, a truncated graph section gets an in-section
- * "(graph truncated: showing X of Y nodes, Z of W edges)" marker and the
- * section header reports POST-truncation counts (pre-S1 the header
- * misreported full counts over truncated JSON). Defaults to the flag so
- * production callers need no plumbing; tests pass it explicitly. Flag-off
- * output is byte-identical to pre-S1.
- */
-export interface SerialiseEditContextOpts {
-  readonly discloseTruncations?: boolean;
-}
-
-/** Metadata form of {@link serialiseEditContextForLLM}. Byte-identical text with disclosure off. */
+/** Metadata form of {@link serialiseEditContextForLLM}. */
 export function serialiseEditContextForLLMWithMeta(
   context: ConversationContext,
   maxGraphBytes: number = 8000,
   maxConversationChars: number = 4000,
-  opts?: SerialiseEditContextOpts,
 ): SerialisedEditContext {
-  const discloseTruncations =
-    opts?.discloseTruncations ?? config.features.contextDisclosureV2;
   const briefSlice = context.brief ?? null;
   const sections: string[] = [];
   const sectionChars: Record<string, number> = {};
@@ -375,7 +356,7 @@ export function serialiseEditContextForLLMWithMeta(
       const compact = editCompactGraph(context.graph as GraphV3T);
       const graphCut = truncateGraphJsonWithMeta(compact, maxGraphBytes);
       if (graphCut.truncated) {
-        // S0 made the cut observable; S1 (CEE_CONTEXT_DISCLOSURE_V2) makes
+        // S0 made the cut observable; disclosure (now unconditional) makes
         // it VISIBLE to the LLM — honest header counts + in-section marker.
         // `disclosed` tracks the in-prompt reality, not an aspiration.
         emitContextTruncation({
@@ -384,20 +365,18 @@ export function serialiseEditContextForLLMWithMeta(
           original_chars: graphCut.originalChars,
           kept_chars: graphCut.json.length,
           strategy: 'drop_edges_then_nodes',
-          disclosed: discloseTruncations,
+          disclosed: true,
           scenario_id: scenarioId,
         });
         truncations.push({
           section: 'graph_json',
           original_chars: graphCut.originalChars,
           kept_chars: graphCut.json.length,
-          disclosed: discloseTruncations,
+          disclosed: true,
         });
-      }
-      if (graphCut.truncated && discloseTruncations) {
         // 02 §Disclosure fix 1: header reports what is ACTUALLY in the JSON
-        // below it (pre-S1 it printed pre-truncation counts — the LLM was
-        // actively misinformed), and the marker names the cut explicitly.
+        // below it (pre-disclosure it printed pre-truncation counts — the LLM
+        // was actively misinformed), and the marker names the cut explicitly.
         sections.push(`## Current Graph (${graphCut.keptNodes} nodes, ${graphCut.keptEdges} edges)`);
         sections.push(
           `(graph truncated: showing ${graphCut.keptNodes} of ${compact.nodes.length} nodes, ` +
