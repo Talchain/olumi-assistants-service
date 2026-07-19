@@ -29,7 +29,7 @@ const UNSUPPORTED_KEYWORDS = new Set([
   "maxLength",
   "minimum",
   "maximum",
-  "minItems",
+  // NOTE: "minItems" is deliberately NOT here — see MIN_ITEMS_ALLOWED_VALUES.
   "maxItems",
   "pattern",
   "format",
@@ -40,6 +40,31 @@ const UNSUPPORTED_KEYWORDS = new Set([
   "exclusiveMaximum",
   "default",
 ]);
+
+/**
+ * `minItems` is PARTIALLY supported: the grammar compiler accepts 0 and 1 and
+ * rejects everything else. Live-probed against claude-sonnet-4-6, 2026-07-19:
+ *
+ *   minItems: 4  -> HTTP 400 invalid_request_error
+ *                   "For 'array' type, 'minItems' values other than 0 or 1 are
+ *                    not supported"
+ *   minItems: 0  -> accepted; a no-op (an empty array still validates)
+ *   minItems: 1  -> accepted AND genuinely ENFORCED at generation time. Asked a
+ *                   question whose only correct answer is an empty list, the
+ *                   model could not emit `[]` and returned `[""]`; the same
+ *                   request with no minItems, and with minItems: 0, both
+ *                   returned `[]`.
+ *
+ * This distinction is load-bearing. `minItems: 1` is the only grammar-level
+ * lever that can stop the model satisfying a `required` array with `[]`, and a
+ * blanket ban on the keyword is what left the draft grammar unable to guarantee
+ * an option carries any interventions — the 2026-07-19 OPTIONS_IDENTICAL
+ * outage, where every draft turn 500'd with `intervention_signature: ""`.
+ *
+ * Values outside this set are still stripped: sending them would 400 the whole
+ * request, which is strictly worse than dropping the constraint.
+ */
+const MIN_ITEMS_ALLOWED_VALUES = new Set([0, 1]);
 
 // ============================================================================
 // Types
@@ -166,6 +191,12 @@ function normaliseNode(
       stats.keywords_stripped.push(`${path.join(".")}.${keyword}`);
       delete node[keyword];
     }
+  }
+
+  // --- minItems: keep 0 and 1, strip anything else (see MIN_ITEMS_ALLOWED_VALUES) ---
+  if ("minItems" in node && !MIN_ITEMS_ALLOWED_VALUES.has(node.minItems as number)) {
+    stats.keywords_stripped.push(`${path.join(".")}.minItems`);
+    delete node.minItems;
   }
 
   // --- Inline $ref (with cycle detection) ---
