@@ -232,10 +232,10 @@ const ContextPackConversationTurnSchema = z
     // (system-event turns, pre-migration rows).
     user_message: z.string().nullable(),
     assistant_message: z.string().nullable(),
-    // Context v2 S1 (CEE_CONTEXT_DISCLOSURE_V2, 02 §Disclosure): literal
-    // `true` when a message on this turn was hard-sliced at the persistence
-    // cap. ABSENT otherwise (never `false`), and absent entirely with the
-    // flag off — key absence is the flag-off byte-identity guarantee.
+    // Context v2 (02 §Disclosure): literal `true` when a message on this
+    // turn was hard-sliced at the persistence cap. ABSENT otherwise (never a
+    // noisy `false`). Disclosure is unconditional, so the key appears
+    // whenever a projected turn sits at the cap.
     truncated: z.literal(true).optional(),
   })
   .strict();
@@ -246,9 +246,10 @@ const ContextPackConversationSchema = z
     turn_count: z.number().int().nonnegative(),
     last_tool_used: z.string().nullable(),
     pending_confirmation: z.boolean(),
-    // Context v2 S1 (02 §Disclosure fix 2): window disclosure — how many
+    // Context v2 (02 §Disclosure fix 2): window disclosure — how many
     // prior turns are shown vs available, so the LLM knows history exists
-    // beyond the window. Absent with the flag off (byte-identity).
+    // beyond the window. Emitted unconditionally by projectConversation;
+    // optional here so partial/legacy pack fixtures still validate.
     window: z
       .object({
         shown: z.number().int().nonnegative(),
