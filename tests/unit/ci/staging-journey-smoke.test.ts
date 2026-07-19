@@ -246,23 +246,29 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
  * `total_count: 1` for secrets), so every `if: vars.* == 'true'` in this repo
  * is PERMANENTLY FALSE. Those jobs never run and report as healthy.
  *
- * Deleting or un-gating them is a separate judgement call being rowed
- * elsewhere, so they are TOLERATED HERE — but named, one by one, with a
- * reason. A silent glob-level exclusion is the hand-maintained mirror this
- * suite exists to replace; an explicit list forces the next person to add a
- * row and justify it rather than widen a pattern.
+ * THE LIST IS NOW EMPTY, and that is the point. All three instances have been
+ * resolved by the owner's decision rather than tolerated:
+ *   - `nightly-smoke.yml`     DELETED. Targeted PRODUCTION (out of scope) and
+ *                             exercised `/assist/draft-graph`, a dead endpoint
+ *                             (v1 is 410-gone; the live path is
+ *                             `/orchestrate/v2/turn`). Fully wired it would
+ *                             have proven nothing. This file's own workflow
+ *                             supersedes it.
+ *   - `nightly-stability.yml` DELETED. `gh run list` returned NO runs at all —
+ *                             never triggered, not merely skipped. A benchmark
+ *                             that never produced a baseline has no trend to
+ *                             protect. (The underlying benchmark script is
+ *                             retained; only the dead workflow went.)
+ *   - `cee-diagnostics.yml`   UN-GATED. Now manual-dispatch only, no schedule,
+ *                             no `continue-on-error`, base URL defaulted in
+ *                             code. It fails loudly or not at all.
+ *
+ * An empty list is a materially stronger end state than a justified one: any
+ * NEWLY-ADDED `vars.*` gate now fails this suite immediately, with no
+ * precedent to point at. Re-populating this object should require the same
+ * argument the three entries above could not survive.
  */
-const VAR_GATE_OPT_OUTS: Record<string, string> = {
-  // Nightly smoke against staging. Gate `vars.SMOKE_SCHEDULE_ENABLED` is
-  // unset, so the scheduled run has skipped every time. Tracked separately:
-  // the call is delete-vs-un-gate, not a code change this lane owns.
-  "nightly-smoke.yml": "dead alarm (vars.SMOKE_SCHEDULE_ENABLED never set) — delete-vs-un-gate decision pending",
-  // Same pattern, `vars.CEE_DIAGNOSTICS_SCHEDULE_ENABLED`.
-  "cee-diagnostics.yml": "dead alarm (vars.CEE_DIAGNOSTICS_SCHEDULE_ENABLED never set) — delete-vs-un-gate decision pending",
-  // Same pattern, `vars.STABILITY_SCHEDULE_ENABLED`. Missed by the original
-  // sweep, which named only the other two.
-  "nightly-stability.yml": "dead alarm (vars.STABILITY_SCHEDULE_ENABLED never set) — delete-vs-un-gate decision pending",
-};
+const VAR_GATE_OPT_OUTS: Record<string, string> = {};
 
 describe("no NEW workflow may gate itself on an unset repo variable", () => {
   const WORKFLOW_DIR = resolve(REPO_ROOT, ".github/workflows");
