@@ -2,13 +2,21 @@
  * PROPOSALS_JSON_SCHEMA — Anthropic structured-outputs API compliance pin.
  *
  * The adapter passes outputSchema through VERBATIM ("compliant by
- * construction — no runtime normalisation", anthropic.ts). Live probes
- * against the GA output_config endpoint (2026-07-14, claude-sonnet-5 and
- * claude-sonnet-4-6) show the API REJECTS with a 400:
- *   - `maxItems` on arrays        ("property 'maxItems' is not supported")
- *   - `minimum`/`maximum`/`exclusiveMinimum` on numbers
- * while ACCEPTING `enum`, `minLength`, `maxLength` on strings and
- * `additionalProperties`/`required` on objects.
+ * construction — no runtime normalisation", anthropic.ts), so whatever this
+ * schema carries reaches the API unstripped.
+ *
+ * THE KEYWORD POLICY IS NOT RESTATED HERE. Both halves live together, exported,
+ * in src/adapters/llm/anthropic-schema-compliance.ts — imported below:
+ *   - UNSUPPORTED_KEYWORDS     — the rejected half
+ *   - ACCEPTED_KEYWORDS        — the accepted half, carrying the 2026-07-14
+ *                                live-probe evidence AND the accepted-but-NOT-
+ *                                enforced caveat for minLength/maxLength
+ *   - MIN_ITEMS_ALLOWED_VALUES — minItems' partial support (2026-07-19 probe)
+ *
+ * This docstring used to be the ONLY home for the accepted half, while the
+ * rejected half was already a constant. That asymmetry made the answer
+ * undiscoverable from the policy itself and cost two lanes a re-derivation each
+ * — see ACCEPTED_KEYWORDS for the account. Do not re-inline the policy here.
  *
  * The shipped M2 schema used maxItems (proposals, uncertainty_drivers) and
  * numeric bounds (strength.mean/std, exists_probability), so EVERY
@@ -29,6 +37,7 @@ import { describe, it, expect } from 'vitest';
 import { PROPOSALS_JSON_SCHEMA } from '../proposal-json-schema.js';
 import {
   UNSUPPORTED_KEYWORDS,
+  ACCEPTED_KEYWORDS,
   MIN_ITEMS_ALLOWED_VALUES,
 } from '../../../adapters/llm/anthropic-schema-compliance.js';
 
@@ -76,7 +85,7 @@ function collectMinItemsValues(
 }
 
 /**
- * KNOWN GAP, recorded rather than hidden.
+ * KNOWN, PROBED, AND DELIBERATE — recorded rather than hidden.
  *
  * `PROPOSALS_JSON_SCHEMA` is passed to the Anthropic API RAW — `anthropic.ts`
  * states "Schema is compliant by construction — no runtime normalisation
@@ -85,9 +94,18 @@ function collectMinItemsValues(
  * policy strips would reach the API unstripped.
  *
  * It currently carries `minLength` (1 site) and `maxLength` (7 sites), both of
- * which ARE in the canonical UNSUPPORTED_KEYWORDS. Whether that is a live
- * defect in M2 review or an over-broad entry in the policy has NOT been
- * probed, and resolving it is a correctness question outside this cleanup.
+ * which ARE in the canonical UNSUPPORTED_KEYWORDS.
+ *
+ * That is NOT an open question and NOT a live defect. An earlier version of this
+ * comment said it "has NOT been probed" while the probe result sat in the
+ * docstring at the top of this very file — the asymmetry this file now exists to
+ * NOT repeat. It HAS been probed (2026-07-14): the API ACCEPTS both. They sit in
+ * UNSUPPORTED_KEYWORDS because accepted is not enforced — the compiler takes them
+ * and ignores them — so the normaliser drops them rather than ship a constraint
+ * that buys nothing, while this schema keeps them as an advisory first fence.
+ * Enforcement is deterministic and downstream (findOversizedProposalField + the
+ * merge; `z.string().min(1)` on evidence_pointer). See ACCEPTED_KEYWORDS for the
+ * evidence, the not-enforced caveat, and the backstops.
  *
  * These two are therefore TOLERATED here — named, with a reason — and the
  * tolerance is SELF-CHECKING: if either keyword disappears from the schema
@@ -112,6 +130,15 @@ describe('PROPOSALS_JSON_SCHEMA structured-outputs compliance', () => {
       collectKeywordPaths(PROPOSALS_JSON_SCHEMA, keyword, '$', hits);
       expect(hits.length, `"${keyword}" is no longer in PROPOSALS_JSON_SCHEMA — drop the exemption`)
         .toBeGreaterThan(0);
+      // ...and that leaving it in the RAW-passed schema is safe only because the
+      // API ACCEPTS it (2026-07-14 probe). This is the load-bearing half of the
+      // exemption: a keyword the API REJECTS could never be tolerated here — it
+      // would 400 the call. Cross-checks two independently-maintained sets, so
+      // drift in either goes red rather than assume-good.
+      expect(
+        [...ACCEPTED_KEYWORDS],
+        `"${keyword}" is exempted here but is not recorded as API-accepted — if the probe was overturned, this schema now 400s`,
+      ).toContain(keyword);
     }
   });
 

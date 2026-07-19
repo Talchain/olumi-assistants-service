@@ -39,8 +39,8 @@ const NODE_DELTA_SCHEMA = {
     category: { type: 'string', enum: ['controllable', 'observable', 'external'] },
     uncertainty_drivers: {
       type: 'array',
-      // No maxItems: the structured-outputs compiler rejects it (live-probed
-      // 2026-07-14); the item-count cap is enforced by findOversizedProposalField.
+      // No maxItems: the structured-outputs compiler rejects it (see
+      // UNSUPPORTED_KEYWORDS); the cap is enforced by findOversizedProposalField.
       items: { type: 'string', maxLength: PROPOSAL_FIELD_CAPS.uncertainty_driver_length },
     },
   },
@@ -48,8 +48,9 @@ const NODE_DELTA_SCHEMA = {
 
 // Numeric bounds live in `description` hints only: the Anthropic structured-
 // outputs compiler REJECTS `minimum`/`maximum`/`exclusiveMinimum` on numbers
-// with a 400 (live-probed 2026-07-14, GA output_config, claude-sonnet-5 and
-// claude-sonnet-4-6) — and the adapter passes this schema through verbatim.
+// with a 400 — and the adapter passes this schema through verbatim. The keyword
+// policy and its live-probe evidence live in UNSUPPORTED_KEYWORDS /
+// ACCEPTED_KEYWORDS (src/adapters/llm/anthropic-schema-compliance.ts).
 // Enforcement is unchanged: checkEdgeNumericSanity (G10) rejects out-of-bounds
 // values in the deterministic merge, which is the authoritative gate.
 const EDGE_DELTA_SCHEMA = {

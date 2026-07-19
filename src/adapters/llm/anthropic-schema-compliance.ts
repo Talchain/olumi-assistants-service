@@ -76,6 +76,65 @@ export const UNSUPPORTED_KEYWORDS = new Set([
  */
 export const MIN_ITEMS_ALLOWED_VALUES = new Set([0, 1]);
 
+/**
+ * Validation keywords the GA `output_config` structured-outputs endpoint
+ * ACCEPTS. Live-probed 2026-07-14 against BOTH `claude-sonnet-5` and
+ * `claude-sonnet-4-6` — identical results on the two models, which is why one
+ * shared constant is safe here rather than a per-model table:
+ *
+ *   enum                                     -> accepted
+ *   minLength / maxLength      (on strings)  -> accepted (SEE THE CAVEAT BELOW)
+ *   additionalProperties / required
+ *                              (on objects)  -> accepted
+ *
+ * The SAME probe established the rejected half, which is the reason both halves
+ * are exported side by side. Previously only this accepted half was undiscoverable
+ * — it lived in a test-file docstring while the rejected half was already a
+ * constant here. That asymmetry cost two lanes: one flagged `minLength`/`maxLength`
+ * as "unprobed, possibly a live defect" while pointing at the very file whose
+ * docstring answered it, and a second spent a full investigation re-deriving that
+ * it was already answered.
+ *
+ *   maxItems                   (on arrays)   -> HTTP 400
+ *                                               "property 'maxItems' is not supported"
+ *   minimum / maximum / exclusiveMinimum
+ *                              (on numbers)  -> HTTP 400
+ *
+ * ⚠ ACCEPTED IS NOT ENFORCED — AND IS NOT THE SAME AS "KEPT".
+ *
+ * `minLength`/`maxLength` are accepted by the compiler but are almost certainly
+ * NOT ENFORCED at generation time: Anthropic's structured-outputs reference lists
+ * them under "Not supported" string constraints. NO live enforcement probe has
+ * been run for either — unlike `minItems: 1`, which WAS proven enforced (see
+ * MIN_ITEMS_ALLOWED_VALUES). Do not read this set as a guarantee that a value
+ * satisfying the constraint will come back. Note the docs' "Not supported" label
+ * does not by itself discriminate 400-on-send from silently-ignored: the numeric
+ * bounds sit under the same heading and DO 400. Only the live probe separates them.
+ *
+ * That is why `minLength`/`maxLength` also remain in UNSUPPORTED_KEYWORDS above
+ * and are still stripped by the normaliser — a constraint the compiler accepts
+ * but ignores buys nothing on the wire. They are the ONLY overlap between the two
+ * sets: accepted, yet deliberately dropped.
+ *
+ * Nothing is lost by dropping them, because both are deterministically backstopped
+ * downstream, which is where enforcement actually lives:
+ *   - maxLength     -> `findOversizedProposalField` (cee/dual-draft/guards.ts),
+ *                      with the deterministic merge rejecting the proposal as
+ *                      `proposal_field_too_large` (cee/dual-draft/merge.ts)
+ *   - minLength: 1  -> `evidence_pointer`'s `z.string().min(1, …)` on
+ *                      ProposalEnvelope (cee/dual-draft/proposals.ts)
+ *
+ * As PROPOSALS_JSON_SCHEMA's own header puts it, the model-facing schema is
+ * "a first fence, not the enforcement point".
+ */
+export const ACCEPTED_KEYWORDS = new Set([
+  "enum",
+  "minLength",
+  "maxLength",
+  "additionalProperties",
+  "required",
+]);
+
 // ============================================================================
 // Types
 // ============================================================================
