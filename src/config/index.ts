@@ -668,21 +668,6 @@ const ConfigSchema = z.object({
     //       composed assistant_text is exactly the shape-derived text
     //       (fail-closed against sanitiser/guard rewrites — turn-executor).
     answerShapeEnforced: booleanString.default(false),
-    // CEE_UI_DIRECTIVE_EMIT — ROADMAP 2.27 / seamlessness R4 (CEE half,
-    // slice 1): flag-gated deterministic `ui_directive` block emitter.
-    // Default OFF; flag-off is byte-identical to pre-slice behaviour (the
-    // emitter call site in compose.ts::buildBlocksFromFacts is skipped
-    // entirely). When true, a successful CURRENT-TURN run_analysis fact
-    // whose recommended option (`leading_option_id`) resolves to an option
-    // node in `enrichment.graph.nodes[]` emits exactly ONE ui_directive
-    // block (verb `highlight`, one option TargetRef, NO free-text `note` —
-    // zero LLM authorship in this slice). Fail-closed: no recommendation /
-    // unresolvable or non-option target / noop fact / missing
-    // graph_hash_at_run / prior-fact lifecycle rebuilds emit nothing.
-    // Ships DARK: the env var is not declared in render*.yaml or the
-    // deployed service config; enablement is deliberate and sequenced
-    // behind the DGAI half of R4 (parser/mapper/renderer — the §2
-    // surfacing gate, see compose/__tests__/block-type-allowlist.test.ts).
     // CEE_HELD_PROPOSAL_EMIT — seamlessness R8 (CEE half): flag-gated
     // deterministic `held_proposal` block emitter at the edit_graph GM held
     // seam. Default OFF; flag-off is byte-identical to pre-slice behaviour
@@ -695,21 +680,6 @@ const ConfigSchema = z.object({
     // not declared in render*.yaml; enablement sequenced behind the DGAI
     // card (A2, §2 surfacing gates — see block-type-allowlist.test.ts).
     heldProposalEmit: booleanString.default(false),
-    // CEE_DECISION_RECORD_CAPTURE — ROADMAP 3.1 (CEE half): flag-gated
-    // decision-record capture hook at the commit seam. Default OFF;
-    // flag-off is byte-identical to pre-slice behaviour (the hook call
-    // site in commit.ts is skipped entirely — no store construction, no
-    // env reads; pinned by commit-decision-record-hook.test.ts). When
-    // true, a durable commit carrying a successful (non-noop)
-    // run_analysis fact fires ONE fire-and-forget create_decision_record
-    // RPC (deterministic p_record_id — retries dedupe; guest scenarios
-    // short-circuit pre-RPC; every failure logged and swallowed — the
-    // turn is never blocked or failed). Ships DARK: the env var is not
-    // declared in render*.yaml or the deployed service config, AND the
-    // backing migration (20260710113000_v5_decision_records.sql, #406)
-    // is merged but NOT yet executed — the RPC does not exist until
-    // Paul's execution gate; enablement is sequenced behind it (see
-    // ROADMAP 3.1 and parallel-briefs/PLATFORM-REPORT-2026-07-10-1.md).
     // CEE_CONTEXT_BRIEF_ALL_SITES — Context Architecture v2 S2 (ROADMAP
     // 1.73, design pack 02 §Seam 1): thread the persisted decision brief
     // (`scenarios.brief_text`) into the edit/repair LLM context — the two
