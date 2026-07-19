@@ -1,3 +1,7 @@
+# node_modules was partially TRACKED (4,360 files: .pnpm/ layout, .bin/ symlinks,
+# pnpm metadata) from before this ignore rule existed; untracked (index-only)
+# 2026-07-03. If it ever reappears in `git ls-files node_modules`, someone
+# force-added it -- remove with `git rm -r --cached node_modules`.
 node_modules
 dist
 src/generated
