@@ -237,8 +237,14 @@ function hasCycle(nodes: NodeT[], edges: EdgeT[]): boolean {
  * Build canonical intervention signature for an option.
  * Sort by factor_id, canonicalise floats to 4 decimal places for stability;
  * differences beyond 4dp treated as negligible for identity comparison.
+ *
+ * EXPORTED because it is the product's definition of the very defect the
+ * A/B measurement harnesses exist to measure (an empty signature on >1 option
+ * IS the OPTIONS_IDENTICAL outage). Those harnesses previously RETYPED these
+ * semantics — a measurement instrument calibrated against a copy of the thing
+ * it measures can silently drift out of agreement with it.
  */
-function buildInterventionSignature(interventions: Record<string, number>): string {
+export function buildInterventionSignature(interventions: Record<string, number>): string {
   const entries = Object.entries(interventions)
     .map(([factorId, value]) => `${factorId}:${value.toFixed(4)}`)
     .sort();

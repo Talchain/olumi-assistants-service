@@ -27,9 +27,18 @@
  */
 import { describe, it, expect } from 'vitest';
 import { PROPOSALS_JSON_SCHEMA } from '../proposal-json-schema.js';
+import {
+  UNSUPPORTED_KEYWORDS,
+  MIN_ITEMS_ALLOWED_VALUES,
+} from '../../../adapters/llm/anthropic-schema-compliance.js';
 
-/** Keywords the Anthropic structured-outputs compiler rejects (live-probed). */
-const UNSUPPORTED_KEYWORDS = ['maxItems', 'minItems', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'] as const;
+// IMPORTED, not re-listed. This file previously carried its own 6-keyword copy
+// of the policy that still banned `minItems` outright — and because it lives
+// under `src/`, not `tests/`, the sweep that corrected the other copies missed
+// it. It was not a silent green but a FALSE RED waiting to happen: applying
+// #529's live-proven `minItems: 1` fix to PROPOSALS_JSON_SCHEMA would have
+// failed here with "API rejects minItems", a claim #529 disproved by probe,
+// and the natural response is to back the working fix out.
 
 function collectKeywordPaths(
   value: unknown,
@@ -48,14 +57,85 @@ function collectKeywordPaths(
   }
 }
 
+/** Collect every `minItems` value in the tree with its path. */
+function collectMinItemsValues(
+  value: unknown,
+  trail = '$',
+  out: { path: string; value: unknown }[] = [],
+): { path: string; value: unknown }[] {
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => collectMinItemsValues(v, `${trail}[${i}]`, out));
+    return out;
+  }
+  if (value === null || typeof value !== 'object') return out;
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (k === 'minItems') out.push({ path: trail, value: v });
+    collectMinItemsValues(v, `${trail}.${k}`, out);
+  }
+  return out;
+}
+
+/**
+ * KNOWN GAP, recorded rather than hidden.
+ *
+ * `PROPOSALS_JSON_SCHEMA` is passed to the Anthropic API RAW — `anthropic.ts`
+ * states "Schema is compliant by construction — no runtime normalisation
+ * needed" and assigns `normalisedOutputSchema = args.outputSchema`. It is NOT
+ * put through `enforceAnthropicSchemaCompliance`, so anything the canonical
+ * policy strips would reach the API unstripped.
+ *
+ * It currently carries `minLength` (1 site) and `maxLength` (7 sites), both of
+ * which ARE in the canonical UNSUPPORTED_KEYWORDS. Whether that is a live
+ * defect in M2 review or an over-broad entry in the policy has NOT been
+ * probed, and resolving it is a correctness question outside this cleanup.
+ *
+ * These two are therefore TOLERATED here — named, with a reason — and the
+ * tolerance is SELF-CHECKING: if either keyword disappears from the schema
+ * (or is probed and removed from the policy), the stale-gap assertion below
+ * goes red and forces the exemption out. A gap nobody can forget is the point.
+ */
+const KNOWN_UNENFORCED_KEYWORDS = new Set(['minLength', 'maxLength']);
+
+const ENFORCED_KEYWORDS = [...UNSUPPORTED_KEYWORDS].filter(
+  (k) => !KNOWN_UNENFORCED_KEYWORDS.has(k),
+);
+
 describe('PROPOSALS_JSON_SCHEMA structured-outputs compliance', () => {
-  for (const keyword of UNSUPPORTED_KEYWORDS) {
+  it('the known-gap list is still real (no stale exemptions)', () => {
+    // Positive control for the tolerance above: prove each exempted keyword is
+    // BOTH in the canonical policy AND actually present in the schema. An
+    // exemption that no longer describes reality must not survive quietly.
+    for (const keyword of KNOWN_UNENFORCED_KEYWORDS) {
+      expect([...UNSUPPORTED_KEYWORDS], `"${keyword}" is no longer in the canonical policy — drop the exemption`)
+        .toContain(keyword);
+      const hits: string[] = [];
+      collectKeywordPaths(PROPOSALS_JSON_SCHEMA, keyword, '$', hits);
+      expect(hits.length, `"${keyword}" is no longer in PROPOSALS_JSON_SCHEMA — drop the exemption`)
+        .toBeGreaterThan(0);
+    }
+  });
+
+  for (const keyword of ENFORCED_KEYWORDS) {
     it(`contains no API-rejected keyword "${keyword}"`, () => {
       const hits: string[] = [];
       collectKeywordPaths(PROPOSALS_JSON_SCHEMA, keyword, '$', hits);
       expect(hits, `API rejects "${keyword}" — found at: ${hits.join(', ')}`).toEqual([]);
     });
   }
+
+  it('permits minItems, but only with an API-accepted value', () => {
+    // `minItems` is deliberately absent from UNSUPPORTED_KEYWORDS: the grammar
+    // compiler accepts 0 and 1 and rejects everything else (live-probed
+    // 2026-07-19). `minItems: 1` is the only grammar-level lever that stops the
+    // model satisfying a `required` array with `[]` — the OPTIONS_IDENTICAL
+    // outage. So the policy here is a VALUE check, not a ban.
+    for (const { path, value } of collectMinItemsValues(PROPOSALS_JSON_SCHEMA)) {
+      expect(
+        [...MIN_ITEMS_ALLOWED_VALUES],
+        `${path}.minItems = ${String(value)} — the API accepts only 0 or 1`,
+      ).toContain(value);
+    }
+  });
 
   it('still closes every object (additionalProperties: false) — the supported part of the fence', () => {
     const opens: string[] = [];

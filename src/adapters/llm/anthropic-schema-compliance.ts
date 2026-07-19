@@ -23,8 +23,18 @@ import { log } from "../../utils/telemetry.js";
 // Constants
 // ============================================================================
 
-/** Validation keywords not supported by Anthropic structured outputs. */
-const UNSUPPORTED_KEYWORDS = new Set([
+/**
+ * Validation keywords not supported by Anthropic structured outputs.
+ *
+ * EXPORTED as the single source of truth. Three test suites previously carried
+ * their own divergent copies of this policy (6, 13 and 14 keywords), and the
+ * stalest of them lived under `src/`, not `tests/`, so a sweep of the test tree
+ * missed it. That copy still banned `minItems` outright and failed with the
+ * message "API rejects minItems" — a claim DISPROVED by live probe (see
+ * MIN_ITEMS_ALLOWED_VALUES). A false red is worse than a silent green here: it
+ * tells the next engineer to REMOVE a working fix.
+ */
+export const UNSUPPORTED_KEYWORDS = new Set([
   "minLength",
   "maxLength",
   "minimum",
@@ -64,7 +74,7 @@ const UNSUPPORTED_KEYWORDS = new Set([
  * Values outside this set are still stripped: sending them would 400 the whole
  * request, which is strictly worse than dropping the constraint.
  */
-const MIN_ITEMS_ALLOWED_VALUES = new Set([0, 1]);
+export const MIN_ITEMS_ALLOWED_VALUES = new Set([0, 1]);
 
 // ============================================================================
 // Types
