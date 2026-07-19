@@ -39,7 +39,12 @@ on:
   workflow_dispatch:
     inputs:
       expect_sha:
-        description: "Commit expected to be serving (blank = test whatever is deployed)"
+        # Blank does NOT disable the freshness check: GitHub treats an empty
+        # input as falsy, so it falls back to `github.sha` (the commit this
+        # dispatch ran from). That fallback is deliberate — there is no way to
+        # ask this workflow to skip Phase 1, because "test whatever happens to
+        # be deployed" is how a stale build passes for a build it never ran.
+        description: "Commit expected to be serving (blank = the commit this run was dispatched from)"
         required: false
         type: string
 
