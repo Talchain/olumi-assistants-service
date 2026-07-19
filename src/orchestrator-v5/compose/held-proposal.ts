@@ -5,8 +5,9 @@
  * contract-acknowledged but emission-locked (see
  * __tests__/block-type-allowlist.test.ts). This builder is the ONLY source
  * of held_proposal blocks; the single call site is the edit_graph referee
- * gate's held branch, and the wire append is flag-gated on
- * `config.features.heldProposalEmit` (default OFF, ships dark).
+ * gate's held branch, and the dispatch seam appends the built block
+ * unconditionally (R8 flag deleted per Paul's NO-DARK-LAUNCHES ruling; UI
+ * card #382 is live). Fail-closed `null` here means nothing is appended.
  *
  * Mirrors the R4 `ui-directive.ts` discipline:
  *   - pure function, fail-closed `null` at every guard;

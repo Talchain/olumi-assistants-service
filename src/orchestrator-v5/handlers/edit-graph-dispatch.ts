@@ -2056,12 +2056,13 @@ export async function dispatchEditGraph(
                 severity: 'warn',
                 details: gmDecision.publicReason,
               },
-              // R8 (flag-gated, ships dark): the typed held_proposal block —
-              // ADDITIVE next to the public-reason block so flag-off wire
-              // output is byte-identical. Gate-built, schema-validated,
-              // fail-closed null (see compose/held-proposal.ts).
-              ...(config.features.heldProposalEmit === true &&
-              gmDecision.heldProposalBlock != null
+              // R8 (unconditional — flag deleted per Paul's NO-DARK-LAUNCHES
+              // ruling; UI card #382 is live on DGAI staging): the typed
+              // held_proposal block — ADDITIVE next to the public-reason
+              // block. Gate-built, schema-validated, fail-closed null (see
+              // compose/held-proposal.ts): an unmappable/malformed hold emits
+              // no block, so this append never carries a partial shape.
+              ...(gmDecision.heldProposalBlock != null
                 ? [gmDecision.heldProposalBlock]
                 : []),
             ] as OlumiResponse['blocks'],

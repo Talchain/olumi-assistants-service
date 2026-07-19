@@ -103,22 +103,21 @@ const FROZEN_V5_BLOCK_TYPES = [
   // ships dark), so deployed behaviour is unchanged until the flag is
   // deliberately set AFTER gates 2–5 land in DGAI.
   'ui_directive',
-  // 0.15.0 / seamlessness R8 (CEE half) — MOVED here from
-  // CONTRACT_PRESENT_NOT_YET_SURFACED per this file's surfacing protocol
-  // (W2 overnight lane, 2026-07-11). §2 gate status at the move:
+  // 0.15.0 / seamlessness R8 (CEE half). §2 surfacing gates now ALL SATISFIED:
   //   1. contract          — SATISFIED (0.15.0 wave, adopted by CEE PR #405).
-  //   2. DGAI parser        — NOT YET (A2 held-proposal card, Sunday lane).
-  //   3. DGAI mapper        — NOT YET (A2 lane).
-  //   4. renderer/consumer  — NOT YET (A2 lane).
-  //   5. visibility tests   — NOT YET (A2 lane).
-  //   6. degrade behaviour  — CEE-side specified+tested (fail-closed builder
+  //   2. DGAI parser        — SATISFIED (mapV5Blocks held_proposal branch, #382).
+  //   3. DGAI mapper        — SATISFIED (#382).
+  //   4. renderer/consumer  — SATISFIED (V5HeldProposalBlock card, #382 live).
+  //   5. visibility tests   — SATISFIED (#382 mapV5Blocks/card specs).
+  //   6. degrade behaviour  — CEE-side fail-closed builder
   //                          compose/held-proposal.ts + strict-schema
-  //                          validate-before-emit + pre-existing egress scrub
-  //                          case); DGAI-side = #187 unknown-block tolerance.
-  // DOUBLE-GATED like ui_directive: the only emission site
-  // (edit-graph-dispatch.ts GM held branch, gate-built block) is behind
-  // CEE_HELD_PROPOSAL_EMIT (default OFF, absent from all deploy configs —
-  // ships dark) until gates 2-5 land in DGAI.
+  //                          validate-before-emit + egress scrub; DGAI-side
+  //                          fails an unresolvable ref to the R7 unsupported
+  //                          card (#382 mapV5Blocks).
+  // NO LONGER GATED: the CEE_HELD_PROPOSAL_EMIT flag was deleted (Paul's
+  // NO-DARK-LAUNCHES ruling) once #382 went live; the emission site
+  // (edit-graph-dispatch.ts GM held branch, gate-built block) now appends the
+  // block unconditionally.
   'held_proposal',
 ] as const;
 
@@ -377,9 +376,9 @@ describe('V5 block-type allowlist — frozen union (GUARD 1)', () => {
         'explanation',
         'flip_analysis',
         'graph_patch',
-        // R8 CEE half — flag-gated emitter (CEE_HELD_PROPOSAL_EMIT, default
-        // OFF). See the FROZEN_V5_BLOCK_TYPES entry comment for the §2 gate
-        // status at the move.
+        // R8 CEE half — unconditional emitter (CEE_HELD_PROPOSAL_EMIT flag
+        // deleted; UI card #382 live). See the FROZEN_V5_BLOCK_TYPES entry
+        // comment for the §2 gate status.
         'held_proposal',
         'review_card',
         'text',

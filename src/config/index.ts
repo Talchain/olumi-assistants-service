@@ -683,18 +683,6 @@ const ConfigSchema = z.object({
     // deployed service config; enablement is deliberate and sequenced
     // behind the DGAI half of R4 (parser/mapper/renderer — the §2
     // surfacing gate, see compose/__tests__/block-type-allowlist.test.ts).
-    // CEE_HELD_PROPOSAL_EMIT — seamlessness R8 (CEE half): flag-gated
-    // deterministic `held_proposal` block emitter at the edit_graph GM held
-    // seam. Default OFF; flag-off is byte-identical to pre-slice behaviour
-    // (the append site in edit-graph-dispatch.ts is skipped entirely). When
-    // true, a live-mode GM referee HOLD emits exactly ONE held_proposal
-    // block (typed codes + action refs, fixed-template summary, NO free
-    // prose) alongside today's redacted public-reason block. Fail-closed:
-    // held-without-pending / unmappable reason code / non structural-tunable
-    // class / strict-schema parse failure emit nothing. Ships DARK: env var
-    // not declared in render*.yaml; enablement sequenced behind the DGAI
-    // card (A2, §2 surfacing gates — see block-type-allowlist.test.ts).
-    heldProposalEmit: booleanString.default(false),
     // CEE_DECISION_RECORD_CAPTURE — ROADMAP 3.1 (CEE half): flag-gated
     // decision-record capture hook at the commit seam. Default OFF;
     // flag-off is byte-identical to pre-slice behaviour (the hook call
@@ -1493,7 +1481,6 @@ function parseConfig(): Config {
       constraintInfeasibleGate: env.CEE_CONSTRAINT_INFEASIBLE_GATE,
       answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
       answerShapeEnforced: env.CEE_ANSWER_SHAPE_ENFORCED,
-      heldProposalEmit: env.CEE_HELD_PROPOSAL_EMIT,
       contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
       enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
       rollingSummary: env.CEE_ROLLING_SUMMARY,

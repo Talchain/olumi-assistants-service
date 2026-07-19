@@ -194,8 +194,8 @@ export interface EditGmDecision {
    * Present ONLY on the initial-hold (dispatchPath 'edit_graph')
    * held-with-pending path; null/absent everywhere else (incl. the
    * gm_held_resume re-referee — the block must not double-emit on confirm).
-   * The wire append is flag-gated at the dispatch seam
-   * (config.features.heldProposalEmit, ships dark).
+   * The dispatch seam appends it unconditionally (R8 flag deleted); a
+   * null/absent block simply appends nothing.
    */
   readonly heldProposalBlock?: HeldProposalBlock | null;
 }

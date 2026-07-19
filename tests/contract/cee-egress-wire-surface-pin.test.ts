@@ -140,9 +140,8 @@ describe('block-type registry (@talchain/schemas 0.13.0)', () => {
       'graph_patch',
       // 0.15.0-new: held_proposal (ROADMAP 1.43 durable held-mutation shape)
       // + ui_directive (seamlessness R4). Approved surface change — 0.15.0
-      // contract wave. held_proposal is not emitted by CEE (dormant-but-
-      // armed); ui_directive is emitted by the R4 slice-1 emitter behind
-      // CEE_UI_DIRECTIVE_EMIT (default OFF — ships dark).
+      // contract wave. held_proposal is emitted unconditionally by CEE at the
+      // edit_graph GM held seam (R8 flag deleted; UI card #382 live).
       'held_proposal',
       'review_card',
       'text',
