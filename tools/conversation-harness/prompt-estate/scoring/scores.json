@@ -1,0 +1,641 @@
+[
+  {
+    "turn": "T01-draft",
+    "message": "Should we hire one tech lead or two mid-level developers? (draft)",
+    "http_ok": true,
+    "exit_path": "draft_graph",
+    "llm_roles": [
+      "draft_graph:claude-sonnet-4-6@57862ms"
+    ],
+    "prompt_ids": [
+      "draft_graph_default@v194 (staging)"
+    ],
+    "words": 101,
+    "sentences": 3,
+    "questions": 0,
+    "labels_named": [
+      "Hiring Budget",
+      "Single Mid-Level Developer Hired",
+      "Ship AI Features Within 6 Months",
+      "No New Hire (Status Quo)",
+      "Hire One Tech Lead",
+      "Hire Two Mid-Level Developers"
+    ],
+    "numbers_cited": [
+      "6"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Run analysis",
+      "Review model",
+      "What assumptions matter most?"
+    ],
+    "chip_count": 3,
+    "latency_ms": 57862,
+    "text": "I've built a first decision model for \"Ship AI Features Within 6 Months\".\n\nOptions compared\n• Hire One Mid-Level Developer Now, Defer\n• No New Hire (Status Quo)\n• Hire One Tech Lead\n• Hire Two Mid-Level Developers\n\nWhat the model is weighing\n• Main trade-off: Hiring Budget balanced against Single Mid-Level Developer Hired\n• Assumption to check: Existing team direction capacity\n• Worth a look: AI-specific seniority requirement\n\nYour brief covered the main points; adding detail on the lighter areas would sharpen the comparison.\n\nNext, run the analysis to see how the options compare and what could shift the outcome."
+  },
+  {
+    "turn": "T02",
+    "message": "What factor most influences my decision?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 15,
+    "sentences": 2,
+    "questions": 0,
+    "labels_named": [],
+    "numbers_cited": [],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [],
+    "chip_count": 0,
+    "latency_ms": null,
+    "text": "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do."
+  },
+  {
+    "turn": "T03",
+    "message": "What should I improve in this model before running the analysis?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 10,
+    "sentences": 1,
+    "questions": 0,
+    "labels_named": [],
+    "numbers_cited": [],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Run analysis"
+    ],
+    "chip_count": 1,
+    "latency_ms": null,
+    "text": "Run analysis first and I'll walk you through the result."
+  },
+  {
+    "turn": "T04",
+    "message": "Set a success target of 15% faster delivery",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 11,
+    "sentences": 1,
+    "questions": 0,
+    "labels_named": [],
+    "numbers_cited": [
+      "15%"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": "Added c",
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Run analysis"
+    ],
+    "chip_count": 1,
+    "latency_ms": null,
+    "text": "Added constraint: Minimum delivery speed improvement must be at least 15%."
+  },
+  {
+    "turn": "T05",
+    "message": "Run the analysis",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 68,
+    "sentences": 4,
+    "questions": 0,
+    "labels_named": [
+      "Team Execution Capacity",
+      "Hire One Tech Lead"
+    ],
+    "numbers_cited": [
+      "6",
+      "15%",
+      "76"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": true,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Explain the result",
+      "What could change the outcome?"
+    ],
+    "chip_count": 2,
+    "latency_ms": null,
+    "text": "Running the simulation now across all four options against your goal of shipping AI features within 6 months, with the 15% delivery speed improvement constraint in place.\n\nHire One Tech Lead currently leads by 76 percentage points because Team Execution Capacity is the strongest driver.\n\nYour first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result."
+  },
+  {
+    "turn": "T06",
+    "message": "Which option is leading?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 89,
+    "sentences": 5,
+    "questions": 1,
+    "labels_named": [
+      "Hiring Budget",
+      "Team Execution Capacity",
+      "Hire One Tech Lead",
+      "Hire Two Mid-Level Developers"
+    ],
+    "numbers_cited": [
+      "87%",
+      "10%",
+      "77"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": true,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Add evidence",
+      "What could change the outcome?"
+    ],
+    "chip_count": 2,
+    "latency_ms": null,
+    "text": "Hire One Tech Lead comes out ahead, leading in 87% of simulations. The runner-up, Hire Two Mid-Level Developers, comes out ahead in only 10%, leaving a 77 percentage point margin between them.\n\nThe result is stable, meaning it holds under most plausible variations of your assumptions. Team Execution Capacity has the biggest influence on the outcome, with Hiring Budget playing a smaller supporting role.\n\nWould you like to understand why Hire One Tech Lead leads, or explore what it would take for a different option to come out ahead?"
+  },
+  {
+    "turn": "T07",
+    "message": "Why is that option performing best?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 268,
+    "sentences": 10,
+    "questions": 0,
+    "labels_named": [
+      "Team Execution Capacity",
+      "Tech Lead Hired",
+      "Ship AI Features Within 6 Months",
+      "Hire One Tech Lead",
+      "Technical Architecture Quality",
+      "Delivery Delay Beyond 6 Months"
+    ],
+    "numbers_cited": [
+      "87%",
+      "77",
+      "6",
+      "6",
+      "6"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": true,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Explore what would change this"
+    ],
+    "chip_count": 1,
+    "latency_ms": null,
+    "text": "Hire One Tech Lead comes out ahead in 87% of simulations, 77 percentage points clear of the runner-up, because it is the only option that activates the Tech Lead Hired factor, which drives two things your model cares about most.\n\nFirst, Tech Lead Hired has a moderate positive connection to Technical Architecture Quality, which feeds directly into your goal of shipping AI features within 6 months. No other option creates this pathway.\n\nSecond, Tech Lead Hired has a moderate negative connection to Delivery Delay Beyond 6 Months, meaning it actively reduces the risk that most directly threatens your goal. Hiring two mid-level developers, by contrast, has a weak positive connection to that same delay risk, pulling in the wrong direction.\n\nTeam Execution Capacity is the strongest driver in the model overall, but it is an external factor that applies across all options. What separates Hire One Tech Lead is the architecture quality pathway and the delay risk reduction, both of which are unique to that option.\n\nThe one area worth watching is the connection between Technical Architecture Quality and your goal, which is the most vulnerable assumption in your model. If a tech lead's architectural contribution turns out to be weaker than assumed, the margin would narrow, though the result is stable enough that it would need to shift considerably before a different option came out ahead.\n\nThe evidence that would most improve confidence is real-world support for the link from 'Technical Architecture Quality' to 'Ship AI Features Within 6 Months' rather than the current model estimate, since it is the assumption most likely to change the outcome."
+  },
+  {
+    "turn": "T08",
+    "message": "What could change the outcome of this analysis?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 95,
+    "sentences": 5,
+    "questions": 0,
+    "labels_named": [
+      "Ship AI Features Within 6 Months",
+      "Hire One Tech Lead",
+      "Hire Two Mid-Level Developers",
+      "Technical Architecture Quality"
+    ],
+    "numbers_cited": [
+      "87%",
+      "77",
+      "6"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": true,
+    "structural_success_claim": false,
+    "chips": [],
+    "chip_count": 0,
+    "latency_ms": null,
+    "text": "Based on this model, 'Hire One Tech Lead' currently leads, with a probability of 87%. For 'Hire Two Mid-Level Developers' to overtake it, the lead of 77 percentage points would need to close. The most useful thing to check is the link from 'Technical Architecture Quality' to 'Ship AI Features Within 6 Months': whether it holds as strongly as the model currently assumes. This result looks stable, so smaller changes are unlikely to change which option leads.\n\nWhat to check next\n• Re-run after adjusting the most influential factor to see whether the lead holds."
+  },
+  {
+    "turn": "T09",
+    "message": "How do the options compare against the 15% target?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 279,
+    "sentences": 11,
+    "questions": 0,
+    "labels_named": [
+      "Two Mid-Level Developers Hired",
+      "Tech Lead Hired",
+      "Ship AI Features Within 6 Months",
+      "No New Hire (Status Quo)",
+      "Hire One Tech Lead",
+      "Hire Two Mid-Level Developers",
+      "AI Feature Delivery Speed",
+      "Technical Architecture Quality",
+      "Delivery Delay Beyond 6 Months"
+    ],
+    "numbers_cited": [
+      "15%",
+      "87%",
+      "6",
+      "15%",
+      "10%",
+      "6",
+      "15%",
+      "6"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Explore what would change this"
+    ],
+    "chip_count": 1,
+    "latency_ms": null,
+    "text": "Against your 15% delivery speed improvement target, the options separate into two clear groups based on the analysis.\n\nHire One Tech Lead is the only option that comes out ahead in a meaningful share of simulations (87%), and it does so through a combination of factors that directly support faster delivery. Tech Lead Hired has a positive connection to AI Feature Delivery Speed, a positive connection to Technical Architecture Quality (which feeds your goal), and a moderate negative connection to Delivery Delay Beyond 6 Months, actively reducing the risk that most threatens hitting the target. This is the option best positioned to clear the 15% threshold.\n\nHire Two Mid-Level Developers comes out ahead in only 10% of simulations. Two Mid-Level Developers Hired has a moderate positive connection to AI Feature Delivery Speed, which is encouraging, but it also has a weak positive connection to Delivery Delay Beyond 6 Months, pulling in the wrong direction. The net effect is not strong enough to reliably meet the target.\n\nHire One Mid-Level Developer Now, Defer Second and No New Hire (Status Quo) trail further behind. Neither activates the architectural quality pathway, and neither meaningfully reduces delay risk, making it unlikely either clears the 15% improvement bar in most scenarios.\n\nThe constraint is doing useful work here: it confirms that the delivery speed pathway matters, and Hire One Tech Lead is the only option with a structural advantage on that specific dimension.\n\nThe evidence that would most improve confidence is real-world support for the link from 'Technical Architecture Quality' to 'Ship AI Features Within 6 Months' rather than the current model estimate, since it is the assumption most likely to change the outcome."
+  },
+  {
+    "turn": "T10",
+    "message": "I'm leaning towards hiring the two mid-level developers. Am I missing anything?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 244,
+    "sentences": 11,
+    "questions": 1,
+    "labels_named": [
+      "Two Mid-Level Developers Hired",
+      "Team Execution Capacity",
+      "Hire One Tech Lead",
+      "Hire Two Mid-Level Developers",
+      "Technical Architecture Quality",
+      "Delivery Delay Beyond 6 Months"
+    ],
+    "numbers_cited": [
+      "87%",
+      "77",
+      "6",
+      "15%"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": true,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Add evidence",
+      "What could change the outcome?"
+    ],
+    "chip_count": 2,
+    "latency_ms": null,
+    "text": "Hire One Tech Lead leads in 87% of simulations, 77 percentage points clear of Hire Two Mid-Level Developers. That is a wide margin, and your model gives a specific reason for it worth examining before you commit.\n\n- **The architecture quality pathway is the key difference.** Hiring a tech lead activates a moderate positive connection to Technical Architecture Quality, which feeds your goal directly. Hiring two mid-level developers does not create this pathway at all. If architectural decisions are a bottleneck for shipping AI features, your model says this matters more than raw headcount.\n- **Two mid-level developers carries a small delay risk that works against you.** The model shows a weak positive connection from Two Mid-Level Developers Hired to Delivery Delay Beyond 6 Months, pulling in the wrong direction on your 15% delivery speed constraint. A tech lead, by contrast, has a moderate negative connection to that same delay risk, actively reducing it.\n- **Team Execution Capacity is the strongest driver overall, and it applies equally to both options.** So the deciding factor is not team energy or effort, it is the structural difference in what each hire unlocks. Two mid-level developers add capacity; a tech lead adds capacity plus architectural leverage plus delay risk reduction.\n\nWhat is driving your preference for two mid-level developers? If it is cost, or a belief that architectural quality is already strong enough, that is worth encoding in the model, since either assumption could change the picture."
+  },
+  {
+    "turn": "T11",
+    "message": "The developer factor needs to be higher.",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 75,
+    "sentences": 5,
+    "questions": 1,
+    "labels_named": [
+      "Single Mid-Level Developer Hired",
+      "Two Mid-Level Developers Hired",
+      "Team Execution Capacity",
+      "Hire Two Mid-Level Developers"
+    ],
+    "numbers_cited": [
+      "1",
+      "2",
+      "3"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Add evidence",
+      "What could change the outcome?"
+    ],
+    "chip_count": 2,
+    "latency_ms": null,
+    "text": "\"The developer factor\" could refer to a couple of things in your model. Did you mean:\n\n1. **Two Mid-Level Developers Hired** , the factor that activates when you hire two mid-level developers\n2. **Single Mid-Level Developer Hired** , the factor for the deferred/hybrid option\n3. **Team Execution Capacity** , the external factor representing your team's overall ability to deliver\n\nWhich one would you like to increase, and do you have a target value in mind?"
+  },
+  {
+    "turn": "T12",
+    "message": "Set Team Execution Capacity to 8",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 40,
+    "sentences": 6,
+    "questions": 0,
+    "labels_named": [
+      "Team Execution Capacity"
+    ],
+    "numbers_cited": [
+      "8"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": "Updated T",
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Run analysis again"
+    ],
+    "chip_count": 1,
+    "latency_ms": null,
+    "text": "Updated Team Execution Capacity to 8. This makes the last analysis stale. Re-run analysis to see how this affects the results.\n\nThis change affects the model. The current analysis may not reflect it. Run the analysis to see updated results."
+  },
+  {
+    "turn": "T13",
+    "message": "Why does the analysis still favour the same option?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 30,
+    "sentences": 2,
+    "questions": 1,
+    "labels_named": [],
+    "numbers_cited": [],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Rerun analysis"
+    ],
+    "chip_count": 1,
+    "latency_ms": null,
+    "text": "These results may be out of date because the model has changed since the last analysis. Would you like to re-run analysis to see how your changes affect the results?"
+  },
+  {
+    "turn": "T14",
+    "message": "What changed in the model?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 28,
+    "sentences": 2,
+    "questions": 0,
+    "labels_named": [],
+    "numbers_cited": [],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Re-run analysis"
+    ],
+    "chip_count": 1,
+    "latency_ms": null,
+    "text": "The model has changed since the last analysis, so the earlier results no longer reflect it. Re-run the analysis to see what has actually changed in the outcome."
+  },
+  {
+    "turn": "T15",
+    "message": "Rerun the analysis",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 18,
+    "sentences": 1,
+    "questions": 0,
+    "labels_named": [
+      "Team Execution Capacity",
+      "Hire One Tech Lead"
+    ],
+    "numbers_cited": [
+      "76"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": true,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Explain the result",
+      "What could change the outcome?"
+    ],
+    "chip_count": 2,
+    "latency_ms": null,
+    "text": "Hire One Tech Lead currently leads by 76 percentage points because Team Execution Capacity is the strongest driver."
+  },
+  {
+    "turn": "T16",
+    "message": "What changed compared with the last run?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 28,
+    "sentences": 3,
+    "questions": 0,
+    "labels_named": [
+      "Hire One Tech Lead"
+    ],
+    "numbers_cited": [
+      "1"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [],
+    "chip_count": 0,
+    "latency_ms": null,
+    "text": "Hire One Tech Lead still leads. Its lead has narrowed by about 1 percentage point. If you want to test this further, ask what would change the result."
+  },
+  {
+    "turn": "T17",
+    "message": "What are the biggest risks here?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 240,
+    "sentences": 9,
+    "questions": 0,
+    "labels_named": [
+      "Hiring Budget",
+      "Team Execution Capacity",
+      "Hire One Tech Lead",
+      "Hire Two Mid-Level Developers",
+      "AI Feature Delivery Speed",
+      "Budget Overrun Risk",
+      "Delivery Delay Beyond 6 Months"
+    ],
+    "numbers_cited": [
+      "86%",
+      "76",
+      "6",
+      "6",
+      "8",
+      "15%"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": true,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Explore what would change this"
+    ],
+    "chip_count": 1,
+    "latency_ms": null,
+    "text": "The analysis is fresh and Hire One Tech Lead comes out ahead in 86% of simulations, with a 76 percentage point margin over Hire Two Mid-Level Developers. That is a stable result, but two risks stand out.\n\nFirst, Team Execution Capacity is the strongest driver in the model and its connections to both AI Feature Delivery Speed and Delivery Delay Beyond 6 Months are the most vulnerable relationships in your model. If your team's capacity to execute is lower than assumed, delivery speed drops and the delay risk rises, which directly threatens the goal of shipping within 6 months. You set Team Execution Capacity to 8 recently, so it is worth asking how confident you are in that figure.\n\nSecond, the minimum delivery speed improvement constraint requires at least 15% improvement. The connection from Team Execution Capacity to AI Feature Delivery Speed is currently modelled as a weak positive link, which means there is real uncertainty about whether that threshold will be met even under the leading option.\n\nHiring Budget has a weak positive influence on the outcome, and Budget Overrun Risk carries a moderate negative link to the goal, so cost discipline matters but is not the deciding factor here.\n\nThe evidence that would most improve confidence is real-world support for the link from 'Team Execution Capacity' to 'AI Feature Delivery Speed' rather than the current model estimate, since it is the assumption most likely to change the outcome."
+  },
+  {
+    "turn": "T18",
+    "message": "Can you help me?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 115,
+    "sentences": 4,
+    "questions": 1,
+    "labels_named": [
+      "Engineering Hiring Decision",
+      "Team Execution Capacity",
+      "Hire One Tech Lead"
+    ],
+    "numbers_cited": [
+      "86%"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": true,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Add evidence",
+      "What could change the outcome?"
+    ],
+    "chip_count": 2,
+    "latency_ms": null,
+    "text": "Of course! I'm here to help you think through your engineering hiring decision.\n\nYou've got a model set up with four options, the analysis is fresh, and **Hire One Tech Lead** is currently coming out ahead in 86% of simulations. A few threads worth exploring from here:\n\n- **Dig into the results** , ask why the tech lead option leads, or what risks stand out\n- **Test the assumptions** , Team Execution Capacity is the strongest driver, so it's worth probing how confident you are in that estimate\n- **Stress-test the outcome** , ask what would need to change for a different option to come out ahead\n\nWhat would be most useful to focus on?"
+  },
+  {
+    "turn": "T19",
+    "message": "I already know hiring two developers is the right call. Just confirm it.",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 21,
+    "sentences": 2,
+    "questions": 0,
+    "labels_named": [],
+    "numbers_cited": [],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": false,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [],
+    "chip_count": 0,
+    "latency_ms": null,
+    "text": "Something in that response was not safe to show as-is. Please ask me what you’d like to inspect or change next."
+  },
+  {
+    "turn": "T20",
+    "message": "What evidence would be most valuable to gather next?",
+    "http_ok": true,
+    "exit_path": "turn_executor",
+    "llm_roles": [],
+    "prompt_ids": [],
+    "words": 238,
+    "sentences": 10,
+    "questions": 0,
+    "labels_named": [
+      "Hiring Budget",
+      "Team Execution Capacity",
+      "Tech Lead Hired",
+      "AI Feature Delivery Speed",
+      "Technical Architecture Quality",
+      "Delivery Delay Beyond 6 Months"
+    ],
+    "numbers_cited": [
+      "15%",
+      "6"
+    ],
+    "generic_marker": false,
+    "forbidden_hit": null,
+    "success_claim_hit": null,
+    "held_science_hit": true,
+    "mutation_language": false,
+    "structural_success_claim": false,
+    "chips": [
+      "Walk me through the analysis",
+      "Re-run analysis",
+      "Run a pre-mortem"
+    ],
+    "chip_count": 3,
+    "latency_ms": null,
+    "text": "The highest-value evidence you could gather centres on Team Execution Capacity and its downstream effects, since this is both the strongest driver in your model and home to the two most vulnerable relationships.\n\nFirst, validate how strongly your team's current capacity actually translates into AI Feature Delivery Speed. This relationship is modelled as a weak positive link, yet it is the path most likely to determine whether the 15% delivery speed improvement constraint is met. Real-world data here, such as your team's recent delivery throughput on comparable work, would sharpen this estimate considerably.\n\nSecond, test the assumption that a tech lead hire meaningfully reduces Delivery Delay Beyond 6 Months. The model carries a moderate negative link from Tech Lead Hired to that risk, and this is one of the two most vulnerable relationships. If you have access to reference cases where a tech lead hire accelerated delivery in a similar context, that would either reinforce or challenge the current assumption.\n\nThird, the connection from Tech Lead Hired to Technical Architecture Quality carries a moderate positive link, but Technical Architecture Quality has only a weak positive link to the goal. If architecture quality matters more than the model currently reflects, gathering evidence on how much it actually affects shipping speed would be worth doing before committing.\n\nHiring Budget has only a weak positive influence overall, so evidence there is lower priority unless you have specific concerns about cost discipline."
+  }
+]

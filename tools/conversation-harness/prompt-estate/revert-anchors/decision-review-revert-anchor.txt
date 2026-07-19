@@ -1,0 +1,11 @@
+# decision_review_default — staging revert anchor (A1, updated 2026-07-16 ~14:05Z)
+# CURRENT staging pin: version 14 (content = the "v15'" amended text, 22/22 clauses), content_hash b4f15305c2bb32e9
+#   — uploaded+pinned+reloaded+served-verified from real turns 2026-07-16 ~12:44:50Z; all 3 behavioural checks passed.
+# REVERT ANCHOR (the version to PATCH back to if v14 must be pulled): version 13, content_hash ac07859bec2dfc77
+#   Revert recipe: PATCH /admin/prompts/decision_review_default {stagingVersion: 13} -> POST /admin/prompts/reload
+#   -> verify served from a REAL turn's log prompt_hash (expect ac07859bec2dfc77). NEVER trust /admin/prompts/status.
+# Production activeVersion = 11 throughout — untouched.
+# Naming note: the AMENDED TEXT is called "v15'" in the clause-check docs but landed as PMS VERSION 14. Do not create a v15.
+# Prior anchor (superseded): version 11.
+# Known pre-existing oddity (rowed 16 Jul): decision_review serves on gpt-4.1 via env_legacy_tier despite PMS modelConfig
+# claiming claude-sonnet-4-6 — the modelConfig field is a non-governing hand-maintained mirror (trap-12 class).
