@@ -60,6 +60,7 @@ import type { CoachingBlock, TargetRefKindLiteral } from '@talchain/schemas/boun
 
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { deterministicBlockId } from '../compose/block-id.js';
+import { guidanceSignalsForCoachingKind } from '../compose/guidance-signals.js';
 
 /**
  * Ratified render budget: at most 2 bias-signal cards per draft turn. The
@@ -254,6 +255,9 @@ export function buildDraftBiasSignalBlocks(
       // Priority order IS engine order — the signals carry no rank of their
       // own. 1-based so the value is never a falsy 0.
       priority_rank: out.length + 1,
+      // Wave-2 ask 1 (0.19.0): producer-owned guidance signals — a detected
+      // reasoning bias is should_fix (see compose/guidance-signals.ts).
+      ...guidanceSignalsForCoachingKind('bias_signal'),
     });
   }
 

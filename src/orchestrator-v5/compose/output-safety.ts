@@ -364,6 +364,9 @@ function sanitiseAction(action: Action, collect: (s: string) => string): Action 
     ...action,
     label: collect(action.label),
     message: collect(action.message),
+    // 0.19.0 (wave-2 ask #20): `detail` is user-facing prose (the full
+    // sentence behind a clamped label) — scrubbed like label/message.
+    ...(action.detail !== undefined ? { detail: collect(action.detail) } : {}),
   };
 }
 

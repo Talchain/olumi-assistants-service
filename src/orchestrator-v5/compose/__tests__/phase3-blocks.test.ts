@@ -28,8 +28,14 @@ import {
   buildFactorConfidenceLookup,
   buildGraphNodeLookup,
   buildReviewCardBlocks,
+  buildStaleRerunCoachingBlock,
   type BlockBuildCtx,
 } from '../phase3-blocks.js';
+import {
+  PRIORITY_BY_CATEGORY,
+  guidanceSignalsForCoachingKind,
+  guidanceSignalsForSeverity,
+} from '../guidance-signals.js';
 
 // ============================================================================
 // Fixtures
@@ -866,8 +872,9 @@ describe('suggested_technique formatting (Codex correction #2)', () => {
 // Banned-copy and raw-ID drift guard (Codex correction #6) across every block
 // ============================================================================
 
-describe('banned-copy and raw-ID drift guard (Codex correction #6)', () => {
-  const RICH_DR = {
+// Rich decision_review producing a block of every kind — shared by the
+// banned-copy drift guard and the wave-2 guidance-signal pins below.
+const RICH_DR = {
     narrative_summary: 'Hire two senior engineers locally is currently ahead by a narrow lead.',
     story_headlines: { opt_a: 'A wins because…', opt_b: 'B would lead if…' },
     robustness_explanation: {
@@ -926,6 +933,7 @@ describe('banned-copy and raw-ID drift guard (Codex correction #6)', () => {
     },
   };
 
+describe('banned-copy and raw-ID drift guard (Codex correction #6)', () => {
   const fact = makeFact({
     decisionReview: RICH_DR,
     graphNodes: STANDARD_GRAPH_NODES,
@@ -2180,5 +2188,72 @@ describe('RC4 rewrite-don\'t-drop — rewritable lexicon offences survive rewrit
     });
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
     expect(blocks.filter((b) => b.card_kind === 'narrative')).toHaveLength(0);
+  });
+});
+
+// ============================================================================
+// Wave-2 ask 1 (UI-SEM-085, 0.19.0): producer-owned category + priority on
+// EVERY guidance block CEE emits. Before this, the UI invented both on 10/10
+// live blocks. The pins below run the REAL builders over the rich fixture and
+// assert (a) presence on every block, (b) coherence with the single
+// guidance-signals source — a build site that hand-rolls its own values, or a
+// new site that forgets the fields, goes red here.
+// ============================================================================
+
+describe('wave-2 guidance signals — every emitted block carries coherent category + priority', () => {
+  const fact = makeFact({
+    decisionReview: RICH_DR,
+    graphNodes: STANDARD_GRAPH_NODES,
+    factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+  });
+  const lookup = buildGraphNodeLookup(fact);
+  const conf = buildFactorConfidenceLookup(fact);
+
+  const review = buildReviewCardBlocks(fact, lookup, CTX);
+  const coaching = buildCoachingBlocks(fact, lookup, CTX);
+  const evidence = buildEvidenceBlocks(fact, lookup, conf, CTX);
+  const stale = buildStaleRerunCoachingBlock(CTX);
+
+  it('positive control: the fixture produces blocks of every family', () => {
+    expect(review.length).toBeGreaterThan(0);
+    expect(coaching.length).toBeGreaterThan(0);
+    expect(evidence.length).toBeGreaterThan(0);
+    expect(stale).not.toBeNull();
+  });
+
+  it('every ReviewCard carries category+priority derived from ITS severity', () => {
+    for (const b of review) {
+      const expected = guidanceSignalsForSeverity(b.severity);
+      expect(b.category, `${b.card_kind} category`).toBe(expected.category);
+      expect(b.priority, `${b.card_kind} priority`).toBe(expected.priority);
+    }
+  });
+
+  it('every EvidenceBlock carries category+priority derived from ITS severity', () => {
+    for (const b of evidence) {
+      const expected = guidanceSignalsForSeverity(b.severity);
+      expect(b.category).toBe(expected.category);
+      expect(b.priority).toBe(expected.priority);
+    }
+  });
+
+  it('every CoachingBlock carries category+priority derived from ITS coaching_kind', () => {
+    for (const b of [...coaching, stale!]) {
+      const expected = guidanceSignalsForCoachingKind(b.coaching_kind);
+      expect(b.category, `${b.coaching_kind} category`).toBe(expected.category);
+      expect(b.priority, `${b.coaching_kind} priority`).toBe(expected.priority);
+    }
+  });
+
+  it('the stale-rerun nudge is should_fix — the UI can filter housekeeping out of the framing slot', () => {
+    expect(stale!.coaching_kind).toBe('orientation');
+    expect(stale!.category).toBe('should_fix');
+  });
+
+  it('priority is ALWAYS the 1:1 category derivation (the stated 0.19.0 contract)', () => {
+    for (const b of [...review, ...coaching, ...evidence, stale!]) {
+      expect(b.category).toBeDefined();
+      expect(b.priority).toBe(PRIORITY_BY_CATEGORY[b.category!]);
+    }
   });
 });

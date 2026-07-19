@@ -206,3 +206,24 @@ describe('buildGmHeldPublicCopy — wave-2 ask #20: the chip label is CLAMPED, t
     expect(buildGmHeldPublicCopy(LONG_SUBJECT).label).not.toBe(buildGmHeldPublicCopy(other).label);
   });
 });
+
+describe('buildGmHeldPublicCopy — wave-2 ask #20: chip detail carries the full sentence behind a clamped label', () => {
+  const LONG =
+    "remove the link from 'Local Talent Market Tightness' to 'Hiring and Staffing Cost', " +
+    "remove the link from 'Engineering Capacity' to 'Onboarding and Ramp-Up Delay' " +
+    "and add option 'Hire Two Senior Engineers Locally'";
+
+  it('clamped label → detail is the FULL capitalised sentence, verbatim', () => {
+    const copy = buildGmHeldPublicCopy(LONG);
+    expect(copy.label.endsWith('...')).toBe(true); // positive control: clamp fired
+    expect(copy.detail).toBe(LONG.charAt(0).toUpperCase() + LONG.slice(1));
+  });
+
+  it('short label → detail ABSENT (the label already says everything)', () => {
+    expect(buildGmHeldPublicCopy("update 'Marketing'").detail).toBeUndefined();
+  });
+
+  it('no safe subject → generic copy, no detail', () => {
+    expect(buildGmHeldPublicCopy(null).detail).toBeUndefined();
+  });
+});
