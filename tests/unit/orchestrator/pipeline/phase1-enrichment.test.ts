@@ -36,6 +36,34 @@ describe("phase1-enrichment (index)", () => {
     );
   });
 
+  // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_ENTITY_MEMORY_ENABLED is deleted —
+  // cross-turn entity memory runs unconditionally. Before this pin the phase1
+  // seam had NO coverage at all: disabling the tracker entirely left every
+  // entity-memory test green (the Zone-2 suite builds EnrichedContext by hand
+  // and never crosses this seam). This is that missing pin.
+  it("populates entity_state_map unconditionally (no feature flag)", () => {
+    const result = phase1Enrich(
+      "Tell me about the plan",
+      makeContext({
+        graph: {
+          nodes: [
+            { id: "f_price", label: "Unit price", kind: "factor" },
+            { id: "g_goal", label: "Grow revenue", kind: "goal" },
+          ],
+          edges: [],
+        } as unknown as ConversationContext["graph"],
+        messages: [{ role: "user", content: "Tell me about the plan" }],
+      }),
+      "s1",
+    );
+
+    expect(result.entity_state_map).toBeDefined();
+    expect(result.entity_state_map!["f_price"]).toMatchObject({
+      label: "Unit price",
+      state: "untouched",
+    });
+  });
+
   it("generates unique turn_id each call", () => {
     const a = phase1Enrich("Hi", makeContext(), "s1");
     const b = phase1Enrich("Hi", makeContext(), "s1");

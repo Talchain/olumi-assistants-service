@@ -1,5 +1,6 @@
 /**
- * CEE_UI_DIRECTIVE_EMIT — flag-gated deterministic ui_directive emitter
+ * Deterministic ui_directive emitter (unconditional since 19 Jul —
+ * CEE_UI_DIRECTIVE_EMIT deleted under the no-dark-launch ruling)
  * (ROADMAP 2.27 / seamlessness R4, CEE half, slice 1).
  *
  * Contract under test (deliberately minimal first slice):
@@ -33,7 +34,7 @@
  * (config/index.ts `features.uiDirectiveEmit`, default OFF).
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { OlumiResponseSchema, UiDirectiveBlockSchema } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -128,48 +129,17 @@ function uiDirectives(response: { blocks: ReadonlyArray<{ type: string }> }) {
 }
 
 // ---------------------------------------------------------------------------
-// Flag OFF — default behaviour is byte-identical to base
+// NO-DARK-LAUNCH (Paul, 19 Jul): CEE_UI_DIRECTIVE_EMIT is deleted — the
+// emitter runs unconditionally. The former flag-OFF dormancy describe (zero
+// directives / JSON-additivity vs the flag-off response) is replaced by the
+// positive pin below; the fail-closed cases still live in the suites further
+// down, and they are what keeps this emitter honest.
 // ---------------------------------------------------------------------------
 
-describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT OFF (default)', () => {
-  beforeEach(async () => {
-    await setFlag(undefined);
-  });
-  afterEach(async () => {
-    await restoreFlag();
-  });
-
-  it('emits zero ui_directive blocks on a run_analysis turn with a recommended option (flag unset)', () => {
+describe('ui_directive emitter — unconditional', () => {
+  it('emits exactly one ui_directive on a run_analysis turn with a recommended option', () => {
     const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
-    expect(uiDirectives(env)).toHaveLength(0);
-  });
-
-  it('emits zero ui_directive blocks with the flag explicitly false', async () => {
-    await setFlag('false');
-    const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
-    expect(uiDirectives(env)).toHaveLength(0);
-  });
-
-  it('flag-on response == flag-off response + exactly the one appended directive (JSON additivity pin)', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-10T09:30:00.000Z'));
-    try {
-      const flagOff = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
-
-      await setFlag('true');
-      const flagOn = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
-
-      expect(uiDirectives(flagOn)).toHaveLength(1);
-      // Removing the directive from the flag-on response reproduces the
-      // flag-off response byte-for-byte — the flag changes NOTHING else.
-      const flagOnMinusDirective = {
-        ...flagOn,
-        blocks: flagOn.blocks.filter((b) => b.type !== 'ui_directive'),
-      };
-      expect(JSON.stringify(flagOnMinusDirective)).toBe(JSON.stringify(flagOff));
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(uiDirectives(env)).toHaveLength(1);
   });
 });
 

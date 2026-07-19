@@ -77,13 +77,13 @@ function checkDskCoaching(): FeatureHealthCheck {
 }
 
 function checkEntityMemory(): FeatureHealthCheck {
-  const enabled = !!config.cee?.entityMemoryEnabled;
+  // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_ENTITY_MEMORY_ENABLED deleted — entity
+  // memory is unconditional, so this check reports permanently enabled/healthy.
   return {
     name: 'entity_memory',
-    flag: 'CEE_ENTITY_MEMORY_ENABLED',
-    enabled,
-    healthy: enabled, // Requires multi-turn context at runtime — no static dependency
-    reason: enabled ? undefined : 'disabled',
+    flag: 'unconditional',
+    enabled: true,
+    healthy: true, // Requires multi-turn context at runtime — no static dependency
   };
 }
 

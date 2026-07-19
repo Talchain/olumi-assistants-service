@@ -2417,7 +2417,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // ingress as non-null but is 'no model' by this file's own predicate —
     // gate on POPULATION, not nullness, so clarify v2 engages for exactly
     // the empty-canvas users it was built for.
-    if (config.cee.clarifyV2Enabled && !isPopulatedIngressGraph(extensions.graphState)) {
+    // NO-DARK-LAUNCH (Paul, 19 Jul): clarify v2 runs unconditionally; the
+    // former CEE_CLARIFY_V2_ENABLED gate is deleted (was live `true` on staging).
+    if (!isPopulatedIngressGraph(extensions.graphState)) {
       const { tryClarifyV2Turn } = await import(
         '../orchestrator-v5/handlers/clarify-v2-dispatch.js'
       );

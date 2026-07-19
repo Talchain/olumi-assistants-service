@@ -39,7 +39,7 @@
  *       the prior-fact FRESH lifecycle branch needs no hash.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { UiDirectiveBlockSchema } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
@@ -582,65 +582,7 @@ describe('Phase 3 + ui_directive — neither graph source (fail-closed baseline)
 });
 
 // ---------------------------------------------------------------------------
-// (d) flag-off dormancy unchanged — even with the fallback present
+// (d) NO-DARK-LAUNCH (Paul, 19 Jul): CEE_UI_DIRECTIVE_EMIT deleted — the
+// former flag-off dormancy describe is gone. The emitter's fallback-path
+// behaviour is pinned positively by the suites above.
 // ---------------------------------------------------------------------------
-
-describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT OFF, fallback present', () => {
-  beforeEach(async () => {
-    await setFlag(undefined);
-  });
-  afterEach(async () => {
-    await restoreFlag();
-  });
-
-  it('flag unset: persistedGraph (with an open hash gate) never produces a directive', () => {
-    const env = composeToolCallResponse({
-      ...BASE_INPUT,
-      handlerFacts: [productionShapedFact()],
-      persistedGraph: PERSISTED_GRAPH,
-      persistedGraphHash: GRAPH_HASH,
-    });
-    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
-  });
-
-  it('flag explicitly false: same dormancy', async () => {
-    await setFlag('false');
-    const env = composeToolCallResponse({
-      ...BASE_INPUT,
-      handlerFacts: [productionShapedFact()],
-      persistedGraph: PERSISTED_GRAPH,
-      persistedGraphHash: GRAPH_HASH,
-    });
-    expect(byType(env.blocks, 'ui_directive')).toHaveLength(0);
-  });
-
-  it('flag-on response == flag-off response + exactly the one appended directive (additivity holds on the fallback path)', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-10T09:30:00.000Z'));
-    try {
-      const flagOff = composeToolCallResponse({
-        ...BASE_INPUT,
-        handlerFacts: [productionShapedFact()],
-        persistedGraph: PERSISTED_GRAPH,
-        persistedGraphHash: GRAPH_HASH,
-      });
-
-      await setFlag('true');
-      const flagOn = composeToolCallResponse({
-        ...BASE_INPUT,
-        handlerFacts: [productionShapedFact()],
-        persistedGraph: PERSISTED_GRAPH,
-        persistedGraphHash: GRAPH_HASH,
-      });
-
-      expect(byType(flagOn.blocks, 'ui_directive')).toHaveLength(1);
-      const flagOnMinusDirective = {
-        ...flagOn,
-        blocks: flagOn.blocks.filter((b) => b.type !== 'ui_directive'),
-      };
-      expect(JSON.stringify(flagOnMinusDirective)).toBe(JSON.stringify(flagOff));
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});

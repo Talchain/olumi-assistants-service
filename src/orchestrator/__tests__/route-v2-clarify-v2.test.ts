@@ -91,7 +91,6 @@ vi.mock('../../adapters/llm/prompt-loader.js', () => ({
 
 // Flag control: `cee.clarifyV2Enabled` reads this mutable variable so each
 // test flips the dark flag without re-parsing config.
-let clarifyV2EnabledForTest = false;
 vi.mock('../../config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../config/index.js')>();
   return {
@@ -110,7 +109,6 @@ vi.mock('../../config/index.js', async (importOriginal) => {
         if (prop === 'cee') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(ceeTarget, ceeProp) {
-              if (ceeProp === 'clarifyV2Enabled') return clarifyV2EnabledForTest;
               return Reflect.get(ceeTarget, ceeProp);
             },
           });
@@ -218,31 +216,12 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     persistedBriefTextForRead = null;
     hasPriorTurnsForRead = false;
     pendingActionsForRead = [];
-    clarifyV2EnabledForTest = false;
   });
 
-  // ── FLAG OFF: behaviour-preservation pins (byte-identity with today) ────
-  it('FLAG OFF: a thin draft-shaped brief drafts exactly as today — clarify v2 never engages', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: messagePayload(THIN_BRIEF),
-    });
-    expect(res.statusCode).toBe(200);
-    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
-    const args = dispatchDraftGraphMock.mock.calls[0]![0] as Record<string, unknown>;
-    // No briefOverride on the heuristic path — bit-identical to before.
-    expect('briefOverride' in args).toBe(false);
-    // The dark path performs NO pending-actions read with the flag off.
-    expect(readMostRecentPendingActionsMock).not.toHaveBeenCalled();
-    const body = JSON.parse(res.body);
-    expect(body.assistant_text).toBe('Drafted the model.');
-    expect(body.suggested_actions).toEqual([]);
-  });
-
+  // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_CLARIFY_V2_ENABLED is deleted — clarify
+  // v2 runs unconditionally, so the former FLAG-OFF byte-identity pin is gone.
   // ── FLAG ON: draft preflight ─────────────────────────────────────────────
   it('FLAG ON: a thin brief gets tap-able clarifying questions instead of a draft (zero LLM calls)', async () => {
-    clarifyV2EnabledForTest = true;
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -275,7 +254,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
 
   // ── Review fix A5 (17 Jul) — behavioural pin (deferred from #497) ───────
   it('A5: an EMPTY canvas ({nodes:[],edges:[]}) does NOT defeat clarify v2 — questions still engage', async () => {
-    clarifyV2EnabledForTest = true;
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -294,7 +272,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   });
 
   it('A5 control: a POPULATED canvas keeps clarify v2 out (gate is population, not nullness)', async () => {
-    clarifyV2EnabledForTest = true;
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -315,7 +292,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   });
 
   it('FLAG ON: a complete brief proceeds SILENTLY — the draft dispatch is bit-identical to flag-off', async () => {
-    clarifyV2EnabledForTest = true;
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -336,7 +312,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     // list — the verified worst-first-impression bug. This inverts the E0-B
     // launch behaviour (which clarified over explicit-generate on a thin
     // brief); the rubric still governs every NON-generate draft-shaped turn.
-    clarifyV2EnabledForTest = true;
     persistedBriefTextForRead = THIN_BRIEF;
     const res = await app.inject({
       method: 'POST',
@@ -366,7 +341,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
     // arrived until a second "go ahead" turn. With the generate flag
     // respected AND the rubric crediting the already-given runway, turn 1
     // must draft.
-    clarifyV2EnabledForTest = true;
     const PROBE_BRIEF =
       'Should we hire a senior engineer now or wait until after our next funding round? Budget around £120k, current runway 14 months.';
     const res = await app.inject({
@@ -386,7 +360,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
 
   // ── PR #490 review P1 — over-length round-1 brief must round-trip ───────
   it('ROUND-TRIP: a >5000-char round-1 brief persists a pending its own READER accepts; the answer turn resumes and drafts', async () => {
-    clarifyV2EnabledForTest = true;
     // Thin decision question + long pasted background (the live probe that
     // proved the dead end was 6,341 chars).
     const longBrief = `${THIN_BRIEF} ${'Background detail. '.repeat(340)}`.trim();
@@ -431,7 +404,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   });
 
   it('ROUND-TRIP: the escape chip stays ALIVE after a >5000-char round-1 brief (go-ahead proceeds to draft)', async () => {
-    clarifyV2EnabledForTest = true;
     const longBrief = `${THIN_BRIEF} ${'Background detail. '.repeat(340)}`.trim();
     await app.inject({
       method: 'POST',
@@ -466,7 +438,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   //    .test.ts "A7 survival control"), which reaches round 1 with
   //    draftShaped:true directly, bypassing the route's continuation guard.
   it('EXPLICIT-GENERATE continuation: a live hold present, the turn DRAFTS with the assembled brief (respects Generate; does not clarify)', async () => {
-    clarifyV2EnabledForTest = true;
     hasPriorTurnsForRead = true;
     persistedBriefTextForRead = THIN_BRIEF;
     pendingActionsForRead = [makeProposedConceptHold()];
@@ -490,7 +461,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   });
 
   it('HOLD SURVIVAL on RESUME: the follow-up ask supersedes the previous round but CARRIES an unrelated hold', async () => {
-    clarifyV2EnabledForTest = true;
     hasPriorTurnsForRead = true;
     pendingActionsForRead = [
       livePending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1),
@@ -518,7 +488,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
 
   // ── FLAG ON: resume ──────────────────────────────────────────────────────
   it('RESUME: an answer is incorporated and a NEVER-ASKED dimension is asked next (no-repeat)', async () => {
-    clarifyV2EnabledForTest = true;
     hasPriorTurnsForRead = true;
     // Round 1 asked goal/options/timeframe. quantities was never asked.
     pendingActionsForRead = [livePending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1)];
@@ -549,7 +518,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   });
 
   it('RESUME: a completing answer proceeds to the draft with the answer-augmented briefOverride', async () => {
-    clarifyV2EnabledForTest = true;
     hasPriorTurnsForRead = true;
     pendingActionsForRead = [livePending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1)];
     const answer =
@@ -570,7 +538,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   });
 
   it('RESUME: the default-forward chip proceeds immediately with the working brief (ready-to-draft stop rule)', async () => {
-    clarifyV2EnabledForTest = true;
     hasPriorTurnsForRead = true;
     pendingActionsForRead = [livePending(THIN_BRIEF, ['goal', 'options', 'timeframe'], 1)];
     const res = await app.inject({
@@ -586,7 +553,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   });
 
   it('RESUME: never claims a turn once a graph exists — falls through to pre-existing routing', async () => {
-    clarifyV2EnabledForTest = true;
     hasPriorTurnsForRead = true;
     pendingActionsForRead = [livePending(THIN_BRIEF, ['goal'], 1)];
     persistedGraphForRead = { nodes: [], edges: [] };
@@ -606,7 +572,6 @@ describe('POST /orchestrate/v2/turn — clarify v2 wiring (E0-B)', () => {
   });
 
   it('FLAG ON: an EXPIRED clarify pending does not claim the turn (falls through)', async () => {
-    clarifyV2EnabledForTest = true;
     hasPriorTurnsForRead = true;
     const expired = {
       ...livePending(THIN_BRIEF, ['goal'], 1),
