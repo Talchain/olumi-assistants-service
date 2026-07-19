@@ -722,6 +722,218 @@ export function tryDeterministicValueUpdate(
   };
 }
 
+// ---------------------------------------------------------------------------
+// A1 multi-edit — compound value-update detection
+// ---------------------------------------------------------------------------
+
+/**
+ * One applied part of a compound value-update: a resolved factor candidate
+ * paired with the CQE quantity that belongs to it.
+ */
+export interface CompoundUpdatePart {
+  readonly candidate: ValueUpdateCandidate;
+  readonly quantity: QuantityExtractionResult;
+}
+
+export type CompoundSkipReason =
+  | 'degraded_extraction'
+  | 'no_edit_verb'
+  | 'no_graph'
+  | 'hypothetical_gate'
+  | 'option_intervention_edit'
+  /** Fewer than two non-null CQE quantities — the single-quantity path owns
+   *  this; a compound update needs at least two independent value edits. */
+  | 'not_compound'
+  /** The count of DISTINCT substring-matched factor labels does not equal the
+   *  count of non-null quantities (e.g. "Set A between 0.6 and 0.8" — one
+   *  label, two quantities). Position pairing would be unsafe, so we bail. */
+  | 'label_quantity_count_mismatch'
+  /** A disjunction / range connective ("or", "between") is present — the
+   *  parts are not an unambiguous conjunction of independent value sets. */
+  | 'disjunction'
+  /** The message does not read as strict "label to <num>" segments in
+   *  document order (some label is not followed by a `to` connector before
+   *  the next label), so position pairing cannot be trusted. */
+  | 'non_interleaved';
+
+export type CompoundValueUpdateDispatch =
+  | { readonly matched: false; readonly skip_reason: CompoundSkipReason }
+  | {
+      readonly matched: true;
+      readonly dispatch: 'compound_value_update';
+      readonly updates: readonly CompoundUpdatePart[];
+    };
+
+/**
+ * A1 multi-edit — detect a COMPOUND value update: two or more independent
+ * "label to <num>" edits in a single message ("Set A to 0.6 and B to 0.8").
+ *
+ * This is the sibling of {@link tryDeterministicValueUpdate}, invoked by the
+ * caller ONLY when the single-edit path bailed (its `nonNullQuantities.length
+ * > 1` guard returns `ambiguous_quantity`). The single path is deliberately
+ * conservative — silently applying the wrong quantity to a factor is worse
+ * than asking — so it refuses every multi-quantity message. This detector
+ * covers the safe, unambiguous subset: N distinct factor labels, N quantities,
+ * strict positional interleaving.
+ *
+ * THE SUBTLETY (why a naive split-on-"and" fails): the edit verb appears only
+ * in the FIRST segment. "Set A to 0.6 and B to 0.8" splits into "Set A to 0.6"
+ * (has verb) and "B to 0.8" (no verb) — a per-segment `EDIT_VERB_PATTERN` gate
+ * would reject the second half. So we do NOT split on the verb. Instead:
+ *
+ *   1. Substring-match DISTINCT factor labels against the whole message,
+ *      capturing each label's character index (`labelMatchIndex`).
+ *   2. Require the count of distinct labels to EQUAL the count of non-null CQE
+ *      quantities (and be ≥ 2). A mismatch (range/disjunction/partial match)
+ *      bails — no guessing.
+ *   3. Pair BY POSITION: labels sorted by `labelMatchIndex` (document order)
+ *      against `nonNullQuantities` in CQE document order (which mirrors
+ *      document order). Label[i] ↔ quantity[i].
+ *   4. Validate strict "label to <num>" interleaving: each label must be
+ *      followed by a `to` connector before the next label begins, and the
+ *      message must carry no disjunction/range connective. This rejects the
+ *      "labels first, then values" shape ("Set A and B to 0.6 and 0.8") where
+ *      positional pairing would misattribute.
+ *
+ * Per-part VALUE validity (range / cap / unit) is NOT checked here — the
+ * caller synthesises the primary proposal from `updates[0]` and loops the
+ * `set_factor_value` handler over the rest; the handler runs the shared
+ * `evaluateFactorValueProposal` predicate per part and refuses an invalid
+ * part by name while the rest apply. This mirrors the single-edit path, where
+ * the executor (not this detector) runs the value precheck.
+ *
+ * Gates mirror {@link tryDeterministicValueUpdate}: degraded-extraction
+ * refusal, edit-verb presence, graph availability, the hypothetical negative
+ * gate, and the option-intervention negative gate all apply identically.
+ */
+export function tryCompoundValueUpdate(
+  message: string,
+  parsedQuantities: readonly QuantityExtractionResult[],
+  graphLookup: GraphLookup | undefined,
+  factorNodeIds?: ReadonlySet<string>,
+  extractionDegraded: boolean = false,
+): CompoundValueUpdateDispatch {
+  if (extractionDegraded) {
+    return { matched: false, skip_reason: 'degraded_extraction' };
+  }
+  if (!EDIT_VERB_PATTERN.test(message)) {
+    return { matched: false, skip_reason: 'no_edit_verb' };
+  }
+
+  const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
+  if (nonNullQuantities.length < 2) {
+    // Single quantity (or none) → the single-edit path owns it.
+    return { matched: false, skip_reason: 'not_compound' };
+  }
+
+  if (graphLookup === undefined) {
+    return { matched: false, skip_reason: 'no_graph' };
+  }
+
+  for (const pat of HYPOTHETICAL_PATTERNS) {
+    if (pat.test(message)) {
+      return { matched: false, skip_reason: 'hypothetical_gate' };
+    }
+  }
+
+  const optionLabelsForGate = graphLookup
+    .listEntitiesByKind('option')
+    .map((entity) => entity.label)
+    .filter(
+      (label): label is string => typeof label === 'string' && label.trim().length > 0,
+    );
+  if (impliesOptionInterventionEdit(message, optionLabelsForGate)) {
+    return { matched: false, skip_reason: 'option_intervention_edit' };
+  }
+
+  // A disjunction ("or") or range ("between") connective means the parts are
+  // not an unambiguous conjunction of independent value sets — refuse.
+  if (/\b(?:or|between)\b/i.test(message)) {
+    return { matched: false, skip_reason: 'disjunction' };
+  }
+
+  // Build the factor-filtered candidate pool, identical to the single path:
+  // GraphLookup buckets factor/outcome/decision/risk/action under EntityKind
+  // 'node', so narrow to factor-kind ids when the caller supplies them (fall
+  // back to unfiltered only when the filter would empty the pool).
+  const rawCandidatesPool = graphLookup.listEntitiesByKind('node');
+  if (rawCandidatesPool.length === 0) {
+    return { matched: false, skip_reason: 'label_quantity_count_mismatch' };
+  }
+  const factorFilteredPool =
+    factorNodeIds === undefined
+      ? rawCandidatesPool
+      : rawCandidatesPool.filter((f) => factorNodeIds.has(f.id));
+  const candidatesPool =
+    factorNodeIds !== undefined && factorFilteredPool.length === 0
+      ? rawCandidatesPool
+      : factorFilteredPool;
+
+  const normMessage = message.trim().toLowerCase();
+
+  // Collect DISTINCT substring-matched labels (one candidate per factor id),
+  // each carrying its label length so segment boundaries can be computed.
+  const seenIds = new Set<string>();
+  const substringMatches: Array<{
+    candidate: ValueUpdateCandidate;
+    labelStart: number;
+    labelEnd: number;
+  }> = [];
+  for (const f of candidatesPool) {
+    if (f.label == null) continue;
+    const normLabel = f.label.trim().toLowerCase();
+    if (normLabel.length === 0) continue;
+    if (seenIds.has(f.id)) continue;
+    const idx = normMessage.indexOf(normLabel);
+    if (idx === -1) continue;
+    seenIds.add(f.id);
+    substringMatches.push({
+      candidate: {
+        id: f.id,
+        label: f.label,
+        score: 1,
+        source: 'substring',
+        labelMatchIndex: idx,
+      },
+      labelStart: idx,
+      labelEnd: idx + normLabel.length,
+    });
+  }
+
+  // Position pairing is only safe when EVERY quantity has exactly one label to
+  // attribute to — N distinct labels and N quantities.
+  if (substringMatches.length !== nonNullQuantities.length) {
+    return { matched: false, skip_reason: 'label_quantity_count_mismatch' };
+  }
+
+  // Sort by document position so index i aligns with CQE document order.
+  substringMatches.sort((a, b) => a.labelStart - b.labelStart);
+
+  // Strict "label to <num>" interleaving: each label must be followed by a
+  // `to` connector before the next label begins (or the message end for the
+  // last label). This rejects "Set A and B to 0.6 and 0.8" — between the A and
+  // B labels there is only " and ", no `to`, so positional pairing (which
+  // would misattribute) is refused.
+  for (let i = 0; i < substringMatches.length; i++) {
+    const segStart = substringMatches[i]!.labelEnd;
+    const segEnd =
+      i + 1 < substringMatches.length
+        ? substringMatches[i + 1]!.labelStart
+        : normMessage.length;
+    const segment = normMessage.slice(segStart, segEnd);
+    if (!/\bto\b/.test(segment)) {
+      return { matched: false, skip_reason: 'non_interleaved' };
+    }
+  }
+
+  const updates: CompoundUpdatePart[] = substringMatches.map((m, i) => ({
+    candidate: m.candidate,
+    quantity: nonNullQuantities[i]!,
+  }));
+
+  return { matched: true, dispatch: 'compound_value_update', updates };
+}
+
 /**
  * P0 V5 golden-path repair (Wave 2, Path B — selected-deictic).
  *

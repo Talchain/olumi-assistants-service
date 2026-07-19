@@ -499,6 +499,13 @@ describe('Gate 2 invariant — mutated_graph emitters are exactly the three D1 h
       'orchestrator-v5/tools/handlers/set-factor-value.ts',
       'orchestrator-v5/tools/handlers/add-constraint.ts',
       'orchestrator-v5/tools/handlers/adjust-edge-strength.ts',
+      // A1 multi-edit — compound value-update chaining forwards the
+      // `set_factor_value` handler's OWN mutated_graph, chained across parts.
+      // The graph is therefore a D1 ingress-echo mutation that never deletes
+      // nodes (the contract this guard protects) by construction — it is not a
+      // novel producer. Scoped to this small, purpose-built module rather than
+      // exempting the whole turn-executor. See its module doc.
+      'orchestrator-v5/compound-value-update-chain.ts',
     ]);
 
     const offenders: string[] = [];

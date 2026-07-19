@@ -76,6 +76,7 @@ import type { ComposeContext, SuggestedAction } from './compose/types.js';
 import {
   tryDeterministicValueUpdate,
   tryDeicticValueUpdate,
+  tryCompoundValueUpdate,
   buildClarifyAssistantText,
   buildNonFactorKindRefusalText,
   buildClarifyChipMessage,
@@ -83,6 +84,7 @@ import {
   mapCqeQuantityToProposalValue,
   deriveOperator,
 } from './routing/deterministic-value-update.js';
+import type { CompoundUpdatePart } from './routing/deterministic-value-update.js';
 import {
   evaluateFactorValueProposal,
   resolveExistingRawValue,
@@ -90,6 +92,7 @@ import {
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
+import { applyCompoundValueUpdateChain } from './compound-value-update-chain.js';
 import {
   decideGoalTargetReceipt,
   formatGoalTargetNotSavedText,
@@ -1232,6 +1235,12 @@ export async function runTurnExecutor(
     // synthesise this before the routeWithToolUse call. Wider type so the
     // guard below the pre-route block can compare against undefined.
     let routingResult: RoutingResult | undefined;
+    // A1 multi-edit — remaining parts of a COMPOUND value update. When the
+    // deterministic pre-route detects "Set A to 0.6 and B to 0.8", the primary
+    // part (update[0]) is synthesised into `routingResult` and runs the normal
+    // STEP 2-7 lifecycle; update[1..] are stashed here and applied by looping
+    // the set_factor_value handler after the primary handler executes.
+    let compoundRemainingUpdates: readonly CompoundUpdatePart[] = [];
     // Resumed pending action, if the short-confirm pre-route synthesised
     // a tool_call. Cleared after the commit-success consumed-telemetry
     // emit. Null on every other path.
@@ -3873,6 +3882,33 @@ export async function runTurnExecutor(
             : {}),
         };
       }
+
+      // A1 multi-edit — COMPOUND value update. When the single-edit path
+      // bailed (its multi-quantity `ambiguous_quantity` guard fires on "Set A
+      // to 0.6 and B to 0.8") AND the deictic path did not match, try the
+      // compound detector. On a match, promote update[0] to the single
+      // set_factor_value shape so the existing kind/registry guard + synthesis
+      // block below handles it unchanged; stash update[1..] for the
+      // post-primary handler loop (STEP 3.5, after the primary handler runs).
+      if (!deterministicValueUpdate.matched) {
+        const compoundDispatch = tryCompoundValueUpdate(
+          payload.message,
+          contextPack.parsed_quantities,
+          graphLookupForValidate,
+          graphStateForTurn !== null ? factorIdSet : undefined,
+          cqeSummary.degraded,
+        );
+        if (compoundDispatch.matched && compoundDispatch.updates.length >= 2) {
+          deterministicValueUpdate = {
+            matched: true,
+            dispatch: 'set_factor_value',
+            candidate: compoundDispatch.updates[0]!.candidate,
+            quantity: compoundDispatch.updates[0]!.quantity,
+          };
+          compoundRemainingUpdates = compoundDispatch.updates.slice(1);
+        }
+      }
+
       // V5 D1 golden-path closure (A3.1): the original (pre-guard)
       // dispatch is what the pre-route function alone would have
       // produced. The guards below (kind check + registry executable)
@@ -6149,6 +6185,41 @@ export async function runTurnExecutor(
             llm_calls_used: handlerOutcome.llm_calls_used,
           }),
         );
+
+        // STEP 3.5 — A1 multi-edit compound chaining. update[0] ran the full
+        // lifecycle above; apply update[1..] by looping the SAME
+        // set_factor_value handler, threading each part's `mutated_graph` into
+        // the next part's `graphForTurn` (graph-in → graph-out). The chaining +
+        // the merged `mutated_graph` producer live in a dedicated module so the
+        // Gate 2 mutated_graph-producer allowlist can name it precisely rather
+        // than exempting the whole turn-executor — see that module's doc.
+        if (
+          compoundRemainingUpdates.length > 0 &&
+          proposedHandlerId === 'set_factor_value' &&
+          handlerOutcome.mutated_graph !== undefined &&
+          handlerOutcome.mutated_graph !== null
+        ) {
+          const chainRegistry = options.handlerRegistry ?? getDefaultRegistry();
+          const chainHandlerFn = resolveHandler(chainRegistry, 'set_factor_value');
+          if (chainHandlerFn !== null) {
+            const chained = await applyCompoundValueUpdateChain({
+              primaryOutcome: handlerOutcome,
+              remainingUpdates: compoundRemainingUpdates,
+              handlerFn: chainHandlerFn,
+              message: payload.message,
+              context,
+              payload,
+              requestId,
+              scenarioId: context.session_id,
+              signal: turnAbort.signal,
+            });
+            handlerOutcome = chained.outcome;
+            handlerFactsForCommit = chained.outcome.handler_facts;
+            if (chained.graphMutated) {
+              handlerEmittedMutatedGraph = true;
+            }
+          }
+        }
       } catch (error) {
         // Fix 4 review fix (round 4): rebuild RunAnalysisTimings from
         // error.details on PLoT-failure paths so the recovery / fatal
