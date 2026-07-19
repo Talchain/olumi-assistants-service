@@ -1,5 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DiagnosticTraceCollector, emptyDiagnosticTrace } from "../../../../src/orchestrator/pipeline/diagnostic-trace.js";
+// ROADMAP 1.162 — `attachDiagnosticTrace` is imported statically here rather
+// than via `await import(...)` in a top-level `beforeEach`.
+//
+// The old shape re-entered the module loader before EVERY test in this file.
+// The first invocation paid the cold cost of the pipeline module graph, which
+// vitest charges to the HOOK, not the test body — and the hook budget is
+// vitest's 10000ms `hookTimeout`. That is the exact origin of the reported
+// "diagnostic-trace.test.ts: 10s timeout on a synchronous body": the body
+// (`freeze()` on a fresh collector) really is synchronous and trivial, so the
+// report read as a paradox. It was never the body; it was this hook.
+//
+// Measured: the file's first test reported 1395ms idle and 3613-5449ms under
+// CPU oversubscription, tracking machine load rather than any code path.
+//
+// The lazy form bought nothing. `vi.mock` factories are hoisted above all
+// imports, so a static import observes exactly the same mocked config module;
+// and because neither this file nor vitest.setup.ts ever calls
+// `vi.resetModules()`, the "fresh import" resolved to the same cached module
+// object on every call after the first. The comment it carried ("Fresh import
+// to ensure mocks are in effect") described a guarantee the code did not
+// provide. Static import, same semantics, cost moved out of the hook budget.
+import { attachDiagnosticTrace } from "../../../../src/orchestrator/pipeline/pipeline.js";
 import type {
   EnrichedContext,
   LLMResult,
@@ -269,22 +291,15 @@ describe("emptyDiagnosticTrace", () => {
 // Unit Tests: attachDiagnosticTrace (via pipeline export)
 // ============================================================================
 
-// Import attachDiagnosticTrace lazily so mocks are in place
-let attachDiagnosticTrace: typeof import("../../../../src/orchestrator/pipeline/pipeline.js").attachDiagnosticTrace;
-
 const originalEnv = { ...process.env };
 
-beforeEach(async () => {
+beforeEach(() => {
   diagnosticTraceEnabled = true;
   anthropicStructuredOutputs = false;
   artefactAppendixEnabled = false;
 
   // Explicitly enable trace via env var to make isDiagnosticTraceEnabled() check the config flag
   process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
-
-  // Fresh import to ensure mocks are in effect
-  const pipeline = await import("../../../../src/orchestrator/pipeline/pipeline.js");
-  attachDiagnosticTrace = pipeline.attachDiagnosticTrace;
 });
 
 afterEach(() => {

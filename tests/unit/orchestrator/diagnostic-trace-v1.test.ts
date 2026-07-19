@@ -9,6 +9,17 @@
 
 import { describe, it, expect } from "vitest";
 import { DiagnosticTraceCollector } from "../../../src/orchestrator/pipeline/diagnostic-trace.js";
+// ROADMAP 1.162 — statically imported; see the sibling note in
+// tests/unit/cee.analysis-ready-enrichment.test.ts. This file resolved the same
+// `draft-graph.js` module graph from inside four `it()` bodies, charging its
+// cost to the 5000ms per-test timeout. It was the LAST survivor of this class:
+// with the other two files fixed, this one still failed on both clean
+// full-suite runs under ~30x CPU oversubscription (loadavg 195-308 on 10
+// cores), with `Error: Test timed out in 5000ms.` raised at the dynamic
+// import in `extractToolLLMTelemetry`'s first case. No `vi.mock` and no
+// `vi.resetModules()` in this file, so the dynamic form yielded the same
+// cached module a static import does.
+import { __test_only } from "../../../src/orchestrator/tools/draft-graph.js";
 
 describe("DiagnosticTraceCollector (unit)", () => {
   it("should produce non-empty llm_calls when a tool call is recorded", () => {
@@ -127,8 +138,7 @@ describe("DiagnosticTraceCollector (unit)", () => {
 });
 
 describe("extractToolLLMTelemetry (draft-graph)", () => {
-  it("should extract telemetry from pipeline response with trace.pipeline.llm_metadata", async () => {
-    const { __test_only } = await import("../../../src/orchestrator/tools/draft-graph.js");
+  it("should extract telemetry from pipeline response with trace.pipeline.llm_metadata", () => {
     const { extractToolLLMTelemetry } = __test_only;
 
     const body = {
@@ -169,16 +179,14 @@ describe("extractToolLLMTelemetry (draft-graph)", () => {
     });
   });
 
-  it("should return undefined when trace is absent", async () => {
-    const { __test_only } = await import("../../../src/orchestrator/tools/draft-graph.js");
+  it("should return undefined when trace is absent", () => {
     const { extractToolLLMTelemetry } = __test_only;
 
     const telemetry = extractToolLLMTelemetry({ graph: { nodes: [], edges: [] } });
     expect(telemetry).toBeUndefined();
   });
 
-  it("should return undefined when both token_usage and model are absent", async () => {
-    const { __test_only } = await import("../../../src/orchestrator/tools/draft-graph.js");
+  it("should return undefined when both token_usage and model are absent", () => {
     const { extractToolLLMTelemetry } = __test_only;
 
     const telemetry = extractToolLLMTelemetry({
@@ -190,13 +198,9 @@ describe("extractToolLLMTelemetry (draft-graph)", () => {
 });
 
 describe("V1 envelope _diagnostic_trace field", () => {
-  it("should accept _diagnostic_trace on OrchestratorResponseEnvelope type", async () => {
+  it("should accept _diagnostic_trace on OrchestratorResponseEnvelope type", () => {
     // This is a compile-time check — if the type doesn't include _diagnostic_trace,
     // this import and assignment would fail TypeScript compilation.
-    const { DiagnosticTraceCollector } = await import(
-      "../../../src/orchestrator/pipeline/diagnostic-trace.js"
-    );
-
     const collector = new DiagnosticTraceCollector();
     collector.recordLLMCall({
       role: "draft_graph",
