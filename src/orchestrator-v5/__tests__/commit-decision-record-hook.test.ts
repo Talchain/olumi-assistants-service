@@ -143,9 +143,10 @@ afterEach(() => {
   emitSpy.mockRestore();
 });
 
-function setFlag(on: boolean): void {
+// NO-DARK-LAUNCH (Paul, 19 Jul): CEE_DECISION_RECORD_CAPTURE deleted; this
+// helper now only pins the runtime env the hook's guest pre-check depends on.
+function setStagingEnv(): void {
   vi.stubEnv('OLUMI_ENV', 'staging');
-  vi.stubEnv('CEE_DECISION_RECORD_CAPTURE', on ? 'true' : 'false');
   _resetConfigCache();
 }
 
@@ -155,43 +156,15 @@ function captureEvents() {
   );
 }
 
-describe('flag OFF — inert, byte-identical commit path', () => {
-  it('never constructs the store, even on a run_analysis-fact commit', async () => {
-    setFlag(false);
-    const result = await commitDirectAnswer(
-      composed(),
-      meta([makeRunAnalysisFact()]),
-      ownedStore(),
-    );
-    await drainMicrotasks();
-    expect(result.performed).toBe(true);
-    expect(storeMock.getStoreCalls).toBe(0);
-    expect(storeMock.createRecord).not.toHaveBeenCalled();
-    expect(captureEvents()).toHaveLength(0);
-  });
-
-  it('JSON-additivity pin: flag-off and flag-on commit results are byte-identical (the hook never touches the turn)', async () => {
-    setFlag(false);
-    const off = await commitDirectAnswer(
-      composed(),
-      meta([makeRunAnalysisFact()]),
-      ownedStore('row-pin'),
-    );
-    await drainMicrotasks();
-    setFlag(true);
-    const on = await commitDirectAnswer(
-      composed(),
-      meta([makeRunAnalysisFact()]),
-      ownedStore('row-pin'),
-    );
-    await drainMicrotasks();
-    expect(JSON.stringify(off)).toBe(JSON.stringify(on));
-  });
-});
+// NO-DARK-LAUNCH (Paul, 19 Jul): CEE_DECISION_RECORD_CAPTURE is deleted —
+// capture runs unconditionally, so the former flag-OFF inertness describe
+// (no store construction / JSON-additivity vs flag-on) no longer has a path
+// to exercise. The turn-result-untouched contract is still pinned by the
+// failure-mode suites below (any capture failure must leave the turn intact).
 
 describe('flag ON — happy path', () => {
   it('fires create_decision_record exactly once with the EXACT payload', async () => {
-    setFlag(true);
+    setStagingEnv();
     const result = await commitDirectAnswer(
       composed(),
       meta([makeRunAnalysisFact()]),
@@ -226,7 +199,7 @@ describe('flag ON — happy path', () => {
   });
 
   it('deterministic ids: a retried commit of the SAME fact carries the SAME record_id + event_id (RPC replay = dedupe)', async () => {
-    setFlag(true);
+    setStagingEnv();
     await commitDirectAnswer(composed(), meta([makeRunAnalysisFact()]), ownedStore());
     await commitDirectAnswer(composed(), meta([makeRunAnalysisFact()]), ownedStore());
     await drainMicrotasks();
@@ -239,7 +212,7 @@ describe('flag ON — happy path', () => {
   });
 
   it('deduped outcome reports status=deduped on the telemetry event', async () => {
-    setFlag(true);
+    setStagingEnv();
     storeMock.createRecord.mockResolvedValue({
       record_id: EXPECTED_RECORD_ID,
       deduped: true,
@@ -251,7 +224,7 @@ describe('flag ON — happy path', () => {
   });
 
   it('optional-forward: absent decision_brief.analysis_summary (the normal case today) still records, with NO analysis_summary key', async () => {
-    setFlag(true);
+    setStagingEnv();
     await commitDirectAnswer(composed(), meta([makeRunAnalysisFact()]), ownedStore());
     await drainMicrotasks();
     const write = storeMock.createRecord.mock.calls[0]![0] as {
@@ -261,7 +234,7 @@ describe('flag ON — happy path', () => {
   });
 
   it('present + valid decision_brief.analysis_summary is copied verbatim', async () => {
-    setFlag(true);
+    setStagingEnv();
     const analysisSummary = {
       leading_option: 'Option A',
       win_probability: 0.62,
@@ -294,7 +267,7 @@ describe('flag ON — happy path', () => {
 
 describe('flag ON — guest short-circuit (BEFORE any RPC)', () => {
   it('unowned scenario (getScenarioOwner → null) → zero store construction, zero RPC calls, log-only', async () => {
-    setFlag(true);
+    setStagingEnv();
     const result = await commitDirectAnswer(
       composed(),
       meta([makeRunAnalysisFact()]),
@@ -312,7 +285,7 @@ describe('flag ON — guest short-circuit (BEFORE any RPC)', () => {
   });
 
   it('pre-check unavailable (store without getScenarioOwner) → fails open to the RPC, which answers authoritatively', async () => {
-    setFlag(true);
+    setStagingEnv();
     await commitDirectAnswer(
       composed(),
       meta([makeRunAnalysisFact()]),
@@ -323,7 +296,7 @@ describe('flag ON — guest short-circuit (BEFORE any RPC)', () => {
   });
 
   it('authoritative DR001 refusal on the fail-open path is swallowed as the expected guest outcome (turn unaffected)', async () => {
-    setFlag(true);
+    setStagingEnv();
     storeMock.createRecord.mockRejectedValue(
       new DecisionRecordSignInRequiredError('create_decision_record RPC failed: DR001'),
     );
@@ -341,7 +314,7 @@ describe('flag ON — guest short-circuit (BEFORE any RPC)', () => {
 
 describe('flag ON — non-blocking contract (never fail or block the turn)', () => {
   it('store construction throw (missing SUPABASE_* env) never affects the turn result', async () => {
-    setFlag(true);
+    setStagingEnv();
     storeMock.throwOnGet = true;
     const result = await commitDirectAnswer(
       composed(),
@@ -354,7 +327,7 @@ describe('flag ON — non-blocking contract (never fail or block the turn)', () 
   });
 
   it('a rejected createRecord never affects the turn result; telemetry reports error', async () => {
-    setFlag(true);
+    setStagingEnv();
     storeMock.createRecord.mockRejectedValue(new Error('rpc down'));
     const result = await commitDirectAnswer(
       composed(),
@@ -370,7 +343,7 @@ describe('flag ON — non-blocking contract (never fail or block the turn)', () 
 
 describe('flag ON — capture scope', () => {
   it('noop run_analysis fact → no capture', async () => {
-    setFlag(true);
+    setStagingEnv();
     await commitDirectAnswer(
       composed(),
       meta([makeRunAnalysisFact({ noop: true })]),
@@ -382,7 +355,7 @@ describe('flag ON — capture scope', () => {
   });
 
   it('turn without a run_analysis fact → no capture', async () => {
-    setFlag(true);
+    setStagingEnv();
     await commitDirectAnswer(composed(), meta([]), ownedStore());
     await drainMicrotasks();
     expect(storeMock.createRecord).not.toHaveBeenCalled();
@@ -390,7 +363,7 @@ describe('flag ON — capture scope', () => {
   });
 
   it('no unambiguous leader (leading_option_id null) → skipped before the RPC, disclosed via telemetry', async () => {
-    setFlag(true);
+    setStagingEnv();
     await commitDirectAnswer(
       composed(),
       meta([makeRunAnalysisFact({ result: { leading_option_id: null } })]),

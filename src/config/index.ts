@@ -683,7 +683,6 @@ const ConfigSchema = z.object({
     // deployed service config; enablement is deliberate and sequenced
     // behind the DGAI half of R4 (parser/mapper/renderer — the §2
     // surfacing gate, see compose/__tests__/block-type-allowlist.test.ts).
-    uiDirectiveEmit: booleanString.default(false),
     // CEE_HELD_PROPOSAL_EMIT — seamlessness R8 (CEE half): flag-gated
     // deterministic `held_proposal` block emitter at the edit_graph GM held
     // seam. Default OFF; flag-off is byte-identical to pre-slice behaviour
@@ -711,7 +710,6 @@ const ConfigSchema = z.object({
     // is merged but NOT yet executed — the RPC does not exist until
     // Paul's execution gate; enablement is sequenced behind it (see
     // ROADMAP 3.1 and parallel-briefs/PLATFORM-REPORT-2026-07-10-1.md).
-    decisionRecordCapture: booleanString.default(false),
     // CEE_CONTEXT_BRIEF_ALL_SITES — Context Architecture v2 S2 (ROADMAP
     // 1.73, design pack 02 §Seam 1): thread the persisted decision brief
     // (`scenarios.brief_text`) into the edit/repair LLM context — the two
@@ -861,8 +859,8 @@ const ConfigSchema = z.object({
     explainFeatureVersion: z.string().optional(),
     evidenceHelperFeatureVersion: z.string().optional(),
     biasCheckFeatureVersion: z.string().optional(),
-    biasStructuralEnabled: booleanString.default(false),
     biasMitigationPatchesEnabled: booleanString.default(false),
+    addRiskRejectionGuidanceEnabled: booleanString.default(false),
     sensitivityCoachFeatureVersion: z.string().optional(),
     teamPerspectivesFeatureVersion: z.string().optional(),
     reviewFeatureVersion: z.string().optional(),
@@ -880,7 +878,6 @@ const ConfigSchema = z.object({
     clarificationThresholdAllowDirect: z.coerce.number().min(0).max(1).default(0.8), // >= this = allow direct draft
     clarificationThresholdOneRound: z.coerce.number().min(0).max(1).default(0.4), // >= this = require 1 round, < this = require 2+ rounds
     // Pre-decision checklist and framing nudges (Phase 6)
-    preDecisionChecksEnabled: booleanString.default(false), // If true, include pre-decision checks in draft response
     // (Multi-turn Stage-4 clarifier settings removed 2026-07-16 — ROADMAP 1.94
     // Option A retirement. CEE_CLARIFIER_ENABLED and CEE_CLARIFIER_* env vars
     // are now inert; they can be deleted from deployment dashboards.)
@@ -891,7 +888,6 @@ const ConfigSchema = z.object({
     // drafting; complete briefs proceed silently. Env: CEE_CLARIFY_V2_ENABLED.
     // Flip gates on the clarify-v2 eval floors (tools/conversation-harness)
     // + Paul; flag-off is byte-identical to today (pinned).
-    clarifyV2Enabled: booleanString.default(false),
     // Bias detection confidence thresholding (Phase 6)
     biasConfidenceThreshold: z.coerce.number().min(0).max(1).default(0.3), // Minimum confidence to report bias finding
     // Response caching (Phase 7)
@@ -913,7 +909,6 @@ const ConfigSchema = z.object({
     // rejection class; every other rejection reason/type is byte-identical. Default OFF;
     // flag-off renders exactly as today. Final user-facing wording is authored separately
     // before any live run / flag enablement.
-    addRiskRejectionGuidanceEnabled: booleanString.default(false),
     deterministicEnforcementEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ENFORCEMENT_ENABLED — budget rescale + bridge chain repair (Stage 4 substep 9b)
     editNormalisationEnabled: booleanString.default(true), // CEE_EDIT_NORMALISATION_ENABLED — normalise non-canonical LLM field names before Zod validation
     editInterventionRoutingEnabled: booleanString.default(true), // CEE_EDIT_INTERVENTION_ROUTING_ENABLED — read interventions from data.interventions + slash-keyed entries
@@ -1177,6 +1172,7 @@ const ConfigSchema = z.object({
     // product behaviour. Reserved as the single seam for a future,
     // separately-approved LLM-facing behavioural-activation step.
     coachingStatePackEnabled: booleanString.default(false),
+    coachingContextPromptEnabled: booleanString.default(false),
     // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED — first
     // narrow coaching activation on the trust path). When true, the turn-executor
     // injects a redacted, hash-free `coaching_context` pack (the 8
@@ -1189,7 +1185,6 @@ const ConfigSchema = z.object({
     // chip change, no new telemetry). Distinct from CEE_COACHING_CONTEXT_ENABLED
     // (the always-on coaching policy engine) and CEE_COACHING_STATE_PACK_ENABLED
     // (the diagnostic-only `_context_summary` sub-block).
-    coachingContextPromptEnabled: booleanString.default(false),
     // V5 Tier-2 claim-permission master lock (CEE_COACHING_TIER2_ENABLED —
     // Brief 5 "the cage, not the activation"). Lock 1 of two independent
     // locks on Tier-2 claim usage (Brief 4 §3 candidates: factor_sensitivity,
@@ -1254,7 +1249,6 @@ const ConfigSchema = z.object({
     // BriefSignals context header (appended to user message after compliance reminder)
     briefSignalsHeaderEnabled: booleanString.default(false), // CEE_BRIEF_SIGNALS_HEADER_ENABLED
     // Cross-turn entity memory (tracks per-factor interaction state for Zone 2)
-    entityMemoryEnabled: booleanString.default(false), // CEE_ENTITY_MEMORY_ENABLED
     // Two-pass graph parameter validation pipeline (CEE_VALIDATION_PIPELINE_ENABLED)
     validationPipelineEnabled: booleanString.default(false),
     // Post-assembly Zod schema verification pipeline (CEE_VERIFICATION_PIPELINE_ENABLED)
@@ -1499,9 +1493,7 @@ function parseConfig(): Config {
       constraintInfeasibleGate: env.CEE_CONSTRAINT_INFEASIBLE_GATE,
       answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
       answerShapeEnforced: env.CEE_ANSWER_SHAPE_ENFORCED,
-      uiDirectiveEmit: env.CEE_UI_DIRECTIVE_EMIT,
       heldProposalEmit: env.CEE_HELD_PROPOSAL_EMIT,
-      decisionRecordCapture: env.CEE_DECISION_RECORD_CAPTURE,
       contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
       enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
       rollingSummary: env.CEE_ROLLING_SUMMARY,
@@ -1550,8 +1542,8 @@ function parseConfig(): Config {
       explainFeatureVersion: env.CEE_EXPLAIN_FEATURE_VERSION,
       evidenceHelperFeatureVersion: env.CEE_EVIDENCE_HELPER_FEATURE_VERSION,
       biasCheckFeatureVersion: env.CEE_BIAS_CHECK_FEATURE_VERSION,
-      biasStructuralEnabled: env.CEE_BIAS_STRUCTURAL_ENABLED,
       biasMitigationPatchesEnabled: env.CEE_BIAS_MITIGATION_PATCHES_ENABLED,
+      addRiskRejectionGuidanceEnabled: env.CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED,
       sensitivityCoachFeatureVersion: env.CEE_SENSITIVITY_COACH_FEATURE_VERSION,
       teamPerspectivesFeatureVersion: env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION,
       reviewFeatureVersion: env.CEE_REVIEW_FEATURE_VERSION,
@@ -1568,9 +1560,7 @@ function parseConfig(): Config {
       clarificationThresholdAllowDirect: env.CEE_CLARIFICATION_THRESHOLD_ALLOW_DIRECT,
       clarificationThresholdOneRound: env.CEE_CLARIFICATION_THRESHOLD_ONE_ROUND,
       // Pre-decision checklist and framing nudges
-      preDecisionChecksEnabled: env.CEE_PRE_DECISION_CHECKS_ENABLED,
       // Clarify v2 (E0-B) — dark, default off
-      clarifyV2Enabled: env.CEE_CLARIFY_V2_ENABLED,
       // Bias detection confidence thresholding
       biasConfidenceThreshold: env.CEE_BIAS_CONFIDENCE_THRESHOLD,
       // Response caching
@@ -1582,7 +1572,6 @@ function parseConfig(): Config {
       orchestratorValidationEnabled: env.CEE_ORCHESTRATOR_VALIDATION_ENABLED,
       // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
       patchPreValidationEnabled: env.CEE_PATCH_PRE_VALIDATION_ENABLED,
-      addRiskRejectionGuidanceEnabled: env.CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED,
       patchBudgetEnabled: env.CEE_PATCH_BUDGET_ENABLED,
       deterministicEnforcementEnabled: env.CEE_DETERMINISTIC_ENFORCEMENT_ENABLED,
       editNormalisationEnabled: env.CEE_EDIT_NORMALISATION_ENABLED,
@@ -1718,7 +1707,6 @@ function parseConfig(): Config {
       // CEE_UNIFIED_PIPELINE_ENABLED removed — unified pipeline is always-on
       boundaryAllowInvalid: env.CEE_BOUNDARY_ALLOW_INVALID,
       draftComplianceReminderEnabled: env.CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED,
-      entityMemoryEnabled: env.CEE_ENTITY_MEMORY_ENABLED,
       validationPipelineEnabled: env.CEE_VALIDATION_PIPELINE_ENABLED,
       verificationPipelineEnabled: env.CEE_VERIFICATION_PIPELINE_ENABLED,
       // Coaching architecture kill switches

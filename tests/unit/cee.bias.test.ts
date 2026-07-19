@@ -388,43 +388,35 @@ describe("CEE bias helper - detectBiases", () => {
     }
   });
 
-  it("does not emit structural confirmation or sunk cost biases when structural flag is disabled (default)", () => {
-    const originalFlag = process.env.CEE_BIAS_STRUCTURAL_ENABLED;
-    delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
+  // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_BIAS_STRUCTURAL_ENABLED is deleted —
+  // structural bias detection always runs, so the former flag-disabled pin
+  // (which asserted these codes were absent) is replaced by its inverse.
+  it("emits structural confirmation / sunk cost biases unconditionally (no flag)", () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: "g1", kind: "goal" } as any,
+        { id: "opt_a", kind: "option" } as any,
+        { id: "opt_b", kind: "option" } as any,
+        { id: "r1", kind: "risk" } as any,
+        { id: "opt_single", kind: "option" } as any,
+        { id: "a1", kind: "action" } as any,
+        { id: "a2", kind: "action" } as any,
+        { id: "a3", kind: "action" } as any,
+      ],
+      edges: [
+        { from: "opt_a", to: "r1" } as any,
+        { from: "opt_single", to: "a1" } as any,
+        { from: "opt_single", to: "a2" } as any,
+        { from: "opt_single", to: "a3" } as any,
+      ],
+    });
 
-    try {
-      const graph = makeGraph({
-        nodes: [
-          { id: "g1", kind: "goal" } as any,
-          { id: "opt_a", kind: "option" } as any,
-          { id: "opt_b", kind: "option" } as any,
-          { id: "r1", kind: "risk" } as any,
-          { id: "opt_single", kind: "option" } as any,
-          { id: "a1", kind: "action" } as any,
-          { id: "a2", kind: "action" } as any,
-          { id: "a3", kind: "action" } as any,
-        ],
-        edges: [
-          { from: "opt_a", to: "r1" } as any,
-          { from: "opt_single", to: "a1" } as any,
-          { from: "opt_single", to: "a2" } as any,
-          { from: "opt_single", to: "a3" } as any,
-        ],
-      });
+    const findings = detectBiases(graph, null);
+    const hasStructural = findings.some(
+      (f: any) => f.code === "CONFIRMATION_BIAS" || f.code === "SUNK_COST",
+    );
 
-      const findings = detectBiases(graph, null);
-      const hasStructural = findings.some(
-        (f: any) => f.code === "CONFIRMATION_BIAS" || f.code === "SUNK_COST",
-      );
-
-      expect(hasStructural).toBe(false);
-    } finally {
-      if (originalFlag === undefined) {
-        delete process.env.CEE_BIAS_STRUCTURAL_ENABLED;
-      } else {
-        process.env.CEE_BIAS_STRUCTURAL_ENABLED = originalFlag;
-      }
-    }
+    expect(hasStructural).toBe(true);
   });
 });
 

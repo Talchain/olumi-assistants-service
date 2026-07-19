@@ -16,7 +16,6 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 
 import { selectRunAnalysisFact, type FreshnessDerivation } from './context/freshness.js';
 import { TelemetryEvents, emit } from '../utils/telemetry.js';
-import { config } from '../config/index.js';
 import type { SuggestedAction } from './compose/types.js';
 import {
   buildCoachingBlocks,
@@ -290,7 +289,9 @@ function buildBlocksFromFacts(
         // the hash-gated persisted-snapshot fallback — in production it
         // is the ONLY source that can resolve the option target (see
         // ComposeToolCallInput.persistedGraph).
-        if (!uiDirectiveEmitted && config.features.uiDirectiveEmit) {
+        // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_UI_DIRECTIVE_EMIT deleted
+        // (was live `true` on staging).
+        if (!uiDirectiveEmitted) {
           const directive = buildRecommendedOptionUiDirective(fact, lookup);
           if (directive !== null) {
             blocks.push(directive);

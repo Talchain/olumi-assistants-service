@@ -1069,22 +1069,22 @@ export async function commitDirectAnswer(
   // graph_hash is the fact's OWN `graph_hash_at_run` (aag_v1-prefixed) —
   // the hash the handler computed from the exact snapshot the analysis ran
   // against (PR #411 object-identity discipline; no re-read, no re-hash).
-  if (config.features.decisionRecordCapture === true) {
-    const decisionRecordFact = metadata.handler_facts.find(
-      (f): f is RunAnalysisHandlerFact => f.fact_type === 'run_analysis' && f.noop === false,
-    );
-    if (decisionRecordFact !== undefined) {
-      void recordDecisionRecordForCommit({
-        scenarioId: metadata.scenario_id,
-        turnId: metadata.turn_id,
-        persistedRowId,
-        fact: decisionRecordFact,
-        // Guest pre-check reads scenarios.user_id via the store's optional
-        // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
-        // the SessionStore import surface at its declared three files).
-        sessionStore: store,
-      });
-    }
+  // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_DECISION_RECORD_CAPTURE deleted (was
+  // live `true` on staging); capture now runs whenever the qualifying fact exists.
+  const decisionRecordFact = metadata.handler_facts.find(
+    (f): f is RunAnalysisHandlerFact => f.fact_type === 'run_analysis' && f.noop === false,
+  );
+  if (decisionRecordFact !== undefined) {
+    void recordDecisionRecordForCommit({
+      scenarioId: metadata.scenario_id,
+      turnId: metadata.turn_id,
+      persistedRowId,
+      fact: decisionRecordFact,
+      // Guest pre-check reads scenarios.user_id via the store's optional
+      // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
+      // the SessionStore import surface at its declared three files).
+      sessionStore: store,
+    });
   }
 
   // Context Architecture v2 — S4 rolling conversation summary

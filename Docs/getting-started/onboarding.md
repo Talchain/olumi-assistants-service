@@ -152,7 +152,6 @@ Each of these has an associated route file under `src/routes/` and a correspondi
 CEE behaviour is controlled via environment variables. Important examples:
 
 - Structural bias and draft structural warnings:
-  - `CEE_BIAS_STRUCTURAL_ENABLED` – enables structural bias detectors for bias check.
   - `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED` – enables structural draft warnings and confidence flags on draft graph responses.
 - Per-feature rate limits (RPM):
   - `CEE_DRAFT_RATE_LIMIT_RPM`, `CEE_BIAS_CHECK_RATE_LIMIT_RPM`, etc.

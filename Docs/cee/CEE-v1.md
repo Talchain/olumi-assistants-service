@@ -115,7 +115,7 @@ CEE v1 is a small, deterministic surface area built around the core draft pipeli
         - `mechanism` – short description of the cognitive mechanism.
         - `citation` – canonical reference (authors + venue).
         - `micro_intervention` – small, time-bounded intervention (`steps[]`, `estimated_minutes`).
-      - **Structural detectors (v1, optional):** when `CEE_BIAS_STRUCTURAL_ENABLED=true`, CEE enables additional graph-structural detectors that only use node kinds and edges (no free text or prompts), for example:
+      - **Structural detectors (v1, always on):** CEE runs additional graph-structural detectors that only use node kinds and edges (no free text or prompts), for example:
         - **Structural confirmation bias** when one option has explicit risks/outcomes connected while alternatives have none.
         - **Structural sunk cost bias** when a single option has multiple attached actions consistent with “keep investing in the current path”.
       - These detectors are additive and **opt-in by env flag**; turning them off does not change existing non-structural findings.
@@ -771,8 +771,6 @@ Key environment variables relevant to CEE v1:
 - `CEE_DRAFT_RATE_LIMIT_RPM` – per-feature CEE rate limit per key/IP.
 - `COST_MAX_USD` – maximum allowed cost per draft response (shared guard).
 - `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED` – when `true`, enables structural draft warnings (`draft_warnings`) and confidence flags (`confidence_flags`) on `CEEDraftGraphResponseV1`. Default: `false`.
-- `CEE_BIAS_STRUCTURAL_ENABLED` – when `true`, enables additional graph-structural bias detectors (e.g. confirmation bias and sunk cost) inside Bias Check. Default: `false`.
-- `CEE_PRE_DECISION_CHECKS_ENABLED` – when `true`, includes pre-decision checklist and framing nudges in draft responses. Default: `false`.
 - `CEE_BIAS_CONFIDENCE_THRESHOLD` – minimum confidence score (0–1) for bias findings to be reported. Findings below this threshold are filtered out. Default: `0.3`.
 - `CEE_CACHE_RESPONSE_ENABLED` – when `true`, enables in-memory caching for draft-graph responses. Default: `false`.
 - `CEE_CACHE_RESPONSE_TTL_MS` – cache entry TTL in milliseconds. Default: `300000` (5 minutes).
@@ -834,7 +832,7 @@ Implementation: `src/cee/validation/readiness.ts`, `src/routes/assist.clarify-br
 
 ### 4.5 Pre-Decision Checklist and Framing Nudges
 
-When `CEE_PRE_DECISION_CHECKS_ENABLED=true`, draft responses include contextual
+Draft responses include contextual
 pre-decision checks and framing nudges derived from graph structure:
 
 **Pre-Decision Checks** (max 5):

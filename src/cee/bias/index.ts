@@ -49,8 +49,10 @@ export function filterByConfidence(
   });
 }
 
+// NO-DARK-LAUNCH (Paul, 19 Jul): CEE_BIAS_STRUCTURAL_ENABLED deleted (was
+// live `true` on staging). Structural bias detection always runs.
 function structuralBiasEnabled(): boolean {
-  return config.cee.biasStructuralEnabled;
+  return true;
 }
 
 type GraphNode = GraphV1["nodes"][number];
