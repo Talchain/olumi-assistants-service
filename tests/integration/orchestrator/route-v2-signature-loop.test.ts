@@ -455,6 +455,16 @@ describe('POST /orchestrate/v2/turn — V5 Signature Loop guards', () => {
         stage: 'frame',
         graph_state: undefined,
         turn_id: '22222222-2222-4222-8222-2222222222d3',
+        // #539 deleted CEE_CLARIFY_V2_ENABLED, so clarify v2 now runs
+        // unconditionally and would intercept this brief with its round-1
+        // rubric before draft dispatch. `generate_model` is an EXPLICIT
+        // instruction to draft: tryClarifyV2Turn returns null for it, so the
+        // route dispatches bit-identically to the old flag-off path. The
+        // subject here is the continuation guard NOT firing on a fresh
+        // scenario, not the clarify rubric. NOTE: D1 above shares this exact
+        // message string but asserts the OPPOSITE (no draft_graph) and queues
+        // no mock — never apply this by find-replace on the message.
+        generate_model: true,
       }),
     });
     expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
