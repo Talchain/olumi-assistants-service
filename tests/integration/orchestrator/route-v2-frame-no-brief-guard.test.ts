@@ -237,6 +237,15 @@ describe('POST /orchestrate/v2/turn — frame-stage no-brief guard', () => {
         message: 'Should we hire a tech lead or two developers to improve delivery speed?',
         turn_class: 'frame',
         source: 'composer',
+        // #539 deleted CEE_CLARIFY_V2_ENABLED, so clarify v2 now runs
+        // unconditionally and would intercept this brief with its round-1
+        // rubric before dispatch is reached. `generate_model` is an EXPLICIT
+        // instruction to draft: tryClarifyV2Turn returns null for it, so the
+        // route dispatches bit-identically to the old flag-off path. That
+        // isolates this test from the clarify rubric, which is not its
+        // subject — the subject is that the frame-no-brief guard must not
+        // shadow draft_graph.
+        generate_model: true,
       },
     });
 
