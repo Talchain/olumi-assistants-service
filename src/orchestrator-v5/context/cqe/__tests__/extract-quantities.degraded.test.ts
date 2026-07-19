@@ -12,9 +12,17 @@
  *
  * Note the two substitution paths differ: the first is a lower-priority CQE
  * RULE taking the span (source stays 'cqe'), the second is the compromise
- * backstop. A guard keyed on quantity COUNT or on `source` sees neither —
- * the count is unchanged and the first case never leaves 'cqe'. That is why
- * the guard keys on provenance (`summary.degraded`) instead.
+ * backstop. Neither is visible to a guard keyed on quantity COUNT or on
+ * `source` — for THESE TWO cases the count is unchanged and the first never
+ * leaves 'cqe'.
+ *
+ * The class is wider than the two cases pinned here. Adversarial review
+ * found 6-9 rules affected across at least four corruption modes, and they
+ * disagree about what they perturb: a RANGE COLLAPSE mode DOES change the
+ * quantity count, and an OPERATOR FLIP mode (`set 42` -> `increment 42`)
+ * leaves the number byte-identical. So arity guards, magnitude heuristics
+ * and `source` checks each miss some mode; only PROVENANCE — did every
+ * rule run? — covers all of them. Hence `summary.degraded`.
  *
  * DETERMINISM: these tests never depend on real CPU load. A fake clock is
  * advanced from inside a wrapped rule's own `apply()`, so exactly the
@@ -121,7 +129,9 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
         });
         expect(pct.results.map((r) => r.value)).toEqual([10]); // 100x wrong
         expect(pct.results[0]!.source).toBe('cqe'); // NOT compromise — a rule did this
-        expect(pct.results).toHaveLength(1); // count UNCHANGED: a count guard is blind
+        // Count UNCHANGED *in this mode* — which is why an arity guard is
+        // blind here. (Other modes DO change it; see the file header.)
+        expect(pct.results).toHaveLength(1);
         expect(pct.summary.degraded).toBe(true); // ...but provenance sees it
 
         const bn = __runExtractionForTesting('USD 1.2bn', {

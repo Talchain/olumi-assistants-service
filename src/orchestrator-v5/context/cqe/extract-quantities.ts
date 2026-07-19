@@ -14,6 +14,17 @@ import { tracePattern } from './pattern-trace.js';
 // Main CQE orchestrator. Pure, synchronous, deterministic, never throws.
 // Returns an ordered array of QuantityExtractionResult per CQE Design v1.1 §5.
 //
+// TIMEOUT CONFORMANCE — read §5 "Timeout behaviour (amended 2026-07-19)"
+// before changing either fork below. §5's ORIGINAL clause said "on timeout:
+// fail closed to [] ... no partial-result fallback". The code never did
+// that: it dropped one rule's result and let later rules and the compromise
+// backstop re-claim the unmasked span — the forbidden partial-result
+// fallback, and the mechanism of a P0 that silently wrote values wrong by
+// 100x to 1e9x. That clause is now RETIRED and §5 documents the behaviour
+// as built. Do not "restore" the `continue` on the per-rule fork: a rule
+// that COMPLETED slowly has a correct result, and discarding it reclaims no
+// latency (the work is already done) while re-opening the defect.
+//
 // Telemetry is emitted by the caller (context-pack-assembler) using the
 // summary returned here; this function itself does not emit events.
 

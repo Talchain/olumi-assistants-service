@@ -283,19 +283,29 @@ export type SkipReason =
    * to completion, so a span's highest-fidelity reading may be missing and
    * a lower-fidelity substitute may have taken its place.
    *
-   * The failure this guards is NOT "fewer quantities" (that class was
-   * measured and does not occur); it is a DIFFERENT NUMBER arriving with
-   * full confidence — e.g. "increase by about 10%" yielding 10 instead of
-   * 0.1 when the percentage rule (P6) is skipped and the absolute-quantity
+   * The headline failure is a DIFFERENT NUMBER arriving with full
+   * confidence — e.g. "increase by about 10%" yielding 10 instead of 0.1
+   * when the percentage rule (P6) is skipped and the absolute-quantity
    * rule (P6b) claims the span, or "USD 1.2bn" yielding 1.2 instead of
    * 1200000000 when the suffix rule (P8) is skipped and the compromise
    * backstop claims it.
    *
-   * A count-based guard cannot see either case — the quantity count is
-   * UNCHANGED and `source` may still be `cqe`. So this guard keys on
-   * provenance (did every rule run?), never on arity. Falling through to
-   * LLM routing costs a round trip; applying a silently-wrong value costs
-   * the user's graph.
+   * The class is WIDER than those two cases: adversarial review found it
+   * spans 6-9 rules and at least four distinct corruption modes, and the
+   * modes are mutually inconsistent in what they perturb —
+   *
+   *   - magnitude change, count UNCHANGED (the two cases above);
+   *   - RANGE COLLAPSE, which DOES change the quantity count;
+   *   - OPERATOR FLIP (`set 42` -> `increment 42`) where the numeric value
+   *     is byte-identical and only the semantics move.
+   *
+   * So no guard on arity works (some modes hold count constant, others
+   * change it), no magnitude heuristic works (the operator flip changes no
+   * number at all), and `source` is unreliable (it stays `cqe` whenever a
+   * lower-priority rule, rather than the backstop, claims the span). The
+   * only signal that covers every mode is PROVENANCE: did every rule run?
+   * That is what this guard keys on. Falling through to LLM routing costs
+   * a round trip; applying a silently-wrong value costs the user's graph.
    */
   | 'degraded_extraction'
   | 'no_edit_verb'
