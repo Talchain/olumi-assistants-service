@@ -19,6 +19,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { env } from 'node:process';
 
 import { log } from '../../utils/telemetry.js';
 
@@ -127,142 +128,178 @@ export type StateQueryGuardOutcomeForLog =
   | 'no_recent_changes'
   | 'not_evaluated';
 
-export interface RoutingLog {
-  readonly turn_id: string;
-  readonly scenario_id: string;
-  readonly stage: string;
-  readonly intent_class: IntentClass | null;
-  readonly handler_id: string | null;
-  readonly coaching_mode: CoachingMode | null;
-  readonly resolution_status: ResolutionStatus | null;
-  readonly routing_error_cause: string | null;
-  readonly validation_error_code: string | null;
-  readonly compound_detected: boolean;
-  readonly compound_pattern_matched: string | null;
-  readonly raw_user_message: string | null;
-  readonly sonnet_text: string | null;
-  readonly sonnet_text_hash: string | null;
+/**
+ * PER-FIELD REDACTION POLICY — the single list both output branches
+ * derive from (14-Jul PII ruling follow-through; kills the
+ * hand-maintained-mirror defect class here).
+ *
+ * WHY: buildRoutingLog used to be two hand-maintained ~44-field
+ * object literals whose redacted branch nulled exactly two enumerated
+ * fields — so a NEW field defaulted to include-not-redact (fail-open)
+ * unless its author remembered both literals. This policy inverts
+ * that structurally:
+ *
+ *  - `satisfies Record<keyof RoutingLogInput, …>` makes an
+ *    unclassified field a BUILD-TIME error (`tsc -p
+ *    tsconfig.build.json`, the required gate): add a field to
+ *    RoutingLogInput and the compile fails until you classify it
+ *    here. Add a policy entry for a field the input doesn't declare
+ *    and the compile also fails (excess key).
+ *  - The output record is built ONLY by iterating this policy, so a
+ *    field the policy doesn't know about structurally CANNOT reach
+ *    the JSONL — at runtime an unknown key (only reachable via
+ *    untyped spreads) throws in test envs and is dropped-with-warning
+ *    in production (this call site sits in TurnExecutor's `finally`;
+ *    a production throw here would eat the turn's real outcome).
+ *
+ * Classifications:
+ *  - `structural`   — service metadata (ids, enums, counts, hashes,
+ *                     timings); passes through both branches.
+ *  - `content_null` — decision content; nulled when redacted.
+ *  - `content_hash` — decision content; nulled when redacted with a
+ *                     SHA-256 emitted as `<field>_hash`.
+ *  - `control`      — consumed by buildRoutingLog itself
+ *                     (`redacted`, `label_tier`).
+ *
+ * Content-classified fields must also be members of
+ * DECISION_CONTENT_FIELDS (src/utils/logger-config.ts) so the pino
+ * logger boundary covers the same names — enforced by test.
+ */
+export type RoutingLogFieldPolicy =
+  | 'structural'
+  | 'content_null'
+  | 'content_hash'
+  | 'control';
+
+export const ROUTING_LOG_FIELD_POLICY = {
+  turn_id: 'structural',
+  scenario_id: 'structural',
+  stage: 'structural',
+  intent_class: 'structural',
+  handler_id: 'structural',
+  coaching_mode: 'structural',
+  resolution_status: 'structural',
+  routing_error_cause: 'structural',
+  validation_error_code: 'structural',
+  compound_detected: 'structural',
+  compound_pattern_matched: 'structural',
+  raw_user_message: 'content_null',
+  sonnet_text: 'content_hash',
+  redacted: 'control',
+  created_at: 'structural',
+  label_tier: 'control',
+  graph_node_count: 'structural',
+  graph_edge_count: 'structural',
+  graph_hash: 'structural',
+  graph_mapped_nodes: 'structural',
+  graph_dropped_by_unknown_kind: 'structural',
+  graph_dropped_by_missing_id: 'structural',
+  graph_lookup_outcome: 'structural',
+  cqe_message_length: 'structural',
+  cqe_result_count: 'structural',
+  cqe_match_count: 'structural',
+  cqe_compromise_match_count: 'structural',
+  cqe_patterns_matched: 'structural',
+  cqe_duration_ms: 'structural',
+  cqe_timeout: 'structural',
+  cqe_degraded: 'structural',
+  cqe_message_too_long: 'structural',
+  cqe_word_range_missed: 'structural',
+  cqe_ambiguous_phrasing_detected: 'structural',
+  coaching_signal_id: 'structural',
+  recent_changes_count: 'structural',
+  prior_mutation_fact_count: 'structural',
+  state_query_guard_outcome: 'structural',
+} as const satisfies Record<keyof RoutingLogInput, RoutingLogFieldPolicy>;
+
+type PolicyMap = typeof ROUTING_LOG_FIELD_POLICY;
+
+/** Keys carrying a given policy — used to DERIVE the output type. */
+type KeysWithPolicy<P extends RoutingLogFieldPolicy> = {
+  [K in keyof PolicyMap]: PolicyMap[K] extends P ? K : never;
+}[keyof PolicyMap];
+
+/**
+ * The routing-log output shape — DERIVED from the field policy, not
+ * hand-declared, so the policy and the wire shape cannot drift:
+ * structural fields keep their input type; content fields become
+ * nullable; each content_hash field gains a `<field>_hash` sibling.
+ */
+export type RoutingLog = {
+  readonly [K in KeysWithPolicy<'structural'>]: RoutingLogInput[K];
+} & {
+  readonly [K in KeysWithPolicy<'content_null' | 'content_hash'>]:
+    | RoutingLogInput[K]
+    | null;
+} & {
+  readonly [K in KeysWithPolicy<'content_hash'> as `${K & string}_hash`]:
+    | string
+    | null;
+} & {
   readonly redacted: boolean;
-  readonly created_at: string;
   readonly label_tier: LabelTier;
-  readonly graph_node_count: number;
-  readonly graph_edge_count: number;
-  readonly graph_hash: string | null;
-  readonly graph_mapped_nodes: number;
-  readonly graph_dropped_by_unknown_kind: number;
-  readonly graph_dropped_by_missing_id: number;
-  readonly graph_lookup_outcome: GraphLookupOutcome;
-  readonly cqe_message_length: number;
-  readonly cqe_result_count: number;
-  readonly cqe_match_count: number;
-  readonly cqe_compromise_match_count: number;
-  readonly cqe_patterns_matched: readonly string[];
-  readonly cqe_duration_ms: number;
-  readonly cqe_timeout: boolean;
-  /** True when a CQE pattern rule did not run to completion (see
-   * CqeExtractionSummary.degraded) — the result set may hold a
-   * lower-fidelity substitute value. Suppresses deterministic apply. */
-  readonly cqe_degraded: boolean;
-  readonly cqe_message_too_long: boolean;
-  readonly cqe_word_range_missed: boolean;
-  readonly cqe_ambiguous_phrasing_detected: boolean;
-  /** V5 Group 1 Task C: coaching signal emitted by Step 5, or null. */
-  readonly coaching_signal_id: CoachingSignalId | null;
-  /** V5 product-state continuity (foamy-bee tranche). See RoutingLogInput. */
-  readonly recent_changes_count: number;
-  readonly prior_mutation_fact_count: number;
-  readonly state_query_guard_outcome: StateQueryGuardOutcomeForLog;
+};
+
+function isTestEnv(): boolean {
+  // Same direct-env test-detection shape as telemetry.ts setTestSink —
+  // read at call time (not module load) so tests can exercise the
+  // production drop path by clearing these for one call.
+  return env.NODE_ENV === 'test' || Boolean(env.VITEST);
 }
 
 /**
  * Build a routing log record. Applies redaction + defaults. Pure — no I/O.
+ *
+ * The output is assembled ONLY from ROUTING_LOG_FIELD_POLICY entries;
+ * see the policy's header for the fail-loud contract on unknown fields.
  */
 export function buildRoutingLog(input: RoutingLogInput): RoutingLog {
-  const labelTier = input.label_tier ?? 'unreviewed';
-  if (input.redacted) {
-    return {
-      turn_id: input.turn_id,
-      scenario_id: input.scenario_id,
-      stage: input.stage,
-      intent_class: input.intent_class,
-      handler_id: input.handler_id,
-      coaching_mode: input.coaching_mode,
-      resolution_status: input.resolution_status,
-      routing_error_cause: input.routing_error_cause,
-      validation_error_code: input.validation_error_code,
-      compound_detected: input.compound_detected,
-      compound_pattern_matched: input.compound_pattern_matched,
-      raw_user_message: null,
-      sonnet_text: null,
-      sonnet_text_hash: sha256(input.sonnet_text),
-      redacted: true,
-      created_at: input.created_at,
-      label_tier: labelTier,
-      graph_node_count: input.graph_node_count,
-      graph_edge_count: input.graph_edge_count,
-      graph_hash: input.graph_hash,
-      graph_mapped_nodes: input.graph_mapped_nodes,
-      graph_dropped_by_unknown_kind: input.graph_dropped_by_unknown_kind,
-      graph_dropped_by_missing_id: input.graph_dropped_by_missing_id,
-      graph_lookup_outcome: input.graph_lookup_outcome,
-      cqe_message_length: input.cqe_message_length,
-      cqe_result_count: input.cqe_result_count,
-      cqe_match_count: input.cqe_match_count,
-      cqe_compromise_match_count: input.cqe_compromise_match_count,
-      cqe_patterns_matched: input.cqe_patterns_matched,
-      cqe_duration_ms: input.cqe_duration_ms,
-      cqe_timeout: input.cqe_timeout,
-      cqe_degraded: input.cqe_degraded,
-      cqe_message_too_long: input.cqe_message_too_long,
-      cqe_word_range_missed: input.cqe_word_range_missed,
-      cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
-      coaching_signal_id: input.coaching_signal_id,
-      recent_changes_count: input.recent_changes_count,
-      prior_mutation_fact_count: input.prior_mutation_fact_count,
-      state_query_guard_outcome: input.state_query_guard_outcome,
-    };
+  // FAIL-LOUD SEAM: a field with no policy entry can only appear at
+  // runtime through an untyped spread (typed call sites are caught at
+  // compile time by the `satisfies` clause above). Tests die on it;
+  // production drops it with a warning — never silent passthrough.
+  const unknownFields = Object.keys(input).filter(
+    (k) => !Object.prototype.hasOwnProperty.call(ROUTING_LOG_FIELD_POLICY, k),
+  );
+  if (unknownFields.length > 0) {
+    const detail = `routing-log: field(s) without a redaction policy: ${unknownFields.join(
+      ', ',
+    )} — classify them in ROUTING_LOG_FIELD_POLICY (structural | content_null | content_hash)`;
+    if (isTestEnv()) {
+      throw new Error(detail);
+    }
+    // Field NAMES are code-authored identifiers, never user content.
+    log.warn(
+      { unknown_fields: unknownFields },
+      'routing-log: fields without a redaction policy were DROPPED',
+    );
   }
-  return {
-    turn_id: input.turn_id,
-    scenario_id: input.scenario_id,
-    stage: input.stage,
-    intent_class: input.intent_class,
-    handler_id: input.handler_id,
-    coaching_mode: input.coaching_mode,
-    resolution_status: input.resolution_status,
-    routing_error_cause: input.routing_error_cause,
-    validation_error_code: input.validation_error_code,
-    compound_detected: input.compound_detected,
-    compound_pattern_matched: input.compound_pattern_matched,
-    raw_user_message: input.raw_user_message,
-    sonnet_text: input.sonnet_text,
-    sonnet_text_hash: null,
-    redacted: false,
-    created_at: input.created_at,
-    label_tier: labelTier,
-    graph_node_count: input.graph_node_count,
-    graph_edge_count: input.graph_edge_count,
-    graph_hash: input.graph_hash,
-    graph_mapped_nodes: input.graph_mapped_nodes,
-    graph_dropped_by_unknown_kind: input.graph_dropped_by_unknown_kind,
-    graph_dropped_by_missing_id: input.graph_dropped_by_missing_id,
-    graph_lookup_outcome: input.graph_lookup_outcome,
-    cqe_message_length: input.cqe_message_length,
-    cqe_result_count: input.cqe_result_count,
-    cqe_match_count: input.cqe_match_count,
-    cqe_compromise_match_count: input.cqe_compromise_match_count,
-    cqe_patterns_matched: input.cqe_patterns_matched,
-    cqe_duration_ms: input.cqe_duration_ms,
-    cqe_timeout: input.cqe_timeout,
-    cqe_degraded: input.cqe_degraded,
-    cqe_message_too_long: input.cqe_message_too_long,
-    cqe_word_range_missed: input.cqe_word_range_missed,
-    cqe_ambiguous_phrasing_detected: input.cqe_ambiguous_phrasing_detected,
-    coaching_signal_id: input.coaching_signal_id,
-    recent_changes_count: input.recent_changes_count,
-    prior_mutation_fact_count: input.prior_mutation_fact_count,
-    state_query_guard_outcome: input.state_query_guard_outcome,
-  };
+
+  const redacted = input.redacted;
+  const out: Record<string, unknown> = {};
+  for (const field of Object.keys(ROUTING_LOG_FIELD_POLICY) as Array<
+    keyof PolicyMap
+  >) {
+    const policy: RoutingLogFieldPolicy = ROUTING_LOG_FIELD_POLICY[field];
+    switch (policy) {
+      case 'structural':
+        out[field] = input[field];
+        break;
+      case 'content_null':
+        out[field] = redacted ? null : input[field];
+        break;
+      case 'content_hash':
+        out[field] = redacted ? null : input[field];
+        out[`${field}_hash`] = redacted ? sha256(String(input[field])) : null;
+        break;
+      case 'control':
+        // Emitted at the policy's position to keep JSONL key order stable.
+        if (field === 'redacted') out.redacted = redacted;
+        if (field === 'label_tier') out.label_tier = input.label_tier ?? 'unreviewed';
+        break;
+    }
+  }
+  return out as RoutingLog;
 }
 
 function sha256(s: string): string {

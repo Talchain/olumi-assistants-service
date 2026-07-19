@@ -4,7 +4,7 @@
  * Tests all 4 reconciliation rules and integration scenarios.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   reconcileStructuralTruth,
   fuzzyMatchNodeId,
@@ -470,6 +470,45 @@ describe('reconcileStructuralTruth', () => {
       expect(result.goalConstraints).toHaveLength(0);
       const mutation = result.mutations.find(m => m.code === 'CONSTRAINT_DROPPED');
       expect(mutation).toBeDefined();
+    });
+
+    it('PII (14-Jul ruling): the CONSTRAINT_DROPPED log carries digests/counts only — never raw target ids, labels, or the node-id roster (sentinel-proven)', async () => {
+      const SENTINEL_TARGET = 'fac_sentinel_9e4b_acquire_fintechco';
+      const SENTINEL_LABEL = 'SENTINEL-9e4b Acquire FintechCo for 50m';
+      const { log } = await import('../../src/utils/telemetry.js');
+      const infoSpy = vi.spyOn(log, 'info').mockImplementation((() => {}) as never);
+      try {
+        const graph = createValidGraph();
+        const constraints = [{
+          node_id: SENTINEL_TARGET,
+          label: SENTINEL_LABEL,
+          constraint_id: 'c1',
+          operator: '>=',
+          value: 100,
+        }];
+
+        const result = reconcileStructuralTruth(graph, { goalConstraints: constraints as any });
+
+        // POSITIVE CONTROL: the sentinel IS visible in the product
+        // mutation record — the harness can see presences.
+        expect(JSON.stringify(result.mutations)).toContain(SENTINEL_TARGET);
+
+        const dropCalls = infoSpy.mock.calls.filter((call) =>
+          JSON.stringify(call).includes('CONSTRAINT_DROPPED'),
+        );
+        expect(dropCalls.length).toBeGreaterThan(0);
+        for (const call of dropCalls) {
+          const serialized = JSON.stringify(call);
+          expect(serialized).not.toContain(SENTINEL_TARGET);
+          expect(serialized).not.toContain(SENTINEL_LABEL);
+          // No raw node-id roster either (the old available_node_ids
+          // field enumerated every node id in the graph).
+          expect(serialized).not.toContain('fac_price');
+          expect(serialized).toMatch(/sha8:[0-9a-f]{8}/);
+        }
+      } finally {
+        infoSpy.mockRestore();
+      }
     });
 
     it('is no-op when goalConstraints not provided', () => {

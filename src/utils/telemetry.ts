@@ -20,10 +20,12 @@ export function hashIP(ip: string): string {
 }
 
 /**
- * Pino logger with secret/PII redaction
+ * Pino logger with secret/PII/decision-content redaction
  *
  * Redacts sensitive fields to prevent accidental exposure in logs.
- * Paths use wildcards to match nested objects at any depth.
+ * NOTE: pino redact wildcards match exactly ONE level each — paths are
+ * generated at nesting depths 0–2 (NOT "any depth"; the old claim here
+ * was false, see logger-config.ts).
  *
  * SECURITY: Redaction paths centralized in src/utils/logger-config.ts
  * to ensure both Fastify and standalone Pino loggers stay in sync.

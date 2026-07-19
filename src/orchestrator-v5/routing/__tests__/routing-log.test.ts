@@ -5,10 +5,12 @@ import { tmpdir } from 'node:os';
 
 import {
   DEFAULT_ROUTING_LOG_PATH,
+  ROUTING_LOG_FIELD_POLICY,
   buildRoutingLog,
   writeRoutingLog,
   type RoutingLogInput,
 } from '../routing-log.js';
+import { isDecisionContentField } from '../../../utils/logger-config.js';
 
 function baseInput(overrides: Partial<RoutingLogInput> = {}): RoutingLogInput {
   // Construct a complete RoutingLogInput — every required field
@@ -179,6 +181,95 @@ describe('buildRoutingLog', () => {
         );
         expect(log.state_query_guard_outcome).toBe(outcome);
       }
+    });
+  });
+
+  describe('field-policy redaction (14-Jul PII ruling — fail-loud, sentinel-proven)', () => {
+    // High-entropy sentinel: cannot collide with structural vocabulary.
+    const SENTINEL = 'SENTINEL-4be1d9a2-relocate-hq-to-lisbon';
+
+    it('SENTINEL: redacted=true keeps decision content out of the serialized record', () => {
+      const record = buildRoutingLog(
+        baseInput({
+          redacted: true,
+          raw_user_message: SENTINEL,
+          sonnet_text: `${SENTINEL} with trailing prose`,
+        }),
+      );
+      const serialized = JSON.stringify(record);
+      expect(serialized).not.toContain(SENTINEL);
+      expect(record.raw_user_message).toBeNull();
+      expect(record.sonnet_text).toBeNull();
+      expect(record.sonnet_text_hash).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('POSITIVE CONTROL: redacted=false shows the same sentinel — the assertion above can see a presence', () => {
+      const record = buildRoutingLog(
+        baseInput({
+          redacted: false,
+          raw_user_message: SENTINEL,
+          sonnet_text: `${SENTINEL} with trailing prose`,
+        }),
+      );
+      const serialized = JSON.stringify(record);
+      // Same harness, same fields, redaction off → sentinel visible.
+      // Without this, the absence assertion above would be vacuous.
+      expect(serialized).toContain(SENTINEL);
+    });
+
+    it('FAIL-LOUD: a field with no policy entry throws in test envs (never silent passthrough)', () => {
+      const rogue = {
+        ...baseInput({ redacted: true }),
+        brand_new_field: SENTINEL,
+      } as unknown as RoutingLogInput;
+      expect(() => buildRoutingLog(rogue)).toThrowError(
+        /brand_new_field.*ROUTING_LOG_FIELD_POLICY/s,
+      );
+    });
+
+    it('FAIL-CLOSED: in production (non-test env) an unknown field is DROPPED, not passed through', () => {
+      // Simulate the production env-check window only for this call.
+      const savedNodeEnv = process.env.NODE_ENV;
+      const savedVitest = process.env.VITEST;
+      delete process.env.NODE_ENV;
+      delete process.env.VITEST;
+      try {
+        const rogue = {
+          ...baseInput({ redacted: true }),
+          brand_new_field: SENTINEL,
+        } as unknown as RoutingLogInput;
+        const record = buildRoutingLog(rogue);
+        const serialized = JSON.stringify(record);
+        expect(serialized).not.toContain('brand_new_field');
+        expect(serialized).not.toContain(SENTINEL);
+      } finally {
+        if (savedNodeEnv !== undefined) process.env.NODE_ENV = savedNodeEnv;
+        if (savedVitest !== undefined) process.env.VITEST = savedVitest;
+      }
+    });
+
+    it('POLICY COHERENCE: every content-classified routing field is in the logger-boundary DECISION_CONTENT_FIELDS list', () => {
+      // The pino boundary (src/utils/logger-config.ts) and this policy
+      // must agree on what counts as decision content — otherwise a
+      // field nulled here could still leak through a pino log site
+      // under the same name.
+      const contentFields = Object.entries(ROUTING_LOG_FIELD_POLICY)
+        .filter(([, policy]) => policy === 'content_null' || policy === 'content_hash')
+        .map(([field]) => field);
+      expect(contentFields.length).toBeGreaterThanOrEqual(2);
+      for (const field of contentFields) {
+        expect(isDecisionContentField(field), `${field} missing from DECISION_CONTENT_FIELDS`).toBe(true);
+      }
+    });
+
+    it('the output record is built ONLY from the policy: key set = policy fields + derived hash siblings', () => {
+      const record = buildRoutingLog(baseInput({ redacted: true }));
+      const expectedKeys = new Set<string>();
+      for (const [field, policy] of Object.entries(ROUTING_LOG_FIELD_POLICY)) {
+        expectedKeys.add(field);
+        if (policy === 'content_hash') expectedKeys.add(`${field}_hash`);
+      }
+      expect(new Set(Object.keys(record))).toEqual(expectedKeys);
     });
   });
 });

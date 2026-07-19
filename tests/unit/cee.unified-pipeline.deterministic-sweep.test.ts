@@ -1643,6 +1643,50 @@ describe("fixFactorGoalEdges", () => {
 // =============================================================================
 
 describe("fixDisconnectedObservables", () => {
+  it("PII (14-Jul ruling): the pruned-node log carries a digest + category only — never the raw label or id (sentinel-proven)", async () => {
+    const SENTINEL_LABEL = "SENTINEL-7d2e91bc Relocate HQ To Lisbon";
+    const SENTINEL_ID = "fac_sentinel_relocate_hq_to_lisbon";
+    const { log } = await import("../../src/utils/telemetry.js");
+    const infoMock = log.info as ReturnType<typeof vi.fn>;
+    infoMock.mockClear();
+
+    const graph = makeGraph({
+      nodes: [
+        { id: "dec_1", kind: "decision", label: "Decision" },
+        { id: "opt_a", kind: "option", label: "A" },
+        { id: "opt_b", kind: "option", label: "B" },
+        { id: SENTINEL_ID, kind: "factor", label: SENTINEL_LABEL, category: "observable" },
+        { id: "out_revenue", kind: "outcome", label: "Revenue" },
+        { id: "goal_1", kind: "goal", label: "Goal" },
+      ],
+      edges: [
+        { from: "dec_1", to: "opt_a", strength_mean: 1 },
+        { from: "opt_a", to: "out_revenue", strength_mean: 0.7 },
+        { from: "out_revenue", to: "goal_1", strength_mean: 0.8 },
+      ],
+    });
+
+    const result = fixDisconnectedObservables(graph);
+
+    // POSITIVE CONTROL: the sentinel IS visible in the product repair
+    // record (returned data, not a log) — the harness can see presences.
+    expect(JSON.stringify(result.repairs)).toContain(SENTINEL_LABEL);
+
+    // The LOG must carry neither the label nor the raw id — path-based
+    // logger redaction cannot clean interpolated message strings, so
+    // this call site must emit digests/enums only.
+    const prunedCalls = infoMock.mock.calls.filter((call) =>
+      JSON.stringify(call).includes("observable_pruned"),
+    );
+    expect(prunedCalls.length).toBeGreaterThan(0);
+    for (const call of prunedCalls) {
+      const serialized = JSON.stringify(call);
+      expect(serialized).not.toContain(SENTINEL_LABEL);
+      expect(serialized).not.toContain(SENTINEL_ID);
+      expect(serialized).toMatch(/sha8:[0-9a-f]{8}/);
+    }
+  });
+
   it("prunes observable factor with zero edges", () => {
     const graph = makeGraph({
       nodes: [
