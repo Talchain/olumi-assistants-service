@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { parse } from "yaml";
 
@@ -52,23 +52,49 @@ function readJson(p: string): any {
   return JSON.parse(readFileSync(p, "utf8"));
 }
 
+/**
+ * The fixtures are large (~20KB) and immutable. Read and parse ONCE at module
+ * scope; the two tests that vary them already spread-copy, so a shared frozen
+ * object is safe and `structuredClone` covers any deeper mutation.
+ */
+const HEALTHY_DRAFT = readJson(HEALTHY_DRAFT_PATH);
+const BROKEN_DRAFT = readJson(BROKEN_DRAFT_PATH);
+
+/**
+ * Collect every `if:` in a parsed workflow that reads a repository variable.
+ * Walks the PARSED tree rather than the raw text so a file's own explanatory
+ * comments about the anti-pattern are not mistaken for a real gate.
+ */
+function findVarGatedConditions(node: unknown, path: string, offenders: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    node.forEach((v, i) => findVarGatedConditions(v, `${path}[${i}]`, offenders));
+    return offenders;
+  }
+  if (node && typeof node === "object") {
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k === "if" && typeof v === "string" && v.includes("vars.")) {
+        offenders.push(`${path}.if = ${v}`);
+      }
+      findVarGatedConditions(v, `${path}.${k}`, offenders);
+    }
+  }
+  return offenders;
+}
+
 describe("staging journey smoke — assertions discriminate", () => {
   it("the healthy fixture is present and really is a successful draft", () => {
     // If this file moves, the positive control below is testing nothing, so
     // fail loudly here rather than silently losing the healthy-path proof.
     expect(existsSync(HEALTHY_DRAFT_PATH), `missing healthy capture at ${HEALTHY_DRAFT_PATH}`).toBe(true);
-    const body = readJson(HEALTHY_DRAFT_PATH);
-    expect(body._diagnostic_trace.exit_path).toBe("draft_graph");
+    expect(HEALTHY_DRAFT._diagnostic_trace.exit_path).toBe("draft_graph");
   });
 
   it("PASSES a real successful draft (not always-red)", () => {
-    const body = readJson(HEALTHY_DRAFT_PATH);
-    expect(assertHealthyDraft(body)).toEqual([]);
+    expect(assertHealthyDraft(HEALTHY_DRAFT)).toEqual([]);
   });
 
   it("POSITIVE CONTROL: FAILS the real e22f8a6 outage response", () => {
-    const body = readJson(BROKEN_DRAFT_PATH);
-    const failures = assertHealthyDraft(body);
+    const failures = assertHealthyDraft(BROKEN_DRAFT);
     expect(failures.length).toBeGreaterThan(0);
     // The message must name the actual cause — an alarm that just says
     // "failed" costs the on-call engineer the whole diagnosis.
@@ -90,7 +116,7 @@ describe("staging journey smoke — assertions discriminate", () => {
   });
 
   it("FAILS a graph with only one option (nothing to compare)", () => {
-    const healthy = readJson(HEALTHY_DRAFT_PATH);
+    const healthy = structuredClone(HEALTHY_DRAFT);
     const oneOption = {
       ...healthy,
       draft_graph: {
@@ -105,7 +131,7 @@ describe("staging journey smoke — assertions discriminate", () => {
   });
 
   it("FAILS duplicate option_ids", () => {
-    const healthy = readJson(HEALTHY_DRAFT_PATH);
+    const healthy = structuredClone(HEALTHY_DRAFT);
     const dup = healthy.analysis_ready.options[0];
     const body = { ...healthy, analysis_ready: { ...healthy.analysis_ready, options: [dup, dup] } };
     expect(assertHealthyDraft(body).join(" ")).toContain("duplicate option_id");
@@ -121,7 +147,7 @@ describe("staging journey smoke — assertions discriminate", () => {
   });
 
   it("extracts the diagnostics that prove WHICH build was tested", () => {
-    const d = extractDiagnostics(readJson(BROKEN_DRAFT_PATH));
+    const d = extractDiagnostics(BROKEN_DRAFT);
     expect(d.build_sha).toBe("e22f8a6");
     expect(d.exit_path).toBe("draft_graph_error");
     // prompt_identity is legitimately [] on non-draft/error exits — the trace
@@ -135,6 +161,17 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
   const raw = readFileSync(WORKFLOW_PATH, "utf8");
   const wf = parse(raw);
   const job = wf.jobs.journey;
+
+  /**
+   * The one place that locates the smoke step. Throws a NAMED error if it is
+   * absent, so "the step was deleted" can never present as an unrelated
+   * `Cannot read properties of undefined`.
+   */
+  const requireSmokeStep = (): any => {
+    const step = job.steps.find((s: any) => typeof s.run === "string" && s.run.includes("staging-journey-smoke.mjs"));
+    if (!step) throw new Error("the smoke step (running staging-journey-smoke.mjs) is gone from the workflow");
+    return step;
+  };
 
   it("the workflow file exists (deleting it fails this suite)", () => {
     expect(existsSync(WORKFLOW_PATH)).toBe(true);
@@ -152,32 +189,14 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
     // `if: vars.SMOKE_SCHEDULE_ENABLED == 'true'` is precisely what made
     // nightly-smoke skip 8 of its last 8 runs while looking healthy.
     expect(job.if, "job is conditionally gated — it can be disabled by leaving a variable unset").toBeUndefined();
-    const smokeStep = job.steps.find((s: any) => typeof s.run === "string" && s.run.includes("staging-journey-smoke.mjs"));
-    expect(smokeStep, "the smoke step is gone").toBeDefined();
-    expect(smokeStep.if).toBeUndefined();
+    expect(requireSmokeStep().if).toBeUndefined();
   });
 
   it("no `if:` anywhere in the workflow reads a repo variable", () => {
     // Walk the PARSED tree, not the raw text: the file's own comments explain
     // the `if: vars.X == 'true'` anti-pattern, and a raw regex would match the
     // explanation rather than a real gate. Structure is the source of truth.
-    const offenders: string[] = [];
-    const walk = (node: unknown, path: string): void => {
-      if (Array.isArray(node)) {
-        node.forEach((v, i) => walk(v, `${path}[${i}]`));
-        return;
-      }
-      if (node && typeof node === "object") {
-        for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
-          if (k === "if" && typeof v === "string" && v.includes("vars.")) {
-            offenders.push(`${path}.if = ${v}`);
-          }
-          walk(v, `${path}.${k}`);
-        }
-      }
-    };
-    walk(wf, "workflow");
-    expect(offenders, `variable-gated conditions found: ${offenders.join("; ")}`).toEqual([]);
+    expect(findVarGatedConditions(wf, "workflow")).toEqual([]);
   });
 
   it("runs on push to staging, not only on a schedule", () => {
@@ -186,8 +205,7 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
   });
 
   it("targets staging and never production", () => {
-    const smokeStep = job.steps.find((s: any) => typeof s.run === "string" && s.run.includes("staging-journey-smoke.mjs"));
-    const baseUrl = String(smokeStep.env.SMOKE_BASE_URL);
+    const baseUrl = String(requireSmokeStep().env.SMOKE_BASE_URL);
     expect(baseUrl).toContain("cee-staging");
     // The production hostname must not appear anywhere in the workflow.
     expect(raw).not.toMatch(/https:\/\/olumi-assistants-service\.onrender\.com/);
@@ -198,16 +216,88 @@ describe("staging journey smoke — the alarm cannot be silenced quietly", () =>
     // `| tee`, a failing node process would yield exit 0 and this alarm would
     // pass while the product was broken. Verified empirically: `bash -e -c
     // 'false | tee x'` exits 0; `bash -eo pipefail -c ...` exits 1.
-    const smokeStep = job.steps.find((s: any) => typeof s.run === "string" && s.run.includes("staging-journey-smoke.mjs"));
-    if (/\|/.test(smokeStep.run)) {
-      expect(smokeStep.shell, "step pipes output but does not set `shell: bash` (no pipefail)").toBe("bash");
-    }
+    //
+    // UNCONDITIONAL, both halves. The previous `if (/\|/.test(run))` guard made
+    // this silently vacuous the moment the pipe was removed — and the tee'd log
+    // is not incidental, it is a DESIGN DEPENDENCY of the upload step below.
+    // So assert the pipe exists AND that pipefail is enabled.
+    const smokeStep = requireSmokeStep();
+    expect(
+      smokeStep.run,
+      "the smoke step no longer tees its output — the upload-artifact step has nothing to attach",
+    ).toContain("| tee");
+    expect(smokeStep.shell, "step pipes output but does not set `shell: bash` (no pipefail)").toBe("bash");
   });
 
   it("asserts deploy freshness by passing the expected commit", () => {
     // The "deploy did not ship" half. Without SMOKE_EXPECT_SHA the gate would
     // happily test whatever stale build is deployed and call it green.
-    const smokeStep = job.steps.find((s: any) => typeof s.run === "string" && s.run.includes("staging-journey-smoke.mjs"));
-    expect(String(smokeStep.env.SMOKE_EXPECT_SHA)).toContain("github.sha");
+    expect(String(requireSmokeStep().env.SMOKE_EXPECT_SHA)).toContain("github.sha");
+  });
+});
+
+/**
+ * THE ANTI-PATTERN SWEEP, WIDENED TO EVERY WORKFLOW.
+ *
+ * Asserting the dead-alarm pattern against only the file that introduced it
+ * is the narrowest possible scope — it leaves every LIVE instance green. The
+ * pattern was found in THREE workflows, and `gh api .../actions/variables`
+ * returns `total_count: 0` (positive control: the same API form returns
+ * `total_count: 1` for secrets), so every `if: vars.* == 'true'` in this repo
+ * is PERMANENTLY FALSE. Those jobs never run and report as healthy.
+ *
+ * Deleting or un-gating them is a separate judgement call being rowed
+ * elsewhere, so they are TOLERATED HERE — but named, one by one, with a
+ * reason. A silent glob-level exclusion is the hand-maintained mirror this
+ * suite exists to replace; an explicit list forces the next person to add a
+ * row and justify it rather than widen a pattern.
+ */
+const VAR_GATE_OPT_OUTS: Record<string, string> = {
+  // Nightly smoke against staging. Gate `vars.SMOKE_SCHEDULE_ENABLED` is
+  // unset, so the scheduled run has skipped every time. Tracked separately:
+  // the call is delete-vs-un-gate, not a code change this lane owns.
+  "nightly-smoke.yml": "dead alarm (vars.SMOKE_SCHEDULE_ENABLED never set) — delete-vs-un-gate decision pending",
+  // Same pattern, `vars.CEE_DIAGNOSTICS_SCHEDULE_ENABLED`.
+  "cee-diagnostics.yml": "dead alarm (vars.CEE_DIAGNOSTICS_SCHEDULE_ENABLED never set) — delete-vs-un-gate decision pending",
+  // Same pattern, `vars.STABILITY_SCHEDULE_ENABLED`. Missed by the original
+  // sweep, which named only the other two.
+  "nightly-stability.yml": "dead alarm (vars.STABILITY_SCHEDULE_ENABLED never set) — delete-vs-un-gate decision pending",
+};
+
+describe("no NEW workflow may gate itself on an unset repo variable", () => {
+  const WORKFLOW_DIR = resolve(REPO_ROOT, ".github/workflows");
+  const workflowFiles = readdirSync(WORKFLOW_DIR).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
+
+  it("finds workflows to check (guards against an empty glob passing vacuously)", () => {
+    // An absence assertion over an empty set proves nothing. Prove the sweep
+    // can SEE files before trusting what it says about them.
+    expect(workflowFiles.length).toBeGreaterThan(3);
+  });
+
+  it("every var-gated workflow is on the explicit opt-out list, and every opt-out is still real", () => {
+    const found = new Map<string, string[]>();
+    for (const file of workflowFiles) {
+      const parsed = parse(readFileSync(resolve(WORKFLOW_DIR, file), "utf8"));
+      const offenders = findVarGatedConditions(parsed, file);
+      if (offenders.length > 0) found.set(file, offenders);
+    }
+
+    // (a) Nothing new may appear.
+    const unlisted = [...found.keys()].filter((f) => !(f in VAR_GATE_OPT_OUTS));
+    expect(
+      unlisted,
+      `NEW variable-gated workflow(s): ${unlisted.map((f) => found.get(f)!.join("; ")).join(" | ")}. ` +
+        `A repo variable that is never set makes the job permanently skipped while reporting healthy. ` +
+        `Remove the gate, or add the file to VAR_GATE_OPT_OUTS with a reason.`,
+    ).toEqual([]);
+
+    // (b) And the list may not rot. An opt-out whose workflow no longer has
+    // the pattern (or no longer exists) is a stale exemption — exactly the
+    // drift that lets a tolerated red outlive the thing it tolerated.
+    const stale = Object.keys(VAR_GATE_OPT_OUTS).filter((f) => !found.has(f));
+    expect(
+      stale,
+      `stale VAR_GATE_OPT_OUTS entries (workflow fixed or deleted — remove the exemption): ${stale.join(", ")}`,
+    ).toEqual([]);
   });
 });

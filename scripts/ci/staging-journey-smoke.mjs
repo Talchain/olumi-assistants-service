@@ -203,7 +203,13 @@ async function waitForBuild(base, expectSha, timeoutMs) {
     } catch (e) {
       log(`  [freshness] attempt ${attempt}: /healthz unreachable (${e.name}) — waiting…`);
     }
-    await new Promise((r) => setTimeout(r, 15000));
+    // Never sleep PAST the deadline. A fixed 15s wait on the final iteration
+    // burns up to 15s of job time after the poll has already given up. The
+    // 15s interval itself is deliberately kept — ~60 healthz GETs over 15
+    // minutes is negligible load and needs no backoff.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(15000, remaining)));
   }
   return { ok: false, served, waitedMs: timeoutMs, attempt };
 }
