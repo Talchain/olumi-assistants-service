@@ -40,7 +40,10 @@ import {
   type AdviceGateAnalysis,
 } from '../post-analysis-advice-gate.js';
 // --- round-5 additions: surfaces found by the INVERTED search ---
-import { buildAnalysisResultHeadline } from '../../coaching/analysis-result-headline.js';
+import {
+  buildAnalysisResultHeadline,
+  isAllowedRunAnalysisAssistantText,
+} from '../../coaching/analysis-result-headline.js';
 import { compareOptionsAction } from '../../../orchestrator/deterministic/actions/compare-options.js';
 import { whatWouldFlipAction } from '../../../orchestrator/deterministic/actions/what-would-flip.js';
 import type { DeterministicTurnContext } from '../../../orchestrator/deterministic/types.js';
@@ -552,5 +555,148 @@ describe('S4 round-5 — the raw is_tie override bites at wide margins on every 
     expect(tied, 'no headline on a genuine near-tie').not.toBeNull();
     expect(tied!).toMatch(/effectively tied/i);
     expect(tied!, 'a real sub-1pp tie must not quote a margin').not.toMatch(/percentage points/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ROUND 6 — the residual sites the round-5 review named, PLUS the third the
+// exhaustiveness audit surfaced (the grammar-drift egress drop).
+//
+// (1) The run_analysis headline's SOFT-CONFIDENCE branch [0.30, 0.40) and its
+//     Case E floor both emitted their own copy WITHOUT consulting the tie
+//     override — a sub-0.40 tie override reached neither the meaningful-lead
+//     cases (gated on tieReason===null) nor the >=0.40 near-tie branch.
+// (2) The >=0.40 override copy ("… but the analysis treats this as a close
+//     call.") was routed through the shared verdict in round 5 but had NO
+//     matching grammar regex, so `isAllowedRunAnalysisAssistantText` REJECTED
+//     it and the egress forwarder silently swapped it for the locked template.
+//     Round 5's fix was therefore theatre for that case: honest copy composed,
+//     bland copy shipped.
+//
+// A soft-confidence winner sits at 0.35 (in [0.30, 0.40)) with a real >=5pp
+// margin so, ABSENT the override, the soft-confidence enrichment fires — the
+// positive control. WITH the override it must read as a close call and must
+// still pass the egress allowlist.
+// ---------------------------------------------------------------------------
+
+/** Soft-confidence (winner in [0.30, 0.40)) enrichment with a real >=5pp gap. */
+function softEnrichment(
+  raw: RawRobustnessSignals,
+  opts?: { driver?: boolean },
+): Record<string, unknown> {
+  const enrichment: Record<string, unknown> = {
+    option_comparison: [
+      { option_id: 'opt-alpha', option_label: LEADING.label, win_probability: 0.35 },
+      { option_id: 'opt-beta', option_label: RUNNER.label, win_probability: 0.28 },
+    ],
+    robustness: { level: raw.level, near_tie: { is_tie: raw.near_tie_is_tie } },
+  };
+  if (opts?.driver !== false) {
+    enrichment.factor_sensitivity = [
+      { factor_id: 'f1', factor_label: 'Market demand', sensitivity_score: 0.8, influence_score: 0.8 },
+    ];
+  }
+  return enrichment;
+}
+
+describe('S4 round-6 — the tie override preempts the soft-confidence branch and the Case E floor', () => {
+  it('soft-confidence (0.35, driver present): positive control enriches a lead, override downgrades it', () => {
+    // POSITIVE CONTROL: without the override, the soft-confidence branch fires a
+    // provisional LEAD headline — proving this cell reaches that branch at all.
+    const control = buildAnalysisResultHeadline({
+      enrichment: softEnrichment(NO_OVERRIDE),
+      leading_option_id: 'opt-alpha',
+      status_kind: 'ok',
+    });
+    expect(control, 'positive control produced no headline').not.toBeNull();
+    expect(control!, 'soft-confidence positive control did not enrich a lead').toMatch(
+      /currently leads by \d+ percentage points?, but treat this as provisional/i,
+    );
+    expect(control!, 'positive control must not pre-emptively say close call').not.toMatch(
+      /close call/i,
+    );
+
+    // WITH the override: the same soft-confidence cell must read as a close call,
+    // never a provisional lead, and it must SURVIVE the egress allowlist.
+    const tied = buildAnalysisResultHeadline({
+      enrichment: softEnrichment(TIE_OVERRIDE),
+      leading_option_id: 'opt-alpha',
+      status_kind: 'ok',
+    });
+    expect(tied, 'headline vanished instead of being corrected').not.toBeNull();
+    expect(tied!, 'the tie override never reached the soft-confidence branch').toMatch(/close call/i);
+    expect(tied!, 'soft-confidence branch still asserted a provisional lead').not.toMatch(
+      /but treat this as provisional/i,
+    );
+    // Honesty: a 7pp gap is not fractional, so state the real margin.
+    expect(tied!, 'the real margin was suppressed').toMatch(/7 percentage points/i);
+    expect(
+      isAllowedRunAnalysisAssistantText(tied!),
+      'the override headline is dropped by the egress allowlist (grammar drift)',
+    ).toBe(true);
+  });
+
+  it('Case E floor (0.35, NO driver/fragility): positive control is a bare lead, override downgrades it', () => {
+    // Without a driver/fragility the soft-confidence branch cannot fire, so the
+    // control lands on the Case E floor "…currently leads." — the bare lead the
+    // override must also preempt.
+    const control = buildAnalysisResultHeadline({
+      enrichment: softEnrichment(NO_OVERRIDE, { driver: false }),
+      leading_option_id: 'opt-alpha',
+      status_kind: 'ok',
+    });
+    expect(control, 'Case E positive control produced no headline').not.toBeNull();
+    expect(control!, 'Case E positive control was not the bare lead floor').toMatch(
+      /^Alpha currently leads\.$/,
+    );
+
+    const tied = buildAnalysisResultHeadline({
+      enrichment: softEnrichment(TIE_OVERRIDE, { driver: false }),
+      leading_option_id: 'opt-alpha',
+      status_kind: 'ok',
+    });
+    expect(tied, 'headline vanished instead of being corrected').not.toBeNull();
+    expect(tied!, 'the override never reached the Case E floor').toMatch(/close call/i);
+    expect(tied!, 'the Case E floor still asserted a bare lead').not.toBe('Alpha currently leads.');
+    expect(
+      isAllowedRunAnalysisAssistantText(tied!),
+      'the Case E override headline is dropped by the egress allowlist',
+    ).toBe(true);
+  });
+
+  it('grammar drift: the >=0.40 override close-call headline SURVIVES the egress allowlist', () => {
+    // Round 5 routed this branch through the shared verdict but never taught the
+    // grammar the new "close call" copy; the forwarder then swapped it for the
+    // bland locked template. The composer + the allowlist must agree.
+    const tied = buildAnalysisResultHeadline({
+      enrichment: wideEnrichment(8, TIE_OVERRIDE),
+      leading_option_id: 'opt-alpha',
+      status_kind: 'ok',
+    });
+    expect(tied!).toMatch(/treats this as a close call/i);
+    expect(
+      isAllowedRunAnalysisAssistantText(tied!),
+      'round-5 override headline still fails the egress allowlist (grammar mirror drift)',
+    ).toBe(true);
+  });
+
+  it('every emitted tie-override headline the composer can produce passes the egress allowlist', () => {
+    // Lockstep proof across the routed populations (>=0.40 wide gap, soft
+    // confidence, Case E) — a composer that emits copy the allowlist rejects is
+    // guarantee-theatre, whichever branch emitted it.
+    const emissions = [
+      buildAnalysisResultHeadline({ enrichment: wideEnrichment(8, TIE_OVERRIDE), leading_option_id: 'opt-alpha', status_kind: 'ok' }),
+      buildAnalysisResultHeadline({ enrichment: wideEnrichment(0.4, NO_OVERRIDE), leading_option_id: 'opt-alpha', status_kind: 'ok' }),
+      buildAnalysisResultHeadline({ enrichment: softEnrichment(TIE_OVERRIDE), leading_option_id: 'opt-alpha', status_kind: 'ok' }),
+      buildAnalysisResultHeadline({ enrichment: softEnrichment(TIE_OVERRIDE, { driver: false }), leading_option_id: 'opt-alpha', status_kind: 'ok' }),
+    ];
+    for (const text of emissions) {
+      expect(text, 'a tie cell produced no headline').not.toBeNull();
+      expect(saysTied(text!), 'a routed tie cell did not narrate the tie').toBe(true);
+      expect(
+        isAllowedRunAnalysisAssistantText(text!),
+        `emitted tie headline rejected by the egress allowlist: ${JSON.stringify(text)}`,
+      ).toBe(true);
+    }
   });
 });
