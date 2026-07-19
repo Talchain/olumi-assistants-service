@@ -88,7 +88,7 @@ import { log } from '../../../utils/telemetry.js';
 // foamy-bee UI handoff brief bans `recommended`, `winner`, `winning`
 // from user-facing copy; the noun form `recommendation` is treated
 // in scope by the same rule).
-const STALENESS_NARRATIVE =
+export const STALENESS_NARRATIVE =
   ' This makes the last analysis stale. Re-run analysis to see how this affects the results.';
 
 /**

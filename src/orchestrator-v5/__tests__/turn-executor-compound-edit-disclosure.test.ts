@@ -170,8 +170,17 @@ describe('POC-BOARD 5b — compound tunable edit discloses the dropped op', () =
       setProposal('f-sales', 'Sales Budget', 60000),
     ]);
 
+    // NB (A1 multi-edit): the driver message must NOT itself read as a literal
+    // "set X to N and set Y to M" command, or the deterministic COMPOUND
+    // value-update pre-route (tryCompoundValueUpdate) intercepts BEFORE routing
+    // and applies BOTH parts from the message — the LLM never runs and the
+    // injected droppedActions path this test exercises never fires. The two set
+    // ops are supplied by the mock adapter (blocks), not by the message text,
+    // so a value-free ask is the faithful driver for "the model emitted two
+    // set_factor_value blocks". The deterministic both-apply behaviour is
+    // covered separately by turn-executor-compound-value-update.test.ts.
     const { response, telemetry } = await runTurnExecutor(
-      payload('set marketing budget to £45,000 and set sales budget to £60,000'),
+      payload('please update the marketing and sales budgets'),
       'req-compound-edit',
       { routingAdapter, graphState: buildTwoFactorGraph() },
     );
