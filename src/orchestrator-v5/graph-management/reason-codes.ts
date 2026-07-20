@@ -68,6 +68,14 @@ export const STRUCTURAL_APPLY_HELD = 'STRUCTURAL_APPLY_HELD' as const;
 // registered for historical pendings + the ratified held_proposal wire enum.
 export const TUNABLE_APPLY_HELD = 'TUNABLE_APPLY_HELD' as const;
 export const REMOVE_UNCONFIRMED = 'REMOVE_UNCONFIRMED' as const;
+// F-3 negation guard (S-AUDIT-2026-07-20 probe P8/P9): the user's message
+// carried protection/negation context naming this op's target entity, so a
+// would_apply verdict is DEMOTED to held (propose-confirm) at the referee
+// gate. Internal-vocabulary code; the held_proposal wire card maps it to the
+// ratified TUNABLE_APPLY_HELD (see edit-graph-referee-gate.ts) because the
+// @talchain/schemas HeldProposalReasonCode enum is a wire contract this
+// service cannot extend unilaterally.
+export const USER_PROTECTED_ENTITY = 'USER_PROTECTED_ENTITY' as const;
 
 // --- Slice 4 idempotency ------------------------------------------------------
 export const PROPOSAL_ALREADY_APPLIED = 'PROPOSAL_ALREADY_APPLIED' as const;
@@ -107,6 +115,7 @@ export const MUTATION_REASON_CODES = Object.freeze([
   STRUCTURAL_APPLY_HELD,
   TUNABLE_APPLY_HELD,
   REMOVE_UNCONFIRMED,
+  USER_PROTECTED_ENTITY,
   PROPOSAL_ALREADY_APPLIED,
   CLASSIFY_FAILED,
 ] as const);

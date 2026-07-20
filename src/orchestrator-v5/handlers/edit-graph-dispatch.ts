@@ -2070,6 +2070,12 @@ export async function dispatchEditGraph(
       scenarioId: payload.scenario_id,
       turnId: payload.turn_id,
       requestId,
+      // F-3 negation guard (probe P8/P9, 2026-07-20): the gate extracts
+      // protection scope ("… but do NOT touch X") from the CURRENT turn's
+      // message and demotes any would_apply op targeting a protected
+      // entity to a held proposal. Deliberately NOT threaded on the
+      // gm_held_resume confirm path — a confirmed hold must execute.
+      userMessage: payload.message,
     });
   }
   const gmBlockedApply = gmDecision !== null && gmDecision.blockApply;
