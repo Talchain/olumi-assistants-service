@@ -186,7 +186,7 @@ import {
   isProcessMetaIntake,
   composeProcessMetaIntakeResponse,
 } from '../orchestrator-v5/routing/process-meta-intake.js';
-import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
+import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 
 // ───────────────────────────────────────────────────────────────────
 // Chip-click resume-intent detector
@@ -2734,7 +2734,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const analyticalQuestionDetected = isAnalyticalQuestion(ingress.message);
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
-    const valueUpdatePhrasingHit = isValueUpdatePhrasing(ingress.message);
+    // Part-accounting conservation law (2026-07-20): the suppressor stands
+    // DOWN for mixed value+structural messages so both halves reach the
+    // edit_graph lane together — see shouldSuppressEditDispatchForValueUpdate.
+    const valueUpdatePhrasingHit = shouldSuppressEditDispatchForValueUpdate(ingress.message);
     // ROADMAP 2.11 / P0-2 (deterministic half) — configure-option intent
     // ("configure {option}", "set {option}'s {factor} intervention to X",
     // and the system's OWN options_not_configured recovery-chip message)

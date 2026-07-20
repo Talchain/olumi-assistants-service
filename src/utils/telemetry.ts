@@ -1385,6 +1385,17 @@ export const TelemetryEvents = {
   // exploration chips so users never get an analysis-grounded nudge
   // against an out-of-date result.
   V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
+  // Part-accounting conservation law (rehearsal defect A + B's CEE half,
+  // 2026-07-20). Emitted once per multi-part edit turn (>= 2 accountable
+  // decomposed sub-requests): how many parts intake counted, how many the
+  // returned operations covered, how many were disclosed as uncovered, and
+  // whether a named-target substitution (defect B) forced the batch closed
+  // to clarify. Payload: { request_id, scenario_id, dispatch_path,
+  // parts_detected, parts_covered, parts_uncovered, missing_target_count,
+  // substitution_blocked, disclosure_appended }. A rising
+  // parts_uncovered-with-no-disclosure rate or any silent-substitution
+  // regression is drift this event exists to make observable.
+  V5EditGraphPartAccounting: "v5.edit_graph.part_accounting",
   // R7 — one structured event per edit_graph turn (content-free; pino /
   // Datadog-log only, registered debug-only in the freeze-gate).
   V5EditGraphTurn: "v5.edit_graph.turn",

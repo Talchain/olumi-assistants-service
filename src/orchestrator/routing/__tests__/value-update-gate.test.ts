@@ -15,7 +15,11 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { isValueUpdatePhrasing, __testOnly } from '../value-update-gate.js';
+import {
+  isValueUpdatePhrasing,
+  shouldSuppressEditDispatchForValueUpdate,
+  __testOnly,
+} from '../value-update-gate.js';
 
 interface Case {
   readonly label: string;
@@ -229,6 +233,59 @@ describe('isValueUpdatePhrasing — table-driven gate behaviour', () => {
     it('is case-insensitive', () => {
       expect(isValueUpdatePhrasing('SET CHURN TO 5%')).toBe(true);
       expect(isValueUpdatePhrasing('Set Churn To 5%')).toBe(true);
+    });
+  });
+
+  describe('shouldSuppressEditDispatchForValueUpdate — part-accounting stand-down (2026-07-20)', () => {
+    it('suppresses a PURE value update exactly as isValueUpdatePhrasing does', () => {
+      expect(shouldSuppressEditDispatchForValueUpdate('set churn to 5%')).toBe(true);
+      expect(shouldSuppressEditDispatchForValueUpdate('increase price by 10%')).toBe(true);
+    });
+
+    it("suppresses #549's value+value compound (no structural part — the batch lane owns it)", () => {
+      // NB: labels must not contain a literal kind keyword ('Factor X'),
+      // or the PRE-EXISTING kind-change lookahead already keeps the
+      // message on the edit lane — that behaviour is untouched.
+      expect(
+        shouldSuppressEditDispatchForValueUpdate(
+          'Set Marketing Budget to 0.6 and Sales Budget to 0.8',
+        ),
+      ).toBe(true);
+    });
+
+    // POSITIVE CONTROL (mutation-checked 2026-07-20). Each case below FIRST
+    // asserts `isValueUpdatePhrasing` is TRUE, so the stand-down is provably
+    // the thing that flips the suppressor to false. Without that control the
+    // assertion is VACUOUS: the obvious phrasing
+    // "...and add a new factor called Shipping costs" puts the kind noun
+    // 'factor' inside the gate's OWN kind-change scan window, so the gate
+    // already returns false and `toBe(false)` passes for the wrong reason
+    // (reverting the stand-down left this suite green — the defect that
+    // prompted this control).
+    const REACHABLE_MIXED = [
+      'Increase Support cost by 10 and add a new factor called Shipping costs',
+      'Set Support cost to 30 and create one called Shipping costs',
+      'Set Support cost to 30 and remove the Localisation factor',
+      'Set Support cost to 30 and link it to Gross margin',
+      'Add a new factor called Shipping costs and set Support cost to 30',
+    ] as const;
+
+    it.each(REACHABLE_MIXED)(
+      'STANDS DOWN for a mixed value+structural message so the edit lane serves both halves: %s',
+      (message) => {
+        // Positive control: the gate itself DOES fire on this phrasing...
+        expect(isValueUpdatePhrasing(message)).toBe(true);
+        // ...and the stand-down is what releases it to the edit lane.
+        // Pre-fix, this suppressed edit dispatch and the deterministic lane
+        // silently swallowed the structural half (rehearsal defect A class).
+        expect(shouldSuppressEditDispatchForValueUpdate(message)).toBe(false);
+      },
+    );
+
+    it('never suppresses what isValueUpdatePhrasing never suppressed (structural-only messages)', () => {
+      expect(
+        shouldSuppressEditDispatchForValueUpdate('add a new factor called Shipping costs'),
+      ).toBe(false);
     });
   });
 

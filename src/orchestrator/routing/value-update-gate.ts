@@ -75,6 +75,8 @@
  * + "Something went wrong" UX.
  */
 
+import { decomposeEditMessage } from '../../orchestrator-v5/routing/edit-part-decomposition.js';
+
 // ---------------------------------------------------------------------------
 // Tunable subpatterns (table-driven so future edits are localised).
 // ---------------------------------------------------------------------------
@@ -379,6 +381,36 @@ const VALUE_UPDATE_REGEX = new RegExp(
  */
 export function isValueUpdatePhrasing(message: string): boolean {
   return VALUE_UPDATE_REGEX.test(message);
+}
+
+/**
+ * Route-v2's ACTUAL suppression predicate (part-accounting conservation
+ * law, rehearsal defect A, 2026-07-20).
+ *
+ * `isValueUpdatePhrasing` alone suppressed edit_graph dispatch for ANY
+ * message containing a value-update clause — including MIXED messages
+ * ("Set Support cost to 30 and add a new factor called Shipping costs")
+ * whose structural half the deterministic value lane then silently
+ * swallowed: the single-substring auto-dispatch consumed the whole
+ * message, applied the value part, and the add-factor part terminated
+ * NOWHERE. That is the same silent half-drop class the 2026-07-20
+ * rehearsal exposed on the LLM lane.
+ *
+ * The fix stands the suppressor DOWN when intake decomposition finds a
+ * value part mixed with a structural/link part: the whole message then
+ * reaches the edit_graph lane — the only lane that can serve both halves
+ * in one batch — where the part-accounting law (edit-graph-dispatch.ts)
+ * guarantees every part terminates visibly. Pure value updates (including
+ * #549's value+value compounds) and single-part messages are unchanged:
+ * `decomposeEditMessage` reports mixedValueStructural=false for them.
+ *
+ * NOTE: `isValueUpdatePhrasing` itself is deliberately untouched — its
+ * other consumer (vague-edit-guard) must keep seeing mixed messages as
+ * value-bearing so it never claims them as vague edits.
+ */
+export function shouldSuppressEditDispatchForValueUpdate(message: string): boolean {
+  if (!isValueUpdatePhrasing(message)) return false;
+  return !decomposeEditMessage(message).mixedValueStructural;
 }
 
 /**

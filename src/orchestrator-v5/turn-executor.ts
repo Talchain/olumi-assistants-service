@@ -86,6 +86,10 @@ import {
 } from './routing/deterministic-value-update.js';
 import type { CompoundUpdatePart } from './routing/deterministic-value-update.js';
 import {
+  buildStructuralRemainderNotice,
+  decomposeEditMessage,
+} from './routing/edit-part-decomposition.js';
+import {
   evaluateFactorValueProposal,
   resolveExistingRawValue,
   type FactorValueOperator,
@@ -1253,6 +1257,20 @@ export async function runTurnExecutor(
     // against its OWN message segment — the STEP 2 whole-message P0-A guard
     // is skipped in that case (see the compound dispatch block).
     let compoundPreflightUnitChecked = false;
+    // Part-accounting conservation law (rehearsal defect A, 2026-07-20) —
+    // defence in depth for the DETERMINISTIC lane. Route-v2 now sends mixed
+    // value+structural messages to the edit_graph lane, but any mixed
+    // message that still reaches this executor and auto-dispatches
+    // set_factor_value must not swallow its structural half silently: this
+    // notice (built at the dispatch site, appended after STEP 3.5) names
+    // the unserved structural part(s) so every part terminates visibly.
+    // The counts ride along so the telemetry emitted at the append site
+    // reports what intake actually counted.
+    let partAccountingStructuralNotice: {
+      readonly notice: string;
+      readonly partsDetected: number;
+      readonly partsUncovered: number;
+    } | null = null;
     // Resumed pending action, if the short-confirm pre-route synthesised
     // a tool_call. Cleared after the commit-success consumed-telemetry
     // emit. Null on every other path.
@@ -3968,6 +3986,37 @@ export async function runTurnExecutor(
         }
       }
 
+      // Part-accounting conservation law (defence in depth — see the
+      // declaration comment). Only when a deterministic set_factor_value
+      // dispatch is about to consume the message: if intake decomposition
+      // finds structural part(s) alongside the value part(s), stash the
+      // deterministic remainder notice for the STEP 3.5 receipt append and
+      // make the drop observable. Single-part and value-only messages
+      // never build a notice (buildStructuralRemainderNotice is null for
+      // them — the false-compound trap).
+      if (
+        deterministicValueUpdate.matched &&
+        deterministicValueUpdate.dispatch === 'set_factor_value'
+      ) {
+        const editDecomposition = decomposeEditMessage(payload.message);
+        if (editDecomposition.mixedValueStructural) {
+          // The telemetry event is emitted at the STEP 3.5 APPEND site —
+          // where the disclosure verifiably lands on the receipt — never
+          // here, so the event can never claim a disclosure a downgraded
+          // turn did not carry.
+          const notice = buildStructuralRemainderNotice(editDecomposition);
+          if (notice !== null) {
+            partAccountingStructuralNotice = {
+              notice,
+              partsDetected: editDecomposition.accountableParts.length,
+              partsUncovered: editDecomposition.accountableParts.filter(
+                (p) => p.kind !== 'value',
+              ).length,
+            };
+          }
+        }
+      }
+
       // V5 D1 golden-path closure (A3.1): the original (pre-guard)
       // dispatch is what the pre-route function alone would have
       // produced. The guards below (kind check + registry executable)
@@ -6300,6 +6349,37 @@ export async function runTurnExecutor(
               handlerEmittedMutatedGraph = true;
             }
           }
+        }
+
+        // Part-accounting conservation law (defence in depth) — the
+        // deterministic lane served the VALUE part(s) of a mixed message;
+        // the structural remainder must terminate visibly, not vanish.
+        // Appended to the receipt AFTER the compound chain merge so both
+        // the single-part and compound deterministic paths carry it; the
+        // notice is null unless intake decomposition found structural
+        // part(s), so ordinary value updates are byte-identical.
+        if (
+          partAccountingStructuralNotice !== null &&
+          proposedHandlerId === 'set_factor_value'
+        ) {
+          handlerOutcome = {
+            ...handlerOutcome,
+            assistant_text:
+              `${handlerOutcome.assistant_text} ${partAccountingStructuralNotice.notice}`.trim(),
+          };
+          emit(TelemetryEvents.V5EditGraphPartAccounting, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            dispatch_path: 'deterministic_value_update',
+            parts_detected: partAccountingStructuralNotice.partsDetected,
+            parts_covered:
+              partAccountingStructuralNotice.partsDetected -
+              partAccountingStructuralNotice.partsUncovered,
+            parts_uncovered: partAccountingStructuralNotice.partsUncovered,
+            missing_target_count: 0,
+            substitution_blocked: false,
+            disclosure_appended: true,
+          });
         }
       } catch (error) {
         // Fix 4 review fix (round 4): rebuild RunAnalysisTimings from

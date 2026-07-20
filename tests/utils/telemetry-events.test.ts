@@ -545,6 +545,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ProposedChangeEmitted: "v5.proposed_change.emitted",
         V5NoAnalysisGuard: "v5.no_analysis_guard",
         V5EditGraphNoOpRecovery: "v5.edit_graph.no_op_recovery",
+        V5EditGraphPartAccounting: "v5.edit_graph.part_accounting",
         V5EditGraphTurn: "v5.edit_graph.turn",
         // V5 link-safe response floor — headline Case-E + chip floor.
         V5HeadlineFellBack: "v5.headline.fell_back",
@@ -1283,6 +1284,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5ProposedChangeEmitted,
         TelemetryEvents.V5NoAnalysisGuard,
         TelemetryEvents.V5EditGraphNoOpRecovery,
+        TelemetryEvents.V5EditGraphPartAccounting,
         TelemetryEvents.V5EditGraphTurn,
         // Lane CEE-D (edit-loop reliability) — diagnostic-only parse-shape
         // recovery + relative-delta resolution events. Structured logs are
@@ -1912,6 +1914,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.proposed_change.emitted",
         "v5.no_analysis_guard",
         "v5.edit_graph.no_op_recovery",
+        "v5.edit_graph.part_accounting",
         "v5.edit_graph.turn",
         // V5 link-safe response floor — headline Case-E + chip floor
         "v5.headline.fell_back",
