@@ -8,8 +8,11 @@
  * enrichment field. It surfaces nothing itself, relaxes nothing, and
  * activates no field:
  *
- *   - Lock 1: `config.cee.coachingTier2Enabled`
- *     (CEE_COACHING_TIER2_ENABLED, default OFF).
+ *   - Lock 1: the caller's `tier2Enabled` activation signal. The former
+ *     CEE_COACHING_TIER2_ENABLED env flag was deleted 2026-07-20 (O-7
+ *     wave 2, Appendix A4 — zero production callers); a future Tier-2
+ *     activation must supply a deliberate signal here (Brief 4 gate G2),
+ *     not resurrect an env bit.
  *   - Lock 2: {@link TIER2_COACHING_ALLOWLIST} — ships EMPTY. Moving a
  *     single field into it is Brief 4 gate G2: a separate, per-field
  *     decision with science sign-off (Neil / Jinghui, Brief 4 §9).
@@ -117,7 +120,12 @@ export const TIER3_TRANSPORT_BANNED_FIELDS: readonly string[] = Object.freeze([
 
 /** Inputs to the claim-permission decision. Everything defaults CLOSED. */
 export interface ClaimUsableInput {
-  /** Lock 1 — pass `config.cee.coachingTier2Enabled`. */
+  /**
+   * Lock 1 — the Tier-2 activation signal. No config field exists for this
+   * any more (CEE_COACHING_TIER2_ENABLED deleted 2026-07-20, O-7 wave 2);
+   * a production caller must wire a deliberate, separately-approved
+   * activation decision. Defaults CLOSED like everything else here.
+   */
   readonly tier2Enabled: boolean;
   /**
    * Companion-status gate (Brief 5 §10): the field's companion status

@@ -217,7 +217,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     expect(outcome.handler_facts).toHaveLength(1);
   });
 
-  it('P1-1 (A): net-OFF scaffold values use the SIBLING convention (the stored .value), never raw user-scale', async () => {
+  it('P1-1: scaffold values use the SIBLING convention — RAW user-scale (net unconditional since 2026-07-20)', async () => {
     const { client, run } = makePreflightPlotClient();
     const handler = createRunAnalysisHandler({
       plotClient: client,
@@ -230,17 +230,17 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
       interventions: Record<string, number>;
     }>;
     const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
-    // opt_new is edge-connected to fac_price only. With the egress scale net
-    // OFF (production posture) the configured siblings' interventions reach
-    // the wire as the stored `.value` field verbatim
-    // (extractNumericInterventionValue) — so the scaffold's neutral for
-    // fac_price MUST be observed_state.value (0.5), the same convention.
-    // Sending observed_state.raw_value (100) — the pre-P1-1 behaviour —
-    // mixes raw user-scale into a normalised wire: with cap 200 that is a
-    // 200x position distortion, and because PLoT ranks options RELATIVE to
-    // each other, the REAL options' win probabilities distort with it,
-    // undisclosed.
-    expect(sentNew.interventions).toEqual({ fac_price: 0.5 });
+    // opt_new is edge-connected to fac_price only. The egress scale net is
+    // UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+    // CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted, live-true on staging), so
+    // configured siblings reach the wire in RAW user-scale (CONFIGURED_A
+    // sends fac_price: 120) — the scaffold's neutral for fac_price MUST be
+    // observed_state.raw_value (100), the SAME convention. Mixing the
+    // stored normalised 0.5 into the raw wire would be the 200x position
+    // distortion P1-1 exists to prevent (PLoT ranks options RELATIVE to
+    // each other, so the REAL options' win probabilities distort with it,
+    // undisclosed).
+    expect(sentNew.interventions).toEqual({ fac_price: 100 });
   });
 
   it('neutral-value precedence: observed value rung, then prior range midpoint; no-provenance factors are skipped', async () => {
@@ -274,13 +274,14 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
       interventions: Record<string, number>;
     }>;
     const sentNew = sentOptions.find((o) => o.option_id === 'opt_new')!;
+    // RE-PINNED 2026-07-20 (O-7 wave 2 — the egress scale net is
+    // unconditional, so the wire convention is RAW user-scale):
     expect(sentNew.interventions).toEqual({
-      fac_volume: 0.4, // observed_state.value rung (no raw_value on the factor)
-      // fac_range ABSENT — RE-PINNED by review fix B3 (17 Jul): its prior
-      // (10..30) is OUTSIDE the [0,1] sibling convention, and on the
-      // net-OFF wire the midpoint (20) was forwarded VERBATIM — a raw-scale
-      // "neutral" beside normalised siblings. Out-of-convention priors no
-      // longer scaffold on net-OFF (fail-closed; honest configure path).
+      // fac_volume ABSENT — observed_state { value: 0.4, cap: 5000 } with no
+      // raw_value cannot PROVE the normalised convention, so it is SKIPPED
+      // on the raw wire (the P1-1 (B) evidence gate: PLoT divides by cap, so
+      // an unproven 0.4 would slam the factor to ~0.00008).
+      fac_range: 20, // capless prior midpoint passes through — PLoT cannot double-normalise it
       // fac_dead absent: no value provenance → never invented
     });
   });
@@ -309,10 +310,12 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
       interventions: Record<string, number>;
     }>;
     const sentIso = sentOptions.find((o) => o.option_id === 'opt_iso')!;
-    // Configured siblings intervene on fac_price + fac_volume → the
-    // scaffold covers the same comparison basis at neutral values, in the
-    // net-OFF sibling convention (stored `.value`, never raw_value).
-    expect(sentIso.interventions).toEqual({ fac_price: 0.5, fac_volume: 0.4 });
+    // Configured siblings intervene on fac_price + fac_volume → the scaffold
+    // covers the same comparison basis at neutral values in the RAW
+    // user-scale convention (net unconditional since 2026-07-20):
+    // fac_price → raw_value 100; fac_volume is SKIPPED (cap-bearing with no
+    // raw_value — the P1-1 (B) evidence gate refuses to fabricate it).
+    expect(sentIso.interventions).toEqual({ fac_price: 100 });
   });
 
   // -------------------------------------------------------------------------
@@ -463,9 +466,9 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
 // ---------------------------------------------------------------------------
 // P1-1 — ONE scale convention, not two. The scaffold's wire numbers must be
 // produced by the EXACT projection the configured siblings' interventions
-// went through in loadScenarioSnapshotForRunAnalysis, in BOTH flag states of
-// cee.plotEgressScaleNetEnabled and on EVERY provenance rung. The net-OFF
-// (A) construction is pinned above ("P1-1 (A)"); this block pins the net-ON
+// went through in loadScenarioSnapshotForRunAnalysis, on EVERY provenance
+// rung. The scale net is UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+// CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted); this block pins the raw-wire
 // constructions, including (B): a rung-2 value-without-raw_value on a
 // cap-bearing factor must never reach the raw-scale wire as a normalised
 // number (PLoT divides intervention values by observed_state.cap, so an

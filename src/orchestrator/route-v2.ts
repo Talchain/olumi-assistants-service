@@ -74,8 +74,8 @@
  *   4. B1 egress validator → 200 + OlumiResponse (success OR schema-drift
  *      fallback), else 500 + BoundaryError.
  *
- * Route registration is gated on config.features.orchestratorV5. When the
- * flag is off, this route is not registered and the endpoint returns 404.
+ * Route registration is UNCONDITIONAL (server.ts) since 2026-07-20 — the
+ * ENABLE_V5_ORCHESTRATOR flag was deleted in O-7 wave 2.
  *
  * Transport invariant: buffered JSON only (no raw-stream writes, no SSE
  * Content-Type). Enforced by scripts/validate-transport-invariants.sh in CI.

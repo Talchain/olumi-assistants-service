@@ -90,7 +90,6 @@ config.llm.providersConfigPath // PROVIDERS_CONFIG_PATH
 config.features.grounding      // CEE_GROUNDING_ENABLED ?? GROUNDING_ENABLED (default: false)
 config.features.critique       // CRITIQUE_ENABLED (default: true)
 config.features.clarifier      // CLARIFIER_ENABLED (default: true)
-config.features.piiGuard       // PII_GUARD_ENABLED (default: false)
 config.features.shareReview    // SHARE_REVIEW_ENABLED (default: false)
 config.features.enableLegacySSE // ENABLE_LEGACY_SSE (default: false)
 ```

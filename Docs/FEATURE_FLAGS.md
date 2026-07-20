@@ -10,6 +10,21 @@
 > `CEE_DECISION_RECORD_CAPTURE`, `CEE_PRE_DECISION_CHECKS_ENABLED` (dead).
 > Those capabilities are now unconditional — no env var controls them.
 
+> **O-7 WAVE 2 DELETIONS (PR-B, 2026-07-20).** Thirteen more flags left the
+> estate, adjudicated against LIVE Render values (never repo defaults):
+> **Made unconditional (7, all live-true on cee-staging):**
+> `ENABLE_V5_ORCHESTRATOR`, `CEE_ANSWER_TEXT_REQUIRED`,
+> `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED`,
+> `CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED`,
+> `CEE_PLOT_EGRESS_SCALE_NET_ENABLED`,
+> `CEE_COACHING_CONTEXT_PROMPT_ENABLED`, `CEE_POST_ANALYSIS_LOOP_ENABLED`.
+> **Config deleted as unbuilt/inert (6, zero behaviour consumers):**
+> `PII_GUARD_ENABLED` (status-report field removed with it),
+> `STRICT_TOPOLOGY_VALIDATION` (was never even env-mapped),
+> `CEE_COACHING_TIER2_ENABLED` (cage keeps its caller-supplied input),
+> `CEE_ACTION_POLICY_ENABLED`, `CEE_POST_FLIGHT_VALIDATOR_ENABLED`,
+> `CEE_GUIDED_INTAKE_ENABLED`. Stale Render keys for these can be deleted.
+
 > **STRICT BOOLEAN PARSING (O-7 wave 2, PR-A, 2026-07-20).** Every boolean
 > env var is parsed with exact allowlists (case-insensitive, trimmed):
 > `true|1|yes|on` → true · `false|0|no|off|disabled|""` → false · absent →
@@ -42,10 +57,8 @@
 | `GROUNDING_ENABLED` / `CEE_GROUNDING_ENABLED` | `false` | feature-flags.ts, v1.status.ts | No | Deprecated alias: `GROUNDING_ENABLED` |
 | `CRITIQUE_ENABLED` | `true` | feature-flags.ts, v1.status.ts | No | |
 | `CLARIFIER_ENABLED` | `true` | feature-flags.ts, v1.status.ts | No | Gates the standalone `/assist/clarify-brief` route only (Stage-4 pipeline clarifier retired 2026-07-16) |
-| `PII_GUARD_ENABLED` | `false` | v1.status.ts | No | |
 | `SHARE_REVIEW_ENABLED` | `false` | assist.share.ts, v1.status.ts | Commented | |
 | `ENABLE_LEGACY_SSE` | `false` | assist.draft-graph.ts, auth.ts | No | Legacy SSE path |
-| `STRICT_TOPOLOGY_VALIDATION` | `false` | — | No | **DEAD DECLARATION** |
 
 ## Orchestrator
 
@@ -65,7 +78,6 @@
 | `CEE_UNIFIED_PIPELINE_ENABLED` | `false` | assist.v1.draft-graph.ts | No | Main pipeline gate |
 | `CEE_LEGACY_PIPELINE_ENABLED` | `false` | validation/pipeline.ts, assist.draft-graph.ts | No | |
 | `CEE_DRAFT_ARCHETYPES_ENABLED` | `true` | unified-pipeline/stages/package.ts, validation/pipeline.ts | No | **Risky default: true** |
-| `CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED` | `false` | unified-pipeline/stages/package.ts, validation/pipeline.ts | No | |
 | `CEE_REFINEMENT_ENABLED` | `false` | assist.draft-graph.ts, unified-pipeline/stages/parse.ts | No | |
 | `CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED` | `true` | adapters/llm/anthropic.ts, adapters/llm/openai.ts | No | **Risky default: true** |
 | `CEE_ENFORCE_SINGLE_GOAL` | `true` | unified-pipeline/stages/repair/goal-merge.ts, assist.draft-graph.ts | Yes | |
@@ -216,7 +228,6 @@ These flags are read via `process.env` directly, bypassing `src/config/index.ts`
 
 | Env Var | Declared In | Notes |
 |---------|-------------|-------|
-| `STRICT_TOPOLOGY_VALIDATION` | config/index.ts (features.strictTopologyValidation) | Never consumed in any source file |
 
 ## Risky Defaults
 

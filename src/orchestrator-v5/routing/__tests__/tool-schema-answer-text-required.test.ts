@@ -2,10 +2,10 @@
  * CEE_ANSWER_TEXT_REQUIRED — schema-pressure layer (layer A) unit tests.
  *
  * Belt-and-braces hardening for the coach/converse `answer_text` channel
- * (PR #380 / ROADMAP 1.38). Sequenced behind the prompt track's prompt-only
- * fix for the same Sonnet-5 empty-orientation defect — see
- * Docs/lanes/LANE-ANSWER-TEXT-HARDENING.md. Flag default OFF
- * (config/index.ts `features.answerTextRequired`).
+ * (PR #380 / ROADMAP 1.38). UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+ * CEE_ANSWER_TEXT_REQUIRED deleted, live-true on staging) — the former
+ * flag-OFF acceptance pins were removed with the flag; the rejection pins
+ * below are the make-unconditional mutation checks.
  *
  * This file covers ONLY the Zod-schema layer (`RawToolCallSchema` via
  * `parseToolCallResponse`). The REPAIR_ONCE retry integration lives in
@@ -14,72 +14,11 @@
  * `../../__tests__/turn-executor-answer-text-compose-guard.test.ts`.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { ToolCallParseError, parseToolCallResponse } from '../tool-schema.js';
 
-let priorFlag: string | undefined;
-
-async function setFlag(value: 'true' | undefined) {
-  priorFlag = process.env.CEE_ANSWER_TEXT_REQUIRED;
-  if (value === undefined) {
-    delete process.env.CEE_ANSWER_TEXT_REQUIRED;
-  } else {
-    process.env.CEE_ANSWER_TEXT_REQUIRED = value;
-  }
-  const { _resetConfigCache } = await import('../../../config/index.js');
-  _resetConfigCache();
-}
-
-async function restoreFlag() {
-  if (priorFlag === undefined) {
-    delete process.env.CEE_ANSWER_TEXT_REQUIRED;
-  } else {
-    process.env.CEE_ANSWER_TEXT_REQUIRED = priorFlag;
-  }
-  const { _resetConfigCache } = await import('../../../config/index.js');
-  _resetConfigCache();
-}
-
-describe('RawToolCallSchema — CEE_ANSWER_TEXT_REQUIRED flag OFF (default)', () => {
-  beforeEach(async () => {
-    await setFlag(undefined);
-  });
-  afterEach(async () => {
-    await restoreFlag();
-  });
-
-  it('accepts a coach tool call with NO answer_text (byte-identical to pre-hardening)', () => {
-    const result = parseToolCallResponse({ intent_class: 'coach', coaching_mode: 'reframe' });
-    expect(result.intent_class).toBe('coach');
-    if (result.intent_class === 'coach') {
-      expect(result.answer_text).toBeUndefined();
-    }
-  });
-
-  it('accepts a converse tool call with NO answer_text (byte-identical to pre-hardening)', () => {
-    const result = parseToolCallResponse({ intent_class: 'converse' });
-    expect(result.intent_class).toBe('converse');
-    if (result.intent_class === 'converse') {
-      expect(result.answer_text).toBeUndefined();
-    }
-  });
-
-  it('accepts a coach tool call with whitespace-only answer_text (flag off — no requirement enforced)', () => {
-    expect(() =>
-      parseToolCallResponse({ intent_class: 'coach', coaching_mode: 'reframe', answer_text: '   ' }),
-    ).not.toThrow();
-  });
-});
-
-describe('RawToolCallSchema — CEE_ANSWER_TEXT_REQUIRED flag ON', () => {
-  beforeEach(async () => {
-    await setFlag('true');
-  });
-  afterEach(async () => {
-    await restoreFlag();
-  });
-
+describe('RawToolCallSchema — answer_text required (unconditional)', () => {
   it('rejects a coach tool call with NO answer_text', () => {
     expect(() => parseToolCallResponse({ intent_class: 'coach', coaching_mode: 'reframe' })).toThrow(
       ToolCallParseError,

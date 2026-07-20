@@ -13,7 +13,6 @@ vi.mock("../../src/config/index.js", () => ({
   config: {
     cee: {
       draftArchetypesEnabled: true,
-      draftStructuralWarningsEnabled: true,
       pipelineCheckpointsEnabled: false,
     },
   },
@@ -258,7 +257,6 @@ describe("runStagePackage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (config.cee as any).draftArchetypesEnabled = true;
-    (config.cee as any).draftStructuralWarningsEnabled = true;
     (config.cee as any).pipelineCheckpointsEnabled = false;
     (config.cee as any).verificationPipelineEnabled = true;
     (isProduction as any).mockReturnValue(false);
@@ -365,7 +363,12 @@ describe("runStagePackage", () => {
 
   // ── Structural warnings ─────────────────────────────────────────────────
 
-  it("collects structural warnings when draftStructuralWarningsEnabled = true", async () => {
+  // Structural-warning detection is UNCONDITIONAL since 2026-07-20 (O-7
+  // wave 2: CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED deleted, live-true on
+  // staging). The former "skips when flag = false" OFF-pin was removed with
+  // the branch; this pin is the make-unconditional mutation check — restore
+  // the gate with a false default and it goes RED.
+  it("collects structural warnings unconditionally", async () => {
     (detectStructuralWarnings as any).mockReturnValue({
       warnings: [{ code: "W001", message: "test warning" }],
       uncertainNodeIds: [],
@@ -375,16 +378,7 @@ describe("runStagePackage", () => {
 
     expect(detectStructuralWarnings).toHaveBeenCalledTimes(1);
     expect(ctx.draftWarnings).toContainEqual(expect.objectContaining({ code: "W001" }));
-  });
-
-  it("skips detectStructuralWarnings when flag = false (detectors still run)", async () => {
-    (config.cee as any).draftStructuralWarningsEnabled = false;
-    const ctx = makeCtx();
-    await runStagePackage(ctx);
-
-    // detectStructuralWarnings gated behind config flag
-    expect(detectStructuralWarnings).not.toHaveBeenCalled();
-    // But ungated detectors still run
+    // The other detectors run alongside, as before
     expect(detectUniformStrengths).toHaveBeenCalledTimes(1);
     expect(detectStrengthClustering).toHaveBeenCalledTimes(1);
   });

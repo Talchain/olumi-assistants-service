@@ -159,9 +159,12 @@ const CLARIFY_INPUT = {
   clarification: { ambiguity_type: 'entity', question: 'Which option did you mean?' },
 };
 
+// answer_text is REQUIRED on coach/converse tool calls since 2026-07-20
+// (O-7 wave 2: CEE_ANSWER_TEXT_REQUIRED deleted — requirement unconditional).
 const COACH_INPUT = {
   intent_class: 'coach',
   coaching_mode: 'challenge',
+  answer_text: 'Let me push back on that assumption with a fuller answer.',
 };
 
 // ---------------------------------------------------------------------------
@@ -252,9 +255,12 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       expect((response as Record<string, unknown>).updated_session_state).toBeUndefined();
     });
 
-    it('uses orientation text when Sonnet returns a converse tool call', async () => {
+    it('composes the converse tool call answer_text (required since 2026-07-20)', async () => {
       const routingAdapter = mockRoutingAdapter(async () =>
-        mkToolUseResult({ intent_class: 'converse' }, 'Here are the practical trade-offs.'),
+        mkToolUseResult(
+          { intent_class: 'converse', answer_text: 'Here are the practical trade-offs.' },
+          'Short orientation.',
+        ),
       );
 
       const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-c3', {

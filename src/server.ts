@@ -1107,11 +1107,11 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     app.log.info({}, 'Orchestrator routes registered (POST /orchestrate/v1/turn, POST /assist/v1/edit-graph)');
   }
 
-  // V5 orchestrator scaffold (slice A0). Route returns 404 when flag is off.
-  if (config.features.orchestratorV5) {
-    await ceeOrchestratorRouteV2(app);
-    app.log.info({}, 'V5 orchestrator scaffold registered (POST /orchestrate/v2/turn)');
-  }
+  // V5 orchestrator — the live product path. Registered UNCONDITIONALLY since
+  // 2026-07-20 (O-7 wave 2: ENABLE_V5_ORCHESTRATOR deleted; its OFF branch
+  // 404'd the core route).
+  await ceeOrchestratorRouteV2(app);
+  app.log.info({}, 'V5 orchestrator registered (POST /orchestrate/v2/turn)');
 
   // Browser proxy for V5 turns — bypasses Netlify Edge timeout.
   // Registered after V5 orchestrator so /orchestrate/v2/turn exists as the internal target.

@@ -16,7 +16,6 @@ vi.mock("../../src/config/index.js", () => ({
   config: {
     cee: {
       draftArchetypesEnabled: false,
-      draftStructuralWarningsEnabled: false,
       pipelineCheckpointsEnabled: false,
     },
   },

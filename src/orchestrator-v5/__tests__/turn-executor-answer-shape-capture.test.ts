@@ -171,10 +171,18 @@ describe('TurnExecutor — answer_shape threading (CEE_ANSWER_SHAPE_ENFORCED)', 
       ),
     });
 
-    // Positive control for the mechanism: the rewriter DID fire — the final
-    // text is the honesty-swap decline, not the shape-derived text. Without
-    // this, the absence assertion below would be vacuous.
-    expect(result.response.assistant_text).toBe(V5_STRUCTURAL_DECLINE_TEXT);
+    // Positive control for the mechanism: a rewriter DID fire — the final
+    // text is not the shape-derived text. Without this, the absence
+    // assertion below would be vacuous.
+    // REWRITER UPDATED 2026-07-20 (O-7 wave 2): the coaching-context
+    // post-check became UNCONDITIONAL (CEE_COACHING_CONTEXT_PROMPT_ENABLED
+    // deleted, live-true on staging) and now degrades this
+    // completion-claim-under-freshness-'none' prose to the deterministic
+    // verdict-correct copy BEFORE the STEP 6.6 honesty gate would swap it —
+    // so the pinned text is the coaching degrade response, not
+    // V5_STRUCTURAL_DECLINE_TEXT. The invariant under test is unchanged.
+    expect(result.response.assistant_text).toContain('No analysis has been run on your model yet');
+    expect(result.response.assistant_text).not.toBe(V5_STRUCTURAL_DECLINE_TEXT);
     expect(result.response.assistant_text).not.toBe(deriveAnswerTextFromShape(CLAIM_SHAPE));
     // The invariant under test: a turn whose text was rewritten AFTER shape
     // capture must ship either a matching sidecar or none. The derived text

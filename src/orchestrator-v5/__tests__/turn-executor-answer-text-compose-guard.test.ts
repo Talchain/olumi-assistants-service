@@ -18,19 +18,15 @@
  * with no retained inner text (`sanitiseNarrateOutput`'s TAG_PATTERN strips
  * `<...>` markers but keeps inner text; content that is ONLY markers
  * sanitises to `''`). Layer B checks the FINAL composed text, so it also
- * backstops layer A being bypassed entirely (flag off, or a future/rolled
- * code path).
+ * backstops layer A being bypassed by a future/rolled code path.
  *
- * Flag default OFF — see config/index.ts `features.answerTextRequired`.
- *
- * ROADMAP 1.20(a) update: the flag-OFF cases below previously pinned a
- * KNOWN LIVE DEFECT (blank assistant_text shipped, papered over by a
- * recycled chip) as the asserted-correct behaviour. A separate,
- * UNCONDITIONAL backstop now runs at turn-executor's STEP 7 commit
- * chokepoint (reusing the SAME `buildBoundedFallbackCopyAndChips`
- * helper this layer-B guard uses) regardless of the flag, so those cases
- * now assert the honest bounded-recovery text instead. Layer B itself
- * (this file's flag-ON describe blocks) is unchanged.
+ * UNCONDITIONAL since 2026-07-20 (O-7 wave 2: CEE_ANSWER_TEXT_REQUIRED
+ * deleted, live-true on staging). The former flag-OFF describes were removed
+ * with the flag — their scenario (a tool call omitting answer_text) now
+ * takes the unconditional REPAIR_ONCE + layer-B path pinned here. The
+ * separate always-on STEP 7 backstop (ROADMAP 1.20(a),
+ * `buildBoundedFallbackCopyAndChips`) remains beneath this guard at the
+ * commit chokepoint.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -90,78 +86,21 @@ function toolResult(input: unknown, prefaceText?: string): ChatWithToolsResult {
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
-let priorFlag: string | undefined;
-
-async function setFlag(value: 'true' | undefined) {
-  priorFlag = process.env.CEE_ANSWER_TEXT_REQUIRED;
-  if (value === undefined) {
-    delete process.env.CEE_ANSWER_TEXT_REQUIRED;
-  } else {
-    process.env.CEE_ANSWER_TEXT_REQUIRED = value;
-  }
-  const { _resetConfigCache } = await import('../../config/index.js');
-  _resetConfigCache();
-}
-
-async function restoreFlag() {
-  if (priorFlag === undefined) {
-    delete process.env.CEE_ANSWER_TEXT_REQUIRED;
-  } else {
-    process.env.CEE_ANSWER_TEXT_REQUIRED = priorFlag;
-  }
-  const { _resetConfigCache } = await import('../../config/index.js');
-  _resetConfigCache();
-}
-
 beforeEach(() => {
   events = [];
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
 });
 
-afterEach(async () => {
+afterEach(() => {
   setTestSink(null);
   vi.restoreAllMocks();
-  await restoreFlag();
 });
 
-describe('coach — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — ROADMAP 1.20(a) unconditional STEP 7 backstop', () => {
-  beforeEach(async () => {
-    await setFlag(undefined);
-  });
-
-  it('absent answer_text + empty orientationText no longer ships a BLANK assistant_text — the STEP 7 backstop degrades to bounded-recovery regardless of the flag', async () => {
-    const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }),
-      ),
-    };
-
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-flagoff-empty', {
-      routingAdapter: adapter,
-    });
-
-    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
-    expect(telemetry.intent_class).toBe('coach');
-    // Previously this asserted the OPPOSITE (a blank assistant_text) —
-    // that was the live defect this lane closes (ROADMAP 1.20(a)): an
-    // empty direct_answer turn must never ship blank, papered over by a
-    // recycled chip, regardless of the flag-gated layer-B guard's state.
-    expect(response.assistant_text.trim()).not.toBe('');
-    expect(response.assistant_text).toBe(
-      "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.",
-    );
-    // The flag-gated layer-B event does NOT fire (flag off) — this is
-    // the SEPARATE, unconditional STEP 7 backstop, not layer B.
-    expect(events.some((e) => e.event === 'v5.coaching.empty_answer_recovered')).toBe(true);
-    const recoveryEvent = events.find((e) => e.event === 'v5.coaching.empty_answer_recovered');
-    expect(recoveryEvent?.data.intent_class).toBe('direct_answer_backstop');
-  });
-});
-
-describe('coach — CEE_ANSWER_TEXT_REQUIRED flag ON — compose guard (layer B)', () => {
-  beforeEach(async () => {
-    await setFlag('true');
-  });
+// The former flag-OFF describes were removed 2026-07-20 (O-7 wave 2:
+// CEE_ANSWER_TEXT_REQUIRED deleted, live-true on staging): their scenarios —
+// a tool call omitting answer_text — now take the unconditional REPAIR_ONCE +
+// layer-B path pinned below, so a distinct OFF state no longer exists.
+describe('coach — answer_text hardening (unconditional) — compose guard (layer B)', () => {
 
   it('raw answer_text passes layer A (non-blank) but sanitises to empty on BOTH fields → single LLM call, degrades to bounded-recovery', async () => {
     const adapter = {
@@ -244,35 +183,7 @@ describe('coach — CEE_ANSWER_TEXT_REQUIRED flag ON — compose guard (layer B)
   });
 });
 
-describe('converse — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — ROADMAP 1.20(a) unconditional STEP 7 backstop', () => {
-  beforeEach(async () => {
-    await setFlag(undefined);
-  });
-
-  it('tool-call converse with no answer_text + empty orientationText no longer ships a BLANK assistant_text', async () => {
-    const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(toolResult({ intent_class: 'converse' })),
-    };
-
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-converse-flagoff-empty', {
-      routingAdapter: adapter,
-    });
-
-    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
-    expect(telemetry.intent_class).toBe('converse');
-    // Previously this asserted the OPPOSITE (a blank assistant_text) —
-    // see the coach describe block above for the ROADMAP 1.20(a) rationale.
-    expect(response.assistant_text.trim()).not.toBe('');
-    expect(response.assistant_text).toBe(
-      "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.",
-    );
-  });
-});
-
-describe('converse — CEE_ANSWER_TEXT_REQUIRED flag ON — compose guard (layer B)', () => {
-  beforeEach(async () => {
-    await setFlag('true');
-  });
+describe('converse — answer_text hardening (unconditional) — compose guard (layer B)', () => {
 
   it('raw answer_text passes layer A but sanitises to empty on BOTH fields → single LLM call, degrades to bounded-recovery', async () => {
     const adapter = {

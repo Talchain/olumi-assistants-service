@@ -64,29 +64,6 @@ function toolResult(input: unknown, prefaceText?: string): ChatWithToolsResult {
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
-let priorFlag: string | undefined;
-
-async function setFlag(value: 'true' | undefined) {
-  priorFlag = process.env.CEE_ANSWER_TEXT_REQUIRED;
-  if (value === undefined) {
-    delete process.env.CEE_ANSWER_TEXT_REQUIRED;
-  } else {
-    process.env.CEE_ANSWER_TEXT_REQUIRED = value;
-  }
-  const { _resetConfigCache } = await import('../../config/index.js');
-  _resetConfigCache();
-}
-
-async function restoreFlag() {
-  if (priorFlag === undefined) {
-    delete process.env.CEE_ANSWER_TEXT_REQUIRED;
-  } else {
-    process.env.CEE_ANSWER_TEXT_REQUIRED = priorFlag;
-  }
-  const { _resetConfigCache } = await import('../../config/index.js');
-  _resetConfigCache();
-}
-
 beforeEach(() => {
   events = [];
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
@@ -95,13 +72,9 @@ beforeEach(() => {
 afterEach(async () => {
   setTestSink(null);
   vi.restoreAllMocks();
-  await restoreFlag();
 });
 
-describe('v5.coaching.answer_source — flag OFF (default, the current prompt-only world)', () => {
-  beforeEach(async () => {
-    await setFlag(undefined);
-  });
+describe('v5.coaching.answer_source — channel-pick truthfulness (answer_text requirement unconditional)', () => {
 
   it('coach with a real answer_text records source=answer_text', async () => {
     const adapter = {
@@ -126,21 +99,27 @@ describe('v5.coaching.answer_source — flag OFF (default, the current prompt-on
     expect(Object.keys(evt!.data)).not.toContain('orientation_text');
   });
 
-  it('coach with absent answer_text records source=orientation_fallback', async () => {
+  // UPDATED 2026-07-20 (O-7 wave 2): answer_text is now REQUIRED on
+  // coach/converse tool calls (CEE_ANSWER_TEXT_REQUIRED deleted), so an
+  // absent answer_text triggers REPAIR_ONCE; when the repair also omits it,
+  // the turn takes the bounded-recovery path and NO raw channel is ever
+  // picked — the honest telemetry is the ABSENCE of the channel-pick event.
+  it('coach with absent answer_text on both attempts → repair exhausted, no channel-pick event', async () => {
     const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }, 'Fallback orientation text.'),
-      ),
+      chatWithTools: vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }, 'Fallback orientation text.'),
+        )
+        .mockResolvedValueOnce(
+          toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }, 'Fallback orientation text.'),
+        ),
     };
 
     await runTurnExecutor(BASE_PAYLOAD, 'req-source-coach-fallback', { routingAdapter: adapter });
 
-    const evt = events.find((e) => e.event === 'v5.coaching.answer_source');
-    expect(evt).toBeDefined();
-    expect(evt?.data.intent_class).toBe('coach');
-    expect(evt?.data.source).toBe('orientation_fallback');
-    expect(evt?.data.answer_text_length).toBe(0);
-    expect(evt?.data.orientation_length).toBe('Fallback orientation text.'.length);
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2); // initial + REPAIR_ONCE
+    expect(events.some((e) => e.event === 'v5.coaching.answer_source')).toBe(false);
   });
 
   it('tool-call converse with a real answer_text records source=answer_text', async () => {
@@ -161,19 +140,18 @@ describe('v5.coaching.answer_source — flag OFF (default, the current prompt-on
     expect(evt?.data.source).toBe('answer_text');
   });
 
-  it('tool-call converse with absent answer_text records source=orientation_fallback', async () => {
+  it('tool-call converse with absent answer_text on both attempts → repair exhausted, no channel-pick event', async () => {
     const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult({ intent_class: 'converse' }, 'Only the orientation.'),
-      ),
+      chatWithTools: vi
+        .fn()
+        .mockResolvedValueOnce(toolResult({ intent_class: 'converse' }, 'Only the orientation.'))
+        .mockResolvedValueOnce(toolResult({ intent_class: 'converse' }, 'Only the orientation.')),
     };
 
     await runTurnExecutor(BASE_PAYLOAD, 'req-source-converse-fallback', { routingAdapter: adapter });
 
-    const evt = events.find((e) => e.event === 'v5.coaching.answer_source');
-    expect(evt).toBeDefined();
-    expect(evt?.data.intent_class).toBe('converse');
-    expect(evt?.data.source).toBe('orientation_fallback');
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2); // initial + REPAIR_ONCE
+    expect(events.some((e) => e.event === 'v5.coaching.answer_source')).toBe(false);
   });
 
   it('text_only converse (no tool call) never emits the channel-pick event — no answer_text channel exists', async () => {
@@ -193,10 +171,7 @@ describe('v5.coaching.answer_source — flag OFF (default, the current prompt-on
   });
 });
 
-describe('v5.coaching.answer_source — flag ON — still fires, independent of the recovery guard', () => {
-  beforeEach(async () => {
-    await setFlag('true');
-  });
+describe('v5.coaching.answer_source — fires independent of the recovery guard', () => {
 
   it('fires alongside the layer-B recovery event — reflects the RAW channel pick, independent of post-sanitise recovery', async () => {
     // Raw answer_text is non-blank (satisfies layer A, no REPAIR_ONCE) but

@@ -263,9 +263,14 @@ describe('phase 1 behavioural — coach vs converse distinction', () => {
     //   - Tool-call with intent_class="coach" (+coaching_mode)
     //   - Text-only response (inferred "converse")
     // The two MUST be distinguishable in telemetry for Phase 2 evaluation.
+    // answer_text REQUIRED on coach tool calls since 2026-07-20 (O-7 wave 2:
+    // CEE_ANSWER_TEXT_REQUIRED deleted — requirement unconditional).
     const adapterCoach = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult({ intent_class: 'coach', coaching_mode: 'deepen' }, 'Think about what matters most.'),
+        toolResult(
+          { intent_class: 'coach', coaching_mode: 'deepen', answer_text: 'Think about what matters most.' },
+          'Short orientation.',
+        ),
       ),
     };
     const adapterConverse = {
@@ -333,40 +338,55 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
     );
   });
 
-  it('coach tool call WITHOUT answer_text is byte-identical to pre-fix behaviour (orientationText ships)', async () => {
+  // UPDATED 2026-07-20 (O-7 wave 2): answer_text is REQUIRED on coach/converse
+  // tool calls (CEE_ANSWER_TEXT_REQUIRED deleted, live-true on staging). An
+  // omitted/blank answer_text is now a schema failure → REPAIR_ONCE; if the
+  // repair also omits it, the turn ships the bounded recovery copy — it NEVER
+  // silently falls back to the short orientation (that silent-drop WAS the
+  // ROADMAP 1.38 defect class).
+  it('coach tool call WITHOUT answer_text on both attempts → REPAIR_ONCE then bounded recovery (never blank)', async () => {
     const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult(
-          { intent_class: 'coach', coaching_mode: 'reframe' },
-          'A short orientation sentence only.',
+      chatWithTools: vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }, 'A short orientation sentence only.'),
+        )
+        .mockResolvedValueOnce(
+          toolResult({ intent_class: 'coach', coaching_mode: 'reframe' }, 'A short orientation sentence only.'),
         ),
-      ),
     };
 
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-absent', {
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-absent', {
       routingAdapter: adapter,
     });
 
-    expect(telemetry.intent_class).toBe('coach');
-    expect(response.assistant_text).toBe('A short orientation sentence only.');
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2); // initial + REPAIR_ONCE
+    expect(response.assistant_text.trim()).not.toBe('');
   });
 
-  it('coach tool call with EMPTY/whitespace answer_text falls back to orientationText (never ships blank)', async () => {
+  it('coach tool call with EMPTY/whitespace answer_text → REPAIR_ONCE then bounded recovery (never ships blank)', async () => {
     const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult(
-          { intent_class: 'coach', coaching_mode: 'reframe', answer_text: '   ' },
-          'A short orientation sentence only.',
+      chatWithTools: vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolResult(
+            { intent_class: 'coach', coaching_mode: 'reframe', answer_text: '   ' },
+            'A short orientation sentence only.',
+          ),
+        )
+        .mockResolvedValueOnce(
+          toolResult(
+            { intent_class: 'coach', coaching_mode: 'reframe', answer_text: '   ' },
+            'A short orientation sentence only.',
+          ),
         ),
-      ),
     };
 
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-blank', {
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-coach-blank', {
       routingAdapter: adapter,
     });
 
-    expect(telemetry.intent_class).toBe('coach');
-    expect(response.assistant_text).toBe('A short orientation sentence only.');
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2); // initial + REPAIR_ONCE
     expect(response.assistant_text.trim()).not.toBe('');
   });
 
@@ -395,19 +415,20 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
     expect(response.assistant_text).not.toBe('Good structural question.');
   });
 
-  it('converse tool call WITHOUT answer_text is byte-identical to pre-fix behaviour (orientationText ships)', async () => {
+  it('converse tool call WITHOUT answer_text on both attempts → REPAIR_ONCE then bounded recovery (never blank)', async () => {
     const adapter = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult({ intent_class: 'converse' }, 'Just a short conversational reply.'),
-      ),
+      chatWithTools: vi
+        .fn()
+        .mockResolvedValueOnce(toolResult({ intent_class: 'converse' }, 'Just a short conversational reply.'))
+        .mockResolvedValueOnce(toolResult({ intent_class: 'converse' }, 'Just a short conversational reply.')),
     };
 
-    const { response, telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-converse-absent', {
+    const { response } = await runTurnExecutor(BASE_PAYLOAD, 'req-converse-absent', {
       routingAdapter: adapter,
     });
 
-    expect(telemetry.intent_class).toBe('converse');
-    expect(response.assistant_text).toBe('Just a short conversational reply.');
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2); // initial + REPAIR_ONCE
+    expect(response.assistant_text.trim()).not.toBe('');
   });
 
   it('a guard-tripping coach answer_text is scrubbed exactly like other narrate surfaces', async () => {

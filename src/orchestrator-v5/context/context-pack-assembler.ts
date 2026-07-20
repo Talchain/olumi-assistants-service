@@ -485,9 +485,10 @@ export interface ContextPack {
   /**
    * Coaching Context Pack v1 — the hash-free, prompt-safe projection of the
    * canonical analysis state the LLM may RECEIVE for coaching (never author).
-   * Present ONLY when `CEE_COACHING_CONTEXT_PROMPT_ENABLED` is on (the
-   * turn-executor supplies it via `AssembleContextPackInput.coachingContext`);
-   * absent otherwise, so flag-off `buildUserMessage` output is byte-identical.
+   * Present whenever a freshness verdict was derived this turn (the
+   * turn-executor supplies it via `AssembleContextPackInput.coachingContext`
+   * — UNCONDITIONAL since 2026-07-20, O-7 wave 2:
+   * CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted); absent when no verdict.
    * Unlike `analysis_state` (stripped from the prompt for its graph-hash
    * digests) this projection carries no hashes/indices/values/units/labels/text,
    * so it is the ONLY canonical-state surface allowed to reach the prompt.
@@ -599,12 +600,12 @@ export interface AssembleContextPackInput {
    */
   readonly canonicalState?: CanonicalAnalysisState;
   /**
-   * Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED). The
-   * hash-free, prompt-safe `CoachingStatePack` the turn-executor projects from
-   * the live `deriveAnalysisFreshness` verdict for coaching turns. When
-   * present, it is surfaced verbatim as `ContextPack.coaching_context` (and
-   * thereby into the LLM routing prompt). Omitted when the flag is off / no
-   * freshness was derived → the field is absent → flag-off byte-identity.
+   * Coaching Context Pack v1 (unconditional since 2026-07-20 — O-7 wave 2:
+   * CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted). The hash-free, prompt-safe
+   * `CoachingStatePack` the turn-executor projects from the live
+   * `deriveAnalysisFreshness` verdict for coaching turns. When present, it is
+   * surfaced verbatim as `ContextPack.coaching_context` (and thereby into the
+   * LLM routing prompt). Omitted when no freshness was derived.
    */
   readonly coachingContext?: CoachingStatePack;
   /**

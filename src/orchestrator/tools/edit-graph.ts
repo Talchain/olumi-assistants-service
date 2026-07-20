@@ -2500,13 +2500,14 @@ export async function handleEditGraph(
             { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
           ],
         };
-        // Capability 2A (flag-gated): for the unsupported add-risk / reachability
-        // rejection class ONLY, substitute deterministic, structural-only next-step
-        // copy in place of the generic suppression. The classifier returns null for
-        // every other rejection, so all other reasons/types stay byte-identical
-        // (and the flag is default-OFF). Placeholder copy — final wording authored
-        // separately before any live run / flag enablement.
-        if (config.cee.addRiskRejectionGuidanceEnabled) {
+        // Capability 2A — UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+        // CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED deleted, live-true on
+        // staging). For the unsupported add-risk / reachability rejection
+        // class ONLY, substitute deterministic, structural-only next-step
+        // copy in place of the generic suppression. The classifier returns
+        // null for every other rejection, so all other reasons/types stay
+        // byte-identical.
+        {
           const addRiskMatch = classifyAddRiskToOptionRejection(
             candidateGraph,
             structResult.violations,
