@@ -23,7 +23,15 @@
 
 import { createHash } from 'node:crypto';
 
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  beforeEach,
+  afterEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 
 import * as telemetry from '../../../utils/telemetry.js';
 import { TelemetryEvents } from '../../../utils/telemetry.js';
@@ -65,7 +73,11 @@ function assembleUnderBudgetPack() {
   });
 }
 
-let emitSpy: ReturnType<typeof vi.spyOn>;
+// Typed against the real emit signature so `mock.calls` destructures with
+// concrete tuple types (the generic `ReturnType<typeof vi.spyOn>` widening
+// left the call-tuple elements implicitly `any` — 5 errors visible only to
+// the full-tsc drift ratchet, whose config includes test files).
+let emitSpy: MockInstance<typeof telemetry.emit>;
 
 beforeEach(() => {
   emitSpy = vi.spyOn(telemetry, 'emit');
