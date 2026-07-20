@@ -224,7 +224,15 @@ function runExtractionInternal(
     const cqeCount = filtered.filter((m) => m.result.source === 'cqe').length;
     const compromiseCount = filtered.filter((m) => m.result.source === 'compromise').length;
 
-    const results = filtered.map((m) => normaliseResult(m.result));
+    const results = filtered.map((m) => {
+      const valueSpan = locateValueTokenSpan(m);
+      return {
+        ...normaliseResult(m.result),
+        ...(valueSpan !== null
+          ? { span_start: valueSpan.start, span_end: valueSpan.end }
+          : {}),
+      };
+    });
 
     const wordRangeMissed = detectWordRangeMiss(rawMessage, results);
     const ambiguousPhrasingDetected = results.some(
@@ -330,6 +338,70 @@ function emitBudgetExhausted(
 function maskSpan(text: string, start: number, end: number): string {
   const spaces = ' '.repeat(Math.max(0, end - start));
   return text.slice(0, start) + spaces + text.slice(end);
+}
+
+// ---------------------------------------------------------------------------
+// O-1 (batch mutation lifecycle) — value-token span location.
+//
+// A CQE match's spanStart/spanEnd cover the WHOLE pattern match — the
+// sentence-level rules capture the full leading clause ("set Factor A to
+// current plan and Factor B to 0.8" is ONE match), so the match span is
+// useless for label↔quantity pairing. What pairing needs is the span of the
+// NUMERIC VALUE TOKEN inside the match. Rules don't expose per-capture-group
+// offsets, so we re-locate the token inside `raw`:
+//   1. collect every digit-bearing numeric token in the matched text;
+//   2. prefer the token whose parsed number reproduces `result.value`
+//      (undoing the percent /100 pre-normalisation and the k/m/bn suffix
+//      expansion); when several qualify, take the LAST — value phrasing puts
+//      the operand at the end of the clause ("set X to 0.8");
+//   3. otherwise fall back to the last numeric token;
+//   4. a match with NO digit token ("double it", "a half") gets no span —
+//      the compound detector refuses to pair spanless quantities.
+// Offsets are absolute positions in the CQE-normalised text (the same
+// coordinate space as spanStart/spanEnd).
+// ---------------------------------------------------------------------------
+
+const VALUE_TOKEN_SCAN_RE = /-?(?:\d[\d]*(?:\.\d+)?|\.\d+)/g;
+const VALUE_SUFFIX_FACTORS = [1, 1e3, 1e6, 1e9];
+
+function locateValueTokenSpan(
+  match: CqePatternMatch,
+): { start: number; end: number } | null {
+  const tokens: Array<{ start: number; end: number; parsed: number }> = [];
+  VALUE_TOKEN_SCAN_RE.lastIndex = 0;
+  for (
+    let m = VALUE_TOKEN_SCAN_RE.exec(match.raw);
+    m !== null;
+    m = VALUE_TOKEN_SCAN_RE.exec(match.raw)
+  ) {
+    if (m.index === VALUE_TOKEN_SCAN_RE.lastIndex) VALUE_TOKEN_SCAN_RE.lastIndex++;
+    const parsed = Number.parseFloat(m[0]);
+    if (!Number.isFinite(parsed)) continue;
+    tokens.push({
+      start: match.spanStart + m.index,
+      end: match.spanStart + m.index + m[0].length,
+      parsed,
+    });
+  }
+  if (tokens.length === 0) return null;
+
+  const targets = [
+    match.result.value,
+    match.result.range_min,
+    match.result.range_max,
+  ].filter((v): v is number => typeof v === 'number');
+  const isPercent = match.result.unit === 'percentage';
+  const reproduces = (parsed: number): boolean =>
+    targets.some((target) =>
+      VALUE_SUFFIX_FACTORS.some(
+        (f) =>
+          parsed * f === target || (isPercent && (parsed * f) / 100 === target),
+      ),
+    );
+  const matching = tokens.filter((t) => reproduces(t.parsed));
+  const chosen =
+    matching.length > 0 ? matching[matching.length - 1]! : tokens[tokens.length - 1]!;
+  return { start: chosen.start, end: chosen.end };
 }
 
 function normaliseResult(partial: Partial<QuantityExtractionResult>): QuantityExtractionResult {

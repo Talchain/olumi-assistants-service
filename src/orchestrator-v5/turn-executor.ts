@@ -92,7 +92,11 @@ import {
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
-import { applyCompoundValueUpdateChain } from './compound-value-update-chain.js';
+import {
+  applyCompoundValueUpdateChain,
+  preflightCompoundBatch,
+  type CompoundPartRefusal,
+} from './compound-value-update-chain.js';
 import {
   decideGoalTargetReceipt,
   formatGoalTargetNotSavedText,
@@ -1235,12 +1239,20 @@ export async function runTurnExecutor(
     // synthesise this before the routeWithToolUse call. Wider type so the
     // guard below the pre-route block can compare against undefined.
     let routingResult: RoutingResult | undefined;
-    // A1 multi-edit — remaining parts of a COMPOUND value update. When the
-    // deterministic pre-route detects "Set A to 0.6 and B to 0.8", the primary
-    // part (update[0]) is synthesised into `routingResult` and runs the normal
-    // STEP 2-7 lifecycle; update[1..] are stashed here and applied by looping
-    // the set_factor_value handler after the primary handler executes.
+    // O-1 batch lifecycle — remaining APPROVED parts of a COMPOUND value
+    // update. When the deterministic pre-route detects "Set A to 0.6 and B to
+    // 0.8", the batch preflight vets EVERY part, the first approved part is
+    // synthesised into `routingResult` and runs the normal STEP 2-7
+    // lifecycle; the remaining approved parts are stashed here and applied by
+    // looping the set_factor_value handler after the primary handler executes.
     let compoundRemainingUpdates: readonly CompoundUpdatePart[] = [];
+    // Parts the batch preflight refused (by name, with reasons) — folded into
+    // the STEP 3.5 receipt so the user sees one DISCLOSED-PARTIAL disclosure.
+    let compoundPreflightRefusals: readonly CompoundPartRefusal[] = [];
+    // True when the batch preflight already unit-checked the promoted primary
+    // against its OWN message segment — the STEP 2 whole-message P0-A guard
+    // is skipped in that case (see the compound dispatch block).
+    let compoundPreflightUnitChecked = false;
     // Resumed pending action, if the short-confirm pre-route synthesised
     // a tool_call. Cleared after the commit-success consumed-telemetry
     // emit. Null on every other path.
@@ -3883,13 +3895,19 @@ export async function runTurnExecutor(
         };
       }
 
-      // A1 multi-edit — COMPOUND value update. When the single-edit path
+      // O-1 batch lifecycle — COMPOUND value update. When the single-edit path
       // bailed (its multi-quantity `ambiguous_quantity` guard fires on "Set A
       // to 0.6 and B to 0.8") AND the deictic path did not match, try the
-      // compound detector. On a match, promote update[0] to the single
-      // set_factor_value shape so the existing kind/registry guard + synthesis
-      // block below handles it unchanged; stash update[1..] for the
-      // post-primary handler loop (STEP 3.5, after the primary handler runs).
+      // compound detector. On a match, run the ONE shared batch preflight over
+      // EVERY part (kind + validateToolCall + segment-scoped unit-family
+      // guard — the same validation the promoted primary gets), then promote
+      // the FIRST APPROVED part into the ordinary lifecycle; the remaining
+      // approved parts chain at STEP 3.5 and the refused parts are narrated
+      // by name (DISCLOSED-PARTIAL). Promoting the first APPROVED part —
+      // never blindly update[0] — is what makes the outcome order-symmetric:
+      // pre-O-1, an invalid part in FIRST position killed the whole turn
+      // (valid parts silently dropped) while the same part in second position
+      // bypassed validation entirely (Codex F4/F12).
       if (!deterministicValueUpdate.matched) {
         const compoundDispatch = tryCompoundValueUpdate(
           payload.message,
@@ -3899,13 +3917,44 @@ export async function runTurnExecutor(
           cqeSummary.degraded,
         );
         if (compoundDispatch.matched && compoundDispatch.updates.length >= 2) {
-          deterministicValueUpdate = {
-            matched: true,
-            dispatch: 'set_factor_value',
-            candidate: compoundDispatch.updates[0]!.candidate,
-            quantity: compoundDispatch.updates[0]!.quantity,
-          };
-          compoundRemainingUpdates = compoundDispatch.updates.slice(1);
+          const compoundPreflight = preflightCompoundBatch({
+            updates: compoundDispatch.updates,
+            message: payload.message,
+            graphNodes: graphStateForTurn?.nodes ?? [],
+            graphLookup: graphLookupForValidate,
+            validationRegistry: options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
+            requestId,
+            scenarioId: context.session_id,
+          });
+          if (compoundPreflight.approved.length > 0) {
+            const primaryPart = compoundPreflight.approved[0]!;
+            deterministicValueUpdate = {
+              matched: true,
+              dispatch: 'set_factor_value',
+              candidate: primaryPart.candidate,
+              quantity: primaryPart.quantity,
+            };
+            compoundRemainingUpdates = compoundPreflight.approved.slice(1);
+            compoundPreflightRefusals = compoundPreflight.refused;
+            // The preflight already ran the unit-family guard per part over
+            // that part's OWN segment. The STEP 2 whole-message P0-A guard
+            // must not re-run for this primary: with multiple clauses it can
+            // attribute ANOTHER (already-refused) part's unit token to the
+            // primary's value and refuse a part the segment guard passed.
+            compoundPreflightUnitChecked = true;
+          } else {
+            // Every part failed preflight. Promote update[0] UNCHANGED so the
+            // ordinary lifecycle owns the refusal — STEP 2 re-derives the
+            // same verdict via the same validators and routes it through the
+            // canonical recoverable-clarify path (guidance chip, graph
+            // unchanged, no handler executes). Nothing is chained.
+            deterministicValueUpdate = {
+              matched: true,
+              dispatch: 'set_factor_value',
+              candidate: compoundDispatch.updates[0]!.candidate,
+              quantity: compoundDispatch.updates[0]!.quantity,
+            };
+          }
         }
       }
 
@@ -5672,10 +5721,16 @@ export async function runTurnExecutor(
       // falsely refuse the resolved absolute proposal. The skip is
       // recorded on the v5.turn_executor.relative_delta_resolved event
       // (value_unit_guard_skipped: true).
+      // O-1: the guard is ALSO skipped when the compound batch preflight
+      // already unit-checked this primary against its OWN message segment —
+      // re-running it over the whole multi-clause message can attribute an
+      // already-refused part's unit token to the primary's value and refuse a
+      // part the segment guard passed (the same order-dependence O-1 removes).
       if (
         validationResult.valid &&
         proposedHandlerId === 'set_factor_value' &&
         !relativeDeltaResolved &&
+        !compoundPreflightUnitChecked &&
         graphLookupForValidate?.findFactorObservedState !== undefined
       ) {
         const factorObs = graphLookupForValidate.findFactorObservedState(action.entity.id);
@@ -6186,15 +6241,17 @@ export async function runTurnExecutor(
           }),
         );
 
-        // STEP 3.5 — A1 multi-edit compound chaining. update[0] ran the full
-        // lifecycle above; apply update[1..] by looping the SAME
-        // set_factor_value handler, threading each part's `mutated_graph` into
-        // the next part's `graphForTurn` (graph-in → graph-out). The chaining +
-        // the merged `mutated_graph` producer live in a dedicated module so the
+        // STEP 3.5 — O-1 compound batch chaining. The first APPROVED part ran
+        // the full lifecycle above; apply the remaining approved parts by
+        // looping the SAME set_factor_value handler, threading each part's
+        // `mutated_graph` into the next part's `graphForTurn` (graph-in →
+        // graph-out), and fold the preflight refusals into ONE receipt naming
+        // applied and refused sets (DISCLOSED-PARTIAL). The chaining + the
+        // merged `mutated_graph` producer live in a dedicated module so the
         // Gate 2 mutated_graph-producer allowlist can name it precisely rather
         // than exempting the whole turn-executor — see that module's doc.
         if (
-          compoundRemainingUpdates.length > 0 &&
+          (compoundRemainingUpdates.length > 0 || compoundPreflightRefusals.length > 0) &&
           proposedHandlerId === 'set_factor_value' &&
           handlerOutcome.mutated_graph !== undefined &&
           handlerOutcome.mutated_graph !== null
@@ -6207,6 +6264,7 @@ export async function runTurnExecutor(
               remainingUpdates: compoundRemainingUpdates,
               handlerFn: chainHandlerFn,
               message: payload.message,
+              preflightRefusals: compoundPreflightRefusals,
               context,
               payload,
               requestId,

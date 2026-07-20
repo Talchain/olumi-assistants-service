@@ -59,6 +59,8 @@ import {
   CURRENCY_SYMBOL_SOURCE,
   NUMERIC_SUFFIX_SOURCE,
 } from '../context/cqe/rules.js';
+import { preNormalise } from '../context/cqe/pre-normalise.js';
+import { applyWordNumberPrePass } from '../context/cqe/word-numbers.js';
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import type { GraphLookup } from './validator.js';
@@ -728,11 +730,21 @@ export function tryDeterministicValueUpdate(
 
 /**
  * One applied part of a compound value-update: a resolved factor candidate
- * paired with the CQE quantity that belongs to it.
+ * paired with the CQE quantity whose VALUE-TOKEN SPAN sits inside that
+ * label's bounded segment, plus the segment text itself (used by the batch
+ * preflight's per-part unit-family guard).
  */
 export interface CompoundUpdatePart {
   readonly candidate: ValueUpdateCandidate;
   readonly quantity: QuantityExtractionResult;
+  /**
+   * The CQE-normalised message slice from this label's end to the next
+   * label's start (or the message end) — the region the part's value was
+   * paired from. The batch preflight runs `classifyValueUnitAgainstFactor`
+   * over THIS slice, so a dropped unit token ("5 agents") is judged against
+   * its own factor, never against another part's clause.
+   */
+  readonly segmentText: string;
 }
 
 export type CompoundSkipReason =
@@ -744,17 +756,27 @@ export type CompoundSkipReason =
   /** Fewer than two non-null CQE quantities — the single-quantity path owns
    *  this; a compound update needs at least two independent value edits. */
   | 'not_compound'
-  /** The count of DISTINCT substring-matched factor labels does not equal the
-   *  count of non-null quantities (e.g. "Set A between 0.6 and 0.8" — one
-   *  label, two quantities). Position pairing would be unsafe, so we bail. */
-  | 'label_quantity_count_mismatch'
+  /** Fewer than two DISTINCT factor labels substring-matched (also covers an
+   *  empty candidate pool) — nothing to pair a second value against. */
+  | 'too_few_labels'
   /** A disjunction / range connective ("or", "between") is present — the
    *  parts are not an unambiguous conjunction of independent value sets. */
   | 'disjunction'
   /** The message does not read as strict "label to <num>" segments in
    *  document order (some label is not followed by a `to` connector before
-   *  the next label), so position pairing cannot be trusted. */
-  | 'non_interleaved';
+   *  the next label), so segment pairing cannot be trusted. */
+  | 'non_interleaved'
+  /** Some non-null quantity carries no value-token span (no digit-bearing
+   *  token in its match — e.g. "double it"), so segment containment cannot
+   *  be established. Refuse rather than fall back to order pairing. */
+  | 'missing_spans'
+  /** Some label's bounded segment does not contain EXACTLY ONE non-null
+   *  quantity (zero: "set A to current plan…" — the value is not a number;
+   *  two+: "…to 0.8 by March 2027"). Pairing would be a guess, so we bail
+   *  and the LLM owns the message. THE F2 FIX: a stray number OUTSIDE every
+   *  label's segment (a leading date, budget, age, version) is ignored, and
+   *  can never be misattributed as a factor value. */
+  | 'unpaired_label';
 
 export type CompoundValueUpdateDispatch =
   | { readonly matched: false; readonly skip_reason: CompoundSkipReason }
@@ -781,26 +803,28 @@ export type CompoundValueUpdateDispatch =
  * (has verb) and "B to 0.8" (no verb) — a per-segment `EDIT_VERB_PATTERN` gate
  * would reject the second half. So we do NOT split on the verb. Instead:
  *
- *   1. Substring-match DISTINCT factor labels against the whole message,
- *      capturing each label's character index (`labelMatchIndex`).
- *   2. Require the count of distinct labels to EQUAL the count of non-null CQE
- *      quantities (and be ≥ 2). A mismatch (range/disjunction/partial match)
- *      bails — no guessing.
- *   3. Pair BY POSITION: labels sorted by `labelMatchIndex` (document order)
- *      against `nonNullQuantities` in CQE document order (which mirrors
- *      document order). Label[i] ↔ quantity[i].
- *   4. Validate strict "label to <num>" interleaving: each label must be
+ *   1. Substring-match DISTINCT factor labels (≥ 2) against the CQE-normalised
+ *      message, capturing each label's character bounds. The NORMALISED text
+ *      (preNormalise → word-number pre-pass) is the pairing coordinate space
+ *      because that is what CQE value-token spans are expressed in.
+ *   2. Validate strict "label to <num>" interleaving: each label must be
  *      followed by a `to` connector before the next label begins, and the
  *      message must carry no disjunction/range connective. This rejects the
- *      "labels first, then values" shape ("Set A and B to 0.6 and 0.8") where
- *      positional pairing would misattribute.
+ *      "labels first, then values" shape ("Set A and B to 0.6 and 0.8").
+ *   3. Pair BY SEGMENT CONTAINMENT (the O-1 / Codex-F2 fix): label i's
+ *      segment runs from its label end to the next label's start (or the
+ *      message end). A quantity belongs to label i iff its VALUE-TOKEN SPAN
+ *      (`span_start`/`span_end`) lies inside that segment — i.e. the value
+ *      occurs AFTER its label, before the next. Every label must claim
+ *      EXACTLY ONE non-null quantity; zero or two+ bails (`unpaired_label`).
+ *      Quantities outside every segment (a leading "Using the 2026
+ *      forecast…", budgets, ages, versions) are ignored — the old global
+ *      document-order pairing durably wrote such strays into factors.
  *
- * Per-part VALUE validity (range / cap / unit) is NOT checked here — the
- * caller synthesises the primary proposal from `updates[0]` and loops the
- * `set_factor_value` handler over the rest; the handler runs the shared
- * `evaluateFactorValueProposal` predicate per part and refuses an invalid
- * part by name while the rest apply. This mirrors the single-edit path, where
- * the executor (not this detector) runs the value precheck.
+ * Per-part VALUE validity (kind / range / cap / unit-family) is NOT checked
+ * here — the executor runs `preflightCompoundBatch` over ALL parts (the same
+ * validation the promoted primary gets) before ANY execution, applies the
+ * valid parts, and refuses the invalid ones by name (DISCLOSED-PARTIAL).
  *
  * Gates mirror {@link tryDeterministicValueUpdate}: degraded-extraction
  * refusal, edit-verb presence, graph availability, the hypothetical negative
@@ -858,7 +882,7 @@ export function tryCompoundValueUpdate(
   // back to unfiltered only when the filter would empty the pool).
   const rawCandidatesPool = graphLookup.listEntitiesByKind('node');
   if (rawCandidatesPool.length === 0) {
-    return { matched: false, skip_reason: 'label_quantity_count_mismatch' };
+    return { matched: false, skip_reason: 'too_few_labels' };
   }
   const factorFilteredPool =
     factorNodeIds === undefined
@@ -869,7 +893,14 @@ export function tryCompoundValueUpdate(
       ? rawCandidatesPool
       : factorFilteredPool;
 
-  const normMessage = message.trim().toLowerCase();
+  // PAIRING COORDINATE SPACE (O-1): CQE value-token spans are offsets into
+  // the CQE-NORMALISED text (preNormalise → word-number pre-pass), not the
+  // raw message. Label positions must live in the SAME space for segment
+  // containment to mean anything, so we recompute the normalisation here —
+  // both steps are pure, deterministic, and sub-millisecond on the ≤2000-char
+  // input. Deriving (not caching) keeps this the single source of truth.
+  const normInput = applyWordNumberPrePass(preNormalise(message).text).text;
+  const normMessage = normInput.toLowerCase();
 
   // Collect DISTINCT substring-matched labels (one candidate per factor id),
   // each carrying its label length so segment boundaries can be computed.
@@ -900,20 +931,19 @@ export function tryCompoundValueUpdate(
     });
   }
 
-  // Position pairing is only safe when EVERY quantity has exactly one label to
-  // attribute to — N distinct labels and N quantities.
-  if (substringMatches.length !== nonNullQuantities.length) {
-    return { matched: false, skip_reason: 'label_quantity_count_mismatch' };
+  // A compound edit needs at least two labelled targets.
+  if (substringMatches.length < 2) {
+    return { matched: false, skip_reason: 'too_few_labels' };
   }
 
-  // Sort by document position so index i aligns with CQE document order.
+  // Sort by document position so segment i runs label i → label i+1.
   substringMatches.sort((a, b) => a.labelStart - b.labelStart);
 
   // Strict "label to <num>" interleaving: each label must be followed by a
   // `to` connector before the next label begins (or the message end for the
   // last label). This rejects "Set A and B to 0.6 and 0.8" — between the A and
-  // B labels there is only " and ", no `to`, so positional pairing (which
-  // would misattribute) is refused.
+  // B labels there is only " and ", no `to`, so pairing (which would
+  // misattribute) is refused.
   for (let i = 0; i < substringMatches.length; i++) {
     const segStart = substringMatches[i]!.labelEnd;
     const segEnd =
@@ -926,10 +956,40 @@ export function tryCompoundValueUpdate(
     }
   }
 
-  const updates: CompoundUpdatePart[] = substringMatches.map((m, i) => ({
-    candidate: m.candidate,
-    quantity: nonNullQuantities[i]!,
-  }));
+  // SEGMENT PAIRING (the F2 fix). Every non-null quantity must carry a
+  // value-token span; refuse otherwise — order pairing is exactly the
+  // defect this replaced, so there is deliberately NO fallback to it.
+  if (
+    nonNullQuantities.some(
+      (q) => typeof q.span_start !== 'number' || typeof q.span_end !== 'number',
+    )
+  ) {
+    return { matched: false, skip_reason: 'missing_spans' };
+  }
+
+  const updates: CompoundUpdatePart[] = [];
+  for (let i = 0; i < substringMatches.length; i++) {
+    const m = substringMatches[i]!;
+    const segStart = m.labelEnd;
+    const segEnd =
+      i + 1 < substringMatches.length
+        ? substringMatches[i + 1]!.labelStart
+        : normMessage.length;
+    const inSegment = nonNullQuantities.filter(
+      (q) => q.span_start! >= segStart && q.span_end! <= segEnd,
+    );
+    if (inSegment.length !== 1) {
+      // Zero: this label's value is not a parseable number ("to current
+      // plan"). Two+: the segment carries extra numbers ("to 0.8 by March
+      // 2027"). Either way pairing would be a guess — the LLM owns it.
+      return { matched: false, skip_reason: 'unpaired_label' };
+    }
+    updates.push({
+      candidate: m.candidate,
+      quantity: inSegment[0]!,
+      segmentText: normInput.slice(segStart, segEnd),
+    });
+  }
 
   return { matched: true, dispatch: 'compound_value_update', updates };
 }

@@ -1,11 +1,38 @@
 /**
- * A1 multi-edit — compound value-update chaining.
+ * O-1 — the ONE batch-mutation lifecycle for compound value updates.
  *
  * A compound value update ("Set A to 0.6 and B to 0.8") is detected by
- * `tryCompoundValueUpdate` in the routing pre-route. The turn-executor
- * synthesises the FIRST part into the normal STEP 2-7 lifecycle (validate →
- * execute → confirm → compose → commit); this module applies the REMAINING
- * parts by looping the same `set_factor_value` handler.
+ * `tryCompoundValueUpdate` in the routing pre-route. This module is the single
+ * component that owns the batch:
+ *
+ *   1. `preflightCompoundBatch` — one shared contextual preflight that EVERY
+ *      part passes through BEFORE any execution: the factor-kind check, the
+ *      full `validateToolCall` (structural + graph checks + the shared
+ *      `evaluateFactorValueProposal` value predicate), and the raw-message
+ *      unit-family guard scoped to the part's OWN message segment. This is the
+ *      same validation the promoted primary gets from the ordinary lifecycle —
+ *      previously parts 1..N bypassed all of it (Codex F4: "Marketing Budget
+ *      to 5 agents" stored £5 into a £ factor when it sat in second position).
+ *      The executor promotes the FIRST APPROVED part into the ordinary STEP
+ *      2-7 lifecycle and chains the remaining approved parts here, so clause
+ *      order can no longer decide correctness.
+ *
+ *   2. `applyCompoundValueUpdateChain` — applies the approved non-primary
+ *      parts by looping the same `set_factor_value` handler, threading each
+ *      part's `mutated_graph` into the next part's `graphForTurn`.
+ *
+ *   3. BATCH POLICY — DISCLOSED-PARTIAL (Paul's ratified compound doctrine):
+ *      apply the valid parts, refuse the invalid ones BY NAME with reasons,
+ *      one receipt naming both sets. Same input set → same applied set and
+ *      same named refusals regardless of clause order. (Strict atomic-or-
+ *      refuse is a rowed future upgrade — deliberately not built here.)
+ *
+ *   4. ERROR DISCIPLINE — only typed parameter-invalid errors become named
+ *      refusals. Abort, timeout, and infrastructure errors RETHROW so the
+ *      turn fails as what it is; `signal.throwIfAborted()` runs before each
+ *      part (mirroring the executor's own abort checks). Previously the chain
+ *      caught EVERY thrown value as "value invalid" — an infrastructure error
+ *      mid-batch committed the earlier parts and blamed the user (Codex F12).
  *
  * WHY A DEDICATED MODULE (not inline in turn-executor): the Gate 2 invariant
  * (`turn-executor-d1-mutation-commit-graph.test.ts`) enforces that
@@ -32,13 +59,6 @@
  *     `mutated_graph`, so without threading the persisted graph would carry
  *     only the primary part's mutation. It also keeps each part's handler
  *     validating against the correct running graph (e.g. delta operators).
- *
- * Per-part validity: the `set_factor_value` handler runs the shared
- * `evaluateFactorValueProposal` predicate (its `preEvaluation`) and throws
- * `D1HandlerError(PARAMETER_INVALID)` on an invalid value. A thrown part is
- * refused BY NAME (see `buildCompoundReceiptText`) while the rest apply — the
- * primary part already committed a real mutation, so a later invalid part must
- * not fail the whole turn.
  */
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
@@ -52,6 +72,11 @@ import {
   mapCqeQuantityToProposalValue,
   deriveOperator,
 } from './routing/deterministic-value-update.js';
+import type { GraphLookup, HandlerValidationRegistry } from './routing/validator.js';
+import { validateToolCall } from './routing/validator.js';
+import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
+import { HandlerInvocationFailedError } from './tools/handler-errors.js';
+import { D1HandlerError } from './tools/handlers/d1-shared/errors.js';
 import { STALENESS_NARRATIVE } from './tools/handlers/set-factor-value.js';
 import { log } from '../utils/telemetry.js';
 
@@ -60,22 +85,235 @@ function serialiseError(err: unknown): { name?: string; message?: string } {
   return { message: String(err) };
 }
 
+// ---------------------------------------------------------------------------
+// Batch preflight
+// ---------------------------------------------------------------------------
+
+/** Why a part was refused. Coarse machine enums (no user text) — safe for
+ *  telemetry; the receipt maps each to user-facing copy. */
+export type CompoundPartRefusalReason =
+  /** The resolved target is not a factor node — no value can be set on it. */
+  | 'not_a_factor'
+  /** `validateToolCall` rejected the proposal with PARAMETER_INVALID (the
+   *  shared value predicate: range / cap / unit / delta checks). */
+  | 'value_invalid'
+  /** `validateToolCall` rejected for a non-parameter reason (entity missing,
+   *  suspicious label match, precondition unmet, …). */
+  | 'target_unresolved'
+  /** Segment unit-family guard: the value carries a unit token from a
+   *  DIFFERENT family than the factor's stored unit ("5 agents" on £). */
+  | 'unit_incompatible'
+  /** Segment unit-family guard: a value-attached unit-like token that cannot
+   *  be resolved at all ("5 widgets" on a typed factor). */
+  | 'unit_unresolved'
+  /** The handler itself refused at execute time (typed parameter/entity
+   *  error) — defence in depth behind the preflight. */
+  | 'execute_invalid';
+
+export interface CompoundPartRefusal {
+  readonly label: string;
+  readonly target_id: string;
+  readonly reason: CompoundPartRefusalReason;
+  /** Machine detail (validator code / rejection_reason) — telemetry only. */
+  readonly detail?: string;
+}
+
+export interface CompoundBatchPreflightResult {
+  /** Parts that passed every check, in detector (document) order. */
+  readonly approved: readonly CompoundUpdatePart[];
+  /** Parts refused by name, with reasons, in detector (document) order. */
+  readonly refused: readonly CompoundPartRefusal[];
+}
+
+/**
+ * Build the `set_factor_value` proposal for one compound part — the single
+ * construction shared by the preflight (validation) and the chain (execution),
+ * and shape-identical to the primary proposal the executor synthesises.
+ */
+export function buildCompoundPartProposal(
+  part: CompoundUpdatePart,
+  message: string,
+): ProposalAction {
+  const { value, unit } = mapCqeQuantityToProposalValue(part.quantity);
+  const operator = deriveOperator(message, part.quantity);
+  return {
+    handler_id: 'set_factor_value',
+    entity: {
+      id: part.candidate.id,
+      kind: 'node',
+      label: part.candidate.label,
+      resolution_status: 'resolved',
+      resolution_method: 'label_match',
+    },
+    parameters: [
+      {
+        name: 'value',
+        value: unit !== undefined ? { value, unit } : value,
+        operator,
+        source: 'user_explicit',
+        ...(unit !== undefined ? { unit } : {}),
+      },
+    ],
+    cited_context_fields: ['graph.nodes'],
+  };
+}
+
+export interface CompoundBatchPreflightParams {
+  readonly updates: readonly CompoundUpdatePart[];
+  /** The raw user message (operator derivation for each part). */
+  readonly message: string;
+  /** Raw graph nodes for the turn (`graphStateForTurn?.nodes ?? []`) — the
+   *  same source the executor's primary kind-check reads. */
+  readonly graphNodes: ReadonlyArray<unknown>;
+  readonly graphLookup: GraphLookup | undefined;
+  readonly validationRegistry: HandlerValidationRegistry;
+  readonly requestId: string;
+  readonly scenarioId: string;
+}
+
+/**
+ * ONE shared contextual preflight over the whole batch — every part gets the
+ * same validation the promoted primary receives from the ordinary lifecycle:
+ *
+ *   a. factor-kind check (mirrors the executor's pre-synthesis kind gate);
+ *   b. `validateToolCall` — structural checks + graph-dependent checks +
+ *      the shared `evaluateFactorValueProposal` value predicate (Layer A.2);
+ *   c. the P0-A unit-family guard, scoped to the part's OWN message segment
+ *      (`part.segmentText`), so a dropped unit token ("5 agents") is judged
+ *      against its own factor — this is the check whose absence stored £5
+ *      into a £200k factor when the clause sat in second position (F4).
+ *
+ * Runs BEFORE any execution. The caller applies the approved parts (first
+ * approved part through the ordinary lifecycle, the rest through the chain)
+ * and narrates the refused parts by name — DISCLOSED-PARTIAL.
+ */
+export function preflightCompoundBatch(
+  params: CompoundBatchPreflightParams,
+): CompoundBatchPreflightResult {
+  const { updates, message, graphNodes, graphLookup, validationRegistry } = params;
+  const approved: CompoundUpdatePart[] = [];
+  const refused: CompoundPartRefusal[] = [];
+
+  const refuse = (
+    part: CompoundUpdatePart,
+    reason: CompoundPartRefusalReason,
+    detail?: string,
+  ): void => {
+    refused.push({
+      label: part.candidate.label,
+      target_id: part.candidate.id,
+      reason,
+      ...(detail !== undefined ? { detail } : {}),
+    });
+    log.warn(
+      {
+        event: 'v5.compound_value_update.part_refused',
+        phase: 'preflight',
+        request_id: params.requestId,
+        scenario_id: params.scenarioId,
+        target_id: part.candidate.id,
+        reason,
+        ...(detail !== undefined ? { detail } : {}),
+      },
+      'V5 compound batch preflight: part refused; remaining parts unaffected',
+    );
+  };
+
+  for (const part of updates) {
+    // (a) Kind gate — same source of truth as the executor's primary check.
+    const node = graphNodes.find(
+      (n) => (n as { id?: unknown }).id === part.candidate.id,
+    ) as { kind?: unknown; observed_state?: { unit?: unknown } } | undefined;
+    if (typeof node?.kind !== 'string' || node.kind !== 'factor') {
+      refuse(part, 'not_a_factor', typeof node?.kind === 'string' ? node.kind : 'missing');
+      continue;
+    }
+
+    // (b) The full validator — structural + graph checks + value predicate.
+    const proposal = buildCompoundPartProposal(part, message);
+    const validation = validateToolCall(proposal, graphLookup, validationRegistry);
+    if (!validation.valid) {
+      refuse(
+        part,
+        validation.error.code === 'PARAMETER_INVALID' ? 'value_invalid' : 'target_unresolved',
+        validation.error.code,
+      );
+      continue;
+    }
+
+    // (c) Unit-family guard over the part's OWN segment. Mirrors the STEP 2
+    // P0-A guard (including its findFactorObservedState availability gate),
+    // but scoped so one part's unit token can never be attributed to another
+    // part's value.
+    if (graphLookup?.findFactorObservedState !== undefined) {
+      const obs = graphLookup.findFactorObservedState(part.candidate.id);
+      const { value: userUnitValue } = mapCqeQuantityToProposalValue(part.quantity);
+      const verdict = classifyValueUnitAgainstFactor(
+        part.segmentText,
+        obs?.unit,
+        userUnitValue,
+      );
+      if (!verdict.resolved) {
+        refuse(
+          part,
+          verdict.reason === 'incompatible_unit' ? 'unit_incompatible' : 'unit_unresolved',
+          verdict.reason,
+        );
+        continue;
+      }
+    }
+
+    approved.push(part);
+  }
+
+  return { approved, refused };
+}
+
+// ---------------------------------------------------------------------------
+// Receipt
+// ---------------------------------------------------------------------------
+
+/** User-facing clause per refusal reason. Phrasing deliberately avoids the
+ *  state-mutation denial forms the egress guard rewrites ("no change",
+ *  "nothing changed"). */
+function refusalClause(reason: CompoundPartRefusalReason, plural: boolean): string {
+  const factors = plural ? 'those factors' : 'that factor';
+  switch (reason) {
+    case 'unit_incompatible':
+    case 'unit_unresolved':
+      return `the value's unit doesn't match how ${plural ? 'they are' : 'it is'} measured`;
+    case 'not_a_factor':
+      return `${plural ? "they aren't factors" : "it isn't a factor"} I can set a value on`;
+    case 'target_unresolved':
+      return `I couldn't match ${plural ? 'them' : 'it'} to ${plural ? 'factors' : 'a factor'} confidently`;
+    case 'value_invalid':
+    case 'execute_invalid':
+      return `that value isn't valid for ${factors}`;
+  }
+}
+
+function joinNames(names: readonly string[]): string {
+  if (names.length === 1) return names[0]!;
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 /**
  * Build the combined user-visible receipt for a compound value update from the
- * per-part handler outcomes.
+ * per-part handler outcomes plus the refused parts.
  *
  * Each `set_factor_value` outcome's `assistant_text` is its own change sentence
  * ("Updated Factor A to 0.6.") optionally followed by the shared staleness
  * narrative when a prior analysis existed. Concatenating raw texts would repeat
  * that narrative once per part, so we STRIP the trailing narrative from each
  * sentence, join the change sentences, then re-append the narrative exactly
- * once when ANY part made the analysis stale. A refused part (invalid value) is
- * named plainly — the phrasing avoids the state-mutation denial forms the
- * egress guard rewrites ("no change", "nothing changed").
+ * once when ANY part made the analysis stale. Refused parts are named plainly
+ * WITH their reason (DISCLOSED-PARTIAL: one receipt, both sets), grouped by
+ * reason so shared clauses read naturally.
  */
 export function buildCompoundReceiptText(
   outcomes: readonly HandlerOutcome[],
-  refusedLabels: readonly string[],
+  refusals: readonly CompoundPartRefusal[],
 ): string {
   const stripStaleness = (text: string): string =>
     text.endsWith(STALENESS_NARRATIVE)
@@ -85,16 +323,25 @@ export function buildCompoundReceiptText(
     .map((o) => stripStaleness(o.assistant_text).trim())
     .filter((s) => s.length > 0);
   let text = sentences.join(' ');
-  if (refusedLabels.length > 0) {
-    const names =
-      refusedLabels.length === 1
-        ? refusedLabels[0]!
-        : refusedLabels.length === 2
-          ? `${refusedLabels[0]} and ${refusedLabels[1]}`
-          : `${refusedLabels.slice(0, -1).join(', ')} and ${refusedLabels[refusedLabels.length - 1]}`;
-    const factorWord = refusedLabels.length === 1 ? 'that factor' : 'those factors';
-    text = `${text} I couldn't set ${names} — that value isn't valid for ${factorWord}.`.trim();
+
+  if (refusals.length > 0) {
+    // Group by the user-facing clause so identical reasons share a sentence.
+    const groups = new Map<CompoundPartRefusalReason, string[]>();
+    for (const r of refusals) {
+      const key: CompoundPartRefusalReason =
+        r.reason === 'execute_invalid' ? 'value_invalid'
+        : r.reason === 'unit_unresolved' ? 'unit_incompatible'
+        : r.reason;
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(r.label);
+      else groups.set(key, [r.label]);
+    }
+    for (const [reason, labels] of groups) {
+      const plural = labels.length > 1;
+      text = `${text} I couldn't set ${joinNames(labels)} — ${refusalClause(reason, plural)}.`.trim();
+    }
   }
+
   const anyStale = outcomes.some((o) => o.assistant_text.endsWith(STALENESS_NARRATIVE));
   if (anyStale) {
     text = `${text}${STALENESS_NARRATIVE}`;
@@ -102,15 +349,50 @@ export function buildCompoundReceiptText(
   return text;
 }
 
+// ---------------------------------------------------------------------------
+// Chain execution
+// ---------------------------------------------------------------------------
+
+/** Handler-boundary cause kinds that mean "this part's input was invalid" —
+ *  the ONLY errors a part may absorb as a named refusal. Everything else
+ *  (abort, timeout, PLoT transport, commit, graph invariants, plain Errors)
+ *  rethrows so the turn fails as infrastructure, not as the user's fault. */
+const REFUSABLE_EXECUTE_CAUSES: ReadonlySet<string> = new Set([
+  'parameter_invalid_at_execute',
+  'entity_not_found_in_graph',
+  'entity_kind_mismatch_at_execute',
+]);
+
+const REFUSABLE_D1_CODES: ReadonlySet<string> = new Set([
+  'PARAMETER_INVALID',
+  'ENTITY_NOT_FOUND',
+  'ENTITY_KIND_MISMATCH',
+]);
+
+function isRefusablePartError(err: unknown): boolean {
+  if (err instanceof HandlerInvocationFailedError) {
+    return REFUSABLE_EXECUTE_CAUSES.has(err.cause_kind);
+  }
+  // Defence in depth for a handler invoked without its runD1Handler boundary.
+  if (err instanceof D1HandlerError) {
+    return REFUSABLE_D1_CODES.has(err.code);
+  }
+  return false;
+}
+
 export interface CompoundChainParams {
-  /** The primary part's outcome (update[0]), already executed by the lifecycle. */
+  /** The primary part's outcome (first APPROVED part), already executed by
+   *  the ordinary lifecycle. */
   readonly primaryOutcome: HandlerOutcome;
-  /** update[1..] — the remaining parts to apply. */
+  /** The remaining APPROVED parts to apply (preflight-passed). */
   readonly remainingUpdates: readonly CompoundUpdatePart[];
   /** The resolved `set_factor_value` handler fn to invoke per part. */
   readonly handlerFn: HandlerFn;
   /** The user's raw message — used to derive each part's operator. */
   readonly message: string;
+  /** Parts already refused by the batch preflight — folded into the receipt
+   *  so the user sees ONE disclosure naming applied and refused sets. */
+  readonly preflightRefusals?: readonly CompoundPartRefusal[];
   readonly context: EnrichedTurnContext;
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
@@ -127,10 +409,11 @@ export interface CompoundChainResult {
 }
 
 /**
- * Apply the remaining parts of a compound value update by looping the
+ * Apply the remaining approved parts of a compound value update by looping the
  * `set_factor_value` handler, threading the mutated graph part-to-part, and
- * merging the results into the primary outcome. See the module doc for the
- * contract the Gate 2 invariant relies on.
+ * merging the results (and the preflight refusals) into the primary outcome.
+ * See the module doc for the contract the Gate 2 invariant relies on, the
+ * DISCLOSED-PARTIAL batch policy, and the error discipline.
  */
 export async function applyCompoundValueUpdateChain(
   params: CompoundChainParams,
@@ -152,31 +435,15 @@ export async function applyCompoundValueUpdateChain(
     primaryOutcome.mutated_graph !== undefined && primaryOutcome.mutated_graph !== null;
   const chainedFacts: HandlerFact[] = [];
   const appliedOutcomes: HandlerOutcome[] = [];
-  const refusedLabels: string[] = [];
+  const refusals: CompoundPartRefusal[] = [...(params.preflightRefusals ?? [])];
 
   for (const part of remainingUpdates) {
-    const { value: partValue, unit: partUnit } = mapCqeQuantityToProposalValue(part.quantity);
-    const partOperator = deriveOperator(message, part.quantity);
-    const partProposal: ProposalAction = {
-      handler_id: 'set_factor_value',
-      entity: {
-        id: part.candidate.id,
-        kind: 'node',
-        label: part.candidate.label,
-        resolution_status: 'resolved',
-        resolution_method: 'label_match',
-      },
-      parameters: [
-        {
-          name: 'value',
-          value: partUnit !== undefined ? { value: partValue, unit: partUnit } : partValue,
-          operator: partOperator,
-          source: 'user_explicit',
-          ...(partUnit !== undefined ? { unit: partUnit } : {}),
-        },
-      ],
-      cited_context_fields: ['graph.nodes'],
-    };
+    // Error discipline: a turn abort (budget) must stop the batch NOW and
+    // surface as BUDGET_EXCEEDED — never absorb it into a part refusal or
+    // keep executing parts after the turn is dead. Mirrors the executor's
+    // own `turnAbort.signal.aborted` checks around handler invocation.
+    signal.throwIfAborted();
+    const partProposal = buildCompoundPartProposal(part, message);
     try {
       const partOutcome = await handlerFn({
         context,
@@ -194,10 +461,24 @@ export async function applyCompoundValueUpdateChain(
         graphMutated = true;
       }
     } catch (partError) {
-      refusedLabels.push(part.candidate.label);
+      // ONLY typed parameter/entity-invalid errors become named refusals
+      // (defence in depth — the batch preflight already vets every part).
+      // Abort, timeout, and infrastructure errors rethrow: pre-O-1 this
+      // catch swallowed EVERY thrown value as "value invalid", so an
+      // infrastructure fault mid-batch committed the earlier parts and
+      // blamed the user (Codex F12).
+      if (!isRefusablePartError(partError)) {
+        throw partError;
+      }
+      refusals.push({
+        label: part.candidate.label,
+        target_id: part.candidate.id,
+        reason: 'execute_invalid',
+      });
       log.warn(
         {
           event: 'v5.compound_value_update.part_refused',
+          phase: 'execute',
           request_id: requestId,
           scenario_id: scenarioId,
           target_id: part.candidate.id,
@@ -210,7 +491,7 @@ export async function applyCompoundValueUpdateChain(
 
   const combinedReceipt = buildCompoundReceiptText(
     [primaryOutcome, ...appliedOutcomes],
-    refusedLabels,
+    refusals,
   );
   const mergedFacts: readonly HandlerFact[] = [
     ...primaryOutcome.handler_facts,
