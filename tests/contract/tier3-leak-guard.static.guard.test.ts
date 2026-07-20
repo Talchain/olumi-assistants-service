@@ -24,6 +24,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, relative } from 'node:path';
 
+import { stripComments } from '../../scripts/ci/strip-source-comments.mjs';
 import { TIER3_LEAK_BLOCK_FIELDS } from '../../src/orchestrator-v5/compose/claim-safety-cage.js';
 
 const V5_ROOT = fileURLToPath(new URL('../../src/orchestrator-v5', import.meta.url));
@@ -40,16 +41,26 @@ const PRODUCER_DIRS = ['compose', 'coaching', 'routing', 'tools/handlers'] as co
 const SCAN_ROOT_FILES = true;
 
 /**
- * Files allowed to mention a ratified Tier-3 key, relative to
+ * Files allowed to reference a ratified Tier-3 key in CODE, relative to
  * src/orchestrator-v5, each with its classification:
  *   cage        — the claim-safety cage itself / the suppression site
  *   transport   — structured normaliser / adapter; no prose passthrough
  *   structured  — reads the field as a STRUCTURED signal (never quotes
  *                 its values into prose; sanctioned pre-Brief-5 surface,
  *                 escalation of its claim posture is Brief 4 §9's lane)
- *   doc         — comment-only mention
+ *
+ * The scan matches the COMMENT-STRIPPED view of each file
+ * (scripts/ci/strip-source-comments.mjs, the shared literal-aware
+ * tokeniser), so a comment naming a Tier-3 key — documentation, not
+ * consumption — never trips the guard and never needs an entry here. The
+ * former 'doc' classification is retired for exactly that reason, and
+ * files whose mentions were comment-only (coaching/types.ts,
+ * coaching/pick-flip-summary.ts, tools/handlers/explanation-fallback.ts,
+ * response-finaliser.ts — its deny-list lives in claim-safety-cage
+ * imports, not key literals) have left the list; the stale-entry check
+ * below forces that pruning to stay honest.
  */
-const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured' | 'doc'>([
+const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   ['compose/claim-safety-cage.ts', 'cage'],
   ['compose/sanitise-enrichment.ts', 'cage'],
   // flip-proposal + phase3-blocks DO feed user-facing surfaces (the P0.2
@@ -61,13 +72,9 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured' | 'doc'>([
   ['compose/flip-proposal.ts', 'structured'],
   ['compose/phase3-blocks.ts', 'structured'],
   ['coaching/decision-review-enricher.ts', 'transport'],
-  ['coaching/pick-flip-summary.ts', 'structured'],
-  ['coaching/types.ts', 'doc'],
   ['routing/post-analysis-advice-gate.ts', 'structured'],
-  ['tools/handlers/explanation-fallback.ts', 'doc'],
   // Root-level seams (non-recursive root scan):
   ['compose.ts', 'transport'],
-  ['response-finaliser.ts', 'cage'],
 ]);
 
 const TIER3_PATTERN = new RegExp(TIER3_LEAK_BLOCK_FIELDS.join('|'));
@@ -92,7 +99,7 @@ function producerFiles(): Array<{ rel: string; source: string }> {
     for (const abs of walkTsFiles(join(V5_ROOT, dir))) {
       files.push({
         rel: relative(V5_ROOT, abs).split('\\').join('/'),
-        source: readFileSync(abs, 'utf-8'),
+        source: stripComments(readFileSync(abs, 'utf-8')),
       });
     }
   }
@@ -101,7 +108,7 @@ function producerFiles(): Array<{ rel: string; source: string }> {
       const full = join(V5_ROOT, entry);
       if (!statSync(full).isFile()) continue;
       if (!entry.endsWith('.ts') || entry.endsWith('.d.ts') || entry.endsWith('.test.ts')) continue;
-      files.push({ rel: entry, source: readFileSync(full, 'utf-8') });
+      files.push({ rel: entry, source: stripComments(readFileSync(full, 'utf-8')) });
     }
   }
   return files;

@@ -19,6 +19,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, relative } from 'node:path';
 
+import { stripComments } from '../../scripts/ci/strip-source-comments.mjs';
+
 const HELPER_NAME = 'hasReducedSamplesDisclosure';
 
 const SRC_ROOT = fileURLToPath(new URL('../../src', import.meta.url));
@@ -42,10 +44,16 @@ function walkTsFiles(dir: string, out: string[] = []): string[] {
 }
 
 describe('reduced-samples disclosure — single consumption site (claim-safety pin)', () => {
+  // Matching runs on the COMMENT-STRIPPED view (scripts/ci/
+  // strip-source-comments.mjs): a comment naming the helper — e.g. a design
+  // note explaining that presence-testing is capped to run-analysis — is
+  // documentation, not a consumption site, and must not demand a
+  // claim-safety review (the source-scanning-guard footgun,
+  // positive-controlled 2026-07-20).
   const referencingFiles = walkTsFiles(SRC_ROOT)
     .map((abs) => ({
       rel: relative(SRC_ROOT, abs).split('\\').join('/'),
-      source: readFileSync(abs, 'utf-8'),
+      source: stripComments(readFileSync(abs, 'utf-8')),
     }))
     .filter(({ source }) => source.includes(HELPER_NAME));
 

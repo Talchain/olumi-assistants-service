@@ -11,6 +11,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+import { stripComments } from "../../scripts/ci/strip-source-comments.mjs";
 import {
   FALLBACK_ANTHROPIC_MODEL,
   resolveAnthropicModel,
@@ -52,7 +54,11 @@ describe("resolveAnthropicModel (1.79b)", () => {
       "src/adapters/llm/anthropic.ts",
       "src/adapters/llm/extraction.ts",
     ]) {
-      const src = readFileSync(resolve(process.cwd(), file), "utf8");
+      // Comment-stripped view (scripts/ci/strip-source-comments.mjs): a
+      // comment documenting a retired id ("never reinstate model || \"…\"")
+      // is history, not a fallback; the real fallback's id lives in a string
+      // literal, which the stripped view keeps.
+      const src = stripComments(readFileSync(resolve(process.cwd(), file), "utf8"));
       for (const id of RETIRED_IDS) {
         const fallbackPattern = new RegExp(`\\|\\|\\s*['"\`]${id}['"\`]`);
         expect(
