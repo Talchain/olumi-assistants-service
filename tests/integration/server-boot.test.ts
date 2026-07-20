@@ -1,16 +1,20 @@
 /**
- * Server-boot test — verifies the /orchestrate/v2/turn route registration
- * follows the ENABLE_V5_ORCHESTRATOR flag.
+ * Server-boot test — verifies /orchestrate/v2/turn route registration.
  *
- * A1 scope:
- *   - Flag ON → POST /orchestrate/v2/turn is registered (non-404 on a payload)
- *   - Flag OFF → POST /orchestrate/v2/turn returns 404
+ * UNCONDITIONAL since 2026-07-20 (O-7 wave 2: ENABLE_V5_ORCHESTRATOR
+ * deleted). Two pins:
+ *   - the route registrar itself serves the route (direct registration);
+ *   - the REAL `build()` server registers it (this is the make-unconditional
+ *     MUTATION CHECK for server.ts — re-gate the registration behind a
+ *     default-false conditional and the real-server pin goes RED with 404;
+ *     the pre-deletion tests only ever self-simulated the server conditional
+ *     in-test, so they could never catch the real gate).
  *
  * The LLM adapter and prompt loader are mocked so boot exercise doesn't touch
  * a real provider (Paul's constraint 9).
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
 
 const bootMockAdapter = {
@@ -42,10 +46,21 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
     },
   }),
   getMaxTokensFromConfig: () => undefined,
+  // Real-server build() pin: server.ts warms the provider-config cache at boot.
+  warmProviderConfigCache: async () => ({ loaded: false, path: '' }),
 }));
-vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
-  getSystemPrompt: async () => 'test prompt',
-}));
+// importOriginal-spread, NOT a hand-listed mock: the real server's request
+// path also reads isCacheWarmingComplete (and future exports) from this
+// module — a hand-list silently breaks them (proven: the first version of
+// the real-server pin below 500'd in BOTH mutation states, passing
+// vacuously, exactly the derive-don't-mirror trap).
+vi.mock('../../src/adapters/llm/prompt-loader.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/adapters/llm/prompt-loader.js')>();
+  return {
+    ...original,
+    getSystemPrompt: async () => 'test prompt',
+  };
+});
 
 // v5-maintenance: mock session store so commit succeeds without Supabase.
 vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
@@ -61,27 +76,6 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
   SessionReadError: class SessionReadError extends Error {},
 }));
 
-let flagEnabled = true;
-vi.mock('../../src/config/index.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../src/config/index.js')>();
-  return {
-    ...original,
-    config: new Proxy(original.config as object, {
-      get(target, prop) {
-        if (prop === 'features') {
-          return new Proxy(Reflect.get(target, prop) as object, {
-            get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return flagEnabled;
-              return Reflect.get(featTarget, featProp);
-            },
-          });
-        }
-        return Reflect.get(target, prop);
-      },
-    }),
-  };
-});
-
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
 
 const VALID_PAYLOAD = {
@@ -94,18 +88,15 @@ const VALID_PAYLOAD = {
   source: 'composer' as const,
 };
 
-describe('server-boot: /orchestrate/v2/turn registration is flag-gated', () => {
-  beforeEach(() => {
-    flagEnabled = true;
-  });
-
-  it('flag ON: route registered → POST succeeds (200)', async () => {
-    flagEnabled = true;
+// UPDATED 2026-07-20 (O-7 wave 2): ENABLE_V5_ORCHESTRATOR deleted —
+// /orchestrate/v2/turn registration is UNCONDITIONAL in server.ts. The former
+// flag-gated ON/OFF pair (which also self-simulated the server conditional
+// in-test) collapses to the single unconditional registration case.
+describe('server-boot: /orchestrate/v2/turn registration is unconditional', () => {
+  it('route registered → POST succeeds (200)', async () => {
     const app = Fastify();
-    // Mirrors src/server.ts:952-955 flag-gated registration.
-    if (flagEnabled) {
-      await ceeOrchestratorRouteV2(app);
-    }
+    // Mirrors src/server.ts: registration is unconditional.
+    await ceeOrchestratorRouteV2(app);
     await app.ready();
 
     const res = await app.inject({
@@ -117,20 +108,24 @@ describe('server-boot: /orchestrate/v2/turn registration is flag-gated', () => {
     await app.close();
   });
 
-  it('flag OFF: route not registered → 404', async () => {
-    flagEnabled = false;
-    const app = Fastify();
-    if ((flagEnabled as boolean)) {
-      await ceeOrchestratorRouteV2(app);
-    }
+  it('REAL server build(): /orchestrate/v2/turn is registered unconditionally (never 404)', async () => {
+    vi.stubEnv('LLM_PROVIDER', 'fixtures');
+    const { build } = await import('../../src/server.js');
+    const app = await build();
     await app.ready();
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: VALID_PAYLOAD,
-    });
-    expect(res.statusCode).toBe(404);
-    await app.close();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: VALID_PAYLOAD,
+      });
+      // POSITIVE assertion (a not-404 pin proved vacuous — see mock note
+      // above): the mocked adapter/session make a valid turn SUCCEED, so
+      // registration must yield 200; an unregistered route yields 404.
+      expect(res.statusCode).toBe(200);
+    } finally {
+      await app.close();
+      vi.unstubAllEnvs();
+    }
   });
 });

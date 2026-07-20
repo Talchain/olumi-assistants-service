@@ -40,7 +40,6 @@ import {
 } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
   buildFactorScaleMap,
-  extractNumericInterventionValue,
   projectInterventionsToRawScale,
   summariseConversions,
   summaryIsNoteworthy,
@@ -1267,26 +1266,20 @@ export async function loadScenarioSnapshotForRunAnalysis(
     throw new Error(`Could not derive analysis_ready.goal_node_id for scenario ${scenarioId}`);
   }
 
-  // CEE → PLoT value-scale egress net (Tier 0, Phase 1) — flag-gated, default OFF.
+  // CEE → PLoT value-scale egress net (Tier 0, Phase 1) — UNCONDITIONAL since
+  // 2026-07-20 (O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted,
+  // live-true on staging).
   //
   // PLoT consumes intervention input `value` as RAW user-scale and normalises
   // internally using the target factor node's `observed_state.cap` (re-verified
   // clean on PLoT staging `78aea76`, 2026-06-18). CEE historically projected the
   // normalised `[0,1]` convention, which double-normalises capped interventions
-  // (e.g. sends 0.25 where PLoT expects 25000). When `cee.plotEgressScaleNetEnabled`
-  // is ON we canonicalise the OUTBOUND interventions here — the single egress
-  // projection point — via the evidence-gated rule in `plot-intervention-scale.ts`
-  // (no silent corruption, double-conversion-safe). When OFF this is a
-  // byte-identical no-op (the legacy numeric projection). Read-only either way:
-  // the persisted graph is never mutated; only the outbound PLoT projection changes.
-  const options = config.cee.plotEgressScaleNetEnabled
-    ? projectOptionsToRawScale(parsedGraph.data.nodes, readiness.options, requestId, scenarioId)
-    : readiness.options.map((option) => ({
-        id: option.option_id,
-        option_id: option.option_id,
-        label: option.label,
-        interventions: normaliseNumericInterventions(option.interventions),
-      }));
+  // (e.g. sends 0.25 where PLoT expects 25000). We therefore canonicalise the
+  // OUTBOUND interventions here — the single egress projection point — via the
+  // evidence-gated rule in `plot-intervention-scale.ts` (no silent corruption,
+  // double-conversion-safe). Read-only: the persisted graph is never mutated;
+  // only the outbound PLoT projection changes.
+  const options = projectOptionsToRawScale(parsedGraph.data.nodes, readiness.options, requestId, scenarioId);
 
   return {
     graph: parsedGraph.data,
@@ -1367,18 +1360,6 @@ function projectOptionsToRawScale(
   return projected;
 }
 
-// P1-1 (one scale convention): the per-entry rule lives in
-// plot-intervention-scale.ts (`extractNumericInterventionValue`) — the
-// single home of both outbound wire conventions — so the D-ask-1 scaffold
-// derives its neutral wire numbers from the SAME function this loader
-// applies to the configured siblings, instead of mirroring it.
-function normaliseNumericInterventions(
-  interventions: Record<string, unknown>,
-): Record<string, number> {
-  const entries: Array<[string, number]> = [];
-  for (const [factorId, rawValue] of Object.entries(interventions)) {
-    const numeric = extractNumericInterventionValue(rawValue);
-    if (numeric !== null) entries.push([factorId, numeric]);
-  }
-  return Object.fromEntries(entries);
-}
+// normaliseNumericInterventions deleted 2026-07-20 (O-7 wave 2): it was the
+// legacy [0,1]-convention projection used only by the egress-scale-net OFF
+// branch, which no longer exists (the net is unconditional above).

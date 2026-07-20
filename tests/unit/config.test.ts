@@ -50,7 +50,7 @@ describe("Configuration Module", () => {
       expect(config.features.grounding).toBe(false); // conservative default - opt-in for safety
       expect(config.features.critique).toBe(true);
       expect(config.features.clarifier).toBe(true);
-      expect(config.features.piiGuard).toBe(false);
+      expect(config.features.shareReview).toBe(false);
 
       // Performance defaults
       expect(config.performance.metricsEnabled).toBe(true);
@@ -77,7 +77,7 @@ describe("Configuration Module", () => {
       process.env = {
         GROUNDING_ENABLED: "false",
         CRITIQUE_ENABLED: "true",
-        PII_GUARD_ENABLED: "1",
+        SHARE_REVIEW_ENABLED: "1",
         REDIS_TLS: "0",
       };
 
@@ -85,7 +85,7 @@ describe("Configuration Module", () => {
 
       expect(config.features.grounding).toBe(false);
       expect(config.features.critique).toBe(true);
-      expect(config.features.piiGuard).toBe(true);
+      expect(config.features.shareReview).toBe(true);
       expect(config.redis.tls).toBe(false);
     });
   });
@@ -233,7 +233,7 @@ describe("Configuration Module", () => {
         // Features
         GROUNDING_ENABLED: "true",
         CRITIQUE_ENABLED: "true",
-        PII_GUARD_ENABLED: "true",
+        SHARE_REVIEW_ENABLED: "true",
 
         // Redis
         REDIS_URL: "redis://localhost:6379",
@@ -252,7 +252,7 @@ describe("Configuration Module", () => {
       expect(config.auth.assistApiKeys).toEqual(["prod-key-1", "prod-key-2"]);
       expect(config.llm.provider).toBe("anthropic");
       expect(config.llm.model).toBe("claude-3-5-sonnet-20241022");
-      expect(config.features.piiGuard).toBe(true);
+      expect(config.features.shareReview).toBe(true);
       expect(config.redis.url).toBe("redis://localhost:6379");
       expect(config.performance.slowThresholdMs).toBe(45000);
     });

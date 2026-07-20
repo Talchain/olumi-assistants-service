@@ -1,7 +1,7 @@
 /**
  * Shared fixtures for the AI-harness coaching suites — Cap-1 post-analysis
- * loop (`CEE_POST_ANALYSIS_LOOP_ENABLED`) and Cap-2A add-risk rejection
- * guidance (`CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED`).
+ * loop and Cap-2A add-risk rejection guidance (both UNCONDITIONAL since
+ * 2026-07-20 — O-7 wave 2: their flags were deleted, live-true on staging).
  *
  * Extracted from the suites that previously carried diverging copies:
  *   - src/orchestrator-v5/__tests__/turn-executor-post-analysis-loop.integration.test.ts

@@ -199,16 +199,23 @@ function mkPayload(message: string): MessageTurnPayload {
   };
 }
 
-/** Coach tool call with NO answer_text and NO preface text — the STEP 7
- * empty-answer backstop's trigger condition, same as the sibling
- * chip-sameness-guard suite. */
+/** Coach tool call whose answer_text is pure markup sanitising to '' —
+ * non-blank at the RAW layer (satisfies the now-UNCONDITIONAL schema
+ * requirement, O-7 wave 2: CEE_ANSWER_TEXT_REQUIRED deleted; a genuinely
+ * ABSENT answer_text would REPAIR_ONCE instead of composing) — the
+ * empty-answer recovery trigger, same as the sibling chip-sameness-guard
+ * suite. */
 function emptyAnswerCoachToolResult(): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [
     {
       type: 'tool_use',
       id: 'tu-1',
       name: OLUMI_ACTION_TOOL_NAME,
-      input: { intent_class: 'coach', coaching_mode: 'reframe' },
+      input: {
+        intent_class: 'coach',
+        coaching_mode: 'reframe',
+        answer_text: '<internal></internal>',
+      },
     },
   ];
   return {

@@ -2,13 +2,18 @@
  * Coaching Context Pack v1 — turn-executor integration (both coaching branches).
  *
  * Drives the LLM-authored coaching path (text_only → converse) through the real
- * turn-executor with a mocked routing adapter. Proves:
- *   - flag ON + confident directional advice under unsafe state → the wire
+ * turn-executor with a mocked routing adapter. UNCONDITIONAL since 2026-07-20
+ * (O-7 wave 2: CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted, live-true on
+ * staging). Proves:
+ *   - an invented mutation-success claim on a real graph label → the wire
  *     `assistant_text` is DEGRADED to a deterministic safe trust response +
  *     rerun chip, and `v5.coaching.output_postcheck` telemetry fires;
- *   - flag ON + safe prose → unchanged, no telemetry;
- *   - flag OFF → byte-identical to today (LLM prose verbatim, no post-check,
- *     no telemetry) — the activation is a deliberate flag flip.
+ *   - safe prose (incl. pre-analysis directional coaching, the T1/T2 fix) →
+ *     unchanged, no telemetry.
+ * (The former "flag OFF = byte-identical" describe was removed with the
+ * flag: its scenario — pre-analysis directional prose shipping verbatim —
+ * is identical to the pass-through case above, which it silently duplicated
+ * once the T1/T2 fix landed.)
  *
  * The session store is mocked with no facts / no graph, so the canonical
  * freshness verdict is `none` (unsafe). Mirrors
@@ -72,12 +77,6 @@ const BASE_PAYLOAD: MessageTurnPayload = {
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
-function setFlag(on: boolean): void {
-  if (on) vi.stubEnv('CEE_COACHING_CONTEXT_PROMPT_ENABLED', 'true');
-  else vi.stubEnv('CEE_COACHING_CONTEXT_PROMPT_ENABLED', 'false');
-  _resetConfigCache();
-}
-
 beforeEach(() => {
   events = [];
   setTestSink((eventName, data) => events.push({ event: eventName, data }));
@@ -96,7 +95,7 @@ function postcheckEvent(): Event | undefined {
 // byte-identity assertion about the LANE, not the (unchanged) sanitiser.
 const DIRECTIONAL = 'You should choose Option A. It is clearly the best option.';
 
-describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () => {
+describe('turn-executor — Coaching Context Pack v1 post-check (unconditional)', () => {
   it('pre-analysis (none) directional coaching REACHES THE USER, not the canned dead-end (behavioural-retest T1/T2)', async () => {
     // The reported bug: a genuine coaching answer on an early conversational
     // turn (the model WAS invoked — converse branch) was degraded into the
@@ -104,7 +103,6 @@ describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () =
     // state-conditional post-check fired purely on freshness === 'none'.
     // Pre-analysis there is no result to misrepresent, so the model's answer
     // must ship through and the post-check must NOT fire.
-    setFlag(true);
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'what should I do about my decision?' },
       'req-coach-preanalysis-passthrough',
@@ -120,7 +118,6 @@ describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () =
   });
 
   it('passes safe coaching prose through unchanged (no telemetry)', async () => {
-    setFlag(true);
     const safe = 'Here is one way to weigh the trade-off between speed and cost.';
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'help me think about this' },
@@ -154,7 +151,6 @@ describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () =
     // misrepresented result — it must ship through. (Post-analysis, when a
     // stale/unknown/blocked result exists, the label-aware directional degrade
     // still fires — covered by the coaching-output-postcheck unit tests.)
-    setFlag(true);
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'what should I do about my decision?' },
       'req-coach-label-dir',
@@ -165,7 +161,6 @@ describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () =
   });
 
   it('threads the graph’s real factor label: "I updated Pricing" degrades even pre-analysis (always-on rule)', async () => {
-    setFlag(true);
     const { response } = await runTurnExecutor(
       { ...BASE_PAYLOAD, message: 'help me think about this' },
       'req-coach-label-mut',
@@ -176,17 +171,4 @@ describe('turn-executor — Coaching Context Pack v1 post-check (flag ON)', () =
   });
 });
 
-describe('turn-executor — Coaching Context Pack v1 (flag OFF = byte-identical)', () => {
-  it('emits the model prose verbatim and never invokes the post-check', async () => {
-    setFlag(false);
-    const { response } = await runTurnExecutor(
-      { ...BASE_PAYLOAD, message: 'what should I do about my decision?' },
-      'req-coach-flagoff',
-      { routingAdapter: mockRoutingAdapter(DIRECTIONAL) },
-    );
-    // Flag off: the very same confident advice ships unchanged — proving the
-    // activation is a deliberate flag flip, not a merge side-effect.
-    expect(response.assistant_text).toBe(DIRECTIONAL);
-    expect(postcheckEvent()).toBeUndefined();
-  });
-});
+

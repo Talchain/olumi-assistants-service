@@ -40,11 +40,17 @@ const VALID_CLARIFY_INPUT = {
   },
 };
 
-const VALID_CONVERSE_INPUT = { intent_class: 'converse' as const };
+// answer_text is REQUIRED on coach/converse since 2026-07-20 (O-7 wave 2:
+// CEE_ANSWER_TEXT_REQUIRED deleted — the requirement is unconditional).
+const VALID_CONVERSE_INPUT = {
+  intent_class: 'converse' as const,
+  answer_text: 'A complete conversational answer.',
+};
 
 const VALID_COACH_INPUT = {
   intent_class: 'coach' as const,
   coaching_mode: 'challenge' as const,
+  answer_text: 'A complete coaching answer.',
 };
 
 describe('OLUMI_ACTION_TOOL definition', () => {
@@ -326,7 +332,10 @@ describe('parseToolCallResponse', () => {
   });
 
   it('parses a coach response without coaching_mode', () => {
-    const result = parseToolCallResponse({ intent_class: 'coach' });
+    const result = parseToolCallResponse({
+      intent_class: 'coach',
+      answer_text: 'A complete coaching answer.',
+    });
     expect(result.intent_class).toBe('coach');
   });
 
@@ -533,12 +542,9 @@ describe('OLUMI_ACTION_TOOL top-level answer_text field (coach/converse)', () =>
     }
   });
 
-  it('parses a coach response with NO answer_text (backwards-compatible)', () => {
-    const result = parseToolCallResponse(VALID_COACH_INPUT);
-    expect(result.intent_class).toBe('coach');
-    if (result.intent_class === 'coach') {
-      expect(result.answer_text).toBeUndefined();
-    }
+  it('rejects a coach response with NO answer_text (requirement unconditional since 2026-07-20)', () => {
+    const { answer_text: _omitted, ...coachWithout } = VALID_COACH_INPUT;
+    expect(() => parseToolCallResponse(coachWithout)).toThrow(/answer_text is required/);
   });
 
   it('parses a converse response carrying answer_text', () => {
@@ -552,12 +558,9 @@ describe('OLUMI_ACTION_TOOL top-level answer_text field (coach/converse)', () =>
     }
   });
 
-  it('parses a converse response with NO answer_text (backwards-compatible)', () => {
-    const result = parseToolCallResponse(VALID_CONVERSE_INPUT);
-    expect(result.intent_class).toBe('converse');
-    if (result.intent_class === 'converse') {
-      expect(result.answer_text).toBeUndefined();
-    }
+  it('rejects a converse response with NO answer_text (requirement unconditional since 2026-07-20)', () => {
+    const { answer_text: _omitted, ...converseWithout } = VALID_CONVERSE_INPUT;
+    expect(() => parseToolCallResponse(converseWithout)).toThrow(/answer_text is required/);
   });
 
   it('rejects execute carrying answer_text (execute uses action.explanation.answer_text)', () => {

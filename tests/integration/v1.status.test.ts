@@ -114,7 +114,9 @@ describe("GET /v1/status", () => {
     expect(body.feature_flags).toHaveProperty("grounding", true);
     expect(body.feature_flags).toHaveProperty("critique", true);
     expect(body.feature_flags).toHaveProperty("clarifier", true);
-    expect(body.feature_flags).toHaveProperty("pii_guard", false);
+    // pii_guard removed 2026-07-20 (O-7 wave 2, Appendix A4): the flag only
+    // ever fed this report field — no enforcement existed.
+    expect(body.feature_flags).not.toHaveProperty("pii_guard");
     expect(body.feature_flags).toHaveProperty("share_review", true);
     expect(body.feature_flags).toHaveProperty("prompt_cache", true);
   });

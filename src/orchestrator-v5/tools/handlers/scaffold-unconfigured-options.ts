@@ -84,13 +84,15 @@ export interface ScaffoldUnconfiguredInput {
    */
   readonly rawPersistedGraph?: unknown;
   /**
-   * P1-1 (one scale convention): MUST be the same
-   * `config.cee.plotEgressScaleNetEnabled` value the snapshot loader
-   * branched on when it projected the configured siblings' interventions —
-   * the caller (run_analysis, which owns the outbound PLoT payload) passes
-   * the live config read. The scaffold routes its neutral candidates
+   * P1-1 (one scale convention): MUST match the projection the snapshot
+   * loader applied to the configured siblings' interventions. The egress
+   * scale net is UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+   * CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted), so the production caller
+   * (run_analysis, which owns the outbound PLoT payload) pins this true;
+   * the parameter survives as a pure-function input so the OFF-convention
+   * maths stays unit-testable. The scaffold routes its neutral candidates
    * through the SAME projection functions the loader used, so its wire
-   * numbers land in the sibling convention in both flag states.
+   * numbers land in the sibling convention.
    */
   readonly scaleNetEnabled: boolean;
 }

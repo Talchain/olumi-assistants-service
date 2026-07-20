@@ -12,10 +12,12 @@
  * orchestrator resolves to (Sonnet 5 today; unaffected by a revert to a
  * gpt-4o-class model since the adapter interface is uniform).
  *
- * Flag default OFF — see config/index.ts `features.answerTextRequired`.
+ * UNCONDITIONAL since 2026-07-20 (O-7 wave 2: CEE_ANSWER_TEXT_REQUIRED
+ * deleted, live-true on staging). The former flag-OFF no-repair pins were
+ * removed with the flag.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   ChatWithToolsArgs,
@@ -60,36 +62,7 @@ function mkResult(content: ToolResponseBlock[]): ChatWithToolsResult {
   };
 }
 
-let priorFlag: string | undefined;
-
-async function setFlag(value: 'true' | undefined) {
-  priorFlag = process.env.CEE_ANSWER_TEXT_REQUIRED;
-  if (value === undefined) {
-    delete process.env.CEE_ANSWER_TEXT_REQUIRED;
-  } else {
-    process.env.CEE_ANSWER_TEXT_REQUIRED = value;
-  }
-  const { _resetConfigCache } = await import('../../../config/index.js');
-  _resetConfigCache();
-}
-
-async function restoreFlag() {
-  if (priorFlag === undefined) {
-    delete process.env.CEE_ANSWER_TEXT_REQUIRED;
-  } else {
-    process.env.CEE_ANSWER_TEXT_REQUIRED = priorFlag;
-  }
-  const { _resetConfigCache } = await import('../../../config/index.js');
-  _resetConfigCache();
-}
-
-describe('routeWithToolUse — CEE_ANSWER_TEXT_REQUIRED flag ON — REPAIR_ONCE', () => {
-  beforeEach(async () => {
-    await setFlag('true');
-  });
-  afterEach(async () => {
-    await restoreFlag();
-  });
+describe('routeWithToolUse — answer_text required (unconditional) — REPAIR_ONCE', () => {
 
   it('coach tool call omitting answer_text triggers ONE repair call citing the omission, then succeeds', async () => {
     const adapter = {
@@ -205,46 +178,3 @@ describe('routeWithToolUse — CEE_ANSWER_TEXT_REQUIRED flag ON — REPAIR_ONCE'
   });
 });
 
-describe('routeWithToolUse — CEE_ANSWER_TEXT_REQUIRED flag OFF (default) — byte-identical, no repair', () => {
-  beforeEach(async () => {
-    await setFlag(undefined);
-  });
-  afterEach(async () => {
-    await restoreFlag();
-  });
-
-  it('coach tool call with NO answer_text: single call, no repair, proposal parses as before', async () => {
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
-        .mockResolvedValueOnce(mkResult([toolCallBlock({ intent_class: 'coach', coaching_mode: 'reframe' })])),
-    };
-
-    const result = await routeWithToolUse(minimalContextPack(), 'go', {
-      requestId: 'req-flag-off-coach',
-      adapter,
-    });
-
-    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
-    expect(result.type).toBe('tool_call');
-    if (result.type === 'tool_call' && result.proposal.intent_class === 'coach') {
-      expect(result.proposal.answer_text).toBeUndefined();
-    }
-  });
-
-  it('converse tool call with NO answer_text: single call, no repair', async () => {
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
-        .mockResolvedValueOnce(mkResult([toolCallBlock({ intent_class: 'converse' })])),
-    };
-
-    const result = await routeWithToolUse(minimalContextPack(), 'go', {
-      requestId: 'req-flag-off-converse',
-      adapter,
-    });
-
-    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
-    expect(result.type).toBe('tool_call');
-  });
-});

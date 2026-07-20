@@ -373,7 +373,8 @@ const AnalysisStateSummarySchema = z
   .strict();
 
 /**
- * Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED). The
+ * Coaching Context Pack v1 (unconditional since 2026-07-20 — O-7 wave 2:
+ * CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted). The
  * hash-free, prompt-safe projection of the canonical analysis state the LLM
  * may RECEIVE for coaching (never author). Strictly narrower than
  * `AnalysisStateSummarySchema`: closed enums / booleans / one count only — no
@@ -502,11 +503,11 @@ export const ContextPackSchema = z
      */
     analysis_state: AnalysisStateSummarySchema.nullable(),
     /**
-     * Coaching Context Pack v1 (additive, flag-gated by
-     * CEE_COACHING_CONTEXT_PROMPT_ENABLED). Present ONLY when the behaviour
-     * flag is on; absent otherwise (flag-off byte-identity). Unlike
-     * `analysis_state` this projection IS prompt-safe (hash-free), so it is
-     * the only canonical-state surface allowed to reach the LLM.
+     * Coaching Context Pack v1 (additive; unconditional since 2026-07-20 —
+     * O-7 wave 2: CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted). Present
+     * whenever a freshness verdict was derived. Unlike `analysis_state` this
+     * projection IS prompt-safe (hash-free), so it is the only
+     * canonical-state surface allowed to reach the LLM.
      */
     coaching_context: CoachingStatePackSchema.optional(),
     /**

@@ -458,10 +458,12 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   // ── Step 5: (STRP trace merged onto trace variable in Step 9b below) ─────
 
   // ── Step 6: Structural warnings ──────────────────────────────────────────
+  // UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+  // CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED deleted, live-true on staging).
   let draftWarnings: any[] | undefined;
   let confidenceFlags: Record<string, unknown> | undefined;
 
-  if (config.cee.draftStructuralWarningsEnabled) {
+  {
     const structural = detectStructuralWarnings(ctx.graph as any, ctx.structuralMeta);
     if (structural.warnings.length > 0) {
       draftWarnings = structural.warnings;

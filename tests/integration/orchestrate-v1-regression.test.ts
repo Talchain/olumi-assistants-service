@@ -1,15 +1,15 @@
 /**
- * V4 regression smoke — proves V5 slice A0 scaffold does not affect the V4
- * turn path when ENABLE_V5_ORCHESTRATOR is off.
+ * V4 regression smoke — proves the V5 route does not leak V5 artefacts into
+ * the V4 turn path.
  *
- * Scope (intentionally narrow):
- *   - With orchestratorV5 = false, POST /orchestrate/v1/turn returns 200 + a
- *     V4-shaped envelope containing the V4-only top-level fields.
- *   - With orchestratorV5 = false, POST /orchestrate/v2/turn is absent (404).
- *
- * This is a *scaffold* regression guard — it proves the route-v2 seam is not
- * reachable and not interfering. Full response-shape parity lives in the
- * existing route.test.ts / pipeline-integration.test.ts suites.
+ * UPDATED 2026-07-20 (O-7 wave 2): ENABLE_V5_ORCHESTRATOR was deleted and
+ * /orchestrate/v2/turn registration is UNCONDITIONAL in server.ts, so this
+ * suite now registers BOTH routes (the live shape) and asserts the V1 path
+ * still emits no V5 artefacts. The former "v2 absent (404) when flag off"
+ * case was removed with the flag — it was also self-simulating (it
+ * re-implemented the server conditional in-test, so it never exercised the
+ * real gate). Full response-shape parity lives in the existing
+ * route.test.ts / pipeline-integration.test.ts suites.
  */
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
 import Fastify from 'fastify';
@@ -38,7 +38,6 @@ vi.mock('../../src/orchestrator/plot-client.js', async (importOriginal) => {
   };
 });
 
-// V5 flag is OFF — this is the whole point of this test.
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -49,7 +48,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
               if (featProp === 'orchestrator') return true;
-              if (featProp === 'orchestratorV5') return false; // ← the lever
               if (featProp === 'deterministicOrchestratorEnabled') return false;
               if (featProp === 'legacyOrchestratorEnabled') return false;
               return Reflect.get(featTarget, featProp);
@@ -82,18 +80,14 @@ function makeValidV1Request() {
   };
 }
 
-describe('V4 regression smoke (V5 flag OFF)', () => {
+describe('V4 regression smoke (V5 route registered unconditionally)', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
     app = Fastify();
     await ceeOrchestratorRouteV1(app);
-    // Mimic server.ts: only register v2 when the flag is on. Here it's off,
-    // so we deliberately do NOT register. The 404 assertion proves this path.
-    const v5On = false;
-    if (v5On) {
-      await ceeOrchestratorRouteV2(app);
-    }
+    // Mirror server.ts since 2026-07-20: the V5 route is ALWAYS registered.
+    await ceeOrchestratorRouteV2(app);
     await app.ready();
   });
 
@@ -127,12 +121,4 @@ describe('V4 regression smoke (V5 flag OFF)', () => {
     expect(bodyStr).not.toContain('INGRESS_CONTRACT_VIOLATION');
   });
 
-  it('POST /orchestrate/v2/turn is absent (404) when flag is off', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: makeValidV1Request(),
-    });
-    expect(res.statusCode).toBe(404);
-  });
 });

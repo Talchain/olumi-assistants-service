@@ -29,6 +29,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
+import { ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER } from '../../../src/orchestrator/add-risk-rejection-guidance.js';
 import type { FastifyRequest } from 'fastify';
 
 // ────────────────────────────────────────────────────────────────────
@@ -239,7 +240,14 @@ describe('#5c connectivity named-refusal flag seam — the real edit-graph.ts co
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });
 
-  it('flag OFF, same dead-end turn → BYTE-IDENTICAL to today (Lane-22 catalogue copy)', async () => {
+  // FALLBACK PINS UPDATED 2026-07-20 (O-7 wave 2): with the named-refusal
+  // kill-switch OFF, these add-risk-shaped turns now fall back to the
+  // Cap-2A structural guidance, which became UNCONDITIONAL when
+  // CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED was deleted (it was live-true on
+  // staging). The former Lane-22 catalogue copy (OFF_NO_PATH / OFF_ORPHAN)
+  // is no longer reachable for turns the add-risk classifier matches; it
+  // remains the fallback for non-add-risk rejections (cycle case below).
+  it('flag OFF, same dead-end turn → deterministic Cap-2A guidance (unconditional fallback)', async () => {
     setFlag(false);
     const result = await runRejectionTurn(
       'bbbbbb3-0000-4000-8000-000000000003',
@@ -247,11 +255,12 @@ describe('#5c connectivity named-refusal flag seam — the real edit-graph.ts co
       TARGETED_ADD_RISK_OPS,
     );
     expect(llmChatMock).toHaveBeenCalled();
-    expect(result.response.assistant_text).toBe(OFF_NO_PATH);
+    expect(result.response.assistant_text).toBe(ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER);
+    expect(result.response.assistant_text).not.toBe(OFF_NO_PATH);
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });
 
-  it('flag OFF, same compound-orphan turn → BYTE-IDENTICAL to today (Lane-22 catalogue copy)', async () => {
+  it('flag OFF, same compound-orphan turn → deterministic Cap-2A guidance (unconditional fallback)', async () => {
     setFlag(false);
     const result = await runRejectionTurn(
       'bbbbbb4-0000-4000-8000-000000000004',
@@ -259,7 +268,8 @@ describe('#5c connectivity named-refusal flag seam — the real edit-graph.ts co
       ORPHAN_COMPOUND_OPS,
     );
     expect(llmChatMock).toHaveBeenCalled();
-    expect(result.response.assistant_text).toBe(OFF_ORPHAN);
+    expect(result.response.assistant_text).toBe(ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER);
+    expect(result.response.assistant_text).not.toBe(OFF_ORPHAN);
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });
 
