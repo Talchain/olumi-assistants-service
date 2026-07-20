@@ -1180,10 +1180,11 @@ export function buildCommitFailureBoundaryError(params: {
  * the catch block in dispatchDraftGraph).
  *
  * Category source: `buildCeeErrorResponse` in src/cee/validation/pipeline.ts
- * — the canonical field is `body.code`. Eight known CEE codes are emitted
+ * — the canonical field is `body.code`. Ten known CEE codes are emitted
  * across the codebase: CEE_LLM_VALIDATION_FAILED, CEE_TIMEOUT,
- * CEE_LLM_UPSTREAM_ERROR, CEE_RATE_LIMIT, CEE_INTERNAL_ERROR,
- * CEE_GRAPH_INVALID, CEE_VALIDATION_FAILED, CEE_SERVICE_UNAVAILABLE.
+ * CEE_LLM_UPSTREAM_ERROR, CEE_RATE_LIMIT, CEE_COST_CAP,
+ * CEE_BUDGET_EXCEEDED, CEE_INTERNAL_ERROR, CEE_GRAPH_INVALID,
+ * CEE_VALIDATION_FAILED, CEE_SERVICE_UNAVAILABLE.
  */
 export function mapDraftGraphPipelineReason(
   pipelineStatusCode: number,
@@ -1198,7 +1199,18 @@ export function mapDraftGraphPipelineReason(
       return { reason: 'draft_graph_cee_timeout', retryable: true };
     case 'CEE_LLM_UPSTREAM_ERROR':
       return { reason: 'draft_graph_cee_llm_upstream_error', retryable: true };
+    // ── 429 family — one shared wire reason, three distinct causes ───────
+    // CEE_COST_CAP (spend cap) and CEE_BUDGET_EXCEEDED (elapsed-time
+    // deadline) were split out of CEE_RATE_LIMIT on 2026-07-20 so on-call
+    // can tell a throttle from a budget breach. They deliberately share
+    // this case arm: the wire `reason` must stay byte-identical to what
+    // consumers already handle, so the rename is observable in CEE logs
+    // and telemetry only, never on the wire. Pinned by
+    // tests/unit/cee.error-code-taxonomy.test.ts — the raw code is still
+    // available to dashboards via `details.pipeline_error_code`.
     case 'CEE_RATE_LIMIT':
+    case 'CEE_COST_CAP':
+    case 'CEE_BUDGET_EXCEEDED':
       return { reason: 'draft_graph_cee_rate_limit', retryable: true };
     case 'CEE_INTERNAL_ERROR':
       // Pipeline catch-all — likely a true internal bug. Retryable so the user

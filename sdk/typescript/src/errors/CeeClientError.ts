@@ -120,7 +120,14 @@ export class CeeClientError extends Error {
       return null;
     }
 
-    if (this.code === "CEE_RATE_LIMIT" && this.retryAfterSeconds) {
+    // All three 429-family codes honour a server Retry-After. CEE_COST_CAP
+    // in particular carries one (the daily token budget resets).
+    if (
+      (this.code === "CEE_RATE_LIMIT" ||
+        this.code === "CEE_COST_CAP" ||
+        this.code === "CEE_BUDGET_EXCEEDED") &&
+      this.retryAfterSeconds
+    ) {
       return this.retryAfterSeconds * 1000;
     }
 
@@ -153,6 +160,11 @@ function isRetriableCode(code: CeeClientErrorCode): boolean {
     case "CEE_NETWORK_ERROR":
     case "CEE_TIMEOUT":
     case "CEE_RATE_LIMIT":
+    // Both must stay retriable. Before the 2026-07-20 split these arrived as
+    // CEE_RATE_LIMIT and were retriable; omitting them here would silently
+    // flip them to non-retriable via the `default` arm.
+    case "CEE_COST_CAP":
+    case "CEE_BUDGET_EXCEEDED":
     case "CEE_INTERNAL_ERROR":
       return true;
     case "CEE_PROTOCOL_ERROR":
@@ -245,6 +257,8 @@ function isValidCeeClientErrorCode(code: string): code is CeeClientErrorCode {
     "CEE_TIMEOUT",
     "CEE_VALIDATION_FAILED",
     "CEE_RATE_LIMIT",
+    "CEE_COST_CAP",
+    "CEE_BUDGET_EXCEEDED",
     "CEE_INTERNAL_ERROR",
     "CEE_CONFIG_ERROR",
   ].includes(code);

@@ -3196,7 +3196,18 @@ components:
       description: Machine-readable CEE error code
       enum:
         - CEE_TIMEOUT
+        # Requests-per-minute throttle only (src/middleware/rate-limit.ts and
+        # the /assist/v1/* per-feature limiters). Two conditions that used to
+        # share this code were split out on 2026-07-20 — see CEE_COST_CAP and
+        # CEE_BUDGET_EXCEEDED below.
         - CEE_RATE_LIMIT
+        # Money/spend cap: per-request USD cost guard, or the daily token
+        # budget. Retry-later is still meaningful (a daily budget resets), so
+        # these responses keep Retry-After and retryable=true.
+        - CEE_COST_CAP
+        # Elapsed-time deadline breach (RequestBudgetExceededError —
+        # budgetMs/elapsedMs). Neither money nor a rate.
+        - CEE_BUDGET_EXCEEDED
         - CEE_GRAPH_INVALID
         - CEE_GRAPH_CONNECTIVITY_FAILED
         - CEE_VALIDATION_FAILED

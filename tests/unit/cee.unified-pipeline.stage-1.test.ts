@@ -220,14 +220,19 @@ describe("runStageParse", () => {
 
   // ── Cost guard ──────────────────────────────────────────────────────────
 
-  it("returns earlyReturn 429 when cost guard fails", async () => {
+  it("returns earlyReturn 429 with CEE_COST_CAP when cost guard fails", async () => {
     setupMocks({ costGuardFail: true });
     const ctx = makeCtx();
     await runStageParse(ctx);
 
     expect(ctx.earlyReturn).toBeDefined();
     expect(ctx.earlyReturn!.statusCode).toBe(429);
-    expect((ctx.earlyReturn!.body as any).error.code).toBe("CEE_RATE_LIMIT");
+    // Per-request $ cap (allowedCostUSD) — a SPEND cap, not an RPM throttle
+    // and not an elapsed-time deadline. See
+    // tests/unit/cee.error-code-taxonomy.test.ts for the family contract.
+    expect((ctx.earlyReturn!.body as any).error.code).toBe("CEE_COST_CAP");
+    expect((ctx.earlyReturn!.body as any).error.code).not.toBe("CEE_RATE_LIMIT");
+    expect((ctx.earlyReturn!.body as any).error.code).not.toBe("CEE_BUDGET_EXCEEDED");
     expect(mockAdapter.draftGraph).not.toHaveBeenCalled();
   });
 

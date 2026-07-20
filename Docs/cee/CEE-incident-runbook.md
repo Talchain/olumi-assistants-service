@@ -16,8 +16,12 @@ briefs, graphs, or LLM text.
     `/assist/v1/evidence-helper`, `/assist/v1/bias-check`,
     `/assist/v1/sensitivity-coach`, `/assist/v1/team-perspectives`.
 - **Error-code patterns in telemetry**
-  - `CEE_RATE_LIMIT`, `CEE_SERVICE_UNAVAILABLE`, `CEE_TIMEOUT`,
+  - `CEE_RATE_LIMIT`, `CEE_COST_CAP`, `CEE_BUDGET_EXCEEDED`,
+    `CEE_SERVICE_UNAVAILABLE`, `CEE_TIMEOUT`,
     `CEE_VALIDATION_FAILED`, `CEE_GRAPH_INVALID`.
+  - ⚠ The first three all return **HTTP 429** but mean completely different
+    things. Read §3.1 before acting on a 429 spike — the response for each is
+    different and two of them are not about traffic volume at all.
 - **Users frequently seeing caution banners or partial views**
   - UI driven by `CeeUiFlags`:
     - `has_high_risk_envelopes === true` → "use with caution" style banners.
@@ -55,12 +59,28 @@ briefs, graphs, or LLM text.
 
 ## 3. Typical causes and responses
 
-### 3.1 Many `CEE_RATE_LIMIT` errors
+### 3.1 A spike in HTTP `429` — first, work out WHICH 429
 
-**Signal:**
+Three unrelated conditions return 429. Until 2026-07-20 they all shared the
+code `CEE_RATE_LIMIT`, which made a 429 spike unreadable — a draft-timeout
+investigation on that date lost time reading deadline breaches as throttling.
+They are now distinct. **Check `error_code` before you touch any limit.**
 
-- Elevated `cee.*.failed` events with `error_code: "CEE_RATE_LIMIT"`.
-- HTTP `429` on CEE endpoints.
+| `error_code` | Means | It is NOT | Lever |
+|---|---|---|---|
+| `CEE_RATE_LIMIT` | **We are being throttled.** Too many requests per minute for a feature. | Not a spend or time problem. | `CEE_*_RATE_LIMIT_RPM` envs (§3.1.1) |
+| `CEE_COST_CAP` | **We hit a spend cap.** Per-request USD cost guard, or the daily token budget. | Not traffic volume. Raising RPM makes it *worse*. | Cost/budget config (§3.1.2) |
+| `CEE_BUDGET_EXCEEDED` | **We blew a deadline.** A request exceeded its elapsed-time budget. | Not money, not a rate. | Latency + budget ms (§3.1.3) |
+
+All three keep `retryable: true` and a `Retry-After`, so client backoff
+behaviour is identical for each — the difference is entirely in *your*
+response.
+
+#### 3.1.1 `CEE_RATE_LIMIT` — genuine RPM throttle
+
+**Signal:** elevated `cee.*.failed` with `error_code: "CEE_RATE_LIMIT"`.
+Emitted by `src/middleware/rate-limit.ts` and the per-feature guards in
+`src/routes/assist.v1.*.ts` (each returns `retry_after_seconds`).
 
 **Likely causes:**
 
@@ -75,6 +95,62 @@ briefs, graphs, or LLM text.
   gradually increasing the relevant `CEE_*_RATE_LIMIT_RPM` envs.
 - If unplanned, rate-limit at the edge / client and keep CEE limits where they
   are.
+
+#### 3.1.2 `CEE_COST_CAP` — spend cap reached
+
+**Signal:** `error_code: "CEE_COST_CAP"`. Two emitters:
+
+- Per-request USD guard (`allowedCostUSD`,
+  `src/cee/unified-pipeline/stages/parse.ts`), message `"Cost guard exceeded"`.
+  Fires *before* the LLM call, so no spend actually occurred.
+- Daily token budget (`DailyBudgetExceededError`,
+  `src/orchestrator/route.ts`), message `"Daily token budget exceeded"`.
+  `Retry-After` points at the budget reset.
+
+**Likely causes:**
+
+- Genuine budget exhaustion for the day (expected near period end).
+- A cost cap set too low for a newly-enabled larger model — model changes move
+  cost per request without moving request volume.
+- A runaway loop burning budget: check whether spend rose *without* a matching
+  rise in successful turns.
+
+**Response:**
+
+- Do **not** raise RPM limits — traffic is not the constraint, and more
+  throughput burns the remaining budget faster.
+- Confirm which of the two emitters fired (the `message` field distinguishes
+  them) — a per-request guard trip and a daily-quota exhaustion have different
+  fixes.
+- If legitimate demand growth, raise the cost/budget configuration.
+- If a model change preceded this, re-check the per-request cap against the new
+  model's pricing.
+
+#### 3.1.3 `CEE_BUDGET_EXCEEDED` — elapsed-time deadline breach
+
+**Signal:** `error_code: "CEE_BUDGET_EXCEEDED"`, paired with a
+`cee.request_budget.exceeded` log carrying `budget_ms`, `elapsed_ms` and
+`stage`. Thrown by `RequestBudgetExceededError`
+(`src/cee/unified-pipeline/stages/parse.ts`), caught in
+`src/cee/unified-pipeline/index.ts`.
+
+**This is a latency symptom, not a capacity or cost one.** It means the work
+was still in flight when the clock ran out.
+
+**Likely causes:**
+
+- Upstream LLM latency degradation — cross-check `CEE_TIMEOUT` (§3.2), which
+  usually rises alongside.
+- A slow stage: read `stage` and `elapsed_ms` in the log line to see where the
+  budget went.
+- A budget lowered without a matching latency improvement.
+
+**Response:**
+
+- Treat as a latency incident: go to §3.2 and check the provider first.
+- Compare `elapsed_ms` against `budget_ms` — if `elapsed_ms` is only marginally
+  over, the budget may simply be too tight for current p95.
+- Raising RPM or cost caps will do **nothing** for this code.
 
 ### 3.2 Many `CEE_SERVICE_UNAVAILABLE` / `CEE_TIMEOUT`
 
