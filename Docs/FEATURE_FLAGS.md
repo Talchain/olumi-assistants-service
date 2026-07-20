@@ -10,6 +10,16 @@
 > `CEE_DECISION_RECORD_CAPTURE`, `CEE_PRE_DECISION_CHECKS_ENABLED` (dead).
 > Those capabilities are now unconditional — no env var controls them.
 
+> **STRICT BOOLEAN PARSING (O-7 wave 2, PR-A, 2026-07-20).** Every boolean
+> env var is parsed with exact allowlists (case-insensitive, trimmed):
+> `true|1|yes|on` → true · `false|0|no|off|disabled|""` → false · absent →
+> the field default. **Any other value is a startup rejection**
+> (`INVALID_BOOLEAN_ENV`, thrown as `Configuration validation failed:
+> <field>: …`). Before this, every unrecognised non-empty string parsed as
+> TRUE (`off`/`no`/`disabled`/typos silently enabled capabilities).
+> Exception: `CEE_*_THINKING` accepts `enabled` (its own strict parser);
+> `CEE_V5_GRAPH_CAS_MODE` is a three-state mode, not a boolean (see its row).
+
 
 ---
 

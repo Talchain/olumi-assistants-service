@@ -58,20 +58,61 @@ const thinkingMode = z
   });
 
 /**
- * Custom boolean coercion that handles string "false" and "true"
+ * Strict boolean env parsing (O-7 flag-estate wave 2, PR-A).
+ *
+ * Exact allowlists (case-insensitive, whitespace-trimmed):
+ *   TRUE  ⟵ "true" | "1" | "yes" | "on"
+ *   FALSE ⟵ "false" | "0" | "no" | "off" | "disabled" | "" (absent → field default)
+ * Numbers: exactly 1 → true, exactly 0 → false; anything else is rejected.
+ *
+ * Anything else is a NAMED STARTUP REJECTION (`INVALID_BOOLEAN_ENV`, surfaced
+ * as `Configuration validation failed: <field-path>: …`). The pre-fix parser
+ * fell through to `Boolean(val)`, so `off`, `no`, `disabled`, and typos
+ * silently ENABLED capabilities (proven on HEAD: CEE_DEBUG_CATEGORY_TRACE=off
+ * → true; CEE_OBSERVABILITY_RAW_IO=disabled → raw IO capture ON).
+ *
+ * The sets are deliberately asymmetric ("disabled" parses false; "enabled"
+ * is NOT a recognised true): strings operators use to mean OFF are the exact
+ * class the old fallback inverted, so they must parse false; unknown
+ * probably-true strings fail loud instead of guessing, because guessing-true
+ * IS the defect class this fix removes. Do not widen either set without
+ * updating tests/unit/config.boolean-strict.test.ts and FEATURE_FLAGS docs.
  */
+const BOOLEAN_TRUE_STRINGS = new Set(["true", "1", "yes", "on"]);
+const BOOLEAN_FALSE_STRINGS = new Set(["false", "0", "no", "off", "disabled", ""]);
+
+/**
+ * Returns the parsed boolean, or `{ error }` when the value is in neither
+ * allowlist. Callers surface the error via `ctx.addIssue` so the Zod issue
+ * path names the offending config field.
+ */
+function parseStrictBoolean(val: boolean | string | number): boolean | { error: string } {
+  if (typeof val === "boolean") return val;
+  if (typeof val === "number") {
+    if (val === 1) return true;
+    if (val === 0) return false;
+    return {
+      error: `INVALID_BOOLEAN_ENV: unrecognised numeric boolean ${val}. Use 1 (true) or 0 (false).`,
+    };
+  }
+  const lower = val.toLowerCase().trim();
+  if (BOOLEAN_FALSE_STRINGS.has(lower)) return false;
+  if (BOOLEAN_TRUE_STRINGS.has(lower)) return true;
+  return {
+    error:
+      `INVALID_BOOLEAN_ENV: unrecognised boolean value ${JSON.stringify(val)}. ` +
+      `Accepted (case-insensitive): true|1|yes|on for true; ` +
+      `false|0|no|off|disabled|"" for false.`,
+  };
+}
+
 const booleanString = z
   .union([z.boolean(), z.string(), z.number()])
-  .transform((val) => {
-    if (typeof val === "boolean") return val;
-    if (typeof val === "number") return val !== 0;
-    if (typeof val === "string") {
-      const lower = val.toLowerCase().trim();
-      if (lower === "false" || lower === "0" || lower === "") return false;
-      if (lower === "true" || lower === "1") return true;
-      return Boolean(val); // fallback
-    }
-    return Boolean(val);
+  .transform((val, ctx) => {
+    const parsed = parseStrictBoolean(val);
+    if (typeof parsed === "boolean") return parsed;
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error });
+    return z.NEVER;
   });
 
 /**
@@ -95,20 +136,21 @@ function createEnvEnforcedBoolean(
 ) {
   return z
     .union([z.boolean(), z.string(), z.number(), z.undefined()])
-    .transform((val) => {
+    .transform((val, ctx) => {
       const env = getRuntimeEnv();
 
-      // Parse the requested value using booleanString logic
+      // Parse the requested value with the SAME strict allowlists as
+      // booleanString (O-7 PR-A). Security-sensitive flags must not be more
+      // permissive than ordinary ones: pre-fix, the repeated inline fallback
+      // meant CEE_OBSERVABILITY_RAW_IO=disabled turned raw IO capture ON.
       let requestedValue = defaultValue;
       if (val !== undefined) {
-        if (typeof val === "boolean") requestedValue = val;
-        else if (typeof val === "number") requestedValue = val !== 0;
-        else if (typeof val === "string") {
-          const lower = val.toLowerCase().trim();
-          if (lower === "false" || lower === "0" || lower === "") requestedValue = false;
-          else if (lower === "true" || lower === "1") requestedValue = true;
-          else requestedValue = Boolean(val);
+        const parsed = parseStrictBoolean(val);
+        if (typeof parsed !== "boolean") {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error });
+          return z.NEVER;
         }
+        requestedValue = parsed;
       }
 
       // Prod: always false, warn if override attempted
