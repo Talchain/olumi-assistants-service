@@ -86,6 +86,10 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       // UI-SEM-077). Approved surface change — 0.19.0 wave-2 contract wave.
       'decision_classification',
       'draft_graph',
+      // 0.20.0-new: producer-owned framing readiness (`ready | thin |
+      // conflict`). `conflict` displaces the UI's client-side `blocked`
+      // heuristic — the UI retires that derivation on consumption.
+      'framing_quality',
       // 0.19.0-new: explicit producer framing question (wave-2 ask 4,
       // UI-SEM-078 — retires the UI's client-side derivation).
       'framing_question',
@@ -106,6 +110,7 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
     expect(optionality('reasoning')).toBe(true)
     expect(optionality('framing_question')).toBe(true)
     expect(optionality('decision_classification')).toBe(true)
+    expect(optionality('framing_quality')).toBe(true)
     expect(optionality('assistant_text')).toBe(false)
     expect(optionality('blocks')).toBe(false)
   })
@@ -183,6 +188,13 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'graph_hash_at_generation',
       'priority',
       'priority_rank',
+      // 0.20.0-new (ROADMAP 1.120 residual): `signal` = short human-readable
+      // signal text (140-char WIRE bound, not a layout contract);
+      // `signal_code` = STABLE machine-readable detector CLASS
+      // (SCREAMING_SNAKE_CASE by doc convention, open string in schema).
+      // Distinct from `signal_id`, which identifies the INSTANCE.
+      'signal',
+      'signal_code',
       'signal_id',
       'source',
       'source_handler',
@@ -207,6 +219,9 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'priority',
       'priority_rank',
       'severity',
+      // 0.20.0-new (ROADMAP 1.120 residual).
+      'signal',
+      'signal_code',
       'signal_id',
       'source_handler',
       'target_refs',
@@ -233,6 +248,9 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'priority',
       'priority_rank',
       'severity',
+      // 0.20.0-new (ROADMAP 1.120 residual).
+      'signal',
+      'signal_code',
       'signal_id',
       'source_handler',
       'suggested_technique',
@@ -256,6 +274,9 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'priority',
       'reference_class',
       'review_trigger',
+      // 0.20.0-new (ROADMAP 1.120 residual).
+      'signal',
+      'signal_code',
       'signal_id',
       'source_handler',
       'target_element_ref',
