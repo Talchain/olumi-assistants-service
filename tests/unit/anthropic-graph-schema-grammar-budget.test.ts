@@ -292,15 +292,17 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — grammar-size budget", () => {
   });
 });
 
-// ── v10 (2026-07-18): flag-dark topology_plan omission ──────────────────
-// The candidate is a zero-reader field the grammar was forcing the model to
-// emit against the served prompt's explicit instruction. These tests pin BOTH
-// arms: flag-off must be provably unchanged, flag-on must actually remove the
-// key AND must not spend an optional-parameter slot (v9 left only one).
-describe("v10 — buildDraftGraphSchema({ omitTopologyPlan })", () => {
+// ── v11 (2026-07-21): UNCONDITIONAL topology_plan omission ──────────────
+// topology_plan is a zero-reader field the grammar was forcing the model to
+// emit against the served prompt's explicit instruction. v10 shipped this
+// behind CEE_DRAFT_OMIT_TOPOLOGY_PLAN (default false); v11 deletes the flag
+// and makes omission unconditional (no-dark-launches). buildDraftGraphSchema()
+// now always removes the key AND must not spend an optional-parameter slot.
+describe("v11 — buildDraftGraphSchema() (unconditional topology_plan omission)", () => {
   it("ANCHOR: topology_plan is a property of the base schema", () => {
-    // Guards the builder against becoming a silent no-op if the field is
-    // ever renamed — without this, flag-on would look enabled and do nothing.
+    // Guards the builder against becoming a silent no-op if the field is ever
+    // renamed — without this, the builder would look correct and do nothing,
+    // leaking topology_plan back into the grammar.
     expect(
       Object.keys(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties),
     ).toContain("topology_plan");
@@ -309,63 +311,61 @@ describe("v10 — buildDraftGraphSchema({ omitTopologyPlan })", () => {
     ).toContain("topology_plan");
   });
 
-  it("flag OFF returns the v9 object BY IDENTITY (wire schema byte-identical)", () => {
-    expect(buildDraftGraphSchema()).toBe(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
-    expect(buildDraftGraphSchema({})).toBe(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
-    expect(buildDraftGraphSchema({ omitTopologyPlan: false })).toBe(
-      ANTHROPIC_DRAFT_GRAPH_SCHEMA,
-    );
-  });
-
-  it("flag ON removes topology_plan from properties AND required", () => {
-    const v10 = buildDraftGraphSchema({ omitTopologyPlan: true });
-    expect(Object.keys(v10.properties)).not.toContain("topology_plan");
-    expect(v10.required).not.toContain("topology_plan");
+  it("ALWAYS removes topology_plan from properties AND required", () => {
+    const v11 = buildDraftGraphSchema();
+    expect(Object.keys(v11.properties)).not.toContain("topology_plan");
+    expect(v11.required).not.toContain("topology_plan");
     // additionalProperties:false is what makes the key UNEMITTABLE rather
     // than merely not-required — the whole point of removing over demoting.
-    expect(v10.additionalProperties).toBe(false);
+    expect(v11.additionalProperties).toBe(false);
   });
 
-  it("flag ON changes NOTHING else — every other key and required entry survives", () => {
-    const v10 = buildDraftGraphSchema({ omitTopologyPlan: true });
+  it("does NOT return the base object by identity (the key is dropped, so the shapes differ)", () => {
+    // v10's flag-off path returned the base object by identity; v11 always
+    // derives a topology-omitted variant, so it is never the base object.
+    expect(buildDraftGraphSchema()).not.toBe(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
+  });
+
+  it("changes NOTHING else — every other key and required entry survives", () => {
+    const v11 = buildDraftGraphSchema();
     const baseProps = Object.keys(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)
       .filter((k) => k !== "topology_plan")
       .sort();
-    expect(Object.keys(v10.properties).sort()).toEqual(baseProps);
+    expect(Object.keys(v11.properties).sort()).toEqual(baseProps);
 
     const baseReq = (ANTHROPIC_DRAFT_GRAPH_SCHEMA as { required: string[] }).required
       .filter((k) => k !== "topology_plan")
       .sort();
-    expect(v10.required.slice().sort()).toEqual(baseReq);
+    expect(v11.required.slice().sort()).toEqual(baseReq);
 
     // The other two stringified aux fields must be untouched: they DO have
     // real CEE readers (coaching.bias_signals[*].detail reaches user-visible
     // assistant_text; causal_claims feeds graph-validator).
-    expect(Object.keys(v10.properties)).toContain("coaching");
-    expect(Object.keys(v10.properties)).toContain("causal_claims");
-    expect(v10.required).toContain("coaching");
-    expect(v10.required).toContain("causal_claims");
+    expect(Object.keys(v11.properties)).toContain("coaching");
+    expect(Object.keys(v11.properties)).toContain("causal_claims");
+    expect(v11.required).toContain("coaching");
+    expect(v11.required).toContain("causal_claims");
   });
 
-  it("flag ON spends NO optional-parameter slot and shrinks the grammar", () => {
-    const v10 = buildDraftGraphSchema({ omitTopologyPlan: true });
+  it("spends NO optional-parameter slot and shrinks the grammar", () => {
+    const v11 = buildDraftGraphSchema();
     // Removing a REQUIRED property cannot add optional params. Demoting it to
     // optional would have — v9 left exactly one slot (23 of 24).
-    expect(countOptionalParams(v10)).toBe(
+    expect(countOptionalParams(v11)).toBe(
       countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA),
     );
-    expect(countOptionalParams(v10)).toBeLessThanOrEqual(ANTHROPIC_OPTIONAL_PARAM_LIMIT);
+    expect(countOptionalParams(v11)).toBeLessThanOrEqual(ANTHROPIC_OPTIONAL_PARAM_LIMIT);
     // Union budget untouched (topology_plan was a plain string, not a union).
-    expect(countUnionParams(v10)).toBe(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
+    expect(countUnionParams(v11)).toBe(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
     // Grammar-size budget strictly improves.
-    expect(JSON.stringify(v10).length).toBeLessThan(
+    expect(JSON.stringify(v11).length).toBeLessThan(
       JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA).length,
     );
   });
 
-  it("flag ON does not mutate the shared base schema", () => {
+  it("does not mutate the shared base schema", () => {
     const before = JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
-    buildDraftGraphSchema({ omitTopologyPlan: true });
+    buildDraftGraphSchema();
     expect(JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA)).toBe(before);
   });
 });

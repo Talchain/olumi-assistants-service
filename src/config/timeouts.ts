@@ -575,6 +575,30 @@ export function getDraftLlmRetryBudgetMs(elapsedMs: number): number {
   );
 }
 
+/**
+ * Output-token demand floor a LEAN corrective draft must be able to afford
+ * before the lean-retry backstop (parse.ts Step 7) is allowed to fire.
+ *
+ * The backstop fires ONE corrective retry when the first draft truncates at
+ * max_tokens, appending a directive that cuts output-token demand ("primary
+ * trade-off only, ≤18 nodes, numbers qualitative"). The controlled probes that
+ * motivated it (S-AUDIT-2026-07-20 V2/V3/V4c — the runaway brief with EITHER
+ * the numeric verbosity OR the multi-alternative comparison removed) landed
+ * lean drafts at 4,065 / 4,141 / 4,220 output tokens. This floor sits just
+ * above that observed lean demand: it is the smallest budget in which a lean
+ * draft is likely to COMPLETE. Budget honesty (2026-07-20 RCA class): a retry
+ * launched into a window that cannot afford even a lean draft only burns a
+ * second generation on a result guaranteed to truncate again or be discarded
+ * by the Step-11 budget guard — so the gate fails fast with the existing typed
+ * truncation error instead.
+ *
+ * Paired with `getAffordableDraftTokens(getDraftLlmRetryBudgetMs(elapsed))`:
+ * the remaining window must afford at least this many tokens at the derived
+ * throughput floor. NOT env-gated (no new flags — the constant is derived from
+ * the measured lean-draft distribution, not tuned per deployment).
+ */
+export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 4_500;
+
 // ---------------------------------------------------------------------------
 // SSE heartbeat & resume polling
 // ---------------------------------------------------------------------------

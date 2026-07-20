@@ -97,6 +97,27 @@ export const STRENGTH_DEFAULT_RETRY_NUDGE =
   "mechanism's strength. Revisit each causal relationship in this decision and assign strengths " +
   "that reflect the specific mechanism described in the brief.";
 
+/**
+ * Directive appended to the user message when the lean-retry backstop fires
+ * (parse.ts Step 7). The first draft was cut off at the output-token budget
+ * (stop_reason=max_tokens) because it committed to a graph too large to finish
+ * — a demand-exceeds-budget failure, not a vague-brief failure. This directive
+ * reduces output-token DEMAND so the corrective retry fits the remaining
+ * budget: the S-AUDIT-2026-07-20 probes proved that removing either the
+ * per-attribute numeric verbosity or the multi-alternative cross-product
+ * collapses the runaway to ~4,100 tokens. It asks for the primary trade-off
+ * only, a hard node ceiling, and qualitative treatment of all but the decisive
+ * numeric guardrails.
+ */
+export const DRAFT_LEAN_RETRY_DIRECTIVE =
+  "IMPORTANT: Your previous draft was too large to complete and was cut off. " +
+  "Draft the PRIMARY trade-off only: at most 18 nodes. Keep only the 2-3 " +
+  "decisive numeric guardrails as explicit numbers; express every other number " +
+  "qualitatively (e.g. 'high', 'moderate', 'low') rather than as a precise value. " +
+  "Model the single most important decision and the options directly compared in " +
+  "it; leave secondary options, background factors, and less-critical risks out of " +
+  "the graph. A smaller graph that finishes is far better than a large one that does not.";
+
 // Re-export additional thresholds from shared package for direct use
 export {
   STRENGTH_DEFAULT_THRESHOLD,
