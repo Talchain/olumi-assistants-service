@@ -65,8 +65,8 @@ importers:
         specifier: ^2.90.1
         version: 2.90.1
       '@talchain/schemas':
-        specifier: file:./vendor/talchain-schemas-0.18.0.tgz
-        version: file:vendor/talchain-schemas-0.18.0.tgz
+        specifier: file:./vendor/talchain-schemas-0.19.0.tgz
+        version: file:vendor/talchain-schemas-0.19.0.tgz
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
@@ -2173,9 +2173,9 @@ packages:
     resolution: {integrity: sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w==}
     engines: {node: '>=10'}
 
-  '@talchain/schemas@file:vendor/talchain-schemas-0.18.0.tgz':
-    resolution: {integrity: sha512-zSysC4JAIrFPry9RSKnRtNX4+/D7glWv5YnNR/IFLhdGri+cFoJVwVWe0lznoXvTYRFlkVQSlbQvnntZr8g6xA==, tarball: file:vendor/talchain-schemas-0.18.0.tgz}
-    version: 0.18.0
+  '@talchain/schemas@file:vendor/talchain-schemas-0.19.0.tgz':
+    resolution: {integrity: sha512-OyLQ3hRj4zUQoog1bGHGRoqygKuZZiqCvpUxB7HdvcjPzGSw0CqXj7Sbg5Tw4+FUf7zEYU8vzw4cpY9WZdbqHw==, tarball: file:vendor/talchain-schemas-0.19.0.tgz}
+    version: 0.19.0
     engines: {node: '>=18.0.0'}
 
   '@types/archiver@7.0.0':
@@ -7885,7 +7885,7 @@ snapshots:
     dependencies:
       defer-to-connect: 2.0.1
 
-  '@talchain/schemas@file:vendor/talchain-schemas-0.18.0.tgz':
+  '@talchain/schemas@file:vendor/talchain-schemas-0.19.0.tgz':
     dependencies:
       zod: 3.25.76
 

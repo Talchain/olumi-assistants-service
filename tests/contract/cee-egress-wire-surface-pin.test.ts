@@ -82,7 +82,13 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       'analysis_ready',
       'assistant_text',
       'blocks',
+      // 0.19.0-new: producer decision classification (wave-2 ask 5,
+      // UI-SEM-077). Approved surface change — 0.19.0 wave-2 contract wave.
+      'decision_classification',
       'draft_graph',
+      // 0.19.0-new: explicit producer framing question (wave-2 ask 4,
+      // UI-SEM-078 — retires the UI's client-side derivation).
+      'framing_question',
       'insights',
       // 0.15.0-new: optional top-level reasoning (formalises the _reasoning
       // wire sidecar). Approved surface change — 0.15.0 contract wave.
@@ -98,6 +104,8 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
     expect(optionality('draft_graph')).toBe(true)
     expect(optionality('analysis_ready')).toBe(true)
     expect(optionality('reasoning')).toBe(true)
+    expect(optionality('framing_question')).toBe(true)
+    expect(optionality('decision_classification')).toBe(true)
     expect(optionality('assistant_text')).toBe(false)
     expect(optionality('blocks')).toBe(false)
   })
@@ -165,10 +173,15 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'action_label',
       'block_id',
       'body',
+      // 0.19.0-new (wave-2 ask 1, UI-SEM-085): producer-owned guidance
+      // class + coarse urgency score, previously UI-invented on 10/10
+      // live blocks.
+      'category',
       'coaching_kind',
       'created_at',
       'freshness',
       'graph_hash_at_generation',
+      'priority',
       'priority_rank',
       'signal_id',
       'source',
@@ -186,9 +199,12 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'block_id',
       'body',
       'card_kind',
+      // 0.19.0-new (wave-2 ask 1, UI-SEM-085).
+      'category',
       'created_at',
       'freshness',
       'graph_hash_at_generation',
+      'priority',
       'priority_rank',
       'severity',
       'signal_id',
@@ -204,6 +220,8 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'action_intent',
       'action_label',
       'block_id',
+      // 0.19.0-new (wave-2 ask 1, UI-SEM-085).
+      'category',
       'created_at',
       'current_confidence',
       'evidence_gap',
@@ -212,6 +230,7 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'freshness',
       'graph_hash_at_generation',
       'impact_if_gathered',
+      'priority',
       'priority_rank',
       'severity',
       'signal_id',
@@ -225,6 +244,8 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
   it('pins ExerciseBlockSchema keys', () => {
     expect(shapeKeys(ExerciseBlockSchema)).toEqual([
       'block_id',
+      // 0.19.0-new (wave-2 ask 1, UI-SEM-085).
+      'category',
       'counter_case',
       'created_at',
       'exercise_kind',
@@ -232,6 +253,7 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'freshness',
       'graph_hash_at_generation',
       'mitigation',
+      'priority',
       'reference_class',
       'review_trigger',
       'signal_id',
@@ -245,8 +267,10 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
 })
 
 describe('affordance pins (chips-on-the-wire)', () => {
-  it('pins ActionSchema keys — suggested_actions[] carries action_type (0.5.0+)', () => {
-    expect(shapeKeys(ActionSchema)).toEqual(['action_type', 'id', 'label', 'message'])
+  it('pins ActionSchema keys — action_type (0.5.0+) + detail (0.19.0, wave-2 ask 20)', () => {
+    // `detail` carries the FULL producer text behind a SHORT `label` —
+    // the held-proposal confirm-chip split (see compose/held-proposal.ts).
+    expect(shapeKeys(ActionSchema)).toEqual(['action_type', 'detail', 'id', 'label', 'message'])
   })
 
   it('pins ChipSchema keys (0.13.0 export, not yet rendered by the UI)', () => {

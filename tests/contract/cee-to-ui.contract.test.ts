@@ -133,7 +133,6 @@ describe("CEE→UI: keep-list projection (real compose.ts toSafeTransportEnrichm
       "_meta",
       "meta",
       "downstream_calls",
-      "decision_brief",
       "fact_objects",
       "critiques",
     ]) {
@@ -141,6 +140,29 @@ describe("CEE→UI: keep-list projection (real compose.ts toSafeTransportEnrichm
         droppedKey,
       );
     }
+  });
+
+  // Wave-2 ask 3 (0.19.0): decision_brief joined the keep-list — the UI's
+  // leader-band consumer (DGAI #291/#292) shipped contract-pinned and never
+  // fired because this key was stripped. The lineage-leak reason for the
+  // original omission is the mutation-check built into this test: the
+  // PERSISTED staging capture really carries `seed` and `graph_hash` inside
+  // the brief (asserted below as positive controls), so if
+  // stripInternalKeysDeep ever stops discriminating, the not-shipped
+  // assertions go red.
+  it("ships decision_brief WITH its internal lineage stripped (0.19.0, through the REAL projection)", () => {
+    const persistedBrief = persisted.decision_brief as Record<string, unknown>;
+    // Positive controls — the source really carries the internal keys.
+    expect(persistedBrief).toHaveProperty("seed");
+    expect(persistedBrief).toHaveProperty("graph_hash");
+    // The real projection ships the brief…
+    const shipped = projected.decision_brief as Record<string, unknown>;
+    expect(shipped).toBeDefined();
+    expect(shipped.headline).toBe(persistedBrief.headline);
+    expect(shipped.options).toEqual(persistedBrief.options);
+    // …minus the internal carriers, at any depth.
+    expect(shipped).not.toHaveProperty("seed");
+    expect(shipped).not.toHaveProperty("graph_hash");
   });
 });
 
@@ -154,7 +176,11 @@ describe("CEE→UI: keep-list membership pins", () => {
     expect(CEE_UI_ENRICHMENT_KEEP_LIST).not.toContain("m1_coaching");
   });
 
-  it("keep-list is exactly the CEE compose.ts P0B list (11 keys)", () => {
-    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(11);
+  it("decision_brief is keep-listed (0.19.0, wave-2 ask 3)", () => {
+    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toContain("decision_brief");
+  });
+
+  it("keep-list is exactly the CEE compose.ts P0B list (12 keys)", () => {
+    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(12);
   });
 });
