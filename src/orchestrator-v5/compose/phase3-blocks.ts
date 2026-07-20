@@ -85,6 +85,10 @@ import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js
 import { deterministicBlockId } from './block-id.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
+import {
+  guidanceSignalsForCoachingKind,
+  severityWithSignals,
+} from './guidance-signals.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
 
@@ -602,6 +606,8 @@ export function buildCoachingBlocks(
         source: 'decision_review' as const,
         target_refs: [] as readonly TargetRef[],
         priority_rank: 100 + idx, // coaching ranks deprioritised vs review cards
+        // Wave-2 ask 1 (0.19.0): producer-owned guidance signals.
+        ...guidanceSignalsForCoachingKind('assumption_check'),
         action_intent: 'confirm_factor' as ActionIntentLiteral,
         action_label: truncate('Confirm this assumption', ACTION_LABEL_MAX),
       };
@@ -645,6 +651,7 @@ export function buildCoachingBlocks(
         source: 'decision_review' as const,
         target_refs: [] as readonly TargetRef[],
         priority_rank: 200 + idx,
+        ...guidanceSignalsForCoachingKind('calibration_prompt'),
         action_intent: 'start_guided_chat' as ActionIntentLiteral,
         action_label: truncate('Try this prompt', ACTION_LABEL_MAX),
       };
@@ -768,7 +775,9 @@ export function buildEvidenceBlocks(
       suggested_technique: suggestedTechnique,
       impact_if_gathered: truncate(impact, BODY_MAX),
       priority_rank: rank,
-      severity,
+      // Wave-2 ask 1 (0.19.0): severity + derived category/priority from one
+      // argument, so they can never disagree.
+      ...severityWithSignals(severity),
       action_intent: 'gather_evidence' as ActionIntentLiteral,
       action_label: truncate('Strengthen this evidence', ACTION_LABEL_MAX),
     };
@@ -821,6 +830,10 @@ export function buildStaleRerunCoachingBlock(
     source: 'decision_review' as const,
     target_refs: [] as readonly TargetRef[],
     priority_rank: 1,
+    // Wave-2 ask 1 (0.19.0). Also the honest filter signal for the UI's
+    // framing slot: a should_fix orientation nudge is housekeeping, never a
+    // framing question (the UI-SEM-078 leak class).
+    ...guidanceSignalsForCoachingKind('orientation'),
     action_intent: 'rerun_analysis' as ActionIntentLiteral,
     action_label: truncate('Re-run analysis', ACTION_LABEL_MAX),
   };
@@ -866,7 +879,7 @@ function buildNarrativeCard(
     card_kind: 'narrative' as const,
     title: truncate('How the analysis reads', TITLE_MAX),
     body,
-    severity: 'info' as Phase3BlockSeverityLiteral,
+    ...severityWithSignals('info'),
     target_refs: [] as readonly TargetRef[],
     priority_rank: 10,
   };
@@ -988,7 +1001,7 @@ function buildPreMortemCard(
     card_kind: 'pre_mortem' as const,
     title: truncate('If things go wrong', TITLE_MAX),
     body: truncate(standaloneBody, BODY_MAX),
-    severity: 'warning' as Phase3BlockSeverityLiteral,
+    ...severityWithSignals('warning'),
     target_refs: targetRefs,
     priority_rank: 20,
     action_intent: 'run_pre_mortem' as ActionIntentLiteral,
@@ -1050,7 +1063,7 @@ function buildFlipThresholdCards(
       card_kind: 'flip_threshold' as const,
       title: truncate(`What would flip the result on ${ref.label}`, TITLE_MAX),
       body: truncate(narrative, BODY_MAX),
-      severity: 'warning' as Phase3BlockSeverityLiteral,
+      ...severityWithSignals('warning'),
       target_refs: [ref] as readonly TargetRef[],
       priority_rank: 30 + idx,
       action_intent: 'what_would_flip' as ActionIntentLiteral,
@@ -1102,7 +1115,7 @@ function buildBiasCards(
       card_kind: 'bias' as const,
       title: truncate(`Something to check: ${humaniseBiasType(biasType)}`, TITLE_MAX),
       body: truncate(description, BODY_MAX),
-      severity: 'warning' as Phase3BlockSeverityLiteral,
+      ...severityWithSignals('warning'),
       target_refs: targetRefs,
       priority_rank: 40 + idx,
       action_intent: 'gather_evidence' as ActionIntentLiteral,
@@ -1139,7 +1152,7 @@ function buildRobustnessCard(
     card_kind: 'robustness' as const,
     title: truncate('How robust is this?', TITLE_MAX),
     body: truncate(summary, BODY_MAX),
-    severity: (primaryRisk.length > 0 ? 'warning' : 'info') as Phase3BlockSeverityLiteral,
+    ...severityWithSignals(primaryRisk.length > 0 ? 'warning' : 'info'),
     target_refs: [] as readonly TargetRef[],
     priority_rank: 50,
   };
@@ -1184,7 +1197,7 @@ function buildEvidencePriorityCard(
       card_kind: 'evidence_priority' as const,
       title: truncate(`Highest-leverage evidence gap: ${ref.label}`, TITLE_MAX),
       body: truncate(rationale, BODY_MAX),
-      severity: 'info' as Phase3BlockSeverityLiteral,
+      ...severityWithSignals('info'),
       target_refs: [ref],
       priority_rank: 60,
       action_intent: 'gather_evidence' as ActionIntentLiteral,
@@ -1227,7 +1240,7 @@ function buildAssumptionCards(
       card_kind: 'assumption' as const,
       title: truncate('A load-bearing assumption', TITLE_MAX),
       body: truncate(text, BODY_MAX),
-      severity: 'info' as Phase3BlockSeverityLiteral,
+      ...severityWithSignals('info'),
       target_refs: [] as readonly TargetRef[],
       priority_rank: 70 + idx,
     };
@@ -1302,7 +1315,7 @@ function buildScenarioContextCards(
       card_kind: 'scenario_context' as const,
       title: truncate('A scenario worth considering', TITLE_MAX),
       body: truncate(body, BODY_MAX),
-      severity: 'info' as Phase3BlockSeverityLiteral,
+      ...severityWithSignals('info'),
       target_refs: [ref] as readonly TargetRef[],
       priority_rank: 80 + idx,
     };
