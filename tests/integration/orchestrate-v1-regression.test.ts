@@ -48,6 +48,10 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
               if (featProp === 'orchestrator') return true;
+              // pipelineV4Enabled now defaults to `false` (fail-safe tombstone);
+              // this regression asserts the V4 response path, so opt in
+              // explicitly rather than relying on the schema default.
+              if (featProp === 'pipelineV4Enabled') return true;
               if (featProp === 'deterministicOrchestratorEnabled') return false;
               if (featProp === 'legacyOrchestratorEnabled') return false;
               return Reflect.get(featTarget, featProp);
