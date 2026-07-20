@@ -43,18 +43,21 @@ vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', async (i
 });
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
-vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({
-    append: appendMock,
-    readRecent: async () => [],
-    readFactsFor: async () => [],
-    invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
-    invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
-    ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
-  }),
-  resetSessionStoreForTests: () => {},
-  SessionReadError: class SessionReadError extends Error {},
-}));
+// ROADMAP 1.148 — importOriginal-spread + complete shared store mock
+// (derive, don't mirror): interface growth can't silently break this suite.
+// The previous hand-rolled 6-method mock left readMostRecentPendingActions /
+// loadGraphAndBriefText undefined, degrading the C3 draft-offer pendings
+// read to [] with warn-spam on every test in this suite.
+vi.mock('../../../src/orchestrator-v5/session/index.js', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../../src/orchestrator-v5/session/index.js')>();
+  const { createMockSessionStore } = await import('../../utils/mock-session-store.js');
+  return {
+    ...original,
+    getSessionStore: () => createMockSessionStore({ append: appendMock }),
+    resetSessionStoreForTests: () => {},
+  };
+});
 
 // Minimal LLM adapter for TurnExecutor fall-through paths.
 vi.mock('../../../src/adapters/llm/router.js', () => ({
@@ -320,12 +323,18 @@ describe('POST /orchestrate/v2/turn — round-1 process-meta intake guard', () =
       source: 'chip_click',
       chip: { action_type: 'compare_options' },
     });
-    // Falls through to TurnExecutor (Sonnet ORIENT / typed unsupported-action
-    // path) — the outcome may be 200 or a typed failure in this harness; the
-    // contract under test is only that the draft heuristic never fires.
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
     expect(dispatchDeterministicChipClickMock).not.toHaveBeenCalled();
-    expect([200, 500]).toContain(res.statusCode);
+    // POST-MERGE CORRECTION (SIMPLIFY-575 F6, verified at the bytes): this
+    // turn does NOT fall through to TurnExecutor as the #575 commit message
+    // claims. The chip_click exclusion makes draftShapedTurn false →
+    // isDraftGraphShape false → the frame-stage no-brief guard's negated
+    // consumption makes isFrameNoBriefShape TRUE → the canned framing
+    // prompt answers, deterministically, with a 200. Pinned exactly so a
+    // routing change here goes RED instead of hiding inside [200, 500].
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('I need a single decision question');
   });
 
   // ------------------------------------------------------------------
@@ -367,11 +376,13 @@ describe('POST /orchestrate/v2/turn — round-1 process-meta intake guard', () =
   it('anonymous "Run the analysis now" never drafts and never gets the meta answer', async () => {
     const res = await inject({ message: RUN_ANALYSIS_CHIP_TEXT, source: 'chip' });
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
-    expect([200, 500]).toContain(res.statusCode);
-    if (res.statusCode === 200) {
-      const body = JSON.parse(res.body);
-      expect(body.assistant_text ?? '').not.toContain(PROCESS_META_ANSWER_MARKER);
-    }
+    // Verified destination: too short for the draft heuristic → frame-stage
+    // no-brief guard (canned framing prompt), 200. Exact-pinned (trap 13:
+    // [200, 500] could not tell a routed answer from a harness-caused 500).
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text ?? '').not.toContain(PROCESS_META_ANSWER_MARKER);
+    expect(body.assistant_text).toContain('I need a single decision question');
   });
 
   // ------------------------------------------------------------------
@@ -399,12 +410,13 @@ describe('POST /orchestrate/v2/turn — round-1 process-meta intake guard', () =
       },
     });
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
-    expect([200, 500]).toContain(res.statusCode);
-    if (res.statusCode === 200) {
-      const body = JSON.parse(res.body);
-      // Falls through to TurnExecutor (LLM coaching with graph context),
-      // never the canned empty-canvas answer.
-      expect(body.assistant_text ?? '').not.toContain(PROCESS_META_ANSWER_MARKER);
-    }
+    // Verified destination: TurnExecutor (exit_path=turn_executor — LLM
+    // coaching with graph context), 200 in this harness. Exact-pinned.
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    // Never the canned empty-canvas answer, and never the framing prompt
+    // (the canvas is populated — the frame guard must not claim it).
+    expect(body.assistant_text ?? '').not.toContain(PROCESS_META_ANSWER_MARKER);
+    expect(body.assistant_text ?? '').not.toContain('I need a single decision question');
   });
 });

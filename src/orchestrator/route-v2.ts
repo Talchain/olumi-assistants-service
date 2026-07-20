@@ -3185,10 +3185,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // draft_graph or sending a follow-up clarification.
     //
     // The previous (draft_graph) dispatch already filtered for the
-    // brief-shaped messages; chip_click and system_event branches handled
-    // those above. What reaches here at stage=frame + no graph is
-    // necessarily a non-brief, non-chip user message. Guide them back to
-    // the frame-stage flow deterministically with no LLM call.
+    // brief-shaped messages; whitelisted chip_click and system_event
+    // branches handled those above. What reaches here at stage=frame + no
+    // graph on a FRESH scenario is a non-brief anonymous message — OR
+    // (post-#575, verified at the bytes) a chip_click with a valid but
+    // NON-whitelisted action_type: the chip_click exclusion makes
+    // `draftShapedTurn` false even for draft-shaped canned text, so this
+    // guard claims it and answers with the framing prompt. That is
+    // deliberate-in-effect (deterministic, no LLM spend, no meta-draft) but
+    // note it contradicts the #575 commit message's "the rest belong to
+    // TurnExecutor" — TurnExecutor only receives non-whitelisted
+    // chip_clicks when the canvas is populated or the scenario is a
+    // continuation. Pinned by route-v2-process-meta-intake.test.ts
+    // ("chip_click with valid non-whitelisted action_type"). Guide them
+    // back to the frame-stage flow deterministically with no LLM call.
     //
     // Pricing-brief retry scenario from staging:
     //   Turn 1: pricing brief → CEE_GRAPH_INVALID (no graph persisted)
