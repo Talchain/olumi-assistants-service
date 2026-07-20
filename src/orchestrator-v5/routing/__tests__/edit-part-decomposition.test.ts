@@ -230,6 +230,102 @@ describe('accountEditParts — the rehearsal attribution (defect A + defect B)',
   });
 });
 
+describe('accountEditParts — removal parts consume removal ops one-to-one (#577 conservation law)', () => {
+  // Two removals, ONE removal op: the op covers exactly one part, never both.
+  // Pre-fix, `covered = removeOpCount > 0` marked EVERY removal part covered,
+  // silently violating the conservation law.
+  it('a single remove op covers exactly one of two removal parts (target-resolved)', () => {
+    const message = 'remove the Localisation factor and remove the EU Market Demand factor';
+    const d = decomposeEditMessage(message);
+    const removeParts = d.accountableParts.filter((p) => p.kind === 'structural_remove');
+    expect(removeParts).toHaveLength(2);
+
+    const ops: PatchOperationLike[] = [{ op: 'remove_node', path: 'fac_localisation' }];
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: ops,
+      graphNodes: REDRAFT_NODES,
+    });
+
+    const covered = a.fates.filter((f) => f.covered);
+    const uncovered = a.fates.filter((f) => !f.covered);
+    expect(covered).toHaveLength(1);
+    expect(uncovered).toHaveLength(1);
+
+    // The op resolves to 'Localisation' — that part is covered; the other is not.
+    const locFate = a.fates.find((f) => f.part.namedTargets[0] === 'Localisation');
+    const euFate = a.fates.find((f) => f.part.namedTargets[0] === 'EU Market Demand');
+    expect(locFate!.covered).toBe(true);
+    expect(euFate!.covered).toBe(false);
+    expect(a.uncoveredParts).toContain(euFate!.part);
+    // The EU target DOES exist in the graph, so this is a plain unaccounted
+    // part, not a missing-target issue.
+    expect(a.missingTargets).toHaveLength(0);
+  });
+
+  // Target-priority, not document order: the op matching the SECOND-mentioned
+  // part must claim it, leaving the first uncovered.
+  it('the target-matching part claims the op regardless of mention order', () => {
+    const message = 'remove the EU Market Demand factor and remove the Localisation factor';
+    const d = decomposeEditMessage(message);
+    const ops: PatchOperationLike[] = [{ op: 'remove_node', path: 'fac_localisation' }];
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: ops,
+      graphNodes: REDRAFT_NODES,
+    });
+    const locFate = a.fates.find((f) => f.part.namedTargets[0] === 'Localisation');
+    const euFate = a.fates.find((f) => f.part.namedTargets[0] === 'EU Market Demand');
+    expect(locFate!.covered).toBe(true);
+    expect(euFate!.covered).toBe(false);
+  });
+
+  // Generous fallback stays one-to-one: an unresolved removal op (edge removal
+  // or unknown id) covers exactly one part, never all of them.
+  it('an unresolvable removal op still covers only one removal part', () => {
+    const message = 'remove the Localisation factor and remove the EU Market Demand factor';
+    const d = decomposeEditMessage(message);
+    const ops: PatchOperationLike[] = [{ op: 'remove_node', path: 'fac_unknown_id' }];
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: ops,
+      graphNodes: REDRAFT_NODES,
+    });
+    expect(a.fates.filter((f) => f.covered)).toHaveLength(1);
+    expect(a.fates.filter((f) => !f.covered)).toHaveLength(1);
+  });
+
+  // Two removal ops cover two removal parts (no false uncovered).
+  it('two removal ops cover both removal parts', () => {
+    const message = 'remove the Localisation factor and remove the EU Market Demand factor';
+    const d = decomposeEditMessage(message);
+    const ops: PatchOperationLike[] = [
+      { op: 'remove_node', path: 'fac_localisation' },
+      { op: 'remove_node', path: 'fac_eu_demand' },
+    ];
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: ops,
+      graphNodes: REDRAFT_NODES,
+    });
+    expect(a.uncoveredParts).toHaveLength(0);
+    expect(a.fates.filter((f) => f.covered)).toHaveLength(2);
+  });
+
+  // Positive control: zero ops leaves both removal parts uncovered.
+  it('zero ops leaves both removal parts uncovered', () => {
+    const message = 'remove the Localisation factor and remove the EU Market Demand factor';
+    const d = decomposeEditMessage(message);
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: [],
+      graphNodes: REDRAFT_NODES,
+    });
+    expect(a.fates.filter((f) => f.covered)).toHaveLength(0);
+    expect(a.uncoveredParts).toHaveLength(2);
+  });
+});
+
 describe('disclosure copy — DISCLOSED-PARTIAL and fail-closed clarify', () => {
   function rehearsalAccounting() {
     const d = decomposeEditMessage(REHEARSAL_MESSAGE);

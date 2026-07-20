@@ -419,7 +419,11 @@ export function accountEditParts(input: AccountEditPartsInput): EditPartAccounti
 
   const addNodes: Array<NodeRef & { opIndex: number }> = [];
   const edges: Array<{ from: string; to: string; opIndex: number }> = [];
-  let removeOpCount = 0;
+  // Removal ops carry an entity identity we can (for remove_node) resolve to a
+  // pre-edit label; `nodeId` is the bare node id (op.path — see
+  // patch-validation.checkReferentialIntegrity) or null for remove_edge and
+  // composite paths that cannot be resolved to a single node.
+  const removeOps: Array<{ opIndex: number; nodeId: string | null }> = [];
   for (let i = 0; i < input.operations.length; i += 1) {
     const op = input.operations[i]!;
     if (op.op === 'add_node') {
@@ -432,12 +436,52 @@ export function accountEditParts(input: AccountEditPartsInput): EditPartAccounti
       if (typeof value.from === 'string' && typeof value.to === 'string') {
         edges.push({ from: value.from, to: value.to, opIndex: i });
       }
-    } else if (op.op === 'remove_node' || op.op === 'remove_edge') {
-      removeOpCount += 1;
+    } else if (op.op === 'remove_node') {
+      removeOps.push({ opIndex: i, nodeId: typeof op.path === 'string' ? op.path : null });
+    } else if (op.op === 'remove_edge') {
+      removeOps.push({ opIndex: i, nodeId: null });
     }
   }
 
   const existingById = new Map(existing.map((n) => [n.id, n]));
+
+  // Conservation law (#577): each removal PART consumes at most ONE removal op,
+  // entity-resolved rather than kind-counted. A single removal op must never
+  // mark every removal part covered (the accounting-under-count defect).
+  // Two-phase, target-priority: parts whose named target resolves to a removal
+  // op's pre-edit label claim that op first; the remainder claim any still
+  // unconsumed removal op (edge removals / unresolved ids stay generous, but
+  // still one-for-one). Order-independent, so the reply discloses the part the
+  // op did NOT serve, not merely the last-listed one.
+  const removeCoveredPartIndices = new Set<number>();
+  const removeParts = input.parts.filter((p) => p.kind === 'structural_remove');
+  if (removeParts.length > 0 && removeOps.length > 0) {
+    const consumedOps = new Set<number>();
+    const removeOpLabel = (r: { nodeId: string | null }): string | null =>
+      r.nodeId !== null ? (existingById.get(r.nodeId)?.label ?? null) : null;
+    // Phase 1 — target-resolved matches.
+    for (const part of removeParts) {
+      const target = part.namedTargets[0] ?? null;
+      if (target === null) continue;
+      const hit = removeOps.find(
+        (r) => !consumedOps.has(r.opIndex) && labelMatches(removeOpLabel(r), target),
+      );
+      if (hit !== undefined) {
+        consumedOps.add(hit.opIndex);
+        removeCoveredPartIndices.add(part.index);
+      }
+    }
+    // Phase 2 — generous fallback: any still-uncovered removal part claims any
+    // remaining removal op (one each).
+    for (const part of removeParts) {
+      if (removeCoveredPartIndices.has(part.index)) continue;
+      const hit = removeOps.find((r) => !consumedOps.has(r.opIndex));
+      if (hit !== undefined) {
+        consumedOps.add(hit.opIndex);
+        removeCoveredPartIndices.add(part.index);
+      }
+    }
+  }
   const nameExistsSomewhere = (name: string): boolean =>
     existing.some((n) => labelMatches(n.label, name)) ||
     addNodes.some((n) => labelMatches(n.label, name));
@@ -513,11 +557,12 @@ export function accountEditParts(input: AccountEditPartsInput): EditPartAccounti
         });
       }
     } else if (part.kind === 'structural_remove') {
-      // Generous: any remove op covers a removal part (edge-removal ids and
-      // composite paths cannot be resolved to labels reliably, and a false
-      // "uncovered" here sprays clarify noise).
+      // Coverage is the one-to-one removal match computed above: a removal op
+      // covers exactly one removal part, so "remove A and B" with a single
+      // remove op leaves one part uncovered (the conservation law), instead of
+      // one op silently satisfying both.
       const target = part.namedTargets[0] ?? null;
-      covered = removeOpCount > 0;
+      covered = removeCoveredPartIndices.has(part.index);
       if (!covered && target !== null && !nameExistsSomewhere(target)) {
         missingTargets.push({
           partIndex: part.index,
