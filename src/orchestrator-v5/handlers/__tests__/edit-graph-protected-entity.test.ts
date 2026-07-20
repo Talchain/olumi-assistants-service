@@ -207,6 +207,73 @@ describe('F-3 guard — ops NOT targeting a protected entity keep would_apply', 
   });
 });
 
+// ── P1 (adversarial review 2026-07-20): protected FACTOR reached through ────
+// ── ANOTHER node's interventions map. The write's direct node is the OPTION,
+// ── so the protected FACTOR never appeared in the target set and the write
+// ── AUTO-APPLIED (the guard's whole point). envelopeTargetNodeIds must yield
+// ── the factor id via the interventions key — from BOTH the whole-map shape
+// ── and the canonical slash-keyed `data/interventions/<factor>` shape. ──────
+
+/** The op writes the OPTION, configuring the FACTOR via the interventions
+ *  map (whole-map spelling). Direct node_id = the option; factor = the key. */
+const CONFIGURE_FACTOR_VIA_OPTION_MAP_OP = {
+  op: 'update_node',
+  path: 'opt_cloud_native',
+  value: { interventions: { fac_cost: { value: 0.5 } } },
+  old_value: { interventions: { fac_cost: { value: 0.58 } } },
+};
+
+/** Same reach, canonical slash-keyed field spelling
+ *  (`data/interventions/<factor>` — candidate-graph.ts setTunableFieldPath). */
+const CONFIGURE_FACTOR_VIA_OPTION_SLASH_OP = {
+  op: 'update_node',
+  path: 'opt_cloud_native',
+  value: { 'data/interventions/fac_cost': { value: 0.5 } },
+  old_value: { 'data/interventions/fac_cost': { value: 0.58 } },
+};
+
+/** Protects the FACTOR (CRM Platform Cost) while the OPTION is left
+ *  configurable — the "but do NOT touch X" class, X = the factor. The option
+ *  is named only in the non-protective clause before the "but" seam, so ONLY
+ *  the factor is protected; the demotion can therefore ONLY fire if the
+ *  factor is extracted from the interventions key. */
+const PROTECT_FACTOR_MESSAGE =
+  'Reconfigure Cloud-Native CRM to be cheaper, but do not touch CRM Platform Cost.';
+
+describe('F-3 guard P1 — protected FACTOR reached via an option interventions map', () => {
+  it.each([
+    ['whole-map', CONFIGURE_FACTOR_VIA_OPTION_MAP_OP],
+    ['slash-keyed', CONFIGURE_FACTOR_VIA_OPTION_SLASH_OP],
+  ])('%s: writing the protected factor through the option holds, naming the factor', (_name, op) => {
+    const decision = evaluateEditGraphMutations(
+      baseInput({ operations: [op], userMessage: PROTECT_FACTOR_MESSAGE }),
+    );
+    // Without the interventions-key extraction the target set is just the
+    // OPTION, the protected FACTOR never matches, and this auto-applies.
+    expect(decision.governing).toBe('held');
+    expect(decision.blockApply).toBe(true);
+    expect(decision.verdictCounts.would_apply ?? 0).toBe(0);
+    expect(decision.verdictCounts.held).toBe(1);
+    // The hold NAMES the protected factor, not the option carrying the map.
+    expect(decision.assistantText).toContain('CRM Platform Cost');
+    expect(findSuccessClaimHit(decision.assistantText ?? '')).toBeNull();
+    expect(findForbiddenPhraseHit(decision.assistantText ?? '')).toBeNull();
+    expect(decision.publicReason?.blocker_code).toBe('USER_PROTECTED_ENTITY');
+  });
+
+  it('no protection cue: the same option-configure write auto-applies (no over-hold)', () => {
+    const decision = evaluateEditGraphMutations(
+      baseInput({
+        operations: [CONFIGURE_FACTOR_VIA_OPTION_MAP_OP],
+        userMessage: 'Make Cloud-Native CRM cheaper by setting CRM Platform Cost to 0.5.',
+      }),
+    );
+    expect(decision.governing).toBe('proceed');
+    expect(decision.blockApply).toBe(false);
+    expect(decision.verdictCounts.would_apply).toBe(1);
+  });
+});
+
 // ── positive controls (probe P12 / T12) — no cue, byte-identical proceed ────
 
 describe('F-3 guard — positive controls stay green', () => {

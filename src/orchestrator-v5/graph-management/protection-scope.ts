@@ -280,11 +280,38 @@ export function extractProtectedEntities(
 // ---------------------------------------------------------------------------
 
 /**
- * The EXISTING node ids a candidate mutation TARGETS (i.e. whose state or
- * configuration it would change). Exhaustive over CandidateKind — a new
- * kind is a COMPILE error here, never a silent guard bypass (the
- * hand-maintained-mirror trap): whoever adds a kind must decide its
- * protection semantics.
+ * The EXISTING entity ids a candidate mutation TARGETS — EVERY entity whose
+ * state or configuration it would change, DIRECT and INDIRECT. Exhaustive
+ * over CandidateKind — a new kind is a COMPILE error here, never a silent
+ * guard bypass (the hand-maintained-mirror trap): whoever adds a kind must
+ * decide its protection semantics.
+ *
+ * INDIRECT TARGETS — the F-3 P1 bypass (adversarial review, 2026-07-20):
+ * an option-configure write reaches a FACTOR through the OPTION's
+ * interventions map, not through the factor's own id. On the live wire the
+ * op is `update_node_field{ node_id: <option>, field:
+ * "data/interventions/<factor>" | "interventions", to: … }` (the standard
+ * option-configure shape — see candidate-graph.ts setTunableFieldPath field
+ * spellings). If this returned only the direct `node_id`, a user who
+ * protected the FACTOR ("… do not touch CRM Platform Cost") would have the
+ * write AUTO-APPLY, because the factor never appears in the target set —
+ * precisely the A5/A6 class the guard exists for (the probe's real writes
+ * went through interventions maps). So `update_node_field` also yields every
+ * factor id reachable via an interventions key. Derived from the op SHAPE,
+ * not a hand-list of paths.
+ *
+ * The OTHER kinds carry no such gap ON THE AUTO-APPLY SURFACE (verified
+ * against classify-mutation.ts + referee.ts): only the three TUNABLE kinds
+ * (rename_node, update_node_field, update_edge_field) are would_apply-
+ * eligible, and this function is only ever consulted for would_apply
+ * verdicts (demoteProtectedEntityTargets skips the rest). rename_node
+ * touches only its own node; update_edge_field already returns BOTH
+ * endpoints; every structural kind (add_node/add_edge/add_option/
+ * remove_node/remove_edge — the latter carrying interventions maps or
+ * cascade neighbours) is HELD (propose-confirm) and never auto-applies, so
+ * the demotion never inspects it. Should any structural kind ever become
+ * would_apply-eligible, its indirect references (add_option interventions
+ * keys, remove_node cascade neighbours) must be added here at that time.
  */
 export function envelopeTargetNodeIds(env: CandidateMutationEnvelope): readonly string[] {
   switch (env.kind) {
@@ -293,7 +320,11 @@ export function envelopeTargetNodeIds(env: CandidateMutationEnvelope): readonly 
     case 'add_edge':
       return [env.payload.edge.from, env.payload.edge.to];
     case 'update_node_field':
-      return [env.payload.node_id];
+      // Direct node + every factor reached through its interventions map.
+      return [
+        env.payload.node_id,
+        ...interventionTargetIds(env.payload.field, env.payload.to, env.payload.from),
+      ];
     case 'update_edge_field':
       return [env.payload.from_node, env.payload.to_node];
     case 'rename_node':
@@ -316,6 +347,72 @@ export function envelopeTargetNodeIds(env: CandidateMutationEnvelope): readonly 
       return _never;
     }
   }
+}
+
+/** Total object-record read (null/array/scalar → not a record). */
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * The factor ids an `update_node_field` write reaches INDIRECTLY through an
+ * option's interventions map. Derived from the op shape, mirroring
+ * setTunableFieldPath's `/`+`.` field segmentation (candidate-graph.ts), so
+ * it covers every producer spelling of an option-configure write:
+ *
+ *  - slash/dot-keyed leaf — `field: "data/interventions/<factor>"` (the
+ *    canonical live shape) or `"interventions/<factor>"` /
+ *    `"interventions.<factor>"`: the factor is the segment AFTER
+ *    `interventions`;
+ *  - whole-map replacement — `field: "interventions"` /
+ *    `"data/interventions"`, `to`/`from` a record whose KEYS are factor ids
+ *    (both new and old, so an intervention REMOVAL that names the factor
+ *    only in `from` is still caught);
+ *  - nested value — `field: "data"`, `to: { interventions: { <factor>: … } }`
+ *    (or a whole-node/root write): the interventions record sits inside the
+ *    payload value; its keys are factor ids.
+ *
+ * Conservative by construction: any id this over-yields is inert — the
+ * caller (demoteProtectedEntityTargets) intersects the result with the
+ * graph's protected set, so a non-protected extra id demotes nothing. Total;
+ * never throws.
+ */
+function interventionTargetIds(field: unknown, to: unknown, from: unknown): string[] {
+  try {
+    const out: string[] = [];
+    if (typeof field === 'string') {
+      const segments = field.split(/[/.]/).filter((s) => s.length > 0);
+      const ivIdx = segments.indexOf('interventions');
+      if (ivIdx !== -1) {
+        const factorSeg = segments[ivIdx + 1];
+        if (typeof factorSeg === 'string' && factorSeg.length > 0) {
+          // Leaf write: …/interventions/<factor>[/subfield].
+          out.push(factorSeg);
+        } else {
+          // Whole-map write: factor ids are the value-record keys (new + old).
+          if (isPlainRecord(to)) out.push(...Object.keys(to));
+          if (isPlainRecord(from)) out.push(...Object.keys(from));
+        }
+      }
+    }
+    // Nested/whole-node write: an interventions record inside the payload
+    // value (e.g. field "data", to { interventions: { <factor>: … } }).
+    collectNestedInterventionKeys(to, out);
+    collectNestedInterventionKeys(from, out);
+    return out.filter((s) => typeof s === 'string' && s.length > 0);
+  } catch {
+    return []; // TOTALITY: extraction failure degrades to direct-target only.
+  }
+}
+
+/** Depth-bounded scan for an `interventions` record nested in a payload value
+ *  (directly or under `data`); appends its keys to `out`. Bounded so hostile
+ *  deeply-nested input stays O(bounded). */
+function collectNestedInterventionKeys(value: unknown, out: string[], depth = 0): void {
+  if (depth > 4 || !isPlainRecord(value)) return;
+  const iv = value.interventions;
+  if (isPlainRecord(iv)) out.push(...Object.keys(iv));
+  if (isPlainRecord(value.data)) collectNestedInterventionKeys(value.data, out, depth + 1);
 }
 
 // ---------------------------------------------------------------------------
