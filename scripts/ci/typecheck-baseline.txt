@@ -37,7 +37,6 @@ src/orchestrator-v5/tools/handlers/__tests__/explain-results.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/explanation-fallback.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/integration-bef4470b.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/integration-explain-results-post-analysis.test.ts
-src/orchestrator-v5/tools/handlers/__tests__/integration-precondition-fail-chip.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/run-analysis-timing.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/run-analysis.test.ts
