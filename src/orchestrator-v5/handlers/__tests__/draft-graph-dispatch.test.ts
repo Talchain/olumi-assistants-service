@@ -138,6 +138,24 @@ describe('dispatchDraftGraph', () => {
       expect(result.response.stage_indicator).toBe('analyse');
     });
 
+    it('threads requestStartMs to handleDraftGraph so the retry gate measures from request start (review-576 condition 2)', async () => {
+      (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);
+
+      const requestStartMs = Date.now() - 9_876;
+      await dispatchDraftGraph({
+        payload: makePayload(),
+        requestId: 'req-1',
+        request: STUB_REQUEST,
+        requestStartMs,
+      });
+
+      expect(handleDraftGraph).toHaveBeenCalledOnce();
+      const draftOpts = (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
+        .mock.calls[0][3] as Record<string, unknown> | undefined;
+      expect(draftOpts?.requestStartMs).toBe(requestStartMs);
+    });
+
     it('passes graph directly in CommitMetadata to commitDirectAnswer', async () => {
       (handleDraftGraph as MockedFunction<typeof handleDraftGraph>)
         .mockResolvedValue(makeDraftResult() as Awaited<ReturnType<typeof handleDraftGraph>>);

@@ -22,7 +22,9 @@ import {
   DRAFT_REQUEST_BUDGET_MS,
   DRAFT_LLM_TIMEOUT_MS,
   LLM_POST_PROCESSING_HEADROOM_MS,
+  MIN_DRAFT_RETRY_BUDGET_MS,
   REPAIR_TIMEOUT_MS,
+  getDraftLlmRetryBudgetMs,
   getJitteredRetryDelayMs,
 } from "../../../config/timeouts.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamTimeoutError } from "../../../adapters/llm/errors.js";
@@ -41,7 +43,9 @@ import { STRENGTH_DEFAULT_RETRY_NUDGE } from "../../constants.js";
  *  4. Model override resolution
  *  5. Adapter selection
  *  6. Cost guard
- *  7. LLM call with retry (max 2 attempts)
+ *  7. LLM call with budget-gated retry (max 2 attempts; a retry is launched
+ *     only when the remaining request budget can fit a real draft, and its
+ *     timeout is capped to that remaining window — see getDraftLlmRetryBudgetMs)
  *  8. Graph shape assertion (change 2: before stash creation)
  *  9. Edge field stash (frozen Record objects)
  * 10. Graph normalisation (version + provenance)
@@ -148,9 +152,15 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     return;
   }
 
-  // ── Step 7: LLM call with retry ────────────────────────────────────────
+  // ── Step 7: LLM call with budget-gated retry ───────────────────────────
   const llmStartTime = Date.now();
   const effectiveLlmTimeout = DRAFT_LLM_TIMEOUT_MS;
+  // Same baseline the Step-11 budget guard uses — retry affordability and the
+  // guard that would discard a late result MUST agree on what "elapsed" means.
+  // The live V5 turn path and the assist.v1 routes thread requestStartMs from
+  // route-handler entry (review-576 condition 2); on any caller that omits it,
+  // BOTH measurements fall back to LLM start and are blind to pre-LLM time.
+  const requestStartMs = ctx.opts.requestStartMs ?? llmStartTime;
   emit(TelemetryEvents.Stage, {
     stage: "llm_start",
     confidence: ctx.confidence,
@@ -174,6 +184,14 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     attempt += 1;
     const requestId = attempt === 1 ? `draft_${Date.now()}` : `draft_retry_${Date.now()}`;
 
+    // Attempt 1 gets the full single-attempt cap; any retry (timeout or
+    // strength-default) is CAPPED to what is still affordable inside
+    // DRAFT_REQUEST_BUDGET_MS — never a fresh full window. An uncapped retry
+    // produced the 2026-07-20 211s worst case against a 125s proxy deadline.
+    const attemptTimeoutMs = attempt === 1
+      ? effectiveLlmTimeout
+      : getDraftLlmRetryBudgetMs(Date.now() - requestStartMs);
+
     try {
       const draftThinking = config.cee.thinking?.draftGraphEnabled
         ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.draftGraphBudget }
@@ -196,7 +214,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
         },
         {
           requestId,
-          timeoutMs: effectiveLlmTimeout,
+          timeoutMs: attemptTimeoutMs,
           collector: ctx.collector,
           bypassCache: ctx.opts.refreshPrompts,
           forceDefault: ctx.opts.forceDefault,
@@ -249,12 +267,31 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           draftResult.graph.edges as ReadonlyArray<{ from: string; to: string; strength_mean?: number; strength_std?: number; strength?: { mean?: number; std?: number } }>,
         );
         if (detection.detected) {
-          strengthDefaultRetried = true;
           ctx.strengthDefaultDetection = {
             detected: true,
             total_edges: detection.total_edges,
             defaulted_count: detection.defaulted_count,
           };
+
+          // Budget gate (2026-07-20 RCA): the nudge retry is another full LLM
+          // call — launching it into a window that cannot fit one converts a
+          // usable (defaulted) success into a timeout failure. Skip the retry
+          // and accept the defaulted result instead.
+          const strengthRetryWindowMs = getDraftLlmRetryBudgetMs(Date.now() - requestStartMs);
+          if (strengthRetryWindowMs < MIN_DRAFT_RETRY_BUDGET_MS) {
+            log.warn({
+              event: "cee.strength_default.skip",
+              reason: "insufficient_budget",
+              retry_window_ms: strengthRetryWindowMs,
+              min_retry_budget_ms: MIN_DRAFT_RETRY_BUDGET_MS,
+              total_edges: detection.total_edges,
+              defaulted_count: detection.defaulted_count,
+              request_id: ctx.requestId,
+            }, "Strength-default retry skipped — remaining request budget cannot fit another LLM attempt");
+            break;
+          }
+
+          strengthDefaultRetried = true;
 
           log.warn({
             event: "cee.strength_default.retry",
@@ -327,13 +364,40 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
         log.warn({
           event: "cee.llm.call_timeout",
           model: draftAdapter.model,
-          timeout_ms: effectiveLlmTimeout,
+          timeout_ms: attemptTimeoutMs,
           elapsed_ms: llmDuration,
           request_id: ctx.requestId,
         }, "LLM draft call timed out");
       }
 
-      if (!isTimeout || attempt >= 2) {
+      // Budget-gated retry (2026-07-20 RCA): retry only when the window still
+      // affordable inside DRAFT_REQUEST_BUDGET_MS can fit a real draft. A
+      // first attempt that burned its full window leaves 0 affordable — the
+      // old unconditional retry gave a 211s worst case against a 125s proxy
+      // deadline, and the Step-11 budget guard discarded every late retry
+      // success anyway. Early failures (connect resets etc.) — the only case a
+      // retry can help — still get one, capped to the remaining window.
+      const retryDelayMs = getJitteredRetryDelayMs();
+      const retryWindowMs = getDraftLlmRetryBudgetMs(Date.now() - requestStartMs + retryDelayMs);
+      const retryAffordable = retryWindowMs >= MIN_DRAFT_RETRY_BUDGET_MS;
+
+      if (!isTimeout || attempt >= 2 || !retryAffordable) {
+        if (isTimeout && attempt < 2 && !retryAffordable) {
+          // OBSERVABILITY HONESTY (review-576 condition 3): this is a
+          // structured pino LOG, not a registered TelemetryEvents entry — it
+          // reaches no Datadog dashboard or alert. Detection of a mis-tuned
+          // floor is log search on Render (event:cee.llm.retry_skipped_budget),
+          // same as its siblings cee.llm.call_timeout and
+          // cee.request_budget.exceeded. Do not describe it as telemetry.
+          log.warn({
+            event: "cee.llm.retry_skipped_budget",
+            model: draftAdapter.model,
+            retry_window_ms: retryWindowMs,
+            min_retry_budget_ms: MIN_DRAFT_RETRY_BUDGET_MS,
+            elapsed_since_request_start_ms: Date.now() - requestStartMs,
+            request_id: ctx.requestId,
+          }, "Draft retry skipped — remaining request budget cannot fit a useful LLM attempt");
+        }
         const llmDuration = Date.now() - llmStartTime;
         const upstreamStatusCode = isTimeout ? 504 : 500;
         emit(TelemetryEvents.DraftUpstreamError, {
@@ -345,9 +409,9 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
 
         if (isTimeout) {
           throw new LLMTimeoutError(
-            `LLM provider did not respond within ${Math.round(effectiveLlmTimeout / 1000)}s`,
+            `LLM provider did not respond within ${Math.round(attemptTimeoutMs / 1000)}s`,
             draftAdapter.model,
-            effectiveLlmTimeout,
+            attemptTimeoutMs,
             llmDuration,
             ctx.requestId,
             err,
@@ -363,12 +427,16 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
         throw err;
       }
 
-      const delayMs = getJitteredRetryDelayMs();
       log.warn(
-        { provider: draftAdapter.name, correlation_id: ctx.requestId, delay_ms: delayMs },
+        {
+          provider: draftAdapter.name,
+          correlation_id: ctx.requestId,
+          delay_ms: retryDelayMs,
+          retry_window_ms: retryWindowMs,
+        },
         "Upstream draft_graph timeout, retrying once",
       );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
   }
 
@@ -455,7 +523,6 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   ctx.graph = normaliseCeeGraphVersionAndProvenance(ctx.graph as any) as any;
 
   // ── Step 11: Budget guard ───────────────────────────────────────────────
-  const requestStartMs = ctx.opts.requestStartMs ?? llmStartTime;
   const totalElapsed = Date.now() - requestStartMs;
   if (totalElapsed > DRAFT_REQUEST_BUDGET_MS) {
     log.warn({

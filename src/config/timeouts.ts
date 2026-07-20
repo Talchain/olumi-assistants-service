@@ -373,6 +373,45 @@ export function getDerivedRepairBudgetMs(): number {
   return Math.max(0, DRAFT_LLM_TIMEOUT_MS - REPAIR_TIMEOUT_MS);
 }
 
+/** Minimum affordable window for a draft LLM retry (default: 55s).
+ *
+ *  Empirical anchor (recurrence RCA, staging 2026-07-20, n=7 successful
+ *  drafts): min 37.9s / p50 43.4s / p95 53.7s / max 54.6s. The floor sits AT
+ *  OR ABOVE the slowest success ever observed, so any window this gate
+ *  authorizes fits every healthy draft in the distribution. A retry launched
+ *  into a smaller window usually cannot complete a real draft — it only burns
+ *  provider spend on a result the Step-11 budget guard is guaranteed to
+ *  discard. (Originally 35s, which sat BELOW the cited 38–55s anchor and
+ *  below the fastest draft ever observed; re-anchored per adversarial-review
+ *  condition 1.)
+ */
+export const MIN_DRAFT_RETRY_BUDGET_MS = parseTimeoutEnv("MIN_DRAFT_RETRY_BUDGET_MS", 55_000);
+
+/** Derived: the LLM window still affordable inside the draft request budget
+ *  after `elapsedMs` has been spent, reserving post-processing headroom.
+ *  Never exceeds the single-attempt cap (`DRAFT_LLM_TIMEOUT_MS`); floors at 0.
+ *
+ *  WHY THIS EXISTS (2026-07-20 staging outage). The draft retry used to hand
+ *  attempt 2 a full fresh DRAFT_LLM_TIMEOUT_MS, giving a worst case of
+ *  105s + ~0.8s + 105s ≈ 211s against a 120s request budget and a 125s
+ *  browser-proxy deadline. Every retry outcome was unusable BY CONSTRUCTION:
+ *  a retry timeout surfaced at ~211s (proxy 504'd at 125s), and a retry
+ *  SUCCESS landed past the budget guard, which threw it away (observed twice:
+ *  cee.request_budget.exceeded at 09:51:06Z and 10:12:02Z while llm_usage
+ *  recorded the completed — and binned — drafts). Deriving the retry window
+ *  from the SAME constants the budget guard enforces makes that arithmetic
+ *  impossible to reintroduce by drift: a full-window first-attempt timeout
+ *  yields 0 here, so slow-burn timeouts fail fast with CEE's typed error
+ *  (~105s, inside every outer deadline) while EARLY failures — the only case
+ *  a retry can actually help — keep an affordable, capped second attempt.
+ */
+export function getDraftLlmRetryBudgetMs(elapsedMs: number): number {
+  return Math.min(
+    DRAFT_LLM_TIMEOUT_MS,
+    Math.max(0, DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS - elapsedMs),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // SSE heartbeat & resume polling
 // ---------------------------------------------------------------------------
@@ -488,6 +527,14 @@ export function validateTimeoutRelationships(ladder: BudgetLadderInputs): string
     warnings.push(
       `REPAIR_TIMEOUT_MS (${REPAIR_TIMEOUT_MS}ms) > DRAFT_LLM_TIMEOUT_MS (${DRAFT_LLM_TIMEOUT_MS}ms) — ` +
       `repair timeout exceeds LLM draft budget, repair will always be skipped`,
+    );
+  }
+
+  if (MIN_DRAFT_RETRY_BUDGET_MS >= DRAFT_LLM_TIMEOUT_MS) {
+    warnings.push(
+      `MIN_DRAFT_RETRY_BUDGET_MS (${MIN_DRAFT_RETRY_BUDGET_MS}ms) >= DRAFT_LLM_TIMEOUT_MS (${DRAFT_LLM_TIMEOUT_MS}ms) — ` +
+      `the draft LLM retry is structurally unreachable even when the first attempt fails instantly; ` +
+      `retry disabled by arithmetic rather than by policy`,
     );
   }
 
@@ -607,6 +654,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     DRAFT_REQUEST_BUDGET_MS,
     LLM_POST_PROCESSING_HEADROOM_MS,
     DRAFT_LLM_TIMEOUT_MS,
+    MIN_DRAFT_RETRY_BUDGET_MS,
     RETRY_BACKOFF_MS,
     MIN_RETRY_BUDGET_MS,
     RETRY_SAFETY_MARGIN_MS,
