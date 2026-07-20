@@ -5,8 +5,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 describe("Request budget configuration", () => {
-  it("uses sensible defaults (120s budget, 15s headroom, 105s derived LLM timeout)", async () => {
-    // These are module-level constants with default values
+  it("uses sensible defaults (120s budget, 10s headroom, 110s derived LLM timeout)", async () => {
+    // These are module-level constants with default values. Headroom 15s->10s
+    // (2026-07-20 recalibration): measured post-LLM tail is ~1-1.5s, so 10s
+    // stays >5x observed while freeing 5s of budget for the LLM window.
     const {
       DRAFT_REQUEST_BUDGET_MS,
       LLM_POST_PROCESSING_HEADROOM_MS,
@@ -15,8 +17,8 @@ describe("Request budget configuration", () => {
     } = await import("../../src/config/timeouts.js");
 
     expect(DRAFT_REQUEST_BUDGET_MS).toBe(120_000);
-    expect(LLM_POST_PROCESSING_HEADROOM_MS).toBe(15_000);
-    expect(DRAFT_LLM_TIMEOUT_MS).toBe(105_000);
+    expect(LLM_POST_PROCESSING_HEADROOM_MS).toBe(10_000);
+    expect(DRAFT_LLM_TIMEOUT_MS).toBe(110_000);
     // Derived timeout must always be >= MIN_TIMEOUT_MS
     expect(DRAFT_LLM_TIMEOUT_MS).toBeGreaterThanOrEqual(MIN_TIMEOUT_MS);
   });

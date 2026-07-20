@@ -219,11 +219,12 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // temperature must be 0 for analytical consistency
     expect(body.temperature).toBe(0);
 
-    // max_tokens is DERIVED from the timeout (2026-07-20 outage fix): at the
-    // default 105s draft LLM timeout, (105 - 5) * 60 tok/s = 6000 tokens.
-    // The pre-fix 8192 floor needed 115s at the measured 71 tok/s — every
-    // long generation HUNG to the cap instead of completing.
-    expect(body.max_tokens).toBe(6000);
+    // max_tokens is DERIVED from the timeout (2026-07-20 outage fix,
+    // recalibrated same day): at the derived 110s draft LLM timeout,
+    // (110 - 15) * 90 tok/s = 8550 tokens. The overhead/floor constants come
+    // from the settled 84-call two-parameter fit (13.26s + tokens/101.5) —
+    // see tests/unit/draft-token-affordability.test.ts for the evidence pins.
+    expect(body.max_tokens).toBe(8550);
 
     // No structured outputs params when flag is off
     expect(body).not.toHaveProperty("output_config");
@@ -321,10 +322,11 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     });
 
     const [body] = createSpy.mock.calls[0];
-    // The "minimum safe value" floor still guards a too-low config, but the
-    // floor itself is capped at affordability: min(8192 floor, 6000 affordable).
-    // A floor ABOVE affordability was the exact 2026-07-20 defect.
-    expect(body.max_tokens).toBe(6000);
+    // The "minimum safe value" floor still guards a too-low config, capped at
+    // affordability: min(8192 floor, 8550 affordable) = 8192. A floor ABOVE
+    // affordability was the exact 2026-07-20 defect — at the recalibrated
+    // window the floor now genuinely fits.
+    expect(body.max_tokens).toBe(8192);
   });
 
   it("max_tokens CLAMPS CEE_MAX_TOKENS_DRAFT down to the affordable budget (the outage config)", async () => {
@@ -342,9 +344,10 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     });
 
     const [body] = createSpy.mock.calls[0];
-    // 32768 tokens needs ~461s at the measured 71 tok/s — no timeout on the
-    // ladder affords it. Honouring it verbatim is how drafts hung to 105s.
-    expect(body.max_tokens).toBe(6000);
+    // 32768 tokens needs ~379s even at the fitted marginal 101.5 tok/s — no
+    // timeout on the ladder affords it. Honouring it verbatim is how drafts
+    // hung to the timeout.
+    expect(body.max_tokens).toBe(8550);
   });
 
   it("max_tokens is derived from the ACTUAL call-site timeout (opts.timeoutMs), not a global", async () => {
@@ -364,8 +367,8 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     );
 
     const [body] = createSpy.mock.calls[0];
-    // (45s - 5s overhead) * 60 tok/s = 2400 tokens affordable in this window.
-    expect(body.max_tokens).toBe(2400);
+    // (45s - 15s overhead) * 90 tok/s = 2700 tokens affordable in this window.
+    expect(body.max_tokens).toBe(2700);
   });
 
   it("a runaway generation truncated at max_tokens fails FAST with a truncation-typed error, not a generic non-JSON error", async () => {
@@ -387,14 +390,34 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
-    await expect(
-      draftGraphWithAnthropic({
+    let thrown: unknown;
+    try {
+      await draftGraphWithAnthropic({
         brief: "Should I hire a contractor or full-time employee?",
         docs: [],
         seed: 17,
         model: "claude-sonnet-4-6",
-      }),
-    ).rejects.toThrow(/truncated at max_tokens/);
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/truncated at max_tokens/);
+
+    // Probe aggravator 2 (S-AUDIT-2026-07-20): the failed call must carry its
+    // LLM metadata on the thrown error so parse.ts captures it into ctx.llmMeta
+    // and `_diagnostic_trace.llm_calls` is populated on failed drafts —
+    // diagnosis must not require Render log access. Mirrors the existing
+    // `_llm_meta` pattern the schema-validation failure path already uses.
+    const meta = (thrown as { _llm_meta?: Record<string, unknown> })._llm_meta;
+    expect(meta).toBeDefined();
+    expect(meta!.model).toBe("claude-sonnet-4-6");
+    expect(meta!.finish_reason).toBe("max_tokens");
+    expect((meta!.token_usage as { completion_tokens: number }).completion_tokens).toBe(6000);
+    expect(typeof meta!.provider_latency_ms).toBe("number");
+    // Structured truncation flag — the pipeline's recovery-copy selection and
+    // typed-400 mapping key off THIS, not off message-prefix matching.
+    expect((thrown as { truncated_at_max_tokens?: boolean }).truncated_at_max_tokens).toBe(true);
   });
 
   it("a generation that hits max_tokens but still parses is ACCEPTED (truncated-but-parseable is the payoff)", async () => {
