@@ -160,11 +160,25 @@ export type ShortConfirmSkipReason =
  * targets. Bare forms fall through to the normal gates (and the LLM)
  * untouched.
  *
+ * POC-BOARD 5d (Step-0 trust-spine capture T11, 2026-07-17): with TWO
+ * proposals held, the natural reply "Yes, all of them." matched NOTHING —
+ * this pattern had no leading-affirmative prefix (SHORT_CONFIRM_PATTERN
+ * gained one in P1a for exactly this over-answering habit), so the turn
+ * fell to the LLM router, which minted a false "that covers both changes
+ * I'm holding" acknowledgement while the committed graph stayed
+ * byte-unchanged. The OPTIONAL leading affirmative below mirrors
+ * SHORT_CONFIRM_PATTERN's P1a prefix so the doubled form resolves
+ * deterministically to `consent_all` (GM-live atomic apply, else the
+ * honest one-at-a-time listing). The ratified bare-form exclusions are
+ * unchanged: the prefix is optional, but the COLLECTIVE body must still
+ * be one of the explicit forms — "Yes, both." stays unbound just as bare
+ * "both" does.
+ *
  * Anchored start-to-end with the usual politeness/punctuation tail so
  * any substantive content ("all of the numbers") falls through.
  */
 export const CONSENT_RESOLVE_ALL_PATTERN =
-  /^\s*(?:all\s+of\s+(?:them|those|it)|both\s+of\s+(?:them|those)|yes\s+to\s+all|apply\s+(?:them\s+all|all(?:\s+of\s+(?:them|those))?|both(?:\s+of\s+(?:them|those))?))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:(?:yes|yep|yeah|sure|ok(?:ay)?)[,\s]+(?:and\s+)?)?(?:all\s+of\s+(?:them|those|it)|both\s+of\s+(?:them|those)|yes\s+to\s+all|apply\s+(?:them\s+all|all(?:\s+of\s+(?:them|those))?|both(?:\s+of\s+(?:them|those))?))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * Order consent-expecting candidates for LISTING and for ordinal
