@@ -1,8 +1,22 @@
 /**
- * Cross-boundary contract tests: UI → CEE.
+ * Cross-boundary contract tests: UI → CEE — LEGACY V1-route input schemas.
  *
- * Every golden fixture represents a real payload shape the UI sends.
- * If a fixture fails validation the schema must be fixed — not the fixture.
+ * ⚠ These fixtures do NOT represent the live wire. They pin
+ * `TurnRequestSchema` / `AnalysisStateSchema` from `route-schemas.ts`, which
+ * derive from the 410'd V1 route (route.ts / route-stream.ts) — their only
+ * runtime importers are those dead routes. The fixtures carry `client_turn_id`
+ * and flat `conversation_history`; the live `/orchestrate/v2/turn` wire sends
+ * `turn_id` + the V5 discriminated union and would FAIL these schemas.
+ *
+ * The LOAD-BEARING gate for the shape the UI actually sends is
+ * `ui-cee-live-v5-contract.test.ts` (B1 `OrchestratorTurnPayload` + the V5
+ * extension slice, through the real pre-flight chain). This file is retained
+ * because the UI's #394 mirror gate still pins these V1-derived contracts as
+ * KNOWN-DIVERGENCE; do not delete the schemas or fixtures without warning the
+ * UI first (their pins go red by design). See contracts/README.md.
+ *
+ * Within this legacy scope: if a fixture fails validation the schema must be
+ * fixed — not the fixture.
  */
 import { describe, it, expect } from "vitest";
 import { TurnRequestSchema, AnalysisStateSchema } from "../../src/orchestrator/route-schemas.js";

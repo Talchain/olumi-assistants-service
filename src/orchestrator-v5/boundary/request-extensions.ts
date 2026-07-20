@@ -140,6 +140,42 @@ export type SelectedElementsIngress = {
   readonly edge_ids: readonly string[];
 };
 
+/**
+ * The V5 request-extension CONTRACT as one declarative object schema.
+ *
+ * DERIVE-DON'T-MIRROR anchor. This composite is assembled from the very
+ * field schemas that `parseRequestExtensions` (below) runs — so its `.shape`
+ * keys ARE, by construction, the exact set of extension fields the pre-flight
+ * strips off the body before B1 and re-parses afterwards. Two things derive
+ * from it instead of hand-mirroring it:
+ *
+ *   1. `route-v2-preflight.ts` derives its `V5_EXTENSION_FIELDS` strip-list
+ *      from `Object.keys(V5RequestExtensionsSchema.shape)` — add a field here
+ *      and it is stripped automatically; there is no second list to forget.
+ *   2. `scripts/export-schemas.ts` emits this to
+ *      `contracts/v5-request-extensions.schema.json`, so the "Contract schemas"
+ *      CI job drift-checks the LIVE extension shapes (not just the dead
+ *      V1-derived input schemas).
+ *
+ * Every field is optional-and-nullable because the pre-flight treats an
+ * absent or `null` extension as "not provided" (graceful pass-through). This
+ * schema documents the extension SLICE of the request body only — it is NOT
+ * a whole-body validator (the core turn fields live in B1's
+ * `OrchestratorTurnPayload`); `.strict()` keeps the slice contract tight so
+ * the drift tripwire in `tests/contract/v5-extension-fields-derived.test.ts`
+ * fails loudly if the strip-set and the parser's consumed-set ever diverge.
+ */
+export const V5RequestExtensionsSchema = z
+  .object({
+    graph_state: GraphStateIngressSchema.nullable().optional(),
+    analysis_state: AnalysisStateIngressSchema.nullable().optional(),
+    user_id: UserIdIngressSchema.nullable().optional(),
+    selected_elements: SelectedElementsIngressSchema.nullable().optional(),
+  })
+  .strict();
+
+export type V5RequestExtensions = z.infer<typeof V5RequestExtensionsSchema>;
+
 function normaliseSelectedElements(
   parsed: z.infer<typeof SelectedElementsIngressSchema>,
 ): SelectedElementsIngress {

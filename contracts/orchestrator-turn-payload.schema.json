@@ -1,0 +1,286 @@
+{
+  "$ref": "#/definitions/OrchestratorTurnPayloadSchema",
+  "definitions": {
+    "OrchestratorTurnPayloadSchema": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "turn_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "scenario_id": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/turn_id"
+            },
+            "stage": {
+              "type": "string",
+              "enum": [
+                "frame",
+                "analyse",
+                "decide",
+                "review"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "message"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 10000
+            },
+            "turn_class": {
+              "type": "string",
+              "enum": [
+                "frame",
+                "clarify",
+                "propose",
+                "decide",
+                "review"
+              ]
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "composer",
+                "chip",
+                "chip_click",
+                "retry"
+              ]
+            },
+            "chip": {
+              "type": "object",
+              "properties": {
+                "action_type": {
+                  "type": "string",
+                  "enum": [
+                    "run_analysis",
+                    "set_factor_value",
+                    "add_constraint",
+                    "adjust_edge_strength",
+                    "explain_result",
+                    "explain_results",
+                    "explain_from_structure",
+                    "compare_options",
+                    "what_would_flip",
+                    "analysis_readiness"
+                  ]
+                },
+                "parameters": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "additionalProperties": false
+            },
+            "retry_of": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/turn_id"
+            },
+            "generate_model": {
+              "type": "boolean"
+            },
+            "explicit_generate": {
+              "type": "boolean"
+            },
+            "selected_elements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 20
+            }
+          },
+          "required": [
+            "turn_id",
+            "scenario_id",
+            "stage",
+            "kind",
+            "message",
+            "turn_class",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "turn_id": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/turn_id"
+            },
+            "scenario_id": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/turn_id"
+            },
+            "stage": {
+              "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/stage"
+            },
+            "kind": {
+              "type": "string",
+              "const": "system_event"
+            },
+            "event": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "patch_accepted"
+                    },
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "patch_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "patch_dismissed"
+                    },
+                    "patch_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "patch_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "direct_graph_edit"
+                    },
+                    "target_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "operation": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "target_id",
+                    "operation"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "chip_click"
+                    },
+                    "chip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "chip_id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "undo"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "redo"
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "selection_change"
+                    },
+                    "selected": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/0/properties/selected_elements/items"
+                      },
+                      "maxItems": 20
+                    },
+                    "cleared": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "selected"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "turn_id",
+            "scenario_id",
+            "stage",
+            "kind",
+            "event"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
