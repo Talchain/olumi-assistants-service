@@ -386,11 +386,17 @@ export async function ceeOrchestratorRouteV1(app: FastifyInstance): Promise<void
           { event: 'daily_budget_exceeded', request_id: requestId, user_key: error.userKey },
           'Daily token budget exceeded during orchestrator turn',
         );
+        // CEE_COST_CAP, not CEE_RATE_LIMIT: a daily token SPEND quota, not
+        // a requests-per-minute throttle. Retry-After and retryable stay —
+        // the budget does reset, so retry-later semantics were always right;
+        // only the CAUSE label was wrong. (The SSE paths for this same error
+        // already used a distinct DAILY_BUDGET_EXCEEDED code — see
+        // route-stream.ts:397 and pipeline/pipeline-stream.ts:639.)
         reply.header('Retry-After', error.retryAfterSeconds);
         reply.code(429);
         return reply.send({
           schema: 'cee.error.v1',
-          code: 'CEE_RATE_LIMIT',
+          code: 'CEE_COST_CAP',
           message: 'Daily token budget exceeded',
           retryable: true,
           source: 'cee',

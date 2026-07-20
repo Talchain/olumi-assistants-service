@@ -292,9 +292,13 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
 
   if (err instanceof RequestBudgetExceededError) {
     log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: budget exceeded");
+    // CEE_BUDGET_EXCEEDED, not CEE_RATE_LIMIT: the error carries
+    // budgetMs/elapsedMs — this is an elapsed-time DEADLINE breach, not a
+    // throttle and not a spend cap. Sharing CEE_RATE_LIMIT here is what made
+    // the 2026-07-20 draft-timeout investigation read these 429s as throttling.
     return {
       statusCode: 429,
-      body: withLlmTrace(buildCeeErrorResponse("CEE_RATE_LIMIT", err.message, { requestId: ctx.requestId })),
+      body: withLlmTrace(buildCeeErrorResponse("CEE_BUDGET_EXCEEDED", err.message, { requestId: ctx.requestId })),
     };
   }
 

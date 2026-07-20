@@ -139,9 +139,12 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   const tokensOut = estimateTokens(1200);
 
   if (!allowedCostUSD(tokensIn, tokensOut, draftAdapter.model)) {
+    // CEE_COST_CAP, not CEE_RATE_LIMIT: this is a per-request SPEND cap in
+    // USD. It is unrelated to the requests-per-minute limiter in
+    // src/middleware/rate-limit.ts, which keeps CEE_RATE_LIMIT.
     ctx.earlyReturn = {
       statusCode: 429,
-      body: buildCeeErrorResponse("CEE_RATE_LIMIT", "Cost guard exceeded", {
+      body: buildCeeErrorResponse("CEE_COST_CAP", "Cost guard exceeded", {
         requestId: ctx.requestId,
       }),
     };

@@ -127,7 +127,11 @@ export function isRetryableCEEError(error: unknown): boolean {
   }
 
   const code = error.code;
-  if (code === "CEE_RATE_LIMIT") {
+  if (
+    code === "CEE_RATE_LIMIT" ||
+    code === "CEE_COST_CAP" ||
+    code === "CEE_BUDGET_EXCEEDED"
+  ) {
     return true;
   }
 
@@ -296,7 +300,15 @@ export function getCeeErrorCategory(error: unknown): CeeErrorCategory {
     }
     case "CEE_VALIDATION_FAILED":
       return "validation";
+    // CEE_COST_CAP (spend cap) and CEE_BUDGET_EXCEEDED (elapsed-time
+    // deadline) were split out of CEE_RATE_LIMIT server-side on 2026-07-20.
+    // They map to the existing "rate_limit" category deliberately: widening
+    // the public `CeeErrorCategory` union would break exhaustive consumer
+    // switches, and this rename is behaviour-preserving by design. Splitting
+    // the category is a separate, opt-in SDK change.
     case "CEE_RATE_LIMIT":
+    case "CEE_COST_CAP":
+    case "CEE_BUDGET_EXCEEDED":
       return "rate_limit";
     case "CEE_TIMEOUT":
       return "timeout";

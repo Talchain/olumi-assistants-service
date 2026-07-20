@@ -107,6 +107,11 @@ Implementation details:
   - Increments a per-key counter within the active window.
   - If the limit is exceeded:
     - Returns a `CEEErrorResponseV1` with `code = "CEE_RATE_LIMIT"`, `retryable = true`.
+      This is the genuine RPM throttle and keeps `CEE_RATE_LIMIT`. Two other
+      429 conditions were split out of this code on 2026-07-20 and must not be
+      confused with it: `CEE_COST_CAP` (per-request USD cost guard, or the
+      daily token budget) and `CEE_BUDGET_EXCEEDED` (a request exceeding its
+      elapsed-time budget). See `Docs/cee/CEE-incident-runbook.md` §3.1.
     - Sets `details.retry_after_seconds` with a minimal positive retry-after.
     - Sets `Retry-After` header to the same value.
 

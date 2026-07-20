@@ -427,7 +427,9 @@ export type CeeClientErrorCode =
   | "CEE_NETWORK_ERROR"       // Network/transport failure
   | "CEE_TIMEOUT"             // Request timed out
   | "CEE_VALIDATION_FAILED"   // Input validation failed
-  | "CEE_RATE_LIMIT"          // Rate limited
+  | "CEE_RATE_LIMIT"          // Rate limited (requests-per-minute throttle)
+  | "CEE_COST_CAP"            // Spend cap: per-request USD guard or daily token budget
+  | "CEE_BUDGET_EXCEEDED"     // Elapsed-time deadline breach (not money, not a rate)
   | "CEE_INTERNAL_ERROR"      // Server-side error
   | "CEE_CONFIG_ERROR"        // Client configuration error
   | "CEE_ERROR";              // Generic error
