@@ -194,6 +194,79 @@ describe('buildMinimalV5DiagnosticTrace', () => {
     });
     expect(trace!.coaching_delivery).toBeUndefined();
   });
+
+  // ── S3-L6 / F-5: edit-lane LLM call recorded into llm_calls[] ─────────────
+  it('records the edit-lane LLM call in llm_calls[] on an edit_graph exit (F-5 fix)', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'edit_graph',
+      editLlmCall: {
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        input_tokens: 3100,
+        output_tokens: 210,
+        latency_ms: 1450,
+        stop_reason: 'end_turn',
+        repair_attempts: 1,
+      },
+    });
+    expect(trace!.exit_path).toBe('edit_graph');
+    // BEFORE the fix this was always [] — the edit dispatch never threaded a call.
+    expect(trace!.llm_calls.length).toBe(1);
+    const call = trace!.llm_calls[0]!;
+    expect(call.role).toBe('edit_graph');
+    expect(call.provider).toBe('anthropic');
+    expect(call.model).toBe('claude-sonnet-4-6');
+    expect(call.input_tokens).toBe(3100);
+    expect(call.output_tokens).toBe(210);
+    expect(call.latency_ms).toBe(1450);
+    expect(call.stop_reason).toBe('end_turn');
+    // Cache split + thinking are not threaded through the edit result today.
+    expect(call.cache_read_tokens).toBeNull();
+    expect(call.cache_creation_tokens).toBeNull();
+    expect(call.thinking_enabled).toBe(false);
+    expect(call.error).toBeNull();
+  });
+
+  it('falls back to the honest model sentinel when the edit adapter did not expose a model', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'edit_graph',
+      editLlmCall: {
+        provider: 'anthropic',
+        model: null,
+        input_tokens: 0,
+        output_tokens: 5,
+        latency_ms: 900,
+        stop_reason: null,
+        repair_attempts: 0,
+      },
+    });
+    expect(trace!.llm_calls.length).toBe(1);
+    expect(trace!.llm_calls[0]!.model).toBe('unknown');
+  });
+
+  it('leaves llm_calls empty on a deterministic (no-LLM) edit exit — editLlmCall omitted', async () => {
+    process.env.CEE_DIAGNOSTIC_TRACE_ENABLED = 'true';
+    const trace = buildMinimalV5DiagnosticTrace({
+      startedAt: Date.now() - 100,
+      scenarioId: SCENARIO_ID,
+      turnId: TURN_ID,
+      requestId: REQUEST_ID,
+      exitPath: 'edit_graph',
+      // No editLlmCall — the constraint-shortcut / deterministic value pre-route.
+    });
+    expect(trace!.exit_path).toBe('edit_graph');
+    expect(trace!.llm_calls).toEqual([]);
+  });
 });
 
 describe('buildErrorV5DiagnosticTrace', () => {

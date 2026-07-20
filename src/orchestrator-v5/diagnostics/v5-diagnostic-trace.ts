@@ -58,6 +58,7 @@ import {
 } from '../../orchestrator/pipeline/diagnostic-trace.js';
 import type { PipelineOutcome } from '../../cee/unified-pipeline/types.js';
 import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
+import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import type { CommitResult } from '../commit.js';
 import type {
   V5TurnTimings,
@@ -226,6 +227,81 @@ export type V5DiagnosticExitPath =
   | 'clarify_v2'
   | 'draft_graph_error';
 
+/**
+ * Edit-lane LLM call attribution (S3-L6 / F-5). The edit_graph turn calls the
+ * LLM once (plus repair attempts), but its exit path builds only the minimal
+ * trace, whose `llm_calls[]` came exclusively from `V5TurnTimings` — a shape
+ * the edit dispatch never captures. The result: `_diagnostic_trace.llm_calls`
+ * was structurally `[]` on every edit turn that demonstrably called the LLM,
+ * so diagnosing an edit meant reading Render logs. This carries the edit LLM
+ * call's real, already-captured attribution (`EditGraphTraceDiagnostics` R7
+ * accumulators + `EditGraphResult.latencyMs`) into the trace's `llm_calls[]`
+ * — the same "record the real call" shape the draft (`toolLLMTelemetry`) and
+ * turn_executor (`V5TurnTimings`) paths already emit.
+ *
+ * Present ONLY when the edit LLM actually ran: the edit dispatch builds this
+ * from the diagnostics of a returned edit result, and omits it entirely on
+ * deterministic (no-LLM) edit exits (constraint shortcut, deterministic
+ * value pre-route), so a no-LLM edit still honestly reports `llm_calls: []`.
+ * `input_tokens` is the R7 estimate (`input_tokens_est`) summed across repair
+ * attempts; `latency_ms` is the handler's wall-clock (includes repair loop),
+ * not a single provider round-trip. `model` is `null` only when the adapter
+ * genuinely did not expose one (test doubles) — an honest sentinel, mapped to
+ * `'unknown'` at record time (mirrors the routing-call convention).
+ */
+export interface EditGraphLlmCallTelemetry {
+  readonly provider: string;
+  readonly model: string | null;
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+  readonly latency_ms: number;
+  readonly stop_reason: string | null;
+  readonly repair_attempts: number;
+}
+
+/**
+ * S3-L6 / F-5 — map a returned edit result's already-captured R7 LLM
+ * diagnostics into edit-lane call attribution, so an edit turn's
+ * `_diagnostic_trace.llm_calls[]` carries the call it made (previously
+ * structurally empty on every edit turn — diagnosis-hostile).
+ *
+ * Lives HERE (the trace assembly), not in `edit-graph.ts`: 19 dispatch test
+ * suites `vi.mock` the whole `tools/edit-graph.js` module with a bare factory,
+ * which would strand a new export there (trap-12 — a mock factory REPLACES the
+ * module). This module is mocked by no test, and it already type-imports the
+ * sibling `draft-graph.js` result shape — so it is the natural, mock-safe home.
+ *
+ * Returns `undefined` when the edit LLM did NOT run (deterministic exits:
+ * constraint shortcut, deterministic value pre-route, and any partial result
+ * with no diagnostics), so a no-LLM edit still reports `llm_calls: []` honestly
+ * rather than a fabricated zero-token call. The "did it run" signal is the R7
+ * accumulators: on an LLM path `model` is the adapter model and/or tokens are
+ * summed; on a deterministic path `model` stays `null` and both sums are 0.
+ *
+ * `provider` is the resolved adapter name (the dispatch knows it; the R7
+ * diagnostics do not carry it).
+ */
+export function extractEditLlmCallTelemetry(
+  result: Pick<EditGraphResult, 'diagnostics' | 'latencyMs'>,
+  provider: string,
+): EditGraphLlmCallTelemetry | undefined {
+  const diag = result.diagnostics;
+  if (!diag) return undefined;
+  const inputTokens = diag.input_tokens_est ?? 0;
+  const outputTokens = diag.output_tokens ?? 0;
+  const llmRan = diag.model != null || inputTokens > 0 || outputTokens > 0;
+  if (!llmRan) return undefined;
+  return {
+    provider,
+    model: diag.model ?? null,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    latency_ms: result.latencyMs,
+    stop_reason: diag.stop_reason ?? null,
+    repair_attempts: diag.repair_attempts ?? 0,
+  };
+}
+
 // ─── Inputs ────────────────────────────────────────────────────────────────
 
 export interface BuildV5DiagnosticTraceInput {
@@ -249,6 +325,13 @@ export interface BuildMinimalV5DiagnosticTraceInput {
   /** Copy-source delivery diagnostics (Scope C). Surfaced when the
    *  post-analysis advice gate produced the response. */
   readonly coachingDelivery?: V5CoachingDelivery;
+  /**
+   * Edit-lane LLM call attribution (S3-L6 / F-5). Present only when the
+   * edit_graph turn actually invoked the LLM; recorded into `llm_calls[]`
+   * with role `edit_graph`. Omitted on deterministic edit exits so a no-LLM
+   * edit honestly reports `llm_calls: []`. See `EditGraphLlmCallTelemetry`.
+   */
+  readonly editLlmCall?: EditGraphLlmCallTelemetry;
 }
 
 export interface BuildErrorV5DiagnosticTraceInput {
@@ -326,6 +409,13 @@ export function buildMinimalV5DiagnosticTrace(
   const collector = new DiagnosticTraceCollector();
   if (tt) {
     populateCollectorFromTurnTimings(collector, tt);
+  }
+  // S3-L6 / F-5: record the edit-lane LLM call so an edit turn's trace carries
+  // the call it demonstrably made (previously always `[]` on this path). The
+  // edit dispatch supplies this ONLY when the LLM actually ran, so a
+  // deterministic edit still freezes an empty `llm_calls[]` honestly.
+  if (input.editLlmCall) {
+    populateCollectorFromEditTelemetry(collector, input.editLlmCall);
   }
   const frozen = collector.freeze();
 
@@ -561,6 +651,35 @@ function populateCollectorFromTurnTimings(
       error: null,
     });
   }
+}
+
+/**
+ * S3-L6 / F-5 — record the edit-lane LLM call into `llm_calls[]`. Called only
+ * when the edit dispatch confirmed the LLM ran (see `EditGraphLlmCallTelemetry`
+ * and `extractEditLlmCallTelemetry`). Every value is REAL data already captured
+ * at the edit site (R7 diagnostics + handler wall-clock); `model` falls back to
+ * the `'unknown'` sentinel only when the adapter genuinely did not expose one
+ * (test doubles), never a fabricated id. Cache-token split and thinking flag
+ * are not threaded through the edit result today, so they are recorded as
+ * `null`/`false` rather than guessed.
+ */
+function populateCollectorFromEditTelemetry(
+  collector: DiagnosticTraceCollector,
+  editLlmCall: EditGraphLlmCallTelemetry,
+): void {
+  collector.recordLLMCall({
+    role: 'edit_graph',
+    provider: editLlmCall.provider,
+    model: editLlmCall.model ?? 'unknown',
+    input_tokens: editLlmCall.input_tokens,
+    output_tokens: editLlmCall.output_tokens,
+    cache_read_tokens: null,
+    cache_creation_tokens: null,
+    latency_ms: editLlmCall.latency_ms,
+    stop_reason: editLlmCall.stop_reason,
+    thinking_enabled: false,
+    error: null,
+  });
 }
 
 function buildBenchmarkingForDraftGraph(
