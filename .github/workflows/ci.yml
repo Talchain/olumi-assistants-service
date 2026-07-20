@@ -33,15 +33,23 @@ jobs:
         run: pnpm openapi:generate
       - name: Lint
         run: pnpm lint
-      - name: Typecheck (blocking gate)
-        # `pnpm typecheck` IS the honest gate: source-only (tsconfig.build.json
-        # excludes tests), plus a `pretypecheck` that regenerates the OpenAPI types
-        # and asserts @talchain/schemas resolves from THIS checkout at the pinned
-        # version. The full src+test `tsc --noEmit` is deliberately NOT this gate —
-        # it carries ~466 pre-existing test-file errors and lives behind the honest
-        # name `pnpm typecheck:all-including-known-broken-tests`, run by the separate
-        # non-required "Typecheck Drift (ratchet)" job.
-        run: pnpm typecheck
+      - name: Typecheck via build (blocking gate; emits dist)
+        # Same honest gate as before — tsc over tsconfig.build.json (source-only;
+        # tests are excluded) plus the explicit assertion that @talchain/schemas
+        # resolves from THIS checkout at the pinned version — but the tsc pass now
+        # EMITS instead of `--noEmit` (`pnpm build`; measured delta ~2-3s). Why:
+        # the compiled-boot test (prompt-loader.test.ts, "compiled dist module
+        # boots") is `it.skipIf(!dist exists)` and this job never built, so it
+        # DETERMINISTICALLY skipped in the required gate — an always-skipping
+        # check is theatre. With dist present, `pnpm test:required` below actually
+        # executes it. (`pnpm check:schemas-resolution` is run explicitly because
+        # it lived in `pretypecheck`, which `pnpm build` does not trigger; build
+        # itself re-runs openapi:generate, which is idempotent here.)
+        # The full src+test `tsc --noEmit` is deliberately NOT this gate — it
+        # carries ~466 pre-existing test-file errors and lives behind the honest
+        # name `pnpm typecheck:all-including-known-broken-tests`, run by the
+        # separate non-required "Typecheck Drift (ratchet)" job.
+        run: pnpm check:schemas-resolution && pnpm build
       - name: Validate config defaults
         run: pnpm config:validate
         env:
@@ -72,11 +80,16 @@ jobs:
         run: pnpm eval:orchestrator:test
 
       - name: Run required test subset
-        # Deterministic, in-process suite that is currently green (see
-        # vitest.required.config.ts). The full suite + coverage and the
-        # service-like integration suite run in the non-required
-        # "Full Test Suite (advisory)" / "Integration Tests (advisory)" jobs
-        # below, so all broader failures stay visible and nothing is hidden.
+        # Deterministic, in-process suite (see vitest.required.config.ts).
+        # Since O-6 this INCLUDES the ~155 in-process tests/integration files —
+        # only the finite, self-checking REQUIRED_GATE_INTEGRATION_EXCLUSIONS
+        # list (vitest.shared.ts: real Supabase/Postgres, live LLM, staging
+        # HTTP) is excluded, so a change that breaks an in-process integration
+        # test turns THIS required check red (the old `tests/integration/**`
+        # category glob let PR #539 report "0 failed" while breaking two).
+        # The full suite + coverage and the external-dependent files still run
+        # in the non-required "Full Test Suite (advisory)" / "Integration
+        # Tests (advisory)" jobs below, so nothing is hidden.
         run: pnpm test:required
 
       - name: Check for quarantined tests
