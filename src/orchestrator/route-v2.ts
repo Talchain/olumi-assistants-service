@@ -2504,6 +2504,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           payload: ingress,
           requestId,
           request: req,
+          // Review-576 condition 2: the draft retry-affordability gate and
+          // the Step-11 budget guard measure elapsed time from THIS baseline
+          // (request start), not from LLM start — pre-LLM turn time (routing
+          // tool-use call, context assembly) now counts against the budget.
+          requestStartMs: routeStartedAt,
           // C2 — on the explicit-generate path the pipeline drafts from the
           // server-assembled brief, not the (possibly canned-chip) wire
           // message. The committed turn's user_message stays verbatim

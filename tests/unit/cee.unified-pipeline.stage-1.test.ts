@@ -52,12 +52,29 @@ vi.mock("../../src/cee/transforms/graph-normalisation.js", () => ({
   normaliseCeeGraphVersionAndProvenance: vi.fn(),
 }));
 
-vi.mock("../../src/config/timeouts.js", () => ({
+vi.mock("../../src/config/timeouts.js", async (importOriginal) => ({
+  // Spread the real module so newly added exports (e.g. MIN_DRAFT_RETRY_BUDGET_MS,
+  // getDraftLlmRetryBudgetMs) flow through automatically instead of silently
+  // becoming undefined — a hand-listed mock factory is the mirror that drifts.
+  ...(await importOriginal<typeof import("../../src/config/timeouts.js")>()),
   DRAFT_REQUEST_BUDGET_MS: 120_000,
   DRAFT_LLM_TIMEOUT_MS: 105_000,
   LLM_POST_PROCESSING_HEADROOM_MS: 15_000,
   REPAIR_TIMEOUT_MS: 10_000,
   getJitteredRetryDelayMs: vi.fn().mockReturnValue(0),
+}));
+
+vi.mock("../../src/cee/validation/integrity-sentinel.js", () => ({
+  // Default: no default-strength signature detected — preserves the behaviour
+  // every pre-existing test ran under (the flag is off in the config mock
+  // anyway). Individual tests flip the return value to exercise the
+  // strength-default retry path.
+  detectStrengthDefaultsV1: vi.fn().mockReturnValue({
+    detected: false,
+    total_edges: 1,
+    defaulted_count: 0,
+    defaulted_edge_ids: [],
+  }),
 }));
 
 vi.mock("../../src/cee/validation/pipeline.js", () => ({
@@ -137,6 +154,10 @@ function setupMocks(overrides?: {
 }) {
   // Reset
   vi.clearAllMocks();
+  // Once-queues survive vi.clearAllMocks(); a test that legitimately leaves an
+  // unconsumed mockResolvedValueOnce/mockRejectedValueOnce (e.g. the budget
+  // gate suppressing attempt 2) must not leak it into the next test.
+  mockAdapter.draftGraph.mockReset();
 
   // groundAttachments
   if (overrides?.attachmentError) {
@@ -315,6 +336,169 @@ describe("runStageParse", () => {
 
     const ctx = makeCtx();
     await expect(runStageParse(ctx)).rejects.toThrow("did not respond");
+  });
+
+  // ── Retry budget coherence (2026-07-20 staging outage RCA) ────────────
+  //
+  // A first attempt that burns its full 105s window leaves ZERO affordable
+  // budget (120s − 105s − 15s headroom = 0): the old unconditional retry
+  // produced a 211s worst case against a 125s browser-proxy deadline, and
+  // CEE's own Step-11 budget guard discarded both retry successes observed
+  // in the outage window. The retry must be gated on remaining budget.
+
+  it("does NOT retry when the first timeout consumed the request budget (ladder coherence)", async () => {
+    setupMocks();
+    const timeoutErr = new Error("timeout");
+    timeoutErr.name = "UpstreamTimeoutError";
+
+    // First attempt times out having consumed its full 105s window; a second
+    // attempt WOULD succeed — but must never be launched, because the
+    // remaining budget (120 − 105 − 15 = 0) cannot fit a real draft and the
+    // Step-11 budget guard would discard the result anyway.
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(timeoutErr)
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    const ctx = makeCtx({
+      opts: { schemaVersion: "v3", requestStartMs: Date.now() - 105_000 },
+    });
+
+    await expect(runStageParse(ctx)).rejects.toThrow("did not respond");
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps the retry attempt's timeoutMs to the remaining request budget", async () => {
+    setupMocks();
+    const timeoutErr = new Error("timeout");
+    timeoutErr.name = "UpstreamTimeoutError";
+
+    // First attempt fails fast (e.g. connect-phase failure) 40s into the
+    // request: retry is affordable (120 − 40 − 15 = 65s ≥ 55s minimum) but
+    // must be CAPPED to the remaining window, not handed a fresh 105s.
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(timeoutErr)
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    const ctx = makeCtx({
+      opts: { schemaVersion: "v3", requestStartMs: Date.now() - 40_000 },
+    });
+
+    await runStageParse(ctx);
+
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
+    const retryOpts = mockAdapter.draftGraph.mock.calls[1][1];
+    expect(retryOpts.timeoutMs).toBeLessThanOrEqual(65_000);
+    expect(retryOpts.timeoutMs).toBeGreaterThanOrEqual(55_000);
+  });
+
+  it("does NOT retry into a window smaller than the slowest observed draft (floor re-anchor)", async () => {
+    setupMocks();
+    const timeoutErr = new Error("timeout");
+    timeoutErr.name = "UpstreamTimeoutError";
+
+    // First attempt fails 60s into the request: remaining window =
+    // 120 − 60 − 15 = 45s. Successful drafts run 37.9–54.6s (p95 53.7s,
+    // recurrence RCA 2026-07-20), so a 45s window fails p95+ drafts — the
+    // retry would usually burn a second LLM call to return the same error.
+    // The 55s floor (adversarial-review condition 1) refuses it; the old
+    // 35s floor would have launched it.
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(timeoutErr)
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    const ctx = makeCtx({
+      opts: { schemaVersion: "v3", requestStartMs: Date.now() - 60_000 },
+    });
+
+    await expect(runStageParse(ctx)).rejects.toThrow("did not respond");
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(1);
+  });
+
+  it("still retries a fast-failing timeout when budget is affordable (existing behaviour preserved)", async () => {
+    setupMocks();
+    const timeoutErr = new Error("timeout");
+    timeoutErr.name = "UpstreamTimeoutError";
+
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(timeoutErr)
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    // Fresh request: near-zero elapsed → full retry window affordable.
+    const ctx = makeCtx();
+    await runStageParse(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips the strength-default retry when the remaining budget cannot fit another attempt", async () => {
+    setupMocks();
+    const { detectStrengthDefaultsV1 } = await import("../../src/cee/validation/integrity-sentinel.js");
+    (detectStrengthDefaultsV1 as any).mockReturnValue({
+      detected: true,
+      total_edges: 1,
+      defaulted_count: 1,
+      defaulted_edge_ids: ["e1"],
+    });
+    (config as any).cee.retryOnDefaultStrengths = true;
+
+    try {
+      // 100s elapsed → remaining window = 120 − 100 − 15 = 5s < 35s minimum.
+      // Without the gate, the nudge retry would launch into a window it cannot
+      // complete, converting a usable (defaulted) SUCCESS into a timeout error.
+      const ctx = makeCtx({
+        opts: { schemaVersion: "v3", requestStartMs: Date.now() - 100_000 },
+      });
+      await runStageParse(ctx);
+
+      expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(1);
+      expect(ctx.graph).toBeDefined();
+      expect(ctx.strengthDefaultDetection?.detected).toBe(true);
+    } finally {
+      delete (config as any).cee.retryOnDefaultStrengths;
+    }
+  });
+
+  it("still performs the strength-default retry when budget is affordable", async () => {
+    setupMocks();
+    const { detectStrengthDefaultsV1 } = await import("../../src/cee/validation/integrity-sentinel.js");
+    (detectStrengthDefaultsV1 as any).mockReturnValue({
+      detected: true,
+      total_edges: 1,
+      defaulted_count: 1,
+      defaulted_edge_ids: ["e1"],
+    });
+    (config as any).cee.retryOnDefaultStrengths = true;
+
+    try {
+      const ctx = makeCtx(); // near-zero elapsed → retry affordable
+      await runStageParse(ctx);
+
+      expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
+      expect(ctx.graph).toBeDefined();
+    } finally {
+      delete (config as any).cee.retryOnDefaultStrengths;
+    }
   });
 
   // ── Budget exceeded ───────────────────────────────────────────────────

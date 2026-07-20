@@ -118,6 +118,15 @@ export interface DispatchDraftGraphParams {
    * Absent on the heuristic and flag paths (nothing to consume).
    */
   readonly consumedPendingRefs?: readonly string[];
+  /**
+   * Review-576 condition 2 — wall-clock baseline of the HTTP request
+   * (route-v2's `routeStartedAt`). Threaded through `handleDraftGraph` to
+   * the unified pipeline so the draft retry-affordability gate and the
+   * Step-11 budget guard measure elapsed time from REQUEST start (covering
+   * routing tool-use + context assembly), not from LLM start. Optional:
+   * absent callers keep parse.ts's documented LLM-start fallback.
+   */
+  readonly requestStartMs?: number;
 }
 
 export interface DispatchDraftGraphResult {
@@ -420,7 +429,12 @@ export async function dispatchDraftGraph(
 
   let draftResult: DraftGraphResult;
   try {
-    draftResult = await handleDraftGraph(effectiveBrief, request, payload.turn_id);
+    draftResult = await handleDraftGraph(
+      effectiveBrief,
+      request,
+      payload.turn_id,
+      params.requestStartMs !== undefined ? { requestStartMs: params.requestStartMs } : undefined,
+    );
   } catch (err) {
     log.error(
       {

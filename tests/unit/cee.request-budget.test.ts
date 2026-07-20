@@ -103,6 +103,89 @@ describe("Request budget configuration", () => {
 // 2. Error types tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Draft retry budget coherence (2026-07-20 staging outage RCA)
+//
+// The old draft retry handed attempt 2 a full fresh DRAFT_LLM_TIMEOUT_MS,
+// giving a 211s worst case (105 + ~0.8 + 105) against a 120s request budget
+// and a 125s browser-proxy deadline. Every retry outcome was unusable by
+// construction: a retry timeout surfaced at ~211s, and a retry SUCCESS landed
+// past the budget guard, which threw it away (observed twice in the outage
+// window: cee.request_budget.exceeded at 09:51:06Z and 10:12:02Z). These pins
+// make that arithmetic impossible to reintroduce silently.
+// ---------------------------------------------------------------------------
+
+describe("Draft retry budget coherence", () => {
+  it("a full-window first-attempt timeout leaves NO affordable retry at defaults", async () => {
+    const {
+      getDraftLlmRetryBudgetMs,
+      DRAFT_LLM_TIMEOUT_MS,
+      MIN_DRAFT_RETRY_BUDGET_MS,
+    } = await import("../../src/config/timeouts.js");
+
+    const windowAfterFullTimeout = getDraftLlmRetryBudgetMs(DRAFT_LLM_TIMEOUT_MS);
+    // 120s budget − 105s spent − 15s headroom = 0
+    expect(windowAfterFullTimeout).toBe(0);
+    expect(windowAfterFullTimeout).toBeLessThan(MIN_DRAFT_RETRY_BUDGET_MS);
+  });
+
+  it("retry window invariant: elapsed + window + headroom never exceeds the budget", async () => {
+    const {
+      getDraftLlmRetryBudgetMs,
+      DRAFT_REQUEST_BUDGET_MS,
+      DRAFT_LLM_TIMEOUT_MS,
+      LLM_POST_PROCESSING_HEADROOM_MS,
+    } = await import("../../src/config/timeouts.js");
+
+    for (let elapsed = 0; elapsed <= 150_000; elapsed += 5_000) {
+      const window = getDraftLlmRetryBudgetMs(elapsed);
+      expect(window).toBeGreaterThanOrEqual(0);
+      expect(window).toBeLessThanOrEqual(DRAFT_LLM_TIMEOUT_MS);
+      if (window > 0) {
+        expect(elapsed + window + LLM_POST_PROCESSING_HEADROOM_MS).toBeLessThanOrEqual(
+          DRAFT_REQUEST_BUDGET_MS,
+        );
+      }
+    }
+  });
+
+  it("MIN_DRAFT_RETRY_BUDGET_MS default is 55s: at or above every successful draft ever observed", async () => {
+    const { MIN_DRAFT_RETRY_BUDGET_MS, DRAFT_LLM_TIMEOUT_MS } =
+      await import("../../src/config/timeouts.js");
+    // Empirical anchor (recurrence RCA, 2026-07-20, n=7 successful drafts):
+    // min 37.9s / p50 43.4s / p95 53.7s / max 54.6s. The floor must sit AT OR
+    // ABOVE the slowest success ever observed — a granted retry window smaller
+    // than that can only burn provider spend on a result that cannot finish.
+    // (The original 35s floor sat BELOW its own cited 38–55s anchor and below
+    // the fastest draft ever observed; re-anchored per adversarial review
+    // condition 1.)
+    expect(MIN_DRAFT_RETRY_BUDGET_MS).toBe(55_000);
+    // ≥ max observed successful draft (54.6s): any authorized window fits
+    // every healthy draft in the distribution.
+    expect(MIN_DRAFT_RETRY_BUDGET_MS).toBeGreaterThanOrEqual(54_600);
+    expect(MIN_DRAFT_RETRY_BUDGET_MS).toBeLessThan(DRAFT_LLM_TIMEOUT_MS);
+  });
+
+  it("validateTimeoutRelationships warns when MIN_DRAFT_RETRY_BUDGET_MS makes the retry structurally unreachable", async () => {
+    vi.resetModules();
+    const prev = process.env.MIN_DRAFT_RETRY_BUDGET_MS;
+    process.env.MIN_DRAFT_RETRY_BUDGET_MS = "200000"; // ≥ DRAFT_LLM_TIMEOUT_MS (105s)
+    try {
+      const { validateTimeoutRelationships } = await import("../../src/config/timeouts.js");
+      const warnings = validateTimeoutRelationships({
+        handlerBudgetMs: 85_000,
+        turnBudgetMs: 115_000,
+        browserProxyTimeoutMs: 125_000,
+      });
+      expect(warnings.some((w) => w.includes("MIN_DRAFT_RETRY_BUDGET_MS"))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.MIN_DRAFT_RETRY_BUDGET_MS;
+      else process.env.MIN_DRAFT_RETRY_BUDGET_MS = prev;
+      vi.resetModules();
+    }
+  });
+});
+
 describe("Typed error classes", () => {
   it("LLMTimeoutError has correct name and properties", async () => {
     const { LLMTimeoutError } = await import("../../src/adapters/llm/errors.js");

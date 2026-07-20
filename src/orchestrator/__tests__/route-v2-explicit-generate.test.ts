@@ -249,6 +249,11 @@ describe('POST /orchestrate/v2/turn — explicit-generate wire flag (ROADMAP 2.6
     // The committed turn keeps the verbatim wire message.
     expect((args.payload as Record<string, unknown>).message).toBe(CANNED_CHIP_MESSAGE);
     expect(chatWithToolsMock).not.toHaveBeenCalled();
+    // Review-576 condition 2: the route threads its wall-clock baseline so
+    // the draft retry-affordability gate and the Step-11 budget guard measure
+    // elapsed time from REQUEST start, not LLM start.
+    expect(typeof args.requestStartMs).toBe('number');
+    expect(args.requestStartMs as number).toBeLessThanOrEqual(Date.now());
     const body = JSON.parse(res.body);
     expect(body.assistant_text).not.toContain(FRAME_GUARD_COPY);
   });

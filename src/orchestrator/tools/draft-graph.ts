@@ -137,13 +137,19 @@ export interface DraftGraphResult {
  *   `detectCurrencyInMessage` on the full user message. Prefers this over
  *   brief-only detection — the message catches "£100k" even when the brief
  *   itself omits the symbol.
+ * @param draftOpts.requestStartMs - Wall-clock baseline of the HTTP request
+ *   (route-handler entry). Threaded to the unified pipeline so the draft
+ *   retry-affordability gate and the Step-11 budget guard measure elapsed
+ *   time from REQUEST start, covering pre-LLM turn time (routing tool-use
+ *   call, context assembly). When absent, parse.ts falls back to LLM start —
+ *   both measurements are then blind to pre-LLM time (review-576 condition 2).
  * @returns Graph patch block + optional assistant text with warnings
  */
 export async function handleDraftGraph(
   brief: string,
   request: FastifyRequest,
   turnId: string,
-  draftOpts?: { briefSignalsHeader?: string; signal?: AbortSignal; userCurrencyHint?: string | null },
+  draftOpts?: { briefSignalsHeader?: string; signal?: AbortSignal; userCurrencyHint?: string | null; requestStartMs?: number },
 ): Promise<DraftGraphResult> {
   const startTime = Date.now();
 
@@ -170,6 +176,11 @@ export async function handleDraftGraph(
   const opts: UnifiedPipelineOpts = {
     schemaVersion: 'v3',
     signal: draftOpts?.signal,
+    // Review-576 condition 2: thread the request-start baseline when the
+    // caller provides one, so budget arithmetic inside the pipeline starts at
+    // request start, not LLM start. Omitted (not defaulted) when absent —
+    // parse.ts owns the documented LLM-start fallback for legacy callers.
+    ...(draftOpts?.requestStartMs !== undefined ? { requestStartMs: draftOpts.requestStartMs } : {}),
   };
 
   log.info({ brief_length: brief.length, turn_id: turnId }, "draft_graph: starting unified pipeline");
