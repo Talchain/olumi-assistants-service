@@ -71,6 +71,7 @@ import {
   ADD_RISK_REJECTION_GUIDANCE_PLACEHOLDER,
 } from "../add-risk-rejection-guidance.js";
 import { buildConnectivityNamedRefusal } from "../connectivity-named-refusal.js";
+import { shouldHandOffProposeToLlmLane, resolveClauseLabel } from "./propose-handoff.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { encodeOptionInterventionsForEdit, optionIdsTouchedByOperations, optionIdsAddedWithInterventionIntent } from "./encode-option-interventions.js";
 import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classifier.js";
@@ -335,6 +336,7 @@ const PROPOSE_AND_CONFIRM_FALLBACK_TEXT = 'I’ve drafted a change that fits you
 function buildProposeAndConfirmText(
   proposedChanges: ProposedChangesPayload,
   resolvedTarget: ResolvedEditTarget | null,
+  knownLabels: readonly string[] = [],
 ): string {
   if (!resolvedTarget) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
   const changes = proposedChanges.changes ?? [];
@@ -362,13 +364,26 @@ function buildProposeAndConfirmText(
     return `I have a change in mind for **${label}**, but I need the specifics to apply it directly. ${action} and I'll make it.`;
   }
 
+  // F-2 (POSTDEPLOY-PROBES-573): a bolded target is a graph entity or it is
+  // nothing. Before this filter the copy bolded raw message clauses —
+  // "**CRM Platform Cost to 0.55.**", "**Not anything on the option.**" —
+  // telling the user the system had understood entities by those names.
+  // `structural_add` labels are exempt: a new element the user just named is
+  // legitimately absent from the graph.
+  const entityLabels = new Set<string>(knownLabels.map((label) => label.trim()));
+  entityLabels.add(resolvedTarget.label.trim());
   const labels: string[] = [];
   for (const change of changes.slice(0, 3)) {
-    if (change.element_label && !labels.includes(change.element_label)) {
-      labels.push(change.element_label);
-    }
+    const candidate = change.element_label?.trim();
+    if (!candidate || labels.includes(candidate)) continue;
+    if (change.action_type !== 'structural_add' && !entityLabels.has(candidate)) continue;
+    labels.push(candidate);
   }
-  if (labels.length === 0) return PROPOSE_AND_CONFIRM_FALLBACK_TEXT;
+  // Every proposed change resolved to a non-entity: name the one target we
+  // genuinely resolved rather than inventing a list of clause echoes.
+  if (labels.length === 0) {
+    return `I have changes in mind for **${resolvedTarget.label}**, but I need the specifics to apply them directly. Reply with the exact changes you'd like and I'll make them one at a time.`;
+  }
 
   const list =
     labels.length === 1
@@ -904,14 +919,16 @@ function inferActionTypeFromClause(clause: string, intentCategory: EditIntentCat
   return 'value_update';
 }
 
-function inferElementLabel(clause: string, resolvedTarget: ResolvedEditTarget | null, candidateLabels: string[] = []): string {
+function inferElementLabel(clause: string, resolvedTarget: ResolvedEditTarget | null, candidateLabels: readonly string[] = []): string {
   if (resolvedTarget) return resolvedTarget.label;
-  // Try matching clause text against known graph labels before falling back to clause text.
-  // Handles compound requests where later clauses reference the same or a sibling entity.
-  const normClause = normaliseMatchingText(clause);
-  for (const label of candidateLabels) {
-    if (normClause.includes(normaliseMatchingText(label))) return label;
-  }
+  // F-2 (POSTDEPLOY-PROBES-573): match the clause against the GRAPH's label
+  // set, longest match first. The caller used to pass
+  // `resolution.candidate_labels`, which contains only the labels that ALREADY
+  // resolved as targets (verified live: `["Cloud-Native CRM"]` on every 5c
+  // probe) — so no clause after the first could ever match and every one fell
+  // through to echoing its own text.
+  const resolved = resolveClauseLabel(clause, candidateLabels);
+  if (resolved !== null) return resolved;
   const structuralMatch = clause.match(/\b(?:add|create|remove|delete)\s+(?:a |an )?(.*)$/i);
   if (structuralMatch?.[1]) {
     return formatClauseDescription(structuralMatch[1]);
@@ -923,6 +940,7 @@ function buildProposedChanges(
   editDescription: string,
   resolution: EditTargetResolutionResult,
   intentCategory: EditIntentCategory,
+  knownLabels: readonly string[] = [],
 ): ProposedChangesPayload {
   // Defence-in-depth: when a high-confidence single target is resolved AND
   // its label itself contains a compound-edit separator (`and`, `also`,
@@ -951,7 +969,8 @@ function buildProposedChanges(
     description: formatClauseDescription(clause),
     element_label: index === 0
       ? inferElementLabel(clause, resolution.resolved_target)
-      : inferElementLabel(clause, null, resolution.candidate_labels),
+      // F-2: the GRAPH's labels, not the already-resolved candidates.
+      : inferElementLabel(clause, null, knownLabels.length > 0 ? knownLabels : resolution.candidate_labels),
     action_type: inferActionTypeFromClause(clause, intentCategory),
   }));
   return { changes };
@@ -1636,6 +1655,9 @@ export async function handleEditGraph(
   const pendingProposal = invocationInput.pending_proposal as PendingProposalState | undefined;
   const confirmationMode = invocationInput.confirmation_mode === 'apply_pending_proposal';
   const intentCategory = classifyEditIntent(editDescription);
+  // F-2: the graph's own label set — the only legitimate source of a target
+  // name in deterministic clarify copy (trap-12: derive, don't echo).
+  const knownGraphLabels = getResolvedTargets(context).map((target) => target.label);
   const targetResolution = groupedTargets.length > 0
     ? buildResolutionResult('graph_local', 'high', groupedTargets)
     : resolveEditTarget(editDescription, context, intentCategory);
@@ -1802,29 +1824,71 @@ export async function handleEditGraph(
   }
 
   if (resolutionMode === 'propose_and_confirm') {
-    branchTaken = 'propose';
-    branchReason = confirmationMode ? 'confirmed_pending_proposal' : 'requires_confirmation_before_apply';
-    proposalReturned = true;
-    const proposedChanges = pendingProposal?.proposed_changes ?? buildProposedChanges(editDescription, targetResolution, intentCategory);
-    const candidateLabels = pendingProposal?.candidate_labels
-      ?? [...new Set(proposedChanges.changes.map((change) => change.element_label))];
-    return {
-      blocks: [],
-      assistantText: buildProposeAndConfirmText(proposedChanges, targetResolution.resolved_target),
-      latencyMs: Date.now() - startTime,
-      appliedGraph: null,
-      wasRejected: false,
-      pendingProposal: {
-        tool: 'edit_graph',
-        original_edit_request: editDescription.trim(),
-        proposed_changes: proposedChanges,
-        candidate_labels: candidateLabels,
-        base_graph_hash: baseGraphHash,
-      },
-      proposedChanges,
-      diagnostics: diagnostics(),
-      routeMetadata: routeMetadata(),
-    };
+    // ── F-1 (POSTDEPLOY-PROBES-573) — claim-then-starve gate ────────────────
+    //
+    // MECHANISM RULE: a deterministic claim must either fully handle the turn
+    // OR fall through to the more capable path. It must never claim-then-
+    // starve. A clarify is correct ONLY when neither path can proceed.
+    //
+    // This branch returns ABOVE `getSystemPrompt('edit_graph')`, so taking it
+    // means the edit LLM is never called (`llm_calls=0` on every capture).
+    // What it returns instead asks the user for "the specifics" — but
+    // `ProposedChange` carries no value field, so the payload it mints cannot
+    // represent one, and on the live V5 path nothing ever reads the pending
+    // back (see the persist/read-back/thread note in edit-graph-dispatch.ts).
+    // Live result on build 53b817b: nine configure-shaped turns, every one
+    // carrying its specifics, every one answered with the same request for
+    // specifics; `interventions` still null at the end.
+    //
+    // So the branch keeps the turn only when it genuinely holds something the
+    // LLM lane does not — a STORED proposal to replay (the V4 confirm
+    // round-trip, which the V4 pipeline does persist) — or when the message
+    // carries no value and no direction, in which case the LLM lane could not
+    // produce a value op either and asking is the truthful, cheaper move.
+    const storedProposal = pendingProposal?.proposed_changes ?? null;
+    if (shouldHandOffProposeToLlmLane(editDescription, storedProposal !== null)) {
+      // Fall through to the edit LLM lane below. `resolutionMode` stays
+      // `propose_and_confirm`, which deliberately keeps
+      // `resolvedTargetInstruction` OUT of the prompt (see line ~1679): the
+      // REVIEW-573 C-1 target preference is negation-blind, so the LLM must
+      // read the message for itself rather than be pinned to a heuristically
+      // redirected entity. Every mutation it proposes still passes the GM
+      // referee gate in the dispatcher.
+      branchReason = 'propose_handed_off_to_llm_lane';
+    } else {
+      branchTaken = 'propose';
+      branchReason = confirmationMode
+        ? 'confirmed_pending_proposal'
+        : storedProposal !== null
+        ? 'requires_confirmation_before_apply'
+        : 'no_value_or_direction_in_message';
+      proposalReturned = true;
+      const proposedChanges = storedProposal
+        ?? buildProposedChanges(editDescription, targetResolution, intentCategory, knownGraphLabels);
+      const candidateLabels = pendingProposal?.candidate_labels
+        ?? [...new Set(proposedChanges.changes.map((change) => change.element_label))];
+      return {
+        blocks: [],
+        assistantText: buildProposeAndConfirmText(
+          proposedChanges,
+          targetResolution.resolved_target,
+          knownGraphLabels,
+        ),
+        latencyMs: Date.now() - startTime,
+        appliedGraph: null,
+        wasRejected: false,
+        pendingProposal: {
+          tool: 'edit_graph',
+          original_edit_request: editDescription.trim(),
+          proposed_changes: proposedChanges,
+          candidate_labels: candidateLabels,
+          base_graph_hash: baseGraphHash,
+        },
+        proposedChanges,
+        diagnostics: diagnostics(),
+        routeMetadata: routeMetadata(),
+      };
+    }
   }
 
   // Load system prompt from prompt store (3-tier: cache → Supabase → hardcoded default)

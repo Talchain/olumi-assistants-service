@@ -1637,16 +1637,26 @@ describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
 
   it("single-change high-impact parameter_update → single-change copy with abstract placeholder example", async () => {
     // Single-change ("no and|comma|also|then") + high-impact verb
-    // ("double") + parameter_update → falls past auto_apply gate
-    // (isLowImpactEditRequest=false because "double" matches
+    // ("major") + parameter_update → falls past auto_apply gate
+    // (isLowImpactEditRequest=false because "major" matches the
     // high-impact regex) → final propose_and_confirm fallthrough.
     // This exercises the SINGLE-change branch of
     // `buildProposeAndConfirmText` which used to interpolate
     // "120k" / "20%" hardcoded examples.
+    //
+    // F-1 (POSTDEPLOY-PROBES-573, 2026-07-20) — fixture changed from
+    // "Make Price double" to "Make Price a major driver". "double" IS a
+    // direction with a magnitude, so under the claim-then-starve rule that
+    // turn now hands off to the edit LLM lane rather than answering a stated
+    // direction with a request for a direction (pinned deliberately in
+    // edit-graph-propose-handoff.test.ts). The new fixture carries no value
+    // and no direction, so it still reaches this branch and this test's
+    // actual guarantee — no hardcoded scale values in the propose copy —
+    // is unchanged.
     const adapter = makeAdapter({ operations: [], removed_edges: [], warnings: [], coaching: null });
     const result = await handleEditGraph(
       makeContext(),
-      "Make Price double",
+      "Make Price a major driver",
       adapter,
       "req-1",
       "turn-1",
