@@ -4,7 +4,7 @@
     "seq": 0,
     "turn_id": "turn-disc-001",
     "routing": "llm",
-    "stage": "frame"
+    "stage": "analyse"
   },
   {
     "type": "text_delta",

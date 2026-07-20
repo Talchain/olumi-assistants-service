@@ -102,10 +102,13 @@ describe("OrchestratorStreamEventSchema", () => {
   // ==========================================================================
   // Stage-vocabulary guard (fixture assert, not a happy-path parse).
   //
-  // These fixtures are shared with the UI repo's parser tests, so a retired
-  // stage value here pins the OLD wire for a downstream consumer. Every
-  // `stage` (and string-valued `stage_indicator`) found ANYWHERE in ANY
-  // fixture in tests/fixtures/streaming must be a member of the canonical
+  // A retired stage value in these fixtures silently pins the OLD wire
+  // vocabulary in this repo's test corpus. (An earlier claim that these
+  // fixture files are shared with the UI repo's parser tests was REFUTED in
+  // review 2026-07-20 — none of these basenames exist in the UI tree; the
+  // README's consumer note predates that check.) Every `stage` (and
+  // string-valued `stage_indicator`) found ANYWHERE in ANY fixture in
+  // tests/fixtures/streaming must be a member of the canonical
   // @talchain/schemas `Stage` vocabulary (frame | analyse | decide | review)
   // — derived from `Stage.options`, never hand-listed, per the 0.19.0
   // derive-don't-mirror rule.
