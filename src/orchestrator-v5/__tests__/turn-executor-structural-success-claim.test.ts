@@ -109,6 +109,22 @@ const hasSuccessClaim = (txt: unknown): boolean =>
 const EXPECTED_DECLINE =
   "I haven't changed the model. This version can't make that kind of model edit yet.";
 
+/**
+ * UPDATED 2026-07-20 (O-7 wave 2): CEE_COACHING_CONTEXT_PROMPT_ENABLED was
+ * deleted (it was live-true on staging), so the coaching-context output
+ * post-check now runs UNCONDITIONALLY whenever a freshness verdict exists.
+ * In this harness (graph present, no analysis yet) it degrades
+ * past/perfective model-change claims to the deterministic no-analysis copy
+ * at COMPOSE time — BEFORE the STEP 6.6 structural gate reads the text — so
+ * those cases below pin the coaching degrade (containment is preserved:
+ * the false claim never ships). Future-tense promises ("I'll add …") pass
+ * the coaching check and still exercise the structural gate's decline. The
+ * structural gate's full grammar contract stays unit-pinned in
+ * routing/__tests__/mutation-language.test.ts, which drives
+ * classifyStructuralClaim directly.
+ */
+const COACHING_DEGRADE_FRAGMENT = 'No analysis has been run on your model yet';
+
 // The verbatim captured false-success turn (c92614a8 / f15ede2f).
 const E1_CAPTURED_CLAIM =
   'I\'ll add the "Coach Internal Developer into Tech Lead Role" option to your model now, connecting it to the relevant factors as discussed.';
@@ -239,24 +255,28 @@ describe('E1 — structural success claim is swapped to an honest decline (no co
     expect(swapEvents()).toHaveLength(1);
   });
 
-  it('past-tense completion claim → declines', async () => {
+  it('past-tense completion claim → contained by the coaching post-check degrade', async () => {
     const { response } = await runTurnExecutor(
       payload('continue please', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa03'),
       'req-e1-pasttense',
       { routingAdapter: mockRoutingAdapter("I've added the Coach option to the model.") },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toContain('added the Coach option');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
+    expect(swapEvents()).toHaveLength(0);
   });
 
-  it('high-confidence claim with an unambiguous structural noun ("added a factor") → declines', async () => {
+  it('high-confidence claim with an unambiguous structural noun ("added a factor") → contained by the coaching post-check degrade', async () => {
     const { response } = await runTurnExecutor(
       payload('do that', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa09'),
       'req-e1-edge',
       { routingAdapter: mockRoutingAdapter("I've added a new factor to your model.") },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toContain('added a new factor');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
+    expect(swapEvents()).toHaveLength(0);
   });
 });
 
@@ -454,36 +474,42 @@ describe('Codex round-5 — preserved (not swapped)', () => {
 
   // Codex round-13 (hole 1) — a real completion joined to a later conditional
   // offer by ", and" must STILL decline (core guarantee).
-  it('completion + later conditional offer ("I added a factor, and I\'ll explain if you want") → declines', async () => {
+  it('completion + later conditional offer ("I added a factor, and I\'ll explain if you want") → contained by the coaching post-check degrade', async () => {
     const { response } = await runTurnExecutor(
       payload('Add a churn factor', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1c'),
       'req-completion-then-offer',
       { routingAdapter: mockRoutingAdapter("I added a factor, and I'll explain more if you want.") },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toContain('I added a factor');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
+    expect(swapEvents()).toHaveLength(0);
   });
 
   // Codex round-14 — completion masked by a bare comma-splice / em-dash offer
   // must STILL decline (a completion is never conditional).
-  it('completion + bare comma-splice offer ("I added a factor, I\'ll explain if you want") → declines', async () => {
+  it('completion + bare comma-splice offer ("I added a factor, I\'ll explain if you want") → contained by the coaching post-check degrade', async () => {
     const { response } = await runTurnExecutor(
       payload('Add a churn factor', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1d'),
       'req-completion-comma-splice',
       { routingAdapter: mockRoutingAdapter("I added a factor, I'll explain if you want.") },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toContain('I added a factor');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
+    expect(swapEvents()).toHaveLength(0);
   });
 
-  it('graph/model completion masked by an em-dash offer → declines', async () => {
+  it('graph/model completion masked by an em-dash offer → contained by the coaching post-check degrade', async () => {
     const { response } = await runTurnExecutor(
       payload('Update the model', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa1e'),
       'req-p6-emdash-offer',
       { routingAdapter: mockRoutingAdapter("I updated the model — I'll add more if you confirm.") },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toContain('I updated the model');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
+    expect(swapEvents()).toHaveLength(0);
   });
 
   // Codex round-15 blocker 1 — em-dash must not detach a condition from a future
@@ -553,27 +579,34 @@ describe('Codex round-6 — state query, passive success, ambiguous edge', () =>
     expect(swapEvents()).toHaveLength(0);
   });
 
-  it('passive success ("The option has been added.") under add-intent → NOT swapped (monitor)', async () => {
+  it('passive success ("The option has been added.") under add-intent → contained by the coaching post-check degrade (never the structural swap)', async () => {
     const { response } = await runTurnExecutor(
       payload('Add a new option called Coach', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa21'),
       'req-passive-add',
       { routingAdapter: mockRoutingAdapter('The option has been added.') },
     );
-    // Precision-first: passive/actorless claims are monitor-only, never swapped.
+    // Precision-first still holds: the STRUCTURAL gate never swaps a
+    // passive claim (swapEvents 0); since 2026-07-20 the unconditional
+    // coaching post-check degrades it at compose, so the monitor event no
+    // longer sees the raw claim either.
     expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(response.assistant_text).not.toContain('has been added');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
     expect(swapEvents()).toHaveLength(0);
-    expect(monitorEvents()).toHaveLength(1);
   });
 
-  it('passive structural success ("The factor has been changed.") under intent → NOT swapped (monitor)', async () => {
+  it('passive structural success ("The factor has been changed.") under intent → contained by the coaching post-check degrade (never the structural swap)', async () => {
     const { response } = await runTurnExecutor(
       payload('Change the churn factor structure', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa22'),
       'req-passive-struct',
       { routingAdapter: mockRoutingAdapter('The factor has been changed.') },
     );
     expect(response.assistant_text).not.toBe(EXPECTED_DECLINE);
+    expect(response.assistant_text).not.toContain('has been changed');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
     expect(swapEvents()).toHaveLength(0);
-    expect(monitorEvents()).toHaveLength(1);
   });
 
   it('non-graph doc link ("I created a link to the documentation") → NOT swapped', async () => {
@@ -701,24 +734,28 @@ describe('Codex round-8 — non-graph qualifiers preserved; passive edge monitor
 // ---------------------------------------------------------------------------
 
 describe('Codex round-9 — graph-edit-with-purpose declines; full-parity edge monitored', () => {
-  it('blocker 1: "add the Pricing option to your model for the presentation" → declines (intent)', async () => {
+  it('blocker 1: "add the Pricing option to your model for the presentation" → contained by the coaching post-check degrade (intent)', async () => {
     const { response } = await runTurnExecutor(
       payload('Add the Pricing option to your model for the presentation.', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa50'),
       'req-r9-graph-purpose-intent',
       { routingAdapter: mockRoutingAdapter('I added the Pricing option to your model for the presentation.') },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toContain('I added the Pricing option');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
+    expect(swapEvents()).toHaveLength(0);
   });
 
-  it('blocker 1: same claim with NO edit intent → still declines (high-confidence, unconditional)', async () => {
+  it('blocker 1: same claim with NO edit intent → still contained (coaching post-check degrade)', async () => {
     const { response } = await runTurnExecutor(
       payload('where are the docs?', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa51'),
       'req-r9-graph-purpose-nointent',
       { routingAdapter: mockRoutingAdapter('I added the Pricing option to your model for the presentation.') },
     );
-    expect(response.assistant_text).toBe(EXPECTED_DECLINE);
-    expect(swapEvents()).toHaveLength(1);
+    expect(response.assistant_text).not.toContain('I added the Pricing option');
+    expect(response.assistant_text).toContain(COACHING_DEGRADE_FRAGMENT);
+    expect(events.some((e) => e.event === 'v5.coaching.output_postcheck')).toBe(true);
+    expect(swapEvents()).toHaveLength(0);
   });
 
   // Blocker 2 — PASSIVE edge claims with each previously-missing verb. Passives

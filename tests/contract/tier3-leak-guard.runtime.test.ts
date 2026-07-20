@@ -33,7 +33,6 @@ import {
   sanitiseEnrichment,
   SUPPRESSED_PROSE_FALLBACK,
 } from '../../src/orchestrator-v5/compose/sanitise-enrichment.js';
-import { config } from '../../src/config/index.js';
 
 /**
  * Deliberately scrub-proof sentinel: no hard-ban vocabulary, no node
@@ -45,8 +44,13 @@ const M1_SENTINEL =
   'TIER3-M1-SENTINEL unverified science coaching prose that must never reach a user-facing surface.';
 
 describe('Tier-2 cage — locks are closed at ship', () => {
-  it('CEE_COACHING_TIER2_ENABLED parses to false by default (lock 1)', () => {
-    expect(config.cee.coachingTier2Enabled).toBe(false);
+  // Lock 1 default-closed pin updated 2026-07-20 (O-7 wave 2): the
+  // CEE_COACHING_TIER2_ENABLED config field was deleted (Appendix A4 —
+  // zero production callers). Lock 1 is now the caller-supplied
+  // `tier2Enabled` input, which `isClaimUsable` treats as CLOSED unless
+  // explicitly true — pinned below via the omitted-input deny cases.
+  it('lock 1 defaults CLOSED: isClaimUsable denies when tier2Enabled is false', () => {
+    expect(isClaimUsable('factor_sensitivity', { tier2Enabled: false })).toBe(false);
   });
 
   it('TIER2_COACHING_ALLOWLIST ships EMPTY (lock 2) — populating it is a G2 decision, not a default', () => {

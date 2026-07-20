@@ -77,7 +77,6 @@ vi.mock("../../src/config/index.js", () => ({
       orchestratorValidationEnabled: false,
       enforceSingleGoal: true,
       draftArchetypesEnabled: false,
-      draftStructuralWarningsEnabled: true,
       pipelineCheckpointsEnabled: false,
       debugLoggingEnabled: false,
       debugCategoryTrace: false,

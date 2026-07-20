@@ -11,7 +11,6 @@
  *     typed BoundaryError per §6.4 (invalid cases)
  *   - telemetry.boundary.validation events fire with correct
  *     direction + pass + validator + contract_version
- *   - Route is absent when feature flag is off (404)
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -63,8 +62,6 @@ describe('B1 fixture folder', () => {
 // Feature flag mock — toggleable per describe block
 // ============================================================================
 
-let v5Enabled = true;
-
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -74,7 +71,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(featTarget, featProp);
             },
           });
@@ -177,11 +173,10 @@ function boundaryEvents(): TelemetryEvent[] {
 // Flag-on tests — route is registered, fixtures drive behaviour
 // ============================================================================
 
-describe('POST /orchestrate/v2/turn (V5 flag ON)', () => {
+describe('POST /orchestrate/v2/turn', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();
@@ -324,33 +319,9 @@ describe('POST /orchestrate/v2/turn (V5 flag ON)', () => {
 });
 
 // ============================================================================
-// Flag-off test — route must be absent (404)
+// (Former "flag OFF → 404" describe removed 2026-07-20 — O-7 wave 2:
+// ENABLE_V5_ORCHESTRATOR deleted, /orchestrate/v2/turn registration is
+// UNCONDITIONAL in server.ts. The removed test was also self-simulating —
+// it re-implemented the server's conditional in-test, so it could never
+// have caught the real gate changing.)
 // ============================================================================
-
-describe('POST /orchestrate/v2/turn (V5 flag OFF)', () => {
-  let app: FastifyInstance;
-
-  beforeAll(async () => {
-    v5Enabled = false;
-    app = Fastify();
-    // Simulate server.ts conditional registration logic: only call the
-    // registrar when the flag is on. With flag off, nothing is registered.
-    if (v5Enabled) {
-      await ceeOrchestratorRouteV2(app);
-    }
-    await app.ready();
-  });
-
-  afterAll(async () => {
-    await app.close();
-  });
-
-  it('route is not registered when feature flag is off', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: { turn_id: 'x' },
-    });
-    expect(res.statusCode).toBe(404);
-  });
-});

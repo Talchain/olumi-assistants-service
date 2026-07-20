@@ -20,7 +20,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
-import { config } from '../../config/index.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import {
   HELD_SCIENCE_VOCABULARY_PATTERN,
@@ -82,27 +81,10 @@ function throwingRoutingAdapter() {
   };
 }
 
-function passthroughRoutingAdapter() {
-  return {
-    chatWithTools: vi
-      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
-      .mockImplementation(async () => ({
-        content: [{ type: 'text', text: 'ok' }],
-        stop_reason: 'end_turn' as const,
-        usage: { input_tokens: 5, output_tokens: 5 },
-        model: 'mock',
-        latencyMs: 0,
-      })),
-  };
-}
 
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
-let originalFlag = false;
 
-function setLoopFlag(on: boolean): void {
-  (config.cee as { postAnalysisLoopEnabled: boolean }).postAnalysisLoopEnabled = on;
-}
 
 describe('AI Harness cap-1 — full flag-ON turn-flow integration', () => {
   beforeEach(() => {
@@ -110,12 +92,10 @@ describe('AI Harness cap-1 — full flag-ON turn-flow integration', () => {
     mockState.priorTurns = [PRIOR_RA_TURN];
     mockState.priorFacts = [makeBlankProjectionFreshFact()];
     mockState.persistedGraph = PARTIAL_GRAPH;
-    originalFlag = config.cee.postAnalysisLoopEnabled === true;
     setTestSink((eventName, data) => events.push({ event: eventName, data }));
   });
 
   afterEach(() => {
-    setLoopFlag(originalFlag);
     vi.clearAllMocks();
     setTestSink(null);
   });
@@ -125,7 +105,6 @@ describe('AI Harness cap-1 — full flag-ON turn-flow integration', () => {
   }
 
   it('flag ON + blank projection + fresh usable state → deterministic canonical_rich answer, no LLM', async () => {
-    setLoopFlag(true);
     const adapter = throwingRoutingAdapter();
     const result = await runTurnExecutor(mkPayload('How can we improve this?'), 'req-loop-on', {
       routingAdapter: adapter,
@@ -151,22 +130,11 @@ describe('AI Harness cap-1 — full flag-ON turn-flow integration', () => {
     expect(text).not.toMatch(HELD_SCIENCE_VOCABULARY_PATTERN);
   });
 
-  it('flag OFF, same turn → falls through data_unavailable_for_class (lived defect)', async () => {
-    setLoopFlag(false);
-    // Passthrough adapter: flag-OFF degrades to the LLM router; the adapter must
-    // be reachable so the turn completes instead of throwing.
-    const adapter = passthroughRoutingAdapter();
-    await runTurnExecutor(mkPayload('How can we improve this?'), 'req-loop-off', {
-      routingAdapter: adapter,
-      graphState: PARTIAL_GRAPH as never,
-    });
-
-    const ev = adviceEvent();
-    expect(ev, 'advice-gate telemetry should fire').toBeDefined();
-    expect(ev!.matched).toBe(false);
-    expect(ev!.unmatched_reason).toBe('data_unavailable_for_class');
-    expect(ev!.loop_enabled).toBe(false);
-    // Generic route was reached (the defect this feature reduces).
-    expect(adapter.chatWithTools).toHaveBeenCalled();
-  });
+  // (former "flag OFF → falls through data_unavailable_for_class" pin removed
+  // 2026-07-20 with the flag — O-7 wave 2: CEE_POST_ANALYSIS_LOOP_ENABLED
+  // deleted, live-true on staging; the fall-through-to-LLM branch for
+  // blank-projection-with-usable-state no longer exists. The flag-ON pins in
+  // this file are the make-unconditional mutation checks: re-gate the
+  // canonicalState/recentChanges threading behind a default-false config
+  // read and they go RED.)
 });

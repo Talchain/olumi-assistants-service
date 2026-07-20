@@ -63,8 +63,6 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
   }),
   getMaxTokensFromConfig: () => undefined,
 }));
-
-let v5Enabled = true;
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -74,7 +72,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (p === 'features') {
           return new Proxy(Reflect.get(t, p) as object, {
             get(ft, fp) {
-              if (fp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(ft, fp);
             },
           });
@@ -113,7 +110,6 @@ describe('Actionable failure responses — HTTP boundary', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();

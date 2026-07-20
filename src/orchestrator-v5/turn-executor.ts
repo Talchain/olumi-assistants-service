@@ -1507,17 +1507,19 @@ export async function runTurnExecutor(
       const contextPackStartedAt = timingsEnabled ? Date.now() : 0;
       // Coaching Context Pack v1: project the live `deriveAnalysisFreshness`
       // verdict (already computed this turn) + readiness into the hash-free,
-      // prompt-safe `CoachingStatePack`. Assembled ONLY when the behaviour flag
-      // is on AND a freshness verdict exists; otherwise the field is omitted so
-      // the assembled pack — and the serialised prompt — is byte-identical to
-      // today. Mission 1 (context authority): sourced from the SHARED
+      // prompt-safe `CoachingStatePack`. Assembled whenever a freshness
+      // verdict exists (UNCONDITIONAL since 2026-07-20 — O-7 wave 2:
+      // CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted, live-true on staging);
+      // without a verdict the field is omitted so the assembled pack — and
+      // the serialised prompt — carries no coaching_context block.
+      // Mission 1 (context authority): sourced from the SHARED
       // memoised pre-dispatch canonical (`canonicalStateForNonExecute`) —
       // the same object the clarify/coach/converse chips and the finalise
       // fallback read — instead of a separate partial
       // `canonicalStateFromFreshness` object, so the prompt pack and the
       // chips can never disagree. The full verdict is contradiction-aware;
       // `summariseCoachingStatePack` still omits hashes/degraded detail.
-      if (config.cee.coachingContextPromptEnabled && freshness !== null) {
+      if (freshness !== null) {
         coachingPromptCanonical = canonicalStateForNonExecute() ?? null;
       }
       const coachingContext = coachingPromptCanonical
@@ -4952,18 +4954,18 @@ export async function runTurnExecutor(
           // signal is available — composer falls back to margin_pp +
           // projected robustness_band.
           rawRobustness: pickLatestRawRobustness(context.prior_facts),
-          // AI Harness capability 1 (CEE_POST_ANALYSIS_LOOP_ENABLED, default
-          // OFF). Thread the already-derived canonical analysis state + the
-          // recent-changes projection so the gate can compose a grounded
-          // safe-now answer instead of falling through `data_unavailable_for_class`
-          // to the slow generic LLM router when the thin projection is blank but
-          // fresh, usable state exists. Flag OFF → both fields absent (undefined)
-          // → the gate's relaxation branch is dead → behaviour byte-identical.
+          // AI Harness capability 1 — UNCONDITIONAL since 2026-07-20 (O-7
+          // wave 2: CEE_POST_ANALYSIS_LOOP_ENABLED deleted, live-true on
+          // staging). Thread the already-derived canonical analysis state +
+          // the recent-changes projection so the gate can compose a grounded
+          // safe-now answer instead of falling through
+          // `data_unavailable_for_class` to the slow generic LLM router when
+          // the thin projection is blank but fresh, usable state exists.
           // Mission 1 (context authority): sourced from the SHARED memoised
           // pre-dispatch canonical — the same object the chips, coaching pack
           // and finalise fallback read — replacing a separate partial
           // `canonicalStateFromFreshness` object.
-          ...(config.cee.postAnalysisLoopEnabled && canonicalStateForNonExecute()
+          ...(canonicalStateForNonExecute()
             ? {
                 canonicalState: canonicalStateForNonExecute()!,
                 recentChanges: contextPack.recent_changes,
@@ -5029,11 +5031,14 @@ export async function runTurnExecutor(
           // The advice-gate path is always deterministic (llm_calls_used: 0).
           deterministic: adviceOutcome.matched ? true : null,
           // AI Harness capability 1 latency/grounding diagnostics (additive).
-          // `loop_enabled` records the flag state per turn; `routing_path` marks
-          // whether the grounded safe-now fallback fired (`canonical_rich`) vs
-          // the existing projection-backed match vs an unmatched fall-through.
-          // Lets dashboards compare llm_calls_used / fall-through rate ON vs OFF.
-          loop_enabled: config.cee.postAnalysisLoopEnabled === true,
+          // `loop_enabled` is pinned true since 2026-07-20 (O-7 wave 2:
+          // CEE_POST_ANALYSIS_LOOP_ENABLED deleted — the loop is
+          // unconditional); the field is retained so dashboard queries over
+          // the historical ON/OFF comparison window keep working.
+          // `routing_path` marks whether the grounded safe-now fallback fired
+          // (`canonical_rich`) vs the existing projection-backed match vs an
+          // unmatched fall-through.
+          loop_enabled: true,
           routing_path: adviceOutcome.matched
             ? adviceOutcome.copy_source === 'canonical_rich'
               ? 'canonical_rich'
@@ -7265,9 +7270,9 @@ export async function runTurnExecutor(
       // past Layer A. Reuses the SAME deterministic copy/chip builder as
       // the routing schema-repair-failure path
       // (commitBoundedRoutingFallback) rather than inventing new copy.
-      // Flag OFF: this block never runs — byte-identical to pre-hardening
-      // behaviour (the known live defect this lane hardens against).
-      if (config.features.answerTextRequired && !composedOk.assistant_text.trim()) {
+      // UNCONDITIONAL since 2026-07-20 (O-7 wave 2: CEE_ANSWER_TEXT_REQUIRED
+      // deleted, live-true on staging).
+      if (!composedOk.assistant_text.trim()) {
         const { assistantText: recoveryText, chips: recoveryChips } =
           buildBoundedFallbackCopyAndChips();
         emit(TelemetryEvents.V5CoachingEmptyAnswerRecovered, {
@@ -7412,7 +7417,6 @@ export async function runTurnExecutor(
       // `empty_response` check already rejects an all-blank text_only
       // response upstream, in route-with-tool-use.ts).
       if (
-        config.features.answerTextRequired &&
         routingResult.type === 'tool_call' &&
         routingResult.proposal.intent_class === 'converse' &&
         !composedOk.assistant_text.trim()
@@ -7749,21 +7753,16 @@ export async function runTurnExecutor(
         }
       }
       // ROADMAP 1.20(a) — empty-direct-answer papering, STEP 7 backstop.
-      // UNCONDITIONAL (not gated by CEE_ANSWER_TEXT_REQUIRED). Live
-      // evidence: a direct_answer turn shipped a sha256('')-empty
-      // assistant_text papered over by a recycled chip — the deterministic
-      // chip generators (coachChips/converseChips) build from
-      // stage/analysis context independent of the text, so an empty
-      // answer still carries a chip and reads as a valid turn. The
-      // compose-guard above (STEP 6.7, coach/converse branches) already
-      // closes this when CEE_ANSWER_TEXT_REQUIRED is on — but that flag
-      // defaults OFF (config/index.ts `features.answerTextRequired`),
-      // which is the exact regression the flag-OFF pins in
-      // turn-executor-answer-text-compose-guard.test.ts documented as a
-      // KNOWN LIVE DEFECT rather than a passing invariant. This backstop
-      // makes the honest-recovery behaviour unconditional by running at
-      // the shared STEP 7 commit chokepoint every direct_answer-class
-      // turn passes through, regardless of which branch composed it.
+      // UNCONDITIONAL, and since 2026-07-20 (O-7 wave 2) so is the STEP 6.7
+      // compose guard above — CEE_ANSWER_TEXT_REQUIRED was deleted. Live
+      // evidence for this backstop: a direct_answer turn shipped a
+      // sha256('')-empty assistant_text papered over by a recycled chip —
+      // the deterministic chip generators (coachChips/converseChips) build
+      // from stage/analysis context independent of the text, so an empty
+      // answer still carries a chip and reads as a valid turn. The backstop
+      // runs at the shared STEP 7 commit chokepoint every
+      // direct_answer-class turn passes through, regardless of which branch
+      // composed it — belt-and-braces beneath the compose guard.
       // Reuses the SAME buildBoundedFallbackCopyAndChips() helper (#388)
       // so there is one copy/chip source, not a second one drifting
       // apart. Scoped to `direct_answer` only — handler-class turns (D1

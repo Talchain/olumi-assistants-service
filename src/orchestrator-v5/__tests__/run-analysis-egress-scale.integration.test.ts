@@ -1,15 +1,16 @@
 /**
  * CEE → PLoT intervention value-scale protection (Tier 0, Phase 1) — egress
  * integration, exercising the LIVE run_analysis projection boundary
- * (`loadScenarioSnapshotForRunAnalysis` → run_analysis handler → PLoT payload)
- * for BOTH states of the default-OFF `cee.plotEgressScaleNetEnabled` flag.
+ * (`loadScenarioSnapshotForRunAnalysis` → run_analysis handler → PLoT payload).
  *
- *   - flag ON  → the evidence-gated shim canonicalises capped numeric
- *     interventions to RAW user-scale (raw_value style AND brief-extraction
- *     style via proven `observed_state` normalisation), while NEVER silently
- *     rewriting a `[0,1]` value on a capped factor lacking evidence;
- *   - flag OFF → byte-identical legacy behaviour (numeric `.value` projection):
- *     the net ships dark and is a runtime no-op until explicitly enabled.
+ * UNCONDITIONAL since 2026-07-20 (O-7 wave 2:
+ * CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted, live-true on staging): the
+ * evidence-gated shim canonicalises capped numeric interventions to RAW
+ * user-scale (raw_value style AND brief-extraction style via proven
+ * `observed_state` normalisation), while NEVER silently rewriting a `[0,1]`
+ * value on a capped factor lacking evidence. The former flag-OFF legacy
+ * projection no longer exists; these pins are the make-unconditional
+ * mutation checks.
  *
  * Production note on graph shape: `loadScenarioSnapshotForRunAnalysis` runs the
  * persisted graph through `GraphV3.safeParse`, which keeps the DECLARED
@@ -22,7 +23,7 @@
  * Uses only injected mocks (noop session store, capturing PLoT client). No
  * live runs, no real Supabase, no graph mutation.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 import { loadScenarioSnapshotForRunAnalysis } from '../build-turn-context.js';
 import { _resetConfigCache } from '../../config/index.js';
@@ -39,16 +40,7 @@ import { makeMessagePayload } from './fixtures.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const REQUEST_ID = 'req-egress-scale-1';
-const EGRESS_ENV = 'CEE_PLOT_EGRESS_SCALE_NET_ENABLED';
-
-function setEgressFlag(on: boolean): void {
-  if (on) process.env[EGRESS_ENV] = 'true';
-  else delete process.env[EGRESS_ENV];
-  _resetConfigCache();
-}
-
 afterEach(() => {
-  delete process.env[EGRESS_ENV];
   _resetConfigCache();
 });
 
@@ -142,8 +134,7 @@ function buildGraph() {
   };
 }
 
-describe('run_analysis egress value-scale — loadScenarioSnapshotForRunAnalysis (flag ON)', () => {
-  beforeEach(() => setEgressFlag(true));
+describe('run_analysis egress value-scale — loadScenarioSnapshotForRunAnalysis (unconditional)', () => {
 
   it('denormalises capped interventions to raw user-scale; never multiplies an unproven [0,1]', async () => {
     const store = createNoopSessionStore({ loadGraphResult: buildGraph() });
@@ -208,36 +199,10 @@ describe('run_analysis egress value-scale — loadScenarioSnapshotForRunAnalysis
   });
 });
 
-describe('run_analysis egress value-scale — flag OFF is a byte-identical legacy no-op', () => {
-  beforeEach(() => setEgressFlag(false));
-
-  it('projects the legacy numeric .value (NOT raw user-scale) when the flag is OFF', async () => {
-    const store = createNoopSessionStore({ loadGraphResult: buildGraph() });
-    const snapshot = await loadScenarioSnapshotForRunAnalysis(SCENARIO_ID, REQUEST_ID, store);
-
-    const byId = Object.fromEntries(snapshot.options.map((o) => [o.option_id, o.interventions]));
-
-    // Legacy projection extracts the numeric `.value` only — capped factors stay
-    // normalised (0.25, 0.5), proving the egress net is inert until enabled.
-    expect(byId.opt_edit).toEqual({
-      fac_spend: 0.25, // NOT 5000 — legacy normalised value
-      fac_budget: 0.5, // NOT 50000
-      fac_already_raw: 9000,
-      fac_rate: 0.3,
-      fac_region: 1,
-      fac_ambiguous: 0.4,
-    });
-    expect(byId.opt_draft).toEqual({ fac_spend: 0.25 }); // NOT 5000
-  });
-
-  it('does not mutate the persisted graph (flag OFF)', async () => {
-    const graph = buildGraph();
-    const before = JSON.stringify(graph);
-    const store = createNoopSessionStore({ loadGraphResult: graph });
-    await loadScenarioSnapshotForRunAnalysis(SCENARIO_ID, REQUEST_ID, store);
-    expect(JSON.stringify(graph)).toBe(before);
-  });
-});
+// (former "flag OFF is a byte-identical legacy no-op" describe removed
+// 2026-07-20 — O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted,
+// live-true on staging; the legacy normalised projection no longer exists.
+// The flag-ON pins above are the make-unconditional mutation checks.)
 
 describe('GraphV3.safeParse shape — what the egress reader actually sees', () => {
   it('strips undeclared node.data but preserves top-level node.interventions (with nested raw_value)', () => {
@@ -319,8 +284,7 @@ describe('run_analysis egress value-scale — PLoT payload (end-to-end, route-le
     return { handler, plotClient, invocation, getPayload: () => capturedPayload };
   }
 
-  it('flag ON: sends RAW user-scale intervention values in the /v2/run payload', async () => {
-    setEgressFlag(true);
+  it('sends RAW user-scale intervention values in the /v2/run payload (unconditional)', async () => {
     const { handler, plotClient, invocation, getPayload } = makeCapturingHandler();
     await handler(invocation);
 
@@ -341,17 +305,4 @@ describe('run_analysis egress value-scale — PLoT payload (end-to-end, route-le
     expect(optDraft.interventions).toEqual({ fac_spend: 5000 });
   });
 
-  it('flag OFF: sends the legacy normalised values in the /v2/run payload (no-op)', async () => {
-    setEgressFlag(false);
-    const { handler, plotClient, invocation, getPayload } = makeCapturingHandler();
-    await handler(invocation);
-
-    expect(plotClient.run).toHaveBeenCalledTimes(1);
-    const options = getPayload()!.options as Array<{ option_id: string; interventions: Record<string, number> }>;
-    const optEdit = options.find((o) => o.option_id === 'opt_edit')!;
-    expect(optEdit.interventions.fac_spend).toBe(0.25); // legacy normalised, NOT 5000
-    expect(optEdit.interventions.fac_budget).toBe(0.5);
-    const optDraft = options.find((o) => o.option_id === 'opt_draft')!;
-    expect(optDraft.interventions).toEqual({ fac_spend: 0.25 });
-  });
 });

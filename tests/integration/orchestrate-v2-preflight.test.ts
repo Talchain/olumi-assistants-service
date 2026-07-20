@@ -133,8 +133,6 @@ vi.mock('../../src/adapters/llm/router.js', () => ({
 vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'test system prompt',
 }));
-
-let v5Enabled = true;
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -144,7 +142,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(featTarget, featProp);
             },
           });
@@ -182,7 +179,6 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();

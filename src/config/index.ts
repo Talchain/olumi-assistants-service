@@ -504,10 +504,12 @@ const ConfigSchema = z.object({
     grounding: booleanString.default(false), // Conservative default - opt-in for production safety
     critique: booleanString.default(true),
     clarifier: booleanString.default(true),
-    piiGuard: booleanString.default(false),
+    // PII_GUARD_ENABLED deleted 2026-07-20 (O-7 wave 2 — Appendix A4): the
+    // flag only ever fed a `pii_guard` status-report field; no enforcement
+    // consumer existed. STRICT_TOPOLOGY_VALIDATION deleted same pass: the
+    // field was never env-mapped in rawConfig and had zero source consumers.
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
-    strictTopologyValidation: booleanString.default(false), // If true, promote topology warnings to errors
     orchestrator: booleanString.default(false), // CEE_ORCHESTRATOR_ENABLED — Track C: multi-turn conversational decision modelling
     orchestratorV2: booleanString.default(false), // ENABLE_ORCHESTRATOR_V2 — V2 five-phase pipeline
     // CEE_ORCHESTRATOR_CONTEXT_ENABLED — Context Fabric: 3-zone cache-aware context assembly pipeline
@@ -577,7 +579,10 @@ const ConfigSchema = z.object({
     // migrated to explicit flag mocking (mirrors route-v4-disabled-guard.
     // test.ts's `vi.mock` proxy pattern).
     pipelineV4Enabled: booleanString.default(true),
-    orchestratorV5: booleanString.default(false), // ENABLE_V5_ORCHESTRATOR — V5 slice A0 scaffold (contracts + ingress/egress B1 validation only, no TurnExecutor). Route returns 404 when false.
+    // ENABLE_V5_ORCHESTRATOR deleted 2026-07-20 (O-7 wave 2 — Appendix A1,
+    // live-true on staging): /orchestrate/v2/turn registration is now
+    // UNCONDITIONAL (server.ts). The flag's OFF branch 404'd the core
+    // product route.
     // CEE_V5_GRAPH_CAS_MODE — A3 graph CAS observe-mode ('off' | 'observe' | 'enforce').
     // App-side stale-write OBSERVATION at the single live scenarios.graph write
     // chokepoint (SupabaseSessionStore.append → append_turn_atomic_v2). NOT atomic
@@ -665,29 +670,10 @@ const ConfigSchema = z.object({
     // (no surface consults feasibility, exactly as before). The eligibility
     // FILTER upstream is A3's (ISL/PLoT) half; this is the honest-surface half.
     constraintInfeasibleGate: booleanString.default(true),
-    // CEE_ANSWER_TEXT_REQUIRED — belt-and-braces hardening for the
-    // coach/converse `answer_text` channel (PR #380 / ROADMAP 1.38). Default
-    // OFF; sequenced BEHIND the prompt track's prompt-only fix for the same
-    // Sonnet-5 empty-orientation defect so the two fixes' effects on the
-    // live metric can be measured independently — see
-    // Docs/lanes/LANE-ANSWER-TEXT-HARDENING.md. When true, gates two layers:
-    //   (A) SCHEMA PRESSURE — tool-schema.ts's RawToolCallSchema requires a
-    //       non-blank top-level `answer_text` on coach/converse tool calls.
-    //       An omission is a Zod validation failure, which the EXISTING
-    //       REPAIR_ONCE mechanism (route-with-tool-use.ts) already retries
-    //       exactly once, citing the omission in the repair message — no
-    //       new retry plumbing. execute/clarify are unaffected (they already
-    //       carry their answer via action.explanation.answer_text /
-    //       clarification.question and remain forbidden from answer_text).
-    //   (B) COMPOSE GUARD — turn-executor.ts's coach/converse compose
-    //       branches degrade to the existing bounded-recovery copy/chips
-    //       (the same builder commitBoundedRoutingFallback uses for the
-    //       routing schema-repair-failure path) instead of shipping an
-    //       empty assistant_text, for the residual case where BOTH
-    //       answer_text and orientationText land empty/whitespace even
-    //       after REPAIR_ONCE.
-    // Flag OFF is byte-identical to pre-hardening behaviour on both layers.
-    answerTextRequired: booleanString.default(false),
+    // CEE_ANSWER_TEXT_REQUIRED deleted 2026-07-20 (O-7 wave 2 — Appendix A1,
+    // live-true on staging): the coach/converse answer_text hardening
+    // (schema pressure in tool-schema.ts + compose guard in turn-executor.ts,
+    // PR #380 / ROADMAP 1.38) is now UNCONDITIONAL.
     // CEE_ANSWER_SHAPE_ENFORCED — ROADMAP 1.132 (F2): schema-enforced
     // coach/converse answer SHAPE `{ headline: 1 sentence, bullets: ≤3,
     // detail }` so answers stop arriving as walls of prose. Default OFF and
@@ -832,7 +818,9 @@ const ConfigSchema = z.object({
   cee: z.object({
     draftFeatureVersion: z.string().optional(),
     draftArchetypesEnabled: booleanString.default(true), // Default true to match pipeline.ts behavior
-    draftStructuralWarningsEnabled: booleanString.default(false),
+    // CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED deleted 2026-07-20 (O-7 wave 2 —
+    // Appendix A1, live-true on staging): structural-warning detection in
+    // unified-pipeline stage 5 (package.ts) is now UNCONDITIONAL.
     refinementEnabled: booleanString.default(false), // Enable draft refinement feature
     decisionReviewEnabled: booleanString.default(false), // Enable M2 Decision Review endpoint
     decisionReviewRateLimitRpm: z.coerce.number().int().positive().default(30), // Decision review rate limit
@@ -872,7 +860,9 @@ const ConfigSchema = z.object({
     evidenceHelperFeatureVersion: z.string().optional(),
     biasCheckFeatureVersion: z.string().optional(),
     biasMitigationPatchesEnabled: booleanString.default(false),
-    addRiskRejectionGuidanceEnabled: booleanString.default(false),
+    // CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED deleted 2026-07-20 (O-7 wave 2 —
+    // Appendix A1, live-true on staging): the structural next-step copy for the
+    // add-risk/reachability rejection class (edit-graph.ts) is now UNCONDITIONAL.
     sensitivityCoachFeatureVersion: z.string().optional(),
     teamPerspectivesFeatureVersion: z.string().optional(),
     reviewFeatureVersion: z.string().optional(),
@@ -912,15 +902,13 @@ const ConfigSchema = z.object({
     // Patch pre-validation and budget enforcement (cf-v11.1 graph-safe invariant)
     patchPreValidationEnabled: booleanString.default(true), // If true, apply structural validation to edit_graph patches before assembly
     patchBudgetEnabled: booleanString.default(true), // If true, enforce complexity budget (3 node ops, 4 edge ops) on edit_graph patches
-    // Capability 2A — add-risk rejection guidance (CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED).
-    // When true, an unsupported add-risk edit that fails structural validation with a
-    // reachability-class violation (the new risk node is not reachable from the decision —
-    // e.g. wired only to an option, or orphaned) renders a deterministic, structural-only
-    // next-step ("the risk needs to connect through to your goal…") instead of the generic
-    // "inconsistency in the model structure" suppression. Tightly scoped to that single
-    // rejection class; every other rejection reason/type is byte-identical. Default OFF;
-    // flag-off renders exactly as today. Final user-facing wording is authored separately
-    // before any live run / flag enablement.
+    // Capability 2A — add-risk rejection guidance. UNCONDITIONAL since
+    // 2026-07-20 (O-7 wave 2: CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED
+    // deleted, live-true on staging — see the cee block's deletion note).
+    // An unsupported add-risk edit that fails structural validation with a
+    // reachability-class violation renders a deterministic, structural-only
+    // next-step instead of the generic suppression; tightly scoped to that
+    // single rejection class.
     deterministicEnforcementEnabled: booleanString.default(true), // CEE_DETERMINISTIC_ENFORCEMENT_ENABLED — budget rescale + bridge chain repair (Stage 4 substep 9b)
     editNormalisationEnabled: booleanString.default(true), // CEE_EDIT_NORMALISATION_ENABLED — normalise non-canonical LLM field names before Zod validation
     editInterventionRoutingEnabled: booleanString.default(true), // CEE_EDIT_INTERVENTION_ROUTING_ENABLED — read interventions from data.interventions + slash-keyed entries
@@ -1117,11 +1105,11 @@ const ConfigSchema = z.object({
     // Default OFF in production; staging sets V5_TIMING_DEBUG=true so the
     // replay harness can request `_timings` via the debug header.
     timingDebugEnabled: booleanString.default(false),
-    // CEE → PLoT intervention value-scale egress net (CEE_PLOT_EGRESS_SCALE_NET_ENABLED).
-    // When true, the run_analysis projection boundary canonicalises outbound
-    // option interventions to RAW user-scale (evidence-gated) before they reach
-    // PLoT. Default OFF: the net ships dark and is a runtime no-op until enabled.
-    plotEgressScaleNetEnabled: booleanString.default(false),
+    // CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted 2026-07-20 (O-7 wave 2 —
+    // Appendix A1, live-true on staging): the run_analysis projection boundary
+    // now UNCONDITIONALLY canonicalises outbound option interventions to RAW
+    // user-scale (evidence-gated) before they reach PLoT. The OFF branch sent
+    // raw fractions where PLoT expects user-scale values (bad-scale class).
     // EP2 (V5 Edit Safety Core, Phase 1): read-boundary analysis-ready guard at
     // run_analysis (scoped to /orchestrate/v2/turn). Default OFF. When ON it gates
     // the run-time canonicalisation AND the freshness-side canonicalise-before-hash
@@ -1184,32 +1172,22 @@ const ConfigSchema = z.object({
     // product behaviour. Reserved as the single seam for a future,
     // separately-approved LLM-facing behavioural-activation step.
     coachingStatePackEnabled: booleanString.default(false),
-    coachingContextPromptEnabled: booleanString.default(false),
-    // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED — first
-    // narrow coaching activation on the trust path). When true, the turn-executor
-    // injects a redacted, hash-free `coaching_context` pack (the 8
-    // CoachingStatePack closed-enum / boolean / count fields, pinned to the live
-    // `deriveAnalysisFreshness` verdict) into the LLM routing prompt for coaching
-    // turns, and a deterministic post-check degrades coaching prose that would
-    // present stale / unknown / blocked analysis as current or give confident
-    // directional advice under unsafe state. Default OFF; flag-off is
-    // byte-identical (no pack injected, no post-check invoked, no prompt / prose /
-    // chip change, no new telemetry). Distinct from CEE_COACHING_CONTEXT_ENABLED
-    // (the always-on coaching policy engine) and CEE_COACHING_STATE_PACK_ENABLED
-    // (the diagnostic-only `_context_summary` sub-block).
-    // V5 Tier-2 claim-permission master lock (CEE_COACHING_TIER2_ENABLED —
-    // Brief 5 "the cage, not the activation"). Lock 1 of two independent
-    // locks on Tier-2 claim usage (Brief 4 §3 candidates: factor_sensitivity,
-    // confidence_tier, robustness). Lock 2 is TIER2_COACHING_ALLOWLIST
-    // (compose/claim-safety-cage.ts), which ships EMPTY — so even flipping
-    // this flag surfaces ZERO fields until a field is deliberately
-    // allowlisted (Brief 4 gate G2, a separate per-field decision with
-    // science sign-off). Default OFF. Flag-off is byte-identical: nothing
-    // consults the Tier-2 gate for output today; the cage exists so future
-    // coaching/DSK surfacing has a mechanical, fail-closed permission check
-    // instead of doctrine-only guidance. Transport is unaffected either way
-    // (the P0B keep-list owns transport; claim-permission is the other axis).
-    coachingTier2Enabled: booleanString.default(false),
+    // CEE_COACHING_CONTEXT_PROMPT_ENABLED deleted 2026-07-20 (O-7 wave 2 —
+    // Appendix A1, live-true on staging): the Coaching Context Pack v1
+    // (redacted, hash-free `coaching_context` in the LLM routing prompt for
+    // coaching turns, pinned to the live `deriveAnalysisFreshness` verdict,
+    // plus the deterministic stale/unsafe-state prose post-check) is now
+    // UNCONDITIONAL in turn-executor.ts. Distinct from
+    // CEE_COACHING_CONTEXT_ENABLED (the always-on coaching policy engine) and
+    // CEE_COACHING_STATE_PACK_ENABLED (the diagnostic-only `_context_summary`
+    // sub-block), both of which remain.
+    // CEE_COACHING_TIER2_ENABLED deleted 2026-07-20 (O-7 wave 2 — Appendix
+    // A4: no production caller of `isClaimUsable`, and its Lock 2
+    // TIER2_COACHING_ALLOWLIST (compose/claim-safety-cage.ts) ships EMPTY).
+    // The cage's `ClaimUsableInput.tier2Enabled` parameter remains — a future
+    // Tier-2 activation must reintroduce a deliberate activation signal
+    // (Brief 4 gate G2, per-field decision with science sign-off), not
+    // resurrect this env bit.
     // V5 option-identity freshness guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD).
     // When true, the freshness derivation additionally compares the analysed
     // option identities carried on the selected run_analysis fact
@@ -1233,20 +1211,19 @@ const ConfigSchema = z.object({
     // byte-identical legacy behaviour (no option IDs threaded into
     // deriveAnalysisFreshness, no override, no new telemetry).
     optionIdentityFreshnessGuard: booleanString.default(true),
-    // V5 post-analysis conversational loop (CEE_POST_ANALYSIS_LOOP_ENABLED —
-    // AI Harness capability 1). When true, the post-analysis advice gate may
+    // V5 post-analysis conversational loop (AI Harness capability 1),
+    // UNCONDITIONAL since 2026-07-20: the post-analysis advice gate may
     // consume the already-assembled canonical analysis state + readiness
     // blockers + recent-changes to compose a grounded, safe-now deterministic
     // answer in the fresh-analysis case where the thin LLM-facing projection
     // is blank — instead of falling through `data_unavailable_for_class` to the
-    // slow generic LLM router. Default OFF; flag-off is byte-identical (the gate
-    // receives no canonical/readiness/recent-change inputs, so the relaxation
-    // branch is dead and the existing fall-through is unchanged). The always-on
-    // false-success neutralisation (finaliser) is NOT gated by this flag.
-    // Surfacing is restricted to Tier-1 safe-now content (status/freshness/
-    // readiness/recent-changes/next-step) — no held science prose. Behavioural
-    // activation (flag ON) is reserved for an authorised live-acceptance step.
-    postAnalysisLoopEnabled: booleanString.default(false),
+    // slow generic LLM router. The always-on false-success neutralisation
+    // (finaliser) was never gated. Surfacing is restricted to Tier-1 safe-now
+    // content (status/freshness/readiness/recent-changes/next-step) — no held
+    // science prose.
+    // CEE_POST_ANALYSIS_LOOP_ENABLED deleted 2026-07-20 (O-7 wave 2 —
+    // Appendix A1, live-true on staging): the post-analysis loop relaxation
+    // above is now UNCONDITIONAL in turn-executor.ts.
     // Prompt debug logging (CEE_PROMPT_DEBUG_ENABLED)
     promptDebugEnabled: booleanString.default(false), // If true, log prompt hash, source, and 200-char preview on every draft call
     // Prompt store required (CEE_PROMPT_STORE_REQUIRED)
@@ -1267,10 +1244,11 @@ const ConfigSchema = z.object({
     verificationPipelineEnabled: booleanString.default(true),
     // Coaching architecture kill switches
     coachingContextEnabled: booleanString.default(true), // CEE_COACHING_CONTEXT_ENABLED — coaching policy engine + dynamic block enrichment (WS1 + WS8)
-    actionPolicyEnabled: booleanString.default(false), // CEE_ACTION_POLICY_ENABLED — deterministic intent classification (WS4) — not wired
     chipEngineEnabled: booleanString.default(true), // CEE_CHIP_ENGINE_ENABLED — typed chip engine (WS5)
-    postFlightValidatorEnabled: booleanString.default(false), // CEE_POST_FLIGHT_VALIDATOR_ENABLED — post-flight response validation (WS7) — not wired
-    guidedIntakeEnabled: booleanString.default(false), // CEE_GUIDED_INTAKE_ENABLED — BIL wire-up for thin briefs (WS3) — not wired
+    // CEE_ACTION_POLICY_ENABLED (WS4), CEE_POST_FLIGHT_VALIDATOR_ENABLED (WS7)
+    // and CEE_GUIDED_INTAKE_ENABLED (WS3) deleted 2026-07-20 (O-7 wave 2 —
+    // Appendix A4): all three were explicitly "not wired" with zero source
+    // consumers. Reintroduce config only WITH a call site.
     // Model Management v1 (CEE_MODEL_VERSIONS_ENABLED — Layer 2, DARK).
     // Gates every entry point of src/orchestrator-v5/model-management/
     // (save/list/get/restore/compare versions). Default OFF; flag-off is a
@@ -1471,7 +1449,6 @@ function parseConfig(): Config {
       // it used to be distinct from was retired 2026-07-16 (ROADMAP 1.94 Option A);
       // CLARIFIER_ENABLED now serves this route gate only.
       clarifier: env.CLARIFIER_ENABLED,
-      piiGuard: env.PII_GUARD_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
       enableLegacySSE: env.ENABLE_LEGACY_SSE,
       // CEE_ORCHESTRATOR_ENABLED preferred; falls back to ENABLE_ORCHESTRATOR
@@ -1495,7 +1472,6 @@ function parseConfig(): Config {
       draftSubstageDetail: env.CEE_DRAFT_SUBSTAGE_DETAIL,
       deterministicOrchestratorEnabled: env.CEE_DETERMINISTIC_ORCHESTRATOR_ENABLED,
       pipelineV4Enabled: env.CEE_PIPELINE_V4_ENABLED,
-      orchestratorV5: env.ENABLE_V5_ORCHESTRATOR,
       v6DualDraftEnabled: env.CEE_V6_DUAL_DRAFT_ENABLED,
       graphCasMode: env.CEE_V5_GRAPH_CAS_MODE,
       graphCasRpc: env.CEE_V5_GRAPH_CAS_RPC,
@@ -1503,7 +1479,6 @@ function parseConfig(): Config {
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
       coachThinkingDisabled: env.CEE_COACH_THINKING_DISABLED,
       constraintInfeasibleGate: env.CEE_CONSTRAINT_INFEASIBLE_GATE,
-      answerTextRequired: env.CEE_ANSWER_TEXT_REQUIRED,
       answerShapeEnforced: env.CEE_ANSWER_SHAPE_ENFORCED,
       contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
       enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
@@ -1543,7 +1518,6 @@ function parseConfig(): Config {
     cee: {
       draftFeatureVersion: env.CEE_DRAFT_FEATURE_VERSION,
       draftArchetypesEnabled: env.CEE_DRAFT_ARCHETYPES_ENABLED,
-      draftStructuralWarningsEnabled: env.CEE_DRAFT_STRUCTURAL_WARNINGS_ENABLED,
       refinementEnabled: env.CEE_REFINEMENT_ENABLED,
       decisionReviewEnabled: env.CEE_DECISION_REVIEW_ENABLED,
       decisionReviewRateLimitRpm: env.CEE_DECISION_REVIEW_RATE_LIMIT_RPM,
@@ -1553,7 +1527,6 @@ function parseConfig(): Config {
       evidenceHelperFeatureVersion: env.CEE_EVIDENCE_HELPER_FEATURE_VERSION,
       biasCheckFeatureVersion: env.CEE_BIAS_CHECK_FEATURE_VERSION,
       biasMitigationPatchesEnabled: env.CEE_BIAS_MITIGATION_PATCHES_ENABLED,
-      addRiskRejectionGuidanceEnabled: env.CEE_ADD_RISK_REJECTION_GUIDANCE_ENABLED,
       sensitivityCoachFeatureVersion: env.CEE_SENSITIVITY_COACH_FEATURE_VERSION,
       teamPerspectivesFeatureVersion: env.CEE_TEAM_PERSPECTIVES_FEATURE_VERSION,
       reviewFeatureVersion: env.CEE_REVIEW_FEATURE_VERSION,
@@ -1700,17 +1673,13 @@ function parseConfig(): Config {
       debugLoggingEnabled: env.CEE_DEBUG_LOGGING,
       pipelineCheckpointsEnabled: env.CEE_PIPELINE_CHECKPOINTS_ENABLED,
       timingDebugEnabled: env.V5_TIMING_DEBUG,
-      plotEgressScaleNetEnabled: env.CEE_PLOT_EGRESS_SCALE_NET_ENABLED,
       analysisReadyGuardEnabled: env.CEE_RUN_ANALYSIS_READY_GUARD,
       runAnalysisNullGraphRecoverable: env.CEE_RUN_ANALYSIS_NULL_GRAPH_RECOVERABLE,
       sendBriefToPlot: env.CEE_SEND_BRIEF_TO_PLOT,
       contextSummaryEnabled: env.CEE_CONTEXT_SUMMARY_ENABLED,
       pendingConfirmationTruthEnabled: env.CEE_PENDING_CONFIRMATION_TRUTH_ENABLED,
       coachingStatePackEnabled: env.CEE_COACHING_STATE_PACK_ENABLED,
-      coachingContextPromptEnabled: env.CEE_COACHING_CONTEXT_PROMPT_ENABLED,
-      coachingTier2Enabled: env.CEE_COACHING_TIER2_ENABLED,
       optionIdentityFreshnessGuard: env.CEE_OPTION_IDENTITY_FRESHNESS_GUARD,
-      postAnalysisLoopEnabled: env.CEE_POST_ANALYSIS_LOOP_ENABLED,
       promptDebugEnabled: env.CEE_PROMPT_DEBUG_ENABLED,
       promptStoreRequired: env.CEE_PROMPT_STORE_REQUIRED,
       fieldSurvivalTrace: env.CEE_FIELD_SURVIVAL_TRACE,
@@ -1721,10 +1690,7 @@ function parseConfig(): Config {
       verificationPipelineEnabled: env.CEE_VERIFICATION_PIPELINE_ENABLED,
       // Coaching architecture kill switches
       coachingContextEnabled: env.CEE_COACHING_CONTEXT_ENABLED,
-      actionPolicyEnabled: env.CEE_ACTION_POLICY_ENABLED,
       chipEngineEnabled: env.CEE_CHIP_ENGINE_ENABLED,
-      postFlightValidatorEnabled: env.CEE_POST_FLIGHT_VALIDATOR_ENABLED,
-      guidedIntakeEnabled: env.CEE_GUIDED_INTAKE_ENABLED,
       modelVersionsEnabled: env.CEE_MODEL_VERSIONS_ENABLED,
       decisionReviewDecompose: env.CEE_DECISION_REVIEW_DECOMPOSE,
     },

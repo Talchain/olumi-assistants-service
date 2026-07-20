@@ -128,11 +128,15 @@ describe('EP2 integration — loadScenarioSnapshotForRunAnalysis (run-time seam)
     expect(Object.keys(optInterventions(opt))).toHaveLength(0); // node.data stripped by GraphV3.safeParse
   });
 
-  it('guard ON: the broken node.data option is canonicalised before strip → configured (0.8)', async () => {
+  it('guard ON: the broken node.data option is canonicalised before strip → configured (RAW user-scale)', async () => {
     setGuard(true);
     const snap = await loadScenarioSnapshotForRunAnalysis('sc', 'req', stubStore(makeBrokenF1()));
     const opt = snap.options.find((o) => (o as Dict).option_id === 'opt_hybrid') as Dict;
-    expect(optInterventions(opt).fac_annual_cost).toBeCloseTo(0.8, 10);
+    // UPDATED 2026-07-20 (O-7 wave 2): the CEE→PLoT egress scale net is now
+    // UNCONDITIONAL (CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted, live-true on
+    // staging), so the canonicalised 0.8 (normalised, cap 150000) projects
+    // outbound as RAW user-scale 120000 — the convention PLoT consumes.
+    expect(optInterventions(opt).fac_annual_cost).toBeCloseTo(120000, 6);
     // rawPersistedGraph is the canonical graph → graph_hash_at_run is over the canonical projection.
     const parsed = GraphStateIngressSchema.safeParse(snap.rawPersistedGraph);
     expect(parsed.success).toBe(true);

@@ -92,7 +92,6 @@ interface StatusResponse {
     grounding: boolean;
     critique: boolean;
     clarifier: boolean;
-    pii_guard: boolean;
     share_review: boolean;
     prompt_cache: boolean;
   };
@@ -185,7 +184,9 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
         grounding: config.features.grounding,
         critique: config.features.critique,
         clarifier: config.features.clarifier,
-        pii_guard: config.features.piiGuard,
+        // pii_guard removed 2026-07-20 (O-7 wave 2, Appendix A4): the flag
+        // only ever fed this report field — no enforcement existed, so the
+        // field was a false safety signal.
         share_review: config.features.shareReview,
         prompt_cache: config.promptCache.enabled,
       },

@@ -115,7 +115,6 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return true;
               if (featProp === 'pipelineV4Enabled') return false;
               return Reflect.get(featTarget, featProp);
             },

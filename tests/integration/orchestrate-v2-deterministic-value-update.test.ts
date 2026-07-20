@@ -130,8 +130,6 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
     resetSessionStoreForTests: () => {},
   };
 });
-
-let v5Enabled = true;
 vi.mock('../../src/config/index.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../src/config/index.js')>();
   return {
@@ -141,7 +139,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
         if (prop === 'features') {
           return new Proxy(Reflect.get(target, prop) as object, {
             get(featTarget, featProp) {
-              if (featProp === 'orchestratorV5') return v5Enabled;
               return Reflect.get(featTarget, featProp);
             },
           });
@@ -302,7 +299,6 @@ describe('POST /orchestrate/v2/turn — deterministic value-update HTTP boundary
   const originalEnv = { ...process.env };
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();
@@ -468,7 +464,6 @@ describe('POST /orchestrate/v2/turn — live-hash prior fact + mutation replay',
   const originalEnv = { ...process.env };
 
   beforeAll(async () => {
-    v5Enabled = true;
     app = Fastify();
     await ceeOrchestratorRouteV2(app);
     await app.ready();

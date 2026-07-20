@@ -31,7 +31,6 @@ vi.mock("../../src/config/index.js", () => ({
   config: {
     cee: {
       draftArchetypesEnabled: true,
-      draftStructuralWarningsEnabled: true,
       pipelineCheckpointsEnabled: false,
       // biasStructuralEnabled deliberately ABSENT → minimum engine
       // posture; the fixture's control detectors are flag-independent.

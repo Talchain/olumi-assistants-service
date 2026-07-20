@@ -346,12 +346,13 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       options: snapshot.options,
       graph: snapshot.graph,
       rawPersistedGraph: snapshot.rawPersistedGraph,
-      // P1-1 (one scale convention): the SAME flag the snapshot loader
-      // branched on when it projected the configured siblings'
-      // interventions — the scaffold routes its neutral candidates through
-      // the same projection functions, so its wire numbers land in the
-      // sibling convention in both flag states.
-      scaleNetEnabled: config.cee.plotEgressScaleNetEnabled,
+      // P1-1 (one scale convention): the egress scale net is UNCONDITIONAL
+      // since 2026-07-20 (O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED
+      // deleted) — the scaffold routes its neutral candidates through the
+      // same always-on RAW-scale projection as the configured siblings.
+      // (`scaleNetEnabled` survives as a pure-function parameter of the
+      // scaffold, pinned true at this, its only production call site.)
+      scaleNetEnabled: true,
     });
     if (scaffoldOutcome.scaffolded.length > 0) {
       emit(TelemetryEvents.V5RunAnalysisOptionsScaffolded, {

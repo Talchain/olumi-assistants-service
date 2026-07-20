@@ -20,8 +20,8 @@
  *
  * This module is the single, centralised, pure transformation that runs at the
  * `run_analysis` projection boundary (invoked from
- * `loadScenarioSnapshotForRunAnalysis`, behind the default-OFF
- * `cee.plotEgressScaleNetEnabled` flag). It converts the *outbound* PLoT
+ * `loadScenarioSnapshotForRunAnalysis` — UNCONDITIONAL since 2026-07-20,
+ * O-7 wave 2: CEE_PLOT_EGRESS_SCALE_NET_ENABLED deleted). It converts the *outbound* PLoT
  * payload's intervention values to raw user-scale. It NEVER mutates persisted
  * graph state and does NOT touch PLoT's input contract — PLoT still owns final
  * normalisation, and the request shape stays the flat `{ factor_id: number }`
@@ -265,10 +265,11 @@ function scaleNumeric(
 
 /**
  * Legacy (scale-net OFF) per-entry numeric intervention projection — the
- * EXACT rule `loadScenarioSnapshotForRunAnalysis` applies to configured
- * options when `cee.plotEgressScaleNetEnabled` is false: a bare finite
- * number passes through; an object contributes its finite numeric `.value`;
- * anything else is dropped. Lives in THIS module (the single home of both
+ * rule the pre-2026-07-20 OFF branch applied to configured options: a bare
+ * finite number passes through; an object contributes its finite numeric
+ * `.value`; anything else is dropped. The production loader path is now
+ * always net-ON; this survives for the scaffold's pure-function OFF
+ * convention (unit-tested) only. Lives in THIS module (the single home of both
  * outbound wire conventions) so every producer of PLoT intervention numbers
  * — the snapshot loader's sibling projection AND the D-ask-1 scaffold —
  * derives from the same function instead of mirroring it (P1-1: one scale
