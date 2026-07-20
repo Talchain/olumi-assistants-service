@@ -985,10 +985,11 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // re-appended AFTER the ground-truth `analysis`/`graph` substitutions so
   // the serialised prompt reads it BELOW structured state — Layer-A
   // projections above the summary, precedence by placement AND by the
-  // instruction block below. Key absent (flag off/maintain, or no stored
-  // summary) → spread contributes nothing → byte-identity with pre-S4
-  // output (pinned by tests/unit/v5.route-with-tool-use.conversation-
-  // summary.test.ts against a pre-change sha256 golden).
+  // instruction block below. Key absent (conversation fits the verbatim
+  // window, or no stored summary) → spread contributes nothing →
+  // byte-identity with pre-S4 output (pinned by
+  // tests/unit/v5.route-with-tool-use.conversation-summary.test.ts against
+  // a pre-change sha256 golden).
   const llmFacing = {
     ...rest,
     analysis: display_analysis,
@@ -1008,8 +1009,8 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // Context v2 S4-INJECT [R2]: the facts-beat-summary precedence instruction
   // — CODE-OWNED (not PMS-served), a sibling of COACHING_CONTEXT_INSTRUCTION
   // appended the same way, gated by the same condition that put the section
-  // on the pack (CEE_ROLLING_SUMMARY='inject' via the turn-executor loader).
-  // Absent section → no instruction → off/maintain byte-identity.
+  // on the pack (the turn-executor loader's beyond-window activation).
+  // Absent section → no instruction → byte-identity.
   if (conversation_summary !== undefined) {
     parts.push('', SUMMARY_PRECEDENCE_INSTRUCTION);
   }
@@ -1044,7 +1045,7 @@ export const COACHING_CONTEXT_INSTRUCTION = [
  * (design pack 04 §3.1), CODE-OWNED at this locus by decision of record:
  * a hard-coded sibling of {@link COACHING_CONTEXT_INSTRUCTION}, appended to
  * the routing user message only when the `conversation_summary` section is
- * on the pack (CEE_ROLLING_SUMMARY='inject'). It does NOT ride the
+ * on the pack (beyond-window activation, O-2). It does NOT ride the
  * PMS-served orchestrator prompt — no estate coordination required.
  * British English. The load-bearing sentence ("the structured state is
  * correct") is the pack's wording verbatim. Exported for the byte-level

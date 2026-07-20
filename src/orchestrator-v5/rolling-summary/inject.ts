@@ -6,10 +6,14 @@
  *
  * What this module does (and the maintain half — capture.ts — does not):
  *   READS `scenarios.rolling_summary` at ContextPack-assembly time and
- *   projects it into the `conversation_summary` pack section, ONLY when
- *   CEE_ROLLING_SUMMARY = 'inject' (the third rung of the two-stage flag —
- *   'off' and 'maintain' are byte-inert here by early return, pinned by
- *   __tests__/inject.test.ts).
+ *   projects it into the `conversation_summary` pack section, ONLY when the
+ *   conversation extends BEYOND the verbatim window (O-2 activation, 2026-07-20:
+ *   the CEE_ROLLING_SUMMARY flag is DELETED per the no-dark-launches ruling —
+ *   rollback = code revert). Below the window every committed turn is already
+ *   verbatim in the pack, so a block here could only duplicate — or, on the
+ *   floor path, contradict — content the prompt fully carries; the loader
+ *   returns without even a store read (pinned by __tests__/inject.test.ts and
+ *   the activation acceptance test's ≤window byte-identity control).
  *
  * Safety properties:
  *  - NEVER a turn failure: store construction and the RPC read are inside a
@@ -144,8 +148,6 @@ export function buildConversationSummarySection(
 // ---------------------------------------------------------------------------
 
 export interface SummaryInjectionArgs {
-  /** config.features.rollingSummary — the two-stage flag. */
-  readonly flag: 'off' | 'maintain' | 'inject';
   readonly scenarioId: string;
   /** The assembler's prior turns, newest-first (readRecent order). */
   readonly windowTurnsNewestFirst: readonly LagTurn[];
@@ -158,33 +160,44 @@ export interface SummaryInjectionArgs {
 }
 
 export interface SummaryInjectionOutcome {
-  /** The pack section, or null (flag below inject / no stored summary /
-   *  store error). Null ⇒ no block, no error — the prompt is byte-identical
-   *  to pre-S4. */
+  /** The pack section, or null (conversation fits the verbatim window / no
+   *  stored summary / store error). Null ⇒ no block, no error — the prompt
+   *  is byte-identical to pre-S4. */
   readonly section: ContextPackConversationSummary | null;
   /** For `v5.context_budget.summary_lag_turns`: the computed lag when a
    *  summary was injected; null when no summary layer entered this prompt. */
   readonly lagTurns: number | null;
+  /** For the `conversation.window` disclosure marker (#536 extension): how
+   *  many of the window turns OUTSIDE the verbatim slice the injected block
+   *  actually absorbs. 0 for a floor (absorbed no history) and for a
+   *  memory-hole refusal (block withheld) — a section in the prompt that
+   *  summarises nothing must never mint a coverage claim. Null when no
+   *  section was injected at all (marker unchanged — byte-identity). */
+  readonly summarisedTurns: number | null;
 }
 
 const NO_INJECTION: SummaryInjectionOutcome = Object.freeze({
   section: null,
   lagTurns: null,
+  summarisedTurns: null,
 });
 
 /**
  * Load + project the stored rolling summary for injection. Non-throwing by
  * contract: any failure returns NO_INJECTION (the turn must never fail or
- * slow beyond the one RPC read this performs at 'inject').
+ * slow beyond the one RPC read this performs).
  *
- * Flag ladder: 'off' and 'maintain' return immediately — no store
- * construction, no env reads, no RPC — so both stages stay byte-identical
- * at the prompt seam (the task's two-stage guarantee).
+ * ACTIVATION CONDITION (O-2, replaces the deleted CEE_ROLLING_SUMMARY flag
+ * ladder): inject ONLY when the conversation extends beyond the verbatim
+ * window. Below it, every committed turn is already verbatim in the pack —
+ * a summary block could only duplicate (or, on the floor path, contradict)
+ * fully-present content — so the loader returns immediately: no store
+ * construction, no env reads, no RPC, prompt byte-identical to pre-S4.
  */
 export async function loadConversationSummaryForInjection(
   args: SummaryInjectionArgs,
 ): Promise<SummaryInjectionOutcome> {
-  if (args.flag !== 'inject') return NO_INJECTION;
+  if (args.windowTurnsNewestFirst.length <= args.windowDepth) return NO_INJECTION;
   try {
     const store = args.summaryStore ?? getRollingSummaryStore();
     const summary = await store.loadSummary(args.scenarioId);
@@ -226,6 +239,9 @@ export async function loadConversationSummaryForInjection(
           note: '(conversation summary not yet generated: the decision frame above is a deterministic seed from whichever was available of the decision brief, the goal, or the opening user message; nothing else has been captured yet — recent turns are shown verbatim in the conversation section and any earlier turns are NOT yet summarised)',
         },
         lagTurns: lag,
+        // A floor absorbed NO conversation history — the window marker must
+        // not claim any turn is "summarised" (the lying-coverage class).
+        summarisedTurns: 0,
       };
     }
 
@@ -261,6 +277,8 @@ export async function loadConversationSummaryForInjection(
           note: `(conversation summary withheld: it is ${gapPhrase} and only the latest ${verbatimCount} turns are shown verbatim in the conversation section — turns in between are NOT shown; do not assume knowledge of earlier turns)`,
         },
         lagTurns: lag,
+        // The four-slot block was WITHHELD — nothing is summarised here.
+        summarisedTurns: 0,
       };
     }
 
@@ -268,7 +286,14 @@ export async function loadConversationSummaryForInjection(
     if (section.stale) {
       emitSummaryLag(args, summary, lag, false);
     }
-    return { section, lagTurns: lag };
+    // Every window turn outside the verbatim slice is at-or-before the
+    // watermark here (the memory-hole guard above rejected every other
+    // arrangement), so the block absorbs exactly the not-shown turns.
+    return {
+      section,
+      lagTurns: lag,
+      summarisedTurns: args.windowTurnsNewestFirst.length - verbatimCount,
+    };
   } catch (err) {
     log.debug(
       {

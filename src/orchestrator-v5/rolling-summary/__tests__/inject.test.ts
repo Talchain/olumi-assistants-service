@@ -1,13 +1,17 @@
 /**
  * Context Architecture v2 — S4-INJECT (ROADMAP 1.73): the assembly-time
- * injector. RED-first pins (design pack 01 §2/§4, 04 §3, 05 §S4 inject row):
+ * injector. RED-first pins (design pack 01 §2/§4, 04 §3, 05 §S4 inject row;
+ * activation condition rewritten by O-2, which DELETED CEE_ROLLING_SUMMARY):
  *
- *  - flag 'off' / 'maintain' → NO section, NO store construction, NO lag —
- *    the injection half is byte-inert below 'inject' (two-stage flag).
- *  - 'inject' + no stored summary → no block, no error (loader returns null).
- *  - 'inject' + store error → no block, no error (never a turn failure).
- *  - 'inject' + stored summary → the four-slot block renders EXACTLY
- *    (golden), with [t:xxxxxxxx] provenance stamps riding along [R3].
+ *  - conversation fits the verbatim window (turns ≤ windowDepth) → NO
+ *    section, NO store construction, NO lag — the injection half is
+ *    byte-inert below the window (the O-2 activation gate).
+ *  - beyond window + no stored summary → no block, no error (loader null).
+ *  - beyond window + store error → no block, no error (never a turn failure).
+ *  - beyond window + stored summary → the four-slot block renders EXACTLY
+ *    (golden), with [t:xxxxxxxx] provenance stamps riding along [R3], and
+ *    `summarisedTurns` counts the not-shown turns the block absorbs (the
+ *    #536 window-marker extension); a floor / refusal stamps an honest 0.
  *  - staleness invariant (01 §4): lag ≥ windowDepth → stale:true + in-band
  *    disclosure note + v5.summary.lag emitted. Never silently stale.
  *  - lag is computed against the injector's window turns and surfaced for
@@ -70,14 +74,14 @@ function summaryFixture(): RollingSummary {
   };
 }
 
-/** A store whose methods explode — proves the off/maintain paths never touch it. */
+/** A store whose methods explode — proves the below-window gate never touches it. */
 function explodingStore(): RollingSummaryStorePort {
   return {
     upsertSummary: vi.fn(async () => {
       throw new Error('upsertSummary must not be called by the injector');
     }),
     loadSummary: vi.fn(async () => {
-      throw new Error('loadSummary must not be called below inject');
+      throw new Error('loadSummary must not be called below the window');
     }),
   };
 }
@@ -109,14 +113,14 @@ function lagEmits(): unknown[][] {
 }
 
 // ---------------------------------------------------------------------------
-// Flag ladder: off / maintain are byte-inert (no section, no store touch)
+// Activation gate (O-2): below the window the loader is byte-inert
+// (no section, no store touch) — every committed turn is already verbatim.
 // ---------------------------------------------------------------------------
 
-describe('loadConversationSummaryForInjection — flag ladder', () => {
-  it("flag 'off' → no section, null lag, store NEVER constructed/touched", async () => {
+describe('loadConversationSummaryForInjection — below-window activation gate', () => {
+  it('turns ≤ windowDepth → no section, null lag, store NEVER constructed/touched', async () => {
     const store = explodingStore();
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'off',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: [T2, T1],
       windowDepth: 5,
@@ -124,16 +128,16 @@ describe('loadConversationSummaryForInjection — flag ladder', () => {
     });
     expect(outcome.section).toBeNull();
     expect(outcome.lagTurns).toBeNull();
+    expect(outcome.summarisedTurns).toBeNull();
     expect(store.loadSummary).not.toHaveBeenCalled();
     expect(lagEmits()).toHaveLength(0);
   });
 
-  it("flag 'maintain' → identical to off: write-only shadow, nothing injects", async () => {
+  it('empty window (fresh conversation) → identical: nothing to summarise, store untouched', async () => {
     const store = explodingStore();
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'maintain',
       scenarioId: 'scn-1',
-      windowTurnsNewestFirst: [T2, T1],
+      windowTurnsNewestFirst: [],
       windowDepth: 5,
       summaryStore: store,
     });
@@ -142,22 +146,22 @@ describe('loadConversationSummaryForInjection — flag ladder', () => {
     expect(store.loadSummary).not.toHaveBeenCalled();
   });
 
-  it("'inject' + no stored summary → no block, no error, null lag", async () => {
+  it('beyond window + no stored summary → no block, no error, null lag', async () => {
     const store = storeReturning(null);
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: [T2, T1],
-      windowDepth: 5,
+      windowDepth: 1,
       summaryStore: store,
     });
     expect(outcome.section).toBeNull();
     expect(outcome.lagTurns).toBeNull();
+    expect(outcome.summarisedTurns).toBeNull();
     expect(store.loadSummary).toHaveBeenCalledTimes(1);
     expect(lagEmits()).toHaveLength(0);
   });
 
-  it("'inject' + store error → no block, no error (never fails the turn)", async () => {
+  it('beyond window + store error → no block, no error (never fails the turn)', async () => {
     const store: RollingSummaryStorePort = {
       loadSummary: vi.fn(async () => {
         throw new Error('RPC down');
@@ -165,10 +169,9 @@ describe('loadConversationSummaryForInjection — flag ladder', () => {
       upsertSummary: vi.fn(),
     };
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: [T2, T1],
-      windowDepth: 5,
+      windowDepth: 1,
       summaryStore: store,
     });
     expect(outcome.section).toBeNull();
@@ -184,13 +187,15 @@ describe('loadConversationSummaryForInjection — inject renders the block', () 
   it('fresh summary (watermark = newest window turn) → lag 0, not stale, golden text', async () => {
     const store = storeReturning(summaryFixture());
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: [T2, T1],
-      windowDepth: 5,
-    summaryStore: store,
+      windowDepth: 1,
+      summaryStore: store,
     });
     expect(outcome.lagTurns).toBe(0);
+    // #536 marker extension: one window turn (T1) sits outside the verbatim
+    // slice and is absorbed by the block.
+    expect(outcome.summarisedTurns).toBe(1);
     const section = outcome.section;
     expect(section).not.toBeNull();
     // Golden four-slot block with [t:xxxxxxxx] provenance stamps riding along.
@@ -222,7 +227,6 @@ describe('loadConversationSummaryForInjection — inject renders the block', () 
     };
     const store = storeReturning(staleSummary);
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       requestId: 'req-9',
       windowTurnsNewestFirst: [newer1, T3, T2, T1],
@@ -230,6 +234,7 @@ describe('loadConversationSummaryForInjection — inject renders the block', () 
       summaryStore: store,
     });
     expect(outcome.lagTurns).toBe(3);
+    expect(outcome.summarisedTurns).toBe(1);
     const section = outcome.section;
     expect(section).not.toBeNull();
     expect(section!.stale).toBe(true);
@@ -252,20 +257,16 @@ describe('loadConversationSummaryForInjection — inject renders the block', () 
   });
 
   it('below-threshold lag (lag < windowDepth) → fresh-enough: no note, no lag event', async () => {
-    const staleSummary: RollingSummary = {
-      ...summaryFixture(),
-      updated_turn_id: T1.turn_id,
-      updated_turn_created_at: T1.created_at,
-    };
-    const store = storeReturning(staleSummary);
+    // Watermark T2: one newer turn (T3) — lag 1 < depth 2, verbatim-covered.
+    const store = storeReturning(summaryFixture());
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: [T3, T2, T1],
-      windowDepth: 5,
+      windowDepth: 2,
       summaryStore: store,
     });
-    expect(outcome.lagTurns).toBe(2);
+    expect(outcome.lagTurns).toBe(1);
+    expect(outcome.summarisedTurns).toBe(1);
     expect(outcome.section!.stale).toBe(false);
     expect(outcome.section!.note).toBeUndefined();
     expect(lagEmits()).toHaveLength(0);
@@ -364,13 +365,14 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
     // turns that are NOWHERE. New behaviour: refuse + absence note.
     const store = storeReturning(summaryFixture());
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       requestId: 'req-hole',
       windowTurnsNewestFirst: newerTurns(20),
       windowDepth: 5,
       summaryStore: store,
     });
+    // A withheld block summarises NOTHING — the window marker must say 0.
+    expect(outcome.summarisedTurns).toBe(0);
     const section = outcome.section;
     expect(section).not.toBeNull();
     // The four-slot block must NOT inject.
@@ -399,13 +401,13 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
     const store = storeReturning(summaryFixture());
     const window = [...newerTurns(7), T2, T1];
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: window,
       windowDepth: 5,
       summaryStore: store,
     });
     expect(outcome.lagTurns).toBe(7);
+    expect(outcome.summarisedTurns).toBe(0);
     const section = outcome.section;
     expect(section).not.toBeNull();
     expect(section!.text).not.toContain('DECISION FRAME');
@@ -416,13 +418,14 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
     expect(lagEmits()[0]![1]).toMatchObject({ refused: true, generator: 'incremental' });
   });
 
-  it('REFUSES when a summary exists but the window is empty (coverage unverifiable)', async () => {
+  it('REFUSES an uncovered watermark even on a shallow window (coverage unverifiable)', async () => {
+    // One newer turn, watermark nowhere in the window: the true gap may
+    // extend arbitrarily past the window — refuse, disclose the absence.
     const store = storeReturning(summaryFixture());
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
-      windowTurnsNewestFirst: [],
-      windowDepth: 5,
+      windowTurnsNewestFirst: newerTurns(2),
+      windowDepth: 1,
       summaryStore: store,
     });
     const section = outcome.section;
@@ -430,20 +433,21 @@ describe('loadConversationSummaryForInjection — memory-hole guard (true gap)',
     expect(section!.text).not.toContain('DECISION FRAME');
     expect(section!.stale).toBe(true);
     expect(section!.note!.toLowerCase()).toContain('withheld');
+    expect(outcome.summarisedTurns).toBe(0);
   });
 
   it('still injects when the gap is fully verbatim-covered (no false refusal)', async () => {
-    // Watermark T2, 3 newer turns, all within the 5-verbatim window, watermark
-    // visible → lag 3 < depth 5 → normal injection, no note, no lag event.
+    // Watermark T2, 3 newer turns, all within the 4-verbatim window, watermark
+    // visible → lag 3 < depth 4 → normal injection, no note, no lag event.
     const store = storeReturning(summaryFixture());
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: [...newerTurns(3), T2, T1],
-      windowDepth: 5,
+      windowDepth: 4,
       summaryStore: store,
     });
     expect(outcome.lagTurns).toBe(3);
+    expect(outcome.summarisedTurns).toBe(1);
     expect(outcome.section!.text).toContain('DECISION FRAME');
     expect(outcome.section!.stale).toBe(false);
     expect(outcome.section!.note).toBeUndefined();
@@ -480,17 +484,18 @@ describe('loadConversationSummaryForInjection — floor honesty (M1)', () => {
   it('injects the FRAME but NEVER a bare "(none)" coverage claim (first-ever maintenance, parse reject)', async () => {
     const store = storeReturning(floorFixture());
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       requestId: 'req-floor',
       // Watermark T2 covered, lag 0 — pre-fix this sailed past the memory-hole
       // guard and rendered bare "(none)".
       windowTurnsNewestFirst: [T2, T1],
-      windowDepth: 5,
+      windowDepth: 1,
       summaryStore: store,
     });
     const section = outcome.section;
     expect(section).not.toBeNull();
+    // A floor absorbed NO history — the window marker must say 0, not 1.
+    expect(outcome.summarisedTurns).toBe(0);
     // FRAME (brief-derived) still rides along — it is legitimately known.
     expect(section!.text).toContain('DECISION FRAME');
     // The empty slots must be HONEST: "not captured yet", never a bare
@@ -534,10 +539,9 @@ describe('loadConversationSummaryForInjection — floor honesty (M1)', () => {
     });
     const store = storeReturning(floor);
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: [T2, T1],
-      windowDepth: 5,
+      windowDepth: 1,
       summaryStore: store,
     });
     const section = outcome.section;
@@ -564,10 +568,9 @@ describe('loadConversationSummaryForInjection — floor honesty (M1)', () => {
     };
     const store = storeReturning(realEmpty);
     const outcome = await loadConversationSummaryForInjection({
-      flag: 'inject',
       scenarioId: 'scn-1',
       windowTurnsNewestFirst: [T2, T1],
-      windowDepth: 5,
+      windowDepth: 1,
       summaryStore: store,
     });
     expect(outcome.section!.text).toContain('CONSTRAINTS & PREFERENCES: (none)');

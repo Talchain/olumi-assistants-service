@@ -1087,35 +1087,33 @@ export async function commitDirectAnswer(
     });
   }
 
-  // Context Architecture v2 — S4 rolling conversation summary
-  // (CEE_ROLLING_SUMMARY). Fires after the durable append, off the turn path,
-  // when the flag is 'maintain' (shadow — write+store, nothing injects) or
-  // 'inject' (S4 follow-up). Fire-and-forget under the same non-blocking
-  // contract as the MM / decision-record hooks above: every failure — store
-  // construction, RPC error, summariser model timeout — is caught and logged;
-  // NOTHING propagates to the turn result. Flag 'off' ⇒ byte-identical commit
-  // path (no store construction, no model call, no env reads — pinned by
+  // Context Architecture v2 — S4 rolling conversation summary. Fires after
+  // the durable append, off the turn path, on EVERY commit — UNCONDITIONAL
+  // since the O-2 activation (2026-07-20; the CEE_ROLLING_SUMMARY flag is
+  // DELETED per the no-dark-launches ruling — rollback = code revert).
+  // Fire-and-forget under the same non-blocking contract as the MM /
+  // decision-record hooks above: every failure — store construction, RPC
+  // error, summariser model timeout — is caught and logged; NOTHING
+  // propagates to the turn result (pinned by
   // commit-rolling-summary-hook.test.ts). The summariser reads the FULL
   // persisted history via the store's readRecent (unclamped) and writes only
   // scenarios.rolling_summary via a MONOTONIC RPC (out-of-order writes no-op).
   // Concurrent commits for one scenario do NOT stampede: the maintainer is
   // per-scenario single-flight with latest-wins coalescing (Codex r2 fix 4b),
   // so a burst of commits runs one pass plus at most one rerun.
-  if (config.features.rollingSummary !== 'off') {
-    void maintainRollingSummaryForCommit({
-      scenarioId: metadata.scenario_id,
-      turnId: metadata.turn_id,
-      persistedRowId,
-      // The store satisfies ConversationHistoryReader structurally (readRecent);
-      // the rolling-summary module never imports SessionStore, keeping the
-      // state-write-invariant import surface bounded.
-      historyReader: store,
-      // Best-effort deterministic-floor input: the brief supplied on this turn,
-      // if any. Absent on most turns — the floor then degrades to the latest
-      // user message, never empty.
-      briefText: metadata.briefText,
-    });
-  }
+  void maintainRollingSummaryForCommit({
+    scenarioId: metadata.scenario_id,
+    turnId: metadata.turn_id,
+    persistedRowId,
+    // The store satisfies ConversationHistoryReader structurally (readRecent);
+    // the rolling-summary module never imports SessionStore, keeping the
+    // state-write-invariant import surface bounded.
+    historyReader: store,
+    // Best-effort deterministic-floor input: the brief supplied on this turn,
+    // if any. Absent on most turns — the floor then degrades to the latest
+    // user message, never empty.
+    briefText: metadata.briefText,
+  });
 
   const graphPersisted = graphWasProvided(metadata.graph);
   return {

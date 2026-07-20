@@ -1,11 +1,11 @@
 /**
  * Context Architecture v2 — S4 rolling summary — module entry.
  *
- * ONE sanctioned production call site: the flag-gated commit-seam maintainer
+ * ONE sanctioned production call site: the commit-seam maintainer
  * (`maintainRollingSummaryForCommit` in capture.ts, invoked from
- * src/orchestrator-v5/commit.ts after a durable commit, when
- * CEE_ROLLING_SUMMARY is 'maintain' or 'inject'; fire-and-forget — failures
- * never affect the turn).
+ * src/orchestrator-v5/commit.ts after EVERY durable commit — unconditional
+ * since the O-2 activation deleted CEE_ROLLING_SUMMARY; fire-and-forget —
+ * failures never affect the turn).
  *
  * Env-read pattern — call-time, not module-load (mirrors decision-records/
  * index.ts): tests can stub env between cases, and importing this module never

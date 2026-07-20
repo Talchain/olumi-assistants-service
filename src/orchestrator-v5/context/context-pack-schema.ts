@@ -250,10 +250,15 @@ const ContextPackConversationSchema = z
     // prior turns are shown vs available, so the LLM knows history exists
     // beyond the window. Emitted unconditionally by projectConversation;
     // optional here so partial/legacy pack fixtures still validate.
+    // `summarised` (#536 extension, O-2 activation): how many not-shown
+    // turns arrive via `conversation_summary` instead of vanishing —
+    // present IFF a summary section was injected (0 there is honest: a
+    // floor / withheld block absorbs nothing).
     window: z
       .object({
         shown: z.number().int().nonnegative(),
         available: z.number().int().nonnegative(),
+        summarised: z.number().int().nonnegative().optional(),
       })
       .strict()
       .optional(),
@@ -468,9 +473,10 @@ export const ContextPackSchema = z
     display_graph: DisplaySafeGraphSchema,
     conversation: ContextPackConversationSchema,
     /**
-     * Context v2 S4-INJECT: present ONLY when CEE_ROLLING_SUMMARY='inject'
-     * and a stored summary exists (key absent otherwise — off/maintain
-     * byte-identity).
+     * Context v2 S4-INJECT (unconditional since the O-2 activation —
+     * CEE_ROLLING_SUMMARY deleted): present ONLY when the conversation
+     * extends beyond the verbatim window AND a stored summary exists (key
+     * absent otherwise — byte-identity with pre-S4 packs).
      */
     conversation_summary: ContextPackConversationSummarySchema.optional(),
     recent_changes: z.array(RecentMutationSchema).readonly(),
