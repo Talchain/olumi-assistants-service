@@ -1,16 +1,17 @@
 /**
  * ROADMAP 3.1 (CEE half) — commit-seam decision-record capture hook
- * (CEE_DECISION_RECORD_CAPTURE, ships DARK — migration #406 is merged but
- * UNEXECUTED, so the RPC does not exist yet; everything here mocks the
- * client boundary).
+ * (UNCONDITIONAL since #539 deleted CEE_DECISION_RECORD_CAPTURE — Paul's
+ * 19 Jul no-dark-launch ruling; migration #406, amended by #417, EXECUTED
+ * on staging 2026-07-10/11 per its own header; everything here still mocks
+ * the client boundary).
  *
  * Pins (mirrors commit-model-version-hook.test.ts):
- *  - flag OFF ⇒ byte-identical commit path: the decision-record store is
- *    NEVER constructed (no env reads, no RPC), even on commits carrying a
- *    successful run_analysis fact — AND the commit result JSON is
- *    byte-identical to the flag-ON result (JSON-additivity pin: the hook
- *    never touches the turn, on or off);
- *  - flag ON + successful run_analysis fact ⇒ fire-and-forget
+ *  - (historical) flag OFF ⇒ byte-identical commit path: #539 deleted the
+ *    flag, so that inertness describe no longer has a path to exercise and
+ *    was removed — see the NO-DARK-LAUNCH note above the suites. Commits
+ *    without a qualifying fact still pin the no-store/no-RPC path (last
+ *    bullet);
+ *  - successful run_analysis fact ⇒ fire-and-forget
  *    create_decision_record with the EXACT payload (aag_v1-prefixed
  *    fact-carried graph hash, leading option id + resolved label,
  *    deterministic record_id/event_id, computed_at+90d review_date);

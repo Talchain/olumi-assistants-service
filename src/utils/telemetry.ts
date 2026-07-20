@@ -940,9 +940,11 @@ export const TelemetryEvents = {
   // and NEVER affect the turn result.
   V5ModelVersionCreated: "v5.model_versions.version_created",
 
-  // Decision Records (CEE_DECISION_RECORD_CAPTURE) — commit-seam capture
-  // hook (ROADMAP 3.1, CEE half; ships DARK until migration
-  // 20260710113000_v5_decision_records.sql is executed). Emitted AFTER a
+  // Decision Records — commit-seam capture hook (ROADMAP 3.1, CEE half;
+  // UNCONDITIONAL since #539 deleted CEE_DECISION_RECORD_CAPTURE, Paul's
+  // 19 Jul no-dark-launch ruling; migration
+  // 20260710113000_v5_decision_records.sql EXECUTED on staging
+  // 2026-07-10/11 — see its header). Emitted AFTER a
   // durable commit carrying a successful (non-noop) run_analysis fact when
   // the fire-and-forget create_decision_record call resolves, or when the
   // builder skips before the RPC. Content-free: scenario/turn/row ids,

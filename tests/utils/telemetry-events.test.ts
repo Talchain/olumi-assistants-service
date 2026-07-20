@@ -480,7 +480,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Lane 8 — Model Management commit-seam version hook (CEE_MODEL_VERSIONS_ENABLED)
         V5ModelVersionCreated: "v5.model_versions.version_created",
         // ROADMAP 3.1 — Decision Records commit-seam capture hook
-        // (CEE_DECISION_RECORD_CAPTURE, ships dark)
+        // (unconditional since #539 deleted CEE_DECISION_RECORD_CAPTURE)
         V5DecisionRecordCaptured: "v5.decision_records.record_captured",
         V5CoachingStateLifecycleDerived: "v5.coaching_state.lifecycle_derived",
         V5CoachingSignalFired: "v5.coaching.signal_fired",
@@ -1941,7 +1941,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.candidate_mutation.clarify_required",
         "v5.model_versions.version_created",
         // ROADMAP 3.1 — Decision Records commit-seam capture hook
-        // (CEE_DECISION_RECORD_CAPTURE, ships dark)
+        // (unconditional since #539 deleted CEE_DECISION_RECORD_CAPTURE)
         "v5.decision_records.record_captured",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites
         "edit_graph.no_operations",
