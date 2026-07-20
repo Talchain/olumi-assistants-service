@@ -5385,8 +5385,11 @@ export async function runTurnExecutor(
           // brief slice discloses original_chars in-pack). The window slice
           // is on the per-cut `v5.context_truncation` stream with exact
           // chars — the pack only knows turn counts at this altitude.
-          const routingTruncations =
-            contextPack.brief?.truncated === true
+          // O-3: budget-trim records are DERIVED from the pack's in-band
+          // `context_budget` marker (never re-estimated here), so the
+          // accounting event and the prompt-visible disclosure can't drift.
+          const routingTruncations = [
+            ...(contextPack.brief?.truncated === true
               ? [
                   {
                     section: 'brief',
@@ -5395,7 +5398,14 @@ export async function runTurnExecutor(
                     disclosed: true,
                   },
                 ]
-              : [];
+              : []),
+            ...(contextPack.context_budget?.truncations ?? []).map((t) => ({
+              section: t.section,
+              original_chars: t.original_chars,
+              kept_chars: t.kept_chars,
+              disclosed: true,
+            })),
+          ];
           // S8u tolerance (02 Seam 4 [R8]): the UI's pre-narrowing marker
           // rides INSIDE the analysis_state passthrough carrier. Absent on
           // pre-S8u UIs → null (unknown), never fabricated.
