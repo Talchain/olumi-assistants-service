@@ -182,6 +182,10 @@ import {
   tryPostAnalysisLabelIntercept,
 } from '../orchestrator-v5/routing/post-analysis-label-intercept.js';
 import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
+import {
+  isProcessMetaIntake,
+  composeProcessMetaIntakeResponse,
+} from '../orchestrator-v5/routing/process-meta-intake.js';
 import { isValueUpdatePhrasing } from './routing/value-update-gate.js';
 
 // ───────────────────────────────────────────────────────────────────
@@ -2400,7 +2404,30 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // drafting a full shaped brief the user just typed carries no consent
       // risk, so a wall-expired offer still un-strands it.
       (!isContinuationScenario || draftOfferMarker !== null) &&
-      isDraftShapedText(ingress.message);
+      // META-DECISION-DIAGNOSIS-2026-07-20 — a chip_click carries EXPLICIT
+      // product-intent metadata; the draft heuristic exists to classify
+      // anonymous free text and must never capture product-authored canned
+      // text. Whitelisted action_types were dispatched upstream; the rest
+      // belong to TurnExecutor (Sonnet ORIENT / typed unsupported-action),
+      // never to a graph drafted ABOUT the chip's own wording. (`source:
+      // 'chip'` — inline chip metadata without an action_type — is NOT
+      // excluded here: the wire's 0.19.0 action_type enum has no coaching
+      // intent value yet, so spark taps arrive that way and are handled by
+      // the narrower process-meta guard below.)
+      ingress.source !== 'chip_click' &&
+      isDraftShapedText(ingress.message) &&
+      // META-DECISION-DIAGNOSIS-2026-07-20 — round-1 process-meta guard:
+      // a question TO the assistant about the process ("What should I
+      // check before running the first analysis?" — the product's own
+      // pre-analysis spark) is never a decision brief. The clarify RESUME
+      // path already refuses to fold such questions into the working brief
+      // (CLARIFY_V2_QUESTION_REPLY_PATTERN); this term gives round-1
+      // intake the same protection, and (via `clarifyDraftShaped` below)
+      // bars a mid-round meta-question from REPLACING a live round's
+      // working brief. Deflected turns are ANSWERED by the deterministic
+      // process-meta branch ahead of the frame guard — never captured,
+      // never silently dropped.
+      !isProcessMetaIntake(ingress.message);
     const isDraftGraphShape = extensions.graphState == null && draftShapedTurn;
     // ── Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
     // CEE_CLARIFY_V2_ENABLED (default off; flag-off skips the import
@@ -3078,6 +3105,70 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // 500: infrastructure failure — no analysis_ready stamped (UI retains prior store value)
         return reply.code(500).send(boundaryError);
       }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Round-1 process-meta intake answer (META-DECISION-DIAGNOSIS-2026-07-20)
+    // ────────────────────────────────────────────────────────────────────
+    // A question TO the assistant about the process — the product's own
+    // pre-analysis spark prompts ("What should I check before running the
+    // first analysis?"), or a narrowly-matched typed variant — on the
+    // empty-canvas frame state. The `draftShapedTurn` exclusion above
+    // already kept it out of the draft dispatch and the clarify round;
+    // this branch gives it an ANSWER. It must run BEFORE the frame-stage
+    // no-brief guard below: that guard's canned reply ignores the user's
+    // question, and its C3 offer path would seed a "Build the model" chip
+    // with the meta-question as the brief seed — re-creating the exact
+    // poisoned-brief defect one tap later.
+    //
+    // Scope (deliberately the defect state and nothing else):
+    //   - frame stage, canvas not populated (nullness OR {nodes:[]} — the
+    //     clarify gate's A5 population judgement, so both defect entry
+    //     points are covered);
+    //   - not a continuation (a mid-conversation meta-question already
+    //     reaches TurnExecutor's LLM with memory — richer than this canned
+    //     answer), EXCEPT the frame guard's own offer-loop continuation
+    //     (marker), which would otherwise re-fire the canned framing
+    //     prompt over the user's question.
+    // COMMIT POSTURE: none — same as the plain frame guard ("no chip, no
+    // commit, scenario stays fresh"). A committed turn here would make the
+    // NEXT message a continuation and strand the user's real brief (the
+    // Signature-Loop guard would suppress its draft) — the exact dead-end
+    // class C3 exists to prevent, and no non-poisoned offer seed exists on
+    // this state. Cost accepted: the exchange is not in turn memory.
+    const isProcessMetaIntakeTurn =
+      ingress.stage === 'frame' &&
+      !isPopulatedIngressGraph(extensions.graphState) &&
+      (!isContinuationScenario || draftOfferMarker !== null) &&
+      isProcessMetaIntake(ingress.message);
+    if (isProcessMetaIntakeTurn) {
+      log.info(
+        {
+          event: 'v5.process_meta_intake_guard',
+          request_id: requestId,
+          message_length: ingress.message.length,
+          source: ingress.source,
+        },
+        'Round-1 process-meta intake guard fired — answering the process question instead of drafting/clarifying',
+      );
+      emit(TelemetryEvents.V5ProcessMetaIntakeGuard, {
+        request_id: requestId,
+        message_length: ingress.message.length,
+        source: ingress.source,
+      });
+      return sendFinalised200(
+        reply,
+        requestId,
+        'process_meta_intake',
+        composeProcessMetaIntakeResponse(),
+        {
+          graph: null,
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        },
+      );
     }
 
     // ────────────────────────────────────────────────────────────────────
