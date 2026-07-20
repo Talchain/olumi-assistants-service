@@ -160,12 +160,13 @@ function isRetriableCode(code: CeeClientErrorCode): boolean {
     case "CEE_NETWORK_ERROR":
     case "CEE_TIMEOUT":
     case "CEE_RATE_LIMIT":
-    // Both must stay retriable. Before the 2026-07-20 split these arrived as
-    // CEE_RATE_LIMIT and were retriable; omitting them here would silently
-    // flip them to non-retriable via the `default` arm.
     case "CEE_COST_CAP":
     case "CEE_BUDGET_EXCEEDED":
     case "CEE_INTERNAL_ERROR":
+      // CEE_COST_CAP and CEE_BUDGET_EXCEEDED must stay retriable. Before the
+      // 2026-07-20 split these arrived as CEE_RATE_LIMIT and were retriable;
+      // omitting them here would silently flip them to non-retriable via the
+      // `default` arm.
       return true;
     case "CEE_PROTOCOL_ERROR":
     case "CEE_VALIDATION_FAILED":
