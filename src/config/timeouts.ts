@@ -366,6 +366,99 @@ export const DRAFT_LLM_TIMEOUT_MS = Math.max(
   DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS,
 );
 
+// ---------------------------------------------------------------------------
+// Draft token affordability — max_tokens is DERIVED from the timeout
+//
+// ROOT CAUSE of the 2026-07-20 draft outage (chronic: 4/14 failures 07-19,
+// 10/15 on 07-20; RCA `parallel-briefs/DRAFT-TIMEOUT-RCA-2026-07-20.md`):
+// the draft timeout was derived HERE while draft max_tokens was hand-set in
+// `adapters/llm/anthropic.ts` (default 16,384, hard floor 8,192), with
+// nothing relating the two. Provider throughput was CONSTANT across both
+// outage windows and the prior day (70.8–71.2 tok/s, sd 1.7–3.0), so a 105s
+// timeout affords ~7,450 tokens at best — the 8,192 FLOOR alone needed 115s.
+// Any generation longer than the affordable budget HUNG to the timeout and
+// surfaced as a 504, instead of returning truncated-but-typed.
+//
+// The derivation lives HERE, next to the timeout it derives from, so the two
+// can never drift apart again (trap 12: derive, don't mirror).
+// ---------------------------------------------------------------------------
+
+/**
+ * Conservative output-throughput floor (tokens/second).
+ *
+ * Measured effective draft throughput (output_tokens / total wall time):
+ * 71.1 tok/s (07-20 morning), 71.2 (07-20 afternoon), 70.8 (07-19),
+ * sd 1.7–3.0 — constant across two days, both pods, and both builds.
+ * 60 is more than 3 standard deviations below the SLOWEST measured mean, so
+ * a generation sized by this floor completes inside its timeout even at a
+ * throughput excursion worse than anything ever observed.
+ */
+export const DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S = 60;
+
+/**
+ * Safety overhead (seconds) reserved for TTFB + network + request setup.
+ *
+ * The measured tok/s figures above are END-TO-END rates (output tokens over
+ * total wall time), so first-token latency and network transfer are already
+ * folded into them; sibling-call measurements put pure network overhead at
+ * ~0.2–0.45s. Reserving a further 5s on top of the 15% throughput discount
+ * is deliberate double margin, and still lands the derived budget at 6,000
+ * tokens for the current 105s timeout — 1.45x the largest draft ever
+ * observed (4,136 tokens).
+ */
+export const DRAFT_TTFB_SAFETY_OVERHEAD_S = 5;
+
+/**
+ * The number of output tokens a draft LLM call can AFFORD to emit inside
+ * `timeoutMs`, at the conservative throughput floor, after reserving the
+ * TTFB/network overhead. Floors at 0 for degenerate timeouts.
+ *
+ * At the default-derived DRAFT_LLM_TIMEOUT_MS (105s):
+ * (105 - 5) x 60 = 6,000 tokens (~89.5s at the measured 71 tok/s).
+ */
+export function getAffordableDraftTokens(timeoutMs: number): number {
+  return Math.max(
+    0,
+    Math.floor(
+      (timeoutMs / 1000 - DRAFT_TTFB_SAFETY_OVERHEAD_S) * DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S,
+    ),
+  );
+}
+
+/**
+ * Boot assertion (the "never again"): a configured draft max_tokens that the
+ * derived timeout cannot afford is the exact arithmetic that caused the
+ * 2026-07-20 outage. Returns error strings for `server.ts` to log at ERROR
+ * level; empty when the configuration is coherent.
+ *
+ * BOTH sides of the comparison are DERIVED from the real, env-applied values
+ * (the caller injects the resolved CEE_MAX_TOKENS_DRAFT; the affordable
+ * budget is recomputed from DRAFT_LLM_TIMEOUT_MS here) — never restated.
+ * The runtime independently clamps (`resolveDraftMaxTokens` in the Anthropic
+ * adapter), so this misconfiguration cannot hang drafts even if the log is
+ * ignored — but it should be fixed, not tolerated.
+ *
+ * Pass `null` when CEE_MAX_TOKENS_DRAFT is unset: the runtime then derives
+ * the affordable value itself and no assertion is needed.
+ */
+export function validateDraftTokenAffordability(
+  configuredDraftMaxTokens: number | null,
+): string[] {
+  const errors: string[] = [];
+  const affordable = getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS);
+  if (configuredDraftMaxTokens !== null && configuredDraftMaxTokens > affordable) {
+    errors.push(
+      `CEE_MAX_TOKENS_DRAFT (${configuredDraftMaxTokens} tokens) exceeds the affordable draft budget ` +
+      `(${affordable} tokens) derived from DRAFT_LLM_TIMEOUT_MS (${DRAFT_LLM_TIMEOUT_MS}ms) at ` +
+      `${DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S} tok/s minus ${DRAFT_TTFB_SAFETY_OVERHEAD_S}s overhead — ` +
+      `a draft asked to emit more tokens than the timeout affords HANGS to the cap and 504s ` +
+      `(2026-07-20 outage class). The runtime clamps the request to ${affordable} tokens; ` +
+      `lower CEE_MAX_TOKENS_DRAFT or raise DRAFT_REQUEST_BUDGET_MS.`,
+    );
+  }
+  return errors;
+}
+
 /** Derived: budget remaining for repair after the LLM draft call.
  *  Repair is skipped when elapsed draft time exceeds this threshold.
  *  Clamped to 0 — negative values mean repair can never run. */

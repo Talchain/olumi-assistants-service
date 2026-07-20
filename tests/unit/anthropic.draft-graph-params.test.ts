@@ -200,7 +200,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     vi.unstubAllEnvs();
   });
 
-  it("sends temperature=0, max_tokens≥8192, and no output_config when flag is off", async () => {
+  it("sends temperature=0, an affordable max_tokens, and no output_config when flag is off", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
 
@@ -219,8 +219,11 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // temperature must be 0 for analytical consistency
     expect(body.temperature).toBe(0);
 
-    // max_tokens must meet the 8192 hard floor
-    expect(body.max_tokens).toBeGreaterThanOrEqual(8192);
+    // max_tokens is DERIVED from the timeout (2026-07-20 outage fix): at the
+    // default 105s draft LLM timeout, (105 - 5) * 60 tok/s = 6000 tokens.
+    // The pre-fix 8192 floor needed 115s at the measured 71 tok/s — every
+    // long generation HUNG to the cap instead of completing.
+    expect(body.max_tokens).toBe(6000);
 
     // No structured outputs params when flag is off
     expect(body).not.toHaveProperty("output_config");
@@ -303,7 +306,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     expect(headers["Idempotency-Key"].length).toBeGreaterThan(0);
   });
 
-  it("max_tokens is floored at 8192 even when CEE_MAX_TOKENS_DRAFT is set very low", async () => {
+  it("max_tokens is raised from a very low CEE_MAX_TOKENS_DRAFT — but only up to the affordable budget", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_MAX_TOKENS_DRAFT", "512"); // well below the floor
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
@@ -318,11 +321,13 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     });
 
     const [body] = createSpy.mock.calls[0];
-    // Floor must be enforced regardless of config
-    expect(body.max_tokens).toBeGreaterThanOrEqual(8192);
+    // The "minimum safe value" floor still guards a too-low config, but the
+    // floor itself is capped at affordability: min(8192 floor, 6000 affordable).
+    // A floor ABOVE affordability was the exact 2026-07-20 defect.
+    expect(body.max_tokens).toBe(6000);
   });
 
-  it("max_tokens respects CEE_MAX_TOKENS_DRAFT when above the floor", async () => {
+  it("max_tokens CLAMPS CEE_MAX_TOKENS_DRAFT down to the affordable budget (the outage config)", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_MAX_TOKENS_DRAFT", "32768");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
@@ -337,7 +342,87 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     });
 
     const [body] = createSpy.mock.calls[0];
-    expect(body.max_tokens).toBe(32768);
+    // 32768 tokens needs ~461s at the measured 71 tok/s — no timeout on the
+    // ladder affords it. Honouring it verbatim is how drafts hung to 105s.
+    expect(body.max_tokens).toBe(6000);
+  });
+
+  it("max_tokens is derived from the ACTUAL call-site timeout (opts.timeoutMs), not a global", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    await draftGraphWithAnthropic(
+      {
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      },
+      { timeoutMs: 45_000 },
+    );
+
+    const [body] = createSpy.mock.calls[0];
+    // (45s - 5s overhead) * 60 tok/s = 2400 tokens affordable in this window.
+    expect(body.max_tokens).toBe(2400);
+  });
+
+  it("a runaway generation truncated at max_tokens fails FAST with a truncation-typed error, not a generic non-JSON error", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    // Simulate the API cutting the generation at the token cap: stop_reason
+    // "max_tokens" with JSON chopped mid-object.
+    createSpy.mockResolvedValue({
+      content: [{ type: "text", text: VALID_GRAPH_JSON.slice(0, 200) }],
+      stop_reason: "max_tokens",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 6000,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    });
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    await expect(
+      draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      }),
+    ).rejects.toThrow(/truncated at max_tokens/);
+  });
+
+  it("a generation that hits max_tokens but still parses is ACCEPTED (truncated-but-parseable is the payoff)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    // stop_reason max_tokens but the text happens to be complete valid JSON
+    // (cap landed exactly at the end of the payload).
+    createSpy.mockResolvedValue({
+      content: [{ type: "text", text: VALID_GRAPH_JSON }],
+      stop_reason: "max_tokens",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 6000,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    });
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const result = await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+    expect(result.graph.nodes.length).toBeGreaterThan(0);
   });
 
   it("falls back to prompt-only mode when API rejects output_config as unsupported", async () => {
