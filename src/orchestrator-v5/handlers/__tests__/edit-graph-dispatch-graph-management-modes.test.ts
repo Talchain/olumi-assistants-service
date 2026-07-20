@@ -213,7 +213,14 @@ function makeCommitResult() {
   };
 }
 
-async function runDispatch(ops: PatchOperation[], resultOverrides: Partial<EditGraphResult> = {}) {
+async function runDispatch(
+  ops: PatchOperation[],
+  resultOverrides: Partial<EditGraphResult> = {},
+  // F-3 negation guard: overridable so the dispatch-seam threading of the
+  // user message into the referee gate can be pinned. The default carries
+  // no protection cue, so every pre-existing pin is byte-identical.
+  message = 'Change the price factor',
+) {
   (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
     makeAppliedEditResult(ops, resultOverrides),
   );
@@ -221,7 +228,7 @@ async function runDispatch(ops: PatchOperation[], resultOverrides: Partial<EditG
     makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>,
   );
   const result = await dispatchEditGraph({
-    payload: makePayload('Change the price factor'),
+    payload: makePayload(message),
     requestId: 'req-gm-mode',
     request: STUB_REQUEST,
     graphState: INGRESS_GRAPH,
@@ -436,6 +443,62 @@ describe('mode=live', () => {
     } finally {
       emitSpy.mockRestore();
     }
+  });
+});
+
+// ── F-3 negation guard — dispatch-seam threading (probe P8/P9, 2026-07-20) ──
+// The gate's demotion is only as real as the dispatch actually THREADING the
+// user message into it (deleting `userMessage: payload.message` at the call
+// site must turn these RED — the gate unit tests alone cannot see it).
+
+describe('mode=live — protection cue in the message (F-3 negation guard)', () => {
+  it('a tunable op targeting the protected entity HOLDS: no persist, named copy, real pending', async () => {
+    setMode('live');
+    const { result, response, metadata } = await runDispatch(
+      FIELD_OPS,
+      {},
+      'Improve the model but do NOT touch Price.',
+    );
+
+    // Structural honesty: the would_apply was demoted — nothing persisted.
+    expect(metadata.graph).toBeUndefined();
+    expect((metadata.handler_facts as unknown[]).length).toBe(0);
+    expect(result.graph).toBeNull();
+    expect(result.analysisReady).toBeUndefined();
+
+    // The hold ask NAMES the protected entity and stays consent-framed.
+    const text = (response as { assistant_text: string }).assistant_text;
+    expect(text).toContain("'Price'");
+    expect(text).toContain('Nothing in the model moves until you confirm');
+    expect(findSuccessClaimHit(text)).toBeNull();
+    expect(findForbiddenPhraseHit(text)).toBeNull();
+
+    // A real propose_and_confirm pending shipped with the commit.
+    const pendings = metadata.pending_actions as unknown[];
+    expect(pendings).toHaveLength(1);
+    const parsed = parsePendingAction(pendings[0]);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.action.kind).toBe('apply_proposed_change');
+
+    // The wire details carry the TRUE internal code.
+    const blocks = (response as { blocks: Array<{ details?: Record<string, unknown> }> }).blocks;
+    expect(blocks[0]!.details).toMatchObject({
+      source: 'graph_management',
+      verdict: 'held',
+      blocker_code: 'USER_PROTECTED_ENTITY',
+    });
+  });
+
+  it('the SAME op with a cue-free message auto-applies (D-S posture preserved)', async () => {
+    setMode('live');
+    const { result, metadata } = await runDispatch(
+      FIELD_OPS,
+      {},
+      'Add a description to the price factor',
+    );
+    expect(metadata.graph).toBeDefined();
+    expect((metadata.handler_facts as unknown[]).length).toBe(1);
+    expect(result.graph).not.toBeNull();
   });
 });
 

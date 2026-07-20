@@ -49,6 +49,10 @@ import {
   type EditPatchOperationLike,
 } from '../graph-management/adapters/edit-graph-producer.js';
 import { refereeMutationBatch } from '../graph-management/referee.js';
+import {
+  demoteProtectedEntityTargets,
+} from '../graph-management/protection-scope.js';
+import { USER_PROTECTED_ENTITY, TUNABLE_APPLY_HELD } from '../graph-management/reason-codes.js';
 import { parseEnvelope } from '../graph-management/parse-envelope.js';
 import { mutationTargetKey } from '../graph-management/pending-projection.js';
 import {
@@ -119,6 +123,14 @@ export interface EditGmEvaluationInput {
    * resume path. Event NAMES are unchanged (frozen registry).
    */
   readonly dispatchPath?: 'edit_graph' | 'gm_held_resume';
+  /**
+   * F-3 negation guard (probe P8/P9, 2026-07-20): the CURRENT turn's raw
+   * user message, used ONLY for deterministic protection-scope extraction
+   * ("… but do NOT touch X" → any op targeting X is demoted would_apply →
+   * held). Absent (the gm_held_resume confirm path, hold-threading
+   * re-assessment) → no demotion, so a confirmed hold still executes.
+   */
+  readonly userMessage?: string | null;
 }
 
 export type EditGmGoverningVerdict =
@@ -304,6 +316,58 @@ export function buildGmHeldAssistantText(
     `I'm holding the change to ${subject} rather than applying it straight away. ` +
     'Nothing in the model moves until you confirm. Reply yes to continue, or tell ' +
     'me what to adjust instead.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// F-3 NEGATION GUARD COPY (probe-edit-lane.md P8/P9, 2026-07-20). The hold
+// ask for a protection demotion must NAME the protected entity and the
+// conflict ("you asked me not to touch X — this change would"), so the user
+// can catch the negation-blind emission before anything applies. Swept by
+// edit-graph-protected-entity.test.ts against findSuccessClaimHit /
+// findForbiddenPhraseHit. provisional_doctrine_v0; no em dash.
+// ---------------------------------------------------------------------------
+
+/** Fallback when no protected label survives the render-safety filter. */
+export const GM_PROTECTED_HELD_ASSISTANT_TEXT =
+  'Your message asked for part of the model to stay as it is, and this ' +
+  'change would affect it, so I am holding it rather than applying it ' +
+  'straight away. Nothing in the model moves until you confirm. Reply yes ' +
+  'to continue, or tell me what to adjust instead.';
+
+/** Oxford-free list join: "'A'", "'A' and 'B'", "'A', 'B' and 'C'". */
+function joinQuotedLabels(labels: readonly string[]): string {
+  const quoted = labels.map((l) => `'${clampLabel(l)}'`);
+  if (quoted.length === 1) return quoted[0]!;
+  return `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]!}`;
+}
+
+/**
+ * The protection hold ask, NAMED: states the entity the user protected,
+ * the conflict, and (when derivable) exactly what the held change is. The
+ * conservative-detection bias is deliberately part of the copy: the user
+ * is told nothing was applied and a single yes proceeds.
+ */
+export function buildGmProtectedHeldAssistantText(
+  protectedLabels: readonly string[],
+  subject: string | null,
+  opCount: number = 1,
+): string {
+  const safeLabels = protectedLabels.filter((l) => l.trim().length > 0 && subjectIsSafe(l));
+  if (safeLabels.length === 0) return GM_PROTECTED_HELD_ASSISTANT_TEXT;
+  const named = joinQuotedLabels(safeLabels);
+  const it = safeLabels.length === 1 ? 'it' : 'them';
+  const change =
+    subject !== null && subjectIsSafe(subject)
+      ? opCount > 1
+        ? `these changes would affect ${it}: ${subject}`
+        : `this change would affect ${it}: ${subject}`
+      : `this change would affect ${it}`;
+  return (
+    `You asked for ${named} to stay as ${safeLabels.length === 1 ? 'it is' : 'they are'}, ` +
+    `and ${change}. So I am holding it rather than applying it straight away. ` +
+    'Nothing in the model moves until you confirm. Reply yes to continue, or ' +
+    'tell me what to adjust instead.'
   );
 }
 
@@ -724,7 +788,20 @@ const GM_STALE_RERUN_CHIP: EditGmChip = {
  */
 export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGmDecision {
   try {
-    const { verdicts, envelopes } = refereeBatch(input);
+    const { verdicts: refereed, envelopes } = refereeBatch(input);
+    // F-3 negation guard (probe P8/P9): demote would_apply verdicts whose
+    // envelope TARGETS an entity the user's message protects ("… but do NOT
+    // touch X") to held — BEFORE telemetry and the governing pick, so the
+    // demotion is never a silent outcome. Per-op: non-protected verdicts
+    // pass through untouched. No userMessage (gm_held_resume confirm,
+    // hold-threading) → no demotion.
+    const protection = demoteProtectedEntityTargets(
+      refereed,
+      envelopes,
+      input.userMessage ?? null,
+      input.currentGraph,
+    );
+    const verdicts = protection.verdicts;
     const governing = governingOf(verdicts);
     const verdictCounts = tally(verdicts);
 
@@ -784,7 +861,16 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
               proposalId: held.chip.id,
               confirmActionId: held.chip.id,
               mutationClass: gv.mutation_class,
-              blockerCode: gv.blocker?.code ?? null,
+              // F-3: USER_PROTECTED_ENTITY is internal vocabulary; the
+              // @talchain/schemas HeldProposalReasonCode wire enum cannot be
+              // extended unilaterally, so the card carries the ratified
+              // nearest code (a tunable held pending confirmation). The
+              // TRUE code still reaches the wire details block via
+              // publicReason and telemetry via blocker_code.
+              blockerCode:
+                gv.blocker?.code === USER_PROTECTED_ENTITY
+                  ? TUNABLE_APPLY_HELD
+                  : gv.blocker?.code ?? null,
               targetKey: held.targetKey,
               graph: input.currentGraph as HeldProposalBlockInput['graph'],
               // Ask #20: the card body carries the FULL mutation
@@ -799,10 +885,20 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
         input.operations,
         input.currentGraph,
       );
-      const heldAsk = buildGmHeldAssistantText(
-        heldChangesetSubject,
-        input.operations.length,
-      );
+      // F-3 negation guard: when the governing hold IS a protection
+      // demotion, the ask names the protected entity and the conflict.
+      // When the governing hold is something else but demotions occurred
+      // in the same batch (e.g. structural hold + protected tunable), the
+      // standard ask is used — the whole batch is still held behind the
+      // one confirm, so nothing auto-applies against the protection.
+      const heldAsk =
+        gv.blocker?.code === USER_PROTECTED_ENTITY
+          ? buildGmProtectedHeldAssistantText(
+              protection.demotedEntityLabels,
+              heldChangesetSubject,
+              input.operations.length,
+            )
+          : buildGmHeldAssistantText(heldChangesetSubject, input.operations.length);
       return {
         governing,
         blockApply: true,
