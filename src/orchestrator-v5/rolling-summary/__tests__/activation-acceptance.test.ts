@@ -263,6 +263,36 @@ describe('S4 activation — positive control (≤ window: byte-identical, no sto
     expect(prompt).toContain(EARLY_FACT);
   });
 
+  it('EXACTLY at the window (5 prior turns): gate holds — no store read, no section, no summarised key', async () => {
+    // Boundary pin (review gap on #551): the activation gate is `<=`, not
+    // `<`. A summary EXISTS in the store with its watermark at the newest
+    // turn, so a `<`-mutated gate would read the store and inject a fresh
+    // section end-to-end — the loadCalls / key-absence assertions below all
+    // die under that exact mutation. NOTE the marker contract: at
+    // exactly-window there is NO block in the prompt, so the window marker
+    // carries NO `summarised` key at all — `summarised: 0` is reserved for
+    // a PRESENT block that earned no coverage (floor / withheld); stamping
+    // 0 here would falsely imply a block was injected.
+    const store = new InMemoryStore();
+    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP);
+    await maintain(history, store, derivingModel());
+    expect(store.stored).not.toBeNull();
+    store.loadCalls = 0;
+
+    const { pack, prompt } = await assembleLive(history, store, 'What next?');
+
+    expect(store.loadCalls).toBe(0);
+    expect('conversation_summary' in pack).toBe(false);
+    expect(pack.conversation.window).toEqual({
+      shown: CONTEXT_PACK_RECENT_TURNS_CAP,
+      available: CONTEXT_PACK_RECENT_TURNS_CAP,
+    });
+    expect(JSON.stringify(pack.conversation.window)).not.toContain('summarised');
+    expect(prompt).not.toContain(SUMMARY_PRECEDENCE_INSTRUCTION);
+    // All five turns verbatim — the turn-1 fact is present without any block.
+    expect(JSON.stringify(pack.conversation)).toContain(EARLY_FACT);
+  });
+
   it('byte-identity: a ≤window assembly equals an assembly with no summary machinery threaded at all', async () => {
     const store = new InMemoryStore();
     const history = historyNewestFirst(4);

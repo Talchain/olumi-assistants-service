@@ -133,6 +133,25 @@ describe('loadConversationSummaryForInjection — below-window activation gate',
     expect(lagEmits()).toHaveLength(0);
   });
 
+  it('EXACTLY at the window (turns == windowDepth) → gate holds: no section, store untouched', async () => {
+    // Boundary pin (review gap on #551): the gate is `<=`, not `<`. A
+    // stored summary EXISTS and its watermark is the newest window turn, so
+    // a `<`-mutated gate would read the store and inject a fresh section —
+    // every assertion below dies under that mutation.
+    const store = storeReturning(summaryFixture());
+    const outcome = await loadConversationSummaryForInjection({
+      scenarioId: 'scn-1',
+      windowTurnsNewestFirst: [T2, T1],
+      windowDepth: 2,
+      summaryStore: store,
+    });
+    expect(outcome.section).toBeNull();
+    expect(outcome.lagTurns).toBeNull();
+    expect(outcome.summarisedTurns).toBeNull();
+    expect(store.loadSummary).not.toHaveBeenCalled();
+    expect(lagEmits()).toHaveLength(0);
+  });
+
   it('empty window (fresh conversation) → identical: nothing to summarise, store untouched', async () => {
     const store = explodingStore();
     const outcome = await loadConversationSummaryForInjection({
