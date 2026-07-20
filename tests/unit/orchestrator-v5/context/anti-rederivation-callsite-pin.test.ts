@@ -121,7 +121,15 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // post-edit hash the client could never observe). Deliberate, reviewed;
     // still ad-hoc debt — migrate with the frame-consumer audit, do not add
     // more.
-    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 5,
+    // 2026-07-20 part-accounting conservation law: +1 — the defect-B
+    // substitution fail-closed branch re-derives freshness against
+    // `gmFrameBase` (the PRE-edit persisted base). Identical reason and
+    // identical shape to the GM-blocked and swap-withheld branches above:
+    // when the law blocks a named-target substitution, NOTHING persists, so
+    // the wire must not carry a post-edit hash for a graph that never
+    // existed. Deliberate, reviewed; still ad-hoc debt — migrate with the
+    // frame-consumer audit, do not add more.
+    'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 6,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)

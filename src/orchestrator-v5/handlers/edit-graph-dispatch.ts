@@ -104,6 +104,14 @@ import {
   evaluateEditGraphMutations,
   type EditGmDecision,
 } from './edit-graph-referee-gate.js';
+import {
+  accountEditParts,
+  buildPartAccountingDisclosure,
+  buildSubstitutionClarify,
+  decomposeEditMessage,
+  type EditPartAccounting,
+  type PatchOperationLike,
+} from '../routing/edit-part-decomposition.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import {
@@ -1975,6 +1983,35 @@ export async function dispatchEditGraph(
     });
   }
 
+  // ── Part-accounting conservation law (rehearsal defects A + B, 2026-07-20) ──
+  // REHEARSAL-DEFECT-TRIAGE-2026-07-20.md: decompose the user's message into
+  // countable sub-requests at intake and attribute the returned operations
+  // against them. Every part must terminate in exactly one of {applied, held,
+  // refused-with-reason, clarify} and the reply must account for ALL of them:
+  //  1. SUBSTITUTION FAILS CLOSED (defect B): a user-NAMED target absent from
+  //     the graph, with an edge from this batch's new node to a DIFFERENT
+  //     existing node, blocks the WHOLE batch to clarify — nothing persists
+  //     and no held pending is minted (a confirm must never commit the
+  //     stand-in). Deliberately FLAG-FREE: enforced in every GM mode — the
+  //     law is a property of the edit lane, not of the referee rollout.
+  //  2. UNDER-ACCOUNT DISCLOSES (defect A): parts no operation covers are
+  //     disclosed by name in the final reply (appended just before the
+  //     finaliser egress guard below, so applied, held and no-op branches
+  //     are all covered by ONE seam).
+  // Single-part messages never engage (>= 2 accountable parts required) —
+  // the false-compound trap. Detection misses degrade to today's behaviour.
+  const partDecomposition = decomposeEditMessage(payload.message);
+  const partAccounting: EditPartAccounting | null =
+    !editResult.wasRejected && partDecomposition.accountableParts.length >= 2
+      ? accountEditParts({
+          parts: partDecomposition.accountableParts,
+          operations: (editResult.operations ?? []) as readonly PatchOperationLike[],
+          graphNodes: parsedGraph.nodes,
+        })
+      : null;
+  const paSubstitutionBlocked =
+    partAccounting !== null && partAccounting.substitutions.length > 0;
+
   // ── Graph Management referee gate (lane 8, CEE_GRAPH_MANAGEMENT_MODE) ──
   // off: zero referee calls, byte-identical path (pinned by
   // edit-graph-dispatch-graph-management-modes.test.ts). shadow: the referee
@@ -1983,10 +2020,18 @@ export async function dispatchEditGraph(
   // route below — the mutation is NOT persisted, no ack prose, no edit fact,
   // no analysis_ready stamp (structural honesty). GM never writes graph
   // state itself; the single durable writer remains commitDirectAnswer.
+  // Part-accounting precedence: a substitution-blocked batch never reaches
+  // the referee — a held pending carrying the substituted edge is exactly
+  // what the fail-closed rule exists to prevent.
   const gmMode = config.features.graphManagementMode;
   let gmDecision: EditGmDecision | null = null;
   let gmCurrentHash: string | null = null;
-  if (gmMode !== 'off' && successfulAppliedMutation && (editResult.operations?.length ?? 0) > 0) {
+  if (
+    gmMode !== 'off' &&
+    successfulAppliedMutation &&
+    (editResult.operations?.length ?? 0) > 0 &&
+    !paSubstitutionBlocked
+  ) {
     try {
       gmCurrentHash = computeAnalysisAffectingGraphHash(
         gmFrameBase as GraphStateIngress | null | undefined,
@@ -2030,8 +2075,56 @@ export async function dispatchEditGraph(
   const gmBlockedApply = gmDecision !== null && gmDecision.blockApply;
   // Structural honesty: every downstream success effect (persist, edit fact,
   // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
-  // live-blocked verdict can never surface an applied-mutation signal.
-  const effectiveAppliedMutation = successfulAppliedMutation && !gmBlockedApply;
+  // live-blocked verdict — or a part-accounting substitution block — can
+  // never surface an applied-mutation signal.
+  const effectiveAppliedMutation =
+    successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked;
+  if (paSubstitutionBlocked && partAccounting !== null) {
+    // Defect-B fail-closed branch: replace the V4 narration with the
+    // deterministic clarify that enumerates EVERY part and names the
+    // missing target(s). No chips: the ask is a free-text question ("which
+    // part of the model did you mean") a chip cannot answer.
+    response = {
+      ...response,
+      assistant_text: buildSubstitutionClarify(
+        partDecomposition.accountableParts,
+        partAccounting,
+      ),
+      suggested_actions: [],
+    };
+    // The graph did NOT change this turn — re-derive the wire freshness
+    // against the UNCHANGED frame base (same rule as the GM blocked branch;
+    // a derivation_failed verdict is kept as honest degradation).
+    if (freshness.reason !== 'derivation_failed') {
+      let unchangedHash: string | null = null;
+      try {
+        unchangedHash = computeAnalysisAffectingGraphHash(
+          gmFrameBase as GraphStateIngress | null | undefined,
+        );
+      } catch {
+        unchangedHash = null;
+      }
+      freshness = deriveAnalysisFreshness(
+        priorFactsForRecovery,
+        unchangedHash,
+        config.cee.optionIdentityFreshnessGuard
+          ? extractGraphOptionIds(gmFrameBase)
+          : undefined,
+      );
+    }
+    ev.branch = 'part_accounting_substitution_blocked';
+    ev.outcome = 'clarify';
+    log.info(
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        substitutions: partAccounting.substitutions.length,
+        missing_targets: partAccounting.missingTargets.length,
+        operations_count: editResult.operations?.length ?? 0,
+      },
+      'V5 edit_graph — part-accounting law blocked a named-target substitution (mutation NOT persisted)',
+    );
+  }
   if (gmBlockedApply && gmDecision !== null) {
     // Replace the V4 success narration wholesale: verdict template text
     // (provisional_doctrine_v0), verdict-appropriate chips, and a redacted
@@ -2382,6 +2475,36 @@ export async function dispatchEditGraph(
     }
   }
 
+  // Part-accounting disclosure (defect A) — appended as the LAST content
+  // step before the egress guard, so ONE seam covers every emit branch
+  // (applied narration, GM held ask, no-op recovery copy). The builder is
+  // null unless at least one part WAS covered (a full no-op turn keeps its
+  // own clarify copy) and something is genuinely unaccounted.
+  let paDisclosureAppended = false;
+  if (partAccounting !== null && !paSubstitutionBlocked && !editResult.wasRejected) {
+    const paDisclosure = buildPartAccountingDisclosure(partAccounting);
+    if (paDisclosure !== null) {
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, paDisclosure),
+      };
+      paDisclosureAppended = true;
+    }
+  }
+  if (partAccounting !== null) {
+    emit(TelemetryEvents.V5EditGraphPartAccounting, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'edit_graph',
+      parts_detected: partDecomposition.accountableParts.length,
+      parts_covered: partAccounting.fates.filter((f) => f.covered).length,
+      parts_uncovered: partAccounting.uncoveredParts.length,
+      missing_target_count: partAccounting.missingTargets.length,
+      substitution_blocked: paSubstitutionBlocked,
+      disclosure_appended: paDisclosureAppended,
+    });
+  }
+
   // V5 stale-aware explain recovery — finaliser-level egress guard.
   // Runs as the LAST step before the response is committed and
   // returned, so it backstops EVERY edit_graph emit path: V4
@@ -2478,8 +2601,12 @@ export async function dispatchEditGraph(
     try {
       // Lane 8: a GM-live-blocked mutation persists NO graph, so it must
       // also emit NO edit receipt fact (the builders derive "applied" from
-      // editResult alone and cannot see the block).
-      editGraphFact = gmBlockedApply ? null : buildEditGraphHandlerFact(factBuilderInput);
+      // editResult alone and cannot see the block). Same rule for a
+      // part-accounting substitution block (defect B fail-closed).
+      editGraphFact =
+        gmBlockedApply || paSubstitutionBlocked
+          ? null
+          : buildEditGraphHandlerFact(factBuilderInput);
     } catch (err) {
       richBuilderThrew = true;
       richBuilderError = err instanceof Error ? err : new Error(String(err));
