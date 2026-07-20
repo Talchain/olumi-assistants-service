@@ -82,6 +82,20 @@ export const CLARIFY_V2_MAX_ROUNDS = 2;
  *
  * (If DS-1 ratifies 3 permanently, moving the hatch back to last for
  * readability is a safe follow-up — but it re-couples us to their cap.)
+ *
+ * WHY HERE AND NOT IN THE EGRESS FINALIZER: `compose/chip-finalizer.ts`
+ * already runs on every V5 response and carries its own `MAX_CHIPS = 3`,
+ * but that budget is scoped to the SUGGESTION family
+ * (`chip_action_*` / `chip_prompt_*` / `prop_`). Clarification and
+ * candidate-pick chips — ours, `cv2_*` — are deliberately EXEMPT there:
+ * "Candidate / clarification chips are NOT counted and are never trimmed
+ * (their own composers already size them)." That delegation is correct;
+ * this composer simply was not holding up its end. Sizing here is the
+ * composer keeping the contract the finalizer already assumes, not a
+ * second capping mechanism competing with it.
+ *
+ * NOTE the two 3s are independent constants for independent budgets. If
+ * one moves, check the other deliberately — do not assume they track.
  */
 export const CLARIFY_V2_MAX_CHIPS = 3;
 
