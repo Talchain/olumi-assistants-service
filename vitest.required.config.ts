@@ -1,5 +1,8 @@
 import { defineConfig } from "vitest/config";
-import { STANDALONE_TOOL_EXCLUSIONS } from "./vitest.shared.js";
+import {
+  REQUIRED_GATE_INTEGRATION_EXCLUSIONS,
+  STANDALONE_TOOL_EXCLUSIONS,
+} from "./vitest.shared.js";
 
 /**
  * Vitest config for the REQUIRED CI gate (`Lint, TypeCheck, Unit Tests` →
@@ -12,9 +15,16 @@ import { STANDALONE_TOOL_EXCLUSIONS } from "./vitest.shared.js";
  * jobs. Group 2 is a different case — a package-boundary exclusion, not a
  * product test (see its note below).
  *
- *   1. `tests/integration/**` — service-like (exercise LLM/Supabase/Redis paths;
- *      they showed `LLMTimeoutError` / `422` in CI run 26750031968). They run in
- *      `Integration Tests (advisory)` and `Full Test Suite (advisory)`.
+ *   1. REQUIRED_GATE_INTEGRATION_EXCLUSIONS (vitest.shared.ts) — the FINITE
+ *      list of external-dependent integration files (real Supabase/Postgres,
+ *      live LLM, deployed staging HTTP). Exact paths only, self-checking in
+ *      both directions via tests/meta/required-gate-integration-exclusions
+ *      .test.ts. The other ~155 tests/integration files are in-process
+ *      `app.inject()` tests and RUN IN THIS GATE (they previously did not:
+ *      the old `tests/integration/**` category glob let PR #539 report
+ *      "0 failed" while breaking two of them). The excluded files still run
+ *      in `Integration Tests (advisory)` / `Full Test Suite (advisory)`
+ *      when their env is present.
  *
  *   2. STANDALONE_TOOL_EXCLUSIONS (vitest.shared.ts) — `tools/graph-evaluator/**`, a
  *      self-contained tool package with its own deps and runner. Excluded from
@@ -66,8 +76,11 @@ const BASE_EXCLUDE = [
   "tests/staging/**",
 ];
 
-// Service-like category — excluded from the required gate, visible in advisory.
-const REQUIRED_GATE_CATEGORY_EXCLUSIONS = ["tests/integration/**"];
+// External-dependent integration files — a FINITE exact-path list
+// (REQUIRED_GATE_INTEGRATION_EXCLUSIONS, vitest.shared.ts), NOT a category
+// glob. Enforced equal to the mechanically-derived external-dependent set by
+// tests/meta/required-gate-integration-exclusions.test.ts, which runs in this
+// gate: stale entry → RED, unlisted new external-dependent test → RED.
 
 // Standalone tool package (`tools/graph-evaluator`, a package boundary):
 // STANDALONE_TOOL_EXCLUSIONS is imported from vitest.shared.ts — single-
@@ -127,7 +140,7 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     exclude: [
       ...BASE_EXCLUDE,
-      ...REQUIRED_GATE_CATEGORY_EXCLUSIONS,
+      ...REQUIRED_GATE_INTEGRATION_EXCLUSIONS,
       ...STANDALONE_TOOL_EXCLUSIONS,
       ...REQUIRED_GATE_RED_EXCLUSIONS,
     ],
