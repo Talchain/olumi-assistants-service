@@ -7,10 +7,12 @@
  *
  * RPCs: upsert_rolling_summary (MONOTONIC conditional write — the real R4
  * cross-instance guard) + get_rolling_summary (read). Migration:
- * supabase/migrations/20260712120000_v5_rolling_summary.sql — DRAFT, Paul-gated.
- * Until executed the RPCs do not exist on staging: this adapter surfaces the
- * PostgREST "function not found" error as a RollingSummaryStoreError, which the
- * fire-and-forget maintainer logs and swallows (never a turn failure).
+ * supabase/migrations/20260712120000_v5_rolling_summary.sql — EXECUTED on
+ * staging 2026-07-14 (Paul-authorised; revert anchor at
+ * acceptance-evidence/s4-migration-2026-07-14/REVERT.sql). In an environment
+ * without the RPCs this adapter surfaces the PostgREST "function not found"
+ * error as a RollingSummaryStoreError, which the fire-and-forget maintainer
+ * logs and swallows (never a turn failure).
  *
  * The summary row is a MUTABLE SINGLETON per scenario. Its safety comes NOT
  * from an idempotency key (as decision_records has) but from the RPC's WHERE

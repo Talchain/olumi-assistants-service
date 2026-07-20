@@ -3,10 +3,21 @@
 -- (ROADMAP 1.73; design pack CONTEXT-ARCHITECTURE-V2-2026-07-13/01 §2, §4,
 --  04 §3, 05 §S4). CEE half.
 --
--- ⚠ DRAFT — NOT YET EXECUTED. Paul-gated (same posture as
---   20260710113000_v5_decision_records.sql at authoring time): the CEE
---   maintainer ships flag-dark behind CEE_ROLLING_SUMMARY (default 'off'),
---   AND the RPCs below do not exist on staging until this file is executed.
+-- ✅ EXECUTED ON STAGING 2026-07-14 (Paul-authorised, DB-only batch; header
+--   corrected 2026-07-20 during the O-2 activation, following the
+--   20260710113000_v5_decision_records.sql precedent). Applied transactionally
+--   with LOCK + verify-before-commit to project etmmuzwxtcjipwphdola:
+--   scenarios.rolling_summary jsonb NULL + get_rolling_summary(uuid) +
+--   upsert_rolling_summary(uuid,jsonb,timestamptz) (SECURITY DEFINER,
+--   EXECUTE→service_role only); 696 scenarios rows unchanged. Revert anchor
+--   (written, NOT executed): acceptance-evidence/s4-migration-2026-07-14/
+--   REVERT.sql. The paragraph below records the pre-execution posture.
+--
+-- ⚠ (Historical) DRAFT posture at authoring time — Paul-gated (same posture
+--   as 20260710113000_v5_decision_records.sql at authoring time): the CEE
+--   maintainer shipped flag-dark behind CEE_ROLLING_SUMMARY (default 'off';
+--   flag DELETED 2026-07-20 by the O-2 activation),
+--   AND the RPCs below did not exist on staging until this file was executed.
 --   Until then the store adapter surfaces the PostgREST "function not found"
 --   error as a RollingSummaryStoreError, which the fire-and-forget maintainer
 --   logs and swallows — never a turn failure, never silent corruption.
@@ -39,7 +50,7 @@
 --
 -- Target: Staging Supabase
 -- Date authored: 2026-07-12
--- Date executed: (pending — Paul-gated batch)
+-- Date executed: 2026-07-14 (staging; Paul-authorised — see header)
 --
 -- What this creates (all additive; scenarios is the only table touched, and
 -- only by ADDING one nullable column — no existing column/row is modified):

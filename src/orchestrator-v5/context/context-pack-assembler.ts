@@ -320,8 +320,18 @@ export interface ContextPackConversation {
    * vs how many the read returned — discloses that history exists beyond the
    * window. Emitted unconditionally by projectConversation; optional on the
    * type so partial/legacy fixtures still assign.
+   *
+   * `summarised` (#536 marker extension, O-2 activation): how many of the
+   * not-shown turns arrive via the `conversation_summary` block instead of
+   * vanishing. Present IFF a summary section was injected this turn — 0 is
+   * an honest value there (a floor / withheld block absorbs nothing);
+   * absent means no summary layer entered this prompt at all.
    */
-  readonly window?: { readonly shown: number; readonly available: number };
+  readonly window?: {
+    readonly shown: number;
+    readonly available: number;
+    readonly summarised?: number;
+  };
   /**
    * Boolean flag indicating that the next user turn is expected to confirm
    * or dismiss a pending change. Diverges from spec §10:444, which defines
@@ -398,9 +408,10 @@ export interface ContextPack {
    * Context v2 S4-INJECT (ROADMAP 1.73; design pack 01 §2, 04 §3): the
    * rolling conversation summary, projected by the injector
    * (`rolling-summary/inject.ts`) from `scenarios.rolling_summary`.
-   * Present ONLY when CEE_ROLLING_SUMMARY = 'inject' AND a stored summary
-   * exists for the scenario; ABSENT otherwise — key absence is the
-   * off/maintain byte-identity guarantee at the prompt seam.
+   * Unconditional since the O-2 activation (CEE_ROLLING_SUMMARY deleted):
+   * present ONLY when the conversation extends beyond the verbatim window
+   * AND a stored summary exists for the scenario; ABSENT otherwise — key
+   * absence is the byte-identity guarantee at the prompt seam.
    *
    * Adjacent to `conversation` here (01 §2); in the SERIALISED routing
    * prompt `buildUserMessage` re-appends it after the ground-truth
@@ -599,13 +610,22 @@ export interface AssembleContextPackInput {
   /**
    * Context v2 S4-INJECT: the pre-projected rolling-summary section, built
    * by `loadConversationSummaryForInjection` (rolling-summary/inject.ts) in
-   * the turn-executor — the loader owns the flag gate, the store read, the
-   * lag computation, and the staleness disclosure; the assembler stays
+   * the turn-executor — the loader owns the activation condition (beyond-
+   * window only, since the O-2 flag deletion), the store read, the lag
+   * computation, and the staleness disclosure; the assembler stays
    * synchronous and only places the section. Omitted (undefined) when the
-   * flag is below 'inject' or no stored summary exists → the field is
-   * absent → off/maintain byte-identity.
+   * conversation fits the verbatim window or no stored summary exists →
+   * the field is absent → byte-identity with pre-S4 packs.
    */
   readonly conversationSummary?: ContextPackConversationSummary;
+  /**
+   * #536 marker extension (O-2): the loader's `summarisedTurns` — how many
+   * not-shown window turns the injected block absorbs. Stamped onto
+   * `conversation.window.summarised` ONLY when `conversationSummary` is
+   * also supplied (a coverage number without its block would be a marker
+   * that discloses nothing). Null/undefined → marker unchanged.
+   */
+  readonly summarisedTurns?: number | null;
 }
 
 /**
@@ -782,6 +802,26 @@ export function assembleContextPackWithSummary(
   // prompt surfaces "what this decision is about" before the graph/analysis
   // detail.
   const projectedBrief = projectBrief(input.brief);
+  // #536 marker extension (O-2 activation): when a summary section is
+  // injected, the "N of M turns included" window marker additionally says
+  // how many of the not-shown turns arrive as the summary (`summarised`).
+  // The count comes from the loader (the only component that knows whether
+  // the block is a real four-slot summary, a floor, or a withheld refusal
+  // — the latter two stamp an honest 0). No section ⇒ marker unchanged ⇒
+  // byte-identity with pre-S4 packs.
+  const projectedConversation = projectConversation(
+    input.priorTurns,
+    input.pendingConfirmation ?? false,
+  );
+  const conversation =
+    input.conversationSummary !== undefined &&
+    input.summarisedTurns != null &&
+    projectedConversation.window !== undefined
+      ? {
+          ...projectedConversation,
+          window: { ...projectedConversation.window, summarised: input.summarisedTurns },
+        }
+      : projectedConversation;
   const base: ContextPack = {
     version: CONTEXT_PACK_VERSION,
     scenario_id: input.payload.scenario_id,
@@ -799,7 +839,7 @@ export function assembleContextPackWithSummary(
     // are dropped; node numeric fields stripped. Raw `graph` above is
     // unchanged for handlers, freshness hashing, telemetry.
     display_graph: formatGraphForContext(projectedGraph),
-    conversation: projectConversation(input.priorTurns, input.pendingConfirmation ?? false),
+    conversation,
     // Context v2 S4-INJECT: placed adjacent to `conversation` (01 §2).
     // Conditional spread — when the caller supplies nothing the key is
     // ABSENT (never null/undefined-valued), preserving off/maintain

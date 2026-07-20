@@ -2,8 +2,9 @@
  * Context Architecture v2 — S4 rolling summary: the fire-and-forget
  * commit-seam maintainer.
  *
- * Invoked from commit.ts AFTER the durable append, when CEE_ROLLING_SUMMARY is
- * 'maintain' or 'inject'. Non-blocking contract (mirrors the decision-record
+ * Invoked from commit.ts AFTER the durable append, on EVERY commit
+ * (unconditional since the O-2 activation deleted CEE_ROLLING_SUMMARY).
+ * Non-blocking contract (mirrors the decision-record
  * hook verbatim): every failure — store construction, RPC error, model
  * timeout, telemetry fault — is caught and logged; NOTHING propagates to the
  * turn result. The turn is ALREADY committed; the summariser runs off the path

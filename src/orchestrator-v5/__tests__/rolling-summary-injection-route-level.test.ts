@@ -1,15 +1,19 @@
 /**
  * Context Architecture v2 — S4-INJECT route-level pins (ROADMAP 1.73;
- * design pack 01 §2/§4, 05 §S4 inject row): the flag ladder at the REAL
- * seam — TurnExecutor → assembler → routing adapter.
+ * design pack 01 §2/§4, 05 §S4 inject row) at the REAL seam —
+ * TurnExecutor → assembler → routing adapter. UNCONDITIONAL since the O-2
+ * activation (CEE_ROLLING_SUMMARY DELETED; the activation condition is now
+ * the loader's beyond-window gate):
  *
- *  - CEE_ROLLING_SUMMARY=inject + stored summary → the routing user
- *    message carries the `conversation_summary` block + the precedence
- *    instruction, and `v5.context_budget` carries populated
- *    `summary_lag_turns` + a `section_chars.conversation_summary` entry.
- *  - CEE_ROLLING_SUMMARY=maintain → NO block, NO instruction (maintain
+ *  - beyond-window history + stored summary → the routing user message
+ *    carries the `conversation_summary` block + the precedence instruction
+ *    + the extended window marker (`"summarised"`), and `v5.context_budget`
+ *    carries populated `summary_lag_turns` + a
+ *    `section_chars.conversation_summary` entry.
+ *  - history that fits the window → NO block, NO instruction (below-window
  *    byte-identity at the prompt seam), `summary_lag_turns` stays null.
- *  - inject + summary-store failure → turn proceeds, no block, no error.
+ *  - beyond window + summary-store failure → turn proceeds, no block,
+ *    no error.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,28 +25,39 @@ import type {
   ChatWithToolsResult,
 } from '../../adapters/llm/types.js';
 
-import { _resetConfigCache } from '../../config/index.js';
 import { setTestSink } from '../../utils/telemetry.js';
 import type { RollingSummary } from '../rolling-summary/summary-types.js';
 
 const SCENARIO_ID = randomUUID();
 
-const NEWEST_TURN = {
-  turn_id: 'bbbbbbbb-2222-4222-8222-222222222222',
-  turn_class: 'coach',
-  handler_id: null,
-  created_at: '2026-07-10T10:01:00.000Z',
-  user_message: 'Second question',
-  assistant_message: 'Second answer',
-};
-const OLDER_TURN = {
-  turn_id: 'aaaaaaaa-1111-4111-8111-111111111111',
-  turn_class: 'coach',
-  handler_id: null,
-  created_at: '2026-07-10T10:00:00.000Z',
-  user_message: 'First question',
-  assistant_message: 'First answer',
-};
+interface MockTurn {
+  turn_id: string;
+  turn_class: string;
+  handler_id: null;
+  created_at: string;
+  user_message: string;
+  assistant_message: string;
+}
+
+/** turns 1..n (oldest..newest), returned NEWEST-FIRST as readRecent does. */
+function turnsNewestFirst(n: number): MockTurn[] {
+  const out: MockTurn[] = [];
+  for (let i = 1; i <= n; i++) {
+    out.push({
+      turn_id: `tttttttt-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      turn_class: 'coach',
+      handler_id: null,
+      created_at: new Date(Date.UTC(2026, 6, 10, 10, i, 0)).toISOString(),
+      user_message: `Question ${i}`,
+      assistant_message: `Answer ${i}`,
+    });
+  }
+  return out.reverse();
+}
+
+const SIX_TURNS = turnsNewestFirst(6);
+const NEWEST_TURN = SIX_TURNS[0]!;
+const OLDEST_TURN = SIX_TURNS[SIX_TURNS.length - 1]!;
 
 const STORED_SUMMARY: RollingSummary = {
   text: [
@@ -55,7 +70,7 @@ const STORED_SUMMARY: RollingSummary = {
     { slot: 'FRAME', entries: [{ text: 'Choosing a supplier.', source_turn_ids: [] }] },
     {
       slot: 'CONSTRAINTS',
-      entries: [{ text: 'Keep Maria on the team.', source_turn_ids: [OLDER_TURN.turn_id] }],
+      entries: [{ text: 'Keep Maria on the team.', source_turn_ids: [OLDEST_TURN.turn_id] }],
     },
     { slot: 'RESOLVED', entries: [] },
     { slot: 'OPEN', entries: [{ text: 'Which region first?', source_turn_ids: [] }] },
@@ -67,15 +82,16 @@ const STORED_SUMMARY: RollingSummary = {
   schema_version: 1,
 };
 
-// Mutable per-test store behaviour (the mock below closes over these).
+// Mutable per-test behaviour (the mocks below close over these).
 let loadSummaryImpl: () => Promise<RollingSummary | null> = async () => STORED_SUMMARY;
+let readRecentTurns: MockTurn[] = SIX_TURNS;
 
 vi.mock('../rolling-summary/index.js', () => ({
   getRollingSummaryStore: () => ({
     loadSummary: () => loadSummaryImpl(),
     upsertSummary: async () => ({ applied: true, regressed: false, current_watermark: null }),
   }),
-  // The commit-seam maintainer (flag ≥ maintain) must never hit a real model.
+  // The commit-seam maintainer (now unconditional) must never hit a real model.
   getRollingSummaryModel: () => ({
     summarise: async () => ({ text: 'DECISION FRAME: noop.' }),
   }),
@@ -85,7 +101,7 @@ vi.mock('../rolling-summary/index.js', () => ({
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
-    readRecent: async () => [NEWEST_TURN, OLDER_TURN],
+    readRecent: async () => readRecentTurns,
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     invalidateScoped: async () => ({ caches_invalidated: 0, scoped_to: 'session' }),
@@ -155,11 +171,7 @@ function contextBudgetEvents(): Array<Record<string, unknown>> {
   return events.filter((e) => e.event === 'v5.context_budget').map((e) => e.payload);
 }
 
-async function runTurn(flag: 'maintain' | 'inject'): Promise<{
-  calls: ChatWithToolsArgs[];
-}> {
-  vi.stubEnv('CEE_ROLLING_SUMMARY', flag);
-  _resetConfigCache();
+async function runTurn(): Promise<{ calls: ChatWithToolsArgs[] }> {
   const { adapter, calls } = textOnlyAdapter();
   await runTurnExecutor(payload('What should I focus on?'), `req-${randomUUID()}`, {
     routingAdapter: adapter,
@@ -167,28 +179,29 @@ async function runTurn(flag: 'maintain' | 'inject'): Promise<{
   return { calls };
 }
 
-describe('S4-inject — route-level flag ladder', () => {
+describe('S4-inject — route-level (unconditional, beyond-window activation)', () => {
   beforeEach(() => {
     events = [];
     setTestSink((event, payload) => {
       events.push({ event, payload: payload as Record<string, unknown> });
     });
     loadSummaryImpl = async () => STORED_SUMMARY;
+    readRecentTurns = SIX_TURNS;
   });
 
   afterEach(() => {
     setTestSink(null);
-    vi.unstubAllEnvs();
-    _resetConfigCache();
     vi.clearAllMocks();
   });
 
-  it('inject + stored summary → block + instruction in the routing prompt; lag + section entry on v5.context_budget', async () => {
-    const { calls } = await runTurn('inject');
+  it('beyond-window history + stored summary → block + instruction + summarised marker; lag + section entry on v5.context_budget', async () => {
+    const { calls } = await runTurn();
     const prompt = routingUserMessage(calls);
     expect(prompt).toContain('"conversation_summary":');
     expect(prompt).toContain('Keep Maria on the team.');
     expect(prompt).toContain('the structured state is correct');
+    // #536 marker extension: 6 available, 5 shown, 1 absorbed by the block.
+    expect(prompt).toContain('"summarised": 1');
 
     const budgets = contextBudgetEvents();
     expect(budgets.length).toBeGreaterThan(0);
@@ -200,11 +213,13 @@ describe('S4-inject — route-level flag ladder', () => {
     expect(sectionChars.conversation_summary).toBeGreaterThan(0);
   });
 
-  it('maintain → NO block, NO instruction; summary_lag_turns stays null', async () => {
-    const { calls } = await runTurn('maintain');
+  it('history fits the window → NO block, NO instruction, NO summarised marker; summary_lag_turns stays null', async () => {
+    readRecentTurns = turnsNewestFirst(2);
+    const { calls } = await runTurn();
     const prompt = routingUserMessage(calls);
     expect(prompt).not.toContain('"conversation_summary":');
     expect(prompt).not.toContain('the structured state is correct');
+    expect(prompt).not.toContain('"summarised"');
 
     const routing = contextBudgetEvents().find((b) => b.call_site === 'routing')!;
     expect(routing).toBeDefined();
@@ -213,11 +228,11 @@ describe('S4-inject — route-level flag ladder', () => {
     expect(sectionChars.conversation_summary).toBe(0);
   });
 
-  it('inject + summary-store failure → turn proceeds with no block, no error', async () => {
+  it('beyond window + summary-store failure → turn proceeds with no block, no error', async () => {
     loadSummaryImpl = async () => {
-      throw new Error('RPC not found (migration not executed)');
+      throw new Error('RPC unavailable');
     };
-    const { calls } = await runTurn('inject');
+    const { calls } = await runTurn();
     const prompt = routingUserMessage(calls);
     expect(prompt).not.toContain('"conversation_summary":');
 

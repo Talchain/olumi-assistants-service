@@ -734,34 +734,16 @@ const ConfigSchema = z.object({
         const lower = (val ?? "").toLowerCase().trim();
         return lower === "shadow" || lower === "enforce" ? lower : "off";
       }),
-    // CEE_ROLLING_SUMMARY — Context Architecture v2 S4 (ROADMAP 1.73, design
-    // pack 01 §2, 05 §S4): the two-stage rolling-conversation-summary flag.
-    //   'off'      (default): the commit-seam maintainer is NOT invoked —
-    //              byte-identical to pre-S4 (no store construction, no model
-    //              call, no env reads; pinned by commit-rolling-summary-hook.test).
-    //   'maintain' (shadow): the summariser WRITES + STORES summaries off the
-    //              turn path (fire-and-forget, monotonic write), but NOTHING
-    //              consumes them — no prompt sees a summary. Lets a week of real
-    //              summaries be inspected before any prompt injects one.
-    //   'inject'  : the summary additionally enters the ROUTING prompt — the
-    //              turn-executor loads scenarios.rolling_summary at assembly
-    //              (rolling-summary/inject.ts) and the pack carries a
-    //              `conversation_summary` section + the code-owned
-    //              facts-beat-summary instruction (route-with-tool-use.ts),
-    //              staleness-disclosed per 01 §4. FLIP GATES: D-G2/D-G4
-    //              ratification + the harness 1.70 continuity scenario
-    //              (05 §S4). The edit-serialiser injection is a follow-up;
-    //              'inject' currently changes the routing prompt only.
-    // Unrecognised values fall back to 'off'. Ships dark: not in render*.yaml,
-    // AND the backing migration (20260712120000_v5_rolling_summary.sql) is a
-    // DRAFT — the RPCs do not exist on staging until Paul executes it, so a
-    // stray flip degrades to swallowed store errors, never a turn failure.
-    rollingSummary: z
-      .union([z.string(), z.undefined()])
-      .transform((val): "off" | "maintain" | "inject" => {
-        const lower = (val ?? "").toLowerCase().trim();
-        return lower === "maintain" || lower === "inject" ? lower : "off";
-      }),
+    // Context Architecture v2 S4 rolling conversation summary (ROADMAP 1.73):
+    // UNCONDITIONAL since O-2 activation (2026-07-20). The CEE_ROLLING_SUMMARY
+    // two-stage flag was DELETED per the no-dark-launches ruling — the
+    // commit-seam maintainer always runs (fire-and-forget, monotonic write)
+    // and the injector always consumes when the conversation extends beyond
+    // the verbatim window (rolling-summary/inject.ts). Rollback = code
+    // revert. The backing migration (20260712120000_v5_rolling_summary.sql)
+    // was EXECUTED on staging 2026-07-14 (Paul-authorised); in an environment
+    // without the RPCs every store call degrades to a swallowed error, never
+    // a turn failure.
   }),
 
   // Prompt Cache Configuration
@@ -1483,7 +1465,6 @@ function parseConfig(): Config {
       answerShapeEnforced: env.CEE_ANSWER_SHAPE_ENFORCED,
       contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
       enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
-      rollingSummary: env.CEE_ROLLING_SUMMARY,
     },
     promptCache: {
       enabled: env.PROMPT_CACHE_ENABLED,

@@ -1524,19 +1524,20 @@ export async function runTurnExecutor(
         ? summariseCoachingStatePack(coachingPromptCanonical)
         : undefined;
       // Context v2 S4-INJECT (ROADMAP 1.73; 01 §2/§4, 05 §S4 inject row):
-      // read the stored rolling summary for injection. The loader owns the
-      // whole ladder — 'off'/'maintain' return immediately (no store
-      // construction, no RPC; byte-identity pinned by test), 'inject'
-      // performs ONE read and degrades to "no block" on any failure (never
-      // a turn failure). Lag/staleness (01 §4) is computed against the same
-      // prior turns the pack's verbatim window projects from — the FULL hot
-      // read (≤ SESSION_READ_WINDOW_TURNS, default 20), NOT the 5-turn pack
-      // slice; that surplus is what lets the loader's memory-hole guard
-      // (Codex r2 blocker 1) verify watermark coverage and REFUSE the block
-      // (disclosed-absence note) when unabsorbed turns fall outside the
-      // verbatim slice.
+      // read the stored rolling summary for injection — UNCONDITIONAL since
+      // the O-2 activation (CEE_ROLLING_SUMMARY deleted per the
+      // no-dark-launches ruling). The loader owns the whole activation
+      // condition: below-window conversations return immediately (no store
+      // construction, no RPC; byte-identity pinned by test); beyond the
+      // window it performs ONE read and degrades to "no block" on any
+      // failure (never a turn failure). Lag/staleness (01 §4) is computed
+      // against the same prior turns the pack's verbatim window projects
+      // from — the FULL hot read (≤ SESSION_READ_WINDOW_TURNS, default 20),
+      // NOT the 5-turn pack slice; that surplus is what lets the loader's
+      // memory-hole guard (Codex r2 blocker 1) verify watermark coverage
+      // and REFUSE the block (disclosed-absence note) when unabsorbed turns
+      // fall outside the verbatim slice.
       const summaryInjection = await loadConversationSummaryForInjection({
-        flag: config.features.rollingSummary,
         scenarioId: context.session_id,
         windowTurnsNewestFirst: context.prior_turns,
         windowDepth: CONTEXT_PACK_RECENT_TURNS_CAP,
@@ -1594,9 +1595,16 @@ export async function runTurnExecutor(
         // pack/frame agreement by construction. LLM-routing-visible via the
         // serialised pack; kill-switch documented at the derivation site.
         pendingConfirmation: pendingConfirmationForTurn,
-        // Context v2 S4-INJECT: undefined below 'inject' / when no stored
-        // summary exists → the pack key is absent (byte-identity).
+        // Context v2 S4-INJECT: undefined when the conversation fits the
+        // verbatim window / no stored summary exists → the pack key is
+        // absent (byte-identity).
         conversationSummary: summaryInjection.section ?? undefined,
+        // #536 marker extension (O-2): how many not-shown window turns the
+        // injected block absorbs — stamped onto `conversation.window` as
+        // `summarised`. Null when no section injected (marker unchanged);
+        // 0 when a section is present but earned no coverage (floor /
+        // memory-hole refusal).
+        summarisedTurns: summaryInjection.summarisedTurns,
       });
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
