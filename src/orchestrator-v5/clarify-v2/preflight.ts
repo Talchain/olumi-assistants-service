@@ -52,6 +52,61 @@ export const CLARIFY_V2_MAX_QUESTIONS_PER_ROUND = 3;
 export const CLARIFY_V2_MAX_ROUNDS = 2;
 
 /**
+ * The chip budget — D-K ("0–3 chips", ratified 15 Jul) as a PRODUCER
+ * contract, not a rendering hint.
+ *
+ * Why this exists (dress rehearsal, 20 Jul): this module used to emit
+ * `[...everyCandidate, proceedChip]` uncapped — 10 chips on a plain thin
+ * brief, up to 16 at the full question budget. The UI renders the first
+ * three. Because the escape hatch was appended LAST, it was ALWAYS the
+ * chip the cap dropped: the one chip the clarify doctrine calls mandatory
+ * ("no question is ever a dead end") was the only one guaranteed never to
+ * reach the user. Emitting more than the consumer renders does not
+ * degrade gracefully — it silently deletes whatever the producer ordered
+ * last, so the ORDER decided the doctrine, which is exactly backwards.
+ *
+ * The producer therefore caps here, and — the load-bearing half — emits
+ * the escape hatch FIRST rather than last.
+ *
+ * Why first and not "in the reserved last slot": the consumer's cap is
+ * not ours and it moves. At DGAI staging `42390d7f` the render is
+ * `slice(0, 3)` (SuggestedChips.tsx), but the comment on the line above
+ * it reads `DS v5 §21.4 "max 2" cap; the DS doc amendment is owned by
+ * the DS-1 lane` — i.e. the design system currently says TWO and the
+ * code says THREE, with an amendment pending in another lane. A
+ * last-slot escape hatch is correct only while the consumer's cap is
+ * exactly the number this file assumed; the day DS-1 lands "2", the
+ * escape hatch silently dies again in precisely the way it just did.
+ * First-position survives ANY cap >= 1, so the guarantee stops being
+ * contingent on a number owned by a different repo.
+ *
+ * (If DS-1 ratifies 3 permanently, moving the hatch back to last for
+ * readability is a safe follow-up — but it re-couples us to their cap.)
+ *
+ * WHY HERE AND NOT IN THE EGRESS FINALIZER: `compose/chip-finalizer.ts`
+ * already runs on every V5 response and carries its own `MAX_CHIPS = 3`,
+ * but that budget is scoped to the SUGGESTION family
+ * (`chip_action_*` / `chip_prompt_*` / `prop_`). Clarification and
+ * candidate-pick chips — ours, `cv2_*` — are deliberately EXEMPT there:
+ * "Candidate / clarification chips are NOT counted and are never trimmed
+ * (their own composers already size them)." That delegation is correct;
+ * this composer simply was not holding up its end. Sizing here is the
+ * composer keeping the contract the finalizer already assumes, not a
+ * second capping mechanism competing with it.
+ *
+ * NOTE the two 3s are independent constants for independent budgets. If
+ * one moves, check the other deliberately — do not assume they track.
+ */
+export const CLARIFY_V2_MAX_CHIPS = 3;
+
+/**
+ * Slots left for candidate answers once the escape hatch has its
+ * reserved one. DERIVED, never hand-maintained — the recorded
+ * mirror-drift defect class.
+ */
+export const CLARIFY_V2_CANDIDATE_CHIP_BUDGET = CLARIFY_V2_MAX_CHIPS - 1;
+
+/**
  * The default-forward chip — the explicit "proceed with defaults" escape
  * every clarify response carries. Its `message` is deliberately a stable
  * constant: the resume path recognises it (alongside free-typed
@@ -540,13 +595,6 @@ export function composeClarifyV2Response(
     "or say “go ahead” and I'll draft with sensible defaults.";
   const assistantText = `${lead} ${numbered} ${tail}`;
 
-  const candidateChips: SuggestedAction[] = questions.flatMap((q) =>
-    q.candidates.map((c) => ({
-      id: c.id,
-      label: c.label,
-      message: c.message,
-    })),
-  );
   const proceedChip: SuggestedAction = {
     id: CLARIFY_V2_PROCEED_CHIP_ID,
     label: 'Use sensible defaults',
@@ -557,10 +605,71 @@ export function composeClarifyV2Response(
     response_version: 2,
     assistant_text: assistantText,
     blocks: [],
-    suggested_actions: [...candidateChips, proceedChip],
+    suggested_actions: assertClarifyChipContract([
+      // FIRST, deliberately — see CLARIFY_V2_MAX_CHIPS. Any consumer cap
+      // of one or more preserves it, so the escape hatch stops depending
+      // on the consumer's cap being exactly the number we assumed.
+      proceedChip,
+      ...selectCandidateChips(questions, CLARIFY_V2_CANDIDATE_CHIP_BUDGET),
+    ]),
     insights: [],
     stage_indicator: 'frame',
   } as OlumiResponse;
+}
+
+/**
+ * Choose which candidate answers get the scarce chip slots.
+ *
+ * ROUND-ROBIN across questions, not first-question-first: under a budget
+ * of two, taking both slots from question 1 leaves questions 2 and 3 with
+ * no tap-able answer at all, while round-robin gives each asked question
+ * a representative. The prose still names every question and its impact,
+ * and typing a free-form answer always works — the chips are a shortcut,
+ * never the whole answer space.
+ *
+ * Deterministic: same questions in, same chips out (the resume path and
+ * the supersession-by-chip_id logic both depend on stable ids).
+ */
+function selectCandidateChips(
+  questions: readonly ClarifyQuestion[],
+  budget: number,
+): SuggestedAction[] {
+  const chips: SuggestedAction[] = [];
+  if (budget <= 0) return chips;
+  const deepest = questions.reduce((n, q) => Math.max(n, q.candidates.length), 0);
+  for (let rank = 0; rank < deepest && chips.length < budget; rank += 1) {
+    for (const q of questions) {
+      if (chips.length >= budget) break;
+      const c = q.candidates[rank];
+      if (c === undefined) continue;
+      chips.push({ id: c.id, label: c.label, message: c.message });
+    }
+  }
+  return chips;
+}
+
+/**
+ * FAIL LOUD on drift. The cap and the escape hatch's survival are the two
+ * properties the UI's 3-chip render silently destroys when a producer
+ * gets them wrong — silently, because an over-long row still looks fine
+ * on the wire. A throw here turns a future regression into a test
+ * failure at the composition site instead of a missing button in a dress
+ * rehearsal three weeks later.
+ */
+function assertClarifyChipContract(chips: readonly SuggestedAction[]): SuggestedAction[] {
+  if (chips.length > CLARIFY_V2_MAX_CHIPS) {
+    throw new Error(
+      `clarify_v2 emitted ${chips.length} chips; the ratified cap (D-K) is ${CLARIFY_V2_MAX_CHIPS}. ` +
+        'Chips beyond the cap are dropped by the UI, silently.',
+    );
+  }
+  if (!chips.some((c) => c.id === CLARIFY_V2_PROCEED_CHIP_ID)) {
+    throw new Error(
+      'clarify_v2 composed a response without the default-forward escape hatch ' +
+        `('${CLARIFY_V2_PROCEED_CHIP_ID}') — every clarify response must offer a one-tap exit.`,
+    );
+  }
+  return [...chips];
 }
 
 /**
@@ -613,7 +722,7 @@ export function composeClarifyV2ReofferResponse(
     response_version: 2,
     assistant_text: assistantText,
     blocks: [],
-    suggested_actions: [proceedChip],
+    suggested_actions: assertClarifyChipContract([proceedChip]),
     insights: [],
     stage_indicator: 'frame',
   } as OlumiResponse;

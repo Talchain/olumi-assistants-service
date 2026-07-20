@@ -15,6 +15,7 @@ import { OlumiResponseSchema } from "@talchain/schemas/boundary";
 
 import {
   CLARIFY_V2_HEDGED_PROCEED_PATTERN,
+  CLARIFY_V2_CANDIDATE_CHIP_BUDGET,
   CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
   CLARIFY_V2_MAX_ROUNDS,
   CLARIFY_V2_PROCEED_CHIP_ID,
@@ -304,10 +305,36 @@ describe("clarify_v2 response composition (wire shape)", () => {
     expect(parsed.success, JSON.stringify((parsed as { error?: unknown }).error)).toBe(true);
   });
 
-  it("NO DEAD ENDS: carries every question's candidates AND the default-forward chip", () => {
+  /**
+   * NARROWED 20 Jul (defect B). This pin used to assert that EVERY
+   * question's every candidate reached the wire — the 16 Jul clarify
+   * doctrine invariant. That is unsatisfiable under D-K ("0–3 chips",
+   * 15 Jul): the fixture round alone produces 10 candidate chips and the
+   * UI renders three, so "every candidate is tap-able" was never true in
+   * the product — it was only true in this test, which asserted the
+   * emitted array and not what the user can reach.
+   *
+   * What survives, and is now pinned harder (see the chip-cap describe
+   * below): the escape hatch is ALWAYS reachable, every ASKED question is
+   * represented among the surviving candidate chips, and no question is a
+   * dead end because the prose names all of them and free-typed answers
+   * always route.
+   */
+  it("NO DEAD ENDS: every asked question is represented, and the default-forward chip is present", () => {
     const chipIds = response.suggested_actions.map((a) => a.id);
-    for (const q of round1.questions) {
-      for (const c of q.candidates) expect(chipIds).toContain(c.id);
+    const representedQuestions = round1.questions.filter((q) =>
+      q.candidates.some((c) => chipIds.includes(c.id)),
+    );
+    // Under the cap, "represented" is per-question, not per-candidate.
+    expect(representedQuestions.length).toBe(
+      Math.min(round1.questions.length, CLARIFY_V2_CANDIDATE_CHIP_BUDGET),
+    );
+    // Every emitted candidate chip is a REAL candidate of an asked question
+    // (no fabricated ids reach the wire).
+    const everyCandidateId = round1.questions.flatMap((q) => q.candidates.map((c) => c.id));
+    for (const id of chipIds) {
+      if (id === CLARIFY_V2_PROCEED_CHIP_ID) continue;
+      expect(everyCandidateId).toContain(id);
     }
     expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
     const proceedChip = response.suggested_actions.find((a) => a.id === CLARIFY_V2_PROCEED_CHIP_ID);
@@ -764,5 +791,127 @@ describe('1.152 A12 — proceed vocabulary vs SHORT_CONFIRM: deliberate divergen
     // Draft-domain phrases are meaningless to short-confirm and stay local.
     expect(CLARIFY_V2_PROCEED_PATTERN.test('use sensible defaults')).toBe(true);
     expect(SHORT_CONFIRM_PATTERN.test('use sensible defaults')).toBe(false);
+  });
+});
+
+/**
+ * DEFECT B (dress rehearsal, 20 Jul) — CEE over-emits chips and the
+ * escape hatch is evicted.
+ *
+ * Observed: CEE emitted 4 `suggested_actions`; the UI renders at most 3
+ * (D-K "0–3 chips", ratified 15 Jul). The default-forward escape hatch
+ * was appended LAST, so it was ALWAYS the chip the cap dropped — the one
+ * chip the clarify doctrine calls mandatory ("no question is ever a dead
+ * end") was the only one guaranteed never to reach the user.
+ *
+ * RED-first on base: base emits `[...candidateChips, proceedChip]` with
+ * no cap, so (1) the count pin fails and (2) the survival pin fails.
+ *
+ * Mutation check for these pins (throwaway worktree): restore
+ * `[...candidateChips, proceedChip]` in `composeClarifyV2Response` and
+ * BOTH the cap pin and the survival pin go RED.
+ */
+describe('clarify_v2 chip cap (D-K 0–3) — the escape hatch must never be the evicted chip', () => {
+  /** The ratified UI display cap. Producer-side contract, not a hint. */
+  const UI_DISPLAY_CAP = 3;
+
+  /** What the UI actually does with an over-long chip row. */
+  const asRenderedByUi = (
+    r: { suggested_actions: readonly { id: string }[] },
+    cap: number = UI_DISPLAY_CAP,
+  ) => r.suggested_actions.slice(0, cap).map((a) => a.id);
+
+  /**
+   * Consumer caps to prove survival against. DGAI staging 42390d7f
+   * renders `slice(0, 3)`, but its own comment cites DS v5 §21.4 "max 2"
+   * with the amendment owned by the DS-1 lane — so the cap this producer
+   * must survive is genuinely uncertain, and pinning only the value we
+   * happen to see today rebuilds the coupling that caused the defect.
+   * 1 is included as the degenerate floor.
+   */
+  const PLAUSIBLE_CONSUMER_CAPS = [1, 2, 3] as const;
+
+  /**
+   * Every clarify response shape this module can put on the wire, derived
+   * from the module's OWN budget constant rather than hand-listed — a
+   * hand-maintained shape list would drift the moment a round shape is
+   * added (the recorded mirror-drift defect class).
+   */
+  const everyClarifyResponseShape = () => {
+    const shapes: { name: string; response: ReturnType<typeof composeClarifyV2Response> }[] = [];
+    const round1 = decideClarifyV2Round1(THIN_BRIEF);
+    if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+    shapes.push({ name: 'round1(thin brief)', response: composeClarifyV2Response(round1.questions, round1.phase) });
+    // Derived worst case: the full per-round question budget.
+    for (let n = 1; n <= Math.min(CLARIFY_V2_MAX_QUESTIONS_PER_ROUND, round1.questions.length); n += 1) {
+      for (const phase of ['initial', 'follow_up'] as const) {
+        shapes.push({
+          name: `${n} question(s), phase=${phase}`,
+          response: composeClarifyV2Response(round1.questions.slice(0, n), phase),
+        });
+      }
+    }
+    return shapes;
+  };
+
+  it('POSITIVE CONTROL: the fixture round really does carry a multi-chip candidate set', () => {
+    const round1 = decideClarifyV2Round1(THIN_BRIEF);
+    if (round1.kind !== 'ask') throw new Error('fixture: round 1 must ask');
+    const totalCandidates = round1.questions.reduce((n, q) => n + q.candidates.length, 0);
+    // If this ever drops to 0 the cap assertions below would pass vacuously.
+    expect(totalCandidates).toBeGreaterThan(0);
+    expect(round1.questions.length).toBeGreaterThan(0);
+  });
+
+  it('emits AT MOST the ratified cap on every response shape (RED on base: 4+)', () => {
+    for (const { name, response } of everyClarifyResponseShape()) {
+      expect(
+        response.suggested_actions.length,
+        `${name}: emitted ${response.suggested_actions.length} chips, cap is ${UI_DISPLAY_CAP}`,
+      ).toBeLessThanOrEqual(UI_DISPLAY_CAP);
+    }
+  });
+
+  it('the escape hatch SURVIVES the UI cap on every response shape (RED on base: evicted)', () => {
+    for (const { name, response } of everyClarifyResponseShape()) {
+      expect(asRenderedByUi(response), `${name}: escape hatch evicted by the UI cap`).toContain(
+        CLARIFY_V2_PROCEED_CHIP_ID,
+      );
+    }
+  });
+
+  it('the escape hatch survives ANY plausible consumer cap, not just the one we see today', () => {
+    for (const cap of PLAUSIBLE_CONSUMER_CAPS) {
+      for (const { name, response } of everyClarifyResponseShape()) {
+        expect(
+          asRenderedByUi(response, cap),
+          `${name}: escape hatch evicted at consumer cap ${cap} — the guarantee is coupled to the consumer's number`,
+        ).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+      }
+      for (const cue of ['bare_ack', 'question_reply', 'hedged_proceed'] as const) {
+        expect(
+          asRenderedByUi(composeClarifyV2ReofferResponse(cue), cap),
+          `reoffer(${cue}): escape hatch evicted at consumer cap ${cap}`,
+        ).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+      }
+    }
+  });
+
+  it('the escape hatch keeps its stable id and resume message inside the capped set', () => {
+    for (const { name, response } of everyClarifyResponseShape()) {
+      const proceed = response.suggested_actions.find((a) => a.id === CLARIFY_V2_PROCEED_CHIP_ID);
+      expect(proceed, `${name}: escape hatch absent`).toBeDefined();
+      expect(proceed?.message, `${name}: resume path would not recognise the chip`).toBe(
+        CLARIFY_V2_PROCEED_MESSAGE,
+      );
+    }
+  });
+
+  it('the re-offer response is already within the cap and carries the escape hatch', () => {
+    for (const cue of ['bare_ack', 'question_reply', 'hedged_proceed'] as const) {
+      const response = composeClarifyV2ReofferResponse(cue);
+      expect(response.suggested_actions.length).toBeLessThanOrEqual(UI_DISPLAY_CAP);
+      expect(asRenderedByUi(response)).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+    }
   });
 });
