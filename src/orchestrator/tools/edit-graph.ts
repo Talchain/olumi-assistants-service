@@ -212,6 +212,18 @@ export interface EditTargetResolutionResult {
   confidence: EditResolutionConfidence;
   alternatives: Array<{ id: string; label: string }>;
   candidate_labels: string[];
+  /**
+   * REVIEW-573 C-1 — set when `preferOptionTargetForOptionConfiguration`
+   * REDIRECTED the resolution to a single named option over a wider match
+   * set. The preference is a text heuristic that is blind to negation and
+   * to whether the configure/option vocabulary actually GOVERNS the option
+   * ("…the configuration of Cloud-Native CRM shouldn't change" still
+   * resolves the option). `determineEditResolutionMode` therefore demotes
+   * flagged resolutions out of auto-apply eligibility: the held-proposal
+   * consent flow makes a wrong-entity pick visible and declinable instead
+   * of silently written.
+   */
+  option_target_preferred?: boolean;
 }
 
 export interface EditGraphTraceDiagnostics {
@@ -706,6 +718,62 @@ function resolveTokenOverlapMatches(
   });
 }
 
+/**
+ * POC-BOARD 5c (Step-0 capture T12b, 2026-07-17) — option-configuration
+ * target preference. An option-configuration edit names the OPTION being
+ * configured AND the factors whose intervention values it sets:
+ * "Configure the Cloud-Native CRM option: set CRM Feature Depth to 0.7,
+ * set CRM Platform Cost to 0.55." Treating every matched label as a
+ * competing TARGET made this ambiguous, and the clarifier asked "Which
+ * option should I update: CRM Feature Depth or CRM Platform Cost or
+ * Cloud-Native CRM?" — offering FACTORS as options. Live dead-end: the
+ * user answered the option and looped.
+ *
+ * Doctrine: in an option-configuration edit, factor labels are the FIELDS
+ * being configured, never candidate targets. Exactly one matched option →
+ * it IS the target (high confidence). Several matched options → still
+ * ambiguous, but the alternatives list contains ONLY options.
+ *
+ * Fires for `option_configuration` intent, and for `parameter_update`
+ * carrying explicit configure vocabulary (T12 names the option by label
+ * without the word "option", so `classifyEditIntent` cannot see the
+ * category — the graph-aware resolver can). NEVER fires for `structural`
+ * intent: an add-option request that mentions an existing option must not
+ * snap to it.
+ */
+function preferOptionTargetForOptionConfiguration(
+  editDescription: string,
+  intentCategory: EditIntentCategory,
+  matches: ResolvedEditTarget[],
+): EditTargetResolutionResult | null {
+  if (intentCategory === 'structural') return null;
+  const isOptionConfigure =
+    intentCategory === 'option_configuration'
+    || /\bconfigur(?:e|es|ed|ing|ation)\b/i.test(editDescription);
+  if (!isOptionConfigure) return null;
+  const optionMatches = dedupeTargets(matches.filter((match) => match.type === 'option'));
+  if (optionMatches.length === 0) return null;
+  if (optionMatches.length === 1) {
+    if (matches.length === 1) return null; // single match — default path is already right
+    // REVIEW-573 C-1: flag the redirect so the mode decision demotes it out
+    // of auto-apply eligibility (see `option_target_preferred` on the
+    // interface). BOTH arms are flagged — the adversarial probes proved the
+    // exposure is shared, not configure-vocab-specific: A5/A6 land via the
+    // configure-vocab arm ("…the configuration of Cloud-Native CRM
+    // shouldn't change" → parameter_update + /configur/), and "The
+    // Cloud-Native CRM option shouldn't change. Set CRM Platform Cost to
+    // 0.55." lands the same wrong-entity auto-apply via the
+    // option_configuration-intent arm ("change" + "option" classifies the
+    // intent with no configure vocabulary at all).
+    return {
+      ...buildResolutionResult('exact_label', 'high', optionMatches),
+      option_target_preferred: true,
+    };
+  }
+  // Several options named: still ambiguous, but only options are candidates.
+  return buildResolutionResult('exact_label', 'medium', optionMatches);
+}
+
 export function resolveEditTarget(
   editDescription: string,
   context: ConversationContext,
@@ -715,7 +783,10 @@ export function resolveEditTarget(
   const targets = getResolvedTargets(context);
   const exactMatches = targets.filter((target) => normalisedMessage.includes(normaliseMatchingText(target.label)));
   if (exactMatches.length > 0) {
-    return buildResolutionResult('exact_label', 'high', exactMatches);
+    return (
+      preferOptionTargetForOptionConfiguration(editDescription, intentCategory, exactMatches)
+      ?? buildResolutionResult('exact_label', 'high', exactMatches)
+    );
   }
 
   const aliasMatches = resolveAliasMatches(editDescription, context);
@@ -728,10 +799,13 @@ export function resolveEditTarget(
   // "competitor pressure" → "Competitive Pressure" via substring containment.
   const tokenMatches = resolveTokenOverlapMatches(normalisedMessage, targets);
   if (tokenMatches.length > 0) {
-    return buildResolutionResult(
-      tokenMatches.length === 1 ? 'exact_label' : 'ambiguous',
-      tokenMatches.length === 1 ? 'high' : 'medium',
-      tokenMatches,
+    return (
+      preferOptionTargetForOptionConfiguration(editDescription, intentCategory, tokenMatches)
+      ?? buildResolutionResult(
+        tokenMatches.length === 1 ? 'exact_label' : 'ambiguous',
+        tokenMatches.length === 1 ? 'high' : 'medium',
+        tokenMatches,
+      )
     );
   }
 
@@ -784,6 +858,22 @@ export function determineEditResolutionMode(
       return 'propose_and_confirm';
     }
     return 'clarify';
+  }
+
+  // REVIEW-573 C-1 — consent demotion for option-preferred resolutions.
+  // The option-target preference is negation/governance-blind (probes A5
+  // "Set CRM Platform Cost to 0.55 - the configuration of Cloud-Native CRM
+  // shouldn't change." and A6 "Configure nothing on Cloud-Native CRM; just
+  // set CRM Platform Cost to 0.55." both resolved the PROTECTED option at
+  // high confidence and auto-applied toward it). A heuristically redirected
+  // target never auto-applies: the held-proposal consent flow names the
+  // resolved entity, so a wrong pick is visible and declinable — one extra
+  // confirm turn on the narrow non-compound single-clause class (the four
+  // captured 5c phrasings are all compound and already confirm-first).
+  // Confirmed replays are unaffected: `confirmationMode` forces auto_apply
+  // upstream of this function.
+  if (resolution.option_target_preferred === true) {
+    return 'propose_and_confirm';
   }
 
   if (
