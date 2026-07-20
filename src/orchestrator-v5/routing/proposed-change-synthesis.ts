@@ -270,6 +270,13 @@ const HANDLER_MATCHERS: Readonly<
   explain_results: undefined,
   explain_from_structure: undefined,
   compare_options: undefined,
+  // 0.20.0: `analysis_readiness` is an analysis-PREPARATION intent, not a
+  // graph mutation — there is no `after` state for the synthesis path to
+  // match against, so it stays `undefined` like the other non-mutating
+  // action types. (The exhaustive `Record<V5ActionType, …>` above is what
+  // surfaced this at the re-vendor: the key set is DERIVED from the enum,
+  // so a new action type cannot be silently forgotten here.)
+  analysis_readiness: undefined,
 };
 
 /**
