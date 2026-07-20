@@ -278,9 +278,8 @@ function buildBlocksFromFacts(
         );
         blocks.push(...freshBlocks);
 
-        // R4 CEE-half slice 1 — flag-gated deterministic ui_directive
-        // (CEE_UI_DIRECTIVE_EMIT, default OFF; flag-off skips this block
-        // entirely = byte-identical base behaviour). CURRENT-TURN fact
+        // R4 CEE-half slice 1 — deterministic ui_directive emitter
+        // (UNCONDITIONAL — see the NO-DARK-LAUNCH note below). CURRENT-TURN fact
         // with a verified graph_hash_at_run ONLY — the prior-fact
         // lifecycle branch below never emits a directive, and the
         // fail-closed conditions (no recommendation / unresolvable or

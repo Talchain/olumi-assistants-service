@@ -7,8 +7,10 @@
  *      payload (or a typed skip). No I/O, no clock reads (review_date
  *      derives from the fact's own computed_at), fully unit-testable.
  *   2. `recordDecisionRecordForCommit` — the fire-and-forget hook invoked
- *      from commit.ts AFTER the durable append succeeded, when
- *      CEE_DECISION_RECORD_CAPTURE is true. Non-blocking contract
+ *      from commit.ts AFTER the durable append succeeded, whenever the
+ *      commit carries a successful (non-noop) run_analysis fact
+ *      (UNCONDITIONAL since #539 deleted CEE_DECISION_RECORD_CAPTURE —
+ *      Paul's 19 Jul no-dark-launch ruling). Non-blocking contract
  *      (mirrors the MM commit-seam hook verbatim): every failure — guest
  *      pre-check read, store construction (missing SUPABASE_* env), RPC
  *      error, telemetry fault — is caught and logged; NOTHING propagates

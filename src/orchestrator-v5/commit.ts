@@ -1058,13 +1058,14 @@ export async function commitDirectAnswer(
   }
 
   // ROADMAP 3.1 (CEE half) — decision-record capture hook
-  // (CEE_DECISION_RECORD_CAPTURE). Fires ONLY after the durable append
-  // succeeded AND this commit carries a successful (non-noop) run_analysis
-  // fact — which covers BOTH producers (the routed turn-executor path and
-  // chip-click run_analysis funnel through this commit seam). Fire-and-
-  // forget under the same non-blocking contract as the MM hook above: any
-  // capture failure logs and NEVER affects the turn result. Flag off ⇒
-  // byte-identical commit path (no store construction, no env reads —
+  // (UNCONDITIONAL — see the NO-DARK-LAUNCH note below). Fires ONLY after
+  // the durable append succeeded AND this commit carries a successful
+  // (non-noop) run_analysis fact — which covers BOTH producers (the routed
+  // turn-executor path and chip-click run_analysis funnel through this
+  // commit seam). Fire-and-forget under the same non-blocking contract as
+  // the MM hook above: any capture failure logs and NEVER affects the turn
+  // result. No qualifying fact ⇒ byte-identical commit path (no store
+  // construction, no env reads —
   // pinned by commit-decision-record-hook.test.ts). The record's
   // graph_hash is the fact's OWN `graph_hash_at_run` (aag_v1-prefixed) —
   // the hash the handler computed from the exact snapshot the analysis ran

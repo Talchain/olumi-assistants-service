@@ -96,12 +96,11 @@ const FROZEN_V5_BLOCK_TYPES = [
   //                          validate-before-emit, see ui-directive-emit
   //                          .test.ts); DGAI-side = #187 unknown-block
   //                          tolerance (tolerated-and-dropped, safe).
-  // The §2 rule guards against CEE *emitting* an unrenderable type. This
-  // entry is therefore DOUBLE-GATED: the only emission site
-  // (compose.ts::buildBlocksFromFacts → compose/ui-directive.ts) is behind
-  // CEE_UI_DIRECTIVE_EMIT (default OFF, absent from all deploy configs —
-  // ships dark), so deployed behaviour is unchanged until the flag is
-  // deliberately set AFTER gates 2–5 land in DGAI.
+  // The §2 rule guards against CEE *emitting* an unrenderable type. The
+  // only emission site (compose.ts::buildBlocksFromFacts →
+  // compose/ui-directive.ts) is UNCONDITIONAL since #539 deleted
+  // CEE_UI_DIRECTIVE_EMIT (Paul's 19 Jul no-dark-launch ruling) — the
+  // former "dark until DGAI gates 2–5 land" sequencing no longer applies.
   'ui_directive',
   // 0.15.0 / seamlessness R8 (CEE half). §2 surfacing gates now ALL SATISFIED:
   //   1. contract          — SATISFIED (0.15.0 wave, adopted by CEE PR #405).

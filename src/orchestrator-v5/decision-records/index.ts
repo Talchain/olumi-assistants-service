@@ -1,17 +1,18 @@
 /**
  * Decision Records v1 (ROADMAP 3.1, CEE half) — module entry.
  *
- * ONE sanctioned production call site: the flag-gated commit-seam capture
- * hook (`recordDecisionRecordForCommit` in capture.ts, invoked from
+ * ONE sanctioned production call site: the commit-seam capture hook
+ * (`recordDecisionRecordForCommit` in capture.ts, invoked from
  * src/orchestrator-v5/commit.ts after a durable commit carrying a
- * successful run_analysis fact, when CEE_DECISION_RECORD_CAPTURE is true;
+ * successful run_analysis fact — UNCONDITIONAL since #539 deleted
+ * CEE_DECISION_RECORD_CAPTURE, Paul's 19 Jul no-dark-launch ruling;
  * fire-and-forget — failures never affect the turn).
  *
  * Env-read pattern — call-time, not module-load (mirrors
  * model-management/index.ts and session/index.ts and their documented
  * rationale): tests can stub env between cases, and importing this module
  * never crashes on missing SUPABASE_* creds; only an actual
- * `getDecisionRecordStore()` call on a flag-on path requires them.
+ * `getDecisionRecordStore()` call on a capture path requires them.
  */
 
 import { createClient } from '@supabase/supabase-js';

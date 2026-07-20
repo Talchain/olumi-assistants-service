@@ -1,8 +1,9 @@
 /**
  * ui_directive block builder — ROADMAP 2.27 / seamlessness R4 (CEE half,
- * slice 1). Flag-gated by CEE_UI_DIRECTIVE_EMIT (config/index.ts
- * `features.uiDirectiveEmit`, default OFF); the flag is read at the single
- * call site in compose.ts::buildBlocksFromFacts — this builder is pure.
+ * slice 1). UNCONDITIONAL since #539 deleted CEE_UI_DIRECTIVE_EMIT
+ * (Paul's 19 Jul no-dark-launch ruling; was live `true` on staging);
+ * invoked at the single call site in compose.ts::buildBlocksFromFacts —
+ * this builder is pure.
  *
  * ONE deterministic emission, ZERO LLM authorship: on a successful
  * CURRENT-TURN run_analysis fact, point the UI at the analysis's
