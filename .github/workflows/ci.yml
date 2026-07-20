@@ -12,7 +12,7 @@ jobs:
     name: Lint, TypeCheck, Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -47,7 +47,7 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -78,7 +78,7 @@ jobs:
     # Only run if ANTHROPIC_API_KEY secret is set
     if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
         with:
           version: 9

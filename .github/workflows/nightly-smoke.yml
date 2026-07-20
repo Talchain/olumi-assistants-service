@@ -17,7 +17,7 @@ jobs:
     # Manual workflow_dispatch runs always execute regardless of variable setting
     if: ${{ github.event_name == 'workflow_dispatch' || vars.SMOKE_SCHEDULE_ENABLED == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v3
         with: { version: 9 }
       - name: Use Node 18

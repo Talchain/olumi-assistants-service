@@ -21,7 +21,7 @@ jobs:
     env:
       BASE_URL: https://olumi-assistants-service.onrender.com
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v3
         with: { version: 9 }
@@ -121,7 +121,7 @@ jobs:
     env:
       PERF_TARGET_URL: https://olumi-assistants-service.onrender.com
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v3
         with: { version: 9 }
