@@ -169,6 +169,18 @@ export type ProposedChangeActionType =
   | 'structural_add'
   | 'structural_remove';
 
+/**
+ * @deprecated VESTIGIAL V4 proposed-change shape — carries NO value field, so a
+ * proposal built from it can never represent the specific it asks for. Its only
+ * remaining live use is building the propose-and-confirm "ask for the specifics"
+ * copy WITHIN a turn (`buildProposeAndConfirmText`); it is no longer minted onto
+ * the edit-lane hold (S3-L1 retired the write-only `pendingProposal` round-trip,
+ * which nothing read back on the live V5 path). The value-bearing carrier is the
+ * V5 `ProposedChange` (`orchestrator-v5/types/proposed-change.ts`, `params` +
+ * `inline_patch.operations`), which has the live reader in
+ * `proposed-change-synthesis.ts`. Do not add new consumers; prefer the V5 type.
+ * Remaining references live behind the default-off V4 pipeline (410 tombstone).
+ */
 export interface ProposedChange {
   description: string;
   element_label: string;
