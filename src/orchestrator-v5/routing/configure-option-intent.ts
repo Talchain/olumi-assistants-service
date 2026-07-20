@@ -91,8 +91,23 @@ const OPTION_WORD = /\boptions?\b/;
 /** "effect"/"effects" — the lay synonym for an option's interventions. */
 const EFFECT_VOCAB = /\beffects?\b/;
 
-/** Imperative edit verbs that make effect-vocabulary a mutation request. */
-const EDIT_SET_VERB = /\b(?:set|change|update|adjust|make|revise|configure)\b/;
+/**
+ * Assignment verbs that make effect-vocabulary a mutation request.
+ *
+ * REVIEW-573 C-2: "make" was removed after two adversarial phrasings
+ * proved it claims conversational STATEMENTS for the edit lane — C1d
+ * "Make sure the effects on both options are captured." (a meta-request)
+ * and C1e "The options make no difference to the effect here." (an
+ * observation) both matched via `make` + effect + option-word anchor,
+ * and both classify `structural` in the edit lane, whose resolution mode
+ * is auto_apply — leaving mutation-vs-no-op entirely to the edit LLM's
+ * judgement. With `make` excluded, both stay on the pre-PR LLM-router
+ * path. The genuine configure shapes keep an explicit assignment verb
+ * ("set/change/update/adjust/revise/configure … effect …"), including the
+ * qualitative no-digit form "Set the {option} option's effect on
+ * {factor} to high" that VALUE_SET_PAYLOAD (digit-anchored) cannot see.
+ */
+const EFFECT_ASSIGN_VERB = /\b(?:set|change|update|adjust|revise|configure)\b/;
 
 /**
  * A value-assignment payload: an assignment verb … "to" … a number
@@ -191,7 +206,7 @@ export function detectConfigureOptionIntent(
   // verb: "Under the {option} option, set its effect on {factor} to 0.7."
   // "Effect" is the lay synonym for an intervention; without this trigger
   // the message routes to adjust_edge_strength and WRITES the wrong field.
-  if (EFFECT_VOCAB.test(normalised) && EDIT_SET_VERB.test(normalised)) {
+  if (EFFECT_VOCAB.test(normalised) && EFFECT_ASSIGN_VERB.test(normalised)) {
     return { matched: true, trigger: 'effect_vocab' };
   }
 

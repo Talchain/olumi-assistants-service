@@ -104,4 +104,41 @@ describe('detectConfigureOptionIntent — Step-0 dead-end phrasings (5c)', () =>
       ).toBe(false);
     });
   });
+
+  describe('REVIEW-573 C-2 — adversarial statement shapes stay OFF the edit lane', () => {
+    // Verbatim reviewer probes (REVIEW-573-2026-07-20.md, C1d/C1e): both
+    // claimed the edit lane via the effect arm's original verb set ("make"),
+    // classify `structural` there, and would leave mutation-vs-no-op to the
+    // edit LLM's judgement with zero pins. With "make" removed from
+    // EFFECT_ASSIGN_VERB they keep their pre-PR LLM-router routing.
+    it('C1d: "Make sure the effects on both options are captured." does NOT match', () => {
+      expect(
+        detectConfigureOptionIntent(
+          'Make sure the effects on both options are captured.',
+          CRM_OPTION_LABELS,
+        ).matched,
+      ).toBe(false);
+    });
+
+    it('C1e: "The options make no difference to the effect here." does NOT match', () => {
+      expect(
+        detectConfigureOptionIntent(
+          'The options make no difference to the effect here.',
+          CRM_OPTION_LABELS,
+        ).matched,
+      ).toBe(false);
+    });
+
+    it('control: the qualitative no-digit effect assignment still matches', () => {
+      // VALUE_SET_PAYLOAD is digit-anchored, so this shape rides the effect
+      // arm — the reason the arm survives with a stricter verb set instead
+      // of being deleted.
+      expect(
+        detectConfigureOptionIntent(
+          "Set the Cloud-Native CRM option's effect on CRM Feature Depth to high.",
+          CRM_OPTION_LABELS,
+        ).matched,
+      ).toBe(true);
+    });
+  });
 });

@@ -212,6 +212,18 @@ export interface EditTargetResolutionResult {
   confidence: EditResolutionConfidence;
   alternatives: Array<{ id: string; label: string }>;
   candidate_labels: string[];
+  /**
+   * REVIEW-573 C-1 — set when `preferOptionTargetForOptionConfiguration`
+   * REDIRECTED the resolution to a single named option over a wider match
+   * set. The preference is a text heuristic that is blind to negation and
+   * to whether the configure/option vocabulary actually GOVERNS the option
+   * ("…the configuration of Cloud-Native CRM shouldn't change" still
+   * resolves the option). `determineEditResolutionMode` therefore demotes
+   * flagged resolutions out of auto-apply eligibility: the held-proposal
+   * consent flow makes a wrong-entity pick visible and declinable instead
+   * of silently written.
+   */
+  option_target_preferred?: boolean;
 }
 
 export interface EditGraphTraceDiagnostics {
@@ -743,7 +755,20 @@ function preferOptionTargetForOptionConfiguration(
   if (optionMatches.length === 0) return null;
   if (optionMatches.length === 1) {
     if (matches.length === 1) return null; // single match — default path is already right
-    return buildResolutionResult('exact_label', 'high', optionMatches);
+    // REVIEW-573 C-1: flag the redirect so the mode decision demotes it out
+    // of auto-apply eligibility (see `option_target_preferred` on the
+    // interface). BOTH arms are flagged — the adversarial probes proved the
+    // exposure is shared, not configure-vocab-specific: A5/A6 land via the
+    // configure-vocab arm ("…the configuration of Cloud-Native CRM
+    // shouldn't change" → parameter_update + /configur/), and "The
+    // Cloud-Native CRM option shouldn't change. Set CRM Platform Cost to
+    // 0.55." lands the same wrong-entity auto-apply via the
+    // option_configuration-intent arm ("change" + "option" classifies the
+    // intent with no configure vocabulary at all).
+    return {
+      ...buildResolutionResult('exact_label', 'high', optionMatches),
+      option_target_preferred: true,
+    };
   }
   // Several options named: still ambiguous, but only options are candidates.
   return buildResolutionResult('exact_label', 'medium', optionMatches);
@@ -833,6 +858,22 @@ export function determineEditResolutionMode(
       return 'propose_and_confirm';
     }
     return 'clarify';
+  }
+
+  // REVIEW-573 C-1 — consent demotion for option-preferred resolutions.
+  // The option-target preference is negation/governance-blind (probes A5
+  // "Set CRM Platform Cost to 0.55 - the configuration of Cloud-Native CRM
+  // shouldn't change." and A6 "Configure nothing on Cloud-Native CRM; just
+  // set CRM Platform Cost to 0.55." both resolved the PROTECTED option at
+  // high confidence and auto-applied toward it). A heuristically redirected
+  // target never auto-applies: the held-proposal consent flow names the
+  // resolved entity, so a wrong pick is visible and declinable — one extra
+  // confirm turn on the narrow non-compound single-clause class (the four
+  // captured 5c phrasings are all compound and already confirm-first).
+  // Confirmed replays are unaffected: `confirmationMode` forces auto_apply
+  // upstream of this function.
+  if (resolution.option_target_preferred === true) {
+    return 'propose_and_confirm';
   }
 
   if (
