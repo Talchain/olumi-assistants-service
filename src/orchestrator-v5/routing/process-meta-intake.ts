@@ -48,9 +48,12 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
  * at runtime, so this list is pinned instead:
  *   - the CEE test pins every string byte-verbatim with a pointer to the
  *     UI file, so a silent edit HERE goes RED against the test;
- *   - the UI workstream owns the counterpart contract test (every spark
- *     ships explicit intent metadata) so NEW sparks cannot regress to
- *     anonymous text;
+ *   - a UI-side counterpart contract test (every spark ships explicit
+ *     intent metadata, so NEW sparks cannot regress to anonymous text) is
+ *     EXPECTED from the UI spark lane but does NOT exist yet — verified
+ *     absent at UI staging tip 2e5abdb1 (REVIEW-575-2026-07-20 C2;
+ *     tracked with that lane). Until it lands, UI-side drift is
+ *     silent-but-safe only;
  *   - drift fails SAFE: a UI prompt missing from this list gets today's
  *     (pre-fix) routing, never a new failure mode.
  * The real class-killer is wire-level intent (a chip action_type for
@@ -89,17 +92,29 @@ const KNOWN_PROMPTS_NORMALISED: ReadonlySet<string> = new Set(
 
 /**
  * Narrow typed-variant pattern for genuinely typed process-meta questions
- * (diagnosis §5 P1). Two arms, both requiring a single-question message
- * (no internal `?`) ending in `?`:
+ * (diagnosis §5 P1; arms tightened per REVIEW-575-2026-07-20 C1 — the
+ * original arms over-captured 10 constructed genuine briefs and missed
+ * the defect string without its trailing "?"). Two arms:
  *
  *   A. "What should I check/do/know/prepare/need … before … the
  *      analysis/model/draft" — the reproduced defect shape. The process
- *      word is REQUIRED after "before", so "What should I check before
- *      buying the house?" (a genuine brief opener) never matches.
- *   B. "How does the/this/your analysis|model|draft|simulation|tool work"
- *      (+ the bare "how does Olumi work" form). The determiner must be
- *      ADJACENT to the process word, so "How does the competitor's
- *      pricing model work?" stays with the pre-existing routing.
+ *      word must be the OBJECT of "before": directly, or through a
+ *      CLOSED run/start gerund + determiner chain ("before running the
+ *      first analysis", "before I run my first analysis"). A domain noun
+ *      merely appearing somewhere after "before" no longer matches
+ *      ("before the acquisition: the model of their finances…", "before
+ *      the merger analysis call…" are genuine briefs). The trailing "?"
+ *      is OPTIONAL (the defect string minus its "?" still drafted a
+ *      meta-graph), but the process object must end the sentence — a
+ *      compound second sentence falls through, since it may carry a
+ *      genuine brief.
+ *   B. "How does the/this/your analysis|model|draft|simulation|tool
+ *      work?" (+ the bare "how does Olumi work?" form). `works?` must be
+ *      ADJACENT to the determiner+process word AND must TERMINATE the
+ *      question: adjacency alone cannot exclude "How does the analysis
+ *      work at our lab affect which vendor we choose?" — there
+ *      "analysis work" is a noun compound and the question ends with the
+ *      user's decision clause, not with "work?".
  *
  * Interrogative openers that are ALSO decision verbs ("should", "shall",
  * "whether") are deliberately NOT accepted as arm openers: "Should we run
@@ -107,10 +122,13 @@ const KNOWN_PROMPTS_NORMALISED: ReadonlySet<string> = new Set(
  */
 export const PROCESS_META_TYPED_PATTERN: RegExp = new RegExp(
   [
-    // Arm A — pre-analysis preparation questions.
-    String.raw`^\s*(?:what|which|is\s+there\s+anything|anything(?:\s+else)?)\b[^?]*\b(?:check|do|know|prepare|review|need|have|complete|set\s+up|get\s+ready)\b[^?]*\bbefore\b[^?]*\b(?:analysis|analyse|analysing|model(?:ling)?|draft(?:ing)?)\b[^?]*\?\s*$`,
-    // Arm B — how-does-the-product-work questions.
-    String.raw`^\s*(?:how\s+(?:does|do|will|would)|can\s+you\s+explain\s+how)\b[^?]*\b(?:(?:the|this|your)\s+(?:analysis|model(?:ling)?|draft(?:ing)?|simulation|tool)|olumi)\b[^?]*\bworks?\b[^?]*\?\s*$`,
+    // Arm A — pre-analysis preparation questions. Object chain after
+    // "before": [run/start gerund]? [determiner]? [first]? process-word,
+    // then at most one sentence terminator to end-of-message.
+    String.raw`^\s*(?:what|which|is\s+there\s+anything|anything(?:\s+else)?)\b[^?]*\b(?:check|do|know|prepare|review|need|have|complete|set\s+up|get\s+ready)\b[^?]*\bbefore\s+(?:(?:running|starting|doing|i\s+run|we\s+run|you\s+run)\s+)?(?:(?:the|my|our|this|an?)\s+)?(?:first\s+)?(?:analysis|analysing|model(?:ling)?|draft(?:ing)?)\b[^?.!]*[?.!]?\s*$`,
+    // Arm B — how-does-the-product-work questions; `works?` adjacent to
+    // the process word and terminating the question.
+    String.raw`^\s*(?:how\s+(?:does|do|will|would)|can\s+you\s+explain\s+how)\b[^?]*\b(?:(?:the|this|your)\s+(?:analysis|model(?:ling)?|draft(?:ing)?|simulation|tool)|olumi)\s+works?\s*\?\s*$`,
   ].join('|'),
   'i',
 );
@@ -156,10 +174,10 @@ export function composeProcessMetaIntakeResponse(): OlumiResponse {
   const assistantText =
     'Happy to help with that. This decision does not have ' +
     'a model on the canvas yet, so there is nothing for me to analyse or review so far. ' +
-    'A first analysis needs four things in place: the decision question itself, at least ' +
-    'two options you are genuinely weighing up, a goal with a measurable target to judge ' +
-    'the options against, and the factors you believe drive the result, with rough ' +
-    'estimates or ranges. ' +
+    'A first analysis needs the decision question itself, at least two options you are ' +
+    'genuinely weighing up, a goal to judge them against, and the factors you believe ' +
+    'drive the result, with rough estimates or ranges. The analysis is most useful when ' +
+    'the goal also carries a measurable target, though that can come later. ' +
     'The first step is the model. Tell me the decision you are weighing up, in a sentence ' +
     'or two, and I will draft it for you. Once it is on the canvas, ask me again and we ' +
     'will work through the checks together before you run the analysis.';

@@ -8,8 +8,9 @@
  * SPARK_PROMPTS; staging tip 8007d03d, 2026-07-20) as independent string
  * LITERALS — deliberately NOT imported from the mechanism module, so an
  * edit to the mechanism's list that drops or mangles a prompt goes RED
- * here. The UI workstream owns the counterpart contract test (every spark
- * ships explicit intent metadata).
+ * here. A UI-side counterpart contract test (every spark ships explicit
+ * intent metadata) is EXPECTED from the UI spark lane but did not exist
+ * at UI tip 2e5abdb1 (REVIEW-575 C2 — tracked with that lane).
  *
  * PRECISION BIAS: the negative cases below are the guard's contract too.
  * Over-blocking a genuine decision brief is a WORSE defect than the
@@ -75,6 +76,11 @@ describe('isProcessMetaIntake — narrow typed variants', () => {
     'What do I need to have before the first analysis?',
     'What data do I need before the analysis?',
     'Is there anything I should review before running the analysis?',
+    // REVIEW-575-2026-07-20 C1 under-capture: the ORIGINAL defect string
+    // minus the trailing "?" reproduced the meta-draft end-to-end. Arm A
+    // accepts the interrogative-opener form without a question mark.
+    'What should I check before I run my first analysis',
+    'What should I check before running the first analysis',
     'How does the analysis work?',
     'How does this model work?',
     'How does Olumi work?',
@@ -106,6 +112,22 @@ describe('isProcessMetaIntake — precision (genuine briefs must NOT match)', ()
     // opener).
     'Should we run the analysis before hiring?',
     'Whether to launch in Q3 or hold for Q4?',
+    // ── REVIEW-575-2026-07-20 C1 over-capture cases 1–5, pinned RED-first
+    // (each was CLAIMED by the pre-tightening arms; each is a plausible
+    // genuine first message). ──
+    // Case 1 — Arm B: "analysis work" is a noun compound (the user's lab
+    // work), and the question ends with the decision clause, not "work?".
+    'How does the analysis work at our lab affect which vendor we choose?',
+    // Case 2 — Arm A: "model" is the user's own option content after
+    // "before the acquisition", not the object of "before"; the message
+    // even lists the user's two options.
+    'What do we need to check before the acquisition: the model of their finances or their contracts?',
+    // Case 3 — Arm A: domain noun "data analysis" after "before".
+    'What should I review before choosing a vendor for data analysis?',
+    // Case 4 — Arm A: "analysis provider" is a domain compound.
+    'What do I need to know before switching our analysis provider from Gartner to Forrester?',
+    // Case 5 — Arm A: "which" opener + domain compound "merger analysis".
+    'Which contracts do we need to review before the merger analysis call with the bankers?',
   ];
   for (const brief of GENUINE_BRIEFS) {
     it(`does NOT claim: ${JSON.stringify(brief.slice(0, 50))}…`, () => {
@@ -130,14 +152,23 @@ describe('shape relationship with the draft heuristic', () => {
     );
   });
 
-  it('the typed pattern requires a single trailing-? question', () => {
+  it('the typed pattern requires a single interrogative sentence', () => {
     // Internal '?' (two questions) falls through — narrow by design.
     expect(
       PROCESS_META_TYPED_PATTERN.test(
         'What should I check before the analysis? And should we expand to Leeds?',
       ),
     ).toBe(false);
-    // No trailing '?' falls through.
+    // A trailing second SENTENCE after the process object falls through
+    // (the compound may carry a genuine brief — precision bias).
+    expect(
+      PROCESS_META_TYPED_PATTERN.test(
+        'What should I check before running the first analysis. Also whether to expand to Leeds.',
+      ),
+    ).toBe(false);
+    // An imperative without an interrogative opener falls through even
+    // with the process object present (REVIEW-575 C1 keeps the no-"?"
+    // allowance opener-gated).
     expect(
       PROCESS_META_TYPED_PATTERN.test('Tell me what to check before running the analysis.'),
     ).toBe(false);

@@ -13,8 +13,9 @@
  * `src/canvas/components/pre-analysis-v3/constants.ts` (staging tip
  * 8007d03d, 2026-07-20). They are deliberately duplicated here as string
  * literals (NOT imported from the mechanism module) so a silent edit to
- * the mechanism's list goes RED against this file. The UI workstream owns
- * the counterpart test (every spark ships intent metadata).
+ * the mechanism's list goes RED against this file. A UI-side counterpart
+ * test (every spark ships intent metadata) is EXPECTED from the UI spark
+ * lane but did not exist at UI tip 2e5abdb1 (REVIEW-575 C2).
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -229,6 +230,21 @@ describe('POST /orchestrate/v2/turn — round-1 process-meta intake guard', () =
   it('the reproduced spark deflects when TYPED (composer source) too', async () => {
     const res = await inject({
       message: 'What should I check before running the first analysis?',
+      source: 'composer',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain(PROCESS_META_ANSWER_MARKER);
+  });
+
+  it('the defect string WITHOUT the trailing "?" also deflects (REVIEW-575 C1 under-capture)', async () => {
+    // "What should I check before I run my first analysis" (no "?")
+    // reproduced the meta-draft end-to-end at the pre-tightening head:
+    // the decision-verb regex arm ("should") makes it draft-shaped even
+    // without the trailing question mark.
+    const res = await inject({
+      message: 'What should I check before I run my first analysis',
       source: 'composer',
     });
     expect(res.statusCode).toBe(200);
