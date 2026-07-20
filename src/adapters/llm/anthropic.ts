@@ -527,7 +527,10 @@ const DRAFT_MAX_TOKENS_FLOOR = 8192;
  * (stop_reason=max_tokens, typed handling below) instead of hanging to the
  * timeout and 504ing.
  *
- * - unconfigured: effective = affordable (derived, e.g. 6,000 at 105s)
+ * - unconfigured: effective = affordable — the timeout-derived budget from
+ *   `getAffordableDraftTokens(timeoutMs)` (config/timeouts.ts), computed from the
+ *   throughput floor and TTFB overhead, NOT a hand-set number (illustrative:
+ *   ~8,550 tokens at the default LLM window — recompute from config, do not pin)
  * - configured too low: raised to min(DRAFT_MAX_TOKENS_FLOOR, affordable)
  * - configured too high: clamped down to affordable
  *
@@ -630,11 +633,14 @@ export async function draftGraphWithAnthropic(
   const draftThinkingBudget = draftThinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
 
   // Align timeout with DRAFT_LLM_TIMEOUT_MS when not explicitly overridden.
-  // Previously fell back to HTTP_CLIENT_TIMEOUT_MS (110s); DRAFT_LLM_TIMEOUT_MS
-  // (DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS = 105s) is correct
-  // for the pipeline path. Stage 1 (Parse) always passes opts.timeoutMs so this
-  // fallback only matters for direct calls (e.g. tests, legacy routes).
-  // Resolved BEFORE max_tokens because max_tokens is DERIVED from it.
+  // Previously fell back to HTTP_CLIENT_TIMEOUT_MS, which reserves NO post-LLM
+  // headroom. DRAFT_LLM_TIMEOUT_MS (= DRAFT_REQUEST_BUDGET_MS minus
+  // LLM_POST_PROCESSING_HEADROOM_MS, both derived in config/timeouts.ts) is the
+  // pipeline-correct window because it leaves room for validation/repair/
+  // enrichment inside the request budget — recompute from config, don't pin the
+  // number. Stage 1 (Parse) always passes opts.timeoutMs so this fallback only
+  // matters for direct calls (e.g. tests, legacy routes). Resolved BEFORE
+  // max_tokens because max_tokens is DERIVED from it.
   const effectiveTimeout = opts?.timeoutMs ?? DRAFT_LLM_TIMEOUT_MS;
 
   // Token budget derived from the timeout (2026-07-20 outage fix) — see

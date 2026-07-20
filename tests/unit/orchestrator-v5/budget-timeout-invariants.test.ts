@@ -30,6 +30,7 @@ import {
   MIN_RETRY_BUDGET_MS,
   RETRY_SAFETY_MARGIN_MS,
   TURN_RESPONSE_HEADROOM_MS,
+  DRAFT_REQUEST_RESPONSE_HEADROOM_MS,
   validateTimeoutRelationships,
   getResolvedTimeouts,
 } from "../../../src/config/timeouts.js";
@@ -164,11 +165,12 @@ describe("boot validator carries the ladder rungs (positive control)", () => {
 });
 
 describe("the ladder rung is registered in the diagnostic snapshot", () => {
-  it("exposes TURN_RESPONSE_HEADROOM_MS and the PLoT retry constants", () => {
+  it("exposes the proxy-headroom rungs and the PLoT retry constants", () => {
     // getResolvedTimeouts() is the estate's single view of the ladder. A rung
     // absent from it is a rung nobody can see when diagnosing a live instance.
     const resolved = getResolvedTimeouts();
     expect(resolved.TURN_RESPONSE_HEADROOM_MS).toBe(TURN_RESPONSE_HEADROOM_MS);
+    expect(resolved.DRAFT_REQUEST_RESPONSE_HEADROOM_MS).toBe(DRAFT_REQUEST_RESPONSE_HEADROOM_MS);
     expect(resolved.RETRY_BACKOFF_MS).toBe(RETRY_BACKOFF_MS);
     expect(resolved.MIN_RETRY_BUDGET_MS).toBe(MIN_RETRY_BUDGET_MS);
     expect(resolved.RETRY_SAFETY_MARGIN_MS).toBe(RETRY_SAFETY_MARGIN_MS);

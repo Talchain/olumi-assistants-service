@@ -188,6 +188,68 @@ describe("Draft retry budget coherence", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Draft request budget nested under the browser-proxy deadline (proxy-504 guard)
+//
+// The ladder-header comment in config/timeouts.ts long CLAIMED "the budget
+// itself cannot rise without the proxy deadline rising first", but no rung in
+// validateTimeoutRelationships enforced it: DRAFT_REQUEST_BUDGET_MS is a module
+// constant (env-resolved), not one of the injected ladder inputs, so a bare
+// DRAFT_REQUEST_BUDGET_MS=130000 override booted silently and re-opened the
+// 2026-07-20 proxy-504 symptom while every default-only CI assertion stayed
+// green. These pins are the positive control for the now-real rung.
+//
+// DRAFT_REQUEST_BUDGET_MS is read at import time, so this is an env-mutation
+// test — it re-imports the module after setting the env, exactly like the
+// MIN_DRAFT_RETRY_BUDGET_MS test above.
+// ---------------------------------------------------------------------------
+
+describe("Draft request budget is nested under the browser-proxy deadline", () => {
+  it("is SILENT at repo defaults — the wire-composition margin is exactly met", async () => {
+    vi.resetModules();
+    const { validateTimeoutRelationships, DRAFT_REQUEST_BUDGET_MS, DRAFT_REQUEST_RESPONSE_HEADROOM_MS } =
+      await import("../../src/config/timeouts.js");
+    // Sanity: no leaked env override — otherwise the "silent" claim is vacuous.
+    expect(DRAFT_REQUEST_BUDGET_MS).toBe(120_000);
+    // The default proxy deadline sits exactly one margin above the budget.
+    expect(125_000 - DRAFT_REQUEST_BUDGET_MS).toBe(DRAFT_REQUEST_RESPONSE_HEADROOM_MS);
+    const warnings = validateTimeoutRelationships({
+      handlerBudgetMs: 85_000,
+      turnBudgetMs: 115_000,
+      browserProxyTimeoutMs: 125_000, // repo default
+    });
+    const draftProxyWarning = warnings.find(
+      (w) => w.includes("DRAFT_REQUEST_BUDGET_MS") && w.includes("BROWSER_PROXY_TIMEOUT_MS"),
+    );
+    expect(draftProxyWarning).toBeUndefined();
+  });
+
+  it("FIRES when DRAFT_REQUEST_BUDGET_MS rises to 130s without the proxy deadline rising", async () => {
+    vi.resetModules();
+    const prev = process.env.DRAFT_REQUEST_BUDGET_MS;
+    process.env.DRAFT_REQUEST_BUDGET_MS = "130000"; // climbs past the 125s proxy deadline
+    try {
+      const { validateTimeoutRelationships } = await import("../../src/config/timeouts.js");
+      const warnings = validateTimeoutRelationships({
+        handlerBudgetMs: 85_000,
+        turnBudgetMs: 115_000,
+        browserProxyTimeoutMs: 125_000,
+      });
+      expect(
+        warnings.some(
+          (w) =>
+            w.includes("DRAFT_REQUEST_BUDGET_MS") &&
+            w.includes("DRAFT_REQUEST_RESPONSE_HEADROOM_MS"),
+        ),
+      ).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.DRAFT_REQUEST_BUDGET_MS;
+      else process.env.DRAFT_REQUEST_BUDGET_MS = prev;
+      vi.resetModules();
+    }
+  });
+});
+
 describe("Typed error classes", () => {
   it("LLMTimeoutError has correct name and properties", async () => {
     const { LLMTimeoutError } = await import("../../src/adapters/llm/errors.js");

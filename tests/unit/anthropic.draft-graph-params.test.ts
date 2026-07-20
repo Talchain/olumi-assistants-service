@@ -344,9 +344,14 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     });
 
     const [body] = createSpy.mock.calls[0];
-    // 32768 tokens needs ~379s even at the fitted marginal 101.5 tok/s — no
-    // timeout on the ladder affords it. Honouring it verbatim is how drafts
-    // hung to the timeout.
+    // A 32768-token config is unaffordable at every timeout on the ladder and is
+    // clamped to the affordable budget. The affordability bound comes from
+    // config/timeouts.ts getAffordableDraftTokens — the throughput FLOOR plus the
+    // TTFB/overhead reserve — NOT from the fitted 101.5 marginal rate.
+    // (Illustrative on the FLOOR basis: 32768/90 + 15s ≈ 379s — recompute from
+    // config. At the fitted 101.5 rate the same tokens would be ~336s; the ~379s
+    // figure is the floor-basis number, so don't attribute it to the fit.)
+    // Honouring the config verbatim is how drafts hung to the timeout.
     expect(body.max_tokens).toBe(8550);
   });
 
