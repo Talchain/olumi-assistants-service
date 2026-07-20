@@ -310,23 +310,53 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     };
   }
 
-  // Upstream non-JSON: LLM returned unparseable content (e.g. nonsensical brief → garbage output)
+  // Truncation classification (S-AUDIT-2026-07-20 probe, aggravator 1): the
+  // adapter flags generations cut at the derived token budget
+  // (stop_reason=max_tokens) with a STRUCTURED property — message-prefix
+  // matching cannot carry this (the truncation note breaks the anchored
+  // `^anthropic_response_invalid_schema` regex below). A truncated draft is a
+  // demand-exceeds-budget failure, not a vague-brief failure, and the two need
+  // OPPOSITE recovery copy: asking a truncated-draft user to be "more
+  // specific" increases output-token demand and steers them back into the
+  // exact failure. The honest levers are demand reduction and retry.
+  const truncatedAtMaxTokens =
+    (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true;
+  const truncationRecovery = {
+    suggestion: "The drafted model was too large to finish. Simplify the brief and try again.",
+    hints: [
+      "Focus the brief on one decision",
+      "Limit it to the 2-3 options you are seriously weighing",
+      "Leave out background detail that would not change the decision",
+    ],
+  };
+
+  // Upstream non-JSON: LLM returned unparseable content — either a generation
+  // truncated at the derived token budget (flag above) or garbage output from
+  // a nonsensical brief.
   if (err instanceof UpstreamNonJsonError) {
-    log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM returned non-JSON response");
+    log.warn({ error: err, requestId: ctx.requestId, truncated_at_max_tokens: truncatedAtMaxTokens }, "Unified pipeline: LLM returned non-JSON response");
     return {
       statusCode: 400,
-      body: withLlmTrace(buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM response could not be parsed — the brief may be too vague or nonsensical", {
-        requestId: ctx.requestId,
-        reason: "llm_non_json",
-        recovery: {
-          suggestion: "Provide a clearer, more specific decision brief.",
-          hints: [
-            "State the specific decision you are trying to make",
-            "List 2-3 concrete options you are considering",
-            "Describe what success looks like",
-          ],
+      body: withLlmTrace(buildCeeErrorResponse(
+        "CEE_LLM_VALIDATION_FAILED",
+        truncatedAtMaxTokens
+          ? "The draft needed more output tokens than the request budget affords and was truncated"
+          : "LLM response could not be parsed — the brief may be too vague or nonsensical",
+        {
+          requestId: ctx.requestId,
+          reason: truncatedAtMaxTokens ? "llm_truncated_max_tokens" : "llm_non_json",
+          recovery: truncatedAtMaxTokens
+            ? truncationRecovery
+            : {
+                suggestion: "Provide a clearer, more specific decision brief.",
+                hints: [
+                  "State the specific decision you are trying to make",
+                  "List 2-3 concrete options you are considering",
+                  "Describe what success looks like",
+                ],
+              },
         },
-      })),
+      )),
     };
   }
 
@@ -353,22 +383,34 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     /^(?:openai|anthropic)_(?:response_invalid_schema|empty_response)/.test(err.message ?? "") ||
     err.message === "draft_graph_missing_result";
 
-  if (isLlmSchemaOrEmptyError) {
-    log.warn({ error: err, requestId: ctx.requestId }, "Unified pipeline: LLM response failed schema validation");
+  // `truncatedAtMaxTokens` joins the condition because the adapter PREFIXES
+  // the schema-invalid message with the truncation note, which breaks the
+  // anchored regex above — pre-flag, a truncated-then-schema-invalid draft
+  // fell through to the untyped 500 below with no recovery at all.
+  if (isLlmSchemaOrEmptyError || truncatedAtMaxTokens) {
+    log.warn({ error: err, requestId: ctx.requestId, truncated_at_max_tokens: truncatedAtMaxTokens }, "Unified pipeline: LLM response failed schema validation");
     return {
       statusCode: 400,
-      body: withLlmTrace(buildCeeErrorResponse("CEE_LLM_VALIDATION_FAILED", "LLM produced a response that does not match the expected graph schema", {
-        requestId: ctx.requestId,
-        reason: "llm_schema_invalid",
-        recovery: {
-          suggestion: "Provide a clearer, more specific decision brief.",
-          hints: [
-            "State the specific decision you are trying to make",
-            "List 2-3 concrete options you are considering",
-            "Describe what success looks like",
-          ],
+      body: withLlmTrace(buildCeeErrorResponse(
+        "CEE_LLM_VALIDATION_FAILED",
+        truncatedAtMaxTokens
+          ? "The draft needed more output tokens than the request budget affords and was truncated"
+          : "LLM produced a response that does not match the expected graph schema",
+        {
+          requestId: ctx.requestId,
+          reason: truncatedAtMaxTokens ? "llm_truncated_max_tokens" : "llm_schema_invalid",
+          recovery: truncatedAtMaxTokens
+            ? truncationRecovery
+            : {
+                suggestion: "Provide a clearer, more specific decision brief.",
+                hints: [
+                  "State the specific decision you are trying to make",
+                  "List 2-3 concrete options you are considering",
+                  "Describe what success looks like",
+                ],
+              },
         },
-      })),
+      )),
     };
   }
 

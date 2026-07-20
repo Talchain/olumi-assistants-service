@@ -378,8 +378,8 @@ describe("runStageParse", () => {
     timeoutErr.name = "UpstreamTimeoutError";
 
     // First attempt fails fast (e.g. connect-phase failure) 40s into the
-    // request: retry is affordable (120 − 40 − 15 = 65s ≥ 55s minimum) but
-    // must be CAPPED to the remaining window, not handed a fresh 105s.
+    // request: retry is affordable (120 − 40 − 10 = 70s ≥ 55s minimum) but
+    // must be CAPPED to the remaining window, not handed a fresh 110s.
     mockAdapter.draftGraph
       .mockRejectedValueOnce(timeoutErr)
       .mockResolvedValueOnce({
@@ -397,7 +397,7 @@ describe("runStageParse", () => {
 
     expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
     const retryOpts = mockAdapter.draftGraph.mock.calls[1][1];
-    expect(retryOpts.timeoutMs).toBeLessThanOrEqual(65_000);
+    expect(retryOpts.timeoutMs).toBeLessThanOrEqual(70_000);
     expect(retryOpts.timeoutMs).toBeGreaterThanOrEqual(55_000);
   });
 
@@ -407,8 +407,8 @@ describe("runStageParse", () => {
     timeoutErr.name = "UpstreamTimeoutError";
 
     // First attempt fails 60s into the request: remaining window =
-    // 120 − 60 − 15 = 45s. Successful drafts run 37.9–54.6s (p95 53.7s,
-    // recurrence RCA 2026-07-20), so a 45s window fails p95+ drafts — the
+    // 120 − 60 − 10 = 50s. Successful drafts run 37.9–54.6s (p95 53.7s,
+    // recurrence RCA 2026-07-20), so a 50s window fails p95+ drafts — the
     // retry would usually burn a second LLM call to return the same error.
     // The 55s floor (adversarial-review condition 1) refuses it; the old
     // 35s floor would have launched it.

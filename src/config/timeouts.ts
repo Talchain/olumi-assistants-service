@@ -340,7 +340,11 @@ export const VALIDATION_PIPELINE_TIMEOUT_MS = clampTimeout(
 
 // ---------------------------------------------------------------------------
 // Request budget — single source of truth for draft-graph request lifecycle
-// Intended chain: CEE LLM (105s) < CEE budget (120s) < PLoT proxy (135s) < Render gateway (~150s)
+// Intended chain: CEE LLM (110s) < CEE budget (120s) < browser proxy (125s)
+//                 < ROUTE_TIMEOUT_MS (135s repo default; 180s live staging env)
+// The 125s browser-proxy deadline is the BINDING external constraint on this
+// ladder: the budget keeps a 5s wire-composition margin under it, so the
+// budget itself cannot rise without the proxy deadline rising first.
 // ---------------------------------------------------------------------------
 
 /** Overall request budget for draft-graph requests (default: 120s).
@@ -350,6 +354,12 @@ export const DRAFT_REQUEST_BUDGET_MS = parseTimeoutEnv("DRAFT_REQUEST_BUDGET_MS"
 /** Headroom reserved for post-LLM processing (validation, repair, enrichment).
  *  The effective LLM timeout = DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS
  *
+ *  15s -> 10s (2026-07-20 recalibration): the post-LLM tail is MEASURED at
+ *  ~1-1.5s end-to-end (live probe: success 50.3s total vs 48.8s provider;
+ *  typed failures ~1s tail), so 10s remains >5x the observed worst while
+ *  freeing 5s of the fixed request budget for the LLM window — the scarce
+ *  quantity that decides the affordable draft token budget below.
+ *
  *  SIBLING of `TURN_RESPONSE_HEADROOM_MS`: both reserve tail time inside an
  *  outer deadline so the layer below can turn its result into a response. This
  *  one guards the DRAFT pipeline inside `DRAFT_REQUEST_BUDGET_MS`;
@@ -357,7 +367,7 @@ export const DRAFT_REQUEST_BUDGET_MS = parseTimeoutEnv("DRAFT_REQUEST_BUDGET_MS"
  *  `config.proxy.browserProxyTimeoutMs`. Independent knobs (different tails),
  *  but if you are changing one, check whether the other wants the same
  *  treatment. */
-export const LLM_POST_PROCESSING_HEADROOM_MS = parseTimeoutEnv("LLM_POST_PROCESSING_HEADROOM_MS", 15_000);
+export const LLM_POST_PROCESSING_HEADROOM_MS = parseTimeoutEnv("LLM_POST_PROCESSING_HEADROOM_MS", 10_000);
 
 /** Derived: maximum time the LLM draft call may run before being aborted.
  *  Computed as DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS. */
@@ -384,37 +394,61 @@ export const DRAFT_LLM_TIMEOUT_MS = Math.max(
 // ---------------------------------------------------------------------------
 
 /**
- * Conservative output-throughput floor (tokens/second).
+ * Conservative output-throughput floor (tokens/second) — the MARGINAL decode
+ * rate, applied to the seconds remaining after `DRAFT_TTFB_SAFETY_OVERHEAD_S`.
  *
- * Measured effective draft throughput (output_tokens / total wall time):
- * 71.1 tok/s (07-20 morning), 71.2 (07-20 afternoon), 70.8 (07-19),
- * sd 1.7–3.0 — constant across two days, both pods, and both builds.
- * 60 is more than 3 standard deviations below the SLOWEST measured mean, so
- * a generation sized by this floor completes inside its timeout even at a
- * throughput excursion worse than anything ever observed.
+ * RECALIBRATED 2026-07-20 (60 -> 90) after the live probe
+ * (`parallel-briefs/S-AUDIT-2026-07-20/probe-draft-affordability.md`) proved
+ * the original calibration survivor-biased: 3 of 4 ordinary briefs (344-1,730
+ * chars) hit the 6,000-token budget and failed as typed 500s.
+ *
+ * SETTLED THROUGHPUT MODEL (n=84 completed draft LLM calls, Render llm_usage
+ * events 2026-07-17..07-20, BOTH builds/max_tokens configs, plus the 3
+ * token-capped calls):
+ *
+ *   duration_s = 13.26 + output_tokens / 101.5     (residual sd 1.74s,
+ *                                                    worst residual +5.17s)
+ *
+ * The earlier "~71 tok/s constant throughput" reading and the probe's
+ * "113-115 tok/s" reading were BOTH real but measured different regimes of
+ * this one model: effective end-to-end rate RISES with output size because
+ * the ~13s fixed overhead amortises (3.1-3.5k-token drafts: ~70-73 effective;
+ * 4.7-5.1k: ~78-82; the three capped 6,000-token generations: 111.9-115.1).
+ * Neither a model config change nor a measurement artefact — a size-dependent
+ * effective rate that a single flat number cannot represent.
+ *
+ * 90 is defensible against that settled distribution: below the fitted
+ * marginal rate (101.5), below the slowest capped-call end-to-end rate
+ * (111.9), and — the strongest check — the model `15s + tokens/90` predicts a
+ * LONGER duration than every single one of the 84 observed calls actually
+ * took (0/84 violations; empirical p0, stronger than a p10 requirement).
  */
-export const DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S = 60;
+export const DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S = 90;
 
 /**
- * Safety overhead (seconds) reserved for TTFB + network + request setup.
+ * Safety overhead (seconds) reserved for TTFB + prompt processing + the slow
+ * early-decode phase + network.
  *
- * The measured tok/s figures above are END-TO-END rates (output tokens over
- * total wall time), so first-token latency and network transfer are already
- * folded into them; sibling-call measurements put pure network overhead at
- * ~0.2–0.45s. Reserving a further 5s on top of the 15% throughput discount
- * is deliberate double margin, and still lands the derived budget at 6,000
- * tokens for the current 105s timeout — 1.45x the largest draft ever
- * observed (4,136 tokens).
+ * RECALIBRATED 2026-07-20 (5 -> 15): the 84-call fit puts the FIXED component
+ * of draft duration at 13.26s (intercept of the linear model above) — the
+ * original 5s treated overhead as near-zero because it was buried inside a
+ * flat effective rate. 15s covers the fitted intercept with margin; paired
+ * with the 90 tok/s floor the resulting affordability model over-predicts the
+ * duration of every observed call (see floor comment). At the derived 110s
+ * timeout this lands the budget at (110-15)*90 = 8,550 tokens — above the
+ * proven >=6,000-token live demand floor and 1.66x the largest COMPLETED
+ * draft in the sample (5,148 tokens).
  */
-export const DRAFT_TTFB_SAFETY_OVERHEAD_S = 5;
+export const DRAFT_TTFB_SAFETY_OVERHEAD_S = 15;
 
 /**
  * The number of output tokens a draft LLM call can AFFORD to emit inside
  * `timeoutMs`, at the conservative throughput floor, after reserving the
  * TTFB/network overhead. Floors at 0 for degenerate timeouts.
  *
- * At the default-derived DRAFT_LLM_TIMEOUT_MS (105s):
- * (105 - 5) x 60 = 6,000 tokens (~89.5s at the measured 71 tok/s).
+ * At the default-derived DRAFT_LLM_TIMEOUT_MS (110s):
+ * (110 - 15) x 90 = 8,550 tokens (~97.5s at the fitted 13.26s + tokens/101.5
+ * model — inside the 110s cap with ~12s to spare at typical speed).
  */
 export function getAffordableDraftTokens(timeoutMs: number): number {
   return Math.max(

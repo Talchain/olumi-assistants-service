@@ -884,6 +884,28 @@ export async function draftGraphWithAnthropic(
     // failure below is typed as truncation rather than generic non-JSON.
     const stopReason = (response as { stop_reason?: string | null }).stop_reason ?? undefined;
     const truncatedAtMaxTokens = stopReason === "max_tokens";
+
+    // LLM metadata for FAILED calls (probe aggravator 2, S-AUDIT-2026-07-20):
+    // attached to every parse/validation throw below so Stage 1 (parse.ts)
+    // captures it into ctx.llmMeta and `_diagnostic_trace.llm_calls` is
+    // populated on failed drafts — previously only the schema-validation path
+    // attached `_llm_meta`, so truncation/parse failures were invisible in the
+    // response trace and diagnosis required Render log access. Same shape as
+    // the existing schema-error `_llm_meta` (consumed by parse.ts:~426 and
+    // `extractToolLLMTelemetry`).
+    const failedCallLlmMeta = {
+      model,
+      prompt_version: promptMeta.prompt_version,
+      prompt_hash: promptMeta.prompt_hash,
+      temperature: draftTemperature,
+      provider_latency_ms: providerLatencyMs,
+      finish_reason: stopReason,
+      token_usage: {
+        prompt_tokens: response.usage.input_tokens,
+        completion_tokens: response.usage.output_tokens,
+        total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+      },
+    };
     if (truncatedAtMaxTokens) {
       log.error({
         event: "cee.llm.draft_truncated_max_tokens",
@@ -908,16 +930,19 @@ export async function draftGraphWithAnthropic(
           rawJson = JSON.parse(content.text) as Record<string, unknown>;
         } catch (cause) {
           // Should not happen with Structured Outputs enabled, but guard defensively
-          throw new UpstreamNonJsonError(
-            `anthropic draft_graph structured-outputs returned invalid JSON`,
-            "anthropic",
-            "draft_graph",
-            providerLatencyMs,
-            content.text.slice(0, 500),
-            undefined,
-            undefined,
-            idempotencyKey,
-            cause,
+          throw Object.assign(
+            new UpstreamNonJsonError(
+              `anthropic draft_graph structured-outputs returned invalid JSON`,
+              "anthropic",
+              "draft_graph",
+              providerLatencyMs,
+              content.text.slice(0, 500),
+              undefined,
+              undefined,
+              idempotencyKey,
+              cause,
+            ),
+            { _llm_meta: failedCallLlmMeta },
           );
         }
       } else {
@@ -936,19 +961,31 @@ export async function draftGraphWithAnthropic(
         // generic non-JSON garbage makes the runaway-generation case
         // diagnosable at a glance (pre-fix, these requests never returned at
         // all — they hung to the timeout).
-        throw new UpstreamNonJsonError(
-          `anthropic draft_graph output truncated at max_tokens=${maxTokens} (stop_reason=max_tokens, ` +
-          `output_tokens=${response.usage.output_tokens}) — runaway generation returned truncated JSON ` +
-          `inside the ${effectiveTimeout}ms timeout instead of hanging to it`,
-          "anthropic",
-          "draft_graph",
-          providerLatencyMs,
-          content.text.slice(0, 500),
-          undefined,
-          undefined,
-          idempotencyKey,
-          parseErr,
+        throw Object.assign(
+          new UpstreamNonJsonError(
+            `anthropic draft_graph output truncated at max_tokens=${maxTokens} (stop_reason=max_tokens, ` +
+            `output_tokens=${response.usage.output_tokens}) — runaway generation returned truncated JSON ` +
+            `inside the ${effectiveTimeout}ms timeout instead of hanging to it`,
+            "anthropic",
+            "draft_graph",
+            providerLatencyMs,
+            content.text.slice(0, 500),
+            undefined,
+            undefined,
+            idempotencyKey,
+            parseErr,
+          ),
+          // Structured classification + failed-call metadata: the pipeline's
+          // recovery-copy selection keys off the FLAG (message-prefix matching
+          // breaks anchored regexes), and the meta feeds ctx.llmMeta →
+          // _diagnostic_trace.llm_calls on the failure envelope.
+          { _llm_meta: failedCallLlmMeta, truncated_at_max_tokens: true },
         );
+      }
+      // Non-truncated parse failure: still carry the failed call's metadata so
+      // the diagnostic trace records the LLM call that produced the bad text.
+      if (parseErr instanceof Error && !(parseErr as { _llm_meta?: unknown })._llm_meta) {
+        Object.assign(parseErr, { _llm_meta: failedCallLlmMeta });
       }
       throw parseErr;
     }
@@ -1036,6 +1073,12 @@ export async function draftGraphWithAnthropic(
               total_tokens: response.usage.input_tokens + response.usage.output_tokens,
             },
           },
+          // Structured truncation flag: `truncationPrefix` breaks the
+          // pipeline's `^anthropic_response_invalid_schema` message anchor, so
+          // without the flag a truncated-then-schema-invalid draft fell
+          // through to an untyped 500 with no recovery copy. The pipeline
+          // keys its typed 400 + truncation recovery off this flag.
+          ...(truncatedAtMaxTokens ? { truncated_at_max_tokens: true } : {}),
         },
       );
       throw schemaError;
