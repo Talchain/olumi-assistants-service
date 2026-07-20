@@ -19,6 +19,7 @@ import {
   type RuntimeEnv,
   type RuntimeEnvSource,
 } from "./env-resolver.js";
+import { getAffordableDraftTokens, DRAFT_LLM_TIMEOUT_MS } from "./timeouts.js";
 
 /**
  * Config override events to be emitted after telemetry is available
@@ -1799,7 +1800,9 @@ function parseConfig(): Config {
 
     // Validate thinking configuration at startup to surface misconfiguration before first request.
     // The Anthropic API requires max_tokens > budget_tokens. When no explicit max_tokens override
-    // is set, the adapter defaults (4096 for chat/chatWithTools, 16384 for draft_graph) apply —
+    // is set, the adapter defaults apply (4096 for chat/chatWithTools; for draft_graph the budget
+    // is DERIVED from the draft timeout — see resolveDraftMaxTokens, 2026-07-20 outage fix; the
+    // draft adapter also auto-raises max_tokens to budget_tokens + 1024 when thinking is enabled) —
     // the startup check must cover both the unset case (undefined) and the too-low case.
     const thinkingChecks: Array<{
       name: string;
@@ -1810,7 +1813,10 @@ function parseConfig(): Config {
       adapterDefault: number;
     }> = [
       { name: 'orchestrator', enabled: parsed.cee.thinking.orchestratorEnabled, budget: parsed.cee.thinking.orchestratorBudget, maxTokens: parsed.cee.maxTokens.orchestrator, envVar: 'CEE_MAX_TOKENS_ORCHESTRATOR', adapterDefault: 4096   },
-      { name: 'draft_graph',  enabled: parsed.cee.thinking.draftGraphEnabled,   budget: parsed.cee.thinking.draftGraphBudget,   maxTokens: parsed.cee.maxTokens.draft,        envVar: 'CEE_MAX_TOKENS_DRAFT',        adapterDefault: 16384  },
+      // draft_graph adapterDefault is DERIVED (was a hand-set 16384 mirror of the adapter —
+      // the 2026-07-20 outage class): unconfigured means the adapter uses the affordable
+      // budget derived from the draft timeout.
+      { name: 'draft_graph',  enabled: parsed.cee.thinking.draftGraphEnabled,   budget: parsed.cee.thinking.draftGraphBudget,   maxTokens: parsed.cee.maxTokens.draft,        envVar: 'CEE_MAX_TOKENS_DRAFT',        adapterDefault: getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS) },
       { name: 'edit_graph',   enabled: parsed.cee.thinking.editGraphEnabled,    budget: parsed.cee.thinking.editGraphBudget,    maxTokens: parsed.cee.maxTokens.edit_graph,   envVar: 'CEE_MAX_TOKENS_EDIT_GRAPH',   adapterDefault: 4096   },
     ];
     for (const check of thinkingChecks) {

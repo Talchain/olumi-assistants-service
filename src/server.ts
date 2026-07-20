@@ -45,7 +45,7 @@ import { statusRoutes, incrementRequestCount, incrementErrorCount } from "./rout
 import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
-import { getAdapter, warmProviderConfigCache } from "./adapters/llm/router.js";
+import { getAdapter, warmProviderConfigCache, getMaxTokensFromConfig } from "./adapters/llm/router.js";
 import { validateModelsAtStartup, getEnabledModelsSummary } from "./config/models.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
@@ -56,7 +56,7 @@ import { responseHashPlugin } from "./plugins/response-hash.js";
 import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
 import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
-import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS, getResolvedTimeouts, validateTimeoutRelationships } from "./config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS, getResolvedTimeouts, validateTimeoutRelationships, getAffordableDraftTokens, validateDraftTokenAffordability } from "./config/timeouts.js";
 import { getTurnExecutorBudgets, getHandlerBudgetMs } from "./orchestrator-v5/budgets.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
@@ -265,7 +265,18 @@ export async function build() {
     draft_request_budget_ms: DRAFT_REQUEST_BUDGET_MS,
     llm_post_processing_headroom_ms: LLM_POST_PROCESSING_HEADROOM_MS,
     derived_llm_timeout_ms: DRAFT_LLM_TIMEOUT_MS,
-  }, `Request budget: ${DRAFT_REQUEST_BUDGET_MS}ms total, ${DRAFT_LLM_TIMEOUT_MS}ms LLM timeout, ${LLM_POST_PROCESSING_HEADROOM_MS}ms headroom`);
+    affordable_draft_tokens: getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS),
+  }, `Request budget: ${DRAFT_REQUEST_BUDGET_MS}ms total, ${DRAFT_LLM_TIMEOUT_MS}ms LLM timeout, ${LLM_POST_PROCESSING_HEADROOM_MS}ms headroom, ${getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS)} affordable draft tokens`);
+
+  // Boot assertion (2026-07-20 draft outage — "never again"): a configured
+  // draft max_tokens the derived timeout cannot afford is exactly the
+  // arithmetic that hung every long draft generation to the 105s cap. The
+  // runtime clamps independently (resolveDraftMaxTokens), so this logs at
+  // ERROR and continues rather than killing the pod over a config the clamp
+  // has already made safe. Both compared values are DERIVED from live config.
+  for (const affordabilityError of validateDraftTokenAffordability(getMaxTokensFromConfig('draft_graph') ?? null)) {
+    log.error({ event: 'config.draft_token_affordability' }, affordabilityError);
+  }
 
   // Validate timeout relationships (warn about misconfigurations).
   // The V5 budget-layer values are injected: `timeouts.ts` is kept import-light

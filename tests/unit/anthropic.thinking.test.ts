@@ -356,7 +356,9 @@ describe("draftGraphWithAnthropic — thinking", () => {
 
   it("auto-raises max_tokens to budget + 1024 when no override is set", async () => {
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
-    // draft_graph default is 16384; budget is 6000; 16384 > 7024 so max stays at 16384
+    // draft_graph max_tokens is derived from the timeout (6000 at the default
+    // 105s); thinking budget 6000 + 1024 = 7024 > 6000, so max is auto-raised
+    // to 7024 to satisfy the Anthropic max_tokens > budget_tokens constraint.
     await draftGraphWithAnthropic({
       brief: "Help me decide whether to take the job offer.",
       docs: [],

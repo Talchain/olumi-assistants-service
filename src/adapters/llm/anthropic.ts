@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Agent, fetch as undiciFetch } from "undici";
-import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, getAffordableDraftTokens, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
@@ -505,11 +505,53 @@ function isThinkingSupported(model: string, context: string): boolean {
   return false;
 }
 
-// Hard floor and default for draft_graph max_tokens.
-// A complex 15-node graph with coaching, causal claims, and goal constraints can exceed
-// 4096 tokens; 16384 is the unconfigured default and 8192 is the minimum safe value.
+// Guard floor for an EXPLICITLY-configured draft max_tokens set too low —
+// a complex 15-node graph with coaching, causal claims, and goal constraints
+// can exceed 4096 tokens. The floor is capped at the affordable budget in
+// `resolveDraftMaxTokens`: a floor ABOVE what the timeout affords was the
+// exact 2026-07-20 outage defect (8,192 tokens needed 115s against a 105s
+// timeout, so long generations hung to the cap instead of completing).
+// The former hand-set default of 16,384 is GONE: when CEE_MAX_TOKENS_DRAFT
+// is unset, the budget is derived from the timeout instead of mirrored from
+// what the model could theoretically emit.
 const DRAFT_MAX_TOKENS_FLOOR = 8192;
-const DRAFT_MAX_TOKENS_DEFAULT = 16384;
+
+/**
+ * Resolve the draft max_tokens for a call that will be aborted at `timeoutMs`.
+ *
+ * THE mechanism that closes the 2026-07-20 draft-outage arithmetic: the
+ * effective token budget is DERIVED from the timeout at the call site — the
+ * one place both values are visible — and can never exceed what the timeout
+ * affords (`getAffordableDraftTokens`, conservative constants documented in
+ * `config/timeouts.ts`). A runaway generation now returns at the token cap
+ * (stop_reason=max_tokens, typed handling below) instead of hanging to the
+ * timeout and 504ing.
+ *
+ * - unconfigured: effective = affordable (derived, e.g. 6,000 at 105s)
+ * - configured too low: raised to min(DRAFT_MAX_TOKENS_FLOOR, affordable)
+ * - configured too high: clamped down to affordable
+ *
+ * Exported for the boot-time affordability assertion and value tests.
+ */
+export function resolveDraftMaxTokens(timeoutMs: number): {
+  configured: number | null;
+  affordable: number;
+  effective: number;
+} {
+  // Anthropic requires max_tokens >= 1; a degenerate timeout still needs an
+  // API-valid request (it will fail fast on time, not on a 400).
+  const affordable = Math.max(1, getAffordableDraftTokens(timeoutMs));
+  const configured = getMaxTokensFromConfig('draft_graph') ?? null;
+  if (configured === null) {
+    return { configured, affordable, effective: affordable };
+  }
+  const floor = Math.min(DRAFT_MAX_TOKENS_FLOOR, affordable);
+  return {
+    configured,
+    affordable,
+    effective: Math.min(Math.max(configured, floor), affordable),
+  };
+}
 
 /**
  * Determine if a caught error is a Structured Outputs **capability** rejection
@@ -586,12 +628,54 @@ export async function draftGraphWithAnthropic(
   const draftThinkingRequested = args.thinking?.type === 'enabled';
   const draftThinkingEnabled = draftThinkingRequested && isThinkingSupported(model, 'draft_graph');
   const draftThinkingBudget = draftThinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
-  // Math.max enforces: (1) draft floor, (2) thinking budget headroom when enabled
-  const maxTokens = Math.max(
-    getMaxTokensFromConfig('draft_graph') ?? DRAFT_MAX_TOKENS_DEFAULT,
-    DRAFT_MAX_TOKENS_FLOOR,
-    draftThinkingEnabled ? draftThinkingBudget + 1024 : 0,
-  );
+
+  // Align timeout with DRAFT_LLM_TIMEOUT_MS when not explicitly overridden.
+  // Previously fell back to HTTP_CLIENT_TIMEOUT_MS (110s); DRAFT_LLM_TIMEOUT_MS
+  // (DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS = 105s) is correct
+  // for the pipeline path. Stage 1 (Parse) always passes opts.timeoutMs so this
+  // fallback only matters for direct calls (e.g. tests, legacy routes).
+  // Resolved BEFORE max_tokens because max_tokens is DERIVED from it.
+  const effectiveTimeout = opts?.timeoutMs ?? DRAFT_LLM_TIMEOUT_MS;
+
+  // Token budget derived from the timeout (2026-07-20 outage fix) — see
+  // resolveDraftMaxTokens above. The effective budget can never exceed what
+  // the timeout affords, so a runaway generation returns truncated (typed
+  // handling below) instead of hanging to the timeout.
+  const {
+    configured: configuredDraftMaxTokens,
+    affordable: affordableDraftTokens,
+    effective: derivedMaxTokens,
+  } = resolveDraftMaxTokens(effectiveTimeout);
+  if (configuredDraftMaxTokens !== null && configuredDraftMaxTokens > affordableDraftTokens) {
+    log.warn({
+      event: "cee.llm.draft_max_tokens_clamped",
+      configured_max_tokens: configuredDraftMaxTokens,
+      affordable_tokens: affordableDraftTokens,
+      timeout_ms: effectiveTimeout,
+      throughput_floor_tok_s: DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S,
+      overhead_s: DRAFT_TTFB_SAFETY_OVERHEAD_S,
+    }, "[Anthropic] configured draft max_tokens exceeds what the timeout affords — clamped (2026-07-20 outage class; boot logs the same at ERROR)");
+  }
+
+  // Extended thinking is an explicit operator opt-in (CEE_DRAFT_GRAPH_THINKING,
+  // default off) and the Anthropic API requires max_tokens > budget_tokens —
+  // clamping below the budget would 400 every call. If the operator's thinking
+  // budget forces max_tokens past affordability, honour the API constraint but
+  // say so loudly: this is the ONE remaining way to exceed the affordable
+  // budget, and it is a deliberate config choice, not silent arithmetic.
+  let maxTokens = derivedMaxTokens;
+  if (draftThinkingEnabled && draftThinkingBudget + 1024 > maxTokens) {
+    maxTokens = draftThinkingBudget + 1024;
+    if (maxTokens > affordableDraftTokens) {
+      log.warn({
+        event: "cee.llm.draft_thinking_exceeds_affordable",
+        thinking_budget_tokens: draftThinkingBudget,
+        max_tokens: maxTokens,
+        affordable_tokens: affordableDraftTokens,
+        timeout_ms: effectiveTimeout,
+      }, "[Anthropic] extended-thinking budget forces draft max_tokens above the affordable token budget — generation may hit the timeout; lower CEE_DRAFT_GRAPH_THINKING_BUDGET or raise DRAFT_REQUEST_BUDGET_MS");
+    }
+  }
   // Anthropic requires temperature=1 when extended thinking is active
   const draftTemperature = draftThinkingEnabled ? 1 : 0;
 
@@ -628,13 +712,6 @@ export async function draftGraphWithAnthropic(
   // V04: Generate idempotency key for request traceability
   const idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
-
-  // Align timeout with DRAFT_LLM_TIMEOUT_MS when not explicitly overridden.
-  // Previously fell back to HTTP_CLIENT_TIMEOUT_MS (110s); DRAFT_LLM_TIMEOUT_MS
-  // (DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS = 105s) is correct
-  // for the pipeline path. Stage 1 (Parse) always passes opts.timeoutMs so this
-  // fallback only matters for direct calls (e.g. tests, legacy routes).
-  const effectiveTimeout = opts?.timeoutMs ?? DRAFT_LLM_TIMEOUT_MS;
 
   // Debug: Log model parameters for runtime validation (mirrors OpenAI adapter pattern)
   log.debug({
@@ -799,19 +876,70 @@ export async function draftGraphWithAnthropic(
       throw new Error(ERR_UNEXPECTED_RESPONSE_TYPE);
     }
 
+    // Truncation detection (2026-07-20 outage payoff): with max_tokens derived
+    // from the timeout, a runaway generation now RETURNS at the token cap
+    // (stop_reason=max_tokens) inside the timeout, instead of hanging to the
+    // cap and 504ing. Log it loudly either way; if the truncated text still
+    // parses, the draft is accepted (truncated-but-parseable), otherwise the
+    // failure below is typed as truncation rather than generic non-JSON.
+    const stopReason = (response as { stop_reason?: string | null }).stop_reason ?? undefined;
+    const truncatedAtMaxTokens = stopReason === "max_tokens";
+    if (truncatedAtMaxTokens) {
+      log.error({
+        event: "cee.llm.draft_truncated_max_tokens",
+        model,
+        max_tokens: maxTokens,
+        output_tokens: response.usage.output_tokens,
+        timeout_ms: effectiveTimeout,
+        affordable_tokens: affordableDraftTokens,
+        provider_latency_ms: providerLatencyMs,
+      }, "[Anthropic] draft_graph generation hit max_tokens — runaway generation truncated by the derived token budget instead of hanging to the timeout (2026-07-20 outage class)");
+    }
+
     // Extract JSON from response.
     // When Structured Outputs was actually used (not fallen back from), the response is
     // guaranteed valid JSON matching our schema — go straight to JSON.parse.
     // When inactive or after a 400 fallback to prompt-only mode, use the robust extractor
     // that handles markdown fences and preamble.
     let rawJson: Record<string, unknown>;
-    if (useStructuredOutputs) {
-      try {
-        rawJson = JSON.parse(content.text) as Record<string, unknown>;
-      } catch (cause) {
-        // Should not happen with Structured Outputs enabled, but guard defensively
+    try {
+      if (useStructuredOutputs) {
+        try {
+          rawJson = JSON.parse(content.text) as Record<string, unknown>;
+        } catch (cause) {
+          // Should not happen with Structured Outputs enabled, but guard defensively
+          throw new UpstreamNonJsonError(
+            `anthropic draft_graph structured-outputs returned invalid JSON`,
+            "anthropic",
+            "draft_graph",
+            providerLatencyMs,
+            content.text.slice(0, 500),
+            undefined,
+            undefined,
+            idempotencyKey,
+            cause,
+          );
+        }
+      } else {
+        const extractionResult = safeExtractJson(content.text, {
+          task: "draft_graph",
+          model,
+          correlationId: idempotencyKey,
+          includeRawContent: args.includeDebug, // Preserve full raw text for debugging
+        }, "draft_graph", providerLatencyMs, idempotencyKey);
+        rawJson = extractionResult.json as Record<string, unknown>;
+      }
+    } catch (parseErr) {
+      if (truncatedAtMaxTokens) {
+        // Fail FAST and TYPED: the generation was cut at the derived token
+        // budget and the remainder is unparseable. Distinguishing this from
+        // generic non-JSON garbage makes the runaway-generation case
+        // diagnosable at a glance (pre-fix, these requests never returned at
+        // all — they hung to the timeout).
         throw new UpstreamNonJsonError(
-          `anthropic draft_graph structured-outputs returned invalid JSON`,
+          `anthropic draft_graph output truncated at max_tokens=${maxTokens} (stop_reason=max_tokens, ` +
+          `output_tokens=${response.usage.output_tokens}) — runaway generation returned truncated JSON ` +
+          `inside the ${effectiveTimeout}ms timeout instead of hanging to it`,
           "anthropic",
           "draft_graph",
           providerLatencyMs,
@@ -819,17 +947,10 @@ export async function draftGraphWithAnthropic(
           undefined,
           undefined,
           idempotencyKey,
-          cause,
+          parseErr,
         );
       }
-    } else {
-      const extractionResult = safeExtractJson(content.text, {
-        task: "draft_graph",
-        model,
-        correlationId: idempotencyKey,
-        includeRawContent: args.includeDebug, // Preserve full raw text for debugging
-      }, "draft_graph", providerLatencyMs, idempotencyKey);
-      rawJson = extractionResult.json as Record<string, unknown>;
+      throw parseErr;
     }
     // Use full raw text for debug output (preserves preamble/suffix for forensics)
     const jsonText = content.text.trim();
@@ -886,11 +1007,21 @@ export async function draftGraphWithAnthropic(
       const formIssues = (flatErrors.formErrors || []).join('; ');
       const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
 
+      // Truncation typing (2026-07-20 outage payoff): a generation cut at the
+      // derived token budget can still yield text the robust extractor turns
+      // into a partial object — which then fails HERE, at schema validation.
+      // Name the truncation so the runaway-generation case stays diagnosable
+      // on this path too, not just on the parse-failure path above.
+      const truncationPrefix = truncatedAtMaxTokens
+        ? `anthropic draft_graph output truncated at max_tokens=${maxTokens} (stop_reason=max_tokens, ` +
+          `output_tokens=${response.usage.output_tokens}) — truncated JSON failed schema validation — `
+        : '';
+
       // Attach LLM metadata to the error so Stage 1 parse.ts can capture it
       // even when the adapter throws. Without this, ctx.llmMeta is never set
       // and _diagnostic_trace.llm_calls remains empty on validation failures.
       const schemaError = Object.assign(
-        new Error(`anthropic_response_invalid_schema: ${details || 'unknown validation error'}`),
+        new Error(`${truncationPrefix}anthropic_response_invalid_schema: ${details || 'unknown validation error'}`),
         {
           _llm_meta: {
             model,
