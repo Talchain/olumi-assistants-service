@@ -340,11 +340,18 @@ export const VALIDATION_PIPELINE_TIMEOUT_MS = clampTimeout(
 
 // ---------------------------------------------------------------------------
 // Request budget — single source of truth for draft-graph request lifecycle
-// Intended chain: CEE LLM (110s) < CEE budget (120s) < browser proxy (125s)
-//                 < ROUTE_TIMEOUT_MS (135s repo default; 180s live staging env)
-// The 125s browser-proxy deadline is the BINDING external constraint on this
-// ladder: the budget keeps a 5s wire-composition margin under it, so the
-// budget itself cannot rise without the proxy deadline rising first.
+// Intended chain (nesting, not fixed numbers — the live values are env-resolved,
+// recompute from config): CEE LLM window < CEE draft budget < browser proxy <
+// ROUTE_TIMEOUT_MS. The browser-proxy deadline is the BINDING external constraint
+// on this ladder: the draft budget must keep a DRAFT_REQUEST_RESPONSE_HEADROOM_MS
+// wire-composition margin under it, so the budget cannot rise without the proxy
+// deadline rising first.
+//
+// This is no longer an honour-system comment. `validateTimeoutRelationships()`
+// ENFORCES that margin at boot against the env-resolved values (see the
+// DRAFT_REQUEST_BUDGET_MS vs browserProxyTimeoutMs rung); a bare
+// `DRAFT_REQUEST_BUDGET_MS=130000` override that used to boot silently and
+// re-open the proxy-504 symptom now warns instead.
 // ---------------------------------------------------------------------------
 
 /** Overall request budget for draft-graph requests (default: 120s).
@@ -375,6 +382,26 @@ export const DRAFT_LLM_TIMEOUT_MS = Math.max(
   MIN_TIMEOUT_MS,
   DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS,
 );
+
+/**
+ * Wire-composition margin the draft request budget must keep UNDER the
+ * browser-proxy deadline (`config.proxy.browserProxyTimeoutMs`).
+ *
+ * `DRAFT_REQUEST_BUDGET_MS` is the deadline by which CEE must HAVE a response;
+ * the proxy still has to RECEIVE the composed, serialised bytes before it gives
+ * up. This reserves that tail (plus any pre-budget request handling the proxy
+ * clock already counts). It is the DRAFT-path analogue of
+ * `TURN_RESPONSE_HEADROOM_MS` (which guards the V5 TURN budget under the same
+ * proxy deadline): separate knobs because the draft and turn tails differ.
+ *
+ * The value lives HERE as the single source of truth. The ladder-header comment
+ * above and the config-schema note on `browserProxyTimeoutMs` DESCRIBE this
+ * margin; they must not re-pin the number. Enforced at boot by
+ * `validateTimeoutRelationships()` — raising `DRAFT_REQUEST_BUDGET_MS` toward or
+ * past the proxy deadline without preserving this margin is the 2026-07-20
+ * proxy-504 class.
+ */
+export const DRAFT_REQUEST_RESPONSE_HEADROOM_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // Draft token affordability — max_tokens is DERIVED from the timeout
@@ -417,11 +444,20 @@ export const DRAFT_LLM_TIMEOUT_MS = Math.max(
  * Neither a model config change nor a measurement artefact — a size-dependent
  * effective rate that a single flat number cannot represent.
  *
- * 90 is defensible against that settled distribution: below the fitted
- * marginal rate (101.5), below the slowest capped-call end-to-end rate
- * (111.9), and — the strongest check — the model `15s + tokens/90` predicts a
- * LONGER duration than every single one of the 84 observed calls actually
- * took (0/84 violations; empirical p0, stronger than a p10 requirement).
+ * 90 is defensible against that settled distribution: below the fitted marginal
+ * rate (101.5), and below the slowest capped call ONCE THAT RATE IS PUT ON THE
+ * FIT'S BASIS. Watch the basis here: the 111.9-115.1 figures above are
+ * provider_latency-based (decode window only), whereas the fit is measured
+ * request-id-mint -> completion-event and therefore includes the pre-decode
+ * overhead the capped calls also paid. On that shared mint->event basis the
+ * slowest capped call runs ~92 tok/s, so the floor's real margin over it is
+ * ~2 tok/s — NOT the ~22 a naive 90-vs-111.9 comparison implies. A recalibrator
+ * MUST compare same-basis before raising this floor; the provider_latency rate
+ * is not headroom.
+ *
+ * The strongest check is basis-independent: the model `15s + tokens/90` predicts
+ * a LONGER duration than every single one of the 84 observed calls actually took
+ * (0/84 violations; empirical p0, stronger than a p10 requirement).
  */
 export const DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S = 90;
 
@@ -735,6 +771,22 @@ export function validateTimeoutRelationships(ladder: BudgetLadderInputs): string
     );
   }
 
+  // Same shape as the turn-budget rung above, but for the DRAFT request budget.
+  // DRAFT_REQUEST_BUDGET_MS is a module constant (env-resolved) rather than an
+  // injected value, so this was the ladder's only step the header comment CLAIMED
+  // but nothing enforced: a bare DRAFT_REQUEST_BUDGET_MS override could climb to
+  // the proxy deadline and re-open the 2026-07-20 proxy-504 symptom while every
+  // CI assertion (which runs at repo defaults) stayed green.
+  if (ladder.browserProxyTimeoutMs - DRAFT_REQUEST_BUDGET_MS < DRAFT_REQUEST_RESPONSE_HEADROOM_MS) {
+    warnings.push(
+      `BROWSER_PROXY_TIMEOUT_MS (${ladder.browserProxyTimeoutMs}ms) - DRAFT_REQUEST_BUDGET_MS (${DRAFT_REQUEST_BUDGET_MS}ms) < ` +
+      `DRAFT_REQUEST_RESPONSE_HEADROOM_MS (${DRAFT_REQUEST_RESPONSE_HEADROOM_MS}ms) — ` +
+      `the draft request budget can hold to its own deadline but leave too little margin to compose and serialise the ` +
+      `response before the browser proxy answers; raising DRAFT_REQUEST_BUDGET_MS without also raising ` +
+      `BROWSER_PROXY_TIMEOUT_MS re-opens the 2026-07-20 proxy-504 symptom`,
+    );
+  }
+
   if (ladder.browserProxyTimeoutMs >= ROUTE_TIMEOUT_MS) {
     warnings.push(
       `BROWSER_PROXY_TIMEOUT_MS (${ladder.browserProxyTimeoutMs}ms) >= ROUTE_TIMEOUT_MS (${ROUTE_TIMEOUT_MS}ms) — ` +
@@ -786,6 +838,7 @@ export function getResolvedTimeouts(): Record<string, number> {
     MIN_RETRY_BUDGET_MS,
     RETRY_SAFETY_MARGIN_MS,
     TURN_RESPONSE_HEADROOM_MS,
+    DRAFT_REQUEST_RESPONSE_HEADROOM_MS,
     SSE_HEARTBEAT_INTERVAL_MS,
     SSE_RESUME_LIVE_TIMEOUT_MS,
     SSE_RESUME_POLL_INTERVAL_MS,
