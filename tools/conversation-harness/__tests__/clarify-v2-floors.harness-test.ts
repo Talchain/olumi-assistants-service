@@ -148,7 +148,7 @@ describe('FLOOR 5 — no repeats across rounds + the stop rule terminates', () =
         state,
         message: turn.message,
         messageIsDraftShaped: false,
-        explicitGenerate: false,
+        explicitGenerateBrief: null,
       });
       if (turn.expect === 'proceed') {
         expect(lastDecision.kind, script.note).toBe('proceed');
@@ -182,9 +182,12 @@ describe('FLOOR 5 — no repeats across rounds + the stop rule terminates', () =
         state,
         message: 'hmm let me think about the weather instead',
         messageIsDraftShaped: false,
-        explicitGenerate: false,
+        explicitGenerateBrief: null,
       });
-      if (decision.kind === 'proceed') break;
+      // Break on any terminal decision; the assertion below still pins that
+      // THIS sequence ends in 'proceed' (a 'decline' here would be a real
+      // behaviour change and must go red, not be absorbed).
+      if (decision.kind !== 'ask') break;
       state = decision.state;
     }
     expect(decision.kind).toBe('proceed');
