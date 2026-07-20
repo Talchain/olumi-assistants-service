@@ -197,6 +197,14 @@ export type V5DiagnosticExitPath =
   | 'edit_graph'
   | 'system_event'
   | 'frame_no_brief_guard'
+  // META-DECISION-DIAGNOSIS-2026-07-20 — round-1 process-meta intake
+  // guard: a question TO the assistant about the process (the product's
+  // own pre-analysis spark prompts, or a narrowly-matched typed variant)
+  // on the empty-canvas frame state is ANSWERED deterministically instead
+  // of being captured as a decision brief by the draft/clarify pipeline.
+  // Zero LLM calls, no commit (scenario stays fresh so the user's next
+  // real brief still drafts).
+  | 'process_meta_intake'
   // ROADMAP 2.63 C2 — deterministic honest decline when an explicit
   // generate (generate_model/explicit_generate wire flag) arrives but no
   // usable brief exists anywhere (message, persisted brief_text, recent

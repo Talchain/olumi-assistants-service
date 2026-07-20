@@ -147,6 +147,15 @@ export const TelemetryEvents = {
   // prompt. See src/orchestrator/route-v2.ts (frame_no_brief_guard).
   V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
 
+  // META-DECISION-DIAGNOSIS-2026-07-20 — round-1 process-meta intake
+  // guard. Fires when a frame-stage empty-canvas message is a question TO
+  // the assistant about the process (the product's own pre-analysis spark
+  // prompts, or a narrowly-matched typed variant) and is answered
+  // deterministically instead of being captured as a decision brief by
+  // the draft/clarify pipeline. See src/orchestrator-v5/routing/
+  // process-meta-intake.ts and route-v2's process_meta_intake branch.
+  V5ProcessMetaIntakeGuard: "v5.process_meta_intake_guard",
+
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
   // message turn that arrives with generate_model/explicit_generate set,
   // regardless of outcome (`outcome` field: dispatch_draft /
