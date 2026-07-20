@@ -8,7 +8,7 @@
     "dsk_version_hash": null
   },
   "stage_indicator": {
-    "stage": "evaluate",
+    "stage": "analyse",
     "confidence": "high",
     "source": "inferred"
   },

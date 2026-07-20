@@ -4,7 +4,7 @@
     "seq": 0,
     "turn_id": "turn-tool-001",
     "routing": "llm",
-    "stage": "evaluate"
+    "stage": "analyse"
   },
   {
     "type": "text_delta",
@@ -83,7 +83,7 @@
         "dsk_version_hash": null
       },
       "stage_indicator": {
-        "stage": "evaluate",
+        "stage": "analyse",
         "confidence": "high",
         "source": "explicit_event"
       },

@@ -4,9 +4,20 @@
  * Contract-testing only — not used at runtime. Kept intentionally loose
  * (.passthrough()) on nested objects so the contract catches structural
  * regressions without breaking on additive fields.
+ *
+ * Stage vocabulary: DERIVED from the canonical `Stage` export of
+ * `@talchain/schemas` (0.19.0, UI-SEM-020) — frame | analyse | decide |
+ * review. This file previously hand-maintained the retired 5-stage list
+ * (frame/ideate/evaluate/decide/optimise), which meant the exported
+ * contract (contracts/orchestrator-response-v2.schema.json, shared with
+ * the UI repo) kept ACCEPTING retired stage values after the canonical
+ * vocabulary shipped. Per the schemas 0.19.0 doctrine, consumers MUST
+ * derive from `Stage`; a hand-maintained mirror is the known drift
+ * defect. Pinned by tests/contracts/response-envelope-stage-vocab.test.ts.
  */
 
 import { z } from "zod";
+import { Stage } from "@talchain/schemas/boundary";
 
 const SpecialistAdviceSchema = z.object({
   specialist_id: z.string(),
@@ -81,13 +92,13 @@ export const OrchestratorResponseEnvelopeV2Schema = z.object({
   }),
 
   stage_indicator: z.object({
-    stage: z.enum(['frame', 'ideate', 'evaluate', 'decide', 'optimise']),
+    stage: Stage,
     substate: z.string().optional(),
     confidence: z.enum(['high', 'medium', 'low']),
     source: z.enum(['explicit_event', 'inferred']),
     transition: z.object({
-      from: z.enum(['frame', 'ideate', 'evaluate', 'decide', 'optimise']),
-      to: z.enum(['frame', 'ideate', 'evaluate', 'decide', 'optimise']),
+      from: Stage,
+      to: Stage,
       trigger: z.string(),
     }).optional(),
   }),
