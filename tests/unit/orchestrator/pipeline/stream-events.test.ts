@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { Stage } from "@talchain/schemas/boundary";
 import { OrchestratorStreamEventSchema } from "../../../../src/orchestrator/pipeline/stream-events.js";
 
 const FIXTURES_DIR = resolve(__dirname, "../../../fixtures/streaming");
@@ -96,6 +97,63 @@ describe("OrchestratorStreamEventSchema", () => {
       expect(data).toHaveProperty("lineage");
       expect(Array.isArray(data)).toBe(false);
     });
+  });
+
+  // ==========================================================================
+  // Stage-vocabulary guard (fixture assert, not a happy-path parse).
+  //
+  // A retired stage value in these fixtures silently pins the OLD wire
+  // vocabulary in this repo's test corpus. (An earlier claim that these
+  // fixture files are shared with the UI repo's parser tests was REFUTED in
+  // review 2026-07-20 — none of these basenames exist in the UI tree; the
+  // README's consumer note predates that check.) Every `stage` (and
+  // string-valued `stage_indicator`) found ANYWHERE in ANY fixture in
+  // tests/fixtures/streaming must be a member of the canonical
+  // @talchain/schemas `Stage` vocabulary (frame | analyse | decide | review)
+  // — derived from `Stage.options`, never hand-listed, per the 0.19.0
+  // derive-don't-mirror rule.
+  //
+  // Positive control: the collector must find at least one stage value
+  // (cached-json.json carries stage_indicator.stage), otherwise the absence
+  // assertion would be vacuous.
+  // ==========================================================================
+  describe("fixture stage vocabulary is canonical (derived from @talchain/schemas)", () => {
+    function collectStageValues(value: unknown, found: Array<{ path: string; value: string }>, path: string): void {
+      if (Array.isArray(value)) {
+        value.forEach((item, i) => collectStageValues(item, found, `${path}[${i}]`));
+        return;
+      }
+      if (value === null || typeof value !== "object") return;
+      for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+        if ((key === "stage" || key === "stage_indicator") && typeof child === "string") {
+          found.push({ path: `${path}.${key}`, value: child });
+        } else {
+          collectStageValues(child, found, `${path}.${key}`);
+        }
+      }
+    }
+
+    const allFixtureFiles = readdirSync(FIXTURES_DIR).filter((f) => f.endsWith(".json"));
+
+    it("collector finds at least one stage value (positive control)", () => {
+      const found: Array<{ path: string; value: string }> = [];
+      for (const file of allFixtureFiles) {
+        collectStageValues(loadFixture(file), found, file);
+      }
+      expect(found.length).toBeGreaterThan(0);
+    });
+
+    for (const file of allFixtureFiles) {
+      it(`${file} carries no retired stage vocabulary`, () => {
+        const found: Array<{ path: string; value: string }> = [];
+        collectStageValues(loadFixture(file), found, file);
+        for (const hit of found) {
+          // Assertion message carries the offending path so a regression
+          // names its own location.
+          expect(Stage.options, `${hit.path} = "${hit.value}" is not canonical Stage vocabulary`).toContain(hit.value);
+        }
+      });
+    }
   });
 
   // Parser hardening edge cases present in fixtures
