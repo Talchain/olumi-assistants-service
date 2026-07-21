@@ -186,6 +186,7 @@ import {
   isProcessMetaIntake,
   composeProcessMetaIntakeResponse,
 } from '../orchestrator-v5/routing/process-meta-intake.js';
+import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 
 // ───────────────────────────────────────────────────────────────────
@@ -1854,6 +1855,97 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
 
     // ────────────────────────────────────────────────────────────────────
+    // S2-L1 — typed readiness/coaching pre-heuristic arm + §2g totality
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // Runs immediately AFTER the deterministic-chip-click block and BEFORE the
+    // entire heuristic ladder (resume-intent, draft dispatch, clarify gate,
+    // process-meta answer, frame guard). This is the correct pre-route
+    // insertion point: a typed chip_click is routed by its TYPE, ahead of every
+    // string/shape heuristic.
+    //
+    // It cannot shadow the held-proposal / short-confirm / value-update text
+    // ladders: those key on composer TEXT (AFFIRMATIVE_PREFIX_PATTERN +
+    // rendered-copy match, SHORT_CONFIRM_PATTERN, deterministic-value-update)
+    // and run inside / just ahead of TurnExecutor. This arm keys on
+    // `source==='chip_click'` + a typed `action_type` — a disjoint
+    // discriminant. It also does not collide with the what_would_flip
+    // chip-click resume below (gated on `action_type==='what_would_flip'`, a
+    // whitelisted literal that already returned above).
+    //
+    // By the time control reaches here, every WHITELISTED chip_click
+    // (`DETERMINISTIC_CHIP_ACTION_TYPES`) has already returned from the block
+    // above. What remains, for `source==='chip_click'` with a defined typed
+    // `action_type`, is: `analysis_readiness` (→ the readiness arm) and every
+    // other valid-but-non-whitelisted type (→ TurnExecutor via the §2g
+    // totality below).
+    const isTypedChipClick =
+      ingress.source === 'chip_click' && chipActionType !== undefined;
+    const isReadinessChipClick =
+      isTypedChipClick && chipActionType === 'analysis_readiness';
+    // §2g fix (fold-in): a typed chip_click with a defined action_type that was
+    // neither deterministically dispatched (returned above) nor claimed by the
+    // readiness arm. The #575 commit message always intended these to reach
+    // TurnExecutor ("the rest belong to TurnExecutor"); today the chip_click
+    // exclusion forces draftShapedTurn=false and the frame-stage no-brief guard
+    // wrongly CLAIMS a draft-shaped one with the canned framing prompt
+    // (documented + test-pinned as a live misfire). This flag makes the
+    // chip_click region TOTAL over typed chip clicks: whitelisted →
+    // deterministic; analysis_readiness → readiness arm; every other valid type
+    // → TurnExecutor. It is threaded as an exclusion into the process-meta
+    // answer branch and the frame-stage no-brief guard below so neither claims
+    // it, and control falls through to the single runTurnExecutor call site.
+    const isNonReadinessTypedChipClickForExecutor =
+      isTypedChipClick && !isReadinessChipClick;
+
+    if (isReadinessChipClick) {
+      // Read the PERSISTED scenario graph (the same authority the run_analysis
+      // chip uses — never the HTTP body). A store/RPC failure degrades to the
+      // honest fresh-canvas answer (persistedGraph=null path) rather than a
+      // 500: a readiness coaching turn should not brick on a transient read.
+      let persistedGraph: unknown | null = null;
+      try {
+        const state = await loadPersistedScenarioStateStrict(ingress.scenario_id);
+        persistedGraph = state.graph;
+      } catch (err) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+          },
+          'S2-L1 readiness arm — persisted-graph read failed; degrading to fresh-canvas answer',
+        );
+      }
+      const readiness = composeReadinessIntakeResponse(persistedGraph, ingress.stage);
+      log.info(
+        {
+          event: 'v5.readiness_intake',
+          request_id: requestId,
+          outcome: readiness.outcome,
+          message_length: ingress.message.length,
+        },
+        'S2-L1 typed readiness/coaching arm fired — answering by type, not by the string mirror',
+      );
+      emit(TelemetryEvents.V5ReadinessIntakeArm, {
+        request_id: requestId,
+        outcome: readiness.outcome,
+        message_length: ingress.message.length,
+      });
+      // No commit: parity with the process-meta intake answer (no chip, no
+      // commit, scenario stays fresh). graph:null — the composed text carries
+      // option LABELS (via summariseReadiness), never raw node ids, so the
+      // egress label sanitiser has nothing to resolve.
+      return sendFinalised200(reply, requestId, 'readiness_intake', readiness.response, {
+        graph: null,
+        requestStartedAt: routeStartedAt,
+        scenarioId: ingress.scenario_id,
+        turnId: ingress.turn_id,
+        userMessage: ingress.message,
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // Chip-click parity for `what_would_flip`
     // ────────────────────────────────────────────────────────────────────
     //
@@ -3160,6 +3252,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       ingress.stage === 'frame' &&
       !isPopulatedIngressGraph(extensions.graphState) &&
       (!isContinuationScenario || draftOfferMarker !== null) &&
+      // S2-L1 §2g: a typed chip_click bound for TurnExecutor is routed BY TYPE
+      // and must never be intercepted by the string mirror (the whole point of
+      // S2 — the type wins over the canned wording).
+      !isNonReadinessTypedChipClickForExecutor &&
       isProcessMetaIntake(ingress.message);
     if (isProcessMetaIntakeTurn) {
       log.info(
@@ -3204,18 +3300,22 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // The previous (draft_graph) dispatch already filtered for the
     // brief-shaped messages; whitelisted chip_click and system_event
     // branches handled those above. What reaches here at stage=frame + no
-    // graph on a FRESH scenario is a non-brief anonymous message — OR
-    // (post-#575, verified at the bytes) a chip_click with a valid but
-    // NON-whitelisted action_type: the chip_click exclusion makes
-    // `draftShapedTurn` false even for draft-shaped canned text, so this
-    // guard claims it and answers with the framing prompt. That is
-    // deliberate-in-effect (deterministic, no LLM spend, no meta-draft) but
-    // note it contradicts the #575 commit message's "the rest belong to
-    // TurnExecutor" — TurnExecutor only receives non-whitelisted
-    // chip_clicks when the canvas is populated or the scenario is a
-    // continuation. Pinned by route-v2-process-meta-intake.test.ts
-    // ("chip_click with valid non-whitelisted action_type"). Guide them
-    // back to the frame-stage flow deterministically with no LLM call.
+    // graph on a FRESH scenario is a non-brief ANONYMOUS message (source
+    // 'composer'/'chip', no typed action_type).
+    //
+    // S2-L1 §2g FIX (2026-07-20): a `source='chip_click'` with a valid but
+    // non-whitelisted, non-readiness `action_type` no longer reaches this
+    // guard. Previously the chip_click exclusion forced `draftShapedTurn`
+    // false even for draft-shaped canned text, so this guard CLAIMED it and
+    // answered with the framing prompt — a misfire that contradicted the
+    // #575 commit message's "the rest belong to TurnExecutor". The
+    // `isNonReadinessTypedChipClickForExecutor` exclusion above now routes
+    // every such typed chip_click to TurnExecutor, making the chip_click
+    // region total. The formerly-pinning test
+    // (route-v2-process-meta-intake.test.ts "chip_click with valid
+    // non-whitelisted action_type") now asserts TurnExecutor routing.
+    // Guide genuine anonymous frame-stage text back to the flow
+    // deterministically with no LLM call.
     //
     // Pricing-brief retry scenario from staging:
     //   Turn 1: pricing brief → CEE_GRAPH_INVALID (no graph persisted)
@@ -3248,6 +3348,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // C3 re-fire (above) is the one exception: the continuation consists of
       // the guard's own offer turns.
       (!isContinuationScenario || isDraftOfferRefire) &&
+      // S2-L1 §2g fix: a typed chip_click with a valid non-whitelisted,
+      // non-readiness action_type must reach TurnExecutor, not the canned
+      // framing prompt. This retires the documented misfire (a draft-shaped
+      // such chip_click was CLAIMED here because the chip_click exclusion
+      // forces draftShapedTurn=false → isDraftGraphShape=false → this guard
+      // consumed it). With the exclusion, the chip_click region is total.
+      !isNonReadinessTypedChipClickForExecutor &&
       !isDraftGraphShape;
     if (isFrameNoBriefShape) {
       log.info(

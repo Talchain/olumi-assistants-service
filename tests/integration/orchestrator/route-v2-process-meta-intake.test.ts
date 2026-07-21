@@ -317,24 +317,32 @@ describe('POST /orchestrate/v2/turn — round-1 process-meta intake guard', () =
   //    draft heuristic — even for a valid, non-whitelisted action_type
   //    whose canned text is draft-shaped.
   // ------------------------------------------------------------------
-  it('chip_click with valid non-whitelisted action_type + draft-shaped text does NOT draft', async () => {
+  it('chip_click with valid non-whitelisted action_type routes to TurnExecutor (§2g fix)', async () => {
     const res = await inject({
       message: 'Compare my current options and tell me whether to expand or hold?',
       source: 'chip_click',
       chip: { action_type: 'compare_options' },
     });
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    // compare_options is NOT in DETERMINISTIC_CHIP_ACTION_TYPES (and has no
+    // registered handler), so the deterministic dispatcher is not invoked.
     expect(dispatchDeterministicChipClickMock).not.toHaveBeenCalled();
-    // POST-MERGE CORRECTION (SIMPLIFY-575 F6, verified at the bytes): this
-    // turn does NOT fall through to TurnExecutor as the #575 commit message
-    // claims. The chip_click exclusion makes draftShapedTurn false →
-    // isDraftGraphShape false → the frame-stage no-brief guard's negated
-    // consumption makes isFrameNoBriefShape TRUE → the canned framing
-    // prompt answers, deterministically, with a 200. Pinned exactly so a
-    // routing change here goes RED instead of hiding inside [200, 500].
+    // S2-L1 §2g FIX (2026-07-20): a typed chip_click with a valid but
+    // non-whitelisted, non-readiness action_type now falls through to
+    // TurnExecutor, exactly as the #575 commit message always intended
+    // ("the rest belong to TurnExecutor"). Previously the chip_click
+    // exclusion forced draftShapedTurn=false → isDraftGraphShape=false → the
+    // frame-stage no-brief guard CLAIMED it with the canned framing prompt.
+    // The `isNonReadinessTypedChipClickForExecutor` exclusion retires that
+    // misfire. Exact-pinned (trap 13: [200,500] could not tell a routed
+    // answer from a harness-caused 500) — the mocked LLM's text-only
+    // fallthrough is TurnExecutor's compose output on this path.
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('I need a single decision question');
+    expect(body.assistant_text).toBe('text-only fallthrough response');
+    // And NEVER the framing prompt nor the process-meta deflection.
+    expect(body.assistant_text).not.toContain('I need a single decision question');
+    expect(body.assistant_text).not.toContain(PROCESS_META_ANSWER_MARKER);
   });
 
   // ------------------------------------------------------------------
