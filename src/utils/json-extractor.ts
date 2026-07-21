@@ -10,6 +10,7 @@
  */
 
 import { log, emit, TelemetryEvents } from "./telemetry.js";
+import { contentDigest } from "./redaction.js";
 
 /**
  * Result of JSON extraction
@@ -201,7 +202,8 @@ export function extractJsonFromResponse(
             extraction_method: extractionMethod,
             preamble_length: preambleLength,
             suffix_length: suffixLength,
-            preamble_preview: preamblePreview,
+            // Digest model preamble — never place model output on the wire verbatim (see contentDigest).
+            preamble_preview: contentDigest(preamblePreview),
             candidates_tried: candidates.indexOf(candidate) + 1,
             total_candidates: candidates.length,
           },

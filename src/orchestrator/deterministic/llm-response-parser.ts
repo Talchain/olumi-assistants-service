@@ -8,6 +8,7 @@
 import { LLMResponseSchema, InsightSchema, RecommendedActionSchema } from "./llm-response-schema.js";
 import type { LLMJsonResponse } from "./types.js";
 import { log } from "../../utils/telemetry.js";
+import { contentDigest } from "../../utils/redaction.js";
 
 // ============================================================================
 // Public API
@@ -50,7 +51,8 @@ export function parseLLMJsonResponse(rawContent: string): ParseResult {
   // Strategy 4: Fallback — treat entire content as text
   warnings.push('No valid JSON found in LLM output — treating as plain text');
   log.warn(
-    { content_length: rawContent.length, content_preview: rawContent.slice(0, 200) },
+    // Digest raw LLM output — never place it on the wire verbatim (see contentDigest).
+    { content_length: rawContent.length, content_preview: contentDigest(rawContent) },
     'deterministic.llm_response_parse_fallback',
   );
 
