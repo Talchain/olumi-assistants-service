@@ -117,7 +117,10 @@ import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-disp
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
-import { deriveAnswerTextFromShape } from '../orchestrator-v5/routing/answer-shape.js';
+import {
+  deriveAnswerTextFromShape,
+  synthesiseAnswerShapeFromText,
+} from '../orchestrator-v5/routing/answer-shape.js';
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import { getRequestId } from '../utils/request-id.js';
@@ -1029,6 +1032,72 @@ function sendFinalised200(
         final_text_length: finalText.length,
         derived_text_length: derivedText.length,
       });
+    }
+  }
+  // ROADMAP 1.132 (F1) — deterministic answer-shape FALLBACK. Every model- or
+  // deterministic-recovery-authored `assistant_text` that reaches the wire
+  // WITHOUT a shape (the intent-null / text_only prose path, whose capture
+  // gates require a tool_call and so structurally exclude it; any path whose
+  // shape was dropped stale just above; the non-turn-executor dispatch
+  // families) would otherwise ship as an un-collapsible wall of prose. This
+  // is the SINGLE chokepoint covering all five dispatch families, so we
+  // synthesise a shape here rather than per-path.
+  //
+  // Byte-equality is preserved BY CONSTRUCTION (approach b): we SET
+  // `assistant_text := deriveAnswerTextFromShape(synth)`, so the tie the
+  // sidecar contract requires holds by identity. Approach (a) — find a shape
+  // whose derive() equals the ORIGINAL bytes — is provably impossible for the
+  // hard case (single-paragraph prose has zero `\n\n`, but every derived text
+  // joins a non-blank headline and detail with `\n\n`), so (b) is the only
+  // general solution.
+  //
+  // Fail-closed net: the shape is synthesised BEFORE the egress sanitiser,
+  // then we re-verify the tie on the POST-sanitise body. If the sanitiser
+  // perturbed the derived text (entity-id scrub), we REVERT to the original
+  // `wireBody` entirely — never ship a mutated assistant_text without its
+  // matching sidecar.
+  if (
+    egress.ok &&
+    !('_answer_shape' in (wireBody as Record<string, unknown>)) &&
+    typeof wireBody.assistant_text === 'string' &&
+    wireBody.assistant_text.trim().length > 0
+  ) {
+    const synth = synthesiseAnswerShapeFromText(wireBody.assistant_text);
+    if (synth !== null) {
+      const derived = deriveAnswerTextFromShape(synth);
+      const augmented: OlumiResponseWithDebugFields = {
+        ...wireBody,
+        assistant_text: derived,
+        _answer_shape: synth,
+      };
+      const withSynth = finaliseV5Response(
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+        ctx,
+      );
+      const synthFinalText =
+        typeof withSynth.assistant_text === 'string' ? withSynth.assistant_text : '';
+      if (synthFinalText === derived) {
+        wireBody = withSynth;
+        emit(TelemetryEvents.V5AnswerShapeEmitted, {
+          request_id: requestId,
+          exit_path: exitPath,
+          source: 'route_egress_synthesised',
+          headline_length: synth.headline.length,
+          bullet_count: synth.bullets.length,
+          detail_length: synth.detail.length,
+        });
+      } else {
+        // Sanitiser perturbed the derived text — fail closed, keep the
+        // un-shaped prose rather than ship a sidecar describing text the
+        // user never sees.
+        emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+          request_id: requestId,
+          exit_path: exitPath,
+          dispatch_path: 'route_egress_synthesised',
+          final_text_length: synthFinalText.length,
+          derived_text_length: derived.length,
+        });
+      }
     }
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
