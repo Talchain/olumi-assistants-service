@@ -28,6 +28,9 @@ describe("checkDeadEnvVars", () => {
       CEE_BIAS_LLM_DETECTION_ENABLED: "true",
       CAUSAL_CLAIMS_ENABLED: "1",
       ORCHESTRATOR_ENABLED: "true",
+      // V1 orchestrator belt deleted (#615): these enable flags are now inert.
+      ENABLE_ORCHESTRATOR: "true",
+      CEE_ORCHESTRATOR_ENABLED: "true",
       VITE_ENABLE_ORCHESTRATOR_V2: "1",
       CEE_UNIFIED_PIPELINE_ENABLED: "true",
       CEE_MODEL_REPAIR_GRAPH: "gpt-4.1",
@@ -45,7 +48,7 @@ describe("checkDeadEnvVars", () => {
     const { checkDeadEnvVars } = await import("../../src/config/index.js");
     const warnings = checkDeadEnvVars();
 
-    expect(warnings).toHaveLength(13);
+    expect(warnings).toHaveLength(15);
     const keys = warnings.map(w => w.key);
     expect(keys).toEqual(
       expect.arrayContaining([
@@ -53,6 +56,8 @@ describe("checkDeadEnvVars", () => {
         "CEE_BIAS_LLM_DETECTION_ENABLED",
         "CAUSAL_CLAIMS_ENABLED",
         "ORCHESTRATOR_ENABLED",
+        "ENABLE_ORCHESTRATOR",
+        "CEE_ORCHESTRATOR_ENABLED",
         "VITE_ENABLE_ORCHESTRATOR_V2",
         "CEE_UNIFIED_PIPELINE_ENABLED",
         "CEE_MODEL_REPAIR_GRAPH",
@@ -77,6 +82,8 @@ describe("checkDeadEnvVars", () => {
     delete process.env.CEE_BIAS_LLM_DETECTION_ENABLED;
     delete process.env.CAUSAL_CLAIMS_ENABLED;
     delete process.env.ORCHESTRATOR_ENABLED;
+    delete process.env.ENABLE_ORCHESTRATOR;
+    delete process.env.CEE_ORCHESTRATOR_ENABLED;
     delete process.env.VITE_ENABLE_ORCHESTRATOR_V2;
     delete process.env.CEE_UNIFIED_PIPELINE_ENABLED;
     delete process.env.CEE_MODEL_REPAIR_GRAPH;

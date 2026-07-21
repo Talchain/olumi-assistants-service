@@ -15,14 +15,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ZodTypeAny } from "zod";
 
 import { OrchestratorTurnPayloadSchema } from "@talchain/schemas/boundary";
-import {
-  TurnRequestSchema,
-  SystemEventSchema,
-  AnalysisStateSchema,
-  GraphSchema,
-} from "../src/orchestrator/route-schemas.js";
 import { V5RequestExtensionsSchema } from "../src/orchestrator-v5/boundary/request-extensions.js";
-import { OrchestratorStreamEventSchema } from "../src/orchestrator/pipeline/stream-events.js";
 import { OrchestratorResponseEnvelopeV2Schema } from "../src/orchestrator/validation/response-envelope-schema.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -41,25 +34,25 @@ const schemas: SchemaEntry[] = [
   //   discriminated union), V5RequestExtensions = the graph_state/
   //   analysis_state/user_id/selected_elements slice re-parsed after B1.
   // Exporting them here is the whole point of the "Contract schemas" job:
-  //   drift-check the shapes the live path depends on. (The four INPUT schemas
-  //   below are V1-route-derived and NO live path validates them — kept for the
-  //   UI's #394 KNOWN-DIVERGENCE mirror pins until the cross-repo retire window.)
+  //   drift-check the shapes the live path depends on.
   { name: "OrchestratorTurnPayloadSchema", filename: "orchestrator-turn-payload.schema.json", schema: OrchestratorTurnPayloadSchema },
   { name: "V5RequestExtensionsSchema", filename: "v5-request-extensions.schema.json", schema: V5RequestExtensionsSchema },
 
-  // LEGACY input schemas (UI → CEE) — derived from the 410'd V1 route
-  // (route.ts / route-stream.ts); their only runtime importers are those dead
-  // routes. Retained as the contract the UI's mirror gate still pins; do NOT
-  // delete without warning the UI first (their KNOWN-DIVERGENCE pins go red by
-  // design). See contracts/README.md "Live vs legacy".
-  { name: "TurnRequestSchema", filename: "turn-request.schema.json", schema: TurnRequestSchema },
-  { name: "SystemEventSchema", filename: "system-event.schema.json", schema: SystemEventSchema },
-  { name: "AnalysisStateSchema", filename: "analysis-state.schema.json", schema: AnalysisStateSchema },
-  { name: "GraphSchema", filename: "graph-state.schema.json", schema: GraphSchema },
-
-  // Output schemas (CEE → UI)
+  // Output schema (CEE → UI)
   { name: "OrchestratorResponseEnvelopeV2Schema", filename: "orchestrator-response-v2.schema.json", schema: OrchestratorResponseEnvelopeV2Schema },
-  { name: "OrchestratorStreamEventSchema", filename: "stream-event.schema.json", schema: OrchestratorStreamEventSchema },
+
+  // FROZEN legacy contracts — NO LONGER EXPORTED HERE.
+  //   turn-request / system-event / analysis-state / graph-state (V1-route Zod,
+  //   `src/orchestrator/route-schemas.ts`) and stream-event
+  //   (`src/orchestrator/pipeline/stream-events.ts`) had their Zod source
+  //   DELETED with the V1 orchestrator belt (PR #615). The generated
+  //   contracts/*.schema.json for those five are RETAINED, committed, and
+  //   frozen — they are the pins the UI's #394 KNOWN-DIVERGENCE mirror gate
+  //   still consumes, and the tests/contracts/schema-self-test.test.ts fixtures.
+  //   They can only be retired in a cross-repo window: warn the UI first (their
+  //   pins go red by design), then delete the JSON + their self-test blocks.
+  //   Because their Zod source is gone they can no longer be regenerated; do NOT
+  //   re-add an export entry for them. See contracts/README.md "Live vs legacy".
 ];
 
 mkdirSync(CONTRACTS_DIR, { recursive: true });

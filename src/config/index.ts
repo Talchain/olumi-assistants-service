@@ -2162,7 +2162,13 @@ const DEAD_ENV_VARS: string[] = [
   'CEE_LEGACY_PIPELINE_ENABLED',       // Legacy pipeline code removed
   'CEE_BIAS_LLM_DETECTION_ENABLED',    // Never existed in config schema
   'CAUSAL_CLAIMS_ENABLED',             // Feature gated by CEE_CAUSAL_VALIDATION_ENABLED, not this
-  'ORCHESTRATOR_ENABLED',              // Actual legacy name is ENABLE_ORCHESTRATOR
+  // V1 orchestrator belt deleted (PR #615): its enable flags are now inert. The
+  // old note here — "actual legacy name is ENABLE_ORCHESTRATOR" — is stale: that
+  // var was the belt's own gate and is itself dead now. Remove all three from
+  // deployment/Render config; the admin dashboard flags them via checkDeadEnvVars.
+  'ORCHESTRATOR_ENABLED',              // Never had a reader; the belt read ENABLE_ORCHESTRATOR
+  'ENABLE_ORCHESTRATOR',               // V1 orchestrator-belt enable flag; belt deleted (#615)
+  'CEE_ORCHESTRATOR_ENABLED',          // V1 orchestrator-belt enable flag (CEE_ variant); belt deleted (#615)
   'VITE_ENABLE_ORCHESTRATOR_V2',       // Frontend-only (Vite prefix); not read by backend
   'CEE_UNIFIED_PIPELINE_ENABLED',      // Unified pipeline is always-on; flag retired
   'CEE_MODEL_REPAIR_GRAPH',            // Never existed; canonical name is CEE_MODEL_REPAIR
