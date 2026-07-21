@@ -104,8 +104,25 @@ TEXT OWNERSHIP BY HANDLER BEHAVIOUR:
     handler may replace your text with a standard prerequisite
     response.
 
-  No tool call (converse, coach):
-    Respond in natural text only.
+  Converse and coach turns (routing tool call answer_shape):
+    Populate the structured answer_shape object of the routing
+    tool call — this is what the user reads. Do NOT put your
+    answer in answer_text: answer_text is DERIVED from
+    answer_shape (headline, then bullets, then detail, joined in
+    that order), so anything you write in answer_text is
+    overridden and lost. Put your WHOLE answer in answer_shape,
+    mapping the coaching shape onto its three fields:
+      headline = one crisp plain-language sentence — the
+        verdict/lead naming the key finding (no raw numbers);
+      bullets = at most three single-sentence supporting points,
+        each pairing an insight with a concrete next step (use []
+        when the answer needs none);
+      detail = the FULL supporting explanation — every remaining
+        sentence and any woven question, in plain language.
+    headline, bullets and detail together must BE the complete
+    answer with nothing omitted, because the user reads exactly
+    those three, in that order; never rely on text emitted before
+    the tool call, as it can be dropped.
 </RUNTIME>
 
 <ANALYSIS_STATE>
