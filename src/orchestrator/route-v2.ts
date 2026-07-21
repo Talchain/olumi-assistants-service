@@ -117,7 +117,10 @@ import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-disp
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
-import { deriveAnswerTextFromShape } from '../orchestrator-v5/routing/answer-shape.js';
+import {
+  deriveAnswerTextFromShape,
+  synthesiseAnswerShapeFromText,
+} from '../orchestrator-v5/routing/answer-shape.js';
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
 import { getRequestId } from '../utils/request-id.js';
@@ -657,6 +660,20 @@ function sendFinalised200(
      */
     readonly answerShape?: import('../orchestrator-v5/routing/answer-shape.js').AnswerShape;
     /**
+     * ROADMAP 1.132 (F1) — SCOPING gate for the egress answer-shape FALLBACK
+     * below. Threaded from `run.answerProse` (turn-executor), TRUE iff the
+     * FINAL assistant_text is the model's own coach / converse / text_only
+     * ANSWER prose (verified by a fail-closed FINAL-text equality check at the
+     * executor's finalise seam, so any deterministic post-compose mutator
+     * clears it). The fallback fires ONLY when this is true. Deterministic
+     * functional copy (clarify / receipt / recovery / decline) never sets it,
+     * and it is threaded at the `turn_executor` callsite ALONE — every other
+     * dispatch family (draft_graph / edit_graph / chip_click / system_event /
+     * clarify_v2 / readiness_intake / …) omits it and so is structurally
+     * excluded from progressive-disclosure reshaping.
+     */
+    readonly answerProse?: boolean;
+    /**
      * The user's message for THIS turn, verbatim, or `null` when the turn
      * carries none (system events). Threaded to the egress sanitiser's
      * looping-chip guard, which drops any pure-text-replay chip that would
@@ -1029,6 +1046,84 @@ function sendFinalised200(
         final_text_length: finalText.length,
         derived_text_length: derivedText.length,
       });
+    }
+  }
+  // ROADMAP 1.132 (F1) — deterministic answer-shape FALLBACK, SCOPED to the
+  // model's own ANSWER prose. The un-shaped LLM answer prose path (the
+  // intent-null / text_only converse compose, whose F2 capture gates require a
+  // tool_call answer_shape and so structurally exclude text_only; plus any
+  // coach/converse answer whose captured shape was dropped stale just above)
+  // would otherwise ship as an un-collapsible wall of prose. F1 progressive
+  // disclosure is for that long ANSWER prose ONLY.
+  //
+  // SCOPE GATE (`ctx.answerProse === true`): this same egress chokepoint also
+  // carries DETERMINISTIC FUNCTIONAL COPY — clarify questions, add-option /
+  // edit receipts, decline / refusal copy, deterministic recovery messages,
+  // and the chip-click / draft-graph / edit-graph / system-event dispatch
+  // families. Reshaping a multi-sentence functional message would push its
+  // second sentence (often the actual question or call-to-action) behind
+  // progressive disclosure — a UX regression. `answerProse` is threaded ONLY
+  // from the turn-executor's coach/converse/text_only answer compose (verified
+  // fail-closed against the FINAL text there, and threaded at the
+  // `turn_executor` callsite ALONE), so every deterministic builder and every
+  // non-turn-executor family is excluded here by construction.
+  //
+  // Byte-equality is preserved BY CONSTRUCTION (approach b): we SET
+  // `assistant_text := deriveAnswerTextFromShape(synth)`, so the tie the
+  // sidecar contract requires holds by identity. Approach (a) — find a shape
+  // whose derive() equals the ORIGINAL bytes — is provably impossible for the
+  // hard case (single-paragraph prose has zero `\n\n`, but every derived text
+  // joins a non-blank headline and detail with `\n\n`), so (b) is the only
+  // general solution.
+  //
+  // Fail-closed net: the shape is synthesised BEFORE the egress sanitiser,
+  // then we re-verify the tie on the POST-sanitise body. If the sanitiser
+  // perturbed the derived text (entity-id scrub), we REVERT to the original
+  // `wireBody` entirely — never ship a mutated assistant_text without its
+  // matching sidecar.
+  if (
+    egress.ok &&
+    ctx.answerProse === true &&
+    !('_answer_shape' in (wireBody as Record<string, unknown>)) &&
+    typeof wireBody.assistant_text === 'string' &&
+    wireBody.assistant_text.trim().length > 0
+  ) {
+    const synth = synthesiseAnswerShapeFromText(wireBody.assistant_text);
+    if (synth !== null) {
+      const derived = deriveAnswerTextFromShape(synth);
+      const augmented: OlumiResponseWithDebugFields = {
+        ...wireBody,
+        assistant_text: derived,
+        _answer_shape: synth,
+      };
+      const withSynth = finaliseV5Response(
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+        ctx,
+      );
+      const synthFinalText =
+        typeof withSynth.assistant_text === 'string' ? withSynth.assistant_text : '';
+      if (synthFinalText === derived) {
+        wireBody = withSynth;
+        emit(TelemetryEvents.V5AnswerShapeEmitted, {
+          request_id: requestId,
+          exit_path: exitPath,
+          source: 'route_egress_synthesised',
+          headline_length: synth.headline.length,
+          bullet_count: synth.bullets.length,
+          detail_length: synth.detail.length,
+        });
+      } else {
+        // Sanitiser perturbed the derived text — fail closed, keep the
+        // un-shaped prose rather than ship a sidecar describing text the
+        // user never sees.
+        emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+          request_id: requestId,
+          exit_path: exitPath,
+          dispatch_path: 'route_egress_synthesised',
+          final_text_length: synthFinalText.length,
+          derived_text_length: derived.length,
+        });
+      }
     }
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
@@ -3632,6 +3727,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // into the flag-gated `_answer_shape` sidecar (see sendFinalised200
       // ctx docs above).
       ...(run.answerShape ? { answerShape: run.answerShape } : {}),
+      // ROADMAP 1.132 (F1): thread the turn-executor's answer-prose scope
+      // signal so the egress fallback synthesises a shape ONLY for the model's
+      // own coach/converse/text_only ANSWER prose — never for the deterministic
+      // clarify / receipt / recovery / decline copy this same path can emit.
+      // This is the ONLY sendFinalised200 callsite that threads it; every other
+      // dispatch family is deterministic and structurally excluded by omission.
+      ...(run.answerProse ? { answerProse: true } : {}),
     });
   });
 }

@@ -29,6 +29,23 @@ import { fileURLToPath } from 'node:url';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import { OlumiResponseSchema, BoundaryErrorSchema } from '@talchain/schemas/boundary';
+import { AnswerShapeSchema } from '../../src/orchestrator-v5/routing/answer-shape.js';
+
+// The vendored `@talchain/schemas` OlumiResponseSchema is `.strict()` and does
+// NOT declare `_answer_shape`: that field is a POST-validation product sidecar
+// (ROADMAP 1.132), the same mechanic as `_reasoning` / `_timings` — route-v2
+// STRIPS it before the strict egress parse and RE-ATTACHES it after, so the
+// wire body legitimately carries it while the contract schema never sees it.
+// Coach/converse turns have shipped it on the wire unconditionally since the F1
+// flag deletion; the F1 egress fallback now additionally synthesises it for the
+// model's own un-shaped ANSWER prose (this A1 direct_answer path). To validate
+// the wire body the way it is actually shaped, extend the strict contract with
+// the KNOWN optional sidecar — DERIVED from the authoritative `AnswerShapeSchema`
+// (not a hand-copied field list) so its shape is still fully validated, and
+// `.extend` preserves `.strict()` so every OTHER unknown key is still rejected.
+const OlumiResponseWireSchema = OlumiResponseSchema.extend({
+  _answer_shape: AnswerShapeSchema.optional(),
+});
 
 // ---------------------------------------------------------------------------
 // Fixture loading
@@ -295,7 +312,7 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
+    const parsed = OlumiResponseWireSchema.parse(body);
     expect(parsed.assistant_text).toBe(fx.expected.body!.assistant_text);
     expect(parsed.blocks).toEqual([]);
     // ROADMAP 1.148 C3 re-pin: at stage 'analyse' with no analysable graph
@@ -401,7 +418,7 @@ describe('POST /orchestrate/v2/turn — slice A1 fixtures', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
+    const parsed = OlumiResponseWireSchema.parse(body);
     // Text was contaminated; sanitiser stripped tags + em-dashes.
     expect(parsed.assistant_text).not.toMatch(/<[a-zA-Z]|\u2014/);
     expect(parsed.assistant_text).toContain('two forces');

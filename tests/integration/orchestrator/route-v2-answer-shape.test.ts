@@ -70,7 +70,20 @@ const ANSWER_SHAPE = {
   detail: 'The churn to revenue causal link is the strongest in the model.',
 };
 
-function mkRunResult(opts: { withShape: boolean; assistantText?: string }) {
+function mkRunResult(opts: {
+  withShape: boolean;
+  assistantText?: string;
+  answerProse?: boolean;
+}) {
+  // ROADMAP 1.132 (F1) — the executor's answer-prose scope signal. A run whose
+  // FINAL text is the model's own answer prose surfaces `answerProse: true`;
+  // one whose text was rewritten by a deterministic mutator (or is a
+  // deterministic builder) does not. Default: an un-shaped run models the
+  // intent-null / text_only prose path (F1 target → true); a shaped run's
+  // signal is irrelevant to the fallback (the shape re-attach short-circuits
+  // it), so it defaults false. cc06 (a post-capture rewrite to deterministic
+  // decline) overrides to false explicitly.
+  const answerProse = opts.answerProse ?? !opts.withShape;
   return {
     response: {
       response_version: 2 as const,
@@ -86,6 +99,7 @@ function mkRunResult(opts: { withShape: boolean; assistantText?: string }) {
     analysisReady: { status: 'ready', goal_node_id: 'goal', options: [] },
     effectiveGraph: null,
     ...(opts.withShape ? { answerShape: ANSWER_SHAPE } : {}),
+    ...(answerProse ? { answerProse: true as const } : {}),
     telemetry: {
       stages_completed: ['orient', 'compose'],
       response_emitted: true as const,
@@ -142,33 +156,41 @@ describe('route-v2 — `_answer_shape` (unconditional, ROADMAP 1.132)', () => {
     expect(body.assistant_text.length).toBeGreaterThan(0);
   });
 
-  it('run.answerShape present but final assistant_text was rewritten after capture → `_answer_shape` is DROPPED, never shipped stale (P1)', async () => {
-    // Simulates any post-capture rewriter (STEP 6.6 honesty swap, goal-receipt
-    // swap, empty-answer backstop, finaliser guards, commit-failure
-    // replacement, route egress entity-id scrub): the run result carries a
-    // captured shape whose derived text is NOT the final assistant_text.
+  it('run.answerShape present but final assistant_text was rewritten to DETERMINISTIC decline → STALE shape dropped AND the fallback is out of scope (no shape, text byte-identical)', async () => {
+    // Simulates a post-capture rewriter (STEP 6.6 structural-claim honesty
+    // swap, goal-receipt swap, empty-answer backstop, commit-failure
+    // replacement): the captured shape's derived text is NOT the final text,
+    // AND the final text is now DETERMINISTIC DECLINE copy — so the executor's
+    // FINAL-text check clears `answerProse` (modelled here as the default-false
+    // for a rewrite). Two things must hold: (1) the route drops the STALE
+    // captured shape (fail-closed), and (2) the F1 fallback does NOT re-shape
+    // the decline — a deterministic message keeps its second sentence visible.
+    const rewritten =
+      "I haven't changed the model. This version can't make that kind of model edit yet.";
     runTurnExecutorMock.mockResolvedValue(
-      mkRunResult({
-        withShape: true,
-        assistantText:
-          "I haven't changed the model. This version can't make that kind of model edit yet.",
-      }),
+      mkRunResult({ withShape: true, assistantText: rewritten, answerProse: false }),
     );
     const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc06');
     expect(status).toBe(200);
-    // Fail closed: a sidecar describing text the user never sees must not ship.
+    // (1) The stale captured shape was dropped, and (2) the out-of-scope
+    // fallback synthesised nothing: NO `_answer_shape` anywhere on the wire.
     expect(body).not.toHaveProperty('_answer_shape');
-    // The response itself is untouched — only the stale sidecar is withheld.
-    expect(body.assistant_text).toBe(
-      "I haven't changed the model. This version can't make that kind of model edit yet.",
-    );
+    // The deterministic decline ships verbatim — no reflow, no fabricated shape.
+    expect(body.assistant_text).toBe(rewritten);
   });
 
-  it('run.answerShape absent → still no `_answer_shape` (never fabricated)', async () => {
+  it('run.answerShape absent → multi-sentence prose is re-shaped by the deterministic egress fallback (F1)', async () => {
+    // The intent-null / text_only prose path: no model-authored shape, a
+    // non-empty multi-part assistant_text. The deterministic fallback shapes
+    // it. (For a TERSE single-sentence answer — nothing to disclose — no shape
+    // is fabricated; see route-v2-answer-shape-fallback.test.ts.)
     runTurnExecutorMock.mockResolvedValue(mkRunResult({ withShape: false }));
     const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc03');
     expect(status).toBe(200);
-    expect(body).not.toHaveProperty('_answer_shape');
+    expect(body._answer_shape).toBeDefined();
+    // Round-trip: derive(ANSWER_SHAPE) → synthesise reconstitutes ANSWER_SHAPE.
+    expect(body._answer_shape).toEqual(ANSWER_SHAPE);
+    expect(deriveAnswerTextFromShape(body._answer_shape)).toBe(body.assistant_text);
   });
 
   it('egress validation fails → typed-fallback 200 carries NO `_answer_shape`, even with an upstream body pre-attach', async () => {
@@ -206,15 +228,27 @@ describe('route-v2 — `_answer_shape` (unconditional, ROADMAP 1.132)', () => {
     expect(body.response_version).toBe(2);
   });
 
-  it('upstream body pre-attach with run.answerShape absent → the strip step removes `_answer_shape` before the strict egress schema sees it (200, no fallback)', async () => {
+  it('upstream body pre-attach with run.answerShape absent → the strip step removes it before the strict egress schema sees it; the egress fallback re-shapes from the TEXT, not the leaked attach (200, no fallback envelope)', async () => {
     const result = mkRunResult({ withShape: false });
-    (result.response as Record<string, unknown>)._answer_shape = ANSWER_SHAPE;
+    // A DISTINCTIVE upstream pre-attach — if it leaked through the strip step
+    // it would appear on the wire verbatim. Its shape is deliberately NOT what
+    // synthesis produces from the assistant_text, so the two are separable.
+    (result.response as Record<string, unknown>)._answer_shape = {
+      headline: 'LEAKED_UPSTREAM_SHAPE.',
+      bullets: ['LEAKED_BULLET.'],
+      detail: 'leaked detail',
+    };
     runTurnExecutorMock.mockResolvedValue(result);
     const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc05');
     expect(status).toBe(200);
-    expect(body).not.toHaveProperty('_answer_shape');
+    // The leaked upstream attach was stripped: it does not appear anywhere.
+    expect(JSON.stringify(body)).not.toContain('LEAKED_UPSTREAM_SHAPE');
+    expect(JSON.stringify(body)).not.toContain('LEAKED_BULLET');
     // Not the fallback envelope: the real assistant_text survived, which
-    // proves the strict schema never saw the unknown key.
-    expect(body.assistant_text).toBe(deriveAnswerTextFromShape(ANSWER_SHAPE));
+    // proves the strict schema never saw the unknown key. The egress fallback
+    // then re-shaped it deterministically FROM THE TEXT (round-trip of
+    // ANSWER_SHAPE), and the tie holds.
+    expect(body._answer_shape).toEqual(ANSWER_SHAPE);
+    expect(deriveAnswerTextFromShape(body._answer_shape)).toBe(body.assistant_text);
   });
 });

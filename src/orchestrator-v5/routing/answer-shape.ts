@@ -35,7 +35,18 @@ export const ANSWER_SHAPE_MAX_BULLETS = 3;
  * REPAIR_ONCE retry prompting the model to rephrase, never a dropped turn.
  * A trailing terminator is allowed but not required.
  */
-const INTERNAL_SENTENCE_BOUNDARY = /[.!?]["')\]]*\s+["'([]?[A-Z0-9]/;
+// The boundary is assembled from three fragments so the "detect" regex
+// (INTERNAL_SENTENCE_BOUNDARY) and the "split" regex (SENTENCE_SPLIT, below)
+// derive from a SINGLE source and cannot drift apart (CLAUDE.md "derive,
+// don't mirror"). A terminator run (`.` `!` `?` + closing quotes/brackets),
+// then whitespace, then the start of the next sentence (capital/digit,
+// optionally after an opening quote/bracket).
+const SENTENCE_TERMINATOR = `[.!?]["')\\]]*`;
+const SENTENCE_GAP = `\\s+`;
+const SENTENCE_NEXT_START = `["'([]?[A-Z0-9]`;
+const INTERNAL_SENTENCE_BOUNDARY = new RegExp(
+  `${SENTENCE_TERMINATOR}${SENTENCE_GAP}${SENTENCE_NEXT_START}`,
+);
 
 export function isSingleSentence(text: string): boolean {
   const trimmed = text.trim();
@@ -146,4 +157,97 @@ export function deriveAnswerTextFromShape(shape: AnswerShape): string {
   return [shape.headline.trim(), bulletLines, shape.detail.trim()]
     .filter((part) => part.length > 0)
     .join('\n\n');
+}
+
+/**
+ * Split `text` at its FIRST internal sentence boundary. Derives from the same
+ * three fragments as `INTERNAL_SENTENCE_BOUNDARY` (lookahead on the
+ * next-sentence start so it is NOT consumed), so the split point is exactly
+ * where `isSingleSentence` says a boundary exists — the two can never drift.
+ *
+ *   - Returns `null` when there is no internal boundary (the whole `text` is
+ *     one sentence — nothing to split).
+ *   - Otherwise `headline` is `text` up to and including the first
+ *     terminator run (guaranteed single-sentence by construction, since it
+ *     contains no earlier boundary), and `remainder` is everything after the
+ *     inter-sentence whitespace.
+ */
+function splitFirstSentence(text: string): { headline: string; remainder: string } | null {
+  const split = new RegExp(`(${SENTENCE_TERMINATOR})(${SENTENCE_GAP})(?=${SENTENCE_NEXT_START})`);
+  const match = split.exec(text);
+  if (match === null || match.index === undefined) return null;
+  const headlineEnd = match.index + match[1].length;
+  const remainderStart = headlineEnd + match[2].length;
+  return { headline: text.slice(0, headlineEnd), remainder: text.slice(remainderStart) };
+}
+
+const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
+
+/**
+ * Deterministically SYNTHESISE an answer shape from a plain-prose
+ * `assistant_text` that arrived with NO model-authored shape (the intent-null
+ * / text_only prose path, and any deterministic-recovery copy). This is the
+ * F1 progressive-disclosure fallback: a concise headline + optional bullets,
+ * with everything else behind `detail`.
+ *
+ * Rules (deterministic, no LLM):
+ *   - bullets  = lines already bullet-formatted (leading `•`, `-`, `*`), in
+ *     order, capped at `ANSWER_SHAPE_MAX_BULLETS`;
+ *   - headline = the FIRST sentence of the remaining (non-bullet) prose;
+ *   - detail   = the rest of that prose, plus any bullet lines BEYOND the cap
+ *     folded in verbatim so no content is ever dropped.
+ *
+ * Returns `null` — synthesise NOTHING, leave the prose un-shaped — when the
+ * prose is a single sentence with no splittable remainder (a terse
+ * clarify/receipt one-liner is already a concise headline; there is nothing
+ * to disclose), or whenever a schema-valid shape cannot be built (e.g. a
+ * headline-plus-bullets with no trailing prose — AnswerShapeSchema requires a
+ * NON-BLANK detail, so we fail closed and ship the original text as-is rather
+ * than fabricate filler).
+ *
+ * The caller is responsible for preserving the byte-equality invariant by
+ * SETTING `assistant_text := deriveAnswerTextFromShape(result)` — see the
+ * route-v2 egress fallback.
+ */
+export function synthesiseAnswerShapeFromText(text: string): AnswerShape | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  // 1. Extract already-bulleted lines FIRST (in order, cap at 3) so the
+  //    sentence split below sees only the prose. A bullet line BEYOND the cap
+  //    is kept VERBATIM (glyph and all) and folded into `detail`, never
+  //    dropped and never allowed to pollute the headline.
+  const bullets: string[] = [];
+  const proseLines: string[] = [];
+  const overflowBulletLines: string[] = [];
+  for (const line of trimmed.split('\n')) {
+    const m = SYNTH_BULLET_LINE.exec(line);
+    if (m !== null) {
+      if (bullets.length < ANSWER_SHAPE_MAX_BULLETS) {
+        bullets.push(m[1].trim());
+      } else {
+        overflowBulletLines.push(line);
+      }
+    } else {
+      proseLines.push(line);
+    }
+  }
+  const proseText = proseLines.join('\n').trim();
+  if (!proseText) return null;
+
+  // 2. Split the prose into headline (first sentence) + detail (remainder).
+  //    A single-sentence prose has no splittable remainder — there is nothing
+  //    to disclose beyond the headline, so synthesise NOTHING.
+  const split = splitFirstSentence(proseText);
+  if (split === null) return null;
+  const headline = split.headline.trim();
+  const detail = [split.remainder.trim(), overflowBulletLines.join('\n').trim()]
+    .filter((part) => part.length > 0)
+    .join('\n\n');
+  // AnswerShapeSchema requires a NON-BLANK detail; a blank remainder (with no
+  // overflow to fall back on) yields no shape — fail closed, ship as-is.
+  if (!headline || !detail) return null;
+
+  const parsed = AnswerShapeSchema.safeParse({ headline, bullets, detail });
+  return parsed.success ? parsed.data : null;
 }

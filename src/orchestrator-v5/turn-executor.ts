@@ -422,6 +422,21 @@ export interface TurnExecutorRunResult {
    * the shape, so the sidecar can never contradict what the user reads.
    */
   answerShape?: AnswerShape;
+  /**
+   * ROADMAP 1.132 (F1) — SCOPING signal for route-v2's egress answer-shape
+   * FALLBACK. TRUE iff the FINAL `response.assistant_text` is the model's own
+   * coach / converse / text_only ANSWER prose. Captured at the answer-compose
+   * branch (`answerProseText`) and RE-VERIFIED against the final text at the
+   * finalise seam — the same fail-closed FINAL-text check `answerShape` uses —
+   * so any deterministic post-compose mutator (empty-answer recovery,
+   * structural-claim decline swap, goal-target receipt, commit-failure
+   * replacement, forbidden-phrase guard) that rewrites the text CLEARS it, and
+   * every deterministic builder (clarify / receipt / recovery / decline — none
+   * of which capture) stays false. The F1 fallback synthesises a shape ONLY
+   * when this is true, so deterministic functional copy is never pushed behind
+   * progressive disclosure. Omitted (falsy) on every non-answer path.
+   */
+  answerProse?: boolean;
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -1115,6 +1130,15 @@ export async function runTurnExecutor(
   // clarify / text_only turns, and whenever a post-capture rewrite diverges
   // the final text from the shape.
   let capturedAnswerShape: AnswerShape | undefined;
+  // ROADMAP 1.132 (F1) — the model's own ANSWER prose, captured at the
+  // coach / converse / text_only compose branch for route-v2's egress
+  // answer-shape fallback SCOPING (see TurnExecutorRunResult.answerProse).
+  // Hoisted to outer scope for the same reason as `capturedAnswerShape` —
+  // `finalizeRun` re-verifies it against the FINAL assistant_text and only
+  // then surfaces `answerProse: true`. Set ONLY in the two answer-compose
+  // branches; undefined on execute / clarify / every deterministic builder, so
+  // a deterministic path can never surface the flag.
+  let answerProseText: string | undefined;
 
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
@@ -7331,6 +7355,15 @@ export async function runTurnExecutor(
         suggested_actions: coachGuarded.suggested_actions,
       });
       stagesCompleted.push('compose');
+      // ROADMAP 1.132 (F1) — capture the model's coach ANSWER prose for the
+      // egress fallback scope gate. Capture `sanitised.output` — the model's
+      // OWN sanitised answer, BEFORE `applyCoachingOutputGuard` above (which
+      // can DEGRADE to deterministic recovery copy), the empty-answer recovery
+      // below, and every later post-compose mutator. finalizeRun re-checks this
+      // against the FINAL assistant_text, so any of those deterministic
+      // rewrites diverges it and clears `answerProse` — only the model's own
+      // unmodified answer keeps the flag.
+      answerProseText = sanitised.output;
       // CEE_ANSWER_TEXT_REQUIRED compose guard (belt-and-braces layer B,
       // default OFF — config/index.ts). Layer A (tool-schema.ts) forces a
       // REPAIR_ONCE retry when a coach tool call omits/blanks answer_text,
@@ -7483,6 +7516,14 @@ export async function runTurnExecutor(
         suggested_actions: converseGuarded.suggested_actions,
       });
       stagesCompleted.push('compose');
+      // ROADMAP 1.132 (F1) — capture the model's converse / text_only ANSWER
+      // prose (the primary F1 target) for the egress fallback scope gate.
+      // Capture `sanitised.output` — the model's OWN sanitised answer, BEFORE
+      // `applyCoachingOutputGuard` above (which can DEGRADE to deterministic
+      // recovery copy), the empty-answer recovery below, and every later
+      // post-compose mutator. finalizeRun re-checks it against the FINAL text,
+      // so any deterministic rewrite diverges it and clears `answerProse`.
+      answerProseText = sanitised.output;
       // CEE_ANSWER_TEXT_REQUIRED compose guard (belt-and-braces layer B,
       // default OFF — config/index.ts). Mirrors the coach-branch guard
       // above; see its comment for the full rationale — checks the FINAL
@@ -8535,6 +8576,22 @@ export async function runTurnExecutor(
         });
       }
     }
+    // ROADMAP 1.132 (F1) — SCOPE the route egress answer-shape fallback to the
+    // model's own ANSWER prose. `answerProseText` was captured at the coach /
+    // converse / text_only compose branch; re-verify it against the FINAL
+    // assistant_text HERE (identical fail-closed FINAL-text check as the shape
+    // sidecar above) so any deterministic post-compose mutator that rewrote the
+    // text — empty-answer recovery, STEP 6.6 structural-claim decline swap,
+    // goal-target receipt, commit-failure replacement, forbidden-phrase guard —
+    // clears the signal, and every deterministic builder (which never captured)
+    // stays false. Drift-proof: a future post-compose mutator cannot fool the
+    // equality, and nothing outside the two answer branches can set it.
+    const answerProseFinalText =
+      typeof response?.assistant_text === 'string' ? response.assistant_text : '';
+    const answerProse =
+      answerProseText !== undefined &&
+      answerProseFinalText.length > 0 &&
+      answerProseFinalText === answerProseText;
     return {
       response,
       analysisReady: analysisReadyForTurn,
@@ -8570,6 +8627,10 @@ export async function runTurnExecutor(
       // re-verified against the FINAL assistant_text just above — absent
       // whenever a post-capture rewriter diverged the text from the shape.
       ...(answerShapeForRun ? { answerShape: answerShapeForRun } : {}),
+      // ROADMAP 1.132 (F1) — scope signal for route-v2's egress answer-shape
+      // fallback (see above + TurnExecutorRunResult.answerProse). Surfaced only
+      // when the FINAL text is the model's own answer prose.
+      ...(answerProse ? { answerProse: true } : {}),
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,
