@@ -627,20 +627,26 @@ export const DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL = parseIntEnv(
  * a directive asking for a ≤12-node graph paired with a floor sized above
  * anything larger would fire retries that truncate again.
  *
- * RECALIBRATED 4,500 -> 2,500 (2026-07-21, lean-retry reachability). The 4,500
+ * RECALIBRATED 4,500 -> 2,700 (2026-07-21, lean-retry reachability). The 4,500
  * value was calibrated to the S-AUDIT-2026-07-20 V2/V3/V4c probes (4,065-4,220
  * tokens), which were the runaway brief with ONE dimension removed — still
  * relatively rich. Against the attempt-1 sentinel (6,800), a runaway truncates
  * with only ~30-48s of window left (affording ~1,650-2,970 tokens at the
  * conservative floor), so a 4,500-token floor could NEVER be met and the retry
- * stayed unreachable. 2,500 is calibrated instead to the size of the observed
- * healthy CONVERGED drafts (12-14 nodes / 2,206-2,601 tokens): a genuinely
- * lean-but-useful graph, and the smallest budget in which the retuned ≤12-node
- * directive is likely to COMPLETE. Budget honesty is preserved (2026-07-20 RCA
- * class): when even 2,500 tokens are unaffordable — a late truncation — the
- * gate still fails fast with the typed truncation error rather than burn a
- * second generation guaranteed to truncate again or be discarded by the
- * Step-11 budget guard.
+ * stayed unreachable. 2,700 is calibrated instead to the observed healthy
+ * CONVERGED drafts (12-14 nodes / 2,206-2,601 tokens) — but pinned just ABOVE
+ * the TOP of that band (2,601), not into it. That is the point of the raise: a
+ * boundary-authorized retry (one whose freed window affords EXACTLY the floor)
+ * is then sized above the largest band-typical converged draft, so it can no
+ * longer re-truncate on band-typical output the way a 2,500-token authorization
+ * (below the 2,601 top) could. Reachability still closes at the higher floor
+ * (re-verified): a runaway now truncating ~63s into the window frees a ~47s
+ * retry budget, and getAffordableDraftTokens(~47s) ≈ 2,907 tokens ≥ 2,700 ✓ —
+ * the retry clears the raised floor with ~200 tokens of margin. Budget honesty
+ * is preserved (2026-07-20 RCA class): when even 2,700 tokens are unaffordable
+ * — a late truncation (>~65s elapsed) — the gate still fails fast with the
+ * typed truncation error rather than burn a second generation guaranteed to
+ * truncate again or be discarded by the Step-11 budget guard.
  *
  * Paired with `getAffordableDraftTokens(getDraftLlmRetryBudgetMs(elapsed))`:
  * the remaining window must afford at least this many tokens at the derived
@@ -649,7 +655,7 @@ export const DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL = parseIntEnv(
  * NOT env-gated (no new flags — the constant is derived from the measured
  * converged-draft distribution, not tuned per deployment).
  */
-export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 2_500;
+export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 2_700;
 
 // ---------------------------------------------------------------------------
 // SSE heartbeat & resume polling

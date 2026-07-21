@@ -285,6 +285,7 @@ describe("resolveDraftMaxTokens — effective max_tokens can NEVER exceed the af
 describe("lean-retry reachability — the sentinel frees a window the retry can complete in", () => {
   // Observed demand facts (S-AUDIT-2026-07-20 + 21-Jul HANDOVER):
   const WORST_CONVERGENT_TOKENS = 6_365; // largest converged draft observed ("long")
+  const CONVERGED_BAND_TOP_TOKENS = 2_601; // top of the healthy converged band (12-14 nodes)
   const OBSERVED_RUNAWAY_TOK_PER_S = 112; // runaway-regime decode rate (8,550 truncated ~76s)
   const OBSERVED_TTFB_S = 2;
   const BUDGET_MINUS_HEADROOM_S =
@@ -323,10 +324,20 @@ describe("lean-retry reachability — the sentinel frees a window the retry can 
   it("REGRESSION GUARD: at the SAME sentinel truncation the PRE-recalibration 4,500 floor could NOT be met — the fix is load-bearing", () => {
     const truncS = OBSERVED_TTFB_S + DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL / OBSERVED_RUNAWAY_TOK_PER_S;
     const affordable = getAffordableDraftTokens(getDraftLlmRetryBudgetMs(Math.round(truncS * 1000)));
-    // The retry is reachable now (>= 2,500) but would have been unreachable at
-    // the old 4,500 floor — the recalibration is what closes the inequality.
+    // The retry is reachable now (affordable ≈ 2,906 ≥ the 2,700 floor) but
+    // would have been unreachable at the old 4,500 floor — the recalibration is
+    // what closes the inequality.
     expect(affordable).toBeGreaterThanOrEqual(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR);
     expect(affordable).toBeLessThan(4_500);
-    expect(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR).toBe(2_500);
+    expect(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR).toBe(2_700);
+  });
+
+  it("PIN: the floor sits just ABOVE the converged-band top (2,601) so a boundary-authorized retry cannot re-truncate on band-typical output", () => {
+    // The reason the floor was raised 2,500 -> 2,700: a retry authorized at
+    // EXACTLY the floor is sized to the floor. A floor BELOW the converged-band
+    // top (2,601) could re-truncate a band-typical lean draft; pinned above it,
+    // the boundary-authorized retry is sized above band-typical output. (This
+    // assertion also fails RED at the old 2,500, since 2,500 < 2,601.)
+    expect(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR).toBeGreaterThan(CONVERGED_BAND_TOP_TOKENS);
   });
 });

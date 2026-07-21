@@ -543,7 +543,7 @@ describe("runStageParse", () => {
       });
 
     // Near-zero elapsed → remaining window ~110s affords ~8,550 tokens,
-    // comfortably above the 2,500-token lean-draft floor → retry fires.
+    // comfortably above the 2,700-token lean-draft floor → retry fires.
     const ctx = makeCtx();
     await runStageParse(ctx);
 
@@ -580,16 +580,16 @@ describe("runStageParse", () => {
     // The load-bearing reachability fix. With attempt-1 capped at the runaway
     // sentinel (6,800 tok), a runaway truncates ~62s into the request (vs ~78s
     // at the old 8,550-tok budget). At 62s elapsed the remaining window affords
-    // ~2,970 tokens — ABOVE the recalibrated 2,500 floor (fires) but BELOW the
+    // ~2,970 tokens — ABOVE the recalibrated 2,700 floor (fires) but BELOW the
     // old 4,500 floor (would have stayed unreachable). This test pins that the
     // retry is now reachable exactly in the window the sentinel creates.
     const elapsedMs = 62_000;
     const window = getDraftLlmRetryBudgetMs(elapsedMs); // real fn: 110_000 - 62_000
     const affordable = getAffordableDraftTokens(window);
-    // Guard the premise: affordable sits in the (2500, 4500) gap. If the
+    // Guard the premise: affordable sits in the (2700, 4500) gap. If the
     // constants move, this derived guard fails loudly rather than the test
     // silently asserting the wrong regime.
-    expect(affordable).toBeGreaterThanOrEqual(2_500);
+    expect(affordable).toBeGreaterThanOrEqual(2_700);
     expect(affordable).toBeLessThan(4_500);
 
     mockAdapter.draftGraph
@@ -629,7 +629,7 @@ describe("runStageParse", () => {
       });
 
     // 75s elapsed → remaining window = 120 − 75 − 10 = 35s → affords
-    // (35 − 15) × 90 = 1,800 tokens < the recalibrated 2,500-token lean-draft
+    // (35 − 15) × 90 = 1,800 tokens < the recalibrated 2,700-token lean-draft
     // floor. A late truncation with no room left: the gate refuses the retry
     // and the typed truncation error propagates (degrade honestly, never burn a
     // doomed second generation).

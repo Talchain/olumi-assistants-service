@@ -113,8 +113,10 @@ export const STRENGTH_DEFAULT_RETRY_NUDGE =
  * the retry stayed unreachable AND would re-truncate if it did fire. Retuned to
  * ≤12 nodes — the size of the observed healthy CONVERGED drafts (12-14 nodes /
  * 2,206-2,601 tokens): a genuinely lean-but-useful graph that COMPLETES inside
- * the freed window. The 2,500-token floor is calibrated to exactly this target;
- * change the two together (derive, don't mirror). The S-AUDIT-2026-07-20 V2/V3/
+ * the freed window. The 2,700-token floor is pinned just ABOVE the top of that
+ * band (2,601) so a boundary-authorized retry is sized above band-typical
+ * output and cannot re-truncate on it; change the two together (derive, don't
+ * mirror). The S-AUDIT-2026-07-20 V2/V3/
  * V4c probes (~4,100 tokens with ONE dimension removed) motivated the mechanism
  * — cutting numeric/comparison verbosity collapses the runaway — but the
  * reachable corrective draft must be leaner still.
