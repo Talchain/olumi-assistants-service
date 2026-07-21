@@ -426,26 +426,27 @@ export interface TurnExecutorRunResult {
   /**
    * ROADMAP 1.132 (F1) — the SUBSTANTIVE/FUNCTIONAL classification of this
    * turn's answer, for route-v2's egress answer-shape synthesiser (see
-   * `AnswerKind`). REPLACES the former `answerProse` boolean, whose implicit
-   * axis ("is the text LLM-authored") misclassified the DETERMINISTIC
-   * post-analysis advice-gate / run-comparison answers as functional and shipped
-   * them un-shaped on the live wire (3x). Now DECLARED at each compose site
-   * (`answerKind` on ComposeInput) and surfaced here:
+   * `AnswerKind`). EGRESS-DEFAULT INVERSION (fourth F1 fix): the first three
+   * fixes tried to ENUMERATE substantive compose sites (shape iff a site
+   * declared itself substantive) and each MISSED a sibling site — the
+   * DETERMINISTIC advice-gate answers, then the LLM EXPLANATION HANDLER answers
+   * (explain_results / what_would_flip: d9ac487d "bottom line" / 86654fd0
+   * "pre-mortem") — shipping un-shaped on the live wire. The structural fix
+   * inverts the default:
    *
-   *   - `'substantive'` — the FINAL `response.assistant_text` is a real answer
-   *     (coach / converse / text_only model prose OR a deterministic
-   *     post-analysis explanation). Captured at the substantive compose branch
-   *     (`substantiveAnswerText`) and RE-VERIFIED against the FINAL text at the
-   *     finalise seam (the same fail-closed check `answerShape` uses), so any
-   *     deterministic post-compose mutator (empty-answer recovery, STEP 6.6
-   *     structural-claim decline swap, goal-target receipt, commit-failure
-   *     replacement, forbidden-phrase guard) that rewrites the text downgrades
-   *     the kind to `'functional'`. route-v2 synthesises `_answer_shape` ONLY
-   *     for this value.
-   *   - `'functional'` — terse operational copy (clarify / receipt / decline /
-   *     recovery / guard); left plain.
+   *   - `'functional'` — this turn is a FAILURE response, OR a FUNCTIONAL
+   *     compose branch (clarify question / add-option or edit receipt / decline /
+   *     deterministic recovery / coaching-guard degrade) captured its text
+   *     (`functionalAnswerText`) and it survives as the FINAL text. Ships PLAIN.
+   *   - `'substantive'` — EVERYTHING ELSE, by DEFAULT: coach / converse /
+   *     text_only model prose, deterministic post-analysis explanations, AND the
+   *     answer-carrying explanation handlers — no per-site opt-in required, so a
+   *     new/unclassified answer path shapes rather than shipping un-shaped.
+   *     route-v2 synthesises `_answer_shape` for this value (unless the response
+   *     carries a draft_graph block or is a single sentence).
    *
-   * Omitted only when no response was composed (early failure paths).
+   * Always surfaced when a response was composed (the finalise seam always
+   * assigns one of the two kinds).
    */
   answerKind?: AnswerKind;
   telemetry: {
@@ -1141,34 +1142,37 @@ export async function runTurnExecutor(
   // clarify / text_only turns, and whenever a post-capture rewrite diverges
   // the final text from the shape.
   let capturedAnswerShape: AnswerShape | undefined;
-  // ROADMAP 1.132 (F1) — the composed text of the turn's SUBSTANTIVE answer,
-  // captured at EACH substantive compose branch (coach / converse / text_only
-  // model prose AND the deterministic post-analysis advice-gate / run-comparison
-  // explanations) for route-v2's egress answer-shape synthesiser (see
-  // TurnExecutorRunResult.answerKind). Hoisted to outer scope for the same
-  // reason as `capturedAnswerShape` — `finalizeRun` re-verifies it against the
-  // FINAL assistant_text and only then surfaces `answerKind: 'substantive'`. Set
-  // ONLY where a compose declares `answerKind: 'substantive'`; a functional
-  // builder never sets it, so a functional path can never surface 'substantive'.
-  let substantiveAnswerText: string | undefined;
+  // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION (fourth F1 fix). The composed
+  // text of the turn's FUNCTIONAL answer (clarify question / add-option or edit
+  // receipt / decline / deterministic recovery), captured at EACH functional
+  // compose branch and re-verified against the FINAL assistant_text at
+  // `finalizeRun`. This inverts the former substantive-capture axis: the
+  // route egress now shapes ANY answer UNLESS it is marked `'functional'`, so a
+  // NEW / unclassified / explanation-handler answer path shapes BY DEFAULT
+  // (fails toward the F1 goal) and ONLY the small, stable FUNCTIONAL set must
+  // opt out. `finalizeRun` classifies `'functional'` iff this captured text (or
+  // a failure response) survives to the final text; everything else is
+  // `'substantive'`. See TurnExecutorRunResult.answerKind + the route egress.
+  let functionalAnswerText: string | undefined;
 
   // ROADMAP 1.132 (F1) — the SINGLE capture chokepoint for direct-answer
   // composes in this executor. Every direct-answer compose in the turn body goes
   // through here (the `answer-kind-compose-classification.drift.test.ts` guard
   // asserts `composeDirectAnswerResponse` is called ONLY here), so the DECLARED
-  // `answerKind` DRIVES the egress synthesiser: a `'substantive'` declaration
-  // records the composed text for the finalise-seam re-verify; a `'functional'`
-  // one does not. This makes the per-site `answerKind` literal LOAD-BEARING at
-  // runtime (not a decoration parallel to a hand-assignment) — a NEW substantive
-  // site is captured automatically the moment it declares its kind, and flipping
-  // a site's literal flips whether it shapes. The LLM coach/converse branches
-  // additionally OVERRIDE the captured value with the model's PRE-output-guard
-  // answer (so a guard degrade still clears the kind); that refinement layers on
-  // top of this default.
+  // `answerKind` DRIVES the egress synthesiser. Post-inversion the load-bearing
+  // capture is the FUNCTIONAL one: a `'functional'` declaration records the
+  // composed text so `finalizeRun` can re-verify it and mark the turn functional
+  // (→ ships PLAIN); a `'substantive'` declaration does NOT capture and no longer
+  // GATES shaping — an unmarked/substantive answer shapes by default. A
+  // functional site that forgets its literal therefore ships one long message
+  // behind Show-more (mild, caught by the functional-marking fail-loud guard),
+  // never a substantive answer silently un-shaped. The LLM coach/converse
+  // branches additionally capture the recovery text as functional ONLY when the
+  // coaching output-guard DEGRADED the model's answer (see those branches).
   const composeAnswer = (input: import('./compose.js').ComposeInput): OlumiResponse => {
     const response = composeDirectAnswerResponse(input);
-    if (input.answerKind === 'substantive') {
-      substantiveAnswerText = response.assistant_text;
+    if (input.answerKind === 'functional') {
+      functionalAnswerText = response.assistant_text;
     }
     return response;
   };
@@ -6027,6 +6031,15 @@ export async function runTurnExecutor(
           recoveredChipType = recovered.chip_type;
         }
 
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The recoverable-
+        // validation responses (unsupported-action coaching + the per-code
+        // recovery copy) are FUNCTIONAL — deterministic decline/coaching, not a
+        // substantive answer. They are composed by dedicated builders (NOT the
+        // `composeAnswer` chokepoint), so capture their text here so `finalizeRun`
+        // marks the turn functional and it ships PLAIN (post-inversion an
+        // unmarked answer would shape).
+        functionalAnswerText = recoveredResponse.assistant_text;
+
         // Impossible-state guard (correction 8): if composeBody's fallback
         // fired, the map is out of sync with ValidationErrorCode. Fail
         // loudly via the legacy 500 wrapper so the problem surfaces in
@@ -6612,6 +6625,11 @@ export async function runTurnExecutor(
           }
 
           response = recovered.response;
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: handler-recovery
+          // coaching copy is FUNCTIONAL (a recovery family), composed by a
+          // dedicated builder (not the `composeAnswer` chokepoint). Capture it so
+          // `finalizeRun` marks the turn functional and it ships PLAIN.
+          functionalAnswerText = response.assistant_text;
           resolvedTurnClass = 'direct_answer';
           intentClass = 'converse';
           responseTypeForObs = 'direct_answer';
@@ -7137,8 +7155,23 @@ export async function runTurnExecutor(
         }
       }
 
+      // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. `composeToolCallResponse`
+      // serves BOTH kinds on the execute path: an ANSWER-carrying explanation
+      // handler (explain_from_structure / explain_results / what_would_flip —
+      // `EXPLANATION_HANDLER_IDS`, whose `assistant_text` IS the substantive
+      // answer the fourth F1 fix must shape: the d9ac487d "bottom line" /
+      // 86654fd0 "pre-mortem" class that fell through the advice gate to the LLM
+      // router) AND a mutation/run RECEIPT (add-option / set-value / run_analysis
+      // confirmation — functional, stays plain). Classify by handler family:
+      // explanation → `'substantive'` (shapes by default at egress); everything
+      // else → `'functional'` (captured below so `finalizeRun` marks it plain).
+      // NOTE the explanation branch does NOT capture `functionalAnswerText`, so a
+      // future post-compose rewrite still leaves it shaping (the safe direction).
+      const toolCallAnswerKind: AnswerKind = isExplanationHandler
+        ? 'substantive'
+        : 'functional';
       composedOk = composeToolCallResponse({
-        answerKind: 'functional',
+        answerKind: toolCallAnswerKind,
         orientation: orientationForCompose,
         confirmation: confirmationText,
         coaching: coachingText,
@@ -7187,6 +7220,19 @@ export async function runTurnExecutor(
             }
           : {}),
       });
+      // ROADMAP 1.132 (F1) — capture the execute RECEIPT text so `finalizeRun`
+      // marks it functional (→ ships plain). Only for the non-explanation
+      // (mutation/run) receipt; the explanation-handler answer is left
+      // uncaptured so it shapes by default. This is the PRE-rewrite capture; it
+      // is RE-CAPTURED after each post-compose rewrite below (resume echo /
+      // dropped-action disclosure) so a FUNCTIONAL receipt that gains APPENDED
+      // functional text (e.g. the POC-BOARD 5b honest compound-edit disclosure)
+      // stays functional and ships PLAIN — the invariant is: a functional
+      // response stays functional through every post-compose rewrite, never
+      // getting re-buried behind progressive disclosure.
+      if (toolCallAnswerKind === 'functional' && composedOk !== null) {
+        functionalAnswerText = composedOk.assistant_text;
+      }
       // V5 P0.2 — resume echo. When this execute turn is a RESUMED
       // apply_proposed_change that ACTUALLY applied a change, prepend the
       // proposal's label so the user sees exactly which proposal is being
@@ -7217,6 +7263,15 @@ export async function runTurnExecutor(
           ...composedOk,
           assistant_text: `Applying: ${echoLabel}.${rest}`,
         };
+        // ROADMAP 1.132 (F1) — RE-CAPTURE after the resume-echo rewrite. The
+        // "Applying: <label>." prefix is functional narration on a functional
+        // receipt; without this re-capture the diverged final text flips the
+        // receipt to substantive and shapes it (a REGRESSION — the receipt must
+        // ship plain). Guarded on the functional receipt only, so an explanation
+        // handler (substantive) stays uncaptured and still shapes.
+        if (toolCallAnswerKind === 'functional') {
+          functionalAnswerText = composedOk.assistant_text;
+        }
       }
       // POC-BOARD 5b — honest compound-edit disclosure. The router applies only
       // the FIRST olumi_action the model emits; any additional actions in the
@@ -7264,6 +7319,17 @@ export async function runTurnExecutor(
               `other ${n} changes yet (${subject}). Tell me if you'd like those too.`;
         const base = composedOk.assistant_text ? `${composedOk.assistant_text} ` : '';
         composedOk = { ...composedOk, assistant_text: `${base}${disclosure}` };
+        // ROADMAP 1.132 (F1) — RE-CAPTURE after the compound-edit disclosure
+        // rewrite. This is the load-bearing case from the F1 review: POC-BOARD 5b
+        // appended the honest "I haven't applied your other change ('…')"
+        // disclosure to a functional receipt; without this re-capture the diverged
+        // final text flips the receipt to substantive and the disclosure line is
+        // pushed into `detail` behind Show-more — RE-BURYING the exact disclosure
+        // 5b shipped PLAIN (a regression vs pre-#618). Guarded on the functional
+        // receipt only, so a substantive explanation handler still shapes.
+        if (toolCallAnswerKind === 'functional') {
+          functionalAnswerText = composedOk.assistant_text;
+        }
       }
       stagesCompleted.push('compose');
     } else if (
@@ -7322,6 +7388,11 @@ export async function runTurnExecutor(
         stage: context.stage,
         suggested_actions: clarifyChips,
       });
+      // ROADMAP 1.132 (F1) — capture the routed-clarify text so `finalizeRun`
+      // marks it functional (a clarify QUESTION must ship plain, never behind
+      // progressive disclosure). This composer is called DIRECTLY (not via the
+      // `composeAnswer` chokepoint), so the capture is explicit here.
+      functionalAnswerText = composedOk.assistant_text;
       stagesCompleted.push('compose');
     } else if (
       routingResult.type === 'tool_call' &&
@@ -7427,15 +7498,18 @@ export async function runTurnExecutor(
         answerKind: 'substantive',
       });
       stagesCompleted.push('compose');
-      // ROADMAP 1.132 (F1) — capture the model's coach ANSWER prose for the
-      // egress answer-shape synthesiser scope. Capture `sanitised.output` — the
-      // model's OWN sanitised answer, BEFORE `applyCoachingOutputGuard` above
-      // (which can DEGRADE to deterministic recovery copy), the empty-answer
-      // recovery below, and every later post-compose mutator. finalizeRun
-      // re-checks this against the FINAL assistant_text, so any of those
-      // deterministic rewrites diverges it and downgrades the kind to
-      // 'functional' — only the model's own unmodified answer stays 'substantive'.
-      substantiveAnswerText = sanitised.output;
+      // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The coach ANSWER prose
+      // shapes by default (it is a substantive answer). Detect the ONE case that
+      // must ship PLAIN: `applyCoachingOutputGuard` above DEGRADED the model's
+      // answer to deterministic recovery copy — observable as the guarded text
+      // diverging from the model's own sanitised output. On degrade, capture the
+      // recovery text as FUNCTIONAL so `finalizeRun` marks the turn plain;
+      // otherwise leave it unmarked so the genuine model answer shapes. (The
+      // empty-answer recovery below recomposes via the functional `composeAnswer`
+      // chokepoint, so that path is captured independently.)
+      if (coachGuarded.assistant_text !== sanitised.output) {
+        functionalAnswerText = coachGuarded.assistant_text;
+      }
       // CEE_ANSWER_TEXT_REQUIRED compose guard (belt-and-braces layer B,
       // default OFF — config/index.ts). Layer A (tool-schema.ts) forces a
       // REPAIR_ONCE retry when a coach tool call omits/blanks answer_text,
@@ -7594,14 +7668,16 @@ export async function runTurnExecutor(
         answerKind: 'substantive',
       });
       stagesCompleted.push('compose');
-      // ROADMAP 1.132 (F1) — capture the model's converse / text_only ANSWER
-      // prose (the primary F1 target) for the egress answer-shape synthesiser.
-      // Capture `sanitised.output` — the model's OWN sanitised answer, BEFORE
-      // `applyCoachingOutputGuard` above (which can DEGRADE to deterministic
-      // recovery copy), the empty-answer recovery below, and every later
-      // post-compose mutator. finalizeRun re-checks it against the FINAL text,
-      // so any deterministic rewrite diverges it and downgrades to 'functional'.
-      substantiveAnswerText = sanitised.output;
+      // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The converse / text_only
+      // ANSWER prose (the primary F1 target) shapes by default. Detect the ONE
+      // case that must ship PLAIN: `applyCoachingOutputGuard` DEGRADED the
+      // model's answer to deterministic recovery copy — observable as the
+      // guarded text diverging from the model's own sanitised output. On
+      // degrade, capture the recovery text as FUNCTIONAL; otherwise leave it
+      // unmarked so the genuine model answer shapes.
+      if (converseGuarded.assistant_text !== sanitised.output) {
+        functionalAnswerText = converseGuarded.assistant_text;
+      }
       // CEE_ANSWER_TEXT_REQUIRED compose guard (belt-and-braces layer B,
       // default OFF — config/index.ts). Mirrors the coach-branch guard
       // above; see its comment for the full rationale — checks the FINAL
@@ -8408,6 +8484,14 @@ export async function runTurnExecutor(
       ...response,
       assistant_text: guarded.text,
     };
+    // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: this guard SCRUBS a denial
+    // phrase but keeps the same answer. Carry the classification through the
+    // scrub — if the pre-scrub text was the captured FUNCTIONAL text, re-point
+    // the capture at the scrubbed text so the turn stays functional (a
+    // substantive answer stays substantive by leaving the capture unset).
+    if (functionalAnswerText === assistantText) {
+      functionalAnswerText = guarded.text;
+    }
   }
 
   /**
@@ -8456,6 +8540,11 @@ export async function runTurnExecutor(
       ...response,
       assistant_text: V5_STRUCTURAL_DECLINE_TEXT,
     };
+    // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: the swap replaces the
+    // answer with a two-sentence DECLINE. Mark it functional so the egress does
+    // not reshape a decline behind progressive disclosure (a substantive answer
+    // that got swapped would otherwise default to 'substantive' and shape).
+    functionalAnswerText = V5_STRUCTURAL_DECLINE_TEXT;
   }
 
   function finalizeRun(): TurnExecutorRunResult {
@@ -8658,28 +8747,35 @@ export async function runTurnExecutor(
         });
       }
     }
-    // ROADMAP 1.132 (F1) — classify the FINAL answer for the route egress
-    // answer-shape synthesiser. `substantiveAnswerText` was captured at each
-    // SUBSTANTIVE compose branch (coach / converse / text_only model prose AND
-    // the deterministic post-analysis advice-gate / run-comparison explanations);
-    // re-verify it against the FINAL assistant_text HERE (identical fail-closed
-    // FINAL-text check as the shape sidecar above) so any deterministic
-    // post-compose mutator that rewrote the text — empty-answer recovery, STEP
-    // 6.6 structural-claim decline swap, goal-target receipt, commit-failure
-    // replacement, forbidden-phrase guard — downgrades the kind to 'functional',
-    // and every functional builder (which never captured) is 'functional'.
-    // Drift-proof: a future post-compose mutator cannot fool the equality, and
-    // nothing outside a substantive compose branch can surface 'substantive'.
-    // 'functional' whenever a response is composed but is not a surviving
-    // substantive answer (`response` is always assigned by this seam).
+    // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION (fourth F1 fix). Classify
+    // the FINAL answer for the route egress synthesiser. The previous three
+    // fixes tried to ENUMERATE substantive compose sites (shape iff a site
+    // declared itself substantive) and each MISSED a sibling site (green tests,
+    // live failure). The structural fix inverts the default: an answer is
+    // `'functional'` (→ ships PLAIN) ONLY when
+    //   (a) the turn produced a FAILURE response (`failureType` set — error copy
+    //       must never be reshaped behind progressive disclosure), OR
+    //   (b) a FUNCTIONAL compose branch captured its text (`functionalAnswerText`
+    //       — clarify question / add-option or edit receipt / decline /
+    //       deterministic recovery) AND that text survives as the FINAL text.
+    // EVERYTHING ELSE is `'substantive'` and shapes by default — including the
+    // ANSWER-carrying explanation handlers (explain_from_structure /
+    // explain_results / what_would_flip) that compose via
+    // `composeToolCallResponse` and were the FOURTH miss (d9ac487d "bottom line"
+    // / 86654fd0 "pre-mortem" fell through the advice gate to the LLM router).
+    // The re-verify against the FINAL text keeps this drift-proof: a functional
+    // receipt rewritten post-compose diverges and shapes (mild, safe direction);
+    // a new/unclassified answer path shapes without any per-site wiring. The
+    // route egress applies the same "shape unless functional" rule plus a
+    // draft_graph block-primary guard + the single-sentence synthesiser skip.
     const answerFinalText =
       typeof response?.assistant_text === 'string' ? response.assistant_text : '';
-    const answerKind: AnswerKind =
-      substantiveAnswerText !== undefined &&
-      answerFinalText.length > 0 &&
-      answerFinalText === substantiveAnswerText
-        ? 'substantive'
-        : 'functional';
+    const isFunctionalAnswer =
+      failureType !== null ||
+      (functionalAnswerText !== undefined &&
+        answerFinalText.length > 0 &&
+        answerFinalText === functionalAnswerText);
+    const answerKind: AnswerKind = isFunctionalAnswer ? 'functional' : 'substantive';
     return {
       response,
       analysisReady: analysisReadyForTurn,

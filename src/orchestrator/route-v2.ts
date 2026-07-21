@@ -661,20 +661,22 @@ function sendFinalised200(
     readonly answerShape?: import('../orchestrator-v5/routing/answer-shape.js').AnswerShape;
     /**
      * ROADMAP 1.132 (F1) — SUBSTANTIVE/FUNCTIONAL classification driving the
-     * egress answer-shape synthesiser below. Threaded from `run.answerKind`
-     * (turn_executor path) and from the chip-click dispatch result (`cc.answerKind`,
-     * chip_click path). `'substantive'` iff the FINAL assistant_text is a real
-     * answer — the model's own coach / converse / text_only prose OR a
-     * deterministic post-analysis explanation (advice gate, run-comparison,
-     * chip-click explain/flip) — DECLARED at the compose site (`answerKind` on
-     * ComposeInput) and, for the executor, re-verified fail-closed against the
-     * FINAL text at the finalise seam so any deterministic post-compose mutator
-     * downgrades it. The synthesiser fires ONLY for `'substantive'`. Deterministic
-     * functional copy (clarify / receipt / recovery / decline) is `'functional'`,
-     * and it is threaded at the `turn_executor` callsite ALONE — every other
-     * dispatch family (draft_graph / edit_graph / chip_click / system_event /
-     * clarify_v2 / readiness_intake / …) that does not thread a kind omits it
-     * and is structurally excluded from progressive-disclosure reshaping.
+     * egress answer-shape synthesiser below. EGRESS-DEFAULT INVERSION (fourth F1
+     * fix): the synthesiser now shapes UNLESS `answerKind === 'functional'`, so
+     * a substantive / unclassified / explanation-handler answer shapes BY
+     * DEFAULT. Threaded from `run.answerKind` (turn_executor, re-verified
+     * fail-closed against the FINAL text at the finalise seam — its default is
+     * `'substantive'`, so a NEW executor answer path shapes without per-site
+     * wiring) and `cc.answerKind` (chip_click). CONSEQUENCE OF THE INVERSION:
+     * every OTHER dispatch family that is functional copy (edit_graph /
+     * clarify_v2 / readiness_intake / system_event / declines / guards / the
+     * draft_graph intro) MUST now EXPLICITLY thread `answerKind: 'functional'` at
+     * its `sendFinalised200` callsite — omission means SHAPE (the inverted
+     * default), not skip. A functional site that forgets its mark ships one long
+     * message behind Show-more (mild, and caught by the functional-marking
+     * fail-loud guard — `route-egress-functional-marking.drift.test.ts`), never a
+     * substantive answer silently un-shaped. See `responseCarriesDraftGraphBlock`
+     * for the block-primary (draft_graph) exclusion.
      */
     readonly answerKind?: import('../orchestrator-v5/compose.js').AnswerKind;
     /**
@@ -1052,28 +1054,37 @@ function sendFinalised200(
       });
     }
   }
-  // ROADMAP 1.132 (F1) — deterministic answer-shape FALLBACK, SCOPED to the
-  // model's own ANSWER prose. The un-shaped LLM answer prose path (the
-  // intent-null / text_only converse compose, whose F2 capture gates require a
-  // tool_call answer_shape and so structurally exclude text_only; plus any
-  // coach/converse answer whose captured shape was dropped stale just above)
-  // would otherwise ship as an un-collapsible wall of prose. F1 progressive
-  // disclosure is for that long ANSWER prose ONLY.
+  // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION (fourth F1 fix). Progressive
+  // disclosure for long ANSWER prose. The previous three fixes SCOPED shaping to
+  // sites explicitly declared `answerKind === 'substantive'` and each MISSED a
+  // sibling substantive site (advice gate, then the LLM EXPLANATION HANDLER
+  // answers — explain_results / what_would_flip: d9ac487d "bottom line" /
+  // 86654fd0 "pre-mortem" — which compose via `composeToolCallResponse` and were
+  // never declared substantive). Each miss passed every test yet shipped
+  // un-shaped on the live wire. This ends the whack-a-mole by INVERTING the
+  // default: shape ANY answer UNLESS it is explicitly FUNCTIONAL.
   //
-  // SCOPE GATE (`ctx.answerKind === 'substantive'`): this same egress chokepoint
-  // also carries DETERMINISTIC FUNCTIONAL COPY — clarify questions, add-option /
-  // edit receipts, decline / refusal copy, deterministic recovery messages,
-  // and the draft-graph / edit-graph / system-event dispatch families. Reshaping
-  // a multi-sentence functional message would push its second sentence (often
-  // the actual question or call-to-action) behind progressive disclosure — a UX
-  // regression. `answerKind` is DECLARED at each compose site (`answerKind` on
-  // ComposeInput) and threaded from BOTH the turn_executor path (`run.answerKind`,
-  // re-verified fail-closed against the FINAL text at the executor's finalise
-  // seam) AND the chip_click path (`cc.answerKind`, the deterministic
-  // explain/flip answers) — so the substantive DETERMINISTIC post-analysis
-  // answers (advice gate, run-comparison, chip explain/flip) that the previous
-  // "LLM-authored" (`answerProse`) axis wrongly excluded are now IN scope, while
-  // functional copy stays plain by declaration.
+  // GATE — shape when ALL hold:
+  //   1. `ctx.answerKind !== 'functional'` — substantive/unclassified/
+  //      explanation-handler/any-new answer path shapes BY DEFAULT (fails toward
+  //      the goal). Only the small, stable FUNCTIONAL set (clarify questions,
+  //      add-option / edit receipts, declines, recovery copy, and the
+  //      edit_graph / clarify_v2 / readiness_intake / system_event dispatch
+  //      families) is marked `'functional'` and stays plain. `answerKind` is
+  //      threaded from `run.answerKind` (turn_executor, re-verified fail-closed
+  //      at the finalise seam), `cc.answerKind` (chip_click), and the explicit
+  //      functional mark on every other dispatch family's `sendFinalised200`.
+  //   2. NO `draft_graph` block — a draft-graph response's user-facing artifact
+  //      is the GRAPH, not the prose; its brief intro must not be reshaped. This
+  //      is the ONE block type that means "the block is the answer". Phase-3
+  //      lifecycle blocks (review_card / coaching / evidence / analysis_result)
+  //      ACCOMPANY a substantive prose answer — the explanation handlers carry
+  //      them on a fresh post-analysis turn — and MUST NOT suppress shaping, so
+  //      the guard is draft_graph-specific, NOT "any non-empty blocks".
+  //   3. no `_answer_shape` already present (the executor/chip already shaped it).
+  //   4. non-blank assistant_text; and `synthesiseAnswerShapeFromText` returns a
+  //      shape only when there is a remainder after the first sentence — a terse
+  //      single-sentence functional one-liner is skipped (returns null).
   //
   // Byte-equality is preserved BY CONSTRUCTION (approach b): we SET
   // `assistant_text := deriveAnswerTextFromShape(synth)`, so the tie the
@@ -1090,7 +1101,8 @@ function sendFinalised200(
   // matching sidecar.
   if (
     egress.ok &&
-    ctx.answerKind === 'substantive' &&
+    ctx.answerKind !== 'functional' &&
+    !responseCarriesDraftGraphBlock(wireBody) &&
     !('_answer_shape' in (wireBody as Record<string, unknown>)) &&
     typeof wireBody.assistant_text === 'string' &&
     wireBody.assistant_text.trim().length > 0
@@ -1135,6 +1147,37 @@ function sendFinalised200(
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);
+}
+
+/**
+ * ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION block-primary guard.
+ *
+ * True when the response carries a `draft_graph` block — the one block type
+ * whose user-facing artifact IS the block (the drafted decision graph), not the
+ * `assistant_text` prose. A draft-graph turn's prose is a brief intro that must
+ * NOT be reshaped behind progressive disclosure, so the egress synthesiser skips
+ * it (the draft_graph dispatch is ALSO functional-marked; this is defence in
+ * depth against a future path that emits a draft_graph block without a mark).
+ *
+ * DELIBERATELY draft_graph-ONLY, not "any non-empty blocks": the Phase-3
+ * lifecycle blocks (review_card / coaching / evidence / analysis_result /
+ * graph_patch / comparison / flip_analysis) ACCOMPANY a substantive prose answer
+ * — the explanation handlers (explain_results / what_would_flip) carry them on a
+ * fresh post-analysis turn — and that prose IS the F1 target. A broad
+ * "blocks-empty" gate would wrongly exclude exactly the d9ac487d / 86654fd0
+ * answers this fix must shape.
+ */
+function responseCarriesDraftGraphBlock(
+  response: import('@talchain/schemas/boundary').OlumiResponse,
+): boolean {
+  const blocks = (response as { blocks?: unknown }).blocks;
+  if (!Array.isArray(blocks)) return false;
+  return blocks.some(
+    (b) =>
+      b !== null &&
+      typeof b === 'object' &&
+      (b as { type?: unknown }).type === 'draft_graph',
+  );
 }
 
 /**
@@ -1411,7 +1454,7 @@ function sendEditGraphRecovery(
     answerKind: 'functional',
     assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
     stage,
-  }), { graph: null, userMessage });
+  }), { graph: null, answerKind: 'functional', userMessage });
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1832,6 +1875,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return sendFinalised200(reply, requestId, 'system_event', sysResult.response, {
         analysisReady: sysResult.analysisReady,
         graph: sysResult.graph,
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: system-event copy is
+        // functional (receipts/notices) and must ship plain (omission now shapes).
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
@@ -1891,6 +1937,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'handler_recovered') {
           return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
             graph: cc.graph,
+            // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: chip-click recovery
+            // copy is functional and must ship plain (omission would now SHAPE).
+            answerKind: 'functional',
             requestStartedAt: routeStartedAt,
             scenarioId: ingress.scenario_id,
             turnId: ingress.turn_id,
@@ -1938,13 +1987,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisReady: cc.analysisReady,
           graph: cc.graph,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
-          // ROADMAP 1.132 (F1) — thread the chip answer's declared kind so the
-          // egress synthesiser shapes the substantive explain_results /
-          // what_would_flip answers (never the run_analysis receipt). Without
-          // this the chip-driven explanations would ship un-shaped on the live
-          // wire — the second F1 substantive egress the turn_executor fix alone
-          // would miss.
-          ...(cc.answerKind ? { answerKind: cc.answerKind } : {}),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: thread the chip
+          // answer's declared kind, DEFAULTING to 'functional' when the dispatch
+          // did not declare one. Post-inversion an omitted kind would SHAPE, so a
+          // chip path that returns no answerKind (today every chip answer,
+          // including the deferred-functional explain_results / what_would_flip
+          // explanations) must stay plain by default; a chip site that later opts
+          // into shaping sets `answerKind: 'substantive'` explicitly.
+          answerKind: cc.answerKind ?? 'functional',
           // ROADMAP 2.73 Fix C — decision_review call attribution from the
           // chip dispatch (present only when the call returned under an
           // enabled timings/trace gate). The minimal-trace builder folds it
@@ -2061,6 +2111,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // egress label sanitiser has nothing to resolve.
       return sendFinalised200(reply, requestId, 'readiness_intake', readiness.response, {
         graph: null,
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: readiness-intake copy is
+        // functional (receipt / question) and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
@@ -2483,6 +2536,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       } as import('@talchain/schemas/boundary').OlumiResponse;
       return sendFinalised200(reply, requestId, 'explicit_generate_no_brief', declineResponse, {
         graph: null,
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: decline copy is
+        // functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
@@ -2608,6 +2664,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         wireResponse,
         {
           graph: null,
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: this decline/offer
+          // copy is functional and must ship plain.
+          answerKind: 'functional',
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
@@ -2700,6 +2759,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       if (cv2 !== null && cv2.kind === 'respond') {
         return sendFinalised200(reply, requestId, 'clarify_v2', cv2.response, {
           graph: null,
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a clarify QUESTION is
+          // functional and must ship plain, never behind progressive disclosure.
+          answerKind: 'functional',
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
@@ -2762,6 +2824,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a draft-graph turn's
+          // artifact is the GRAPH (draft_graph block), not the intro prose. Mark
+          // functional AND rely on the draft_graph block-primary egress guard.
+          answerKind: 'functional',
           ...(dg.freshness ? { freshness: dg.freshness } : {}),
           ...(dg.diagnosticTrace ? { diagnosticTrace: dg.diagnosticTrace } : {}),
           requestStartedAt: routeStartedAt,
@@ -3080,6 +3146,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         });
         return sendFinalised200(reply, requestId, 'edit_graph', noProposalResponse, {
           graph: null,
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
+          // functional and must ship plain.
+          answerKind: 'functional',
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
@@ -3111,6 +3180,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+        // copy is functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
@@ -3158,6 +3230,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       );
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+        // copy is functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
@@ -3181,6 +3256,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+        // copy is functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
@@ -3317,6 +3395,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
           analysisReady: eg.analysisReady,
           graph: eg.graph,
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
+          // functional (add-option / edit confirmation) and must ship plain.
+          answerKind: 'functional',
           ...(eg.freshness ? { freshness: eg.freshness } : {}),
           // S3-L6 / F-5: edit-lane LLM call → `_diagnostic_trace.llm_calls[]`.
           ...(eg.editLlmCall ? { editLlmCall: eg.editLlmCall } : {}),
@@ -3405,6 +3486,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         composeProcessMetaIntakeResponse(),
         {
           graph: null,
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: process-meta intake
+          // copy is functional and must ship plain.
+          answerKind: 'functional',
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
@@ -3591,6 +3675,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
           return sendFinalised200(reply, requestId, 'frame_no_brief_guard', commitResult.response, {
             graph: null,
+            // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: guard/commit copy is
+            // functional and must ship plain.
+            answerKind: 'functional',
             requestStartedAt: routeStartedAt,
             scenarioId: ingress.scenario_id,
             turnId: ingress.turn_id,
@@ -3618,6 +3705,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       }
       return sendFinalised200(reply, requestId, 'frame_no_brief_guard', guardResponse, {
         graph: null,
+        // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: guard decline copy is
+        // functional and must ship plain.
+        answerKind: 'functional',
         requestStartedAt: routeStartedAt,
         scenarioId: ingress.scenario_id,
         turnId: ingress.turn_id,
