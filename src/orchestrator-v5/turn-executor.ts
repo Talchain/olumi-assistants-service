@@ -7223,10 +7223,13 @@ export async function runTurnExecutor(
       // ROADMAP 1.132 (F1) — capture the execute RECEIPT text so `finalizeRun`
       // marks it functional (→ ships plain). Only for the non-explanation
       // (mutation/run) receipt; the explanation-handler answer is left
-      // uncaptured so it shapes by default. Captured PRE any post-compose
-      // rewrite (resume echo / dropped-action disclosure below) — a rewrite
-      // therefore diverges the final text and lets the (rare) rewritten receipt
-      // shape, the safe fail direction.
+      // uncaptured so it shapes by default. This is the PRE-rewrite capture; it
+      // is RE-CAPTURED after each post-compose rewrite below (resume echo /
+      // dropped-action disclosure) so a FUNCTIONAL receipt that gains APPENDED
+      // functional text (e.g. the POC-BOARD 5b honest compound-edit disclosure)
+      // stays functional and ships PLAIN — the invariant is: a functional
+      // response stays functional through every post-compose rewrite, never
+      // getting re-buried behind progressive disclosure.
       if (toolCallAnswerKind === 'functional' && composedOk !== null) {
         functionalAnswerText = composedOk.assistant_text;
       }
@@ -7260,6 +7263,15 @@ export async function runTurnExecutor(
           ...composedOk,
           assistant_text: `Applying: ${echoLabel}.${rest}`,
         };
+        // ROADMAP 1.132 (F1) — RE-CAPTURE after the resume-echo rewrite. The
+        // "Applying: <label>." prefix is functional narration on a functional
+        // receipt; without this re-capture the diverged final text flips the
+        // receipt to substantive and shapes it (a REGRESSION — the receipt must
+        // ship plain). Guarded on the functional receipt only, so an explanation
+        // handler (substantive) stays uncaptured and still shapes.
+        if (toolCallAnswerKind === 'functional') {
+          functionalAnswerText = composedOk.assistant_text;
+        }
       }
       // POC-BOARD 5b — honest compound-edit disclosure. The router applies only
       // the FIRST olumi_action the model emits; any additional actions in the
@@ -7307,6 +7319,17 @@ export async function runTurnExecutor(
               `other ${n} changes yet (${subject}). Tell me if you'd like those too.`;
         const base = composedOk.assistant_text ? `${composedOk.assistant_text} ` : '';
         composedOk = { ...composedOk, assistant_text: `${base}${disclosure}` };
+        // ROADMAP 1.132 (F1) — RE-CAPTURE after the compound-edit disclosure
+        // rewrite. This is the load-bearing case from the F1 review: POC-BOARD 5b
+        // appended the honest "I haven't applied your other change ('…')"
+        // disclosure to a functional receipt; without this re-capture the diverged
+        // final text flips the receipt to substantive and the disclosure line is
+        // pushed into `detail` behind Show-more — RE-BURYING the exact disclosure
+        // 5b shipped PLAIN (a regression vs pre-#618). Guarded on the functional
+        // receipt only, so a substantive explanation handler still shapes.
+        if (toolCallAnswerKind === 'functional') {
+          functionalAnswerText = composedOk.assistant_text;
+        }
       }
       stagesCompleted.push('compose');
     } else if (
