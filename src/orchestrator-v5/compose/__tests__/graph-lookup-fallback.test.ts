@@ -312,6 +312,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
 
   it('compose: production-shaped fact + persistedGraph → exactly one ui_directive on blocks[]', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
@@ -327,6 +328,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
 
   it('fallback resolving the recommended id to a NON-option kind still fails closed', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact({ leadingOptionId: 'fac_delivery_risk' })],
       persistedGraph: PERSISTED_GRAPH,
@@ -337,6 +339,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
 
   it('recommended id absent from BOTH sources still fails closed (no id-as-label fallback)', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact({ leadingOptionId: 'opt_unknown' })],
       persistedGraph: PERSISTED_GRAPH,
@@ -347,6 +350,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
 
   it('prior-fact FRESH lifecycle rebuild with persistedGraph still emits ZERO directives (current-turn only)', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [],
       persistedGraph: PERSISTED_GRAPH,
@@ -376,6 +380,7 @@ describe('ui_directive emitter — persisted-snapshot fallback (flag ON)', () =>
 describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
   it('flip_threshold card emits with the factor target ref resolved from the fallback', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
@@ -390,6 +395,7 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
 
   it('scenario_context card emits with the edge target ref (derived endpoint label)', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
@@ -404,6 +410,7 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
 
   it('evidence_priority card and evidence block resolve the factor ref from the fallback', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
@@ -423,6 +430,7 @@ describe('Phase 3 target_refs — persisted-snapshot fallback', () => {
 
   it('prior-fact FRESH lifecycle rebuild also resolves target_refs from the fallback', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [],
       persistedGraph: PERSISTED_GRAPH,
@@ -473,6 +481,7 @@ describe('current-turn fallback hash gate (review F1)', () => {
 
   it('persistedGraphHash === graph_hash_at_run → fallback consulted (directive + resolved target_refs)', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
@@ -484,6 +493,7 @@ describe('current-turn fallback hash gate (review F1)', () => {
 
   it('persistedGraphHash MISMATCH → fallback NOT consulted; pre-fix fail-closed behaviour', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
@@ -501,6 +511,7 @@ describe('current-turn fallback hash gate (review F1)', () => {
 
   it('persistedGraphHash ABSENT (null) → fallback NOT consulted on the current-turn branch', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
@@ -512,6 +523,7 @@ describe('current-turn fallback hash gate (review F1)', () => {
 
   it('persistedGraphHash omitted entirely → fallback NOT consulted on the current-turn branch', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       persistedGraph: PERSISTED_GRAPH,
@@ -522,6 +534,7 @@ describe('current-turn fallback hash gate (review F1)', () => {
 
   it('prior-fact FRESH lifecycle rebuild needs NO hash — fallback still resolves target_refs', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [],
       persistedGraph: PERSISTED_GRAPH,
@@ -562,6 +575,7 @@ describe('Phase 3 + ui_directive — neither graph source (fail-closed baseline)
 
   it('lookup-gated blocks drop; narrative and assumption cards still ship with empty target_refs; zero directives', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [productionShapedFact()],
       // no persistedGraph

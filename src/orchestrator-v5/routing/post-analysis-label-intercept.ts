@@ -327,6 +327,7 @@ export function composePostAnalysisLabelInterceptResponse(
   stage: StageType,
 ): OlumiResponse {
   return composeDirectAnswerResponse({
+    answerKind: 'functional',
     assistant_text: composeExploreText(canonicalLabel),
     stage,
     suggested_actions: [WALK_ME_THROUGH_CHIP, RERUN_ANALYSIS_CHIP, RUN_PRE_MORTEM_CHIP],

@@ -90,10 +90,10 @@ function mkProseRun(assistantText: string) {
     },
     analysisReady: { status: 'ready', goal_node_id: 'goal', options: [] },
     effectiveGraph: null,
-    // No `answerShape` — this is the un-shaped prose path. `answerProse: true`
-    // marks it as the model's ANSWER prose (finalizeRun's FINAL-text-verified
-    // scope signal), so the egress fallback is in scope for it.
-    answerProse: true as const,
+    // No `answerShape` — this is the un-shaped prose path. `answerKind:
+    // 'substantive'` marks it as a real answer (finalizeRun's FINAL-text-verified
+    // classification), so the egress synthesiser is in scope for it.
+    answerKind: 'substantive' as const,
     telemetry: {
       stages_completed: ['orient', 'compose'],
       response_emitted: true as const,
@@ -111,11 +111,10 @@ function mkProseRun(assistantText: string) {
 
 // DETERMINISTIC FUNCTIONAL COPY through the SAME egress chokepoint: a clarify
 // question, an add-option / edit receipt, a decline, a deterministic recovery
-// message. The turn-executor's deterministic builders NEVER capture answer
-// prose, so the run carries NO `answerProse` (nor `answerShape`). The egress
-// fallback must leave it byte-identical and un-shaped — reshaping would push a
-// functional message's second sentence (the question / call-to-action) behind
-// progressive disclosure.
+// message. These builders declare `answerKind: 'functional'` (never
+// 'substantive'), and carry no `answerShape`. The egress synthesiser must leave
+// it byte-identical and un-shaped — reshaping would push a functional message's
+// second sentence (the question / call-to-action) behind progressive disclosure.
 function mkDeterministicRun(assistantText: string) {
   return {
     response: {
@@ -128,7 +127,9 @@ function mkDeterministicRun(assistantText: string) {
     },
     analysisReady: { status: 'ready', goal_node_id: 'goal', options: [] },
     effectiveGraph: null,
-    // No `answerShape`, and crucially NO `answerProse` — deterministic copy.
+    // No `answerShape`, and crucially `answerKind: 'functional'` — deterministic
+    // functional copy (a clarify / receipt / decline / recovery message).
+    answerKind: 'functional' as const,
     telemetry: {
       stages_completed: ['orient', 'compose'],
       response_emitted: true as const,

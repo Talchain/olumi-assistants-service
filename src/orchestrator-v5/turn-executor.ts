@@ -50,6 +50,7 @@ import {
   composeDirectAnswerResponse,
   composeClarifyResponse,
   composeToolCallResponse,
+  type AnswerKind,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import { buildTurnContext, loadPersistedGraphStrict } from './build-turn-context.js';
@@ -423,20 +424,30 @@ export interface TurnExecutorRunResult {
    */
   answerShape?: AnswerShape;
   /**
-   * ROADMAP 1.132 (F1) — SCOPING signal for route-v2's egress answer-shape
-   * FALLBACK. TRUE iff the FINAL `response.assistant_text` is the model's own
-   * coach / converse / text_only ANSWER prose. Captured at the answer-compose
-   * branch (`answerProseText`) and RE-VERIFIED against the final text at the
-   * finalise seam — the same fail-closed FINAL-text check `answerShape` uses —
-   * so any deterministic post-compose mutator (empty-answer recovery,
-   * structural-claim decline swap, goal-target receipt, commit-failure
-   * replacement, forbidden-phrase guard) that rewrites the text CLEARS it, and
-   * every deterministic builder (clarify / receipt / recovery / decline — none
-   * of which capture) stays false. The F1 fallback synthesises a shape ONLY
-   * when this is true, so deterministic functional copy is never pushed behind
-   * progressive disclosure. Omitted (falsy) on every non-answer path.
+   * ROADMAP 1.132 (F1) — the SUBSTANTIVE/FUNCTIONAL classification of this
+   * turn's answer, for route-v2's egress answer-shape synthesiser (see
+   * `AnswerKind`). REPLACES the former `answerProse` boolean, whose implicit
+   * axis ("is the text LLM-authored") misclassified the DETERMINISTIC
+   * post-analysis advice-gate / run-comparison answers as functional and shipped
+   * them un-shaped on the live wire (3x). Now DECLARED at each compose site
+   * (`answerKind` on ComposeInput) and surfaced here:
+   *
+   *   - `'substantive'` — the FINAL `response.assistant_text` is a real answer
+   *     (coach / converse / text_only model prose OR a deterministic
+   *     post-analysis explanation). Captured at the substantive compose branch
+   *     (`substantiveAnswerText`) and RE-VERIFIED against the FINAL text at the
+   *     finalise seam (the same fail-closed check `answerShape` uses), so any
+   *     deterministic post-compose mutator (empty-answer recovery, STEP 6.6
+   *     structural-claim decline swap, goal-target receipt, commit-failure
+   *     replacement, forbidden-phrase guard) that rewrites the text downgrades
+   *     the kind to `'functional'`. route-v2 synthesises `_answer_shape` ONLY
+   *     for this value.
+   *   - `'functional'` — terse operational copy (clarify / receipt / decline /
+   *     recovery / guard); left plain.
+   *
+   * Omitted only when no response was composed (early failure paths).
    */
-  answerProse?: boolean;
+  answerKind?: AnswerKind;
   telemetry: {
     stages_completed: string[];
     response_emitted: true;
@@ -1130,15 +1141,37 @@ export async function runTurnExecutor(
   // clarify / text_only turns, and whenever a post-capture rewrite diverges
   // the final text from the shape.
   let capturedAnswerShape: AnswerShape | undefined;
-  // ROADMAP 1.132 (F1) — the model's own ANSWER prose, captured at the
-  // coach / converse / text_only compose branch for route-v2's egress
-  // answer-shape fallback SCOPING (see TurnExecutorRunResult.answerProse).
-  // Hoisted to outer scope for the same reason as `capturedAnswerShape` —
-  // `finalizeRun` re-verifies it against the FINAL assistant_text and only
-  // then surfaces `answerProse: true`. Set ONLY in the two answer-compose
-  // branches; undefined on execute / clarify / every deterministic builder, so
-  // a deterministic path can never surface the flag.
-  let answerProseText: string | undefined;
+  // ROADMAP 1.132 (F1) — the composed text of the turn's SUBSTANTIVE answer,
+  // captured at EACH substantive compose branch (coach / converse / text_only
+  // model prose AND the deterministic post-analysis advice-gate / run-comparison
+  // explanations) for route-v2's egress answer-shape synthesiser (see
+  // TurnExecutorRunResult.answerKind). Hoisted to outer scope for the same
+  // reason as `capturedAnswerShape` — `finalizeRun` re-verifies it against the
+  // FINAL assistant_text and only then surfaces `answerKind: 'substantive'`. Set
+  // ONLY where a compose declares `answerKind: 'substantive'`; a functional
+  // builder never sets it, so a functional path can never surface 'substantive'.
+  let substantiveAnswerText: string | undefined;
+
+  // ROADMAP 1.132 (F1) — the SINGLE capture chokepoint for direct-answer
+  // composes in this executor. Every direct-answer compose in the turn body goes
+  // through here (the `answer-kind-compose-classification.drift.test.ts` guard
+  // asserts `composeDirectAnswerResponse` is called ONLY here), so the DECLARED
+  // `answerKind` DRIVES the egress synthesiser: a `'substantive'` declaration
+  // records the composed text for the finalise-seam re-verify; a `'functional'`
+  // one does not. This makes the per-site `answerKind` literal LOAD-BEARING at
+  // runtime (not a decoration parallel to a hand-assignment) — a NEW substantive
+  // site is captured automatically the moment it declares its kind, and flipping
+  // a site's literal flips whether it shapes. The LLM coach/converse branches
+  // additionally OVERRIDE the captured value with the model's PRE-output-guard
+  // answer (so a guard degrade still clears the kind); that refinement layers on
+  // top of this default.
+  const composeAnswer = (input: import('./compose.js').ComposeInput): OlumiResponse => {
+    const response = composeDirectAnswerResponse(input);
+    if (input.answerKind === 'substantive') {
+      substantiveAnswerText = response.assistant_text;
+    }
+    return response;
+  };
 
   try {
     // Derive GraphLookup from the ingress payload. A payload-drift situation
@@ -1827,7 +1860,8 @@ export async function runTurnExecutor(
             : decisionStatus === 'already_applied'
               ? PROPOSAL_ALREADY_APPLIED_RESPONSE
               : 'The offer I had open is no longer valid. Tell me what to explore next.';
-        const recoveryResponse = composeDirectAnswerResponse({
+        const recoveryResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: recoveryAssistantText,
           stage: context.stage,
           suggested_actions: [],
@@ -1956,7 +1990,8 @@ export async function runTurnExecutor(
         // route) rather than offering nothing.
         const gmReadiness = computeStructuralReadiness(outcome.appliedGraph);
         const gmAppliedSubject = describeHeldOperationsSubject(read.operations, gmBaseGraph);
-        const appliedResponse = composeDirectAnswerResponse({
+        const appliedResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: buildGmHeldAppliedReceipt(
             gmAppliedSubject !== null ? [gmAppliedSubject] : [],
             deriveUnconfiguredOptionLabels(gmReadiness),
@@ -2185,7 +2220,8 @@ export async function runTurnExecutor(
             declinedLabels.length === 1 ? 'that one' : 'those'
           }.`;
         }
-        const appliedResponse = composeDirectAnswerResponse({
+        const appliedResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: receiptText,
           stage: context.stage,
           suggested_actions: buildGmHeldAppliedChips(gmReadiness),
@@ -2346,7 +2382,8 @@ export async function runTurnExecutor(
                 },
               ]
             : [];
-          const recoveryResponse = composeDirectAnswerResponse({
+          const recoveryResponse = composeAnswer({
+            answerKind: 'functional',
             assistant_text: noPendingAssistantText,
             stage: context.stage,
             suggested_actions: noPendingChips,
@@ -2544,7 +2581,8 @@ export async function runTurnExecutor(
           pending_action_id: pending.id,
           kind: pending.action.kind,
         });
-        const recoveryResponse = composeDirectAnswerResponse({
+        const recoveryResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text:
             "The analysis is no longer fresh, so the answer to 'what would change this' " +
             'might be misleading. Run analysis again first?',
@@ -2632,7 +2670,8 @@ export async function runTurnExecutor(
               },
             ]
           : [];
-        const recoveryResponse = composeDirectAnswerResponse({
+        const recoveryResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: expiredAssistantText,
           stage: context.stage,
           suggested_actions: expiredChips,
@@ -2927,7 +2966,8 @@ export async function runTurnExecutor(
             message: 'Not now.',
           },
         ];
-        const ambiguousResponse = composeDirectAnswerResponse({
+        const ambiguousResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: ambiguousAssistantText,
           stage: context.stage,
           suggested_actions: consentResolutionChips,
@@ -3079,7 +3119,8 @@ export async function runTurnExecutor(
         const oneAtATimeNumbered = oneAtATimeChips
           .map((c, i) => `${i + 1}) ${c.label}`)
           .join(' ');
-        const oneAtATimeResponse = composeDirectAnswerResponse({
+        const oneAtATimeResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text:
             `I can apply those one at a time, checking each against the latest ` +
             `model. ${oneAtATimeNumbered}. Reply with a number to start, or 'none'.`,
@@ -3302,7 +3343,8 @@ export async function runTurnExecutor(
             const ambiguousAssistantText = allLabelsAreFallback
               ? 'I had more than one offer open. Which would you like?'
               : `Which one would you like? ${numberedList}`;
-            const ambiguousResponse = composeDirectAnswerResponse({
+            const ambiguousResponse = composeAnswer({
+              answerKind: 'functional',
               assistant_text: ambiguousAssistantText,
               stage: context.stage,
               suggested_actions: labelAmbiguousChips,
@@ -3377,7 +3419,8 @@ export async function runTurnExecutor(
             candidate_count: dismissal.dismissed_count,
             kinds: ['apply_proposed_change'],
           });
-          const dismissalResponse = composeDirectAnswerResponse({
+          const dismissalResponse = composeAnswer({
+            answerKind: 'functional',
             assistant_text: PROPOSAL_DISMISSAL_RESPONSE,
             stage: context.stage,
             suggested_actions: [],
@@ -3556,7 +3599,8 @@ export async function runTurnExecutor(
         });
         const riskLabel = clarificationDispatch.riskLabel;
         const driverLabel = clarificationDispatch.driverLabel;
-        const addRiskResumeResponse = composeDirectAnswerResponse({
+        const addRiskResumeResponse = composeAnswer({
+          answerKind: 'functional',
           // Deterministic copy family: mirrors the swept GM held wording
           // ("Nothing in the model moves until you confirm") — no success
           // claim, no denial phrase, no internal tokens, no em dash.
@@ -3778,7 +3822,8 @@ export async function runTurnExecutor(
           scenario_id: context.session_id,
           reason: `clarification_recovery_${telemetryReason}`,
         });
-        const recoveryResponse = composeDirectAnswerResponse({
+        const recoveryResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: recoveryAssistantText,
           stage: context.stage,
           suggested_actions: recoveryChips,
@@ -4392,7 +4437,8 @@ export async function runTurnExecutor(
         deicticDispatch.matched &&
         deicticDispatch.dispatch === 'clarify_deictic'
       ) {
-        const clarifyResponse = composeDirectAnswerResponse({
+        const clarifyResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: buildDeicticClarifyAssistantText(deicticDispatch.reason),
           stage: context.stage,
           suggested_actions: [],
@@ -4521,7 +4567,8 @@ export async function runTurnExecutor(
             message: `Add a constraint on ${refusedCandidate.label}.`,
           },
         ];
-        const refusalResponse = composeDirectAnswerResponse({
+        const refusalResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: buildNonFactorKindRefusalText(
             refusedCandidate.label,
             refusedKind,
@@ -4642,7 +4689,8 @@ export async function runTurnExecutor(
             emitted_at_iso: clarifyEmittedAtIso,
           }),
         );
-        const clarifyResponse = composeDirectAnswerResponse({
+        const clarifyResponse = composeAnswer({
+          answerKind: 'functional',
           assistant_text: buildClarifyAssistantText(deterministicValueUpdate.candidates),
           stage: context.stage,
           suggested_actions: clarifyChips,
@@ -4743,10 +4791,15 @@ export async function runTurnExecutor(
           freshness: freshness?.freshness ?? null,
         });
         if (runComparisonOutcome.matched) {
-          const runComparisonResponse = composeDirectAnswerResponse({
+          const runComparisonResponse = composeAnswer({
             assistant_text: runComparisonOutcome.assistant_text,
             stage: context.stage,
             suggested_actions: [...runComparisonOutcome.suggested_actions],
+            // ROADMAP 1.132 (F1) — a deterministic analytical answer (compares
+            // two run deltas from the analysis projection): substantive. The
+            // composeAnswer chokepoint captures it for the egress synthesiser
+            // (re-verified at finalizeRun), driven by this literal.
+            answerKind: 'substantive',
           });
           sonnetTextForLog = runComparisonResponse.assistant_text;
           resolvedTurnClass = 'direct_answer';
@@ -4852,7 +4905,8 @@ export async function runTurnExecutor(
             validationRegistry:
               options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY,
           });
-          const stateQueryResponse = composeDirectAnswerResponse({
+          const stateQueryResponse = composeAnswer({
+            answerKind: 'functional',
             assistant_text: stateQueryOutcome.assistant_text,
             stage: context.stage,
             suggested_actions: stateQueryChips,
@@ -4933,7 +4987,8 @@ export async function runTurnExecutor(
           freshness: freshness?.freshness ?? null,
         });
         if (staleOutcome.matched) {
-          const staleResponse = composeDirectAnswerResponse({
+          const staleResponse = composeAnswer({
+            answerKind: 'functional',
             assistant_text: staleOutcome.assistant_text,
             stage: context.stage,
             suggested_actions: [...staleOutcome.suggested_actions],
@@ -5121,11 +5176,23 @@ export async function runTurnExecutor(
               : 'fallthrough_other',
         });
         if (adviceOutcome.matched) {
-          const adviceResponse = composeDirectAnswerResponse({
+          const adviceResponse = composeAnswer({
             assistant_text: adviceOutcome.assistant_text,
             stage: context.stage,
             suggested_actions: [...adviceOutcome.suggested_actions],
+            // ROADMAP 1.132 (F1) — THE fix. The deterministic post-analysis
+            // advice-gate answer (explain_results / meaning / advice /
+            // evidence_gap / canonical_rich, composed from the analysis
+            // projection) IS a substantive answer and MUST get progressive
+            // disclosure. The prior `answerProse` axis ("LLM-authored") skipped
+            // it, so it shipped un-shaped on the live wire (A2, 3x).
+            answerKind: 'substantive',
           });
+          // The composeAnswer chokepoint captured the advice answer for the
+          // egress synthesiser (driven by the 'substantive' literal above), and
+          // finalizeRun re-verifies it against the FINAL text — so the
+          // commit-failure replacement below (buildFailureResponse) that rewrites
+          // `response` downgrades the kind to 'functional'.
           sonnetTextForLog = adviceResponse.assistant_text;
           resolvedTurnClass = 'direct_answer';
           intentClass = 'converse';
@@ -5265,7 +5332,8 @@ export async function runTurnExecutor(
             : null,
         });
         if (freshFollowupOutcome.matched) {
-          const freshFollowupResponse = composeDirectAnswerResponse({
+          const freshFollowupResponse = composeAnswer({
+            answerKind: 'functional',
             assistant_text: freshFollowupOutcome.assistant_text,
             stage: context.stage,
             suggested_actions: [...freshFollowupOutcome.suggested_actions],
@@ -5346,7 +5414,8 @@ export async function runTurnExecutor(
             : null,
         });
         if (noAnalysisOutcome.matched) {
-          const noAnalysisResponse = composeDirectAnswerResponse({
+          const noAnalysisResponse = composeAnswer({
+            answerKind: 'functional',
             assistant_text: noAnalysisOutcome.assistant_text,
             stage: context.stage,
             suggested_actions: [...noAnalysisOutcome.suggested_actions],
@@ -7069,6 +7138,7 @@ export async function runTurnExecutor(
       }
 
       composedOk = composeToolCallResponse({
+        answerKind: 'functional',
         orientation: orientationForCompose,
         confirmation: confirmationText,
         coaching: coachingText,
@@ -7247,6 +7317,7 @@ export async function runTurnExecutor(
         clarifyValidLabels,
       ).text;
       composedOk = composeClarifyResponse({
+        answerKind: 'functional',
         assistant_text: clarifyGuardedText,
         stage: context.stage,
         suggested_actions: clarifyChips,
@@ -7349,21 +7420,22 @@ export async function runTurnExecutor(
       // boundary violation, degrade to a safe rerun response; otherwise pass
       // the LLM prose + chips through unchanged.
       const coachGuarded = applyCoachingOutputGuard(sanitised.output, coachComposedChips);
-      composedOk = composeDirectAnswerResponse({
+      composedOk = composeAnswer({
         assistant_text: coachGuarded.assistant_text,
         stage: context.stage,
         suggested_actions: coachGuarded.suggested_actions,
+        answerKind: 'substantive',
       });
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — capture the model's coach ANSWER prose for the
-      // egress fallback scope gate. Capture `sanitised.output` — the model's
-      // OWN sanitised answer, BEFORE `applyCoachingOutputGuard` above (which
-      // can DEGRADE to deterministic recovery copy), the empty-answer recovery
-      // below, and every later post-compose mutator. finalizeRun re-checks this
-      // against the FINAL assistant_text, so any of those deterministic
-      // rewrites diverges it and clears `answerProse` — only the model's own
-      // unmodified answer keeps the flag.
-      answerProseText = sanitised.output;
+      // egress answer-shape synthesiser scope. Capture `sanitised.output` — the
+      // model's OWN sanitised answer, BEFORE `applyCoachingOutputGuard` above
+      // (which can DEGRADE to deterministic recovery copy), the empty-answer
+      // recovery below, and every later post-compose mutator. finalizeRun
+      // re-checks this against the FINAL assistant_text, so any of those
+      // deterministic rewrites diverges it and downgrades the kind to
+      // 'functional' — only the model's own unmodified answer stays 'substantive'.
+      substantiveAnswerText = sanitised.output;
       // CEE_ANSWER_TEXT_REQUIRED compose guard (belt-and-braces layer B,
       // default OFF — config/index.ts). Layer A (tool-schema.ts) forces a
       // REPAIR_ONCE retry when a coach tool call omits/blanks answer_text,
@@ -7395,10 +7467,15 @@ export async function runTurnExecutor(
           answer_text_length: routingResult.proposal.answer_text?.length ?? 0,
           orientation_length: routingResult.orientationText.length,
         });
-        composedOk = composeDirectAnswerResponse({
+        // Functional: bounded recovery copy replaced the model's answer. The
+        // finalise-seam re-verify ALSO independently downgrades the kind (the
+        // captured substantive text no longer equals the final text), so this
+        // declaration is belt-and-braces.
+        composedOk = composeAnswer({
           assistant_text: recoveryText,
           stage: context.stage,
           suggested_actions: recoveryChips,
+          answerKind: 'functional',
         });
       }
       // ROADMAP 1.132 (F2) — capture the routing proposal's structured
@@ -7510,20 +7587,21 @@ export async function runTurnExecutor(
         sanitised.output,
         converseComposedChips,
       );
-      composedOk = composeDirectAnswerResponse({
+      composedOk = composeAnswer({
         assistant_text: converseGuarded.assistant_text,
         stage: context.stage,
         suggested_actions: converseGuarded.suggested_actions,
+        answerKind: 'substantive',
       });
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — capture the model's converse / text_only ANSWER
-      // prose (the primary F1 target) for the egress fallback scope gate.
+      // prose (the primary F1 target) for the egress answer-shape synthesiser.
       // Capture `sanitised.output` — the model's OWN sanitised answer, BEFORE
       // `applyCoachingOutputGuard` above (which can DEGRADE to deterministic
       // recovery copy), the empty-answer recovery below, and every later
       // post-compose mutator. finalizeRun re-checks it against the FINAL text,
-      // so any deterministic rewrite diverges it and clears `answerProse`.
-      answerProseText = sanitised.output;
+      // so any deterministic rewrite diverges it and downgrades to 'functional'.
+      substantiveAnswerText = sanitised.output;
       // CEE_ANSWER_TEXT_REQUIRED compose guard (belt-and-braces layer B,
       // default OFF — config/index.ts). Mirrors the coach-branch guard
       // above; see its comment for the full rationale — checks the FINAL
@@ -7548,10 +7626,13 @@ export async function runTurnExecutor(
           answer_text_length: routingResult.proposal.answer_text?.length ?? 0,
           orientation_length: routingResult.orientationText.length,
         });
-        composedOk = composeDirectAnswerResponse({
+        // Functional bounded recovery — see coach-branch note; the finalise
+        // re-verify also downgrades independently.
+        composedOk = composeAnswer({
           assistant_text: recoveryText,
           stage: context.stage,
           suggested_actions: recoveryChips,
+          answerKind: 'functional',
         });
       }
       // ROADMAP 1.132 (F2) — converse-branch shape capture (UNCONDITIONAL
@@ -7900,7 +7981,8 @@ export async function runTurnExecutor(
           answer_text_length: 0,
           orientation_length: 0,
         });
-        composedOk = composeDirectAnswerResponse({
+        composedOk = composeAnswer({
+          answerKind: 'functional',
           assistant_text: recoveryText,
           stage: context.stage,
           suggested_actions: recoveryChips,
@@ -8576,22 +8658,28 @@ export async function runTurnExecutor(
         });
       }
     }
-    // ROADMAP 1.132 (F1) — SCOPE the route egress answer-shape fallback to the
-    // model's own ANSWER prose. `answerProseText` was captured at the coach /
-    // converse / text_only compose branch; re-verify it against the FINAL
-    // assistant_text HERE (identical fail-closed FINAL-text check as the shape
-    // sidecar above) so any deterministic post-compose mutator that rewrote the
-    // text — empty-answer recovery, STEP 6.6 structural-claim decline swap,
-    // goal-target receipt, commit-failure replacement, forbidden-phrase guard —
-    // clears the signal, and every deterministic builder (which never captured)
-    // stays false. Drift-proof: a future post-compose mutator cannot fool the
-    // equality, and nothing outside the two answer branches can set it.
-    const answerProseFinalText =
+    // ROADMAP 1.132 (F1) — classify the FINAL answer for the route egress
+    // answer-shape synthesiser. `substantiveAnswerText` was captured at each
+    // SUBSTANTIVE compose branch (coach / converse / text_only model prose AND
+    // the deterministic post-analysis advice-gate / run-comparison explanations);
+    // re-verify it against the FINAL assistant_text HERE (identical fail-closed
+    // FINAL-text check as the shape sidecar above) so any deterministic
+    // post-compose mutator that rewrote the text — empty-answer recovery, STEP
+    // 6.6 structural-claim decline swap, goal-target receipt, commit-failure
+    // replacement, forbidden-phrase guard — downgrades the kind to 'functional',
+    // and every functional builder (which never captured) is 'functional'.
+    // Drift-proof: a future post-compose mutator cannot fool the equality, and
+    // nothing outside a substantive compose branch can surface 'substantive'.
+    // 'functional' whenever a response is composed but is not a surviving
+    // substantive answer (`response` is always assigned by this seam).
+    const answerFinalText =
       typeof response?.assistant_text === 'string' ? response.assistant_text : '';
-    const answerProse =
-      answerProseText !== undefined &&
-      answerProseFinalText.length > 0 &&
-      answerProseFinalText === answerProseText;
+    const answerKind: AnswerKind =
+      substantiveAnswerText !== undefined &&
+      answerFinalText.length > 0 &&
+      answerFinalText === substantiveAnswerText
+        ? 'substantive'
+        : 'functional';
     return {
       response,
       analysisReady: analysisReadyForTurn,
@@ -8627,10 +8715,11 @@ export async function runTurnExecutor(
       // re-verified against the FINAL assistant_text just above — absent
       // whenever a post-capture rewriter diverged the text from the shape.
       ...(answerShapeForRun ? { answerShape: answerShapeForRun } : {}),
-      // ROADMAP 1.132 (F1) — scope signal for route-v2's egress answer-shape
-      // fallback (see above + TurnExecutorRunResult.answerProse). Surfaced only
-      // when the FINAL text is the model's own answer prose.
-      ...(answerProse ? { answerProse: true } : {}),
+      // ROADMAP 1.132 (F1) — SUBSTANTIVE/FUNCTIONAL classification for route-v2's
+      // egress answer-shape synthesiser (see above + TurnExecutorRunResult.answerKind).
+      // Always surfaced when a response was composed; route synthesises a shape
+      // only for 'substantive'.
+      answerKind,
       telemetry: {
         stages_completed: stagesCompleted,
         response_emitted: true,
@@ -8792,7 +8881,8 @@ export async function runTurnExecutor(
     failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
     const { assistantText, chips, analysisFreshAndAvailable } =
       buildBoundedFallbackCopyAndChips();
-    const fallbackResponse = composeDirectAnswerResponse({
+    const fallbackResponse = composeAnswer({
+      answerKind: 'functional',
       assistant_text: assistantText,
       stage: context.stage,
       suggested_actions: chips,

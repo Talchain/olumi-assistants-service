@@ -148,7 +148,8 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
     setTestSink((event, data) => events.push({ event, data }));
     const { store, appendCalls } = makeSpyStore();
     const g = buildCombinedGraph();
-    const composed = composeDirectAnswerResponse({ assistant_text: 'applied', stage: 'frame' });
+    const composed = composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
 
     await commitDirectAnswer(composed, { ...META, graph: g }, store);
 
@@ -197,7 +198,8 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
         { from: 'fac_a', to: 'goal_g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
       ],
     };
-    const composed = composeDirectAnswerResponse({ assistant_text: 'applied', stage: 'frame' });
+    const composed = composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
 
     await commitDirectAnswer(composed, { ...META, graph: g }, store);
 
@@ -236,7 +238,8 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
         { from: 'fac_bomb', to: 'goal_g', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
       ],
     };
-    const composed = composeDirectAnswerResponse({ assistant_text: 'applied', stage: 'frame' });
+    const composed = composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
 
     await commitDirectAnswer(composed, { ...META, graph: g }, store);
 
@@ -248,7 +251,8 @@ describe('persist-site repair chain — Track S #274 + edit_graph P0 (combined)'
 
   it('idempotent: re-committing the already-repaired graph changes nothing (stable persisted graph)', async () => {
     setTestSink(() => {});
-    const composed = composeDirectAnswerResponse({ assistant_text: 'applied', stage: 'frame' });
+    const composed = composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'applied', stage: 'frame' });
 
     const first = makeSpyStore();
     await commitDirectAnswer(composed, { ...META, graph: buildCombinedGraph() }, first.store);

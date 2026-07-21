@@ -105,7 +105,8 @@ function meta(facts: readonly RunAnalysisHandlerFact[]) {
 }
 
 function composed() {
-  return composeDirectAnswerResponse({ assistant_text: 'hi', stage: 'analyse' });
+  return composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'hi', stage: 'analyse' });
 }
 
 /** Owned-scenario store: the guest pre-check resolves an owner. */
