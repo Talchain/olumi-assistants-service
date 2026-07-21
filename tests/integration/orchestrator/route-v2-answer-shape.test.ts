@@ -70,7 +70,20 @@ const ANSWER_SHAPE = {
   detail: 'The churn to revenue causal link is the strongest in the model.',
 };
 
-function mkRunResult(opts: { withShape: boolean; assistantText?: string }) {
+function mkRunResult(opts: {
+  withShape: boolean;
+  assistantText?: string;
+  answerProse?: boolean;
+}) {
+  // ROADMAP 1.132 (F1) — the executor's answer-prose scope signal. A run whose
+  // FINAL text is the model's own answer prose surfaces `answerProse: true`;
+  // one whose text was rewritten by a deterministic mutator (or is a
+  // deterministic builder) does not. Default: an un-shaped run models the
+  // intent-null / text_only prose path (F1 target → true); a shaped run's
+  // signal is irrelevant to the fallback (the shape re-attach short-circuits
+  // it), so it defaults false. cc06 (a post-capture rewrite to deterministic
+  // decline) overrides to false explicitly.
+  const answerProse = opts.answerProse ?? !opts.withShape;
   return {
     response: {
       response_version: 2 as const,
@@ -86,6 +99,7 @@ function mkRunResult(opts: { withShape: boolean; assistantText?: string }) {
     analysisReady: { status: 'ready', goal_node_id: 'goal', options: [] },
     effectiveGraph: null,
     ...(opts.withShape ? { answerShape: ANSWER_SHAPE } : {}),
+    ...(answerProse ? { answerProse: true as const } : {}),
     telemetry: {
       stages_completed: ['orient', 'compose'],
       response_emitted: true as const,
@@ -142,35 +156,27 @@ describe('route-v2 — `_answer_shape` (unconditional, ROADMAP 1.132)', () => {
     expect(body.assistant_text.length).toBeGreaterThan(0);
   });
 
-  it('run.answerShape present but final assistant_text was rewritten after capture → the STALE captured shape is dropped; the egress fallback re-shapes the ACTUAL final text (F1)', async () => {
-    // Simulates any post-capture rewriter (STEP 6.6 honesty swap, goal-receipt
-    // swap, empty-answer backstop, finaliser guards, commit-failure
-    // replacement, route egress entity-id scrub): the run result carries a
-    // captured shape whose derived text is NOT the final assistant_text.
+  it('run.answerShape present but final assistant_text was rewritten to DETERMINISTIC decline → STALE shape dropped AND the fallback is out of scope (no shape, text byte-identical)', async () => {
+    // Simulates a post-capture rewriter (STEP 6.6 structural-claim honesty
+    // swap, goal-receipt swap, empty-answer backstop, commit-failure
+    // replacement): the captured shape's derived text is NOT the final text,
+    // AND the final text is now DETERMINISTIC DECLINE copy — so the executor's
+    // FINAL-text check clears `answerProse` (modelled here as the default-false
+    // for a rewrite). Two things must hold: (1) the route drops the STALE
+    // captured shape (fail-closed), and (2) the F1 fallback does NOT re-shape
+    // the decline — a deterministic message keeps its second sentence visible.
     const rewritten =
       "I haven't changed the model. This version can't make that kind of model edit yet.";
     runTurnExecutorMock.mockResolvedValue(
-      mkRunResult({ withShape: true, assistantText: rewritten }),
+      mkRunResult({ withShape: true, assistantText: rewritten, answerProse: false }),
     );
     const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc06');
     expect(status).toBe(200);
-    // Fail closed on the STALE shape: the captured retention shape (which
-    // described text the user never sees) must NOT ship.
-    expect(body._answer_shape).not.toEqual(ANSWER_SHAPE);
-    // F1 deterministic fallback: a FRESH shape describing the ACTUAL final
-    // text is synthesised at the egress chokepoint (headline = first sentence,
-    // detail = remainder), and the tie holds by construction.
-    expect(body._answer_shape).toEqual({
-      headline: "I haven't changed the model.",
-      bullets: [],
-      detail: "This version can't make that kind of model edit yet.",
-    });
-    expect(deriveAnswerTextFromShape(body._answer_shape)).toBe(body.assistant_text);
-    // The single space between sentences is reflowed to a blank-line break —
-    // the F1 progressive-disclosure win.
-    expect(body.assistant_text).toBe(
-      "I haven't changed the model.\n\nThis version can't make that kind of model edit yet.",
-    );
+    // (1) The stale captured shape was dropped, and (2) the out-of-scope
+    // fallback synthesised nothing: NO `_answer_shape` anywhere on the wire.
+    expect(body).not.toHaveProperty('_answer_shape');
+    // The deterministic decline ships verbatim — no reflow, no fabricated shape.
+    expect(body.assistant_text).toBe(rewritten);
   });
 
   it('run.answerShape absent → multi-sentence prose is re-shaped by the deterministic egress fallback (F1)', async () => {
