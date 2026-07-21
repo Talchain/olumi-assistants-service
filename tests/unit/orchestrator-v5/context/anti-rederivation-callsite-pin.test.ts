@@ -32,13 +32,17 @@
  * file — commit or remove it, or update EXPECTED if the caller is intended.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { stripComments } from '../../../../scripts/ci/strip-source-comments.mjs';
+import {
+  stripComments,
+  stripCommentsFile,
+  GUARD_WALK_TIMEOUT_MS,
+} from '../../../../scripts/ci/strip-source-comments.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const SCAN_ROOT = 'src';
@@ -59,11 +63,13 @@ const EXCLUDED: readonly RegExp[] = [
 // reference and broke the pin (positive-controlled 2026-07-20). With
 // stripping, EXPECTED below counts exactly the code references — imports,
 // calls, definitions — never documentation.
-export function countReferences(source: string, ident: string): number {
+function countReferencesInStripped(stripped: string, ident: string): number {
   const re = new RegExp(`\\b${ident}\\b`);
-  return stripComments(source)
-    .split('\n')
-    .filter((l) => re.test(l)).length;
+  return stripped.split('\n').filter((l) => re.test(l)).length;
+}
+
+export function countReferences(source: string, ident: string): number {
+  return countReferencesInStripped(stripComments(source), ident);
 }
 
 function walk(relDir: string, out: string[]): void {
@@ -83,7 +89,7 @@ function scanRepo(ident: string): Record<string, number> {
   const result: Record<string, number> = {};
   for (const rel of files.sort()) {
     if (EXCLUDED.some((re) => re.test(rel))) continue;
-    const count = countReferences(readFileSync(join(REPO_ROOT, rel), 'utf-8'), ident);
+    const count = countReferencesInStripped(stripCommentsFile(join(REPO_ROOT, rel)), ident);
     if (count > 0) result[rel] = count;
   }
   return result;
@@ -174,7 +180,7 @@ describe('anti-rederivation call-site pin', () => {
   for (const [ident, expected] of Object.entries(EXPECTED)) {
     it(`\`${ident}\` is referenced only by the pinned files, with pinned per-file counts`, () => {
       expect(scanRepo(ident), guidance(ident)).toEqual(expected);
-    });
+    }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
   }
 
   // Scanner self-tests (mirrors the shell ratchet's --self-test philosophy):

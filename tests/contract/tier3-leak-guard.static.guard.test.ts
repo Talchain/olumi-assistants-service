@@ -20,11 +20,11 @@
  * living under tests/contract/ — no workflow surgery (Brief 5 §14).
  */
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, relative } from 'node:path';
 
-import { stripComments } from '../../scripts/ci/strip-source-comments.mjs';
+import { stripCommentsFile } from '../../scripts/ci/strip-source-comments.mjs';
 import { TIER3_LEAK_BLOCK_FIELDS } from '../../src/orchestrator-v5/compose/claim-safety-cage.js';
 
 const V5_ROOT = fileURLToPath(new URL('../../src/orchestrator-v5', import.meta.url));
@@ -99,7 +99,7 @@ function producerFiles(): Array<{ rel: string; source: string }> {
     for (const abs of walkTsFiles(join(V5_ROOT, dir))) {
       files.push({
         rel: relative(V5_ROOT, abs).split('\\').join('/'),
-        source: stripComments(readFileSync(abs, 'utf-8')),
+        source: stripCommentsFile(abs),
       });
     }
   }
@@ -108,7 +108,7 @@ function producerFiles(): Array<{ rel: string; source: string }> {
       const full = join(V5_ROOT, entry);
       if (!statSync(full).isFile()) continue;
       if (!entry.endsWith('.ts') || entry.endsWith('.d.ts') || entry.endsWith('.test.ts')) continue;
-      files.push({ rel: entry, source: stripComments(readFileSync(full, 'utf-8')) });
+      files.push({ rel: entry, source: stripCommentsFile(full) });
     }
   }
   return files;

@@ -16,10 +16,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
-import { stripComments } from '../../../../scripts/ci/strip-source-comments.mjs';
+import { stripCommentsFile, GUARD_WALK_TIMEOUT_MS } from '../../../../scripts/ci/strip-source-comments.mjs';
 
 const REPO_ROOT = resolve(__dirname, '../../../..');
 
@@ -51,7 +51,7 @@ describe('composeStateQueryChip — ownership boundary', () => {
     for (const abs of walkTsFiles(join(REPO_ROOT, 'src'))) {
       const rel = relative(REPO_ROOT, abs).split('\\').join('/');
       if (rel === 'src/orchestrator-v5/routing/state-query-guard.ts') continue;
-      const lines = stripComments(readFileSync(abs, 'utf8')).split('\n');
+      const lines = stripCommentsFile(abs).split('\n');
       for (let i = 0; i < lines.length; i++) {
         if (lines[i]!.includes('composeStateQueryChip(')) {
           callLines.push(`${rel}:${i + 1}:${lines[i]!.trim()}`);
@@ -75,5 +75,5 @@ describe('composeStateQueryChip — ownership boundary', () => {
       callLines.length,
       `expected exactly 1 production call line; got:\n${callLines.join('\n')}`,
     ).toBe(1);
-  });
+  }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
 });

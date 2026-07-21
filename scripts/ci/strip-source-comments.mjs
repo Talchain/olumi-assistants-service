@@ -31,11 +31,13 @@
  *   node scripts/ci/strip-source-comments.mjs --scan '<JS regex>' <path>...
  *
  * `--scan` walks each <path> (file, or directory scanned recursively for
- * *.ts — skipping node_modules and *.d.ts) and, for every line whose
+ * *.ts / *.tsx / *.d.ts — skipping node_modules) and, for every line whose
  * COMMENT-STRIPPED text matches the pattern, prints `path:line:original text`
  * exactly like `grep -rnH`, so existing shell pipelines (path filters,
  * exemption markers on the ORIGINAL line) keep working unchanged. Exit code:
- * 0 with matches, 1 with none (grep convention), 2 on usage/read errors.
+ * 0 with matches, 1 with none (grep convention), 2 on usage/read errors. A
+ * missing/unreadable scanned root FAILS LOUD to STDOUT (not stderr, which the
+ * shell callers swallow) so the guard goes RED instead of vacuously green.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -238,6 +240,46 @@ export function stripComments(source) {
   return tokenise(source).noComments;
 }
 
+// ── Per-file memoised strip (for the tree-walking guard specs) ──────────────
+/**
+ * The static guard specs each walk the ~1,300-file `src/` tree and tokenise
+ * every file (1–9s per walk); several specs walk it more than once (three
+ * `it` blocks, one per key), and under PARALLEL test load those repeated
+ * full-tree walks crowd vitest's 5000ms default `testTimeout` and flake red.
+ *
+ * `stripCommentsFile` memoises the comment-stripped view per absolute-or-
+ * relative path, keyed on the file's `mtimeMs`, so a second walk of the same
+ * unchanged file is a Map hit instead of a re-tokenise. The mtime key means an
+ * edited file (mtime bumps) is always re-stripped — the cache can never serve
+ * a stale view. It reads the file itself so callers drop the `readFileSync`.
+ *
+ * CLI behaviour is deliberately UNAFFECTED: `runScan` reads each file exactly
+ * once per invocation and does NOT consult this cache, so the shell guards'
+ * output is byte-identical to before.
+ */
+const stripCommentsFileCache = new Map();
+
+export function stripCommentsFile(path) {
+  const { mtimeMs } = statSync(path);
+  const cached = stripCommentsFileCache.get(path);
+  if (cached !== undefined && cached.mtimeMs === mtimeMs) {
+    return cached.stripped;
+  }
+  const stripped = stripComments(readFileSync(path, 'utf8'));
+  stripCommentsFileCache.set(path, { mtimeMs, stripped });
+  return stripped;
+}
+
+/**
+ * Explicit `testTimeout` (ms) for the tree-walking guard specs — belt to the
+ * memoisation's braces. The slowest isolated single-tree walk is ~3.2s; this
+ * is ~9× that, comfortably ≥3× margin even on a CI box several times slower
+ * than a dev laptop, while still small enough that a genuinely hung walk
+ * (infinite loop) blows past it and surfaces. Single-sourced here so all the
+ * walking specs share one derived value rather than a hand-copied literal.
+ */
+export const GUARD_WALK_TIMEOUT_MS = 30_000;
+
 // ── CLI: --scan ─────────────────────────────────────────────────────────────
 
 function walkTsFiles(path, out) {
@@ -252,7 +294,12 @@ function walkTsFiles(path, out) {
     const child = statSync(full);
     if (child.isDirectory()) {
       walkTsFiles(full, out);
-    } else if (entry.endsWith('.ts') && !entry.endsWith('.d.ts')) {
+    } else if (entry.endsWith('.ts') || entry.endsWith('.tsx')) {
+      // Cover .ts, .tsx AND .d.ts (a .d.ts filename ends in `.ts`). The raw
+      // greps this CLI replaced scanned `*.ts` (which matches `*.d.ts`) and
+      // phase1.5 additionally scanned `*.tsx`; narrowing to `.ts && !.d.ts`
+      // silently dropped BOTH from guard coverage, so a forbidden pattern in a
+      // scanned .d.ts / .tsx would pass unseen. Restore the original reach.
       out.push(full);
     }
   }
@@ -271,13 +318,49 @@ function runScan(pattern, paths) {
     process.stderr.write('strip-source-comments: --scan needs at least one path\n');
     process.exit(2);
   }
+
+  // FAIL LOUD on a missing/unreadable scanned root. A source-scanning guard
+  // that silently scans NOTHING is worse than no guard: it reports GREEN, so a
+  // directory rename/move turns every enumerated-path guard vacuously green.
+  // The shell callers run this with `2>/dev/null` and `|| true`, i.e. they
+  // SWALLOW stderr and the exit code — a stderr message or a non-zero exit
+  // ALONE would be invisible. We therefore emit the failure to STDOUT, which
+  // callers CAPTURE as the match stream: a non-empty hit turns the guard RED
+  // and NAMES the missing root. The sentinel text carries none of the
+  // `/__tests__/`, `.test.ts:`, `/src/generated/` substrings the callers
+  // `grep -v` away, so it always survives to trip the guard. (Belt-and-braces:
+  // we also exit 2.)
+  const missingRoots = [];
+  for (const root of paths) {
+    try {
+      statSync(root);
+    } catch {
+      missingRoots.push(root);
+    }
+  }
+  if (missingRoots.length > 0) {
+    for (const root of missingRoots) {
+      process.stdout.write(
+        `FATAL strip-source-comments --scan >> scanned root does not exist or is unreadable >> ${root} ` +
+          `>> guard scope is VACUOUS, failing loud (a renamed/moved root must not pass green-empty)\n`,
+      );
+    }
+    process.exit(2);
+  }
+
   let matched = false;
   for (const root of paths) {
     let files;
     try {
       files = walkTsFiles(root, []);
     } catch (err) {
-      process.stderr.write(`strip-source-comments: cannot read ${root}: ${err.message}\n`);
+      // A subdirectory that became unreadable mid-walk (or a root that vanished
+      // after the existence assert above): same fail-loud-to-stdout contract —
+      // stderr/exit alone are swallowed by the callers, so surface it as a hit.
+      process.stdout.write(
+        `FATAL strip-source-comments --scan >> cannot read ${root} >> ${err.message} ` +
+          `>> guard scope is VACUOUS, failing loud\n`,
+      );
       process.exit(2);
     }
     for (const file of files) {

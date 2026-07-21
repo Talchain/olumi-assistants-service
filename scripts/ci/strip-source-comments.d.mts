@@ -33,3 +33,20 @@ export declare function tokenise(source: string): TokenisedViews;
  * and line-preserving: safe to split on '\n' keeping original line numbers.
  */
 export declare function stripComments(source: string): string;
+
+/**
+ * Per-file memoised {@link stripComments}, for the tree-walking guard specs
+ * that tokenise the whole `src/` tree (often more than once). Reads the file
+ * at `path` and returns its comment-stripped view, caching keyed on the file's
+ * `mtimeMs` — an edited file is always re-stripped, never served stale. Used
+ * ONLY by the vitest guard specs; the shell-guard CLI does not consult it.
+ */
+export declare function stripCommentsFile(path: string): string;
+
+/**
+ * Explicit vitest `testTimeout` (ms) for the tree-walking guard specs, single-
+ * sourced so every walking spec shares one value instead of a copied literal.
+ * Sized at ≥3× the slowest isolated tree walk to absorb parallel-load CPU
+ * contention without masking a genuinely hung walk.
+ */
+export declare const GUARD_WALK_TIMEOUT_MS: number;

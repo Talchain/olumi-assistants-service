@@ -15,11 +15,11 @@
  * Auto-enrols in the required CI gate by living under tests/contract/.
  */
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, relative } from 'node:path';
 
-import { stripComments } from '../../scripts/ci/strip-source-comments.mjs';
+import { stripCommentsFile } from '../../scripts/ci/strip-source-comments.mjs';
 
 const HELPER_NAME = 'hasReducedSamplesDisclosure';
 
@@ -53,7 +53,7 @@ describe('reduced-samples disclosure — single consumption site (claim-safety p
   const referencingFiles = walkTsFiles(SRC_ROOT)
     .map((abs) => ({
       rel: relative(SRC_ROOT, abs).split('\\').join('/'),
-      source: stripComments(readFileSync(abs, 'utf-8')),
+      source: stripCommentsFile(abs),
     }))
     .filter(({ source }) => source.includes(HELPER_NAME));
 

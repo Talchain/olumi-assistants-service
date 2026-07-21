@@ -18,11 +18,11 @@
  * safe; this proves the value is not load-bearing outside diagnostics.
  */
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, relative } from 'node:path';
 
-import { stripComments } from '../../scripts/ci/strip-source-comments.mjs';
+import { stripCommentsFile, GUARD_WALK_TIMEOUT_MS } from '../../scripts/ci/strip-source-comments.mjs';
 
 const SRC_ROOT = fileURLToPath(new URL('../../src', import.meta.url));
 const WIRE_KEY = '_context_summary';
@@ -39,7 +39,7 @@ const WIRE_KEY = '_context_summary';
  * mention is documentation need no entry at all.
  */
 function codeView(file: string): string {
-  return stripComments(readFileSync(file, 'utf8'));
+  return stripCommentsFile(file);
 }
 
 /**
@@ -97,7 +97,7 @@ describe('`_context_summary` is diagnostic-only (static guard)', () => {
         `file legitimately references it, add it to the ALLOWLIST; if a product ` +
         `path is reading it, that is a contract violation.`,
     ).toEqual([]);
-  });
+  }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
 
   it('allowlist entries are real and still reference the key (no stale allowlisting)', () => {
     for (const rel of ALLOWLIST) {
@@ -139,7 +139,7 @@ describe('`coaching_state_pack` is diagnostic-only (static guard)', () => {
         `Unexpected files: ${offenders.join(', ')}. The coaching pack is a ` +
         `diagnostic sub-block; no prompt / chip / coaching / handler path may read it.`,
     ).toEqual([]);
-  });
+  }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
 
   it('allowlist entry still references the key (no stale allowlisting)', () => {
     for (const rel of COACHING_ALLOWLIST) {
@@ -182,7 +182,7 @@ describe('`canonical_state_source` is diagnostic-only (static guard)', () => {
         `Unexpected files: ${offenders.join(', ')}. The provenance discriminator is ` +
         `diagnostic-only; no prompt / chip / coaching / handler path may read it.`,
     ).toEqual([]);
-  });
+  }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
 
   it('allowlist entry still references the key (no stale allowlisting)', () => {
     for (const rel of SOURCE_ALLOWLIST) {

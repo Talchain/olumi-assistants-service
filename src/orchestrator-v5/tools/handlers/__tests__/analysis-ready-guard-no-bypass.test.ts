@@ -15,7 +15,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { stripComments } from '../../../../../scripts/ci/strip-source-comments.mjs';
+import {
+  stripComments,
+  stripCommentsFile,
+  GUARD_WALK_TIMEOUT_MS,
+} from '../../../../../scripts/ci/strip-source-comments.mjs';
 
 // HERE = .../src/orchestrator-v5/tools/handlers/__tests__/  →  V5 root is three up.
 const HERE = fileURLToPath(new URL('.', import.meta.url));
@@ -44,7 +48,7 @@ function walkSrc(dir: string): string[] {
 function plotRunCallSites(): string[] {
   const hits: string[] = [];
   for (const file of walkSrc(V5_ROOT)) {
-    const lines = stripComments(readFileSync(file, 'utf8')).split('\n');
+    const lines = stripCommentsFile(file).split('\n');
     const isCaller = lines.some((l) => /plotClient\.run\s*\(/.test(l) && /\bawait\b/.test(l));
     if (isCaller) hits.push(file.slice(V5_ROOT.length + 1));
   }
@@ -54,7 +58,7 @@ function plotRunCallSites(): string[] {
 describe('EP2 §11 — V5 graph→PLoT no-bypass', () => {
   it('the ONLY V5 plotClient.run call site is the run_analysis handler (single graph→PLoT seam)', () => {
     expect(plotRunCallSites()).toEqual(['tools/handlers/run-analysis.ts']);
-  });
+  }, GUARD_WALK_TIMEOUT_MS); // V5-subtree walk; explicit timeout absorbs parallel-load CPU contention
 
   // The positive assertions below also read the STRIPPED view: a comment
   // merely naming the seam must not vacuously satisfy an "is wired" check,
