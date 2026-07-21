@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ANTHROPIC_DRAFT_GRAPH_SCHEMA } from "../../src/cee/draft/anthropic-graph-schema.js";
 import { getModelProvider, isModelEnabled, supportsExtendedThinking } from "../../src/config/models.js";
+import { getAffordableDraftTokens, DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL } from "../../src/config/timeouts.js";
 
 // =============================================================================
 // Static schema tests
@@ -669,6 +670,153 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
 
     expect(result.graph.nodes.length).toBeGreaterThan(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // ROADMAP 2.90 (Codex #8) — THINKING CLAMP. When extended thinking is enabled
+  // the TOTAL request (thinking budget + reserved output) must fit the affordable
+  // envelope. The pre-2.90 adapter RAISED max_tokens to budget+1024 and warned;
+  // the clamp reduces the budget instead so max_tokens is provably ≤ affordable.
+  // ---------------------------------------------------------------------------
+
+  it("thinking-on + the DEFAULT budget clamps the request so max_tokens ≤ affordable (no outage resurrection)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    // claude-sonnet-4-6 is in the adapter's thinking-supported allowlist.
+    // The default CEE_DRAFT_GRAPH_THINKING_BUDGET is 10000; pre-2.90 that forced
+    // max_tokens to 11024 > the 8550 affordable window. Pass it explicitly here.
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 10000 },
+    }, { timeoutMs: 110_000 });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body] = createSpy.mock.calls[0];
+
+    const affordable = getAffordableDraftTokens(110_000); // 8550
+    // THE load-bearing guarantee: the effective request never exceeds affordable.
+    expect(body.max_tokens).toBeLessThanOrEqual(affordable);
+    // Thinking is still enabled but its budget was clamped below the request…
+    expect(body.thinking.type).toBe("enabled");
+    expect(body.thinking.budget_tokens).toBeLessThan(10000);
+    // …and remains a strict subset of max_tokens (Anthropic's API constraint).
+    expect(body.max_tokens).toBeGreaterThan(body.thinking.budget_tokens);
+  });
+
+  it("thinking-on with a budget that already fits is passed through unclamped", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 4000 },
+    }, { timeoutMs: 110_000 });
+
+    const [body] = createSpy.mock.calls[0];
+    const affordable = getAffordableDraftTokens(110_000);
+    expect(body.thinking.budget_tokens).toBe(4000);
+    expect(body.max_tokens).toBeLessThanOrEqual(affordable);
+    expect(body.max_tokens).toBeGreaterThan(4000);
+  });
+
+  // ---------------------------------------------------------------------------
+  // RECONCILIATION PIN (Lane 0a, 2026-07-21) — the #609 attempt-1 runaway
+  // sentinel must STILL cap max_tokens after #608 HOISTED resolveDraftMaxTokens
+  // into the provider-independent seam (draft-budget.ts). The hazard both PR
+  // bodies flagged: if the hoisted wrapper keeps the OLD single-arg signature,
+  // the `maxTokensCeiling` opt is silently dropped and the cap no-ops. This
+  // drives the REAL threading end-to-end — opts.maxTokensCeiling → the hoisted
+  // resolveDraftMaxTokens ceiling arg → the request body — through the mocked
+  // SDK, so it fails RED if the ceiling threading is dropped at any hop.
+  // ---------------------------------------------------------------------------
+
+  it("the attempt-1 runaway sentinel STILL caps max_tokens after the 2.90 hoist (opts.maxTokensCeiling → hoisted wrapper → body)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    // The exact constant parse.ts threads as maxTokensCeiling on attempt 1.
+    // At the default 110s window the timeout affords 8550 tokens; the sentinel
+    // (6800) sits below it, so the ceiling is the binding cap.
+    const affordable = getAffordableDraftTokens(110_000); // 8550
+    expect(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL).toBeLessThan(affordable);
+
+    await draftGraphWithAnthropic(
+      {
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      },
+      { timeoutMs: 110_000, maxTokensCeiling: DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL },
+    );
+
+    const [body] = createSpy.mock.calls[0];
+    // THE load-bearing pin: the wire max_tokens equals the sentinel, NOT the
+    // 8550 the timeout would otherwise afford. Drop the ceiling threading (in
+    // the call site or the hoisted wrapper's signature) and this reads 8550 → RED.
+    expect(body.max_tokens).toBe(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL);
+    expect(body.max_tokens).toBeLessThan(affordable);
+  });
+
+  it("with NO ceiling, the same 110s window sends the full affordable budget (proves the sentinel — not something else — is what lowers it)", async () => {
+    // Positive control for the pin above: identical call minus maxTokensCeiling
+    // must send 8550, so the previous test's 6800 is demonstrably the CEILING's
+    // doing, not an unrelated cap. (Absence-assertion needs a presence control.)
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    await draftGraphWithAnthropic(
+      {
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      },
+      { timeoutMs: 110_000 },
+    );
+
+    const [body] = createSpy.mock.calls[0];
+    expect(body.max_tokens).toBe(getAffordableDraftTokens(110_000)); // 8550
+    expect(body.max_tokens).toBeGreaterThan(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL);
+  });
+
+  it("thinking-on but a tight timeout cannot afford it → thinking DISABLED, request stays ≤ affordable", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    // 32s timeout → (32-15)*90 = 1530 affordable; can't fit 1024 thinking + 1024 output.
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 4000 },
+    }, { timeoutMs: 32_000 });
+
+    const [body] = createSpy.mock.calls[0];
+    const affordable = getAffordableDraftTokens(32_000);
+    // Thinking is dropped rather than shipped unaffordable — no thinking block sent.
+    expect(body).not.toHaveProperty("thinking");
+    expect(body.max_tokens).toBeLessThanOrEqual(affordable);
+    // Disabled thinking reverts temperature to 0 (thinking requires temperature=1).
+    expect(body.temperature).toBe(0);
+  });
 });
 
 // =============================================================================
@@ -916,5 +1064,94 @@ describe("OpenAI draft_graph — unaffected by Anthropic structured outputs chan
     expect(callArgs).not.toHaveProperty("output_config");
     expect(callArgs).not.toHaveProperty("output_format");
     expect(callArgs.model).toBe("gpt-4.1-2025-04-14");
+  });
+
+  // ---------------------------------------------------------------------------
+  // ROADMAP 2.90 (Codex #9) — the OpenAI draft path shares the affordability
+  // cap and the truncation policy with the Anthropic path.
+  // ---------------------------------------------------------------------------
+
+  it("ALWAYS sends a derived token cap even when CEE_MAX_TOKENS_DRAFT is unset (no more raw/absent cap)", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    // CEE_MAX_TOKENS_DRAFT intentionally unset — pre-2.90 this omitted the cap.
+
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    // gpt-4o is a legacy model → the cap rides on max_tokens (not max_completion_tokens).
+    const adapter = new OpenAIAdapter("gpt-4o");
+
+    await adapter.draftGraph(
+      { brief: "Should I expand into the EU market?", docs: [], seed: 42 },
+      { requestId: "test-openai-cap", timeoutMs: 110_000 },
+    );
+
+    const [callArgs] = openaiCreateSpy.mock.calls[0];
+    // The cap is DERIVED from the call-site timeout — recompute it, do not pin.
+    const affordable = getAffordableDraftTokens(110_000);
+    expect(callArgs.max_tokens).toBe(affordable);
+    expect(callArgs.max_tokens).toBeGreaterThanOrEqual(1);
+  });
+
+  it("the derived cap follows the ACTUAL call-site timeout, not a global", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const adapter = new OpenAIAdapter("gpt-4o");
+
+    await adapter.draftGraph(
+      { brief: "Should I expand into the EU market?", docs: [], seed: 42 },
+      { requestId: "test-openai-cap-2", timeoutMs: 45_000 },
+    );
+
+    const [callArgs] = openaiCreateSpy.mock.calls[0];
+    expect(callArgs.max_tokens).toBe(getAffordableDraftTokens(45_000)); // (45-15)*90 = 2700
+  });
+
+  it("a draft truncated at finish_reason=length that STILL parses is ACCEPTED (truncated-but-parseable payoff)", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    openaiCreateSpy.mockResolvedValue({
+      choices: [{ message: { content: VALID_GRAPH_JSON, role: "assistant" }, finish_reason: "length" }],
+      usage: { prompt_tokens: 100, completion_tokens: 8550, total_tokens: 8650 },
+    });
+
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const adapter = new OpenAIAdapter("gpt-4o");
+
+    const result = await adapter.draftGraph(
+      { brief: "Should I expand into the EU market?", docs: [], seed: 42 },
+      { requestId: "test-openai-trunc-ok", timeoutMs: 110_000 },
+    );
+    // Complete valid JSON despite finish_reason=length → accepted.
+    expect(result.graph.nodes.length).toBeGreaterThan(0);
+    expect(result.meta?.finish_reason).toBe("length");
+  });
+
+  it("a runaway draft truncated at finish_reason=length with unparseable JSON fails FAST and TYPED (truncated_at_max_tokens)", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "test-key");
+    // A generation cut mid-object — valid JSON prefix, no closing braces.
+    const partial = '{"nodes":[{"id":"goal_1","kind":"goal","label":"Grow rev';
+    openaiCreateSpy.mockResolvedValue({
+      choices: [{ message: { content: partial, role: "assistant" }, finish_reason: "length" }],
+      usage: { prompt_tokens: 100, completion_tokens: 8550, total_tokens: 8650 },
+    });
+
+    const { OpenAIAdapter } = await import("../../src/adapters/llm/openai.js");
+    const { UpstreamNonJsonError } = await import("../../src/adapters/llm/errors.js");
+    const adapter = new OpenAIAdapter("gpt-4o");
+
+    let thrown: unknown;
+    try {
+      await adapter.draftGraph(
+        { brief: "Should I expand into the EU market?", docs: [], seed: 42 },
+        { requestId: "test-openai-trunc-fail", timeoutMs: 110_000 },
+      );
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(UpstreamNonJsonError);
+    expect((thrown as Error).message).toMatch(/truncated at max_tokens/);
+    // Structured flag — the pipeline's recovery-copy selection keys off it.
+    expect((thrown as { truncated_at_max_tokens?: boolean }).truncated_at_max_tokens).toBe(true);
+    // Failed-call metadata carries the finish reason for the diagnostic trace.
+    const meta = (thrown as { _llm_meta?: { finish_reason?: string } })._llm_meta;
+    expect(meta?.finish_reason).toBe("length");
   });
 });
