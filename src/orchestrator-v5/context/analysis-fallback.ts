@@ -60,6 +60,7 @@ import {
   type InfluenceDirection,
 } from '../../orchestrator/context/influence-direction.js';
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
+import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   deriveConfidenceTierFromEnrichment,
@@ -539,11 +540,26 @@ export function buildAnalysisFromPriorFacts(
           ? { ...o, option_label: labelMap.get(o.option_id)! }
           : o,
       );
-      const winner = relabelled[0]
+      // Status gate (shared with compactAnalysis / projectAnalysis / the direct
+      // receipt via the ONE isRecommendableOption predicate). `relabelled`
+      // deliberately retains the FULL option list (errored options kept so the
+      // coach can still disclose they ran) and is sorted by win_probability
+      // descending, so `relabelled[0]` can be a FAILED option carrying the top
+      // win_probability. Taking it as the winner here would RE-CROWN the failed
+      // option that compactAnalysis already excluded — desyncing the winner from
+      // the margin, which compactAnalysis measures over the recommendable subset
+      // only (fromEnrichment.margin / margin_pp flow through the `...fromEnrichment`
+      // spread below). Select the top RECOMMENDABLE option so winner and margin
+      // derive from the SAME subset; when none is recommendable, fall through to
+      // the honest empty winner compactAnalysis already produced. `relabelled`
+      // preserves the win_probability order, so `[0]` of the filtered list is the
+      // same option deriveWinner crowned inside compactAnalysis.
+      const topRecommendable = relabelled.filter(isRecommendableTypedOption)[0];
+      const winner = topRecommendable
         ? {
-            option_id: relabelled[0].option_id,
-            option_label: relabelled[0].option_label,
-            win_probability: relabelled[0].win_probability,
+            option_id: topRecommendable.option_id,
+            option_label: topRecommendable.option_label,
+            win_probability: topRecommendable.win_probability,
           }
         : fromEnrichment.winner;
 

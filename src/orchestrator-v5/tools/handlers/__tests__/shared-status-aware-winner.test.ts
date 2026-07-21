@@ -28,11 +28,15 @@
 
 import { describe, it, expect } from 'vitest';
 
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
 import { compactAnalysis } from '../../../../orchestrator/context/analysis-compact.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 import { projectAnalysis } from '../../../context/context-pack-assembler.js';
 import type { AnalysisResponseSummaryWithSignals } from '../../../context/analysis-signals.js';
 import { buildInvokeInputForTests } from '../../../coaching/decision-review-enricher.js';
+import { buildAnalysisResultHeadline } from '../../../coaching/analysis-result-headline.js';
+import { buildAnalysisFromPriorFacts } from '../../../context/analysis-fallback.js';
 
 // --- Codex #4 repro: a FAILED option carries the top win_probability --------
 // B (error, 0.90) must never beat A (computed, 0.40). C (computed, 0.30) is the
@@ -146,5 +150,192 @@ describe('shared status-aware winner — site 3: decision-review enricher', () =
     const input = buildInvokeInputForTests('brief', allComputedEnvelope() as unknown as Record<string, unknown>, null);
     expect(input!.winner.id).toBe('B');
     expect(input!.runner_up?.id).toBe('A');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Site 4 — analysis-result-headline.ts `resolveWinner` (the run_analysis
+// headline the user reads). Round-2 (Codex #4, second pass): this FIFTH
+// selector reads the winner AND the runner-up straight off the RAW,
+// unfiltered enrichment source, so it fabricated a crown over a failed option
+// and — worse — let a failed option's high probability defeat a legitimate
+// leader's meaningful-lead test. Verified end-to-end through the public
+// `buildAnalysisResultHeadline`, exactly the reviewer's three scenarios.
+// ---------------------------------------------------------------------------
+
+// All three options FAILED to compute. A status-blind selector crowns the
+// top (B, 0.90) and prints "Option B currently leads by 50 percentage points"
+// over a 100%-failed run.
+function allFailedHeadlineEnrichment(): Record<string, unknown> {
+  return {
+    analysis_status: 'partial',
+    option_comparison: [
+      { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'error' },
+      { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'error' },
+      { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'error' },
+    ],
+  };
+}
+
+// Two COMPUTED options tie at 0.45; a third FAILED option carries the top
+// 0.90. A status-blind selector crowns the failed C ("Option C currently
+// leads by 45 percentage points"); the gate must instead see the real tie.
+function computedTieErroredTopEnrichment(): Record<string, unknown> {
+  return {
+    analysis_status: 'partial',
+    option_comparison: [
+      { option_id: 'A', option_label: 'Option A', win_probability: 0.45, status: 'computed' },
+      { option_id: 'B', option_label: 'Option B', win_probability: 0.45, status: 'computed' },
+      { option_id: 'C', option_label: 'Option C', win_probability: 0.9, status: 'error' },
+    ],
+  };
+}
+
+// A legitimately-computed leader A (0.60) with a single FAILED option B (0.90)
+// as its only rival. Status-blind, B's 0.90 becomes the "runner-up", the
+// margin goes negative, the meaningful-lead test fails, and A's real headline
+// is WITHHELD. Gated, B drops out and A's single-option confident lead is
+// RESTORED.
+function declaredLeaderErroredRunnerUpEnrichment(): Record<string, unknown> {
+  return {
+    analysis_status: 'partial',
+    option_comparison: [
+      { option_id: 'A', option_label: 'Option A', win_probability: 0.6, status: 'computed' },
+      { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'error' },
+    ],
+  };
+}
+
+describe('shared status-aware winner — site 4: run_analysis headline (resolveWinner)', () => {
+  it('all-failed set: emits NO headline (does not crown the top failed option)', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: allFailedHeadlineEnrichment(),
+      leading_option_id: '',
+      status_kind: 'partial',
+    });
+    expect(out).toBeNull();
+  });
+
+  it('computed-tie + errored-top: never fabricates a crown for the failed option', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: computedTieErroredTopEnrichment(),
+      leading_option_id: '',
+      status_kind: 'partial',
+    });
+    // The failed C (0.90) must not be crowned; a genuine 0.45/0.45 tie is not a
+    // confident lead, so the honest outcome is the neutral locked template
+    // (null). Status-blind, C's 0.90 would win and print "…currently leads by
+    // 45 percentage points" — the mutation-check asserts exactly that revert.
+    expect(out).toBeNull();
+  });
+
+  it('declared leader + errored runner-up: the legitimate headline is RESTORED, not withheld', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: declaredLeaderErroredRunnerUpEnrichment(),
+      leading_option_id: 'A',
+      status_kind: 'partial',
+    });
+    expect(out).not.toBeNull();
+    expect(out!).toContain('Option A');
+    expect(out!).toContain('currently leads');
+    // Never the failed rival.
+    expect(out!).not.toContain('Option B');
+  });
+
+  it('GOLDEN — all-computed set is unchanged: the top option leads by its real margin', () => {
+    const out = buildAnalysisResultHeadline({
+      enrichment: {
+        analysis_status: 'ok',
+        option_comparison: [
+          { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed' },
+          { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'computed' },
+          { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed' },
+        ],
+      },
+      leading_option_id: '',
+      status_kind: 'ok',
+    });
+    expect(out).not.toBeNull();
+    expect(out!).toContain('Option B');
+    expect(out!).toContain('50 percentage points'); // B 0.90 - A 0.40
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Site 5 (P2) — analysis-fallback.ts `buildAnalysisFromPriorFacts`. The
+// enriched prior-facts path OVERRODE compactAnalysis's already-gated winner
+// with `relabelled[0]` — the FULL (status-blind) option list's top — so a
+// failed option carrying the highest win_probability was re-crowned on the
+// conversational follow-up path, AND desynced from the margin (which
+// compactAnalysis measures over the recommendable subset only). The fix picks
+// the top RECOMMENDABLE option, pinning winner and margin to the same source.
+// ---------------------------------------------------------------------------
+
+function priorFactWithEnrichment(optionComparison: Record<string, unknown>[]): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: '00000000-0000-4000-8000-000000000001',
+      leading_option_id: 'A',
+      win_probabilities: {},
+      summary: 'Prior run',
+      // Envelope status is a SUCCESS (the fact is eligible); the gate under
+      // test is the PER-OPTION status carried on each option_comparison entry.
+      enrichment: { analysis_status: 'complete', option_comparison: optionComparison },
+    },
+  } as unknown as HandlerFact;
+}
+
+describe('shared status-aware winner — site 5: prior-facts fallback (buildAnalysisFromPriorFacts)', () => {
+  it('does NOT re-crown the failed top option; winner is the recommendable leader', () => {
+    const summary = buildAnalysisFromPriorFacts([
+      priorFactWithEnrichment([
+        { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed', outcome_mean: 10 },
+        { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'error', outcome_mean: 20 },
+        { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed', outcome_mean: 5 },
+      ]),
+    ]);
+    expect(summary).not.toBeNull();
+    expect(summary!.winner.option_id).toBe('A');
+    expect(summary!.winner.win_probability).toBeCloseTo(0.4, 10);
+  });
+
+  it('pins coherence: the winner and the margin derive from the SAME recommendable subset', () => {
+    const summary = buildAnalysisFromPriorFacts([
+      priorFactWithEnrichment([
+        { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed', outcome_mean: 10 },
+        { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'error', outcome_mean: 20 },
+        { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed', outcome_mean: 5 },
+      ]),
+    ])!;
+    // margin = A(0.40) - C(0.30); the failed B is neither winner nor runner-up.
+    expect(summary.margin).toBeCloseTo(0.1, 10);
+  });
+
+  it('retains the failed option in the FULL options list (so the coach can disclose it ran)', () => {
+    const summary = buildAnalysisFromPriorFacts([
+      priorFactWithEnrichment([
+        { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed', outcome_mean: 10 },
+        { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'error', outcome_mean: 20 },
+        { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed', outcome_mean: 5 },
+      ]),
+    ])!;
+    const b = summary.options.find((o) => o.option_id === 'B');
+    expect(b).toBeDefined();
+    expect(b?.status).toBe('error');
+  });
+
+  it('GOLDEN — all-computed set is unchanged: highest win_probability is crowned', () => {
+    const summary = buildAnalysisFromPriorFacts([
+      priorFactWithEnrichment([
+        { option_id: 'A', option_label: 'Option A', win_probability: 0.4, status: 'computed', outcome_mean: 10 },
+        { option_id: 'B', option_label: 'Option B', win_probability: 0.9, status: 'computed', outcome_mean: 20 },
+        { option_id: 'C', option_label: 'Option C', win_probability: 0.3, status: 'computed', outcome_mean: 5 },
+      ]),
+    ])!;
+    expect(summary.winner.option_id).toBe('B');
+    expect(summary.margin).toBeCloseTo(0.5, 10); // B 0.90 - A 0.40
   });
 });
