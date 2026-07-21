@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tokenise } from "../../scripts/ci/strip-source-comments.mjs";
 
 /**
  * TRIPWIRE: content-bearing log calls must route through contentDigest().
@@ -78,8 +79,20 @@ function listTsFiles(dir: string): string[] {
 }
 
 /** Extract every content-convention field passed to a log.* call in one source file. */
-function scanFile(src: string, relPath: string): Hit[] {
+function scanFile(rawSrc: string, relPath: string): Hit[] {
   const hits: Hit[] = [];
+  // LITERAL-AWARE SCAN. Both walkers below balance brackets by counting raw
+  // characters, so a stray ')' / ',' / '{' / '}' hiding inside a string,
+  // template, or regex literal — e.g. log.info("oops ) done", { raw_output: x })
+  // — would truncate the walk BEFORE the content-bearing fields and let a raw
+  // log call slip past the tripwire (the exact guard-that-cannot-see class this
+  // file fights). So we scan the STRUCTURAL view produced by the repo's ratified
+  // literal-aware tokeniser (scripts/ci/strip-source-comments.mjs, parity-pinned
+  // by tests/unit/ci/strip-source-comments.test.ts — NOT a third hand-rolled
+  // tokeniser): comments and string/template/regex-literal CONTENTS are blanked
+  // to spaces (their stray brackets vanish), while code — the `log.*(` call, the
+  // `key:` structure, and the `contentDigest(` routing — stays intact.
+  const src = tokenise(rawSrc).structural;
   const logCallRe = /\blog\.(info|warn|error|debug|trace|fatal)\s*\(/g;
   let m: RegExpExecArray | null;
   while ((m = logCallRe.exec(src)) !== null) {
@@ -174,5 +187,51 @@ describe("content-digest log tripwire", () => {
       `EXPECTED_UNROUTED entries no longer match a real un-digested site — remove them:\n  ` +
         staleExpectations.join("\n  "),
     ).toEqual([]);
+  });
+});
+
+describe("content-digest log tripwire — literal-aware scanning", () => {
+  // These synthetic-source cases pin the reviewer's exact bypass: a scanner that
+  // balances brackets on RAW characters is STRING-LITERAL-BLIND — a ')' inside a
+  // string/template/regex literal earlier in a log call truncates the paren-walk
+  // before the content-bearing fields, so a raw-content log call sails past the
+  // tripwire. Each case is a combined positive+absence control: it first proves
+  // the scanner can SEE the field at all (presence), then asserts its digest
+  // verdict — so a blind scanner (field unseen → `undefined`) fails LOUD, never
+  // passes vacuously. Mutation-check: revert scanFile to scan the raw source and
+  // the `.toBeDefined()` presence assertions go RED.
+
+  it("a ')' inside an earlier string literal must NOT hide a later raw-content field", () => {
+    const src = `
+      log.info("model refused with a ) closing paren in the message", {
+        turn_id,
+        raw_output: someRawModelText,
+      });
+    `;
+    const hit = scanFile(src, "synthetic.ts").find((h) => h.key === "raw_output");
+    expect(hit, "scanner must SEE the field past the )-bearing string").toBeDefined();
+    expect(hit?.digested).toBe(false);
+  });
+
+  it("a digested field after a ')'-bearing string still reads as DIGESTED (detector discriminates)", () => {
+    const src = `log.warn("aborted ) here", { raw_output_sample: contentDigest(x) });`;
+    const hit = scanFile(src, "synthetic.ts").find((h) => h.key === "raw_output_sample");
+    expect(hit, "scanner must SEE the digested field past the )-bearing string").toBeDefined();
+    expect(hit?.digested).toBe(true);
+  });
+
+  it("a ')' inside a template literal must NOT hide a later raw-content field", () => {
+    const src = "log.error(`prompt with ) in a ${expr} template`, { raw_text: rawUserText });";
+    const hit = scanFile(src, "synthetic.ts").find((h) => h.key === "raw_text");
+    expect(hit, "scanner must SEE the field past the )-bearing template").toBeDefined();
+    expect(hit?.digested).toBe(false);
+  });
+
+  it("a content field that only APPEARS inside a string literal is not a real log field", () => {
+    // The value's brackets are literal text, not code — the field name here lives
+    // entirely inside a string, so it must not be mistaken for a real log key.
+    const src = `log.info("raw_output: not a real field, just prose )");`;
+    const hits = scanFile(src, "synthetic.ts");
+    expect(hits.find((h) => h.key === "raw_output")).toBeUndefined();
   });
 });
