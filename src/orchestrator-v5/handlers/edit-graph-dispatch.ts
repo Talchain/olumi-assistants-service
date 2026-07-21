@@ -22,6 +22,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { handleEditGraph, type EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
+import { extractEditLlmCallTelemetry, type EditGraphLlmCallTelemetry } from '../diagnostics/v5-diagnostic-trace.js';
 import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
@@ -679,6 +680,15 @@ export interface DispatchEditGraphResult {
    * applied — sanitiser falls back to prefix-aware generic wording.
    */
   readonly graph: GraphV3T | null;
+  /**
+   * S3-L6 / F-5 — edit-lane LLM call attribution for `_diagnostic_trace`.
+   * Present only when this edit turn actually invoked the LLM; route-v2
+   * threads it into the minimal trace's `llm_calls[]` (role `edit_graph`).
+   * Undefined on deterministic (no-LLM) edit exits and on the commit-failure
+   * path (that path returns a 500 before route-v2 builds a trace). See
+   * `extractEditLlmCallTelemetry`.
+   */
+  readonly editLlmCall?: EditGraphLlmCallTelemetry;
 }
 
 /**
@@ -1673,6 +1683,14 @@ export async function dispatchEditGraph(
   // original error is never caught or masked. `eventEmitted` makes the emit
   // idempotent, so the success path (inner commit-`finally`, then this outer
   // `finally`) emits once, not twice.
+
+  // S3-L6 / F-5: capture the edit-lane LLM call attribution once, from the
+  // finalised edit result's R7 diagnostics + the resolved adapter provider.
+  // `undefined` on deterministic (no-LLM) edits. Surfaced on the success and
+  // commit-failure returns so route-v2 can thread it into
+  // `_diagnostic_trace.llm_calls[]` — previously always `[]` on edit turns.
+  const editLlmCall = extractEditLlmCallTelemetry(editResult, adapter.name);
+
   try {
   let response = editResultToOlumiResponse(editResult, payload);
 
@@ -3049,6 +3067,7 @@ export async function dispatchEditGraph(
       analysisReady,
       graph: appliedGraphForWire,
       freshness,
+      ...(editLlmCall ? { editLlmCall } : {}),
     };
   } catch (err) {
     log.error(
@@ -3073,6 +3092,7 @@ export async function dispatchEditGraph(
       // `commitPerformed=false`.
       graph: null,
       freshness,
+      ...(editLlmCall ? { editLlmCall } : {}),
     };
   } finally {
     // R7: emit the single per-turn event exactly once. This finally covers both

@@ -600,6 +600,16 @@ function sendFinalised200(
      */
     readonly turnTimings?: V5TurnTimings;
     /**
+     * S3-L6 / F-5 — edit-lane LLM call attribution threaded by the edit_graph
+     * path from `eg.editLlmCall`. Folded into the flag-gated minimal
+     * diagnostic trace below so an edit turn's `_diagnostic_trace.llm_calls[]`
+     * carries the edit LLM call (model, tokens, wall-clock) instead of the
+     * empty array the minimal builder emitted before. Undefined on
+     * deterministic (no-LLM) edits; the builder then records nothing for it.
+     * Never reaches the wire body outside the trace.
+     */
+    readonly editLlmCall?: import('../orchestrator-v5/diagnostics/v5-diagnostic-trace.js').EditGraphLlmCallTelemetry;
+    /**
      * V5 canonical analysis state for the redacted `_context_summary`
      * surface. When a dispatch path threads the FULL verdict (with degraded
      * detection — M5, turn-executor), it is used verbatim. Otherwise the
@@ -770,6 +780,9 @@ function sendFinalised200(
           // empty — the sole production call site omitted this input).
           ...(ctx.turnTimings ? { turnTimings: ctx.turnTimings } : {}),
           ...(ctx.coachingDelivery ? { coachingDelivery: ctx.coachingDelivery } : {}),
+          // S3-L6 / F-5: thread the edit-lane LLM call so the edit turn's trace
+          // records it in `llm_calls[]` (previously always empty on this path).
+          ...(ctx.editLlmCall ? { editLlmCall: ctx.editLlmCall } : {}),
         })
       : undefined;
   const diagnosticTraceForWire: unknown =
@@ -3194,6 +3207,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisReady: eg.analysisReady,
           graph: eg.graph,
           ...(eg.freshness ? { freshness: eg.freshness } : {}),
+          // S3-L6 / F-5: edit-lane LLM call → `_diagnostic_trace.llm_calls[]`.
+          ...(eg.editLlmCall ? { editLlmCall: eg.editLlmCall } : {}),
           requestStartedAt: routeStartedAt,
           scenarioId: ingress.scenario_id,
           turnId: ingress.turn_id,
