@@ -582,7 +582,8 @@ export async function routeWithToolUse(
     ...initialSystem.fields,
     messages: [{ role: 'user', content: userMessage }],
     // ROADMAP 1.132 (F2): flag OFF returns the exact pre-flag
-    // OLUMI_ACTION_TOOL object; flag ON advertises `answer_shape`.
+    // buildOlumiActionTool() unconditionally advertises `answer_shape`
+    // (ROADMAP 1.132, F2 — F1 flag deletion).
     tools: [buildOlumiActionTool()],
     tool_choice: { type: 'auto' },
     temperature: 0,

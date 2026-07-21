@@ -1,19 +1,22 @@
 /**
- * CEE_ANSWER_SHAPE_ENFORCED — flag-gated `_answer_shape` on
- * /orchestrate/v2/turn (ROADMAP 1.132, F2).
+ * `_answer_shape` on /orchestrate/v2/turn (ROADMAP 1.132, F2) — UNCONDITIONAL
+ * since the F1 flag deletion (no-dark-launches doctrine).
  *
  * Contract (mirrors route-v2-reasoning-capture.test.ts — the `_reasoning`
  * product-sidecar mechanic):
- *   - `config.features.answerShapeEnforced === false` (default) ⇒ no
- *     `_answer_shape` on the wire, even when `run.answerShape` is present.
- *   - `=== true` ⇒ `_answer_shape` is attached post-egress-validation via
- *     the same strip → validate → re-attach machinery as `_reasoning` (the
- *     strict OlumiResponseSchema at the vendored pin must never see the
- *     unknown key — it would fail the whole envelope to the typed fallback).
- *   - Flag ON but `run.answerShape` absent ⇒ still no `_answer_shape`.
+ *   - `run.answerShape` present + final text IS the shape-derived text ⇒
+ *     `_answer_shape` is attached post-egress-validation via the same
+ *     strip → validate → re-attach machinery as `_reasoning` (the strict
+ *     OlumiResponseSchema at the vendored pin must never see the unknown key
+ *     — it would fail the whole envelope to the typed fallback).
+ *   - `run.answerShape` present but the final assistant_text was REWRITTEN
+ *     after capture ⇒ `_answer_shape` is DROPPED, never shipped stale (P1).
+ *   - `run.answerShape` absent ⇒ no `_answer_shape` (never fabricated).
  *   - Egress validation failure (typed-fallback path) ⇒ the fallback
  *     envelope NEVER carries `_answer_shape`, even with an upstream body
  *     pre-attach.
+ *   - An upstream body pre-attach with `run.answerShape` absent is stripped
+ *     before the strict egress schema sees it (defence-in-depth).
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -30,7 +33,6 @@ const configHolder = {
     optionShortcutRepair: true,
     diagnosticTraceEnabled: false,
     reasoningCaptureEnabled: false,
-    answerShapeEnforced: false,
   },
 };
 vi.mock('../../../src/config/index.js', () => ({
@@ -116,7 +118,7 @@ async function postTurn(app: FastifyInstance, turnId: string) {
   return { status: res.statusCode, body: JSON.parse(res.body) as Record<string, any> };
 }
 
-describe('route-v2 — flag-gated `_answer_shape` (ROADMAP 1.132)', () => {
+describe('route-v2 — `_answer_shape` (unconditional, ROADMAP 1.132)', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     app = Fastify();
@@ -126,18 +128,9 @@ describe('route-v2 — flag-gated `_answer_shape` (ROADMAP 1.132)', () => {
   afterAll(async () => app.close());
   beforeEach(() => {
     runTurnExecutorMock.mockReset();
-    configHolder.features.answerShapeEnforced = false;
   });
 
-  it('flag OFF (default) → no `_answer_shape` on the wire, even when run.answerShape is present', async () => {
-    runTurnExecutorMock.mockResolvedValue(mkRunResult({ withShape: true }));
-    const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc01');
-    expect(status).toBe(200);
-    expect(body).not.toHaveProperty('_answer_shape');
-  });
-
-  it('flag ON + run.answerShape present + final text IS the shape-derived text → `_answer_shape` attached post-validation', async () => {
-    configHolder.features.answerShapeEnforced = true;
+  it('run.answerShape present + final text IS the shape-derived text → `_answer_shape` attached post-validation', async () => {
     runTurnExecutorMock.mockResolvedValue(mkRunResult({ withShape: true }));
     const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc02');
     expect(status).toBe(200);
@@ -149,8 +142,7 @@ describe('route-v2 — flag-gated `_answer_shape` (ROADMAP 1.132)', () => {
     expect(body.assistant_text.length).toBeGreaterThan(0);
   });
 
-  it('flag ON + run.answerShape present but final assistant_text was rewritten after capture → `_answer_shape` is DROPPED, never shipped stale (P1)', async () => {
-    configHolder.features.answerShapeEnforced = true;
+  it('run.answerShape present but final assistant_text was rewritten after capture → `_answer_shape` is DROPPED, never shipped stale (P1)', async () => {
     // Simulates any post-capture rewriter (STEP 6.6 honesty swap, goal-receipt
     // swap, empty-answer backstop, finaliser guards, commit-failure
     // replacement, route egress entity-id scrub): the run result carries a
@@ -172,16 +164,14 @@ describe('route-v2 — flag-gated `_answer_shape` (ROADMAP 1.132)', () => {
     );
   });
 
-  it('flag ON but run.answerShape absent → still no `_answer_shape` (never fabricated)', async () => {
-    configHolder.features.answerShapeEnforced = true;
+  it('run.answerShape absent → still no `_answer_shape` (never fabricated)', async () => {
     runTurnExecutorMock.mockResolvedValue(mkRunResult({ withShape: false }));
     const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc03');
     expect(status).toBe(200);
     expect(body).not.toHaveProperty('_answer_shape');
   });
 
-  it('flag ON + egress validation fails → typed-fallback 200 carries NO `_answer_shape`, even with an upstream body pre-attach', async () => {
-    configHolder.features.answerShapeEnforced = true;
+  it('egress validation fails → typed-fallback 200 carries NO `_answer_shape`, even with an upstream body pre-attach', async () => {
     runTurnExecutorMock.mockResolvedValue({
       response: {
         response_version: 'NOT_TWO' as unknown as 2,
@@ -216,7 +206,7 @@ describe('route-v2 — flag-gated `_answer_shape` (ROADMAP 1.132)', () => {
     expect(body.response_version).toBe(2);
   });
 
-  it('flag OFF + upstream body pre-attach → the strip step removes `_answer_shape` before the strict egress schema sees it (200, no fallback)', async () => {
+  it('upstream body pre-attach with run.answerShape absent → the strip step removes `_answer_shape` before the strict egress schema sees it (200, no fallback)', async () => {
     const result = mkRunResult({ withShape: false });
     (result.response as Record<string, unknown>)._answer_shape = ANSWER_SHAPE;
     runTurnExecutorMock.mockResolvedValue(result);

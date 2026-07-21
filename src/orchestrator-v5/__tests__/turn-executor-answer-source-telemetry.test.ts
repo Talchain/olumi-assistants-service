@@ -30,6 +30,7 @@ vi.mock('../session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
+const { deriveAnswerTextFromShape } = await import('../routing/answer-shape.js');
 
 const BASE_PAYLOAD = makeMessagePayload({
   turn_id: '99999999-9999-4999-8999-999999999997',
@@ -37,11 +38,17 @@ const BASE_PAYLOAD = makeMessagePayload({
   message: 'help me think this through',
 });
 
-// Sanitises to '' via sanitiseNarrateOutput's TAG_PATTERN (strips <...>
-// markers, retains inner text — this string has none) while being raw
-// non-blank, so it satisfies layer A's schema-pressure check and never
-// triggers REPAIR_ONCE (mirrors turn-executor-answer-text-compose-guard.test.ts).
-const PURE_MARKUP = '<internal></internal>';
+// A schema-VALID shape (coach/converse now require one — ROADMAP 1.132, F2)
+// whose derived text is ONLY tag markup: non-blank (satisfies layer A / the
+// shape requirement, no REPAIR_ONCE) yet it sanitises to '' via
+// sanitiseNarrateOutput's TAG_PATTERN (mirrors
+// turn-executor-answer-text-compose-guard.test.ts).
+const MARKUP_SHAPE = {
+  headline: '<internal></internal>',
+  bullets: [],
+  detail: '<internal></internal>',
+};
+const MARKUP_DERIVED_LENGTH = deriveAnswerTextFromShape(MARKUP_SHAPE).length;
 
 function toolResult(input: unknown, prefaceText?: string): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [];
@@ -76,11 +83,16 @@ afterEach(async () => {
 
 describe('v5.coaching.answer_source — channel-pick truthfulness (answer_text requirement unconditional)', () => {
 
-  it('coach with a real answer_text records source=answer_text', async () => {
+  it('coach with a real (shape-derived) answer_text records source=answer_text', async () => {
+    const shape = {
+      headline: 'The full coaching answer.',
+      bullets: [],
+      detail: 'A complete supporting explanation for this coaching turn.',
+    };
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
         toolResult(
-          { intent_class: 'coach', coaching_mode: 'reframe', answer_text: 'The full coaching answer.' },
+          { intent_class: 'coach', coaching_mode: 'reframe', answer_shape: shape },
           'Short orientation.',
         ),
       ),
@@ -92,7 +104,7 @@ describe('v5.coaching.answer_source — channel-pick truthfulness (answer_text r
     expect(evt).toBeDefined();
     expect(evt?.data.intent_class).toBe('coach');
     expect(evt?.data.source).toBe('answer_text');
-    expect(evt?.data.answer_text_length).toBe('The full coaching answer.'.length);
+    expect(evt?.data.answer_text_length).toBe(deriveAnswerTextFromShape(shape).length);
     expect(evt?.data.orientation_length).toBe('Short orientation.'.length);
     // Lengths only — never the model's prose.
     expect(Object.keys(evt!.data)).not.toContain('answer_text');
@@ -122,11 +134,16 @@ describe('v5.coaching.answer_source — channel-pick truthfulness (answer_text r
     expect(events.some((e) => e.event === 'v5.coaching.answer_source')).toBe(false);
   });
 
-  it('tool-call converse with a real answer_text records source=answer_text', async () => {
+  it('tool-call converse with a real (shape-derived) answer_text records source=answer_text', async () => {
+    const shape = {
+      headline: 'The full conversational answer.',
+      bullets: [],
+      detail: 'A complete supporting explanation for this converse turn.',
+    };
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
         toolResult(
-          { intent_class: 'converse', answer_text: 'The full conversational answer.' },
+          { intent_class: 'converse', answer_shape: shape },
           'Short lead-in.',
         ),
       ),
@@ -174,24 +191,24 @@ describe('v5.coaching.answer_source — channel-pick truthfulness (answer_text r
 describe('v5.coaching.answer_source — fires independent of the recovery guard', () => {
 
   it('fires alongside the layer-B recovery event — reflects the RAW channel pick, independent of post-sanitise recovery', async () => {
-    // Raw answer_text is non-blank (satisfies layer A, no REPAIR_ONCE) but
-    // sanitises to '' (pure markup, no retained inner text), so layer B's
-    // FINAL-text check still degrades to bounded-recovery. The source
-    // telemetry is computed at the RAW pick site, before sanitisation, so
-    // it correctly reports 'answer_text' here — proving the two signals
+    // The shape-derived answer_text is non-blank (satisfies layer A, no
+    // REPAIR_ONCE) but sanitises to '' (pure markup, no retained inner text),
+    // so layer B's FINAL-text check still degrades to bounded-recovery. The
+    // source telemetry is computed at the RAW pick site, before sanitisation,
+    // so it correctly reports 'answer_text' here — proving the two signals
     // are independent instruments measuring different things.
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
-        toolResult({ intent_class: 'coach', coaching_mode: 'reframe', answer_text: PURE_MARKUP }),
+        toolResult({ intent_class: 'coach', coaching_mode: 'reframe', answer_shape: MARKUP_SHAPE }),
       ),
     };
 
-    await runTurnExecutor(BASE_PAYLOAD, 'req-source-coach-flagon-empty', { routingAdapter: adapter });
+    await runTurnExecutor(BASE_PAYLOAD, 'req-source-coach-empty', { routingAdapter: adapter });
 
     const sourceEvt = events.find((e) => e.event === 'v5.coaching.answer_source');
     expect(sourceEvt).toBeDefined();
     expect(sourceEvt?.data.source).toBe('answer_text');
-    expect(sourceEvt?.data.answer_text_length).toBe(PURE_MARKUP.length);
+    expect(sourceEvt?.data.answer_text_length).toBe(MARKUP_DERIVED_LENGTH);
     expect(events.some((e) => e.event === 'v5.coaching.empty_answer_recovered')).toBe(true);
   });
 });

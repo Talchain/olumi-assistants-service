@@ -208,8 +208,9 @@ function mkPayload(message: string): MessageTurnPayload {
   };
 }
 
-/** Coach tool call WITH answer_text — the analyse-stage direct_answer path
- * on which the post-analysis wrapper fires and appends its chips. */
+/** Coach tool call WITH a real (shape-derived) answer — the analyse-stage
+ * direct_answer path on which the post-analysis wrapper fires and appends its
+ * chips. */
 function coachToolResultWithAnswer(): ChatWithToolsResult {
   const content: ToolResponseBlock[] = [
     {
@@ -219,8 +220,12 @@ function coachToolResultWithAnswer(): ChatWithToolsResult {
       input: {
         intent_class: 'coach',
         coaching_mode: 'reframe',
-        answer_text:
-          'Your analysis is fresh. Consider strengthening the evidence behind your capacity assumptions before you decide.',
+        answer_shape: {
+          headline: 'Your analysis is fresh.',
+          bullets: [],
+          detail:
+            'Consider strengthening the evidence behind your capacity assumptions before you decide.',
+        },
       },
     },
   ];
