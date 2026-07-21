@@ -545,41 +545,35 @@ const ConfigSchema = z.object({
     // regardless of this flag — the V5 draft_graph and edit_graph dispatches
     // depend on that independence.
     //
-    // Default flipped true (April 2026): V4 is the only supported V1 path and
-    // V1 handlers (e.g. src/orchestrator/tools/explain-results.ts) are
-    // stubbed to throw if reached. Set to false only for emergency rollback
-    // of V1 AND revert the V1 stubs.
-    // STALE-COMMENT FIX (hygiene batch, ROADMAP 1.30c item D): this
-    // previously asserted the OPPOSITE of the guard code — claiming
-    // CEE_PIPELINE_V4_ENABLED=true DISABLES V4 and =false ENABLES it. The
-    // actual guard (src/orchestrator/route.ts:~102,
-    // `if (!config.features.pipelineV4Enabled) { ...; reply.code(410); }`)
-    // does the reverse: CEE_PIPELINE_V4_ENABLED=false is what returns 410
-    // V4_DISABLED on the /v1 routes; =true is what lets V4 execute
-    // normally. The name itself is fine (plain "enabled" semantics) — only
-    // this comment had it backwards.
-    // V4-TOMBSTONE DEFAULT — INVESTIGATED, NOT FLIPPED (ROADMAP 1.25 hygiene
-    // batch, item 5, Brief G addition, 9 Jul): confirmed the real risk —
-    // neither render.yaml nor render-staging.yaml declares
-    // CEE_PIPELINE_V4_ENABLED, so the live 410 depends entirely on an
-    // out-of-band Render dashboard env var; a fresh deploy or a reset env
-    // var would silently fall back to this `true` default and RE-ENABLE the
-    // tombstoned /v1 pipeline. Flipping the default to `false` (the
-    // "obvious" fix) was attempted and REVERTED: `tests/integration/
-    // orchestrator/route.test.ts` has ~30 cases across its "multi-turn
-    // conversation lifecycle" suite that call `/orchestrate/v1/turn`
-    // WITHOUT mocking this flag, relying on today's `true` default to reach
-    // the V4 pipeline and assert 200 — flipping the default turned every
-    // one of them into a 410, a real regression far outside a hygiene
-    // batch's blast radius (verified: reverting just this one line restores
-    // route.test.ts to green; the failures are not pre-existing flake).
-    // Fixing it properly means auditing and updating every test that
-    // depends on the implicit default, which is a dedicated lane, not a
-    // one-line default flip. Filed as ROADMAP residual: default-flip
-    // CEE_PIPELINE_V4_ENABLED to `false` once route.test.ts's V1 suite is
-    // migrated to explicit flag mocking (mirrors route-v4-disabled-guard.
-    // test.ts's `vi.mock` proxy pattern).
-    pipelineV4Enabled: booleanString.default(true),
+    // Guard semantics (src/orchestrator/route.ts:~102,
+    // `if (!config.features.pipelineV4Enabled) { ...; reply.code(410); }`):
+    // CEE_PIPELINE_V4_ENABLED=false returns 410 V4_DISABLED on the /v1 routes;
+    // =true lets the V4 pipeline execute normally. Plain "enabled" semantics.
+    //
+    // FAIL-SAFE DEFAULT — the tombstone is now the CODE DEFAULT (false).
+    // The `/orchestrate/v1/turn` route is a tombstone; the live product path is
+    // `/orchestrate/v2/turn` (V5). Neither render.yaml nor render-staging.yaml
+    // declares CEE_PIPELINE_V4_ENABLED, so before this flip the live 410 rested
+    // ENTIRELY on an out-of-band Render dashboard env var: a fresh deploy or a
+    // wiped/reset env var fell back to the old `true` default and silently
+    // RE-ENABLED the tombstoned /v1 pipeline (a dead route nobody has tested in
+    // months). Defaulting to `false` makes the 410 fail-safe — the env var is
+    // now INERT by default and only an explicit CEE_PIPELINE_V4_ENABLED=true
+    // re-enables V4 (emergency rollback only, and revert the V1 stubs too, e.g.
+    // src/orchestrator/tools/explain-results.ts). The staging dashboard var is
+    // now redundant and safe to remove.
+    //
+    // Doctrine note: the ideal end-state is DELETING this flag and making the
+    // /v1 410 unconditional (rollback = code revert). That was NOT done here
+    // because it is a dedicated lane, not a micro-fix: it would gut the V4
+    // execution branches in route.ts / route-stream.ts / pipeline-stream.ts and
+    // force rewriting ~23 live assertions in tests/integration/orchestrator/
+    // route.test.ts that exercise executePipelineV4 THROUGH the /v1 route. This
+    // flip achieves the identical production fail-safe with a contained diff;
+    // the two tests that relied on the implicit `true` default
+    // (route.test.ts + orchestrate-v1-regression.test.ts) now mock
+    // pipelineV4Enabled: true explicitly (mirrors route-v4-disabled-guard.ts).
+    pipelineV4Enabled: booleanString.default(false),
     // ENABLE_V5_ORCHESTRATOR deleted 2026-07-20 (O-7 wave 2 — Appendix A1,
     // live-true on staging): /orchestrate/v2/turn registration is now
     // UNCONDITIONAL (server.ts). The flag's OFF branch 404'd the core

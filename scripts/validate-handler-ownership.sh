@@ -26,6 +26,14 @@ cd "$REPO_ROOT"
 EXIT=0
 HANDLER_FILE='src/orchestrator-v5/tools/handlers/run-analysis.ts'
 
+# Comment handling: negative-proof scans (checks 2–4) match against the
+# COMMENT-STRIPPED view of the handler via
+# scripts/ci/strip-source-comments.mjs (literal-aware tokeniser). A JSDoc or
+# trailing comment documenting a forbidden pattern — which the old `^ *//`
+# filters could not see — can never fail the gate; real code still does.
+STRIPPER="scripts/ci/strip-source-comments.mjs"
+command -v node >/dev/null 2>&1 || { echo "FAIL: node is required (matching runs via $STRIPPER)"; exit 1; }
+
 fail() {
   local name="$1"
   shift
@@ -61,8 +69,7 @@ fi
 # 2. No direct PLoT HTTP calls from the handler (must go through PLoTClient)
 # ---------------------------------------------------------------------------
 DIRECT_HTTP=$(
-  grep -nE "fetch\(|axios|node-fetch|undici" "$HANDLER_FILE" 2>/dev/null \
-  | grep -v '^ *//' \
+  node "$STRIPPER" --scan "fetch\(|axios|node-fetch|undici" "$HANDLER_FILE" 2>/dev/null \
   || true
 )
 if [ -n "$DIRECT_HTTP" ]; then
@@ -73,8 +80,7 @@ fi
 # 3. No UI repo references
 # ---------------------------------------------------------------------------
 UI_REFS=$(
-  grep -nE "DecisionGuideAI|decision-guide-ai" "$HANDLER_FILE" 2>/dev/null \
-  | grep -v '^ *//' \
+  node "$STRIPPER" --scan "DecisionGuideAI|decision-guide-ai" "$HANDLER_FILE" 2>/dev/null \
   || true
 )
 if [ -n "$UI_REFS" ]; then
@@ -101,29 +107,16 @@ fi
 # coercion, and is necessary for NaN/Infinity filtering. The whitelist below
 # strips `Number.isFinite` matches before the audit.
 # ---------------------------------------------------------------------------
-# Strip comment lines before auditing. JSDoc may legitimately document what
-# is forbidden; we only care about forbidden patterns in EXECUTABLE code.
-#
-# Passes each candidate line through the filter:
-#   - strips lines starting with // (line comment)
-#   - strips lines starting with * or whitespace+* (JSDoc continuation)
-#   - strips lines inside /** … */ blocks by anchoring on leading *
-HANDLER_CODE=$(
-  awk '
-    /^[[:space:]]*\/\*/ { in_block = 1 }
-    in_block { if (/\*\//) in_block = 0; next }
-    /^[[:space:]]*\/\// { next }
-    /^[[:space:]]*\*/ { next }
-    { print NR ":" $0 }
-  ' "$HANDLER_FILE"
-)
-
+# Comments are stripped BEFORE matching (via $STRIPPER): JSDoc and trailing
+# comments may legitimately document what is forbidden; we only care about
+# forbidden patterns in EXECUTABLE code. The old awk filter dropped whole
+# comment LINES but could not see a trailing comment on a code line — the
+# tokeniser can.
 FORBIDDEN_HELPERS=$(
-  echo "$HANDLER_CODE" | grep -E "Math\.(round|floor|ceil|abs)|\.toFixed\(|parseFloat\(|parseInt\(" || true
+  node "$STRIPPER" --scan "Math\.(round|floor|ceil|abs)|\.toFixed\(|parseFloat\(|parseInt\(" "$HANDLER_FILE" 2>/dev/null || true
 )
 NUMBER_COERCIONS=$(
-  echo "$HANDLER_CODE" \
-  | grep -E "Number\(" \
+  node "$STRIPPER" --scan "Number\(" "$HANDLER_FILE" 2>/dev/null \
   | grep -vE "Number\.isFinite|Number\.is" \
   || true
 )
@@ -135,7 +128,7 @@ if [ -n "$NUMBER_COERCIONS" ]; then
 fi
 
 MATH_IMPORTS=$(
-  grep -nE "from ['\"](d3|mathjs|simple-statistics|lodash/round|lodash-es/round)" "$HANDLER_FILE" 2>/dev/null \
+  node "$STRIPPER" --scan "from ['\"](d3|mathjs|simple-statistics|lodash/round|lodash-es/round)" "$HANDLER_FILE" 2>/dev/null \
   || true
 )
 if [ -n "$MATH_IMPORTS" ]; then

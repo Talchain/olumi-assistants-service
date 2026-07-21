@@ -44,21 +44,30 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# Comment handling: all scans below match against the COMMENT-STRIPPED view of
+# each file via scripts/ci/strip-source-comments.mjs (literal-aware tokeniser),
+# so a comment that accurately documents this contract — including a trailing
+# comment or an unstarred block-comment body, which the old per-line filters
+# could not see — can never fail the gate, while string literals and real code
+# still can. Emitted lines are the ORIGINAL source lines, so the
+# `// finaliser-exempt:` same-line marker still works.
+STRIPPER="scripts/ci/strip-source-comments.mjs"
+command -v node >/dev/null 2>&1 || { echo "FAIL: node is required (matching runs via $STRIPPER)"; exit 1; }
+
 # ─── D1: direct analysis_ready writes ─────────────────────────────────────
 
-PATTERN='analysis_ready[[:space:]]*:|\.analysis_ready[[:space:]]*=|\["analysis_ready"\][[:space:]]*=|\['"'"'analysis_ready'"'"'\][[:space:]]*='
+PATTERN='analysis_ready\s*:|\.analysis_ready\s*=|\["analysis_ready"\]\s*=|\['"'"'analysis_ready'"'"'\]\s*='
 
-matches=$(grep -rnE "$PATTERN" \
-  src/orchestrator-v5/compose/ \
-  src/orchestrator-v5/handlers/ \
-  src/orchestrator-v5/system-events/ \
+matches=$(node "$STRIPPER" --scan "$PATTERN" \
+  src/orchestrator-v5/compose \
+  src/orchestrator-v5/handlers \
+  src/orchestrator-v5/system-events \
   src/orchestrator-v5/turn-executor.ts \
-  --include="*.ts" 2>/dev/null \
+  2>/dev/null \
   | grep -v "__tests__" \
+  | grep -v "\.test\.ts:" \
   | grep -v "response-finaliser" \
   | grep -v "analysis-ready-emit" \
-  | grep -vE "^[^:]+:[0-9]+:[[:space:]]*//.*analysis_ready" \
-  | grep -vE "^[^:]+:[0-9]+:[[:space:]]*\*.*analysis_ready" \
   | grep -v "// finaliser-exempt:" \
   | grep -v "analysisReady\?:" \
   | grep -v "readonly analysisReady" \
@@ -84,7 +93,7 @@ fi
 # the finaliser invocation. The finaliser is the only sanctioned writer; the
 # route-v2 logger reads `response.analysis_ready` (which is fine — read-only
 # access doesn't violate the contract, only writes do).
-route_matches=$(grep -nE "$PATTERN" src/orchestrator/route-v2.ts 2>/dev/null \
+route_matches=$(node "$STRIPPER" --scan "$PATTERN" src/orchestrator/route-v2.ts 2>/dev/null \
   | grep -v "// finaliser-exempt:" \
   | grep -v "analysis_ready_emitted" \
   | grep -v "analysis_ready_status" \
@@ -111,9 +120,7 @@ fi
 # Anchor each exclusion with the trailing `:` that grep -n always emits
 # between path and line number, so a file like `route-v2.ts.bak` cannot
 # match the `route-v2.ts` exclusion by substring.
-brand_refs=$(grep -rn 'FinalisedV5Response' \
-  src/ \
-  --include="*.ts" 2>/dev/null \
+brand_refs=$(node "$STRIPPER" --scan 'FinalisedV5Response' src 2>/dev/null \
   | grep -v "^src/orchestrator-v5/response-finaliser\.ts:" \
   | grep -v "^src/orchestrator-v5/__tests__/response-finaliser" \
   | grep -v "^src/orchestrator/route-v2\.ts:" \

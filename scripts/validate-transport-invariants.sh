@@ -10,6 +10,13 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Matching runs on the COMMENT-STRIPPED view (scripts/ci/strip-source-comments.mjs,
+# literal-aware tokeniser): a comment documenting this invariant can never trip
+# it, while real code — including a 'text/event-stream' string literal — still
+# does.
+STRIPPER="$REPO_ROOT/scripts/ci/strip-source-comments.mjs"
+command -v node >/dev/null 2>&1 || { echo "ERROR: node is required (matching runs via $STRIPPER)"; exit 1; }
+
 EXIT=0
 
 check() {
@@ -18,7 +25,7 @@ check() {
   local -a paths=("src/orchestrator-v5" "src/orchestrator/route-v2.ts")
 
   local hits
-  hits="$(grep -RIn --include='*.ts' --exclude-dir='__tests__' -E "$pattern" "${paths[@]/#/$REPO_ROOT/}" 2>/dev/null || true)"
+  hits="$(node "$STRIPPER" --scan "$pattern" "${paths[@]/#/$REPO_ROOT/}" 2>/dev/null | grep -v '/__tests__/' || true)"
   if [ -n "$hits" ]; then
     echo "ERROR: Transport invariant violated ($label)"
     echo "Pattern: $pattern"
