@@ -61,6 +61,98 @@ const GraphReadinessInput = z.object({
 
 type GraphReadinessInputT = z.infer<typeof GraphReadinessInput>;
 
+/**
+ * F4 (readiness↔run gate) — build the `rawPersistedGraph` the SHARED scaffold
+ * predicate reads for intervention INTENT on the stateless readiness route.
+ *
+ * The run path's intent authority is `snapshot.rawPersistedGraph` — the RAW
+ * persisted graph, whose option nodes still carry `data.interventions`
+ * (numeric OR not). `collectInterventionIntentOptionIds` treats ANY intervention
+ * entry as user intent and never scaffolds over it. The `/graph-readiness`
+ * route has no persisted graph and the request `graph` is Zod-parsed: the
+ * `OptionData` schema is numeric-only, so a CONFIGURED-BUT-NON-NUMERIC option's
+ * intent (a categorical value the user set, awaiting encoding) cannot ride the
+ * parsed graph at all — it would 400. Passing the parsed graph as
+ * `rawPersistedGraph` therefore makes that option read as UN-configured and
+ * OVER-reports a scaffold the run path will NOT perform (it leaves the option on
+ * the honest configure path) — reopening the readiness↔run drift in the
+ * permissive direction.
+ *
+ * That intent DOES reach readiness, on the analysis_ready wire: a
+ * configured-but-non-numeric option arrives as status `needs_encoding` with the
+ * original value under `raw_interventions` (its `interventions` map carries no
+ * numeric). This helper folds that exact provenance back into the option nodes'
+ * `data.interventions` so the ONE existing predicate — no second, driftable
+ * copy — sees the same intent the run path sees. Semantics are identical to
+ * `collectInterventionIntentOptionIds`: an option has intent iff it carries any
+ * intervention entry (here: any `interventions` key, any `raw_interventions`
+ * key, or the `needs_encoding` status that by contract implies raw values).
+ *
+ * Pure: returns a shallow-cloned graph; the request graph is never mutated. The
+ * neutral-value / edge reads still use the untouched request `graph`.
+ */
+export function buildReadinessRawPersistedGraph(
+  graph: unknown,
+  options: ReadonlyArray<{
+    id?: string;
+    status?: string;
+    interventions?: Record<string, unknown>;
+    raw_interventions?: Record<string, unknown>;
+  }>,
+): unknown {
+  if (
+    graph === null ||
+    typeof graph !== "object" ||
+    Array.isArray(graph) ||
+    !Array.isArray((graph as { nodes?: unknown }).nodes)
+  ) {
+    return graph;
+  }
+
+  // Per-option intent keys from analysis_ready. `needs_encoding` implies raw
+  // (non-numeric) values by contract, so a synthetic key guarantees intent even
+  // if a caller omitted raw_interventions.
+  const intentKeysByOptionId = new Map<string, Record<string, number>>();
+  for (const opt of options) {
+    if (typeof opt?.id !== "string" || opt.id.length === 0) continue;
+    const keys: Record<string, number> = {};
+    for (const k of Object.keys(opt.interventions ?? {})) keys[k] = 1;
+    for (const k of Object.keys(opt.raw_interventions ?? {})) keys[k] = 1;
+    if (opt.status === "needs_encoding" && Object.keys(keys).length === 0) {
+      keys.__needs_encoding_intent__ = 1;
+    }
+    if (Object.keys(keys).length > 0) intentKeysByOptionId.set(opt.id, keys);
+  }
+  if (intentKeysByOptionId.size === 0) return graph;
+
+  const nodes = (graph as { nodes: unknown[] }).nodes.map((node) => {
+    if (node === null || typeof node !== "object" || Array.isArray(node)) return node;
+    const n = node as Record<string, unknown>;
+    if (n.kind !== "option" || typeof n.id !== "string") return node;
+    const intentKeys = intentKeysByOptionId.get(n.id);
+    if (intentKeys === undefined) return node;
+    const existingData =
+      n.data !== null && typeof n.data === "object" && !Array.isArray(n.data)
+        ? (n.data as Record<string, unknown>)
+        : {};
+    const existingInterventions =
+      existingData.interventions !== null &&
+      typeof existingData.interventions === "object" &&
+      !Array.isArray(existingData.interventions)
+        ? (existingData.interventions as Record<string, unknown>)
+        : {};
+    return {
+      ...n,
+      data: {
+        ...existingData,
+        interventions: { ...existingInterventions, ...intentKeys },
+      },
+    };
+  });
+
+  return { ...(graph as Record<string, unknown>), nodes };
+}
+
 // ============================================================================
 // V3 Analysis-Ready Assessment
 // ============================================================================
@@ -550,10 +642,20 @@ export default async function route(app: FastifyInstance) {
           options: input.analysis_ready.options,
           graph: input.graph,
           // Readiness is stateless: the request graph is the proxy for the
-          // snapshot run_analysis loads (same graph state ⇒ same decision). It
-          // also serves as the intervention-intent authority, mirroring the
-          // scaffold's own `rawPersistedGraph ?? graph` fallback.
-          rawPersistedGraph: input.graph,
+          // snapshot run_analysis loads (same graph state ⇒ same decision) for
+          // the neutral-value / edge reads. For intervention INTENT, though, the
+          // parsed request graph is NOT a faithful proxy — its numeric-only
+          // OptionData schema cannot carry a configured-but-non-numeric option's
+          // intent, so passing it here would over-report a scaffold the run path
+          // won't perform (F4 review P1). We therefore hand the predicate a
+          // rawPersistedGraph reconstructed from the analysis_ready wire, where
+          // that intent DOES arrive (needs_encoding + raw_interventions) — the
+          // same intent the run path's rawPersistedGraph carries, read by the
+          // same predicate. See buildReadinessRawPersistedGraph.
+          rawPersistedGraph: buildReadinessRawPersistedGraph(
+            input.graph,
+            input.analysis_ready.options,
+          ),
           // The CEE→PLoT egress scale net is unconditional since 2026-07-20
           // (O-7 wave 2), matching run_analysis' pinned-true call site.
           scaleNetEnabled: true,

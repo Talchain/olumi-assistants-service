@@ -18,7 +18,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    vi.stubEnv("ASSIST_API_KEYS", "readiness-key-1,readiness-key-2,readiness-key-rate,readiness-key-alt,readiness-key-min,readiness-key-f4");
+    vi.stubEnv("ASSIST_API_KEYS", "readiness-key-1,readiness-key-2,readiness-key-rate,readiness-key-alt,readiness-key-min,readiness-key-f4,readiness-key-f4b");
     vi.stubEnv("CEE_GRAPH_READINESS_RATE_LIMIT_RPM", "3");
 
     cleanBaseUrl();
@@ -37,6 +37,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   const headersAlt = { "X-Olumi-Assist-Key": "readiness-key-alt" } as const;
   const headersMin = { "X-Olumi-Assist-Key": "readiness-key-min" } as const;
   const headersF4 = { "X-Olumi-Assist-Key": "readiness-key-f4" } as const;
+  const headersF4b = { "X-Olumi-Assist-Key": "readiness-key-f4b" } as const;
 
   function makeGraph() {
     return {
@@ -386,6 +387,97 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     expect(body.scaffold_plan.option_count).toBeUndefined();
     // Two distinct ready options + valid goal → analysis can run.
     expect(body.can_run_analysis).toBe(true);
+  });
+
+  // --- F4 over-report repro (review P1) -------------------------------------
+  // The proven defect: readiness must EXACTLY equal the run path's scaffold
+  // decision on the SAME graph state — no over-report in the PERMISSIVE
+  // direction (that reopens the readiness↔run drift, flipped).
+  //
+  // Same graph state: opt_b was CONFIGURED by the user with a NON-NUMERIC value
+  // (a categorical "UK"). On the persisted graph its node carries intervention
+  // INTENT (data.interventions), so the run path's scaffolder leaves it on the
+  // honest configure path (collectInterventionIntentOptionIds → never scaffold
+  // over intent) and the run stays blocked. The pre-run panel must AGREE it is
+  // NOT will_scaffold-to-runnable.
+  //
+  // On the wire that intent reaches readiness through analysis_ready: a
+  // configured-but-non-numeric option is status:"needs_encoding" with the
+  // original value under raw_interventions (interventions carries no numeric).
+  // The request `graph` (parsed) cannot carry a non-numeric data.interventions
+  // (the OptionData schema is numeric-only), so readiness's ONLY intent
+  // authority for this option is analysis_ready — exactly the provenance the
+  // over-report ignored.
+  it("F4 over-report: configured-but-non-numeric option (needs_encoding + raw_interventions) → will_scaffold_options=false (agrees with the run path's block)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_encoding",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            // opt_b: the user DID configure it — with a categorical value that
+            // has not been encoded to a number yet. This is intervention INTENT,
+            // not an empty option; the run path will NOT scaffold over it.
+            {
+              id: "opt_b",
+              label: "UK launch",
+              status: "needs_encoding",
+              interventions: {},
+              raw_interventions: { fac_price: "UK" },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan).toBeDefined();
+    // The run path leaves opt_b on the configure path (persisted intent) → the
+    // panel must NOT advertise a scaffold. Over-reporting `true` here would
+    // un-block the panel while run_analysis stays blocked — the exact drift F4
+    // closes, in the permissive direction.
+    expect(body.scaffold_plan.will_scaffold_options).toBe(false);
+    expect(body.scaffold_plan.option_count).toBeUndefined();
+    expect(body.can_run_analysis).toBe(false);
+  });
+
+  it("F4 over-report control: raw_interventions intent also blocks scaffold even when status is not needs_encoding", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4b,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_user_mapping",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            // Intent present via raw_interventions (a value the user typed that
+            // failed numeric projection) — the run path treats ANY intervention
+            // entry, numeric or not, as intent. Readiness must too.
+            {
+              id: "opt_b",
+              label: "Bespoke",
+              status: "needs_user_mapping",
+              interventions: {},
+              raw_interventions: { fac_price: "tbd" },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(false);
+    expect(body.can_run_analysis).toBe(false);
   });
 
   it("accepts minimal graph without version/default_seed/meta (uses defaults)", async () => {
