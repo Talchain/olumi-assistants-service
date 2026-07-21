@@ -801,7 +801,7 @@ describe("envelope and coaching wiring", () => {
     expect(result.diagnostics?.target_resolution?.alternatives_count).toBe(2);
   });
 
-  it("returns minimal proposed_changes for compound edits without executing the LLM path", async () => {
+  it("takes the deterministic propose branch for compound edits without executing the LLM path (V4 proposed_changes payload retired)", async () => {
     const adapter = makeAdapter(V2_GOOD_RESPONSE);
     const result = await handleEditGraph(
       makeContext(),
@@ -813,15 +813,21 @@ describe("envelope and coaching wiring", () => {
 
     expect(result.blocks).toEqual([]);
     expect(result.wasRejected).toBe(false);
-    expect(result.proposedChanges).toEqual({
-      changes: [
-        { description: "Update Price", element_label: "Price", action_type: "value_update" },
-        { description: "Also lower Price", element_label: "Price", action_type: "value_update" },
-      ],
-    });
+    // S3-L1 — the top-level `proposedChanges` payload is no longer RETURNED.
+    // Its only readers were the 410-tombstoned V4 pipeline (phase4-tools:369,
+    // tools/dispatch:323); the live V5 dispatcher (edit-graph-dispatch.ts)
+    // never reads it. `proposedChanges` is now a within-turn local feeding the
+    // copy builder only. The compound edit still resolves both clauses to
+    // Price, which is asserted where it is live-observable: the copy.
+    expect(result.proposedChanges).toBeUndefined();
+    // POSITIVE controls that the branch was genuinely taken (trap-13 — the
+    // absence above is not vacuous): the LLM lane was NOT reached, the
+    // resolution mode is the propose branch, proposal_returned is flagged, and
+    // the copy names the resolved target it holds a change for.
     expect((adapter.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
     expect(result.diagnostics?.resolution_mode).toBe("propose_and_confirm");
     expect(result.diagnostics?.proposal_returned).toBe(true);
+    expect(result.assistantText ?? "").toContain("**Price**");
   });
 
   it("constrains auto-apply prompt with the resolved target label context", async () => {
