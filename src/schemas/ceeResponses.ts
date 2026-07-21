@@ -434,6 +434,19 @@ export const CEEGraphReadinessResponseV1Schema = z
     quality_factors: z.array(CEEQualityFactorV1Schema),
     can_run_analysis: z.boolean(),
     blocker_reason: z.string().optional(),
+    // F4 (readiness↔run gate): pre-run projection of what run_analysis would
+    // scaffold. `will_scaffold_options` is true iff run_analysis would scaffold
+    // ≥1 unconfigured option (disclosed placeholders) for this graph state — so
+    // the pre-run panel need not read `can_run_analysis === false` as a hard
+    // block when the run would in fact proceed. Computed by the SAME predicate
+    // the run path uses (scaffold-unconfigured-options.computeScaffoldPlan), so
+    // the two gates cannot drift.
+    scaffold_plan: z
+      .object({
+        will_scaffold_options: z.boolean(),
+        option_count: z.number().int().min(0).optional(),
+      })
+      .optional(),
     trace: CEETraceMetaSchema,
   })
   .passthrough();

@@ -4160,6 +4160,27 @@ components:
         blocker_reason:
           type: string
           description: Reason analysis is blocked (if can_run_analysis is false)
+        scaffold_plan:
+          type: object
+          description: >-
+            F4 (readiness/run gate): pre-run projection of what run_analysis
+            would scaffold for this graph state. Computed by the same predicate
+            the run path uses, so the pre-run panel and the run cannot disagree.
+            When will_scaffold_options is true, run_analysis will fill disclosed
+            placeholder interventions for the unconfigured options and proceed —
+            so the panel need not treat can_run_analysis=false as a hard block.
+          required:
+            - will_scaffold_options
+          properties:
+            will_scaffold_options:
+              type: boolean
+              description: True iff run_analysis would scaffold at least one unconfigured option.
+              example: true
+            option_count:
+              type: integer
+              minimum: 0
+              description: How many options would be scaffolded (present when will_scaffold_options is true).
+              example: 1
         evidence_quality:
           type: object
           description: Distribution of evidence quality across edges
