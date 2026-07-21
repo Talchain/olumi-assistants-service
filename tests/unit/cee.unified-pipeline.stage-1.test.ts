@@ -101,6 +101,18 @@ import { UpstreamTimeoutError, ClientDisconnectError } from "../../src/adapters/
 import { createEdgeFieldStash } from "../../src/cee/unified-pipeline/edge-identity.js";
 import { normaliseCeeGraphVersionAndProvenance } from "../../src/cee/transforms/graph-normalisation.js";
 import { config } from "../../src/config/index.js";
+import { DRAFT_LEAN_RETRY_DIRECTIVE } from "../../src/cee/constants.js";
+
+/** A max_tokens-truncation error as the Anthropic adapter throws it (#588):
+ *  an Error carrying the structured `truncated_at_max_tokens: true` flag. */
+function makeTruncationError(): Error {
+  return Object.assign(
+    new Error(
+      "anthropic draft_graph output truncated at max_tokens=8550 (stop_reason=max_tokens)",
+    ),
+    { truncated_at_max_tokens: true },
+  );
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -499,6 +511,84 @@ describe("runStageParse", () => {
     } finally {
       delete (config as any).cee.retryOnDefaultStrengths;
     }
+  });
+
+  // ── Lean-retry backstop on max_tokens truncation (fix e, S-AUDIT-2026-07-20) ──
+  //
+  // A draft cut at the derived token budget (stop_reason=max_tokens) is a
+  // demand-exceeds-budget failure. When the remaining request budget can still
+  // afford a lean draft, the pipeline fires ONE corrective retry with a
+  // demand-reducing directive; when it cannot, it fails fast with the typed
+  // truncation error rather than double-spend a second full generation.
+
+  it("fires ONE lean retry with the lean directive on truncation when budget is affordable, then succeeds", async () => {
+    setupMocks();
+
+    // Attempt 1 truncates at max_tokens; attempt 2 (lean) succeeds.
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(makeTruncationError())
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    // Near-zero elapsed → remaining window ~110s affords ~8,550 tokens,
+    // comfortably above the 4,500-token lean-draft floor → retry fires.
+    const ctx = makeCtx();
+    await runStageParse(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(ctx.graph).toBeDefined();
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
+
+    // The corrective retry must carry the demand-reducing lean directive —
+    // that is the mechanism (V2/V3/V4c: removing numeric/comparison verbosity
+    // collapses the runaway). Attempt 1 must NOT carry it.
+    const attempt1Brief = mockAdapter.draftGraph.mock.calls[0][0].brief as string;
+    const attempt2Brief = mockAdapter.draftGraph.mock.calls[1][0].brief as string;
+    expect(attempt1Brief).not.toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
+    expect(attempt2Brief).toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
+  });
+
+  it("does NOT fire the lean retry when the remaining budget cannot afford a lean draft (fail fast with the typed truncation error)", async () => {
+    setupMocks();
+
+    // Attempt 1 truncates; a hypothetical attempt 2 WOULD succeed but must
+    // never be launched.
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(makeTruncationError())
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    // 60s elapsed → remaining window = 120 − 60 − 10 = 50s → affords
+    // (50 − 15) × 90 = 3,150 tokens < the 4,500-token lean-draft floor.
+    // The gate refuses the retry and the typed truncation error propagates.
+    const ctx = makeCtx({
+      opts: { schemaVersion: "v3", requestStartMs: Date.now() - 60_000 },
+    });
+
+    await expect(runStageParse(ctx)).rejects.toThrow("truncated at max_tokens");
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT fire a SECOND lean retry when the lean draft also truncates (one retry only, no double-spend)", async () => {
+    setupMocks();
+
+    // Both attempts truncate. Attempt 1 → lean retry (affordable); attempt 2
+    // → also truncates but must not spawn a third call.
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(makeTruncationError())
+      .mockRejectedValueOnce(makeTruncationError());
+
+    const ctx = makeCtx(); // near-zero elapsed → first retry affordable
+    await expect(runStageParse(ctx)).rejects.toThrow("truncated at max_tokens");
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
   });
 
   // ── Budget exceeded ───────────────────────────────────────────────────

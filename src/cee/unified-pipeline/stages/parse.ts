@@ -23,15 +23,17 @@ import {
   DRAFT_LLM_TIMEOUT_MS,
   LLM_POST_PROCESSING_HEADROOM_MS,
   MIN_DRAFT_RETRY_BUDGET_MS,
+  LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
   REPAIR_TIMEOUT_MS,
   getDraftLlmRetryBudgetMs,
+  getAffordableDraftTokens,
   getJitteredRetryDelayMs,
 } from "../../../config/timeouts.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamTimeoutError } from "../../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../../validation/pipeline.js";
 import { log, emit, calculateCost, TelemetryEvents } from "../../../utils/telemetry.js";
 import { detectStrengthDefaultsV1 } from "../../validation/integrity-sentinel.js";
-import { STRENGTH_DEFAULT_RETRY_NUDGE } from "../../constants.js";
+import { STRENGTH_DEFAULT_RETRY_NUDGE, DRAFT_LEAN_RETRY_DIRECTIVE } from "../../constants.js";
 
 /**
  * Stage 1: Parse — LLM draft + adapter normalisation.
@@ -182,6 +184,12 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   let draftResult: DraftGraphResult | undefined;
   let attempt = 0;
   let strengthDefaultRetried = false;
+  // Lean-retry backstop (fix e, S-AUDIT-2026-07-20): set when the first draft
+  // truncates at max_tokens and the remaining budget can afford a lean retry.
+  // Mutually exclusive with the strength-default nudge — a truncation throws
+  // before strength detection runs, so only one of the two directives is ever
+  // appended to a given attempt.
+  let leanDraftRetried = false;
 
   while (attempt < 2) {
     attempt += 1;
@@ -202,9 +210,11 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
 
       draftResult = await draftAdapter.draftGraph(
         {
-          brief: strengthDefaultRetried
-            ? `${ctx.effectiveBrief}\n\n${STRENGTH_DEFAULT_RETRY_NUDGE}`
-            : ctx.effectiveBrief,
+          brief: leanDraftRetried
+            ? `${ctx.effectiveBrief}\n\n${DRAFT_LEAN_RETRY_DIRECTIVE}`
+            : strengthDefaultRetried
+              ? `${ctx.effectiveBrief}\n\n${STRENGTH_DEFAULT_RETRY_NUDGE}`
+              : ctx.effectiveBrief,
           docs,
           seed: 17,
           flags: typeof ctx.input.flags === "object" && ctx.input.flags !== null
@@ -327,6 +337,12 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
       const err = error instanceof Error ? error : new Error("unexpected error");
       const isTimeout = err.name === "UpstreamTimeoutError";
       const isAbort = err.name === "AbortError" || (ctx.opts.signal?.aborted === true);
+      // Truncation flag (#588): the Anthropic adapter attaches
+      // `truncated_at_max_tokens: true` when a draft is cut at the derived
+      // token budget (stop_reason=max_tokens). Structured, not message-prefix
+      // matched, so it survives the truncation note the adapter prepends.
+      const isTruncation =
+        (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true;
 
       if (isAbort && !isTimeout) {
         const llmDuration = Date.now() - llmStartTime;
@@ -360,6 +376,57 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           llmDuration,
           ctx.requestId,
         );
+      }
+
+      // Lean-retry backstop (fix e, S-AUDIT-2026-07-20): a draft truncated at
+      // max_tokens is a demand-exceeds-budget failure — the model committed to
+      // a graph too large to finish inside the derived token budget. Fire ONE
+      // corrective retry with a directive that CUTS output-token demand
+      // (primary trade-off only, ≤18 nodes, numbers qualitative); the probes
+      // that motivated it (V2/V3/V4c) land lean drafts at ~4,100 tokens.
+      // Attempt-1-only, so a second truncation falls through to the typed
+      // error below. Budget honesty (reuse #576's affordability gate): if the
+      // window still affordable inside DRAFT_REQUEST_BUDGET_MS cannot fit even
+      // a lean draft (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR), fail fast with the
+      // existing typed truncation error rather than burn a second full
+      // generation on a result guaranteed to truncate again or be discarded by
+      // the Step-11 budget guard. No double-spend beyond the one retry.
+      if (isTruncation && attempt === 1 && !leanDraftRetried) {
+        const leanRetryDelayMs = getJitteredRetryDelayMs();
+        const leanRetryWindowMs = getDraftLlmRetryBudgetMs(
+          Date.now() - requestStartMs + leanRetryDelayMs,
+        );
+        const leanAffordableTokens = getAffordableDraftTokens(leanRetryWindowMs);
+        if (leanAffordableTokens >= LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR) {
+          leanDraftRetried = true;
+          // OBSERVABILITY HONESTY: a structured pino LOG, not a registered
+          // TelemetryEvents entry — detection is Render log search
+          // (event:cee.llm.draft_lean_retry), same class as its sibling
+          // cee.llm.retry_skipped_budget. Do not describe it as telemetry.
+          log.warn({
+            event: "cee.llm.draft_lean_retry",
+            model: draftAdapter.model,
+            lean_retry_window_ms: leanRetryWindowMs,
+            lean_affordable_tokens: leanAffordableTokens,
+            lean_tokens_floor: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+            elapsed_since_request_start_ms: Date.now() - requestStartMs,
+            request_id: ctx.requestId,
+          }, "Draft truncated at max_tokens — retrying once with a lean directive (demand reduction)");
+          await new Promise((resolve) => setTimeout(resolve, leanRetryDelayMs));
+          continue;
+        }
+        // Remaining budget cannot fit even a lean draft — do NOT retry. Fall
+        // through to the throw path below so the typed truncation error (and
+        // its truncation-specific recovery copy) reaches the client.
+        log.warn({
+          event: "cee.llm.draft_lean_retry_skipped_budget",
+          model: draftAdapter.model,
+          lean_retry_window_ms: leanRetryWindowMs,
+          lean_affordable_tokens: leanAffordableTokens,
+          lean_tokens_floor: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+          elapsed_since_request_start_ms: Date.now() - requestStartMs,
+          request_id: ctx.requestId,
+        }, "Lean retry skipped — remaining request budget cannot fit even a lean draft");
       }
 
       if (isTimeout) {

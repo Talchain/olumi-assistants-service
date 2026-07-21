@@ -94,13 +94,13 @@ describe("draft grammar — an option's interventions array must be non-empty", 
     expect(interventions.minItems as number).toBeGreaterThanOrEqual(1);
   });
 
-  it("the guard survives the v10 flag-on variant of the schema", () => {
-    // buildDraftGraphSchema() derives the topology_plan-omitted variant. The
-    // guard must hold on BOTH arms or flipping CEE_DRAFT_OMIT_TOPOLOGY_PLAN
-    // would silently reopen the outage.
-    for (const schema of [buildDraftGraphSchema(), buildDraftGraphSchema({ omitTopologyPlan: true })]) {
-      expect(interventionsArraySchema(schema).minItems as number).toBeGreaterThanOrEqual(1);
-    }
+  it("the guard survives the v11 built (topology-omitted) variant of the schema", () => {
+    // buildDraftGraphSchema() derives the topology_plan-omitted variant that is
+    // actually sent to Anthropic (omission is unconditional since v11). The
+    // minItems guard must hold on that served shape or the OPTIONS_IDENTICAL
+    // outage silently reopens.
+    const schema = buildDraftGraphSchema();
+    expect(interventionsArraySchema(schema).minItems as number).toBeGreaterThanOrEqual(1);
   });
 
   it("interventions stays OPTIONAL — minItems must not force factor nodes to invent one", () => {

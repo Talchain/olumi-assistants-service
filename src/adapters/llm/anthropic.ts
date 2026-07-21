@@ -291,28 +291,22 @@ const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 
 // v8 stringified aux fields (2026-07-07, Lane 26): appended to the user
 // message ONLY when structured outputs is active. The grammar declares
-// coaching / causal_claims / topology_plan as `{ type: "string" }` fields
-// (see GRAMMAR BUDGET (v8) in src/cee/draft/anthropic-graph-schema.ts), so
-// the model physically cannot emit objects there — this reminder tells it
-// to put the JSON-ENCODED content the system prompt describes inside those
-// strings, rather than prose. On the prompt-only fallback path the reminder
-// is omitted and the model emits the object shapes the system prompt
-// documents; parseStringifiedAuxFields() accepts both shapes at ingress.
+// coaching / causal_claims as `{ type: "string" }` fields (see GRAMMAR BUDGET
+// in src/cee/draft/anthropic-graph-schema.ts), so the model physically cannot
+// emit objects there — this reminder tells it to put the JSON-ENCODED content
+// the system prompt describes inside those strings, rather than prose. On the
+// prompt-only fallback path the reminder is omitted and the model emits the
+// object shapes the system prompt documents; parseStringifiedAuxFields()
+// accepts both shapes at ingress.
+//
+// v11 (2026-07-21): topology_plan omission is UNCONDITIONAL (the
+// CEE_DRAFT_OMIT_TOPOLOGY_PLAN flag was deleted per no-dark-launches). The
+// grammar no longer declares `topology_plan` and the top-level object is
+// `additionalProperties: false`, so the key is unemittable — this reminder
+// must NEVER mention it. Instructing the model to emit an unemittable key was
+// the exact prompt/grammar contradiction this closes (v195 says "must NOT
+// contain a topology_plan key" while the v8/v9 grammar demanded one).
 const STRUCTURED_OUTPUTS_AUX_STRING_REMINDER = `\n\nOUTPUT FORMAT OVERRIDE (structured mode):
-Emit "coaching", "causal_claims", and "topology_plan" as JSON-encoded STRINGS.
-Each must contain exactly the JSON value the schema instructions describe
-(coaching object, causal_claims array, topology_plan string array), serialised
-with correctly escaped quotes. Example: "topology_plan": "[\\"line 1\\",\\"line 2\\"]".`;
-
-// v10 (2026-07-18, latency lane round 2): variant used when
-// CEE_DRAFT_OMIT_TOPOLOGY_PLAN is on. The grammar no longer declares
-// `topology_plan`, and the top-level object is `additionalProperties: false`,
-// so the key is unemittable — instructing the model to emit it would be a
-// direct prompt/grammar contradiction (exactly the defect this flag fixes,
-// where v195 says "must NOT contain a topology_plan key" and the grammar
-// demanded one). Kept as a separate literal rather than a runtime
-// string-replace so the served text is greppable and diffable.
-const STRUCTURED_OUTPUTS_AUX_STRING_REMINDER_NO_TOPOLOGY = `\n\nOUTPUT FORMAT OVERRIDE (structured mode):
 Emit "coaching" and "causal_claims" as JSON-encoded STRINGS.
 Each must contain exactly the JSON value the schema instructions describe
 (coaching object, causal_claims array), serialised with correctly escaped
@@ -700,13 +694,13 @@ export async function draftGraphWithAnthropic(
     );
   }
 
-  // v10 (2026-07-18, latency lane round 2) — FLAG-DARK, default false.
-  // Drops the zero-reader `topology_plan` key from the grammar (508 output
-  // tokens / 8.1% of a measured draft). Only meaningful on the structured
-  // path: the prompt-only fallback has no grammar to omit it from, and the
-  // served prompt v195 already instructs the model not to emit it there.
-  const omitTopologyPlan = config.cee.draftOmitTopologyPlan;
-  const draftGraphSchema = buildDraftGraphSchema({ omitTopologyPlan });
+  // v11 (2026-07-21, runaway-draft lane fix b) — UNCONDITIONAL. Drops the
+  // zero-reader `topology_plan` key from the grammar (508 output tokens / 8.1%
+  // of a measured draft, and closes the live prompt/grammar contradiction).
+  // Only meaningful on the structured path: the prompt-only fallback has no
+  // grammar to omit it from, and the served prompt v195 already instructs the
+  // model not to emit it there.
+  const draftGraphSchema = buildDraftGraphSchema();
 
   if (draftThinkingEnabled && config.cee.anthropicStructuredOutputs) {
     log.info(
@@ -793,9 +787,7 @@ export async function draftGraphWithAnthropic(
         messages: [{
           role: "user",
           content: useStructuredOutputs
-            ? prompt.userContent + (omitTopologyPlan
-                ? STRUCTURED_OUTPUTS_AUX_STRING_REMINDER_NO_TOPOLOGY
-                : STRUCTURED_OUTPUTS_AUX_STRING_REMINDER)
+            ? prompt.userContent + STRUCTURED_OUTPUTS_AUX_STRING_REMINDER
             : prompt.userContent,
         }],
         ...(useStructuredOutputs

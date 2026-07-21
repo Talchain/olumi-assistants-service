@@ -346,7 +346,7 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
 
 export type AnthropicDraftGraphSchema = typeof ANTHROPIC_DRAFT_GRAPH_SCHEMA;
 
-// ── OUTPUT-TOKEN BUDGET (v10 — 2026-07-18, draft-latency lane round 2) ──
+// ── OUTPUT-TOKEN BUDGET (v11 — 2026-07-21, runaway-draft lane fix b) ──
 // `topology_plan` is a zero-reader field that the grammar FORCES the model to
 // emit, in direct contradiction of the served prompt.
 //
@@ -375,9 +375,16 @@ export type AnthropicDraftGraphSchema = typeof ANTHROPIC_DRAFT_GRAPH_SCHEMA;
 // merely unrequired. Union count and every `required` list elsewhere are
 // untouched; serialized size falls further.
 //
-// Behaviour-visible, so it ships FLAG-DARK (`CEE_DRAFT_OMIT_TOPOLOGY_PLAN`,
-// default false). Flag OFF returns the v9 object by identity — byte-identical
-// wire schema, no revalidation needed.
+// v10 shipped this FLAG-DARK (`CEE_DRAFT_OMIT_TOPOLOGY_PLAN`, default false).
+// v11 DELETES that flag and makes omission UNCONDITIONAL (no-dark-launches:
+// ship the capability ON, roll back by code revert). The zero-reader premise
+// was re-verified at HEAD before this change — a complete manifest of every
+// `topology_plan` / `topologyPlan` occurrence in src/ plus a value-access
+// sweep found NO consumer that inspects the field's CONTENT (schema defs are
+// `.optional()`; every runtime touch is a conditional passthrough that no-ops
+// when the field is absent), with a `coaching` positive control proving the
+// sweep can see a real reader. Cross-repo it is absent from DecisionGuideAI
+// and plot-lite-service.
 //
 // PERSISTENCE (`scenarios.graph`) — verified safe in both directions:
 //  - Both Zod declarations are `.optional()` (schemas/cee-v3.ts:521,
@@ -390,9 +397,6 @@ export type AnthropicDraftGraphSchema = typeof ANTHROPIC_DRAFT_GRAPH_SCHEMA;
 //    the full ingress shape, not a hand-listed allowlist, so re-load and
 //    re-parse of an existing `scenarios.graph` is unaffected.
 // The change is therefore forward-only and shape-preserving.
-
-/** Env-var name for the v10 flag-dark omission. */
-export const DRAFT_OMIT_TOPOLOGY_PLAN_ENV = 'CEE_DRAFT_OMIT_TOPOLOGY_PLAN';
 
 /**
  * Structural type both schema variants satisfy. Deliberately widened at
@@ -416,8 +420,8 @@ if (!(TOPOLOGY_PLAN_KEY in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
 
   console.error(
     `[anthropic-graph-schema] ANCHOR MISSING: '${TOPOLOGY_PLAN_KEY}' is not a property of ` +
-    `ANTHROPIC_DRAFT_GRAPH_SCHEMA. buildDraftGraphSchema({ omitTopologyPlan: true }) would ` +
-    `silently return an unchanged schema. Update the v10 builder.`
+    `ANTHROPIC_DRAFT_GRAPH_SCHEMA. buildDraftGraphSchema() would silently return an ` +
+    `unchanged schema (topology_plan would leak back into the grammar). Update the v11 builder.`
   );
 }
 
@@ -425,17 +429,16 @@ if (!(TOPOLOGY_PLAN_KEY in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
  * The draft-graph JSON schema actually sent to Anthropic.
  *
  * DERIVED from `ANTHROPIC_DRAFT_GRAPH_SCHEMA` rather than mirrored, so there is
- * exactly one source of truth for every field the two variants share.
+ * exactly one source of truth for every field it shares with the base object.
  *
- * @param opts.omitTopologyPlan when true, drops the zero-reader `topology_plan`
- *   property and its `required` entry. Default false → returns the v9 object
- *   BY IDENTITY (not a copy), so the flag-off path is provably unchanged.
+ * v11 (2026-07-21): topology_plan omission is now UNCONDITIONAL — the
+ * `CEE_DRAFT_OMIT_TOPOLOGY_PLAN` flag was deleted per no-dark-launches. The
+ * builder always drops the zero-reader `topology_plan` property and its
+ * `required` entry (508 output tokens saved, and the live prompt/grammar
+ * contradiction — v195 says "must NOT contain a topology_plan key" while the
+ * v8/v9 grammar demanded one — is resolved). The base object is never mutated.
  */
-export function buildDraftGraphSchema(
-  opts?: { omitTopologyPlan?: boolean },
-): DraftGraphSchemaObject {
-  if (!opts?.omitTopologyPlan) return ANTHROPIC_DRAFT_GRAPH_SCHEMA;
-
+export function buildDraftGraphSchema(): DraftGraphSchemaObject {
   const { [TOPOLOGY_PLAN_KEY]: _omitted, ...properties } =
     ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties;
 
