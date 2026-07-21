@@ -342,7 +342,8 @@ describe('chip-click run_analysis — real enricher integration', () => {
     // 1. Seed scenarios.brief_text via a canonical draft commit
     //    (mirrors what dispatchDraftGraph does in production).
     await commitDirectAnswer(
-      composeDirectAnswerResponse({ assistant_text: 'drafted', stage: 'frame' }),
+      composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'drafted', stage: 'frame' }),
       {
         scenario_id: SCENARIO_ID,
         turn_id: DRAFT_TURN_ID,
@@ -404,7 +405,8 @@ describe('chip-click run_analysis — real enricher integration', () => {
   it('composer emits non-zero Phase 3 blocks from the enriched fact', async () => {
     const store = liveStoreHolder.current;
     await commitDirectAnswer(
-      composeDirectAnswerResponse({ assistant_text: 'drafted', stage: 'frame' }),
+      composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'drafted', stage: 'frame' }),
       {
         scenario_id: SCENARIO_ID,
         turn_id: DRAFT_TURN_ID,
@@ -452,6 +454,7 @@ describe('chip-click run_analysis — real enricher integration', () => {
     // additional layers; the direct composer call isolates the
     // decompose-from-enrichment contract.
     const composed = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Ran analysis on your current scenario.',
       coaching: null,
@@ -474,7 +477,8 @@ describe('chip-click run_analysis — real enricher integration', () => {
     // compose.ts wiring, not the enricher / persistence chain.
     const store = liveStoreHolder.current;
     await commitDirectAnswer(
-      composeDirectAnswerResponse({ assistant_text: 'drafted', stage: 'frame' }),
+      composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'drafted', stage: 'frame' }),
       {
         scenario_id: SCENARIO_ID,
         turn_id: DRAFT_TURN_ID,

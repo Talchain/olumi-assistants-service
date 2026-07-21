@@ -172,20 +172,22 @@ describe('TurnExecutor — answer_shape threading (unconditional)', () => {
     // capture must ship either a matching sidecar or none. The derived text
     // no longer matches, so the shape must be dropped.
     expect(result.answerShape).toBeUndefined();
-    // ROADMAP 1.132 (F1) — SAME divergence clears the answer-prose scope flag:
-    // the final text is now the deterministic coaching degrade copy, NOT the
-    // model's captured answer, so the egress fallback is out of scope for it.
-    expect(result.answerProse).toBeUndefined();
+    // ROADMAP 1.132 (F1) — SAME divergence downgrades the answer kind: the final
+    // text is now the deterministic coaching degrade copy, NOT the model's
+    // captured answer, so it classifies 'functional' and the egress synthesiser
+    // is out of scope for it.
+    expect(result.answerKind).toBe('functional');
   });
 });
 
-// ROADMAP 1.132 (F1) — the answer-prose SCOPE signal (`run.answerProse`) that
-// gates route-v2's egress answer-shape fallback. Proven at the SOURCE (the
-// executor) against the path enumeration: TRUE only when the FINAL
-// assistant_text is the model's own coach / converse / text_only ANSWER prose,
-// absent on the clarify / execute builders. (The route-level gate consuming it
-// is covered in tests/integration/orchestrator/route-v2-answer-shape*.test.ts.)
-describe('TurnExecutor — answer-prose scope flag (ROADMAP 1.132, F1)', () => {
+// ROADMAP 1.132 (F1) — the SUBSTANTIVE/FUNCTIONAL classification (`run.answerKind`)
+// that gates route-v2's egress answer-shape synthesiser. Proven at the SOURCE
+// (the executor) against the path enumeration: 'substantive' only when the FINAL
+// assistant_text is a real answer (coach / converse / text_only prose OR a
+// deterministic post-analysis explanation), 'functional' on the clarify / execute
+// builders. (The route-level gate consuming it is covered in
+// tests/integration/orchestrator/route-v2-answer-shape*.test.ts.)
+describe('TurnExecutor — answer kind classification (ROADMAP 1.132, F1)', () => {
   beforeEach(() => {
     setTestSink(() => {});
   });
@@ -194,7 +196,7 @@ describe('TurnExecutor — answer-prose scope flag (ROADMAP 1.132, F1)', () => {
     vi.restoreAllMocks();
   });
 
-  it('text_only prose (no tool_use, no shape) → answerProse === true (the F1 target)', async () => {
+  it("text_only prose (no tool_use, no shape) → answerKind === 'substantive' (the F1 target)", async () => {
     const prose =
       'Retention is the biggest lever here. Fix churn before you touch pricing.';
     const result = await runTurnExecutor(BASE_PAYLOAD, 'req-prose-textonly', {
@@ -203,11 +205,11 @@ describe('TurnExecutor — answer-prose scope flag (ROADMAP 1.132, F1)', () => {
     // The model's own prose reaches the wire unshaped (no tool_call shape)…
     expect(result.response.assistant_text).toBe(prose);
     expect(result.answerShape).toBeUndefined();
-    // …and the scope flag is set, so the route fallback is IN scope for it.
-    expect(result.answerProse).toBe(true);
+    // …and it classifies substantive, so the route synthesiser is IN scope for it.
+    expect(result.answerKind).toBe('substantive');
   });
 
-  it('coach answer with a valid shape (final text unrewritten) → answerProse === true', async () => {
+  it("coach answer with a valid shape (final text unrewritten) → answerKind === 'substantive'", async () => {
     const result = await runTurnExecutor(BASE_PAYLOAD, 'req-prose-coach-shaped', {
       routingAdapter: mockAdapter(
         toolResult(
@@ -217,13 +219,13 @@ describe('TurnExecutor — answer-prose scope flag (ROADMAP 1.132, F1)', () => {
       ),
     });
     // Both signals fire on an unrewritten LLM answer; the route attaches the
-    // shape (fallback short-circuits on the present `_answer_shape`), and
-    // answerProse is a harmless-true here.
+    // model shape (synthesiser short-circuits on the present `_answer_shape`),
+    // and answerKind is a harmless-substantive here.
     expect(result.answerShape).toEqual(VALID_SHAPE);
-    expect(result.answerProse).toBe(true);
+    expect(result.answerKind).toBe('substantive');
   });
 
-  it('clarify turn (deterministic builder) → answerProse is NOT set', async () => {
+  it("clarify turn (deterministic builder) → answerKind === 'functional'", async () => {
     const result = await runTurnExecutor(BASE_PAYLOAD, 'req-clarify-noflag', {
       routingAdapter: mockAdapter(
         toolResult({
@@ -233,8 +235,8 @@ describe('TurnExecutor — answer-prose scope flag (ROADMAP 1.132, F1)', () => {
       ),
     });
     // The clarify branch composes deterministic functional copy and never
-    // captures answer prose, so the scope flag is absent — the route fallback
-    // cannot reshape a clarify question behind progressive disclosure.
-    expect(result.answerProse).toBeUndefined();
+    // captures a substantive answer, so it classifies 'functional' — the route
+    // synthesiser cannot reshape a clarify question behind progressive disclosure.
+    expect(result.answerKind).toBe('functional');
   });
 });

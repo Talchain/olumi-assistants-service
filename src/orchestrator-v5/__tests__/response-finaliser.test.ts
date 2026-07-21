@@ -78,17 +78,20 @@ function fixtureValidationError(): ValidationError {
 
 describe('finaliser contract — composers do not set analysis_ready', () => {
   it('composeDirectAnswerResponse output omits analysis_ready', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     expect('analysis_ready' in env).toBe(false);
   });
 
   it('composeClarifyResponse output omits analysis_ready', () => {
-    const env = composeClarifyResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeClarifyResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     expect('analysis_ready' in env).toBe(false);
   });
 
   it('composeToolCallResponse output omits analysis_ready', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: 'o',
       confirmation: 'c',
       coaching: null,
@@ -130,14 +133,16 @@ describe('finaliser contract — composers do not set analysis_ready', () => {
 
 describe('finaliseV5Response — behaviour', () => {
   it('omits analysis_ready when ctx.analysisReady is undefined', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, {});
     expect('analysis_ready' in finalised).toBe(false);
     OlumiResponseSchema.parse(finalised);
   });
 
   it('stamps analysis_ready with a fresh ISO-8601 computed_at when payload provided', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, { analysisReady: fixturePayload() });
     expect(finalised.analysis_ready).toBeDefined();
     const ts = (finalised.analysis_ready as { computed_at?: string }).computed_at;
@@ -147,7 +152,8 @@ describe('finaliseV5Response — behaviour', () => {
   });
 
   it('preserves the response shape (response_version, blocks, suggested_actions, etc.)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'hello', stage: 'analyse' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'hello', stage: 'analyse' });
     const finalised = finaliseV5Response(env, { analysisReady: fixturePayload() });
     expect(finalised.response_version).toBe(env.response_version);
     expect(finalised.assistant_text).toBe(env.assistant_text);
@@ -158,7 +164,8 @@ describe('finaliseV5Response — behaviour', () => {
   });
 
   it('does not mutate the input response or payload (caller refs stay clean)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const payload = fixturePayload();
     finaliseV5Response(env, { analysisReady: payload });
     expect('analysis_ready' in env).toBe(false);
@@ -166,7 +173,8 @@ describe('finaliseV5Response — behaviour', () => {
   });
 
   it('is idempotent — calling twice re-stamps computed_at; structure is identical', async () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const payload = fixturePayload();
     const first = finaliseV5Response(env, { analysisReady: payload });
     await new Promise((r) => setTimeout(r, 5));
@@ -183,7 +191,8 @@ describe('finaliseV5Response — behaviour', () => {
   });
 
   it('regenerates computed_at across two emissions of the same payload', async () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const payload = fixturePayload();
     const a = finaliseV5Response(env, { analysisReady: payload });
     await new Promise((r) => setTimeout(r, 5));
@@ -218,7 +227,8 @@ describe('finaliseV5Response — freshness-only synthesis', () => {
   }
 
   it('synthesises a freshness-only block for unknown/current_graph_hash_unavailable with no readiness payload', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, { freshness: derivation() });
 
     const ar = finalised.analysis_ready as Record<string, unknown>;
@@ -246,7 +256,8 @@ describe('finaliseV5Response — freshness-only synthesis', () => {
   });
 
   it('synthesises for legacy_fact_missing_hash; null fact timestamp falls back to wire-emit time', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, {
       freshness: derivation({
         reason: 'legacy_fact_missing_hash',
@@ -264,7 +275,8 @@ describe('finaliseV5Response — freshness-only synthesis', () => {
   });
 
   it('a real readiness payload wins over synthesis on the same unknown verdict', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, {
       analysisReady: fixturePayload(),
       freshness: derivation(),
@@ -276,7 +288,8 @@ describe('finaliseV5Response — freshness-only synthesis', () => {
   });
 
   it('does NOT synthesise for freshness none (no prior analysis)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, {
       freshness: derivation({
         freshness: 'none',
@@ -290,7 +303,8 @@ describe('finaliseV5Response — freshness-only synthesis', () => {
   });
 
   it('does NOT synthesise for freshness fresh without a readiness payload', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, {
       freshness: derivation({
         freshness: 'fresh',
@@ -302,7 +316,8 @@ describe('finaliseV5Response — freshness-only synthesis', () => {
   });
 
   it('does NOT synthesise for stale without a readiness payload (known follow-up, deliberately unrecovered)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const finalised = finaliseV5Response(env, {
       freshness: derivation({
         freshness: 'stale',
@@ -314,7 +329,8 @@ describe('finaliseV5Response — freshness-only synthesis', () => {
   });
 
   it('does NOT synthesise for unknown with non-allowlisted reasons (derivation_failed, invariant_failed)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     for (const reason of ['derivation_failed', 'invariant_failed'] as const) {
       const finalised = finaliseV5Response(env, {
         freshness: derivation({ reason, selected_fact_index: null, graph_hash_at_run: null, computed_at: null }),
@@ -339,16 +355,19 @@ describe('finaliser contract — schema sweep across compose surface', () => {
   const cases: Array<{ name: string; build: () => unknown }> = [
     {
       name: 'composeDirectAnswerResponse',
-      build: () => composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' }),
+      build: () => composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' }),
     },
     {
       name: 'composeClarifyResponse',
-      build: () => composeClarifyResponse({ assistant_text: 'x', stage: 'frame' }),
+      build: () => composeClarifyResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' }),
     },
     {
       name: 'composeToolCallResponse',
       build: () =>
         composeToolCallResponse({
+          answerKind: 'functional',
           orientation: 'o',
           confirmation: 'c',
           coaching: null,
@@ -422,6 +441,7 @@ describe('finaliser contract — schema sweep across compose surface', () => {
 describe('finaliser contract — chip-click compose negative-then-positive', () => {
   it('composeToolCallResponse omits analysis_ready; finaliseV5Response stamps it on the same envelope', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Ran analysis on your current scenario.',
       coaching: null,
@@ -458,7 +478,8 @@ describe('finaliser contract — chip-click compose negative-then-positive', () 
 
 describe('finaliser contract — ceeTrace defensive scrub', () => {
   it('strips ceeTrace when present on the response and debug is disabled', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const polluted = { ...env, ceeTrace: { reason: 'CEE' } } as typeof env & {
       ceeTrace: { reason: string };
     };
@@ -467,7 +488,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   });
 
   it('strips ceeTrace alongside analysis_ready stamping when payload also provided', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const polluted = { ...env, ceeTrace: { reason: 'CEE', pipeline: 'foo' } } as typeof env & {
       ceeTrace: { reason: string; pipeline: string };
     };
@@ -477,7 +499,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   });
 
   it('no-op when ceeTrace is absent (no spurious key insertion)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     expect('ceeTrace' in (env as object)).toBe(false);
     const finalised = finaliseV5Response(env, {});
     expect('ceeTrace' in (finalised as object)).toBe(false);
@@ -502,7 +525,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
       // each access, so the new value is observed without cache busting.
       vi.resetModules();
       const { finaliseV5Response: finaliseDebug } = await import('../response-finaliser.js');
-      const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+      const env = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
       const polluted = { ...env, ceeTrace: { reason: 'CEE', pipeline: 'foo' } } as typeof env & {
         ceeTrace: { reason: string; pipeline: string };
       };
@@ -527,7 +551,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   // strip missed it entirely. These four cases lock the deeper walk in.
 
   it('strips nested blocks[*].enrichment.ceeTrace when debug is disabled', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const polluted = {
       ...env,
       blocks: [
@@ -555,7 +580,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   });
 
   it('strips both top-level and nested ceeTrace in the same response', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const polluted = {
       ...env,
       ceeTrace: { reason: 'top' },
@@ -577,7 +603,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
       process.env.CEE_TURN_DEBUG_ENABLED = 'true';
       vi.resetModules();
       const { finaliseV5Response: finaliseDebug } = await import('../response-finaliser.js');
-      const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+      const env = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
       const polluted = {
         ...env,
         blocks: [
@@ -600,7 +627,8 @@ describe('finaliser contract — ceeTrace defensive scrub', () => {
   });
 
   it('is a no-op when blocks have enrichment without ceeTrace', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     const clean = {
       ...env,
       blocks: [

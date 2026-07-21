@@ -53,7 +53,7 @@ import { config } from '../../config/index.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
-import { composeToolCallResponse } from '../compose.js';
+import { composeToolCallResponse, type AnswerKind } from '../compose.js';
 import {
   buildTurnContext,
   loadScenarioSnapshotForRunAnalysis,
@@ -213,6 +213,15 @@ export type DispatchChipClickRunAnalysisResult =
        *  minimal diagnostic trace carries the decision_review llm_calls
        *  entry, matching the routed path. */
       readonly turnTimings?: V5TurnTimings;
+      /**
+       * ROADMAP 1.132 (F1) — the declared SUBSTANTIVE/FUNCTIONAL kind of this
+       * chip-click answer (see `AnswerKind`). `'substantive'` for the
+       * explain_results / what_would_flip explanations (progressive disclosure at
+       * egress); `'functional'` for the run_analysis receipt. route-v2 threads it
+       * into `sendFinalised200` so the egress synthesiser shapes the substantive
+       * chip answers exactly as it shapes the turn_executor advice-gate answers.
+       */
+      readonly answerKind?: AnswerKind;
     }
   | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined; readonly graph: GraphV3T | null }
   | {
@@ -477,6 +486,7 @@ export async function dispatchChipClickRunAnalysis(
     return {
       outcome: 'commit_failed',
       response: composeToolCallResponse({
+        answerKind: 'functional',
         orientation: '',
         confirmation: 'Could not run analysis. The analysis service is temporarily unavailable.',
         coaching: null,
@@ -494,6 +504,7 @@ export async function dispatchChipClickRunAnalysis(
   // Response skeleton used for typed-failure paths where the handler never
   // produced a usable outcome.
   const failureResponse = composeToolCallResponse({
+    answerKind: 'functional',
     orientation: '',
     confirmation: 'Analysis could not complete.',
     coaching: null,
@@ -749,6 +760,7 @@ export async function dispatchChipClickRunAnalysis(
         ? composedRunFact.result.graph_hash_at_run
         : null;
     let response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',  // no Sonnet orientation on chip clicks.
       confirmation: confirmationText,
       // ROADMAP 2.73 Fix A — was `coaching: null` hardcoded; the chip run
@@ -908,6 +920,9 @@ export async function dispatchChipClickRunAnalysis(
         // Fix C: present only when the decision_review LLM call returned
         // under an enabled timings/trace gate (never fabricated).
         ...(chipTurnTimings !== undefined ? { turnTimings: chipTurnTimings } : {}),
+        // ROADMAP 1.132 (F1) — the run_analysis chip response is a receipt +
+        // coaching blocks, not a prose answer: functional (stays plain).
+        answerKind: 'functional' as AnswerKind,
       };
     } catch (err) {
       log.error(
@@ -1009,6 +1024,7 @@ async function dispatchChipClickNoopExplanation(
     return {
       outcome: 'commit_failed',
       response: composeToolCallResponse({
+        answerKind: 'functional',
         orientation: '',
         confirmation: NOOP_EXPLANATION_FAILURE_TEXT[actionType],
         coaching: null,
@@ -1029,6 +1045,7 @@ async function dispatchChipClickNoopExplanation(
   const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
 
   const failureResponse = composeToolCallResponse({
+    answerKind: 'functional',
     orientation: '',
     confirmation: NOOP_EXPLANATION_FAILURE_TEXT[actionType],
     coaching: null,
@@ -1152,6 +1169,22 @@ async function dispatchChipClickNoopExplanation(
     });
 
     let response = composeToolCallResponse({
+      // ROADMAP 1.132 (F1) — DEFERRED-FUNCTIONAL (see below). The chip-click
+      // explain_results / what_would_flip answer is composed deterministically
+      // from the analysis projection and, like the turn_executor advice-gate
+      // answer, is arguably SUBSTANTIVE. It is left 'functional' (un-shaped) for
+      // now, DELIBERATELY, because:
+      //   (a) it was NOT in the authoritative A2 live-wire capture set (A2 did
+      //       not click these chips), so shaping it is unverified on the wire;
+      //   (b) this compose ALSO emits Phase-3 BLOCKS (structured UI), so it is
+      //       not the plain headline+bullets prose F1 targets — reshaping the
+      //       prose ON TOP of blocks is a scope question for Paul (Map risk #4);
+      //   (c) doing so reflows the COMMITTED explanation prose and adds the
+      //       sidecar to a body that existing wire-contract tests strict-parse.
+      // The discriminator + route threading below are already wired, so covering
+      // this path later is a one-line flip once (a)-(c) are resolved and it is
+      // verified on the live A2 chip-click wire. See the F1 build report.
+      answerKind: 'functional',
       orientation: '',
       confirmation: confirmationText,
       coaching: null,
@@ -1263,6 +1296,11 @@ async function dispatchChipClickNoopExplanation(
         analysisReady: projectionInputs.analysisReady,
         graph: projectionInputs.graph,
         freshness: projectionInputs.analysisFreshness,
+        // ROADMAP 1.132 (F1) — DEFERRED-FUNCTIONAL (see the compose call above
+        // for the rationale). Threaded through so covering this path later is a
+        // one-line flip to 'substantive' once the scope + live-wire questions
+        // are resolved; today the egress leaves it plain.
+        answerKind: 'functional' as AnswerKind,
       };
     } catch (err) {
       log.error(

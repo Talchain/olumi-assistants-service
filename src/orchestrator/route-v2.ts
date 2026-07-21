@@ -660,19 +660,23 @@ function sendFinalised200(
      */
     readonly answerShape?: import('../orchestrator-v5/routing/answer-shape.js').AnswerShape;
     /**
-     * ROADMAP 1.132 (F1) — SCOPING gate for the egress answer-shape FALLBACK
-     * below. Threaded from `run.answerProse` (turn-executor), TRUE iff the
-     * FINAL assistant_text is the model's own coach / converse / text_only
-     * ANSWER prose (verified by a fail-closed FINAL-text equality check at the
-     * executor's finalise seam, so any deterministic post-compose mutator
-     * clears it). The fallback fires ONLY when this is true. Deterministic
-     * functional copy (clarify / receipt / recovery / decline) never sets it,
+     * ROADMAP 1.132 (F1) — SUBSTANTIVE/FUNCTIONAL classification driving the
+     * egress answer-shape synthesiser below. Threaded from `run.answerKind`
+     * (turn_executor path) and from the chip-click dispatch result (`cc.answerKind`,
+     * chip_click path). `'substantive'` iff the FINAL assistant_text is a real
+     * answer — the model's own coach / converse / text_only prose OR a
+     * deterministic post-analysis explanation (advice gate, run-comparison,
+     * chip-click explain/flip) — DECLARED at the compose site (`answerKind` on
+     * ComposeInput) and, for the executor, re-verified fail-closed against the
+     * FINAL text at the finalise seam so any deterministic post-compose mutator
+     * downgrades it. The synthesiser fires ONLY for `'substantive'`. Deterministic
+     * functional copy (clarify / receipt / recovery / decline) is `'functional'`,
      * and it is threaded at the `turn_executor` callsite ALONE — every other
      * dispatch family (draft_graph / edit_graph / chip_click / system_event /
-     * clarify_v2 / readiness_intake / …) omits it and so is structurally
-     * excluded from progressive-disclosure reshaping.
+     * clarify_v2 / readiness_intake / …) that does not thread a kind omits it
+     * and is structurally excluded from progressive-disclosure reshaping.
      */
-    readonly answerProse?: boolean;
+    readonly answerKind?: import('../orchestrator-v5/compose.js').AnswerKind;
     /**
      * The user's message for THIS turn, verbatim, or `null` when the turn
      * carries none (system events). Threaded to the egress sanitiser's
@@ -1056,17 +1060,20 @@ function sendFinalised200(
   // would otherwise ship as an un-collapsible wall of prose. F1 progressive
   // disclosure is for that long ANSWER prose ONLY.
   //
-  // SCOPE GATE (`ctx.answerProse === true`): this same egress chokepoint also
-  // carries DETERMINISTIC FUNCTIONAL COPY — clarify questions, add-option /
+  // SCOPE GATE (`ctx.answerKind === 'substantive'`): this same egress chokepoint
+  // also carries DETERMINISTIC FUNCTIONAL COPY — clarify questions, add-option /
   // edit receipts, decline / refusal copy, deterministic recovery messages,
-  // and the chip-click / draft-graph / edit-graph / system-event dispatch
-  // families. Reshaping a multi-sentence functional message would push its
-  // second sentence (often the actual question or call-to-action) behind
-  // progressive disclosure — a UX regression. `answerProse` is threaded ONLY
-  // from the turn-executor's coach/converse/text_only answer compose (verified
-  // fail-closed against the FINAL text there, and threaded at the
-  // `turn_executor` callsite ALONE), so every deterministic builder and every
-  // non-turn-executor family is excluded here by construction.
+  // and the draft-graph / edit-graph / system-event dispatch families. Reshaping
+  // a multi-sentence functional message would push its second sentence (often
+  // the actual question or call-to-action) behind progressive disclosure — a UX
+  // regression. `answerKind` is DECLARED at each compose site (`answerKind` on
+  // ComposeInput) and threaded from BOTH the turn_executor path (`run.answerKind`,
+  // re-verified fail-closed against the FINAL text at the executor's finalise
+  // seam) AND the chip_click path (`cc.answerKind`, the deterministic
+  // explain/flip answers) — so the substantive DETERMINISTIC post-analysis
+  // answers (advice gate, run-comparison, chip explain/flip) that the previous
+  // "LLM-authored" (`answerProse`) axis wrongly excluded are now IN scope, while
+  // functional copy stays plain by declaration.
   //
   // Byte-equality is preserved BY CONSTRUCTION (approach b): we SET
   // `assistant_text := deriveAnswerTextFromShape(synth)`, so the tie the
@@ -1083,7 +1090,7 @@ function sendFinalised200(
   // matching sidecar.
   if (
     egress.ok &&
-    ctx.answerProse === true &&
+    ctx.answerKind === 'substantive' &&
     !('_answer_shape' in (wireBody as Record<string, unknown>)) &&
     typeof wireBody.assistant_text === 'string' &&
     wireBody.assistant_text.trim().length > 0
@@ -1401,6 +1408,7 @@ function sendEditGraphRecovery(
     reason,
   });
   return sendFinalised200(reply, requestId, 'edit_graph', composeDirectAnswerResponse({
+    answerKind: 'functional',
     assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
     stage,
   }), { graph: null, userMessage });
@@ -1930,6 +1938,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisReady: cc.analysisReady,
           graph: cc.graph,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
+          // ROADMAP 1.132 (F1) — thread the chip answer's declared kind so the
+          // egress synthesiser shapes the substantive explain_results /
+          // what_would_flip answers (never the run_analysis receipt). Without
+          // this the chip-driven explanations would ship un-shaped on the live
+          // wire — the second F1 substantive egress the turn_executor fix alone
+          // would miss.
+          ...(cc.answerKind ? { answerKind: cc.answerKind } : {}),
           // ROADMAP 2.73 Fix C — decision_review call attribution from the
           // chip dispatch (present only when the call returned under an
           // enabled timings/trace gate). The minimal-trace builder folds it
@@ -3058,6 +3073,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // no-live-proposal clarification rather than dispatching an edit that
         // would no-op. This turn does NOT mutate the graph.
         const noProposalResponse = composeDirectAnswerResponse({
+          answerKind: 'functional',
           assistant_text: NO_LIVE_PROPOSAL_TEXT,
           stage: ingress.stage,
           suggested_actions: [],
@@ -3727,13 +3743,13 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // into the flag-gated `_answer_shape` sidecar (see sendFinalised200
       // ctx docs above).
       ...(run.answerShape ? { answerShape: run.answerShape } : {}),
-      // ROADMAP 1.132 (F1): thread the turn-executor's answer-prose scope
-      // signal so the egress fallback synthesises a shape ONLY for the model's
-      // own coach/converse/text_only ANSWER prose — never for the deterministic
-      // clarify / receipt / recovery / decline copy this same path can emit.
-      // This is the ONLY sendFinalised200 callsite that threads it; every other
-      // dispatch family is deterministic and structurally excluded by omission.
-      ...(run.answerProse ? { answerProse: true } : {}),
+      // ROADMAP 1.132 (F1): thread the turn-executor's declared answer kind so
+      // the egress synthesiser shapes ONLY substantive answers (coach / converse /
+      // text_only model prose AND the deterministic post-analysis advice-gate /
+      // run-comparison explanations) — never the deterministic clarify / receipt /
+      // recovery / decline copy this same path can emit. Verified fail-closed
+      // against the FINAL text at the executor's finalise seam.
+      ...(run.answerKind ? { answerKind: run.answerKind } : {}),
     });
   });
 }

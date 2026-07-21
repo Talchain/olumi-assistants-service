@@ -134,6 +134,7 @@ function makeRunAnalysisFact(withDecisionReview: boolean): HandlerFact {
 
 function compose(withDecisionReview: boolean) {
   return composeToolCallResponse({
+    answerKind: 'functional',
     orientation: '',
     confirmation: 'Ran analysis on your current scenario.',
     coaching: null,

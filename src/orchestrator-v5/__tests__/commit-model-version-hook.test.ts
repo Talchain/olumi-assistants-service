@@ -68,7 +68,8 @@ const GRAPH = {
 };
 
 function composed() {
-  return composeDirectAnswerResponse({ assistant_text: 'hi', stage: 'frame' });
+  return composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'hi', stage: 'frame' });
 }
 
 /** The hook is fire-and-forget; give its microtask a chance to run. */

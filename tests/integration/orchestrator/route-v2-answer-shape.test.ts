@@ -73,17 +73,17 @@ const ANSWER_SHAPE = {
 function mkRunResult(opts: {
   withShape: boolean;
   assistantText?: string;
-  answerProse?: boolean;
+  answerKind?: 'substantive' | 'functional';
 }) {
-  // ROADMAP 1.132 (F1) — the executor's answer-prose scope signal. A run whose
-  // FINAL text is the model's own answer prose surfaces `answerProse: true`;
+  // ROADMAP 1.132 (F1) — the executor's SUBSTANTIVE/FUNCTIONAL classification. A
+  // run whose FINAL text is a real answer surfaces `answerKind: 'substantive'`;
   // one whose text was rewritten by a deterministic mutator (or is a
-  // deterministic builder) does not. Default: an un-shaped run models the
-  // intent-null / text_only prose path (F1 target → true); a shaped run's
-  // signal is irrelevant to the fallback (the shape re-attach short-circuits
-  // it), so it defaults false. cc06 (a post-capture rewrite to deterministic
-  // decline) overrides to false explicitly.
-  const answerProse = opts.answerProse ?? !opts.withShape;
+  // deterministic builder) surfaces 'functional'. Default: an un-shaped run
+  // models the intent-null / text_only prose path (F1 target → substantive); a
+  // shaped run's kind is irrelevant to the synthesiser (the model-shape
+  // re-attach short-circuits it), so it defaults substantive. cc06 (a
+  // post-capture rewrite to a deterministic decline) overrides to 'functional'.
+  const answerKind = opts.answerKind ?? 'substantive';
   return {
     response: {
       response_version: 2 as const,
@@ -99,7 +99,7 @@ function mkRunResult(opts: {
     analysisReady: { status: 'ready', goal_node_id: 'goal', options: [] },
     effectiveGraph: null,
     ...(opts.withShape ? { answerShape: ANSWER_SHAPE } : {}),
-    ...(answerProse ? { answerProse: true as const } : {}),
+    answerKind,
     telemetry: {
       stages_completed: ['orient', 'compose'],
       response_emitted: true as const,
@@ -161,14 +161,14 @@ describe('route-v2 — `_answer_shape` (unconditional, ROADMAP 1.132)', () => {
     // swap, goal-receipt swap, empty-answer backstop, commit-failure
     // replacement): the captured shape's derived text is NOT the final text,
     // AND the final text is now DETERMINISTIC DECLINE copy — so the executor's
-    // FINAL-text check clears `answerProse` (modelled here as the default-false
-    // for a rewrite). Two things must hold: (1) the route drops the STALE
-    // captured shape (fail-closed), and (2) the F1 fallback does NOT re-shape
-    // the decline — a deterministic message keeps its second sentence visible.
+    // FINAL-text check downgrades the kind to 'functional' (modelled here
+    // explicitly). Two things must hold: (1) the route drops the STALE captured
+    // shape (fail-closed), and (2) the F1 synthesiser does NOT re-shape the
+    // decline — a deterministic message keeps its second sentence visible.
     const rewritten =
       "I haven't changed the model. This version can't make that kind of model edit yet.";
     runTurnExecutorMock.mockResolvedValue(
-      mkRunResult({ withShape: true, assistantText: rewritten, answerProse: false }),
+      mkRunResult({ withShape: true, assistantText: rewritten, answerKind: 'functional' }),
     );
     const { status, body } = await postTurn(app, 'cccccccc-1111-4ccc-8ccc-cccccccccc06');
     expect(status).toBe(200);

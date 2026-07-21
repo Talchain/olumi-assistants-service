@@ -138,7 +138,8 @@ function uiDirectives(response: { blocks: ReadonlyArray<{ type: string }> }) {
 
 describe('ui_directive emitter — unconditional', () => {
   it('emits exactly one ui_directive on a run_analysis turn with a recommended option', () => {
-    const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
+    const env = composeToolCallResponse({
+    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
     expect(uiDirectives(env)).toHaveLength(1);
   });
 });
@@ -156,19 +157,22 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, recommended option 
   });
 
   it('emits exactly one ui_directive block', () => {
-    const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
+    const env = composeToolCallResponse({
+    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
     expect(uiDirectives(env)).toHaveLength(1);
   });
 
   it('the block parses under the strict boundary UiDirectiveBlockSchema', () => {
-    const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
+    const env = composeToolCallResponse({
+    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
     const [block] = uiDirectives(env);
     const parsed = UiDirectiveBlockSchema.safeParse(block);
     expect(parsed.success).toBe(true);
   });
 
   it('verb=highlight, one TargetRef for the recommended option, label resolved from the graph', () => {
-    const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
+    const env = composeToolCallResponse({
+    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
     const [block] = uiDirectives(env);
     expect(block).toMatchObject({
       type: 'ui_directive',
@@ -179,7 +183,8 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, recommended option 
   });
 
   it('carries NO free-text note and NO duration_ms (schema-required fields + target only)', () => {
-    const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
+    const env = composeToolCallResponse({
+    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
     const [block] = uiDirectives(env);
     expect(Object.keys(block as Record<string, unknown>).sort()).toEqual([
       'targets',
@@ -189,13 +194,15 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, recommended option 
   });
 
   it('the composed response passes the strict egress OlumiResponseSchema with the directive on blocks[]', () => {
-    const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
+    const env = composeToolCallResponse({
+    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
     const parsed = OlumiResponseSchema.parse(env);
     expect(uiDirectives(parsed)).toHaveLength(1);
   });
 
   it('survives sanitiseOlumiResponseForEgress unchanged (nothing to scrub: no note)', () => {
-    const env = composeToolCallResponse({ ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
+    const env = composeToolCallResponse({
+    answerKind: 'functional', ...BASE_INPUT, handlerFacts: [runAnalysisFact()] });
     const graph = {
       nodes: STANDARD_GRAPH.nodes.map(({ id, kind, label }) => ({ id, kind, label })),
       edges: [],
@@ -226,6 +233,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('no recommended option (leading_option_id null) → zero directives', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [runAnalysisFact({ leadingOptionId: null })],
     });
@@ -234,6 +242,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('recommended id not resolvable in enrichment.graph.nodes → zero directives (no id-as-label fallback)', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [runAnalysisFact({ leadingOptionId: 'opt_unknown' })],
     });
@@ -242,6 +251,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('no enrichment.graph at all → zero directives', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [runAnalysisFact({ graphNodes: null })],
     });
@@ -250,6 +260,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('recommended id resolves to a NON-option node kind → zero directives', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [runAnalysisFact({ leadingOptionId: 'fac_delivery_risk' })],
     });
@@ -258,6 +269,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('noop run_analysis fact → zero directives', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [runAnalysisFact({ noop: true })],
     });
@@ -266,6 +278,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('missing graph_hash_at_run (freshness unverifiable) → zero directives', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [runAnalysisFact({ graphHash: null })],
     });
@@ -274,6 +287,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('prior-fact FRESH lifecycle rebuild (no current-turn fact) → zero directives', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [],
       lifecycle: {
@@ -298,6 +312,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('prior-fact STALE lifecycle (diverged graph) → zero directives', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [],
       lifecycle: {
@@ -319,6 +334,7 @@ describe('ui_directive emitter — CEE_UI_DIRECTIVE_EMIT ON, fail-closed suppres
 
   it('never more than one directive per turn (two run_analysis facts → exactly one)', () => {
     const env = composeToolCallResponse({
+      answerKind: 'functional',
       ...BASE_INPUT,
       handlerFacts: [runAnalysisFact(), runAnalysisFact({ leadingOptionId: 'opt_outsource' })],
     });

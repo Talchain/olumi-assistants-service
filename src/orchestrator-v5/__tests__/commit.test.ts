@@ -21,6 +21,7 @@ const META = {
 describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
   it('returns the composed response unchanged on RPC success', async () => {
     const composed = composeDirectAnswerResponse({
+      answerKind: 'functional',
       assistant_text: 'hi',
       stage: 'frame',
     });
@@ -43,6 +44,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
 
   it('propagates SessionStore.append errors so TurnExecutor catch can map them', async () => {
     const composed = composeDirectAnswerResponse({
+      answerKind: 'functional',
       assistant_text: 'hi',
       stage: 'frame',
     });
@@ -76,6 +78,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
 
     it('threads briefText from CommitMetadata to SessionStore.append', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'drafted',
         stage: 'frame',
       });
@@ -91,6 +94,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
 
     it('omits briefText (undefined) when not present in metadata', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'hi',
         stage: 'frame',
       });
@@ -102,6 +106,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
 
     it('threads both graph and briefText together (initial draft turn shape)', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'drafted',
         stage: 'frame',
       });
@@ -137,7 +142,8 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     }
 
     it('threads both expectedGraphIdentityHash and expectedGraphAnalysisHash verbatim', async () => {
-      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
       const identity = 'a'.repeat(64);
       const analysis = 'b'.repeat(16);
       const { store, appendCalls } = makeSpyStore();
@@ -157,7 +163,8 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     });
 
     it('threads null verbatim (server base read, graph absent — NOT collapsed to undefined)', async () => {
-      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
       const { store, appendCalls } = makeSpyStore();
       await commitDirectAnswer(
         composed,
@@ -174,7 +181,8 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     });
 
     it('omission → undefined on the write (uninstrumented path stays uninstrumented)', async () => {
-      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
       const { store, appendCalls } = makeSpyStore();
       await commitDirectAnswer(composed, META, store);
       expect(appendCalls[0].expectedGraphIdentityHash).toBeUndefined();
@@ -209,6 +217,7 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
         action_type: 'run_analysis',
       };
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'done',
         stage: 'analyse',
         suggested_actions: [dropped, kept],
@@ -256,7 +265,8 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     }
 
     it('this-turn pendings fill the cap → the live prior survivor is cap-dropped, not counted as survived', async () => {
-      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
       // Three pre-supplied pendings occupy the whole cap; one live prior proposal
       // is eligible to carry forward but cannot fit.
       const thisTurn = [makePreSupplied('t1'), makePreSupplied('t2'), makePreSupplied('t3')];
@@ -297,7 +307,8 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     }
 
     it('cap pressure from NON-consent pendings does not evict a threaded live consent hold — the hold persists within the cap', async () => {
-      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
       const thisTurn = [
         makeSuggestionPending('c1'),
         makeSuggestionPending('c2'),
@@ -324,7 +335,8 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     });
 
     it('all-consent overflow: the consent hold that still cannot fit lapses with the honest notice, never silently', async () => {
-      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
       // Three fresh consent pendings occupy the whole cap; the carried consent
       // hold cannot fit even with consent-priority (fresh-first within class).
       const thisTurn = [makePreSupplied('t1'), makePreSupplied('t2'), makePreSupplied('t3')];
@@ -346,7 +358,8 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     });
 
     it('no cap pressure → the live prior survivor persists and is counted as survived', async () => {
-      const composed = composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+      const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
       const prior = [makePreSupplied('prior-live')];
       const { store, appendCalls } = makeSpyStore();
       const result = await commitDirectAnswer(
@@ -413,7 +426,8 @@ describe('commitDirectAnswer — persist-site intercept repair (Track S 0.13c-4)
     void spy;
     return { store: noop, appendCalls };
   }
-  const composed = () => composeDirectAnswerResponse({ assistant_text: 'ok', stage: 'analyse' });
+  const composed = () => composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'ok', stage: 'analyse' });
 
   it('repairs the graph BEFORE persistence: a duplicate observed-root intercept is removed from what store.append receives', async () => {
     const events: Array<{ event: string; data: Record<string, unknown> }> = [];
@@ -574,6 +588,7 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
   describe('fix 2b — honest lapse notice on turn-TTL drop', () => {
     it('appends the deterministic lapse sentence (wire + durable copy) when a hold turn-TTL-drops at commit', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'Here is what I can tell you about the model.',
         stage: 'frame',
       });
@@ -603,6 +618,7 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
 
     it('emits NO notice while the hold still survives (turn-TTL 4 → 3)', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'Still thinking about your question.',
         stage: 'frame',
       });
@@ -620,6 +636,7 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
 
     it('emits NO notice for a lapsing run_analysis chip pending (suggestion lapse is not a consent lapse)', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'Answer.',
         stage: 'frame',
       });
@@ -634,6 +651,7 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
 
     it('emits NO notice when the hold was consumed this turn (applied is not lapsed)', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'Applied.',
         stage: 'frame',
       });
@@ -654,6 +672,7 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
   describe("fix 3a — steer-don't-bind: competing run_analysis suggestion chips", () => {
     it('drops the run_analysis SUGGESTION chip and its would-be pending while a hold is live', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'No analysis has been run on your model yet.',
         stage: 'frame',
         suggested_actions: [RERUN_SUGGESTION_CHIP, PROMPT_CHIP],
@@ -677,6 +696,7 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
 
     it('NEVER suppresses recovery chips (dedicated ids), even while a hold is live', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'That analysis attempt failed.',
         stage: 'frame',
         suggested_actions: [RECOVERY_RETRY_CHIP],
@@ -694,6 +714,7 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
 
     it('no live hold → the response object is returned unchanged (byte-identical fast path)', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'Answer.',
         stage: 'frame',
         suggested_actions: [RERUN_SUGGESTION_CHIP],
@@ -705,6 +726,7 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
 
     it('a hold that lapses THIS commit does not suppress (chips return as the hold dies) and the notice still fires', async () => {
       const composed = composeDirectAnswerResponse({
+        answerKind: 'functional',
         assistant_text: 'Answer.',
         stage: 'frame',
         suggested_actions: [RERUN_SUGGESTION_CHIP],

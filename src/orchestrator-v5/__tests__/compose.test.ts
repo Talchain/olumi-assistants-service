@@ -10,6 +10,7 @@ import {
 describe('composeDirectAnswerResponse', () => {
   it('produces an OlumiResponseSchema-valid success envelope', () => {
     const env = composeDirectAnswerResponse({
+      answerKind: 'functional',
       assistant_text: 'hello world',
       stage: 'frame',
     });
@@ -23,7 +24,8 @@ describe('composeDirectAnswerResponse', () => {
   });
 
   it('omits any session state / lineage fields not on the schema (constraint 6)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     // .strict() rejects extra fields; verify none leaked.
     expect(Object.keys(env).sort()).toEqual(
       [
@@ -41,6 +43,7 @@ describe('composeDirectAnswerResponse', () => {
 describe('composeClarifyResponse (A2)', () => {
   it('produces an OlumiResponseSchema-valid clarify envelope', () => {
     const env = composeClarifyResponse({
+      answerKind: 'functional',
       assistant_text: 'What decision are you weighing?',
       stage: 'frame',
     });
@@ -54,8 +57,10 @@ describe('composeClarifyResponse (A2)', () => {
   });
 
   it('produces the same field set as direct_answer (structural parity)', () => {
-    const ans = composeDirectAnswerResponse({ assistant_text: 'a', stage: 'frame' });
-    const clar = composeClarifyResponse({ assistant_text: 'c', stage: 'frame' });
+    const ans = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'a', stage: 'frame' });
+    const clar = composeClarifyResponse({
+    answerKind: 'functional', assistant_text: 'c', stage: 'frame' });
     expect(Object.keys(ans).sort()).toEqual(Object.keys(clar).sort());
   });
 });
@@ -66,6 +71,7 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
     confirmation: 'Ran analysis on your current scenario.',
     coaching: null as string | null,
     stage: 'analyse' as const,
+    answerKind: 'functional' as const,
   };
 
   function runAnalysisFact(enrichment?: Record<string, unknown>): HandlerFact {
@@ -181,6 +187,7 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     confirmation: 'Ran analysis on your current scenario.',
     coaching: null as string | null,
     stage: 'analyse' as const,
+    answerKind: 'functional' as const,
   };
 
   const PHASE3_GRAPH_HASH = 'gh_phase3a_test_0001';
