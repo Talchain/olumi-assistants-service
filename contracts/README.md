@@ -54,6 +54,18 @@ These runtime rules are **not** captured in the exported schemas:
    `context.analysis_response`) — `refine` requires at least one of
    `analysis_status`, `results`, or `meta`. The exported schema allows all
    three to be absent.
+4. **`V5RequestExtensionsSchema` (LIVE V5) — `selected_elements` fail-open**.
+   The exported `v5-request-extensions.schema.json` declares `selected_elements`
+   as a union (`{node_ids?, edge_ids?}` **or** `string[]`), which reads as
+   "a structurally-invalid value is REJECTED". The RUNTIME diverges: unlike the
+   other three extensions (whose invalid values return a 422 `BoundaryError`),
+   `parseRequestExtensions` treats `selected_elements` as best-effort context —
+   a structurally-invalid value is **silently DROPPED** (a `pass:false`
+   boundary-validation telemetry event is emitted, and the pre-route falls back
+   to label-only matching, identical to a turn that carried no selection). The
+   turn is NOT rejected. JSON Schema cannot express this per-field
+   fail-open-with-drop policy, so a consumer validating against the exported
+   schema would over-reject relative to CEE's actual behaviour.
 
 Consumers should add equivalent validation in their own CI if these
 constraints matter. The self-validation tests in

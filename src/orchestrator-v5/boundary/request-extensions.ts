@@ -1,18 +1,28 @@
 /**
  * V5 Phase 1.5 — HTTP boundary request extensions.
  *
- * `@talchain/schemas` v0.7.0 `OrchestratorTurnPayload` is a discriminated
- * union on `kind: 'message' | 'system_event'`. The `kind: 'message'` variant
- * declares base fields (turn_id, scenario_id, message, turn_class, stage,
- * source, and optional chip / retry_of). The UI ALSO sends `graph_state`,
- * `analysis_state`, and `user_id` on the same request body, but they bypass
- * B1 boundary validation because the base schema (`.strict()`) does not
- * declare them.
+ * `@talchain/schemas` `OrchestratorTurnPayload` is a discriminated union on
+ * `kind: 'message' | 'system_event'`. The `kind: 'message'` variant declares
+ * base fields (turn_id, scenario_id, message, turn_class, stage, source, and
+ * optional chip / retry_of). This module parses FOUR OPTIONAL extension fields
+ * — `graph_state`, `analysis_state`, `user_id`, `selected_elements` — that a
+ * caller MAY put on the same request body but that B1's base schema
+ * (`.strict()`) does not declare, so B1 would otherwise reject them as unknown
+ * keys. The pre-flight strips them off before B1, then re-parses them here.
  *
- * This module adds a second, independent Zod parse over the same request body
- * — extracting `graph_state`, `analysis_state`, and `user_id` with permissive
- * content schemas that match the ACTUAL wire shape (not the CEE response
- * envelope).
+ * ⚠ NO LIVE UI PRODUCER SENDS THESE TODAY. Byte-checked at DGAI `6bc31128d`:
+ * the sole live V5 send site posts `buildV5Payload`'s core keys only; caller
+ * identity travels via HTTP headers; and the request builder that DOES attach
+ * `graph_state` posts to the 410'd V1 route, not the live `/orchestrate/v2/turn`
+ * wire (trap-16: the V5 wire sends no graph). This module is therefore a CEE-
+ * SIDE CAPABILITY, parsed defensively so that IF a producer ever starts sending
+ * these fields they are validated at the boundary rather than silently dropped
+ * — it is NOT evidence the UI sends them today. See
+ * tests/fixtures/golden/PROVENANCE.md for the split live-vs-capability fixtures.
+ *
+ * The parse is a second, independent pass over the same request body,
+ * extracting the four fields with permissive content schemas that match the
+ * ACTUAL wire shape a producer would use (not the CEE response envelope).
  *
  * `user_id` was added 2026-04-21 as part of the upsert-on-append pre-flight
  * (see supabase/migrations/20260421000000_v5_ensure_scenario_exists.sql).
