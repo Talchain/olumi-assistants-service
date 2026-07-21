@@ -15,7 +15,8 @@
     "replay_suite": "N/A",
     "original_failure_mode": "N/A - synthetic",
     "expected_v5_outcome_class": "direct_answer_success",
-    "note_roadmap_1148": "ROADMAP 1.148 C3 (2026-07-17): re-pointed from stage 'frame' to stage 'analyse'. The frame-stage no-brief guard (PR #203/#484) now answers brief-less frame turns deterministically pre-LLM, which orphaned this fixture's coverage (timeout/budget/contamination/telemetry paths never ran). At 'analyse' the turn genuinely reaches ORIENT/the mocked LLM. The guard's deterministic answer for the OLD frame-stage input is pinned separately in tests/integration/orchestrator/route-v2-frame-no-brief-guard.test.ts."
+    "note_roadmap_1148": "ROADMAP 1.148 C3 (2026-07-17): re-pointed from stage 'frame' to stage 'analyse'. The frame-stage no-brief guard (PR #203/#484) now answers brief-less frame turns deterministically pre-LLM, which orphaned this fixture's coverage (timeout/budget/contamination/telemetry paths never ran). At 'analyse' the turn genuinely reaches ORIENT/the mocked LLM. The guard's deterministic answer for the OLD frame-stage input is pinned separately in tests/integration/orchestrator/route-v2-frame-no-brief-guard.test.ts.",
+    "note_roadmap_1132_f1": "ROADMAP 1.132 F1 (PR #616): the deterministic egress answer-shape fallback synthesises `_answer_shape` for this un-shaped two-sentence ANSWER prose and SETS assistant_text := deriveAnswerTextFromShape(shape) (headline + blank line + detail), so expected assistant_text now carries the '\\n\\n' join and the wire carries the `_answer_shape` sidecar (post-validation, same mechanic as `_reasoning`; validated in the test via OlumiResponseWireSchema = OlumiResponseSchema.extend({ _answer_shape: AnswerShapeSchema.optional() }))."
   },
   "request": {
     "kind": "message",
@@ -33,7 +34,12 @@
     "status": 200,
     "body": {
       "response_version": 2,
-      "assistant_text": "Framing the decision means naming the choice, the goal it serves, and the key uncertainty. Start with one sentence for each.",
+      "assistant_text": "Framing the decision means naming the choice, the goal it serves, and the key uncertainty.\n\nStart with one sentence for each.",
+      "_answer_shape": {
+        "headline": "Framing the decision means naming the choice, the goal it serves, and the key uncertainty.",
+        "bullets": [],
+        "detail": "Start with one sentence for each."
+      },
       "blocks": [],
       "suggested_actions": [
         {
