@@ -17,6 +17,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 EXIT=0
 
+# Fail closed if the comment-stripping scanner cannot run (a missing node would
+# otherwise empty every scan and misreport as clean).
+command -v node >/dev/null 2>&1 || { echo "TRIPWIRE: node is required (matching runs via scripts/ci/strip-source-comments.mjs)"; exit 1; }
+
 # Canonical enrichment fields owned by PLoT. CEE is passthrough-only for each.
 # Extend this list whenever a new PLoT-computed field appears in the analysis
 # envelope.
@@ -36,9 +40,12 @@ check() {
   # reading it. Object-literal construction (`{ factor_sensitivity: ... }`) is
   # a legitimate concern too, but also shows up in legitimate passthrough
   # shapes — reviewer judgement required on those hits.
-  local pattern="(^|[^.a-zA-Z0-9_])${field}[[:space:]]*="
+  # Matching runs on the COMMENT-STRIPPED view (scripts/ci/strip-source-comments.mjs):
+  # a comment documenting the passthrough rule can never trip the tripwire.
+  local pattern="(^|[^.a-zA-Z0-9_])${field}\\s*="
   local hits
-  hits="$(grep -RIn --include='*.ts' --exclude-dir='__tests__' --exclude='*.test.ts' -E "$pattern" "${paths[@]/#/$REPO_ROOT/}" 2>/dev/null || true)"
+  hits="$(node "$REPO_ROOT/scripts/ci/strip-source-comments.mjs" --scan "$pattern" "${paths[@]/#/$REPO_ROOT/}" 2>/dev/null \
+    | grep -v '/__tests__/' | grep -v '\.test\.ts:' || true)"
   if [ -n "$hits" ]; then
     echo "TRIPWIRE: suspicious assignment to PLoT-owned enrichment field '$field'"
     echo "CEE handlers must thread enrichment through, not compute it."

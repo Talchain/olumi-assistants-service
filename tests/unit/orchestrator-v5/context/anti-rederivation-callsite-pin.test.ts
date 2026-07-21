@@ -32,11 +32,17 @@
  * file — commit or remove it, or update EXPECTED if the caller is intended.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+
+import {
+  stripComments,
+  stripCommentsFile,
+  GUARD_WALK_TIMEOUT_MS,
+} from '../../../../scripts/ci/strip-source-comments.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const SCAN_ROOT = 'src';
@@ -48,15 +54,22 @@ const EXCLUDED: readonly RegExp[] = [
   /^src\/_archive\//,
 ];
 
-// Comment-only filter — mirrors scripts/check-forbidden-boundary-patterns.sh
-// scope_filter: a line whose first non-space token opens or continues a
-// comment is not a reference. (A code line with a trailing comment still
-// counts — the false-positive direction is the safe one.)
-const COMMENT_ONLY = /^\s*(\/\/|\/\*|\*)/;
+// Comment handling: references are counted in the COMMENT-STRIPPED view of
+// each file (scripts/ci/strip-source-comments.mjs, the shared literal-aware
+// tokeniser — same mechanism as scripts/check-forbidden-boundary-patterns.sh).
+// The per-line first-token filter this replaces could not see a TRAILING
+// comment on a code line, so an accurate design note like
+// `const x = 1; // freshness comes from deriveAnalysisFreshness` counted as a
+// reference and broke the pin (positive-controlled 2026-07-20). With
+// stripping, EXPECTED below counts exactly the code references — imports,
+// calls, definitions — never documentation.
+function countReferencesInStripped(stripped: string, ident: string): number {
+  const re = new RegExp(`\\b${ident}\\b`);
+  return stripped.split('\n').filter((l) => re.test(l)).length;
+}
 
 export function countReferences(source: string, ident: string): number {
-  const re = new RegExp(`\\b${ident}\\b`);
-  return source.split('\n').filter((l) => !COMMENT_ONLY.test(l) && re.test(l)).length;
+  return countReferencesInStripped(stripComments(source), ident);
 }
 
 function walk(relDir: string, out: string[]): void {
@@ -76,7 +89,7 @@ function scanRepo(ident: string): Record<string, number> {
   const result: Record<string, number> = {};
   for (const rel of files.sort()) {
     if (EXCLUDED.some((re) => re.test(rel))) continue;
-    const count = countReferences(readFileSync(join(REPO_ROOT, rel), 'utf-8'), ident);
+    const count = countReferencesInStripped(stripCommentsFile(join(REPO_ROOT, rel)), ident);
     if (count > 0) result[rel] = count;
   }
   return result;
@@ -167,18 +180,29 @@ describe('anti-rederivation call-site pin', () => {
   for (const [ident, expected] of Object.entries(EXPECTED)) {
     it(`\`${ident}\` is referenced only by the pinned files, with pinned per-file counts`, () => {
       expect(scanRepo(ident), guidance(ident)).toEqual(expected);
-    });
+    }, GUARD_WALK_TIMEOUT_MS); // full-src tree walk; explicit timeout absorbs parallel-load CPU contention
   }
 
   // Scanner self-tests (mirrors the shell ratchet's --self-test philosophy):
   // prove the detector fires on code and NOT on comments, and that the word
   // boundary keeps `projectRecentChanges` from matching its Frame projection.
-  it('scanner fires on code lines and ignores comment-only lines', () => {
+  it('scanner fires on code references and ignores comments (including trailing ones)', () => {
     expect(countReferences('const x = deriveAnalysisFreshness([], null);', 'deriveAnalysisFreshness')).toBe(1);
     expect(countReferences("import { deriveAnalysisFreshness } from './freshness.js';", 'deriveAnalysisFreshness')).toBe(1);
-    expect(countReferences(' * see deriveAnalysisFreshness for details', 'deriveAnalysisFreshness')).toBe(0);
     expect(countReferences('// deriveAnalysisFreshness', 'deriveAnalysisFreshness')).toBe(0);
     expect(countReferences('/* deriveAnalysisFreshness */', 'deriveAnalysisFreshness')).toBe(0);
+    expect(
+      countReferences('/**\n * see deriveAnalysisFreshness for details\n */', 'deriveAnalysisFreshness'),
+    ).toBe(0);
+    // The case the old first-token line filter could NOT see — a trailing
+    // comment on a code line (the source-scanning-guard footgun):
+    expect(
+      countReferences('const x = 1; // freshness comes from deriveAnalysisFreshness', 'deriveAnalysisFreshness'),
+    ).toBe(0);
+    // …while a code reference sharing its line with a trailing comment counts:
+    expect(
+      countReferences('const y = deriveAnalysisFreshness([], null); // frame seam', 'deriveAnalysisFreshness'),
+    ).toBe(1);
   });
 
   it('word boundary: projectRecentChangesToFrame is NOT a projectRecentChanges reference', () => {
