@@ -34,6 +34,7 @@ import type {
   ToolResponseBlock,
 } from '../../adapters/llm/types.js';
 import { UpstreamHTTPError, UpstreamTimeoutError } from '../../adapters/llm/errors.js';
+import { deriveAnswerTextFromShape } from '../routing/answer-shape.js';
 import type { RunTurnExecutorOptions } from '../turn-executor.js';
 
 // ---------------------------------------------------------------------------
@@ -159,12 +160,16 @@ const CLARIFY_INPUT = {
   clarification: { ambiguity_type: 'entity', question: 'Which option did you mean?' },
 };
 
-// answer_text is REQUIRED on coach/converse tool calls since 2026-07-20
-// (O-7 wave 2: CEE_ANSWER_TEXT_REQUIRED deleted — requirement unconditional).
+// answer_shape is REQUIRED on coach/converse tool calls (ROADMAP 1.132, F2 —
+// unconditional since the F1 flag deletion); answer_text is DERIVED from it.
 const COACH_INPUT = {
   intent_class: 'coach',
   coaching_mode: 'challenge',
-  answer_text: 'Let me push back on that assumption with a fuller answer.',
+  answer_shape: {
+    headline: 'Let me push back on that assumption with a fuller answer.',
+    bullets: [],
+    detail: 'The assumption deserves a harder look before you commit to it.',
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -255,10 +260,15 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       expect((response as Record<string, unknown>).updated_session_state).toBeUndefined();
     });
 
-    it('composes the converse tool call answer_text (required since 2026-07-20)', async () => {
+    it('composes the converse tool call answer_text, DERIVED from the required shape (ROADMAP 1.132)', async () => {
+      const shape = {
+        headline: 'Here are the practical trade-offs.',
+        bullets: [],
+        detail: 'Each option moves the goal differently, so weigh them against your constraint.',
+      };
       const routingAdapter = mockRoutingAdapter(async () =>
         mkToolUseResult(
-          { intent_class: 'converse', answer_text: 'Here are the practical trade-offs.' },
+          { intent_class: 'converse', answer_shape: shape },
           'Short orientation.',
         ),
       );
@@ -268,7 +278,7 @@ describe('runTurnExecutor — Phase 1 seven-step flow', () => {
       });
 
       const parsed = OlumiResponseSchema.parse(response);
-      expect(parsed.assistant_text).toBe('Here are the practical trade-offs.');
+      expect(parsed.assistant_text).toBe(deriveAnswerTextFromShape(shape));
       expect(telemetry.turn_class).toBe('direct_answer');
       expect(telemetry.intent_class).toBe('converse');
     });

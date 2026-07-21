@@ -652,8 +652,8 @@ function sendFinalised200(
      * from `run.answerShape` (turn-executor; fail-closed capture — only
      * present when the final assistant_text IS the shape-derived text).
      * Attached to the wire body as `_answer_shape` AFTER egress validation
-     * when `config.features.answerShapeEnforced` is set — same re-attach
-     * mechanic as `_reasoning` — and NEVER on the fallback envelope.
+     * (UNCONDITIONAL since the F1 flag deletion) — same re-attach mechanic as
+     * `_reasoning` — and NEVER on the fallback envelope.
      */
     readonly answerShape?: import('../orchestrator-v5/routing/answer-shape.js').AnswerShape;
     /**
@@ -733,9 +733,9 @@ function sendFinalised200(
     const hasReasoning = '_reasoning' in asRecord;
     // ROADMAP 1.132 — `_answer_shape` is threaded via `ctx`, never
     // body-attached by any dispatch path today. Stripped defensively anyway
-    // (same defence-in-depth posture as `_reasoning`): the route's flag
-    // gate at the re-attach block below is the sole authority, and the
-    // strict `OlumiResponseSchema` must not see an unknown key.
+    // (same defence-in-depth posture as `_reasoning`): the re-attach block
+    // below is the sole authority, and the strict `OlumiResponseSchema` must
+    // not see an unknown key.
     const hasAnswerShape = '_answer_shape' in asRecord;
     if (!hasTimings && !hasTrace && !hasContextSummary && !hasReasoning && !hasAnswerShape) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
@@ -987,14 +987,14 @@ function sendFinalised200(
       ctx,
     );
   }
-  // Re-attach `_answer_shape` post-validation on the success path AND only
-  // when `config.features.answerShapeEnforced` is set (ROADMAP 1.132, same
-  // single-flag re-attach shape as `_reasoning` above). `ctx.answerShape`
-  // is threaded from `run.answerShape` (turn-executor) — the VALIDATED
-  // coach/converse shape whose derived text was the final assistant_text
-  // when the executor finalised. The fallback envelope never carries it; an
-  // upstream body-attach was dropped by the strip step above. Re-finalise
-  // for WeakSet membership, same as the other surfaces.
+  // Re-attach `_answer_shape` post-validation on the success path (ROADMAP
+  // 1.132, same re-attach shape as `_reasoning` above; UNCONDITIONAL since
+  // the F1 flag deletion). `ctx.answerShape` is threaded from
+  // `run.answerShape` (turn-executor) — the VALIDATED coach/converse shape
+  // whose derived text was the final assistant_text when the executor
+  // finalised. The fallback envelope never carries it; an upstream
+  // body-attach was dropped by the strip step above. Re-finalise for WeakSet
+  // membership, same as the other surfaces.
   //
   // Stale-sidecar fail-closed (P1 hardening): this block is the LAST body
   // mutation before send, so the tie between the shape and the text the
@@ -1007,7 +1007,7 @@ function sendFinalised200(
   // the sidecar, never a shape describing text the user never sees. The
   // comparison runs on the POST-sanitise augmented body, i.e. the exact
   // bytes `reply.send` would carry.
-  if (egress.ok && config.features.answerShapeEnforced && ctx.answerShape) {
+  if (egress.ok && ctx.answerShape) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _answer_shape: ctx.answerShape,

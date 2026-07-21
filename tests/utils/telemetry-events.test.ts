@@ -487,9 +487,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5CoachingOutputPostcheck: "v5.coaching.output_postcheck",
         V5CoachingEmptyAnswerRecovered: "v5.coaching.empty_answer_recovered",
         V5CoachingAnswerSource: "v5.coaching.answer_source",
-        // ROADMAP 1.132 (F2) — CEE_ANSWER_SHAPE_ENFORCED (ships dark):
-        // shape-capture signal for the `_answer_shape` sidecar
-        // (lengths/counts only).
+        // ROADMAP 1.132 (F2) — answer-shape enforcement (unconditional since
+        // the F1 flag deletion): shape-capture signal for the `_answer_shape`
+        // sidecar (lengths/counts only).
         V5AnswerShapeEmitted: "v5.answer_shape.emitted",
         // P1 hardening — stale-sidecar drop (fail closed): the captured
         // shape no longer matched the FINAL assistant_text at finalise /
@@ -1412,12 +1412,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // now: structured logs are the operational signal used to quantify
         // v42.2g's population lift; no Datadog metric mapping yet.
         TelemetryEvents.V5CoachingAnswerSource,
-        // CEE_ANSWER_SHAPE_ENFORCED (flag default OFF, ROADMAP 1.132 — ships
-        // dark) — diagnostic-only shape-capture signal (lengths/counts only);
-        // no Datadog metric mapping until the flag is activated.
+        // Answer-shape enforcement (ROADMAP 1.132; unconditional since the F1
+        // flag deletion) — diagnostic-only shape-capture signal
+        // (lengths/counts only); no Datadog metric mapping (structured logs
+        // are the operational signal).
         TelemetryEvents.V5AnswerShapeEmitted,
-        // Same flag family — stale-sidecar drop signal; diagnostic-only
-        // until the flag is activated.
+        // Same family — stale-sidecar drop signal; diagnostic-only.
         TelemetryEvents.V5AnswerShapeDroppedStale,
         // V6 dual-draft (flag default OFF) — diagnostic-only: m2 outcome,
         // merge accounting histogram, and degrade reasons; no Datadog metric

@@ -848,10 +848,11 @@ export const TelemetryEvents = {
   //   orientation_length: number
   V5CoachingAnswerSource: "v5.coaching.answer_source",
 
-  // ROADMAP 1.132 (F2) — CEE_ANSWER_SHAPE_ENFORCED. Emitted on coach/converse
-  // turns when the validated `answer_shape` is captured for the `_answer_shape`
-  // wire sidecar (turn-executor compose branches). Lengths/counts ONLY — never
-  // the shape's content (PII discipline).
+  // ROADMAP 1.132 (F2) — answer-shape enforcement (UNCONDITIONAL since the F1
+  // flag deletion). Emitted on coach/converse turns when the validated
+  // `answer_shape` is captured for the `_answer_shape` wire sidecar
+  // (turn-executor compose branches). Lengths/counts ONLY — never the shape's
+  // content (PII discipline).
   //   intent_class: 'coach' | 'converse'
   //   headline_length: number
   //   bullet_count: number   (≤3 by schema)

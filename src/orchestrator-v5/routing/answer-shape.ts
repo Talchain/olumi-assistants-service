@@ -1,17 +1,16 @@
 /**
- * CEE_ANSWER_SHAPE_ENFORCED — the structured answer shape for coach /
- * converse turns (ROADMAP 1.132, F2).
+ * The structured answer shape for coach / converse turns (ROADMAP 1.132, F2)
+ * — UNCONDITIONAL since the F1 flag deletion (no-dark-launches doctrine).
  *
- * Coach/converse answers were arriving as walls of prose. When the flag is
- * on, the routing tool call must carry a structured
- * `{ headline, bullets, detail }` shape; the legacy `answer_text` channel is
- * then DERIVED from the shape (`deriveAnswerTextFromShape`) so every
- * existing consumer of answer_text / assistant_text keeps working
- * unchanged, and the shape itself rides the wire as the flag-gated
- * `_answer_shape` additive sidecar (route-v2 strip → validate → re-attach,
- * the same mechanic as `_reasoning` — the vendored @talchain/schemas
- * OlumiResponseSchema is `.strict()`, so a bare top-level field would fail
- * egress validation).
+ * Coach/converse answers were arriving as walls of prose. The routing tool
+ * call must carry a structured `{ headline, bullets, detail }` shape; the
+ * legacy `answer_text` channel is then DERIVED from the shape
+ * (`deriveAnswerTextFromShape`) so every existing consumer of answer_text /
+ * assistant_text keeps working unchanged, and the shape itself rides the
+ * wire as the `_answer_shape` additive sidecar (route-v2 strip → validate →
+ * re-attach, the same mechanic as `_reasoning` — the vendored
+ * @talchain/schemas OlumiResponseSchema is `.strict()`, so a bare top-level
+ * field would fail egress validation).
  *
  * This module owns the shape's Zod contract, the JSON-schema property
  * advertised to the model (flag-on only — see `buildOlumiActionTool` in
@@ -86,8 +85,8 @@ export type AnswerShape = z.infer<typeof AnswerShapeSchema>;
 
 /**
  * Descriptive JSON-schema property advertised to the model on the
- * `olumi_action` tool — ONLY when CEE_ANSWER_SHAPE_ENFORCED is on (see
- * `buildOlumiActionTool`). Descriptive, not enforcing: the hard contract is
+ * `olumi_action` tool (unconditionally, via `buildOlumiActionTool`).
+ * Descriptive, not enforcing: the hard contract is
  * `AnswerShapeSchema` above, exactly like the rest of the tool schema
  * (tool-schema.ts header comment).
  */

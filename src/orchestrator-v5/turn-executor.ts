@@ -413,14 +413,13 @@ export interface TurnExecutorRunResult {
   reasoning?: string;
   /**
    * ROADMAP 1.132 (F2) — the validated coach/converse `answer_shape` from
-   * the routing proposal, surfaced for route-v2's flag-gated
-   * `_answer_shape` wire sidecar (same strip → validate → re-attach
-   * mechanic as `reasoning` above). Present ONLY when
-   * CEE_ANSWER_SHAPE_ENFORCED is on AND the FINAL composed assistant_text
-   * is exactly the shape-derived answer_text — any rewrite between parse
-   * and compose (sanitiser contamination strip, coaching output-guard
-   * degrade, bounded recovery) fails closed and omits the shape, so the
-   * sidecar can never contradict what the user reads.
+   * the routing proposal, surfaced for route-v2's `_answer_shape` wire
+   * sidecar (same strip → validate → re-attach mechanic as `reasoning`
+   * above). UNCONDITIONAL since the F1 flag deletion; present ONLY when the
+   * FINAL composed assistant_text is exactly the shape-derived answer_text
+   * — any rewrite between parse and compose (sanitiser contamination strip,
+   * coaching output-guard degrade, bounded recovery) fails closed and omits
+   * the shape, so the sidecar can never contradict what the user reads.
    */
   answerShape?: AnswerShape;
   telemetry: {
@@ -1112,8 +1111,9 @@ export async function runTurnExecutor(
   // for the same reason as `capturedReasoning` above (finalizeRun reads it).
   // Set ONLY in the coach/converse compose branches, and only when the FINAL
   // composed assistant_text equals the shape-derived answer_text (fail-closed
-  // — see TurnExecutorRunResult.answerShape jsdoc). Undefined whenever
-  // CEE_ANSWER_SHAPE_ENFORCED is off.
+  // — see TurnExecutorRunResult.answerShape jsdoc). Undefined on execute /
+  // clarify / text_only turns, and whenever a post-capture rewrite diverges
+  // the final text from the shape.
   let capturedAnswerShape: AnswerShape | undefined;
 
   try {
@@ -7369,16 +7369,13 @@ export async function runTurnExecutor(
         });
       }
       // ROADMAP 1.132 (F2) — capture the routing proposal's structured
-      // answer shape for the flag-gated `_answer_shape` wire sidecar,
-      // ONLY when the FINAL composed text is exactly the shape-derived
-      // answer_text. Any rewrite between parse and compose (sanitiser
-      // contamination strip, coaching output-guard degrade, the
-      // empty-answer bounded recovery above) makes the sidecar diverge
-      // from what the user reads — fail closed and omit it. Flag OFF:
-      // `answer_shape` never reaches the proposal (rejected at parse), so
-      // this block is a no-op and the branch stays byte-identical.
+      // answer shape for the `_answer_shape` wire sidecar (UNCONDITIONAL
+      // since the F1 flag deletion), ONLY when the FINAL composed text is
+      // exactly the shape-derived answer_text. Any rewrite between parse and
+      // compose (sanitiser contamination strip, coaching output-guard
+      // degrade, the empty-answer bounded recovery above) makes the sidecar
+      // diverge from what the user reads — fail closed and omit it.
       if (
-        config.features.answerShapeEnforced &&
         routingResult.proposal.answer_shape &&
         composedOk.assistant_text ===
           deriveAnswerTextFromShape(routingResult.proposal.answer_shape)
@@ -7516,12 +7513,11 @@ export async function runTurnExecutor(
           suggested_actions: recoveryChips,
         });
       }
-      // ROADMAP 1.132 (F2) — converse-branch shape capture; mirrors the
-      // coach branch above (see its comment for the fail-closed rationale).
-      // Scoped to tool_call converse — text_only responses have no
-      // answer_shape channel.
+      // ROADMAP 1.132 (F2) — converse-branch shape capture (UNCONDITIONAL
+      // since the F1 flag deletion); mirrors the coach branch above (see its
+      // comment for the fail-closed rationale). Scoped to tool_call converse
+      // — text_only responses have no answer_shape channel.
       if (
-        config.features.answerShapeEnforced &&
         routingResult.type === 'tool_call' &&
         routingResult.proposal.intent_class === 'converse' &&
         routingResult.proposal.answer_shape &&
@@ -8569,7 +8565,7 @@ export async function runTurnExecutor(
       // post-egress-validation sidecar.
       ...(capturedReasoning ? { reasoning: capturedReasoning } : {}),
       // ROADMAP 1.132 (F2) — validated coach/converse answer shape for the
-      // flag-gated `_answer_shape` wire sidecar (route-v2 attaches it
+      // `_answer_shape` wire sidecar (route-v2 attaches it
       // post-egress-validation; never attached to `response` here). Already
       // re-verified against the FINAL assistant_text just above — absent
       // whenever a post-capture rewriter diverged the text from the shape.

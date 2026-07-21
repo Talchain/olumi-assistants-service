@@ -214,7 +214,14 @@ function emptyAnswerCoachToolResult(): ChatWithToolsResult {
       input: {
         intent_class: 'coach',
         coaching_mode: 'reframe',
-        answer_text: '<internal></internal>',
+        // A schema-valid shape whose derived text is pure markup: non-blank
+        // (so the shape requirement is satisfied and no REPAIR_ONCE fires)
+        // but sanitises to '' → the empty-answer recovery trigger.
+        answer_shape: {
+          headline: '<internal></internal>',
+          bullets: [],
+          detail: '<internal></internal>',
+        },
       },
     },
   ];

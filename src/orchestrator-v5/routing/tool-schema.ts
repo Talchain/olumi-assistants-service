@@ -16,7 +16,6 @@
 
 import { z } from 'zod';
 
-import { config } from '../../config/index.js';
 import {
   ANSWER_SHAPE_TOOL_PROPERTY,
   AnswerShapeSchema,
@@ -380,22 +379,18 @@ export const OLUMI_ACTION_TOOL = {
 } as const;
 
 /**
- * CEE_ANSWER_SHAPE_ENFORCED (ROADMAP 1.132, F2) — the tool definition
- * actually served to the model.
+ * Answer-shape enforcement (ROADMAP 1.132, F2) — the tool definition actually
+ * served to the model.
  *
- * Flag OFF (default): returns the exact `OLUMI_ACTION_TOOL` object above —
- * byte-identical served definition, not even a clone, so dark deployment
- * cannot change model behaviour (advertising a new field would already
- * shift what the model emits).
- *
- * Flag ON: returns a copy extended with the `answer_shape` property
+ * UNCONDITIONAL since the F1 flag deletion (no-dark-launches doctrine — the
+ * `CEE_ANSWER_SHAPE_ENFORCED` gate is gone): always returns a copy of
+ * `OLUMI_ACTION_TOOL` extended with the `answer_shape` property
  * (`ANSWER_SHAPE_TOOL_PROPERTY` — descriptive; the hard contract is
- * `AnswerShapeSchema` enforced in `RawToolCallSchema` below). Everything
- * else is structurally unchanged (pinned by
+ * `AnswerShapeSchema` enforced in `RawToolCallSchema` below). Everything else
+ * is structurally unchanged (pinned by
  * tool-schema-answer-shape-enforced.test.ts).
  */
 export function buildOlumiActionTool(): typeof OLUMI_ACTION_TOOL {
-  if (!config.features.answerShapeEnforced) return OLUMI_ACTION_TOOL;
   return {
     ...OLUMI_ACTION_TOOL,
     input_schema: {
@@ -440,9 +435,10 @@ export type ToolCallResponse =
       // description on the JSON schema above for the authoring contract.
       // Falls back to `orientationText` at compose time when absent.
       answer_text?: string;
-      // ROADMAP 1.132 (F2) — structured answer shape. Present ONLY when
-      // CEE_ANSWER_SHAPE_ENFORCED is on (then guaranteed valid, with
-      // `answer_text` derived from it — see parseToolCallResponse).
+      // ROADMAP 1.132 (F2) — structured answer shape (UNCONDITIONAL since
+      // the F1 flag deletion). Always present on a parsed coach/converse
+      // proposal (guaranteed valid, with `answer_text` derived from it — see
+      // parseToolCallResponse).
       answer_shape?: AnswerShape;
     }
   | {
@@ -454,9 +450,10 @@ export type ToolCallResponse =
       // description on the JSON schema above for the authoring contract.
       // Falls back to `orientationText` at compose time when absent.
       answer_text?: string;
-      // ROADMAP 1.132 (F2) — structured answer shape. Present ONLY when
-      // CEE_ANSWER_SHAPE_ENFORCED is on (then guaranteed valid, with
-      // `answer_text` derived from it — see parseToolCallResponse).
+      // ROADMAP 1.132 (F2) — structured answer shape (UNCONDITIONAL since
+      // the F1 flag deletion). Always present on a parsed coach/converse
+      // proposal (guaranteed valid, with `answer_text` derived from it — see
+      // parseToolCallResponse).
       answer_shape?: AnswerShape;
     };
 
@@ -490,28 +487,17 @@ const RawToolCallSchema = z
   .superRefine((obj, ctx) => {
     const { intent_class, action, clarification, coaching_mode, answer_text, answer_shape } =
       obj;
-    // CEE_ANSWER_SHAPE_ENFORCED (ROADMAP 1.132, F2 — default OFF, see
-    // config/index.ts). Flag OFF: `answer_shape` stays REJECTED exactly as
-    // the pre-flag `.strict()` schema rejected it (an unadvertised field the
-    // model cannot legitimately emit), so flag-off behaviour is byte-
-    // identical for every reachable input. Flag ON: coach/converse MUST
-    // carry a shape valid per AnswerShapeSchema (headline exactly one
-    // sentence, ≤3 non-blank bullets, non-blank detail); execute/clarify
-    // remain forbidden. Every violation is a plain Zod issue → the EXISTING
-    // REPAIR_ONCE retry in route-with-tool-use.ts, then a typed
-    // schema_repair_failed — no new retry plumbing (same design as
-    // CEE_ANSWER_TEXT_REQUIRED below).
+    // Answer-shape enforcement (ROADMAP 1.132, F2) — UNCONDITIONAL since the
+    // F1 flag deletion (no-dark-launches doctrine; CEE_ANSWER_SHAPE_ENFORCED
+    // is gone). coach/converse MUST carry a shape valid per AnswerShapeSchema
+    // (headline exactly one sentence, ≤3 non-blank bullets, non-blank
+    // detail); execute/clarify remain forbidden from carrying one. Every
+    // violation is a plain Zod issue → the EXISTING REPAIR_ONCE retry in
+    // route-with-tool-use.ts, then a typed schema_repair_failed — no new
+    // retry plumbing (same design as the unconditional answer_text rule
+    // below).
     let answerShapeValid = false;
-    if (!config.features.answerShapeEnforced) {
-      if (answer_shape !== undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['answer_shape'],
-          message:
-            'answer_shape is not accepted (CEE_ANSWER_SHAPE_ENFORCED is disabled) — put your complete answer in answer_text',
-        });
-      }
-    } else if (intent_class === 'execute' || intent_class === 'clarify') {
+    if (intent_class === 'execute' || intent_class === 'clarify') {
       if (answer_shape !== undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -530,9 +516,8 @@ const RawToolCallSchema = z
           path: ['answer_shape'],
           message:
             `answer_shape is required when intent_class === "${intent_class}" ` +
-            '(CEE_ANSWER_SHAPE_ENFORCED is enabled) — populate headline (exactly ' +
-            'one sentence), bullets (at most 3) and detail with your complete ' +
-            'user-facing answer.',
+            '— populate headline (exactly one sentence), bullets (at most 3) ' +
+            'and detail with your complete user-facing answer.',
         });
       } else {
         const parsedShape = AnswerShapeSchema.safeParse(answer_shape);
@@ -646,9 +631,9 @@ const RawToolCallSchema = z
     // the repair's tool_result content, then a typed schema_repair_failed
     // error if the retry also omits it. execute/clarify are untouched
     // (they forbid answer_text outright above).
-    // ROADMAP 1.132 interaction: when CEE_ANSWER_SHAPE_ENFORCED produced a
-    // VALID shape, parseToolCallResponse derives answer_text from it — the
-    // requirement below is satisfied by construction (derived text is
+    // ROADMAP 1.132 interaction: coach/converse always carry a VALID shape
+    // (enforced above), and parseToolCallResponse derives answer_text from it
+    // — the requirement below is satisfied by construction (derived text is
     // non-blank), so a shape-only tool call must not repair-loop on a
     // missing answer_text.
     if (
@@ -685,17 +670,15 @@ export function parseToolCallResponse(toolInput: unknown): ToolCallResponse {
     );
   }
   const data = parsed.data;
-  // ROADMAP 1.132 (F2): under CEE_ANSWER_SHAPE_ENFORCED the refinement above
-  // guarantees coach/converse carry a VALID shape, so this re-parse cannot
-  // throw; it exists purely to narrow `unknown` → `AnswerShape`. The shape
-  // is the single source of truth: `answer_text` is DERIVED from it
-  // (deterministically — headline / • bullets / detail), overriding any
-  // model-authored answer_text, so legacy consumers keep a populated
-  // answer_text while the user-facing text stops being a wall of prose.
-  // Flag OFF: `data.answer_shape` is unreachable here (rejected above) and
-  // the returned objects are byte-identical to the pre-flag shape.
+  // ROADMAP 1.132 (F2): the refinement above guarantees coach/converse carry
+  // a VALID shape (UNCONDITIONAL since the F1 flag deletion), so this
+  // re-parse cannot throw; it exists purely to narrow `unknown` →
+  // `AnswerShape`. The shape is the single source of truth: `answer_text` is
+  // DERIVED from it (deterministically — headline / • bullets / detail),
+  // overriding any model-authored answer_text, so legacy consumers keep a
+  // populated answer_text while the user-facing text stops being a wall of
+  // prose.
   const shape: AnswerShape | undefined =
-    config.features.answerShapeEnforced &&
     (data.intent_class === 'coach' || data.intent_class === 'converse') &&
     data.answer_shape !== undefined
       ? AnswerShapeSchema.parse(data.answer_shape)

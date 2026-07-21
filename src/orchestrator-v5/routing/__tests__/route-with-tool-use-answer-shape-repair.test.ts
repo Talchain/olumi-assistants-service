@@ -1,5 +1,6 @@
 /**
- * CEE_ANSWER_SHAPE_ENFORCED — REPAIR_ONCE integration (ROADMAP 1.132, F2).
+ * Answer-shape REPAIR_ONCE integration (ROADMAP 1.132, F2) — UNCONDITIONAL
+ * since the F1 flag deletion (no-dark-launches doctrine).
  *
  * Proves that a coach/converse tool call whose `answer_shape` is missing or
  * malformed is a plain Zod validation failure that flows through the
@@ -7,16 +8,15 @@
  * with the violation cited in the repair message, then a typed
  * `schema_repair_failed` RoutingError if the retry is also invalid.
  *
- * Also pins the tool-definition contract at the adapter seam:
- *   - flag ON  → the adapter receives the EXTENDED definition (answer_shape
- *                advertised);
- *   - flag OFF → the adapter receives the exact pre-flag OLUMI_ACTION_TOOL
- *                (served-definition byte-identity).
+ * Also pins the tool-definition contract at the adapter seam: the adapter
+ * ALWAYS receives the EXTENDED definition (answer_shape advertised) — the
+ * served-definition byte-identity to the pre-flag object is gone with the
+ * flag.
  *
  * Mirrors route-with-tool-use-answer-text-repair.test.ts.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   ChatWithToolsArgs,
@@ -28,7 +28,7 @@ import {
   type ContextPack,
 } from '../../context/context-pack-assembler.js';
 import { routeWithToolUse } from '../route-with-tool-use.js';
-import { OLUMI_ACTION_TOOL, OLUMI_ACTION_TOOL_NAME } from '../tool-schema.js';
+import { OLUMI_ACTION_TOOL_NAME } from '../tool-schema.js';
 import { deriveAnswerTextFromShape } from '../answer-shape.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 
@@ -76,37 +76,7 @@ const VALID_SHAPE = {
 // Deliberately malformed: 4 bullets breaches the ≤3 cap.
 const MALFORMED_SHAPE = { ...VALID_SHAPE, bullets: ['a', 'b', 'c', 'd'] };
 
-let priorFlag: string | undefined;
-
-async function setFlag(value: 'true' | undefined) {
-  priorFlag = process.env.CEE_ANSWER_SHAPE_ENFORCED;
-  if (value === undefined) {
-    delete process.env.CEE_ANSWER_SHAPE_ENFORCED;
-  } else {
-    process.env.CEE_ANSWER_SHAPE_ENFORCED = value;
-  }
-  const { _resetConfigCache } = await import('../../../config/index.js');
-  _resetConfigCache();
-}
-
-async function restoreFlag() {
-  if (priorFlag === undefined) {
-    delete process.env.CEE_ANSWER_SHAPE_ENFORCED;
-  } else {
-    process.env.CEE_ANSWER_SHAPE_ENFORCED = priorFlag;
-  }
-  const { _resetConfigCache } = await import('../../../config/index.js');
-  _resetConfigCache();
-}
-
-describe('routeWithToolUse — CEE_ANSWER_SHAPE_ENFORCED flag ON — REPAIR_ONCE', () => {
-  beforeEach(async () => {
-    await setFlag('true');
-  });
-  afterEach(async () => {
-    await restoreFlag();
-  });
-
+describe('routeWithToolUse — answer_shape REPAIR_ONCE (unconditional)', () => {
   it('coach tool call with a MALFORMED shape (4 bullets) triggers ONE repair citing the violation, then succeeds', async () => {
     const adapter = {
       chatWithTools: vi
@@ -219,7 +189,7 @@ describe('routeWithToolUse — CEE_ANSWER_SHAPE_ENFORCED flag ON — REPAIR_ONCE
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
   });
 
-  it('the adapter receives the EXTENDED tool definition (answer_shape advertised)', async () => {
+  it('the adapter ALWAYS receives the EXTENDED tool definition (answer_shape advertised, no env toggle)', async () => {
     const adapter = {
       chatWithTools: vi
         .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
@@ -234,52 +204,12 @@ describe('routeWithToolUse — CEE_ANSWER_SHAPE_ENFORCED flag ON — REPAIR_ONCE
         ),
     };
     await routeWithToolUse(minimalContextPack(), 'go', {
-      requestId: 'req-shape-tooldef-on',
+      requestId: 'req-shape-tooldef',
       adapter,
     });
     const args = adapter.chatWithTools.mock.calls[0]![0];
     const inputSchema = args.tools?.[0]?.input_schema;
     const properties = inputSchema?.properties as Record<string, unknown> | undefined;
     expect(properties?.answer_shape).toBeDefined();
-  });
-});
-
-describe('routeWithToolUse — CEE_ANSWER_SHAPE_ENFORCED flag OFF (default) — byte-identical', () => {
-  beforeEach(async () => {
-    await setFlag(undefined);
-  });
-  afterEach(async () => {
-    await restoreFlag();
-  });
-
-  it('coach tool call with legacy answer_text: single call, no repair, and the adapter receives the EXACT pre-flag tool definition', async () => {
-    const adapter = {
-      chatWithTools: vi
-        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
-        .mockResolvedValueOnce(
-          mkResult([
-            toolCallBlock({
-              intent_class: 'coach',
-              coaching_mode: 'reframe',
-              answer_text: 'The full coaching answer.',
-            }),
-          ]),
-        ),
-    };
-
-    const result = await routeWithToolUse(minimalContextPack(), 'go', {
-      requestId: 'req-shape-flag-off',
-      adapter,
-    });
-
-    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
-    expect(result.type).toBe('tool_call');
-    if (result.type === 'tool_call' && result.proposal.intent_class === 'coach') {
-      expect(result.proposal.answer_text).toBe('The full coaching answer.');
-      expect(result.proposal.answer_shape).toBeUndefined();
-    }
-    const args = adapter.chatWithTools.mock.calls[0]![0];
-    // Served-definition byte-identity: the exact same object, not a clone.
-    expect(args.tools?.[0]).toBe(OLUMI_ACTION_TOOL);
   });
 });

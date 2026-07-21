@@ -12,6 +12,7 @@ import {
   ToolCallParseError,
   parseToolCallResponse,
 } from '../tool-schema.js';
+import { deriveAnswerTextFromShape } from '../answer-shape.js';
 
 const VALID_EXECUTE_INPUT = {
   intent_class: 'execute' as const,
@@ -40,17 +41,26 @@ const VALID_CLARIFY_INPUT = {
   },
 };
 
-// answer_text is REQUIRED on coach/converse since 2026-07-20 (O-7 wave 2:
-// CEE_ANSWER_TEXT_REQUIRED deleted — the requirement is unconditional).
+// answer_shape is REQUIRED on coach/converse (ROADMAP 1.132, F2 —
+// unconditional since the F1 flag deletion). answer_text is DERIVED from the
+// shape at parse (single source of truth). The full shape contract lives in
+// tool-schema-answer-shape-enforced.test.ts; these fixtures carry a valid
+// shape so the shared coach/converse parse tests exercise the real contract.
+const VALID_SHAPE = {
+  headline: 'A complete answer in one sentence.',
+  bullets: ['A supporting point.'],
+  detail: 'The full supporting explanation carrying the rest of the answer.',
+};
+
 const VALID_CONVERSE_INPUT = {
   intent_class: 'converse' as const,
-  answer_text: 'A complete conversational answer.',
+  answer_shape: VALID_SHAPE,
 };
 
 const VALID_COACH_INPUT = {
   intent_class: 'coach' as const,
   coaching_mode: 'challenge' as const,
-  answer_text: 'A complete coaching answer.',
+  answer_shape: VALID_SHAPE,
 };
 
 describe('OLUMI_ACTION_TOOL definition', () => {
@@ -334,7 +344,7 @@ describe('parseToolCallResponse', () => {
   it('parses a coach response without coaching_mode', () => {
     const result = parseToolCallResponse({
       intent_class: 'coach',
-      answer_text: 'A complete coaching answer.',
+      answer_shape: VALID_SHAPE,
     });
     expect(result.intent_class).toBe('coach');
   });
@@ -371,7 +381,11 @@ describe('parseToolCallResponse', () => {
 
   it('rejects converse carrying coaching_mode (coach-only field)', () => {
     expect(() =>
-      parseToolCallResponse({ intent_class: 'converse', coaching_mode: 'deepen' }),
+      parseToolCallResponse({
+        intent_class: 'converse',
+        answer_shape: VALID_SHAPE,
+        coaching_mode: 'deepen',
+      }),
     ).toThrow(/coaching_mode is forbidden/);
   });
 
@@ -529,38 +543,44 @@ describe('OLUMI_ACTION_TOOL top-level answer_text field (coach/converse)', () =>
     expect(OLUMI_ACTION_TOOL.input_schema.required).not.toContain('answer_text');
   });
 
-  it('parses a coach response carrying answer_text', () => {
+  it('parses a coach response: answer_text is DERIVED from the required shape (ROADMAP 1.132)', () => {
     const result = parseToolCallResponse({
       intent_class: 'coach',
       coaching_mode: 'deepen',
-      answer_text: 'The full multi-sentence coaching answer goes here.',
+      answer_shape: VALID_SHAPE,
+      // A model-authored answer_text is OVERRIDDEN by the shape derivation.
+      answer_text: 'A rambling wall of prose that should not ship.',
     });
     expect(result.intent_class).toBe('coach');
     if (result.intent_class === 'coach') {
-      expect(result.answer_text).toBe('The full multi-sentence coaching answer goes here.');
+      expect(result.answer_text).toBe(deriveAnswerTextFromShape(VALID_SHAPE));
       expect(result.coaching_mode).toBe('deepen');
     }
   });
 
-  it('rejects a coach response with NO answer_text (requirement unconditional since 2026-07-20)', () => {
-    const { answer_text: _omitted, ...coachWithout } = VALID_COACH_INPUT;
-    expect(() => parseToolCallResponse(coachWithout)).toThrow(/answer_text is required/);
+  it('rejects a coach response with NO answer_shape (shape required, unconditional — ROADMAP 1.132)', () => {
+    const { answer_shape: _omitted, ...coachWithout } = VALID_COACH_INPUT;
+    expect(() =>
+      parseToolCallResponse({ ...coachWithout, answer_text: 'prose only' }),
+    ).toThrow(/answer_shape is required/);
   });
 
-  it('parses a converse response carrying answer_text', () => {
+  it('parses a converse response: answer_text is DERIVED from the required shape', () => {
     const result = parseToolCallResponse({
       intent_class: 'converse',
-      answer_text: 'The full conversational answer goes here.',
+      answer_shape: VALID_SHAPE,
     });
     expect(result.intent_class).toBe('converse');
     if (result.intent_class === 'converse') {
-      expect(result.answer_text).toBe('The full conversational answer goes here.');
+      expect(result.answer_text).toBe(deriveAnswerTextFromShape(VALID_SHAPE));
     }
   });
 
-  it('rejects a converse response with NO answer_text (requirement unconditional since 2026-07-20)', () => {
-    const { answer_text: _omitted, ...converseWithout } = VALID_CONVERSE_INPUT;
-    expect(() => parseToolCallResponse(converseWithout)).toThrow(/answer_text is required/);
+  it('rejects a converse response with NO answer_shape (shape required, unconditional)', () => {
+    const { answer_shape: _omitted, ...converseWithout } = VALID_CONVERSE_INPUT;
+    expect(() =>
+      parseToolCallResponse({ ...converseWithout, answer_text: 'prose only' }),
+    ).toThrow(/answer_shape is required/);
   });
 
   it('rejects execute carrying answer_text (execute uses action.explanation.answer_text)', () => {

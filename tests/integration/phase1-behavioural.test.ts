@@ -33,6 +33,7 @@ vi.mock('../../src/orchestrator-v5/session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../../src/orchestrator-v5/turn-executor.js');
 const { OLUMI_ACTION_TOOL_NAME } = await import('../../src/orchestrator-v5/routing/tool-schema.js');
+const { deriveAnswerTextFromShape } = await import('../../src/orchestrator-v5/routing/answer-shape.js');
 
 const BASE_PAYLOAD = makeMessagePayload({
   turn_id: '99999999-9999-4999-8999-999999999999',
@@ -263,26 +264,33 @@ describe('phase 1 behavioural — coach vs converse distinction', () => {
     //   - Tool-call with intent_class="coach" (+coaching_mode)
     //   - Text-only response (inferred "converse")
     // The two MUST be distinguishable in telemetry for Phase 2 evaluation.
-    // answer_text REQUIRED on coach tool calls since 2026-07-20 (O-7 wave 2:
-    // CEE_ANSWER_TEXT_REQUIRED deleted — requirement unconditional).
+    // answer_shape REQUIRED on coach tool calls (ROADMAP 1.132, F2 —
+    // unconditional since the F1 flag deletion); answer_text is DERIVED from
+    // it. The text-only converse ships the SAME derived text verbatim.
+    const COACH_SHAPE = {
+      headline: 'Think about what matters most.',
+      bullets: [],
+      detail: 'Weigh the options against your main goal before you decide.',
+    };
+    const derivedText = deriveAnswerTextFromShape(COACH_SHAPE);
     const adapterCoach = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
         toolResult(
-          { intent_class: 'coach', coaching_mode: 'deepen', answer_text: 'Think about what matters most.' },
+          { intent_class: 'coach', coaching_mode: 'deepen', answer_shape: COACH_SHAPE },
           'Short orientation.',
         ),
       ),
     };
     const adapterConverse = {
-      chatWithTools: vi.fn().mockResolvedValueOnce(textResult('Think about what matters most.')),
+      chatWithTools: vi.fn().mockResolvedValueOnce(textResult(derivedText)),
     };
 
     const coachRun = await runTurnExecutor(BASE_PAYLOAD, 'req-co', { routingAdapter: adapterCoach });
     const converseRun = await runTurnExecutor(BASE_PAYLOAD, 'req-cv', { routingAdapter: adapterConverse });
 
     // Runtime text identical
-    expect(coachRun.response.assistant_text).toBe('Think about what matters most.');
-    expect(converseRun.response.assistant_text).toBe('Think about what matters most.');
+    expect(coachRun.response.assistant_text).toBe(derivedText);
+    expect(converseRun.response.assistant_text).toBe(derivedText);
 
     // Intent classification DISTINCT
     expect(coachRun.telemetry.intent_class).toBe('coach');
@@ -307,18 +315,21 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
   // (tool-schema.ts); turn-executor prefers it when present and falls
   // back to `orientationText` exactly as before when absent.
 
-  it('coach tool call carrying answer_text ships the full answer, not the short orientationText', async () => {
+  it('coach tool call carrying a shape ships the full derived answer, not the short orientationText', async () => {
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
         toolResult(
           {
             intent_class: 'coach',
             coaching_mode: 'challenge',
-            answer_text:
-              "You're going against a decisive result, which is worth examining carefully. " +
-              'Two mid-level developers costs more up front but spreads delivery risk across ' +
-              'people rather than one senior hire. Worth stress-testing whether the timeline ' +
-              'assumption holds before committing either way.',
+            answer_shape: {
+              headline: "You're going against a decisive result, worth examining carefully.",
+              bullets: [
+                'Two mid-level developers cost more up front but spread delivery risk across people rather than one senior hire.',
+              ],
+              detail:
+                'Worth stress-testing whether the timeline assumption holds before committing either way.',
+            },
           },
           "You're going against a decisive result, which is worth examining carefully.",
         ),
@@ -331,8 +342,8 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
 
     expect(telemetry.intent_class).toBe('coach');
     expect(telemetry.coaching_mode).toBe('challenge');
-    // Ships the FULL authored answer_text, not the one-sentence orientation.
-    expect(response.assistant_text).toContain('spreads delivery risk across people');
+    // Ships the FULL derived answer, not the one-sentence orientation.
+    expect(response.assistant_text).toContain('spread delivery risk across people');
     expect(response.assistant_text).not.toBe(
       "You're going against a decisive result, which is worth examining carefully.",
     );
@@ -390,16 +401,20 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
     expect(response.assistant_text.trim()).not.toBe('');
   });
 
-  it('converse tool call carrying answer_text ships the full answer, not the short orientationText', async () => {
+  it('converse tool call carrying a shape ships the full derived answer, not the short orientationText', async () => {
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
         toolResult(
           {
             intent_class: 'converse',
-            answer_text:
-              'Good structural question. Looking at your model, there are two moves worth ' +
-              'considering: strengthening the budget link, or revisiting the churn assumption ' +
-              'that is driving most of the spread.',
+            answer_shape: {
+              headline: 'Good structural question, with two moves worth considering.',
+              bullets: [
+                'Strengthen the budget link.',
+                'Revisit the churn assumption that is driving most of the spread.',
+              ],
+              detail: 'Either move changes how the goal responds, so pick based on your constraint.',
+            },
           },
           'Good structural question.',
         ),
@@ -411,7 +426,7 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
     });
 
     expect(telemetry.intent_class).toBe('converse');
-    expect(response.assistant_text).toContain('revisiting the churn assumption');
+    expect(response.assistant_text).toContain('Revisit the churn assumption');
     expect(response.assistant_text).not.toBe('Good structural question.');
   });
 
@@ -431,19 +446,23 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
     expect(response.assistant_text.trim()).not.toBe('');
   });
 
-  it('a guard-tripping coach answer_text is scrubbed exactly like other narrate surfaces', async () => {
+  it('a guard-tripping coach answer (via the shape) is scrubbed exactly like other narrate surfaces', async () => {
     // Pseudo-XML tag contamination — same TAG_PATTERN sanitiseNarrateOutput
     // strips (tag markup only; inner text is retained per house behaviour)
     // on every other narrate surface, flagging contamination via the same
-    // telemetry event. Proves the new answer_text channel runs through the
-    // SAME egress guard as orientationText, not a bypass.
+    // telemetry event. Proves the shape-derived answer_text channel runs
+    // through the SAME egress guard as orientationText, not a bypass.
     const adapter = {
       chatWithTools: vi.fn().mockResolvedValueOnce(
         toolResult(
           {
             intent_class: 'coach',
             coaching_mode: 'summarise',
-            answer_text: '<internal>hidden reasoning</internal>The real coaching answer stands alone.',
+            answer_shape: {
+              headline: '<internal>hidden reasoning</internal>The real coaching answer stands alone.',
+              bullets: [],
+              detail: 'A plain supporting sentence with no markup.',
+            },
           },
           'Orientation text.',
         ),
@@ -456,7 +475,7 @@ describe('phase 1 behavioural — coach/converse answer_text channel (ROADMAP 1.
 
     // Tag markup stripped (matches sanitiseNarrateOutput's TAG_PATTERN
     // behaviour on every other surface); the un-tagged answer text ships.
-    expect(response.assistant_text).toBe('hidden reasoningThe real coaching answer stands alone.');
+    expect(response.assistant_text).toContain('hidden reasoningThe real coaching answer stands alone.');
     expect(response.assistant_text).not.toContain('<internal>');
     expect(response.assistant_text).not.toContain('</internal>');
     // Contamination was flagged (same telemetry event other narrate

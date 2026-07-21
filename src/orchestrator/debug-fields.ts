@@ -139,11 +139,10 @@ export type OlumiResponseWithDebugFields = OlumiResponse & {
    */
   readonly _reasoning?: string;
   /**
-   * ROADMAP 1.132 (F2) — flag-gated PRODUCT sidecar (same class as
-   * `_reasoning` above, NOT a debug/diagnostic surface): the validated
-   * coach/converse structured answer shape
-   * `{ headline: 1 sentence, bullets: ≤3, detail }` enforced by
-   * CEE_ANSWER_SHAPE_ENFORCED. Populated only when that flag is on AND the
+   * ROADMAP 1.132 (F2) — PRODUCT sidecar (same class as `_reasoning` above,
+   * NOT a debug/diagnostic surface): the validated coach/converse structured
+   * answer shape `{ headline: 1 sentence, bullets: ≤3, detail }`, enforced
+   * UNCONDITIONALLY since the F1 flag deletion. Populated only when the
    * turn-executor captured a shape whose derived text is exactly the final
    * assistant_text (fail-closed — see TurnExecutorRunResult.answerShape).
    * Stripped before strict `OlumiResponseSchema` validation, re-attached
