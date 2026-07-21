@@ -576,28 +576,80 @@ export function getDraftLlmRetryBudgetMs(elapsedMs: number): number {
 }
 
 /**
+ * Attempt-1 draft max_tokens ceiling — the "runaway sentinel".
+ *
+ * WHY THIS EXISTS (lean-retry REACHABILITY, 2026-07-21). #585 derived the
+ * attempt-1 budget from the timeout (8,550 tokens at the default 110s window),
+ * and #595 shipped the lean-retry backstop — but the backstop never fired,
+ * because a runaway that streams to the FULL 8,550-token budget truncates only
+ * near the end of the window (observed ~75-81s on staging), leaving too little
+ * remaining budget to afford a lean retry (the reachability arithmetic in the
+ * 21-Jul HANDOVER). The retry can only become reachable if attempt 1 fails
+ * FASTER on the runaway class — and the total window CANNOT grow (it is pinned
+ * under the ~125s browser-proxy deadline). So attempt 1's max_tokens is capped
+ * at a sentinel chosen ABOVE the observed convergent-draft demand and BELOW the
+ * affordable budget: healthy drafts finish unharmed, runaways truncate ~15-30s
+ * earlier, and that freed slack is exactly what the lean retry needs.
+ *
+ * CHOOSING THE SENTINEL (6,800). The demand distribution of CONVERGENT drafts:
+ * the n=84 completed-call sample topped out at 5,148 output tokens, and the
+ * largest converged draft observed in the runaway probes was 6,365 tokens
+ * ("long"). 6,800 sits ~7% above that worst-case convergent draft, so NO
+ * observed healthy draft is truncated by it, while every runaway (true demand
+ * >8,550, streaming cut mid-JSON) truncates at 6,800 instead of 8,550. It is
+ * strictly below the 8,550 affordable budget, so the ONLY behavioural change
+ * for a healthy draft is none — it completes below the cap exactly as before.
+ *
+ * The cap is applied at the adapter (`resolveDraftMaxTokens` ceiling arg,
+ * threaded via the draft call's `maxTokensCeiling` opt); it does NOT change the
+ * attempt-1 TIMEOUT (still DRAFT_LLM_TIMEOUT_MS), so the max_tokens/timeout
+ * derivation the #585 boot assertion guards is untouched — the ceiling can only
+ * ever LOWER the affordable budget, never raise it past what the timeout
+ * affords. Env-overridable for staging tuning; the default is derived from the
+ * measured convergent-draft demand, not tuned per deployment.
+ */
+export const DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL = parseIntEnv(
+  "CEE_DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL",
+  6_800,
+);
+
+/**
  * Output-token demand floor a LEAN corrective draft must be able to afford
  * before the lean-retry backstop (parse.ts Step 7) is allowed to fire.
  *
  * The backstop fires ONE corrective retry when the first draft truncates at
- * max_tokens, appending a directive that cuts output-token demand ("primary
- * trade-off only, ≤18 nodes, numbers qualitative"). The controlled probes that
- * motivated it (S-AUDIT-2026-07-20 V2/V3/V4c — the runaway brief with EITHER
- * the numeric verbosity OR the multi-alternative comparison removed) landed
- * lean drafts at 4,065 / 4,141 / 4,220 output tokens. This floor sits just
- * above that observed lean demand: it is the smallest budget in which a lean
- * draft is likely to COMPLETE. Budget honesty (2026-07-20 RCA class): a retry
- * launched into a window that cannot afford even a lean draft only burns a
- * second generation on a result guaranteed to truncate again or be discarded
- * by the Step-11 budget guard — so the gate fails fast with the existing typed
- * truncation error instead.
+ * max_tokens, appending a directive that cuts output-token demand (the primary
+ * trade-off only, a hard node ceiling, numbers qualitative). This floor is a
+ * MATCHED PAIR with that directive's node ceiling in `src/cee/constants.ts`
+ * (`DRAFT_LEAN_RETRY_DIRECTIVE`): both are anchored to the observed CONVERGENT
+ * draft distribution, so the retry only fires when the remaining window can
+ * COMPLETE the graph the directive actually asks for. Derive them together —
+ * a directive asking for a ≤12-node graph paired with a floor sized above
+ * anything larger would fire retries that truncate again.
+ *
+ * RECALIBRATED 4,500 -> 2,500 (2026-07-21, lean-retry reachability). The 4,500
+ * value was calibrated to the S-AUDIT-2026-07-20 V2/V3/V4c probes (4,065-4,220
+ * tokens), which were the runaway brief with ONE dimension removed — still
+ * relatively rich. Against the attempt-1 sentinel (6,800), a runaway truncates
+ * with only ~30-48s of window left (affording ~1,650-2,970 tokens at the
+ * conservative floor), so a 4,500-token floor could NEVER be met and the retry
+ * stayed unreachable. 2,500 is calibrated instead to the size of the observed
+ * healthy CONVERGED drafts (12-14 nodes / 2,206-2,601 tokens): a genuinely
+ * lean-but-useful graph, and the smallest budget in which the retuned ≤12-node
+ * directive is likely to COMPLETE. Budget honesty is preserved (2026-07-20 RCA
+ * class): when even 2,500 tokens are unaffordable — a late truncation — the
+ * gate still fails fast with the typed truncation error rather than burn a
+ * second generation guaranteed to truncate again or be discarded by the
+ * Step-11 budget guard.
  *
  * Paired with `getAffordableDraftTokens(getDraftLlmRetryBudgetMs(elapsed))`:
  * the remaining window must afford at least this many tokens at the derived
- * throughput floor. NOT env-gated (no new flags — the constant is derived from
- * the measured lean-draft distribution, not tuned per deployment).
+ * throughput floor, and the lean call's own derived max_tokens equals exactly
+ * that affordable figure — so the gate checks precisely what the retry gets.
+ * NOT env-gated (no new flags — the constant is derived from the measured
+ * converged-draft distribution, not tuned per deployment).
  */
-export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 4_500;
+export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 2_500;
 
 // ---------------------------------------------------------------------------
 // SSE heartbeat & resume polling

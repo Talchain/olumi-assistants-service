@@ -46,6 +46,17 @@ export interface DraftGraphArgs {
    */
   currencyInstruction?: string;
   /**
+   * System-side corrective directive appended to the draft prompt OUTSIDE the
+   * untrusted-user-content markers (system authority, not user text). Used by
+   * the lean-retry backstop and the strength-default nudge. Threaded here —
+   * rather than concatenated into `brief` — so it lands after the
+   * `[END_UNTRUSTED_USER_CONTENT]` marker at the adapter (#595 review P2: a
+   * corrective instruction spliced into the brief rides INSIDE the untrusted
+   * markers, telling the model to treat its own retry instruction as untrusted
+   * user input). Undefined on a normal first attempt.
+   */
+  systemDirective?: string;
+  /**
    * Extended thinking configuration. Anthropic only — non-Anthropic adapters ignore this.
    * When enabled, temperature is automatically set to 1 and structured outputs are disabled.
    */
@@ -380,6 +391,14 @@ export interface CallOpts {
   signal?: AbortSignal;
   bypassCache?: boolean; // Bypass prompt cache: invalidates cache and forces fresh load from Supabase (?supa=1 or X-CEE-Refresh-Prompt header)
   forceDefault?: boolean; // Force use of hardcoded default prompt instead of store prompt (?default=1 URL param)
+  /**
+   * Upper bound on the draft call's derived max_tokens (the "runaway sentinel").
+   * When set, the adapter caps the timeout-derived affordable budget at this
+   * value (`resolveDraftMaxTokens` ceiling arg) — it can only ever LOWER the
+   * budget, never raise it past what the timeout affords. Anthropic draft path
+   * only; other adapters ignore it. See DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL.
+   */
+  maxTokensCeiling?: number;
   collector?: CorrectionCollector; // Graph corrections tracking
   observabilityCollector?: ObservabilityCollector; // LLM call observability tracking
 }

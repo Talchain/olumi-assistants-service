@@ -571,10 +571,15 @@ export class OpenAIAdapter implements LLMAdapter {
     const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
     const briefSignalsHeader = args.briefSignalsHeader ?? "";
     const currencyInstruction = args.currencyInstruction ?? "";
+    // System-side corrective directive (lean-retry / strength-default nudge),
+    // OUTSIDE the untrusted markers — parity with the Anthropic adapter's P2
+    // fix so this path does not silently drop the directive now that it is
+    // threaded via systemDirective rather than concatenated into `brief`.
+    const systemDirective = args.systemDirective ? `\n\n${args.systemDirective}` : "";
     const userContent = `## Brief
 [BEGIN_UNTRUSTED_USER_CONTENT]
 ${brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}`;
+[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();

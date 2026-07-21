@@ -44,6 +44,11 @@ export type DraftArgs = {
   includeDebug?: boolean;
   briefSignalsHeader?: string;
   currencyInstruction?: string;
+  /**
+   * System-side corrective directive (lean-retry / strength-default nudge),
+   * appended OUTSIDE the untrusted-user-content markers — see buildDraftPrompt.
+   */
+  systemDirective?: string;
   /** Extended thinking configuration. When enabled, temperature is forced to 1 and structured outputs are disabled. */
   thinking?: ThinkingConfig;
 };
@@ -338,10 +343,21 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
   const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
   const briefSignalsHeader = args.briefSignalsHeader ?? "";
   const currencyInstruction = args.currencyInstruction ?? "";
+  // System-side corrective directive (lean-retry / strength-default nudge) —
+  // OUTSIDE the untrusted markers, alongside the other system-authored
+  // appendices (compliance reminder, signals header). #595 review P2: when a
+  // corrective instruction is concatenated into `args.brief` it lands INSIDE
+  // [BEGIN/END]_UNTRUSTED_USER_CONTENT, which tells the model to treat its own
+  // retry instruction as untrusted user input. Threading it here keeps the
+  // brief itself untouched (still fully bracketed) and gives the directive
+  // system authority.
+  const systemDirective = args.systemDirective
+    ? `\n\n${args.systemDirective}`
+    : "";
   const userContent = `## Brief
 [BEGIN_UNTRUSTED_USER_CONTENT]
 ${args.brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}`;
+[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
@@ -528,9 +544,16 @@ const DRAFT_MAX_TOKENS_FLOOR = 8192;
  * - configured too low: raised to min(DRAFT_MAX_TOKENS_FLOOR, affordable)
  * - configured too high: clamped down to affordable
  *
+ * `ceilingTokens` (optional) is the caller-supplied "runaway sentinel" — an
+ * upper bound applied AFTER all of the above. It can only ever LOWER the
+ * effective budget (a `Math.min`), never raise it past what the timeout
+ * affords, so the #585 max_tokens/timeout coherence guarantee is preserved: a
+ * ceiling above `affordable` is a no-op, and one below it makes the runaway
+ * class truncate earlier (lean-retry reachability, 2026-07-21). Absent → no cap.
+ *
  * Exported for the boot-time affordability assertion and value tests.
  */
-export function resolveDraftMaxTokens(timeoutMs: number): {
+export function resolveDraftMaxTokens(timeoutMs: number, ceilingTokens?: number): {
   configured: number | null;
   affordable: number;
   effective: number;
@@ -539,14 +562,20 @@ export function resolveDraftMaxTokens(timeoutMs: number): {
   // API-valid request (it will fail fast on time, not on a 400).
   const affordable = Math.max(1, getAffordableDraftTokens(timeoutMs));
   const configured = getMaxTokensFromConfig('draft_graph') ?? null;
+  // Apply the runaway sentinel LAST and only downward — never below 1 (API
+  // requires max_tokens >= 1) and never as an upward override of affordability.
+  const applyCeiling = (n: number): number =>
+    typeof ceilingTokens === "number" && ceilingTokens > 0
+      ? Math.max(1, Math.min(n, ceilingTokens))
+      : n;
   if (configured === null) {
-    return { configured, affordable, effective: affordable };
+    return { configured, affordable, effective: applyCeiling(affordable) };
   }
   const floor = Math.min(DRAFT_MAX_TOKENS_FLOOR, affordable);
   return {
     configured,
     affordable,
-    effective: Math.min(Math.max(configured, floor), affordable),
+    effective: applyCeiling(Math.min(Math.max(configured, floor), affordable)),
   };
 }
 
@@ -609,7 +638,7 @@ function isStructuredOutputsRejection(err: unknown): boolean {
 
 export async function draftGraphWithAnthropic(
   args: DraftArgs,
-  opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean; forceDefault?: boolean; signal?: AbortSignal; timeoutMs?: number }
+  opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean; forceDefault?: boolean; signal?: AbortSignal; timeoutMs?: number; maxTokensCeiling?: number }
 ): Promise<DraftGraphResult> {
   const collector = opts?.collector;
 
@@ -645,7 +674,7 @@ export async function draftGraphWithAnthropic(
     configured: configuredDraftMaxTokens,
     affordable: affordableDraftTokens,
     effective: derivedMaxTokens,
-  } = resolveDraftMaxTokens(effectiveTimeout);
+  } = resolveDraftMaxTokens(effectiveTimeout, opts?.maxTokensCeiling);
   if (configuredDraftMaxTokens !== null && configuredDraftMaxTokens > affordableDraftTokens) {
     log.warn({
       event: "cee.llm.draft_max_tokens_clamped",
@@ -3568,9 +3597,10 @@ export class AnthropicAdapter implements LLMAdapter {
         model: this.model,
         briefSignalsHeader: args.briefSignalsHeader,
         currencyInstruction: args.currencyInstruction,
+        systemDirective: args.systemDirective,
         thinking: args.thinking,
       },
-      { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault, signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs }
+      { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault, signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs, maxTokensCeiling: opts.maxTokensCeiling }
     );
 
     return {
