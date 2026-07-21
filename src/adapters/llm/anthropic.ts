@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Agent, fetch as undiciFetch } from "undici";
-import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, getAffordableDraftTokens, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
@@ -16,6 +16,7 @@ import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { resolveDraftMaxTokens, resolveDraftThinking, isDraftTruncated } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
 import { extractJsonFromResponse, type JsonExtractionOptions, type JsonExtractionResult } from '../../utils/json-extractor.js';
@@ -499,56 +500,11 @@ function isThinkingSupported(model: string, context: string): boolean {
   return false;
 }
 
-// Guard floor for an EXPLICITLY-configured draft max_tokens set too low —
-// a complex 15-node graph with coaching, causal claims, and goal constraints
-// can exceed 4096 tokens. The floor is capped at the affordable budget in
-// `resolveDraftMaxTokens`: a floor ABOVE what the timeout affords was the
-// exact 2026-07-20 outage defect (8,192 tokens needed 115s against a 105s
-// timeout, so long generations hung to the cap instead of completing).
-// The former hand-set default of 16,384 is GONE: when CEE_MAX_TOKENS_DRAFT
-// is unset, the budget is derived from the timeout instead of mirrored from
-// what the model could theoretically emit.
-const DRAFT_MAX_TOKENS_FLOOR = 8192;
-
-/**
- * Resolve the draft max_tokens for a call that will be aborted at `timeoutMs`.
- *
- * THE mechanism that closes the 2026-07-20 draft-outage arithmetic: the
- * effective token budget is DERIVED from the timeout at the call site — the
- * one place both values are visible — and can never exceed what the timeout
- * affords (`getAffordableDraftTokens`, conservative constants documented in
- * `config/timeouts.ts`). A runaway generation now returns at the token cap
- * (stop_reason=max_tokens, typed handling below) instead of hanging to the
- * timeout and 504ing.
- *
- * - unconfigured: effective = affordable — the timeout-derived budget from
- *   `getAffordableDraftTokens(timeoutMs)` (config/timeouts.ts), computed from the
- *   throughput floor and TTFB overhead, NOT a hand-set number (illustrative:
- *   ~8,550 tokens at the default LLM window — recompute from config, do not pin)
- * - configured too low: raised to min(DRAFT_MAX_TOKENS_FLOOR, affordable)
- * - configured too high: clamped down to affordable
- *
- * Exported for the boot-time affordability assertion and value tests.
- */
-export function resolveDraftMaxTokens(timeoutMs: number): {
-  configured: number | null;
-  affordable: number;
-  effective: number;
-} {
-  // Anthropic requires max_tokens >= 1; a degenerate timeout still needs an
-  // API-valid request (it will fail fast on time, not on a 400).
-  const affordable = Math.max(1, getAffordableDraftTokens(timeoutMs));
-  const configured = getMaxTokensFromConfig('draft_graph') ?? null;
-  if (configured === null) {
-    return { configured, affordable, effective: affordable };
-  }
-  const floor = Math.min(DRAFT_MAX_TOKENS_FLOOR, affordable);
-  return {
-    configured,
-    affordable,
-    effective: Math.min(Math.max(configured, floor), affordable),
-  };
-}
+// Affordability derivation + terminal-completion policy now live in the
+// provider-independent seam (ROADMAP 2.90) so the OpenAI draft path shares them.
+// Re-exported here so `resolveDraftMaxTokens` keeps its existing import path
+// (server.ts boot assertion + the #588 value tests import it from this module).
+export { resolveDraftMaxTokens };
 
 /**
  * Determine if a caught error is a Structured Outputs **capability** rejection
@@ -623,8 +579,8 @@ export async function draftGraphWithAnthropic(
   const promptMeta = getSystemPromptMeta('draft_graph');
   const model = args.model || "claude-sonnet-4-6";
   const draftThinkingRequested = args.thinking?.type === 'enabled';
-  const draftThinkingEnabled = draftThinkingRequested && isThinkingSupported(model, 'draft_graph');
-  const draftThinkingBudget = draftThinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
+  const draftThinkingSupported = draftThinkingRequested && isThinkingSupported(model, 'draft_graph');
+  const requestedThinkingBudget = draftThinkingSupported ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
 
   // Align timeout with DRAFT_LLM_TIMEOUT_MS when not explicitly overridden.
   // Previously fell back to HTTP_CLIENT_TIMEOUT_MS, which reserves NO post-LLM
@@ -657,23 +613,46 @@ export async function draftGraphWithAnthropic(
     }, "[Anthropic] configured draft max_tokens exceeds what the timeout affords — clamped (2026-07-20 outage class; boot logs the same at ERROR)");
   }
 
-  // Extended thinking is an explicit operator opt-in (CEE_DRAFT_GRAPH_THINKING,
-  // default off) and the Anthropic API requires max_tokens > budget_tokens —
-  // clamping below the budget would 400 every call. If the operator's thinking
-  // budget forces max_tokens past affordability, honour the API constraint but
-  // say so loudly: this is the ONE remaining way to exceed the affordable
-  // budget, and it is a deliberate config choice, not silent arithmetic.
+  // THINKING CLAMP (ROADMAP 2.90, Codex #8). Extended thinking is an explicit
+  // operator opt-in (CEE_DRAFT_GRAPH_THINKING, default off). The Anthropic API
+  // requires max_tokens > budget_tokens, so a thinking budget forces a max_tokens
+  // floor. The PRE-2.90 behaviour raised max_tokens to `budget + 1024` and only
+  // WARNED when that exceeded affordability — which RESURRECTED the exact
+  // unaffordable budget the 2026-07-20 outage fix removed (default budget 10000 +
+  // 1024 = 11024 > affordable ~8550, boot warns-but-continues). `resolveDraftThinking`
+  // instead clamps the thinking budget DOWN so the TOTAL request (thinking +
+  // reserved visible output) is provably ≤ affordable; if affordability cannot fit
+  // even the minimum thinking budget plus a real answer, thinking is disabled
+  // rather than shipped unaffordable. Boot independently rejects an unaffordable
+  // explicit config (validateDraftThinkingAffordability, ERROR level).
+  let draftThinkingEnabled = draftThinkingSupported;
+  let draftThinkingBudget = requestedThinkingBudget;
   let maxTokens = derivedMaxTokens;
-  if (draftThinkingEnabled && draftThinkingBudget + 1024 > maxTokens) {
-    maxTokens = draftThinkingBudget + 1024;
-    if (maxTokens > affordableDraftTokens) {
+  if (draftThinkingSupported) {
+    const clampedThinking = resolveDraftThinking({
+      requestedBudget: requestedThinkingBudget,
+      affordable: affordableDraftTokens,
+      derivedMaxTokens,
+    });
+    draftThinkingEnabled = clampedThinking.enabled;
+    draftThinkingBudget = clampedThinking.budget;
+    maxTokens = clampedThinking.maxTokens;
+    if (clampedThinking.disabled) {
+      log.error({
+        event: "cee.llm.draft_thinking_disabled_unaffordable",
+        requested_budget_tokens: requestedThinkingBudget,
+        affordable_tokens: affordableDraftTokens,
+        timeout_ms: effectiveTimeout,
+      }, "[Anthropic] affordable draft budget cannot fit the minimum extended-thinking budget plus a real answer — extended thinking DISABLED for this call; the request stays within the affordable budget instead of hanging to the timeout (2026-07-20 outage class). Raise DRAFT_REQUEST_BUDGET_MS to re-enable.");
+    } else if (clampedThinking.clamped) {
       log.warn({
-        event: "cee.llm.draft_thinking_exceeds_affordable",
-        thinking_budget_tokens: draftThinkingBudget,
+        event: "cee.llm.draft_thinking_budget_clamped",
+        requested_budget_tokens: requestedThinkingBudget,
+        clamped_budget_tokens: draftThinkingBudget,
         max_tokens: maxTokens,
         affordable_tokens: affordableDraftTokens,
         timeout_ms: effectiveTimeout,
-      }, "[Anthropic] extended-thinking budget forces draft max_tokens above the affordable token budget — generation may hit the timeout; lower CEE_DRAFT_GRAPH_THINKING_BUDGET or raise DRAFT_REQUEST_BUDGET_MS");
+      }, "[Anthropic] extended-thinking budget clamped DOWN so the total request fits the affordable draft budget — no longer resurrects the unaffordable 2026-07-20 outage config (Codex #8). Lower CEE_DRAFT_GRAPH_THINKING_BUDGET or raise DRAFT_REQUEST_BUDGET_MS to avoid the clamp.");
     }
   }
   // Anthropic requires temperature=1 when extended thinking is active
@@ -881,7 +860,7 @@ export async function draftGraphWithAnthropic(
     // parses, the draft is accepted (truncated-but-parseable), otherwise the
     // failure below is typed as truncation rather than generic non-JSON.
     const stopReason = (response as { stop_reason?: string | null }).stop_reason ?? undefined;
-    const truncatedAtMaxTokens = stopReason === "max_tokens";
+    const truncatedAtMaxTokens = isDraftTruncated(stopReason);
 
     // LLM metadata for FAILED calls (probe aggravator 2, S-AUDIT-2026-07-20):
     // attached to every parse/validation throw below so Stage 1 (parse.ts)
