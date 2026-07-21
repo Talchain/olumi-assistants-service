@@ -39,6 +39,7 @@ import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { validateIngress } from '../validators/b1.js';
 import {
   parseRequestExtensions,
+  V5RequestExtensionsSchema,
   type ParsedRequestExtensions,
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import { preflightEnsureScenario } from '../orchestrator-v5/build-turn-context.js';
@@ -58,14 +59,19 @@ import { buildSignInRequiredError, resolveUserIdentity } from './user-identity.j
 // repair (deterministic value-update with selection narrowing /
 // selected-deictic). Same strip-then-parse pattern: B1 strict() would
 // otherwise reject the key as unknown.
-const V5_EXTENSION_FIELDS = [
-  'graph_state',
-  'analysis_state',
-  'user_id',
-  'selected_elements',
-] as const;
+//
+// DERIVED, not mirrored (trap-12 discipline): the strip-list is exactly the
+// key set of the V5 extension contract (`V5RequestExtensionsSchema`), which is
+// itself built from the field schemas `parseRequestExtensions` runs. Adding an
+// extension field there adds it here automatically — there is no second hand-
+// maintained list to forget. The drift tripwire in
+// `tests/contract/v5-extension-fields-derived.test.ts` fails loudly if the
+// strip-set and the parser's consumed-set ever diverge.
+export const V5_EXTENSION_FIELDS: readonly string[] = Object.keys(
+  V5RequestExtensionsSchema.shape,
+);
 
-function stripExtensionFields(body: unknown): unknown {
+export function stripExtensionFields(body: unknown): unknown {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
   const copy: Record<string, unknown> = { ...(body as Record<string, unknown>) };
   for (const k of V5_EXTENSION_FIELDS) delete copy[k];
