@@ -511,7 +511,6 @@ const ConfigSchema = z.object({
     // field was never env-mapped in rawConfig and had zero source consumers.
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
-    orchestrator: booleanString.default(false), // CEE_ORCHESTRATOR_ENABLED — Track C: multi-turn conversational decision modelling
     orchestratorV2: booleanString.default(false), // ENABLE_ORCHESTRATOR_V2 — V2 five-phase pipeline
     // CEE_ORCHESTRATOR_CONTEXT_ENABLED — Context Fabric: 3-zone cache-aware context assembly pipeline
     // IMPORTANT: V2 prompt path must have parity with V1 before enabling on staging. See A.4 audit.
@@ -1429,8 +1428,6 @@ function parseConfig(): Config {
       clarifier: env.CLARIFIER_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
       enableLegacySSE: env.ENABLE_LEGACY_SSE,
-      // CEE_ORCHESTRATOR_ENABLED preferred; falls back to ENABLE_ORCHESTRATOR
-      orchestrator: env.CEE_ORCHESTRATOR_ENABLED ?? env.ENABLE_ORCHESTRATOR,
       orchestratorV2: env.ENABLE_ORCHESTRATOR_V2,
       contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
       dskV0: env.ENABLE_DSK_V0,

@@ -3861,20 +3861,17 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
     if (!verifyAdminKey(request, reply, 'read')) return;
 
     let nodeEnv: string;
-    let orchestratorEnabled: boolean;
     let dskEnabled: boolean;
     let anthropicPromptCacheEnabled: boolean;
     let zone2RegistryEnabled: boolean;
 
     try {
       nodeEnv = config.server.nodeEnv ?? 'unknown';
-      orchestratorEnabled = config.features.orchestrator ?? false;
       dskEnabled = config.features.dskEnabled ?? false;
       anthropicPromptCacheEnabled = config.promptCache.anthropicEnabled ?? false;
       zone2RegistryEnabled = config.features.zone2Registry ?? false;
     } catch {
       nodeEnv = 'unknown';
-      orchestratorEnabled = false;
       dskEnabled = false;
       anthropicPromptCacheEnabled = false;
       zone2RegistryEnabled = false;
@@ -3886,7 +3883,6 @@ export async function adminUIRoutes(app: FastifyInstance): Promise<void> {
       .send({
       node_env: nodeEnv,
       feature_flags: [
-        { name: 'CEE_ORCHESTRATOR_ENABLED', enabled: orchestratorEnabled },
         { name: 'DSK_ENABLED', enabled: dskEnabled },
         { name: 'ANTHROPIC_PROMPT_CACHE_ENABLED', enabled: anthropicPromptCacheEnabled },
         { name: 'CEE_ZONE2_REGISTRY_ENABLED', enabled: zone2RegistryEnabled },
