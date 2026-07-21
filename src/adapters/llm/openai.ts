@@ -14,6 +14,7 @@ import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { resolveDraftMaxTokens, isDraftTruncated } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
 import {
@@ -571,10 +572,15 @@ export class OpenAIAdapter implements LLMAdapter {
     const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
     const briefSignalsHeader = args.briefSignalsHeader ?? "";
     const currencyInstruction = args.currencyInstruction ?? "";
+    // System-side corrective directive (lean-retry / strength-default nudge),
+    // OUTSIDE the untrusted markers — parity with the Anthropic adapter's P2
+    // fix so this path does not silently drop the directive now that it is
+    // threaded via systemDirective rather than concatenated into `brief`.
+    const systemDirective = args.systemDirective ? `\n\n${args.systemDirective}` : "";
     const userContent = `## Brief
 [BEGIN_UNTRUSTED_USER_CONTENT]
 ${brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}`;
+[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
@@ -601,7 +607,17 @@ ${brief}
 
     try {
       const apiClient = getClient();
-      const maxTokens = getMaxTokensFromConfig('draft_graph');
+      // Derive the draft token cap from the call-site timeout — the SAME
+      // affordability mechanism the Anthropic path uses (ROADMAP 2.90, Codex #9).
+      // Previously this sent the raw configured value or NO cap at all
+      // (getMaxTokensFromConfig returns undefined when unset → buildModelParams
+      // omits the cap), so a runaway OpenAI draft could hang to the timeout
+      // exactly as the Anthropic one did before #585. The effective value is
+      // always ≥ 1, so a cap is now ALWAYS sent.
+      const {
+        affordable: affordableDraftTokens,
+        effective: maxTokens,
+      } = resolveDraftMaxTokens(effectiveTimeout);
       const modelParams = buildModelParams(this.model, 0, { maxTokens });
       const temperature = 'temperature' in modelParams
         ? (modelParams as any).temperature as number
@@ -660,8 +676,68 @@ ${brief}
 
       const finishReason = response.choices[0]?.finish_reason;
 
+      // TERMINAL-COMPLETION POLICY (ROADMAP 2.90, Codex #9): finish_reason=length
+      // is OpenAI's truncation signal — the cross-provider analogue of Anthropic's
+      // stop_reason=max_tokens, normalised in the shared seam (isDraftTruncated).
+      // With max_tokens now DERIVED from the timeout, a runaway generation RETURNS
+      // truncated inside the window instead of hanging to it. Policy (same as
+      // Anthropic, per the recorded A1 call): accept the truncated draft if it
+      // still parses+validates; otherwise fail FAST and TYPED (truncated_at_max_tokens)
+      // so the runaway case is diagnosable rather than looking like generic non-JSON.
+      const truncatedAtMaxTokens = isDraftTruncated(finishReason);
+      const failedCallLlmMeta = {
+        model: this.model,
+        prompt_version: promptMeta.prompt_version,
+        prompt_hash: promptMeta.prompt_hash,
+        temperature,
+        provider_latency_ms: _elapsedMs,
+        finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
+        token_usage: {
+          prompt_tokens: response.usage?.prompt_tokens ?? 0,
+          completion_tokens: response.usage?.completion_tokens ?? 0,
+          total_tokens: response.usage?.total_tokens ?? ((response.usage?.prompt_tokens ?? 0) + (response.usage?.completion_tokens ?? 0)),
+        },
+      };
+      if (truncatedAtMaxTokens) {
+        log.error({
+          event: "cee.llm.draft_truncated_max_tokens",
+          model: this.model,
+          max_tokens: maxTokens,
+          affordable_tokens: affordableDraftTokens,
+          output_tokens: response.usage?.completion_tokens ?? 0,
+          timeout_ms: effectiveTimeout,
+          provider_latency_ms: _elapsedMs,
+        }, "[OpenAI] draft_graph generation hit finish_reason=length — runaway generation truncated by the derived token budget instead of hanging to the timeout (2026-07-20 outage class)");
+      }
+
       // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod
-      const rawJson = safeParseJson(content, "draft_graph", _elapsedMs, idempotencyKey);
+      let rawJson: any;
+      try {
+        rawJson = safeParseJson(content, "draft_graph", _elapsedMs, idempotencyKey);
+      } catch (parseErr) {
+        if (truncatedAtMaxTokens) {
+          throw Object.assign(
+            new UpstreamNonJsonError(
+              `openai draft_graph output truncated at max_tokens=${maxTokens} (finish_reason=length, ` +
+              `output_tokens=${response.usage?.completion_tokens ?? 0}) — runaway generation returned truncated JSON ` +
+              `inside the ${effectiveTimeout}ms timeout instead of hanging to it`,
+              "openai",
+              "draft_graph",
+              _elapsedMs,
+              content.slice(0, 500),
+              undefined,
+              undefined,
+              idempotencyKey,
+              parseErr,
+            ),
+            { _llm_meta: failedCallLlmMeta, truncated_at_max_tokens: true },
+          );
+        }
+        if (parseErr instanceof Error && !(parseErr as { _llm_meta?: unknown })._llm_meta) {
+          Object.assign(parseErr, { _llm_meta: failedCallLlmMeta });
+        }
+        throw parseErr;
+      }
       const rawNodeKinds = Array.isArray((rawJson as any)?.nodes)
         ? ((rawJson as any).nodes as any[])
           .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
@@ -714,6 +790,30 @@ ${brief}
           .join('; ');
         const formIssues = (flatErrors.formErrors || []).join('; ');
         const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
+
+        // Truncation typing (ROADMAP 2.90, Codex #9): a generation cut at the
+        // derived token budget can still yield text the parser turns into a
+        // partial object that then fails HERE, at schema validation. Type it as
+        // truncation (matching the Anthropic path) so the pipeline's recovery-copy
+        // selection keys off the FLAG, not a brittle message-prefix match.
+        if (truncatedAtMaxTokens) {
+          throw Object.assign(
+            new UpstreamNonJsonError(
+              `openai draft_graph output truncated at max_tokens=${maxTokens} (finish_reason=length, ` +
+              `output_tokens=${response.usage?.completion_tokens ?? 0}) — runaway generation returned a partial ` +
+              `graph that failed schema validation inside the ${effectiveTimeout}ms timeout instead of hanging to it` +
+              (details ? ` (${details})` : ''),
+              "openai",
+              "draft_graph",
+              _elapsedMs,
+              rawOutputSample,
+              undefined,
+              undefined,
+              idempotencyKey,
+            ),
+            { _llm_meta: failedCallLlmMeta, truncated_at_max_tokens: true },
+          );
+        }
 
         throw new Error(`openai_response_invalid_schema: ${details || 'unknown validation error'}`);
       }

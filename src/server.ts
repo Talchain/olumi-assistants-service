@@ -46,6 +46,7 @@ import { limitsRoute } from "./routes/v1.limits.js";
 import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
 import { getAdapter, warmProviderConfigCache, getMaxTokensFromConfig } from "./adapters/llm/router.js";
+import { validateDraftThinkingAffordability } from "./adapters/llm/draft-budget.js";
 import { validateModelsAtStartup, getEnabledModelsSummary } from "./config/models.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
@@ -276,6 +277,18 @@ export async function build() {
   // has already made safe. Both compared values are DERIVED from live config.
   for (const affordabilityError of validateDraftTokenAffordability(getMaxTokensFromConfig('draft_graph') ?? null)) {
     log.error({ event: 'config.draft_token_affordability' }, affordabilityError);
+  }
+
+  // Boot assertion (thinking half, ROADMAP 2.90 / Codex #8): an ENABLED draft
+  // extended-thinking budget the derived timeout cannot afford is the config that
+  // resurrects the outage arithmetic. The runtime clamps independently
+  // (resolveDraftThinking), so this logs at ERROR and continues. Both compared
+  // values are DERIVED from live config.
+  for (const thinkingError of validateDraftThinkingAffordability(
+    config.cee.thinking.draftGraphEnabled,
+    config.cee.thinking.draftGraphBudget,
+  )) {
+    log.error({ event: 'config.draft_thinking_affordability' }, thinkingError);
   }
 
   // Validate timeout relationships (warn about misconfigurations).

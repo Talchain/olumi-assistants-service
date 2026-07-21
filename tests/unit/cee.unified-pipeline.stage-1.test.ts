@@ -102,6 +102,14 @@ import { createEdgeFieldStash } from "../../src/cee/unified-pipeline/edge-identi
 import { normaliseCeeGraphVersionAndProvenance } from "../../src/cee/transforms/graph-normalisation.js";
 import { config } from "../../src/config/index.js";
 import { DRAFT_LEAN_RETRY_DIRECTIVE } from "../../src/cee/constants.js";
+// Real values (the timeouts mock above spreads the real module): the sentinel
+// and the affordability functions come from source, so the reachability math
+// here derives from the same code parse.ts runs.
+import {
+  DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
+  getDraftLlmRetryBudgetMs,
+  getAffordableDraftTokens,
+} from "../../src/config/timeouts.js";
 
 /** A max_tokens-truncation error as the Anthropic adapter throws it (#588):
  *  an Error carrying the structured `truncated_at_max_tokens: true` flag. */
@@ -535,7 +543,7 @@ describe("runStageParse", () => {
       });
 
     // Near-zero elapsed → remaining window ~110s affords ~8,550 tokens,
-    // comfortably above the 4,500-token lean-draft floor → retry fires.
+    // comfortably above the 2,700-token lean-draft floor → retry fires.
     const ctx = makeCtx();
     await runStageParse(ctx);
 
@@ -546,10 +554,64 @@ describe("runStageParse", () => {
     // The corrective retry must carry the demand-reducing lean directive —
     // that is the mechanism (V2/V3/V4c: removing numeric/comparison verbosity
     // collapses the runaway). Attempt 1 must NOT carry it.
-    const attempt1Brief = mockAdapter.draftGraph.mock.calls[0][0].brief as string;
-    const attempt2Brief = mockAdapter.draftGraph.mock.calls[1][0].brief as string;
-    expect(attempt1Brief).not.toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
-    expect(attempt2Brief).toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
+    //
+    // #595 review P2: the directive rides SYSTEM-SIDE via `systemDirective`,
+    // NOT concatenated into `brief` (where it would sit inside the untrusted
+    // markers). Assert both: it is in systemDirective on attempt 2, and it is
+    // in NEITHER attempt's brief.
+    const attempt1 = mockAdapter.draftGraph.mock.calls[0][0];
+    const attempt2 = mockAdapter.draftGraph.mock.calls[1][0];
+    expect(attempt1.systemDirective).toBeUndefined();
+    expect(attempt2.systemDirective).toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
+    expect(attempt1.brief).not.toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
+    expect(attempt2.brief).not.toContain(DRAFT_LEAN_RETRY_DIRECTIVE);
+
+    // Design (i): every draft call carries the attempt-1 runaway sentinel as
+    // its max_tokens ceiling — the lever that makes truncation (and hence this
+    // retry) fire earlier.
+    expect(mockAdapter.draftGraph.mock.calls[0][1].maxTokensCeiling).toBe(
+      DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
+    );
+  });
+
+  it("REACHABILITY: fires the lean retry at a sentinel-truncation elapsed (~62s) where the pre-recalibration 4,500 floor would NOT have", async () => {
+    setupMocks();
+
+    // The load-bearing reachability fix. With attempt-1 capped at the runaway
+    // sentinel (6,800 tok), a runaway truncates ~62s into the request (vs ~78s
+    // at the old 8,550-tok budget). At 62s elapsed the remaining window affords
+    // ~2,970 tokens — ABOVE the recalibrated 2,700 floor (fires) but BELOW the
+    // old 4,500 floor (would have stayed unreachable). This test pins that the
+    // retry is now reachable exactly in the window the sentinel creates.
+    const elapsedMs = 62_000;
+    const window = getDraftLlmRetryBudgetMs(elapsedMs); // real fn: 110_000 - 62_000
+    const affordable = getAffordableDraftTokens(window);
+    // Guard the premise: affordable sits in the (2700, 4500) gap. If the
+    // constants move, this derived guard fails loudly rather than the test
+    // silently asserting the wrong regime.
+    expect(affordable).toBeGreaterThanOrEqual(2_700);
+    expect(affordable).toBeLessThan(4_500);
+
+    mockAdapter.draftGraph
+      .mockRejectedValueOnce(makeTruncationError())
+      .mockResolvedValueOnce({
+        graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
+        rationales: [],
+        usage: { input_tokens: 500, output_tokens: 200 },
+        meta: { model: "gpt-4o" },
+      });
+
+    const ctx = makeCtx({
+      opts: { schemaVersion: "v3", requestStartMs: Date.now() - elapsedMs },
+    });
+    await runStageParse(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(ctx.graph).toBeDefined();
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
+    expect(mockAdapter.draftGraph.mock.calls[1][0].systemDirective).toContain(
+      DRAFT_LEAN_RETRY_DIRECTIVE,
+    );
   });
 
   it("does NOT fire the lean retry when the remaining budget cannot afford a lean draft (fail fast with the typed truncation error)", async () => {
@@ -566,11 +628,13 @@ describe("runStageParse", () => {
         meta: { model: "gpt-4o" },
       });
 
-    // 60s elapsed → remaining window = 120 − 60 − 10 = 50s → affords
-    // (50 − 15) × 90 = 3,150 tokens < the 4,500-token lean-draft floor.
-    // The gate refuses the retry and the typed truncation error propagates.
+    // 75s elapsed → remaining window = 120 − 75 − 10 = 35s → affords
+    // (35 − 15) × 90 = 1,800 tokens < the recalibrated 2,700-token lean-draft
+    // floor. A late truncation with no room left: the gate refuses the retry
+    // and the typed truncation error propagates (degrade honestly, never burn a
+    // doomed second generation).
     const ctx = makeCtx({
-      opts: { schemaVersion: "v3", requestStartMs: Date.now() - 60_000 },
+      opts: { schemaVersion: "v3", requestStartMs: Date.now() - 75_000 },
     });
 
     await expect(runStageParse(ctx)).rejects.toThrow("truncated at max_tokens");

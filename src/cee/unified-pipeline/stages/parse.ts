@@ -24,6 +24,7 @@ import {
   LLM_POST_PROCESSING_HEADROOM_MS,
   MIN_DRAFT_RETRY_BUDGET_MS,
   LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+  DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
   REPAIR_TIMEOUT_MS,
   getDraftLlmRetryBudgetMs,
   getAffordableDraftTokens,
@@ -208,13 +209,23 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
         ? { type: 'enabled' as const, budget_tokens: config.cee.thinking.draftGraphBudget }
         : undefined;
 
+      // Corrective directives (lean-retry / strength-default nudge) are threaded
+      // SYSTEM-SIDE via `systemDirective`, NOT concatenated into the brief:
+      // the adapter lands them OUTSIDE the [BEGIN/END]_UNTRUSTED_USER_CONTENT
+      // markers so the model reads its own retry instruction with system
+      // authority rather than as untrusted user text (#595 review P2). The
+      // brief itself stays fully bracketed and unchanged. Mutually exclusive:
+      // a truncation throws before strength detection runs, so at most one is
+      // ever set on a given attempt.
+      const systemDirective = leanDraftRetried
+        ? DRAFT_LEAN_RETRY_DIRECTIVE
+        : strengthDefaultRetried
+          ? STRENGTH_DEFAULT_RETRY_NUDGE
+          : undefined;
+
       draftResult = await draftAdapter.draftGraph(
         {
-          brief: leanDraftRetried
-            ? `${ctx.effectiveBrief}\n\n${DRAFT_LEAN_RETRY_DIRECTIVE}`
-            : strengthDefaultRetried
-              ? `${ctx.effectiveBrief}\n\n${STRENGTH_DEFAULT_RETRY_NUDGE}`
-              : ctx.effectiveBrief,
+          brief: ctx.effectiveBrief,
           docs,
           seed: 17,
           flags: typeof ctx.input.flags === "object" && ctx.input.flags !== null
@@ -223,11 +234,20 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           includeDebug: ctx.input.include_debug === true,
           briefSignalsHeader: ctx.input.briefSignalsHeader,
           currencyInstruction: ctx.input.currencyInstruction,
+          ...(systemDirective ? { systemDirective } : {}),
           ...(draftThinking ? { thinking: draftThinking } : {}),
         },
         {
           requestId,
           timeoutMs: attemptTimeoutMs,
+          // Attempt-1 runaway sentinel (lean-retry reachability, 2026-07-21):
+          // cap the draft's derived max_tokens ABOVE the observed convergent
+          // demand (6,365 tok) and BELOW the affordable budget (8,550 tok) so a
+          // runaway truncates ~15-30s earlier, freeing the window the lean
+          // retry needs. Harmless on the retry (its short window already
+          // affords < the sentinel) and on healthy drafts (they finish below
+          // the cap). Anthropic path only; other adapters ignore it.
+          maxTokensCeiling: DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
           collector: ctx.collector,
           bypassCache: ctx.opts.refreshPrompts,
           forceDefault: ctx.opts.forceDefault,
@@ -378,19 +398,23 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
         );
       }
 
-      // Lean-retry backstop (fix e, S-AUDIT-2026-07-20): a draft truncated at
-      // max_tokens is a demand-exceeds-budget failure — the model committed to
-      // a graph too large to finish inside the derived token budget. Fire ONE
-      // corrective retry with a directive that CUTS output-token demand
-      // (primary trade-off only, ≤18 nodes, numbers qualitative); the probes
-      // that motivated it (V2/V3/V4c) land lean drafts at ~4,100 tokens.
-      // Attempt-1-only, so a second truncation falls through to the typed
-      // error below. Budget honesty (reuse #576's affordability gate): if the
-      // window still affordable inside DRAFT_REQUEST_BUDGET_MS cannot fit even
-      // a lean draft (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR), fail fast with the
-      // existing typed truncation error rather than burn a second full
-      // generation on a result guaranteed to truncate again or be discarded by
-      // the Step-11 budget guard. No double-spend beyond the one retry.
+      // Lean-retry backstop (fix e, S-AUDIT-2026-07-20; REACHABILITY 2026-07-21):
+      // a draft truncated at max_tokens is a demand-exceeds-budget failure — the
+      // model committed to a graph too large to finish inside the derived token
+      // budget. Fire ONE corrective retry with a directive that CUTS output-token
+      // demand (primary trade-off only, ≤12 nodes, numbers qualitative). The
+      // attempt-1 runaway sentinel (DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL, passed as
+      // maxTokensCeiling above) is what makes THIS retry reachable: it truncates
+      // the runaway ~15-30s earlier than the full 8,550-token budget would, so a
+      // window big enough for a lean draft actually remains. Attempt-1-only, so a
+      // second truncation falls through to the typed error below. Budget honesty
+      // (reuse #576's affordability gate): if the window still affordable inside
+      // DRAFT_REQUEST_BUDGET_MS cannot fit even a lean draft
+      // (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, recalibrated to the ≤12-node
+      // directive), fail fast with the existing typed truncation error rather
+      // than burn a second generation on a result guaranteed to truncate again
+      // or be discarded by the Step-11 budget guard. No double-spend beyond one
+      // retry.
       if (isTruncation && attempt === 1 && !leanDraftRetried) {
         const leanRetryDelayMs = getJitteredRetryDelayMs();
         const leanRetryWindowMs = getDraftLlmRetryBudgetMs(

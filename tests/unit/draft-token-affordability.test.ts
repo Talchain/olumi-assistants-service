@@ -38,6 +38,9 @@ import {
   DRAFT_LLM_TIMEOUT_MS,
   DRAFT_REQUEST_BUDGET_MS,
   LLM_POST_PROCESSING_HEADROOM_MS,
+  DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
+  LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+  getDraftLlmRetryBudgetMs,
 } from "../../src/config/timeouts.js";
 
 describe("recalibrated constants — evidence-pinned against the settled two-parameter model, not free parameters", () => {
@@ -222,5 +225,119 @@ describe("resolveDraftMaxTokens — effective max_tokens can NEVER exceed the af
         expect(emitSeconds).toBeLessThanOrEqual(Math.max(timeoutMs / 1000, DRAFT_TTFB_SAFETY_OVERHEAD_S + 1));
       }
     }
+  });
+
+  // ── Runaway sentinel (design i, lean-retry reachability 2026-07-21) ──────
+  //
+  // The ceiling caps the attempt-1 max_tokens ABOVE the observed convergent
+  // demand and BELOW the affordable budget, so a runaway truncates earlier
+  // while healthy drafts are untouched. The ceiling can ONLY lower the budget.
+
+  it("a ceiling BELOW affordability caps the effective budget to the ceiling (attempt-1 sentinel binds)", async () => {
+    const r = await resolveWithCeiling({}, 110_000, DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL);
+    expect(r.affordable).toBe(8550); // the timeout still affords 8,550
+    expect(r.effective).toBe(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL); // but the sentinel binds
+    expect(r.effective).toBeLessThan(r.affordable);
+  });
+
+  it("a ceiling ABOVE affordability is a no-op — it can never raise the budget past what the timeout affords (#585 coherence preserved)", async () => {
+    // 45s window affords (45-15)*90 = 2,700; a 6,800 ceiling must not raise it.
+    const r = await resolveWithCeiling({}, 45_000, DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL);
+    expect(r.affordable).toBe(2700);
+    expect(r.effective).toBe(2700);
+    expect(r.effective).toBeLessThanOrEqual(r.affordable);
+  });
+
+  it("a zero/negative ceiling is treated as absent (>0 guard) → no cap; a tiny positive ceiling still floors to the API-valid minimum of 1", async () => {
+    // A non-positive ceiling means "no sentinel" — falls back to affordable.
+    const rNone = await resolveWithCeiling({}, 110_000, 0);
+    expect(rNone.effective).toBe(rNone.affordable);
+    const rNeg = await resolveWithCeiling({}, 110_000, -5);
+    expect(rNeg.effective).toBe(rNeg.affordable);
+    // A positive ceiling of 1 binds, but never drops below the API minimum.
+    const rOne = await resolveWithCeiling({}, 110_000, 1);
+    expect(rOne.effective).toBe(1);
+  });
+
+  it("RECOMPUTED INVARIANT: effective ≤ min(affordable, ceiling) for every ceiling/timeout combination", async () => {
+    for (const timeoutMs of [30_000, 60_000, 110_000, 240_000]) {
+      for (const ceiling of [1_000, 6_800, 8_000, 50_000]) {
+        const r = await resolveWithCeiling({}, timeoutMs, ceiling);
+        expect(r.effective).toBeLessThanOrEqual(r.affordable);
+        expect(r.effective).toBeLessThanOrEqual(ceiling);
+        expect(r.effective).toBeGreaterThanOrEqual(1);
+      }
+    }
+  });
+
+  async function resolveWithCeiling(env: Record<string, string>, timeoutMs: number, ceiling: number) {
+    vi.resetModules();
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+    const { resolveDraftMaxTokens } = await import("../../src/adapters/llm/anthropic.js");
+    return resolveDraftMaxTokens(timeoutMs, ceiling);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Lean-retry reachability arithmetic (2026-07-21) — the inequality must close
+// ---------------------------------------------------------------------------
+
+describe("lean-retry reachability — the sentinel frees a window the retry can complete in", () => {
+  // Observed demand facts (S-AUDIT-2026-07-20 + 21-Jul HANDOVER):
+  const WORST_CONVERGENT_TOKENS = 6_365; // largest converged draft observed ("long")
+  const CONVERGED_BAND_TOP_TOKENS = 2_601; // top of the healthy converged band (12-14 nodes)
+  const OBSERVED_RUNAWAY_TOK_PER_S = 112; // runaway-regime decode rate (8,550 truncated ~76s)
+  const OBSERVED_TTFB_S = 2;
+  const BUDGET_MINUS_HEADROOM_S =
+    (DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS) / 1000; // 110s LLM window
+
+  it("the sentinel does NOT truncate the worst observed convergent draft, and IS below the affordable budget", () => {
+    // Above the worst healthy draft (with margin) → healthy drafts unharmed.
+    expect(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL).toBeGreaterThan(WORST_CONVERGENT_TOKENS);
+    // Below the affordable budget at the default window → it is the binding cap
+    // for the runaway class (otherwise it would be a no-op).
+    expect(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL).toBeLessThan(getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS));
+  });
+
+  it("the worst convergent draft (6,365 tok) still COMPLETES on attempt 1 inside the LLM window", () => {
+    // Conservative model 15s + tokens/90 (over-predicts every observed call).
+    const completeS = DRAFT_TTFB_SAFETY_OVERHEAD_S + WORST_CONVERGENT_TOKENS / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S;
+    expect(completeS).toBeLessThanOrEqual(BUDGET_MINUS_HEADROOM_S);
+  });
+
+  it("a runaway truncates at the sentinel EARLY enough that the freed window affords the lean floor, and the lean draft completes inside the budget", () => {
+    // When a runaway hits the sentinel at the observed runaway decode rate:
+    const truncS = OBSERVED_TTFB_S + DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL / OBSERVED_RUNAWAY_TOK_PER_S;
+    // The runtime gate (conservative) recomputes the freed window from elapsed:
+    const window = getDraftLlmRetryBudgetMs(Math.round(truncS * 1000));
+    const affordable = getAffordableDraftTokens(window);
+    // (a) the retry FIRES: freed window affords at least the recalibrated floor.
+    expect(affordable).toBeGreaterThanOrEqual(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR);
+    // (b) the lean draft (sized to the floor) COMPLETES within the total LLM
+    //     window, so the Step-11 budget guard does not discard it. Conservative
+    //     completion time for a floor-sized lean draft:
+    const leanCompleteS =
+      DRAFT_TTFB_SAFETY_OVERHEAD_S + LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S;
+    expect(truncS + leanCompleteS).toBeLessThanOrEqual(BUDGET_MINUS_HEADROOM_S);
+  });
+
+  it("REGRESSION GUARD: at the SAME sentinel truncation the PRE-recalibration 4,500 floor could NOT be met — the fix is load-bearing", () => {
+    const truncS = OBSERVED_TTFB_S + DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL / OBSERVED_RUNAWAY_TOK_PER_S;
+    const affordable = getAffordableDraftTokens(getDraftLlmRetryBudgetMs(Math.round(truncS * 1000)));
+    // The retry is reachable now (affordable ≈ 2,906 ≥ the 2,700 floor) but
+    // would have been unreachable at the old 4,500 floor — the recalibration is
+    // what closes the inequality.
+    expect(affordable).toBeGreaterThanOrEqual(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR);
+    expect(affordable).toBeLessThan(4_500);
+    expect(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR).toBe(2_700);
+  });
+
+  it("PIN: the floor sits just ABOVE the converged-band top (2,601) so a boundary-authorized retry cannot re-truncate on band-typical output", () => {
+    // The reason the floor was raised 2,500 -> 2,700: a retry authorized at
+    // EXACTLY the floor is sized to the floor. A floor BELOW the converged-band
+    // top (2,601) could re-truncate a band-typical lean draft; pinned above it,
+    // the boundary-authorized retry is sized above band-typical output. (This
+    // assertion also fails RED at the old 2,500, since 2,500 < 2,601.)
+    expect(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR).toBeGreaterThan(CONVERGED_BAND_TOP_TOKENS);
   });
 });
