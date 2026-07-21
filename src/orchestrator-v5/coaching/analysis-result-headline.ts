@@ -49,6 +49,7 @@ import {
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
 import { formatProbabilityMargin } from '../format/format-analysis-value.js';
 import { isUsableWinProbability } from '../../orchestrator/context/option-result-source.js';
+import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
 import { readRawRobustnessSignals } from './pick-raw-robustness.js';
 // NOTE: `NEAR_TIE_PP_THRESHOLD` is deliberately NOT imported any more. Holding
 // the constant was what let this file re-derive the near-tie with its own `<=`
@@ -988,7 +989,22 @@ function resolveWinner(
   enrichment: Record<string, unknown>,
   leadingOptionId: string,
 ): ResolvedWinner | null {
-  const sources = readResultsArraySources(enrichment);
+  // Status gate (shared across ALL winner surfaces via the ONE
+  // isRecommendableOption predicate): a FAILED / skipped option (per-option
+  // ISL `status`) is never crowned as the leader AND never counted as the
+  // runner-up it is measured against — mirroring the direct receipt
+  // (run-analysis.ts selectLeadingOptionId), compactAnalysis, projectAnalysis
+  // and the decision-review enricher. Applied per-source BEFORE selection so
+  // both the `selectWinner` input below and the runner-up loop only see
+  // recommendable records. Absent status stays recommendable, so status-less
+  // enrichments (legacy / most current payloads) are byte-for-byte unaffected.
+  // A source that filters to empty (all options failed) yields no winner and is
+  // skipped, so an all-error set produces the honest null headline instead of
+  // crowning the top failed option; a declared `leadingOptionId` pointing at a
+  // failed option finds no match in any filtered source and falls through.
+  const sources = readResultsArraySources(enrichment).map((source) =>
+    source.filter(isRecommendableOption),
+  );
   if (sources.length === 0) return null;
 
   const id = leadingOptionId.trim();

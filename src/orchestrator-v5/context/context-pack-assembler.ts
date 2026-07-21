@@ -44,6 +44,7 @@ import {
 } from './context-budget-enforcement.js';
 import { emitContextTruncation } from './context-budget-telemetry.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
+import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
 import {
@@ -1290,16 +1291,24 @@ function buildOutcomeResolver(
   return buildOptionSignalLookup(signals, (s) => s.outcome_mean, isFiniteOutcomeMean);
 }
 
-function projectAnalysis(
+export function projectAnalysis(
   analysis: AnalysisResponseSummaryWithSignals | null,
   stalenessReason: string | null,
   controlledFactorIds?: ReadonlySet<string>,
 ): ContextPackAnalysis | null {
   if (analysis === null) return null;
 
-  // 1. Filter options by probability scale guard, then sort desc.
-  //    F.6 passthrough: we only filter+sort; we do not transform values.
+  // 1. Status gate FIRST: a FAILED / skipped option (per-option ISL status)
+  //    must never surface as the leading or runner-up coaching option — the
+  //    same rule the direct receipt (run-analysis.ts) and compactAnalysis
+  //    apply, routed through the ONE shared isRecommendableOption predicate.
+  //    `OptionSummary` now RETAINS `status` (it used to be dropped here, which
+  //    is exactly why this projection could not previously gate on it). Absent
+  //    status stays recommendable, so status-less inputs are unaffected.
+  //    Then the probability scale guard, then sort desc. F.6 passthrough: we
+  //    only filter+sort; we do not transform values.
   const validOptions: OptionSummary[] = analysis.options
+    .filter(isRecommendableTypedOption)
     .filter((o) =>
       isProbabilityValid(o.win_probability, {
         call_site: 'projectAnalysis.options',

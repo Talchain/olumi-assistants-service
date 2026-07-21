@@ -49,6 +49,7 @@ import {
   readOptionResultSources,
   isUsableWinProbability,
 } from '../../orchestrator/context/option-result-source.js';
+import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   buildScaffoldPromptDisclosure,
@@ -463,7 +464,18 @@ function buildInvokeInput(
   // `sources[0]` shortcut silently coerced to no_winner / a thin-current 0%
   // when the current source had entries but none carried a usable
   // win_probability, even though a richer legacy source could supply one.)
-  const sources = readResultsArraySources(enrichment);
+  // Status gate (shared across all winner surfaces via the ONE
+  // isRecommendableOption predicate): a FAILED / skipped option is never
+  // crowned as the winner and never counted as the runner-up it is measured
+  // against, mirroring the direct receipt (run-analysis.ts), compactAnalysis
+  // and projectAnalysis. Applied per-source BEFORE selection so `chosenSource`
+  // — which selectRunnerUp reads — is already status-filtered. Absent status
+  // stays recommendable, so status-less enrichments are unaffected. A declared
+  // `leadingOptionId` that points at a failed option finds no match in any
+  // filtered source and yields the honest `no_winner` outcome.
+  const sources = readResultsArraySources(enrichment).map((source) =>
+    source.filter(isRecommendableOption),
+  );
   if (sources.length === 0) return null;
 
   let winner: DecisionReviewInvokeInput['winner'] | null = null;
