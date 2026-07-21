@@ -205,6 +205,12 @@ export type V5DiagnosticExitPath =
   // Zero LLM calls, no commit (scenario stays fresh so the user's next
   // real brief still drafts).
   | 'process_meta_intake'
+  // S2-L1 — typed readiness/coaching intake arm: a `source='chip_click'` +
+  // `chip.action_type='analysis_readiness'` turn consumed on its TYPE and
+  // answered with readiness/coaching keyed on the persisted graph (fresh
+  // canvas → the same honest checklist as process_meta_intake; populated →
+  // deterministic readiness coaching). Zero LLM calls, no commit.
+  | 'readiness_intake'
   // ROADMAP 2.63 C2 — deterministic honest decline when an explicit
   // generate (generate_model/explicit_generate wire flag) arrives but no
   // usable brief exists anywhere (message, persisted brief_text, recent

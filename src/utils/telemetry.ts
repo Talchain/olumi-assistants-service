@@ -156,6 +156,16 @@ export const TelemetryEvents = {
   // process-meta-intake.ts and route-v2's process_meta_intake branch.
   V5ProcessMetaIntakeGuard: "v5.process_meta_intake_guard",
 
+  // S2-L1 — typed readiness/coaching intake arm. Fires once per
+  // `source='chip_click'` + `chip.action_type='analysis_readiness'` turn,
+  // consumed on its TYPE (not the string mirror). `outcome` names the branch:
+  // fresh_canvas (unified with the process-meta answer) / goal_missing /
+  // readiness_open / readiness_ready. Zero firings after the UI re-vendor
+  // stamps the intent means the typed intent is still not crossing the wire.
+  // See src/orchestrator-v5/routing/readiness-intake.ts and route-v2's
+  // readiness_intake branch.
+  V5ReadinessIntakeArm: "v5.readiness_intake",
+
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
   // message turn that arrives with generate_model/explicit_generate set,
   // regardless of outcome (`outcome` field: dispatch_draft /
