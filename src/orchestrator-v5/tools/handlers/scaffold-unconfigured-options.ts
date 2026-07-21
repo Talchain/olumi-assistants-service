@@ -102,6 +102,46 @@ export interface ScaffoldUnconfiguredOutcome {
   readonly scaffolded: readonly ScaffoldedOptionRecord[];
 }
 
+/**
+ * F4 (readiness↔run gate) — the pre-run PROJECTION of the run-path scaffold
+ * decision. The `/graph-readiness` pre-run panel advertises this so it can say
+ * "will run with disclosed placeholders" instead of "blocked" for exactly the
+ * mixed-configured state `run_analysis` scaffolds and succeeds on.
+ *
+ * `will_scaffold_options` is TRUE iff `run_analysis` would scaffold ≥1
+ * unconfigured option for this input; `option_count` is how many.
+ */
+export interface ScaffoldPlan {
+  readonly will_scaffold_options: boolean;
+  readonly option_count: number;
+  readonly scaffolded_option_ids: readonly string[];
+}
+
+/**
+ * The ONE shared predicate the readiness endpoint and the run path both read.
+ *
+ * Anti-drift by CONSTRUCTION: this does NOT re-derive the scaffold decision —
+ * it DELEGATES to `scaffoldUnconfiguredOptions` (the exact function
+ * `run_analysis` invokes to decide what it will scaffold) and projects that
+ * outcome to the advertised plan. A COPIED predicate here would re-create the
+ * precise readiness↔run drift F4 exists to close (the April-2026 gate drift, in
+ * reverse); there is deliberately no second predicate to keep in sync. For any
+ * given input, `computeScaffoldPlan(input).will_scaffold_options` and
+ * `scaffoldUnconfiguredOptions(input).scaffolded.length > 0` are the same value
+ * because they are the same computation.
+ *
+ * Pure / total: inherits `scaffoldUnconfiguredOptions`' fail-safe (any internal
+ * failure ⇒ the unscaffolded outcome ⇒ `will_scaffold_options: false`).
+ */
+export function computeScaffoldPlan(input: ScaffoldUnconfiguredInput): ScaffoldPlan {
+  const outcome = scaffoldUnconfiguredOptions(input);
+  return {
+    will_scaffold_options: outcome.scaffolded.length > 0,
+    option_count: outcome.scaffolded.length,
+    scaffolded_option_ids: outcome.scaffolded.map((s) => s.option_id),
+  };
+}
+
 type Dict = Record<string, unknown>;
 
 function isPlainObject(v: unknown): v is Dict {

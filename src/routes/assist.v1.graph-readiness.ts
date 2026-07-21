@@ -11,6 +11,10 @@ import { emit, TelemetryEvents, log } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
 import { Graph } from "../schemas/graph.js";
 import { AnalysisReadyPayload, type AnalysisReadyPayloadT } from "../schemas/analysis-ready.js";
+import {
+  computeScaffoldPlan,
+  type ScaffoldPlan,
+} from "../orchestrator-v5/tools/handlers/scaffold-unconfigured-options.js";
 
 import type { GraphV1 } from "../contracts/plot/engine.js";
 
@@ -532,6 +536,29 @@ export default async function route(app: FastifyInstance) {
           (n: any) => n.kind === "factor",
         ).length;
 
+        // F4 (readiness↔run gate): advertise what run_analysis would actually
+        // scaffold for this graph. `can_run_analysis` stays HONEST — an
+        // unconfigured option is genuinely not "ready" — but the run path
+        // scaffolds disclosed placeholders for it in the mixed-configured state
+        // and succeeds; the pre-run panel derives "blocked" purely from
+        // `can_run_analysis === false` and so contradicts the run. This plan is
+        // computed by the SAME predicate run_analysis uses (computeScaffoldPlan
+        // → scaffoldUnconfiguredOptions), so the two gates cannot drift: for
+        // this input the panel now knows the run would proceed with placeholders
+        // rather than block. Additive only — no readiness verdict changes.
+        const scaffoldPlan: ScaffoldPlan = computeScaffoldPlan({
+          options: input.analysis_ready.options,
+          graph: input.graph,
+          // Readiness is stateless: the request graph is the proxy for the
+          // snapshot run_analysis loads (same graph state ⇒ same decision). It
+          // also serves as the intervention-intent authority, mirroring the
+          // scaffold's own `rawPersistedGraph ?? graph` fallback.
+          rawPersistedGraph: input.graph,
+          // The CEE→PLoT egress scale net is unconditional since 2026-07-20
+          // (O-7 wave 2), matching run_analysis' pinned-true call site.
+          scaleNetEnabled: true,
+        });
+
         // Return V3-specific response with extended fields
         const v3Response = {
           readiness_score: v3Result.readiness_score,
@@ -541,6 +568,14 @@ export default async function route(app: FastifyInstance) {
           quality_factors: [], // V3 doesn't use legacy quality factors
           can_run_analysis: v3Result.can_run_analysis,
           blocker_reason: v3Result.blocker_reason,
+          // F4: pre-run projection of the run-path scaffold decision. Shape is
+          // pinned in CEEGraphReadinessResponseV1Schema + openapi.yaml.
+          scaffold_plan: {
+            will_scaffold_options: scaffoldPlan.will_scaffold_options,
+            ...(scaffoldPlan.will_scaffold_options
+              ? { option_count: scaffoldPlan.option_count }
+              : {}),
+          },
           // V3-specific fields
           ready: v3Result.ready,
           options_ready: v3Result.options_ready,
