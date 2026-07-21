@@ -24,6 +24,7 @@ import {
   resolveClauseLabel,
   messageCarriesValueOrDirection,
   proposeCopyAsksForValueOrDirection,
+  shouldHandOffProposeToLlmLane,
 } from '../../../../src/orchestrator/tools/propose-handoff.js';
 
 /** Mirrors the live probe scenario's graph labels (P0 draft, DB-verified). */
@@ -131,5 +132,44 @@ describe('F-1 anti-drift pin — the predicate matches what the copy asks for', 
   ];
   it.each(LIVE_COPY)('asks for a value or direction: %s', (copy) => {
     expect(proposeCopyAsksForValueOrDirection(copy)).toBe(true);
+  });
+});
+
+describe('F-1 predicate — WORD-NUMBER specifics reach the LLM lane (Codex #10)', () => {
+  // The digit grammar missed values spelled as words, so a message whose
+  // specific was "seventy percent" or "half" false-terminated on the same
+  // claim-then-starve dead end. These are the word-number analogues of the
+  // captured digit probes and must hand off, not clarify.
+  const WORD_CARRY = [
+    'set CRM Feature Depth to seventy percent',
+    'Set CRM Platform Cost to half.',
+    'Raise CRM Feature Depth to ninety percent.',
+    'Under the Cloud-Native CRM option, set its effect on CRM Feature Depth to a quarter.',
+    'Lower CRM Platform Cost to a third.',
+    'Set it to seven percent.', // one..ten via the shared CQE pre-pass
+  ];
+  it.each(WORD_CARRY)('carries a value or direction: %s', (message) => {
+    expect(messageCarriesValueOrDirection(message)).toBe(true);
+  });
+
+  it.each(WORD_CARRY)('hands off to the LLM lane (no stored proposal): %s', (message) => {
+    expect(shouldHandOffProposeToLlmLane(message, false)).toBe(true);
+  });
+
+  it('DIGIT POSITIVE CONTROL — the digit forms still carry a value', () => {
+    expect(messageCarriesValueOrDirection('Set CRM Feature Depth to 0.7.')).toBe(true);
+    expect(messageCarriesValueOrDirection('Set CRM Platform Cost to 70%.')).toBe(true);
+  });
+
+  const WORD_VAGUE = [
+    // ordinals in prose are NOT values — the anchoring must hold them out
+    'give the team access to third parties',
+    'move the note to the third column',
+    // a bare count word with no value/direction stays vague
+    'Make sure the effects on both options are captured.',
+    'Configure the Cloud-Native CRM option.',
+  ];
+  it.each(WORD_VAGUE)('carries no value or direction: %s', (message) => {
+    expect(messageCarriesValueOrDirection(message)).toBe(false);
   });
 });

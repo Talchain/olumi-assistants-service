@@ -82,8 +82,42 @@ const NO_DEMOTION = (verdicts: readonly RefereeVerdict[]): ProtectionDemotionRes
 // Protection-cue grammar (conservative by design — see module doc)
 // ---------------------------------------------------------------------------
 
-/** Bound on scanned message length — hostile input stays O(bounded). */
-const MESSAGE_SCAN_CAP = 4_000;
+/**
+ * Bound on scanned message length — hostile input stays O(bounded). Set to
+ * the ingress message cap so a WELL-FORMED request is scanned IN FULL and no
+ * protection clause is ever silently dropped for sitting past the bound. Both
+ * ingress paths that reach this seam cap `message` at 10,000:
+ *   - the V5 turn payload — `MessageTurnPayload.message`
+ *     (@talchain/schemas boundary: `z.string().min(1).max(10000)`), and
+ *   - the V1 edit route — `edit_description`
+ *     (routes/assist.v1.edit-graph.ts: `z.string().min(1).max(10_000)`).
+ *
+ * The prior value (4_000) truncated the scan while ingress accepted 10,000, so
+ * `"x".repeat(4001) + " do not touch Option B"` had its protection clause
+ * sliced off and the op AUTO-APPLIED — the exact silent wrong write this
+ * module exists to stop.
+ *
+ * FAIL-CLOSED on overflow (never silently drop): a message LONGER than this
+ * cap — ingress drift, or a future looser path — has an UNSCANNABLE tail that
+ * may name a protected entity we cannot see, so `messageExceedsScanCap`
+ * reports it and `demoteProtectedEntityTargets` demotes EVERY would_apply
+ * verdict to held (one confirm tap, never a silent wrong write to something
+ * the tail protected). Derive-don't-mirror (trap-12): correctness does NOT
+ * depend on this constant EQUALLING the ingress cap — any drift LARGER fails
+ * closed rather than reading as green, so the equality is a convenience, not a
+ * load-bearing hand-synced mirror.
+ */
+const MESSAGE_SCAN_CAP = 10_000;
+
+/**
+ * True when the message OVERFLOWS the scannable bound — its tail cannot be
+ * read, so protection detection must FAIL CLOSED (see
+ * `demoteProtectedEntityTargets`). Total: a non-string has nothing to scan and
+ * is therefore not an overflow.
+ */
+function messageExceedsScanCap(userMessage: string | null | undefined): boolean {
+  return typeof userMessage === 'string' && userMessage.length > MESSAGE_SCAN_CAP;
+}
 
 /**
  * A clause is PROTECTIVE when any of these cues appears in it. Broad on
@@ -437,8 +471,13 @@ export function demoteProtectedEntityTargets(
   currentGraph: unknown,
 ): ProtectionDemotionResult {
   try {
+    // FAIL-CLOSED (never silently drop): when the message overflows the
+    // scannable bound its tail is unreadable and MAY protect any op's target,
+    // so every would_apply is demoted regardless of the (partial) protected
+    // set extracted from the scanned prefix. See MESSAGE_SCAN_CAP.
+    const overflow = messageExceedsScanCap(userMessage);
     const protectedEntities = extractProtectedEntities(userMessage, currentGraph);
-    if (protectedEntities.length === 0) return NO_DEMOTION(verdicts);
+    if (!overflow && protectedEntities.length === 0) return NO_DEMOTION(verdicts);
     const byId = new Map(protectedEntities.map((p) => [p.nodeId, p] as const));
 
     const out: RefereeVerdict[] = [];
@@ -453,7 +492,10 @@ export function demoteProtectedEntityTargets(
         continue;
       }
       const hits = envelopeTargetNodeIds(env).filter((id) => byId.has(id));
-      if (hits.length === 0) {
+      // On overflow, demote even ops with no scanned-prefix hit — the tail we
+      // could not read may protect this target. Prefix hits still contribute
+      // their names to the copy (the fail-closed default names nothing).
+      if (!overflow && hits.length === 0) {
         out.push(v);
         continue;
       }

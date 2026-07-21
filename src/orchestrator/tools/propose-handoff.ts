@@ -46,11 +46,53 @@
  * dead end.
  */
 
+import { applyWordNumberPrePass } from '../../orchestrator-v5/context/cqe/word-numbers.js';
+
 /**
  * A numeric magnitude in any shape the product's own copy suggests: bare
  * number, decimal, thousands-separated, percentage, or currency-prefixed.
  */
 const NUMERIC_VALUE = /(?:£|\$|€)\s*\d|\b\d+(?:[.,]\d+)*\s*(?:%|percent|k\b|m\b|bn\b)?|\b\d/;
+
+/**
+ * Word-number VALUES the digit grammar above cannot see (Codex #10):
+ * "set X to seventy percent", "set X to half". Without this the propose branch
+ * false-terminates a turn whose specifics are already present — the same
+ * claim-then-starve dead end this module exists to close, one word-number
+ * phrasing away.
+ *
+ * Coverage is split deliberately, derive-don't-mirror (trap-12):
+ *   - one..ten is reused from CQE's shared word-number pre-pass (imported, not
+ *     copied): `applyWordNumberPrePass` folds them to digits the NUMERIC_VALUE
+ *     grammar already reads, so "set it to seven" / "ten percent" resolve; and
+ *   - the forms that shared pre-pass omits BY DESIGN — it is scoped to one..ten
+ *     and excludes fractions, feeding the CQE rule table — are matched below.
+ *     CQE's fuller `extractQuantities` does NOT close this gap either (verified
+ *     at the bytes 2026-07-21): its compromise backstop drops word-cardinal
+ *     tokens (reads `entry.number` as a scalar, but the installed
+ *     compromise-numbers returns a nested `{num}` for "seventy") and P5 fires
+ *     only on "<verb> by <fraction>", never on a value assignment. English
+ *     number words are a CLOSED, stable lexicon, so this short list is not the
+ *     moving-target mirror trap-12 warns about.
+ *
+ * Anchored like the sibling grammars (percent, or a `to`/`as`/`by` slot) so an
+ * ordinal in prose ("access to third parties", "the third column") is not read
+ * as a value.
+ */
+const WORD_NUMBER_TOKEN =
+  'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million';
+const WORD_NUMBER_VALUE = new RegExp(
+  // "<cardinal> percent" — the seventy-percent class, needs no assignment slot.
+  `\\b(?:${WORD_NUMBER_TOKEN})\\b\\s*(?:percent|%)`
+    // assignment/direction slot: "to/as/by [a] <cardinal>" or "… a <fraction>",
+    // plus bare "… half" (rarely an ordinal, unlike third/quarter).
+    + `|\\b(?:to|as|by)\\s+(?:`
+    + `(?:a\\s+|an\\s+|one\\s+)?(?:${WORD_NUMBER_TOKEN})`
+    + `|(?:a\\s+|an\\s+|one\\s+)(?:half|halves|quarter|quarters|third|thirds)`
+    + `|half|halves`
+    + `)\\b`,
+  'i',
+);
 
 /**
  * Qualitative assignment targets — the no-digit form of "set X to N".
@@ -80,10 +122,16 @@ export function messageCarriesValueOrDirection(message: string): boolean {
   if (typeof message !== 'string') return false;
   const normalised = message.toLowerCase().replace(/\s+/g, ' ').trim();
   if (normalised.length === 0) return false;
+  // Fold CQE's one..ten word-numbers to digits so the NUMERIC_VALUE grammar
+  // reads them; the larger cardinals and value-fractions fall to
+  // WORD_NUMBER_VALUE (see its doc for why the shared facility stops short).
+  const folded = applyWordNumberPrePass(normalised).text;
   return (
     NUMERIC_VALUE.test(normalised)
+    || NUMERIC_VALUE.test(folded)
     || QUALITATIVE_ASSIGNMENT.test(normalised)
     || DIRECTIONAL_MAGNITUDE.test(normalised)
+    || WORD_NUMBER_VALUE.test(folded)
   );
 }
 
