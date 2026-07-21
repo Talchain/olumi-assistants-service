@@ -15,6 +15,7 @@ import { resolveInfluenceDirection, type InfluenceDirection } from "./influence-
 import { readDriverInfluenceScore } from "./driver-influence.js";
 import { winnerOptionResultSource } from "./option-result-source.js";
 import { deriveWinnerConstraintInfeasibility } from "./constraint-feasibility.js";
+import { isRecommendableTypedOption } from "../../orchestrator-v5/tools/handlers/recommendable-option.js";
 
 // ============================================================================
 // Output Types
@@ -28,6 +29,20 @@ export interface OptionSummary {
   outcome_p10?: number;
   outcome_p90?: number;
   probability_of_goal?: number;
+  /**
+   * Per-option ISL compute `status` (e.g. `'computed'` / `'error'` /
+   * `'skipped'`), carried straight off the `option_comparison[]` record when
+   * present. Additive + optional: absent when the wire record carries no
+   * status (legacy / most current payloads), so the key is OMITTED and the
+   * projection stays byte-identical for status-less inputs.
+   *
+   * Retained here — rather than dropped, as it used to be — so the DOWNSTREAM
+   * `projectAnalysis` (context-pack-assembler.ts) can gate the coaching
+   * leading/runner-up on it. Winner selection routes this field through the
+   * ONE shared `isRecommendableOption` predicate so a FAILED option is never
+   * crowned. See recommendable-option.ts.
+   */
+  status?: string;
 }
 
 /** Purpose-specific comparison entry for LLM context (Brief B contract). */
@@ -763,6 +778,10 @@ export function compactAnalysis(
         if (probOfGoal !== undefined) {
           summary.probability_of_goal = probOfGoal;
         }
+        // Retain the per-option compute status (additive; key omitted when
+        // absent, so status-less payloads stay byte-identical). Downstream
+        // winner/leading selection gates on it via isRecommendableOption.
+        if (typeof r.status === 'string') summary.status = r.status;
         return summary;
       })
       // Sort by win_probability descending, tiebreak by option_id lexicographic
@@ -772,9 +791,18 @@ export function compactAnalysis(
         return a.option_id.localeCompare(b.option_id);
       });
 
-    const winner = deriveWinner(options);
+    // Status gate (shared with the direct receipt in run-analysis.ts and the
+    // downstream projectAnalysis / decision-review enricher): a FAILED /
+    // skipped option is never crowned and never defines the margin, even when
+    // it carries the top win_probability. Absent status stays recommendable.
+    // The full `options` list is left intact (errored options are retained,
+    // WITH their status) so the coach egress can still disclose that they ran;
+    // only the WINNER + MARGIN are computed from the recommendable subset.
+    const recommendableOptions = options.filter(isRecommendableTypedOption);
+
+    const winner = deriveWinner(recommendableOptions);
     if (!winner) {
-      // No valid options — can still return summary with empty winner
+      // No recommendable options — can still return summary with empty winner
       log.warn({ result_count: results.length }, 'compactAnalysis: no valid options found');
     }
 
@@ -801,9 +829,12 @@ export function compactAnalysis(
         }))
       : [];
 
-    // Margin: winner.win_probability - runner_up.win_probability
-    const margin = options.length >= 2
-      ? options[0].win_probability - options[1].win_probability
+    // Margin: winner.win_probability - runner_up.win_probability, measured
+    // over the RECOMMENDABLE options only (a failed option is never the winner
+    // nor the runner-up it is measured against). recommendableOptions preserves
+    // the win_probability-descending order of `options`.
+    const margin = recommendableOptions.length >= 2
+      ? recommendableOptions[0].win_probability - recommendableOptions[1].win_probability
       : null;
     // margin_pp: margin in percentage points, rounded to 1 dp. Pre-computed
     // upstream so the V5 assembler stays passthrough-only (F.6).

@@ -118,11 +118,28 @@ export function assertComputedStatusLiteralPinned(): void {
  *
  * Takes a loose `Record<string, unknown>` because CEE reads these records
  * straight off the validated-but-passthrough PLoT envelope, where every field
- * is `unknown` until proven otherwise.
+ * is `unknown` until proven otherwise. The typed projections that carry a
+ * `status` field (`OptionSummary`) also route their status eligibility through
+ * this ONE predicate — passed via {@link isRecommendableTypedOption}, which
+ * reads only `status` — rather than minting a second predicate (the recorded
+ * twin-defect class; cf. the two `generateGraphHash` twins).
  */
 export function isRecommendableOption(record: Record<string, unknown>): boolean {
   const status = record.status;
   // Mirrors PLoT's status clause exactly: absent => recommendable.
   if (status === undefined) return true;
   return status === COMPUTED_OPTION_STATUS;
+}
+
+/**
+ * The SAME status gate as {@link isRecommendableOption}, for the typed
+ * option-summary projections (`OptionSummary` in analysis-compact.ts and the
+ * `projectAnalysis` filter in context-pack-assembler.ts) that carry an
+ * additive optional `status` field but no `Record<string, unknown>` index
+ * signature. It reads ONLY `status` and delegates to the one predicate above —
+ * it is a thin typed adapter, NOT a second predicate, so the crowning status
+ * rule lives in exactly one place.
+ */
+export function isRecommendableTypedOption(option: { status?: string }): boolean {
+  return isRecommendableOption(option as Record<string, unknown>);
 }
