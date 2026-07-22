@@ -48,6 +48,16 @@ import {
 const CITED_CONTEXT_FIELD_VALUES: readonly string[] = ContextPackFieldSchema.options;
 const CITED_CONTEXT_FIELD_SET: ReadonlySet<string> = new Set(CITED_CONTEXT_FIELD_VALUES);
 
+/**
+ * The four valid `intent_class` enum members, DERIVED from the enforcing enum
+ * (`IntentClassSchema`) so class (e)'s forced-intent default can never drift
+ * from what the validator accepts (CLAUDE.md rule 12 — derive, don't mirror).
+ * Used to distinguish a MISSING / INVALID-TYPE intent_class (coercible to
+ * 'execute' on a forced pill) from a VALID-but-non-execute one (left for the
+ * #628 assert-execute guard to reject).
+ */
+const VALID_INTENT_CLASSES: ReadonlySet<string> = new Set(IntentClassSchema.options);
+
 export const OLUMI_ACTION_TOOL_NAME = 'olumi_action' as const;
 
 /**
@@ -605,23 +615,36 @@ export class ToolCallParseError extends Error {
   }
 }
 
-const RawToolCallSchema = z
-  .object({
-    intent_class: IntentClassSchema,
-    coaching_mode: CoachingModeSchema.optional(),
-    action: ProposalActionSchema.optional(),
-    clarification: ProposalClarificationSchema.optional(),
-    // ROADMAP 1.38 — optional full-answer channel for coach / converse.
-    // See the JSON schema `answer_text` description above.
-    answer_text: z.string().optional(),
-    // ROADMAP 1.132 (F2) — structured answer shape for coach / converse.
-    // Declared `unknown` so the conditional rules below own ALL validation:
-    // flag OFF preserves the pre-flag rejection (same failure class as the
-    // `.strict()` unknown-key error this key would otherwise produce); flag
-    // ON validates against AnswerShapeSchema with issues that flow through
-    // the EXISTING REPAIR_ONCE mechanism.
-    answer_shape: z.unknown().optional(),
-  })
+const RawToolCallObject = z.object({
+  intent_class: IntentClassSchema,
+  coaching_mode: CoachingModeSchema.optional(),
+  action: ProposalActionSchema.optional(),
+  clarification: ProposalClarificationSchema.optional(),
+  // ROADMAP 1.38 — optional full-answer channel for coach / converse.
+  // See the JSON schema `answer_text` description above.
+  answer_text: z.string().optional(),
+  // ROADMAP 1.132 (F2) — structured answer shape for coach / converse.
+  // Declared `unknown` so the conditional rules below own ALL validation:
+  // flag OFF preserves the pre-flag rejection (same failure class as the
+  // `.strict()` unknown-key error this key would otherwise produce); flag
+  // ON validates against AnswerShapeSchema with issues that flow through
+  // the EXISTING REPAIR_ONCE mechanism.
+  answer_shape: z.unknown().optional(),
+});
+
+/**
+ * The top-level keys the strict {@link RawToolCallSchema} accepts, DERIVED
+ * from the object shape above (CLAUDE.md rule 12 — derive, don't mirror). A
+ * 7th key added to `RawToolCallObject` is picked up here automatically, so
+ * `coerceFirstPassToolCall`'s class-(d) stray-key strip can never fall out of
+ * sync with what `.strict()` rejects (the hand-maintained-mirror defect class
+ * this repair-tax hunt keeps finding).
+ */
+const ALLOWED_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(
+  Object.keys(RawToolCallObject.shape),
+);
+
+const RawToolCallSchema = RawToolCallObject
   .strict()
   .superRefine((obj, ctx) => {
     const { intent_class, action, clarification, coaching_mode, answer_text, answer_shape } =
@@ -808,7 +831,16 @@ export type FirstPassCoercionReason =
   | 'stray_answer_shape'
   | 'stray_answer_text'
   | 'unknown_cited_field'
-  | 'parameter_source_alias';
+  | 'parameter_source_alias'
+  // Class (d) — a stray unknown TOP-LEVEL key outside the six the strict
+  // RawToolCallSchema accepts (root `unrecognized_keys`, the fourth,
+  // attribution-proven class the forced explain pills trip). Carries the
+  // stripped key NAME (structural, R-004-safe).
+  | 'stray_top_level_key'
+  // Class (e) — a MISSING / INVALID-TYPE intent_class on a FORCED pill turn,
+  // defaulted to 'execute' (the #628 assert-execute guard still backstops
+  // semantics). Fires only when the parse context is a forced pill.
+  | 'missing_intent_class_forced';
 
 /**
  * A single coercion applied to a routing tool call before the strict Zod
@@ -820,6 +852,12 @@ export type FirstPassCoercionReason =
 export interface FirstPassCoercion {
   readonly reason: FirstPassCoercionReason;
   readonly count?: number;
+  /**
+   * For `stray_top_level_key` only: the NAME of the stripped top-level key —
+   * a structural schema identifier (R-004-safe; never the value). Absent on
+   * every other reason.
+   */
+  readonly key?: string;
 }
 
 /** Telemetry correlation context for the coercion drift-alarm event. */
@@ -828,10 +866,46 @@ export interface ParseTelemetryContext {
   readonly sessionId: string | null;
   /** 1 = first routing call, 2 = REPAIR_ONCE retry. */
   readonly llmCall: 1 | 2;
+  /**
+   * Set to the pinned handler when this parse is a FORCED analytical-pill turn
+   * (threaded from route-with-tool-use's `forcedExplanationHandlerId`). Enables
+   * class (e): a MISSING / INVALID-TYPE intent_class is coerced to 'execute'.
+   * Absent on every non-pill turn (the coercion behaves exactly as before).
+   */
+  readonly forcedHandlerId?: ForcedPillHandlerId;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Best-effort recovery of authored answer text from an ANSWER-LOOKING stray
+ * top-level value (class (d) lift). Handles the three shapes the model plausibly
+ * hoists to the top level instead of `action.explanation.answer_text`:
+ *   - a plain non-blank string;
+ *   - a hoisted `explanation`-like object `{ answer_text: "…" }`;
+ *   - an `answer_shape`-shaped object (derived via deriveAnswerTextFromShape).
+ * Returns undefined when the value carries no usable prose (so a non-answer
+ * stray — a number, a diagnostic object — is dropped without a phantom lift).
+ * Never throws; never mutates.
+ */
+function recoverStrayAnswerText(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (isPlainObject(value)) {
+    if (typeof value.answer_text === 'string' && value.answer_text.trim().length > 0) {
+      return value.answer_text.trim();
+    }
+    const parsedShape = AnswerShapeSchema.safeParse(value);
+    if (parsedShape.success) {
+      const derived = deriveAnswerTextFromShape(parsedShape.data);
+      if (derived.trim().length > 0) return derived;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -844,7 +918,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * unit-testable and safe to run on the best-effort dropped-action path.
  *
  * Coercions (execute branch only — every non-execute turn is returned
- * byte-identical):
+ * byte-identical, unless class (e) below defaults a forced turn INTO execute):
  *   (a) a stray top-level `answer_shape`/`answer_text` (forbidden on execute)
  *       is STRIPPED. If the handler is an explanation handler and its
  *       `explanation.answer_text` is empty, the stray answer is LIFTED in
@@ -855,22 +929,60 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  *       (observability-only, never user-facing — must not cost a repair).
  *   (c) a parameter `source: "explicit"` is normalised to `"user_explicit"`
  *       (the prompt says "explicit", the enum says "user_explicit").
+ *   (d) any stray unknown TOP-LEVEL key outside the six the strict
+ *       RawToolCallSchema accepts (root `unrecognized_keys` — the fourth,
+ *       attribution-proven class the forced explain pills trip) is STRIPPED.
+ *       An answer-looking stray value is LIFTED into `explanation.answer_text`
+ *       first (same content-preserving rule as (a)); the stripped key NAME is
+ *       carried on the coercion (structural, R-004-safe).
+ *   (e) FORCED pills only (`opts.forced`): a MISSING / INVALID-TYPE
+ *       `intent_class` is defaulted to 'execute' so the turn enters the
+ *       execute-branch coercions above instead of paying a repair. A
+ *       VALID-but-non-execute intent (coach/converse/clarify) is NOT rewritten
+ *       — the #628 enforceForcedExecute assert rejects that (fail-loud →
+ *       repair). The assert still backstops semantics after this default.
  *
  * A GENUINELY malformed execute action (e.g. missing `handler_id`, missing
  * `action`) is left untouched by everything above and still fails the strict
  * parse → REPAIR_ONCE path intact.
  */
-export function coerceFirstPassToolCall(toolInput: unknown): {
+export function coerceFirstPassToolCall(
+  toolInput: unknown,
+  opts?: { forced?: boolean },
+): {
   value: unknown;
   coercions: FirstPassCoercion[];
 } {
-  if (!isPlainObject(toolInput) || toolInput.intent_class !== 'execute') {
+  if (!isPlainObject(toolInput)) {
+    return { value: toolInput, coercions: [] };
+  }
+
+  // (e) forced-intent default. A missing / non-enum intent_class on a FORCED
+  // pill is the 494e4a0b `invalid_type @ intent_class` first pass; default it
+  // to 'execute' so the execute-branch coercions below run. Restricted to
+  // missing / invalid-type — a valid non-execute is left for enforceForcedExecute.
+  const rawIntent = toolInput.intent_class;
+  const intentMissingOrInvalidType =
+    typeof rawIntent !== 'string' || !VALID_INTENT_CLASSES.has(rawIntent);
+  const forcedDefault = opts?.forced === true && intentMissingOrInvalidType;
+
+  if (!forcedDefault && rawIntent !== 'execute') {
+    // Non-execute and not a forced default: byte-identical passthrough — the
+    // pre-fix contract for every coach/converse/clarify turn is unchanged.
     return { value: toolInput, coercions: [] };
   }
 
   const coercions: FirstPassCoercion[] = [];
   const out: Record<string, unknown> = { ...toolInput };
+  if (forcedDefault) {
+    out.intent_class = 'execute';
+    coercions.push({ reason: 'missing_intent_class_forced' });
+  }
   const action = isPlainObject(out.action) ? { ...out.action } : undefined;
+  const isExplanationHandler =
+    action !== undefined &&
+    typeof action.handler_id === 'string' &&
+    EXPLANATION_HANDLER_IDS.has(action.handler_id);
 
   const hasStrayShape = 'answer_shape' in out && out.answer_shape !== undefined;
   const strayTextPresent = 'answer_text' in out && out.answer_text !== undefined;
@@ -880,31 +992,26 @@ export function coerceFirstPassToolCall(toolInput: unknown): {
   // (a) lift authored content into explanation.answer_text BEFORE stripping,
   // but only for explanation handlers (mutation handlers carry no user-facing
   // prose — the answer is the deterministic receipt).
-  if (action && (hasStrayShape || strayTextValue !== undefined)) {
-    const isExplanationHandler =
-      typeof action.handler_id === 'string' &&
-      EXPLANATION_HANDLER_IDS.has(action.handler_id);
-    if (isExplanationHandler) {
-      const explanation = isPlainObject(action.explanation)
-        ? { ...action.explanation }
+  if (action && isExplanationHandler && (hasStrayShape || strayTextValue !== undefined)) {
+    const explanation = isPlainObject(action.explanation)
+      ? { ...action.explanation }
+      : undefined;
+    const existingText =
+      explanation && typeof explanation.answer_text === 'string'
+        ? explanation.answer_text
         : undefined;
-      const existingText =
-        explanation && typeof explanation.answer_text === 'string'
-          ? explanation.answer_text
-          : undefined;
-      if (!existingText || existingText.trim().length === 0) {
-        let recovered: string | undefined;
-        if (strayTextValue && strayTextValue.trim().length > 0) {
-          recovered = strayTextValue.trim();
-        } else if (hasStrayShape) {
-          const parsedShape = AnswerShapeSchema.safeParse(out.answer_shape);
-          if (parsedShape.success) {
-            recovered = deriveAnswerTextFromShape(parsedShape.data);
-          }
+    if (!existingText || existingText.trim().length === 0) {
+      let recovered: string | undefined;
+      if (strayTextValue && strayTextValue.trim().length > 0) {
+        recovered = strayTextValue.trim();
+      } else if (hasStrayShape) {
+        const parsedShape = AnswerShapeSchema.safeParse(out.answer_shape);
+        if (parsedShape.success) {
+          recovered = deriveAnswerTextFromShape(parsedShape.data);
         }
-        if (recovered && recovered.length > 0) {
-          action.explanation = { ...(explanation ?? {}), answer_text: recovered };
-        }
+      }
+      if (recovered && recovered.length > 0) {
+        action.explanation = { ...(explanation ?? {}), answer_text: recovered };
       }
     }
   }
@@ -918,6 +1025,34 @@ export function coerceFirstPassToolCall(toolInput: unknown): {
   if (strayTextPresent) {
     delete out.answer_text;
     coercions.push({ reason: 'stray_answer_text' });
+  }
+
+  // (d) strip stray unknown TOP-LEVEL keys (the fourth class). Every key not in
+  // the derived allowlist would trip the strict schema's root `unrecognized_keys`
+  // → repair / exhaustion. answer_shape / answer_text are in the allowlist and
+  // were already handled by (a); this catches everything else. An answer-looking
+  // stray is lifted into the (still-empty) explanation slot before dropping, so
+  // no authored prose is lost. Object.keys() is a snapshot, safe to delete during.
+  for (const key of Object.keys(out)) {
+    if (ALLOWED_TOP_LEVEL_KEYS.has(key)) continue;
+    if (action && isExplanationHandler) {
+      const existing =
+        isPlainObject(action.explanation) &&
+        typeof action.explanation.answer_text === 'string'
+          ? action.explanation.answer_text
+          : '';
+      if (existing.trim().length === 0) {
+        const recovered = recoverStrayAnswerText(out[key]);
+        if (recovered) {
+          action.explanation = {
+            ...(isPlainObject(action.explanation) ? action.explanation : {}),
+            answer_text: recovered,
+          };
+        }
+      }
+    }
+    delete out[key];
+    coercions.push({ reason: 'stray_top_level_key', key });
   }
 
   if (action) {
@@ -971,18 +1106,24 @@ export function coerceFirstPassToolCall(toolInput: unknown): {
  *
  * Repair-tax fix (2026-07-22): the input is first passed through
  * {@link coerceFirstPassToolCall} so a coercible execute-branch shape (stray
- * answer_shape/answer_text, unknown cited fields, "explicit" parameter source)
- * validates on the FIRST pass instead of paying a ~4-5s REPAIR_ONCE second LLM
- * call. When a `telemetry` context is supplied, every coercion emits a counted
+ * answer_shape/answer_text, unknown cited fields, "explicit" parameter source,
+ * a stray unknown top-level key, and — on a FORCED pill — a missing/invalid
+ * intent_class) validates on the FIRST pass instead of paying a ~4-5s
+ * REPAIR_ONCE second LLM call. The forced-pill signal is threaded via
+ * `telemetry.forcedHandlerId` (absent → non-forced → class (e) is inert). When
+ * a `telemetry` context is supplied, every coercion emits a counted
  * `v5.routing.first_pass_coerced` drift-alarm event (reason-tagged, no user
- * text) — the best-effort dropped-action path omits it to avoid double
- * counting. Coercion is deterministic and idempotent.
+ * text; `stray_top_level_key` also carries the stripped key NAME) — the
+ * best-effort dropped-action path omits it to avoid double counting. Coercion
+ * is deterministic and idempotent.
  */
 export function parseToolCallResponse(
   toolInput: unknown,
   telemetry?: ParseTelemetryContext,
 ): ToolCallResponse {
-  const { value, coercions } = coerceFirstPassToolCall(toolInput);
+  const { value, coercions } = coerceFirstPassToolCall(toolInput, {
+    forced: telemetry?.forcedHandlerId !== undefined,
+  });
   if (telemetry) {
     for (const coercion of coercions) {
       emit(TelemetryEvents.V5RoutingFirstPassCoerced, {
@@ -993,6 +1134,10 @@ export function parseToolCallResponse(
         llm_call: telemetry.llmCall,
         reason: coercion.reason,
         ...(coercion.count !== undefined ? { dropped_count: coercion.count } : {}),
+        // Structural key NAME for the stray-top-level-key strip (R-004-safe —
+        // never the value). Names the offending field in prod, closing the
+        // R-004 log gap the static attribution had to route around.
+        ...(coercion.key !== undefined ? { stray_key: coercion.key } : {}),
       });
     }
   }

@@ -813,6 +813,10 @@ export async function routeWithToolUse(
     requestId: options.requestId,
     sessionId: options.sessionId ?? null,
     llmCall: 1,
+    // Thread the forced-pill signal to the coercion site so class (e) (the
+    // missing/invalid-type intent_class default) fires on forced turns only.
+    // repairTelemetry below spreads this, so it carries to the repair pass too.
+    ...(forcedHandlerId ? { forcedHandlerId } : {}),
   };
   // Codex F3 — assert-execute-after-parse: a forced-pill result that is not an
   // execute tool_call is downgraded to `parse_failed` here so the REPAIR_ONCE
@@ -915,6 +919,14 @@ export async function routeWithToolUse(
 interface SanitisedRoutingIssue {
   readonly code: string;
   readonly path: string;
+  /**
+   * For `unrecognized_keys` issues only: the offending top-level key NAMES.
+   * A key name is a structural schema identifier — R-004-safe (never a value)
+   * — so any FUTURE un-coerced stray-top-level-key class SELF-NAMES in the
+   * `forced_pill_parse_failed` log instead of leaving only `code @ ""`. Absent
+   * for every other issue code.
+   */
+  readonly keys?: readonly string[];
 }
 
 type Interpretation =
@@ -1011,10 +1023,19 @@ function tryInterpret(
       // schema-violation path); a non-Zod throw has no issues.
       const issues: SanitisedRoutingIssue[] | undefined =
         err instanceof ToolCallParseError
-          ? err.issues.map((issue) => ({
-              code: String(issue.code),
-              path: issue.path.join('.'),
-            }))
+          ? err.issues.map((issue) => {
+              const base: SanitisedRoutingIssue = {
+                code: String(issue.code),
+                path: issue.path.join('.'),
+              };
+              // Companion (repair-tax fourth-class PR): carry the offending key
+              // NAMES for a root/nested `unrecognized_keys` issue (structural,
+              // R-004-safe) so a future un-coerced stray-key class self-names.
+              if (issue.code === 'unrecognized_keys' && Array.isArray(issue.keys)) {
+                return { ...base, keys: issue.keys };
+              }
+              return base;
+            })
           : undefined;
       return { kind: 'parse_failed', detail, ...(issues ? { issues } : {}) };
     }
