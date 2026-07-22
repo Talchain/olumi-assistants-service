@@ -93,6 +93,11 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       // 0.19.0-new: explicit producer framing question (wave-2 ask 4,
       // UI-SEM-078 — retires the UI's client-side derivation).
       'framing_question',
+      // 0.22.0-new (S1 batch): optional top-level graph hash for the
+      // freshness / GRAPH_DIVERGED handshake. DECLARED here by the re-vendor;
+      // CEE does not yet EMIT it (emission is the S1 egress lane, later). The
+      // field is optional, so its declaration is additive to the wire surface.
+      'graph_hash',
       'insights',
       // 0.15.0-new: optional top-level reasoning (formalises the _reasoning
       // wire sidecar). Approved surface change — 0.15.0 contract wave.
@@ -111,6 +116,7 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
     expect(optionality('framing_question')).toBe(true)
     expect(optionality('decision_classification')).toBe(true)
     expect(optionality('framing_quality')).toBe(true)
+    expect(optionality('graph_hash')).toBe(true)
     expect(optionality('assistant_text')).toBe(false)
     expect(optionality('blocks')).toBe(false)
   })
