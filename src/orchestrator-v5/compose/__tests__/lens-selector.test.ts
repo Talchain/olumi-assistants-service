@@ -154,7 +154,9 @@ describe('selectLens — recommends NOTHING when evidence is weak', () => {
 // ============================================================================
 
 describe('selectLens — rule 1: sensitivity / flip-risk', () => {
-  it('picks sensitivity when a factor is flagged fragile', () => {
+  it("picks sensitivity when a factor is 'isolated' (can flip on its own)", () => {
+    // PLoT flip_risk_category 'isolated' = this factor ALONE can flip the result
+    // (max marginal_switch_probability over threshold) — the strongest signal.
     const fact = makeFact({
       ...HEALTHY,
       factor_sensitivity: [
@@ -163,7 +165,7 @@ describe('selectLens — rule 1: sensitivity / flip-risk', () => {
           influence_score: 0.34,
           influence_rank: 1,
           confidence: 0.9,
-          flip_risk_category: 'fragile',
+          flip_risk_category: 'isolated',
         },
         { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
@@ -171,10 +173,14 @@ describe('selectLens — rule 1: sensitivity / flip-risk', () => {
     });
     const sel = selectLens(fact);
     expect(sel?.lens).toBe('sensitivity_flip_risk');
-    expect(sel?.rationaleCode).toBe('FLIP_RISK_FRAGILE');
+    expect(sel?.rationaleCode).toBe('FLIP_RISK_ISOLATED');
+    // The single-factor rationale is the ONE that may claim "on its own".
+    expect(sel?.body).toMatch(/on its own/i);
   });
 
-  it('matches a fragile-class substring case-insensitively', () => {
+  it("picks sensitivity with the COMBINATION rationale when a factor is 'correlated'", () => {
+    // PLoT 'correlated' = flips only in combination with other factors (marginal
+    // below threshold). It must NEVER carry the single-factor "on its own" claim.
     const fact = makeFact({
       ...HEALTHY,
       factor_sensitivity: [
@@ -183,13 +189,67 @@ describe('selectLens — rule 1: sensitivity / flip-risk', () => {
           influence_score: 0.34,
           influence_rank: 1,
           confidence: 0.9,
-          flip_risk_category: 'HIGHLY_CORRELATED',
+          flip_risk_category: 'correlated',
         },
         { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
       ],
     });
-    expect(selectLens(fact)?.rationaleCode).toBe('FLIP_RISK_FRAGILE');
+    const sel = selectLens(fact);
+    expect(sel?.lens).toBe('sensitivity_flip_risk');
+    expect(sel?.rationaleCode).toBe('FLIP_RISK_CORRELATED');
+    // Honest wording: combination, and NOT the single-factor "on its own" claim.
+    expect(sel?.body).toMatch(/combination/i);
+    expect(sel?.body).not.toMatch(/on its own/i);
+  });
+
+  it("prefers isolated over correlated when both are present", () => {
+    // isolated is the stronger single-factor signal, so it wins the slot even if
+    // another factor is only correlated.
+    const fact = makeFact({
+      ...HEALTHY,
+      factor_sensitivity: [
+        { factor_id: 'fac_a', influence_score: 0.33, influence_rank: 2, confidence: 0.9, flip_risk_category: 'correlated' },
+        { factor_id: 'fac_b', influence_score: 0.34, influence_rank: 1, confidence: 0.9, flip_risk_category: 'isolated' },
+        { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
+      ],
+    });
+    expect(selectLens(fact)?.rationaleCode).toBe('FLIP_RISK_ISOLATED');
+  });
+
+  it("never fires flip-risk on 'negligible'", () => {
+    // 'negligible' is the third enum value: minimal flip risk — no lens from 1a.
+    // With a healthy, decisive graph this must recommend NOTHING.
+    const fact = makeFact({
+      ...HEALTHY,
+      factor_sensitivity: [
+        { factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9, flip_risk_category: 'negligible' },
+        { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9, flip_risk_category: 'negligible' },
+        { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9, flip_risk_category: 'negligible' },
+      ],
+    });
+    expect(selectLens(fact)).toBeNull();
+  });
+
+  it("regression: fires on the reviewer's staging scenario — an isolated rank-1 factor", () => {
+    // Real PLoT enrichment (fac_eng_capacity, isolated, rank 1). The old trigger
+    // set ['fragile','correlated'] MATCHED NEITHER 'isolated' nor these tokens, so
+    // no lens fired exactly when a single-factor flip signal was strongest. This
+    // factor is not a dominant driver (0.34 share) and the graph is otherwise
+    // strong/decisive, so 1a-isolated is the ONLY thing that can fire — a clean
+    // mutation witness: revert the isolated branch and this reds.
+    const fact = makeFact({
+      confidence_tier: 'strong',
+      factor_sensitivity: [
+        { factor_id: 'fac_eng_capacity', influence_score: 0.34, influence_rank: 1, confidence: 0.9, flip_risk_category: 'isolated' },
+        { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 },
+        { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 },
+      ],
+      option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+    });
+    const sel = selectLens(fact);
+    expect(sel?.lens).toBe('sensitivity_flip_risk');
+    expect(sel?.rationaleCode).toBe('FLIP_RISK_ISOLATED');
   });
 
   it('picks sensitivity when one driver carries a strict majority share', () => {
@@ -368,7 +428,7 @@ describe('selectLens — priority ordering (at most one)', () => {
           influence_rank: 1,
           confidence: 0.2, // low → would trip pre-mortem
           evpi_percentage_points: 5, // material → would trip EVPI
-          flip_risk_category: 'fragile',
+          flip_risk_category: 'isolated', // isolated → sensitivity (rule 1a)
         },
         { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 },
         { factor_id: 'fac_c', influence_score: 0.1, influence_rank: 3, confidence: 0.9 },
@@ -416,9 +476,10 @@ describe('selectLens — copy is prose-guard clean', () => {
   const RAW_DECIMAL = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
   const ID_LIKE = /\b(?:fac|opt|edge|con|out|node)_[a-z0-9]+\b/i;
 
-  // One fact per lens, to sweep the copy for all six rationale codes.
+  // One fact per rationale code, to sweep the copy for all seven codes.
   const cases: ReadonlyArray<EnrichmentInput> = [
-    { ...HEALTHY, factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.7, influence_rank: 1, confidence: 0.9, flip_risk_category: 'fragile' }, { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 }] },
+    { ...HEALTHY, factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.7, influence_rank: 1, confidence: 0.9, flip_risk_category: 'isolated' }, { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 }] },
+    { confidence_tier: 'strong', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9, flip_risk_category: 'correlated' }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }], option_comparison: [{ win_probability: 0.85 }] },
     { confidence_tier: 'strong', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.7, influence_rank: 1, confidence: 0.9 }, { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.1, influence_rank: 3, confidence: 0.9 }], option_comparison: [{ win_probability: 0.85 }] },
     { confidence_tier: 'needs_work', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9 }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }] },
     { confidence_tier: 'fair', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.2 }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }] },

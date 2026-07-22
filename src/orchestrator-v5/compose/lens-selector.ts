@@ -56,7 +56,8 @@ export type LensId =
  */
 export type LensRationaleCode =
   // sensitivity_flip_risk
-  | 'FLIP_RISK_FRAGILE' // a factor is flagged fragile / correlated
+  | 'FLIP_RISK_ISOLATED' // a factor can flip the result ON ITS OWN (PLoT flip_risk_category 'isolated')
+  | 'FLIP_RISK_CORRELATED' // a factor can tip the result only in COMBINATION with others ('correlated')
   | 'DOMINANT_DRIVER' // one factor carries a majority share of total influence
   // pre_mortem
   | 'CONFIDENCE_NEEDS_WORK' // overall analysis is usable but not solid
@@ -87,10 +88,24 @@ export interface LensSelection {
  */
 export const DOMINANCE_SHARE_MIN = 0.5;
 
-/** Rule 1a — flip_risk_category is an OPEN string; these substrings mark the
- * fragile classes the brief §2 names. Matched case-insensitively as a
- * substring so an ISL variant like `"fragile_correlated"` still trips. */
-const FLIP_RISK_FRAGILE_TOKENS = ['fragile', 'correlated'] as const;
+/**
+ * Rule 1a — PLoT `flip_risk_category` is a CLOSED enum (plot-lite
+ * `contracts/README.md`; `computeFlipRiskCategory` in `factor-influence.ts`):
+ *   - `isolated`   — this factor ALONE can flip the result (max
+ *                    marginal_switch_probability over threshold). The strongest
+ *                    single-factor signal.
+ *   - `correlated` — flips only in COMBINATION with other factors (marginal
+ *                    below threshold, joint switch above). NOT a single-factor
+ *                    claim, so it earns its own honest combination wording.
+ *   - `negligible` — neither; never worth a lens.
+ * Matched by EXACT (lower-cased on read) value — no substring or forward-compat
+ * tokens. An unwitnessed token is the mirror-rot class: a hand-listed allow-set
+ * that a producer rename would silently desync. A NEW enum value would fall
+ * through to the lower-priority rules (no lens from 1a) rather than error — that
+ * is the safe direction (silence, not a false single-factor claim); revisit here
+ * if plot-lite ever adds a category. */
+const FLIP_RISK_ISOLATED_CATEGORY = 'isolated';
+const FLIP_RISK_CORRELATED_CATEGORY = 'correlated';
 
 /**
  * Rule 2b — the leading option's win_probability band that reads as
@@ -200,13 +215,19 @@ function readAnalysisSignals(fact: RunAnalysisHandlerFact): AnalysisSignals | nu
 
 /** Rule 1 — sensitivity / flip-risk (highest-priority lens). */
 function evaluateSensitivityFlipRisk(signals: AnalysisSignals): LensRationaleCode | null {
-  // 1a — an explicit fragility / correlation flag on any factor.
-  const fragile = signals.factors.some(
-    (f) =>
-      f.flipRiskCategory !== null &&
-      FLIP_RISK_FRAGILE_TOKENS.some((t) => f.flipRiskCategory!.includes(t)),
+  // 1a — an explicit PLoT flip-risk flag on any factor. `isolated` (this factor
+  // can flip the result on its own) is the strongest single-factor signal and
+  // takes precedence; `correlated` (flips only in combination with others) is a
+  // weaker, honestly distinct claim. `negligible` never fires.
+  const hasIsolated = signals.factors.some(
+    (f) => f.flipRiskCategory === FLIP_RISK_ISOLATED_CATEGORY,
   );
-  if (fragile) return 'FLIP_RISK_FRAGILE';
+  if (hasIsolated) return 'FLIP_RISK_ISOLATED';
+
+  const hasCorrelated = signals.factors.some(
+    (f) => f.flipRiskCategory === FLIP_RISK_CORRELATED_CATEGORY,
+  );
+  if (hasCorrelated) return 'FLIP_RISK_CORRELATED';
 
   // 1b — one factor carries a STRICT majority share of total positive influence.
   const scores = signals.factors
@@ -267,8 +288,10 @@ const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
 };
 
 const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
-  FLIP_RISK_FRAGILE:
-    'The result leans on a factor that looks fragile — a small change could tip which option leads. Asking what would flip the decision shows how much room for error you have.',
+  FLIP_RISK_ISOLATED:
+    'The result leans on a single factor that could tip which option leads on its own — a small change to it alone could flip the outcome. Asking what would flip the decision shows how much room for error you have.',
+  FLIP_RISK_CORRELATED:
+    'No single factor is decisive here, but the right combination of factors could tip which option leads — the outcome is more finely balanced than it first looks. Asking what would flip the decision shows which factors move together.',
   DOMINANT_DRIVER:
     'One factor is doing most of the work in this result. A sensitivity check shows how far it can move before the leading option changes.',
   CONFIDENCE_NEEDS_WORK:
