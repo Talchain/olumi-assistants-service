@@ -603,11 +603,21 @@ function clampClause(text: string): string {
   return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
 }
 
+/**
+ * British-English Oxford-less enumeration join over pre-formatted items:
+ * `[a]` → "a", `[a, b]` → "a and b", `[a, b, c]` → "a, b and c". Quote-
+ * agnostic — callers pre-format each item (single- or double-quoted, or bare)
+ * so this is the single join used by {@link joinQuoted},
+ * {@link buildSubstitutionClarify} and {@link buildMultiPartRejectionClarify}.
+ */
+export function oxfordJoin(items: readonly string[]): string {
+  if (items.length === 1) return items[0]!;
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 function joinQuoted(names: readonly string[]): string {
-  const quoted = names.map((n) => `'${n}'`);
-  if (quoted.length === 1) return quoted[0]!;
-  if (quoted.length === 2) return `${quoted[0]} and ${quoted[1]}`;
-  return `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+  return oxfordJoin(names.map((n) => `'${n}'`));
 }
 
 function dedupe(names: readonly string[]): string[] {
@@ -697,12 +707,7 @@ export function buildSubstitutionClarify(
   accounting: EditPartAccounting,
 ): string {
   const clauses = parts.map((p) => `"${clampClause(p.text)}"`);
-  const enumeration =
-    clauses.length === 1
-      ? clauses[0]!
-      : clauses.length === 2
-        ? `${clauses[0]} and ${clauses[1]}`
-        : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
+  const enumeration = oxfordJoin(clauses);
   const allMissing = dedupe([
     ...accounting.substitutions.map((s) => s.missingName),
     ...accounting.missingTargets.map((i) => i.name),
@@ -752,11 +757,10 @@ export function buildMultiPartRejectionClarify(
 ): string | null {
   const parts = decomposition.accountableParts;
   if (parts.length < 2) return null;
+  // parts.length >= 2 is guaranteed above, so oxfordJoin's 2- and 3+-item
+  // arms produce byte-identical output to the previous inline enumeration.
   const items = parts.map((p) => `"${clampClause(p.text)}"`);
-  const enumeration =
-    items.length === 2
-      ? `${items[0]} and ${items[1]}`
-      : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+  const enumeration = oxfordJoin(items);
   return (
     "I wasn't able to make those edits together. Let me take them one at a " +
     `time. Tell me each part on its own and I'll pick it up: ${enumeration}.`

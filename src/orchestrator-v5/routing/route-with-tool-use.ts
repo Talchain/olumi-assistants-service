@@ -587,9 +587,10 @@ export async function routeWithToolUse(
   // when a forced handler is set, so every non-pill routing turn is byte-
   // identical to today.
   const forcedHandlerId = options.forcedExplanationHandlerId;
+  const base = buildUserMessage(contextPack, message);
   const userMessage = forcedHandlerId
-    ? `${buildUserMessage(contextPack, message)}\n\n${buildForcedIntentDirective(forcedHandlerId)}`
-    : buildUserMessage(contextPack, message);
+    ? `${base}\n\n${buildForcedIntentDirective(forcedHandlerId)}`
+    : base;
 
   // PMS-backed routing prompt snapshot. Built once at startup; this call is
   // a cheap cached read on every routing turn after boot. The snapshot's

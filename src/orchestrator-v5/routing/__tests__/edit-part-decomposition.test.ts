@@ -21,6 +21,7 @@ import {
   buildStructuralRemainderNotice,
   buildSubstitutionClarify,
   decomposeEditMessage,
+  oxfordJoin,
   type PatchOperationLike,
 } from '../edit-part-decomposition.js';
 import {
@@ -430,5 +431,23 @@ describe('disclosure copy — DISCLOSED-PARTIAL and fail-closed clarify', () => 
     expect(
       buildMultiPartRejectionClarify(decomposeEditMessage('Set Headcount Cost to 0.5')),
     ).toBeNull();
+  });
+});
+
+describe('oxfordJoin — British-English enumeration (shared by all three clarify sites)', () => {
+  it('joins two pre-formatted items with a bare "and" (no Oxford comma)', () => {
+    expect(oxfordJoin(['"a"', '"b"'])).toBe('"a" and "b"');
+  });
+
+  it('joins three items with commas then a bare "and" before the last', () => {
+    expect(oxfordJoin(['"a"', '"b"', '"c"'])).toBe('"a", "b" and "c"');
+  });
+
+  it('returns a single item verbatim', () => {
+    expect(oxfordJoin(['"only"'])).toBe('"only"');
+  });
+
+  it('is quote-agnostic — single-quoted items join identically', () => {
+    expect(oxfordJoin(["'x'", "'y'", "'z'"])).toBe("'x', 'y' and 'z'");
   });
 });

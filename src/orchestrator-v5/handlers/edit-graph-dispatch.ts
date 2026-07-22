@@ -114,6 +114,7 @@ import {
   type EditPartAccounting,
   type PatchOperationLike,
 } from '../routing/edit-part-decomposition.js';
+import { clampLabel } from './describe-changeset.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import {
@@ -2069,7 +2070,7 @@ export async function dispatchEditGraph(
         assistant_text: multiPartClarify,
         suggested_actions: partDecomposition.accountableParts.map((part, i) => {
           const clause = part.text.replace(/\s+/g, ' ').trim();
-          const label = clause.length > 60 ? `${clause.slice(0, 57)}...` : clause;
+          const label = clampLabel(clause);
           const action: { id: string; label: string; message: string; detail?: string } = {
             id: `edit_part_retry_${i}`,
             label,
