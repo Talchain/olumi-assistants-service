@@ -43,6 +43,7 @@ import {
   P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP,
   toSafeTransportEnrichment,
 } from "../../src/orchestrator-v5/compose.js";
+import { ENRICHMENT_PRODUCER_MANIFEST } from "../../src/orchestrator-v5/context/enrichment-manifest.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const crossServiceFixtures = join(here, "..", "fixtures", "cross-service");
@@ -87,6 +88,29 @@ describe("CEE→UI: keep-list drift bolt (schemas package is the source of truth
     expect([...P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP]).toEqual([
       ...CEE_UI_ENRICHMENT_KEEP_LIST,
     ]);
+  });
+});
+
+describe("CEE→UI: keep-list is anchored to the PLoT PRODUCER manifest (context-audit #1 row #1)", () => {
+  // The original drift bolt compares CEE-copy == schemas-copy ONLY — it stays
+  // green while BOTH mirror copies omit a real new PLoT field (it never looks
+  // at the producer). Anchor the keep-list to ENRICHMENT_PRODUCER_MANIFEST
+  // (the PLoT /v2/run RunResponseV3 top-level field set) so a kept key that is
+  // NOT a real producer field — a drifted/renamed/removed-upstream key — goes
+  // RED here instead of silently shipping an always-absent key to the UI.
+  it("every kept key is a real PLoT producer field", () => {
+    const notEmitted = P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP.filter(
+      (key) => !ENRICHMENT_PRODUCER_MANIFEST.has(key),
+    );
+    expect(notEmitted).toEqual([]);
+  });
+
+  it("POSITIVE CONTROL — the producer check SEES a keep-list key absent from the manifest", () => {
+    // Prove the subset check can detect a violation (doctrine trap #13):
+    // a hypothetical kept key PLoT never emits must be flagged.
+    const withPhantom = [...P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP, "ghost_field_plot_never_emits"];
+    const notEmitted = withPhantom.filter((key) => !ENRICHMENT_PRODUCER_MANIFEST.has(key));
+    expect(notEmitted).toContain("ghost_field_plot_never_emits");
   });
 });
 
