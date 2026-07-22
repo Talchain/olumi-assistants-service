@@ -53,6 +53,10 @@
             "chip": {
               "type": "object",
               "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "action_type": {
                   "type": "string",
                   "enum": [
@@ -67,6 +71,22 @@
                     "what_would_flip",
                     "analysis_readiness",
                     "what_changed"
+                  ]
+                },
+                "intent": {
+                  "type": "string",
+                  "enum": [
+                    "elicit_options",
+                    "add_option",
+                    "challenge_frame",
+                    "challenge_assumption",
+                    "outside_view",
+                    "pre_mortem",
+                    "elicit_risks",
+                    "estimate_help",
+                    "mitigation_help",
+                    "define_success",
+                    "discuss"
                   ]
                 },
                 "parameters": {
@@ -191,6 +211,39 @@
                     "operation": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "changed_node_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "changed_edge_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "fields_changed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
                     }
                   },
                   "required": [
@@ -265,6 +318,58 @@
                   "required": [
                     "kind",
                     "selected"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "feedback"
+                    },
+                    "rating": {
+                      "type": "string",
+                      "enum": [
+                        "up",
+                        "down"
+                      ]
+                    },
+                    "comment": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "description": "User free-text feedback. MAY contain PII (names, emails, whatever the user typed) — consumers MUST handle per R-004: treat as sensitive, never log verbatim, redact before persistence/telemetry."
+                    },
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "turn",
+                            "message",
+                            "block",
+                            "suggestion",
+                            "analysis"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "rating",
+                    "target"
                   ],
                   "additionalProperties": false
                 }
