@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   accountEditParts,
+  buildMultiPartRejectionClarify,
   buildPartAccountingDisclosure,
   buildStructuralRemainderNotice,
   buildSubstitutionClarify,
@@ -404,5 +405,30 @@ describe('disclosure copy — DISCLOSED-PARTIAL and fail-closed clarify', () => 
   it('buildStructuralRemainderNotice is null for a pure value message (false-compound trap)', () => {
     const d = decomposeEditMessage('Set EU Market Demand to 0.7');
     expect(buildStructuralRemainderNotice(d)).toBeNull();
+  });
+
+  it('buildMultiPartRejectionClarify names every accountable part and passes both egress detectors', () => {
+    // The verbatim F4 live-probe message (cee-staging build 6a202d7).
+    const d = decomposeEditMessage(
+      'Set Headcount Cost to 0.5 and remove the option Hire Two Junior Engineers.',
+    );
+    const text = buildMultiPartRejectionClarify(d);
+    expect(text).not.toBeNull();
+    expect(text!).toContain('Set Headcount Cost to 0.5');
+    expect(text!).toContain('remove the option Hire Two Junior Engineers');
+    expect(text!).toMatch(/one at a time/i);
+    expect(findForbiddenPhraseHit(text!)).toBeNull();
+    expect(findSuccessClaimHit(text!)).toBeNull();
+  });
+
+  it('buildMultiPartRejectionClarify is null for a single-part message (false-compound trap)', () => {
+    expect(
+      buildMultiPartRejectionClarify(
+        decomposeEditMessage('remove the option Hire Two Junior Engineers.'),
+      ),
+    ).toBeNull();
+    expect(
+      buildMultiPartRejectionClarify(decomposeEditMessage('Set Headcount Cost to 0.5')),
+    ).toBeNull();
   });
 });
