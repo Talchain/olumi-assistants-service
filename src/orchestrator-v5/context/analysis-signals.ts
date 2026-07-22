@@ -35,11 +35,14 @@ export const TIPPING_POINT_SIGNAL_CAP = 3;
  * `MAX_PROJECTED_OPTIONS` in `./context-pack-assembler.ts` (the assembler
  * imports this module, so the constant cannot be imported from there without
  * a cycle): the goal-fit carriage never needs more entries than the option
- * list it annotates.
+ * list it annotates. Parity is pinned FAIL-LOUD (was comment-only, context-
+ * audit #1 row #6) by `__tests__/enrichment-manifest.conformance.test.ts` —
+ * if `MAX_PROJECTED_OPTIONS` moves, this cap must move with it or the pin
+ * goes RED.
  */
 export const OPTION_GOAL_FIT_SIGNAL_CAP = 12;
 
-/** Lane 30 fix 3 — cap for per-option outcome signals (same parity note). */
+/** Lane 30 fix 3 — cap for per-option outcome signals (same parity note + pin). */
 export const OPTION_OUTCOME_SIGNAL_CAP = 12;
 
 /**
