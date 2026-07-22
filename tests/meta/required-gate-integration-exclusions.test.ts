@@ -118,7 +118,7 @@ describe("required-gate integration exclusion list (finite, self-checking)", () 
     // be vacuous — fail here first, loudly.
     expect(files.length).toBeGreaterThan(100);
     expect(files).toContain("tests/integration/orchestrate-v2.test.ts");
-    expect(files).toContain("tests/integration/orchestrator/route.test.ts");
+    expect(files).toContain("tests/integration/orchestrator/route-v2-draft-graph.test.ts");
   });
 
   // ── Derive the set and demand exact equality (both directions loud) ──────

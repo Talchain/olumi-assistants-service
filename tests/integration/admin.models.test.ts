@@ -227,7 +227,7 @@ describe("GET /admin/dashboard/env", () => {
     expect(body).toHaveProperty("timestamp");
   });
 
-  it("feature_flags includes all four expected flags", async () => {
+  it("feature_flags includes all three expected flags", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/admin/dashboard/env",
@@ -235,7 +235,7 @@ describe("GET /admin/dashboard/env", () => {
     });
     const body = res.json();
     const flagNames = body.feature_flags.map((f: { name: string }) => f.name);
-    expect(flagNames).toContain("CEE_ORCHESTRATOR_ENABLED");
+    // CEE_ORCHESTRATOR_ENABLED removed with the V1 orchestrator belt (2026-07-21).
     expect(flagNames).toContain("DSK_ENABLED");
     expect(flagNames).toContain("ANTHROPIC_PROMPT_CACHE_ENABLED");
     expect(flagNames).toContain("CEE_ZONE2_REGISTRY_ENABLED");

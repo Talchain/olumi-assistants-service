@@ -511,7 +511,6 @@ const ConfigSchema = z.object({
     // field was never env-mapped in rawConfig and had zero source consumers.
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
-    orchestrator: booleanString.default(false), // CEE_ORCHESTRATOR_ENABLED — Track C: multi-turn conversational decision modelling
     orchestratorV2: booleanString.default(false), // ENABLE_ORCHESTRATOR_V2 — V2 five-phase pipeline
     // CEE_ORCHESTRATOR_CONTEXT_ENABLED — Context Fabric: 3-zone cache-aware context assembly pipeline
     // IMPORTANT: V2 prompt path must have parity with V1 before enabling on staging. See A.4 audit.
@@ -1429,8 +1428,6 @@ function parseConfig(): Config {
       clarifier: env.CLARIFIER_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
       enableLegacySSE: env.ENABLE_LEGACY_SSE,
-      // CEE_ORCHESTRATOR_ENABLED preferred; falls back to ENABLE_ORCHESTRATOR
-      orchestrator: env.CEE_ORCHESTRATOR_ENABLED ?? env.ENABLE_ORCHESTRATOR,
       orchestratorV2: env.ENABLE_ORCHESTRATOR_V2,
       contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
       dskV0: env.ENABLE_DSK_V0,
@@ -2165,7 +2162,13 @@ const DEAD_ENV_VARS: string[] = [
   'CEE_LEGACY_PIPELINE_ENABLED',       // Legacy pipeline code removed
   'CEE_BIAS_LLM_DETECTION_ENABLED',    // Never existed in config schema
   'CAUSAL_CLAIMS_ENABLED',             // Feature gated by CEE_CAUSAL_VALIDATION_ENABLED, not this
-  'ORCHESTRATOR_ENABLED',              // Actual legacy name is ENABLE_ORCHESTRATOR
+  // V1 orchestrator belt deleted (PR #615): its enable flags are now inert. The
+  // old note here — "actual legacy name is ENABLE_ORCHESTRATOR" — is stale: that
+  // var was the belt's own gate and is itself dead now. Remove all three from
+  // deployment/Render config; the admin dashboard flags them via checkDeadEnvVars.
+  'ORCHESTRATOR_ENABLED',              // Never had a reader; the belt read ENABLE_ORCHESTRATOR
+  'ENABLE_ORCHESTRATOR',               // V1 orchestrator-belt enable flag; belt deleted (#615)
+  'CEE_ORCHESTRATOR_ENABLED',          // V1 orchestrator-belt enable flag (CEE_ variant); belt deleted (#615)
   'VITE_ENABLE_ORCHESTRATOR_V2',       // Frontend-only (Vite prefix); not read by backend
   'CEE_UNIFIED_PIPELINE_ENABLED',      // Unified pipeline is always-on; flag retired
   'CEE_MODEL_REPAIR_GRAPH',            // Never existed; canonical name is CEE_MODEL_REPAIR

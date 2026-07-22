@@ -61,9 +61,7 @@ import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAF
 import { getTurnExecutorBudgets, getHandlerBudgetMs } from "./orchestrator-v5/budgets.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
-import { ceeOrchestratorRouteV1 } from "./orchestrator/route.js";
 import { ceeOrchestratorRouteV2 } from "./orchestrator/route-v2.js";
-import ceeEditGraphRouteV1 from "./routes/assist.v1.edit-graph.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { adminPromptStatusRoutes } from "./routes/admin.prompts.status.js";
 import { publicPromptRoutes } from "./routes/v1.prompts.js";
@@ -1124,12 +1122,11 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     await ceeDecisionReviewExampleRouteV1(app);
   }
 
-  // Orchestrator routes (feature-gated)
-  if (config.features.orchestrator) {
-    await ceeOrchestratorRouteV1(app);
-    await ceeEditGraphRouteV1(app);
-    app.log.info({}, 'Orchestrator routes registered (POST /orchestrate/v1/turn, POST /assist/v1/edit-graph)');
-  }
+  // V1 orchestrator belt (POST /orchestrate/v1/turn, POST /assist/v1/edit-graph)
+  // was deleted 2026-07-21: the V1 route was UI-dead (the live product path is
+  // /orchestrate/v2/turn) and already 410'd once CEE_PIPELINE_V4_ENABLED went
+  // inert. Its handlers (turn-handler, parallel-generate, moe-spike,
+  // route-stream) and the V4/V2 pipelines it owned had zero live-V5 importers.
 
   // V5 orchestrator — the live product path. Registered UNCONDITIONALLY since
   // 2026-07-20 (O-7 wave 2: ENABLE_V5_ORCHESTRATOR deleted; its OFF branch
