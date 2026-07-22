@@ -285,6 +285,31 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'warning_signs',
     ])
   })
+
+  it('pins signal_code + signal as optional wire fields on all four guidance blocks', () => {
+    // 0.20.0/0.21.0 (ROADMAP 1.120 residual, UI-SEM-085): the producer now
+    // populates signal_code (+ signal where deterministic) — see
+    // compose/guidance-signals.ts. On the wire both are additive/optional so a
+    // pre-0.20.0 or un-re-vendored consumer fails closed. This asserts the
+    // wire SURFACE (optionality) at each guidance block point; the producer
+    // EMISSION is pinned in compose/__tests__/phase3-blocks.test.ts.
+    const guidanceBlockSchemas: Array<[string, unknown]> = [
+      ['ReviewCardBlock', ReviewCardBlockSchema],
+      ['CoachingBlock', CoachingBlockSchema],
+      ['EvidenceBlock', EvidenceBlockSchema],
+      ['ExerciseBlock', ExerciseBlockSchema],
+    ]
+    for (const [name, schema] of guidanceBlockSchemas) {
+      const shape = unwrapToObject(schema).shape
+      for (const field of ['signal_code', 'signal']) {
+        expect(shape[field], `${name}.${field} exists on the wire`).toBeDefined()
+        expect(
+          (shape[field] as { isOptional(): boolean }).isOptional(),
+          `${name}.${field} is optional (consumers fail closed on absence)`,
+        ).toBe(true)
+      }
+    }
+  })
 })
 
 describe('affordance pins (chips-on-the-wire)', () => {

@@ -86,8 +86,9 @@ import { deterministicBlockId } from './block-id.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
+  evidenceSignals,
   guidanceSignalsForCoachingKind,
-  severityWithSignals,
+  reviewCardSignals,
 } from './guidance-signals.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
@@ -775,9 +776,10 @@ export function buildEvidenceBlocks(
       suggested_technique: suggestedTechnique,
       impact_if_gathered: truncate(impact, BODY_MAX),
       priority_rank: rank,
-      // Wave-2 ask 1 (0.19.0): severity + derived category/priority from one
-      // argument, so they can never disagree.
-      ...severityWithSignals(severity),
+      // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): severity + derived
+      // category/priority + the evidence signal_code from one argument, so they
+      // can never disagree.
+      ...evidenceSignals(severity),
       action_intent: 'gather_evidence' as ActionIntentLiteral,
       action_label: truncate('Strengthen this evidence', ACTION_LABEL_MAX),
     };
@@ -879,7 +881,7 @@ function buildNarrativeCard(
     card_kind: 'narrative' as const,
     title: truncate('How the analysis reads', TITLE_MAX),
     body,
-    ...severityWithSignals('info'),
+    ...reviewCardSignals('narrative', 'info'),
     target_refs: [] as readonly TargetRef[],
     priority_rank: 10,
   };
@@ -1001,7 +1003,7 @@ function buildPreMortemCard(
     card_kind: 'pre_mortem' as const,
     title: truncate('If things go wrong', TITLE_MAX),
     body: truncate(standaloneBody, BODY_MAX),
-    ...severityWithSignals('warning'),
+    ...reviewCardSignals('pre_mortem', 'warning'),
     target_refs: targetRefs,
     priority_rank: 20,
     action_intent: 'run_pre_mortem' as ActionIntentLiteral,
@@ -1063,7 +1065,7 @@ function buildFlipThresholdCards(
       card_kind: 'flip_threshold' as const,
       title: truncate(`What would flip the result on ${ref.label}`, TITLE_MAX),
       body: truncate(narrative, BODY_MAX),
-      ...severityWithSignals('warning'),
+      ...reviewCardSignals('flip_threshold', 'warning'),
       target_refs: [ref] as readonly TargetRef[],
       priority_rank: 30 + idx,
       action_intent: 'what_would_flip' as ActionIntentLiteral,
@@ -1115,7 +1117,7 @@ function buildBiasCards(
       card_kind: 'bias' as const,
       title: truncate(`Something to check: ${humaniseBiasType(biasType)}`, TITLE_MAX),
       body: truncate(description, BODY_MAX),
-      ...severityWithSignals('warning'),
+      ...reviewCardSignals('bias', 'warning'),
       target_refs: targetRefs,
       priority_rank: 40 + idx,
       action_intent: 'gather_evidence' as ActionIntentLiteral,
@@ -1152,7 +1154,7 @@ function buildRobustnessCard(
     card_kind: 'robustness' as const,
     title: truncate('How robust is this?', TITLE_MAX),
     body: truncate(summary, BODY_MAX),
-    ...severityWithSignals(primaryRisk.length > 0 ? 'warning' : 'info'),
+    ...reviewCardSignals('robustness', primaryRisk.length > 0 ? 'warning' : 'info'),
     target_refs: [] as readonly TargetRef[],
     priority_rank: 50,
   };
@@ -1197,7 +1199,7 @@ function buildEvidencePriorityCard(
       card_kind: 'evidence_priority' as const,
       title: truncate(`Highest-leverage evidence gap: ${ref.label}`, TITLE_MAX),
       body: truncate(rationale, BODY_MAX),
-      ...severityWithSignals('info'),
+      ...reviewCardSignals('evidence_priority', 'info'),
       target_refs: [ref],
       priority_rank: 60,
       action_intent: 'gather_evidence' as ActionIntentLiteral,
@@ -1240,7 +1242,7 @@ function buildAssumptionCards(
       card_kind: 'assumption' as const,
       title: truncate('A load-bearing assumption', TITLE_MAX),
       body: truncate(text, BODY_MAX),
-      ...severityWithSignals('info'),
+      ...reviewCardSignals('assumption', 'info'),
       target_refs: [] as readonly TargetRef[],
       priority_rank: 70 + idx,
     };
@@ -1315,7 +1317,7 @@ function buildScenarioContextCards(
       card_kind: 'scenario_context' as const,
       title: truncate('A scenario worth considering', TITLE_MAX),
       body: truncate(body, BODY_MAX),
-      ...severityWithSignals('info'),
+      ...reviewCardSignals('scenario_context', 'info'),
       target_refs: [ref] as readonly TargetRef[],
       priority_rank: 80 + idx,
     };
