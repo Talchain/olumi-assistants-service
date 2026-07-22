@@ -102,9 +102,17 @@ const OperatorSchema = z.enum(['set', 'increase', 'decrease', 'multiply']);
 
 // Per-action_type readers of `chip.parameters`. Non-strict by design: a real
 // chip bag also carries chip_id/spark_id which we ignore, never reject.
+//
+// NUMERIC STRICTNESS: numeric params use `z.number().finite()` — plain
+// `z.number()` accepts NaN/±Infinity, and NO value should be coerced or
+// clamped into range. A non-finite (or non-numeric) value FAILS the parse so
+// the caller takes the #635 `parameters_invalid` fall-through to the LLM,
+// never a silent commit. (Strings already fail `z.number()` — Zod does not
+// coerce here.) These schemas are private to this typed-reader entry; the LLM
+// tool-call path validates elsewhere and is unaffected.
 const SetFactorValueParamsSchema = z.object({
   target_id: z.string().min(1),
-  value: z.number(),
+  value: z.number().finite(),
   unit: z.string().min(1).optional(),
   operator: OperatorSchema.optional(),
 });
@@ -114,8 +122,8 @@ const AdjustEdgeStrengthParamsSchema = z
     target_id: z.string().min(1).optional(),
     from: z.string().min(1).optional(),
     to: z.string().min(1).optional(),
-    value: z.number().min(-1).max(1),
-    std: z.number().gt(0).max(0.5).optional(),
+    value: z.number().finite().min(-1).max(1),
+    std: z.number().finite().gt(0).max(0.5).optional(),
     operator: OperatorSchema.optional(),
   })
   // An edge target is identified EITHER by a composed id ("from→to") OR by an
@@ -129,7 +137,7 @@ const AdjustEdgeStrengthParamsSchema = z
 const AddConstraintParamsSchema = z.object({
   target_id: z.string().min(1),
   constraint_type: z.enum(['at_least', 'at_most']),
-  value: z.number(),
+  value: z.number().finite(),
   label: z.string().min(1).optional(),
   unit: z.string().min(1).optional(),
 });

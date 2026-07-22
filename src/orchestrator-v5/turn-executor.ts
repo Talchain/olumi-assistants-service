@@ -3941,6 +3941,15 @@ export async function runTurnExecutor(
         payload.source === 'chip_click' || payload.source === 'chip'
           ? payload.chip?.action_type
           : undefined;
+      // True when a typed MUTATION chip was attempted here but did NOT route
+      // (malformed/unresolved parameters, or a non-executable handler). Its
+      // `chip.parameters` are the authoritative edit spec and its rendered
+      // `message` copy is merely a RENDERING of that (now-broken) spec — so the
+      // deterministic TEXT value-update parsers below MUST NOT re-infer a value
+      // from that copy (the live silent-wrong-value defect: a string value
+      // fell through and the copy's word-number "one" was committed as 1). Such
+      // a turn falls through to the LLM instead, per the #634/#635 contract.
+      let typedChipMutationUnroutedFallThrough = false;
       if (
         routingResult === undefined &&
         typedChipActionType !== undefined &&
@@ -4002,8 +4011,14 @@ export async function runTurnExecutor(
           });
         } else {
           // Observable fall-through (content-free): params absent/malformed,
-          // target unresolved, or handler not executable → the text/LLM path
-          // owns the turn. The reason is an enum, never user text.
+          // target unresolved, or handler not executable → the LLM path owns
+          // the turn. The reason is an enum, never user text.
+          //
+          // Suppress the deterministic TEXT value-update parsers for this turn:
+          // this IS a typed mutation chip, so its copy is a rendering of the
+          // (broken) typed spec, and re-parsing it would silently commit a
+          // value the user never typed. Fall through to the LLM instead.
+          typedChipMutationUnroutedFallThrough = true;
           emit(TelemetryEvents.V5TypedChipMutationRoute, {
             request_id: requestId,
             action_type: typedChipActionType,
@@ -4087,7 +4102,7 @@ export async function runTurnExecutor(
       // synthesised a proposal (routingResult set), the text parser must NOT
       // re-parse the chip copy and overwrite it — typed ahead of the heuristic.
       let deterministicValueUpdate =
-        routingResult === undefined
+        routingResult === undefined && !typedChipMutationUnroutedFallThrough
           ? tryDeterministicValueUpdate(
               payload.message,
               contextPack.parsed_quantities,
@@ -4110,7 +4125,9 @@ export async function runTurnExecutor(
       // wins (selection is also a tie-breaker for label-based ambiguous
       // cases, handled inside `tryDeterministicValueUpdate`).
       const deicticDispatch =
-        routingResult === undefined && !deterministicValueUpdate.matched
+        routingResult === undefined &&
+        !typedChipMutationUnroutedFallThrough &&
+        !deterministicValueUpdate.matched
           ? tryDeicticValueUpdate(
               payload.message,
               contextPack.parsed_quantities,
@@ -4154,7 +4171,11 @@ export async function runTurnExecutor(
       // bypassed validation entirely (Codex F4/F12).
       // S2-L3 precedence: also skipped when a typed-chip proposal already
       // routed (routingResult set) so the compound text parser cannot overwrite.
-      if (routingResult === undefined && !deterministicValueUpdate.matched) {
+      if (
+        routingResult === undefined &&
+        !typedChipMutationUnroutedFallThrough &&
+        !deterministicValueUpdate.matched
+      ) {
         const compoundDispatch = tryCompoundValueUpdate(
           payload.message,
           contextPack.parsed_quantities,
