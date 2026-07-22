@@ -515,6 +515,21 @@ export interface RunTurnExecutorOptions {
    */
   readonly chipClickResumeIntent?: 'what_would_flip';
   /**
+   * F2 CHANGE A — FORCED explanation intent for a typed analytical pill. Set by
+   * route-v2 (`detectChipClickForcedIntent`) when an ingress arrives with
+   * `source==='chip_click'` and a typed `chip.action_type` of `explain_results`,
+   * the `explain_result` singular alias (canonicalised to `explain_results`), or
+   * `what_would_flip`. These pills are no longer in the deterministic-chip
+   * whitelist; they route through the coach path here. This flag is passed to
+   * `routeWithToolUse` as `forcedExplanationHandlerId`, which (1) disables
+   * thinking on the routing turn (~9s), (2) forces the `olumi_action` tool +
+   * appends a forced-intent directive so the coach authors the answer with the
+   * loaded conversation window in sight, and (3) PINS the proposal handler_id to
+   * this value so the coach cannot re-route the typed pill. Mutually exclusive
+   * with `chipClickResumeIntent` — route-v2 sets at most one.
+   */
+  readonly chipClickForcedIntent?: 'explain_results' | 'what_would_flip';
+  /**
    * Optional graph lookup override — tests pass a mock to exercise validator
    * paths without threading a full GraphV3T. Production derives this from
    * `graphState` via buildGraphLookup(); when both are present, the explicit
@@ -5051,7 +5066,16 @@ export async function runTurnExecutor(
       // the decision based on this?" reaches edit_graph and surfaces
       // the no-op denial copy. The legitimate edit path is preserved by
       // the mutation-signal exclusion patterns inside the gate.
-      if (routingResult === undefined) {
+      //
+      // F2 CHANGE A — a FORCED analytical pill (`chipClickForcedIntent`) must
+      // reach the coach so its answer sees the loaded conversation window. This
+      // deterministic advice gate keys on a message REGEX
+      // (`classifyAnalyticalIntent`) and would otherwise swallow the pill's
+      // analytical copy with a conversation-blind deterministic answer — exactly
+      // the pre-F2 behaviour. Skip it for a forced pill; the coach + explanation
+      // handler own the answer (with the deterministic composer still the routed
+      // fallback). Non-pill turns are unaffected.
+      if (routingResult === undefined && options.chipClickForcedIntent === undefined) {
         const adviceOutcome = tryPostAnalysisAdviceGate({
           message: payload.message,
           analysis: contextPack.analysis,
@@ -5312,7 +5336,16 @@ export async function runTurnExecutor(
       // path of `tryPostAnalysisAdviceGate` is NOT modified — PR #184
       // preserved it bit-for-bit and this guard preserves that
       // guarantee.
-      if (routingResult === undefined && contextReadiness !== null) {
+      // F2 CHANGE A — like the advice gate above, this fresh-analysis catch-net
+      // keys on a message regex and would intercept a FORCED analytical pill's
+      // copy with a deterministic recap (its chip used to re-dispatch the
+      // deterministic explanation handler — the very path F2 removed). Skip it
+      // for a forced pill so the click reaches the coach with conversation sight.
+      if (
+        routingResult === undefined &&
+        contextReadiness !== null &&
+        options.chipClickForcedIntent === undefined
+      ) {
         const freshFollowupOutcome = tryFreshAnalysisFollowupGuard({
           message: payload.message,
           readiness: contextReadiness,
@@ -5501,6 +5534,11 @@ export async function runTurnExecutor(
           sessionId: context.session_id,
           signal: turnAbort.signal,
           adapter: options.routingAdapter,
+          // F2 CHANGE A — a typed analytical pill forces its explanation intent
+          // through the coach (thinking disabled, tool forced, handler pinned).
+          ...(options.chipClickForcedIntent
+            ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
+            : {}),
         });
         // ROADMAP 1.42 — stash VERBATIM reasoning immediately after the real
         // LLM call. Undefined when the flag was off or no thinking blocks

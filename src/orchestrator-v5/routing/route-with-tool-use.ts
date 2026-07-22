@@ -537,6 +537,25 @@ export interface RouteWithToolUseOptions {
    * routing docs — use sparingly and only in tests.
    */
   readonly systemPromptOverride?: string;
+  /**
+   * F2 CHANGE A — FORCED explanation intent for a typed analytical pill
+   * (`explain_results` / `what_would_flip`). Set by TurnExecutor when route-v2
+   * detected a `source==='chip_click'` turn whose typed `chip.action_type` is
+   * an explanation intent (`chipClickForcedIntent`). When present this call:
+   *   1. DISABLES thinking on this routing turn (reuses the existing
+   *      `{ thinking: { type: 'disabled' } }` mechanism — ~9s median vs ~26s —
+   *      NOT a new flag; per-call, unconditional for the pill path), and
+   *   2. FORCES the model to emit the `olumi_action` tool (`tool_choice: tool`),
+   *      appends a forced-intent directive to the user turn, and
+   *   3. PINS the resulting proposal's `handler_id` to this value at interpret
+   *      time so the coach AUTHORS the answer (with full conversation sight)
+   *      but CANNOT re-route the typed pill to a different handler.
+   * The coach still sees the verbatim conversation window (it rides on the
+   * ContextPack serialised by `buildUserMessage`), so the pill answer references
+   * what the user just said; the deterministic explanation fallback stays in
+   * place downstream when the authored `answer_text` is invalid.
+   */
+  readonly forcedExplanationHandlerId?: 'explain_results' | 'what_would_flip';
 }
 
 export async function routeWithToolUse(
@@ -562,7 +581,15 @@ export async function routeWithToolUse(
     recordModelResolution(options.requestId, options.sessionId, resolution);
   }
 
-  const userMessage = buildUserMessage(contextPack, message);
+  // F2 CHANGE A — forced explanation intent for a typed analytical pill. The
+  // directive is APPENDED after the pure `buildUserMessage` output (kept pure so
+  // the budget re-measurement and the byte-golden tests are unaffected) and only
+  // when a forced handler is set, so every non-pill routing turn is byte-
+  // identical to today.
+  const forcedHandlerId = options.forcedExplanationHandlerId;
+  const userMessage = forcedHandlerId
+    ? `${buildUserMessage(contextPack, message)}\n\n${buildForcedIntentDirective(forcedHandlerId)}`
+    : buildUserMessage(contextPack, message);
 
   // PMS-backed routing prompt snapshot. Built once at startup; this call is
   // a cheap cached read on every routing turn after boot. The snapshot's
@@ -585,7 +612,15 @@ export async function routeWithToolUse(
     // buildOlumiActionTool() unconditionally advertises `answer_shape`
     // (ROADMAP 1.132, F2 — F1 flag deletion).
     tools: [buildOlumiActionTool()],
-    tool_choice: { type: 'auto' },
+    // F2 CHANGE A — a forced explanation pill FORCES the `olumi_action` tool so
+    // the coach ALWAYS emits a structured proposal (with a graph-resolved entity
+    // + authored `answer_text`) rather than free text; the handler_id is then
+    // pinned at interpret time. Anthropic requires thinking OFF whenever
+    // tool_choice forces a specific tool — satisfied below (the pill path always
+    // disables thinking). Every non-pill turn keeps `{ type: 'auto' }`.
+    tool_choice: forcedHandlerId
+      ? { type: 'tool' as const, name: OLUMI_ACTION_TOOL_NAME }
+      : { type: 'auto' as const },
     temperature: 0,
     maxTokens: V5_ROUTING_MAX_OUTPUT_TOKENS,
     // CEE_COACH_THINKING_DISABLED (POC-BOARD item 9) — latency lever. Flag OFF
@@ -595,7 +630,12 @@ export async function routeWithToolUse(
     // the N=5 staging spike). This spread propagates to the max_tokens-retry and
     // REPAIR_ONCE calls, which reuse firstCallArgs. Enablement is Paul-gated
     // behind the coaching-quality verdict — see the flag's config/index.ts note.
-    ...(config.features.coachThinkingDisabled
+    //
+    // F2 CHANGE A — a forced explanation pill ALSO disables thinking on this
+    // path unconditionally (reuses the SAME mechanism, not a new flag): the pill
+    // needs the ~9s latency and forced tool_choice is incompatible with adaptive
+    // thinking. OR-ed with the global lever so either route disables it.
+    ...(config.features.coachThinkingDisabled || forcedHandlerId
       ? { thinking: { type: 'disabled' as const } }
       : {}),
   };
@@ -760,7 +800,8 @@ export async function routeWithToolUse(
   }
 
   const parsedOrError = tryInterpret(firstResult, llmCallsUsed);
-  if (parsedOrError.kind === 'ok') return parsedOrError.result;
+  if (parsedOrError.kind === 'ok')
+    return applyForcedExplanationHandler(parsedOrError.result, forcedHandlerId);
   if (parsedOrError.kind === 'non_repairable') throw parsedOrError.error;
 
   // REPAIR_ONCE — parse failed. Build protocol-compliant retry messages
@@ -825,7 +866,8 @@ export async function routeWithToolUse(
   });
 
   const secondAttempt = tryInterpret(repairResult, llmCallsUsed + 1);
-  if (secondAttempt.kind === 'ok') return secondAttempt.result;
+  if (secondAttempt.kind === 'ok')
+    return applyForcedExplanationHandler(secondAttempt.result, forcedHandlerId);
   throw new RoutingError(
     'schema_repair_failed',
     `Routing tool-call repair attempt failed: ${secondAttempt.kind === 'non_repairable' ? secondAttempt.error.message : secondAttempt.detail}`,
@@ -1017,6 +1059,81 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   }
   parts.push('', '## User turn', message);
   return parts.join('\n');
+}
+
+// -----------------------------------------------------------------------
+// F2 CHANGE A — forced explanation intent (typed analytical pill)
+// -----------------------------------------------------------------------
+
+/**
+ * Human-readable label for a forced explanation handler, used only inside the
+ * forced-intent directive prose (never a wire value).
+ */
+const FORCED_INTENT_QUESTION: Record<'explain_results' | 'what_would_flip', string> = {
+  explain_results: 'explain the current analysis results',
+  what_would_flip: 'explain what would change (flip) the current analysis result',
+};
+
+/**
+ * Directive appended to the user turn when a typed analytical pill forces the
+ * intent. It tells the coach WHICH question the user clicked (so its authored
+ * `answer_text` addresses that specific question, grounded in the conversation
+ * window + analysis already in the ContextPack above) and to route via the
+ * matching handler. The hard guarantee is the interpret-time handler_id pin in
+ * {@link applyForcedExplanationHandler}; this directive keeps the AUTHORED prose
+ * on-topic. British English, no internal field names leaked to the model.
+ */
+export function buildForcedIntentDirective(
+  handlerId: 'explain_results' | 'what_would_flip',
+): string {
+  return [
+    '## Requested action (explicit)',
+    `The user clicked a button to ${FORCED_INTENT_QUESTION[handlerId]}. Answer THAT specific question directly, using the conversation above and the analysis context. Call the olumi_action tool with handler_id "${handlerId}" and put your complete, plain-language answer in the explanation.answer_text field.`,
+  ].join('\n');
+}
+
+/**
+ * F2 CHANGE A — PIN the routed proposal to the typed pill intent. When a pill
+ * forced the intent, the coach authored the prose (with conversation sight) but
+ * must NOT be free to re-route the typed pill to a different handler. We take
+ * the model's real, graph-resolved execute proposal and override ONLY its
+ * `handler_id` to the forced value, preserving the model's `entity` (so
+ * downstream validation still checks a real target) and its authored
+ * `explanation`. If the model omitted `explanation` (bare tool_use), we lift the
+ * orientation text into `answer_text` so the side-band validator can judge it;
+ * an empty result falls through unchanged and the deterministic explanation
+ * fallback serves the user (honesty guarantee intact).
+ *
+ * No-op for every non-pill turn (`forcedHandlerId` undefined) and for any result
+ * that is not an execute tool_call — byte-identical to today on those paths.
+ */
+export function applyForcedExplanationHandler(
+  result: RoutingResult,
+  forcedHandlerId: 'explain_results' | 'what_would_flip' | undefined,
+): RoutingResult {
+  if (forcedHandlerId === undefined) return result;
+  if (result.type !== 'tool_call') return result;
+  if (result.proposal.intent_class !== 'execute') return result;
+  const action = result.proposal.action;
+  if (action.handler_id === forcedHandlerId && action.explanation !== undefined) {
+    return result;
+  }
+  const authored = action.explanation?.answer_text ?? result.orientationText;
+  const explanation =
+    authored.trim().length > 0
+      ? { ...(action.explanation ?? {}), answer_text: authored }
+      : action.explanation;
+  return {
+    ...result,
+    proposal: {
+      ...result.proposal,
+      action: {
+        ...action,
+        handler_id: forcedHandlerId,
+        ...(explanation !== undefined ? { explanation } : {}),
+      },
+    },
+  };
 }
 
 /**

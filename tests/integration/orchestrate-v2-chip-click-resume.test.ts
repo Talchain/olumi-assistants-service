@@ -190,9 +190,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
-const { computeAnalysisAffectingGraphHash } = await import(
-  '../../src/orchestrator-v5/context/graph-hash.js'
-);
 const { buildAnalysisUnconfirmedTemplate } = await import(
   '../../src/orchestrator-v5/tools/handlers/no-op-helpers.js'
 );
@@ -225,32 +222,6 @@ function buildChipClickPayload(
  * one option, one goal — enough surface for the explanation handlers
  * to project a leading_option / runner_up / drivers summary.
  */
-function buildGraphState() {
-  return {
-    nodes: [
-      { id: 'goal_1', kind: 'goal', label: 'Profit', successThreshold: 100 },
-      { id: 'fac_a', kind: 'factor', label: 'Engineering Capacity' },
-      { id: 'fac_b', kind: 'factor', label: 'Hiring Cost' },
-      { id: 'opt_a', kind: 'option', label: 'Plan A' },
-      { id: 'opt_b', kind: 'option', label: 'Plan B' },
-    ],
-    edges: [
-      {
-        from: 'fac_a',
-        to: 'goal_1',
-        strength: { mean: 0.6, std: 0.1 },
-        exists_probability: 1,
-        effect_direction: 'positive' as const,
-      },
-    ],
-    options: [
-      { id: 'opt_a', status: 'ready', interventions: {} },
-      { id: 'opt_b', status: 'ready', interventions: {} },
-    ],
-    goal_node_id: 'goal_1',
-  };
-}
-
 describe('POST /orchestrate/v2/turn — chip-click resume HTTP boundary', () => {
   let app: FastifyInstance;
 
@@ -324,75 +295,7 @@ describe('POST /orchestrate/v2/turn — chip-click resume HTTP boundary', () => 
     expect(appendCalls.length).toBeGreaterThan(0);
   });
 
-  it('chip_click + action_type=what_would_flip + FRESH analysis → resumer dispatches the handler at HTTP boundary, no LLM call, explanation prose committed', async () => {
-    // Wave 5I-3 success-path proof. The companion test above exercises
-    // the recovery branch (freshness=unknown → rerun_analysis_required).
-    // This test exercises the success branch: prior fact's
-    // `graph_hash_at_run` matches the live graph hash → freshness=fresh
-    // → resumer dispatches the what_would_flip handler. Together the
-    // two tests cover both halves of the chip-click resume contract at
-    // the real HTTP boundary.
-    const graphState = buildGraphState();
-    const liveHash = computeAnalysisAffectingGraphHash(
-      graphState as never,
-    );
-    expect(liveHash).not.toBeNull();
-    // Pin the prior run_analysis fact to the SAME hash as the live
-    // request — the freshness derivation will report 'fresh' and the
-    // resumer will dispatch (rather than downgrade to recovery).
-    mockedPriorRunAnalysisGraphHash = liveHash;
-    // ROADMAP 1.148 C7: freshness's CURRENT hash derives from the
-    // PERSISTED graph only (anti-false-fresh doctrine, PR #306/#298) —
-    // the wire graph_state is deliberately ignored. Persist the same
-    // graph server-side so 'fresh' is derivable at all.
-    mockedPersistedGraph = graphState;
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: buildChipClickPayload('what_would_flip', graphState),
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-    const parsed = OlumiResponseSchema.parse(body);
-
-    // Acceptance Gate 1: zero LLM calls. The chip-click intent reached
-    // TurnExecutor and the resumer claimed the turn — Sonnet was never
-    // invoked.
-    expect(llmCallTracker.count).toBe(0);
-
-    // Acceptance Gate 2: this is the SUCCESS path, not the recovery
-    // path. The rerun-analysis recovery copy must NOT appear; the
-    // response is the actual what_would_flip explanation prose.
-    expect(parsed.assistant_text).not.toMatch(/run analysis again/i);
-
-    // Acceptance Gate 3: the explanation handler ran. The deterministic
-    // fallback composes a sentence about the leading option whenever
-    // Sonnet's answer_text is missing — and Sonnet is mocked-throwing
-    // here, so the fallback fires. The prose mentions either the
-    // leading option label or the runner-up.
-    const composed = parsed.assistant_text.toLowerCase();
-    const handlerProseFired =
-      composed.includes('plan a') ||
-      composed.includes('plan b') ||
-      composed.includes('leading') ||
-      composed.includes('probability');
-    expect(handlerProseFired).toBe(true);
-
-    // Acceptance Gate 4: no internal failure copy leaks at the wire.
-    expect(parsed.assistant_text).not.toMatch(/no pending action/i);
-    expect(parsed.assistant_text).not.toMatch(/internal error/i);
-    expect(parsed.assistant_text).not.toMatch(/not found in graph/i);
-    // Sensitivity prose must not embed raw decimals (Wave 5H egress
-    // guard). This proves the egress validator runs at the HTTP
-    // boundary, not just at the handler unit-test level.
-    expect(parsed.assistant_text).not.toMatch(/-?\d+\.\d{2,}/);
-
-    // Acceptance Gate 5: the turn was committed (handler ran through
-    // commit, not a bare error).
-    expect(appendCalls.length).toBeGreaterThan(0);
-  });
+  // F2 CHANGE A — removed: a fresh-analysis what_would_flip chip now routes to the coach (forced intent), not the deterministic resumer — covered by route-v2-chip-click-explain.test.ts. The persisted-pending recovery test above and the run_analysis cordon below still hold.
 
   it('chip_click + action_type=run_analysis still hits the dedicated dispatcher (regression cordon)', async () => {
     // The Wave 5H typed-flag rewrite must NOT have broken the existing

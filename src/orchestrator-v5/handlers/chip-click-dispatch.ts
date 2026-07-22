@@ -7,17 +7,20 @@
  * classification ambiguity. Route-v2.ts detects this shape BEFORE
  * TurnExecutor and calls `dispatchDeterministicChipClick`.
  *
- * Whitelisted action_types (Phase 2b):
- *   - `run_analysis`     — heavyweight handler, scenario-snapshot pre-load
- *   - `explain_results`  — V5 no-op explanation handler (deterministic
- *                          fallback prose composed from prior analysis fact)
- *   - `what_would_flip`  — V5 no-op explanation handler (deterministic
- *                          fallback prose composed from prior analysis fact)
+ * Whitelisted action_types:
+ *   - `run_analysis`     — heavyweight NO-LLM compute handler,
+ *                          scenario-snapshot pre-load
+ *
+ * F2 CHANGE A: `explain_results` and `what_would_flip` are NO LONGER
+ * whitelisted. As explanation intents they must reach the coach LLM with the
+ * loaded conversation window, so they now fall through to TurnExecutor with a
+ * FORCED explanation intent (see `DETERMINISTIC_CHIP_ACTION_TYPES` below).
  *
  * Other chip.action_type values (set_factor_value, explain_result alias,
- * compare_options, etc.) fall through to TurnExecutor, which either routes
- * via Sonnet ORIENT or returns a typed FEATURE_NOT_ENABLED via the
- * existing UNSUPPORTED_ACTION path.
+ * explain_results, what_would_flip, compare_options, etc.) fall through to
+ * TurnExecutor, which either routes via Sonnet ORIENT (explanation intents are
+ * pinned by `chipClickForcedIntent`) or returns a typed FEATURE_NOT_ENABLED via
+ * the existing UNSUPPORTED_ACTION path.
  *
  * Why reinvoke the registered handler rather than TurnExecutor? TurnExecutor
  * runs ORIENT (1 Sonnet call, ~12s) even for an already-classified chip
@@ -152,10 +155,21 @@ export interface DispatchChipClickRunAnalysisParams {
  * from local state — otherwise the chip-click path will silently
  * degrade UX.
  */
+// F2 CHANGE A (2026-07-22) — `explain_results` and `what_would_flip` REMOVED
+// from this whitelist. They are now routed through the conversation-aware coach
+// path (route-v2 `detectChipClickForcedIntent` → TurnExecutor
+// `chipClickForcedIntent` → `routeWithToolUse` with a FORCED explanation
+// handler + thinking disabled) so the pill answer sees the loaded conversation
+// window instead of composing canned deterministic prose with zero LLM sight of
+// what the user just said. `run_analysis` STAYS — it is a genuine no-LLM compute
+// handler, not an explanation, so bypassing Sonnet for it is correct (and is
+// pinned by the test below). The deterministic composers
+// (`composeExplainResultsFallback` / `composeWhatWouldFlipFallback`) remain
+// wired as the ROUTED fallback (turn-executor), so the honesty guarantees are
+// unchanged — the coach authors the prose when its `answer_text` is valid, the
+// deterministic composer serves it otherwise.
 export const DETERMINISTIC_CHIP_ACTION_TYPES: ReadonlySet<V5ActionType> = new Set<V5ActionType>([
   'run_analysis',
-  'explain_results',
-  'what_would_flip',
 ]);
 
 /**
@@ -382,11 +396,14 @@ export async function dispatchDeterministicChipClick(
   if (actionType === 'run_analysis') {
     return dispatchChipClickRunAnalysis(params);
   }
-  // Whitelist invariant: the only remaining action types here are the V5
-  // no-op explanation handlers. The cast is tightened against the static
-  // whitelist; an unhandled future addition will fail the dispatch path's
-  // exhaustiveness inside `dispatchChipClickNoopExplanation` rather than
-  // silently falling through.
+  // F2 CHANGE A — `run_analysis` is now the ONLY whitelisted action_type, so the
+  // `if (!DETERMINISTIC_CHIP_ACTION_TYPES.has(...))` guard above throws before
+  // reaching here for anything else. This branch (and
+  // `dispatchChipClickNoopExplanation` + `buildProjectionInputs` below) is now
+  // DEAD: explain_results / what_would_flip route through the coach instead.
+  // Retained (not deleted) to keep this change focused on behaviour; a separate
+  // task removes the dead deterministic-explanation dispatch. If a future
+  // handler is re-whitelisted, re-validate this path before relying on it.
   return dispatchChipClickNoopExplanation(
     actionType as 'explain_results' | 'what_would_flip',
     params,
