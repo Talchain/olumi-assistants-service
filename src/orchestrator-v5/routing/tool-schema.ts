@@ -436,6 +436,112 @@ export function buildOlumiActionTool(): typeof OLUMI_ACTION_TOOL {
   } as typeof OLUMI_ACTION_TOOL;
 }
 
+/** The two forced-explanation handler ids a typed analytical pill can pin. */
+export type ForcedPillHandlerId = 'explain_results' | 'what_would_flip';
+
+/**
+ * The served-tool shape with the two NARROWABLE enums widened to
+ * `readonly string[]` (from the base advert's exact literal tuples) and the
+ * one overridden `intent_class.description` widened to `string`. It is DERIVED
+ * from `typeof OLUMI_ACTION_TOOL` (CLAUDE.md rule 12 — derive, don't mirror):
+ * every field other than the three overridden ones keeps the base's exact
+ * type, so this cannot drift from the advert. Both the base advert (exact
+ * 4-tuple / 7-tuple enums) and the forced-pill single-value narrowing satisfy
+ * it — a `['execute']` / `[handlerId]` enum is a `readonly string[]`, and is
+ * incompatible with the exact tuple ONLY under literal-tuple invariance, not by
+ * shape. This is the honest return type for `buildForcedPillTool`: it preserves
+ * full compile-time structural checking of the constructed tool (no
+ * `as unknown as` double-cast that would erase it).
+ */
+export type OlumiActionToolDefinition = Omit<typeof OLUMI_ACTION_TOOL, 'input_schema'> & {
+  readonly input_schema: Omit<(typeof OLUMI_ACTION_TOOL)['input_schema'], 'properties'> & {
+    readonly properties: Omit<
+      (typeof OLUMI_ACTION_TOOL)['input_schema']['properties'],
+      'intent_class' | 'action'
+    > & {
+      readonly intent_class: Omit<
+        (typeof OLUMI_ACTION_TOOL)['input_schema']['properties']['intent_class'],
+        'enum' | 'description'
+      > & { readonly enum: readonly string[]; readonly description: string };
+      readonly action: Omit<
+        (typeof OLUMI_ACTION_TOOL)['input_schema']['properties']['action'],
+        'properties'
+      > & {
+        readonly properties: Omit<
+          (typeof OLUMI_ACTION_TOOL)['input_schema']['properties']['action']['properties'],
+          'handler_id'
+        > & {
+          readonly handler_id: Omit<
+            (typeof OLUMI_ACTION_TOOL)['input_schema']['properties']['action']['properties']['handler_id'],
+            'enum'
+          > & { readonly enum: readonly string[] };
+        };
+      };
+    };
+  };
+};
+
+/**
+ * Forced-pill tool variant (Codex F3 — close the coach-bypass hole + shrink the
+ * first-pass schema surface).
+ *
+ * THE FINDING: on a forced-explanation pill the caller advertises the generic
+ * `olumi_action` tool and merely `tool_choice`-forces it, but that tool's schema
+ * still offers all four intents (execute|clarify|converse|coach) and every
+ * registered handler. So (1) a schema-valid coach/converse output PARSES and
+ * then slips past `applyForcedExplanationHandler` (which only pins an *execute*
+ * proposal) — the declared "guarantee" has a hole; and (2) the model must author
+ * a full generic execute envelope for what is really "write the answer", the
+ * structural root of the first-pass schema failures the repair-tax fix chases.
+ *
+ * This variant DYNAMICALLY CONSTRAINS the served tool for the forced call to a
+ * single execute intent and a single handler enum. It is DERIVED from
+ * `buildOlumiActionTool()` (spread) and overrides ONLY the two enums, so it can
+ * never drift from the base advert (CLAUDE.md rule 12 — derive, don't mirror).
+ * The tool NAME is unchanged (`OLUMI_ACTION_TOOL_NAME`) so the existing
+ * `tool_choice: { type: 'tool', name }` force and the `toolUse.name` check in
+ * route-with-tool-use both still match.
+ *
+ * The enforcing Zod validator (`RawToolCallSchema`) still structurally accepts
+ * all four intents — narrowing the *descriptive* advert reduces the odds the
+ * model emits a non-execute, but the load-bearing correctness guarantee is the
+ * assert-execute-after-parse in route-with-tool-use (`enforceForcedExecute`),
+ * which fails LOUD if the model somehow returns another intent regardless.
+ */
+export function buildForcedPillTool(
+  forcedHandlerId: ForcedPillHandlerId,
+): OlumiActionToolDefinition {
+  const base = buildOlumiActionTool();
+  const props = base.input_schema.properties;
+  return {
+    ...base,
+    input_schema: {
+      ...base.input_schema,
+      properties: {
+        ...props,
+        intent_class: {
+          ...props.intent_class,
+          enum: ['execute'],
+          description:
+            'Top-level routing intent. FORCED to "execute" for this ' +
+            'button-triggered analytical answer — emit an execute proposal only, ' +
+            'with your complete answer in action.explanation.answer_text.',
+        },
+        action: {
+          ...props.action,
+          properties: {
+            ...props.action.properties,
+            handler_id: {
+              ...props.action.properties.handler_id,
+              enum: [forcedHandlerId],
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
 /**
  * Parsed tool call response — the authoritative typed shape downstream code
  * consumes. Conditional rules (execute ⇔ action, clarify ⇔ clarification)

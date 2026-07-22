@@ -626,6 +626,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ProposalContinuationResumed: "v5.proposal_continuation.resumed",
         V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
         V5RoutingFirstPassCoerced: "v5.routing.first_pass_coerced",
+        V5RoutingForcedPillOutcome: "v5.routing.forced_pill_outcome",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
         V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
@@ -1425,6 +1426,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // text); the operational signal is the log-based rate, no Datadog
         // metric mapping.
         TelemetryEvents.V5RoutingFirstPassCoerced,
+        // Codex F3 — forced-pill first-pass-valid / bypass-blocked counter.
+        // Diagnostic-only structured logs (forced handler id + returned intent
+        // tag + attempt number, no user text); the operational signal is the
+        // log-based first-pass-valid rate, no Datadog metric mapping.
+        TelemetryEvents.V5RoutingForcedPillOutcome,
         // V6 dual-draft (flag default OFF) — diagnostic-only: m2 outcome,
         // merge accounting histogram, and degrade reasons; no Datadog metric
         // until activation dashboards exist.
@@ -2006,6 +2012,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.proposal_continuation.invalidated",
         "v5.proposal_continuation.resumed",
         "v5.routing.first_pass_coerced",
+        "v5.routing.forced_pill_outcome",
         "v5.routing_bounded_fallback",
         "v5.run_analysis.intercept_guard",
         "v5.run_analysis.options_scaffolded",

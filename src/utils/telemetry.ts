@@ -439,6 +439,16 @@ export const TelemetryEvents = {
   // REPAIR-TAX-ROOT-CAUSE-2026-07-22.md and tool-schema.ts
   // coerceFirstPassToolCall().
   V5RoutingFirstPassCoerced: "v5.routing.first_pass_coerced",
+  // Codex F3 — forced-pill dedicated-contract outcome. Emitted once per LLM
+  // attempt on a FORCED analytical pill (`forcedExplanationHandlerId` set) so
+  // the first-pass-valid rate is measurable: `first_pass_execute: true` at
+  // `llm_call: 1` is a forced pill that routed as execute on the first pass
+  // (the latency win); `first_pass_execute: false` is the coach/converse BYPASS
+  // being CAUGHT (`returned_intent` names what the model emitted instead) — the
+  // hole the assert-execute-after-parse closes. No user text ever attached
+  // (R-004): only the forced handler id, the returned intent tag, and the
+  // attempt number. See route-with-tool-use.ts enforceForcedExecute().
+  V5RoutingForcedPillOutcome: "v5.routing.forced_pill_outcome",
   CostCalculationUnknownModel: "assist.cost_calculation.unknown_model",
   // SSE Resume events (v1.8.0)
   SseResumeIssued: "assist.sse.resume_issued",
