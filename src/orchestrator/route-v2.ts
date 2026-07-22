@@ -220,6 +220,41 @@ export function detectChipClickResumeIntent(
 }
 
 // ───────────────────────────────────────────────────────────────────
+// F2 CHANGE A — forced explanation-intent detector (typed analytical pill)
+// ───────────────────────────────────────────────────────────────────
+//
+// `explain_results` and `what_would_flip` are no longer in the
+// deterministic-chip whitelist (chip-click-dispatch.ts) — they must reach the
+// conversation-aware coach. This pure detector maps a typed analytical
+// chip_click to the FORCED explanation handler threaded into
+// `runTurnExecutor` as `chipClickForcedIntent`. TurnExecutor passes it to
+// `routeWithToolUse` (thinking disabled, tool forced, handler pinned) so the
+// pill answer sees the loaded conversation window and the coach cannot
+// re-route the typed intent.
+//
+// HAZARD 3 (the `explain_result` singular alias): the alias is NOT a
+// registered handler id (`resolveHandler(registry, 'explain_result')` is null),
+// so letting it reach the coach as a proposed handler_id would surface
+// HANDLER_NOT_FOUND / UNSUPPORTED_ACTION — a broken pill. We canonicalise it to
+// `explain_results` HERE, at the typed door, so the alias is pinned to the real
+// handler and never 400s.
+//
+// A chip_click of any OTHER typed action_type returns undefined and reaches
+// TurnExecutor unforced (Sonnet routes it normally / UNSUPPORTED_ACTION).
+export function detectChipClickForcedIntent(
+  ingress: OrchestratorTurnPayload,
+): 'explain_results' | 'what_would_flip' | undefined {
+  if (ingress.kind !== 'message') return undefined;
+  if (ingress.source !== 'chip_click') return undefined;
+  const actionType = ingress.chip?.action_type;
+  if (actionType === 'explain_results' || actionType === 'explain_result') {
+    return 'explain_results';
+  }
+  if (actionType === 'what_would_flip') return 'what_would_flip';
+  return undefined;
+}
+
+// ───────────────────────────────────────────────────────────────────
 // ROADMAP 2.63 C3/C4 — deterministic draft/redraft offer
 // ───────────────────────────────────────────────────────────────────
 //
@@ -2154,7 +2189,22 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // only to short-confirm "yes" resumptions of pending actions —
     // chip clicks themselves no longer reach this point for whitelisted
     // action_types.
-    const chipClickResumeIntent = detectChipClickResumeIntent(ingress);
+    // F2 CHANGE A — a typed analytical pill (`explain_results` /
+    // `what_would_flip` / the `explain_result` alias) forces its explanation
+    // intent through the coach. This MUST take precedence over the
+    // `what_would_flip` resume-intent: with those two action_types removed from
+    // the deterministic-chip whitelist, a `what_would_flip` chip_click now
+    // reaches `detectChipClickResumeIntent` (which was dead for chip clicks
+    // while they were whitelisted) and would otherwise be diverted to the
+    // deterministic short-confirm "yes" resume instead of the coach. Suppressing
+    // the resume-intent when a forced intent is present keeps the pill on the
+    // coach path; the resume-intent stays live for its real caller (typed "yes"
+    // short-confirm, which is not a chip_click and so never sets a forced
+    // intent).
+    const chipClickForcedIntent = detectChipClickForcedIntent(ingress);
+    const chipClickResumeIntent = chipClickForcedIntent
+      ? undefined
+      : detectChipClickResumeIntent(ingress);
 
     // ────────────────────────────────────────────────────────────────────
     // Draft_graph pre-Sonnet dispatch (v5-handler-surface brief Task 2)
@@ -3726,6 +3776,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       selectedElements: extensions.selectedElements,
       ...(chipClickResumeIntent
         ? { chipClickResumeIntent }
+        : {}),
+      // F2 CHANGE A — forced explanation intent for a typed analytical pill.
+      ...(chipClickForcedIntent
+        ? { chipClickForcedIntent }
         : {}),
     });
 
