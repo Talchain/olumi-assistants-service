@@ -36,6 +36,12 @@ import {
 } from '../analysis-signals.js';
 import { reconcileAnalysisSummaryWithEnrichment } from '../analysis-fallback.js';
 import { MAX_PROJECTED_OPTIONS } from '../context-pack-assembler.js';
+// Test-side import ONLY (does not couple the src modules): pins the local
+// sanitiser replica to the routing/tool-schema original it mirrors (F3).
+import {
+  MAX_LOGGED_KEY_NAME_LENGTH,
+  sanitiseLoggedKeyName,
+} from '../../routing/tool-schema.js';
 
 const sorted = (values: Iterable<string>): string[] => [...values].sort();
 
@@ -51,13 +57,13 @@ const MINIMAL_SUMMARY: AnalysisResponseSummary = {
 };
 
 /**
- * Run every analysis→LLM enrichment reader against a Proxy over an EMPTY
- * enrichment and return the set of top-level property names each one accessed.
- * This is the runtime-DERIVED read-set (row #2), not a hand-maintained list.
+ * Run every analysis→LLM enrichment reader against a Proxy over `backing` and
+ * return the set of top-level property names each one accessed. This is the
+ * runtime-DERIVED read-set (row #2), not a hand-maintained list.
  */
-function observeTopLevelReads(): Set<string> {
+function observeTopLevelReads(backing: Record<string, unknown>): Set<string> {
   const reads = new Set<string>();
-  const probe = new Proxy({} as Record<string, unknown>, {
+  const probe = new Proxy(backing, {
     get(target, prop, receiver) {
       if (typeof prop === 'string') reads.add(prop);
       return Reflect.get(target, prop, receiver);
@@ -81,7 +87,16 @@ function observeTopLevelReads(): Set<string> {
   return reads;
 }
 
-const observed = observeTopLevelReads();
+// Two probes (F2 — a single empty probe was blind to conditional reads):
+//   • EMPTY — catches every unconditional top-level read.
+//   • POPULATED (non-empty robustness.fragile_edges) — drives the conditional
+//     readGraph(enrichment) path in deriveTopFragileEdgesFromTopLevel, so the
+//     `graph` read (gated on populated fragile edges — the live staging shape)
+//     is observed instead of escaping as an undetected phantom.
+const observed = new Set<string>([
+  ...observeTopLevelReads({}),
+  ...observeTopLevelReads({ robustness: { fragile_edges: [{}] } }),
+]);
 const derivedReal = [...observed].filter((k) => ENRICHMENT_PRODUCER_MANIFEST.has(k));
 const defensiveObserved = [...observed].filter((k) => !ENRICHMENT_PRODUCER_MANIFEST.has(k));
 
@@ -205,6 +220,34 @@ describe('runtime tripwire — findUnknownEnrichmentKeys / emit (context-audit #
       emitUnknownEnrichmentKeyTelemetry({ unknown_x: 1 }, thrower),
     ).not.toThrow();
     expect(() => emitUnknownEnrichmentKeyTelemetry(null, thrower)).not.toThrow();
+  });
+});
+
+describe('sanitiser parity with routing/tool-schema (context-audit #1 F3 pin)', () => {
+  it('MAX_LOGGED_ENRICHMENT_KEY_LENGTH === MAX_LOGGED_KEY_NAME_LENGTH', () => {
+    expect(MAX_LOGGED_ENRICHMENT_KEY_LENGTH).toBe(MAX_LOGGED_KEY_NAME_LENGTH);
+  });
+
+  it('sanitiseEnrichmentKeyName is byte-identical to sanitiseLoggedKeyName (adversarial inputs)', () => {
+    // The replica must never diverge from the routing original it mirrors;
+    // any drift in either implementation goes RED here.
+    const cases = [
+      'option_comparison',
+      'x'.repeat(200),
+      'weird key/with spaces & symbols!@#$%^*()',
+      'ünïcodé_kéy_with_émoji_🚀',
+      'path.to.thing-with_dashes',
+      '',
+      'a'.repeat(64),
+      'a'.repeat(65),
+      '____trailing____',
+    ];
+    for (const c of cases) {
+      expect(
+        sanitiseEnrichmentKeyName(c),
+        `mismatch on ${JSON.stringify(c)}`,
+      ).toBe(sanitiseLoggedKeyName(c));
+    }
   });
 });
 

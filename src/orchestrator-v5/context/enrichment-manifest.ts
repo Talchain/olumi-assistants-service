@@ -142,7 +142,7 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   'meta', // :1441
   // ── CEE post-run additions to the SAME persisted enrichment record ────────
   // The run-analysis handler stores the PLoT body verbatim as
-  // `result.enrichment` (run-analysis.ts:797), then CEE enrichers WRITE more
+  // `result.enrichment` (run-analysis.ts:870), then CEE enrichers WRITE more
   // top-level keys onto it before the fact is read by the analysis→LLM
   // projection. The seam is a multi-writer record, not a pure PLoT
   // passthrough — these MUST be manifested or the runtime tripwire
@@ -151,6 +151,7 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   'coaching_signal_id', // CEE-injected: coaching/coaching-signal-application.ts:150
   'coaching_signal_turn_id', // CEE-injected: coaching/coaching-signal-application.ts:151
   'coaching_signal_produced_at', // CEE-injected: coaching/coaching-signal-application.ts:152
+  '_diagnostics', // CEE-injected (DEBUG only, CEE_TURN_DEBUG_ENABLED): coaching/decision-review-enricher.ts:345-348
   // ── Legacy V1 inbound-tolerance ───────────────────────────────────────────
   // Not emitted by the live PLoT /v2/run producer (RunResponseV3 has no
   // top-level `results`); emitted by the V1 bundle (plot v1/run.ts:589) and
@@ -254,6 +255,7 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['coaching_signal_id', R_COACHING_SIGNAL],
   ['coaching_signal_turn_id', R_COACHING_SIGNAL],
   ['coaching_signal_produced_at', R_COACHING_SIGNAL],
+  ['_diagnostics', R_INTERNAL],
   ['results', R_LEGACY_COMPACT],
 ]);
 
@@ -268,13 +270,25 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
  *   - `notes` — `deriveGoalFitFromEnrichment` scans `notes` OR `critiques` for
  *     the goal-fit basis code; PLoT emits `critiques` (in the manifest), never
  *     top-level `notes`. Defensive alias.
+ *   - `graph` — `deriveTopFragileEdgesFromTopLevel` (analysis-fallback.ts)
+ *     reads `enrichment.graph` via `readGraph()` to label fragile edges, but
+ *     ONLY when `robustness.fragile_edges` is non-empty (a CONDITIONAL read).
+ *     PLoT emits no top-level `graph` (fixture-confirmed absent; it appears
+ *     only NESTED, where compose's INTERNAL_ENRICHMENT_KEYS strips it), so
+ *     this is a defensive read, not a live source.
  *
- * The conformance test asserts (observed-reads − manifest) ⊆ this set, so a
- * NEW phantom top-level read that is not documented here goes RED.
+ * SCOPE of the conformance check (honest limitation): the observed read-set is
+ * derived by running the derivers over TWO probes — an EMPTY enrichment
+ * (catches unconditional reads) and a POPULATED fixture-shaped enrichment
+ * (catches reads gated on populated staging shapes, e.g. `graph`). It asserts
+ * (observed-reads − manifest) ⊆ this set, so a phantom read on those paths
+ * goes RED. A read gated on a shape NEITHER probe carries could still escape;
+ * the runtime tripwire is the backstop for anything that reaches production.
  */
 export const ENRICHMENT_DEFENSIVE_NON_EMITTED_READS: ReadonlySet<string> = new Set<string>([
   'goal_fit_basis',
   'notes',
+  'graph',
 ]);
 
 /**
