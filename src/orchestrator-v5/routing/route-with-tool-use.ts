@@ -127,6 +127,7 @@ import {
   OLUMI_ACTION_TOOL_NAME,
   ToolCallParseError,
   parseToolCallResponse,
+  type ParseTelemetryContext,
   type ToolCallResponse,
 } from './tool-schema.js';
 import {
@@ -800,7 +801,12 @@ export async function routeWithToolUse(
     llmCallsUsed = 2;
   }
 
-  const parsedOrError = tryInterpret(firstResult, llmCallsUsed);
+  const parseTelemetry: ParseTelemetryContext = {
+    requestId: options.requestId,
+    sessionId: options.sessionId ?? null,
+    llmCall: 1,
+  };
+  const parsedOrError = tryInterpret(firstResult, llmCallsUsed, parseTelemetry);
   if (parsedOrError.kind === 'ok')
     return applyForcedExplanationHandler(parsedOrError.result, forcedHandlerId);
   if (parsedOrError.kind === 'non_repairable') throw parsedOrError.error;
@@ -866,7 +872,10 @@ export async function routeWithToolUse(
     stablePrefixBytes,
   });
 
-  const secondAttempt = tryInterpret(repairResult, llmCallsUsed + 1);
+  const secondAttempt = tryInterpret(repairResult, llmCallsUsed + 1, {
+    ...parseTelemetry,
+    llmCall: 2,
+  });
   if (secondAttempt.kind === 'ok')
     return applyForcedExplanationHandler(secondAttempt.result, forcedHandlerId);
   throw new RoutingError(
@@ -912,7 +921,11 @@ function summariseDroppedAction(
   return { handler_id: null, label: null };
 }
 
-function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interpretation {
+function tryInterpret(
+  result: ChatWithToolsResult,
+  llmCallCount: number,
+  telemetry?: ParseTelemetryContext,
+): Interpretation {
   if (result.stop_reason === 'max_tokens') {
     return {
       kind: 'non_repairable',
@@ -950,7 +963,7 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
       };
     }
     try {
-      const proposal = parseToolCallResponse(toolUse.input);
+      const proposal = parseToolCallResponse(toolUse.input, telemetry);
       return {
         kind: 'ok',
         result: {

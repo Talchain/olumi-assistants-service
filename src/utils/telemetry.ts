@@ -425,6 +425,20 @@ export const TelemetryEvents = {
   // out of route-with-tool-use.ts; covers cached, disabled-by-config, and
   // cache_control-rejection fallback paths).
   V5PromptCache: "v5.prompt_cache",
+
+  // V5 routing first-pass coercion (repair-tax fix, 2026-07-22). Emitted once
+  // per coercion applied to a routing tool call BEFORE the strict Zod parse,
+  // so a first-pass-valid shape no longer costs a REPAIR_ONCE second LLM call.
+  // Every coercion carries a `reason` tag (stray_answer_shape |
+  // stray_answer_text | unknown_cited_field | parameter_source_alias) — this
+  // is the DRIFT ALARM: a non-zero rate means the served prompt / descriptive
+  // tool schema / enforcing validator have drifted apart again (the
+  // hand-maintained-mirror defect class). NO user text is ever attached
+  // (R-004 redaction discipline) — only the reason tag and, for the
+  // cited-field filter, a count of dropped entries. See
+  // REPAIR-TAX-ROOT-CAUSE-2026-07-22.md and tool-schema.ts
+  // coerceFirstPassToolCall().
+  V5RoutingFirstPassCoerced: "v5.routing.first_pass_coerced",
   CostCalculationUnknownModel: "assist.cost_calculation.unknown_model",
   // SSE Resume events (v1.8.0)
   SseResumeIssued: "assist.sse.resume_issued",

@@ -81,7 +81,12 @@ describe('RawToolCallSchema — coach/converse answer channel (shape-governed)',
     }
   });
 
-  it('does NOT affect execute — still rejects execute carrying a stray answer_text, still accepts execute without one', () => {
+  it('execute WITHOUT a stray answer_text still accepts; execute WITH one is now COERCED (stripped) — repair-tax fix 2026-07-22', () => {
+    // BEHAVIOUR CHANGE (repair-tax fix): a stray top-level answer_text on
+    // execute used to be a hard rejection → a ~4-5s REPAIR_ONCE call on ~every
+    // forced pill. It is now stripped on the first pass. run_analysis is a
+    // mutation handler (no user-facing prose), so the stray text is dropped,
+    // not lifted. See REPAIR-TAX-ROOT-CAUSE-2026-07-22.md / first-pass-coercion.test.ts.
     const validExecute = {
       intent_class: 'execute' as const,
       action: {
@@ -97,9 +102,9 @@ describe('RawToolCallSchema — coach/converse answer channel (shape-governed)',
       },
     };
     expect(() => parseToolCallResponse(validExecute)).not.toThrow();
-    expect(() =>
-      parseToolCallResponse({ ...validExecute, answer_text: 'stray body' }),
-    ).toThrow(/answer_text is forbidden/);
+    const coerced = parseToolCallResponse({ ...validExecute, answer_text: 'stray body' });
+    expect(coerced.intent_class).toBe('execute');
+    expect((coerced as { answer_text?: unknown }).answer_text).toBeUndefined();
   });
 
   it('does NOT affect clarify — still rejects clarify carrying a stray answer_text, still accepts clarify without one', () => {

@@ -16,6 +16,8 @@
 
 import { z } from 'zod';
 
+import { TelemetryEvents, emit } from '../../utils/telemetry.js';
+
 import {
   ANSWER_SHAPE_TOOL_PROPERTY,
   AnswerShapeSchema,
@@ -25,12 +27,26 @@ import {
 import {
   IntentClassSchema,
   CoachingModeSchema,
+  ContextPackFieldSchema,
+  EXPLANATION_HANDLER_IDS,
   ProposalActionSchema,
   ProposalClarificationSchema,
   type IntentClass,
   type ProposalAction,
   type ProposalClarification,
 } from './types.js';
+
+/**
+ * The closed set of ContextPack field paths, DERIVED from the enforcing enum
+ * (`ContextPackFieldSchema`) so the descriptive tool advert and the
+ * first-pass filter can never drift from the validator (CLAUDE.md rule 12 —
+ * derive, don't mirror; a hand-listed copy is the exact defect class that
+ * caused this repair-tax). Both the `cited_context_fields` JSON-schema enum
+ * advertised to the model and `coerceFirstPassToolCall`'s membership check
+ * read from here.
+ */
+const CITED_CONTEXT_FIELD_VALUES: readonly string[] = ContextPackFieldSchema.options;
+const CITED_CONTEXT_FIELD_SET: ReadonlySet<string> = new Set(CITED_CONTEXT_FIELD_VALUES);
 
 export const OLUMI_ACTION_TOOL_NAME = 'olumi_action' as const;
 
@@ -279,7 +295,24 @@ export const OLUMI_ACTION_TOOL = {
               required: ['name', 'value', 'source'],
             },
           },
-          cited_context_fields: { type: 'array', items: { type: 'string' } },
+          // Descriptive advert ALIGNED to the enforcing enum (repair-tax fix,
+          // 2026-07-22): previously `items: { type: 'string' }` accepted ANY
+          // string, but the validator rejects anything outside the closed
+          // 16-value `ContextPackFieldSchema` — so a model that cited e.g.
+          // "analysis.margin"/"analysis.robustness" (paths the handler
+          // descriptions mention) tripped a REPAIR_ONCE. The enum is DERIVED
+          // from the validator (CITED_CONTEXT_FIELD_VALUES) so it cannot
+          // drift. Observability-only: the field is never shown to the user,
+          // and unknown entries are now filtered (not rejected) at parse time.
+          cited_context_fields: {
+            type: 'array',
+            items: { type: 'string', enum: CITED_CONTEXT_FIELD_VALUES },
+            description:
+              'Observability only (never user-facing): the ContextPack field ' +
+              'paths this action drew on. Choose ONLY from the closed enum ' +
+              'above; if unsure, omit a field rather than inventing a path. ' +
+              'Entries outside the enum are dropped, never surfaced.',
+          },
           // Answer-carrying explanation payload. Required by the side-band
           // validator for explanation handlers (explain_from_structure,
           // explain_results, what_would_flip); silently ignored on
@@ -652,6 +685,175 @@ const RawToolCallSchema = z
     }
   });
 
+// -----------------------------------------------------------------------
+// First-pass coercion (repair-tax fix, 2026-07-22)
+// -----------------------------------------------------------------------
+
+/**
+ * The reason tags for a {@link FirstPassCoercion}. Each corresponds to one of
+ * the three prompt/descriptive-schema/validator divergences a forced-pill
+ * (execute-branch) turn was tripping — the ones the REPAIR_ONCE second LLM
+ * call only ever STRIPPED or FIXED, at a ~4-5s cost. Coercing on the first
+ * pass instead of rejecting removes that repair tax.
+ *
+ * See REPAIR-TAX-ROOT-CAUSE-2026-07-22.md.
+ */
+export type FirstPassCoercionReason =
+  | 'stray_answer_shape'
+  | 'stray_answer_text'
+  | 'unknown_cited_field'
+  | 'parameter_source_alias';
+
+/**
+ * A single coercion applied to a routing tool call before the strict Zod
+ * parse. `count` is present only for coercions that can cover more than one
+ * entry (unknown cited-fields filtered / parameter sources re-aliased). NO
+ * user text is ever carried here — the reason tag + count are the whole
+ * payload (R-004 redaction discipline).
+ */
+export interface FirstPassCoercion {
+  readonly reason: FirstPassCoercionReason;
+  readonly count?: number;
+}
+
+/** Telemetry correlation context for the coercion drift-alarm event. */
+export interface ParseTelemetryContext {
+  readonly requestId: string;
+  readonly sessionId: string | null;
+  /** 1 = first routing call, 2 = REPAIR_ONCE retry. */
+  readonly llmCall: 1 | 2;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Make a routing tool call FIRST-PASS VALID by coercing (never rejecting) the
+ * three execute-branch divergences the served prompt v118 + descriptive tool
+ * schema instruct but the enforcing validator forbids. Pure: returns a NEW
+ * value (the caller's `toolInput` is never mutated) plus the list of coercions
+ * applied. Emitting the drift-alarm telemetry is the caller's job
+ * (`parseToolCallResponse`) — this stays side-effect-free so it is trivially
+ * unit-testable and safe to run on the best-effort dropped-action path.
+ *
+ * Coercions (execute branch only — every non-execute turn is returned
+ * byte-identical):
+ *   (a) a stray top-level `answer_shape`/`answer_text` (forbidden on execute)
+ *       is STRIPPED. If the handler is an explanation handler and its
+ *       `explanation.answer_text` is empty, the stray answer is LIFTED in
+ *       first (top-level `answer_text` string, else derived from a VALID stray
+ *       `answer_shape`) so no authored content is lost — mirrors the
+ *       applyForcedExplanationHandler orientation-lift.
+ *   (b) `cited_context_fields` entries outside the closed enum are FILTERED
+ *       (observability-only, never user-facing — must not cost a repair).
+ *   (c) a parameter `source: "explicit"` is normalised to `"user_explicit"`
+ *       (the prompt says "explicit", the enum says "user_explicit").
+ *
+ * A GENUINELY malformed execute action (e.g. missing `handler_id`, missing
+ * `action`) is left untouched by everything above and still fails the strict
+ * parse → REPAIR_ONCE path intact.
+ */
+export function coerceFirstPassToolCall(toolInput: unknown): {
+  value: unknown;
+  coercions: FirstPassCoercion[];
+} {
+  if (!isPlainObject(toolInput) || toolInput.intent_class !== 'execute') {
+    return { value: toolInput, coercions: [] };
+  }
+
+  const coercions: FirstPassCoercion[] = [];
+  const out: Record<string, unknown> = { ...toolInput };
+  const action = isPlainObject(out.action) ? { ...out.action } : undefined;
+
+  const hasStrayShape = 'answer_shape' in out && out.answer_shape !== undefined;
+  const strayTextPresent = 'answer_text' in out && out.answer_text !== undefined;
+  const strayTextValue =
+    typeof out.answer_text === 'string' ? out.answer_text : undefined;
+
+  // (a) lift authored content into explanation.answer_text BEFORE stripping,
+  // but only for explanation handlers (mutation handlers carry no user-facing
+  // prose — the answer is the deterministic receipt).
+  if (action && (hasStrayShape || strayTextValue !== undefined)) {
+    const isExplanationHandler =
+      typeof action.handler_id === 'string' &&
+      EXPLANATION_HANDLER_IDS.has(action.handler_id);
+    if (isExplanationHandler) {
+      const explanation = isPlainObject(action.explanation)
+        ? { ...action.explanation }
+        : undefined;
+      const existingText =
+        explanation && typeof explanation.answer_text === 'string'
+          ? explanation.answer_text
+          : undefined;
+      if (!existingText || existingText.trim().length === 0) {
+        let recovered: string | undefined;
+        if (strayTextValue && strayTextValue.trim().length > 0) {
+          recovered = strayTextValue.trim();
+        } else if (hasStrayShape) {
+          const parsedShape = AnswerShapeSchema.safeParse(out.answer_shape);
+          if (parsedShape.success) {
+            recovered = deriveAnswerTextFromShape(parsedShape.data);
+          }
+        }
+        if (recovered && recovered.length > 0) {
+          action.explanation = { ...(explanation ?? {}), answer_text: recovered };
+        }
+      }
+    }
+  }
+
+  // (a) strip the stray top-level fields (forbidden on execute regardless of
+  // content). A distinct reason per field keeps the drift alarm precise.
+  if (hasStrayShape) {
+    delete out.answer_shape;
+    coercions.push({ reason: 'stray_answer_shape' });
+  }
+  if (strayTextPresent) {
+    delete out.answer_text;
+    coercions.push({ reason: 'stray_answer_text' });
+  }
+
+  if (action) {
+    // (b) filter unknown cited_context_fields entries (closed enum, derived
+    // from the validator).
+    if (Array.isArray(action.cited_context_fields)) {
+      const original = action.cited_context_fields as unknown[];
+      const filtered = original.filter(
+        (entry): entry is string =>
+          typeof entry === 'string' && CITED_CONTEXT_FIELD_SET.has(entry),
+      );
+      if (filtered.length !== original.length) {
+        action.cited_context_fields = filtered;
+        coercions.push({
+          reason: 'unknown_cited_field',
+          count: original.length - filtered.length,
+        });
+      }
+    }
+
+    // (c) normalise the parameter_source alias "explicit" → "user_explicit".
+    if (Array.isArray(action.parameters)) {
+      let aliased = 0;
+      const params = (action.parameters as unknown[]).map((param) => {
+        if (isPlainObject(param) && param.source === 'explicit') {
+          aliased += 1;
+          return { ...param, source: 'user_explicit' };
+        }
+        return param;
+      });
+      if (aliased > 0) {
+        action.parameters = params;
+        coercions.push({ reason: 'parameter_source_alias', count: aliased });
+      }
+    }
+
+    out.action = action;
+  }
+
+  return { value: out, coercions };
+}
+
 /**
  * Parse a raw tool_use block from Anthropic's response into a typed
  * ToolCallResponse. Throws ToolCallParseError on any schema violation.
@@ -660,9 +862,35 @@ const RawToolCallSchema = z
  * parser (does not throw): spec §6 says the validator downstream flags such
  * cases for clarification rather than rejecting the parse. This keeps the
  * parse stage focused on structural conformance.
+ *
+ * Repair-tax fix (2026-07-22): the input is first passed through
+ * {@link coerceFirstPassToolCall} so a coercible execute-branch shape (stray
+ * answer_shape/answer_text, unknown cited fields, "explicit" parameter source)
+ * validates on the FIRST pass instead of paying a ~4-5s REPAIR_ONCE second LLM
+ * call. When a `telemetry` context is supplied, every coercion emits a counted
+ * `v5.routing.first_pass_coerced` drift-alarm event (reason-tagged, no user
+ * text) — the best-effort dropped-action path omits it to avoid double
+ * counting. Coercion is deterministic and idempotent.
  */
-export function parseToolCallResponse(toolInput: unknown): ToolCallResponse {
-  const parsed = RawToolCallSchema.safeParse(toolInput);
+export function parseToolCallResponse(
+  toolInput: unknown,
+  telemetry?: ParseTelemetryContext,
+): ToolCallResponse {
+  const { value, coercions } = coerceFirstPassToolCall(toolInput);
+  if (telemetry) {
+    for (const coercion of coercions) {
+      emit(TelemetryEvents.V5RoutingFirstPassCoerced, {
+        request_id: telemetry.requestId,
+        turn_id: telemetry.requestId,
+        v5_journey_id: telemetry.sessionId,
+        scenario_id: telemetry.sessionId,
+        llm_call: telemetry.llmCall,
+        reason: coercion.reason,
+        ...(coercion.count !== undefined ? { dropped_count: coercion.count } : {}),
+      });
+    }
+  }
+  const parsed = RawToolCallSchema.safeParse(value);
   if (!parsed.success) {
     throw new ToolCallParseError(
       `Tool call response failed schema validation: ${parsed.error.issues[0]?.message ?? 'unknown'}`,
