@@ -177,6 +177,16 @@ export const TelemetryEvents = {
   // See src/orchestrator-v5/routing/typed-chip-mutation-proposal.ts.
   V5TypedChipMutationRoute: "v5.typed_chip_mutation_route",
 
+  // S3 §5 / Lane C3 — add-option compound transaction. Fires once per typed
+  // `add_option` intent turn (`chip.intent='add_option'`). `outcome`: held
+  // (the atomic option+edges+values batch was refereed to a held proposal) or
+  // fell_through:<reason> (params missing/malformed/target unresolved, GM not
+  // live, or the referee did not hold → the existing free-text edit path owns
+  // the turn). `configured` marks whether the option lands with effect values.
+  // Content-free — never user text. See
+  // src/orchestrator-v5/handlers/add-option-dispatch.ts.
+  V5AddOptionTransaction: "v5.add_option_transaction",
+
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
   // message turn that arrives with generate_model/explicit_generate set,
   // regardless of outcome (`outcome` field: dispatch_draft /

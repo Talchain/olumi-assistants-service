@@ -149,6 +149,16 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // existed. Deliberate, reviewed; still ad-hoc debt — migrate with the
     // frame-consumer audit, do not add more.
     'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 6,
+    // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
+    // transaction pre-route derives the PRE-edit frame freshness for its
+    // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`
+    // (the SAME hash the referee frame + the held pending's `graph_hash`
+    // precondition use), exactly mirroring edit-graph-dispatch's own
+    // pre-edit frame re-derivation for the free-text edit gate. Consistent by
+    // construction; reusing build-turn-context's decision-context freshness
+    // would derive against a DIFFERENT hash. Deliberate, reviewed; still
+    // ad-hoc debt — migrate with the frame-consumer audit, do not add more.
+    'src/orchestrator/route-v2.ts': 2,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)

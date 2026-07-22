@@ -138,6 +138,7 @@ import {
   type GraphStateIngress,
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import {
+  buildTurnContext,
   loadHasPriorTurns,
   loadMostRecentPendingActions,
   loadMostRecentPendingActionsStrict,
@@ -145,6 +146,9 @@ import {
   loadPersistedScenarioStateStrict,
   loadRecentConversationTurns,
 } from '../orchestrator-v5/build-turn-context.js';
+import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js';
+import { dispatchAddOptionTransaction } from '../orchestrator-v5/handlers/add-option-dispatch.js';
+import type { FrameFreshness } from '../orchestrator-v5/graph-management/types.js';
 import {
   assembleExplicitGenerateBrief,
   type AssembledExplicitGenerateBrief,
@@ -2169,6 +2173,140 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         turnId: ingress.turn_id,
         userMessage: ingress.message,
       });
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // S3 §5 / Lane C3 — typed add-option compound transaction
+    // ────────────────────────────────────────────────────────────────────
+    //
+    // A typed `add_option` intent (`chip.intent='add_option'`, schemas 0.22.0)
+    // carries a pre-resolved spec in `chip.parameters`. Route it on its TYPE
+    // into the atomic add-option transaction (option node + parent/factor edges
+    // + effect VALUES as ONE held proposal) HERE — BEFORE the message-text
+    // `editIntentDetected` below can claim the same turn for the free-text edit
+    // LLM (Fable residual i, preemption). `add_option` is an `Intent`, not an
+    // `ActionType`, so it is not caught by the typed-chip-click arms above.
+    //
+    // The transaction reuses the SAME referee gate + `graph_management_held_v1`
+    // pending + `executeGmHeldResume` confirm the free-text edit uses; a
+    // missing/malformed/unresolved spec, GM not live, a stale frame, or a
+    // failed commit falls through BENIGNLY to the existing edit path with
+    // `fell_through` telemetry — never a silent coercion, never a dead end.
+    const isTypedAddOptionChip =
+      (ingress.source === 'chip_click' || ingress.source === 'chip') &&
+      ingress.chip?.intent === 'add_option';
+    if (isTypedAddOptionChip) {
+      const addOptionGmMode = config.features.graphManagementMode;
+      if (addOptionGmMode === 'off') {
+        emit(TelemetryEvents.V5AddOptionTransaction, {
+          request_id: requestId,
+          outcome: 'fell_through:gm_off',
+        });
+      } else {
+        // Frame authority = the PERSISTED graph (the same authority
+        // run_analysis/readiness use), so the held pending's `graph_hash`
+        // precondition matches the persisted graph at confirm time. A read
+        // failure degrades to an unreadable frame → the handler skips.
+        let addOptionFrameGraph: unknown = null;
+        let addOptionGraphHash: string | null = null;
+        let addOptionFreshness: FrameFreshness = 'unknown';
+        try {
+          const turnContext = await buildTurnContext(ingress, requestId);
+          addOptionFrameGraph = turnContext.persistedGraph;
+          try {
+            addOptionGraphHash = computeAnalysisAffectingGraphHash(
+              addOptionFrameGraph as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            addOptionGraphHash = null;
+          }
+          addOptionFreshness = deriveAnalysisFreshness(
+            turnContext.prior_facts,
+            addOptionGraphHash,
+          ).freshness;
+        } catch (err) {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'S3-C3 add-option — turn-context read failed; deferring to the edit path',
+          );
+        }
+        const addOptionOutcome = dispatchAddOptionTransaction({
+          parameters: ingress.chip?.parameters,
+          currentGraph: addOptionFrameGraph,
+          currentGraphHash: addOptionGraphHash,
+          freshness: addOptionFreshness,
+          mode: addOptionGmMode,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          requestId,
+          stage: ingress.stage,
+        });
+        if (addOptionOutcome.kind === 'held') {
+          let addOptionCommitted = false;
+          let addOptionWire = addOptionOutcome.response;
+          try {
+            const commitResult = await commitDirectAnswer(addOptionOutcome.response, {
+              scenario_id: ingress.scenario_id,
+              turn_id: ingress.turn_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(ingress),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - routeStartedAt,
+              handler_facts: [],
+              pending_actions: [...addOptionOutcome.pendingActions],
+              coaching_state: null,
+              userMessage: ingress.message,
+            });
+            addOptionWire = commitResult.response;
+            addOptionCommitted = true;
+          } catch (err) {
+            // The held pending could not be persisted — the confirm turn would
+            // have nothing to resume. Do NOT ship an un-resumable held
+            // proposal; fall through to the existing edit path instead.
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+              },
+              'S3-C3 add-option — held-pending commit failed; deferring to the edit path',
+            );
+          }
+          if (addOptionCommitted) {
+            emit(TelemetryEvents.V5AddOptionTransaction, {
+              request_id: requestId,
+              outcome: 'held',
+              configured: addOptionOutcome.configured,
+            });
+            return sendFinalised200(reply, requestId, 'edit_graph', addOptionWire, {
+              graph: null,
+              // ROADMAP 1.132 (F1) — held-proposal copy is functional
+              // (a receipt/question) and must ship plain.
+              answerKind: 'functional',
+              requestStartedAt: routeStartedAt,
+              scenarioId: ingress.scenario_id,
+              turnId: ingress.turn_id,
+              userMessage: ingress.message,
+            });
+          }
+          emit(TelemetryEvents.V5AddOptionTransaction, {
+            request_id: requestId,
+            outcome: 'fell_through:commit_failed',
+          });
+          // fall through to the existing edit path below.
+        } else {
+          emit(TelemetryEvents.V5AddOptionTransaction, {
+            request_id: requestId,
+            outcome: `fell_through:${addOptionOutcome.reason}`,
+          });
+          // fall through to the existing edit path below.
+        }
+      }
     }
 
     // ────────────────────────────────────────────────────────────────────
