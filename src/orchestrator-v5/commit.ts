@@ -924,6 +924,18 @@ export async function commitDirectAnswer(
     source: metadata.handler_id ?? undefined,
   });
 
+  // NOTE (Lane C3 / decision ③ — DEFERRED, Paul-gated). The node↔options[]
+  // consistency mirror (`reconcileTopLevelOptionsFromNodes`, built + unit-tested)
+  // is deliberately NOT wired here. Wiring it at this global write chokepoint
+  // invents a top-level `options[]` on EVERY option-bearing commit, which
+  // collides with the tested "commit does not invent graph fields" invariant
+  // (turn-executor-d1-mutation-commit-graph.test.ts) and changes the persisted
+  // shape for all option-bearing turns, not just add-option. That is decision ③
+  // (write-both at the chokepoint vs retire top-level options[]), which is Paul's
+  // to rule. Analysis is NOT bitten by the divergence (run_analysis derives from
+  // option-nodes — R-3 probe), so this is a display/secondary-consumer seam. Wire
+  // the mirror once decision ③ is ruled.
+
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
     turn_id: metadata.turn_id,
