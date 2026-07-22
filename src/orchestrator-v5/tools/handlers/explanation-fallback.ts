@@ -440,9 +440,10 @@ export function composeExplainResultsFallback(
  * Robustness honesty (PR #193 SSOT reuse): when `rawRobustness` is
  * available the composer prefers the raw signal over the projected band
  * because canonicalisation can flatten a `very_low`/`low` raw level into
- * a moderate-sounding label. The chip-click path threads the raw signal
- * through (`dispatchChipClickNoopExplanation` → handler → here); routed
- * callers may pass `null` and the composer falls back to the projected band.
+ * a moderate-sounding label. The routed (turn-executor) path threads the raw
+ * signal through (`invocation.rawRobustness` → handler → here); callers
+ * without a raw signal may pass `null` and the composer falls back to the
+ * projected band.
  *
  * The margin sentence AND the closing robustness sentence both come from the
  * shared {@link composeRobustnessVerdict} (`flip` mode), so they resolve
