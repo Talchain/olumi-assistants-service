@@ -96,8 +96,8 @@
  *      `dispatchPath` override params — a refactor of a different
  *      module.
  *
- *   2. Inlining the handler-invocation pattern from
- *      `dispatchChipClickNoopExplanation` directly in turn-executor —
+ *   2. Inlining the deterministic handler-invocation pattern directly in
+ *      turn-executor —
  *      doable but ~100 lines: build `analysisProjection` from
  *      `prior_facts`, resolve handler via registry, invoke with no
  *      `explanation` (triggers deterministic fallback), compose via

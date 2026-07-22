@@ -118,7 +118,13 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // Deliberate, reviewed; migrate with the frame-consumer audit, do not
     // add more.
     'src/orchestrator-v5/turn-executor.ts': 5, // approved assembly seam (frozen file)
-    'src/orchestrator-v5/handlers/chip-click-dispatch.ts': 3, // TOLERATED ad-hoc debt — do not add more
+    // 2026-07-22 dead-noop deletion: 3 → 2 — the deterministic no-op explanation
+    // chip-click dispatch (`buildProjectionInputs`, removed as dead code
+    // post-#619) held one of the three references (its own ad-hoc freshness
+    // re-derivation). Deleting it drops a TOLERATED site; the surviving two are
+    // the import + the live run_analysis path's re-derivation. Reduction, not
+    // growth — the debt shrank.
+    'src/orchestrator-v5/handlers/chip-click-dispatch.ts': 2, // TOLERATED ad-hoc debt — do not add more
     // 2026-07-07 lane-8: +2 — the GM referee gate's pre-edit freshness
     // re-projection (strict persisted-base frame authority for the referee's
     // R2 stale gate; see edit-graph-referee-gate.ts + lane-8 evidence report).
@@ -166,7 +172,7 @@ Do NOT re-derive freshness / canonical state / recent changes at your call site:
   - read the value from the CanonicalContextFrame / turn context you already hold, or
   - thread it from build-turn-context / the context-pack assembler.
 
-The pre-existing ad-hoc sites (chip-click-dispatch.ts x2 call sites,
+The pre-existing ad-hoc sites (chip-click-dispatch.ts x1 call site,
 edit-graph-dispatch.ts x2 call sites) are FROZEN as tolerated debt pending the
 turn-executor frame-threading migration (see
 Docs/t4/context-frame-consumer-migration-audit.md). They are not precedent.

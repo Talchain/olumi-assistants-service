@@ -108,14 +108,20 @@ export const AUTHORITY_ALLOWLIST: Readonly<
     allowedArgs: ['context.persistedGraph ?? options.graphState'],
   },
   'orchestrator-v5/handlers/chip-click-dispatch.ts': {
-    // 2nd site (ROADMAP 2.73): the run_analysis chip path threads the
-    // controlled set into applyCoachingSignal. Persisted-derived on both
-    // legs: the pre-loaded scenario snapshot's raw persisted graph
-    // (production) with the turn-context persisted graph as the
-    // injected-registry test-path fallback. No request-graph leg.
-    count: 2,
+    // The run_analysis chip path threads the controlled set into
+    // applyCoachingSignal. Persisted-derived: the pre-loaded scenario
+    // snapshot's raw persisted graph (production) with the turn-context
+    // persisted graph as the injected-registry test-path fallback. No
+    // request-graph leg.
+    //
+    // 2026-07-22 dead-noop deletion: 2 → 1 — the second site lived in the
+    // deterministic no-op explanation chip-click dispatch
+    // (`buildProjectionInputs`, removed as dead code post-#619) and derived
+    // the controlled set from `context.persistedGraph`. Deleting that dead
+    // path removed the site and its `context.persistedGraph` allowedArg. The
+    // surviving site is the live run_analysis leg below.
+    count: 1,
     allowedArgs: [
-      'context.persistedGraph',
       'cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph',
     ],
   },

@@ -95,10 +95,12 @@ export function createWhatWouldFlipHandler(): HandlerFn {
     //
     // `invocation.rawRobustness` is forwarded so the fallback composer
     // can suppress the "smaller changes are unlikely" sentence on
-    // raw-fragile or near-tie results (PR #193 SSOT). It is populated
-    // on the chip-click path by `dispatchChipClickNoopExplanation`;
-    // routed-path callers may omit it (undefined → composer treats as
-    // "no raw signal" and falls back to projected-band copy).
+    // raw-fragile or near-tie results (PR #193 SSOT). It is populated on
+    // the live routed path — forced-intent explanation handlers via
+    // `routeWithToolUse`, plus turn-executor's
+    // `buildBoundedFallbackCopyAndChips`; callers without a raw signal may
+    // omit it (undefined → composer treats as "no raw signal" and falls
+    // back to projected-band copy).
     const explanation = invocation.explanation;
     const sonnetValid = !!(explanation && explanation.answer_text_valid);
     const rawText = sonnetValid
