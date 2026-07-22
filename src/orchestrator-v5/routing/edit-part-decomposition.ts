@@ -718,6 +718,52 @@ export function buildSubstitutionClarify(
 }
 
 /**
+ * Full-rejection part clarify (F4, 2026-07-22 — mixed-compound dead-end).
+ *
+ * When a MIXED value+structural (or any >= 2-accountable-part) edit message
+ * is forced whole into the LLM edit lane — because the value-update
+ * suppressor stands down for mixed messages (value-update-gate.ts
+ * `shouldSuppressEditDispatchForValueUpdate`) — and that lane REJECTS the
+ * whole thing (SYNTHESIZED_GRAPH_INVALID / parse_failure / structural_
+ * validation), the conservation-law accounting in edit-graph-dispatch.ts is
+ * bypassed (it is gated on `!wasRejected`). Today the turn then falls to the
+ * generic single-cajole ("I wasn't able to make that change safely. Describe
+ * what to change") which DISCARDS the known decomposition and forces the user
+ * to re-describe the entire compound — which re-enters the same fragile LLM
+ * lane and re-fails. That is the observed cajole LOOP.
+ *
+ * This builder replaces that context-losing cajole with an honest per-part
+ * clarify: every accountable part is named, and (paired with per-part replay
+ * chips at the dispatch) the user is invited to send each on its own — where
+ * its dedicated DETERMINISTIC lane serves it (a single value edit through the
+ * value-update path, a single structural remove/add through the referee gate,
+ * each of which is live-verified to terminate cleanly on its own). No part is
+ * silent-dropped; the loop is broken because each part now has a terminal.
+ *
+ * Returns null for < 2 accountable parts — a single-part rejection keeps
+ * today's generic recovery copy (the false-compound trap: never grow a
+ * multi-part disclosure on a single-part message). Copy follows the same
+ * DISCLOSED-PARTIAL discipline as the other builders in this file (British
+ * English, no em dashes, clause-quoted verbatim, neither a denial-of-any-
+ * change nor a success claim).
+ */
+export function buildMultiPartRejectionClarify(
+  decomposition: EditPartDecomposition,
+): string | null {
+  const parts = decomposition.accountableParts;
+  if (parts.length < 2) return null;
+  const items = parts.map((p) => `"${clampClause(p.text)}"`);
+  const enumeration =
+    items.length === 2
+      ? `${items[0]} and ${items[1]}`
+      : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+  return (
+    "I wasn't able to make those edits together. Let me take them one at a " +
+    `time. Tell me each part on its own and I'll pick it up: ${enumeration}.`
+  );
+}
+
+/**
  * Deterministic-lane remainder notice: the deterministic value path served
  * the value part(s) of a mixed message; the structural remainder must not
  * vanish. One sentence per structural part, same vocabulary as

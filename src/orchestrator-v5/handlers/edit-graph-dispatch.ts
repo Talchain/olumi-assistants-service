@@ -107,6 +107,7 @@ import {
 } from './edit-graph-referee-gate.js';
 import {
   accountEditParts,
+  buildMultiPartRejectionClarify,
   buildPartAccountingDisclosure,
   buildSubstitutionClarify,
   decomposeEditMessage,
@@ -2029,6 +2030,68 @@ export async function dispatchEditGraph(
       : null;
   const paSubstitutionBlocked =
     partAccounting !== null && partAccounting.substitutions.length > 0;
+
+  // ── Mixed-compound whole-batch rejection recovery (F4, 2026-07-22) ──
+  // The value-update suppressor stands DOWN for MIXED value+structural
+  // messages (value-update-gate.ts) so the whole message reaches THIS lane —
+  // the only one that can serve both halves in one batch. But when the LLM
+  // edit lane REJECTS the whole batch (SYNTHESIZED_GRAPH_INVALID / parse /
+  // structural_validation), the conservation-law accounting above never runs
+  // (it is gated on `!wasRejected`), and the response falls to the generic
+  // single-cajole ("...describe what to change") which DISCARDS the known
+  // decomposition. The user must then re-describe the entire compound, which
+  // re-enters the same fragile lane and re-fails — the observed cajole loop
+  // (F4 live probe 2026-07-22: "Set X to 0.5 and remove option Y" →
+  // SYNTHESIZED_GRAPH_INVALID after 2 attempts → bare "describe differently").
+  //
+  // Fix (fail-closed to clarify; DISCLOSED-PARTIAL doctrine): when a MIXED
+  // value+structural message is rejected wholesale, name EVERY accountable
+  // part and offer one replay chip per part. Each chip re-sends a SINGLE
+  // clause, which routes to its own DETERMINISTIC lane (value-update path /
+  // referee gate) — each live-verified to terminate cleanly alone — so no part
+  // is silent-dropped and the loop is broken. Blocks (diagnostic
+  // rejection_code) are preserved; only assistant_text + suggested_actions are
+  // re-sourced.
+  //
+  // SCOPE — `mixedValueStructural` ONLY: this is precisely the class the
+  // value-update suppressor stands down for (value-update-gate.ts), forcing an
+  // otherwise deterministically-serviceable value half into the fragile LLM
+  // lane. STRUCTURAL-only compounds ("add a risk and connect it to churn")
+  // already carry their own specific named-refusal / Cap-2A guidance copy
+  // (edit-graph.ts) which is MORE informative than a generic per-part clarify,
+  // so they are deliberately left untouched. Single-part and pure-value
+  // messages report mixedValueStructural=false and keep today's copy.
+  if (editResult.wasRejected && partDecomposition.mixedValueStructural) {
+    const multiPartClarify = buildMultiPartRejectionClarify(partDecomposition);
+    if (multiPartClarify !== null) {
+      response = {
+        ...response,
+        assistant_text: multiPartClarify,
+        suggested_actions: partDecomposition.accountableParts.map((part, i) => {
+          const clause = part.text.replace(/\s+/g, ' ').trim();
+          const label = clause.length > 60 ? `${clause.slice(0, 57)}...` : clause;
+          const action: { id: string; label: string; message: string; detail?: string } = {
+            id: `edit_part_retry_${i}`,
+            label,
+            message: clause,
+          };
+          if (label !== clause) action.detail = clause;
+          return action;
+        }),
+      };
+      emit(TelemetryEvents.V5EditGraphPartAccounting, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'edit_graph_rejected_multipart',
+        parts_detected: partDecomposition.accountableParts.length,
+        parts_covered: 0,
+        parts_uncovered: partDecomposition.accountableParts.length,
+        missing_target_count: 0,
+        substitution_blocked: false,
+        disclosure_appended: true,
+      });
+    }
+  }
 
   // ── Graph Management referee gate (lane 8, CEE_GRAPH_MANAGEMENT_MODE) ──
   // off: zero referee calls, byte-identical path (pinned by
