@@ -60,16 +60,13 @@ import { composeToolCallResponse, type AnswerKind } from '../compose.js';
 import {
   buildTurnContext,
   loadScenarioSnapshotForRunAnalysis,
-  type EnrichedTurnContext,
 } from '../build-turn-context.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
-import { GraphV3 } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
-  type FreshnessDerivation,
 } from '../context/freshness.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
