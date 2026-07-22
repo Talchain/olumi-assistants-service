@@ -360,13 +360,21 @@ function tryComposeRecoverableChipOutcome(
  * gate on `isDeterministicChipClickActionType` first, so reaching this with
  * an unwhitelisted value is a programming error rather than a runtime drift.
  *
- * Branching: `run_analysis` keeps its existing heavyweight code path
- * (scenario-snapshot pre-load, decision_review enrichment, single-source-of-
- * truth analysisReady derivation). The V5 no-op explanation handlers
- * (`explain_results`, `what_would_flip`) flow through a lightweight path
- * that pre-populates `analysisProjection` / `analysisFreshness` /
- * `analysisReady` from prior facts so the handler's precondition decision
- * tree reads the same signals it would have seen on the routed path.
+ * Whitelist contract: `DETERMINISTIC_CHIP_ACTION_TYPES` has exactly ONE
+ * member — `run_analysis`. It is a genuine no-LLM compute handler (not an
+ * explanation), so bypassing Sonnet is correct; it keeps its heavyweight code
+ * path (scenario-snapshot pre-load, decision_review enrichment, single-source-
+ * of-truth analysisReady derivation).
+ *
+ * The analytical pills `explain_results` / `what_would_flip` are NO LONGER
+ * dispatched here (F2 CHANGE A, 2026-07-22 — see the whitelist declaration
+ * above). They are owned by the conversation-aware coach via TYPED FORCED
+ * INTENT (route-v2 `detectChipClickForcedIntent` → TurnExecutor
+ * `chipClickForcedIntent` → `routeWithToolUse` with a forced explanation
+ * handler + thinking disabled), with the deterministic composers
+ * (`composeExplainResultsFallback` / `composeWhatWouldFlipFallback`) serving
+ * as the routed BOUNDED FALLBACK when the coach's `answer_text` is invalid.
+ * No lightweight explanation path exists in this dispatcher any more.
  */
 export async function dispatchDeterministicChipClick(
   actionType: string,

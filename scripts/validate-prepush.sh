@@ -16,18 +16,29 @@ cd "$REPO_ROOT"
 # Capture stdin before any function can consume it
 STDIN_DATA=$(cat || true)
 
-# Smoke test file set: critical orchestrator pipeline tests
+# Smoke test file set: critical V5 orchestrator-pipeline tests.
+#
+# Codex F1 (2026-07-22): the previous list was ten pre-V5 paths, NINE of which
+# #615 deleted with the dead V1 belt. Vitest SILENTLY IGNORES a path filter that
+# matches no file, so the gate ran GREEN while exercising 1/10 files — guarantee
+# theatre. This set is the current LIVE V5 critical pipeline; every entry is
+# verified to exist AND pass, `check_smoke_tests` now fails LOUD on any missing
+# entry (below), and tests/unit/smoke-gate-inventory.test.ts derives from THIS
+# list (reads it out of this script) and asserts each path exists on disk — so a
+# future deletion fails a test, not silently under-covers the gate.
+#
+#   path                                                                  covers
+#   --------------------------------------------------------------------  -------------------------
 SMOKE_TESTS=(
-  tests/unit/orchestrator/pipeline/pipeline.test.ts
-  tests/unit/orchestrator/pipeline/pipeline-stream.test.ts
-  tests/unit/orchestrator/pipeline/phase1-enrichment.test.ts
-  tests/unit/orchestrator/pipeline/phase3-llm.test.ts
-  tests/unit/orchestrator/pipeline/phase4-tools.test.ts
-  tests/unit/orchestrator/pipeline/phase5-envelope-assembler.test.ts
-  tests/unit/orchestrator/pipeline/analysis-state-normalization.test.ts
-  tests/unit/orchestrator/analysis-state-normalizer.test.ts
-  tests/unit/orchestrator/tools/dispatch-chaining.test.ts
-  tests/unit/orchestrator/tools/edit-graph-normalisation.test.ts
+  src/orchestrator-v5/__tests__/turn-executor.test.ts                                 # turn-executor routing
+  src/orchestrator-v5/routing/__tests__/route-with-tool-use-forced-explanation.test.ts # forced-intent analytical pills
+  src/orchestrator-v5/handlers/__tests__/chip-click-dispatch.test.ts                  # run_analysis chip dispatch
+  src/orchestrator-v5/handlers/__tests__/edit-graph-dispatch.test.ts                  # edit-graph dispatch
+  src/orchestrator-v5/context/__tests__/freshness.test.ts                             # analysis-freshness derivation
+  src/orchestrator-v5/__tests__/turn-executor-recovery-chips.test.ts                  # bounded routing fallback
+  tests/unit/validators/b1-drift.test.ts                                              # B1 boundary validator (egress/ingress typed fallback)
+  src/orchestrator-v5/context/__tests__/context-pack-assembler.test.ts                # context-pack assembly
+  src/orchestrator-v5/tools/handlers/__tests__/run-analysis.test.ts                   # run_analysis handler ingest
 )
 
 # ---------------------------------------------------------------------------
@@ -236,9 +247,31 @@ check_lint_changed() {
 # 4. Smoke tests — critical orchestrator pipeline files
 # ---------------------------------------------------------------------------
 check_smoke_tests() {
+  # Fail LOUD if any SMOKE_TESTS entry is missing on disk BEFORE invoking
+  # Vitest. Vitest treats a path filter that matches no file as a silent no-op
+  # (it does not error), so a deleted/renamed entry would otherwise leave this
+  # gate GREEN while exercising fewer files than intended — the exact F1
+  # guarantee-theatre regression (#615 deleted 9 of the 10 old entries and the
+  # gate stayed green on 1). This existence check makes drift a hard FAIL.
+  local missing="" f
+  for f in "${SMOKE_TESTS[@]}"; do
+    if [ ! -f "${REPO_ROOT}/${f}" ]; then
+      missing="${missing}
+      ${f}"
+    fi
+  done
+  if [ -n "$missing" ]; then
+    print_check "smoke-tests" "FAIL"
+    echo "    SMOKE_TESTS entries missing on disk (Vitest would SILENTLY skip these):${missing}"
+    echo "    Update the SMOKE_TESTS list in scripts/validate-prepush.sh to current"
+    echo "    V5 critical-pipeline test paths. See tests/unit/smoke-gate-inventory.test.ts."
+    FAILURES=$((FAILURES + 1))
+    return 0
+  fi
+
   local output
   if output=$(vitest run "${SMOKE_TESTS[@]}" 2>&1); then
-    print_check "smoke-tests" "OK"
+    print_check "smoke-tests" "OK (${#SMOKE_TESTS[@]} files)"
   else
     print_check "smoke-tests" "FAIL"
     echo "$output" | tail -40
