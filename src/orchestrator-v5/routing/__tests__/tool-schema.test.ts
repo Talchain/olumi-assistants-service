@@ -583,10 +583,14 @@ describe('OLUMI_ACTION_TOOL top-level answer_text field (coach/converse)', () =>
     ).toThrow(/answer_shape is required/);
   });
 
-  it('rejects execute carrying answer_text (execute uses action.explanation.answer_text)', () => {
-    expect(() =>
-      parseToolCallResponse({ ...VALID_EXECUTE_INPUT, answer_text: 'stray body' }),
-    ).toThrow(/answer_text is forbidden/);
+  it('COERCES execute carrying a stray answer_text (stripped, not rejected — repair-tax fix 2026-07-22)', () => {
+    // Was a hard rejection; now stripped on the first pass so a forced pill no
+    // longer pays a REPAIR_ONCE second LLM call. run_analysis is a mutation
+    // handler with no user-facing prose, so the stray text is dropped (not
+    // lifted). See REPAIR-TAX-ROOT-CAUSE-2026-07-22.md / first-pass-coercion.test.ts.
+    const coerced = parseToolCallResponse({ ...VALID_EXECUTE_INPUT, answer_text: 'stray body' });
+    expect(coerced.intent_class).toBe('execute');
+    expect((coerced as { answer_text?: unknown }).answer_text).toBeUndefined();
   });
 
   it('rejects clarify carrying answer_text (clarify uses clarification.question)', () => {
