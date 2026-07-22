@@ -545,4 +545,64 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     expect(bf!.data.analysis_ready).toBe(true);
     expect(bf!.data.analysis_freshness).toBe('fresh');
   });
+
+  // F1-flip lane (2026-07-22): when a FORCED analytical pill
+  // (`chipClickForcedIntent`) hits the bounded routing fallback (the live
+  // `schema_repair_failed` class — request_id c1f6c45b, ~01:00Z 22 Jul,
+  // both the initial and repair routing calls returned but their olumi_action
+  // output failed schema twice) AND the prior analysis is FRESH, the fallback
+  // must DEGRADE HONESTLY into the deterministic `composeWhatWouldFlipFallback`
+  // answer built from the same fresh analysis projection — NOT the generic
+  // "I couldn't complete that turn cleanly" recovery copy. A canned flip answer
+  // (leading option + probability + robustness) beats an empty apology when the
+  // analysis is right there. The bounded-fallback telemetry still fires with the
+  // underlying cause so ops keep the signal.
+  function mkFailingToolUse(input: unknown): ChatWithToolsResult {
+    return {
+      content: [{ type: 'tool_use', id: 'tu-x', name: 'olumi_action', input: input as Record<string, unknown> }],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
+      model: 'claude-sonnet-4-6',
+      latencyMs: 50,
+    };
+  }
+
+  it('FORCED what_would_flip pill + schema_repair_failed + FRESH analysis → deterministic flip answer, not the empty recovery copy', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
+    const expectedHash = computeAnalysisAffectingGraphHash(baseGraph)!;
+    mockedPriorFacts = [buildFreshRunAnalysisFact(expectedHash)];
+
+    // Initial routing call + repair both return an olumi_action that fails
+    // schema validation → routing_error_cause 'schema_repair_failed' (the live
+    // failing-turn cause).
+    const adapterMock = vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockResolvedValueOnce(mkFailingToolUse({ intent_class: 'execute' }))
+      .mockResolvedValueOnce(mkFailingToolUse({ intent_class: 'clarify' }));
+    const adapter = { chatWithTools: adapterMock };
+
+    const flipPayload = {
+      ...ANALYSE_PAYLOAD,
+      source: 'chip_click' as const,
+      message: 'What would flip this result?',
+    };
+
+    const result = await runTurnExecutor(flipPayload, 'req-flip-fallback-fresh', {
+      routingAdapter: adapter,
+      graphState: baseGraph,
+      chipClickForcedIntent: 'what_would_flip',
+    });
+
+    // The deterministic flip composer output — leading option A at 62% — must
+    // be present, and the generic apology must NOT be the answer.
+    expect(result.response.assistant_text).toContain('currently leads');
+    expect(result.response.assistant_text).toContain('62%');
+    expect(result.response.assistant_text).not.toContain("couldn't complete that turn");
+
+    // Ops signal preserved: bounded fallback still fired, cause intact.
+    const bf = events.find((e) => e.event === 'v5.routing_bounded_fallback');
+    expect(bf).toBeDefined();
+    expect(bf!.data.routing_error_cause).toBe('schema_repair_failed');
+    expect(bf!.data.analysis_freshness).toBe('fresh');
+  });
 });

@@ -252,6 +252,10 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { pickLatestFlipSummary } from './coaching/pick-flip-summary.js';
+import {
+  composeExplainResultsFallback,
+  composeWhatWouldFlipFallback,
+} from './tools/handlers/explanation-fallback.js';
 import { deriveRecentChangesEvidence } from './context/recent-changes.js';
 import type { TurnOutcome } from './turn-outcome.js';
 import {
@@ -8918,6 +8922,7 @@ export async function runTurnExecutor(
     assistantText: string;
     chips: SuggestedAction[];
     analysisFreshAndAvailable: boolean;
+    deterministicAnalyticalAnswerServed: boolean;
   } {
     const hasAnalysisProjection =
       !!contextPackForLog?.analysis &&
@@ -8941,8 +8946,75 @@ export async function runTurnExecutor(
     //   - no prior analysis      → invite a retry without implying state
     // No "recommendation", no raw IDs, no decimals (forbidden-phrase
     // guard still backstops at the finaliser).
+    // F1-flip lane (2026-07-22): a FORCED analytical pill
+    // (`chipClickForcedIntent` — the typed `what_would_flip` / `explain_results`
+    // chip) that reaches this bounded fallback with a FRESH prior analysis must
+    // DEGRADE HONESTLY into the SAME deterministic composer the happy-path
+    // handler uses when Sonnet's answer_text is unusable — NOT the generic
+    // "I couldn't complete that turn cleanly" apology. Live cause: request_id
+    // c1f6c45b (~01:00Z 22 Jul) — both the initial and repair routing calls
+    // returned but their `olumi_action` output failed schema twice
+    // (`schema_repair_failed`), so the coach authored nothing; with a fresh
+    // analysis sitting in the context pack, a canned flip answer (leading option
+    // + margin + drivers + robustness) beats an empty apology.
+    //
+    // Guards mirror the routed happy-path fallback (turn-executor.ts, EXECUTE
+    // branch): only fire on FRESH + present projection, and only pair prior-fact
+    // robustness / flip evidence with a prior-fact-built projection
+    // (`analysisStateSource !== 'request'`) so a request-sourced projection is
+    // never mixed with a different run's evidence (SAME-SOURCE GUARANTEE). The
+    // composers are the identical finaliser-safe ones used on the Sonnet-valid
+    // path, so no forbidden-phrase or ordering risk is introduced here.
+    const forcedAnalyticalIntent = options.chipClickForcedIntent;
+    let deterministicAnalyticalAnswer: string | null = null;
+    if (forcedAnalyticalIntent && analysisFreshAndAvailable) {
+      const projection =
+        buildAnalysisProjectionSummary(contextPackForLog?.analysis ?? null) ?? undefined;
+      if (projection?.leading_option) {
+        // SAME-SOURCE GUARANTEE: `analysisStateSource === 'request'` iff the
+        // body carried `analysis_state` (see the request branch of
+        // buildTurnContext, which sets it under `if (options.analysisState)`).
+        // That local is block-scoped and out of reach here, so we read the
+        // identical condition off `options.analysisState` — the projection is
+        // request-sourced exactly when the body supplied it, and only then do we
+        // withhold the prior-fact robustness / flip evidence to avoid pairing a
+        // request run's projection with a different run's evidence.
+        const usePriorFactEvidence = !options.analysisState;
+        const rawRobustness = usePriorFactEvidence
+          ? pickLatestRawRobustness(context.prior_facts) ?? null
+          : null;
+        if (forcedAnalyticalIntent === 'what_would_flip') {
+          const flipSummary = usePriorFactEvidence
+            ? pickLatestFlipSummary(context.prior_facts) ?? null
+            : null;
+          const flipSummaryFiltered =
+            flipSummary != null
+              ? filterFlipSummaryEntries(
+                  flipSummary,
+                  collectInterventionControlledFactorIds(
+                    context.persistedGraph ?? options.graphState,
+                  ),
+                )
+              : flipSummary;
+          deterministicAnalyticalAnswer = composeWhatWouldFlipFallback(
+            projection,
+            rawRobustness,
+            flipSummaryFiltered,
+          );
+        } else {
+          deterministicAnalyticalAnswer = composeExplainResultsFallback(
+            projection,
+            null,
+            rawRobustness,
+          );
+        }
+      }
+    }
+
     let assistantText: string;
-    if (analysisFreshAndAvailable) {
+    if (deterministicAnalyticalAnswer !== null) {
+      assistantText = deterministicAnalyticalAnswer;
+    } else if (analysisFreshAndAvailable) {
       assistantText =
         "I couldn't complete that turn cleanly, but your current analysis is still available.";
     } else if (analysisStaleButPresent) {
@@ -8993,7 +9065,12 @@ export async function runTurnExecutor(
     // empty set beats an identical repeat.
     const recentlyOffered = recentlyOfferedChipIds();
     chips = chips.filter((chip) => !recentlyOffered.has(chip.id));
-    return { assistantText, chips, analysisFreshAndAvailable };
+    return {
+      assistantText,
+      chips,
+      analysisFreshAndAvailable,
+      deterministicAnalyticalAnswerServed: deterministicAnalyticalAnswer !== null,
+    };
   }
 
   /**
@@ -9013,7 +9090,7 @@ export async function runTurnExecutor(
     err: RoutingError,
   ): Promise<TurnExecutorRunResult> {
     failureType = INTERNAL_TO_WIRE.LLM_SCHEMA_VIOLATION;
-    const { assistantText, chips, analysisFreshAndAvailable } =
+    const { assistantText, chips, analysisFreshAndAvailable, deterministicAnalyticalAnswerServed } =
       buildBoundedFallbackCopyAndChips();
     const fallbackResponse = composeAnswer({
       answerKind: 'functional',
@@ -9033,6 +9110,10 @@ export async function runTurnExecutor(
       llm_calls_used: llmCallsUsed,
       analysis_ready: analysisFreshAndAvailable, // finaliser-exempt: telemetry payload field, not the response envelope analysis_ready slot
       analysis_freshness: freshness?.freshness ?? null,
+      // F1-flip lane: true when a forced analytical pill degraded into the
+      // deterministic composer answer instead of the generic apology copy.
+      forced_intent: options.chipClickForcedIntent ?? null,
+      deterministic_analytical_answer_served: deterministicAnalyticalAnswerServed,
     });
     // recordFailureContext fires at the top of translateRoutingError for
     // every routing-error cause, including this bounded-fallback path.
