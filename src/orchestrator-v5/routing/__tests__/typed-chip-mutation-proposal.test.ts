@@ -335,3 +335,80 @@ describe('totality / fall-through classification', () => {
     ).toEqual({ matched: false, reason: 'no_parameters' });
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// P1 — strict-reject sweep across EVERY numeric parameter the reader owns.
+//
+// The live silent-wrong-value defect entered through `set_factor_value.value`
+// as a STRING. A numeric param must accept ONLY a genuinely-typed finite
+// number: a string, NaN, or ±Infinity FAILS the parse → `parameters_invalid`
+// → the caller's #635 fall-through to the LLM (never a coerced/clamped commit).
+//
+// STRING cases were already strict (`z.number()` does not coerce) — they are
+// GREEN and prove the sibling readers were never coercing. The NON-FINITE
+// cases are the reader-hardening RED-first control: plain `z.number()` accepts
+// NaN/±Infinity, so the unbounded fields (`set_factor_value.value`,
+// `add_constraint.value`) went RED before `.finite()` was added; the bounded
+// edge fields were already covered by their range checks.
+// ────────────────────────────────────────────────────────────────────────────
+describe('P1 — numeric params reject non-numeric and non-finite values', () => {
+  const NON_FINITE: ReadonlyArray<readonly [string, unknown]> = [
+    ['a string', 'one hundred and forty'],
+    ['NaN', Number.NaN],
+    ['+Infinity', Number.POSITIVE_INFINITY],
+    ['-Infinity', Number.NEGATIVE_INFINITY],
+    ['a boolean', true],
+  ];
+
+  describe('set_factor_value.value', () => {
+    for (const [label, bad] of NON_FINITE) {
+      it(`rejects ${label} → parameters_invalid`, () => {
+        expect(
+          buildTypedChipMutationProposal('set_factor_value', { target_id: 'f-budget', value: bad }, GRAPH),
+        ).toEqual({ matched: false, reason: 'parameters_invalid' });
+      });
+    }
+  });
+
+  describe('adjust_edge_strength.value', () => {
+    for (const [label, bad] of NON_FINITE) {
+      it(`rejects ${label} → parameters_invalid`, () => {
+        expect(
+          buildTypedChipMutationProposal(
+            'adjust_edge_strength',
+            { target_id: 'f-budget→g-rev', value: bad },
+            GRAPH,
+          ),
+        ).toEqual({ matched: false, reason: 'parameters_invalid' });
+      });
+    }
+  });
+
+  describe('adjust_edge_strength.std', () => {
+    for (const [label, bad] of NON_FINITE) {
+      it(`rejects ${label} → parameters_invalid`, () => {
+        expect(
+          buildTypedChipMutationProposal(
+            'adjust_edge_strength',
+            { target_id: 'f-budget→g-rev', value: 0.5, std: bad },
+            GRAPH,
+          ),
+        ).toEqual({ matched: false, reason: 'parameters_invalid' });
+      });
+    }
+  });
+
+  describe('add_constraint.value', () => {
+    for (const [label, bad] of NON_FINITE) {
+      it(`rejects ${label} → parameters_invalid`, () => {
+        expect(
+          buildTypedChipMutationProposal(
+            'add_constraint',
+            { target_id: 'g-rev', constraint_type: 'at_least', value: bad },
+            GRAPH,
+          ),
+        ).toEqual({ matched: false, reason: 'parameters_invalid' });
+      });
+    }
+  });
+});

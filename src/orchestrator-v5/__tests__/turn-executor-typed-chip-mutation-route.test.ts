@@ -231,3 +231,183 @@ describe('un-routable typed mutation chip falls through benignly (#634 contract)
     expect(events.filter((e) => e.event === 'v5.typed_chip_mutation_route')).toHaveLength(0);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// P1 — the SILENT WRONG-VALUE COMMIT (A2 live probe, build eb792d8).
+//
+// A typed set_factor_value chip carried `value: "one hundred and forty"` (a
+// STRING) plus a rendered copy that also read "…one hundred and forty". The
+// typed reader CORRECTLY rejected the string (plain z.number()) and emitted
+// `fell_through:parameters_invalid` — but the turn then fell through to the
+// deterministic TEXT value-update parser, which ran the CQE word-number
+// pre-pass over the CHIP COPY ("one" → "1"), matched the factor by label, and
+// silently committed value **1** with ZERO LLM calls. That is the exact "typed
+// chip re-inferred from its copy" class S2 exists to kill — S2 only prevented
+// it on the reader-SUCCESS path. A malformed typed mutation chip must reach the
+// LLM, never have its copy re-parsed by the deterministic value updater.
+//
+// Both cases below are MUTATION-CHECKED BY CONSTRUCTION: the message copy DOES
+// resolve to a deterministic quantity (word-number 1), so with the fix reverted
+// the value updater fires and the assertions flip RED (committed value 1, LLM
+// never called).
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Unitless count factor at 130 — A2's "Support Ticket Load" scenario shape. */
+function buildTicketGraph(): GraphV3T {
+  return {
+    nodes: [
+      { id: 'g-rev', kind: 'goal', label: 'Revenue' },
+      {
+        id: 'fac_support_load',
+        kind: 'factor',
+        label: 'Support Ticket Load',
+        observed_state: { value: 130, raw_value: 130 },
+      },
+      { id: 'o-x', kind: 'option', label: 'Launch' },
+    ],
+    edges: [],
+  } as unknown as GraphV3T;
+}
+
+/** LLM that would commit a DISTINCTIVE value (777) on the ticket factor. */
+function llmSetsTicketValue777() {
+  const chatWithTools = vi
+    .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+    .mockImplementation(async () =>
+      mkToolUseResult({
+        intent_class: 'execute',
+        action: {
+          handler_id: 'set_factor_value',
+          entity: {
+            id: 'fac_support_load',
+            kind: 'node',
+            label: 'Support Ticket Load',
+            resolution_status: 'resolved',
+            resolution_method: 'context_inference',
+          },
+          parameters: [
+            { name: 'value', value: 777, operator: 'set', source: 'user_explicit' },
+          ],
+          cited_context_fields: [],
+        },
+      }),
+    );
+  return { adapter: { chatWithTools }, chatWithTools };
+}
+
+/** LLM that answers with TEXT only — no tool_use, so no mutation is committed. */
+function llmTextOnly() {
+  const chatWithTools = vi
+    .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+    .mockImplementation(async () => ({
+      content: [{ type: 'text', text: 'Which value did you mean?' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 10, output_tokens: 5 } as unknown as ChatWithToolsResult['usage'],
+      model: 'test',
+      latencyMs: 5,
+    }));
+  return { adapter: { chatWithTools }, chatWithTools };
+}
+
+describe('P1 — malformed typed set_factor_value chip must not re-parse its own copy', () => {
+  it('string value + resolvable copy → reaches the LLM, commits the LLM value (NOT the copy-derived 1)', async () => {
+    const { adapter, chatWithTools } = llmSetsTicketValue777();
+    const { telemetry } = await runTurnExecutor(
+      // A2's verbatim shape: value is a STRING; the copy also carries the
+      // word-form value, so the deterministic text parser CAN resolve it to 1.
+      chipTurn(
+        {
+          action_type: 'set_factor_value',
+          parameters: { target_id: 'fac_support_load', value: 'one hundred and forty' },
+        },
+        'Update Support Ticket Load to one hundred and forty',
+      ),
+      'req-typed-chip-string-value',
+      { routingAdapter: adapter, graphState: buildTicketGraph() },
+    );
+
+    // The typed reader classified the malformed spec (contract telemetry).
+    const routed = events.filter((e) => e.event === 'v5.typed_chip_mutation_route');
+    expect(routed).toHaveLength(1);
+    expect(routed[0]!.data).toMatchObject({
+      action_type: 'set_factor_value',
+      outcome: 'fell_through:parameters_invalid',
+    });
+
+    // The turn reached the LLM (benign fall-through) — the copy was NOT
+    // deterministically re-parsed into a silent commit.
+    expect(chatWithTools).toHaveBeenCalledTimes(1);
+    expect(telemetry.llm_calls_used).toBeGreaterThan(0);
+
+    // The committed value is the LLM's 777 — never the copy-derived 1.
+    expect(appendCalls).toHaveLength(1);
+    const committed = appendCalls[0]!.graph as GraphV3T;
+    const load = committed.nodes.find((n) => n.id === 'fac_support_load');
+    expect(load?.observed_state?.raw_value).toBe(777);
+    expect(load?.observed_state?.raw_value).not.toBe(1);
+  });
+
+  it('positive control: string value + non-mutating LLM → graph value stays 130 (never silently 1)', async () => {
+    const { adapter, chatWithTools } = llmTextOnly();
+    const { response } = await runTurnExecutor(
+      chipTurn(
+        {
+          action_type: 'set_factor_value',
+          parameters: { target_id: 'fac_support_load', value: 'one hundred and forty' },
+        },
+        'Update Support Ticket Load to one hundred and forty',
+      ),
+      'req-typed-chip-string-value-pc',
+      { routingAdapter: adapter, graphState: buildTicketGraph() },
+    );
+
+    // 200-class outcome (no failure), fall-through telemetry present.
+    expect(response.assistant_text.length).toBeGreaterThan(0);
+    const routed = events.filter((e) => e.event === 'v5.typed_chip_mutation_route');
+    expect(routed[0]!.data).toMatchObject({ outcome: 'fell_through:parameters_invalid' });
+
+    // The LLM was consulted and committed nothing → the factor is UNCHANGED at
+    // 130. Pre-fix, the deterministic text parser commits value 1 here.
+    expect(chatWithTools).toHaveBeenCalledTimes(1);
+    const commit = appendCalls.find((c) => {
+      const g = c.graph as GraphV3T | undefined;
+      return g?.nodes?.some((n) => n.id === 'fac_support_load');
+    });
+    const committedLoad = (commit?.graph as GraphV3T | undefined)?.nodes.find(
+      (n) => n.id === 'fac_support_load',
+    );
+    // Either no mutation commit landed at all, or if one did it still reads 130.
+    expect(committedLoad?.observed_state?.raw_value ?? 130).toBe(130);
+  });
+
+  it('does NOT break the legitimate chat path: a real composer message still parses via CQE deterministically', async () => {
+    // The gate is CHIP-SCOPED. A genuine user utterance typed into the composer
+    // (source !== chip_click/chip) is NOT a typed mutation chip, so the flag is
+    // never set and the deterministic text value-update path runs UNCHANGED —
+    // the same CQE extraction it always did (word-number "one" → 1 here). This
+    // pins that the fix suppresses ONLY the chip-copy re-parse, never the real
+    // text lane. (The "one hundred and forty" → 1 CQE behaviour is a separate,
+    // pre-existing quirk this fix deliberately does not touch.)
+    const { chatWithTools } = llmSetsTicketValue777();
+    await runTurnExecutor(
+      makeMessagePayload({
+        turn_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        scenario_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        stage: 'analyse',
+        source: 'composer',
+        message: 'set support ticket load to one hundred and forty',
+      }),
+      'req-composer-legit-text',
+      { routingAdapter: { chatWithTools }, graphState: buildTicketGraph() },
+    );
+
+    // No typed-chip route event (this is not a chip turn).
+    expect(events.filter((e) => e.event === 'v5.typed_chip_mutation_route')).toHaveLength(0);
+    // The deterministic text path owned the turn (unchanged) — LLM not called,
+    // and it committed the CQE-derived value exactly as before the fix.
+    expect(chatWithTools).not.toHaveBeenCalled();
+    const committed = appendCalls[0]?.graph as GraphV3T | undefined;
+    const load = committed?.nodes.find((n) => n.id === 'fac_support_load');
+    expect(load?.observed_state?.raw_value).toBe(1);
+  });
+});
