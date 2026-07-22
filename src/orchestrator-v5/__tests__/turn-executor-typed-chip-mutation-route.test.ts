@@ -235,9 +235,9 @@ describe('un-routable typed mutation chip falls through benignly (#634 contract)
 // ────────────────────────────────────────────────────────────────────────────
 // P1 — the SILENT WRONG-VALUE COMMIT (A2 live probe, build eb792d8).
 //
-// A typed set_factor_value chip carried `value: "one hundred and forty"` (a
-// STRING) plus a rendered copy that also read "…one hundred and forty". The
-// typed reader CORRECTLY rejected the string (plain z.number()) and emitted
+// A typed set_factor_value chip carried a STRING value plus a rendered copy
+// (A2's live probe was the compound "one hundred and forty"). The typed reader
+// CORRECTLY rejected the string (plain z.number()) and emitted
 // `fell_through:parameters_invalid` — but the turn then fell through to the
 // deterministic TEXT value-update parser, which ran the CQE word-number
 // pre-pass over the CHIP COPY ("one" → "1"), matched the factor by label, and
@@ -247,9 +247,13 @@ describe('un-routable typed mutation chip falls through benignly (#634 contract)
 // LLM, never have its copy re-parsed by the deterministic value updater.
 //
 // Both cases below are MUTATION-CHECKED BY CONSTRUCTION: the message copy DOES
-// resolve to a deterministic quantity (word-number 1), so with the fix reverted
-// the value updater fires and the assertions flip RED (committed value 1, LLM
-// never called).
+// resolve to a deterministic quantity (word-number 1), so with #639's gate
+// reverted the value updater fires and the assertions flip RED (committed value
+// 1, LLM never called). The copy uses the BARE single "one" rather than A2's
+// verbatim "one hundred and forty": the sibling compound-word-number fix
+// (cqe/word-numbers.ts) now makes the compound resolve to NOTHING, which would
+// have silently voided this by-construction mutation-check. A bare single still
+// folds to 1, so the check keeps biting.
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Unitless count factor at 130 — A2's "Support Ticket Load" scenario shape. */
@@ -313,14 +317,16 @@ describe('P1 — malformed typed set_factor_value chip must not re-parse its own
   it('string value + resolvable copy → reaches the LLM, commits the LLM value (NOT the copy-derived 1)', async () => {
     const { adapter, chatWithTools } = llmSetsTicketValue777();
     const { telemetry } = await runTurnExecutor(
-      // A2's verbatim shape: value is a STRING; the copy also carries the
-      // word-form value, so the deterministic text parser CAN resolve it to 1.
+      // A2's shape: value is a STRING (rejected by the reader's z.number()) and
+      // the copy carries a word-form value the deterministic text parser CAN
+      // resolve — a bare single "one" → 1, so this stays mutation-checked by
+      // construction after the sibling compound fix (see the block comment).
       chipTurn(
         {
           action_type: 'set_factor_value',
-          parameters: { target_id: 'fac_support_load', value: 'one hundred and forty' },
+          parameters: { target_id: 'fac_support_load', value: 'one' },
         },
-        'Update Support Ticket Load to one hundred and forty',
+        'Update Support Ticket Load to one',
       ),
       'req-typed-chip-string-value',
       { routingAdapter: adapter, graphState: buildTicketGraph() },
@@ -353,9 +359,9 @@ describe('P1 — malformed typed set_factor_value chip must not re-parse its own
       chipTurn(
         {
           action_type: 'set_factor_value',
-          parameters: { target_id: 'fac_support_load', value: 'one hundred and forty' },
+          parameters: { target_id: 'fac_support_load', value: 'one' },
         },
-        'Update Support Ticket Load to one hundred and forty',
+        'Update Support Ticket Load to one',
       ),
       'req-typed-chip-string-value-pc',
       { routingAdapter: adapter, graphState: buildTicketGraph() },
@@ -380,14 +386,21 @@ describe('P1 — malformed typed set_factor_value chip must not re-parse its own
     expect(committedLoad?.observed_state?.raw_value ?? 130).toBe(130);
   });
 
-  it('does NOT break the legitimate chat path: a real composer message still parses via CQE deterministically', async () => {
-    // The gate is CHIP-SCOPED. A genuine user utterance typed into the composer
-    // (source !== chip_click/chip) is NOT a typed mutation chip, so the flag is
-    // never set and the deterministic text value-update path runs UNCHANGED —
-    // the same CQE extraction it always did (word-number "one" → 1 here). This
-    // pins that the fix suppresses ONLY the chip-copy re-parse, never the real
-    // text lane. (The "one hundred and forty" → 1 CQE behaviour is a separate,
-    // pre-existing quirk this fix deliberately does not touch.)
+  it('a composer message with a COMPOUND word-number falls through to the LLM (never silently commits a fragment)', async () => {
+    // Chip-scoping is unchanged: a genuine composer utterance (source !==
+    // chip_click/chip) is NOT a typed mutation chip, so #639's flag is never set
+    // and the deterministic text value-update path runs as usual.
+    //
+    // What CHANGED (sibling lane a1/cqe-compound-word-numbers, cqe/word-numbers.ts):
+    // the CQE word-number pre-pass no longer folds the LEAD fragment of a compound,
+    // so "one hundred and forty" yields NO deterministic quantity — the turn now
+    // falls through to the LLM instead of silently committing the fragment value 1
+    // (the exact pre-existing quirk that lane fixes). This pins the fixed live
+    // behaviour end-to-end through the turn executor.
+    //
+    // Mutation-check (that lane's fix): revert the cqe/word-numbers.ts compound
+    // guard and "one hundred and forty" resolves to 1 again → the deterministic
+    // path commits 1, chatWithTools is never called, and both assertions flip RED.
     const { chatWithTools } = llmSetsTicketValue777();
     await runTurnExecutor(
       makeMessagePayload({
@@ -403,11 +416,14 @@ describe('P1 — malformed typed set_factor_value chip must not re-parse its own
 
     // No typed-chip route event (this is not a chip turn).
     expect(events.filter((e) => e.event === 'v5.typed_chip_mutation_route')).toHaveLength(0);
-    // The deterministic text path owned the turn (unchanged) — LLM not called,
-    // and it committed the CQE-derived value exactly as before the fix.
-    expect(chatWithTools).not.toHaveBeenCalled();
+    // The compound word-number no longer resolves deterministically, so the turn
+    // reaches the LLM (fall-through) — never a silent fragment commit.
+    expect(chatWithTools).toHaveBeenCalledTimes(1);
+    // The committed value is the LLM's distinctive 777 — never the pre-fix
+    // copy-derived fragment 1.
     const committed = appendCalls[0]?.graph as GraphV3T | undefined;
     const load = committed?.nodes.find((n) => n.id === 'fac_support_load');
-    expect(load?.observed_state?.raw_value).toBe(1);
+    expect(load?.observed_state?.raw_value).toBe(777);
+    expect(load?.observed_state?.raw_value).not.toBe(1);
   });
 });
