@@ -109,8 +109,10 @@ import {
   accountEditParts,
   buildMultiPartRejectionClarify,
   buildPartAccountingDisclosure,
+  buildReplayOverflowNotice,
   buildSubstitutionClarify,
   decomposeEditMessage,
+  MAX_REPLAY_CHIPS,
   type EditPartAccounting,
   type PatchOperationLike,
 } from '../routing/edit-part-decomposition.js';
@@ -2065,20 +2067,28 @@ export async function dispatchEditGraph(
   if (editResult.wasRejected && partDecomposition.mixedValueStructural) {
     const multiPartClarify = buildMultiPartRejectionClarify(partDecomposition);
     if (multiPartClarify !== null) {
+      // Codex F8: the UI renders at most MAX_REPLAY_CHIPS (3) chips
+      // (SuggestedChips slice(0,3)); emitting more silently drops the tail on
+      // the wire. Cap the emitted replay actions to match, and disclose any
+      // clauses beyond the cap in prose so no part is hidden.
+      const overflowNotice = buildReplayOverflowNotice(partDecomposition.accountableParts);
       response = {
         ...response,
-        assistant_text: multiPartClarify,
-        suggested_actions: partDecomposition.accountableParts.map((part, i) => {
-          const clause = part.text.replace(/\s+/g, ' ').trim();
-          const label = clampLabel(clause);
-          const action: { id: string; label: string; message: string; detail?: string } = {
-            id: `edit_part_retry_${i}`,
-            label,
-            message: clause,
-          };
-          if (label !== clause) action.detail = clause;
-          return action;
-        }),
+        assistant_text:
+          overflowNotice !== null ? `${multiPartClarify} ${overflowNotice}` : multiPartClarify,
+        suggested_actions: partDecomposition.accountableParts
+          .slice(0, MAX_REPLAY_CHIPS)
+          .map((part, i) => {
+            const clause = part.text.replace(/\s+/g, ' ').trim();
+            const label = clampLabel(clause);
+            const action: { id: string; label: string; message: string; detail?: string } = {
+              id: `edit_part_retry_${i}`,
+              label,
+              message: clause,
+            };
+            if (label !== clause) action.detail = clause;
+            return action;
+          }),
       };
       emit(TelemetryEvents.V5EditGraphPartAccounting, {
         request_id: requestId,

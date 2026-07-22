@@ -190,6 +190,49 @@ describe('dispatchEditGraph — mixed-compound whole-batch rejection recovery (F
     expect(details.rejection_code).toBe('SYNTHESIZED_GRAPH_INVALID');
   });
 
+  // ── F8 (Codex CEE half) — cap replay chips at the UI's render ceiling ──
+  // The UI's SuggestedChips renders at most 3 chips (slice(0,3)); emitting more
+  // silently drops the tail on the wire. A > 3-part rejected compound must emit
+  // exactly 3 replay chips AND disclose the remaining clause(s) in prose so
+  // nothing is hidden.
+  const FOUR_PART_MESSAGE =
+    'Set Headcount Cost to 0.5, add a factor called Onboarding Speed, ' +
+    'remove the option Hire Two Junior Engineers, and add a risk called Attrition Risk';
+
+  it('caps the emitted replay chips at 3 even when the message has 4 accountable parts', async () => {
+    const out = await dispatchEditGraph({
+      payload: makePayload(FOUR_PART_MESSAGE),
+      requestId: 'req-mixed-reject-cap',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const actions = out.response.suggested_actions ?? [];
+    // Exactly the UI render ceiling — not 4. (Was unbounded before the cap.)
+    expect(actions.length).toBe(3);
+    // The first three parts get chips, in document order.
+    const messages = actions.map((a) => a.message ?? '');
+    expect(messages.some((m) => /^Set Headcount Cost to 0\.5$/.test(m))).toBe(true);
+    expect(messages.some((m) => /add a risk called Attrition Risk/.test(m))).toBe(false);
+  });
+
+  it('discloses the clause(s) beyond the chip cap in prose so none is hidden', async () => {
+    const out = await dispatchEditGraph({
+      payload: makePayload(FOUR_PART_MESSAGE),
+      requestId: 'req-mixed-reject-overflow',
+      request: STUB_REQUEST,
+      graphState: INGRESS_GRAPH,
+      analysisState: null,
+    });
+
+    const text = out.response.assistant_text ?? '';
+    // The 4th clause (no chip) is named in prose and the user is told to send
+    // it as a message.
+    expect(text).toMatch(/add a risk called Attrition Risk/);
+    expect(text.toLowerCase()).toMatch(/as a message/);
+  });
+
   it('single-part rejection keeps today\'s generic recovery copy (false-compound trap)', async () => {
     const out = await dispatchEditGraph({
       payload: makePayload('remove the option Hire Two Junior Engineers.'),

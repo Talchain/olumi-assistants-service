@@ -8956,21 +8956,31 @@ export async function runTurnExecutor(
       !!contextPackForLog.analysis.leading_option;
     const freshnessVerdict = freshness?.freshness;
     const isFresh = freshnessVerdict === 'fresh';
-    const isUnknown = freshnessVerdict === 'unknown';
+    const isStale = freshnessVerdict === 'stale';
     const analysisFreshAndAvailable = hasAnalysisProjection && isFresh;
-    const analysisUnknownButPresent = hasAnalysisProjection && isUnknown;
-    // Freshness null/undefined (never computed this turn) stays bucketed
-    // here alongside confirmed `stale`, matching pre-existing behaviour —
-    // this fix only carves the confirmed-`unknown` verdict out of that
-    // bucket, per the F7 finding's scope.
-    const analysisStaleButPresent =
-      hasAnalysisProjection && !isFresh && !isUnknown;
-    // Copy contract (review P1 follow-up; F7 adds the unknown row):
-    //   - fresh prior analysis   → reassure that it is still usable
-    //   - stale prior analysis   → hashes differ: name the change, invite a rerun
-    //   - unknown prior analysis → currency unconfirmed: do NOT assert a
-    //                              change, invite a rerun to be sure
-    //   - no prior analysis      → invite a retry without implying state
+    // Codex F5: the "the model has changed since the last analysis" stale copy
+    // may fire ONLY on a CONFIRMED `stale` verdict (graph hashes compared and
+    // diverged — the model IS known to have changed). A body-supplied
+    // analysis_state can populate the projection (te:1498-1526) with NO prior
+    // successful run_analysis fact behind it, in which case freshness resolves
+    // to `'none'` (freshness.ts:458) — and `'unknown'` (hash derivation
+    // impossible this turn) and null/undefined (never computed) likewise lack
+    // the evidence for a change assertion. Bucketing any of them with `stale`
+    // asserted a change that never happened (there was no prior analysis to
+    // change FROM). Those all get the honest can't-confirm-currency copy, never
+    // a fabricated change claim. No "recommendation", no raw IDs, no decimals
+    // (forbidden-phrase guard still backstops at the finaliser).
+    const analysisStaleButPresent = hasAnalysisProjection && isStale;
+    const analysisCurrencyUnconfirmed =
+      hasAnalysisProjection && !isFresh && !isStale;
+    // Copy contract (review P1 follow-up; F7 added the unknown row; Codex F5
+    // narrows the change-assertion to CONFIRMED stale only):
+    //   - fresh prior analysis        → reassure that it is still usable
+    //   - CONFIRMED stale (hashes differ) → name the change, invite a rerun
+    //   - currency unconfirmed        → projection present but verdict is
+    //     unknown / none / uncomputed: do NOT assert a change, invite a rerun
+    //     to be sure
+    //   - no prior analysis, no projection → invite a retry without implying state
     // No "recommendation", no raw IDs, no decimals (forbidden-phrase
     // guard still backstops at the finaliser).
     // F1-flip lane (2026-07-22): a FORCED analytical pill
@@ -9047,7 +9057,7 @@ export async function runTurnExecutor(
     } else if (analysisStaleButPresent) {
       assistantText =
         "I couldn't complete that turn cleanly. The model has changed since the last analysis, so the cached results may be out of date — re-run analysis to see the current picture.";
-    } else if (analysisUnknownButPresent) {
+    } else if (analysisCurrencyUnconfirmed) {
       assistantText =
         "I couldn't complete that turn cleanly, and I can't confirm whether your current analysis is up to date — re-run analysis to be sure.";
     } else {
@@ -9067,16 +9077,20 @@ export async function runTurnExecutor(
       action_type: 'explain_results',
     };
     // Chip rule:
-    //   fresh   → Explain results + Re-run analysis (both safe)
-    //   stale   → Re-run analysis only (Explain would surface stale results)
-    //   unknown → Re-run analysis only (same conservative choice as stale —
-    //             Explain would surface possibly-stale results, and
-    //             currency cannot be confirmed)
-    //   none    → no action chips
+    //   fresh                 → Explain results + Re-run analysis (both safe)
+    //   confirmed stale       → Re-run analysis only (Explain would surface
+    //                           stale results)
+    //   currency unconfirmed  → Re-run analysis only (same conservative choice
+    //                           as stale — Explain would surface possibly-stale
+    //                           results, and currency cannot be confirmed).
+    //                           Covers unknown / none / uncomputed WITH a
+    //                           projection present, so the Codex-F5 none-with-
+    //                           projection case still offers a rerun.
+    //   no projection         → no action chips
     let chips: SuggestedAction[];
     if (analysisFreshAndAvailable) {
       chips = [explainResultsChip, runAnalysisChip];
-    } else if (analysisStaleButPresent || analysisUnknownButPresent) {
+    } else if (analysisStaleButPresent || analysisCurrencyUnconfirmed) {
       chips = [runAnalysisChip];
     } else {
       chips = [];
