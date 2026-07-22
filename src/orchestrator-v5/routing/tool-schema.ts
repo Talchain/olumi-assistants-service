@@ -835,7 +835,9 @@ export type FirstPassCoercionReason =
   // Class (d) — a stray unknown TOP-LEVEL key outside the six the strict
   // RawToolCallSchema accepts (root `unrecognized_keys`, the fourth,
   // attribution-proven class the forced explain pills trip). Carries the
-  // stripped key NAME (structural, R-004-safe).
+  // stripped key NAME — a MODEL-AUTHORED string (by definition NOT in the
+  // schema), sanitised + capped via `sanitiseLoggedKeyName` before it is
+  // logged; never assumed to be a trusted structural identifier.
   | 'stray_top_level_key'
   // Class (e) — a MISSING / INVALID-TYPE intent_class on a FORCED pill turn,
   // defaulted to 'execute' (the #628 assert-execute guard still backstops
@@ -853,11 +855,46 @@ export interface FirstPassCoercion {
   readonly reason: FirstPassCoercionReason;
   readonly count?: number;
   /**
-   * For `stray_top_level_key` only: the NAME of the stripped top-level key —
-   * a structural schema identifier (R-004-safe; never the value). Absent on
-   * every other reason.
+   * For `stray_top_level_key` only: the NAME of the stripped top-level key.
+   * This is a MODEL-AUTHORED string — by definition a key that is NOT in the
+   * schema, so it is untrusted (possibly reflected user content, unbounded
+   * length). It is NOT a structural schema identifier and MUST be passed
+   * through {@link sanitiseLoggedKeyName} before it enters any log or
+   * telemetry event. Absent on every other reason.
    */
   readonly key?: string;
+}
+
+/**
+ * Max length of a MODEL-AUTHORED key name once it reaches a telemetry event
+ * (the sanitised body; a one-char `~` marker may follow, so the emitted value
+ * is at most this + 1 characters).
+ */
+export const MAX_LOGGED_KEY_NAME_LENGTH = 64;
+
+/**
+ * Cap + sanitise a MODEL-AUTHORED key name for telemetry / logging.
+ *
+ * The key names the two log sites carry — the stray top-level key
+ * (`v5.routing.first_pass_coerced`) and the Zod `unrecognized_keys` names
+ * (`v5.routing.forced_pill_parse_failed`) — are BY DEFINITION strings the
+ * model invented that are NOT in the schema. They are therefore 100%
+ * model-authored: possibly reflected user content, and unbounded in length
+ * (a 5014-char key name has been observed emitted verbatim). They are NOT
+ * structural schema identifiers, so under R-004 they are treated as untrusted
+ * text: keep only `[A-Za-z0-9_.-]` (every other character → `_`), cap the body
+ * at {@link MAX_LOGGED_KEY_NAME_LENGTH}, and append a `~` marker whenever the
+ * original was truncated OR had any character replaced — so the sanitisation
+ * is visible in the log and the raw model string can never be emitted
+ * verbatim. Deterministic; output is at most
+ * {@link MAX_LOGGED_KEY_NAME_LENGTH} + 1 characters.
+ */
+export function sanitiseLoggedKeyName(key: string): string {
+  const replaced = key.replace(/[^A-Za-z0-9_.-]/g, '_');
+  const capped = replaced.slice(0, MAX_LOGGED_KEY_NAME_LENGTH);
+  const wasTruncated = replaced.length > MAX_LOGGED_KEY_NAME_LENGTH;
+  const wasReplaced = replaced !== key;
+  return wasTruncated || wasReplaced ? `${capped}~` : capped;
 }
 
 /** Telemetry correlation context for the coercion drift-alarm event. */
@@ -1113,7 +1150,9 @@ export function coerceFirstPassToolCall(
  * `telemetry.forcedHandlerId` (absent → non-forced → class (e) is inert). When
  * a `telemetry` context is supplied, every coercion emits a counted
  * `v5.routing.first_pass_coerced` drift-alarm event (reason-tagged, no user
- * text; `stray_top_level_key` also carries the stripped key NAME) — the
+ * text; `stray_top_level_key` also carries the stripped key NAME, sanitised +
+ * capped via {@link sanitiseLoggedKeyName} — a model-authored string, never
+ * trusted as structural) — the
  * best-effort dropped-action path omits it to avoid double counting. Coercion
  * is deterministic and idempotent.
  */
@@ -1134,10 +1173,14 @@ export function parseToolCallResponse(
         llm_call: telemetry.llmCall,
         reason: coercion.reason,
         ...(coercion.count !== undefined ? { dropped_count: coercion.count } : {}),
-        // Structural key NAME for the stray-top-level-key strip (R-004-safe —
-        // never the value). Names the offending field in prod, closing the
-        // R-004 log gap the static attribution had to route around.
-        ...(coercion.key !== undefined ? { stray_key: coercion.key } : {}),
+        // MODEL-AUTHORED key NAME for the stray-top-level-key strip: a string
+        // the model invented (by definition NOT in the schema), so it is
+        // untrusted — possibly reflected user content, unbounded length. NOT a
+        // structural identifier: sanitised + capped per R-004 so the raw model
+        // string is never emitted verbatim.
+        ...(coercion.key !== undefined
+          ? { stray_key: sanitiseLoggedKeyName(coercion.key) }
+          : {}),
       });
     }
   }

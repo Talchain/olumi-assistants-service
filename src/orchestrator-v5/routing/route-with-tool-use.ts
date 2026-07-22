@@ -128,6 +128,7 @@ import {
   OLUMI_ACTION_TOOL_NAME,
   ToolCallParseError,
   parseToolCallResponse,
+  sanitiseLoggedKeyName,
   type ForcedPillHandlerId,
   type ParseTelemetryContext,
   type ToolCallResponse,
@@ -921,10 +922,13 @@ interface SanitisedRoutingIssue {
   readonly path: string;
   /**
    * For `unrecognized_keys` issues only: the offending top-level key NAMES.
-   * A key name is a structural schema identifier — R-004-safe (never a value)
-   * — so any FUTURE un-coerced stray-top-level-key class SELF-NAMES in the
-   * `forced_pill_parse_failed` log instead of leaving only `code @ ""`. Absent
-   * for every other issue code.
+   * These are MODEL-AUTHORED strings — by definition keys NOT in the schema,
+   * so untrusted (possibly reflected user content, unbounded length), NOT
+   * structural identifiers. Each is sanitised + capped via
+   * {@link sanitiseLoggedKeyName} before it lands here, so any FUTURE
+   * un-coerced stray-top-level-key class SELF-NAMES in the
+   * `forced_pill_parse_failed` log (safely) instead of leaving only
+   * `code @ ""`. Absent for every other issue code.
    */
   readonly keys?: readonly string[];
 }
@@ -1029,10 +1033,14 @@ function tryInterpret(
                 path: issue.path.join('.'),
               };
               // Companion (repair-tax fourth-class PR): carry the offending key
-              // NAMES for a root/nested `unrecognized_keys` issue (structural,
-              // R-004-safe) so a future un-coerced stray-key class self-names.
+              // NAMES for a root/nested `unrecognized_keys` issue so a future
+              // un-coerced stray-key class self-names. These are MODEL-AUTHORED
+              // strings (keys NOT in the schema) — untrusted, unbounded — NOT
+              // structural identifiers: each is sanitised + capped per R-004 via
+              // sanitiseLoggedKeyName so a raw model string (a 5014-char key was
+              // observed) can never be emitted verbatim.
               if (issue.code === 'unrecognized_keys' && Array.isArray(issue.keys)) {
-                return { ...base, keys: issue.keys };
+                return { ...base, keys: issue.keys.map(sanitiseLoggedKeyName) };
               }
               return base;
             })

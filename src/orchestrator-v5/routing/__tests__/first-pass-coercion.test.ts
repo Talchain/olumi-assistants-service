@@ -36,7 +36,9 @@ import { deriveAnswerTextFromShape } from '../answer-shape.js';
 import { routeWithToolUse } from '../route-with-tool-use.js';
 import {
   coerceFirstPassToolCall,
+  MAX_LOGGED_KEY_NAME_LENGTH,
   OLUMI_ACTION_TOOL_NAME,
+  sanitiseLoggedKeyName,
   ToolCallParseError,
   parseToolCallResponse,
 } from '../tool-schema.js';
@@ -717,5 +719,160 @@ describe('companion — forced_pill_parse_failed names the offending unrecognize
     const payload = parseFailedCalls[0]![0] as { issues?: Array<{ code: string; keys?: string[] }> };
     const unrec = payload.issues?.find((i) => i.code === 'unrecognized_keys');
     expect(unrec?.keys).toEqual(['made_up_sibling']);
+  });
+});
+
+// =======================================================================
+// #633 REVIEW BLOCK — telemetry hygiene: a MODEL-AUTHORED key name is, by
+// definition, a string NOT in the schema (100% model-invented, possibly
+// reflected user content, unbounded length). The review proved a 5014-char
+// key name emitted VERBATIM. Both log sites MUST cap + sanitise the name so
+// the raw model string can never reach a log line. The false "R-004-safe —
+// a key name is a structural schema identifier" comments were INVERTED for
+// this population (rule-14 class) and are corrected in the source.
+// =======================================================================
+
+const HUGE_KEY = 'a'.repeat(5014); // clean chars, over the cap → truncation
+const DIRTY_KEY = 'answer</system>\n{leak: true}  <script>alert(1)</script>'; // user-text / injection chars
+
+/** Body is the allowed alphabet only; an optional single `~` marker may trail. */
+const SANITISED_SHAPE = /^[A-Za-z0-9_.-]*~?$/;
+
+describe('#633 sanitiseLoggedKeyName — pure', () => {
+  it('passes a clean, short key through unchanged (no marker)', () => {
+    expect(sanitiseLoggedKeyName('reasoning_scratch')).toBe('reasoning_scratch');
+    expect(sanitiseLoggedKeyName('a.b-c_1')).toBe('a.b-c_1');
+  });
+
+  it('replaces every out-of-alphabet char with `_` and appends the marker', () => {
+    const out = sanitiseLoggedKeyName('a b<c>d');
+    expect(out).toBe('a_b_c_d~');
+    expect(out).toMatch(SANITISED_SHAPE);
+  });
+
+  it('caps an over-length key at MAX + 1 (body + marker) and marks it', () => {
+    const out = sanitiseLoggedKeyName(HUGE_KEY);
+    expect(out.length).toBe(MAX_LOGGED_KEY_NAME_LENGTH + 1);
+    expect(out.endsWith('~')).toBe(true);
+    expect(out).not.toBe(HUGE_KEY);
+  });
+
+  it('marks a key that is both truncated AND replaced', () => {
+    const out = sanitiseLoggedKeyName('x '.repeat(200)); // long + spaces
+    expect(out.length).toBe(MAX_LOGGED_KEY_NAME_LENGTH + 1);
+    expect(out.endsWith('~')).toBe(true);
+    expect(out).toMatch(SANITISED_SHAPE);
+  });
+
+  it('never emits the raw injection payload verbatim', () => {
+    const out = sanitiseLoggedKeyName(DIRTY_KEY);
+    expect(out).toMatch(SANITISED_SHAPE);
+    expect(out.endsWith('~')).toBe(true);
+    expect(out).not.toContain('<script>');
+    expect(out).not.toContain('</system>');
+    expect(out).not.toContain(' ');
+    expect(out).not.toContain('\n');
+  });
+});
+
+describe('#633 tool-schema site — v5.routing.first_pass_coerced.stray_key is capped + sanitised', () => {
+  let events: Array<{ event: string; payload: Record<string, unknown> }>;
+  beforeEach(() => {
+    events = [];
+    setTestSink((event, payload) => events.push({ event, payload }));
+  });
+  afterEach(() => setTestSink(null));
+
+  function strayKeyFor(name: string) {
+    parseToolCallResponse(
+      {
+        intent_class: 'execute',
+        action: validExplainAction('Authored answer.'),
+        [name]: { note: 'internal chain-of-thought the model spilled' },
+      },
+      { requestId: 'req-633', sessionId: 'scen-633', llmCall: 1 },
+    );
+    const ev = events.find(
+      (e) =>
+        e.event === 'v5.routing.first_pass_coerced' &&
+        e.payload.reason === 'stray_top_level_key',
+    );
+    return ev?.payload.stray_key as string | undefined;
+  }
+
+  it('a 5000+-char stray key is emitted capped (≤65), marked, never verbatim', () => {
+    const emitted = strayKeyFor(HUGE_KEY);
+    expect(typeof emitted).toBe('string');
+    expect(emitted!.length).toBeLessThanOrEqual(MAX_LOGGED_KEY_NAME_LENGTH + 1);
+    expect(emitted!.endsWith('~')).toBe(true);
+    expect(emitted).toMatch(SANITISED_SHAPE);
+    // The raw 5014-char name never reaches the payload.
+    const serialised = JSON.stringify(events.map((e) => e.payload));
+    expect(serialised).not.toContain(HUGE_KEY);
+  });
+
+  it('a stray key with spaces / user-text chars is emitted sanitised + marked', () => {
+    const emitted = strayKeyFor(DIRTY_KEY);
+    expect(emitted).toMatch(SANITISED_SHAPE);
+    expect(emitted!.endsWith('~')).toBe(true);
+    const serialised = JSON.stringify(events.map((e) => e.payload));
+    expect(serialised).not.toContain('<script>');
+    expect(serialised).not.toContain('</system>');
+  });
+});
+
+describe('#633 route-with-tool-use site — forced_pill_parse_failed.issues[].keys are capped + sanitised', () => {
+  afterEach(() => {
+    setTestSink(null);
+    vi.restoreAllMocks();
+  });
+
+  it('a residual unrecognized_keys carrying a 5014-char key logs it capped + sanitised, never verbatim', async () => {
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => log);
+    // A forced turn returning a schema-VALID coach + one HUGE stray key: class
+    // (d) is execute-only and (e) leaves a valid coach untouched, so the stray
+    // survives to the strict parse → root `unrecognized_keys` → the #628
+    // forced_pill_parse_failed log, where its NAME must be sanitised.
+    const coachWithHugeStray = {
+      intent_class: 'coach',
+      coaching_mode: 'reframe',
+      answer_shape: STRAY_SHAPE,
+      [HUGE_KEY]: 'x',
+    };
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValue(
+          mkResult([
+            { type: 'tool_use', id: 'tu-h', name: OLUMI_ACTION_TOOL_NAME, input: coachWithHugeStray as Record<string, unknown> },
+          ]),
+        ),
+    };
+
+    await expect(
+      routeWithToolUse(minimalContextPack(), 'Explain these results.', {
+        requestId: 'req-633-route',
+        sessionId: 'scen-633-route',
+        adapter,
+        forcedExplanationHandlerId: 'explain_results',
+      }),
+    ).rejects.toMatchObject({ name: 'RoutingError', cause: 'schema_repair_failed' });
+
+    const parseFailedCalls = warnSpy.mock.calls.filter(
+      (call) => (call[0] as { event?: string })?.event === 'v5.routing.forced_pill_parse_failed',
+    );
+    expect(parseFailedCalls.length).toBeGreaterThan(0);
+    const payload = parseFailedCalls[0]![0] as {
+      issues?: Array<{ code: string; keys?: string[] }>;
+    };
+    const unrec = payload.issues?.find((i) => i.code === 'unrecognized_keys');
+    expect(unrec?.keys).toBeDefined();
+    for (const k of unrec!.keys!) {
+      expect(k.length).toBeLessThanOrEqual(MAX_LOGGED_KEY_NAME_LENGTH + 1);
+      expect(k.endsWith('~')).toBe(true);
+      expect(k).toMatch(SANITISED_SHAPE);
+    }
+    // The raw 5014-char key never reaches the logged payload.
+    expect(JSON.stringify(payload)).not.toContain(HUGE_KEY);
   });
 });
