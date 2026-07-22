@@ -79,10 +79,12 @@ import {
   type TargetRefKindLiteral,
 } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
+import { selectLens } from './lens-selector.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
@@ -477,16 +479,15 @@ export function buildFactorConfidenceLookup(
       : typeof e.id === 'string' ? e.id
       : null;
     if (factorId === null) continue;
-    const c = e.confidence;
-    if (typeof c !== 'number' || !Number.isFinite(c)) {
-      // Omit — caller treats missing as "confidence unknown" and drops
-      // the EvidenceBlock entirely. NEVER silently default to a band
-      // that would mislabel severity.
-      continue;
-    }
-    if (c >= 0.7) out.set(factorId, 'high');
-    else if (c >= 0.3) out.set(factorId, 'medium');
-    else out.set(factorId, 'low');
+    // Banding is derived from the SHARED `bandConfidence` (confidence-bands.ts)
+    // so the evidence-block band and the lens selector's `'low confidence'`
+    // trigger can never silently diverge (anti-mirror). A non-finite / absent
+    // confidence returns null → omit: the caller treats missing as "confidence
+    // unknown" and drops the EvidenceBlock entirely. NEVER silently default to
+    // a band that would mislabel severity.
+    const band = bandConfidence(e.confidence);
+    if (band === null) continue;
+    out.set(factorId, band);
   }
   return out;
 }
@@ -848,6 +849,80 @@ export function buildStaleRerunCoachingBlock(
       { name: 'action_label', value: candidate.action_label },
     ],
   });
+}
+
+/**
+ * Capability layer P0 (ROADMAP 1.183) — the deterministic lens SUGGESTION.
+ *
+ * Rides the EXISTING coaching-block surface (the "Strengthen your model" class
+ * — `coaching_kind: 'strengthen'`, whose guidance signals already exist but
+ * which had no live V5 emitter until now). It is NOT a new block kind and NOT a
+ * new recommendation home.
+ *
+ * The lens is chosen by the deterministic selector (`lens-selector.ts`) from
+ * REAL analysis signals — no LLM call. When the selector returns nothing
+ * (`selectLens === null`, the load-bearing negative), NO block is emitted.
+ *
+ * `source: 'deterministic_signal'` is the honest provenance: this suggestion is
+ * derived from the analysis SIGNALS (option/factor sensitivity, EVPI,
+ * confidence tier), NOT from the LLM `decision_review` pass.
+ *
+ * NO `action_intent` chip: the on-card action_intent affordance is inert on the
+ * live UI today (V5CoachingBlock renders it display-only). Per the
+ * capability-layer brief Revision-1 item 3 ("no inert chips, ever"), the P0
+ * suggestion ships as coach TEXT + rationale only — the body names the live
+ * action (what-would-flip / pre-mortem / gather-evidence) in prose. Wiring the
+ * chip to a typed dispatch is S2 work.
+ *
+ * `priority_rank: 15` places it just below the narrative summary (rank 10) and
+ * above the review cards (pre_mortem 20+): the proactive lens call-to-action.
+ * The selector returns AT MOST ONE lens, so the "one proactive suggestion per
+ * turn" frequency cap holds by construction. `signal_id` keys on
+ * (lens, graph_hash) so re-emissions for the same graph hash carry identical
+ * identity for UI dedupe (don't re-offer the same lens until the graph
+ * changes).
+ *
+ * Telemetry: exactly ONE frozen-manifest-registered event
+ * (`v5.capability.lens_suggestion_emitted`) fires when the block SURVIVES the
+ * prose/schema gate and is returned — never on a drop, never twice. Payload is
+ * the lens id + rationale CODE only (both closed enums); no user text.
+ */
+export function buildLensSuggestionCoachingBlock(
+  fact: RunAnalysisHandlerFact,
+  ctx: BlockBuildCtx,
+): CoachingBlock | null {
+  const selection = selectLens(fact);
+  if (selection === null) return null;
+
+  const candidate = {
+    ...commonMetadata(`coach:lens:${selection.lens}`, selection.lens, ctx),
+    type: 'coaching' as const,
+    coaching_kind: 'strengthen' as const,
+    title: truncate(selection.title, TITLE_MAX),
+    body: truncate(selection.body, BODY_MAX),
+    source: 'deterministic_signal' as const,
+    target_refs: [] as readonly TargetRef[],
+    priority_rank: 15,
+    // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): producer-owned guidance
+    // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM).
+    ...guidanceSignalsForCoachingKind('strengthen'),
+  };
+  const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
+    block_type: 'coaching',
+    kind: 'strengthen',
+    prose: [
+      { name: 'title', value: candidate.title },
+      { name: 'body', value: candidate.body },
+    ],
+  });
+  if (block === null) return null;
+
+  emit(TelemetryEvents.V5LensSuggestionEmitted, {
+    lens_id: selection.lens,
+    rationale_code: selection.rationaleCode,
+    graph_hash_at_generation: ctx.graph_hash_at_generation,
+  });
+  return block;
 }
 
 // ============================================================================

@@ -22,6 +22,7 @@ import {
   buildEvidenceBlocks,
   buildFactorConfidenceLookup,
   buildGraphNodeLookup,
+  buildLensSuggestionCoachingBlock,
   buildReviewCardBlocks,
   buildStaleRerunCoachingBlock,
   type BlockBuildCtx,
@@ -661,10 +662,18 @@ function rebuildPhase3BlocksFresh(
   // as a gap to gather evidence about or an assumption to confirm.
   const interventionControlledFactorIds =
     collectInterventionControlledFactorIds(rawPersistedGraphForLevers);
+  // Capability layer P0 (ROADMAP 1.183): the deterministic lens suggestion. Read
+  // from the SAME fact enrichment, threaded here so BOTH the current-turn fresh
+  // path and the prior-fact fresh path emit an identical block for a given
+  // analysis (only ever fires on a fresh verdict — the stale branch returns
+  // before reaching this helper, so a lens is never suggested off stale signals).
+  // `selectLens` returns at most one, and null when nothing is justified.
+  const lensSuggestion = buildLensSuggestionCoachingBlock(fact, ctx);
   return [
     ...buildReviewCardBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...buildCoachingBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx, interventionControlledFactorIds),
+    ...(lensSuggestion !== null ? [lensSuggestion] : []),
   ];
 }
 
