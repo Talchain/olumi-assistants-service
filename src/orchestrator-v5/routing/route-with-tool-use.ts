@@ -128,6 +128,7 @@ import {
   OLUMI_ACTION_TOOL_NAME,
   ToolCallParseError,
   parseToolCallResponse,
+  sanitiseLoggedKeyName,
   type ForcedPillHandlerId,
   type ParseTelemetryContext,
   type ToolCallResponse,
@@ -813,6 +814,10 @@ export async function routeWithToolUse(
     requestId: options.requestId,
     sessionId: options.sessionId ?? null,
     llmCall: 1,
+    // Thread the forced-pill signal to the coercion site so class (e) (the
+    // missing/invalid-type intent_class default) fires on forced turns only.
+    // repairTelemetry below spreads this, so it carries to the repair pass too.
+    ...(forcedHandlerId ? { forcedHandlerId } : {}),
   };
   // Codex F3 — assert-execute-after-parse: a forced-pill result that is not an
   // execute tool_call is downgraded to `parse_failed` here so the REPAIR_ONCE
@@ -915,6 +920,17 @@ export async function routeWithToolUse(
 interface SanitisedRoutingIssue {
   readonly code: string;
   readonly path: string;
+  /**
+   * For `unrecognized_keys` issues only: the offending top-level key NAMES.
+   * These are MODEL-AUTHORED strings — by definition keys NOT in the schema,
+   * so untrusted (possibly reflected user content, unbounded length), NOT
+   * structural identifiers. Each is sanitised + capped via
+   * {@link sanitiseLoggedKeyName} before it lands here, so any FUTURE
+   * un-coerced stray-top-level-key class SELF-NAMES in the
+   * `forced_pill_parse_failed` log (safely) instead of leaving only
+   * `code @ ""`. Absent for every other issue code.
+   */
+  readonly keys?: readonly string[];
 }
 
 type Interpretation =
@@ -1011,10 +1027,23 @@ function tryInterpret(
       // schema-violation path); a non-Zod throw has no issues.
       const issues: SanitisedRoutingIssue[] | undefined =
         err instanceof ToolCallParseError
-          ? err.issues.map((issue) => ({
-              code: String(issue.code),
-              path: issue.path.join('.'),
-            }))
+          ? err.issues.map((issue) => {
+              const base: SanitisedRoutingIssue = {
+                code: String(issue.code),
+                path: issue.path.join('.'),
+              };
+              // Companion (repair-tax fourth-class PR): carry the offending key
+              // NAMES for a root/nested `unrecognized_keys` issue so a future
+              // un-coerced stray-key class self-names. These are MODEL-AUTHORED
+              // strings (keys NOT in the schema) — untrusted, unbounded — NOT
+              // structural identifiers: each is sanitised + capped per R-004 via
+              // sanitiseLoggedKeyName so a raw model string (a 5014-char key was
+              // observed) can never be emitted verbatim.
+              if (issue.code === 'unrecognized_keys' && Array.isArray(issue.keys)) {
+                return { ...base, keys: issue.keys.map(sanitiseLoggedKeyName) };
+              }
+              return base;
+            })
           : undefined;
       return { kind: 'parse_failed', detail, ...(issues ? { issues } : {}) };
     }
