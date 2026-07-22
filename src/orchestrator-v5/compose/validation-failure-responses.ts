@@ -519,7 +519,16 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
   // predicates) — not just the `missing_value` branch above. When there is
   // no real value to echo back, drop the clause and keep only the
   // constraint guidance; genuine scalars still render "You gave X".
-  const showActual = actual !== 'unknown';
+  //
+  // Compound-value hardening: on a multi-effect edit `actual_value` is an
+  // object, so `sanitiseForUser` returns the '[complex value]' sentinel and
+  // "You gave [complex value]." leaked — the 'unknown'-only check above let it
+  // through. Gate the echo on the RAW input type instead: only a genuine
+  // finite scalar (number / boolean / non-empty string) has a meaningful
+  // single-value form. Typing the gate — not string-matching sanitiser
+  // sentinels — means a future sentinel can't leak the same way. The residual
+  // `!== 'unknown'` still catches a non-empty string that sanitises to empty.
+  const showActual = isGenuineScalar(details.actual_value) && actual !== 'unknown';
   return {
     body: {
       assistant_text: showActual
@@ -760,6 +769,22 @@ function pickKind(value: unknown): EntityKind | null {
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/**
+ * True only for a genuine finite scalar — a finite number, a boolean, or a
+ * non-empty string. Objects, arrays, null/undefined, and NaN are not.
+ *
+ * Gates the "You gave …" echo in `composeParameterInvalid`: values that are
+ * not scalars have no meaningful single-value form, so `sanitiseForUser`
+ * collapses them to an internal sentinel ('[complex value]' for objects,
+ * 'unknown' for null/undefined) that must never reach the user.
+ */
+function isGenuineScalar(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'string') return value.trim().length > 0;
+  return false;
 }
 
 function readCandidates(value: unknown): EntityLike[] {
