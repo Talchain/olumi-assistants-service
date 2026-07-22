@@ -655,6 +655,13 @@ export const TelemetryEvents = {
   //                            disclosure ratchet later flips.
   V5ContextBudget: "v5.context_budget",
   V5ContextTruncation: "v5.context_truncation",
+  // Capability layer P0 (ROADMAP 1.183). Fires exactly once when a deterministic
+  // lens SUGGESTION (the "strengthen" coach card from lens-selector.ts) survives
+  // the prose/schema gate and is placed on the response. Payload: lens_id +
+  // rationale_code (both closed enums) + graph_hash_at_generation — NO user
+  // text. Content-free; log-only (no Datadog mapping). Zero events means no
+  // analysis in the window justified a lens (the may-recommend-nothing default).
+  V5LensSuggestionEmitted: "v5.capability.lens_suggestion_emitted",
   // Context Architecture v2 S6 (ROADMAP 1.73; design pack 02 §Seam 3).
   // Shadow validation of the PLoT→CEE enrichment passthrough (the
   // platform's known-open seam): emitted when CEE_ENRICHMENT_VALIDATION
