@@ -19,6 +19,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  clampLabel,
   describeChangeset,
   describeHeldOperationsSubject,
 } from '../describe-changeset.js';
@@ -517,5 +518,29 @@ describe('routing safety — the new copy must not trip the value-update gate', 
   it('the multi-op F7 chip message also stays outside the gate', () => {
     const copy = buildGmHeldPublicCopy(describeHeldOperationsSubject(F7_BATCH, GRAPH));
     expect(isValueUpdatePhrasing(copy.message)).toBe(false);
+  });
+});
+
+// clampLabel is the shared 60/57-ellipsis truncation reused by the F4 per-part
+// replay-chip label in edit-graph-dispatch.ts (which previously re-implemented
+// it inline). These pins lock its output byte-for-byte against the pre-refactor
+// inline formula for both an under-limit and an over-limit already-normalised
+// clause, so a future edit to clampLabel cannot silently drift the chip label.
+describe('clampLabel — byte-identical to the inline 60/57 chip-label formula', () => {
+  const inlineFormula = (clause: string): string =>
+    clause.length > 60 ? `${clause.slice(0, 57)}...` : clause;
+
+  it('returns a <=60-char clause verbatim (label === clause, no ellipsis)', () => {
+    const clause = 'Set Headcount Cost to 0.5'; // 25 chars, already normalised
+    expect(clampLabel(clause)).toBe(inlineFormula(clause));
+    expect(clampLabel(clause)).toBe(clause);
+  });
+
+  it('truncates a >60-char clause to 57 chars + ellipsis, matching the formula', () => {
+    const clause =
+      'remove the option Hire Two Junior Engineers and also drop the senior candidate entirely';
+    expect(clause.length).toBeGreaterThan(60);
+    expect(clampLabel(clause)).toBe(inlineFormula(clause));
+    expect(clampLabel(clause)).toBe(`${clause.slice(0, 57)}...`);
   });
 });
