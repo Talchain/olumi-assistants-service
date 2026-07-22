@@ -124,9 +124,11 @@ import type { ContextPack } from '../context/context-pack-assembler.js';
 
 import {
   buildOlumiActionTool,
+  buildForcedPillTool,
   OLUMI_ACTION_TOOL_NAME,
   ToolCallParseError,
   parseToolCallResponse,
+  type ForcedPillHandlerId,
   type ParseTelemetryContext,
   type ToolCallResponse,
 } from './tool-schema.js';
@@ -556,7 +558,7 @@ export interface RouteWithToolUseOptions {
    * what the user just said; the deterministic explanation fallback stays in
    * place downstream when the authored `answer_text` is invalid.
    */
-  readonly forcedExplanationHandlerId?: 'explain_results' | 'what_would_flip';
+  readonly forcedExplanationHandlerId?: ForcedPillHandlerId;
 }
 
 export async function routeWithToolUse(
@@ -610,10 +612,16 @@ export async function routeWithToolUse(
   let firstCallArgs: ChatWithToolsArgs = {
     ...initialSystem.fields,
     messages: [{ role: 'user', content: userMessage }],
-    // ROADMAP 1.132 (F2): flag OFF returns the exact pre-flag
-    // buildOlumiActionTool() unconditionally advertises `answer_shape`
-    // (ROADMAP 1.132, F2 — F1 flag deletion).
-    tools: [buildOlumiActionTool()],
+    // Codex F3 — a FORCED analytical pill advertises the DEDICATED, constrained
+    // tool (`buildForcedPillTool`): a single execute intent + the single pinned
+    // handler enum, so the model is guided to author the answer inside an
+    // execute envelope and cannot be advertised the coach/converse surfaces that
+    // slipped past the pin. Same tool NAME, so the `tool_choice` force and the
+    // downstream `toolUse.name` check are unchanged. Every non-pill turn keeps
+    // the full `buildOlumiActionTool()` advert (`answer_shape` included —
+    // ROADMAP 1.132, F2, F1 flag deletion). The hard bypass guarantee is the
+    // assert-execute-after-parse (`enforceForcedExecute`) below.
+    tools: [forcedHandlerId ? buildForcedPillTool(forcedHandlerId) : buildOlumiActionTool()],
     // F2 CHANGE A — a forced explanation pill FORCES the `olumi_action` tool so
     // the coach ALWAYS emits a structured proposal (with a graph-resolved entity
     // + authored `answer_text`) rather than free text; the handler_id is then
@@ -806,7 +814,15 @@ export async function routeWithToolUse(
     sessionId: options.sessionId ?? null,
     llmCall: 1,
   };
-  const parsedOrError = tryInterpret(firstResult, llmCallsUsed, parseTelemetry);
+  // Codex F3 — assert-execute-after-parse: a forced-pill result that is not an
+  // execute tool_call is downgraded to `parse_failed` here so the REPAIR_ONCE
+  // path below (and, failing that, the terminal schema_repair_failed) closes the
+  // coach/converse bypass hole. No-op on non-pill turns.
+  const parsedOrError = enforceForcedExecute(
+    tryInterpret(firstResult, llmCallsUsed, parseTelemetry),
+    forcedHandlerId,
+    parseTelemetry,
+  );
   if (parsedOrError.kind === 'ok')
     return applyForcedExplanationHandler(parsedOrError.result, forcedHandlerId);
   if (parsedOrError.kind === 'non_repairable') throw parsedOrError.error;
@@ -872,10 +888,12 @@ export async function routeWithToolUse(
     stablePrefixBytes,
   });
 
-  const secondAttempt = tryInterpret(repairResult, llmCallsUsed + 1, {
-    ...parseTelemetry,
-    llmCall: 2,
-  });
+  const repairTelemetry: ParseTelemetryContext = { ...parseTelemetry, llmCall: 2 };
+  const secondAttempt = enforceForcedExecute(
+    tryInterpret(repairResult, llmCallsUsed + 1, repairTelemetry),
+    forcedHandlerId,
+    repairTelemetry,
+  );
   if (secondAttempt.kind === 'ok')
     return applyForcedExplanationHandler(secondAttempt.result, forcedHandlerId);
   throw new RoutingError(
@@ -889,9 +907,19 @@ export async function routeWithToolUse(
 // Interpreting a ChatWithToolsResult
 // -----------------------------------------------------------------------
 
+/**
+ * A sanitised routing validation issue for attributability logging (Codex F3,
+ * R-004): the Zod issue `code` + dotted `path` ONLY — never the message text
+ * (which can echo model-authored fragments) and never any value.
+ */
+interface SanitisedRoutingIssue {
+  readonly code: string;
+  readonly path: string;
+}
+
 type Interpretation =
   | { kind: 'ok'; result: RoutingResult }
-  | { kind: 'parse_failed'; detail: string }
+  | { kind: 'parse_failed'; detail: string; issues?: readonly SanitisedRoutingIssue[] }
   | { kind: 'non_repairable'; error: RoutingError };
 
 /**
@@ -977,7 +1005,18 @@ function tryInterpret(
       };
     } catch (err) {
       const detail = err instanceof ToolCallParseError ? err.message : String(err);
-      return { kind: 'parse_failed', detail };
+      // Codex F3 — carry the sanitised {code, path} of every Zod issue (no
+      // message, no value — R-004) so a residual forced-pill repair is
+      // attributable from logs. Populated only for ToolCallParseError (the
+      // schema-violation path); a non-Zod throw has no issues.
+      const issues: SanitisedRoutingIssue[] | undefined =
+        err instanceof ToolCallParseError
+          ? err.issues.map((issue) => ({
+              code: String(issue.code),
+              path: issue.path.join('.'),
+            }))
+          : undefined;
+      return { kind: 'parse_failed', detail, ...(issues ? { issues } : {}) };
     }
   }
 
@@ -1001,6 +1040,94 @@ function tryInterpret(
       rawResult: result,
       llmCallCount,
     },
+  };
+}
+
+/**
+ * Codex F3 — assert-execute-after-parse for a FORCED analytical pill.
+ *
+ * THE HOLE the review proved at the bytes: a schema-valid coach/converse tool
+ * call PARSES fine, then `applyForcedExplanationHandler` returns it UNCHANGED (it
+ * only pins an *execute* proposal), so a forced pill could silently emit a
+ * coaching/conversational turn — the declared "guarantee" bypassed. This guard
+ * FAILS LOUD: any forced-pill interpretation that is not an execute tool_call is
+ * downgraded to `parse_failed`, so the caller's EXISTING machinery takes over —
+ * REPAIR_ONCE on the first attempt, then a terminal `schema_repair_failed` if the
+ * repair also strays. A non-execute intent is therefore never served.
+ *
+ * No-op for every non-pill turn (`forcedHandlerId` undefined); once the result IS
+ * an execute tool_call it is a byte-identical passthrough (the downstream pin +
+ * side-band are unchanged, so parity with the current forced path holds). Emits
+ * `V5RoutingForcedPillOutcome` once per attempt (first-pass-valid rate is
+ * measurable) and logs the sanitised issue {code,path} of a strayed/failed result
+ * for attributability. No user text on either surface (R-004).
+ */
+function enforceForcedExecute(
+  interp: Interpretation,
+  forcedHandlerId: ForcedPillHandlerId | undefined,
+  telemetry: ParseTelemetryContext,
+): Interpretation {
+  if (forcedHandlerId === undefined) return interp;
+
+  // A schema failure (or hard interpreter error) is left for the caller's
+  // existing repair / bounded-fallback paths; log the sanitised issues so any
+  // residual forced-pill repair is attributable.
+  if (interp.kind === 'parse_failed') {
+    log.warn(
+      {
+        event: 'v5.routing.forced_pill_parse_failed',
+        request_id: telemetry.requestId,
+        v5_journey_id: telemetry.sessionId,
+        forced_handler_id: forcedHandlerId,
+        llm_call: telemetry.llmCall,
+        issues: interp.issues ?? [],
+      },
+      'V5 forced-pill routing call failed schema — repair / bounded fallback will handle',
+    );
+    return interp;
+  }
+  if (interp.kind !== 'ok') return interp;
+
+  const result = interp.result;
+  const isForcedExecute =
+    result.type === 'tool_call' && result.proposal.intent_class === 'execute';
+  const returnedIntent =
+    result.type === 'tool_call' ? result.proposal.intent_class : 'text_only';
+
+  emit(TelemetryEvents.V5RoutingForcedPillOutcome, {
+    request_id: telemetry.requestId,
+    turn_id: telemetry.requestId,
+    v5_journey_id: telemetry.sessionId,
+    scenario_id: telemetry.sessionId,
+    llm_call: telemetry.llmCall,
+    forced_handler_id: forcedHandlerId,
+    returned_intent: returnedIntent,
+    first_pass_execute: isForcedExecute,
+  });
+
+  if (isForcedExecute) return interp;
+
+  // The bypass: a schema-valid non-execute slipped past the parser. Fail loud by
+  // downgrading to `parse_failed` so REPAIR_ONCE (attempt 1) or the terminal
+  // schema_repair_failed (attempt 2) fires — never a silently-served coach turn.
+  // The detail is a generic re-emit instruction, no user text.
+  log.warn(
+    {
+      event: 'v5.routing.forced_pill_bypass_blocked',
+      request_id: telemetry.requestId,
+      v5_journey_id: telemetry.sessionId,
+      forced_handler_id: forcedHandlerId,
+      llm_call: telemetry.llmCall,
+      returned_intent: returnedIntent,
+    },
+    'V5 forced-pill routing returned a non-execute intent — blocking the bypass',
+  );
+  return {
+    kind: 'parse_failed',
+    detail:
+      'Forced analytical pill must route as intent_class "execute" with handler ' +
+      `"${forcedHandlerId}", but the model returned "${returnedIntent}". Re-emit an ` +
+      'execute olumi_action proposal with your answer in action.explanation.answer_text.',
   };
 }
 

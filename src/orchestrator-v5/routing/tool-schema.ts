@@ -436,6 +436,70 @@ export function buildOlumiActionTool(): typeof OLUMI_ACTION_TOOL {
   } as typeof OLUMI_ACTION_TOOL;
 }
 
+/** The two forced-explanation handler ids a typed analytical pill can pin. */
+export type ForcedPillHandlerId = 'explain_results' | 'what_would_flip';
+
+/**
+ * Forced-pill tool variant (Codex F3 — close the coach-bypass hole + shrink the
+ * first-pass schema surface).
+ *
+ * THE FINDING: on a forced-explanation pill the caller advertises the generic
+ * `olumi_action` tool and merely `tool_choice`-forces it, but that tool's schema
+ * still offers all four intents (execute|clarify|converse|coach) and every
+ * registered handler. So (1) a schema-valid coach/converse output PARSES and
+ * then slips past `applyForcedExplanationHandler` (which only pins an *execute*
+ * proposal) — the declared "guarantee" has a hole; and (2) the model must author
+ * a full generic execute envelope for what is really "write the answer", the
+ * structural root of the first-pass schema failures the repair-tax fix chases.
+ *
+ * This variant DYNAMICALLY CONSTRAINS the served tool for the forced call to a
+ * single execute intent and a single handler enum. It is DERIVED from
+ * `buildOlumiActionTool()` (spread) and overrides ONLY the two enums, so it can
+ * never drift from the base advert (CLAUDE.md rule 12 — derive, don't mirror).
+ * The tool NAME is unchanged (`OLUMI_ACTION_TOOL_NAME`) so the existing
+ * `tool_choice: { type: 'tool', name }` force and the `toolUse.name` check in
+ * route-with-tool-use both still match.
+ *
+ * The enforcing Zod validator (`RawToolCallSchema`) still structurally accepts
+ * all four intents — narrowing the *descriptive* advert reduces the odds the
+ * model emits a non-execute, but the load-bearing correctness guarantee is the
+ * assert-execute-after-parse in route-with-tool-use (`enforceForcedExecute`),
+ * which fails LOUD if the model somehow returns another intent regardless.
+ */
+export function buildForcedPillTool(
+  forcedHandlerId: ForcedPillHandlerId,
+): typeof OLUMI_ACTION_TOOL {
+  const base = buildOlumiActionTool();
+  const props = base.input_schema.properties;
+  return {
+    ...base,
+    input_schema: {
+      ...base.input_schema,
+      properties: {
+        ...props,
+        intent_class: {
+          ...props.intent_class,
+          enum: ['execute'],
+          description:
+            'Top-level routing intent. FORCED to "execute" for this ' +
+            'button-triggered analytical answer — emit an execute proposal only, ' +
+            'with your complete answer in action.explanation.answer_text.',
+        },
+        action: {
+          ...props.action,
+          properties: {
+            ...props.action.properties,
+            handler_id: {
+              ...props.action.properties.handler_id,
+              enum: [forcedHandlerId],
+            },
+          },
+        },
+      },
+    },
+  } as unknown as typeof OLUMI_ACTION_TOOL;
+}
+
 /**
  * Parsed tool call response — the authoritative typed shape downstream code
  * consumes. Conditional rules (execute ⇔ action, clarify ⇔ clarification)
