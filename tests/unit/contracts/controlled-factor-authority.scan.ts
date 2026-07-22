@@ -97,7 +97,14 @@ export const AUTHORITY_ALLOWLIST: Readonly<
     // 4th site (ROADMAP 2.73): STEP-5 applyCoachingSignal threads the
     // controlled set into the rerun-delta comparator — same persisted-first
     // form as the other three sites.
-    count: 4,
+    //
+    // 5th site (F1-flip lane, 2026-07-22): the bounded routing-failure fallback
+    // for a FORCED what_would_flip pill filters the prior-fact flip summary
+    // through the controlled set before composing the deterministic flip answer
+    // — the SAME persisted-first authority the routed happy-path fallback uses,
+    // so the pill's degrade-honestly answer suppresses option-pinned levers
+    // identically. No request-graph leg.
+    count: 5,
     allowedArgs: ['context.persistedGraph ?? options.graphState'],
   },
   'orchestrator-v5/handlers/chip-click-dispatch.ts': {
