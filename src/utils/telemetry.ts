@@ -166,6 +166,17 @@ export const TelemetryEvents = {
   // readiness_intake branch.
   V5ReadinessIntakeArm: "v5.readiness_intake",
 
+  // S2-L3 — typed-chip mutation route. Fires once per `source='chip_click'`
+  // (or 'chip') mutation chip whose typed `action_type`
+  // (set_factor_value / adjust_edge_strength / add_constraint) carried a
+  // pre-resolved `chip.parameters` spec that the reader turned into a
+  // deterministic proposal, consumed on its TYPE (not re-parsed from the chip
+  // copy). `outcome`: routed (proposal synthesised, 0-LLM) or
+  // fell_through:<reason> (params missing/malformed/target unresolved → the
+  // existing text/LLM path owns the turn). Content-free — never user text.
+  // See src/orchestrator-v5/routing/typed-chip-mutation-proposal.ts.
+  V5TypedChipMutationRoute: "v5.typed_chip_mutation_route",
+
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
   // message turn that arrives with generate_model/explicit_generate set,
   // regardless of outcome (`outcome` field: dispatch_draft /

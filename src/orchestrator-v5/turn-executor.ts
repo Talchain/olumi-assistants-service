@@ -112,6 +112,11 @@ import {
   SHORT_CONFIRM_PATTERN,
 } from './routing/deterministic-short-confirm.js';
 import { tryClarificationResume } from './routing/clarification-resume.js';
+import {
+  buildTypedChipMutationProposal,
+  isTypedChipMutationActionType,
+  type TypedChipGraphView,
+} from './routing/typed-chip-mutation-proposal.js';
 import { deriveAnswerTextFromShape, type AnswerShape } from './routing/answer-shape.js';
 import { buildRescaleCapPendingActions } from './session/rescale-cap-pending.js';
 import {
@@ -3911,6 +3916,104 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
 
+      // ────────────────────────────────────────────────────────────────────
+      // S2-L3 — typed-chip mutation pre-route (chip.parameters → proposal)
+      // ────────────────────────────────────────────────────────────────────
+      //
+      // A typed mutation chip (source='chip_click'|'chip' with
+      // action_type ∈ {set_factor_value, adjust_edge_strength, add_constraint})
+      // carries the UI-resolved edit spec in chip.parameters. Read it into the
+      // SAME ProposalAction a Sonnet tool-call or the text parser would build,
+      // and synthesise a zero-LLM RoutingToolCallResult so the unchanged
+      // STEP 2-7 validated-proposal lifecycle (validate → referee → hold/apply
+      // → confirm → receipt) owns the turn — consumed on its TYPE, never
+      // re-parsed from the rendered chip copy.
+      //
+      // Runs BEFORE the deterministic value-update text parser below and takes
+      // precedence over it (typed ahead of every string/shape heuristic): the
+      // text parser + its deictic/compound siblings are gated on
+      // `routingResult === undefined`, so they only fire when this route did
+      // NOT synthesise a proposal. A missing/malformed/unresolved chip.parameters
+      // bag (or a non-executable handler) yields no proposal → routingResult
+      // stays undefined → the turn falls through BENIGNLY to the existing
+      // text/LLM path (the un-routed-intent fall-through contract, #634).
+      const typedChipActionType =
+        payload.source === 'chip_click' || payload.source === 'chip'
+          ? payload.chip?.action_type
+          : undefined;
+      if (
+        routingResult === undefined &&
+        typedChipActionType !== undefined &&
+        isTypedChipMutationActionType(typedChipActionType)
+      ) {
+        const typedChipGraphView: TypedChipGraphView | null = graphStateForTurn
+          ? { nodes: graphStateForTurn.nodes, edges: graphStateForTurn.edges }
+          : null;
+        const built = buildTypedChipMutationProposal(
+          typedChipActionType,
+          payload.chip?.parameters,
+          typedChipGraphView,
+        );
+        // Registry-executable guard (parity with the deterministic value-update
+        // path): only synthesise when the active validation AND handler
+        // registries can execute this handler, so a misconfigured executor
+        // falls through to the LLM instead of producing a HANDLER_NOT_FOUND.
+        const typedChipValidationRegistry =
+          options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
+        const typedChipHandlerRegistry =
+          options.handlerRegistry ?? getDefaultRegistry();
+        // `actionType` IS the handler id for these three mutations, and it is a
+        // typed V5ActionType member (unlike the free-string `handler_id`), so
+        // the registry lookups stay type-clean without a cast.
+        const typedChipHandlerExecutable =
+          built.matched &&
+          typedChipValidationRegistry[built.actionType] !== undefined &&
+          resolveHandler(typedChipHandlerRegistry, built.actionType) !== null;
+        if (built.matched && typedChipHandlerExecutable) {
+          // Synthesise a RoutingToolCallResult so the existing Step 2-7
+          // lifecycle treats this exactly like a Sonnet-emitted tool call —
+          // identical telemetry, fact shape, and commit shape. Zero LLM tokens.
+          const typedChipUsage: UsageMetrics = {
+            input_tokens: 0,
+            output_tokens: 0,
+          };
+          const synthesisedTypedChipRouting: RoutingToolCallResult = {
+            type: 'tool_call',
+            proposal: { intent_class: 'execute', action: built.proposal },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: typedChipUsage,
+              model: 'deterministic-typed-chip',
+              latencyMs: 0,
+            },
+            llmCallCount: 0,
+            droppedActions: [],
+          };
+          routingResult = synthesisedTypedChipRouting;
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+          emit(TelemetryEvents.V5TypedChipMutationRoute, {
+            request_id: requestId,
+            action_type: typedChipActionType,
+            outcome: 'routed',
+          });
+        } else {
+          // Observable fall-through (content-free): params absent/malformed,
+          // target unresolved, or handler not executable → the text/LLM path
+          // owns the turn. The reason is an enum, never user text.
+          emit(TelemetryEvents.V5TypedChipMutationRoute, {
+            request_id: requestId,
+            action_type: typedChipActionType,
+            outcome: built.matched
+              ? 'fell_through:handler_not_executable'
+              : `fell_through:${built.reason}`,
+          });
+        }
+      }
+
       // V5 explain-stabilisation Task 4 + V5 D1 golden-path closure
       // (A3.1 Task 1) — deterministic value-update pre-route. Catches
       // explicit "Set X to N" / "Increase Y to N" phrasings before
@@ -3980,18 +4083,24 @@ export async function runTurnExecutor(
       // than leaving the pool unfiltered. Falling back to `undefined`
       // preserves the matcher's documented "no kind information supplied
       // → unfiltered pool" behaviour for that narrow case.
-      let deterministicValueUpdate = tryDeterministicValueUpdate(
-        payload.message,
-        contextPack.parsed_quantities,
-        graphLookupForValidate,
-        selectedFactorIds,
-        graphStateForTurn !== null ? factorIdSet : undefined,
-        // Refuse deterministic application when CQE could not vouch for
-        // the numbers it returned — a degraded extraction can carry a
-        // silently-substituted value (right shape, wrong magnitude), so
-        // the turn falls through to LLM/clarify routing instead.
-        cqeSummary.degraded,
-      );
+      // S2-L3 precedence: when the typed-chip mutation pre-route above already
+      // synthesised a proposal (routingResult set), the text parser must NOT
+      // re-parse the chip copy and overwrite it — typed ahead of the heuristic.
+      let deterministicValueUpdate =
+        routingResult === undefined
+          ? tryDeterministicValueUpdate(
+              payload.message,
+              contextPack.parsed_quantities,
+              graphLookupForValidate,
+              selectedFactorIds,
+              graphStateForTurn !== null ? factorIdSet : undefined,
+              // Refuse deterministic application when CQE could not vouch for
+              // the numbers it returned — a degraded extraction can carry a
+              // silently-substituted value (right shape, wrong magnitude), so
+              // the turn falls through to LLM/clarify routing instead.
+              cqeSummary.degraded,
+            )
+          : ({ matched: false, skip_reason: 'preempted_by_typed_chip' } as const);
 
       // P0 V5 golden-path repair (Wave 2, Path B — selected-deictic):
       // when the user wrote "Update that factor to £30k" or similar
@@ -4000,16 +4109,17 @@ export async function runTurnExecutor(
       // the existing single-substring or selection-narrowed dispatch
       // wins (selection is also a tie-breaker for label-based ambiguous
       // cases, handled inside `tryDeterministicValueUpdate`).
-      const deicticDispatch = !deterministicValueUpdate.matched
-        ? tryDeicticValueUpdate(
-            payload.message,
-            contextPack.parsed_quantities,
-            graphLookupForValidate,
-            selectedFactorIds,
-            (id) => factorLabelById.get(id) ?? null,
-            cqeSummary.degraded,
-          )
-        : { matched: false as const, skip_reason: 'no_deictic' as const };
+      const deicticDispatch =
+        routingResult === undefined && !deterministicValueUpdate.matched
+          ? tryDeicticValueUpdate(
+              payload.message,
+              contextPack.parsed_quantities,
+              graphLookupForValidate,
+              selectedFactorIds,
+              (id) => factorLabelById.get(id) ?? null,
+              cqeSummary.degraded,
+            )
+          : { matched: false as const, skip_reason: 'no_deictic' as const };
       if (deicticDispatch.matched && deicticDispatch.dispatch === 'set_factor_value') {
         // Promote to the Path A shape so the rest of the lifecycle
         // (registry guard, synthesised RoutingToolCallResult, etc.)
@@ -4042,7 +4152,9 @@ export async function runTurnExecutor(
       // pre-O-1, an invalid part in FIRST position killed the whole turn
       // (valid parts silently dropped) while the same part in second position
       // bypassed validation entirely (Codex F4/F12).
-      if (!deterministicValueUpdate.matched) {
+      // S2-L3 precedence: also skipped when a typed-chip proposal already
+      // routed (routingResult set) so the compound text parser cannot overwrite.
+      if (routingResult === undefined && !deterministicValueUpdate.matched) {
         const compoundDispatch = tryCompoundValueUpdate(
           payload.message,
           contextPack.parsed_quantities,
