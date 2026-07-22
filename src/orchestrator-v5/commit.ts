@@ -39,6 +39,7 @@ import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
 import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
 import { normaliseOptionInterventionContract } from './normalise-option-interventions.js';
+import { reconcileTopLevelOptionsFromNodes } from './reconcile-top-level-options.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -917,24 +918,54 @@ export async function commitDirectAnswer(
   // Runs alongside (independent of) the Track S intercept repair above: that
   // operates on factor observed-root intercepts, this on option intervention
   // bundles. No-op on draft/already-canonical options; fail-open; idempotent.
-  const graphForStore = normaliseOptionInterventionContract(graphToPersist, {
+  const graphNormalised = normaliseOptionInterventionContract(graphToPersist, {
     scenarioId: metadata.scenario_id,
     turnId: metadata.turn_id,
     turnClass: metadata.turn_class,
     source: metadata.handler_id ?? undefined,
   });
 
-  // NOTE (Lane C3 / decision ③ — DEFERRED, Paul-gated). The node↔options[]
-  // consistency mirror (`reconcileTopLevelOptionsFromNodes`, built + unit-tested)
-  // is deliberately NOT wired here. Wiring it at this global write chokepoint
-  // invents a top-level `options[]` on EVERY option-bearing commit, which
-  // collides with the tested "commit does not invent graph fields" invariant
-  // (turn-executor-d1-mutation-commit-graph.test.ts) and changes the persisted
-  // shape for all option-bearing turns, not just add-option. That is decision ③
-  // (write-both at the chokepoint vs retire top-level options[]), which is Paul's
-  // to rule. Analysis is NOT bitten by the divergence (run_analysis derives from
-  // option-nodes — R-3 probe), so this is a display/secondary-consumer seam. Wire
-  // the mirror once decision ③ is ruled.
+  // Lane C3 / decision ③ — RULED 22 Jul 2026: WRITE-BOTH NARROWLY,
+  // update-if-present; WIRED HERE. The node↔options[] consistency mirror
+  // (`reconcileTopLevelOptionsFromNodes`) closes the divergence where an option
+  // added as an option-KIND node (add-option held-confirm #640, edit_graph
+  // apply) is invisible to the six live readers of top-level `options[]` — incl.
+  // the ContextPack projection (`projectGraph`), which PREFERS `options[]` over
+  // option-nodes and would otherwise feed Sonnet a stale option list after any
+  // option add.
+  //
+  // Wired at this single persist chokepoint (`store.append`'s only caller) rather
+  // than a hand-listed set of option-mutating paths: every graph-bearing commit
+  // funnels through here by construction, so the coverage is DERIVED, not a mirror
+  // that can drift (trap #12). It is safe on non-option commits because the module
+  // is UPDATE-IF-PRESENT + additive:
+  //   - ABSENT `options[]` (or a non-array one) → byte-identical no-op, NEVER
+  //     invents the field, so the "commit does not invent graph fields" invariant
+  //     (turn-executor-d1-mutation-commit-graph.test.ts) stays GREEN;
+  //   - PRESENT `options[]` already consistent with the option-nodes → the
+  //     ORIGINAL reference is returned unchanged;
+  //   - PRESENT `options[]` missing an option-node → a canonical OptionV3 entry
+  //     DERIVED from that node (id/label/status/interventions/is_baseline) is
+  //     APPENDED. It never modifies or removes an existing entry — deletion stays
+  //     owned by `mergeAppliedGraphForPersistence`, and an already-present entry's
+  //     authoritative run_analysis-derived fields are never clobbered.
+  //
+  // Runs AFTER `normaliseOptionInterventionContract` so a mirrored entry copies
+  // the already-canonical top-level interventions bundle. `graphForStore` remains
+  // the single "what was persisted" object handed to both `store.append` and the
+  // MM version hook, so their identity envelopes match the stored graph.
+  //
+  // OUT OF SCOPE (deferred, rowed follow-up alongside the projectGraph
+  // preference-order reassessment): reconciling an option ALREADY present in
+  // `options[]` whose node interventions later changed — append-only leaves that
+  // stale-existing-entry case untouched by design (clobbering an authoritative
+  // entry is a separate mechanism decision).
+  const graphForStore = reconcileTopLevelOptionsFromNodes(graphNormalised, {
+    scenarioId: metadata.scenario_id,
+    turnId: metadata.turn_id,
+    turnClass: metadata.turn_class,
+    source: metadata.handler_id ?? undefined,
+  });
 
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
