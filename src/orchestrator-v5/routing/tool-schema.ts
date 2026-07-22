@@ -440,6 +440,48 @@ export function buildOlumiActionTool(): typeof OLUMI_ACTION_TOOL {
 export type ForcedPillHandlerId = 'explain_results' | 'what_would_flip';
 
 /**
+ * The served-tool shape with the two NARROWABLE enums widened to
+ * `readonly string[]` (from the base advert's exact literal tuples) and the
+ * one overridden `intent_class.description` widened to `string`. It is DERIVED
+ * from `typeof OLUMI_ACTION_TOOL` (CLAUDE.md rule 12 — derive, don't mirror):
+ * every field other than the three overridden ones keeps the base's exact
+ * type, so this cannot drift from the advert. Both the base advert (exact
+ * 4-tuple / 7-tuple enums) and the forced-pill single-value narrowing satisfy
+ * it — a `['execute']` / `[handlerId]` enum is a `readonly string[]`, and is
+ * incompatible with the exact tuple ONLY under literal-tuple invariance, not by
+ * shape. This is the honest return type for `buildForcedPillTool`: it preserves
+ * full compile-time structural checking of the constructed tool (no
+ * `as unknown as` double-cast that would erase it).
+ */
+export type OlumiActionToolDefinition = Omit<typeof OLUMI_ACTION_TOOL, 'input_schema'> & {
+  readonly input_schema: Omit<(typeof OLUMI_ACTION_TOOL)['input_schema'], 'properties'> & {
+    readonly properties: Omit<
+      (typeof OLUMI_ACTION_TOOL)['input_schema']['properties'],
+      'intent_class' | 'action'
+    > & {
+      readonly intent_class: Omit<
+        (typeof OLUMI_ACTION_TOOL)['input_schema']['properties']['intent_class'],
+        'enum' | 'description'
+      > & { readonly enum: readonly string[]; readonly description: string };
+      readonly action: Omit<
+        (typeof OLUMI_ACTION_TOOL)['input_schema']['properties']['action'],
+        'properties'
+      > & {
+        readonly properties: Omit<
+          (typeof OLUMI_ACTION_TOOL)['input_schema']['properties']['action']['properties'],
+          'handler_id'
+        > & {
+          readonly handler_id: Omit<
+            (typeof OLUMI_ACTION_TOOL)['input_schema']['properties']['action']['properties']['handler_id'],
+            'enum'
+          > & { readonly enum: readonly string[] };
+        };
+      };
+    };
+  };
+};
+
+/**
  * Forced-pill tool variant (Codex F3 — close the coach-bypass hole + shrink the
  * first-pass schema surface).
  *
@@ -468,7 +510,7 @@ export type ForcedPillHandlerId = 'explain_results' | 'what_would_flip';
  */
 export function buildForcedPillTool(
   forcedHandlerId: ForcedPillHandlerId,
-): typeof OLUMI_ACTION_TOOL {
+): OlumiActionToolDefinition {
   const base = buildOlumiActionTool();
   const props = base.input_schema.properties;
   return {
@@ -497,7 +539,7 @@ export function buildForcedPillTool(
         },
       },
     },
-  } as unknown as typeof OLUMI_ACTION_TOOL;
+  };
 }
 
 /**

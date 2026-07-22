@@ -312,8 +312,8 @@ describe('routeWithToolUse — the guard is scoped to forced pills only', () => 
 describe('buildForcedPillTool — a DERIVED narrowing of the base advert', () => {
   it('constrains intent_class to [execute] and handler_id to the single forced handler', () => {
     const tool = buildForcedPillTool('what_would_flip');
-    const props = tool.input_schema.properties as Record<string, { enum?: unknown[] }> & {
-      action: { properties: { handler_id: { enum?: unknown[] } } };
+    const props = tool.input_schema.properties as Record<string, { enum?: readonly unknown[] }> & {
+      action: { properties: { handler_id: { enum?: readonly unknown[] } } };
     };
     expect(props.intent_class.enum).toEqual(['execute']);
     expect(props.action.properties.handler_id.enum).toEqual(['what_would_flip']);
@@ -327,7 +327,7 @@ describe('buildForcedPillTool — a DERIVED narrowing of the base advert', () =>
   it('does NOT mutate the base olumi_action tool (still offers all four intents)', () => {
     buildForcedPillTool('explain_results');
     const base = buildOlumiActionTool();
-    const baseProps = base.input_schema.properties as Record<string, { enum?: unknown[] }>;
+    const baseProps = base.input_schema.properties as Record<string, { enum?: readonly unknown[] }>;
     expect(baseProps.intent_class.enum).toEqual(['execute', 'clarify', 'converse', 'coach']);
   });
 });
