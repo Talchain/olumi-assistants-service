@@ -344,7 +344,14 @@ export type SkipReason =
    * `option_configuration` routing with a clean slate, which is the path
    * actually built to handle option interventions.
    */
-  | 'option_intervention_edit';
+  | 'option_intervention_edit'
+  /**
+   * S2-L3 — a typed-chip mutation pre-route already synthesised the proposal
+   * from `chip.parameters` this turn, so the text parser is preempted (typed
+   * ahead of every string/shape heuristic). The caller supplies this skip
+   * without invoking the detector; it never originates inside this module.
+   */
+  | 'preempted_by_typed_chip';
 
 // (Earlier draft of this file declared a `QUANTITY_PROXIMITY_WINDOW`
 // constant for span-based attribution; that approach was abandoned at
