@@ -96,6 +96,16 @@ export interface RunComparisonGuardInput {
    * bypassing `projectTopDrivers`). Omitted / empty ⇒ no suppression.
    */
   readonly interventionControlledFactorIds?: ReadonlySet<string>;
+  /**
+   * F2 CHANGE B — the intent is TYPED (a `what_changed` chip_click), so the
+   * caller has ALREADY decided this is a comparison turn. Skip the free-text
+   * `classifyAnalyticalIntent` regex, which exists only to disambiguate typed
+   * CHAT. The empty-message and mutation-signal fail-safes still apply (a typed
+   * pill carries fixed, benign copy — never an edit instruction — so neither
+   * fires in practice, but keeping them makes the gate total regardless of
+   * caller). Default false ⇒ the free-text path is byte-identical to today.
+   */
+  readonly forceIntent?: boolean;
 }
 
 const RERUN_ACTION: RunComparisonSuggestedAction = Object.freeze({
@@ -204,7 +214,10 @@ export function tryRunComparisonGate(
   if (hasMutationSignal(message)) {
     return { matched: false, reason: 'mutation_signal' };
   }
-  if (classifyAnalyticalIntent(message) !== 'what_changed') {
+  // F2 CHANGE B — a typed `what_changed` pill (`forceIntent`) has already
+  // declared the intent; the free-text regex is skipped (it is for typed-chat
+  // disambiguation only). The free-text path is unchanged.
+  if (!input.forceIntent && classifyAnalyticalIntent(message) !== 'what_changed') {
     return { matched: false, reason: 'not_what_changed' };
   }
 

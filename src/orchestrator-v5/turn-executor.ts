@@ -527,8 +527,16 @@ export interface RunTurnExecutorOptions {
    * loaded conversation window in sight, and (3) PINS the proposal handler_id to
    * this value so the coach cannot re-route the typed pill. Mutually exclusive
    * with `chipClickResumeIntent` — route-v2 sets at most one.
+   *
+   * F2 CHANGE B — `what_changed` is the THIRD value and behaves differently: it
+   * is NOT an explanation-handler id, so it is NEVER passed as
+   * `forcedExplanationHandlerId`. Instead the run-comparison gate below claims a
+   * `what_changed` pill deterministically (`forceIntent`), staying FAIL-CLOSED on
+   * freshness — stale / unconfirmed / insufficient / no-analysis clicks keep the
+   * honest deterministic answers — and only a confirmed-fresh two-run `RunDelta`
+   * is narrated by the coach (`composeComparison` remains the fallback).
    */
-  readonly chipClickForcedIntent?: 'explain_results' | 'what_would_flip';
+  readonly chipClickForcedIntent?: 'explain_results' | 'what_would_flip' | 'what_changed';
   /**
    * Optional graph lookup override — tests pass a mock to exercise validator
    * paths without threading a full GraphV3T. Production derives this from
@@ -4795,6 +4803,14 @@ export async function runTurnExecutor(
           interventionControlledFactorIds: collectInterventionControlledFactorIds(
             context.persistedGraph ?? options.graphState,
           ),
+          // F2 CHANGE B — a typed `what_changed` chip_click has ALREADY declared
+          // the comparison intent, so the gate skips the free-text
+          // `classifyAnalyticalIntent` regex (typed-chat only) and claims the
+          // turn on the typed door. Freshness stays fail-closed inside the gate:
+          // stale / unconfirmed / insufficient / no-analysis clicks still get the
+          // honest deterministic answers. Free-text turns pass `false` and are
+          // byte-identical to today.
+          forceIntent: options.chipClickForcedIntent === 'what_changed',
         });
         emit(TelemetryEvents.V5RunComparisonGate, {
           request_id: requestId,
@@ -5536,7 +5552,12 @@ export async function runTurnExecutor(
           adapter: options.routingAdapter,
           // F2 CHANGE A — a typed analytical pill forces its explanation intent
           // through the coach (thinking disabled, tool forced, handler pinned).
-          ...(options.chipClickForcedIntent
+          // F2 CHANGE B — `what_changed` is NOT an explanation handler id; it is
+          // claimed by the run-comparison gate above and never reaches this call
+          // as a forced explanation (the gate returns first). Guard the union so
+          // only the two explanation intents can pin a handler here.
+          ...(options.chipClickForcedIntent === 'explain_results' ||
+          options.chipClickForcedIntent === 'what_would_flip'
             ? { forcedExplanationHandlerId: options.chipClickForcedIntent }
             : {}),
         });
