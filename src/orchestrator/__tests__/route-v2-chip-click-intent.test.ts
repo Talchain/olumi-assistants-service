@@ -104,6 +104,15 @@ describe('detectChipClickForcedIntent — F2 forced explanation-intent contract'
     expect(detectChipClickForcedIntent(chipClick('what_would_flip'))).toBe('what_would_flip');
   });
 
+  // F2 CHANGE B — the "What changed?" pill is a THIRD forced analytical intent.
+  // It is TYPED here (not the free-text `classifyAnalyticalIntent` regex) so the
+  // pill reaches the run-comparison mechanism deterministically. Unlike the two
+  // explanation intents it is NOT an explanation handler id — TurnExecutor
+  // branches on it before the forced-explanation `routeWithToolUse` call.
+  it('maps a chip_click what_changed pill to the forced what_changed intent', () => {
+    expect(detectChipClickForcedIntent(chipClick('what_changed'))).toBe('what_changed');
+  });
+
   // HAZARD 3 — the singular `explain_result` alias is NOT a registered handler
   // id; it must be canonicalised to `explain_results` at the typed door so it
   // pins to a real handler instead of 400ing as UNSUPPORTED_ACTION downstream.

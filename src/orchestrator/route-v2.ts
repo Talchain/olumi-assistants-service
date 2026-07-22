@@ -239,11 +239,25 @@ export function detectChipClickResumeIntent(
 // `explain_results` HERE, at the typed door, so the alias is pinned to the real
 // handler and never 400s.
 //
+// F2 CHANGE B — `what_changed` is a THIRD forced analytical intent. Unlike the
+// two explanation intents it does NOT route to an explanation handler; it owns
+// the run-comparison mechanism (freshness fail-closed + the real two-run
+// `RunDelta` via `compareRuns`), answered DETERMINISTICALLY by `composeComparison`
+// (0-LLM) in EVERY case — the confirmed-fresh compared delta and the fail-closed
+// verdicts alike. Coach-narration of the confirmed-fresh delta is DEFERRED to its
+// own review: its precondition is registering `what_changed` as a PINNED
+// explanation-class handler + threading the `RunDelta` as ground truth, with
+// `composeComparison` kept as the fallback. TurnExecutor branches on this value BEFORE the generic
+// forced-explanation `routeWithToolUse` call, so `forcedExplanationHandlerId` is
+// NEVER set to `what_changed` (it is not an explanation handler id). Typing the
+// pill is the point: it reaches the comparison mechanism WITHOUT depending on
+// the free-text `classifyAnalyticalIntent` regex (which is for typed-chat only).
+//
 // A chip_click of any OTHER typed action_type returns undefined and reaches
 // TurnExecutor unforced (Sonnet routes it normally / UNSUPPORTED_ACTION).
 export function detectChipClickForcedIntent(
   ingress: OrchestratorTurnPayload,
-): 'explain_results' | 'what_would_flip' | undefined {
+): 'explain_results' | 'what_would_flip' | 'what_changed' | undefined {
   if (ingress.kind !== 'message') return undefined;
   if (ingress.source !== 'chip_click') return undefined;
   const actionType = ingress.chip?.action_type;
@@ -251,6 +265,7 @@ export function detectChipClickForcedIntent(
     return 'explain_results';
   }
   if (actionType === 'what_would_flip') return 'what_would_flip';
+  if (actionType === 'what_changed') return 'what_changed';
   return undefined;
 }
 

@@ -277,6 +277,11 @@ const HANDLER_MATCHERS: Readonly<
   // surfaced this at the re-vendor: the key set is DERIVED from the enum,
   // so a new action type cannot be silently forgotten here.)
   analysis_readiness: undefined,
+  // 0.21.0 (F2 CHANGE B): `what_changed` is a result-comparison intent, not a
+  // graph mutation — no `after` state for the synthesis path to short-circuit
+  // on, so `undefined` like the other non-mutating intents. Surfaced here by the
+  // same DERIVED exhaustive `Record<V5ActionType, …>` (fail-loud on drift).
+  what_changed: undefined,
 };
 
 /**

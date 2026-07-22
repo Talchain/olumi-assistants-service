@@ -151,3 +151,91 @@ describe('tryRunComparisonGate', () => {
     expect(out.reason).toBe('empty_message');
   });
 });
+
+// F2 CHANGE B — the typed `what_changed` pill declares the intent, so the gate
+// skips the free-text `classifyAnalyticalIntent` regex (`forceIntent: true`)
+// while keeping every OTHER gate — the empty/mutation fail-safes and, crucially,
+// the freshness fail-closed switch — exactly as-is.
+describe('tryRunComparisonGate — forceIntent (typed what_changed pill)', () => {
+  it('compares a fresh two-run pair even when the message does NOT match the free-text regex', () => {
+    // A pill could carry copy the regex would reject; typing the intent must be
+    // enough. This is the anti-"regex-on-UI-copy" property.
+    const out = tryRunComparisonGate({
+      message: 'Give me the run comparison, please.',
+      priorFacts: TWO_RUNS,
+      freshness: 'fresh',
+      forceIntent: true,
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.mode).toBe('compared');
+    expect(out.leading_option_changed).toBe(true);
+    expect(out.assistant_text).toContain('Offshore');
+    expect(out.assistant_text).toContain('Onshore');
+  });
+
+  // POSITIVE CONTROL for the skip: the SAME non-matching message WITHOUT
+  // forceIntent declines `not_what_changed`. Proves forceIntent is what flips it,
+  // not that the message happened to match.
+  it('positive control: the same message declines not_what_changed WITHOUT forceIntent', () => {
+    const out = tryRunComparisonGate({
+      message: 'Give me the run comparison, please.',
+      priorFacts: TWO_RUNS,
+      freshness: 'fresh',
+    });
+    expect(out.matched).toBe(false);
+    if (out.matched) return;
+    expect(out.reason).toBe('not_what_changed');
+  });
+
+  it('FAIL-CLOSED untouched: a typed pill on a STALE model still gets the honest re-run answer, never a comparison', () => {
+    const out = tryRunComparisonGate({
+      message: 'What changed since the last run?',
+      priorFacts: TWO_RUNS,
+      freshness: 'stale',
+      forceIntent: true,
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.mode).toBe('stale');
+    expect(out.mode).not.toBe('compared');
+    expect(out.assistant_text.toLowerCase()).toContain('re-run');
+  });
+
+  it('FAIL-CLOSED untouched: a typed pill on UNKNOWN freshness still holds (unconfirmed), never claims the model changed', () => {
+    const out = tryRunComparisonGate({
+      message: 'What changed since the last run?',
+      priorFacts: TWO_RUNS,
+      freshness: 'unknown',
+      forceIntent: true,
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.mode).toBe('unconfirmed');
+    expect(out.mode).not.toBe('compared');
+  });
+
+  it('FAIL-CLOSED untouched: a typed pill with no analysis declines no_runs (no-analysis guard owns it)', () => {
+    const out = tryRunComparisonGate({
+      message: 'What changed since the last run?',
+      priorFacts: [],
+      freshness: 'none',
+      forceIntent: true,
+    });
+    expect(out.matched).toBe(false);
+    if (out.matched) return;
+    expect(out.reason).toBe('no_runs');
+  });
+
+  it('mutation fail-safe still applies even under forceIntent', () => {
+    const out = tryRunComparisonGate({
+      message: 'Set pricing to 0.7',
+      priorFacts: TWO_RUNS,
+      freshness: 'fresh',
+      forceIntent: true,
+    });
+    expect(out.matched).toBe(false);
+    if (out.matched) return;
+    expect(out.reason).toBe('mutation_signal');
+  });
+});

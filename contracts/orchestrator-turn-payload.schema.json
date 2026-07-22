@@ -65,7 +65,8 @@
                     "explain_from_structure",
                     "compare_options",
                     "what_would_flip",
-                    "analysis_readiness"
+                    "analysis_readiness",
+                    "what_changed"
                   ]
                 },
                 "parameters": {
