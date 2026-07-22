@@ -9,24 +9,20 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ### `talchain-schemas-0.21.0.tgz`
 
-> **⚠ PREP TARBALL — NOT built from a merged tip. DO NOT MERGE this PR
-> until re-packed + sha-verified against the MERGED schemas tip.**
-> This tarball was packed from the **F2 CHANGE B PR head**
-> (`olumi-schemas` PR #17, branch `feat/actiontype-what-changed`, commit
-> `d27b1bb`), with the package version bumped to `0.21.0` **at pack time
-> only** (the schemas repo bumps its version field at release time, so PR
-> #17's `package.json` still reads `0.20.0`). The enum change is Paul-gated
-> (contract class). Landing order: (1) PR #17 merges + is published as
-> `0.21.0` → (2) re-pack the tarball from that MERGED tip, replace this
-> file, and re-verify the sha256 below → (3) THIS CEE PR may merge → (4)
-> A2's UI send. Never merge this CEE PR against the prep tarball.
+> **✔ PUBLISHED TARBALL — this is the released, additive-only `@talchain/schemas@0.21.0`
+> pulled from GitHub Packages via `npm pack`, replacing the earlier PREP tarball.**
+> The published `0.21.0` is the merged additive base (`1b936ec`) plus the single
+> `what_changed` enum member. It DELIBERATELY EXCLUDES the compute-seam JSON-Schema
+> types (schemas PR #13) and the `GoalConstraintSchema` → `LegacyGoalConstraintStubSchema`
+> rename (schemas PR #14) that were present on the branch head the PREP tarball was
+> packed from; those land later under the named CEE 0.22 absorption row. Landing order
+> now: (1) PR #17 merged + published as `0.21.0` ✔ → (2) re-pack from the published
+> tip, replace this file, re-verify the sha256 below ✔ (this commit) → (3) THIS CEE PR
+> may merge → (4) A2's UI send.
 
-Built via `npm run build && npm pack` from a fresh blobless clone at PR #17
-head — the packed `dist/boundary/enums.js` carries the new `what_changed`
-enum member (verified). The schemas package suite is **1012/1012 green** at
-that commit, including the dedicated
-`tests/boundary/actiontype-what-changed.test.ts` and the exact-set enum pin
-in `tests/boundary/v020-readiness-and-signal-fields.test.ts`.
+Fetched via `npm pack @talchain/schemas@0.21.0` from GitHub Packages — the packed
+`dist/boundary/enums.js` carries the new `what_changed` enum member (verified). The
+published surface is additive-only over `0.20.0`.
 
 > **Registry note.** CEE consumes the vendored tarball via
 > `file:./vendor/...`, never a registry version. Registry/publish state is
@@ -77,12 +73,11 @@ cap is a WIRE bound, not a layout contract — consumers clamp visually.
 
 **Checksum verification:** `vendor/talchain-schemas-0.21.0.tgz.sha256`
 holds the canonical sha256 hash
-(`bbc6063bc2cc88b80407b3d488c2189d0b0c2fdb12e1956e4dc58600c2171c24`).
+(`73621323743b36754c70c608f1a7e08ef07e279f43a56f233ef40ee652da5663`).
 The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
-tarball bytes against this manifest on every push. ⚠ This hash is for the
-PREP tarball (packed from PR #17 head) — when the tarball is re-packed from
-the MERGED+published `0.21.0` before merge, this hash and the sidecar MUST be
-regenerated together (the merged-tip pack will differ byte-for-byte).
+tarball bytes against this manifest on every push. ✔ This hash is for the
+PUBLISHED `@talchain/schemas@0.21.0` tarball (`npm pack` from GitHub Packages),
+which replaces the earlier PREP hash `bbc6063…c2171c24`.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
 restores the prior `vendor/talchain-schemas-0.20.0.tgz`, its
