@@ -9,23 +9,31 @@
  * option, while a consumer reading option-NODES can — the two views diverge
  * (probe A2/B1: `options[]` stayed 3 after an option was added to `nodes[]`).
  *
- * Decision ③ (Paul, write-both): keep the two representations consistent at the
- * single `scenarios.graph` write chokepoint (`commitDirectAnswer` →
- * `store.append`, alongside `normaliseOptionInterventionContract`), by MIRRORING
- * every option-node into `options[]`. This is the least-downstream-churn option;
- * retiring top-level `options[]` would touch every PLoT/ISL analysis consumer.
+ * Decision ③ — RULED (Paul, 2026-07-22 23:35Z, evidence-based): **write-both
+ * NARROWLY — update-if-present at option-mutating commits only, NEVER invent the
+ * field.** The reader-manifest sweep found live CEE readers of top-level
+ * `options[]` (incl. the ContextPack projection preferring `options[]`), so the
+ * two views must agree; but a graph that carries NO `options[]` array must not
+ * suddenly grow one on an unrelated commit (that collides with the tested
+ * "commit does not invent graph fields" invariant). Retiring `options[]` was
+ * rejected — it would touch every PLoT/ISL analysis consumer.
  *
- * SCOPE — strictly ADDITIVE + idempotent. For every option-KIND node whose id
- * is NOT already present in top-level `options[]`, append a canonical OptionV3
- * entry DERIVED from the node (id, label, status, interventions, is_baseline).
- * It never modifies or removes an existing `options[]` entry: deletion of a
- * removed option's `options[]` entry stays owned by
- * `mergeAppliedGraphForPersistence` (the edit-path merge). On a graph where
- * every option-node already has an `options[]` entry (every draft graph, whose
- * options are mirrored in sync), this is a byte-identical no-op — the ORIGINAL
- * reference is returned unchanged.
+ * STATUS IN THIS PR — the mechanism below is READY but DELIBERATELY UNWIRED (it
+ * is not called from `commit.ts`). Wiring it — scoped to option-mutating commits
+ * per the ruling — lands as its own follow-up PR after this one merges. This
+ * module + its tests exist so that wiring PR is a pure hook-up.
  *
- * ORDERING — runs AFTER `normaliseOptionInterventionContract` so the
+ * SCOPE — additive + idempotent + UPDATE-IF-PRESENT. When (and only when) a
+ * top-level `options[]` ARRAY is already present, append a canonical OptionV3
+ * entry — DERIVED from the node (id, label, status, interventions, is_baseline)
+ * — for every option-KIND node NOT already in it. An ABSENT `options[]`
+ * (undefined) or a malformed (non-array) one is left exactly as found (never
+ * invented, never clobbered). It never modifies or removes an existing entry:
+ * deletion of a removed option's entry stays owned by
+ * `mergeAppliedGraphForPersistence` (the edit-path merge). An already-consistent
+ * graph is a byte-identical no-op — the ORIGINAL reference is returned unchanged.
+ *
+ * ORDERING (once wired) — runs AFTER `normaliseOptionInterventionContract` so the
  * interventions bundle a mirrored entry copies is already the canonical
  * top-level shape (the sweep + promotion have run). Disjoint fields; they
  * commute except that the interventions must be normalised first.
@@ -105,14 +113,14 @@ function optionEntryFromNode(node: Dict): Dict {
 function findOptionNodesMissingFromOptions(graph: unknown): string[] {
   if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) return [];
   const options = graph.options;
-  // A present-but-malformed `options` (non-array) is a pre-existing corruption
-  // this pass must not touch — reconciling would clobber it. No-op.
-  if (options !== undefined && !Array.isArray(options)) return [];
+  // UPDATE-IF-PRESENT (decision ③ ruling): only reconcile into an EXISTING
+  // top-level `options[]` array. An absent field (undefined) is left alone
+  // (never invented); a present-but-malformed (non-array) one is a pre-existing
+  // corruption this pass must not clobber. Either way → no-op.
+  if (!Array.isArray(options)) return [];
   const existingOptionIds = new Set<string>();
-  if (Array.isArray(options)) {
-    for (const opt of options) {
-      if (isPlainObject(opt) && typeof opt.id === 'string') existingOptionIds.add(opt.id);
-    }
+  for (const opt of options) {
+    if (isPlainObject(opt) && typeof opt.id === 'string') existingOptionIds.add(opt.id);
   }
   const missing: string[] = [];
   for (const node of graph.nodes) {

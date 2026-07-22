@@ -148,6 +148,8 @@ import {
 } from '../orchestrator-v5/build-turn-context.js';
 import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js';
 import { dispatchAddOptionTransaction } from '../orchestrator-v5/handlers/add-option-dispatch.js';
+import { buildHeldSupersessionNotice } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
+import { appendLapseNotice } from '../orchestrator-v5/handlers/hold-thread-through.js';
 import type { FrameFreshness } from '../orchestrator-v5/graph-management/types.js';
 import {
   assembleExplicitGenerateBrief,
@@ -2210,9 +2212,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         let addOptionFrameGraph: unknown = null;
         let addOptionGraphHash: string | null = null;
         let addOptionFreshness: FrameFreshness = 'unknown';
+        // Prior live consent holds — threaded into the commit's carry-forward so
+        // a fresh add-option hold NEVER silently retires an earlier consent hold
+        // (the store reads pendings from only the latest turn row).
+        let addOptionPriorPendings: readonly PendingAction[] = [];
         try {
           const turnContext = await buildTurnContext(ingress, requestId);
           addOptionFrameGraph = turnContext.persistedGraph;
+          addOptionPriorPendings = turnContext.most_recent_pending_actions ?? [];
           try {
             addOptionGraphHash = computeAnalysisAffectingGraphHash(
               addOptionFrameGraph as GraphStateIngress | null | undefined,
@@ -2246,10 +2253,30 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           stage: ingress.stage,
         });
         if (addOptionOutcome.kind === 'held') {
+          // Honest supersession (edit-graph-dispatch precedent): a fresh hold
+          // minted while an earlier consent hold is still live must SAY what
+          // happens to the earlier one (same target → retired by the carry-
+          // forward; different target → both stay live, named). Appended BEFORE
+          // the commit so the stored copy == the wire copy.
+          let addOptionResponse = addOptionOutcome.response;
+          const supersessionNotice = buildHeldSupersessionNotice(
+            addOptionOutcome.pendingActions[0]!,
+            addOptionPriorPendings,
+            Date.now(),
+          );
+          if (supersessionNotice !== null) {
+            addOptionResponse = {
+              ...addOptionResponse,
+              assistant_text: appendLapseNotice(
+                addOptionResponse.assistant_text,
+                supersessionNotice,
+              ),
+            };
+          }
           let addOptionCommitted = false;
-          let addOptionWire = addOptionOutcome.response;
+          let addOptionWire = addOptionResponse;
           try {
-            const commitResult = await commitDirectAnswer(addOptionOutcome.response, {
+            const commitResult = await commitDirectAnswer(addOptionResponse, {
               scenario_id: ingress.scenario_id,
               turn_id: ingress.turn_id,
               turn_class: 'direct_answer',
@@ -2259,6 +2286,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
               duration_ms: Date.now() - routeStartedAt,
               handler_facts: [],
               pending_actions: [...addOptionOutcome.pendingActions],
+              // Thread prior live holds so the commit carry-forward retires the
+              // same-target hold / keeps a different-target one — never a silent
+              // consent wipe (the hold-wipe class).
+              priorPendingActions: addOptionPriorPendings,
               coaching_state: null,
               userMessage: ingress.message,
             });

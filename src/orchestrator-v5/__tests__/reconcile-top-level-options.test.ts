@@ -120,6 +120,16 @@ describe('reconcileTopLevelOptionsFromNodes — the mirror (debit b)', () => {
     expect(out).toBe(graph);
   });
 
+  it('NEVER INVENTS the field: an ABSENT options[] is left absent (decision ③ update-if-present)', () => {
+    // An option-node with no top-level options[] array — the ruling says do NOT
+    // grow one on this commit (that would violate the "no field invention" commit
+    // invariant). No-op, original reference.
+    const graph = { nodes: [{ id: 'opt_a', kind: 'option', label: 'A', interventions: {} }] };
+    const out = reconcileTopLevelOptionsFromNodes(graph) as typeof graph & { options?: unknown };
+    expect(out).toBe(graph);
+    expect((out as { options?: unknown }).options).toBeUndefined();
+  });
+
   it('leaves a malformed (non-array) options field untouched', () => {
     const graph = { nodes: [{ id: 'opt_a', kind: 'option', label: 'A' }], options: 'oops' };
     const out = reconcileTopLevelOptionsFromNodes(graph);

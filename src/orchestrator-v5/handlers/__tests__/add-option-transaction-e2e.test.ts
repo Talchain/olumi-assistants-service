@@ -177,7 +177,7 @@ describe('dispatchAddOptionTransaction — held + skip classification', () => {
     expect(out.response.assistant_text).toContain('configured');
   });
 
-  it('an UNCONFIGURED spec (no values) → held with the unconfigured disclosure', () => {
+  it('an UNCONFIGURED spec (no values) → held, and the "no effect values" disclosure appears EXACTLY ONCE (C4)', () => {
     const out = dispatchAddOptionTransaction({
       ...base,
       parameters: { parent_decision_id: 'dec_choice', label: 'Bare option', interventions: [] },
@@ -185,7 +185,12 @@ describe('dispatchAddOptionTransaction — held + skip classification', () => {
     expect(out.kind).toBe('held');
     if (out.kind !== 'held') return;
     expect(out.configured).toBe(false);
-    expect(out.response.assistant_text).toContain('effect values');
+    // The gate's held copy already carries the 2.11 needs-encoding notice; the
+    // handler must NOT append a second one (C4 — double-disclosure). Count the
+    // "effect values" phrase: exactly one occurrence.
+    const text = out.response.assistant_text;
+    const occurrences = text.split('effect values').length - 1;
+    expect(occurrences).toBe(1);
   });
 
   it.each([

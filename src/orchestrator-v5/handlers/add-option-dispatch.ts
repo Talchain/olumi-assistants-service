@@ -37,7 +37,6 @@ import {
   type EditGmChip,
   type EditGmGoverningVerdict,
 } from './edit-graph-referee-gate.js';
-import { buildUnconfiguredOptionsNotice } from './gm-held-execute.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import {
@@ -180,14 +179,17 @@ export function dispatchAddOptionTransaction(
     return { kind: 'skip', reason: 'not_held', governing: decision.governing };
   }
 
-  // Proposal-time completeness disclosure (ROADMAP 2.11 doctrine, moved to
-  // PROPOSAL time): name whether the option lands analysable (configured) or
-  // still needs values (unconfigured) BEFORE the user confirms — never a
-  // silent analysis-poison land. The unconfigured copy reuses the held-execute
-  // notice verbatim so the two cannot drift (trap-12).
-  const disclosure = configured
-    ? buildConfiguredNotice(optionLabel)
-    : buildUnconfiguredOptionsNotice([optionLabel]);
+  // Proposal-time completeness disclosure (ROADMAP 2.11 doctrine, at PROPOSAL
+  // time). The CONFIGURED case gets an explicit "ready to analyse" affirmation
+  // the referee gate's held copy does not carry. The UNCONFIGURED case is
+  // DELIBERATELY not re-disclosed here (C4): the gate's held copy already emits
+  // the 2.11 needs-encoding notice for a factor-linkless option add
+  // ("...has no effect values yet, so the analysis will stay blocked..."), so
+  // appending `buildUnconfiguredOptionsNotice` too would state it TWICE. The
+  // gate's structural heads-up fires exactly when there are no factor links,
+  // which is precisely `configured === false` here (one factor edge per value),
+  // so relying on it never drops the disclosure.
+  const disclosure = configured ? buildConfiguredNotice(optionLabel) : null;
   const baseText = decision.assistantText ?? '';
   const assistantText =
     disclosure === null || disclosure.length === 0
