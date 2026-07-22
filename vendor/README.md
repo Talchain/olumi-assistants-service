@@ -7,82 +7,69 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.21.0.tgz`
+### `talchain-schemas-0.22.0.tgz`
 
-> **✔ PUBLISHED TARBALL — this is the released, additive-only `@talchain/schemas@0.21.0`
-> pulled from GitHub Packages via `npm pack`, replacing the earlier PREP tarball.**
-> The published `0.21.0` is the merged additive base (`1b936ec`) plus the single
-> `what_changed` enum member. It DELIBERATELY EXCLUDES the compute-seam JSON-Schema
-> types (schemas PR #13) and the `GoalConstraintSchema` → `LegacyGoalConstraintStubSchema`
-> rename (schemas PR #14) that were present on the branch head the PREP tarball was
-> packed from; those land later under the named CEE 0.22 absorption row. Landing order
-> now: (1) PR #17 merged + published as `0.21.0` ✔ → (2) re-pack from the published
-> tip, replace this file, re-verify the sha256 below ✔ (this commit) → (3) THIS CEE PR
-> may merge → (4) A2's UI send.
+> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.22.0`, pulled from
+> GitHub Packages via `npm pack` (tag `v0.22.0` at `e04b900c`).** This is the
+> named CEE 0.22 absorption row (ROADMAP 1.181). 0.22.0 carries the full 0.22
+> batch PLUS the FIRST-SHIP of the two changes 0.21.0 deliberately held back
+> (schemas PR #13 and #14 — see the 0.21.0 README note in git history).
 
-Fetched via `npm pack @talchain/schemas@0.21.0` from GitHub Packages — the packed
-`dist/boundary/enums.js` carries the new `what_changed` enum member (verified). The
-published surface is additive-only over `0.20.0`.
+The 0.22.0 surface over 0.21.0:
+
+- **0.22 batch.** `Intent` enum + `chip.id` / `chip.intent` on the message-turn
+  chip; batched `direct_graph_edit` fields (`changed_node_ids`,
+  `changed_edge_ids`, `operations`, `fields_changed`, `summary`); the S1
+  `graph_hash` / `computed_against_hash` / `GRAPH_DIVERGED` set; the typed
+  `feedback` system event; the Group-A surfaces; and the #16 enrichment
+  additions.
+- **#13 (first ship).** Compute-seam JSON-Schema types. Additive new exports;
+  CEE constructs no objects against them here.
+- **#14 (first ship).** `GoalConstraintSchema` → `LegacyGoalConstraintStubSchema`
+  rename **in the vendored package**. This has ZERO effect on CEE: every
+  `GoalConstraintSchema` reference in CEE resolves to CEE's OWN local
+  `src/schemas/assist.ts`, and no CEE file imports that name from
+  `@talchain/schemas` (verified by `git grep` at re-vendor time — the F2-B
+  re-pack finding still holds). No import changes were required.
 
 > **Registry note.** CEE consumes the vendored tarball via
 > `file:./vendor/...`, never a registry version. Registry/publish state is
-> orthogonal to this pin — but see the PREP caveat above: the CONTENT here
-> must match the merged+published `0.21.0` before merge.
+> orthogonal to this pin — but the CONTENT here must match the
+> merged+published `0.22.0`.
 
-**Purpose — contract acceptance only (F2 CHANGE B accept-half). This PR
-adds NO new EMISSIONS.** 0.21.0 is `0.20.0` plus ONE additive enum value:
+**Purpose — INGRESS ACCEPTANCE ONLY. This re-vendor adds NO new EMISSIONS
+and NO routing/handlers.** CEE's B1 validator (`src/validators/b1.ts`, derived
+from the vendored `OrchestratorTurnPayloadSchema`) is `.strict()` and
+fail-closed: an unknown key or an out-of-vocabulary literal 422s the WHOLE turn.
+So each new INGRESS field — `chip.id`, `chip.intent`, the `feedback` system
+event, and the batched `direct_graph_edit` fields — must be ACCEPTED here FIRST,
+before any producer (the S2+S3 CEE lanes / the UI) sends it. That accept-half is
+pinned executably in `tests/contract/schemas-0.22-ingress-surface.test.ts`
+(one acceptance per new field + a discrimination control each, plus a
+fall-through proof that an intent-carrying turn still completes ingress
+normally). Routing off `intent`, the feedback handler, and the batched-edit
+handler land LATER with S2+S3 — un-routed accepted fields fall through benignly.
 
-0. **`what_changed` joins `ActionType`** (the 11th value). INGRESS
-   obligation, same MIRROR hazard as `analysis_readiness`: CEE's B1
-   validator (`src/validators/b1.ts`, derived from the vendored
-   `OrchestratorTurnPayloadSchema`) validates `chip.action_type`
-   fail-closed, so an older CEE 422s the WHOLE turn when the UI sends the
-   new literal. **CEE must re-vendor + accept FIRST, before the UI's
-   "What changed?" pill sends it.** Proven executably in
-   `tests/contract/action-type-vocabulary-pin.test.ts` (acceptance +
-   near-miss discrimination control). The typed pill is then routed to the
-   run-comparison mechanism (freshness fail-closed) via the reused F2 CHANGE
-   A forced-intent door (`detectChipClickForcedIntent` →
-   `chipClickForcedIntent='what_changed'` → the run-comparison gate with
-   `forceIntent`).
+The prior EGRESS obligations (`signal_code` / `signal` on the guidance blocks,
+`framing_quality`, the `what_changed` / `analysis_readiness` action-type
+literals) are carried forward unchanged; their landing notes live in the 0.20.0
+and 0.21.0 README revisions in git history. 0.21.0 → 0.22.0 is additive on the
+ingress surface: new optional fields and one new system-event member; every
+pre-0.22.0 payload still parses.
 
-The 0.20.0 provenance below is retained for the two change classes that
-0.20.0 introduced and that this re-vendor carries forward unchanged:
-
-1. **`analysis_readiness` joins `ActionType`** (the 10th value). This is
-   an INGRESS obligation with a MIRROR hazard: CEE's B1 validator
-   (`src/validators/b1.ts`) validates `chip.action_type` fail-closed, so
-   an older CEE returns a 422 for the WHOLE turn — not just the chip —
-   when the UI sends the new literal. **CEE must therefore re-vendor
-   FIRST, before the UI's readiness sparks send it.** That handshake is
-   pinned executably in
-   `tests/contract/action-type-vocabulary-pin.test.ts`.
-2. **`signal_code` / `signal` (four guidance blocks) and
-   `framing_quality` (top-level)** are EGRESS additions. The block
-   schemas and the envelope are `.strict()`, so a consumer on an older
-   pin strict-fails a payload carrying them. **CEE must not emit them
-   until DGAI has re-vendored ≥ 0.20.0** — emission is a SEPARATE,
-   LATER PR. This one only widens what CEE will accept and what its
-   schema surface declares.
-
-0.19.0 → 0.20.0 is strictly additive: one new enum value, five new
-optional fields, no existing field changed, removed, or re-typed; every
-pre-0.20.0 payload still parses. The one new export, `FramingQuality`,
-is a scalar vocabulary (`ready | thin | conflict`). The `signal` 140
-cap is a WIRE bound, not a layout contract — consumers clamp visually.
-
-**Checksum verification:** `vendor/talchain-schemas-0.21.0.tgz.sha256`
+**Checksum verification:** `vendor/talchain-schemas-0.22.0.tgz.sha256`
 holds the canonical sha256 hash
-(`73621323743b36754c70c608f1a7e08ef07e279f43a56f233ef40ee652da5663`).
+(`adf17921456eb024fde429a79e7375d7af27aa14db76b4d720498dc99e5f622d`).
 The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
 tarball bytes against this manifest on every push. ✔ This hash is for the
-PUBLISHED `@talchain/schemas@0.21.0` tarball (`npm pack` from GitHub Packages),
-which replaces the earlier PREP hash `bbc6063…c2171c24`.
+PUBLISHED `@talchain/schemas@0.22.0` tarball (`npm pack` from GitHub Packages,
+tag `v0.22.0` at `e04b900c`), replacing the prior `0.21.0` hash
+`73621323…52da5663`.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
-restores the prior `vendor/talchain-schemas-0.20.0.tgz`, its
+restores the prior `vendor/talchain-schemas-0.21.0.tgz`, its
 `.sha256` manifest, the prior `package.json` `file:` reference, and
-this README's prior state — the entire pin returns to v0.20.0 in one
+this README's prior state — the entire pin returns to v0.21.0 in one
 commit. Re-run `pnpm install` after the revert.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
@@ -92,7 +79,8 @@ B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
 adoption, 0.15.0 at the reasoning/held_proposal/ui_directive wave,
 0.16.0 at the decision-record additive wave, 0.18.0 at the
 draft-goal-constraints wave, 0.19.0 at the wave-2 producer fields,
-0.20.0 at the readiness/signal/framing_quality wave) are
+0.20.0 at the readiness/signal/framing_quality wave, 0.21.0 at the
+`what_changed` action-type wave) are
 removed on each bump — only the currently-pinned version lives in
 `vendor/`.
 
