@@ -379,6 +379,90 @@ describe('composeValidationFailure — PARAMETER_INVALID missing_value (Fix B)',
 });
 
 // ---------------------------------------------------------------------------
+// Compound-value hardening. The general PARAMETER_INVALID fallback rendered
+// "You gave [complex value]." on a multi-effect edit whose `actual_value` is
+// an object: `sanitiseForUser` maps objects to the '[complex value]' sentinel,
+// which slipped past the prior 'unknown'-only guard. The echo is now gated on
+// the RAW input type — dropped for any non-scalar, kept for a genuine finite
+// scalar — so a future sentinel can never leak the same way.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID non-scalar actual_value', () => {
+  it('compound-value edit drops the "You gave …" clause instead of leaking "[complex value]"', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'Parameter "value" failed schema: Expected number, received object',
+      details: {
+        parameter: 'value',
+        issue: 'Expected number, received object',
+        actual_value: { magnitude: 0.2, effects: ['cost', 'quality'], direction: 'increase' },
+        constraint_description: 'a valid value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    // The exact live leak must be gone…
+    expect(response.assistant_text).not.toContain('You gave');
+    expect(response.assistant_text).not.toContain('[complex value]');
+    expect(response.assistant_text).not.toBe(
+      "'value' needs to be a valid value. You gave [complex value].",
+    );
+    // …and the first sentence (the constraint guidance) is kept verbatim.
+    expect(response.assistant_text).toBe("'value' needs to be a valid value.");
+    expect(response.suggested_actions[0]?.label).toBe('Try a different value');
+    assertStyle(response.assistant_text);
+  });
+
+  it('array actual_value is also treated as non-scalar and dropped', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Expected number, received array',
+        actual_value: [1, 2, 3],
+        constraint_description: 'a valid value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).not.toContain('You gave');
+    assertStyle(response.assistant_text);
+  });
+
+  // Positive control — the guard must DISCRIMINATE, not blanket-suppress: a
+  // genuine scalar still echoes back.
+  it('scalar number actual_value still renders "You gave 42000."', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Number must be less than or equal to 40000',
+        actual_value: 42000,
+        constraint_description: 'a number below 40000',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).toContain('You gave 42000.');
+    assertStyle(response.assistant_text);
+  });
+
+  it('scalar boolean actual_value still renders "You gave false."', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'enabled',
+        issue: 'Expected true',
+        actual_value: false,
+        constraint_description: 'true or false',
+      },
+    });
+    expect(response.assistant_text).toContain('You gave false.');
+    assertStyle(response.assistant_text);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 1.16 diagnosis cluster items A1/A2/B — composer honesty for the remaining
 // set_factor_value rejection reasons. The validator threads a sanitised,
 // user-readable `details.issue` (e.g. "Value £250,000 exceeds the factor's
