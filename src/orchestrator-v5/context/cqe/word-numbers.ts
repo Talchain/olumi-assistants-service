@@ -35,7 +35,58 @@ export interface WordNumberPrePassResult {
 // whitespace or hyphen) by a fraction word. "one third", "two thirds",
 // "three quarters" are word fractions owned by P5. Converting their lead
 // number to a digit ("1 third") breaks P5 matching.
-const FRACTION_FOLLOW = /^[\s-]+(?:thirds?|quarters?|halves?|half)\b/i;
+//
+// Also covers the MIXED-fraction "and a <fraction>" tail ("one and a half" =
+// 1.5, "two and a quarter" = 2.25): folding the lead to a digit committed the
+// whole part ("1") and dropped the fraction — the same silent wrong-value bug.
+// The "and a" prefix keeps this narrow: a bare "and" (ranges/lists) is NOT a
+// fraction cue, so it is deliberately excluded.
+const FRACTION_FOLLOW =
+  /^[\s-]+(?:(?:thirds?|quarters?|halves?|half)\b|and\s+a\s+(?:half|quarter|third)\b)/i;
+
+// Skip replacement when the word-number is part of a larger COMPOUND number
+// — i.e. it is immediately adjacent (across whitespace or a hyphen) to another
+// number token: a magnitude word (hundred/thousand/million/…/grand), a tens
+// word (twenty…ninety), or a digit. Folding one FRAGMENT of a compound to a
+// digit is the silent-corruption bug this guards: "one hundred and forty" would
+// become "1 hundred and forty" and the deterministic value-update would commit
+// 1. Leaving the whole phrase as words lets the compromise backstop (and,
+// failing that, the LLM) read the compound correctly. The failure mode is
+// therefore always "no partial-compound digit" → correct value or LLM, never a
+// wrong number.
+//
+// Note "thousand"/"million" are guarded even though their digit path
+// ("2 thousand" → 2000) happens to be correct: the compromise backstop reads
+// the intact word compound to the same value, so the guard keeps the correct
+// answer while removing the whole partial-fragment hazard class uniformly
+// rather than enumerating which magnitudes are safe (a mirror we won't keep).
+const MAGNITUDE_ALT = 'hundred|thousand|million|billion|trillion|grand';
+const TENS_ALT = 'twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety';
+// "point" is the spoken decimal separator ("one point five" = 1.5). A
+// word-number on EITHER side of it is a decimal fragment, never a standalone
+// value — folding "one" to a digit committed 1 and dropped the ".5". Adjacency
+// to "point" therefore leaves the whole phrase as words → correct value or LLM.
+const CONNECTOR_ALT = 'point';
+const NUMBER_WORD_ALT = `${MAGNITUDE_ALT}|${TENS_ALT}|${CONNECTOR_ALT}`;
+
+// Tail (text after the matched word) begins with a number word or a digit.
+// No "and" bridge here: English only connects with "and" AFTER a magnitude
+// ("one hundred AND forty"), which the PRECEDE side handles for the trailing
+// fragment; a bare word-number is never "and"-connected on its leading side.
+const COMPOUND_FOLLOW = new RegExp(
+  `^[\\s-]+(?:(?:${NUMBER_WORD_ALT})\\b|\\d)`,
+  'i',
+);
+// Head (text before the matched word) ends with EITHER a number word / digit
+// then the separator ("twenty five", "forty-five", "5 five"), OR a MAGNITUDE
+// word + "and" + the separator ("hundred and six", the trailing ones of a
+// "N hundred and M" compound). The "and" bridge is magnitude-ONLY on purpose:
+// a range like "between five and ten" (which folds to "between 5 and ten") must
+// NOT be misread as a compound — its "and" follows a digit, not a magnitude.
+const COMPOUND_PRECEDE = new RegExp(
+  `(?:(?:\\b(?:${NUMBER_WORD_ALT})|\\d)[\\s-]+|\\b(?:${MAGNITUDE_ALT})\\s+and[\\s-]+)$`,
+  'i',
+);
 
 export function applyWordNumberPrePass(input: string): WordNumberPrePassResult {
   let text = input;
@@ -52,8 +103,14 @@ export function applyWordNumberPrePass(input: string): WordNumberPrePassResult {
         break;
       }
       const followTail = text.slice(match.index + match[0].length);
-      if (FRACTION_FOLLOW.test(followTail)) {
-        // Leave the word in place; P5 owns this phrase.
+      const precedeHead = text.slice(0, match.index);
+      if (
+        FRACTION_FOLLOW.test(followTail) ||
+        COMPOUND_FOLLOW.test(followTail) ||
+        COMPOUND_PRECEDE.test(precedeHead)
+      ) {
+        // Leave the word in place: P5 owns the fraction phrases, and a partial
+        // compound must never be folded to a lead digit (see COMPOUND_* above).
         scan += text.slice(cursor, match.index + match[0].length);
         cursor = match.index + match[0].length;
         continue;
