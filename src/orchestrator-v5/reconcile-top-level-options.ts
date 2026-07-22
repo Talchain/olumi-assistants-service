@@ -18,10 +18,13 @@
  * "commit does not invent graph fields" invariant). Retiring `options[]` was
  * rejected — it would touch every PLoT/ISL analysis consumer.
  *
- * STATUS IN THIS PR — the mechanism below is READY but DELIBERATELY UNWIRED (it
- * is not called from `commit.ts`). Wiring it — scoped to option-mutating commits
- * per the ruling — lands as its own follow-up PR after this one merges. This
- * module + its tests exist so that wiring PR is a pure hook-up.
+ * STATUS — WIRED (decision ③ ruled 22 Jul 2026). `commitDirectAnswer` calls this
+ * at the single persist chokepoint (`store.append`'s only caller), AFTER
+ * `normaliseOptionInterventionContract` and before the write, so every
+ * option-mutating commit (add-option held-confirm, edit_graph apply) reconciles
+ * top-level `options[]` while the update-if-present guard keeps the "commit does
+ * not invent graph fields" invariant green. The wiring is pinned by
+ * `commit-options-reconcile-wiring.test.ts` (call-site deletion → RED).
  *
  * SCOPE — additive + idempotent + UPDATE-IF-PRESENT. When (and only when) a
  * top-level `options[]` ARRAY is already present, append a canonical OptionV3
