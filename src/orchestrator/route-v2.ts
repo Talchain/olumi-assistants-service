@@ -242,9 +242,12 @@ export function detectChipClickResumeIntent(
 // F2 CHANGE B — `what_changed` is a THIRD forced analytical intent. Unlike the
 // two explanation intents it does NOT route to an explanation handler; it owns
 // the run-comparison mechanism (freshness fail-closed + the real two-run
-// `RunDelta` via `compareRuns`), narrated by the coach when the delta is
-// confirmed-fresh and answered deterministically (`composeComparison`) in every
-// fail-closed case. TurnExecutor branches on this value BEFORE the generic
+// `RunDelta` via `compareRuns`), answered DETERMINISTICALLY by `composeComparison`
+// (0-LLM) in EVERY case — the confirmed-fresh compared delta and the fail-closed
+// verdicts alike. Coach-narration of the confirmed-fresh delta is DEFERRED to its
+// own review: its precondition is registering `what_changed` as a PINNED
+// explanation-class handler + threading the `RunDelta` as ground truth, with
+// `composeComparison` kept as the fallback. TurnExecutor branches on this value BEFORE the generic
 // forced-explanation `routeWithToolUse` call, so `forcedExplanationHandlerId` is
 // NEVER set to `what_changed` (it is not an explanation handler id). Typing the
 // pill is the point: it reaches the comparison mechanism WITHOUT depending on

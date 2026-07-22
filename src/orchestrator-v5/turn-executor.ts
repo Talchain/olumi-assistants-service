@@ -533,8 +533,14 @@ export interface RunTurnExecutorOptions {
    * `forcedExplanationHandlerId`. Instead the run-comparison gate below claims a
    * `what_changed` pill deterministically (`forceIntent`), staying FAIL-CLOSED on
    * freshness — stale / unconfirmed / insufficient / no-analysis clicks keep the
-   * honest deterministic answers — and only a confirmed-fresh two-run `RunDelta`
-   * is narrated by the coach (`composeComparison` remains the fallback).
+   * honest deterministic answers — and a confirmed-fresh two-run `RunDelta` is
+   * answered by the DETERMINISTIC `composeComparison` (0-LLM), the same as every
+   * fail-closed verdict. Coach-narration of that confirmed-fresh delta is
+   * DEFERRED — an architectural fold that warrants its own review, not a
+   * ride-along on this accept-half. Its precondition: register `what_changed` as
+   * a PINNED explanation-class handler (so a forced coach call cannot mutate the
+   * graph) + thread the `RunDelta` as ground truth, keeping `composeComparison`
+   * as the fallback.
    */
   readonly chipClickForcedIntent?: 'explain_results' | 'what_would_flip' | 'what_changed';
   /**
