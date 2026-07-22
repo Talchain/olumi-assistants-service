@@ -188,28 +188,132 @@ function seamIsNumericRange(before: string, after: string): boolean {
   return /\d[\s]*$/.test(before.trimEnd()) && /^\s*(?:£|\$|€)?\d/.test(after);
 }
 
+// ---------------------------------------------------------------------------
+// Quote-aware scanning (Codex F6)
+// ---------------------------------------------------------------------------
+//
+// A conjunction/comma seam that sits INSIDE a quoted label is not a clause
+// boundary, and a quoted label must not be truncated at an interior
+// conjunction. Proven live: "add a factor called 'Shipping and handling' and
+// set Cost to 3" split on the FIRST interior "and" into a truncated
+// structural_add ("…called 'Shipping") plus an orphan "handling'", and the
+// replay chip (edit-graph-dispatch.ts) then re-dispatched the truncated clause,
+// mutating the user's entity name. The regex grammar had no quote state; this
+// stateful scanner supplies it (ASCII straight quotes + smart quotes, with
+// backslash-escape handling).
+
+/** Opening quote char → its matching closer. */
+const QUOTE_CLOSERS: Readonly<Record<string, string>> = {
+  "'": "'",
+  '"': '"',
+  '‘': '’', // ‘ ’
+  '“': '”', // “ ”
+};
+
+function isLetterOrDigit(ch: string | undefined): boolean {
+  return ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+}
+
+/**
+ * Boolean mask, one entry per code unit of `s`, true where the position lies
+ * inside a WELL-FORMED quote span (opener + matching closer, inclusive).
+ * Escaped quotes (`\'`) inside a span do not close it. ASCII straight quotes
+ * are disambiguated from apostrophes: a `'`/`"` with a letter/digit on the
+ * inner side is a contraction/possessive, not a quote delimiter, so it never
+ * opens or closes a span (keeps "don't" / "it's" from masking real seams).
+ * An unbalanced opener masks nothing — the char is treated as ordinary.
+ */
+function computeQuoteMask(s: string): boolean[] {
+  const mask = new Array<boolean>(s.length).fill(false);
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i]!;
+    const closer = QUOTE_CLOSERS[ch];
+    if (closer === undefined) {
+      i += 1;
+      continue;
+    }
+    const ambiguous = ch === "'" || ch === '"';
+    if (ambiguous && isLetterOrDigit(s[i - 1])) {
+      i += 1; // mid-word apostrophe/possessive — not a quote opener
+      continue;
+    }
+    // Scan for the matching closer, honouring backslash escapes.
+    let j = i + 1;
+    let found = -1;
+    while (j < s.length) {
+      if (s[j] === '\\') {
+        j += 2;
+        continue;
+      }
+      if (s[j] === closer) {
+        if (ambiguous && isLetterOrDigit(s[j + 1])) {
+          j += 1; // mid-word — not a closer
+          continue;
+        }
+        found = j;
+        break;
+      }
+      j += 1;
+    }
+    if (found === -1) {
+      i += 1; // unbalanced opener — treat as ordinary char
+      continue;
+    }
+    for (let k = i; k <= found; k += 1) mask[k] = true;
+    i = found + 1;
+  }
+  return mask;
+}
+
+/**
+ * Split `text` on every match of `seam` whose delimiter lies entirely OUTSIDE a
+ * quoted span, optionally skipping matches for which `skip(before, after)`
+ * returns true (delimiter discarded). A fresh globally-flagged clone of `seam`
+ * is used so shared module-level `lastIndex` state is never mutated.
+ */
+function splitOutsideQuotes(
+  text: string,
+  seam: RegExp,
+  skip?: (before: string, after: string) => boolean,
+): string[] {
+  const mask = computeQuoteMask(text);
+  const re = new RegExp(seam.source, seam.flags.includes('g') ? seam.flags : `${seam.flags}g`);
+  const pieces: string[] = [];
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const seamStart = m.index;
+    const seamEnd = m.index + m[0].length;
+    let quoted = false;
+    for (let k = seamStart; k < seamEnd; k += 1) {
+      if (mask[k]) {
+        quoted = true;
+        break;
+      }
+    }
+    if (quoted) continue;
+    const before = text.slice(cursor, seamStart);
+    const after = text.slice(seamEnd);
+    if (skip && skip(before, after)) continue;
+    pieces.push(before);
+    cursor = seamEnd;
+  }
+  pieces.push(text.slice(cursor));
+  return pieces;
+}
+
 function splitIntoSegments(message: string): string[] {
-  const sentences = message
-    .split(SENTENCE_SPLIT)
+  const segments: string[] = [];
+  const sentences = splitOutsideQuotes(message, SENTENCE_SPLIT)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  const segments: string[] = [];
   for (const sentence of sentences) {
-    const clauses: string[] = [];
-    let cursor = 0;
-    CONJUNCTION_SEAM.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = CONJUNCTION_SEAM.exec(sentence)) !== null) {
-      const before = sentence.slice(cursor, m.index);
-      const after = sentence.slice(m.index + m[0].length);
-      if (seamIsNumericRange(before, after)) continue;
-      if (before.trim().length > 0) clauses.push(before.trim());
-      cursor = m.index + m[0].length;
-    }
-    const tail = sentence.slice(cursor).trim();
-    if (tail.length > 0) clauses.push(tail);
+    const clauses = splitOutsideQuotes(sentence, CONJUNCTION_SEAM, seamIsNumericRange)
+      .map((c) => c.trim())
+      .filter((c) => c.length > 0);
     for (const clause of clauses) {
-      for (const piece of clause.split(COMMA_VERB_SEAM)) {
+      for (const piece of splitOutsideQuotes(clause, COMMA_VERB_SEAM)) {
         const trimmed = piece.trim();
         if (trimmed.length > 0) segments.push(trimmed);
       }
@@ -231,20 +335,70 @@ function cleanCapture(raw: string | undefined): string | null {
     // Trim trailing punctuation the lookaheads may have left behind.
     .replace(/[,.;:!?]+$/, '')
     .trim();
-  if (cleaned.length < 2 || cleaned.length > 60) return null;
+  // Codex F7: a legitimate label can be a single character ('X') or a short
+  // non-Latin token ('成本'). Reject only the empty string and pathologically
+  // long spans; short-label matchability is enforced downstream in
+  // labelMatches (exact equality for 1-2 char, containment reserved for >= 3).
+  if (cleaned.length < 1 || cleaned.length > 60) return null;
   return cleaned;
 }
+
+/**
+ * Quote-aware label capture (Codex F6): when a naming/relational/link/remove
+ * VERB is immediately followed by a quoted span, return the FULL quoted content
+ * (interior conjunctions and all) rather than letting the regex lookaheads
+ * truncate it at the first " and ". Returns null when there is no quote right
+ * after the verb (the caller then keeps the plain regex capture). Honours
+ * backslash escapes; the opener here is unambiguously a quote (it follows a
+ * verb + whitespace), so no contraction disambiguation is needed.
+ */
+function extractQuotedLabelAfter(segment: string, prefix: RegExp): string | null {
+  const m = prefix.exec(segment);
+  if (m === null) return null;
+  const start = m.index + m[0].length;
+  const opener = segment[start];
+  if (opener === undefined) return null;
+  const closer = QUOTE_CLOSERS[opener];
+  if (closer === undefined) return null;
+  let j = start + 1;
+  while (j < segment.length) {
+    if (segment[j] === '\\') {
+      j += 2;
+      continue;
+    }
+    if (segment[j] === closer) {
+      return cleanCapture(segment.slice(start + 1, j));
+    }
+    j += 1;
+  }
+  return null; // unterminated quote — fall back to the regex capture
+}
+
+/** Verb prefixes whose trailing quoted span carries the label/target. Kept in
+ *  lock-step with the capture regexes above so a quoted argument is taken whole
+ *  regardless of interior conjunctions. */
+const NAMING_PREFIX = /\b(?:called|named|labelled|labeled|titled)\s+/i;
+const RELATIONAL_PREFIX =
+  /\b(?:reduces|increases|decreases|affects|impacts|influences|improves|boosts|lowers|raises|strengthens|weakens|drives|feeds)\s+(?:the\s+)?/i;
+const LINK_PREFIX = /\b(?:link|connect)\b[^,;.]*?\bto\s+(?:the\s+)?/i;
+const REMOVE_PREFIX = /\b(?:remove|delete)\s+(?:the\s+|my\s+|our\s+)?/i;
+const VALUE_PREFIX =
+  /\b(?:set|change|update|increase|decrease|reduce|raise|lower|adjust)\s+(?:the\s+|my\s+|our\s+|its\s+|their\s+)?/i;
 
 function classifySegment(segment: string, index: number): DecomposedEditPart {
   const namedTargets: string[] = [];
   const newLabels: string[] = [];
 
-  const namingHit = NAMING_PATTERN.exec(segment);
-  const newLabel = cleanCapture(namingHit?.[1]);
+  // Prefer the full quoted span when the verb is followed by a quote (Codex
+  // F6), else fall back to the plain regex capture.
+  const newLabel =
+    extractQuotedLabelAfter(segment, NAMING_PREFIX) ??
+    cleanCapture(NAMING_PATTERN.exec(segment)?.[1]);
   if (newLabel !== null) newLabels.push(newLabel);
 
-  const relationalHit = RELATIONAL_VERB_PATTERN.exec(segment);
-  const relationalTarget = cleanCapture(relationalHit?.[1]);
+  const relationalTarget =
+    extractQuotedLabelAfter(segment, RELATIONAL_PREFIX) ??
+    cleanCapture(RELATIONAL_VERB_PATTERN.exec(segment)?.[1]);
 
   // STRUCTURAL ADD: add/create/introduce verb anchored by a node-kind noun
   // or an explicit naming construction. Checked BEFORE value: "add a new
@@ -265,21 +419,27 @@ function classifySegment(segment: string, index: number): DecomposedEditPart {
     STRUCTURAL_REMOVE_VERB_PATTERN.test(segment) &&
     (STRUCTURAL_NOUN_PATTERN.test(segment) || newLabels.length > 0)
   ) {
-    const removeTarget = cleanCapture(REMOVE_TARGET_PATTERN.exec(segment)?.[1]);
+    const removeTarget =
+      extractQuotedLabelAfter(segment, REMOVE_PREFIX) ??
+      cleanCapture(REMOVE_TARGET_PATTERN.exec(segment)?.[1]);
     if (removeTarget !== null) namedTargets.push(removeTarget);
     return { index, text: segment, kind: 'structural_remove', namedTargets, newLabels };
   }
 
   // VALUE: imperative edit verb + a "to/by <number>" connector.
   if (VALUE_EDIT_VERB_PATTERN.test(segment) && VALUE_CONNECTOR_PATTERN.test(segment)) {
-    const target = cleanCapture(VALUE_TARGET_PATTERN.exec(segment)?.[1]);
+    const target =
+      extractQuotedLabelAfter(segment, VALUE_PREFIX) ??
+      cleanCapture(VALUE_TARGET_PATTERN.exec(segment)?.[1]);
     if (target !== null) namedTargets.push(target);
     return { index, text: segment, kind: 'value', namedTargets, newLabels };
   }
 
   // LINK: explicit link/connect clause, or a bare relational clause that
   // survived segmentation on its own.
-  const linkTarget = cleanCapture(LINK_VERB_PATTERN.exec(segment)?.[1]);
+  const linkTarget =
+    extractQuotedLabelAfter(segment, LINK_PREFIX) ??
+    cleanCapture(LINK_VERB_PATTERN.exec(segment)?.[1]);
   if (linkTarget !== null) {
     namedTargets.push(linkTarget);
     return { index, text: segment, kind: 'link', namedTargets, newLabels };
@@ -358,20 +518,31 @@ export interface EditPartAccounting {
 }
 
 function norm(s: string): string {
+  // Codex F7: NFKC-fold then keep Unicode letters/numbers (plus the currency
+  // and percent symbols the value grammar cares about) instead of ASCII-only
+  // stripping, so non-Latin labels ('成本', '运输', 'Café') survive
+  // normalisation rather than collapsing to the empty string.
   return s
+    .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^a-z0-9%£$€ ]+/g, ' ')
+    .replace(/[^\p{L}\p{N}%£$€ ]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-/** Symmetric containment match on normalised labels; requires substance on
- *  both sides so 2-char fragments can never claim coverage. */
+/**
+ * Match on normalised labels. Codex F7: short labels (1-2 normalised chars —
+ * 'X', 'AI', '成本') are legitimate, so they match by EXACT equality; only
+ * labels with >= 3 chars on BOTH sides use symmetric containment (so a 2-char
+ * fragment can still never claim coverage of a longer label). Empty
+ * normalisations never match.
+ */
 function labelMatches(a: string | null | undefined, b: string | null | undefined): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const na = norm(a);
   const nb = norm(b);
-  if (na.length < 3 || nb.length < 3) return false;
+  if (na.length === 0 || nb.length === 0) return false;
+  if (na.length < 3 || nb.length < 3) return na === nb;
   return na.includes(nb) || nb.includes(na);
 }
 
@@ -764,6 +935,40 @@ export function buildMultiPartRejectionClarify(
   return (
     "I wasn't able to make those edits together. Let me take them one at a " +
     `time. Tell me each part on its own and I'll pick it up: ${enumeration}.`
+  );
+}
+
+/**
+ * Cross-boundary invariant (Codex F8): the UI's `SuggestedChips` renders at
+ * most three chips (`slice(0, 3)`). CEE must cap the replay actions it emits to
+ * the same number — an unbounded list is silently truncated on the wire, so a
+ * 4th+ replay clause would have a chip that the user never sees. The dispatch
+ * emits `<= MAX_REPLAY_CHIPS` chips and discloses any clauses beyond the cap in
+ * prose (see {@link buildReplayOverflowNotice}) so none is hidden.
+ */
+export const MAX_REPLAY_CHIPS = 3;
+
+/**
+ * Honest disclosure of the accountable parts that fall BEYOND the replay-chip
+ * cap (Codex F8): those clauses have no clickable chip, so they are named in
+ * prose with an instruction to send them as a message. Returns null when the
+ * part count is within the cap (nothing is hidden). Same DISCLOSED-PARTIAL
+ * vocabulary as the other builders here (British English, no em dashes, neither
+ * a denial-of-any-change nor a success claim — swept against both egress
+ * detectors).
+ */
+export function buildReplayOverflowNotice(
+  parts: readonly DecomposedEditPart[],
+  cap: number = MAX_REPLAY_CHIPS,
+): string | null {
+  if (parts.length <= cap) return null;
+  const overflow = parts.slice(cap).map((p) => `"${clampClause(p.text)}"`);
+  const enumeration = oxfordJoin(overflow);
+  const many = overflow.length > 1;
+  return (
+    `I can only show the first ${cap} as buttons here. ` +
+    `Send ${many ? 'these parts' : 'this part'} as a message and I'll pick ` +
+    `${many ? 'them' : 'it'} up too: ${enumeration}.`
   );
 }
 

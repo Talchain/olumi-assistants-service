@@ -18,6 +18,7 @@ import {
   accountEditParts,
   buildMultiPartRejectionClarify,
   buildPartAccountingDisclosure,
+  buildReplayOverflowNotice,
   buildStructuralRemainderNotice,
   buildSubstitutionClarify,
   decomposeEditMessage,
@@ -449,5 +450,189 @@ describe('oxfordJoin — British-English enumeration (shared by all three clarif
 
   it('is quote-agnostic — single-quoted items join identically', () => {
     expect(oxfordJoin(["'x'", "'y'", "'z'"])).toBe("'x', 'y' and 'z'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F6 (Codex) — quote-aware decomposition: a conjunction/comma seam INSIDE a
+// quoted label is not a clause boundary, and the quoted label is not truncated
+// at an interior conjunction. Proven live: "add a factor called 'Shipping and
+// handling' and set Cost to 3" split into structural_add "…called 'Shipping"
+// plus an orphan "handling'", and the replay chip (edit-graph-dispatch) then
+// re-dispatched the TRUNCATED clause, mutating the user's entity name.
+// ---------------------------------------------------------------------------
+
+describe('decomposeEditMessage — F6 quote-aware segmentation (conjunctions inside quoted labels)', () => {
+  it("keeps an ASCII-quoted label with an interior 'and' whole, and still splits the trailing value clause", () => {
+    const d = decomposeEditMessage(
+      "add a factor called 'Shipping and handling' and set Cost to 3",
+    );
+    // Exactly two accountable parts — no orphan fragment.
+    expect(d.accountableParts).toHaveLength(2);
+
+    const add = d.accountableParts.find((p) => p.kind === 'structural_add');
+    expect(add).toBeDefined();
+    // The replay CHIP message is this clause verbatim: it must equal the
+    // ORIGINAL clause, not the truncated "…called 'Shipping".
+    expect(add!.text).toBe("add a factor called 'Shipping and handling'");
+    // The user's entity name survives intact (was 'Shipping' before the fix).
+    expect(add!.newLabels).toEqual(['Shipping and handling']);
+
+    // No orphan 'handling'' segment of any kind (was a bare 'other' part).
+    expect(d.parts.some((p) => /handling/i.test(p.text) && p.kind === 'other')).toBe(false);
+    expect(d.parts.map((p) => p.text)).not.toContain("handling'");
+
+    const value = d.accountableParts.find((p) => p.kind === 'value');
+    expect(value).toBeDefined();
+    expect(value!.text).toBe('set Cost to 3');
+  });
+
+  it("keeps a SMART-quoted label with an interior 'and' (and an ampersand) whole — single part, no orphan", () => {
+    const d = decomposeEditMessage('add a factor called ‘R&D and Ops’');
+    expect(d.parts).toHaveLength(1);
+    expect(d.parts[0]!.kind).toBe('structural_add');
+    expect(d.parts[0]!.text).toBe('add a factor called ‘R&D and Ops’');
+    expect(d.parts[0]!.newLabels).toEqual(['R&D and Ops']);
+  });
+
+  it('the ASCII-straight-quote variant behaves identically to the smart-quote one', () => {
+    const d = decomposeEditMessage("add a factor called 'R&D and Ops'");
+    expect(d.parts).toHaveLength(1);
+    expect(d.parts[0]!.kind).toBe('structural_add');
+    expect(d.parts[0]!.newLabels).toEqual(['R&D and Ops']);
+  });
+
+  it('a contraction apostrophe is NOT treated as a quote span (unquoted seams still split)', () => {
+    // "don't" must not open a quote span that would swallow the following
+    // conjunction seam — the two clauses must still separate.
+    const d = decomposeEditMessage("set Churn to 5 and add a factor called Growth");
+    expect(d.accountableParts).toHaveLength(2);
+    expect(d.mixedValueStructural).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F7 (Codex) — short and non-Latin labels must be capturable and matchable.
+// Before: cleanCapture rejected < 2 chars, norm ASCII-stripped everything, and
+// labelMatches rejected normalised < 3 chars — so 'X', 'AI', '成本', '运输'
+// reported covered:false / value_target_missing on legitimate graphs.
+// ---------------------------------------------------------------------------
+
+describe('decomposeEditMessage — F7 short/non-Latin target capture', () => {
+  it('captures a ONE-letter value target (was dropped by the < 2 char reject)', () => {
+    const d = decomposeEditMessage('set X to 5');
+    expect(d.accountableParts).toHaveLength(1);
+    expect(d.accountableParts[0]!.kind).toBe('value');
+    expect(d.accountableParts[0]!.namedTargets).toEqual(['X']);
+  });
+
+  it('captures a CJK value target unchanged (no ASCII stripping at capture)', () => {
+    const d = decomposeEditMessage('set 成本 to 5');
+    expect(d.accountableParts[0]!.namedTargets).toEqual(['成本']);
+  });
+
+  it('captures an accented value target (NFKC keeps the letters)', () => {
+    const d = decomposeEditMessage('set Café to 5');
+    expect(d.accountableParts[0]!.namedTargets).toEqual(['Café']);
+  });
+});
+
+describe('accountEditParts — F7 short/non-Latin labels match instead of reporting missing', () => {
+  const optionAndGoal = [
+    { id: 'opt_a', kind: 'option', label: 'Option A' },
+    { id: 'goal_g', kind: 'goal', label: 'Goal' },
+  ];
+
+  it('a TWO-letter label (AI) matches its graph node via exact equality (not < 3 char reject)', () => {
+    const d = decomposeEditMessage('set AI to 0.5 and add a factor called Roadmap');
+    const parts = d.accountableParts;
+    const a = accountEditParts({
+      parts,
+      operations: [
+        { op: 'update_node', path: 'fac_ai', value: { label: 'AI' } },
+        { op: 'add_node', path: '/nodes/-', value: { id: 'fac_new', label: 'Roadmap' } },
+      ],
+      graphNodes: [{ id: 'fac_ai', label: 'AI' }, ...optionAndGoal],
+    });
+    const valueFate = a.fates.find((f) => f.part.kind === 'value');
+    expect(valueFate!.covered).toBe(true);
+    expect(a.missingTargets.filter((m) => m.kind === 'value_target_missing')).toHaveLength(0);
+  });
+
+  it('a CJK label (成本) matches its graph node instead of reporting value_target_missing', () => {
+    const d = decomposeEditMessage('set 成本 to 3 and add a factor called Roadmap');
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: [
+        { op: 'update_node', path: 'fac_cost', value: { label: '成本' } },
+        { op: 'add_node', path: '/nodes/-', value: { id: 'fac_new', label: 'Roadmap' } },
+      ],
+      graphNodes: [{ id: 'fac_cost', label: '成本' }, ...optionAndGoal],
+    });
+    const valueFate = a.fates.find((f) => f.part.kind === 'value');
+    expect(valueFate!.covered).toBe(true);
+    expect(a.missingTargets.filter((m) => m.kind === 'value_target_missing')).toHaveLength(0);
+  });
+
+  it('a smart-quoted short new label (‘AI’) normalises and matches its add_node op', () => {
+    const d = decomposeEditMessage(
+      'set Churn to 3 and add a factor called ‘AI’',
+    );
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: [
+        { op: 'update_node', path: 'fac_churn', value: { label: 'Churn' } },
+        { op: 'add_node', path: '/nodes/-', value: { id: 'fac_ai', label: 'AI' } },
+      ],
+      graphNodes: [{ id: 'fac_churn', label: 'Churn' }, ...optionAndGoal],
+    });
+    const addFate = a.fates.find((f) => f.part.kind === 'structural_add');
+    expect(addFate!.covered).toBe(true);
+  });
+
+  it('a one-letter target is NOT falsely covered by an unrelated op (capture propagates to matching)', () => {
+    // With the < 2 char reject, the target was dropped (null), and a null
+    // target counts ANY update_node as coverage — a false positive. The
+    // captured 'X' must instead require a label match, leaving this uncovered
+    // (but present, so no value_target_missing).
+    const d = decomposeEditMessage('set X to 5 and add a factor called Roadmap');
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: [
+        { op: 'update_node', path: 'fac_y', value: { label: 'Y' } },
+        { op: 'add_node', path: '/nodes/-', value: { id: 'fac_new', label: 'Roadmap' } },
+      ],
+      graphNodes: [
+        { id: 'fac_x', label: 'X' },
+        { id: 'fac_y', label: 'Y' },
+        ...optionAndGoal,
+      ],
+    });
+    const valueFate = a.fates.find((f) => f.part.kind === 'value');
+    expect(valueFate!.covered).toBe(false);
+    // 'X' exists in the graph, so it is uncovered-but-present, never "missing".
+    expect(a.missingTargets.filter((m) => m.kind === 'value_target_missing')).toHaveLength(0);
+  });
+});
+
+describe('buildReplayOverflowNotice — F8 chip-cap disclosure copy', () => {
+  it('is null at or below the cap', () => {
+    const d = decomposeEditMessage(
+      'set Churn to 3 and add a factor called Growth',
+    );
+    expect(buildReplayOverflowNotice(d.accountableParts)).toBeNull();
+  });
+
+  it('names the clauses beyond the cap and stays clear of both egress detectors', () => {
+    const d = decomposeEditMessage(
+      'set Churn to 3, add a factor called Growth, remove the Localisation factor, and add a risk called Attrition',
+    );
+    expect(d.accountableParts.length).toBeGreaterThan(3);
+    const notice = buildReplayOverflowNotice(d.accountableParts)!;
+    expect(notice).not.toBeNull();
+    // The 4th (overflow) clause is named in prose since it has no chip.
+    expect(notice).toMatch(/add a risk called Attrition/);
+    expect(findForbiddenPhraseHit(notice)).toBeNull();
+    expect(findSuccessClaimHit(notice)).toBeNull();
   });
 });
