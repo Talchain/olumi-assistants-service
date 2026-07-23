@@ -326,12 +326,12 @@ export function serialiseEditContextForLLMWithMeta(
     if (after > before) sectionChars[name] = after - before;
   };
 
-  // Decision brief (Context v2 S2, 02 §Seam 1): placed FIRST — it is the
-  // decision frame the rest of the context hangs off. Presence is gated
-  // upstream (dispatchEditGraph populates `context.brief` only under
-  // CEE_CONTEXT_BRIEF_ALL_SITES), so a flag-off render is byte-identical.
-  // Truncation is disclosed in-section, mirroring the routing pack's
-  // {truncated, original_chars} discipline.
+  // Decision brief (Context v2 S2, ROADMAP 1.199): placed FIRST — it is the
+  // decision frame the rest of the context hangs off. dispatchEditGraph now
+  // populates `context.brief` UNCONDITIONALLY when a brief exists (S2 shipped
+  // ON, no-dark-launches); a no-brief render is still byte-identical (the key
+  // is absent, never empty). Truncation is disclosed in-section, mirroring the
+  // routing pack's {truncated, original_chars} discipline.
   if (briefSlice && briefSlice.text.length > 0) {
     measure('brief', () => {
       sections.push('## Decision Brief');

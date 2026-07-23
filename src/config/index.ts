@@ -710,20 +710,6 @@ const ConfigSchema = z.object({
     // failed). The backing migration (20260710113000_v5_decision_records.sql,
     // #406, amended by #417) was EXECUTED on staging 2026-07-10/11 — see
     // that file's header for the evidence pointers. Rollback = code revert.
-    // CEE_CONTEXT_BRIEF_ALL_SITES — Context Architecture v2 S2 (ROADMAP
-    // 1.73, design pack 02 §Seam 1): thread the persisted decision brief
-    // (`scenarios.brief_text`) into the edit/repair LLM context — the two
-    // turn-path sites that today receive NOTHING of the brief. When true,
-    // dispatchEditGraph reads the brief (one extra scenarios read, degrade-
-    // to-absent on failure) and the edit-context serialiser renders a
-    // `## Decision Brief` section: first 1,000 chars, truncation disclosed
-    // (edit needs decision framing to resolve "the hire option" style
-    // referents, not the full narrative — 02 §Seam 1 sizes table).
-    // Repair inherits automatically (same contextSection). Default OFF;
-    // flag-off = no read, no section, byte-identical prompts (pinned by
-    // tests/unit/edit-context-brief.test.ts). Ships dark: not declared in
-    // render*.yaml.
-    contextBriefAllSites: booleanString.default(false),
     // CEE_ENRICHMENT_VALIDATION — Context Architecture v2 S6 (ROADMAP 1.73,
     // design pack 02 §Seam 3): staged validation of the PLoT→CEE enrichment
     // passthrough (the platform's known-open seam — attached today as
@@ -1468,7 +1454,6 @@ function parseConfig(): Config {
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
       coachThinkingDisabled: env.CEE_COACH_THINKING_DISABLED,
       constraintInfeasibleGate: env.CEE_CONSTRAINT_INFEASIBLE_GATE,
-      contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
       enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
     },
     promptCache: {
