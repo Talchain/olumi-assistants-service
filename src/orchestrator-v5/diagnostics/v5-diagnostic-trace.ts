@@ -233,6 +233,15 @@ export type V5DiagnosticExitPath =
   // with up to 3 tap-able questions instead of dispatching the draft.
   // Zero LLM calls on this path.
   | 'clarify_v2'
+  // ROADMAP 1.203 R2(d) / A2-ASKS 1.193c — the deterministic typed add-option
+  // compound transaction (chip.intent='add_option' → held graph_management batch,
+  // route-v2 S3 §5). Zero LLM calls (`llm_calls:[]`), no LLM edit round-trip; it
+  // was previously mis-stamped `edit_graph` (the LLM edit lane's label), so the
+  // wire `exit_path` could not distinguish the 1.7s deterministic transaction from
+  // the 13.6s LLM edit. Its own member, mirroring the other zero-LLM exits
+  // (process_meta_intake / readiness_intake / clarify_v2). External dashboards
+  // that bucket by exit_path gain a new `add_option_transaction` bucket.
+  | 'add_option_transaction'
   | 'draft_graph_error';
 
 /**

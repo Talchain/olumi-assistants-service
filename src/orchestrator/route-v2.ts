@@ -2137,8 +2137,28 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // → TurnExecutor. It is threaded as an exclusion into the process-meta
     // answer branch and the frame-stage no-brief guard below so neither claims
     // it, and control falls through to the single runTurnExecutor call site.
+    // ROADMAP 1.203 R2(a) / A2-ASKS 1.193a — executor-door widening to INTENT-only
+    // chips. An `add_option` chip carries `chip.intent='add_option'` and NO
+    // `action_type`, so `isTypedChipClick` is false and the door guard would not
+    // see it. When the deterministic add-option transaction DECLINES a chip (a
+    // stale / diverged baseline → the structural referee fails closed and the
+    // add-option arm falls through with `fell_through:not_held`), the declined chip
+    // would then be CLAIMED by the free-text edit LLM lane (`editIntentDetected`
+    // below, 13.6s, `llm_calls:['edit_graph']`) rather than reaching TurnExecutor —
+    // because the 1.187 door guard keys on `action_type` only, which is undefined
+    // for an intent-only chip (A2 Lane-U evidence: stale req b3c552bf took the LLM
+    // edit lane, fresh req 19ba5dd1 took the 1.7s deterministic transaction).
+    // Widening the guard to the intent-only add_option chip routes a
+    // declined/fell-through add_option to the executor, not the LLM edit lane.
+    // Safe across all three consumers (editIntentDetected · process-meta-intake ·
+    // frame-no-brief) — each uses this flag as an executor-routing EXCLUSION; and
+    // the held/fresh add_option path RETURNS in the add-option arm below before
+    // reaching any of them, so only the decline/fall-through path is affected.
+    const isAddOptionIntentChip =
+      (ingress.source === 'chip_click' || ingress.source === 'chip') &&
+      ingress.chip?.intent === 'add_option';
     const isNonReadinessTypedChipClickForExecutor =
-      isTypedChipClick && !isReadinessChipClick;
+      (isTypedChipClick && !isReadinessChipClick) || isAddOptionIntentChip;
 
     if (isReadinessChipClick) {
       // Read the PERSISTED scenario graph (the same authority the run_analysis
@@ -2207,9 +2227,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // missing/malformed/unresolved spec, GM not live, a stale frame, or a
     // failed commit falls through BENIGNLY to the existing edit path with
     // `fell_through` telemetry — never a silent coercion, never a dead end.
-    const isTypedAddOptionChip =
-      (ingress.source === 'chip_click' || ingress.source === 'chip') &&
-      ingress.chip?.intent === 'add_option';
+    // Same predicate the executor-door guard was widened with above (R2(a)) —
+    // reused here so the add-option arm and the door guard cannot drift apart.
+    const isTypedAddOptionChip = isAddOptionIntentChip;
     if (isTypedAddOptionChip) {
       const addOptionGmMode = config.features.graphManagementMode;
       if (addOptionGmMode === 'off') {
@@ -2327,7 +2347,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
               outcome: 'held',
               configured: addOptionOutcome.configured,
             });
-            return sendFinalised200(reply, requestId, 'edit_graph', addOptionWire, {
+            return sendFinalised200(reply, requestId, 'add_option_transaction', addOptionWire, {
               graph: null,
               // ROADMAP 1.132 (F1) — held-proposal copy is functional
               // (a receipt/question) and must ship plain.
