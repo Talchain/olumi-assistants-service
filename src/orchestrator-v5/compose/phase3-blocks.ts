@@ -375,6 +375,23 @@ export function buildGraphNodeLookup(
 }
 
 /**
+ * Wave-4 δ2 — build a `GraphNodeLookup` directly from a raw graph record
+ * (`{nodes[], edges[]}`), for the mutation / what_would_flip directive branches
+ * that have NO run_analysis fact to read an enrichment graph from. Consumes the
+ * persisted-snapshot graph the compose caller already holds. Absent / non-record
+ * input ⇒ empty lookup ⇒ every consumer fails closed. Same node-kind gate + edge
+ * handling as `buildGraphNodeLookup`'s fallback pass.
+ */
+export function buildGraphNodeLookupFromGraph(graph: unknown): GraphNodeLookup {
+  const lookup = new Map<string, GraphNodeRef>();
+  const record = readRecord(graph);
+  if (record !== null) {
+    populateGraphNodeLookup(lookup, record);
+  }
+  return lookup;
+}
+
+/**
  * Populate `lookup` from a `{nodes[], edges[]}` graph record. Shared by
  * the enrichment source and the persisted-snapshot fallback — the two
  * shapes differ only in the edge endpoint field names, which are read
@@ -692,6 +709,13 @@ export function buildCoachingBlocks(
   // calibration_prompt branches so a lever is never NAMED as an assumption to
   // confirm nor as a calibration question to answer.
   const leverLabels = collectLeverLabels(interventionControlledFactorIds, lookup);
+  // Wave-4 δ2 / 1.135 — the shared reverse index for clickable-copy linking. One
+  // derivation of the forward lookup (trap-12); reused by BOTH coaching kinds so
+  // an entity NAMED in the surviving coach prose carries a `target_ref` the UI
+  // renders as a link. Fail-closed inside `resolveProseEntityRefs` (ambiguous /
+  // generic / too-short labels are not linked); a lever-naming assumption is
+  // already dropped upstream, so only non-lever entities can link.
+  const labelIndex = buildLabelIndex(lookup);
 
   // assumption_check — one per key_assumptions entry, ranked by order.
   if (Array.isArray(dr.key_assumptions)) {
@@ -711,7 +735,8 @@ export function buildCoachingBlocks(
         title: truncate('An assumption to check', TITLE_MAX),
         body: truncate(text, BODY_MAX),
         source: 'decision_review' as const,
-        target_refs: [] as readonly TargetRef[],
+        // 1.135: link entity names in the (surviving, pre-truncation) prose.
+        target_refs: resolveProseEntityRefs(lookup, labelIndex, text),
         priority_rank: 100 + idx, // coaching ranks deprioritised vs review cards
         // Wave-2 ask 1 (0.19.0): producer-owned guidance signals.
         ...guidanceSignalsForCoachingKind('assumption_check'),
@@ -756,7 +781,8 @@ export function buildCoachingBlocks(
         title: truncate(titleText, TITLE_MAX),
         body: truncate(question, BODY_MAX),
         source: 'decision_review' as const,
-        target_refs: [] as readonly TargetRef[],
+        // 1.135: link entity names in the calibration question prose.
+        target_refs: resolveProseEntityRefs(lookup, labelIndex, question),
         priority_rank: 200 + idx,
         ...guidanceSignalsForCoachingKind('calibration_prompt'),
         action_intent: 'start_guided_chat' as ActionIntentLiteral,

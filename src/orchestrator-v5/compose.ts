@@ -22,13 +22,14 @@ import {
   buildEvidenceBlocks,
   buildFactorConfidenceLookup,
   buildGraphNodeLookup,
+  buildGraphNodeLookupFromGraph,
   buildLensSuggestionCoachingBlock,
   buildReviewCardBlocks,
   buildStaleRerunCoachingBlock,
   type BlockBuildCtx,
   type GraphNodeLookup,
 } from './compose/phase3-blocks.js';
-import { buildRecommendedOptionUiDirective } from './compose/ui-directive.js';
+import { buildFocusInspectorDirective } from './compose/ui-directive.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
@@ -287,6 +288,11 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
  *   3. No current-turn run_analysis fact AND no lifecycle context →
  *      preserve PR #178/180 behaviour: no Phase 3 emission, no telemetry.
  */
+/** Shared empty freshBlocks arg for the mutation / flip directive branches — the
+ *  row-2 lens-survival gate only applies to run_analysis; these fact classes have
+ *  no lens block to consult. */
+const EMPTY_FRESH_BLOCKS: OlumiResponse['blocks'] = [];
+
 function buildBlocksFromFacts(
   facts: readonly HandlerFact[],
   lifecycle?: ComposeToolCallInput['lifecycle'],
@@ -331,20 +337,18 @@ function buildBlocksFromFacts(
         );
         blocks.push(...freshBlocks);
 
-        // R4 CEE-half slice 1 — deterministic ui_directive emitter
-        // (UNCONDITIONAL — see the NO-DARK-LAUNCH note below). CURRENT-TURN fact
-        // with a verified graph_hash_at_run ONLY — the prior-fact
-        // lifecycle branch below never emits a directive, and the
-        // fail-closed conditions (no recommendation / unresolvable or
-        // non-option target / noop) live in the builder. At most ONE
-        // directive per turn in this slice. The shared `lookup` carries
-        // the hash-gated persisted-snapshot fallback — in production it
-        // is the ONLY source that can resolve the option target (see
-        // ComposeToolCallInput.persistedGraph).
-        // NO-DARK-LAUNCH (Paul, 19 Jul): CEE_UI_DIRECTIVE_EMIT deleted
-        // (was live `true` on staging).
+        // Wave-4 δ2 (ROADMAP 1.202) — the deterministic ui_directive ladder
+        // (UNCONDITIONAL — NO-DARK-LAUNCH; CEE_UI_DIRECTIVE_EMIT deleted 19 Jul).
+        // CURRENT-TURN fact with a verified graph_hash_at_run ONLY. For a
+        // run_analysis fact the ladder is: a SURVIVING lens block + a resolvable
+        // subject → `focus` (supersedes, D-53-1); else the v1 recommended-option
+        // `highlight` (regression-proof floor). `freshBlocks` is passed so the
+        // row-2 σ gate reads the lens block's survival at the same chokepoint
+        // wave-3 wired. The shared `lookup` carries the hash-gated persisted
+        // snapshot fallback — in production the only source that resolves labels.
+        // At most ONE directive per turn (`uiDirectiveEmitted` latch, N=1).
         if (!uiDirectiveEmitted) {
-          const directive = buildRecommendedOptionUiDirective(fact, lookup);
+          const directive = buildFocusInspectorDirective(fact, lookup, freshBlocks);
           if (directive !== null) {
             blocks.push(directive);
             uiDirectiveEmitted = true;
@@ -396,6 +400,35 @@ function buildBlocksFromFacts(
         before,
         after,
       });
+
+      // Wave-4 δ2 (ROADMAP 1.202) row 1 — point the UI at the node the user just
+      // changed: an APPLIED set_factor_value / adjust_edge_strength emits
+      // `open_inspector` on the mutated node/edge. The mutation fact's `after`
+      // snapshot carries no label, so resolve it from the turn-start persisted
+      // graph (labels are stable across these edits). `add_constraint` is
+      // EXCLUDED inside the builder (UI drops those patches — fail-open avoided).
+      // N=1 latch; lookup built lazily only when no directive has fired yet.
+      if (!uiDirectiveEmitted) {
+        const mutationLookup = buildGraphNodeLookupFromGraph(persistedGraph);
+        const directive = buildFocusInspectorDirective(fact, mutationLookup, EMPTY_FRESH_BLOCKS);
+        if (directive !== null) {
+          blocks.push(directive);
+          uiDirectiveEmitted = true;
+        }
+      }
+    } else if (fact.fact_type === 'what_would_flip') {
+      // Wave-4 δ2 (ROADMAP 1.202) row 4 — a what_would_flip turn (precondition
+      // met) points the UI at the first flip factor with `focus`. Resolved from
+      // the turn-start persisted graph; fail-closed on unmet precondition / no
+      // flip factor / unresolved id. N=1 latch.
+      if (!uiDirectiveEmitted) {
+        const flipLookup = buildGraphNodeLookupFromGraph(persistedGraph);
+        const directive = buildFocusInspectorDirective(fact, flipLookup, EMPTY_FRESH_BLOCKS);
+        if (directive !== null) {
+          blocks.push(directive);
+          uiDirectiveEmitted = true;
+        }
+      }
     }
   }
 
