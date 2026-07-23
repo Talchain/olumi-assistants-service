@@ -576,41 +576,44 @@ export function getDraftLlmRetryBudgetMs(elapsedMs: number): number {
 }
 
 /**
- * Attempt-1 draft max_tokens ceiling — the "runaway sentinel".
+ * Attempt-1 draft max_tokens ceiling — an OPTIONAL upper safety cap.
  *
- * WHY THIS EXISTS (lean-retry REACHABILITY, 2026-07-21). #585 derived the
- * attempt-1 budget from the timeout (8,550 tokens at the default 110s window),
- * and #595 shipped the lean-retry backstop — but the backstop never fired,
- * because a runaway that streams to the FULL 8,550-token budget truncates only
- * near the end of the window (observed ~75-81s on staging), leaving too little
- * remaining budget to afford a lean retry (the reachability arithmetic in the
- * 21-Jul HANDOVER). The retry can only become reachable if attempt 1 fails
- * FASTER on the runaway class — and the total window CANNOT grow (it is pinned
- * under the ~125s browser-proxy deadline). So attempt 1's max_tokens is capped
- * at a sentinel chosen ABOVE the observed convergent-draft demand and BELOW the
- * affordable budget: healthy drafts finish unharmed, runaways truncate ~15-30s
- * earlier, and that freed slack is exactly what the lean retry needs.
+ * DEFAULT = the FULL affordable budget derived from the draft timeout, so
+ * attempt 1 uses the entire output window the deadline affords. Because the
+ * default equals `getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS)`, the ceiling
+ * is a no-op at the default configuration (`resolveDraftMaxTokens` applies it as
+ * a `Math.min(affordable, ceiling)`), and it tracks the timeout by derivation —
+ * NOT a hand-set mirror (trap 12).
  *
- * CHOOSING THE SENTINEL (6,800). The demand distribution of CONVERGENT drafts:
- * the n=84 completed-call sample topped out at 5,148 output tokens, and the
- * largest converged draft observed in the runaway probes was 6,365 tokens
- * ("long"). 6,800 sits ~7% above that worst-case convergent draft, so NO
- * observed healthy draft is truncated by it, while every runaway (true demand
- * >8,550, streaming cut mid-JSON) truncates at 6,800 instead of 8,550. It is
- * strictly below the 8,550 affordable budget, so the ONLY behavioural change
- * for a healthy draft is none — it completes below the cap exactly as before.
+ * WHY IT WAS RAISED (2026-07-23 firefight — draft down on staging). The prior
+ * default was a 6,800 UNDER-cap, chosen (2026-07-21) to truncate attempt 1
+ * EARLY so a "lean retry" could fire in the freed window. That design failed in
+ * production: claude-sonnet-4-6 now regularly drafts 6,800–8,550 output tokens
+ * even for SIMPLE briefs (378-token prompt), so the 6,800 cap truncated attempt
+ * 1 BELOW the model's real demand — and the lean retry it freed ran at only
+ * ~3,178 tokens (< half of the 6,800 that had just overflowed), so it re-
+ * truncated and the request 400'd after ~89s. A model that cannot fit 6,800
+ * almost never fits 3,178: the sub-budget retry was doomed by construction.
+ *
+ * The fix (recommendation `d`, draft-runaway-structural-diagnosis 2026-07-21):
+ * give attempt 1 the full affordable budget so the 6,800–8,550-token drafts
+ * SUCCEED on attempt 1, and handle the residual true-runaway (>8,550-token)
+ * class with salvage-or-fail-fast (`closeTruncatedJson` in the adapter +
+ * `isLeanRetryAffordable` below) instead of a doomed sub-budget retry. The old
+ * "lean-retry reachability" rationale is RETIRED with this raise.
  *
  * The cap is applied at the adapter (`resolveDraftMaxTokens` ceiling arg,
  * threaded via the draft call's `maxTokensCeiling` opt); it does NOT change the
  * attempt-1 TIMEOUT (still DRAFT_LLM_TIMEOUT_MS), so the max_tokens/timeout
  * derivation the #585 boot assertion guards is untouched — the ceiling can only
  * ever LOWER the affordable budget, never raise it past what the timeout
- * affords. Env-overridable for staging tuning; the default is derived from the
- * measured convergent-draft demand, not tuned per deployment.
+ * affords. Env override (`CEE_DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL`) is available
+ * for staging tuning, but a value BELOW affordability re-opens the exact
+ * attempt-1 starvation this raise removed — keep it at or above affordable.
  */
 export const DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL = parseIntEnv(
   "CEE_DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL",
-  6_800,
+  getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS),
 );
 
 /**
@@ -656,6 +659,38 @@ export const DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL = parseIntEnv(
  * converged-draft distribution, not tuned per deployment).
  */
 export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 2_700;
+
+/**
+ * ANTI-DOOM GUARD (2026-07-23 firefight): may a lean corrective retry fire?
+ *
+ * A max_tokens truncation means attempt 1 committed to a graph too large to
+ * finish inside `attempt1EffectiveMaxTokens` output tokens. Retrying into a
+ * budget SMALLER than the one that just overflowed is doomed by construction —
+ * a model that could not fit `attempt1EffectiveMaxTokens` re-truncates in
+ * anything less, burning ~30s of the request budget on a result guaranteed to
+ * fail (the exact 2026-07-23 draft-down mechanism: a 6,800-token attempt-1
+ * truncation retried at only ~3,178 tokens → re-truncate → 400 at ~89s).
+ *
+ * So the retry may fire ONLY when the remaining affordable window can fund AT
+ * LEAST the attempt that overflowed — `>= attempt1EffectiveMaxTokens` — and
+ * still clears the lean floor. In the default regime (attempt 1 now uses the
+ * FULL affordable budget) this is essentially never true, so the doomed sub-
+ * budget retry cannot fire; truncation is handled by salvage-or-fail-fast
+ * instead. The invariant is independent of the sentinel's value, so it holds
+ * even if an operator lowers `CEE_DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL`.
+ *
+ * Pure + exported so the gate arithmetic is unit-testable and mutation-checkable
+ * in isolation (the runtime call site is `parse.ts` Step 7).
+ */
+export function isLeanRetryAffordable(
+  leanAffordableTokens: number,
+  attempt1EffectiveMaxTokens: number,
+): boolean {
+  return (
+    leanAffordableTokens >=
+    Math.max(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, attempt1EffectiveMaxTokens)
+  );
+}
 
 // ---------------------------------------------------------------------------
 // SSE heartbeat & resume polling

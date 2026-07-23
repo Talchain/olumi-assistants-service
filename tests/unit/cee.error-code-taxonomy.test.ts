@@ -108,4 +108,37 @@ describe("CEE 429-family error-code taxonomy", () => {
       }
     },
   );
+
+  // ── 3. Truncation sub-case is RETRYABLE (2026-07-23 firefight) ───────────
+
+  it(
+    "CEE_LLM_VALIDATION_FAILED is NOT retryable by default, but a max_tokens TRUNCATION reason flips it to retryable",
+    { timeout: 30_000 },
+    async () => {
+      const { mapDraftGraphPipelineReason } = await import(
+        "../../src/orchestrator/route-v2.js"
+      );
+
+      // Default (vague/nonsensical brief, schema mismatch): retrying the same
+      // input reproduces it → NOT retryable.
+      expect(mapDraftGraphPipelineReason(400, "CEE_LLM_VALIDATION_FAILED")).toEqual({
+        reason: "draft_graph_cee_llm_validation_failed",
+        retryable: false,
+      });
+
+      // Truncation (transient model over-generation): RETRY is the honest lever.
+      expect(
+        mapDraftGraphPipelineReason(400, "CEE_LLM_VALIDATION_FAILED", "llm_truncated_max_tokens"),
+      ).toEqual({
+        reason: "draft_graph_cee_llm_validation_failed",
+        retryable: true,
+      });
+
+      // A different reason under the same code stays non-retryable (the flip is
+      // scoped to the truncation reason, not to the code).
+      expect(
+        mapDraftGraphPipelineReason(400, "CEE_LLM_VALIDATION_FAILED", "llm_non_json").retryable,
+      ).toBe(false);
+    },
+  );
 });

@@ -321,12 +321,21 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
   // exact failure. The honest levers are demand reduction and retry.
   const truncatedAtMaxTokens =
     (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true;
+  // HONEST COPY (2026-07-23 firefight). The failure is transient model
+  // over-generation (the draft ran past the token/time budget), NOT a bad brief.
+  // RETRY is the primary, honest lever. Do NOT tell the user to "simplify" or
+  // "be more specific" — a vaguer/simpler brief gives the model less to anchor
+  // on, so it INFERS more factors and options, produces a LARGER graph, and is
+  // MORE likely to truncate again (the cruel inversion; see the firefight RCA).
+  // The only secondary hint narrows SCOPE (a single decision / fewer options =
+  // a smaller graph), never DETAIL.
   const truncationRecovery = {
-    suggestion: "The drafted model was too large to finish. Simplify the brief and try again.",
+    suggestion:
+      "The draft ran past the time budget and was cut off before it finished — this is usually transient. Try again.",
     hints: [
-      "Focus the brief on one decision",
-      "Limit it to the 2-3 options you are seriously weighing",
-      "Leave out background detail that would not change the decision",
+      "Retrying the same brief usually succeeds",
+      "If it keeps happening, focus on a single decision with fewer options",
+      "A very broad brief with many options takes longer to draft",
     ],
   };
 
@@ -345,6 +354,8 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
         {
           requestId: ctx.requestId,
           reason: truncatedAtMaxTokens ? "llm_truncated_max_tokens" : "llm_non_json",
+          // Truncation is transient model over-generation — retry IS the lever.
+          ...(truncatedAtMaxTokens ? { retryable: true } : {}),
           recovery: truncatedAtMaxTokens
             ? truncationRecovery
             : {
@@ -399,6 +410,8 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
         {
           requestId: ctx.requestId,
           reason: truncatedAtMaxTokens ? "llm_truncated_max_tokens" : "llm_schema_invalid",
+          // Truncation is transient model over-generation — retry IS the lever.
+          ...(truncatedAtMaxTokens ? { retryable: true } : {}),
           recovery: truncatedAtMaxTokens
             ? truncationRecovery
             : {

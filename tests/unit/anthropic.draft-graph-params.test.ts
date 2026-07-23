@@ -454,6 +454,80 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     expect(result.graph.nodes.length).toBeGreaterThan(0);
   });
 
+  it("SALVAGE (2026-07-23 firefight): a truncation cut AFTER nodes+edges is recovered by closing the partial JSON, not thrown", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    // Nodes + edges are complete; the cut lands in a trailing `coaching` field.
+    // The unparseable tail (`JSON.parse` fails) enters the salvage path, which
+    // closes the JSON around the complete graph → schema-valid → ACCEPTED.
+    const salvageable =
+      VALID_GRAPH_JSON.slice(0, -1) + // drop the root's closing brace
+      ',"coaching":"You should weigh the trade-off between speed and co'; // truncated field
+    createSpy.mockResolvedValue({
+      content: [{ type: "text", text: salvageable }],
+      stop_reason: "max_tokens",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 8550,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    });
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    // Must NOT throw — the truncated draft is salvaged into a valid graph.
+    const result = await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+    expect(result.graph.nodes.length).toBeGreaterThan(0);
+    expect(result.graph.edges.length).toBeGreaterThan(0);
+    // The salvage is observable on the meta (for the diagnostic trace).
+    expect((result.meta as { salvaged_from_truncation?: boolean }).salvaged_from_truncation).toBe(true);
+    // The incomplete `coaching` field was dropped, not fabricated.
+    expect((result as { coaching?: unknown }).coaching).toBeUndefined();
+  });
+
+  it("SALVAGE SAFETY: a truncation cut INSIDE nodes (no edges yet) is NOT accepted — it fails the schema gate and throws typed", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
+
+    // Cut mid-nodes, before `edges` is emitted: closeTruncatedJson recovers a
+    // syntactically-valid `{nodes:[...]}` with NO edges, which the draft schema
+    // (edges required) REJECTS. The salvage must never ship an invalid graph.
+    createSpy.mockResolvedValue({
+      content: [{ type: "text", text: '{"nodes":[{"id":"a","kind":"decision","label":"Pick"},{"id":"b","kind":"opt' }],
+      stop_reason: "max_tokens",
+      usage: {
+        input_tokens: 100,
+        output_tokens: 8550,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    });
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    let thrown: unknown;
+    try {
+      await draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toMatch(/truncated at max_tokens/);
+    expect((thrown as { truncated_at_max_tokens?: boolean }).truncated_at_max_tokens).toBe(true);
+  });
+
   it("falls back to prompt-only mode when API rejects output_config as unsupported", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
@@ -740,17 +814,49 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
   // SDK, so it fails RED if the ceiling threading is dropped at any hop.
   // ---------------------------------------------------------------------------
 
-  it("the attempt-1 runaway sentinel STILL caps max_tokens after the 2.90 hoist (opts.maxTokensCeiling → hoisted wrapper → body)", async () => {
+  it("an explicit below-affordability maxTokensCeiling STILL caps max_tokens after the 2.90 hoist (opts.maxTokensCeiling → hoisted wrapper → body)", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
-    // The exact constant parse.ts threads as maxTokensCeiling on attempt 1.
-    // At the default 110s window the timeout affords 8550 tokens; the sentinel
-    // (6800) sits below it, so the ceiling is the binding cap.
+    // At the default 110s window the timeout affords 8550 tokens. An explicit
+    // ceiling BELOW that must be the binding cap (the 2026-07-23 firefight raised
+    // the DEFAULT sentinel to the full affordable budget, so we pin the threading
+    // mechanism with an explicit below-affordability value rather than the default).
     const affordable = getAffordableDraftTokens(110_000); // 8550
-    expect(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL).toBeLessThan(affordable);
+    const explicitCeiling = 6_800;
+    expect(explicitCeiling).toBeLessThan(affordable);
+
+    await draftGraphWithAnthropic(
+      {
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      },
+      { timeoutMs: 110_000, maxTokensCeiling: explicitCeiling },
+    );
+
+    const [body] = createSpy.mock.calls[0];
+    // THE load-bearing pin: the wire max_tokens equals the ceiling, NOT the
+    // 8550 the timeout would otherwise afford. Drop the ceiling threading (in
+    // the call site or the hoisted wrapper's signature) and this reads 8550 → RED.
+    expect(body.max_tokens).toBe(explicitCeiling);
+    expect(body.max_tokens).toBeLessThan(affordable);
+  });
+
+  it("the DEFAULT attempt-1 sentinel is the FULL affordable budget — attempt 1 uses the whole window (2026-07-23 firefight)", async () => {
+    // Post-firefight: threading the DEFAULT sentinel is a no-op (it equals
+    // affordable), so attempt 1 sends the full 8550-token budget. This is what
+    // lets the 6,800-8,550-token drafts finish on attempt 1 instead of truncating.
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const affordable = getAffordableDraftTokens(110_000); // 8550
+    expect(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL).toBe(affordable);
 
     await draftGraphWithAnthropic(
       {
@@ -763,35 +869,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     );
 
     const [body] = createSpy.mock.calls[0];
-    // THE load-bearing pin: the wire max_tokens equals the sentinel, NOT the
-    // 8550 the timeout would otherwise afford. Drop the ceiling threading (in
-    // the call site or the hoisted wrapper's signature) and this reads 8550 → RED.
-    expect(body.max_tokens).toBe(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL);
-    expect(body.max_tokens).toBeLessThan(affordable);
-  });
-
-  it("with NO ceiling, the same 110s window sends the full affordable budget (proves the sentinel — not something else — is what lowers it)", async () => {
-    // Positive control for the pin above: identical call minus maxTokensCeiling
-    // must send 8550, so the previous test's 6800 is demonstrably the CEILING's
-    // doing, not an unrelated cap. (Absence-assertion needs a presence control.)
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
-    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
-
-    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
-
-    await draftGraphWithAnthropic(
-      {
-        brief: "Should I hire a contractor or full-time employee?",
-        docs: [],
-        seed: 17,
-        model: "claude-sonnet-4-6",
-      },
-      { timeoutMs: 110_000 },
-    );
-
-    const [body] = createSpy.mock.calls[0];
-    expect(body.max_tokens).toBe(getAffordableDraftTokens(110_000)); // 8550
-    expect(body.max_tokens).toBeGreaterThan(DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL);
+    expect(body.max_tokens).toBe(affordable); // 8550 — the ceiling is a no-op
   });
 
   it("thinking-on but a tight timeout cannot afford it → thinking DISABLED, request stays ≤ affordable", async () => {
