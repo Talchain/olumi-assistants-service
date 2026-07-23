@@ -895,6 +895,81 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // Disabled thinking reverts temperature to 0 (thinking requires temperature=1).
     expect(body.temperature).toBe(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // SAMPLING-PARAM PARITY (2026-07-23). The draft path was the 4th of 4 Anthropic
+  // call sites and the ONLY one that sent temperature unconditionally — so a model
+  // with rejectsSamplingParams:true (Sonnet 5 / Opus 4.7+ / Fable 5) 400'd on
+  // draft, blocking the draft model-swap lever. The chat / chat_with_tools /
+  // stream sites already gate temperature behind rejectsSamplingParams; the fix
+  // brings draft to parity (undefined → the SDK drops the key from the request).
+  // ---------------------------------------------------------------------------
+
+  it("a rejectsSamplingParams model (claude-sonnet-5) on the draft path OMITS temperature — no explicit sampling param, so no 400", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-5",
+    });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body] = createSpy.mock.calls[0];
+
+    // House pattern (mirrors the chat-path sonnet-5 pin at
+    // `chatWithAnthropic — output_config.format contract`): temperature is
+    // undefined, which the SDK's JSON serialisation drops from the body entirely.
+    expect(body.temperature).toBeUndefined();
+    // Wire-level truth, mechanism-agnostic: the serialised request carries NO
+    // temperature key at all — this is exactly what averts the 400 on Sonnet 5.
+    // Revert the rejectsSamplingParams gate on draftTemperature and this reads
+    // `"temperature":0` → RED.
+    expect(JSON.stringify(body)).not.toContain("temperature");
+  });
+
+  it("a non-rejecting model (claude-sonnet-4-6) on the draft path STILL sends temperature=0 — the fix is scoped to rejectsSamplingParams models", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+
+    const [body] = createSpy.mock.calls[0];
+    expect(body.temperature).toBe(0);
+  });
+
+  it("thinking-on for a non-rejecting model (claude-sonnet-4-6) STILL sends temperature=1 — the extended-thinking temperature rule is untouched for models that accept sampling params", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    // claude-sonnet-4-6 is in the adapter's thinking allowlist; a 4000-token
+    // budget at the 110s window is affordable, so thinking stays enabled.
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+      thinking: { type: "enabled", budget_tokens: 4000 },
+    }, { timeoutMs: 110_000 });
+
+    const [body] = createSpy.mock.calls[0];
+    expect(body.thinking.type).toBe("enabled");
+    // Extended thinking active + non-rejecting model → Anthropic's temperature=1 rule.
+    expect(body.temperature).toBe(1);
+  });
 });
 
 // =============================================================================
