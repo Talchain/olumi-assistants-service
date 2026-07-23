@@ -41,10 +41,25 @@ import {
 // coaching payload is small (b2b anatomy: coaching ~529 tok + causal ~209 tok),
 // so 2500 is comfortable headroom without inviting a prose runaway.
 const COACHING_PASS_MAX_TOKENS = 2_500;
-// Skip if less than this remains — a coaching call that cannot finish inside
-// the request budget would only add latency to a response Stage 5 will emit
-// canonical-empty anyway.
-const COACHING_PASS_MIN_BUDGET_MS = 20_000;
+// Skip if less than this remains — a coaching call that cannot FINISH inside the
+// request budget only adds latency to a response Stage 5 emits canonical-empty
+// anyway, and eats the budget the draft retry loop needs.
+//
+// DERIVED (Lane C2, 2026-07-23) from the coaching pass's own measured completion
+// time: n=40 live successful captures (wave1 + lanec builds), `coaching_pass_ms`
+// = min 19.0s / mean 21.6s / median 20.8s / MAX 26.0s. The pass needs its FULL
+// duration to produce coaching; started with less it times out having produced
+// nothing (→ canonical-empty regardless) while burning ~20s of latency. So the
+// floor is the pass's worst-case completion time + a small provider margin:
+// 26.0s + ~2s = 28s. The prior 20s floor sat BELOW the mean (21.6s) and the max
+// (26.0s), so a pass launched at that floor timed out a large fraction of the
+// time — wasted latency, zero coaching, and margin pressure on the 120s deadline.
+// At 28s, a pass that STARTS will (barring provider tail) COMPLETE; otherwise it
+// SKIPS cleanly → the drafted graph returns ~20s sooner with canonical-empty
+// coaching + a coaching_status='skipped_budget' marker. Because the skip fires
+// only when draft(+validation) elapsed > ~82s (110s − 28s), it triggers ONLY on
+// heavy-retry turns — normal ~30-48s drafts keep their coaching.
+const COACHING_PASS_MIN_BUDGET_MS = 28_000;
 // Own timeout ceiling; capped to the remaining window below.
 const COACHING_PASS_TIMEOUT_MS = 30_000;
 
@@ -129,8 +144,18 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
   const elapsed = Date.now() - requestStartMs;
   const remaining = DRAFT_REQUEST_BUDGET_MS - elapsed - LLM_POST_PROCESSING_HEADROOM_MS;
   if (remaining < COACHING_PASS_MIN_BUDGET_MS) {
+    // PROBE- + INGEST-READABLE MARKER: record the budget-skip on the pipeline
+    // outcome, which rides to the response body as `_pipeline_outcome.
+    // coaching_status`. This is the channel A2's async coaching-ingest lane and
+    // the acceptance probes read (they cannot see Render logs). The final
+    // pipeline `coaching_status = 'complete'` assignments (index.ts) preserve
+    // this marker rather than clobbering it. Distinct from a pass that ran and
+    // errored ('failed_degraded') — a budget-skip means "not attempted", so the
+    // async lane knows to fill it. (pipelineOutcome is initialised at pipeline
+    // start and typed non-optional on StageContext.)
+    ctx.pipelineOutcome.coaching_status = "skipped_budget";
     // OBSERVABILITY HONESTY: structured pino LOG (Render-log searchable,
-    // event:cee.coaching_pass.skipped_budget), not a registered telemetry event.
+    // event:cee.coaching_pass.skipped_budget), alongside the response marker.
     log.warn(
       {
         event: "cee.coaching_pass.skipped_budget",
@@ -138,7 +163,7 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
         min_budget_ms: COACHING_PASS_MIN_BUDGET_MS,
         request_id: ctx.requestId,
       },
-      "Post-draft coaching pass skipped — remaining request budget cannot fit another LLM call (coaching will be canonical-empty)",
+      "Post-draft coaching pass skipped — remaining request budget cannot fit the pass to completion (coaching canonical-empty; draft unaffected, returns sooner)",
     );
     return;
   }
