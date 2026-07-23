@@ -206,6 +206,9 @@ export const DRAFT_GRAPH_NUMERIC_TIMING_KEYS = [
   'repair_deterministic_ms',
   'validation_pipeline_ms',
   'threshold_sweep_ms',
+  // Stage 4.5 (v12, lean-draft contract): bounded post-draft coaching pass that
+  // re-produces coaching/causal_claims after the structure-only draft call.
+  'coaching_pass_ms',
   'package_ms',
   'boundary_ms',
 ] as const;

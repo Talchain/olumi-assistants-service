@@ -36,6 +36,7 @@ import { buildCeeErrorResponse } from "../../validation/pipeline.js";
 import { log, emit, calculateCost, TelemetryEvents } from "../../../utils/telemetry.js";
 import { detectStrengthDefaultsV1 } from "../../validation/integrity-sentinel.js";
 import { STRENGTH_DEFAULT_RETRY_NUDGE, DRAFT_LEAN_RETRY_DIRECTIVE } from "../../constants.js";
+import { DRAFT_SOFT_NODE_CAP, DRAFT_SOFT_EDGE_CAP } from "../../draft/anthropic-graph-schema.js";
 
 /**
  * Stage 1: Parse — LLM draft + adapter normalisation.
@@ -606,6 +607,31 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   }
 
   ctx.graph = graph as any;
+
+  // ── Cardinality drift alarm (v12 — 2026-07-23, lean-draft contract) ──────
+  // Anthropic structured outputs cannot cap array length (maxItems → HTTP 400),
+  // so a cardinality runaway cannot be prevented structurally — only FLAGGED.
+  // A completed graph far above the converged-draft soft caps signals either a
+  // count-runaway or a structured-outputs prompt-only fallback; surface it
+  // loudly for diagnosis. NON-corrupting by design: we never trim (dropping
+  // nodes would orphan edges → never ship an invalid graph). Structured pino
+  // LOG (Render-log searchable, event:cee.draft_graph.cardinality_drift), not a
+  // registered telemetry event — do not describe it as telemetry.
+  {
+    const nodeCount = Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0;
+    const edgeCount = Array.isArray((graph as any).edges) ? (graph as any).edges.length : 0;
+    if (nodeCount > DRAFT_SOFT_NODE_CAP || edgeCount > DRAFT_SOFT_EDGE_CAP) {
+      log.warn({
+        event: "cee.draft_graph.cardinality_drift",
+        node_count: nodeCount,
+        edge_count: edgeCount,
+        soft_node_cap: DRAFT_SOFT_NODE_CAP,
+        soft_edge_cap: DRAFT_SOFT_EDGE_CAP,
+        structured_outputs_used: (llmMeta as any)?.structured_outputs_used,
+        request_id: ctx.requestId,
+      }, "Draft graph exceeded the converged-draft cardinality soft cap — possible count-runaway or structured-outputs prompt-only fallback (graph accepted as-is; never trimmed)");
+    }
+  }
 
   // LLM call success telemetry
   const llmDurationSuccess = Date.now() - llmStartTime;

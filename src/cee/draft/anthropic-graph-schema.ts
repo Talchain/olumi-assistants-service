@@ -102,6 +102,23 @@
  * Serialized size FALLS 3,194B → 2,974B (grammar budget improves).
  */
 
+// ── DRAFT CARDINALITY SOFT CAPS (v12 — 2026-07-23, lean-draft contract) ──
+// Derived from the measured converged-draft distribution (n=17 success corpus:
+// 10–17 nodes / 13–38 edges across every brief class), set ABOVE the observed
+// maxima so no observed credible draft is flagged. These are a POST-PARSE
+// DRIFT ALARM, not an enforcer: Anthropic structured outputs rejects `maxItems`
+// (HTTP 400 "property 'maxItems' is not supported" — see
+// adapters/llm/anthropic-schema-compliance.ts), so the grammar CANNOT cap array
+// length during generation. The pipeline therefore cannot prevent a cardinality
+// runaway structurally; it can only FLAG one loudly for diagnosis (a completed
+// graph far above these caps signals a count-runaway or a structured-outputs
+// prompt-only fallback). Trimming post-parse is deliberately NOT done — dropping
+// nodes would orphan edges and risk shipping an invalid graph (never ship a
+// corrupt draft). Single source of truth for the caps; the guard derives from
+// these, and the grammar-budget test pins them so they cannot silently drift.
+export const DRAFT_SOFT_NODE_CAP = 18;
+export const DRAFT_SOFT_EDGE_CAP = 40;
+
 // Helpers for nullable types (required field that can be null)
 const nullable = (typeName: string) => ({
   anyOf: [{ type: typeName }, { type: "null" }],
@@ -278,7 +295,13 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             type: "string",
             enum: ["directed", "bidirected"],
           },
-          provenance_source: { type: "string" },
+          // v12 (2026-07-23, lean-draft contract): `provenance_source` free text
+          // dropped from the draft surface. It is per-edge natural-language
+          // justification — exactly the DRAFT_LEAN_RETRY_DIRECTIVE filler — and
+          // was already emitted on 0 edges across the success corpus, so its
+          // removal is token-neutral on the happy path and forecloses a
+          // per-edge-prose runaway. No compute consumer reads it (ISL GraphV2
+          // edges never carry it).
         },
         required: ["from", "to", "strength", "exists_probability", "effect_direction"],
         additionalProperties: false,
@@ -411,18 +434,35 @@ export type DraftGraphSchemaObject = {
   additionalProperties: boolean;
 };
 
+// ── DEFERRED AUX KEYS (v12 — 2026-07-23, lean-draft contract, ROADMAP 1.197) ──
+// The draft call now emits STRUCTURE ONLY. `coaching` and `causal_claims` are
+// ~30% of draft output tokens (coaching ~21% + causal ~8%, b2b anatomy), the two
+// most prose-heavy / most-runaway-prone surfaces, and NO compute consumer reads
+// them (ISL/PLoT read GraphV2 structure only; GraphV3Schema is nodes+edges;
+// coaching/causal ride as UI envelope siblings — reader-manifest re-verified
+// at the deployed tips 2026-07-23). They are re-produced from the drafted
+// structure by a bounded post-draft pass (unified-pipeline/stages/coaching-pass)
+// and attached to the same response envelope, so the UI (their only consumer)
+// sees no change. Removing them from the grammar (top-level
+// additionalProperties:false makes the keys UNEMITTABLE, not merely unrequired)
+// is the demand cut made structural, not a soft prompt instruction (1.197).
+// `topology_plan` stays deferred as before (v11, zero-reader).
+//
 // Anchor assertion (trap-15: a tool that cannot fail is theatre). The builder
-// below removes a key BY NAME. If `topology_plan` is ever renamed or dropped
-// from the base object, a silent no-op would make the flag look enabled while
-// changing nothing — so fail loud at module load instead.
+// below removes keys BY NAME. If any is ever renamed or dropped from the base
+// object, a silent no-op would leak it back into the grammar — so fail loud at
+// module load instead.
 const TOPOLOGY_PLAN_KEY = 'topology_plan';
-if (!(TOPOLOGY_PLAN_KEY in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
+const DEFERRED_AUX_KEYS = [TOPOLOGY_PLAN_KEY, 'coaching', 'causal_claims'] as const;
+for (const key of DEFERRED_AUX_KEYS) {
+  if (!(key in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
 
-  console.error(
-    `[anthropic-graph-schema] ANCHOR MISSING: '${TOPOLOGY_PLAN_KEY}' is not a property of ` +
-    `ANTHROPIC_DRAFT_GRAPH_SCHEMA. buildDraftGraphSchema() would silently return an ` +
-    `unchanged schema (topology_plan would leak back into the grammar). Update the v11 builder.`
-  );
+    console.error(
+      `[anthropic-graph-schema] ANCHOR MISSING: '${key}' is not a property of ` +
+      `ANTHROPIC_DRAFT_GRAPH_SCHEMA. buildDraftGraphSchema() would silently return an ` +
+      `unchanged schema (${key} would leak back into the grammar). Update the v12 builder.`
+    );
+  }
 }
 
 /**
@@ -431,21 +471,25 @@ if (!(TOPOLOGY_PLAN_KEY in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
  * DERIVED from `ANTHROPIC_DRAFT_GRAPH_SCHEMA` rather than mirrored, so there is
  * exactly one source of truth for every field it shares with the base object.
  *
- * v11 (2026-07-21): topology_plan omission is now UNCONDITIONAL — the
- * `CEE_DRAFT_OMIT_TOPOLOGY_PLAN` flag was deleted per no-dark-launches. The
- * builder always drops the zero-reader `topology_plan` property and its
- * `required` entry (508 output tokens saved, and the live prompt/grammar
- * contradiction — v195 says "must NOT contain a topology_plan key" while the
- * v8/v9 grammar demanded one — is resolved). The base object is never mutated.
+ * v11 (2026-07-21): topology_plan omission is UNCONDITIONAL (zero-reader).
+ * v12 (2026-07-23, lean-draft contract): ALSO drops `coaching` and
+ * `causal_claims` — the draft call is structure-only; both are re-produced by
+ * the bounded post-draft coaching pass. All three deferred keys are dropped
+ * from the sent grammar's `properties` and `required` here; the base object is
+ * never mutated (so the guard counts + anchors keep their single source).
  */
 export function buildDraftGraphSchema(): DraftGraphSchemaObject {
-  const { [TOPOLOGY_PLAN_KEY]: _omitted, ...properties } =
-    ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties;
+  const deferred = new Set<string>(DEFERRED_AUX_KEYS);
+  const properties = Object.fromEntries(
+    Object.entries(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties).filter(
+      ([k]) => !deferred.has(k),
+    ),
+  );
 
   return {
     ...ANTHROPIC_DRAFT_GRAPH_SCHEMA,
     properties,
-    required: ANTHROPIC_DRAFT_GRAPH_SCHEMA.required.filter((k) => k !== TOPOLOGY_PLAN_KEY),
+    required: ANTHROPIC_DRAFT_GRAPH_SCHEMA.required.filter((k) => !deferred.has(k)),
   };
 }
 
