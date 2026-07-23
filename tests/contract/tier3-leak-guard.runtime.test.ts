@@ -53,8 +53,15 @@ describe('Tier-2 cage — locks are closed at ship', () => {
     expect(isClaimUsable('factor_sensitivity', { tier2Enabled: false })).toBe(false);
   });
 
-  it('TIER2_COACHING_ALLOWLIST ships EMPTY (lock 2) — populating it is a G2 decision, not a default', () => {
-    expect(TIER2_COACHING_ALLOWLIST.size).toBe(0);
+  it('TIER2_COACHING_ALLOWLIST carries EXACTLY the three A1-seeded fields (lock 2, wave-3 σ) — any drift fails the gate', () => {
+    // Wave-3 σ (ROADMAP 1.203): the allow-list was A1-seeded with the
+    // review-blessed candidate set (a reviewed code change, Paul reviews in-PR).
+    // Pin the exact membership so an accidental addition/removal fails here.
+    expect([...TIER2_COACHING_ALLOWLIST].sort()).toEqual(
+      ['confidence_tier', 'factor_sensitivity', 'robustness'].sort(),
+    );
+    // It is EXACTLY the ratified candidate set — no more, no less.
+    expect([...TIER2_COACHING_ALLOWLIST].sort()).toEqual([...TIER2_CANDIDATE_FIELDS].sort());
   });
 
   it('the candidate set and the deny set are the ratified Brief 4/5 members, frozen', () => {
@@ -71,10 +78,11 @@ describe('Tier-2 cage — locks are closed at ship', () => {
 
   it('lock 2 is runtime-immutable, not just type-readonly: Set mutators THROW (Object.freeze alone does not stop .add on a Set)', () => {
     const mutable = TIER2_COACHING_ALLOWLIST as Set<string>;
-    expect(() => mutable.add('factor_sensitivity')).toThrow(/read-only/);
-    expect(() => mutable.delete('anything')).toThrow(/read-only/);
+    expect(() => mutable.add('some_new_field')).toThrow(/read-only/);
+    expect(() => mutable.delete('factor_sensitivity')).toThrow(/read-only/);
     expect(() => mutable.clear()).toThrow(/read-only/);
-    expect(TIER2_COACHING_ALLOWLIST.size).toBe(0);
+    // The seeded membership survives the rejected mutations unchanged.
+    expect(TIER2_COACHING_ALLOWLIST.size).toBe(3);
   });
 
   it('the transport-banned subset is exactly the Tier-3 ∩ not-keep-listed intersection (m1_coaching), frozen and a subset of the deny set', () => {
@@ -106,13 +114,17 @@ describe('isClaimUsable — fail-closed at every fork (Brief 5 §2 decision orde
     }
   });
 
-  it('Tier-2 candidates are denied with the flag ON because the allow-list is empty (lock 2 — defence in depth)', () => {
+  it('POSITIVE CONTROL (wave-3 σ) — the seeded Tier-2 candidates PASS when every gate is open (allow-listed ∧ activated ∧ companion-safe ∧ fresh)', () => {
+    // The discriminating half of the positive control: with the allow-list
+    // A1-seeded, every candidate is claim-usable when fully open — proving the
+    // gate is not denying everything vacuously (an allow-list typo would fail
+    // HERE, not silently pass by denying all).
     for (const field of TIER2_CANDIDATE_FIELDS) {
-      expect(isClaimUsable(field, FULLY_OPEN), field).toBe(false);
+      expect(isClaimUsable(field, FULLY_OPEN), field).toBe(true);
     }
   });
 
-  it('an unknown / unclassified field is denied (deny-by-default)', () => {
+  it('an unknown / unclassified field is denied even fully open (deny-by-default — only the seeded set passes)', () => {
     expect(isClaimUsable('some_future_science_field', FULLY_OPEN)).toBe(false);
   });
 

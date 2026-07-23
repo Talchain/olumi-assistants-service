@@ -66,6 +66,16 @@ export type LensRationaleCode =
   // evpi_evidence_priority
   | 'MATERIAL_EVPI'; // learning more about a factor would move the decision
 
+/**
+ * The science-bearing enrichment FIELD each lens grounds its claim in. Wave-3 σ
+ * (ROADMAP 1.203) routes this field through the claim-safety cage before any
+ * value it carries is surfaced. Keyed by rationale (the specific grounding).
+ */
+export type LensGroundingField =
+  | 'factor_sensitivity'
+  | 'confidence_tier'
+  | 'option_comparison';
+
 export interface LensSelection {
   readonly lens: LensId;
   readonly rationaleCode: LensRationaleCode;
@@ -73,6 +83,12 @@ export interface LensSelection {
   readonly title: string;
   /** Plain-language rationale body naming the live action (pre-truncation). */
   readonly body: string;
+  /**
+   * The enrichment field this lens's claim is grounded in — the field wave-3 σ
+   * consults the claim-safety cage for. Exposed here (rather than re-derived at
+   * the call site) so the selector stays the single source of the lens→field map.
+   */
+  readonly groundingField: LensGroundingField;
 }
 
 // ============================================================================
@@ -304,12 +320,32 @@ const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'There is a factor where learning more would change the decision the most. Gathering evidence there first, rather than everywhere, is the fastest way to firm up the choice.',
 };
 
+/**
+ * The science-bearing enrichment field each rationale grounds its claim in —
+ * compile-enforced-exhaustive over `LensRationaleCode` (a new rationale fails the
+ * build here until given a grounding field). This is the wave-3 σ input: the
+ * field the claim-safety cage is consulted for. `option_comparison` is
+ * deliberately NOT in the A1-seeded Tier-2 allow-list, so the WIN_PROB_MODERATE
+ * lens's grounding field is a live, organically-observable cage DENIAL (positive
+ * control on staging); the others ground in allow-listed fields.
+ */
+const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, LensGroundingField>> = {
+  FLIP_RISK_ISOLATED: 'factor_sensitivity',
+  FLIP_RISK_CORRELATED: 'factor_sensitivity',
+  DOMINANT_DRIVER: 'factor_sensitivity',
+  CONFIDENCE_NEEDS_WORK: 'confidence_tier',
+  TOP_FACTOR_LOW_CONFIDENCE: 'factor_sensitivity',
+  WIN_PROB_MODERATE: 'option_comparison',
+  MATERIAL_EVPI: 'factor_sensitivity',
+};
+
 function buildSelection(lens: LensId, rationaleCode: LensRationaleCode): LensSelection {
   return {
     lens,
     rationaleCode,
     title: TITLE_BY_LENS[lens],
     body: BODY_BY_RATIONALE[rationaleCode],
+    groundingField: GROUNDING_FIELD_BY_RATIONALE[rationaleCode],
   };
 }
 

@@ -1,21 +1,26 @@
 /**
  * V5 claim-safety cage — Tier-2 gate + Tier-3 deny set (Brief 5).
  *
- * THE CAGE, NOT THE ACTIVATION. This module makes the Brief 4
- * claim-permission doctrine MECHANICAL instead of advisory: a single
- * fail-closed decision function every future coaching / DSK surfacing
- * path must consult before making a claim about a science-bearing
- * enrichment field. It surfaces nothing itself, relaxes nothing, and
- * activates no field:
+ * THE CAGE. This module makes the Brief 4 claim-permission doctrine
+ * MECHANICAL instead of advisory: a single fail-closed decision function
+ * every coaching / DSK / lens surfacing path must consult before making a
+ * claim about a science-bearing enrichment field. It surfaces nothing
+ * itself and relaxes nothing. As of ROADMAP 1.203 (wave-3 σ) it is
+ * ACTIVATED: `isClaimUsable` has a live caller (`composeCagedField` in
+ * phase3-blocks.ts) and Lock 2 is A1-seeded with the three
+ * review-blessed candidate fields (see {@link TIER2_COACHING_ALLOWLIST}).
  *
  *   - Lock 1: the caller's `tier2Enabled` activation signal. The former
  *     CEE_COACHING_TIER2_ENABLED env flag was deleted 2026-07-20 (O-7
- *     wave 2, Appendix A4 — zero production callers); a future Tier-2
- *     activation must supply a deliberate signal here (Brief 4 gate G2),
- *     not resurrect an env bit.
- *   - Lock 2: {@link TIER2_COACHING_ALLOWLIST} — ships EMPTY. Moving a
- *     single field into it is Brief 4 gate G2: a separate, per-field
- *     decision with science sign-off (Neil / Jinghui, Brief 4 §9).
+ *     wave 2, Appendix A4 — then zero production callers); the deliberate
+ *     activation signal is now `TIER2_ACTIVATION_ENABLED` (a reviewed code
+ *     constant per Brief 4 gate G2 / the no-env-gates doctrine), NOT an env
+ *     bit — see phase3-blocks.ts.
+ *   - Lock 2: {@link TIER2_COACHING_ALLOWLIST} — A1-seeded (wave-3 σ) with
+ *     the three {@link TIER2_CANDIDATE_FIELDS}. Moving any FURTHER field
+ *     into it is Brief 4 gate G2: a separate, per-field decision with
+ *     science sign-off (Neil / Jinghui, Brief 4 §9). Paul reviews the
+ *     seeded set in-PR.
  *   - Tier-3 deny: {@link TIER3_LEAK_BLOCK_FIELDS} — blocked outright
  *     from every user-facing string, regardless of both locks.
  *
@@ -59,10 +64,15 @@ export const TIER2_CANDIDATE_FIELDS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * Lock 2 — the active Tier-2 claim allow-list. SHIPS EMPTY (Brief 5 §1:
- * "either lock alone yields zero surfaced fields"). Append-only via a
- * reviewed G2 decision; never populated by default. The unit test pins
- * emptiness so accidental population fails the required gate.
+ * Lock 2 — the active Tier-2 claim allow-list. A1-SEEDED (ROADMAP 1.203
+ * wave-3 σ) with the three {@link TIER2_CANDIDATE_FIELDS} — the
+ * review-blessed, display-safe candidates (`factor_sensitivity`,
+ * `confidence_tier`, `robustness`). Paul reviews the seeded set in-PR;
+ * Neil ratifies per-field. Append-only via a reviewed G2 decision; the
+ * seed is a REVIEWED CODE CHANGE (populated at construction, before the
+ * mutators are sealed), never a runtime or env mutation. The unit test
+ * pins the exact seeded membership so an accidental addition/removal fails
+ * the required gate.
  *
  * Runtime immutability is REAL, not cosmetic: `Object.freeze` on a Set
  * does not stop `.add()/.delete()/.clear()` (they mutate internal slots),
@@ -71,7 +81,9 @@ export const TIER2_CANDIDATE_FIELDS: readonly string[] = Object.freeze([
  * silently opening lock 2 (adversarial review, Mission 2).
  */
 export const TIER2_COACHING_ALLOWLIST: ReadonlySet<string> = (() => {
-  const set = new Set<string>();
+  // G2 seed: the review-blessed candidate fields, populated HERE (a reviewed
+  // code change) before the mutators are sealed to throw.
+  const set = new Set<string>(TIER2_CANDIDATE_FIELDS);
   const throwReadonly = (): never => {
     throw new Error('TIER2_COACHING_ALLOWLIST is read-only — populating a field is Brief 4 gate G2, a reviewed code change, never a runtime mutation.');
   };
@@ -80,6 +92,16 @@ export const TIER2_COACHING_ALLOWLIST: ReadonlySet<string> = (() => {
   set.clear = throwReadonly;
   return Object.freeze(set);
 })();
+
+/**
+ * Lock 1 — the deliberate Tier-2 activation signal (Brief 4 gate G2). Replaces
+ * the deleted CEE_COACHING_TIER2_ENABLED env flag with a REVIEWED CODE CONSTANT
+ * per the no-env-gates doctrine: activation is a code change under review, not a
+ * runtime/env bit. Callers thread this as `ClaimUsableInput.tier2Enabled`.
+ * Wave-3 σ (ROADMAP 1.203) sets it ON now that Lock 2 carries an A1-seeded set
+ * and `composeCagedField` is a live caller. Rollback = code revert.
+ */
+export const TIER2_ACTIVATION_ENABLED = true;
 
 /**
  * The four RATIFIED, literal-bearing Tier-3 deny keys (Brief 5 §1
@@ -143,23 +165,48 @@ export interface ClaimUsableInput {
 }
 
 /**
- * THE decision function: may a coaching / DSK surface make a claim that
- * uses `field`? Fail-closed at every fork; an unknown field is NOT
- * claim-usable (it is neither allow-listed nor exempt — deny-by-default
- * covers fields that have not even been classified yet).
+ * The reason a claim was DENIED, in fork order. Lets a caller emit a
+ * reason-tagged drop-observability event (never a silent no-op — the
+ * broken-alarm class) without re-deriving the fork logic.
+ */
+export type ClaimDenyReason =
+  | 'tier3_denied' // a Tier-3 leak-block field — denied outright
+  | 'tier2_not_activated' // Lock 1 off (tier2Enabled !== true)
+  | 'not_allowlisted' // Lock 2 — field not in the seeded allow-list
+  | 'companion_unverified' // companion status not verified claim-safe
+  | 'not_fresh'; // freshness verdict is not 'fresh'
+
+/**
+ * THE decision, with its reason. Fail-closed at every fork; an unknown
+ * field is NOT claim-usable (it is neither allow-listed nor exempt —
+ * deny-by-default covers fields that have not even been classified yet).
+ * This is the SINGLE fork; both {@link isClaimUsable} (the boolean) and any
+ * reason-tagged observability derive from it, so they cannot drift.
+ */
+export function classifyClaimUsable(
+  field: string,
+  input: ClaimUsableInput,
+): { readonly usable: true } | { readonly usable: false; readonly reason: ClaimDenyReason } {
+  // Tier-3 deny — both locks notwithstanding.
+  if (TIER3_LEAK_BLOCK_FIELDS.includes(field)) return { usable: false, reason: 'tier3_denied' };
+  // Lock 1 — master flag (default OFF).
+  if (!input.tier2Enabled) return { usable: false, reason: 'tier2_not_activated' };
+  // Lock 2 — allow-list (only the A1-seeded fields pass).
+  if (!TIER2_COACHING_ALLOWLIST.has(field)) return { usable: false, reason: 'not_allowlisted' };
+  // Companion-status gate — unverified ⇒ closed.
+  if (input.companionStatusClaimSafe !== true) return { usable: false, reason: 'companion_unverified' };
+  // Freshness gate — only a confirmed-fresh verdict may ground a claim.
+  if (input.freshness !== 'fresh') return { usable: false, reason: 'not_fresh' };
+  return { usable: true };
+}
+
+/**
+ * THE decision function: may a coaching / DSK / lens surface make a claim
+ * that uses `field`? Delegates to {@link classifyClaimUsable} (the single
+ * fork) — behaviour is unchanged from the original boolean gate.
  */
 export function isClaimUsable(field: string, input: ClaimUsableInput): boolean {
-  // Tier-3 deny — both locks notwithstanding.
-  if (TIER3_LEAK_BLOCK_FIELDS.includes(field)) return false;
-  // Lock 1 — master flag (default OFF).
-  if (!input.tier2Enabled) return false;
-  // Lock 2 — allow-list (ships empty ⇒ all fields denied).
-  if (!TIER2_COACHING_ALLOWLIST.has(field)) return false;
-  // Companion-status gate — unverified ⇒ closed.
-  if (input.companionStatusClaimSafe !== true) return false;
-  // Freshness gate — only a confirmed-fresh verdict may ground a claim.
-  if (input.freshness !== 'fresh') return false;
-  return true;
+  return classifyClaimUsable(field, input).usable;
 }
 
 /**
