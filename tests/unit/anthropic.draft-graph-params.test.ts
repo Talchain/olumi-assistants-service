@@ -130,22 +130,6 @@ describe("Structured Outputs GA output_config.format shape", () => {
 // with the mocked SDK wired in correctly.
 // =============================================================================
 
-// Minimal valid Anthropic response that passes schema validation downstream.
-// (Non-streaming shape — retained for the chatWithAnthropic tests, which still
-// use messages.create.)
-function makeAnthropicResponse(jsonText: string) {
-  return {
-    content: [{ type: "text", text: jsonText }],
-    stop_reason: "end_turn",
-    usage: {
-      input_tokens: 100,
-      output_tokens: 200,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-    },
-  };
-}
-
 // Lane C (2026-07-23): the draft path now STREAMS (messages.stream). A fake
 // MessageStream that yields the JSON as text deltas, then resolves finalMessage
 // with the same {content, stop_reason, usage} shape messages.create returned —
