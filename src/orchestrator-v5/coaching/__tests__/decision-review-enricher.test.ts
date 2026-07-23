@@ -2005,6 +2005,52 @@ describe('decision_review contract gate (auto-fire consume seam)', () => {
     expect(cg).toHaveLength(1);
     expect(cg[0].data.reason).toBe('missing_review_card');
     expect(cg[0].data.violation_count).toBe(1);
+    // Safety violation → dropped=true (the enforce leg of the D-11 split).
+    expect(cg[0].data.dropped).toBe(true);
+  });
+
+  it('count-cap-only breach (ka=4/dqp=3/bias=3): review ATTACHES + emits a telemetry-only contract_violation (dropped=false)', async () => {
+    // B1 / D-11: the TIGHT count caps are TELEMETRY-ONLY. A prompt-legal
+    // tolerance-band review (shape-check rejects only at bias>3 / dqp>3 / ka>5)
+    // must NOT be dropped by this gate — dropping it would silently change
+    // current gpt-4.1 output. The breach is still COUNTED so the per-model A/B
+    // regression signal survives.
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue(
+      fullResult({
+        narrative_summary: 'Option A holds a clear lead across the modelled scenarios.',
+        key_assumptions: ['a', 'b', 'c', 'd'], // 4 > 3
+        decision_quality_prompts: [{ q: 1 }, { q: 2 }, { q: 3 }], // 3 > 2
+        bias_findings: [
+          { type: 'a', source: 'structural', description: 'a', affected_elements: ['node-price'] },
+          { type: 'b', source: 'structural', description: 'b', affected_elements: ['node-price'] },
+          { type: 'c', source: 'structural', description: 'c', affected_elements: ['node-price'] },
+        ], // 3 > 2, every affected_element grounded (node-price exists)
+      }),
+    );
+    const facts: readonly HandlerFact[] = [
+      runAnalysisFact({ enrichment: groundedEnrichment(), leading_option_id: 'opt-1' }),
+    ];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-cg-cap',
+      scenarioId: 'scen-a',
+      signal: notAbortedSignal(),
+      brief: DEFAULT_BRIEF,
+    });
+    // ATTACHED — the review still ships (byte-unchanged output), NOT dropped.
+    expect(out).not.toBe(facts);
+    const patched = out[0];
+    if (patched.fact_type !== 'run_analysis') throw new Error('narrowing');
+    expect((patched.result.enrichment as Record<string, unknown>).decision_review).toBeDefined();
+    // Telemetry-only: the A/B signal still fires, tagged dropped=false and
+    // carrying every breached cap.
+    const cg = contractEvents('req-cg-cap');
+    expect(cg).toHaveLength(1);
+    expect(cg[0].data.dropped).toBe(false);
+    expect(cg[0].data.violation_count).toBe(3);
+    expect(cg[0].data.reasons).toBe(
+      'bias_findings_cap_exceeded,decision_quality_prompts_cap_exceeded,key_assumptions_cap_exceeded',
+    );
   });
 
   it('drops a review with a fabricated conversational callback', async () => {

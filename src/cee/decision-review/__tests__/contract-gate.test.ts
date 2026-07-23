@@ -5,6 +5,8 @@ import {
   collectGraphEntityIds,
   findFabricatedContinuityHit,
   summariseContractViolations,
+  isEnforcedRule,
+  COUNT_CAP_RULES,
   MAX_BIAS_FINDINGS,
   MAX_DECISION_QUALITY_PROMPTS,
   MAX_KEY_ASSUMPTIONS,
@@ -229,6 +231,86 @@ describe('checkDecisionReviewContract', () => {
   });
 });
 
+// ── B1 (A1 ruling D-11): enforce-vs-telemetry rule classification ─────────
+// SAFETY rules ENFORCE-DROP; COUNT-CAP rules are TELEMETRY-ONLY (counted for
+// the per-model A/B signal but never drop the review). The gate reports every
+// violation; `result.mustDrop` is true iff ANY enforced (safety) rule fired.
+describe('enforce-vs-telemetry classification (B1 / D-11)', () => {
+  const SAFETY_RULES: DecisionReviewContractRule[] = [
+    'missing_review_card',
+    'fabricated_continuity_phrase',
+    'ungrounded_entity_reference',
+  ];
+  const CAP_RULES: DecisionReviewContractRule[] = [
+    'bias_findings_cap_exceeded',
+    'decision_quality_prompts_cap_exceeded',
+    'key_assumptions_cap_exceeded',
+    'scenario_contexts_cap_exceeded',
+  ];
+
+  it('safety rules ENFORCE (drop); count-cap rules are telemetry-only', () => {
+    for (const r of SAFETY_RULES) expect(isEnforcedRule(r)).toBe(true);
+    for (const r of CAP_RULES) expect(isEnforcedRule(r)).toBe(false);
+    // COUNT_CAP_RULES is EXACTLY the four cap rules — the only telemetry-only
+    // exemption set. (Fail-closed: anything not in it enforces.)
+    expect([...COUNT_CAP_RULES].sort()).toEqual([...CAP_RULES].sort());
+  });
+
+  it('fail-closed: enforced ⇔ NOT a count-cap rule, across the whole vocabulary', () => {
+    for (const r of [...SAFETY_RULES, ...CAP_RULES]) {
+      expect(isEnforcedRule(r)).toBe(!COUNT_CAP_RULES.has(r));
+    }
+  });
+
+  it('count-cap-only breach (ka=4/dqp=3/bias=3): ok=false but mustDrop=false', () => {
+    // A prompt-legal tolerance-band review that SHIPS today (shape-check rejects
+    // only at bias>3 / dqp>3 / ka>5). All three breach the TIGHT gate caps; NO
+    // safety violation. D-11: telemetry fires (ok=false) but the review is NOT
+    // dropped (mustDrop=false).
+    const capOnly = goodReview();
+    capOnly.key_assumptions = ['a', 'b', 'c', 'd']; // 4 > 3
+    capOnly.decision_quality_prompts = [{ q: 1 }, { q: 2 }, { q: 3 }]; // 3 > 2
+    capOnly.bias_findings = [
+      { type: 'a', source: 'structural', description: 'a', affected_elements: ['node-price'] },
+      { type: 'b', source: 'structural', description: 'b', affected_elements: ['node-demand'] },
+      { type: 'c', source: 'structural', description: 'c', affected_elements: ['edge-price-demand'] },
+    ]; // 3 > 2, every affected_element grounded
+    const result = checkDecisionReviewContract(capOnly, GATE_INPUT);
+    expect(result.ok).toBe(false);
+    expect(result.mustDrop).toBe(false);
+    expect(result.violations.map((v) => v.rule).sort()).toEqual([
+      'bias_findings_cap_exceeded',
+      'decision_quality_prompts_cap_exceeded',
+      'key_assumptions_cap_exceeded',
+    ]);
+  });
+
+  it('a safety breach (missing_review_card): mustDrop=true', () => {
+    const bad = goodReview();
+    delete bad.narrative_summary;
+    const result = checkDecisionReviewContract(bad, GATE_INPUT);
+    expect(result.ok).toBe(false);
+    expect(result.mustDrop).toBe(true);
+  });
+
+  it('mixed safety + count-cap: mustDrop=true and BOTH reported', () => {
+    const bad = goodReview();
+    bad.narrative_summary = 'As you mentioned, Option A stays ahead.'; // R-CONT (safety)
+    bad.key_assumptions = ['a', 'b', 'c', 'd']; // count-cap
+    const result = checkDecisionReviewContract(bad, GATE_INPUT);
+    expect(result.mustDrop).toBe(true);
+    const rules = result.violations.map((v) => v.rule);
+    expect(rules).toContain('fabricated_continuity_phrase');
+    expect(rules).toContain('key_assumptions_cap_exceeded');
+  });
+
+  it('a clean review: ok=true, mustDrop=false', () => {
+    const result = checkDecisionReviewContract(goodReview(), GATE_INPUT);
+    expect(result.ok).toBe(true);
+    expect(result.mustDrop).toBe(false);
+  });
+});
+
 describe('collectGraphEntityIds', () => {
   it('collects node and edge ids, ignoring malformed entries', () => {
     const ids = collectGraphEntityIds({
@@ -248,6 +330,58 @@ describe('findFabricatedContinuityHit', () => {
   it('returns the matched phrase on a hit, null when clean', () => {
     expect(findFabricatedContinuityHit('As you mentioned, X.')).not.toBeNull();
     expect(findFabricatedContinuityHit('The margin is wide and the result is stable.')).toBeNull();
+  });
+});
+
+// ── P2-2: fabricated-continuity pattern PRECISION ─────────────────────────
+// R-CONT is an ENFORCE-DROP rule, so a FALSE POSITIVE drops a legitimate
+// review. After the PR #645 fix-round narrowing, these LEGITIMATE phrasings
+// must NOT match (negative controls), while the genuinely-fabricated callbacks
+// the patterns were narrowed against MUST still match (positive controls).
+// Where a pattern cannot be made precise without conversation context the rule
+// is deliberately biased to FALSE-NEGATIVE (miss a rare fabrication) over
+// FALSE-POSITIVE (drop a good review) — see the R-CONT doc in contract-gate.ts.
+describe('R-CONT pattern precision (P2-2 negative + positive controls)', () => {
+  // Each legit phrasing pairs with the narrowed pattern that USED to false-fire
+  // on it, so a regression that re-broadens a pattern turns this red.
+  const LEGITIMATE_PHRASES = [
+    // "the … you ran/described" — the user initiates the analysis run and the
+    // scenario/question live in the brief the review HAS; grounded, not a prior
+    // turn. (Narrowed: `the (pre-mortem|exercise) you …` only.)
+    'Building on the analysis you ran, the leading option holds.',
+    'The scenario you described leaves demand as the swing factor.',
+    // "in this analysis" — intra-artefact self-reference to THIS review.
+    'In this analysis, the leading option holds a clear lead.',
+    // "your pre-mortem" prospective / first-person DQP guidance — not a
+    // callback to a pre-mortem the user already did. (Narrowed: requires a
+    // past-finding verb after "your pre-mortem".)
+    'Your pre-mortem should focus on the demand assumption.',
+    // "as noted above" — intra-document back-reference, not a prior
+    // conversation. (Narrowed: dropped `above` from the staleness pattern.)
+    'As noted above, the margin on the leading option is thin.',
+  ];
+  it.each(LEGITIMATE_PHRASES)('does NOT flag a legitimate phrasing: %s', (phrase) => {
+    expect(findFabricatedContinuityHit(phrase)).toBeNull();
+    const ok = goodReview();
+    ok.narrative_summary = phrase;
+    expect(checkDecisionReviewContract(ok, GATE_INPUT).ok).toBe(true);
+  });
+
+  // Positive controls — narrowing must NOT gut the rule: each genuine
+  // fabricated callback the patterns target still drops.
+  const FABRICATED_PHRASES = [
+    'As you mentioned, the leading option keeps its lead.',
+    'As we discussed, the framing leans on one price point.',
+    'Treat this as the evidence your pre-mortem asked for.',
+    'This only confirms the exercise you did.',
+    'As discussed earlier, demand is the swing factor.',
+    'The previous analysis pointed the same way.',
+  ];
+  it.each(FABRICATED_PHRASES)('still flags a genuine fabricated callback: %s', (phrase) => {
+    expect(findFabricatedContinuityHit(phrase)).not.toBeNull();
+    const bad = goodReview();
+    bad.narrative_summary = phrase;
+    expect(rulesOf(bad)).toContain('fabricated_continuity_phrase');
   });
 });
 

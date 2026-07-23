@@ -18,11 +18,15 @@
  *   - grounded entity references (bias_findings[].affected_elements must be
  *     real graph ids, never invented).
  *
- * This gate runs POST-parse on the parsed decision_review output. On any
- * violation the caller DROPS the review down the existing graceful no-review
- * path (thin content) and emits a reason-tagged, R-004-clean telemetry event
- * — never a silent trim into compliance. The gate is UNCONDITIONAL (no env
- * gate — Paul doctrine); its existence is the A/B precondition.
+ * This gate runs POST-parse on the parsed decision_review output. It reports
+ * every violated rule and emits a reason-tagged, R-004-clean telemetry event on
+ * ANY violation — never a silent trim into compliance. But the two rule CLASSES
+ * are acted on differently (A1 ruling D-11; see the enforce-vs-telemetry block
+ * below): a SAFETY violation DROPS the review down the existing graceful
+ * no-review path (thin content), while a COUNT-CAP violation is TELEMETRY-ONLY
+ * (counted for the per-model A/B signal but NOT dropped, so current gpt-4.1
+ * output is unchanged). The gate is UNCONDITIONAL (no env gate — Paul doctrine);
+ * its existence is the A/B precondition.
  *
  * ── Rule derivation (derive-don't-mirror; every rule cites its source) ──
  *
@@ -56,15 +60,35 @@
 import { collectStrings } from './shape-check.js';
 
 // ============================================================================
-// Contract count caps — the TIGHT prompt bound
+// Contract count caps — the TIGHT prompt bound  (TELEMETRY-ONLY; see D-11 below)
 //
-// These are the prompt's own per-field maxima (v15 candidate = PMS v13, LIVE
-// on staging). They are DELIBERATELY tighter than the block-parse shape-check
-// backstop in `shape-check.ts` (bias > 3, decision_quality_prompts > 3,
-// key_assumptions > 5, all hard errors). The shape-check bound is a structural
-// floor that catches egregious overruns; THIS gate pins the contract the A/B
-// must not regress. Where a rule already matches a shape-check constraint
-// exactly (flip_thresholds ≤ 2), it is NOT restated here — shape-check owns it.
+// ⚠ EXTERNAL SOURCE OF TRUTH — NOT DERIVABLE IN THIS REPO (trap #12: a
+//   hand-maintained mirror drifts silently). These four maxima MIRROR the
+//   served decision_review prompt's own per-field schema, which lives OUTSIDE
+//   olumi-assistants-service:
+//     • parallel-briefs/decision-review-v15-candidate.txt  (the v15 candidate)
+//     • the served PMS prompt `decision_review_default` (v13 == v15 candidate,
+//       LIVE on staging) — the authoritative wire contract.
+//   Neither is checked into this repo, so these constants CANNOT be derived
+//   in-repo; they are a HAND-MAINTAINED MIRROR that will drift silently if the
+//   served prompt's caps change. Reconciliation owner: the decision_review
+//   prompt-estate owner (see PROMPT-ESTATE-REGISTER.md). Durable fix = derive
+//   these from the served prompt at build/test time (ROADMAP follow-up row —
+//   see PR #645 report). Until then, RE-CHECK on every decision_review prompt
+//   bump. Do NOT add an in-repo copy of the prompt to "fix" this — that is just
+//   a second mirror.
+//
+// ⚠ BLAST RADIUS IS LOW BY CONSTRUCTION: since A1 ruling D-11 these caps are
+//   TELEMETRY-ONLY (see COUNT_CAP_RULES / isEnforcedRule below). A breach is
+//   COUNTED for the per-model A/B signal but NEVER drops the review, so a stale
+//   mirror can only mis-count a telemetry event — it can never change gpt-4.1
+//   output or drop a good review.
+//
+//   They are DELIBERATELY tighter than the block-parse shape-check backstop in
+//   `shape-check.ts` (bias > 3, decision_quality_prompts > 3, key_assumptions
+//   > 5, all hard errors — that ENFORCEMENT is unchanged and still owns the
+//   loose-bound drop). Where a rule already matches a shape-check constraint
+//   exactly (flip_thresholds ≤ 2), it is NOT restated here — shape-check owns it.
 // ============================================================================
 
 /** v15 candidate: `bias_findings (array, max 2; [] unless STRONGLY grounded)`. */
@@ -86,6 +110,24 @@ export const MAX_SCENARIO_CONTEXTS = 2;
 // run" instead). Reflective questions to the reader ("What would change your
 // mind?") are intentionally NOT matched — only invented shared history is.
 //
+// R-CONT is an ENFORCE-DROP rule (see isEnforcedRule below): a match DROPS the
+// whole review. A false positive therefore drops a LEGITIMATE review, which is
+// worse than missing a rare fabrication. So the patterns are deliberately
+// biased to FALSE-NEGATIVE over FALSE-POSITIVE — they target only phrasings
+// that reference a prior TURN / user-performed artefact the input does not
+// contain, and they intentionally do NOT match (P2-2 narrowing, PR #645
+// fix-round; each pinned by a negative control in contract-gate.test.ts):
+//   - "the analysis you ran" / "the scenario you described" — the user
+//     initiates the run and the scenario/question live in the brief the review
+//     HAS, so these are grounded (the noun list is narrowed to review-authored
+//     artefacts: pre-mortem, exercise);
+//   - "your pre-mortem should …" — prospective / first-person DQP guidance, not
+//     a callback to a pre-mortem the user already ran (a past-finding verb is
+//     now required after "your pre-mortem");
+//   - "as noted above" — an intra-document self-reference to THIS review, not a
+//     prior conversation ("above" dropped from the staleness pattern);
+//   - "in this analysis" — intra-artefact self-reference (never matched).
+//
 // Sources: amendment delta TRUTH_DISCIPLINE rule 7 (exact banned examples:
 // "as you mentioned", "as we discussed", "the pre-mortem you asked for",
 // "the exercise you did"); the amendment's recommended detector tokens
@@ -104,16 +146,25 @@ export const FABRICATED_CONTINUITY_PATTERNS: readonly RegExp[] = [
   /\bas we\s+(discussed|mentioned|agreed|talked\s+about|noted|covered|established|said)\b/i,
   // Bare first-person-plural conversation verbs ("we discussed", "we agreed").
   /\bwe\s+(discussed|agreed|talked\s+about|spoke\s+about)\b/i,
-  // "as mentioned / discussed / noted (earlier|before|previously|above)".
-  /\bas\s+(mentioned|discussed|noted|stated)\s+(earlier|before|previously|above)\b/i,
+  // "as mentioned / discussed / noted (earlier|before|previously)". P2-2:
+  // `above` is EXCLUDED — "as noted above" is an intra-document back-reference
+  // to this review's own earlier prose, not a prior conversation.
+  /\bas\s+(mentioned|discussed|noted|stated)\s+(earlier|before|previously)\b/i,
   // "you asked for / about / me" — a prior request the input does not contain.
   /\byou\s+(asked|requested)\s+(for|about|me|us)\b/i,
-  // "the pre-mortem / exercise / analysis you asked / did / …" — the F14
-  // exemplar ("the evidence your pre-mortem asked for").
-  /\bthe\s+(pre-?mortem|exercise|analysis|scenario|question|prompt)\s+you\s+(asked|did|ran|requested|wanted|mentioned|described|raised)\b/i,
-  // "your pre-mortem" — attributes the pre-mortem to the user (fabricated;
-  // the review authors it, the user did not).
-  /\byour\s+pre-?mortem\b/i,
+  // "the pre-mortem / exercise you asked / did / …" — the F14 exemplar
+  // ("the exercise you did"). P2-2: the noun list is narrowed to
+  // review-AUTHORED artefacts (pre-mortem, exercise). `analysis / scenario /
+  // question / prompt` were REMOVED — "the analysis you ran" (the user runs the
+  // analysis) and "the scenario you described" (the scenario lives in the
+  // brief) are grounded, not fabricated callbacks.
+  /\bthe\s+(pre-?mortem|exercise)\s+you\s+(asked|did|ran|requested|wanted)\b/i,
+  // "your pre-mortem <past-finding verb>" — attributes a COMPLETED pre-mortem
+  // to the user (the review authors the pre-mortem; the user did not run one in
+  // a prior turn). P2-2: a past-finding verb is REQUIRED — bare "your
+  // pre-mortem" (e.g. "your pre-mortem should focus on X", prospective DQP
+  // guidance) is legitimate and must not drop.
+  /\byour\s+pre-?mortem\s+(asked|requested|flagged|raised|identified|surfaced|found|showed|revealed|said|told|highlighted)\b/i,
   // "carrying on from an earlier turn / exchange / conversation".
   /\bearlier\s+(turn|exchange|conversation|message|discussion)\b/i,
   /\b(from|in)\s+(a\s+|the\s+)?(previous|prior|earlier)\s+(turn|exchange|conversation|message)\b/i,
@@ -201,8 +252,66 @@ export interface DecisionReviewContractGateInput {
 }
 
 export interface DecisionReviewContractResult {
+  /** True ⇔ ZERO violations of any class (contract-clean; nothing to emit). */
   readonly ok: boolean;
+  /**
+   * True ⇔ at least one SAFETY-class (enforced) violation fired — the review
+   * MUST be dropped down the graceful no-review path. A result with ONLY
+   * count-cap (telemetry-only) violations has `ok === false` (the
+   * `v5.decision_review.contract_violation` event still fires, preserving the
+   * per-model A/B signal) but `mustDrop === false` (the review still attaches).
+   * See the enforce-vs-telemetry classification below.
+   */
+  readonly mustDrop: boolean;
   readonly violations: readonly DecisionReviewContractViolation[];
+}
+
+// ============================================================================
+// Enforce-vs-telemetry rule classification  (A1 ruling D-11)
+//
+// The gate reports EVERY violated rule, but the consume seam
+// (decision-review-enricher.ts) acts on the two CLASSES differently:
+//
+//   • SAFETY rules → ENFORCE-DROP. Model-agnostic DEFECTS
+//     (missing_review_card, fabricated_continuity_phrase / R-CONT,
+//     ungrounded_entity_reference). A review carrying one is DROPPED down the
+//     graceful no-review path on ANY model — this is genuinely-new, correct
+//     protection, not a live-quality change.
+//
+//   • COUNT-CAP rules → TELEMETRY-ONLY. The four tight prompt-bound caps above.
+//     A breach is COUNTED (the per-model A/B regression signal — the whole
+//     point of the gate) but the review is NOT dropped. Rationale (D-11): the
+//     served v15 prompt only REJECTS at the LOOSE shape-check bounds
+//     (bias > 3 / dqp > 3 / key_assumptions > 5), which shape-check already
+//     ENFORCES. A prompt-legal tolerance-band review (e.g. ka = 4, dqp = 3,
+//     bias = 3) SHIPS today; dropping it here would silently change current
+//     gpt-4.1 output. The gate is the A/B PRECONDITION, not a live quality
+//     change — so count-cap breaches must stay observe-only.
+//
+// FAIL-CLOSED: telemetry-only status is an EXPLICIT opt-in (COUNT_CAP_RULES).
+// Any rule NOT listed there ENFORCES (drops), so a rule added to the vocabulary
+// later defaults to DROP — a loud drop-test failure — rather than silently
+// shipping an unclassified defect. (Deliberately NOT a SAFETY_RULES allowlist:
+// that would fail OPEN on a forgotten safety rule.)
+// ============================================================================
+
+/**
+ * The TELEMETRY-ONLY count-cap rules — the ONLY rules exempt from dropping.
+ * Every other rule is enforced (see {@link isEnforcedRule}).
+ */
+export const COUNT_CAP_RULES: ReadonlySet<DecisionReviewContractRule> = new Set([
+  'bias_findings_cap_exceeded',
+  'decision_quality_prompts_cap_exceeded',
+  'key_assumptions_cap_exceeded',
+  'scenario_contexts_cap_exceeded',
+]);
+
+/**
+ * True when a violated rule ENFORCES a drop (a SAFETY-class rule). Fail-closed:
+ * every rule that is not an explicitly telemetry-only count-cap rule enforces.
+ */
+export function isEnforcedRule(rule: DecisionReviewContractRule): boolean {
+  return !COUNT_CAP_RULES.has(rule);
 }
 
 // ============================================================================
@@ -301,7 +410,13 @@ export function checkDecisionReviewContract(
     }
   }
 
-  return { ok: violations.length === 0, violations };
+  return {
+    ok: violations.length === 0,
+    // Enforce-drop iff ANY safety-class violation fired. Count-cap-only
+    // results have ok === false (telemetry fires) but mustDrop === false.
+    mustDrop: violations.some((v) => isEnforcedRule(v.rule)),
+    violations,
+  };
 }
 
 // ============================================================================
