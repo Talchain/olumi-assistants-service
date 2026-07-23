@@ -237,8 +237,27 @@ export function finaliseV5Response(
   const stamped: OlumiResponse = payloadForStamp
     ? { ...scrubbed, analysis_ready: attachComputedAt(payloadForStamp, ctx.freshness) }
     : { ...scrubbed };
-  FINALISED_RESPONSES.add(stamped);
-  return stamped as FinalisedV5Response;
+  // ROADMAP 1.192 leg κ(a) — AUTHORITATIVE top-level graph_hash. The egress
+  // sanitiser sets graph_hash from the GraphV3-parsed per-turn graph as a
+  // FALLBACK, but that projection can diverge from the RAW analysis-affecting
+  // hash after the commit-time options normalisation
+  // (normaliseOptionInterventionContract) — which would make graph_hash
+  // disagree with an analysis block's `computed_against_hash` on a FRESH
+  // analysis (a FALSE GRAPH_DIVERGED, live-proven: effectiveGraph
+  // 7367714928030768 vs persisted b3ebb23cfb03df1d). `freshness.current_graph_hash`
+  // is the SAME canonical hash run_analysis stamps as `graph_hash_at_run` /
+  // `computed_against_hash` (both `computeAnalysisAffectingGraphHash` over the
+  // raw persisted/authoritative graph), so when present it is the authoritative
+  // value — prefer it over the sanitiser fallback. On a STALE turn it is the
+  // CURRENT graph's hash (≠ the analysed hash) — the honest divergence signal
+  // the handshake exists to carry. Turns with no freshness keep the sanitiser
+  // fallback (coverage), where there is no analysis block to mismatch.
+  const withGraphHash: OlumiResponse =
+    ctx.freshness?.current_graph_hash != null
+      ? { ...stamped, graph_hash: ctx.freshness.current_graph_hash }
+      : stamped;
+  FINALISED_RESPONSES.add(withGraphHash);
+  return withGraphHash as FinalisedV5Response;
 }
 
 function sanitiseEnrichmentBlocks(
