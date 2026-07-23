@@ -274,12 +274,25 @@ export function isDraftTruncated(finishSignal: string | null | undefined): boole
 // rollback = code revert — consistent with the rest of this seam).
 
 // Time deadline: a draft still in the nodes array (no edges) at this point
-// cannot be a healthy draft — every healthy draft has fully COMPLETED (not just
-// reached edges) by ~34.8s, and reaches the edges array (a ~30%-of-output
-// milestone) far earlier (est. ≤16s). 30s sits below the 34.8s healthy-
-// completion floor with margin above the healthy time-to-edges. Armed as a
-// timer, so a silent-thrash runaway that stops emitting deltas is still caught.
-export const DRAFT_RUNAWAY_DETECT_MS = 30_000;
+// cannot be a healthy draft. Armed as a timer, so a silent-thrash runaway that
+// stops emitting deltas is still caught.
+//
+// TIGHTENED 30s → 20s (2026-07-23, from LIVE round-1 streaming data on build
+// 85b8e0e). The day-1 30s was the conservative value derived from the ONLY data
+// then available — the wave1 healthy TOTAL-duration ceiling (34.8s) — because
+// streaming time-to-edges could not be measured pre-deploy. Round-1 measured it:
+//   - every runaway aborted at the 30s gate while still at only 3153-6659 partial
+//     chars (a slow ~125 char/s nodes thrash), i.e. detectable well before 30s;
+//   - the largest healthy draft in the corpus completes its ENTIRE structure
+//     (nodes+edges) in 31.8-34.8s, so it reaches the edges array (a ~40%-of-
+//     output milestone) by ~14s — leaving ~6s of margin below 20s.
+// A 30s abort cost 2 doomed attempts ~60s and, with the ~20s post-draft coaching
+// pass competing for the 120s request budget, tipped unlucky briefs into a 110s
+// `anthropic_timeout` (4 seen in round 1). At 20s, even a 3-abort sequence
+// (60s) + a 30s final draft + 20s coaching = 110s < 120s, so the runaway class
+// no longer exhausts the budget. `cee.llm.draft_edges_reached` is logged on
+// success to keep validating this floor live.
+export const DRAFT_RUNAWAY_DETECT_MS = 20_000;
 
 // Char budget: max healthy nodes-section = 6896 chars; runaway visible minimum
 // = 9526 chars. 8000 sits above the healthy max (+16%) and below the runaway

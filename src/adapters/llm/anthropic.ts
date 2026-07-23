@@ -967,6 +967,16 @@ export async function draftGraphWithAnthropic(
               edgesReached = true;
               timeToEdgesMs = Date.now() - attemptStart;
               if (detectTimer) { clearTimeout(detectTimer); detectTimer = undefined; }
+              // Live validation of DRAFT_RUNAWAY_DETECT_MS: a healthy draft must
+              // reach the edges array well under the deadline. Queryable in Render
+              // logs (structural metrics only — no brief content).
+              log.info({
+                event: "cee.llm.draft_edges_reached",
+                model,
+                time_to_edges_ms: timeToEdgesMs,
+                chars: acc.length,
+                detect_ms: detectDeadlineMs,
+              }, "[Anthropic] draft_graph reached the edges array — healthy generation past the nodes bottleneck");
             } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS) {
               runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "chars" };
               perAttempt.abort();
