@@ -1140,6 +1140,23 @@ export const TelemetryEvents = {
   // boolean (fragment success counts, violation count, wall-clock ms).
   V5DecisionReviewDecomposed: "v5.decision_review.decomposed",
 
+  // decision_review POST-parse CONTRACT GATE (ROADMAP 1.185(c) — the named
+  // "keep gpt-4.1" blocker). Fires once per auto-fired decision_review when the
+  // parsed output VIOLATES the prompt contract the block-parse shape check does
+  // not cover (missing review_card, tight count caps, fabricated conversational
+  // callbacks R-CONT, ungrounded entity references). On this event the review
+  // is DROPPED down the graceful no-review path (thin content) — never trimmed
+  // into compliance. The gate is unconditional (no env gate); its existence is
+  // the gpt-4.1 A/B precondition.
+  //
+  // Privacy contract (R-004): `request_id` / `scenario_id` are routing-key
+  // strings; `reason` is the primary violated rule code and `reasons` is the
+  // comma-joined sorted set of violated rule codes — both drawn from a bounded
+  // vocabulary (see DecisionReviewContractRule). `violation_count` is a finite
+  // integer. NO prose, graph label, raw id, brief text, or review content ever
+  // appears on this event.
+  V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
+
   // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
   // events cover the graphState resolution outcomes for an edit-intent turn,
   // so the routing-contract invariant (edit intent → mutation OR clarification
@@ -3267,6 +3284,15 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("cee.decision_review.failed", 1, {
             error_code: String((eventData.error_code as string) || "unknown"),
             http_status: String((eventData.http_status as number | string | undefined) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.V5DecisionReviewContractViolation: {
+          // Reason tag is the PRIMARY violated rule code (bounded, low
+          // cardinality); the full set travels on the log payload's `reasons`.
+          datadogClient.increment("v5.decision_review.contract_violation", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
           });
           break;
         }

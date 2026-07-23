@@ -30,6 +30,10 @@ import {
   invokeDecomposedDecisionReview,
   DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
 } from '../../cee/decision-review/decompose.js';
+import {
+  checkDecisionReviewContract,
+  summariseContractViolations,
+} from '../../cee/decision-review/contract-gate.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
@@ -282,6 +286,32 @@ export async function enrichRunAnalysisWithDecisionReview(
         brief_present: true,
         brief_length: briefLength,
         leading_option_present: leadingOptionPresent,
+      });
+      return input.handlerFacts;
+    }
+
+    // POST-parse CONTRACT GATE (ROADMAP 1.185(c)). The parsed output is
+    // non-null but may still violate the prompt contract the block-parse shape
+    // check does not cover (missing review_card, tight count caps, fabricated
+    // conversational callbacks R-CONT, ungrounded entity references). This is
+    // the highest-stakes user-facing prose on the turn; a violating review is
+    // DROPPED down the SAME graceful no-review path as a shape-extraction
+    // failure — the turn still succeeds with thin content, never shipping
+    // violating prose and never silently trimmed into compliance. Unconditional
+    // (no env gate — Paul doctrine); its existence is the gpt-4.1 A/B
+    // precondition. Grounds entity references against the run's graph.
+    const contract = checkDecisionReviewContract(result.output, {
+      graph: invokeInput.graph,
+    });
+    if (!contract.ok) {
+      emit(TelemetryEvents.V5DecisionReviewContractViolation, {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        duration_ms: Date.now() - startedAt,
+        brief_present: true,
+        brief_length: briefLength,
+        leading_option_present: leadingOptionPresent,
+        ...summariseContractViolations(contract.violations),
       });
       return input.handlerFacts;
     }

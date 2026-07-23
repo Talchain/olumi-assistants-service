@@ -261,8 +261,13 @@ const DESCRIPTIVE_FIELD_KEYS: ReadonlyArray<string> = [
   'pre_mortem',
 ];
 
-/** Recursively collect string values from an unknown value. */
-function collectStrings(value: unknown): string[] {
+/**
+ * Recursively collect string VALUES (never object keys) from an unknown value.
+ * Exported so the POST-parse contract gate (`contract-gate.ts`) reuses the SAME
+ * walker for its fabricated-continuity phrase scan instead of maintaining a
+ * second recursive string collector that could drift (derive-don't-mirror).
+ */
+export function collectStrings(value: unknown): string[] {
   if (typeof value === 'string') return [value];
   if (Array.isArray(value)) return value.flatMap(collectStrings);
   if (typeof value === 'object' && value !== null) {

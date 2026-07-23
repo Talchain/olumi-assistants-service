@@ -86,7 +86,10 @@ function makeRunAnalysisFact(): HandlerFact {
 describe('Test K — decision_review enricher resilience (verification)', () => {
   it('SUCCESS path — populates enrichment.decision_review, no degraded telemetry', async () => {
     invokeMock.mockResolvedValueOnce({
-      output: { recommendation: 'go with Option A', summary: 'strong margin' },
+      // narrative_summary present so the POST-parse contract gate admits the
+      // review (a missing review_card is dropped); `recommendation`/`summary`
+      // remain the fields this success-path attach assertion reads.
+      output: { narrative_summary: 'Option A leads.', recommendation: 'go with Option A', summary: 'strong margin' },
       raw: '{}',
       model: 'claude-sonnet-4-6',
       provider: 'anthropic',
