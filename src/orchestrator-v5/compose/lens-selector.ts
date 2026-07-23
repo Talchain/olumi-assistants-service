@@ -43,11 +43,19 @@ import { bandConfidence, type ConfidenceBand } from './confidence-bands.js';
 // Public result types
 // ============================================================================
 
-/** The three P0-selectable lenses, in priority order. */
+/**
+ * The P0-selectable lenses, in priority order. The first three are the shipped
+ * capability-layer core (ROADMAP 1.183). `what_if_counterfactual` is the first
+ * wave-3 λ EXTENSION lens (#646): it is placed LAST (lowest priority — it never
+ * displaces a core lens on a healthy turn) and its executor is env/programme-gated
+ * (see {@link LENS_EXECUTOR_INTRINSICALLY_AVAILABLE} + the ROADMAP 1.195 gate),
+ * so it can only be suggested when the caller injects its availability.
+ */
 export type LensId =
   | 'sensitivity_flip_risk'
   | 'pre_mortem'
-  | 'evpi_evidence_priority';
+  | 'evpi_evidence_priority'
+  | 'what_if_counterfactual';
 
 /**
  * The specific signal that TRIGGERED the lens. Distinct from `LensId` so
@@ -64,7 +72,9 @@ export type LensRationaleCode =
   | 'TOP_FACTOR_LOW_CONFIDENCE' // the #1-influence factor is least certain
   | 'WIN_PROB_MODERATE' // a leader exists but not decisively
   // evpi_evidence_priority
-  | 'MATERIAL_EVPI'; // learning more about a factor would move the decision
+  | 'MATERIAL_EVPI' // learning more about a factor would move the decision
+  // what_if_counterfactual (wave-3 λ extension, executor-gated)
+  | 'WHATIF_EXPLORE_DRIVER'; // a top-influence factor is worth a counterfactual probe
 
 /**
  * The science-bearing enrichment FIELD each lens grounds its claim in. Wave-3 σ
@@ -138,6 +148,78 @@ export const PREMORTEM_WINPROB_MAX = 0.7;
  * ABSENT) there is nothing worth a dedicated research nudge.
  */
 export const EVPI_MATERIAL_MIN_PP = 1.0;
+
+// ============================================================================
+// Executor availability + the extension-lens enable gate (wave-3 λ)
+// ============================================================================
+
+/**
+ * NEVER suggest a lens whose executor is absent (design §2.6/2.7): the selector
+ * must not point a user at a decision-science method the platform cannot honestly
+ * run. Every `LensId` declares here whether its executor is INTRINSICALLY present
+ * on the live path:
+ *   - the three core lenses point at actions that always execute — sensitivity →
+ *     `what_would_flip`, pre-mortem → the review-path pre_mortem card, EVPI →
+ *     `gather_evidence` — so they are always available;
+ *   - `what_if_counterfactual` runs against ISL (`createCounterfactualClient()`,
+ *     latent when `ISL_BASE_URL` is unset) and is additionally gated by ROADMAP
+ *     1.195 — so it is NOT intrinsically available; the caller must inject its
+ *     availability (see {@link whatIfSuggestionExecutorAvailable}).
+ * Compile-exhaustive over `LensId`: a NEW lens must declare its intrinsic
+ * availability here (fail-loud on drift, never a silent default).
+ */
+const LENS_EXECUTOR_INTRINSICALLY_AVAILABLE: Readonly<Record<LensId, boolean>> = {
+  sensitivity_flip_risk: true,
+  pre_mortem: true,
+  evpi_evidence_priority: true,
+  what_if_counterfactual: false,
+};
+
+/** Options threading caller-owned, non-deterministic state into the otherwise-pure
+ *  selector. Kept OUT of `selectLens`'s core so the rule logic stays testable and
+ *  env-free (the env/config read lives at the compose call site). */
+export interface LensSelectorOptions {
+  /**
+   * Per-lens executor availability for NON-intrinsic (extension) lenses. A lens
+   * whose executor is absent is NEVER suggested — the selector falls through to
+   * the next available lens (design §2.6/2.7). Omitted / `false` ⇒ the extension
+   * lens is not suggested (fail-closed).
+   */
+  readonly executorAvailable?: Partial<Record<LensId, boolean>>;
+}
+
+function isLensExecutorAvailable(lens: LensId, options?: LensSelectorOptions): boolean {
+  if (LENS_EXECUTOR_INTRINSICALLY_AVAILABLE[lens]) return true;
+  return options?.executorAvailable?.[lens] ?? false;
+}
+
+/**
+ * The ROADMAP 1.195 four-item enable-gate for the what-if counterfactual
+ * SUGGESTION, expressed as a fail-closed code constant (the no-env-gates
+ * doctrine — activation is a reviewed code change, never a runtime bit).
+ * Items 2/3/4 — the live ISL model-fidelity probe (A3), the owner-placement
+ * ruling (CEE-2nd-interpreter vs PLoT proxy), and the target-semantics
+ * confirmation (cap/baseline, not the flip tipping_point) — are programme
+ * decisions that are NOT cleared, so this ships `false`. Item 1 (transport:
+ * `ISL_BASE_URL` set / `createCounterfactualClient() !== null`) is ANDed in
+ * separately at the call site via {@link whatIfSuggestionExecutorAvailable}.
+ * While this is `false`, the selector can NEVER suggest the what-if lens,
+ * however the transport is configured. Enabling it is a Paul/A1-gated code
+ * change once all four items clear; rollback = revert.
+ */
+export const WHATIF_SUGGESTION_GATE_CLEARED = false;
+
+/**
+ * Whether the what-if counterfactual SUGGESTION may be offered: the ROADMAP 1.195
+ * enable-gate (items 2/3/4, {@link WHATIF_SUGGESTION_GATE_CLEARED}) AND the ISL
+ * transport being configured (item 1, `createCounterfactualClient() !== null`,
+ * passed as `islTransportConfigured`). Fail-closed: ANY unmet item ⇒ `false`.
+ * Pure + directly testable so the gate is a mutation witness (flip the constant
+ * or drop the transport ⇒ this returns `false`).
+ */
+export function whatIfSuggestionExecutorAvailable(islTransportConfigured: boolean): boolean {
+  return WHATIF_SUGGESTION_GATE_CLEARED && islTransportConfigured;
+}
 
 // ============================================================================
 // Normalised, defensively-read analysis signals
@@ -290,6 +372,26 @@ function evaluateEvpiEvidencePriority(signals: AnalysisSignals): LensRationaleCo
   return null;
 }
 
+/**
+ * Rule 4 (wave-3 λ extension, executor-gated) — what-if counterfactual. LOWEST
+ * priority: only reached when no flip-risk / pre-mortem / EVPI lens fired, so it
+ * NEVER displaces a core lens (priority-preservation guard). Points the user at
+ * exploring how the leading option changes if the single most-influential factor
+ * moves — a counterfactual they can run explicitly (`what_would_flip`'s ISL
+ * counterfactual extension, #646). Trigger: an identifiable top-influence factor
+ * (rank 1 with a finite influence score) exists to intervene on. NOTE: the exact
+ * intervention-target semantics are ROADMAP 1.195 gate item 4 (pending); this
+ * evaluator is provisional and, crucially, the lens is enable-GATED — its
+ * executor availability is injected `false` today, so it never fires in
+ * production regardless of this trigger.
+ */
+function evaluateWhatIfCounterfactual(signals: AnalysisSignals): LensRationaleCode | null {
+  const hasTopDriver = signals.factors.some(
+    (f) => f.influenceRank === 1 && f.influenceScore !== null,
+  );
+  return hasTopDriver ? 'WHATIF_EXPLORE_DRIVER' : null;
+}
+
 // ============================================================================
 // Copy — compile-enforced exhaustive over the input unions (a new LensId or
 // LensRationaleCode fails the build HERE until it is given copy — fail-loud on
@@ -297,13 +399,14 @@ function evaluateEvpiEvidencePriority(signals: AnalysisSignals): LensRationaleCo
 // forbidden vocabulary, no raw decimals, no entity IDs) — asserted in tests.
 // ============================================================================
 
-const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
+export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   sensitivity_flip_risk: 'Strengthen your model: pressure-test the key driver',
   pre_mortem: 'Strengthen your model: run a quick pre-mortem',
   evpi_evidence_priority: 'Strengthen your model: focus your evidence-gathering',
+  what_if_counterfactual: 'Strengthen your model: try a what-if on the key driver',
 };
 
-const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
+export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   FLIP_RISK_ISOLATED:
     'The result leans on a single factor that could tip which option leads on its own — a small change to it alone could flip the outcome. Asking what would flip the decision shows how much room for error you have.',
   FLIP_RISK_CORRELATED:
@@ -318,6 +421,8 @@ const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'The leading option is ahead, but not by a wide margin. A pre-mortem — assuming it went wrong and asking why — helps you see what would have to break for that to happen.',
   MATERIAL_EVPI:
     'There is a factor where learning more would change the decision the most. Gathering evidence there first, rather than everywhere, is the fastest way to firm up the choice.',
+  WHATIF_EXPLORE_DRIVER:
+    'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the leading option changes as it moves — shows how much the choice hangs on it.',
 };
 
 /**
@@ -329,7 +434,7 @@ const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
  * lens's grounding field is a live, organically-observable cage DENIAL (positive
  * control on staging); the others ground in allow-listed fields.
  */
-const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, LensGroundingField>> = {
+export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, LensGroundingField>> = {
   FLIP_RISK_ISOLATED: 'factor_sensitivity',
   FLIP_RISK_CORRELATED: 'factor_sensitivity',
   DOMINANT_DRIVER: 'factor_sensitivity',
@@ -337,6 +442,12 @@ const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, LensGroun
   TOP_FACTOR_LOW_CONFIDENCE: 'factor_sensitivity',
   WIN_PROB_MODERATE: 'option_comparison',
   MATERIAL_EVPI: 'factor_sensitivity',
+  // The what-if claim is about the OUTCOME (option win probability) → grounds in
+  // option_comparison, which is deliberately NOT allow-listed, so the σ cage
+  // DENIES surfacing its value: the counterfactual outcome number stays omitted
+  // until Neil rules (doctrine-pending) — an honest double-lock alongside the
+  // 1.195 enable gate.
+  WHATIF_EXPLORE_DRIVER: 'option_comparison',
 };
 
 function buildSelection(lens: LensId, rationaleCode: LensRationaleCode): LensSelection {
@@ -355,22 +466,58 @@ function buildSelection(lens: LensId, rationaleCode: LensRationaleCode): LensSel
 
 /**
  * Select the single most useful lens for this analysis, or `null` when the
- * evidence doesn't justify one. Priority order: sensitivity/flip-risk →
- * pre-mortem → EVPI evidence priority; the first rule that fires wins.
+ * evidence doesn't justify one (or the only lens whose evidence fired has no
+ * executor). Priority order: sensitivity/flip-risk → pre-mortem → EVPI evidence
+ * priority → what-if counterfactual (extension, executor-gated); the first rule
+ * that BOTH fires AND has an available executor wins.
+ *
+ * The "never suggest a lens whose executor is absent" rule (design §2.6/2.7) is
+ * applied uniformly: a lens whose evidence fires but whose executor is
+ * unavailable is SKIPPED, falling through to the next — never a suggestion the
+ * platform cannot honestly run. The three core lenses are intrinsically
+ * available; `what_if_counterfactual` requires the caller to inject availability
+ * (which is itself gated by ROADMAP 1.195 — see
+ * {@link whatIfSuggestionExecutorAvailable}).
+ *
+ * ── Extension harness (lenses 2..N, design §2.7) ──────────────────────────────
+ * To add a lens: (1) add its `LensId` + `LensRationaleCode(s)`; (2) add a pure
+ * `evaluate<Lens>(signals)` over the (possibly extended) signal bag; (3) add copy
+ * (`TITLE_BY_LENS` / `BODY_BY_RATIONALE`) and its `GROUNDING_FIELD_BY_RATIONALE`
+ * entry and `LENS_EXECUTOR_INTRINSICALLY_AVAILABLE` flag — the compiler forces all
+ * four (fail-loud on drift); (4) insert ONE priority-ordered branch below, gated
+ * on `isLensExecutorAvailable`. The at-most-one + may-return-null invariants hold
+ * by construction. A lens with a NON-intrinsic executor (needs an ISL/PLoT caller
+ * that may be absent) MUST ship executor-intrinsic `false` and be added to
+ * `selectLens` only in lockstep with a real executor + its availability injection
+ * — never suggest a method that cannot run.
  */
-export function selectLens(fact: RunAnalysisHandlerFact): LensSelection | null {
+export function selectLens(
+  fact: RunAnalysisHandlerFact,
+  options?: LensSelectorOptions,
+): LensSelection | null {
   const signals = readAnalysisSignals(fact);
   if (signals === null) return null;
 
   const sensitivity = evaluateSensitivityFlipRisk(signals);
-  if (sensitivity !== null) return buildSelection('sensitivity_flip_risk', sensitivity);
+  if (sensitivity !== null && isLensExecutorAvailable('sensitivity_flip_risk', options)) {
+    return buildSelection('sensitivity_flip_risk', sensitivity);
+  }
 
   const preMortem = evaluatePreMortem(signals);
-  if (preMortem !== null) return buildSelection('pre_mortem', preMortem);
+  if (preMortem !== null && isLensExecutorAvailable('pre_mortem', options)) {
+    return buildSelection('pre_mortem', preMortem);
+  }
 
   const evpi = evaluateEvpiEvidencePriority(signals);
-  if (evpi !== null) return buildSelection('evpi_evidence_priority', evpi);
+  if (evpi !== null && isLensExecutorAvailable('evpi_evidence_priority', options)) {
+    return buildSelection('evpi_evidence_priority', evpi);
+  }
 
-  // Load-bearing negative: the evidence doesn't justify any lens.
+  const whatIf = evaluateWhatIfCounterfactual(signals);
+  if (whatIf !== null && isLensExecutorAvailable('what_if_counterfactual', options)) {
+    return buildSelection('what_if_counterfactual', whatIf);
+  }
+
+  // Load-bearing negative: no lens whose evidence fired has an available executor.
   return null;
 }

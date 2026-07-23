@@ -84,7 +84,8 @@ import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.j
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
-import { selectLens } from './lens-selector.js';
+import { selectLens, whatIfSuggestionExecutorAvailable } from './lens-selector.js';
+import { config } from '../../config/index.js';
 import {
   classifyClaimUsable,
   TIER2_ACTIVATION_ENABLED,
@@ -953,7 +954,18 @@ export function buildLensSuggestionCoachingBlock(
   fact: RunAnalysisHandlerFact,
   ctx: BlockBuildCtx,
 ): CoachingBlock | null {
-  const selection = selectLens(fact);
+  // Wave-3 λ (ROADMAP 1.203): inject the what-if lens's executor availability so
+  // the selector never suggests a lens it cannot honestly run (design §2.6/2.7).
+  // Availability = the ROADMAP 1.195 enable-gate (items 2/3/4, a fail-closed code
+  // constant, currently CLOSED) AND the ISL transport being configured (item 1:
+  // `config.isl.baseUrl` set ≡ `createCounterfactualClient() !== null`). While the
+  // gate ships closed, this is always `false` regardless of transport, so the
+  // proactive what-if suggestion CANNOT fire.
+  const selection = selectLens(fact, {
+    executorAvailable: {
+      what_if_counterfactual: whatIfSuggestionExecutorAvailable(Boolean(config.isl.baseUrl)),
+    },
+  });
   if (selection === null) return null;
 
   const candidate = {
