@@ -19,7 +19,7 @@ import { getMaxTokensFromConfig } from "./router.js";
 import { resolveDraftMaxTokens, resolveDraftThinking, isDraftTruncated } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
-import { extractJsonFromResponse, type JsonExtractionOptions, type JsonExtractionResult } from '../../utils/json-extractor.js';
+import { extractJsonFromResponse, closeTruncatedJson, type JsonExtractionOptions, type JsonExtractionResult } from '../../utils/json-extractor.js';
 import {
   LLMDraftResponse as AnthropicDraftResponse,
   LLMRepairResponse as AnthropicRepairResponse,
@@ -920,7 +920,10 @@ export async function draftGraphWithAnthropic(
     // guaranteed valid JSON matching our schema — go straight to JSON.parse.
     // When inactive or after a 400 fallback to prompt-only mode, use the robust extractor
     // that handles markdown fences and preamble.
-    let rawJson: Record<string, unknown>;
+    let rawJson: Record<string, unknown> | undefined;
+    // 2026-07-23 firefight — set when a truncated draft was recovered by closing
+    // the partial JSON (salvage) rather than thrown. Surfaced on the result meta.
+    let salvagedFromTruncation = false;
     try {
       if (useStructuredOutputs) {
         try {
@@ -953,38 +956,77 @@ export async function draftGraphWithAnthropic(
       }
     } catch (parseErr) {
       if (truncatedAtMaxTokens) {
-        // Fail FAST and TYPED: the generation was cut at the derived token
-        // budget and the remainder is unparseable. Distinguishing this from
-        // generic non-JSON garbage makes the runaway-generation case
-        // diagnosable at a glance (pre-fix, these requests never returned at
-        // all — they hung to the timeout).
-        throw Object.assign(
-          new UpstreamNonJsonError(
-            `anthropic draft_graph output truncated at max_tokens=${maxTokens} (stop_reason=max_tokens, ` +
-            `output_tokens=${response.usage.output_tokens}) — runaway generation returned truncated JSON ` +
-            `inside the ${effectiveTimeout}ms timeout instead of hanging to it`,
-            "anthropic",
-            "draft_graph",
-            providerLatencyMs,
-            content.text.slice(0, 500),
-            undefined,
-            undefined,
-            idempotencyKey,
-            parseErr,
-          ),
-          // Structured classification + failed-call metadata: the pipeline's
-          // recovery-copy selection keys off the FLAG (message-prefix matching
-          // breaks anchored regexes), and the meta feeds ctx.llmMeta →
-          // _diagnostic_trace.llm_calls on the failure envelope.
-          { _llm_meta: failedCallLlmMeta, truncated_at_max_tokens: true },
-        );
+        // SALVAGE FIRST (2026-07-23 firefight, prefer salvage over a doomed
+        // sub-budget retry): the generation was cut at the derived token budget
+        // and the tail is unparseable, but the PREFIX may be a complete graph
+        // (a truncation AFTER `nodes`+`edges`). Close the truncated JSON around
+        // its already-complete data and, if it parses, feed it to the SAME
+        // normalisation + schema validation below. The schema is the gate — a
+        // partial cut before `edges` (or otherwise incomplete) fails
+        // `AnthropicDraftResponse.safeParse` and re-throws the typed truncation
+        // error, so salvage can only ever ACCEPT a syntactically- AND
+        // schema-valid graph; it never ships a malformed one.
+        const repaired = closeTruncatedJson(content.text);
+        if (repaired) {
+          try {
+            const salvaged = JSON.parse(repaired) as Record<string, unknown>;
+            if (Array.isArray((salvaged as { nodes?: unknown }).nodes)) {
+              rawJson = salvaged;
+              salvagedFromTruncation = true;
+              log.warn({
+                event: "cee.llm.draft_truncation_salvaged",
+                model,
+                max_tokens: maxTokens,
+                output_tokens: response.usage.output_tokens,
+                salvaged_bytes: repaired.length,
+                original_bytes: content.text.length,
+              }, "[Anthropic] draft_graph truncated at max_tokens — recovered a complete graph prefix by closing the partial JSON (salvage); validating against the draft schema");
+            }
+          } catch {
+            // Repaired string did not parse — fall through to the typed throw.
+          }
+        }
       }
-      // Non-truncated parse failure: still carry the failed call's metadata so
-      // the diagnostic trace records the LLM call that produced the bad text.
-      if (parseErr instanceof Error && !(parseErr as { _llm_meta?: unknown })._llm_meta) {
-        Object.assign(parseErr, { _llm_meta: failedCallLlmMeta });
+      if (rawJson === undefined) {
+        if (truncatedAtMaxTokens) {
+          // Fail FAST and TYPED: the generation was cut at the derived token
+          // budget and the remainder is unparseable (and unsalvageable).
+          // Distinguishing this from generic non-JSON garbage makes the
+          // runaway-generation case diagnosable at a glance (pre-fix, these
+          // requests never returned at all — they hung to the timeout).
+          throw Object.assign(
+            new UpstreamNonJsonError(
+              `anthropic draft_graph output truncated at max_tokens=${maxTokens} (stop_reason=max_tokens, ` +
+              `output_tokens=${response.usage.output_tokens}) — runaway generation returned truncated JSON ` +
+              `inside the ${effectiveTimeout}ms timeout instead of hanging to it`,
+              "anthropic",
+              "draft_graph",
+              providerLatencyMs,
+              content.text.slice(0, 500),
+              undefined,
+              undefined,
+              idempotencyKey,
+              parseErr,
+            ),
+            // Structured classification + failed-call metadata: the pipeline's
+            // recovery-copy selection keys off the FLAG (message-prefix matching
+            // breaks anchored regexes), and the meta feeds ctx.llmMeta →
+            // _diagnostic_trace.llm_calls on the failure envelope.
+            { _llm_meta: failedCallLlmMeta, truncated_at_max_tokens: true },
+          );
+        }
+        // Non-truncated parse failure: still carry the failed call's metadata so
+        // the diagnostic trace records the LLM call that produced the bad text.
+        if (parseErr instanceof Error && !(parseErr as { _llm_meta?: unknown })._llm_meta) {
+          Object.assign(parseErr, { _llm_meta: failedCallLlmMeta });
+        }
+        throw parseErr;
       }
-      throw parseErr;
+    }
+    // Salvage or normal parse produced a JSON object; a truncation that could
+    // not be salvaged already threw above. Narrow the type for the rest.
+    if (rawJson === undefined) {
+      throw new Error("anthropic_draft_graph_no_parsed_json");
     }
     // Use full raw text for debug output (preserves preamble/suffix for forensics)
     const jsonText = content.text.trim();
@@ -1275,6 +1317,10 @@ export async function draftGraphWithAnthropic(
           total_tokens: response.usage.input_tokens + response.usage.output_tokens,
         },
         finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
+        // 2026-07-23 firefight: true when this draft was recovered from a
+        // max_tokens truncation by closing the partial JSON (salvage) rather
+        // than re-drafted. Observable on the diagnostic trace.
+        salvaged_from_truncation: salvagedFromTruncation,
         provider_latency_ms: providerLatencyMs,
         node_kinds_raw_json: rawNodeKinds,
         // Structured outputs telemetry — propagated through unified pipeline to diagnostic trace

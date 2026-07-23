@@ -29,6 +29,7 @@ import {
   getDraftLlmRetryBudgetMs,
   getAffordableDraftTokens,
   getJitteredRetryDelayMs,
+  isLeanRetryAffordable,
 } from "../../../config/timeouts.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamTimeoutError } from "../../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../../validation/pipeline.js";
@@ -398,30 +399,35 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
         );
       }
 
-      // Lean-retry backstop (fix e, S-AUDIT-2026-07-20; REACHABILITY 2026-07-21):
-      // a draft truncated at max_tokens is a demand-exceeds-budget failure — the
-      // model committed to a graph too large to finish inside the derived token
-      // budget. Fire ONE corrective retry with a directive that CUTS output-token
-      // demand (primary trade-off only, ≤12 nodes, numbers qualitative). The
-      // attempt-1 runaway sentinel (DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL, passed as
-      // maxTokensCeiling above) is what makes THIS retry reachable: it truncates
-      // the runaway ~15-30s earlier than the full 8,550-token budget would, so a
-      // window big enough for a lean draft actually remains. Attempt-1-only, so a
-      // second truncation falls through to the typed error below. Budget honesty
-      // (reuse #576's affordability gate): if the window still affordable inside
-      // DRAFT_REQUEST_BUDGET_MS cannot fit even a lean draft
-      // (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, recalibrated to the ≤12-node
-      // directive), fail fast with the existing typed truncation error rather
-      // than burn a second generation on a result guaranteed to truncate again
-      // or be discarded by the Step-11 budget guard. No double-spend beyond one
-      // retry.
+      // Truncation recovery (fix e, S-AUDIT-2026-07-20; ANTI-DOOM GUARD
+      // 2026-07-23 firefight). A draft truncated at max_tokens is a
+      // demand-exceeds-budget failure. The PRIMARY recovery is SALVAGE — the
+      // adapter (`closeTruncatedJson` in anthropic.ts) closes the truncated JSON
+      // and, if the recovered partial still validates as a GraphV3 (nodes+edges
+      // present), RETURNS it instead of throwing, so most late truncations never
+      // reach this catch at all.
+      //
+      // A lean corrective retry is only a fallback, and ONLY when it is NOT
+      // doomed: `isLeanRetryAffordable` forbids retrying into a budget SMALLER
+      // than the attempt that overflowed (`attempt1EffectiveMaxTokens`). Retrying
+      // a 6,800-token truncation at ~3,178 tokens (< half) was the exact
+      // 2026-07-23 draft-down mechanism — the model that could not fit 6,800
+      // re-truncated in 3,178 and the request 400'd after ~89s. Since attempt 1
+      // now uses the FULL affordable budget, no smaller window can fund an
+      // equal-or-larger retry, so this gate does not fire — truncation falls
+      // through to the typed error + honest retry copy below. Attempt-1-only; no
+      // double-spend beyond one retry.
       if (isTruncation && attempt === 1 && !leanDraftRetried) {
+        const attempt1EffectiveMaxTokens = Math.min(
+          getAffordableDraftTokens(effectiveLlmTimeout),
+          DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
+        );
         const leanRetryDelayMs = getJitteredRetryDelayMs();
         const leanRetryWindowMs = getDraftLlmRetryBudgetMs(
           Date.now() - requestStartMs + leanRetryDelayMs,
         );
         const leanAffordableTokens = getAffordableDraftTokens(leanRetryWindowMs);
-        if (leanAffordableTokens >= LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR) {
+        if (isLeanRetryAffordable(leanAffordableTokens, attempt1EffectiveMaxTokens)) {
           leanDraftRetried = true;
           // OBSERVABILITY HONESTY: a structured pino LOG, not a registered
           // TelemetryEvents entry — detection is Render log search
@@ -432,6 +438,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
             model: draftAdapter.model,
             lean_retry_window_ms: leanRetryWindowMs,
             lean_affordable_tokens: leanAffordableTokens,
+            attempt1_effective_max_tokens: attempt1EffectiveMaxTokens,
             lean_tokens_floor: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
             elapsed_since_request_start_ms: Date.now() - requestStartMs,
             request_id: ctx.requestId,
@@ -439,18 +446,20 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           await new Promise((resolve) => setTimeout(resolve, leanRetryDelayMs));
           continue;
         }
-        // Remaining budget cannot fit even a lean draft — do NOT retry. Fall
-        // through to the throw path below so the typed truncation error (and
-        // its truncation-specific recovery copy) reaches the client.
+        // Remaining budget is SMALLER than the attempt that overflowed — a retry
+        // would re-truncate (the 2026-07-23 doomed-retry class). Do NOT retry;
+        // fall through to the throw path below so the typed truncation error and
+        // its honest retry copy reach the client (salvage already tried upstream).
         log.warn({
           event: "cee.llm.draft_lean_retry_skipped_budget",
           model: draftAdapter.model,
           lean_retry_window_ms: leanRetryWindowMs,
           lean_affordable_tokens: leanAffordableTokens,
+          attempt1_effective_max_tokens: attempt1EffectiveMaxTokens,
           lean_tokens_floor: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
           elapsed_since_request_start_ms: Date.now() - requestStartMs,
           request_id: ctx.requestId,
-        }, "Lean retry skipped — remaining request budget cannot fit even a lean draft");
+        }, "Lean retry skipped — remaining budget is smaller than attempt 1 (would re-truncate); failing fast with honest copy");
       }
 
       if (isTimeout) {

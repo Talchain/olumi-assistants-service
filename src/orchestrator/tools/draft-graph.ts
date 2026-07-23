@@ -295,11 +295,22 @@ export async function handleDraftGraph(
             return Object.keys(filtered).length > 0 ? filtered : null;
           })()
         : null;
+    // The pipeline body's typed `details.reason` (e.g. `llm_truncated_max_tokens`)
+    // distinguishes sub-cases that share one CEE code. route-v2 uses it to make a
+    // truncation (transient over-generation) RETRYABLE even though the parent
+    // code CEE_LLM_VALIDATION_FAILED is otherwise not (2026-07-23 firefight).
+    // It is a fixed enum string, not user content — pattern-guarded before use.
+    const rawReason = (rawDetails && typeof rawDetails === 'object' && !Array.isArray(rawDetails)
+      ? (rawDetails as Record<string, unknown>).reason
+      : undefined);
+    const pipelineReason: string | null =
+      typeof rawReason === 'string' && /^[a-z][a-z0-9_]{1,63}$/.test(rawReason) ? rawReason : null;
     const failureError = Object.assign(new Error(message), {
       orchestratorError: err,
       toolLLMTelemetry: failureTelemetry,
       pipelineStatusCode: pipelineResult.statusCode,
       pipelineErrorCode,
+      pipelineReason,
       pipelineRecovery,
       pipelineDetails,
     });

@@ -109,6 +109,10 @@ export interface DraftGraphResult {
     finish_reason?: string;
     provider_latency_ms?: number;
 
+    // 2026-07-23 firefight: true when this draft was recovered from a max_tokens
+    // truncation by closing the partial JSON (salvage) instead of re-drafted.
+    salvaged_from_truncation?: boolean;
+
     // Safe diagnostics
     node_kinds_raw_json?: string[];
 

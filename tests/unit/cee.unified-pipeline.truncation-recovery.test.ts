@@ -81,6 +81,7 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
     code,
     message: msg,
     reason: opts?.reason,
+    retryable: opts?.retryable,
     recovery: opts?.recovery,
   }),
 }));
@@ -158,9 +159,34 @@ describe("truncation-failure recovery copy (probe aggravator 1)", () => {
     // tokens on a failure caused by too many output tokens.
     expect(allCopy).not.toContain("more specific");
     expect(allCopy).not.toContain("clearer");
-    // The honest levers: demand reduction + retry.
+    // The honest levers: scope reduction (fewer options / one decision) + retry.
     expect(allCopy).toMatch(/shorter|simplif|fewer|focus/);
     expect(allCopy).toMatch(/try again|retry/);
+  });
+
+  it("2026-07-23 firefight: RETRY is the PRIMARY lever and the copy NEVER says 'simplify the brief' (counterproductive — a vaguer brief infers MORE factors)", async () => {
+    (runStageParse as any).mockImplementation(async () => {
+      throw makeTruncatedNonJsonError();
+    });
+
+    const result = await runUnifiedPipeline(
+      { brief: "A perfectly ordinary 400-char business brief" } as any,
+      {},
+      mockRequest,
+      baseOpts,
+    );
+
+    const recovery = (result.body as any).recovery;
+    // The suggestion (primary, first-read copy) leads with retry, not blame.
+    expect(recovery.suggestion.toLowerCase()).toMatch(/try again|retry/);
+    // The exact counterproductive phrasing the firefight removed. A vaguer /
+    // "simpler" brief gives the model less to anchor on → it infers MORE factors
+    // → a LARGER graph → MORE likely to truncate again (the cruel inversion).
+    const allCopy = [recovery.suggestion, ...(recovery.hints ?? [])].join(" ").toLowerCase();
+    expect(allCopy).not.toContain("simplify the brief");
+    expect(allCopy).not.toContain("too large to finish");
+    // Truncation is transient over-generation — the wire marks it retryable.
+    expect((result.body as any).retryable).toBe(true);
   });
 
   it("truncated-then-schema-invalid failure maps to the SAME typed 400 + truncation recovery (was an untyped 500 with none)", async () => {

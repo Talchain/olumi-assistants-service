@@ -1405,9 +1405,21 @@ export function buildCommitFailureBoundaryError(params: {
 export function mapDraftGraphPipelineReason(
   pipelineStatusCode: number,
   pipelineErrorCode: string,
+  pipelineReason?: string | null,
 ): { reason: string; retryable: boolean } {
   switch (pipelineErrorCode) {
     case 'CEE_LLM_VALIDATION_FAILED':
+      // Sub-case split off by the pipeline body's typed `details.reason`
+      // (2026-07-23 firefight): a max_tokens TRUNCATION is transient model
+      // over-generation, not a bad brief — RETRY is the honest lever, so it is
+      // retryable even though the parent code otherwise is not. Telling a
+      // truncation user to refine the brief drives output-token demand UP and
+      // reproduces the failure (the cruel inversion). All other
+      // CEE_LLM_VALIDATION_FAILED causes (vague/nonsensical brief, schema
+      // mismatch) stay non-retryable — retrying the same input reproduces them.
+      if (pipelineReason === 'llm_truncated_max_tokens') {
+        return { reason: 'draft_graph_cee_llm_validation_failed', retryable: true };
+      }
       // Client-actionable: brief was too vague or LLM output didn't validate.
       // Not retryable without changing the input.
       return { reason: 'draft_graph_cee_llm_validation_failed', retryable: false };
@@ -3084,6 +3096,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         const meta = err as {
           readonly pipelineStatusCode?: number;
           readonly pipelineErrorCode?: string | null;
+          readonly pipelineReason?: string | null;
           readonly pipelineRecovery?: Record<string, unknown> | null;
           readonly pipelineDetails?: Record<string, unknown> | null;
         };
@@ -3091,6 +3104,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           typeof meta.pipelineStatusCode === 'number' ? meta.pipelineStatusCode : null;
         const pipelineErrorCode =
           typeof meta.pipelineErrorCode === 'string' ? meta.pipelineErrorCode : null;
+        const pipelineReason =
+          typeof meta.pipelineReason === 'string' ? meta.pipelineReason : null;
         const pipelineRecovery =
           meta.pipelineRecovery && typeof meta.pipelineRecovery === 'object'
             ? meta.pipelineRecovery
@@ -3116,7 +3131,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           'V5 draft_graph pipeline threw — returning 500 BoundaryError',
         );
         const { reason, retryable } = pipelineStatusCode != null && pipelineErrorCode != null
-          ? mapDraftGraphPipelineReason(pipelineStatusCode, pipelineErrorCode)
+          ? mapDraftGraphPipelineReason(pipelineStatusCode, pipelineErrorCode, pipelineReason)
           : { reason: 'draft_graph_pipeline_threw', retryable: true };
         // Build postStageExtras additively: recovery (when present), the
         // raw CEE category code (when present), AND any allowlisted
