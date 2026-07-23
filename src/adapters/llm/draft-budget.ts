@@ -277,22 +277,31 @@ export function isDraftTruncated(finishSignal: string | null | undefined): boole
 // cannot be a healthy draft. Armed as a timer, so a silent-thrash runaway that
 // stops emitting deltas is still caught.
 //
-// TIGHTENED 30s → 20s (2026-07-23, from LIVE round-1 streaming data on build
-// 85b8e0e). The day-1 30s was the conservative value derived from the ONLY data
-// then available — the wave1 healthy TOTAL-duration ceiling (34.8s) — because
-// streaming time-to-edges could not be measured pre-deploy. Round-1 measured it:
-//   - every runaway aborted at the 30s gate while still at only 3153-6659 partial
-//     chars (a slow ~125 char/s nodes thrash), i.e. detectable well before 30s;
-//   - the largest healthy draft in the corpus completes its ENTIRE structure
-//     (nodes+edges) in 31.8-34.8s, so it reaches the edges array (a ~40%-of-
-//     output milestone) by ~14s — leaving ~6s of margin below 20s.
-// A 30s abort cost 2 doomed attempts ~60s and, with the ~20s post-draft coaching
-// pass competing for the 120s request budget, tipped unlucky briefs into a 110s
-// `anthropic_timeout` (4 seen in round 1). At 20s, even a 3-abort sequence
-// (60s) + a 30s final draft + 20s coaching = 110s < 120s, so the runaway class
-// no longer exhausts the budget. `cee.llm.draft_edges_reached` is logged on
-// success to keep validating this floor live.
-export const DRAFT_RUNAWAY_DETECT_MS = 20_000;
+// MARGIN-OPTIMAL 24s (2026-07-23, Lane C2, from LIVE round-2 time-to-edges data).
+// History: day-1 30s (conservative, derived from the only data then available —
+// the wave1 healthy TOTAL-duration ceiling 34.8s, streaming time-to-edges being
+// unmeasurable pre-deploy) → round-1 TIGHTENED to 20s to leave room for the ~20s
+// post-draft coaching pass inside the shared 120s request budget.
+//
+// Round-2 MEASURED time-to-edges live (`cee.llm.draft_edges_reached`, n=10):
+// min 12.2s / mean 13.8s / p90 14.8s / MAX 15.4s. So 20s gives only 4.6s of
+// margin over the slowest healthy draft — thin: a provider-jittered healthy
+// draft can be FALSE-aborted as a runaway, wasting a whole retry attempt and
+// pushing an unlucky brief toward budget exhaustion. The margin-optimal deadline
+// is 15.4s (max healthy time-to-edges) + ~8s ≈ 24s: still far below the 34.8s
+// healthy-completion floor and the ~82s runaway floor (both runaway sub-types
+// are still generating with 0 edges past 82s), but with an ~8.6s healthy margin.
+//
+// The old 20s value was pinned DOWN partly to reserve a coaching slot in the
+// shared budget. Lane C2 decouples that: the post-draft coaching pass is now
+// STRICTLY best-effort — it runs only in whatever budget genuinely remains after
+// a successful draft and SKIPS (→ canonical-empty coaching + a coaching_status
+// skip marker) when it cannot complete (coaching-pass.ts), so it no longer
+// competes for the runaway detector's window. That frees the detector to sit at
+// the margin-optimal 24s instead of being clamped down to make room for coaching.
+// Attempt count is unchanged vs 20s in the ~110s draft budget (~3-4 attempts).
+// `cee.llm.draft_edges_reached` keeps validating this floor live.
+export const DRAFT_RUNAWAY_DETECT_MS = 24_000;
 
 // Char budget: max healthy nodes-section = 6896 chars; runaway visible minimum
 // = 9526 chars. 8000 sits above the healthy max (+16%) and below the runaway

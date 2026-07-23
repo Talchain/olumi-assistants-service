@@ -197,7 +197,14 @@ export interface StageContext {
 
 export type SoftGateStatus = 'passed' | 'skipped' | 'failed_degraded';
 export type EnrichmentStatus = 'complete' | 'partial' | 'skipped';
-export type CoachingStatus = 'complete' | 'partial' | 'failed_degraded';
+// 'skipped_budget' (Lane C2, 2026-07-23): the post-draft coaching pass was
+// SKIPPED because the request budget remaining after a successful draft could
+// not fit the pass to completion — coaching is canonical-empty and A2's async
+// coaching-ingest lane fills it. Surfaced on `_pipeline_outcome.coaching_status`
+// so probes and the async-ingest lane can count budget-skips (distinct from a
+// pass that ran and completed → 'complete', or one that ran and errored →
+// 'failed_degraded'). A drafted graph with empty coaching beats a 504.
+export type CoachingStatus = 'complete' | 'partial' | 'failed_degraded' | 'skipped_budget';
 
 export interface PipelineWarning {
   stage: string;

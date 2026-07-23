@@ -884,7 +884,10 @@ export async function runUnifiedPipeline(
       timings.boundary_ms = stageElapsed(t6);
       // Return the packaged V1 response without boundary transform
       const fallback = ctx.ceeResponse ?? { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
-      ctx.pipelineOutcome.coaching_status = 'complete';
+      // Preserve a deliberate budget-skip marker (Lane C2) on this fallback path.
+      if (ctx.pipelineOutcome.coaching_status !== 'skipped_budget') {
+        ctx.pipelineOutcome.coaching_status = 'complete';
+      }
       attachPipelineOutcome(fallback, ctx.pipelineOutcome);
       finalise(fallback);
       return { statusCode: 200, body: fallback };
@@ -904,8 +907,13 @@ export async function runUnifiedPipeline(
       return { statusCode: 501, body: errorBody };
     }
 
-    // Coaching status: if we got here with a response, coaching passed
-    ctx.pipelineOutcome.coaching_status = 'complete';
+    // Coaching status: if we got here with a response, coaching passed — UNLESS
+    // the post-draft coaching pass deliberately skipped for budget (Lane C2),
+    // in which case that terminal marker must survive to the response body so
+    // probes and A2's async-ingest lane can count budget-skips.
+    if (ctx.pipelineOutcome.coaching_status !== 'skipped_budget') {
+      ctx.pipelineOutcome.coaching_status = 'complete';
+    }
 
     attachPipelineOutcome(ctx.finalResponse, ctx.pipelineOutcome);
     finalise(ctx.finalResponse);
