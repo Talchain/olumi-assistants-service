@@ -375,6 +375,23 @@ export function buildGraphNodeLookup(
 }
 
 /**
+ * Wave-4 δ2 — build a `GraphNodeLookup` directly from a raw graph record
+ * (`{nodes[], edges[]}`), for the mutation / what_would_flip directive branches
+ * that have NO run_analysis fact to read an enrichment graph from. Consumes the
+ * persisted-snapshot graph the compose caller already holds. Absent / non-record
+ * input ⇒ empty lookup ⇒ every consumer fails closed. Same node-kind gate + edge
+ * handling as `buildGraphNodeLookup`'s fallback pass.
+ */
+export function buildGraphNodeLookupFromGraph(graph: unknown): GraphNodeLookup {
+  const lookup = new Map<string, GraphNodeRef>();
+  const record = readRecord(graph);
+  if (record !== null) {
+    populateGraphNodeLookup(lookup, record);
+  }
+  return lookup;
+}
+
+/**
  * Populate `lookup` from a `{nodes[], edges[]}` graph record. Shared by
  * the enrichment source and the persisted-snapshot fallback — the two
  * shapes differ only in the edge endpoint field names, which are read
@@ -440,6 +457,105 @@ function populateGraphNodeLookup(
       });
     }
   }
+}
+
+// ============================================================================
+// Wave-4 δ1 — the ONE shared entity→node-id resolver (ROADMAP 1.202 + 1.135).
+//
+// DERIVED (not mirrored, trap-12) from the forward `GraphNodeLookup` above: the
+// reverse `label → id` index is a pure O(nodes) derivation of the SAME map, so it
+// cannot desync — it has no independent source. Two consumers share it:
+//   - 1.202 (the ui_directive emitter, δ2) uses the FORWARD path (id → ref) it
+//     already has — every deterministic fact names its subject by id;
+//   - 1.135 (clickable coach copy) uses this REVERSE path (label → id) to link
+//     entity NAMES inside LLM-authored prose to their nodes.
+// Fail-closed everywhere: a duplicate normalised label is AMBIGUOUS → never
+// linked (we do not guess which node the prose meant); a too-short / bare-generic
+// label is not linked in prose (reusing the shipped over-match rails); a miss is
+// unlinked. Reuses `normaliseForPhraseMatch` + `containsWholePhrase` +
+// `LEVER_LABEL_MIN_LEN` + `GENERIC_LEVER_TOKENS` — the exact matching rails the
+// lever-naming guard already ships, so a producer label change or new node kind
+// flows through automatically (one input, no second list to maintain).
+// ============================================================================
+
+/**
+ * Sentinel: a normalised label shared by TWO OR MORE nodes. Such a label resolves
+ * to nothing (fail-closed unlinked) — the required ambiguity ruling. A unique
+ * `symbol` so it can never collide with a real string id.
+ */
+export const AMBIGUOUS_LABEL: unique symbol = Symbol('AMBIGUOUS_LABEL');
+
+/** Reverse index: normalised label → the single node id that owns it, or
+ *  `AMBIGUOUS_LABEL` when two+ nodes share the normalised label. */
+export type LabelIndex = ReadonlyMap<string, string | typeof AMBIGUOUS_LABEL>;
+
+/**
+ * Build the reverse `label → id` index from a forward `GraphNodeLookup`. One
+ * pass; duplicate normalised label → `AMBIGUOUS_LABEL`. Pure + deterministic;
+ * derived every build from the forward map (no hand-maintained mirror).
+ */
+export function buildLabelIndex(lookup: GraphNodeLookup): LabelIndex {
+  const index = new Map<string, string | typeof AMBIGUOUS_LABEL>();
+  for (const ref of lookup.values()) {
+    const key = normaliseForPhraseMatch(ref.label);
+    if (key.length === 0) continue;
+    // First writer wins the id slot; the SECOND collision flips the key to
+    // AMBIGUOUS and it never reverts (fail-closed on duplicate labels).
+    index.set(key, index.has(key) ? AMBIGUOUS_LABEL : ref.id);
+  }
+  return index;
+}
+
+/**
+ * Resolve a single candidate label token to its node id, or `null`. Fail-closed
+ * on: too-short / bare-generic label (would over-match), ambiguous (duplicate)
+ * label, or a miss. Reuses the shipped normalisation + over-match rails so a lone
+ * "Cost" / "AI" / "C#" never links.
+ */
+export function resolveLabelToId(index: LabelIndex, rawLabel: string): string | null {
+  const key = normaliseForPhraseMatch(rawLabel);
+  if (key.length < LEVER_LABEL_MIN_LEN) return null;
+  if (!key.includes(' ') && GENERIC_LEVER_TOKENS.has(key)) return null;
+  const resolved = index.get(key);
+  if (resolved === undefined || resolved === AMBIGUOUS_LABEL) return null;
+  return resolved;
+}
+
+/**
+ * 1.135 — scan LLM-authored prose for the graph node labels it NAMES and return
+ * one deduped `TargetRef` per unambiguously-resolved node, in lookup order.
+ * Whole-phrase, both-ends-bounded matching (reusing `containsWholePhrase`, which
+ * already encodes the "Equity Offered to CTO" vs bare "CTO" over-match lesson);
+ * too-short / bare-generic single-word labels are skipped; a label shared by two
+ * nodes (`AMBIGUOUS_LABEL`) links to NEITHER. Pure; no producer value is read —
+ * only the node's own display label. Byte-inert until a builder calls it.
+ */
+export function resolveProseEntityRefs(
+  lookup: GraphNodeLookup,
+  index: LabelIndex,
+  prose: string,
+): readonly TargetRef[] {
+  const hay = normaliseForPhraseMatch(prose);
+  if (hay.length === 0) return [];
+  const refs: TargetRef[] = [];
+  const seen = new Set<string>();
+  for (const ref of lookup.values()) {
+    const needle = normaliseForPhraseMatch(ref.label);
+    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
+    // A bare generic single word ("cost") over-matches ordinary decision prose —
+    // require a distinctive single word or a multi-word phrase (same rule as the
+    // lever-naming guard's Finding-5 tempering).
+    if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
+    if (!containsWholePhrase(hay, needle)) continue;
+    // Fail-closed on ambiguity: a duplicate normalised label resolves to
+    // AMBIGUOUS_LABEL → link to neither node.
+    const resolved = index.get(needle);
+    if (resolved === undefined || resolved === AMBIGUOUS_LABEL) continue;
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    refs.push({ id: ref.id, label: ref.label, kind: ref.kind });
+  }
+  return refs;
 }
 
 /**
@@ -593,6 +709,13 @@ export function buildCoachingBlocks(
   // calibration_prompt branches so a lever is never NAMED as an assumption to
   // confirm nor as a calibration question to answer.
   const leverLabels = collectLeverLabels(interventionControlledFactorIds, lookup);
+  // Wave-4 δ2 / 1.135 — the shared reverse index for clickable-copy linking. One
+  // derivation of the forward lookup (trap-12); reused by BOTH coaching kinds so
+  // an entity NAMED in the surviving coach prose carries a `target_ref` the UI
+  // renders as a link. Fail-closed inside `resolveProseEntityRefs` (ambiguous /
+  // generic / too-short labels are not linked); a lever-naming assumption is
+  // already dropped upstream, so only non-lever entities can link.
+  const labelIndex = buildLabelIndex(lookup);
 
   // assumption_check — one per key_assumptions entry, ranked by order.
   if (Array.isArray(dr.key_assumptions)) {
@@ -612,7 +735,8 @@ export function buildCoachingBlocks(
         title: truncate('An assumption to check', TITLE_MAX),
         body: truncate(text, BODY_MAX),
         source: 'decision_review' as const,
-        target_refs: [] as readonly TargetRef[],
+        // 1.135: link entity names in the (surviving, pre-truncation) prose.
+        target_refs: resolveProseEntityRefs(lookup, labelIndex, text),
         priority_rank: 100 + idx, // coaching ranks deprioritised vs review cards
         // Wave-2 ask 1 (0.19.0): producer-owned guidance signals.
         ...guidanceSignalsForCoachingKind('assumption_check'),
@@ -657,7 +781,8 @@ export function buildCoachingBlocks(
         title: truncate(titleText, TITLE_MAX),
         body: truncate(question, BODY_MAX),
         source: 'decision_review' as const,
-        target_refs: [] as readonly TargetRef[],
+        // 1.135: link entity names in the calibration question prose.
+        target_refs: resolveProseEntityRefs(lookup, labelIndex, question),
         priority_rank: 200 + idx,
         ...guidanceSignalsForCoachingKind('calibration_prompt'),
         action_intent: 'start_guided_chat' as ActionIntentLiteral,

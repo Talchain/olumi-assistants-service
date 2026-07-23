@@ -692,6 +692,17 @@ export const TelemetryEvents = {
   // never a silent no-op (broken-alarm class); content-free (no user text, no
   // field VALUE). Log-only (no Datadog mapping).
   V5ClaimCageFieldEvaluated: "v5.claim_cage.field_evaluated",
+  // Wave-4 δ2 (ROADMAP 1.202) — "AI points at the graph". Fires once per turn
+  // when the deterministic ui_directive emitter places a focus / open_inspector /
+  // highlight directive on the response. Payload: verb + target_kind (both closed
+  // enums) + fact_type — NO user text, NO node id/label. Content-free; log-only.
+  V5UiDirectiveEmitted: "v5.ui_directive.emitted",
+  // Wave-4 δ2 — the reason-tagged DROP counterpart: fires when a candidate
+  // directive is suppressed fail-closed (noop / unresolved target / non-option /
+  // ambiguous / lens-block dropped by σ / no recommendation), so a suppression is
+  // observable and never a silent no-op (broken-alarm class). Payload: fact_type
+  // + reason tag — NO user text. Log-only.
+  V5UiDirectiveSuppressed: "v5.ui_directive.suppressed",
   // Context Architecture v2 S6 (ROADMAP 1.73; design pack 02 §Seam 3).
   // Shadow validation of the PLoT→CEE enrichment passthrough (the
   // platform's known-open seam): emitted when CEE_ENRICHMENT_VALIDATION

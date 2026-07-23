@@ -86,6 +86,23 @@ export type LensGroundingField =
   | 'confidence_tier'
   | 'option_comparison';
 
+/**
+ * Wave-4 δ2 (ROADMAP 1.202) — the specific graph node this lens POINTS AT, for
+ * the `focus` ui_directive. CEE-INTERNAL only (never a wire type → no schema
+ * change). The id is a structured `factor_id` read from the analysis signals; the
+ * directive emitter resolves it to a label via the shared `GraphNodeLookup`,
+ * fail-closed on miss. `kind` is `'factor'` for every subject the selector emits
+ * today — the lens subjects are all factors (the dominant driver, the isolated
+ * flip factor, the top-influence low-confidence factor, the material-EVPI
+ * factor). Lenses with no single-factor subject (CONFIDENCE_NEEDS_WORK,
+ * WIN_PROB_MODERATE) leave this undefined → the directive falls through to the v1
+ * winner-highlight rather than fabricating a target.
+ */
+export interface LensSubjectRef {
+  readonly id: string;
+  readonly kind: 'factor';
+}
+
 export interface LensSelection {
   readonly lens: LensId;
   readonly rationaleCode: LensRationaleCode;
@@ -99,6 +116,12 @@ export interface LensSelection {
    * the call site) so the selector stays the single source of the lens→field map.
    */
   readonly groundingField: LensGroundingField;
+  /**
+   * Wave-4 δ2 — the node the `focus` directive points at (§2.1 rows 2). Undefined
+   * when the lens has no single-factor subject; the directive then defers to the
+   * v1 highlight (the safe floor). NOT a wire field — see {@link LensSubjectRef}.
+   */
+  readonly subjectRef?: LensSubjectRef;
 }
 
 // ============================================================================
@@ -226,6 +249,9 @@ export function whatIfSuggestionExecutorAvailable(islTransportConfigured: boolea
 // ============================================================================
 
 interface FactorSignal {
+  /** Structured `factor_id` from the enrichment (wave-4 δ2 — the lens-subject
+   *  id the `focus` directive points at). `null` when absent. */
+  readonly factorId: string | null;
   readonly influenceScore: number | null;
   readonly influenceRank: number | null;
   /** Present ONLY when a finite value exists and status is not below-resolution. */
@@ -276,6 +302,7 @@ function readAnalysisSignals(fact: RunAnalysisHandlerFact): AnalysisSignals | nu
           ? null
           : finiteNumberOrNull(e.evpi_percentage_points);
       factors.push({
+        factorId: typeof e.factor_id === 'string' && e.factor_id.length > 0 ? e.factor_id : null,
         influenceScore: finiteNumberOrNull(e.influence_score),
         influenceRank: finiteNumberOrNull(e.influence_rank),
         evpiPercentagePoints: evpiPp,
@@ -308,67 +335,92 @@ function readAnalysisSignals(fact: RunAnalysisHandlerFact): AnalysisSignals | nu
 
 // ============================================================================
 // Rule evaluators — one per lens, priority order. Each returns the triggering
-// rationale code or `null`. Pure over the normalised signals.
+// rationale code + the subject FACTOR id it points at (wave-4 δ2), or `null`.
+// Pure over the normalised signals. `subjectFactorId` is `null` for a rationale
+// with no single-factor subject (the directive then defers to the v1 highlight).
 // ============================================================================
 
+interface EvaluatorHit {
+  readonly code: LensRationaleCode;
+  /** The factor the lens points at (§2.1 focus subject); `null` when the lens
+   *  has no single-factor subject (overall-confidence / option-level). */
+  readonly subjectFactorId: string | null;
+}
+
 /** Rule 1 — sensitivity / flip-risk (highest-priority lens). */
-function evaluateSensitivityFlipRisk(signals: AnalysisSignals): LensRationaleCode | null {
+function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | null {
   // 1a — an explicit PLoT flip-risk flag on any factor. `isolated` (this factor
   // can flip the result on its own) is the strongest single-factor signal and
   // takes precedence; `correlated` (flips only in combination with others) is a
   // weaker, honestly distinct claim. `negligible` never fires.
-  const hasIsolated = signals.factors.some(
+  const isolated = signals.factors.find(
     (f) => f.flipRiskCategory === FLIP_RISK_ISOLATED_CATEGORY,
   );
-  if (hasIsolated) return 'FLIP_RISK_ISOLATED';
+  if (isolated) return { code: 'FLIP_RISK_ISOLATED', subjectFactorId: isolated.factorId };
 
-  const hasCorrelated = signals.factors.some(
+  const correlated = signals.factors.find(
     (f) => f.flipRiskCategory === FLIP_RISK_CORRELATED_CATEGORY,
   );
-  if (hasCorrelated) return 'FLIP_RISK_CORRELATED';
+  if (correlated) return { code: 'FLIP_RISK_CORRELATED', subjectFactorId: correlated.factorId };
 
   // 1b — one factor carries a STRICT majority share of total positive influence.
-  const scores = signals.factors
-    .map((f) => f.influenceScore)
-    .filter((s): s is number => s !== null && s > 0);
-  if (scores.length >= 1) {
-    const total = scores.reduce((a, b) => a + b, 0);
-    const top = Math.max(...scores);
-    if (total > 0 && top / total > DOMINANCE_SHARE_MIN) {
-      return 'DOMINANT_DRIVER';
+  // Behaviour-identical to the prior `Math.max`/`reduce` trigger; additionally
+  // carries the dominating factor's id as the focus subject.
+  const scored = signals.factors.filter(
+    (f): f is FactorSignal & { influenceScore: number } =>
+      f.influenceScore !== null && f.influenceScore > 0,
+  );
+  if (scored.length >= 1) {
+    const total = scored.reduce((a, f) => a + f.influenceScore, 0);
+    let top = scored[0]!;
+    for (const f of scored) if (f.influenceScore > top.influenceScore) top = f;
+    if (total > 0 && top.influenceScore / total > DOMINANCE_SHARE_MIN) {
+      return { code: 'DOMINANT_DRIVER', subjectFactorId: top.factorId };
     }
   }
   return null;
 }
 
 /** Rule 2 — pre-mortem: the decision is acceptance-plausible but fragile. */
-function evaluatePreMortem(signals: AnalysisSignals): LensRationaleCode | null {
-  // 2a — the overall analysis is usable but not solid.
-  if (signals.confidenceTier === 'needs_work') return 'CONFIDENCE_NEEDS_WORK';
+function evaluatePreMortem(signals: AnalysisSignals): EvaluatorHit | null {
+  // 2a — the overall analysis is usable but not solid (no single-factor subject).
+  if (signals.confidenceTier === 'needs_work') {
+    return { code: 'CONFIDENCE_NEEDS_WORK', subjectFactorId: null };
+  }
 
   // 2b — the single most-influential factor is also the least certain.
-  const topRankLowConfidence = signals.factors.some(
+  const topRankLowConfidence = signals.factors.find(
     (f) => f.influenceRank === 1 && f.confidenceBand === 'low',
   );
-  if (topRankLowConfidence) return 'TOP_FACTOR_LOW_CONFIDENCE';
+  if (topRankLowConfidence) {
+    return { code: 'TOP_FACTOR_LOW_CONFIDENCE', subjectFactorId: topRankLowConfidence.factorId };
+  }
 
-  // 2c — a leader exists but not decisively.
+  // 2c — a leader exists but not decisively (option-level; no factor subject).
   if (signals.optionWinProbabilities.length > 0) {
     const topWin = Math.max(...signals.optionWinProbabilities);
     if (topWin >= PREMORTEM_WINPROB_MIN && topWin < PREMORTEM_WINPROB_MAX) {
-      return 'WIN_PROB_MODERATE';
+      return { code: 'WIN_PROB_MODERATE', subjectFactorId: null };
     }
   }
   return null;
 }
 
 /** Rule 3 — EVPI-ranked evidence priority. */
-function evaluateEvpiEvidencePriority(signals: AnalysisSignals): LensRationaleCode | null {
-  const presentPp = signals.factors
-    .map((f) => f.evpiPercentagePoints)
-    .filter((p): p is number => p !== null);
-  if (presentPp.length === 0) return null;
-  if (Math.max(...presentPp) >= EVPI_MATERIAL_MIN_PP) return 'MATERIAL_EVPI';
+function evaluateEvpiEvidencePriority(signals: AnalysisSignals): EvaluatorHit | null {
+  // Behaviour-identical trigger (max present pp ≥ MIN); carries the max-pp
+  // factor's id as the focus subject.
+  let best: (FactorSignal & { evpiPercentagePoints: number }) | null = null;
+  for (const f of signals.factors) {
+    if (f.evpiPercentagePoints === null) continue;
+    if (best === null || f.evpiPercentagePoints > best.evpiPercentagePoints) {
+      best = f as FactorSignal & { evpiPercentagePoints: number };
+    }
+  }
+  if (best === null) return null;
+  if (best.evpiPercentagePoints >= EVPI_MATERIAL_MIN_PP) {
+    return { code: 'MATERIAL_EVPI', subjectFactorId: best.factorId };
+  }
   return null;
 }
 
@@ -385,11 +437,13 @@ function evaluateEvpiEvidencePriority(signals: AnalysisSignals): LensRationaleCo
  * executor availability is injected `false` today, so it never fires in
  * production regardless of this trigger.
  */
-function evaluateWhatIfCounterfactual(signals: AnalysisSignals): LensRationaleCode | null {
-  const hasTopDriver = signals.factors.some(
+function evaluateWhatIfCounterfactual(signals: AnalysisSignals): EvaluatorHit | null {
+  const topDriver = signals.factors.find(
     (f) => f.influenceRank === 1 && f.influenceScore !== null,
   );
-  return hasTopDriver ? 'WHATIF_EXPLORE_DRIVER' : null;
+  return topDriver
+    ? { code: 'WHATIF_EXPLORE_DRIVER', subjectFactorId: topDriver.factorId }
+    : null;
 }
 
 // ============================================================================
@@ -450,13 +504,19 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   WHATIF_EXPLORE_DRIVER: 'option_comparison',
 };
 
-function buildSelection(lens: LensId, rationaleCode: LensRationaleCode): LensSelection {
+function buildSelection(lens: LensId, hit: EvaluatorHit): LensSelection {
   return {
     lens,
-    rationaleCode,
+    rationaleCode: hit.code,
     title: TITLE_BY_LENS[lens],
-    body: BODY_BY_RATIONALE[rationaleCode],
-    groundingField: GROUNDING_FIELD_BY_RATIONALE[rationaleCode],
+    body: BODY_BY_RATIONALE[hit.code],
+    groundingField: GROUNDING_FIELD_BY_RATIONALE[hit.code],
+    // Wave-4 δ2: expose the focus subject when the lens points at a single
+    // factor. Omitted (undefined) for subject-less rationales → the directive
+    // defers to the v1 highlight (never fabricates a target).
+    ...(hit.subjectFactorId !== null
+      ? { subjectRef: { id: hit.subjectFactorId, kind: 'factor' as const } }
+      : {}),
   };
 }
 
