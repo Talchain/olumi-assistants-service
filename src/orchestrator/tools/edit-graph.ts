@@ -78,6 +78,13 @@ import { classifyUserIntent } from "../pipeline/phase1-enrichment/intent-classif
 import { buildPatchSummary } from "../patch-summary.js";
 import { sanitiseUserFacingText } from "../../orchestrator-v5/compose/output-safety.js";
 import {
+  detectLabelValueDivergences,
+  buildLabelValueDivergenceDescription,
+  buildLabelValueDivergenceNote,
+  buildLabelValueDivergenceActions,
+  type LabelValueDivergence,
+} from "../../orchestrator-v5/label-value-divergence.js";
+import {
   findSuccessClaimHit,
   findForbiddenPhraseHit,
   findEditInternalsHit,
@@ -1592,9 +1599,20 @@ export function buildAppliedChanges(
   hasExistingAnalysis: boolean,
   preGraph: GraphV3T | null = null,
 ): AppliedChanges {
-  const changes: AppliedChangeItem[] = operations.map(op => {
+  // Deterministic cross-check: a label-only rename that changes an embedded
+  // quantity on a node with a modelled value has NOT changed that value. Such
+  // an op must never read as a completed value change (the P0 leak: a bare
+  // `Renamed "…$49" to "…$39"` receipt while the intervention stays 0.49).
+  const divergences = detectLabelValueDivergences(operations, preGraph, graph);
+  const divergenceByIndex = new Map<number, LabelValueDivergence>();
+  for (const d of divergences) divergenceByIndex.set(d.index, d);
+
+  const changes: AppliedChangeItem[] = operations.map((op, index) => {
     const label = resolveElementLabel(op.path, graph, preGraph, op.value);
-    const description = buildOperationDescription(op, graph, preGraph);
+    const divergence = divergenceByIndex.get(index);
+    const description = divergence
+      ? buildLabelValueDivergenceDescription(divergence)
+      : buildOperationDescription(op, graph, preGraph);
     return { label, description, element_ref: op.path };
   });
 
@@ -3402,6 +3420,30 @@ export async function handleEditGraph(
       preGraphForReceipt,
     );
 
+    // P0 (label-edit silent-corruption, third leg of the silent-wrong-value
+    // family): a label rename that changes an embedded quantity on a node
+    // whose modelled value did NOT change must be DISCLOSED, never claimed as
+    // a completed value change. Consent-first (doctrine b): we do not silently
+    // mutate the modelled value on top of the rename (a different consent
+    // class); we surface the divergence and offer the typed configure
+    // affordance. Derived from the same detector the receipt uses above.
+    const labelValueDivergences = detectLabelValueDivergences(
+      operations,
+      preGraphForReceipt,
+      postGraphForReceipt,
+    );
+    if (labelValueDivergences.length > 0) {
+      log.warn(
+        {
+          event: 'edit_graph.label_value_divergence_disclosed',
+          request_id: requestId,
+          count: labelValueDivergences.length,
+          paths: labelValueDivergences.map((d) => d.path),
+        },
+        'edit_graph: label rename changed a displayed quantity but not the modelled value — disclosing',
+      );
+    }
+
     log.info(
       {
         elapsed_ms: latencyMs,
@@ -3463,6 +3505,15 @@ export async function handleEditGraph(
 
     if (llmResult.coaching?.summary) {
       textParts.push(scrubFragment(llmResult.coaching.summary));
+    }
+    // P0: append the deterministic label-value divergence disclosure. It states
+    // that only the display text changed and the modelled value is unchanged,
+    // which overrides any optimistic "Updated … to $39" the LLM coaching may
+    // have led with — and it stands alone when coaching is absent. Built from
+    // node labels + the label's own numeric tokens; scrubbed for symmetry.
+    const divergenceNote = buildLabelValueDivergenceNote(labelValueDivergences);
+    if (divergenceNote) {
+      textParts.push(scrubFragment(divergenceNote));
     }
     // P0 fix (2026-05): NEVER render PLoT repair / A5 enforcement reasons
     // into user-facing assistant_text. Repair `action` strings come from
@@ -3552,6 +3603,11 @@ export async function handleEditGraph(
         role: 'facilitator',
       });
     }
+    // P0: offer the typed configure affordance for any label-value divergence
+    // so the user can actually change the modelled value (the configure-option
+    // chip's replayed message routes to the intervention-writing lane). This
+    // is the affordance the honest disclosure above points at.
+    suggestedActions.push(...buildLabelValueDivergenceActions(labelValueDivergences));
 
     return {
       blocks: [block],
