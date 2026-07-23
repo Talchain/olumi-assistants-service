@@ -277,31 +277,35 @@ export function isDraftTruncated(finishSignal: string | null | undefined): boole
 // cannot be a healthy draft. Armed as a timer, so a silent-thrash runaway that
 // stops emitting deltas is still caught.
 //
-// MARGIN-OPTIMAL 24s (2026-07-23, Lane C2, from LIVE round-2 time-to-edges data).
+// 20s (2026-07-23, D-54-2 ruling — REVERT of Lane C2's margin-optimal 24s).
 // History: day-1 30s (conservative, derived from the only data then available —
 // the wave1 healthy TOTAL-duration ceiling 34.8s, streaming time-to-edges being
-// unmeasurable pre-deploy) → round-1 TIGHTENED to 20s to leave room for the ~20s
-// post-draft coaching pass inside the shared 120s request budget.
+// unmeasurable pre-deploy) → round-1 TIGHTENED to 20s → Lane C2 round-2 RAISED to
+// 24s ("margin-optimal" = max healthy time-to-edges 15.4s + ~8s, to widen the
+// false-abort margin) → D-54-2 REVERTS to 20s.
 //
-// Round-2 MEASURED time-to-edges live (`cee.llm.draft_edges_reached`, n=10):
-// min 12.2s / mean 13.8s / p90 14.8s / MAX 15.4s. So 20s gives only 4.6s of
-// margin over the slowest healthy draft — thin: a provider-jittered healthy
-// draft can be FALSE-aborted as a runaway, wasting a whole retry attempt and
-// pushing an unlucky brief toward budget exhaustion. The margin-optimal deadline
-// is 15.4s (max healthy time-to-edges) + ~8s ≈ 24s: still far below the 34.8s
-// healthy-completion floor and the ~82s runaway floor (both runaway sub-types
-// are still generating with 0 edges past 82s), but with an ~8.6s healthy margin.
+// Why revert (Lane C2's own live acceptance, build 206cbc2f, 2× 12-probe):
+//   - The false-abort margin that motivated 24s is NOT binding: ZERO false-aborts
+//     were observed, and every healthy draft reached edges ≤15.4s — comfortably
+//     under BOTH 20s and 24s (`cee.llm.draft_edges_reached`, n=10: max 15.4s). So
+//     the extra ~4s of head-of-draft margin bought nothing measurable.
+//   - 24s TRADES AWAY final-attempt budget. The A2killer 504s are pure
+//     runaway-density: 3 consecutive aborts, then a no-early-abort final attempt
+//     that runs out of wall-clock. After 3 aborts at 24s (~72s spent) the final
+//     gets only ~38s — SHORTER than a clean A2killer draft (~44-52s), so a
+//     clean-but-slow final is cut → 504. At 20s the final gets ~50s, enough to
+//     complete. Combined A2killer 2/6 (24s) vs the 20s deployed 3/6 — within n=6
+//     noise, but the arithmetic and the abort anatomy point the same way: 20s
+//     leaves more final-attempt budget for the residual runaway-dense briefs.
 //
-// The old 20s value was pinned DOWN partly to reserve a coaching slot in the
-// shared budget. Lane C2 decouples that: the post-draft coaching pass is now
-// STRICTLY best-effort — it runs only in whatever budget genuinely remains after
-// a successful draft and SKIPS (→ canonical-empty coaching + a coaching_status
-// skip marker) when it cannot complete (coaching-pass.ts), so it no longer
-// competes for the runaway detector's window. That frees the detector to sit at
-// the margin-optimal 24s instead of being clamped down to make room for coaching.
-// Attempt count is unchanged vs 20s in the ~110s draft budget (~3-4 attempts).
+// Still below the 34.8s healthy-completion floor and the ~82s runaway floor (both
+// runaway sub-types keep generating with 0 edges past 82s), so a genuine runaway
+// is still caught early. The coaching pass no longer competes for this window
+// (Lane C2 made it strictly best-effort — coaching-pass.ts), so the detector is
+// tuned purely for final-attempt budget, not to reserve a coaching slot. Attempt
+// count is unchanged vs 24s in the ~110s draft budget (~3-4 attempts).
 // `cee.llm.draft_edges_reached` keeps validating this floor live.
-export const DRAFT_RUNAWAY_DETECT_MS = 24_000;
+export const DRAFT_RUNAWAY_DETECT_MS = 20_000;
 
 // Char budget: max healthy nodes-section = 6896 chars; runaway visible minimum
 // = 9526 chars. 8000 sits above the healthy max (+16%) and below the runaway
