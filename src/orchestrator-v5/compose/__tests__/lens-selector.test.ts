@@ -12,12 +12,21 @@ import { describe, expect, it } from 'vitest';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
+  BODY_BY_RATIONALE,
   DOMINANCE_SHARE_MIN,
   EVPI_MATERIAL_MIN_PP,
   PREMORTEM_WINPROB_MAX,
   PREMORTEM_WINPROB_MIN,
+  TITLE_BY_LENS,
+  WHATIF_SUGGESTION_GATE_CLEARED,
   selectLens,
+  whatIfSuggestionExecutorAvailable,
 } from '../lens-selector.js';
+import {
+  FORBIDDEN_HEADLINE_VOCABULARY_REGEX,
+  RAW_DECIMAL_REGEX,
+  ASSISTANT_TEXT_ID_REGEX,
+} from '../../coaching/assistant-text-defences.js';
 
 // ============================================================================
 // Fixtures
@@ -497,5 +506,117 @@ describe('selectLens — copy is prose-guard clean', () => {
         expect(text).not.toMatch(ID_LIKE);
       }
     }
+  });
+});
+
+// ============================================================================
+// Wave-3 λ — exhaustive copy totality via the EXPORTED maps (derive-don't-mirror)
+// ============================================================================
+
+describe('λ — every lens/rationale has copy that passes the REAL runtime prose guards', () => {
+  // Iterating the exported, compile-exhaustive maps sweeps EVERY LensId /
+  // LensRationaleCode — including the executor-gated what-if lens whose block
+  // never builds in the fact-driven sweep above — using the actual
+  // assistant-text-defences regexes the composer applies (not a hand-rolled
+  // mirror). A new lens/rationale is force-included by the compiler.
+  it('every LensId title is prose-guard clean', () => {
+    const titles = Object.values(TITLE_BY_LENS);
+    expect(titles.length).toBeGreaterThanOrEqual(4);
+    for (const title of titles) {
+      expect(title).not.toMatch(FORBIDDEN_HEADLINE_VOCABULARY_REGEX);
+      expect(title).not.toMatch(RAW_DECIMAL_REGEX);
+      expect(title).not.toMatch(ASSISTANT_TEXT_ID_REGEX);
+    }
+  });
+
+  it('every LensRationaleCode body is prose-guard clean (incl. WHATIF_EXPLORE_DRIVER)', () => {
+    const bodies = Object.entries(BODY_BY_RATIONALE);
+    expect(bodies.some(([code]) => code === 'WHATIF_EXPLORE_DRIVER')).toBe(true);
+    for (const [code, body] of bodies) {
+      expect(body, code).not.toMatch(FORBIDDEN_HEADLINE_VOCABULARY_REGEX);
+      expect(body, code).not.toMatch(RAW_DECIMAL_REGEX);
+      expect(body, code).not.toMatch(ASSISTANT_TEXT_ID_REGEX);
+    }
+  });
+});
+
+// ============================================================================
+// Wave-3 λ — "never suggest a lens whose executor is absent" (design §2.6/2.7)
+// ============================================================================
+
+describe('selectLens — never suggests a lens whose executor is absent', () => {
+  // HEALTHY trips NO core lens (not fragile, decisive, no material EVPI) yet HAS
+  // a rank-1 driver, so the what-if extension lens is the only candidate — the
+  // exact probe for the executor-availability rule.
+  it('the what-if lens is suggested ONLY when its executor is injected available', () => {
+    const fact = makeFact(HEALTHY);
+    // Executor absent (default) → fail-closed → no suggestion at all.
+    expect(selectLens(fact)).toBeNull();
+    // Executor explicitly absent → same.
+    expect(selectLens(fact, { executorAvailable: { what_if_counterfactual: false } })).toBeNull();
+    // Executor present → the what-if lens IS suggested (proves the rule
+    // discriminates, not vacuously denying).
+    const sel = selectLens(fact, { executorAvailable: { what_if_counterfactual: true } });
+    expect(sel?.lens).toBe('what_if_counterfactual');
+    expect(sel?.rationaleCode).toBe('WHATIF_EXPLORE_DRIVER');
+    expect(sel?.groundingField).toBe('option_comparison');
+  });
+
+  it('an absent executor NEVER displaces a core lens (priority preserved on healthy turns)', () => {
+    // A fact that trips sensitivity AND has a rank-1 driver: sensitivity wins
+    // regardless of what-if availability (what-if is lowest priority).
+    const fact = makeFact({
+      confidence_tier: 'strong',
+      factor_sensitivity: [
+        { factor_id: 'fac_a', influence_score: 0.9, influence_rank: 1, confidence: 0.9, flip_risk_category: 'isolated' },
+        { factor_id: 'fac_b', influence_score: 0.05, influence_rank: 2, confidence: 0.9 },
+      ],
+    });
+    expect(selectLens(fact)?.lens).toBe('sensitivity_flip_risk');
+    expect(selectLens(fact, { executorAvailable: { what_if_counterfactual: true } })?.lens).toBe(
+      'sensitivity_flip_risk',
+    );
+  });
+
+  it('the core lenses are intrinsically available — options never change their selection', () => {
+    // Sweep the existing priority fixtures: injecting/omitting what-if
+    // availability leaves every core-lens choice byte-identical.
+    const coreFacts: ReadonlyArray<EnrichmentInput> = [
+      { confidence_tier: 'needs_work', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.34, influence_rank: 1, confidence: 0.9 }, { factor_id: 'fac_b', influence_score: 0.33, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.33, influence_rank: 3, confidence: 0.9 }] },
+      { confidence_tier: 'strong', factor_sensitivity: [{ factor_id: 'fac_a', influence_score: 0.7, influence_rank: 1, confidence: 0.9 }, { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 }, { factor_id: 'fac_c', influence_score: 0.1, influence_rank: 3, confidence: 0.9 }], option_comparison: [{ win_probability: 0.85 }] },
+    ];
+    for (const input of coreFacts) {
+      const withWhatIf = selectLens(makeFact(input), { executorAvailable: { what_if_counterfactual: true } });
+      const without = selectLens(makeFact(input));
+      expect(withWhatIf?.lens).toBe(without?.lens);
+      expect(without?.lens).not.toBe('what_if_counterfactual');
+    }
+  });
+});
+
+// ============================================================================
+// Wave-3 λ — the what-if SUGGESTION enable-gate (ROADMAP 1.195) is fail-closed
+// ============================================================================
+
+describe('what-if suggestion enable-gate (ROADMAP 1.195) — cannot fire while any item is unmet', () => {
+  it('ships CLOSED — items 2/3/4 (ISL fidelity probe / owner-placement / target-semantics) are not cleared', () => {
+    expect(WHATIF_SUGGESTION_GATE_CLEARED).toBe(false);
+  });
+
+  it('is unavailable even when the ISL transport (item 1) IS configured — the gate blocks it', () => {
+    // Item 1 met (ISL_BASE_URL set / client non-null), but items 2/3/4 (the
+    // constant) are not → fail-closed. This is the load-bearing gate proof: on
+    // staging the transport IS up, yet the suggestion must stay dark.
+    expect(whatIfSuggestionExecutorAvailable(true)).toBe(false);
+    // Transport down too → also false (fail-closed on BOTH legs — ANY unmet item).
+    expect(whatIfSuggestionExecutorAvailable(false)).toBe(false);
+  });
+
+  it('the selector never suggests what-if under the shipped gate, end-to-end', () => {
+    // A fact whose only candidate is what-if (rank-1 driver, no core trigger),
+    // wired through the REAL gate helper with the transport up: still nothing.
+    const fact = makeFact(HEALTHY);
+    const available = whatIfSuggestionExecutorAvailable(/* islTransportConfigured */ true);
+    expect(selectLens(fact, { executorAvailable: { what_if_counterfactual: available } })).toBeNull();
   });
 });
