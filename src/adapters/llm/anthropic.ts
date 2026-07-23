@@ -675,8 +675,16 @@ export async function draftGraphWithAnthropic(
       }, "[Anthropic] extended-thinking budget clamped DOWN so the total request fits the affordable draft budget — no longer resurrects the unaffordable 2026-07-20 outage config (Codex #8). Lower CEE_DRAFT_GRAPH_THINKING_BUDGET or raise DRAFT_REQUEST_BUDGET_MS to avoid the clamp.");
     }
   }
-  // Anthropic requires temperature=1 when extended thinking is active
-  const draftTemperature = draftThinkingEnabled ? 1 : 0;
+  // Anthropic requires temperature=1 when extended thinking is active.
+  // Sonnet 5 / Opus 4.7+ / Fable 5 REJECT any explicit sampling param with a 400 —
+  // omit temperature entirely for them (undefined is dropped from the request body
+  // by the SDK's JSON serialisation). This is the 4th sampling-param call site; it
+  // mirrors the chat / chat_with_tools / stream paths (rejectsSamplingParams gate
+  // takes precedence over the thinking=1 rule). Future consolidation: the four sites
+  // inline the same ternary — a shared helper is the obvious de-mirror.
+  const draftTemperature = rejectsSamplingParams(model)
+    ? undefined
+    : (draftThinkingEnabled ? 1 : 0);
 
   // Structured Outputs feature flag — only active when both the flag is on AND the
   // selected model is in the supported allowlist AND thinking is not enabled
