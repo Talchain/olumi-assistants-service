@@ -963,22 +963,28 @@ async function fetchPriorFacts(
  *
  * Behaviour matrix:
  *
- *   userId PRESENT (authenticated UI path):
- *     - RPC INSERTs row if missing, no-ops if present, returns
- *       authoritative user_id. Match → `{ ok: true }`.
- *     - Returned user_id differs from caller's → cross-tenant attempt;
- *       `{ ok: false, reason: 'scenario_owned_by_other_user' }` and the
- *       route emits 422.
- *     - RPC errors (network, DB down, permission) → treated as skipped
- *       and the turn proceeds. `append_turn_atomic` is the last line of
- *       defence and will still surface a genuine missing-scenario as
- *       STATE_COMMIT_FAILED.
+ * Ownership is keyed on the STORED owner (the RPC's authoritative user_id),
+ * never on whether the caller happened to supply one — that distinction is
+ * what closes the IDOR-class hole (a caller omitting user_id must NOT skip
+ * the check on an owned scenario).
  *
- *   userId ABSENT (guest mode — VITE_AUTH_MODE=guest):
- *     - RPC is STILL called. scenarios.user_id is nullable; the row is
- *       created with user_id = NULL. Ownership check is skipped (no
- *       ownership concept in guest mode). Returns `{ ok: true }`.
- *     - RPC errors → same fail-open behaviour as the authenticated path.
+ *   Stored owner NON-null (an owned scenario):
+ *     - Caller == owner → `{ ok: true }`.
+ *     - Caller is a DIFFERENT user → cross-tenant attempt;
+ *       `{ ok: false, reason: 'scenario_owned_by_other_user' }`, route 422.
+ *     - Caller ABSENT (no user_id) → IDOR fail-closed;
+ *       `{ ok: false, reason: 'scenario_requires_authenticated_owner' }`,
+ *       route 422. An anonymous caller is not the owner.
+ *
+ *   Stored owner NULL (a guest scenario — VITE_AUTH_MODE=guest):
+ *     - Any caller (anonymous or identified) → `{ ok: true }`. There is no
+ *       ownership concept for an unowned scenario; this openness is a
+ *       product feature, not a leak.
+ *
+ *   RPC errors (network, DB down, permission), any caller:
+ *     - Treated as skipped and the turn proceeds (`{ ok: true, skipped }`).
+ *       `append_turn_atomic` is the last line of defence and will still
+ *       surface a genuine missing-scenario as STATE_COMMIT_FAILED.
  *
  * ⚠ Caller-ownership check is PoC-grade only. See ensureScenarioExists
  * on SessionStore and the migration file header for the production-
@@ -986,7 +992,10 @@ async function fetchPriorFacts(
  */
 export type PreflightResult =
   | { readonly ok: true; readonly skipped?: boolean }
-  | { readonly ok: false; readonly reason: 'scenario_owned_by_other_user' };
+  | {
+      readonly ok: false;
+      readonly reason: 'scenario_owned_by_other_user' | 'scenario_requires_authenticated_owner';
+    };
 
 export async function preflightEnsureScenario(
   scenarioId: string,
@@ -1012,18 +1021,41 @@ export async function preflightEnsureScenario(
     return { ok: true, skipped: true };
   }
 
-  // Skip ownership check in guest mode (either side null means no auth identity).
-  if (userId !== null && authoritativeUserId !== null && authoritativeUserId !== userId) {
-    log.warn(
-      {
-        request_id: requestId,
-        scenario_id: scenarioId,
-        caller_user_id_prefix: userId.slice(0, 8),
-        owner_user_id_prefix: authoritativeUserId.slice(0, 8),
-      },
-      'V5 pre-flight: scenario owned by a different user — rejecting turn as cross-tenant attempt',
-    );
-    return { ok: false, reason: 'scenario_owned_by_other_user' };
+  // Ownership is enforced ONLY when the scenario has a stored owner. A null
+  // stored owner means a guest (unowned) scenario, which by design any caller
+  // may act on — that carve-out is a product feature (VITE_AUTH_MODE=guest),
+  // NOT the either-null skip that opened the IDOR hole below.
+  if (authoritativeUserId !== null) {
+    if (userId === null) {
+      // IDOR fail-closed: the scenario has a non-null owner but the caller
+      // presented NO identity. The previous `userId !== null &&` guard skipped
+      // the whole check here, so any request that simply omitted user_id could
+      // act on any owned scenario. Refuse — an anonymous caller is not the
+      // owner. (The JWT-derivation half — making identity un-spoofable on
+      // browser paths — is tracked separately in user-identity.ts.)
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: scenarioId,
+          owner_user_id_prefix: authoritativeUserId.slice(0, 8),
+        },
+        'V5 pre-flight: anonymous caller (no user_id) on an owned scenario — refusing turn (fail closed)',
+      );
+      return { ok: false, reason: 'scenario_requires_authenticated_owner' };
+    }
+
+    if (authoritativeUserId !== userId) {
+      log.warn(
+        {
+          request_id: requestId,
+          scenario_id: scenarioId,
+          caller_user_id_prefix: userId.slice(0, 8),
+          owner_user_id_prefix: authoritativeUserId.slice(0, 8),
+        },
+        'V5 pre-flight: scenario owned by a different user — rejecting turn as cross-tenant attempt',
+      );
+      return { ok: false, reason: 'scenario_owned_by_other_user' };
+    }
   }
 
   return { ok: true };
