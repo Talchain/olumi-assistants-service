@@ -7,69 +7,86 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.22.0.tgz`
+### `talchain-schemas-0.23.0.tgz`
 
-> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.22.0`, pulled from
-> GitHub Packages via `npm pack` (tag `v0.22.0` at `e04b900c`).** This is the
-> named CEE 0.22 absorption row (ROADMAP 1.181). 0.22.0 carries the full 0.22
-> batch PLUS the FIRST-SHIP of the two changes 0.21.0 deliberately held back
-> (schemas PR #13 and #14 — see the 0.21.0 README note in git history).
+> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.23.0`, pulled from
+> GitHub Packages via `npm pack @talchain/schemas@0.23.0`.** This is the named
+> CEE 0.23 absorption row (ROADMAP 1.188, wave-2 graph write/identity boundary
+> 1.192). 0.23.0 is ADDITIVE-ONLY over 0.22.0 (D-34: 538→538 symbols, zero
+> removed; a turn WITHOUT the new field still parses).
 
-The 0.22.0 surface over 0.21.0:
+The 0.23.0 surface over 0.22.0:
 
-- **0.22 batch.** `Intent` enum + `chip.id` / `chip.intent` on the message-turn
-  chip; batched `direct_graph_edit` fields (`changed_node_ids`,
-  `changed_edge_ids`, `operations`, `fields_changed`, `summary`); the S1
-  `graph_hash` / `computed_against_hash` / `GRAPH_DIVERGED` set; the typed
-  `feedback` system event; the Group-A surfaces; and the #16 enrichment
-  additions.
-- **#13 (first ship).** Compute-seam JSON-Schema types. Additive new exports;
-  CEE constructs no objects against them here.
-- **#14 (first ship).** `GoalConstraintSchema` → `LegacyGoalConstraintStubSchema`
-  rename **in the vendored package**. This has ZERO effect on CEE: every
-  `GoalConstraintSchema` reference in CEE resolves to CEE's OWN local
-  `src/schemas/assist.ts`, and no CEE file imports that name from
-  `@talchain/schemas` (verified by `git grep` at re-vendor time — the F2-B
-  re-pack finding still holds). No import changes were required.
+- **`graph_state?: GraphV3` on `MessageTurnPayloadSchema`** — the inbound
+  first-touch canvas graph (full GraphV3, not a hash ref — no server model to
+  fetch on first touch). Additive + `.strict()`-safe: CEE's B1 pre-flight
+  strips `graph_state` (with `analysis_state` / `user_id` / `selected_elements`)
+  from the body BEFORE `validateIngress` via
+  `V5_EXTENSION_FIELDS = Object.keys(V5RequestExtensionsSchema.shape)`
+  (`route-v2-preflight.ts`), then re-parses it CEE-side
+  (`request-extensions.ts` `GraphStateIngressSchema`) — the exact
+  strip-then-reparse pattern already proven for `selected_elements` since 0.22.
+  So the re-vendor cannot 422 a `graph_state`-bearing turn on a strict-schema
+  mismatch. The wave-2 adopt leg (turn-executor `graphForCommit`) then persists
+  it at first commit when there is no server model.
+- **F6 accommodation comment** on the turn payload (representative-singular wire
+  convention). Documentation only.
+- The 0.22 handshake set — `OlumiResponseSchema.graph_hash`,
+  `AnalysisResultBlockSchema.computed_against_hash`, the `GRAPH_DIVERGED` error
+  code — is carried forward unchanged; **wave-2 (leg κ) lights it CEE-side**
+  (map `freshness.current_graph_hash` → `graph_hash`; map the fact's
+  `graph_hash_at_run` → `computed_against_hash`). ⚠ `model_graph_hash` NEVER
+  existed (D-34) — it is referenced nowhere.
+
+The `GoalConstraintSchema` → `LegacyGoalConstraintStubSchema` rename (0.22 #14)
+still has ZERO effect on CEE: every `GoalConstraintSchema` reference in CEE
+resolves to CEE's OWN local `src/schemas/assist.ts`, and no CEE file imports
+that name from `@talchain/schemas` (unchanged by 0.23).
 
 > **Registry note.** CEE consumes the vendored tarball via
 > `file:./vendor/...`, never a registry version. Registry/publish state is
 > orthogonal to this pin — but the CONTENT here must match the
-> merged+published `0.22.0`.
+> merged+published `0.23.0`.
 
-**Purpose — INGRESS ACCEPTANCE ONLY. This re-vendor adds NO new EMISSIONS
-and NO routing/handlers.** CEE's B1 validator (`src/validators/b1.ts`, derived
-from the vendored `OrchestratorTurnPayloadSchema`) is `.strict()` and
-fail-closed: an unknown key or an out-of-vocabulary literal 422s the WHOLE turn.
-So each new INGRESS field — `chip.id`, `chip.intent`, the `feedback` system
-event, and the batched `direct_graph_edit` fields — must be ACCEPTED here FIRST,
-before any producer (the S2+S3 CEE lanes / the UI) sends it. That accept-half is
-pinned executably in `tests/contract/schemas-0.22-ingress-surface.test.ts`
-(one acceptance per new field + a discrimination control each, plus a
-fall-through proof that an intent-carrying turn still completes ingress
-normally). Routing off `intent`, the feedback handler, and the batched-edit
-handler land LATER with S2+S3 — un-routed accepted fields fall through benignly.
+**Purpose — the 0.23 re-vendor ENABLES the wave-2 (1.192) graph write/identity
+boundary.** Unlike the pure ingress-acceptance re-vendors before it, the 0.23
+re-vendor lands in one PR with the CEE code that consumes the new surface:
 
-The prior EGRESS obligations (`signal_code` / `signal` on the guidance blocks,
-`framing_quality`, the `what_changed` / `analysis_readiness` action-type
-literals) are carried forward unchanged; their landing notes live in the 0.20.0
-and 0.21.0 README revisions in git history. 0.21.0 → 0.22.0 is additive on the
-ingress surface: new optional fields and one new system-event member; every
-pre-0.22.0 payload still parses.
+- **Ingress:** `graph_state?: GraphV3` on `MessageTurnPayloadSchema`. CEE's B1
+  pre-flight STRIPS it (with `analysis_state`/`user_id`/`selected_elements`)
+  before `validateIngress` and re-parses it CEE-side via
+  `GraphStateIngressSchema` — so B1 `.strict()` cannot 422 a `graph_state`
+  turn on the schema bump (proven strip-then-reparse pattern, unchanged since
+  `selected_elements`). A turn WITHOUT `graph_state` still parses (fail-safe).
+- **Emission (wave-2 leg κ, in `compose/output-safety.ts` + `compose.ts` — NOT
+  the vendor swap):** the 0.22-shipped handshake fields
+  `OlumiResponseSchema.graph_hash` and `AnalysisResultBlockSchema.computed_against_hash`
+  are now MAPPED onto the wire from values CEE already computes
+  (`freshness.current_graph_hash` / the run-analysis fact's `graph_hash_at_run`).
+- **Adopt (wave-2 leg S2, in `turn-executor.ts` `graphForCommit`):** a
+  first-touch `graph_state` with no server model is PERSISTED at commit,
+  routing through the W2 chokepoint (repair + options[]-reconcile + CAS-stamp).
 
-**Checksum verification:** `vendor/talchain-schemas-0.22.0.tgz.sha256`
+0.22.0 → 0.23.0 is additive on the ingress surface: one new optional field on
+the turn payload; every pre-0.23.0 payload still parses. The prior EGRESS/ingress
+obligations (`signal_code`/`signal`, `framing_quality`, the Intent/`chip.id`/
+batched-`direct_graph_edit` accept-half in
+`tests/contract/schemas-0.22-ingress-surface.test.ts`) are carried forward
+unchanged.
+
+**Checksum verification:** `vendor/talchain-schemas-0.23.0.tgz.sha256`
 holds the canonical sha256 hash
-(`adf17921456eb024fde429a79e7375d7af27aa14db76b4d720498dc99e5f622d`).
+(`be49feb8037a963c9a3dcd2ec206b29672ae91e07d055f6aa2bdd99c034eca26`).
 The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
 tarball bytes against this manifest on every push. ✔ This hash is for the
-PUBLISHED `@talchain/schemas@0.22.0` tarball (`npm pack` from GitHub Packages,
-tag `v0.22.0` at `e04b900c`), replacing the prior `0.21.0` hash
-`73621323…52da5663`.
+PUBLISHED `@talchain/schemas@0.23.0` tarball (`npm pack` from GitHub Packages,
+tag `v0.23.0`), replacing the prior `0.22.0` hash
+`adf17921…9e5f622d`.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
-restores the prior `vendor/talchain-schemas-0.21.0.tgz`, its
+restores the prior `vendor/talchain-schemas-0.22.0.tgz`, its
 `.sha256` manifest, the prior `package.json` `file:` reference, and
-this README's prior state — the entire pin returns to v0.21.0 in one
+this README's prior state — the entire pin returns to v0.22.0 in one
 commit. Re-run `pnpm install` after the revert.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
@@ -80,7 +97,8 @@ adoption, 0.15.0 at the reasoning/held_proposal/ui_directive wave,
 0.16.0 at the decision-record additive wave, 0.18.0 at the
 draft-goal-constraints wave, 0.19.0 at the wave-2 producer fields,
 0.20.0 at the readiness/signal/framing_quality wave, 0.21.0 at the
-`what_changed` action-type wave) are
+`what_changed` action-type wave, 0.22.0 at the Intent/chip.id +
+graph-identity-handshake + batched direct_graph_edit wave) are
 removed on each bump — only the currently-pinned version lives in
 `vendor/`.
 
