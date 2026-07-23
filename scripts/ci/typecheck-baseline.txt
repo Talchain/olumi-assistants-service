@@ -10,7 +10,14 @@
 # Goal: shrink toward zero, then retire the ratchet. FOLLOW-UP (noted in PR): upgrade
 # the ratchet from file-set + total-count to PER-FILE counts so intra-baseline drift
 # (removing one error while adding another, net-zero) is also caught.
-# count=280
+# UPDATED 2026-07-23 (ROADMAP 1.192 PR): +2 files added — PRE-EXISTING wave-1 drift
+# from #646 (55b14b15, the what-if counterfactual lens) whose two erroring test
+# files were added AFTER the 2026-07-22 regen and never baselined (a stale-baseline
+# broken-alarm, trap-7). Their errors are schema-INDEPENDENT (vitest mock 'never';
+# CEE-local AnalysisProjectionSummary 'staleness_reason'), unrelated to the 0.23
+# re-vendor. Count 280→282 reflects reality; no 1.192 file errors under full tsc.
+# count=282
+src/adapters/isl/__tests__/counterfactual-client.test.ts
 src/cee/decision-review/__tests__/invoke.test.ts
 src/cee/unified-pipeline/stages/__tests__/boundary.test.ts
 src/orchestrator-v5/__tests__/build-turn-context-direct-answer-facts.test.ts
@@ -47,6 +54,7 @@ src/orchestrator-v5/tools/handlers/__tests__/run-analysis-permissive-status.test
 src/orchestrator-v5/tools/handlers/__tests__/run-analysis-timing.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/run-analysis.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/set-factor-value.test.ts
+src/orchestrator-v5/tools/handlers/__tests__/what-would-flip-counterfactual-extension.test.ts
 src/orchestrator-v5/tools/handlers/__tests__/what-would-flip.test.ts
 src/orchestrator-v5/tools/handlers/d1-shared/__tests__/mutation-persistence.test.ts
 tests/contract/endpoint-feature-matrix.test.ts

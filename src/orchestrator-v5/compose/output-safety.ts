@@ -54,6 +54,7 @@
 
 import type { OlumiResponse, Action, Insight, Block } from '@talchain/schemas/boundary';
 import type { GraphV3T } from '../../orchestrator/types.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { finalizeChips } from './chip-finalizer.js';
 import { guardLoopingChipsAtEgress } from './looping-chip-guard.js';
@@ -141,6 +142,27 @@ export function sanitiseOlumiResponseForEgress(
     exitPath: opts.exitPath,
   });
 
+  // ROADMAP 1.192 leg κ — identity handshake (top-level `graph_hash`). Stamp
+  // the canonical identity of the graph THIS turn reasoned/committed over onto
+  // the response envelope, at the single V5 egress chokepoint every exit path
+  // funnels through. `opts.graph` (= runResult.effectiveGraph) is the
+  // authoritative per-turn graph — the request graph_state parsed, the
+  // persisted fallback, or the just-ADOPTED graph on a first-touch turn (leg 2
+  // row A) — the SAME graph the entity-id scrub above resolves against.
+  // `computeAnalysisAffectingGraphHash` is the SAME canonical hash function the
+  // freshness envelope uses (freshness.current_graph_hash), so the two are
+  // byte-identical for the same graph. Fail-closed: a null/empty graph yields a
+  // null hash → OMIT `graph_hash` (it is .optional(); never emit an empty
+  // string, the schema is .min(1)). Idempotent: this chokepoint re-runs up to
+  // 4x per response; a graph-derived hash is stable, and a response that
+  // already carries `graph_hash` (a prior pass, or a future authoritative
+  // upstream setter) keeps it.
+  const graphHash =
+    response.graph_hash ??
+    (computeAnalysisAffectingGraphHash(
+      opts.graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+    ) ?? undefined);
+
   const sanitised: OlumiResponse = {
     ...response,
     assistant_text: collect(response.assistant_text),
@@ -148,6 +170,7 @@ export function sanitiseOlumiResponseForEgress(
     // Spread the finalizer + loop-guard readonly result into the mutable wire array.
     suggested_actions: [...loopGuarded],
     insights: response.insights.map((i) => sanitiseInsight(i, collect)),
+    ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
   };
 
   for (const m of allMatches) {
