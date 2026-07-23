@@ -30,6 +30,10 @@ import {
   invokeDecomposedDecisionReview,
   DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
 } from '../../cee/decision-review/decompose.js';
+import {
+  checkDecisionReviewContract,
+  summariseContractViolations,
+} from '../../cee/decision-review/contract-gate.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
@@ -283,6 +287,52 @@ export async function enrichRunAnalysisWithDecisionReview(
         brief_length: briefLength,
         leading_option_present: leadingOptionPresent,
       });
+      return input.handlerFacts;
+    }
+
+    // POST-parse CONTRACT GATE (ROADMAP 1.185(c); enforce-vs-telemetry split
+    // per A1 ruling D-11). The parsed output is non-null but may still violate
+    // the prompt contract the block-parse shape check does not cover. The gate
+    // splits its rules into two classes (see contract-gate.ts):
+    //
+    //   • SAFETY rules (missing review_card, fabricated conversational
+    //     callbacks R-CONT, ungrounded entity references) are model-agnostic
+    //     DEFECTS. A safety violation (`contract.mustDrop`) DROPS the review
+    //     down the SAME graceful no-review path as a shape-extraction failure —
+    //     the turn still succeeds with thin content, never shipping violating
+    //     prose and never silently trimmed into compliance.
+    //
+    //   • COUNT-CAP rules (tight bias/dqp/key_assumptions/scenario_contexts
+    //     bounds) are TELEMETRY-ONLY. They are COUNTED for the per-model A/B
+    //     regression signal but do NOT drop the review — the served v15 prompt
+    //     only rejects at the LOOSE shape-check bounds, so a prompt-legal
+    //     tolerance-band review SHIPS today and dropping it here would silently
+    //     change current gpt-4.1 output. The gate is the A/B PRECONDITION, not
+    //     a live quality change.
+    //
+    // So the telemetry event fires on ANY violation (`!contract.ok`), tagged
+    // `dropped` = whether it enforced a drop; the review is dropped ONLY on
+    // `contract.mustDrop`. Unconditional (no env gate — Paul doctrine). Grounds
+    // entity references against the run's graph.
+    const contract = checkDecisionReviewContract(result.output, {
+      graph: invokeInput.graph,
+    });
+    if (!contract.ok) {
+      emit(TelemetryEvents.V5DecisionReviewContractViolation, {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        duration_ms: Date.now() - startedAt,
+        brief_present: true,
+        brief_length: briefLength,
+        leading_option_present: leadingOptionPresent,
+        // Did this violation ENFORCE a drop (safety) or is it telemetry-only
+        // (count-cap)? Lets the A/B dashboard separate enforced drops from
+        // tolerance-band count signals. Bounded boolean — R-004-clean.
+        dropped: contract.mustDrop,
+        ...summariseContractViolations(contract.violations),
+      });
+    }
+    if (contract.mustDrop) {
       return input.handlerFacts;
     }
 

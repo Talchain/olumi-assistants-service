@@ -592,6 +592,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeOptionsIdenticalDroppedDuplicate: "cee.options_identical.dropped_duplicate",
         CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
         V5DecisionReviewCompleted: "v5.decision_review.completed",
+        V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
         V5EditGraphAnalyticalQuestionSuppressed: "v5.edit_graph.analytical_question_suppressed",
         V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
         V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
@@ -921,6 +922,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.json_extracted": [TelemetryEvents.CeeDecisionReviewJsonExtracted],
         "cee.decision_review.shape_check_failed": [TelemetryEvents.CeeDecisionReviewShapeCheckFailed],
         "cee.decision_review.shape_check_warnings": [TelemetryEvents.CeeDecisionReviewShapeCheckWarnings],
+        // POST-parse contract gate — reason-tagged counter (primary rule code).
+        "v5.decision_review.contract_violation": [TelemetryEvents.V5DecisionReviewContractViolation],
 
         // Graph Readiness events (v2.3)
         "cee.graph_readiness.requested": [TelemetryEvents.CeeGraphReadinessRequested],
@@ -1884,6 +1887,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching.answer_source",
         "v5.answer_shape.emitted",
         "v5.answer_shape.dropped_stale",
+        "v5.decision_review.contract_violation",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",

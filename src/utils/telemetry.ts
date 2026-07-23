@@ -1140,6 +1140,32 @@ export const TelemetryEvents = {
   // boolean (fragment success counts, violation count, wall-clock ms).
   V5DecisionReviewDecomposed: "v5.decision_review.decomposed",
 
+  // decision_review POST-parse CONTRACT GATE (ROADMAP 1.185(c) — the named
+  // "keep gpt-4.1" blocker; enforce-vs-telemetry split per A1 ruling D-11).
+  // Fires once per auto-fired decision_review when the parsed output VIOLATES
+  // the prompt contract the block-parse shape check does not cover. The gate
+  // splits its rules into two classes:
+  //   • SAFETY rules (missing review_card, fabricated conversational callbacks
+  //     R-CONT, ungrounded entity references) DROP the review down the graceful
+  //     no-review path (thin content) — never trimmed into compliance.
+  //   • COUNT-CAP rules (tight bias/dqp/key_assumptions/scenario_contexts
+  //     bounds) are TELEMETRY-ONLY — COUNTED for the per-model A/B signal but
+  //     NOT dropped (dropping a prompt-legal tolerance-band review would
+  //     silently change current gpt-4.1 output). shape-check still enforces the
+  //     loose bounds.
+  // The event fires on ANY violation; the `dropped` field says whether it
+  // enforced a drop. The gate is unconditional (no env gate); its existence is
+  // the gpt-4.1 A/B precondition.
+  //
+  // Privacy contract (R-004): `request_id` / `scenario_id` are routing-key
+  // strings; `reason` is the primary violated rule code and `reasons` is the
+  // comma-joined sorted set of violated rule codes — both drawn from a bounded
+  // vocabulary (see DecisionReviewContractRule). `violation_count` is a finite
+  // integer; `dropped` is a boolean (safety-enforced vs telemetry-only). NO
+  // prose, graph label, raw id, brief text, or review content ever appears on
+  // this event.
+  V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
+
   // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
   // events cover the graphState resolution outcomes for an edit-intent turn,
   // so the routing-contract invariant (edit intent → mutation OR clarification
@@ -3267,6 +3293,18 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("cee.decision_review.failed", 1, {
             error_code: String((eventData.error_code as string) || "unknown"),
             http_status: String((eventData.http_status as number | string | undefined) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.V5DecisionReviewContractViolation: {
+          // Reason tag is the PRIMARY violated rule code (bounded, low
+          // cardinality); the full set travels on the log payload's `reasons`.
+          // `dropped` (bounded boolean) separates safety-enforced drops from
+          // telemetry-only count-cap breaches on the A/B dashboard (D-11).
+          datadogClient.increment("v5.decision_review.contract_violation", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+            dropped: String(eventData.dropped === true),
           });
           break;
         }
