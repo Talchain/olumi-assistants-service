@@ -21,10 +21,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 const mockCreate = vi.fn();
+// Lane C (2026-07-23): draftGraphWithAnthropic now STREAMS (messages.stream);
+// the chat / chat_with_tools paths under test still use messages.create.
+const mockStream = vi.fn();
 
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class MockAnthropic {
-    messages = { create: mockCreate };
+    messages = { create: mockCreate, stream: mockStream };
   },
 }));
 
@@ -312,11 +315,29 @@ const MINIMAL_DRAFT_JSON = JSON.stringify({
   ],
 });
 
+/** Fake MessageStream for the streamed draft path: streams the JSON as a text
+ *  delta, resolves finalMessage with the same {content, stop_reason, usage}
+ *  shape as the non-streaming response (so body-param assertions are unchanged). */
+function makeDraftStream(jsonText: string) {
+  return () => {
+    async function* gen() {
+      yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: jsonText } };
+    }
+    const iterator = gen();
+    return {
+      [Symbol.asyncIterator]: () => iterator,
+      finalMessage: async () => makeResponse([{ type: "text", text: jsonText }]),
+      abort: () => {},
+    };
+  };
+}
+
 describe("draftGraphWithAnthropic — thinking", () => {
   beforeEach(() => {
     vi.resetModules();
     mockCreate.mockReset();
-    mockCreate.mockResolvedValue(makeResponse([{ type: "text", text: MINIMAL_DRAFT_JSON }]));
+    mockStream.mockReset();
+    mockStream.mockImplementation(makeDraftStream(MINIMAL_DRAFT_JSON));
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
   });
 
@@ -334,7 +355,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
       model: "claude-sonnet-4-6",
     });
 
-    const [body] = mockCreate.mock.calls[0];
+    const [body] = mockStream.mock.calls[0];
     expect(body.thinking).toBeUndefined();
     expect(body.temperature).toBe(0);
   });
@@ -349,7 +370,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
       thinking: { type: "enabled", budget_tokens: 6000 },
     });
 
-    const [body] = mockCreate.mock.calls[0];
+    const [body] = mockStream.mock.calls[0];
     expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 6000 });
     expect(body.temperature).toBe(1);
   });
@@ -367,7 +388,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
       thinking: { type: "enabled", budget_tokens: 6000 },
     });
 
-    const [body] = mockCreate.mock.calls[0];
+    const [body] = mockStream.mock.calls[0];
     expect(body.max_tokens).toBeGreaterThanOrEqual(6000 + 1024);
   });
 
@@ -383,7 +404,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
       thinking: { type: "enabled", budget_tokens: 6000 },
     });
 
-    const [body] = mockCreate.mock.calls[0];
+    const [body] = mockStream.mock.calls[0];
     expect(body.thinking).toBeUndefined();
     expect(body.temperature).toBe(0);
 
@@ -402,7 +423,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
       thinking: { type: "enabled", budget_tokens: 6000 },
     });
 
-    const [body] = mockCreate.mock.calls[0];
+    const [body] = mockStream.mock.calls[0];
     // output_config must be absent when thinking is enabled (incompatible)
     expect(body.output_config).toBeUndefined();
   });

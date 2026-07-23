@@ -16,7 +16,16 @@ import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { resolveDraftMaxTokens, resolveDraftThinking, isDraftTruncated } from "./draft-budget.js";
+import {
+  resolveDraftMaxTokens,
+  resolveDraftThinking,
+  isDraftTruncated,
+  DRAFT_RUNAWAY_DETECT_MS,
+  DRAFT_RUNAWAY_DETECT_CHARS,
+  DRAFT_RUNAWAY_MIN_RETRY_MS,
+  DRAFT_MAX_RUNAWAY_RETRIES,
+  DRAFT_EDGES_REACHED_RE,
+} from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
 import { extractJsonFromResponse, closeTruncatedJson, type JsonExtractionOptions, type JsonExtractionResult } from '../../utils/json-extractor.js';
@@ -877,48 +886,181 @@ export async function draftGraphWithAnthropic(
     }
 
     let useStructuredOutputs = structuredOutputsEnabled;
-    let { body, options } = buildCallParams(useStructuredOutputs);
+    let { body } = buildCallParams(useStructuredOutputs);
 
-    const response = await withRetry(
-      async () => {
-        try {
-          return await apiClient.messages.create(body, options);
-        } catch (callErr) {
-          // If Structured Outputs is active and the API rejects the parameter with a
-          // 400 (unsupported model / API change), fall back to prompt-only JSON mode
-          // and retry immediately. This is a single-attempt graceful degradation —
-          // withRetry handles rate-limit / server-error retries separately.
-          if (useStructuredOutputs && isStructuredOutputsRejection(callErr)) {
-            log.warn(
-              { model, error: (callErr as Error).message },
-              "[Anthropic] Structured Outputs rejected by API — falling back to prompt-only JSON mode"
-            );
-            // Lane 3 (2026-07-07): the fallback must not be silent — emit a
-            // queryable telemetry event alongside the WARN log so dashboards
-            // catch a permanently-degraded draft path (every draft paying
-            // prompt-only latency, e.g. the "compiled grammar is too large"
-            // regression reintroduced by the v0.11.0 schema amendment).
-            emit(TelemetryEvents.CeeStructuredOutputsFellBack, {
-              operation: "draft_graph",
-              model,
-              error_snippet: ((callErr as Error).message ?? "unknown").slice(0, 200),
-              schema_bytes: JSON.stringify(draftGraphSchema).length,
-            });
-            useStructuredOutputs = false;
-            const fallback = buildCallParams(false);
-            body = fallback.body;
-            options = fallback.options;
-            return await apiClient.messages.create(body, options);
+    /**
+     * C1 + C2 (Lane C, 2026-07-23): stream ONE draft generation and detect the
+     * runaway EARLY. The wave-1 anatomy proved the residual failure class cuts
+     * INSIDE the `nodes` array with 0 edges at ~8550 tokens / ~82-91s; a
+     * non-streaming call pays that full ~85s for a doomed attempt. Streaming
+     * lets us see the model is still in nodes long past when every healthy draft
+     * has finished, abort, and retry within the remaining budget.
+     *
+     * Returns a discriminated result so the caller's retry loop can distinguish:
+     *  - complete   : the stream finished; `message` is the SAME shape as
+     *                 `messages.create` returns (content/usage/stop_reason), so
+     *                 the entire downstream parse/salvage/validate path is
+     *                 unchanged (incl. a natural max_tokens truncation).
+     *  - runaway    : detected still-in-nodes past the deadline; the attempt was
+     *                 aborted — the caller retries a fresh generation.
+     *  - so_reject  : the API rejected `output_config` (400) — the caller drops
+     *                 to prompt-only JSON mode (unchanged graceful degradation).
+     * Any other error (overall timeout / external abort / 429 / 5xx / fatal) is
+     * thrown so `withRetry` (transient) or the outer catch (typed) handles it.
+     *
+     * `detectDeadlineMs === null` disables early abort (the FINAL attempt runs to
+     * the full remaining budget). Detection is also inactive when extended
+     * thinking is on (a legitimately longer generation; off by default here).
+     */
+    async function streamOneDraftAttempt(
+      attemptBody: Anthropic.MessageStreamParams,
+      attemptIdempotencyKey: string,
+      detectDeadlineMs: number | null,
+    ): Promise<
+      | { kind: "complete"; message: Anthropic.Message; timeToEdgesMs: number | null }
+      | { kind: "runaway"; chars: number; elapsedMs: number; trigger: "time" | "chars" }
+      | { kind: "so_reject"; error: unknown }
+    > {
+      // Per-attempt controller: aborted either by our runaway detector OR by the
+      // overall abortController (timeout / external client disconnect). Only the
+      // latter must surface as a real timeout — the runaway abort is swallowed
+      // and retried.
+      const perAttempt = new AbortController();
+      const relayOverallAbort = () => perAttempt.abort();
+      if (abortController.signal.aborted) perAttempt.abort();
+      else abortController.signal.addEventListener("abort", relayOverallAbort, { once: true });
+
+      const attemptStart = Date.now();
+      let acc = "";
+      let edgesReached = false;
+      // Time from stream start to the first edge — the empirical signal that
+      // validates DRAFT_RUNAWAY_DETECT_MS live (a healthy draft should reach
+      // edges well under the deadline). Recorded on success, surfaced on meta.
+      let timeToEdgesMs: number | null = null;
+      let runaway: { chars: number; elapsedMs: number; trigger: "time" | "chars" } | null = null;
+      let detectTimer: ReturnType<typeof setTimeout> | undefined;
+
+      // Timer-armed time gate: fires even if the model stops emitting deltas (a
+      // silent constrained-decode thrash still burns wall-clock), which an
+      // in-loop check alone could not catch.
+      const detectionActive = detectDeadlineMs != null && !draftThinkingEnabled;
+      if (detectionActive) {
+        detectTimer = setTimeout(() => {
+          if (!edgesReached && !runaway) {
+            runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "time" };
+            perAttempt.abort();
           }
-          throw callErr;
-        }
-      },
-      {
-        adapter: "anthropic",
-        model,
-        operation: "draft_graph",
+        }, detectDeadlineMs as number);
       }
-    );
+
+      try {
+        const stream = apiClient.messages.stream(attemptBody, {
+          signal: perAttempt.signal,
+          headers: { "Idempotency-Key": attemptIdempotencyKey },
+        });
+        for await (const event of stream) {
+          if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+            acc += event.delta.text;
+            if (!edgesReached && DRAFT_EDGES_REACHED_RE.test(acc)) {
+              // Past the nodes bottleneck — this is a healthy generation; cancel
+              // the detector and let the stream complete.
+              edgesReached = true;
+              timeToEdgesMs = Date.now() - attemptStart;
+              if (detectTimer) { clearTimeout(detectTimer); detectTimer = undefined; }
+            } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS) {
+              runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "chars" };
+              perAttempt.abort();
+              break;
+            }
+          }
+        }
+        if (detectTimer) clearTimeout(detectTimer);
+        abortController.signal.removeEventListener("abort", relayOverallAbort);
+        if (runaway) return { kind: "runaway", ...runaway };
+        const message = await stream.finalMessage();
+        return { kind: "complete", message, timeToEdgesMs };
+      } catch (streamErr) {
+        if (detectTimer) clearTimeout(detectTimer);
+        abortController.signal.removeEventListener("abort", relayOverallAbort);
+        // WE aborted this attempt for a runaway (perAttempt aborted, overall
+        // still live) — classify as a runaway retry, not an error.
+        if (runaway && !abortController.signal.aborted) {
+          return { kind: "runaway", ...runaway };
+        }
+        // Structured Outputs capability rejection (400) → prompt-only fallback.
+        // Same single-attempt graceful degradation as the non-streaming path;
+        // withRetry handles rate-limit / server-error retries separately.
+        if (useStructuredOutputs && isStructuredOutputsRejection(streamErr)) {
+          return { kind: "so_reject", error: streamErr };
+        }
+        throw streamErr;
+      }
+    }
+
+    let response: Anthropic.Message | undefined;
+    let runawayAbortCount = 0;
+    let streamTimeToEdgesMs: number | null = null;
+    for (let attempt = 1; response === undefined; attempt++) {
+      const remainingBudgetMs = effectiveTimeout - (Date.now() - startTime);
+      // Keep early-aborting only while there is budget for a detect PLUS a full
+      // healthy retry after it; otherwise this is the FINAL attempt and runs to
+      // the whole remaining window (no early abort) so a late completion /
+      // salvage is never thrown away.
+      const canRetryAgain =
+        remainingBudgetMs > DRAFT_RUNAWAY_DETECT_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
+        runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES;
+      const detectDeadlineMs = canRetryAgain ? DRAFT_RUNAWAY_DETECT_MS : null;
+      // Fresh idempotency key per RETRY so the provider RE-GENERATES rather than
+      // replaying the doomed generation for the same key (retries would be
+      // pointless otherwise); attempt 1 keeps the original key for logging
+      // identity, and withRetry's transient retries reuse it (idempotent).
+      const attemptIdempotencyKey = attempt === 1 ? idempotencyKey : makeIdempotencyKey();
+
+      const attemptResult = await withRetry(
+        () => streamOneDraftAttempt(body as Anthropic.MessageStreamParams, attemptIdempotencyKey, detectDeadlineMs),
+        { adapter: "anthropic", model, operation: "draft_graph" },
+      );
+
+      if (attemptResult.kind === "complete") {
+        response = attemptResult.message;
+        streamTimeToEdgesMs = attemptResult.timeToEdgesMs;
+        break;
+      }
+      if (attemptResult.kind === "so_reject") {
+        // Lane 3 (2026-07-07): the fallback must not be silent — emit a queryable
+        // telemetry event alongside the WARN log so dashboards catch a
+        // permanently-degraded draft path (every draft paying prompt-only
+        // latency, e.g. the "compiled grammar is too large" grammar-capacity 400).
+        log.warn(
+          { model, error: (attemptResult.error as Error).message },
+          "[Anthropic] Structured Outputs rejected by API — falling back to prompt-only JSON mode",
+        );
+        emit(TelemetryEvents.CeeStructuredOutputsFellBack, {
+          operation: "draft_graph",
+          model,
+          error_snippet: ((attemptResult.error as Error).message ?? "unknown").slice(0, 200),
+          schema_bytes: JSON.stringify(draftGraphSchema).length,
+        });
+        useStructuredOutputs = false;
+        ({ body } = buildCallParams(false));
+        attempt--; // the prompt-only rebuild is not a runaway attempt
+        continue;
+      }
+      // kind === "runaway": early-abort fired (only possible when detectDeadlineMs
+      // was non-null, i.e. canRetryAgain was true) → budget for a retry exists.
+      runawayAbortCount++;
+      log.warn({
+        event: "cee.llm.draft_runaway_aborted",
+        model,
+        attempt,
+        elapsed_ms: attemptResult.elapsedMs,
+        partial_chars: attemptResult.chars,
+        trigger: attemptResult.trigger,
+        detect_ms: DRAFT_RUNAWAY_DETECT_MS,
+        detect_chars: DRAFT_RUNAWAY_DETECT_CHARS,
+        remaining_budget_ms: remainingBudgetMs,
+      }, "[Anthropic] draft_graph runaway detected EARLY (still in nodes, no edges emitted) — aborted the doomed attempt and retrying a fresh generation within the remaining budget (Lane C streamed abort-retry)");
+    }
 
     clearTimeout(timeoutId);
     if (onExternalAbort && externalSignal) {
@@ -1405,6 +1547,14 @@ export async function draftGraphWithAnthropic(
         // max_tokens truncation by closing the partial JSON (salvage) rather
         // than re-drafted. Observable on the diagnostic trace.
         salvaged_from_truncation: salvagedFromTruncation,
+        // Lane C (2026-07-23): the draft call is STREAMED, with early runaway
+        // detection + cheap abort-retry. runaway_abort_count = how many doomed
+        // attempts were aborted before this one succeeded (0 on a clean first
+        // try); time_to_edges_ms validates DRAFT_RUNAWAY_DETECT_MS live (a
+        // healthy draft reaches the edges array well under the deadline).
+        streamed: true,
+        runaway_abort_count: runawayAbortCount,
+        time_to_edges_ms: streamTimeToEdgesMs,
         provider_latency_ms: providerLatencyMs,
         node_kinds_raw_json: rawNodeKinds,
         // Structured outputs telemetry — propagated through unified pipeline to diagnostic trace

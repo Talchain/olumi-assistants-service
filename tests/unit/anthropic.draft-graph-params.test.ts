@@ -130,17 +130,59 @@ describe("Structured Outputs GA output_config.format shape", () => {
 // with the mocked SDK wired in correctly.
 // =============================================================================
 
-// Minimal valid Anthropic response that passes schema validation downstream
-function makeAnthropicResponse(jsonText: string) {
-  return {
-    content: [{ type: "text", text: jsonText }],
-    stop_reason: "end_turn",
-    usage: {
-      input_tokens: 100,
-      output_tokens: 200,
-      cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
-    },
+// Lane C (2026-07-23): the draft path now STREAMS (messages.stream). A fake
+// MessageStream that yields the JSON as text deltas, then resolves finalMessage
+// with the same {content, stop_reason, usage} shape messages.create returned —
+// so the body-contract assertions below (temperature / max_tokens /
+// output_config / idempotency / salvage / truncation typing) are unchanged; only
+// the transport moved. `chunks` lets a test drip the text so the in-stream
+// runaway detector sees it grow; `hangAfterChunks` simulates a silent thrash
+// (no more deltas) so the time-deadline detector can fire.
+type FakeStreamOpts = {
+  stop_reason?: string;
+  usage?: Record<string, number>;
+  chunks?: string[];
+  hangAfterChunks?: boolean;
+};
+function makeAbortError(): Error {
+  const e = new Error("The operation was aborted");
+  e.name = "AbortError";
+  return e;
+}
+function makeFakeStream(jsonText: string, opts: FakeStreamOpts = {}) {
+  return (_body: unknown, options?: { signal?: AbortSignal; headers?: Record<string, string> }) => {
+    const signal = options?.signal;
+    const chunks = opts.chunks ?? [jsonText];
+    async function* gen() {
+      for (const text of chunks) {
+        if (signal?.aborted) throw makeAbortError();
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } };
+      }
+      if (opts.hangAfterChunks) {
+        // Silent thrash: emit no more deltas; resolve only when aborted (the
+        // real fetch rejects the iteration when the signal fires).
+        await new Promise<void>((_resolve, reject) => {
+          if (signal?.aborted) return reject(makeAbortError());
+          signal?.addEventListener("abort", () => reject(makeAbortError()), { once: true });
+        });
+      }
+    }
+    const iterator = gen();
+    return {
+      [Symbol.asyncIterator]: () => iterator,
+      finalMessage: async () => ({
+        content: [{ type: "text", text: jsonText }],
+        stop_reason: opts.stop_reason ?? "end_turn",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 200,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          ...(opts.usage ?? {}),
+        },
+      }),
+      abort: () => {},
+    };
   };
 }
 
@@ -160,13 +202,16 @@ const VALID_GRAPH_JSON = JSON.stringify({
   rationales: [],
 });
 
-// Hoisted so the mock factories can reference them before beforeEach runs
+// Hoisted so the mock factories can reference them before beforeEach runs.
+// createSpy → messages.create (chatWithAnthropic path); streamSpy →
+// messages.stream (Lane C draft path).
 const createSpy = vi.hoisted(() => vi.fn());
+const streamSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("@anthropic-ai/sdk", () => {
   return {
     default: class MockAnthropic {
-      messages = { create: createSpy };
+      messages = { create: createSpy, stream: streamSpy };
     },
   };
 });
@@ -192,11 +237,11 @@ vi.mock("../../src/adapters/llm/prompt-loader.js", () => ({
 describe("draftGraphWithAnthropic — request payload construction", () => {
   beforeEach(() => {
     vi.resetModules();
-    createSpy.mockResolvedValue(makeAnthropicResponse(VALID_GRAPH_JSON));
+    streamSpy.mockImplementation(makeFakeStream(VALID_GRAPH_JSON));
   });
 
   afterEach(() => {
-    createSpy.mockReset();
+    streamSpy.mockReset();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
@@ -214,8 +259,8 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-sonnet-4-6",
     });
 
-    expect(createSpy).toHaveBeenCalledOnce();
-    const [body, opts] = createSpy.mock.calls[0];
+    expect(streamSpy).toHaveBeenCalledOnce();
+    const [body, opts] = streamSpy.mock.calls[0];
 
     // temperature must be 0 for analytical consistency
     expect(body.temperature).toBe(0);
@@ -249,8 +294,8 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-sonnet-4-6",
     });
 
-    expect(createSpy).toHaveBeenCalledOnce();
-    const [body, opts] = createSpy.mock.calls[0];
+    expect(streamSpy).toHaveBeenCalledOnce();
+    const [body, opts] = streamSpy.mock.calls[0];
 
     // GA parameter: output_config.format (NOT deprecated output_format)
     expect(body).toHaveProperty("output_config");
@@ -280,8 +325,8 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-3-5-haiku-20241022",
     });
 
-    expect(createSpy).toHaveBeenCalledOnce();
-    const [body, opts] = createSpy.mock.calls[0];
+    expect(streamSpy).toHaveBeenCalledOnce();
+    const [body, opts] = streamSpy.mock.calls[0];
 
     expect(body).not.toHaveProperty("output_config");
     expect(body).not.toHaveProperty("output_format");
@@ -302,7 +347,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-sonnet-4-6",
     });
 
-    const [, opts] = createSpy.mock.calls[0];
+    const [, opts] = streamSpy.mock.calls[0];
     const headers: Record<string, string> = opts?.headers ?? {};
     expect(typeof headers["Idempotency-Key"]).toBe("string");
     expect(headers["Idempotency-Key"].length).toBeGreaterThan(0);
@@ -322,7 +367,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-sonnet-4-6",
     });
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     // The "minimum safe value" floor still guards a too-low config, capped at
     // affordability: min(8192 floor, 8550 affordable) = 8192. A floor ABOVE
     // affordability was the exact 2026-07-20 defect — at the recalibrated
@@ -344,7 +389,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-sonnet-4-6",
     });
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     // A 32768-token config is unaffordable at every timeout on the ladder and is
     // clamped to the affordable budget. The affordability bound comes from
     // config/timeouts.ts getAffordableDraftTokens — the throughput FLOOR plus the
@@ -372,7 +417,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       { timeoutMs: 45_000 },
     );
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     // (45s - 15s overhead) * 90 tok/s = 2700 tokens affordable in this window.
     expect(body.max_tokens).toBe(2700);
   });
@@ -383,16 +428,10 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
 
     // Simulate the API cutting the generation at the token cap: stop_reason
     // "max_tokens" with JSON chopped mid-object.
-    createSpy.mockResolvedValue({
-      content: [{ type: "text", text: VALID_GRAPH_JSON.slice(0, 200) }],
+    streamSpy.mockImplementation(makeFakeStream(VALID_GRAPH_JSON.slice(0, 200), {
       stop_reason: "max_tokens",
-      usage: {
-        input_tokens: 100,
-        output_tokens: 6000,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-      },
-    });
+      usage: { output_tokens: 6000 },
+    }));
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -432,16 +471,10 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
 
     // stop_reason max_tokens but the text happens to be complete valid JSON
     // (cap landed exactly at the end of the payload).
-    createSpy.mockResolvedValue({
-      content: [{ type: "text", text: VALID_GRAPH_JSON }],
+    streamSpy.mockImplementation(makeFakeStream(VALID_GRAPH_JSON, {
       stop_reason: "max_tokens",
-      usage: {
-        input_tokens: 100,
-        output_tokens: 6000,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-      },
-    });
+      usage: { output_tokens: 6000 },
+    }));
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -464,16 +497,10 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     const salvageable =
       VALID_GRAPH_JSON.slice(0, -1) + // drop the root's closing brace
       ',"coaching":"You should weigh the trade-off between speed and co'; // truncated field
-    createSpy.mockResolvedValue({
-      content: [{ type: "text", text: salvageable }],
+    streamSpy.mockImplementation(makeFakeStream(salvageable, {
       stop_reason: "max_tokens",
-      usage: {
-        input_tokens: 100,
-        output_tokens: 8550,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-      },
-    });
+      usage: { output_tokens: 8550 },
+    }));
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -499,16 +526,10 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // Cut mid-nodes, before `edges` is emitted: closeTruncatedJson recovers a
     // syntactically-valid `{nodes:[...]}` with NO edges, which the draft schema
     // (edges required) REJECTS. The salvage must never ship an invalid graph.
-    createSpy.mockResolvedValue({
-      content: [{ type: "text", text: '{"nodes":[{"id":"a","kind":"decision","label":"Pick"},{"id":"b","kind":"opt' }],
-      stop_reason: "max_tokens",
-      usage: {
-        input_tokens: 100,
-        output_tokens: 8550,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0,
-      },
-    });
+    streamSpy.mockImplementation(makeFakeStream(
+      '{"nodes":[{"id":"a","kind":"decision","label":"Pick"},{"id":"b","kind":"opt',
+      { stop_reason: "max_tokens", usage: { output_tokens: 8550 } },
+    ));
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -532,12 +553,12 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
-    // First call throws a 400 mentioning output_config; second call succeeds
-    createSpy
-      .mockRejectedValueOnce(
-        Object.assign(new Error("Invalid parameter: output_config not supported"), { status: 400 })
-      )
-      .mockResolvedValueOnce(makeAnthropicResponse(VALID_GRAPH_JSON));
+    // First stream is rejected with a 400 mentioning output_config; second succeeds
+    streamSpy
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error("Invalid parameter: output_config not supported"), { status: 400 });
+      })
+      .mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON));
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -549,10 +570,10 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     });
 
     // Should have been called twice: once with structured outputs, once without
-    expect(createSpy).toHaveBeenCalledTimes(2);
+    expect(streamSpy).toHaveBeenCalledTimes(2);
 
     // Second call (fallback) should have no output_config
-    const [fallbackBody] = createSpy.mock.calls[1];
+    const [fallbackBody] = streamSpy.mock.calls[1];
     expect(fallbackBody).not.toHaveProperty("output_config");
     expect(fallbackBody).not.toHaveProperty("output_format");
 
@@ -564,11 +585,11 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
-    createSpy
-      .mockRejectedValueOnce(
-        Object.assign(new Error("Unexpected key 'output_config' in request body"), { status: 400 })
-      )
-      .mockResolvedValueOnce(makeAnthropicResponse(VALID_GRAPH_JSON));
+    streamSpy
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error("Unexpected key 'output_config' in request body"), { status: 400 });
+      })
+      .mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON));
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -580,7 +601,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     });
 
     // Should fall back — two calls total
-    expect(createSpy).toHaveBeenCalledTimes(2);
+    expect(streamSpy).toHaveBeenCalledTimes(2);
     expect(result.graph.nodes.length).toBeGreaterThan(0);
   });
 
@@ -589,16 +610,16 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
     // The live staging failure: grammar-compilation capacity 400.
-    createSpy
-      .mockRejectedValueOnce(
-        Object.assign(
+    streamSpy
+      .mockImplementationOnce(() => {
+        throw Object.assign(
           new Error(
             "The compiled grammar is too large. Simplify your tool schemas or reduce the number of strict tools."
           ),
           { status: 400 }
-        )
-      )
-      .mockResolvedValueOnce(makeAnthropicResponse(VALID_GRAPH_JSON));
+        );
+      })
+      .mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON));
 
     // Same module registry as the adapter import below, so the sink is
     // installed on the exact telemetry instance the adapter calls.
@@ -616,7 +637,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       });
 
       // Fallback happened and succeeded.
-      expect(createSpy).toHaveBeenCalledTimes(2);
+      expect(streamSpy).toHaveBeenCalledTimes(2);
       expect(result.graph.nodes.length).toBeGreaterThan(0);
 
       // The degradation is NOT silent: the telemetry event fired with the
@@ -638,7 +659,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "true");
 
-    createSpy.mockResolvedValueOnce(makeAnthropicResponse(VALID_GRAPH_JSON));
+    streamSpy.mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON));
 
     const telemetry = await import("../../src/utils/telemetry.js");
     const events: Array<{ name: string }> = [];
@@ -653,7 +674,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
         model: "claude-sonnet-4-6",
       });
 
-      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(streamSpy).toHaveBeenCalledTimes(1);
       expect(
         events.some(
           (e) => e.name === telemetry.TelemetryEvents.CeeStructuredOutputsFellBack
@@ -677,7 +698,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-sonnet-4-6",
     });
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
 
     // system must be an array of blocks (Anthropic system parameter)
     expect(Array.isArray(body.system)).toBe(true);
@@ -697,12 +718,12 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
 
     // Nested "unexpected key" is a schema shape error — must NOT trigger fallback.
     // This is different from "Unexpected key 'output_config'" which is a capability rejection.
-    createSpy.mockRejectedValue(
-      Object.assign(
+    streamSpy.mockImplementation(() => {
+      throw Object.assign(
         new Error("output_config.format: Unexpected key 'json_schema'. The expected format is {\"type\": \"json_schema\", \"schema\": {...}}."),
         { status: 400 }
-      )
-    );
+      );
+    });
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -716,7 +737,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     ).rejects.toThrow("Unexpected key");
 
     // Must NOT have retried with fallback — only the single failing call
-    expect(createSpy).toHaveBeenCalledOnce();
+    expect(streamSpy).toHaveBeenCalledOnce();
   });
 
   it("uses safeExtractJson (not JSON.parse) when fallback response contains markdown fences", async () => {
@@ -726,11 +747,11 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // The fallback (prompt-only) response wraps JSON in markdown fences — real-world Anthropic behaviour
     const fencedResponse = `Here is the decision graph:\n\n\`\`\`json\n${VALID_GRAPH_JSON}\n\`\`\``;
 
-    createSpy
-      .mockRejectedValueOnce(
-        Object.assign(new Error("Invalid parameter: output_config not supported"), { status: 400 })
-      )
-      .mockResolvedValueOnce(makeAnthropicResponse(fencedResponse));
+    streamSpy
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error("Invalid parameter: output_config not supported"), { status: 400 });
+      })
+      .mockImplementationOnce(makeFakeStream(fencedResponse));
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -769,8 +790,8 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       thinking: { type: "enabled", budget_tokens: 10000 },
     }, { timeoutMs: 110_000 });
 
-    expect(createSpy).toHaveBeenCalledOnce();
-    const [body] = createSpy.mock.calls[0];
+    expect(streamSpy).toHaveBeenCalledOnce();
+    const [body] = streamSpy.mock.calls[0];
 
     const affordable = getAffordableDraftTokens(110_000); // 8550
     // THE load-bearing guarantee: the effective request never exceeds affordable.
@@ -796,7 +817,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       thinking: { type: "enabled", budget_tokens: 4000 },
     }, { timeoutMs: 110_000 });
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     const affordable = getAffordableDraftTokens(110_000);
     expect(body.thinking.budget_tokens).toBe(4000);
     expect(body.max_tokens).toBeLessThanOrEqual(affordable);
@@ -838,7 +859,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       { timeoutMs: 110_000, maxTokensCeiling: explicitCeiling },
     );
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     // THE load-bearing pin: the wire max_tokens equals the ceiling, NOT the
     // 8550 the timeout would otherwise afford. Drop the ceiling threading (in
     // the call site or the hoisted wrapper's signature) and this reads 8550 → RED.
@@ -868,7 +889,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       { timeoutMs: 110_000, maxTokensCeiling: DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL },
     );
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     expect(body.max_tokens).toBe(affordable); // 8550 — the ceiling is a no-op
   });
 
@@ -887,7 +908,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       thinking: { type: "enabled", budget_tokens: 4000 },
     }, { timeoutMs: 32_000 });
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     const affordable = getAffordableDraftTokens(32_000);
     // Thinking is dropped rather than shipped unaffordable — no thinking block sent.
     expect(body).not.toHaveProperty("thinking");
@@ -918,8 +939,8 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-sonnet-5",
     });
 
-    expect(createSpy).toHaveBeenCalledOnce();
-    const [body] = createSpy.mock.calls[0];
+    expect(streamSpy).toHaveBeenCalledOnce();
+    const [body] = streamSpy.mock.calls[0];
 
     // House pattern (mirrors the chat-path sonnet-5 pin at
     // `chatWithAnthropic — output_config.format contract`): temperature is
@@ -945,7 +966,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       model: "claude-sonnet-4-6",
     });
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     expect(body.temperature).toBe(0);
   });
 
@@ -965,10 +986,146 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       thinking: { type: "enabled", budget_tokens: 4000 },
     }, { timeoutMs: 110_000 });
 
-    const [body] = createSpy.mock.calls[0];
+    const [body] = streamSpy.mock.calls[0];
     expect(body.thinking.type).toBe("enabled");
     // Extended thinking active + non-rejecting model → Anthropic's temperature=1 rule.
     expect(body.temperature).toBe(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // LANE C (2026-07-23) — EARLY RUNAWAY DETECTION + CHEAP ABORT-RETRY.
+  // The residual draft-failure class (WAVE1 anatomy) cuts INSIDE the nodes array
+  // with 0 edges at ~8550 tokens / ~85s. Streaming lets us detect "still in
+  // nodes past a derived deadline", abort the doomed attempt, and retry within
+  // the remaining budget. Positive controls below; reverting the detector in the
+  // adapter turns the two runaway→retry tests RED (the mutation-check).
+  // ---------------------------------------------------------------------------
+
+  // A >8000-char partial that is all nodes and NO edges (no `"from":`) — the
+  // char-gate signature of a text-heavy runaway.
+  const RUNAWAY_NODES_BLOB =
+    '{"nodes":[{"id":"n1","kind":"factor","label":"' + "x".repeat(8600) + '"}';
+
+  it("CHAR-GATE: a runaway (no edges past the char budget) is aborted and RETRIED, and the retry succeeds", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    // Attempt 1 streams a bloated nodes-only blob with no edges → the char-gate
+    // fires, the attempt is aborted. Attempt 2 returns a clean valid graph.
+    streamSpy
+      .mockImplementationOnce(makeFakeStream(RUNAWAY_NODES_BLOB, { stop_reason: "max_tokens", usage: { output_tokens: 8550 } }))
+      .mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON));
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    const result = await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+
+    // The doomed attempt was aborted and a fresh generation retried → success.
+    expect(streamSpy).toHaveBeenCalledTimes(2);
+    expect(result.graph.nodes.length).toBeGreaterThan(0);
+    expect(result.graph.edges.length).toBeGreaterThan(0);
+    // Observable on the meta: exactly one runaway was aborted before success.
+    expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(1);
+    expect((result.meta as { streamed?: boolean }).streamed).toBe(true);
+  });
+
+  it("CHAR-GATE: the retry uses a FRESH idempotency key (the provider must re-generate, not replay the doomed one)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    streamSpy
+      .mockImplementationOnce(makeFakeStream(RUNAWAY_NODES_BLOB, { stop_reason: "max_tokens", usage: { output_tokens: 8550 } }))
+      .mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON));
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+
+    const key1 = streamSpy.mock.calls[0][1]?.headers?.["Idempotency-Key"];
+    const key2 = streamSpy.mock.calls[1][1]?.headers?.["Idempotency-Key"];
+    expect(typeof key1).toBe("string");
+    expect(typeof key2).toBe("string");
+    // A reused key would make Anthropic replay the SAME (doomed) generation —
+    // the retry would be pointless. They MUST differ.
+    expect(key1).not.toBe(key2);
+  });
+
+  it("TIME-GATE: a silent-thrash runaway (no edges, stops emitting deltas) is aborted at the deadline and RETRIED", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+      vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+      // Attempt 1 emits a small nodes-only chunk (no edges), then goes silent —
+      // burning wall-clock without structural progress. Only a timer-armed gate
+      // (not an in-loop delta check) can catch this. Attempt 2 succeeds.
+      streamSpy
+        .mockImplementationOnce(makeFakeStream('{"nodes":[{"id":"n1","kind":"factor","label":"a"}', {
+          chunks: ['{"nodes":[{"id":"n1","kind":"factor","label":"a"}'],
+          hangAfterChunks: true,
+          stop_reason: "max_tokens",
+        }))
+        .mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON));
+
+      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      const promise = draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [],
+        seed: 17,
+        model: "claude-sonnet-4-6",
+      });
+
+      // Advance past the detection deadline (30s) so the timer fires, aborts the
+      // hung attempt, and the retry runs (its stream resolves synchronously).
+      await vi.advanceTimersByTimeAsync(31_000);
+      const result = await promise;
+
+      expect(streamSpy).toHaveBeenCalledTimes(2);
+      expect(result.graph.nodes.length).toBeGreaterThan(0);
+      expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("NO FALSE ABORT: a large healthy draft whose nodes section is BELOW the char budget and reaches edges is NOT aborted", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    // Stream a ~7500-char nodes-only chunk (ABOVE the observed healthy max of
+    // 6896, but BELOW the 8000 char budget), THEN a chunk that opens the edges
+    // array (`"from":`). The detector must NOT fire: healthy drafts are not
+    // clipped. finalMessage returns a clean valid graph.
+    const bigNodesChunk = '{"nodes":[{"id":"n1","kind":"factor","label":"' + "y".repeat(7400) + '"}';
+    const edgesChunk = '],"edges":[{"from":"n1","to":"n2"}]}';
+    streamSpy.mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON, {
+      chunks: [bigNodesChunk, edgesChunk],
+    }));
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+
+    // Exactly ONE call — no abort, no retry — and zero runaway aborts on the meta.
+    expect(streamSpy).toHaveBeenCalledTimes(1);
+    expect(result.graph.nodes.length).toBeGreaterThan(0);
+    expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(0);
+    // The time-to-edges was measured (the empirical signal that validates the
+    // detection deadline live).
+    expect(typeof (result.meta as { time_to_edges_ms?: number }).time_to_edges_ms).toBe("number");
   });
 });
 

@@ -247,3 +247,66 @@ export function validateDraftThinkingAffordability(
 export function isDraftTruncated(finishSignal: string | null | undefined): boolean {
   return finishSignal === "max_tokens" || finishSignal === "length";
 }
+
+// ── EARLY RUNAWAY DETECTION (Lane C, 2026-07-23) ─────────────────────────────
+// The residual draft-failure class after the wave-1 demand-reduction contract
+// (WAVE1-DRAFT-BUILD anatomy): a generation that cuts INSIDE the `nodes` array
+// with ZERO edges emitted, burning the full ~8550-token budget over ~82-91s.
+// On the NON-streaming call, that one doomed attempt consumes the whole ~110s
+// window, so there is no budget left to retry. Streaming the draft call lets
+// the Anthropic adapter detect the runaway EARLY — while the model is still in
+// the nodes array long past when every healthy draft has finished — abort the
+// doomed attempt, and retry a fresh generation within the remaining budget.
+//
+// The discriminator is STRUCTURAL, not a magic token count: every healthy draft
+// reaches the `edges` array (26-43 edges; every edge object carries `"from":`),
+// every runaway emits 0 edges (measureTruncatedDraftAnatomy over 4 live 400s).
+// So "runaway" == "still in nodes (no `"from":` seen) past a derived deadline".
+//
+// Thresholds DERIVED from the wave1 capture corpus (n=19 healthy successes +
+// 4 runaways), recorded here so they are not a hand-picked sentinel (the 6800
+// lesson — CLAUDE.md trap; derive from measured data, never a magic number):
+//   - healthy draft-call TOTAL wall duration:  23.6s – 34.8s   (max 34,803ms)
+//   - healthy nodes-section serialized chars:  4141 – 6896     (max 6896)
+//   - runaway:  8550 tok, 0 edges, 82-91s, visible output 9526-23281 chars
+//
+// NONE of these are env-gated (no new flags; the streamed abort-retry ships ON,
+// rollback = code revert — consistent with the rest of this seam).
+
+// Time deadline: a draft still in the nodes array (no edges) at this point
+// cannot be a healthy draft — every healthy draft has fully COMPLETED (not just
+// reached edges) by ~34.8s, and reaches the edges array (a ~30%-of-output
+// milestone) far earlier (est. ≤16s). 30s sits below the 34.8s healthy-
+// completion floor with margin above the healthy time-to-edges. Armed as a
+// timer, so a silent-thrash runaway that stops emitting deltas is still caught.
+export const DRAFT_RUNAWAY_DETECT_MS = 30_000;
+
+// Char budget: max healthy nodes-section = 6896 chars; runaway visible minimum
+// = 9526 chars. 8000 sits above the healthy max (+16%) and below the runaway
+// min (-16%), catching a TEXT-heavy runaway before the time deadline. Gated on
+// "no edges yet", so it only ever fires while still in the nodes array.
+export const DRAFT_RUNAWAY_DETECT_CHARS = 8_000;
+
+// Defensive backstop on the number of runaway retries (independent of the
+// budget guard): the budget guard alone terminates the loop only because real
+// streaming consumes wall-clock, so a pathological provider that returned an
+// instant char-gate runaway every time (0ms elapsed) could otherwise spin. On
+// hitting this cap the next attempt runs to the full remaining budget with no
+// early abort (final-attempt semantics), so the loop always terminates. In the
+// real budget this cap never binds (only ~3 attempts fit the ~110s window).
+export const DRAFT_MAX_RUNAWAY_RETRIES = 5;
+
+// Stop early-aborting once the remaining budget is below DETECT_MS + this: the
+// FINAL attempt then runs to the full remaining window with NO early abort, so
+// a late-but-legitimate completion is never discarded and the existing salvage
+// (closeTruncatedJson) still applies to a natural max_tokens truncation. 35s is
+// the observed healthy ceiling (~34.8s), so the final attempt gets a full
+// healthy window. With the ~110s draft budget this affords ~3 attempts
+// (30 + 30 + ≤50); at the corpus runaway rate this is the abort-retry lever.
+export const DRAFT_RUNAWAY_MIN_RETRY_MS = 35_000;
+
+// Structural "reached the edges array" probe over the accumulated stream text.
+// Edge objects carry `"from":`; healthy drafts emit ≥1, runaways emit 0 (the
+// same signal measureTruncatedDraftAnatomy tallies as approx_edges). NOT global
+// (used with .test(); a global flag would advance lastIndex across calls).
+export const DRAFT_EDGES_REACHED_RE = /"from"\s*:/;

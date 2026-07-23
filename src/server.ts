@@ -47,7 +47,7 @@ import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
 import { getAdapter, warmProviderConfigCache, getMaxTokensFromConfig } from "./adapters/llm/router.js";
 import { validateDraftThinkingAffordability } from "./adapters/llm/draft-budget.js";
-import { validateModelsAtStartup, getEnabledModelsSummary } from "./config/models.js";
+import { validateModelsAtStartup, getEnabledModelsSummary, validateDraftModelRegistered } from "./config/models.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
@@ -253,6 +253,17 @@ export async function build() {
     clarification: config.cee.models.clarification ?? TASK_MODEL_DEFAULTS.clarification,
   };
   log.info({ event: 'config.task_models', ...effectiveTaskModels }, 'Effective task model assignments (env overrides applied)');
+
+  // Boot fail-loud assertion (Lane F, 2026-07-23; DRAFTING-COMPONENT-DESIGN Q4
+  // D10 derive-don't-mirror): the resolved DEFAULT draft model must be a
+  // registered, ENABLED model in the registry. A typo or a retired model id in
+  // the draft_graph model config would otherwise only surface as a failure at
+  // the first draft request. Reads the registry directly (never a hand mirror),
+  // logs ERROR and continues in the same fire-but-continue style as the
+  // draft-token / thinking affordability asserts below.
+  for (const draftModelError of validateDraftModelRegistered(effectiveTaskModels.draft_graph)) {
+    log.error({ event: 'config.draft_model_registered' }, draftModelError);
+  }
 
   // Log all resolved timeout values at startup for diagnostics
   const resolvedTimeouts = getResolvedTimeouts();
