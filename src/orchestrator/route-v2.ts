@@ -3509,7 +3509,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // in its own right (see the detection block above) — same suppressors,
     // same proposal-confirm resolution, same dispatch.
     const editIntentDetected =
-      (editVerbCandidate || configureOptionIntent) && !proposalConfirmSuppressed;
+      (editVerbCandidate || configureOptionIntent) &&
+      !proposalConfirmSuppressed &&
+      // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
+      // mutation chip_click (source==='chip_click' with a defined, non-readiness
+      // `action_type` — e.g. `adjust_edge_strength`/`set_factor_value`) whose
+      // rendered copy is edge-edit-shaped hits EDIT_GRAPH_POSITIVE_REGEX and
+      // would be claimed here by the V4 edit lane BEFORE runTurnExecutor — so
+      // the C2 typed-chip reader (buildTypedChipMutationProposal in
+      // turn-executor) never sees the chip's typed parameters. Excluding the
+      // typed chip from this gate (the SAME guard already threaded into the
+      // process-meta / frame-no-brief guards above) routes it by its TYPE to
+      // turn-executor, where the C2 pre-route + #639 fall-through contract own
+      // it. Genuine typed-TEXT edits (source!=='chip_click') are unaffected.
+      !isNonReadinessTypedChipClickForExecutor;
     // Emit ONLY when the analytical-question guard is THE deciding
     // factor — i.e. the message WOULD have dispatched to edit_graph
     // had the guard not fired. The earlier loose condition (emit on
