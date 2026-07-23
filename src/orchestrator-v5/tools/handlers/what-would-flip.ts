@@ -19,9 +19,21 @@
  * `suppress_orientation: true`. The "Run analysis" chip surfaces via the
  * chip-generator's `facts_absent` rule.
  *
- * F.6 invariant: no PLoT, no ISL, no LLM call, no math, no graph mutation.
- * The fallback formats raw values from the projection; it does not derive
- * new metrics.
+ * F.6 invariant (base case): no PLoT, no LLM call, no math, no graph mutation.
+ * The single-factor flip answer formats raw values from the projection; it does
+ * not derive new metrics. This is the THIN base case of a general what-if lens.
+ *
+ * What-if (counterfactual) EXTENSION (A1 subsume ruling, 23 Jul): on the
+ * execute path only, AFTER the base flip answer is composed, a deterministic
+ * selector may run ONE ISL counterfactual probe and APPEND a claim-safe
+ * suggestion card. It is one owner / one path — `what_would_flip` subsumes the
+ * general what-if; there is no new intent, no new handler, no parallel twin.
+ * The extension is FAIL-LOUD: no injected client (transport dark / latent), no
+ * auditable probe, an unmappable graph, or ANY non-2xx / degraded ISL result →
+ * append NOTHING; the base answer is byte-preserved. It never fabricates a
+ * value. See `./whatif/run-counterfactual-lens.ts`. The ISL call lives in the
+ * injected `CounterfactualClient` (`src/adapters/isl/`), never as a `fetch` in
+ * this handler.
  *
  * The `WhatWouldFlipResultSchema` retains optional legacy fields
  * (`narrative`, `flip_scenarios`) for backwards compatibility with the
@@ -47,8 +59,22 @@ import {
 } from './no-op-helpers.js';
 import { composeWhatWouldFlipFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
+import { runCounterfactualLens } from './whatif/run-counterfactual-lens.js';
+import type { CounterfactualClient } from '../../../adapters/isl/counterfactual-client.js';
 
-export function createWhatWouldFlipHandler(): HandlerFn {
+/**
+ * Handler dependencies. `counterfactualClient` is injected by the registry
+ * (the `plotClient` pattern) and is `null`/absent when ISL is not configured —
+ * the honest latent state in which the what-if extension never fires. Absent
+ * deps (e.g. `createWhatWouldFlipHandler()` in unit tests) means a null client,
+ * so the base `what_would_flip` behaviour is exactly preserved.
+ */
+export interface WhatWouldFlipHandlerDeps {
+  readonly counterfactualClient?: CounterfactualClient | null;
+}
+
+export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): HandlerFn {
+  const counterfactualClient = deps?.counterfactualClient ?? null;
   return async function whatWouldFlipHandler(
     invocation: HandlerInvocation,
   ): Promise<HandlerOutcome> {
@@ -115,7 +141,22 @@ export function createWhatWouldFlipHandler(): HandlerFn {
     // staleness caveat. See explain-results.ts for the rationale; same
     // contract applies here. staleness_prefixed stays on the fact as
     // false for backwards-compat with telemetry consumers.
-    const assistantText = rawText;
+    //
+    // What-if (counterfactual) lens EXTENSION — runs only here, on the execute
+    // path, and only APPENDS. `runCounterfactualLens` is fully fail-loud and
+    // returns `null` (append nothing) unless it has a validated ISL 2xx for the
+    // exact intervention it asked about. When the client is null (the latent
+    // state on staging today) it short-circuits immediately, so `rawText` is
+    // returned unchanged and the base flip behaviour is byte-preserved.
+    const lens = await runCounterfactualLens({
+      client: counterfactualClient,
+      graphForTurn: invocation.graphForTurn,
+      flipSummary: invocation.flipSummary,
+      rawRobustness: invocation.rawRobustness,
+      requestId: invocation.requestId,
+      signal: invocation.signal,
+    });
+    const assistantText = lens ? `${rawText} ${lens.card}` : rawText;
 
     const fact: WhatWouldFlipHandlerFact = {
       fact_type: 'what_would_flip',
