@@ -56,6 +56,36 @@ describe("Configuration Module", () => {
       expect(config.performance.metricsEnabled).toBe(true);
       expect(config.performance.slowThresholdMs).toBe(5000);
     });
+
+    it("defaults draft-graph extended thinking ON (no-dark-launches; plan-then-prune the cardinality bistability)", async () => {
+      process.env = {
+        NODE_ENV: "development",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      // Draft-graph thinking ships ON by default (the lever against sonnet-4-6's
+      // 50-100+ node runaways); orchestrator and edit-graph stay OFF.
+      expect(config.cee.thinking.draftGraphEnabled).toBe(true);
+      expect(config.cee.thinking.orchestratorEnabled).toBe(false);
+      expect(config.cee.thinking.editGraphEnabled).toBe(false);
+
+      // Budget is deliberately BELOW the affordable envelope (~8550) so it fits
+      // unclamped and leaves visible-output headroom — it must not gut healthy
+      // drafts, and must not ERROR the boot affordability assertion.
+      expect(config.cee.thinking.draftGraphBudget).toBe(4000);
+    });
+
+    it("CEE_DRAFT_GRAPH_THINKING=false remains a working kill switch over the ON default", async () => {
+      process.env = {
+        NODE_ENV: "development",
+        CEE_DRAFT_GRAPH_THINKING: "false",
+      };
+
+      const { config } = await import("../../src/config/index.js");
+
+      expect(config.cee.thinking.draftGraphEnabled).toBe(false);
+    });
   });
 
   describe("Type Coercion", () => {

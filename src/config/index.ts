@@ -976,11 +976,25 @@ const ConfigSchema = z.object({
     // CEE_ORCHESTRATOR_THINKING_BUDGET — budget_tokens in tokens (min 1024, default 10000)
     //   max_tokens is automatically raised to budget + 1024 when no explicit override is set.
     // CEE_DRAFT_GRAPH_THINKING / CEE_EDIT_GRAPH_THINKING — same contract as orchestrator
+    //
+    // DRAFT_GRAPH thinking defaults ON (no-dark-launches doctrine): plan-then-prune
+    // extended thinking is the lever against the draft cardinality bistability
+    // (sonnet-4-6 over-produces 50-100+ nodes vs the useful ~14-16; it ignores soft
+    // caps and structured-outputs rejects maxItems). Thinking lets the model plan the
+    // right ~14-node graph and PRUNE the runaway before emitting JSON. Kill switch:
+    // CEE_DRAFT_GRAPH_THINKING=false. The default budget (4000) is deliberately BELOW
+    // the affordable draft envelope (~8550 tokens at DRAFT_LLM_TIMEOUT_MS) so it fits
+    // UNCLAMPED and leaves ~4550 tokens of visible-output headroom for a pruned draft's
+    // JSON — enabling thinking must not gut healthy drafts. `resolveDraftThinking`
+    // (draft-budget.ts) still clamps any explicit over-budget so the TOTAL request
+    // (thinking + reserved output) is provably ≤ affordable and completes inside the
+    // 110s window; the boot assertion (validateDraftThinkingAffordability) stays green
+    // at this default (4000 + 1024 ≤ 8550) instead of ERRORing every startup.
     thinking: z.object({
       orchestratorEnabled: thinkingMode.default(false),
       orchestratorBudget: z.coerce.number().int().min(1024).default(10000),
-      draftGraphEnabled: thinkingMode.default(false),
-      draftGraphBudget: z.coerce.number().int().min(1024).default(10000),
+      draftGraphEnabled: thinkingMode.default(true),
+      draftGraphBudget: z.coerce.number().int().min(1024).default(4000),
       editGraphEnabled: thinkingMode.default(false),
       editGraphBudget: z.coerce.number().int().min(1024).default(10000),
     }).default({}),
