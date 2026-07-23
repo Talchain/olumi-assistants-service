@@ -184,6 +184,7 @@ import { findExactProposalCopyMatchIndexes } from '../orchestrator-v5/routing/pr
 import { resolveProposalRenderCopy } from '../orchestrator-v5/compose/proposed-change.js';
 import { isStateQueryQuestionShape } from '../orchestrator-v5/routing/state-query-guard.js';
 import { detectConfigureOptionIntent } from '../orchestrator-v5/routing/configure-option-intent.js';
+import { detectStructuralRestructureIntent } from '../orchestrator-v5/routing/structural-restructure-intent.js';
 import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
 import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
 import {
@@ -3307,6 +3308,33 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         trigger: configureOptionDetection.trigger,
       });
     }
+    // Structural-restructure intent (LATENCY-RECAPTURE finding 3; probe
+    // 69a2f44f). A free-text restructure request ("split the shared factor
+    // into per-option links") carries no EDIT_GRAPH_POSITIVE_REGEX verb, so
+    // without this gate it falls through to the coach, which DESCRIBES the
+    // change without seeding an apply action — leaving a following "Yes, apply
+    // it now" nothing to resume. Routing it to the edit lane (the sole
+    // structural-proposal producer) mints the STRUCTURAL_APPLY_HELD /
+    // REMOVE_UNCONFIRMED held proposal + confirm chip; the bare consent then
+    // resumes via the existing short-confirm → executeGmHeldResume path. Same
+    // shared negative gates as the configure-option sibling above.
+    const structuralRestructureDetection = detectStructuralRestructureIntent(
+      ingress.message,
+    );
+    const structuralRestructureIntent =
+      structuralRestructureDetection.matched &&
+      !negativeEditRegexHit &&
+      !analyticalQuestionDetected &&
+      !stateQuerySuppressed;
+    if (structuralRestructureIntent && !positiveEditRegexHit) {
+      // Emit ONLY when this gate is the deciding factor (an edit-verb-bearing
+      // restructure message would have dispatched via editVerbCandidate).
+      emit(TelemetryEvents.V5EditGraphStructuralRestructureRouted, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        trigger: structuralRestructureDetection.trigger,
+      });
+    }
     if (
       stateQuerySuppressed
       && positiveEditRegexHit
@@ -3509,7 +3537,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // in its own right (see the detection block above) — same suppressors,
     // same proposal-confirm resolution, same dispatch.
     const editIntentDetected =
-      (editVerbCandidate || configureOptionIntent) &&
+      (editVerbCandidate || configureOptionIntent || structuralRestructureIntent) &&
       !proposalConfirmSuppressed &&
       // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
       // mutation chip_click (source==='chip_click' with a defined, non-readiness
