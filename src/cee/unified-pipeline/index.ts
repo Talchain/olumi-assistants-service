@@ -31,6 +31,7 @@ import { runStageParse } from "./stages/parse.js";
 import { runStageNormalise } from "./stages/normalise.js";
 import { runStageEnrich } from "./stages/enrich.js";
 import { runStageRepair } from "./stages/repair/index.js";
+import { runStageCoachingPass } from "./stages/coaching-pass.js";
 import { runStagePackage } from "./stages/package.js";
 import { runStageBoundary } from "./stages/boundary.js";
 import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
@@ -822,6 +823,16 @@ export async function runUnifiedPipeline(
     // on edges when the response is assembled.
     await validationPromise;
     timings.validation_pipeline_ms = stageElapsed(tValidation);
+
+    // Stage 4.5: Post-draft coaching pass (v12, lean-draft contract 1.197).
+    // The lean draft call emits STRUCTURE ONLY; coaching + causal_claims are
+    // re-produced here from the FINAL (repaired) structure in a bounded,
+    // STRICTLY NON-FATAL LLM call and attached to ctx for Stage 5 to package.
+    // A failure leaves ctx.coaching undefined → Stage 5 emits canonical-empty,
+    // exactly as a draft that produced no coaching. Never fails the draft.
+    const tCoaching = stageStart();
+    await runStageCoachingPass(ctx);
+    timings.coaching_pass_ms = stageElapsed(tCoaching);
 
     // Stage 5: Package — Quality + warnings + caps + trace
     // Soft gate: both the verification pipeline inside Package and the

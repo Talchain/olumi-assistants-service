@@ -45,6 +45,7 @@ function makeFullTimings(): Record<string, number> {
     repair_deterministic_ms: 6,
     validation_pipeline_ms: 2,
     threshold_sweep_ms: 4,
+    coaching_pass_ms: 8,
     package_ms: 5,
     boundary_ms: 7,
   };
@@ -189,7 +190,10 @@ describe('ROADMAP 1.77 F1 — draft substage timing detail', () => {
         .filter((traceKey) => !(traceKey in st));
 
       expect(missing).toEqual([]);
-      expect(keys.length).toBe(12);
+      // 13 since v12 (lean-draft contract): coaching_pass_ms (Stage 4.5) joined
+      // DRAFT_GRAPH_NUMERIC_TIMING_KEYS. Bumped deliberately — this pin forces a
+      // reviewer to acknowledge every new pipeline timing key (anti-drift).
+      expect(keys.length).toBe(13);
     });
   });
 });

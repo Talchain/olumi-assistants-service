@@ -296,27 +296,88 @@ const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - 2–6 options maximum`;
 
 // v8 stringified aux fields (2026-07-07, Lane 26): appended to the user
-// message ONLY when structured outputs is active. The grammar declares
-// coaching / causal_claims as `{ type: "string" }` fields (see GRAMMAR BUDGET
-// in src/cee/draft/anthropic-graph-schema.ts), so the model physically cannot
-// emit objects there — this reminder tells it to put the JSON-ENCODED content
-// the system prompt describes inside those strings, rather than prose. On the
-// prompt-only fallback path the reminder is omitted and the model emits the
-// object shapes the system prompt documents; parseStringifiedAuxFields()
-// accepts both shapes at ingress.
+// message ONLY when structured outputs is active. Historically it told the
+// model to emit coaching / causal_claims as JSON-encoded STRING fields.
 //
-// v11 (2026-07-21): topology_plan omission is UNCONDITIONAL (the
-// CEE_DRAFT_OMIT_TOPOLOGY_PLAN flag was deleted per no-dark-launches). The
-// grammar no longer declares `topology_plan` and the top-level object is
-// `additionalProperties: false`, so the key is unemittable — this reminder
-// must NEVER mention it. Instructing the model to emit an unemittable key was
-// the exact prompt/grammar contradiction this closes (v195 says "must NOT
-// contain a topology_plan key" while the v8/v9 grammar demanded one).
-const STRUCTURED_OUTPUTS_AUX_STRING_REMINDER = `\n\nOUTPUT FORMAT OVERRIDE (structured mode):
-Emit "coaching" and "causal_claims" as JSON-encoded STRINGS.
-Each must contain exactly the JSON value the schema instructions describe
-(coaching object, causal_claims array), serialised with correctly escaped
-quotes. Example: "causal_claims": "[{\\"type\\":\\"direct\\"}]".`;
+// v12 (2026-07-23, lean-draft contract, ROADMAP 1.197): the draft grammar is
+// STRUCTURE ONLY — `coaching`, `causal_claims`, and `topology_plan` are all
+// dropped from the sent schema (buildDraftGraphSchema), and the top-level
+// object is `additionalProperties:false`, so every one of them is now
+// UNEMITTABLE. Per the v11 topology_plan lesson, this reminder must NEVER
+// instruct the model to emit an unemittable key (that prompt/grammar
+// contradiction is exactly what wastes tokens and confuses the model), so the
+// reminder is now EMPTY. The append site is retained as an inert no-op so the
+// call shape is unchanged; if a future field is ever re-added to the grammar as
+// a stringified aux field, restore the instruction here. The prompt-only
+// fallback path never appended this reminder, so its behaviour is unchanged
+// (the served prompt still describes coaching for that rare path, and
+// parseStringifiedAuxFields() accepts it at ingress).
+const STRUCTURED_OUTPUTS_AUX_STRING_REMINDER = ``;
+
+/**
+ * Structural anatomy of a TRUNCATED draft response (v12, 2026-07-23).
+ *
+ * A max_tokens runaway stores no partial graph, so the corpus could never say
+ * whether runaways are a COUNT explosion (many nodes/edges) or a PER-ELEMENT
+ * prose blowup (few but huge). These are cheap, NON-SENSITIVE structural
+ * metrics from the truncated text — no raw brief content — that distinguish the
+ * two and localise the truncation section, resolving the drafting design's #1
+ * open evidence limit. Deliberately tolerant of unparseable tails (a truncation
+ * is by definition not valid JSON).
+ */
+function measureTruncatedDraftAnatomy(text: string): {
+  approxNodes: number;
+  approxEdges: number;
+  largestElementBytes: number;
+  section: "nodes" | "edges" | "goal_constraints" | "unknown";
+} {
+  // Node objects carry `"kind":`; edge objects carry `"from":`. One match each
+  // per emitted element — a cheap tally of how much structure was produced
+  // before the cut.
+  const approxNodes = (text.match(/"kind"\s*:/g) || []).length;
+  const approxEdges = (text.match(/"from"\s*:/g) || []).length;
+
+  // Largest COMPLETE {...} block (any depth) = the largest fully-emitted element
+  // (a node contains its `data`, so the node object is the outer block). The
+  // root object never closes on a truncation, so it is excluded automatically.
+  // A largest_element_bytes far above the ~330-byte corpus max signals a
+  // single-element (per-node/per-edge prose) runaway rather than a count one.
+  let largestElementBytes = 0;
+  const startStack: number[] = [];
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") startStack.push(i);
+    else if (ch === "}") {
+      const s = startStack.pop();
+      if (s !== undefined) {
+        const len = i - s + 1;
+        if (len > largestElementBytes) largestElementBytes = len;
+      }
+    }
+  }
+
+  // Which top-level section was open at the cut (last top-level key seen).
+  const nIdx = text.lastIndexOf('"nodes"');
+  const eIdx = text.lastIndexOf('"edges"');
+  const gIdx = text.lastIndexOf('"goal_constraints"');
+  const maxIdx = Math.max(nIdx, eIdx, gIdx);
+  let section: "nodes" | "edges" | "goal_constraints" | "unknown" = "unknown";
+  if (maxIdx < 0) section = "unknown";
+  else if (maxIdx === gIdx) section = "goal_constraints";
+  else if (maxIdx === eIdx) section = "edges";
+  else section = "nodes";
+
+  return { approxNodes, approxEdges, largestElementBytes, section };
+}
 
 // Defense-in-depth cap on total document context chars (grounding module enforces 50k upstream)
 const MAX_DOC_CONTEXT_CHARS = 60_000;
@@ -912,6 +973,15 @@ export async function draftGraphWithAnthropic(
       },
     };
     if (truncatedAtMaxTokens) {
+      // Runaway ANATOMY (v12, 2026-07-23): the corpus could never answer whether
+      // a runaway is a COUNT explosion (many nodes/edges) or PER-ELEMENT prose
+      // (few but huge) because failure bodies stored no partial text. These are
+      // NON-SENSITIVE structural metrics computed from the truncated text (no
+      // raw brief content on the wire or in the log) that finally distinguish
+      // the two — the mechanism attribution the drafting design flagged as its
+      // #1 open evidence limit. Counts are cheap regex tallies of the emitted-
+      // so-far structure; largest_element_bytes flags a single-element runaway.
+      const anatomy = measureTruncatedDraftAnatomy(content.text);
       log.error({
         event: "cee.llm.draft_truncated_max_tokens",
         model,
@@ -920,6 +990,12 @@ export async function draftGraphWithAnthropic(
         timeout_ms: effectiveTimeout,
         affordable_tokens: affordableDraftTokens,
         provider_latency_ms: providerLatencyMs,
+        // ── runaway anatomy (structural metrics only, no brief content) ──
+        output_text_length: content.text.length,
+        approx_nodes_emitted: anatomy.approxNodes,
+        approx_edges_emitted: anatomy.approxEdges,
+        largest_element_bytes: anatomy.largestElementBytes,
+        truncation_section: anatomy.section,
       }, "[Anthropic] draft_graph generation hit max_tokens — runaway generation truncated by the derived token budget instead of hanging to the timeout (2026-07-20 outage class)");
     }
 
