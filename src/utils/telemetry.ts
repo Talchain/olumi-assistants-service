@@ -1554,6 +1554,19 @@ export const TelemetryEvents = {
   // ('chip_prefix' | 'configure_vocab' | 'intervention_vocab').
   V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
 
+  // Structural-restructure routing (LATENCY-RECAPTURE finding 3; probe
+  // 69a2f44f). Emitted when the structural-restructure intent gate is the
+  // DECIDING factor sending a turn to the edit lane (no positive edit verb
+  // would have dispatched it): "split the shared factor into per-option
+  // links"-class requests, which previously fell through to the coach, which
+  // DESCRIBED the change without seeding an apply action — so a following
+  // "Yes, apply it now" had no held proposal to resume (the four-turn-nothing
+  // loop). Routing to the edit lane produces the held proposal + confirm chip;
+  // the bare consent resumes via short-confirm → executeGmHeldResume. Payload:
+  // request_id, scenario_id, trigger ('per_option_term' | 'each_option_own').
+  V5EditGraphStructuralRestructureRouted:
+    "v5.edit_graph.structural_restructure_intent_routed",
+
   // V5 Signature Loop — refresh-continuation guard. Emitted when a turn arrives
   // at frame stage with no request graph but the scenario already has committed
   // turns (refresh / reconnection). The guard suppresses the draft_graph /
