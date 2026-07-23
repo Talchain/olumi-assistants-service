@@ -216,7 +216,28 @@ describe('F-1 — the clarify survives exactly where it is still honest', () => 
     expect(result.assistantText ?? '').toContain('I need the specifics');
   });
 
-  it('a stored proposal still replays deterministically (V4 confirm round-trip preserved)', async () => {
+  it('a stored proposal is still a legitimate reason to KEEP the turn deterministically (no LLM handoff); the vestigial V4 pendingProposal mint is retired (S3-L1)', async () => {
+    // F-1's live guarantee: a stored `pending_proposal` is the one case where
+    // this branch holds something the LLM lane does not, so a value-bearing
+    // message that would otherwise hand off KEEPS the turn deterministically
+    // (`shouldHandOffProposeToLlmLane` returns false when hasStoredProposal).
+    // That exception is what this test still pins — the LLM lane is NOT reached.
+    //
+    // ADJUDICATION (S3-L1): the `pending_proposal` IN / `pendingProposal` OUT
+    // round-trip this test used to assert is DEAD on the live V5 wire, so the
+    // vestigial mint is retired rather than kept. Traced end-to-end at the
+    // bytes: (1) the ONLY code that threads `invocationInput.pending_proposal`
+    // in AND reads `result.pendingProposal` back is the V4 pipeline
+    // (phase3-llm / phase4-tools / tools/dispatch / deterministic-actions),
+    // which is 410-tombstoned by default (`pipelineV4Enabled` defaults false →
+    // route.ts returns 410); (2) the live V5 dispatcher
+    // (edit-graph-dispatch.ts) calls handleEditGraph WITHOUT any
+    // invocationInput — so `pending_proposal` is never threaded in on the
+    // deployed path — and consumes the result via buildBoundarySuggestedActions,
+    // which reads only `suggestedActions` + `pendingClarification`, never
+    // `pendingProposal` (see the "pendingProposal accept/cancel chips
+    // intentionally NOT rendered" note, edit-graph-dispatch.ts:738-757). The
+    // input this test constructs by hand is one the live wire never produces.
     const { adapter, chat } = makeAdapter();
     const result = await handleEditGraph(
       makeCrmContext(),
@@ -244,8 +265,14 @@ describe('F-1 — the clarify survives exactly where it is still honest', () => 
         },
       } as never,
     );
+    // POSITIVE control (the surviving live guarantee): the stored proposal made
+    // the branch KEEP the turn — the LLM lane was not reached even though the
+    // message carries a value ("0.7"), and the deterministic hold copy names
+    // the resolved target the stored proposal is about.
     expect(chat).not.toHaveBeenCalled();
-    expect(result.pendingProposal).toBeDefined();
+    expect(result.assistantText ?? '').toContain('**Cloud-Native CRM**');
+    // Retired: the write-only V4 mint no longer round-trips (see adjudication).
+    expect(result.pendingProposal).toBeUndefined();
   });
 });
 

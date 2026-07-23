@@ -1863,10 +1863,21 @@ export async function handleEditGraph(
         ? 'requires_confirmation_before_apply'
         : 'no_value_or_direction_in_message';
       proposalReturned = true;
+      // S3-L1 — the propose-and-confirm hold no longer mints the vestigial V4
+      // `pendingProposal.proposed_changes` payload. That payload is the
+      // valueless V4 `ProposedChange` ({description, element_label, action_type}
+      // — no value field, orchestrator/types.ts) and it is WRITE-ONLY on the
+      // live V5 path: the V5 edit dispatcher does not persist it, read it back,
+      // or thread it (edit-graph-dispatch.ts:738-757), and this branch fires
+      // ONLY when the message carries no value or direction (propose-handoff.ts)
+      // — so there is nothing to carry. The value-bearing hold is the V5 carrier
+      // (`orchestrator-v5/types/proposed-change.ts` → `inline_patch.operations`),
+      // populated by the chip proposed-change synthesis and gm-held. What this
+      // branch still owns is the user-facing "ask for the specifics" copy, which
+      // is derived locally and never needs to round-trip. `proposedChanges`
+      // stays a within-turn local ONLY to build that copy — it is not returned.
       const proposedChanges = storedProposal
         ?? buildProposedChanges(editDescription, targetResolution, intentCategory, knownGraphLabels);
-      const candidateLabels = pendingProposal?.candidate_labels
-        ?? [...new Set(proposedChanges.changes.map((change) => change.element_label))];
       return {
         blocks: [],
         assistantText: buildProposeAndConfirmText(
@@ -1877,14 +1888,6 @@ export async function handleEditGraph(
         latencyMs: Date.now() - startTime,
         appliedGraph: null,
         wasRejected: false,
-        pendingProposal: {
-          tool: 'edit_graph',
-          original_edit_request: editDescription.trim(),
-          proposed_changes: proposedChanges,
-          candidate_labels: candidateLabels,
-          base_graph_hash: baseGraphHash,
-        },
-        proposedChanges,
         diagnostics: diagnostics(),
         routeMetadata: routeMetadata(),
       };
