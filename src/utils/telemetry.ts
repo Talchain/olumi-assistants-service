@@ -683,6 +683,15 @@ export const TelemetryEvents = {
   // text. Content-free; log-only (no Datadog mapping). Zero events means no
   // analysis in the window justified a lens (the may-recommend-nothing default).
   V5LensSuggestionEmitted: "v5.capability.lens_suggestion_emitted",
+  // Wave-3 σ (ROADMAP 1.203) — the field-level claim-safety cage
+  // (`isClaimUsable`/`composeCagedField`) evaluated whether a surface may claim
+  // about a science-bearing enrichment field. Payload: field (name only),
+  // decision ('allowed' | 'denied'), and on a denial a reason tag (fork-order:
+  // tier3_denied | tier2_not_activated | not_allowlisted | companion_unverified |
+  // not_fresh). Reason-tagged drop observability so the deny rate is visible and
+  // never a silent no-op (broken-alarm class); content-free (no user text, no
+  // field VALUE). Log-only (no Datadog mapping).
+  V5ClaimCageFieldEvaluated: "v5.claim_cage.field_evaluated",
   // Context Architecture v2 S6 (ROADMAP 1.73; design pack 02 §Seam 3).
   // Shadow validation of the PLoT→CEE enrichment passthrough (the
   // platform's known-open seam): emitted when CEE_ENRICHMENT_VALIDATION

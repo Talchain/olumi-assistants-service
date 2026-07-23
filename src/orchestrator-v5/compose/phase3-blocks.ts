@@ -85,6 +85,11 @@ import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js
 import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
 import { selectLens } from './lens-selector.js';
+import {
+  classifyClaimUsable,
+  TIER2_ACTIVATION_ENABLED,
+  type ClaimUsableInput,
+} from './claim-safety-cage.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
@@ -887,6 +892,63 @@ export function buildStaleRerunCoachingBlock(
  * prose/schema gate and is returned — never on a drop, never twice. Payload is
  * the lens id + rationale CODE only (both closed enums); no user text.
  */
+/**
+ * Wave-3 σ (ROADMAP 1.203) — THE field-level claim-safety chokepoint for the
+ * Phase-3 value-surfacing path. Every builder that would surface a
+ * science-bearing enrichment field's VALUE must pass it through here first: the
+ * cage (`classifyClaimUsable`, compose/claim-safety-cage.ts) decides whether this
+ * surface may claim about `field`. On a PASS the value is returned unchanged; on
+ * a DENY the field is OMITTED (returns `null` — fail-closed to silence, never
+ * rewrite, never a "suppressed" caption) and a reason-tagged
+ * `v5.claim_cage.field_evaluated` event fires so the deny is observable, never a
+ * silent no-op (the broken-alarm class). Content-free: the event carries the
+ * field NAME + decision + reason tag, never the value.
+ *
+ * Today no live lens surfaces a value (every lens is claim-safe by omission), so
+ * routing through here is BYTE-INERT on the current wire — it stands ready for
+ * the first value-surfacing λ / P1 increment, which will do
+ * `const v = composeCagedField(field, realValue, gate); if (v !== null) attach(v)`.
+ *
+ * Scope-honest: the cage keys on the field NAME. It gates WHETHER a surface may
+ * claim about a field / an uncomputed-or-stale field — NOT whether a value under
+ * the right name was sourced from the WRONG field (the win%-as-target-fit
+ * MISLABEL class; that is builder-grounding + the ζ conformance harness).
+ */
+export function composeCagedField<T>(
+  field: string,
+  value: T,
+  gateInput: ClaimUsableInput,
+): T | null {
+  const decision = classifyClaimUsable(field, gateInput);
+  if (decision.usable) {
+    emit(TelemetryEvents.V5ClaimCageFieldEvaluated, { field, decision: 'allowed' });
+    return value;
+  }
+  emit(TelemetryEvents.V5ClaimCageFieldEvaluated, {
+    field,
+    decision: 'denied',
+    reason: decision.reason,
+  });
+  return null;
+}
+
+/**
+ * Companion-status claim-safety input for `field` (Brief 5 §10), derived from the
+ * fact enrichment. Claim-safe when the field's explicit `<field>_status` reads
+ * `'computed'`; for a field with no separate status key, when the field itself is
+ * present as a non-empty computed structure. Defensive + fail-closed: absent or
+ * non-`'computed'` ⇒ false.
+ */
+function deriveCompanionClaimSafe(fact: RunAnalysisHandlerFact, field: string): boolean {
+  const enrichment = readRecord((fact.result as Record<string, unknown>).enrichment);
+  if (enrichment === null) return false;
+  const status = enrichment[`${field}_status`];
+  if (typeof status === 'string') return status === 'computed';
+  const value = enrichment[field];
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== undefined && value !== null;
+}
+
 export function buildLensSuggestionCoachingBlock(
   fact: RunAnalysisHandlerFact,
   ctx: BlockBuildCtx,
@@ -916,6 +978,23 @@ export function buildLensSuggestionCoachingBlock(
     ],
   });
   if (block === null) return null;
+
+  // Wave-3 σ (ROADMAP 1.203): route the field this lens grounds its claim in
+  // through the claim-safety cage BEFORE the lens ever surfaces that field's
+  // value. Today the lens ships prose-only (claim-safe by omission), so no value
+  // is passed and the block above is emitted UNCHANGED regardless of the
+  // verdict — this is BYTE-INERT on the wire. Its purpose is to make the cage a
+  // LIVE caller on the exact field a lens claims about and its verdict
+  // staging-observable (`v5.claim_cage.field_evaluated`), so the first
+  // value-surfacing increment finds the gate already wired + proven. The return
+  // is intentionally discarded (`void`): there is no value to attach yet — the
+  // observable side-effect (the cage telemetry) is the whole point of wiring the
+  // precondition before the payload.
+  void composeCagedField(selection.groundingField, undefined, {
+    tier2Enabled: TIER2_ACTIVATION_ENABLED,
+    companionStatusClaimSafe: deriveCompanionClaimSafe(fact, selection.groundingField),
+    freshness: ctx.freshness ?? 'fresh',
+  });
 
   emit(TelemetryEvents.V5LensSuggestionEmitted, {
     lens_id: selection.lens,
