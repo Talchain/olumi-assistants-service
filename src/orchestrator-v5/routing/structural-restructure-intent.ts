@@ -22,7 +22,10 @@
  * LANE instead — the SAME `configureOptionIntent` precedent (ROADMAP 2.11 /
  * P0-2, `configure-option-intent.ts`): a narrow, edit-verb-free candidate that
  * joins `editIntentDetected` and shares the route's negative gates (meta-
- * question regex, analytical question, state query). Once in the edit lane,
+ * question regex, analytical question, state query), AND — like that sibling —
+ * carries its own internal interrogative gate (see the detector body) so a
+ * restructure QUESTION reaches the coach rather than the edit lane. Once in
+ * the edit lane,
  * the served edit prompt authors the restructure operations, the referee HOLDS
  * them (add_node/add_edge → STRUCTURAL_APPLY_HELD; remove → REMOVE_UNCONFIRMED)
  * into an `apply_proposed_change` pending with a confirm chip, and the bare
@@ -42,9 +45,15 @@
  *   2. `each_option_own` — the "each/every/per option ... its/their own X"
  *      framing ("give each option its own cost factor"), the restructure
  *      request phrased without the per-option term. The "its/their own" clause
- *      is what discriminates a restructure from an analytical question about
- *      each option (which lacks it and is a question anyway — caught by the
- *      caller's analytical guard).
+ *      discriminates a restructure REQUEST from a casual each-option MENTION
+ *      ("which factor matters for each option?", which lacks the clause). It
+ *      does NOT by itself exclude a QUESTION that happens to carry the clause —
+ *      "does each option have its own cost factor?" is a pure state query that
+ *      DOES contain "its own" (#644 adversarial P2-1 proved the earlier claim
+ *      that the clause discriminates questions out was false). Questions of
+ *      that shape are excluded by this detector's own INTERROGATIVE GATE (see
+ *      the detector body and `INTERROGATIVE_LEAD` / `TRAILING_QUESTION_MARK`),
+ *      not by the "own" clause and not by the caller's analytical guard.
  *
  * Safe-biased like its sibling detectors (`configure-option-intent.ts`,
  * `option-intervention-guard.ts`): a false positive costs one edit-lane turn
@@ -92,15 +101,57 @@ const EACH_OPTION_OWN =
   /\b(?:each|every|per)\s+option\b[\s\S]{0,60}\b(?:its|their)\s+own\b|\b(?:its|their)\s+own\b[\s\S]{0,60}\b(?:each|every|per)\s+option\b/i;
 
 /**
+ * Interrogative / state-question LEADS — the deliberation, opinion, or state
+ * question the COACH must answer, not the edit lane. #644 adversarial P2-1:
+ * the base triggers matched five genuine QUESTIONS ("should I make the cost
+ * per-option?", "does each option have its own cost factor?"), minting a held
+ * proposal + confirm chip where a coach discussion belonged. Anchored at the
+ * start of the message; case-insensitive.
+ *
+ * DELIBERATELY OMITS the polite-imperative request modals ("can you …",
+ * "could you …", "will you …", and "would you …" — only the deliberative
+ * "would it …" is a lead): those are requests to ACT, not questions, and must
+ * reach the edit lane. This is what keeps the #644 acceptance case "can you
+ * split the shared cost driver into per option links" routing to the edit lane
+ * while "should I split …?" routes to the coach. `do`/`does` require a
+ * following pronoun/determiner ("do you think", "does each option") so an
+ * emphatic imperative ("do split …") is not swept up.
+ */
+const INTERROGATIVE_LEAD =
+  /^\s*(?:should|shall|would\s+it|do(?:es)?\s+(?:you|we|i|they|the|each|every|all|both|any|these|those|my|our|its|their)|is|are|was|were|which|what|why|how|when|where|who|whose|whom|might|may)\b/i;
+
+/**
+ * A trailing question mark (allowing trailing whitespace) — the dominant live
+ * signal: every one of the five reviewer-reproduced false positives carried
+ * one. Either this OR an INTERROGATIVE_LEAD marks the message a question.
+ */
+const TRAILING_QUESTION_MARK = /\?\s*$/;
+
+/**
  * Detect a free-text structural-restructure intent. Pure and total — never
  * throws; returns a classified skip on any non-match. Text-only: the caller
  * owns graph presence (the edit lane reloads / recovers when no graph is
  * attached) and the shared negative gates.
+ *
+ * INTERROGATIVE GATE (checked first, #644 adversarial P2-1): a restructure
+ * phrased as a QUESTION — a deliberation ("should I make the cost
+ * per-option?"), an opinion request ("would it be better to give each option
+ * its own cost factor?"), or a pure STATE query ("does each option have its
+ * own cost factor?") — is a request for COACHING and must reach the coach, not
+ * mint a held proposal. Symmetric with the configure-option sibling
+ * (`configure-option-intent.ts`), which suppresses the same shape inside the
+ * detector. The route's own analytical-question / state-query gates do NOT
+ * catch these (they target outcome-hypotheticals, not restructure questions),
+ * which is why the gate lives here. An IMPERATIVE restructure carries neither
+ * signal and is unaffected.
  */
 export function detectStructuralRestructureIntent(
   message: string,
 ): StructuralRestructureDetection {
   if (typeof message !== 'string' || message.length === 0) return NO_MATCH;
+  if (INTERROGATIVE_LEAD.test(message) || TRAILING_QUESTION_MARK.test(message)) {
+    return NO_MATCH;
+  }
   if (EACH_OPTION_OWN.test(message)) {
     return { matched: true, trigger: 'each_option_own' };
   }

@@ -3381,6 +3381,23 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isProposalReplayCandidate =
       !isConfirmationShaped &&
       (ingress.source === 'chip_click' || AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message));
+    // #644 adversarial P2-2 (KNOWN ASYMMETRY, currently zero blast radius —
+    // deliberately NOT folded in): `structuralRestructureIntent` is absent from
+    // this proposal-confirm resolution gate, so a structural-restructure REPLAY
+    // (a chip_click / affirmative-prefixed message that matches
+    // detectStructuralRestructureIntent) skips resolveProposalConfirmAtRoute
+    // and re-dispatches the edit lane instead of resuming the exact live hold.
+    // This is unreachable today: every structural hold's rendered chip copy is
+    // built by describe-changeset.ts, whose per-op verbs lead with
+    // add/remove/change/update/adjust — ALL in EDIT_GRAPH_POSITIVE_REGEX — so
+    // `editVerbCandidate` already claims the replay here; and the only edit-verb-
+    // free copy it emits ("link 'X' to 'Y'", "rename 'X' to 'Y'") never carries a
+    // per-option / each-option-own clause, so it never matches the structural
+    // detector either. The omission would only bite if a FUTURE hold rendered a
+    // restructure-phrased, edit-verb-free chip label (e.g. "Split 'Cost' into
+    // per-option links"). Folding `|| structuralRestructureIntent` in now would
+    // be symmetry with no discriminating (non-vacuous) mutation-pin — rowed for
+    // ROADMAP follow-up (add it in the SAME change that introduces such copy).
     if ((editVerbCandidate || configureOptionIntent) && (isConfirmationShaped || isProposalReplayCandidate)) {
       const resolution = await resolveProposalConfirmAtRoute(
         ingress.scenario_id,
