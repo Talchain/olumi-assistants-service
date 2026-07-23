@@ -151,9 +151,13 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
     // pipeline `coaching_status = 'complete'` assignments (index.ts) preserve
     // this marker rather than clobbering it. Distinct from a pass that ran and
     // errored ('failed_degraded') — a budget-skip means "not attempted", so the
-    // async lane knows to fill it. (pipelineOutcome is initialised at pipeline
-    // start and typed non-optional on StageContext.)
-    ctx.pipelineOutcome.coaching_status = "skipped_budget";
+    // async lane knows to fill it. Guarded because this stage is STRICTLY
+    // non-fatal: pipelineOutcome is initialised at pipeline start in production,
+    // but isolated stage tests construct a ctx without it, and a coaching pass
+    // must never throw and break an otherwise-valid draft.
+    if (ctx.pipelineOutcome) {
+      ctx.pipelineOutcome.coaching_status = "skipped_budget";
+    }
     // OBSERVABILITY HONESTY: structured pino LOG (Render-log searchable,
     // event:cee.coaching_pass.skipped_budget), alongside the response marker.
     log.warn(
