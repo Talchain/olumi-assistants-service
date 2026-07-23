@@ -274,6 +274,32 @@ describe('finaliseV5Response — freshness-only synthesis', () => {
     OlumiResponseSchema.parse(finalised);
   });
 
+  // ─── leg κ(a): authoritative top-level graph_hash from freshness ───
+  it('κ(a): stamps top-level graph_hash from freshness.current_graph_hash and OVERRIDES the sanitiser fallback', () => {
+    // env carries a fallback graph_hash (as the egress sanitiser would set from
+    // the GraphV3-parsed effectiveGraph); the finaliser must override it with
+    // the authoritative freshness hash so it matches computed_against_hash.
+    const env = {
+      ...composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'x', stage: 'frame' }),
+      graph_hash: 'fallback_effectivegraph_hash',
+    };
+    const finalised = finaliseV5Response(env, {
+      freshness: derivation({ freshness: 'fresh', reason: 'graph_hash_match', current_graph_hash: 'authoritative_fresh_hash' }),
+    });
+    expect((finalised as { graph_hash?: string }).graph_hash).toBe('authoritative_fresh_hash');
+    OlumiResponseSchema.parse(finalised);
+  });
+
+  it('κ(a): with no freshness.current_graph_hash, the sanitiser fallback graph_hash is preserved', () => {
+    const env = {
+      ...composeDirectAnswerResponse({ answerKind: 'functional', assistant_text: 'x', stage: 'frame' }),
+      graph_hash: 'fallback_effectivegraph_hash',
+    };
+    // current_graph_hash null → no override → fallback survives.
+    const finalised = finaliseV5Response(env, { freshness: derivation({ current_graph_hash: null }) });
+    expect((finalised as { graph_hash?: string }).graph_hash).toBe('fallback_effectivegraph_hash');
+  });
+
   it('a real readiness payload wins over synthesis on the same unknown verdict', () => {
     const env = composeDirectAnswerResponse({
     answerKind: 'functional', assistant_text: 'x', stage: 'frame' });

@@ -387,7 +387,7 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
     expect(committedHash).not.toBe(PRE_MUTATION_HASH);
   });
 
-  it('negative: a non-mutating turn attaches NO draft_graph', async () => {
+  it('negative: a non-mutating first-touch turn attaches NO draft_graph BLOCK (though it adopts the graph_state)', async () => {
     const result = await runTurnExecutor(
       payload('What does the analysis say?'),
       'req-applied-graph-non-mutating',
@@ -404,7 +404,12 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
         graphState: buildBudgetGraph() as never,
       },
     );
-    expect(appendCalls.find((w) => w.graph != null)).toBeUndefined();
+    // ROADMAP 1.192: this is a FIRST-TOUCH turn (loadGraph → null), so the
+    // graph_state IS adopted and persisted at commit (was `undefined` pre-1.192).
+    // The load-bearing assertion here is the SECOND one: adopting the graph
+    // must NOT advertise a `draft_graph` on the wire — adopt persists via the
+    // commit chokepoint, it does not compose a draft_graph applied-receipt.
+    expect(appendCalls.find((w) => w.graph != null)).toBeDefined();
     expect('draft_graph' in result.response).toBe(false);
   });
 

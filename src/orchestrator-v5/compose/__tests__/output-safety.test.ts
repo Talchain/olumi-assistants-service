@@ -6,6 +6,7 @@ import {
   sanitiseOlumiResponseForEgress,
 } from '../output-safety.js';
 import { log } from '../../../utils/telemetry.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { GraphV3T } from '../../../orchestrator/types.js';
 
@@ -1172,5 +1173,50 @@ describe('sanitiseCoachingProse', () => {
       expect(once.text).toBe(text);
       expect(twice.text).toBe(text);
     });
+  });
+});
+
+// ----------------------------------------------------------------------------
+// ROADMAP 1.192 leg κ(a) — top-level `graph_hash` on the egress envelope.
+// Stamped at the single V5 egress chokepoint from opts.graph (= the
+// authoritative per-turn graph, incl. the just-adopted first-touch graph).
+// Trap-13: the positive control (graph present → hash emitted) runs before the
+// fail-closed absence assertion (null graph → omitted).
+// ----------------------------------------------------------------------------
+
+describe('leg κ(a) — top-level graph_hash on egress', () => {
+  it('POSITIVE CONTROL: a graph-bearing turn stamps graph_hash == computeAnalysisAffectingGraphHash(graph)', () => {
+    const graph = makeGraph();
+    const out = sanitiseOlumiResponseForEgress(emptyResponse({ assistant_text: 'hi' }), {
+      graph,
+      requestId: 'req-kappa-a',
+      exitPath: 'test',
+      userMessage: null,
+    });
+    const expected = computeAnalysisAffectingGraphHash(
+      graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+    );
+    expect(expected).not.toBeNull();
+    expect((out as { graph_hash?: string }).graph_hash).toBe(expected);
+  });
+
+  it('FAIL-CLOSED: a graph-free turn OMITS graph_hash (never an empty string)', () => {
+    const out = sanitiseOlumiResponseForEgress(emptyResponse({ assistant_text: 'hi' }), {
+      graph: null,
+      requestId: 'req-kappa-a-null',
+      exitPath: 'test',
+      userMessage: null,
+    });
+    expect((out as { graph_hash?: string }).graph_hash).toBeUndefined();
+  });
+
+  it('IDEMPOTENT: re-running the chokepoint keeps the same graph_hash (the 4x re-entry contract)', () => {
+    const graph = makeGraph();
+    const opts = { graph, requestId: 'req-kappa-a-idem', exitPath: 'test', userMessage: null };
+    const once = sanitiseOlumiResponseForEgress(emptyResponse({ assistant_text: 'hi' }), opts);
+    const twice = sanitiseOlumiResponseForEgress(once, opts);
+    expect((twice as { graph_hash?: string }).graph_hash).toBe(
+      (once as { graph_hash?: string }).graph_hash,
+    );
   });
 });

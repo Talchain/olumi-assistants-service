@@ -8091,10 +8091,14 @@ export async function runTurnExecutor(
       // graph through GraphV3.parse before returning it — invalid graphs
       // do not reach here.
       //
-      // When mutated_graph is absent the turn did not change the graph,
-      // and the commit MUST NOT write one (p_graph null leaves
+      // When mutated_graph is absent the turn did not change the graph, and
+      // the commit writes NO graph — EXCEPT the ROADMAP 1.192 leg-2 adopt
+      // branch below (row A): a first-touch turn carrying request graph_state
+      // with NO server model persists that graph_state, so the guest's
+      // template stops evaporating (guest-template invisibility). Where
+      // neither a mutation nor an adopt applies, p_graph null leaves
       // scenarios.graph untouched — the documented CommitMetadata.graph
-      // contract). The previous fallback persisted the client-echoed
+      // contract. The previous fallback persisted the client-echoed
       // options.graphState on every spine turn ("pre-D1 behaviour"), but
       // the wire never carries server-only fields (options[],
       // goal_node_id on the draft_graph block), so a non-mutating
@@ -8136,16 +8140,102 @@ export async function runTurnExecutor(
       // add_constraint, adjust_edge_strength — enumeration pinned by
       // d1-mutated-graph-emitters invariant test); the flip-proposal
       // apply path resolves through the same set_factor_value handler.
+      // ROADMAP 1.192 leg 2 — ADOPT-ON-FIRST-TOUCH. A fail-closed 6-row
+      // decision table over {hasServerModel, incoming, handlerMutated}. Adopting
+      // HERE (the single graph-commit chokepoint) routes the adopted graph
+      // through the ENTIRE W2 pipeline for free (commit.ts:
+      // repairGraphForPersistence → normaliseOptionInterventionContract →
+      // reconcileTopLevelOptionsFromNodes [decision ③, options[] free-ride] →
+      // append_turn_atomic_v3 [CAS identity-hash stamp]). Server-authoritative:
+      // adopt can NEVER overwrite an existing server model (rows E/F never
+      // adopt), so a revert cannot un-write a clobbered model — zero data risk.
+      //
+      // Inputs (byte-anchored):
+      //   incoming        = the RAW request graph_state (`options.graphState`),
+      //                     numeric-bounds-gated at ingress
+      //                     (request-extensions.ts:337 `graphState = bounds.graph`).
+      //                     NOT the mutable `graphStateForTurn`, which is
+      //                     BACKFILLED from context.persistedGraph on follow-up
+      //                     turns (:1242) — using it would let a persisted graph
+      //                     masquerade as "incoming". An EMPTY incoming
+      //                     ({nodes:[]}) counts as NO incoming — never adopt an
+      //                     empty graph over a just-created row (row C no-op).
+      //   hasServerModel  = context.persistedGraph is non-null AND has >=1 node.
+      //                     An empty/absent row is NOT a server model (adopt OK).
+      //   handlerMutated  = a D1 handler emitted a mutated_graph this turn.
+      //
+      //   A no-model + incoming + no-mutate -> ADOPT (persist incoming)
+      //   B no-model + incoming + mutate    -> mutate wins; merge base = incoming
+      //   C no-model + none     + no-mutate -> no graph (honest empty; unchanged)
+      //   D no-model + none     + mutate    -> mutate onto strict-read base (unchanged)
+      //   E has-model+ any      + no-mutate -> persisted wins, NO adopt (unchanged)
+      //   F has-model+ any      + mutate    -> mutate merged onto persisted (unchanged)
       let graphForCommit = await (async (): Promise<unknown> => {
         const mutated = handlerOutcome?.mutated_graph;
-        if (mutated === undefined || mutated === null) return mutated;
+        const handlerMutated = mutated !== undefined && mutated !== null;
+
+        // `incoming` — request-supplied graph_state, non-empty only.
+        const requestGraph = options.graphState ?? null;
+        const incoming =
+          requestGraph !== null && requestGraph.nodes.length > 0 ? requestGraph : null;
+
+        // `hasServerModel` — a persisted graph carrying >=1 node.
+        const persisted = context.persistedGraph;
+        const hasServerModel =
+          persisted !== null &&
+          persisted !== undefined &&
+          typeof persisted === 'object' &&
+          !Array.isArray(persisted) &&
+          Array.isArray((persisted as Record<string, unknown>).nodes) &&
+          ((persisted as Record<string, unknown>).nodes as unknown[]).length > 0;
+
+        if (!handlerMutated) {
+          // rows A / C / E
+          if (!hasServerModel && incoming !== null) {
+            // ROW A — ADOPT. First-touch: no server model, the client holds the
+            // only graph. Persist it VERBATIM (identity-preserving — a std<=0
+            // is floored later at the compute-load seam, never here, so the
+            // persisted hash stays stable; flooring at adopt would fork identity,
+            // the Cut-2 regression). The next turn now has a server model and
+            // analysis runs against the real graph.
+            log.info(
+              {
+                event: 'v5.turn_executor.adopt_on_first_touch',
+                request_id: requestId,
+                scenario_id: context.session_id,
+                incoming_node_count: incoming.nodes.length,
+                incoming_edge_count: incoming.edges.length,
+              },
+              'V5 TurnExecutor — adopting request graph_state as the first-touch server model (no server model existed); persisting through the commit chokepoint',
+            );
+            return incoming;
+          }
+          // rows C / E — nothing to adopt (no incoming), OR a server model
+          // exists (never overwrite it with client graph_state — the
+          // trusted-base rule, :778). Write no graph, exactly as today.
+          return mutated;
+        }
+
+        // rows B / D / F — a D1 handler mutated the graph this turn.
         let persistedBase: unknown;
-        try {
-          persistedBase = await loadPersistedGraphStrict(context.session_id);
-        } catch (err) {
-          throw new Error(
-            `V5 D1 — refusing to persist mutated graph for scenario ${context.session_id}: persisted merge base unavailable (${err instanceof Error ? err.message : String(err)})`,
-          );
+        if (!hasServerModel && incoming !== null) {
+          // ROW B — adopt-then-edit: an edit ON a first-touch graph. The handler
+          // reasoned over `context.persistedGraph ?? graphStateForTurn`, so the
+          // mutation already carries the adopted base. Merge onto `incoming`
+          // (NOT the empty persisted read) so incoming's top-level fields
+          // (options[], goal_node_id, goal_constraints) survive the merge.
+          persistedBase = incoming;
+        } else {
+          // rows D / F — today's behaviour: strict-read the persisted graph. A
+          // degraded/unavailable read FAILS CLOSED here (→ STATE_COMMIT_FAILED;
+          // the whole transaction rolls back, nothing half-lands).
+          try {
+            persistedBase = await loadPersistedGraphStrict(context.session_id);
+          } catch (err) {
+            throw new Error(
+              `V5 D1 — refusing to persist mutated graph for scenario ${context.session_id}: persisted merge base unavailable (${err instanceof Error ? err.message : String(err)})`,
+            );
+          }
         }
         return mergeMutatedGraphForPersistence({
           mutatedGraph: mutated as Record<string, unknown>,
@@ -8434,16 +8524,28 @@ export async function runTurnExecutor(
           // parse of the SAME committed graph the readiness/egress
           // re-projections above use, in exactly the draft-dispatch shape
           // (see applied-graph-emit.ts). Gating parity with #414: committed
-          // success only — this branch runs after `commitTurn` resolved and
-          // only when a graph was persisted this turn (swap-withheld and
-          // non-mutating turns never reach it; the commit-failure catch
-          // below replaces the response wholesale). On a failed GraphV3
-          // parse (the else branch) nothing is attached — fail open to the
-          // pre-fix wire, consistent with the readiness fail-open.
-          response = {
-            ...response,
-            draft_graph: buildAppliedGraphWireField(committedGraphParse.data),
-          };
+          // success only — the commit-failure catch below replaces the
+          // response wholesale. On a failed GraphV3 parse (the else branch)
+          // nothing is attached — fail open to the pre-fix wire.
+          //
+          // ROADMAP 1.192: attach the applied-graph wire field ONLY when a D1
+          // handler actually MUTATED the graph this turn (`mutated_graph`) —
+          // NOT for a pure adopt-on-first-touch commit (row A), which persists
+          // the client's OWN graph_state silently. An adopt echoes no
+          // `draft_graph`: the UI already holds that graph and syncs identity
+          // via the κ handshake (`graph_hash` / `computed_against_hash`), not
+          // an apply-to-canvas receipt — advertising a draft on a plain
+          // coaching turn would trigger a spurious canvas re-render. Row B
+          // (adopt-then-edit) HAS `mutated_graph`, so a genuine edit still
+          // advertises `draft_graph`. Pre-1.192 a committed graph ALWAYS came
+          // from `mutated_graph`, so this gate restores the exact prior
+          // draft_graph semantics.
+          if (handlerOutcome?.mutated_graph != null) {
+            response = {
+              ...response,
+              draft_graph: buildAppliedGraphWireField(committedGraphParse.data),
+            };
+          }
         } else {
           // Should be unreachable: D1 handlers GraphV3-validate the mutated
           // graph and the persistence merge only restores top-level fields.

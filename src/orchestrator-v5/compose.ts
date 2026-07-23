@@ -612,7 +612,8 @@ export function toSafeTransportEnrichment(enrichment: unknown): Record<string, u
 function buildAnalysisResultBlock(
   fact: RunAnalysisHandlerFact,
 ): OlumiResponse['blocks'][number] {
-  const { leading_option_id, summary, win_probabilities, enrichment } = fact.result;
+  const { leading_option_id, summary, win_probabilities, enrichment, graph_hash_at_run } =
+    fact.result;
   const transportEnrichment = toSafeTransportEnrichment(enrichment);
   return {
     type: 'analysis_result',
@@ -621,6 +622,19 @@ function buildAnalysisResultBlock(
     ...(win_probabilities !== undefined ? { win_probabilities } : {}),
     ...(transportEnrichment !== undefined
       ? { enrichment: transportEnrichment as typeof enrichment }
+      : {}),
+    // ROADMAP 1.192 leg κ — identity handshake. Map the fact's
+    // `graph_hash_at_run` (computed at run-analysis.ts:462 over the canonical
+    // CANONICAL_GRAPH_HASH_KEEP_LIST, already stored on the fact) onto the
+    // 0.22-shipped `computed_against_hash` wire field — the graph identity this
+    // analysis result was computed against. A client compares it against the
+    // turn's top-level `graph_hash` (canvas identity) to decide freshness; a
+    // mismatch is a GRAPH_DIVERGED divergence, never a silent stale render.
+    // Fail-closed: a legacy fact (pre-0.10.0) with no `graph_hash_at_run` OMITS
+    // the field (never fabricated) — an honest "identity unknown", which the UI
+    // must treat as un-verifiable, not fresh.
+    ...(graph_hash_at_run !== undefined
+      ? { computed_against_hash: graph_hash_at_run }
       : {}),
   };
 }
