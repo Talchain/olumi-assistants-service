@@ -98,6 +98,8 @@ export interface V5BenchmarkingTimings {
     repair_llm_ms?: number;
     repair_deterministic_ms?: number;
     threshold_sweep_ms?: number;
+    // v12 (lean-draft contract): Stage 4.5 post-draft coaching pass.
+    coaching_pass_ms?: number;
     package_ms?: number;
     boundary_ms?: number;
   };
