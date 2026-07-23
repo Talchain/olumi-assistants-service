@@ -58,6 +58,7 @@ import {
   RETRY_SAFETY_MARGIN_MS,
 } from "../config/timeouts.js";
 import { log } from "../utils/telemetry.js";
+import { contentDigest } from "../utils/redaction.js";
 import type { V2RunResponseEnvelope, OrchestratorError } from "./types.js";
 
 // ============================================================================
@@ -994,7 +995,8 @@ class PLoTClientImpl implements PLoTClient {
       // Other 4xx/5xx → throw PLoTError
       const body = await response.text().catch(() => 'unknown');
       log.error(
-        { status: response.status, elapsed_ms: elapsedMs, request_id: requestId, body_preview: body.slice(0, 500) },
+        // Digest PLoT response body — never place upstream payload on the wire verbatim (see contentDigest).
+        { status: response.status, elapsed_ms: elapsedMs, request_id: requestId, body_preview: contentDigest(body) },
         "PLoT validate_patch failed",
       );
       throw new PLoTError(

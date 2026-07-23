@@ -6,6 +6,7 @@
  */
 
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
+import { contentDigest } from "../../utils/redaction.js";
 
 // ============================================================================
 // Types
@@ -159,7 +160,8 @@ export function parseStringifiedAuxFields(obj: Record<string, unknown>): void {
         field: key,
         expected_shape: expect,
         raw_length: raw.length,
-        raw_preview: raw.slice(0, 120),
+        // Digest raw model output — never place it on the wire verbatim (see contentDigest).
+        raw_preview: contentDigest(raw),
       }, `Draft aux field "${key}" was not a JSON-encoded ${expect} — dropped (canonical-empty default applies downstream)`);
     }
   }

@@ -12,6 +12,7 @@ import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from ".
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import { contentDigest } from "../../utils/redaction.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { resolveDraftMaxTokens, isDraftTruncated } from "./draft-budget.js";
@@ -780,7 +781,8 @@ ${brief}
           raw_node_kinds: Array.isArray(rawJson?.nodes)
             ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
             : [],
-          raw_output_sample: rawOutputSample,
+          // Digest raw model output — never place it on the wire verbatim (see contentDigest).
+          raw_output_sample: contentDigest(rawOutputSample),
           event: 'llm.validation.schema_failed'
         }, "OpenAI response failed schema validation after normalisation");
 
