@@ -94,6 +94,10 @@ import type { FreshnessDerivation } from '../context/freshness.js';
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
 import { createPLoTClient, type PLoTClient } from '../../orchestrator/plot-client.js';
+import {
+  createCounterfactualClient,
+  type CounterfactualClient,
+} from '../../adapters/isl/counterfactual-client.js';
 
 import {
   createRunAnalysisHandler,
@@ -365,6 +369,14 @@ export const EMPTY_HANDLER_REGISTRY: HandlerRegistry = new Map();
 export interface RegistryOverrides {
   readonly plotClient?: PLoTClient;
   readonly scenarioReader?: ScenarioReader;
+  /**
+   * Counterfactual (what-if lens) transport injected into `what_would_flip`.
+   * Tests pass a mock; production omits it and the factory resolves
+   * `createCounterfactualClient()` (which returns `null` — a latent lens —
+   * when `ISL_BASE_URL` is unset). Pass `null` explicitly to force the latent
+   * state in a test without a mock.
+   */
+  readonly counterfactualClient?: CounterfactualClient | null;
 }
 
 /**
@@ -397,10 +409,18 @@ export function createRegistry(overrides?: RegistryOverrides): HandlerRegistry {
     overrides?.plotClient ?? resolvePlotClient();
   const scenarioReader = overrides?.scenarioReader ?? DEFAULT_SCENARIO_READER;
 
+  // The what-if lens transport. `undefined` (not supplied) resolves the
+  // production factory (null when ISL is unconfigured); an explicit `null`
+  // forces the latent state without constructing a client.
+  const counterfactualClient =
+    overrides && 'counterfactualClient' in overrides
+      ? overrides.counterfactualClient ?? null
+      : createCounterfactualClient();
+
   const runAnalysis = createRunAnalysisHandler({ plotClient, scenarioReader });
   const explainFromStructure = createExplainFromStructureHandler();
   const explainResults = createExplainResultsHandler();
-  const whatWouldFlip = createWhatWouldFlipHandler();
+  const whatWouldFlip = createWhatWouldFlipHandler({ counterfactualClient });
 
   const setFactorValue = createSetFactorValueHandler();
   const addConstraint = createAddConstraintHandler();
