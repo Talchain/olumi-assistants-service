@@ -217,4 +217,63 @@ describe('POST /orchestrate/v2/turn — free-text structural restructure routes 
     expect(dispatchEditGraphMock).not.toHaveBeenCalled();
     expect(chatWithToolsMock).toHaveBeenCalled();
   });
+
+  /**
+   * #644 adversarial P2-1 — the precision boundary (through the REAL route).
+   *
+   * The review reproduced five FALSE POSITIVES: genuine QUESTIONS that the base
+   * detector matched, routing a coaching question into the edit lane (held
+   * proposal + confirm chip) instead of a coach discussion. Each passes the
+   * shared route negative gates (analytical-question / state-query) — that is
+   * WHY they leaked — so the interrogative gate must live in the detector.
+   *
+   * MUTATION PIN (route level): remove the interrogative gate from
+   * detectStructuralRestructureIntent → all five reach dispatchEditGraph — RED.
+   * This proves (a) the gate carries the turn and (b) the route's own negative
+   * gates do NOT independently catch these five.
+   */
+  describe('interrogative/state QUESTIONS reach the coach, NOT the edit lane (#644 P2-1)', () => {
+    const questionFalsePositives: ReadonlyArray<string> = [
+      'should I make the cost factor per-option?',
+      'should I split the cost into per-option links?',
+      'would it be better to give each option its own cost factor?',
+      'do you think each option should have its own driver?',
+      'does each option have its own cost factor?',
+    ];
+    it.each(questionFalsePositives)('%s → coach (dispatchEditGraph NOT called)', async (message) => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({ message }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      expect(chatWithToolsMock).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #644 acceptance regression (do NOT over-correct): an IMPERATIVE restructure
+   * — including the polite-imperative "can you split …" form — must STILL reach
+   * the edit lane. These are still-RED-on-revert positives for the precision
+   * boundary: they stay GREEN with the gate, and go RED if the gate over-reaches
+   * (e.g. suppresses on a bare "can" or any question word).
+   */
+  describe('IMPERATIVE restructures still reach the edit lane (#644 acceptance)', () => {
+    const imperativePositives: ReadonlyArray<string> = [
+      'split the cost into per-option links',
+      'give each option its own driver',
+      'can you split the shared cost driver into per option links',
+    ];
+    it.each(imperativePositives)('%s → dispatchEditGraph called', async (message) => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({ message }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+      expect(chatWithToolsMock).not.toHaveBeenCalled();
+    });
+  });
 });
