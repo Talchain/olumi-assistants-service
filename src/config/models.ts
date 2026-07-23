@@ -408,6 +408,42 @@ export function isModelEnabled(modelId: string): boolean {
 }
 
 /**
+ * Boot fail-loud assertion (Lane F, 2026-07-23; DRAFTING-COMPONENT-DESIGN Q4
+ * "derive-don't-mirror" D10). The draft model is authoritatively resolved from
+ * the PMS `draft_graph_default` prompt config per request; at boot the DEFAULT
+ * resolution (`config.cee.models.draft ?? TASK_MODEL_DEFAULTS.draft_graph`) is
+ * the mirror most likely to drift — a typo or a retired model id there would
+ * only surface as a 400/500 at the FIRST draft request. This returns fail-loud
+ * error strings (empty when the model is registered AND enabled) for `server.ts`
+ * to log at ERROR, in the same fire-but-continue style as the draft-token /
+ * thinking affordability asserts. The value passed in is DERIVED from live
+ * config (never restated), and the check reads the registry directly, so it
+ * cannot silently agree with a stale mirror (CLAUDE.md trap-12).
+ */
+export function validateDraftModelRegistered(modelId: string | null | undefined): string[] {
+  const errors: string[] = [];
+  if (!modelId) {
+    errors.push(
+      "The resolved default draft model is empty — no draft_graph model is configured and no code default resolved. " +
+      "The draft path will fail at request time. Set the draft_graph model in the PMS prompt config (or CEE_MODEL_DRAFT).",
+    );
+    return errors;
+  }
+  if (!isKnownModel(modelId)) {
+    errors.push(
+      `The resolved default draft model "${modelId}" is NOT in the model registry (config/models.ts). ` +
+      `Every draft request would fail at the adapter. Register the model or fix the draft_graph model config.`,
+    );
+  } else if (!isModelEnabled(modelId)) {
+    errors.push(
+      `The resolved default draft model "${modelId}" is registered but DISABLED in the model registry (config/models.ts). ` +
+      `Draft requests routed to it would fail. Enable the model or point the draft_graph config at an enabled one.`,
+    );
+  }
+  return errors;
+}
+
+/**
  * Get all enabled models
  */
 export function getEnabledModels(): ModelConfig[] {

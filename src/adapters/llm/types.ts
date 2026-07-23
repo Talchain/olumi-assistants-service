@@ -113,6 +113,15 @@ export interface DraftGraphResult {
     // truncation by closing the partial JSON (salvage) instead of re-drafted.
     salvaged_from_truncation?: boolean;
 
+    // Lane C (2026-07-23): the Anthropic draft call is STREAMED with early
+    // runaway detection + cheap abort-retry. runaway_abort_count = how many
+    // doomed attempts were aborted before this draft succeeded (0 on a clean
+    // first try); time_to_edges_ms = stream time to the first edge, which
+    // validates the runaway-detection deadline live.
+    streamed?: boolean;
+    runaway_abort_count?: number;
+    time_to_edges_ms?: number | null;
+
     // Safe diagnostics
     node_kinds_raw_json?: string[];
 
