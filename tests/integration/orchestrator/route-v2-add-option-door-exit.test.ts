@@ -221,6 +221,38 @@ describe('route-v2 — add-option intent-chip door + exit_path (R2)', () => {
     expect(runTurnExecutorMock).toHaveBeenCalled();
   });
 
+  // ── egress-F1 (2026-07-24): the door exclusion is NARROWED to `not_held`. The
+  // gm_off / malformed-spec legs regain their pre-#658 fallback (the free-text
+  // edit lane); only the stale/diverged referee decline routes to the executor.
+  // MUTATION-CHECK: revert route-v2's `let isNonReadinessTypedChipClickForExecutor`
+  // back to `|| isAddOptionIntentChip` → these two go RED (the executor claims
+  // the turn away from the edit lane, dispatchEditGraph never runs). ──
+
+  it('(F1-gm_off) a GM-off add_option chip regains the edit lane (NOT stranded at the executor)', async () => {
+    gmHolder.mode = 'off';
+    const { status } = await post(app, addOptionPayload(VALID_PARAMS));
+    expect(status).toBe(200);
+    // The arm fell through for gm_off …
+    expect(addOptionEvents(emitSpy).some((e) => e.outcome === 'fell_through:gm_off')).toBe(true);
+    // … to the free-text EDIT lane (its only working fallback — the executor has
+    // no add-option capability), NOT the executor door.
+    expect(dispatchEditGraphMock).toHaveBeenCalled();
+    expect(runTurnExecutorMock).not.toHaveBeenCalled();
+  });
+
+  it('(F1-malformed) a malformed-spec add_option chip regains the edit lane (NOT stranded at the executor)', async () => {
+    // GM live, but the parameters cannot build a transaction → skip with a
+    // built.reason (NOT not_held) → edit-lane fallback.
+    const { status } = await post(app, addOptionPayload({ label: 'nope' }));
+    expect(status).toBe(200);
+    const events = addOptionEvents(emitSpy);
+    expect(
+      events.some((e) => String(e.outcome).startsWith('fell_through') && e.outcome !== 'fell_through:not_held'),
+    ).toBe(true);
+    expect(dispatchEditGraphMock).toHaveBeenCalled();
+    expect(runTurnExecutorMock).not.toHaveBeenCalled();
+  });
+
   it('(d) a fresh/held add_option transaction stamps exit_path:add_option_transaction', async () => {
     // No prior facts → freshness 'none' (trusted for structural) → HELD transaction.
     const { status, body } = await post(app, addOptionPayload(VALID_PARAMS));

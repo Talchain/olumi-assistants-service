@@ -127,13 +127,37 @@ function projectStructuralGraph(graph: unknown): { nodes: unknown[]; edges: unkn
 }
 
 function buildCoachingUserMessage(brief: string, graph: unknown): string {
+  // Mark the user-authored brief as untrusted (draft-F7, 2026-07-24) with the
+  // SAME [BEGIN/END]_UNTRUSTED_USER_CONTENT idiom the main draft path uses
+  // (anthropic.ts buildDraftPrompt, adopted per #595 review P2). This is the
+  // second brief-carrying LLM call site; without the bracketing a brief bearing
+  // prompt-injection could steer the coaching model with system authority.
   return [
     "BRIEF:",
+    "[BEGIN_UNTRUSTED_USER_CONTENT]",
     brief,
+    "[END_UNTRUSTED_USER_CONTENT]",
     "",
     "GRAPH (structure only):",
     JSON.stringify(projectStructuralGraph(graph)),
   ].join("\n");
+}
+
+/**
+ * Record a ran-and-errored coaching pass on the pipeline outcome (draft-F3,
+ * 2026-07-24). types.ts documents 'failed_degraded' as the status distinct from
+ * a pass that ran and completed → 'complete' and one that never ran → 'skipped_budget'.
+ * Before this, the catch / no-JSON / unusable-JSON paths wrote NOTHING and
+ * index.ts then stamped 'complete' — A2's async coaching-ingest lane could not
+ * tell "coaching genuinely produced" from "pass errored and produced nothing".
+ * STRICTLY non-fatal: guarded because the stage must never throw; never clobbers
+ * a 'skipped_budget' marker (that path returns before the try). index.ts's
+ * terminal stamps preserve 'failed_degraded' the same way they preserve 'skipped_budget'.
+ */
+function markCoachingFailedDegraded(ctx: StageContext): void {
+  if (ctx.pipelineOutcome && ctx.pipelineOutcome.coaching_status !== "skipped_budget") {
+    ctx.pipelineOutcome.coaching_status = "failed_degraded";
+  }
 }
 
 export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
@@ -234,6 +258,8 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
         { event: "cee.coaching_pass.no_json", request_id: ctx.requestId },
         "Post-draft coaching pass returned no parseable JSON — coaching stays canonical-empty",
       );
+      // Ran and produced nothing usable → failed_degraded (draft-F3).
+      markCoachingFailedDegraded(ctx);
       return;
     }
 
@@ -268,6 +294,10 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
         ? "Post-draft coaching pass produced coaching/causal_claims"
         : "Post-draft coaching pass returned JSON without usable coaching — canonical-empty",
     );
+    // Parsed JSON but neither coaching nor causal_claims was usable → the pass
+    // ran and produced nothing (draft-F3). A pass that DID attach leaves the
+    // status for index.ts to stamp 'complete'.
+    if (!attached) markCoachingFailedDegraded(ctx);
   } catch (error) {
     // STRICTLY NON-FATAL: never let a coaching failure break an otherwise-valid
     // draft. Leave ctx.coaching undefined → Stage 5 emits canonical-empty.
@@ -281,5 +311,8 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
       },
       "Post-draft coaching pass failed (non-fatal) — coaching will be canonical-empty; draft is unaffected",
     );
+    // Ran and errored → failed_degraded (draft-F3), so A2's async ingest lane can
+    // distinguish this from a genuinely-complete pass.
+    markCoachingFailedDegraded(ctx);
   }
 }

@@ -68,10 +68,15 @@ export const POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP = 2_000;
 export const POLICY_VERBATIM_TURNS = 5;
 /** = `MAX_PROJECTED_OPTIONS` (context-pack-assembler.ts). Pinned. */
 export const POLICY_MAX_PROJECTED_OPTIONS = 12;
-/** Edit-context graph-JSON serialiser cap (serialise default `maxGraphBytes`). */
-const POLICY_EDIT_GRAPH_JSON_CAP = 8_000;
-/** Edit-context conversation serialiser cap (serialise default `maxConversationChars`). */
-const POLICY_EDIT_CONVERSATION_CAP = 4_000;
+/**
+ * Edit-context graph-JSON serialiser cap (= serialise.ts default
+ * `maxGraphBytes`). EXPORTED (egress-F5, 2026-07-24) so the conformance test
+ * pins it to `EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES` — a `telemetry_only` replica
+ * that must FAIL LOUD on drift, not skew `computeOverBudget` silently.
+ */
+export const POLICY_EDIT_GRAPH_JSON_CAP = 8_000;
+/** Edit-context conversation serialiser cap (= serialise.ts default `maxConversationChars`). Pinned (egress-F5). */
+export const POLICY_EDIT_CONVERSATION_CAP = 4_000;
 
 // Telemetry/measurement targets with NO importable enforcement constant (03 §1
 // budget table). Declared here so `CONTEXT_SECTION_BUDGETS` derives from ONE
@@ -166,6 +171,17 @@ export interface ContextSectionPolicy {
    * (e.g. the `rest` aggregate, or the `older_relevant_facts` reservation).
    */
   readonly model_facing: boolean;
+  /**
+   * egress-F3 (2026-07-24): true when this section is UNCONDITIONALLY expected in
+   * every realised composition for its call site — its absence from the live
+   * `section_chars` is an UNDER-emit divergence (a declared section that silently
+   * stopped being emitted), the exact loss class the over-emit/over-budget checks
+   * are blind to. Only set on sections that are always present by construction
+   * (e.g. edit `graph_json` — the handler validates a graph exists before the
+   * call), NEVER on legitimately-conditional sections (brief degrade-to-absent,
+   * first-turn conversation), which would false-fire on healthy turns.
+   */
+  readonly always_expected?: boolean;
 }
 
 export interface ContextPolicy {
@@ -250,7 +266,7 @@ const COACH_CONVERSE: ContextPolicy = {
  */
 const EDIT_GRAPH_SECTIONS: readonly ContextSectionPolicy[] = [
   { name: 'brief', source: 'brief', projection: 'projectBriefForEdit (## Decision Brief, first 1000 chars, disclosed)', char_budget: POLICY_EDIT_BRIEF_CHAR_CAP, enforcement: 'enforced', cut_rank: null, model_facing: true },
-  { name: 'graph_json', source: 'graph', projection: 'editCompactGraph + truncateGraphJson', char_budget: POLICY_EDIT_GRAPH_JSON_CAP, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+  { name: 'graph_json', source: 'graph', projection: 'editCompactGraph + truncateGraphJson', char_budget: POLICY_EDIT_GRAPH_JSON_CAP, enforcement: 'telemetry_only', cut_rank: null, model_facing: true, always_expected: true },
   { name: 'conversation', source: 'conversation_window', projection: 'renderRecentConversationForEdit', char_budget: POLICY_EDIT_CONVERSATION_CAP, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
   { name: 'framing', source: 'framing', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
   { name: 'analysis_summary', source: 'analysis_enrichment', projection: 'summariseAnalysisResponse', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
@@ -515,6 +531,12 @@ export interface ContextPolicyDivergence {
   readonly unknown_sections: string[];
   /** Enforced sections whose realised chars exceeded their derived budget. */
   readonly over_budget_sections: string[];
+  /**
+   * egress-F3: `always_expected` sections DECLARED by the policy row but ABSENT
+   * from the realised `section_chars` — a section that silently stopped being
+   * emitted (under-emit), which the over-emit / over-budget checks cannot see.
+   */
+  readonly missing_sections: string[];
 }
 
 /**
@@ -530,7 +552,7 @@ export function findContextPolicyDivergences(
   callSite: string,
   sectionChars: Readonly<Record<string, number>>,
 ): ContextPolicyDivergence {
-  const empty: ContextPolicyDivergence = { unknown_sections: [], over_budget_sections: [] };
+  const empty: ContextPolicyDivergence = { unknown_sections: [], over_budget_sections: [], missing_sections: [] };
   const policySite = TELEMETRY_TO_POLICY[callSite as BudgetTelemetryCallSite];
   if (!policySite) return empty;
   const policy = CONTEXT_POLICY[policySite];
@@ -553,14 +575,25 @@ export function findContextPolicyDivergences(
       overBudget.push(name);
     }
   }
-  return { unknown_sections: unknown, over_budget_sections: overBudget };
+  // egress-F3: an UNDER-emit is a section the policy declares `always_expected`
+  // whose key never appears in the realised composition. Only these sections are
+  // absence-checked (unconditional ones), so a legitimately-conditional section
+  // being absent stays silent.
+  const missing: string[] = [];
+  for (const section of policy.sections) {
+    if (section.always_expected === true && !(section.name in sectionChars)) {
+      missing.push(section.name);
+    }
+  }
+  return { unknown_sections: unknown, over_budget_sections: overBudget, missing_sections: missing };
 }
 
 /**
  * RUNTIME tripwire. Emit one loud, structured warn event when a live LLM call's
  * realised composition departs from {@link CONTEXT_POLICY} — a new/renamed
- * section the policy does not declare, or an ENFORCED section that blew its
- * derived budget. Called once per LLM call from the `emitContextBudget` seam so
+ * section the policy does not declare, an ENFORCED section that blew its derived
+ * budget, or an `always_expected` section that silently went dark (under-emit,
+ * egress-F3). Called once per LLM call from the `emitContextBudget` seam so
  * it covers every migrated site.
  *
  * Contract: OBSERVE-ONLY. Logs section NAMES + counts (never values), caps the
@@ -578,11 +611,15 @@ export function emitContextPolicyDivergence(
   logger: ContextPolicyTripwireLogger = log,
 ): void {
   try {
-    const { unknown_sections, over_budget_sections } = findContextPolicyDivergences(
+    const { unknown_sections, over_budget_sections, missing_sections } = findContextPolicyDivergences(
       callSite,
       sectionChars,
     );
-    if (unknown_sections.length === 0 && over_budget_sections.length === 0) return;
+    if (
+      unknown_sections.length === 0 &&
+      over_budget_sections.length === 0 &&
+      missing_sections.length === 0
+    ) return;
     logger.warn(
       {
         event: 'v5.context_policy.divergence',
@@ -594,8 +631,11 @@ export function emitContextPolicyDivergence(
         unknown_sections: unknown_sections.slice(0, DIVERGENCE_NAME_LOG_CAP),
         over_budget_count: over_budget_sections.length,
         over_budget_sections: over_budget_sections.slice(0, DIVERGENCE_NAME_LOG_CAP),
+        // egress-F3: under-emit — an always_expected declared section went dark.
+        missing_section_count: missing_sections.length,
+        missing_sections: missing_sections.slice(0, DIVERGENCE_NAME_LOG_CAP),
       },
-      'v5 context: realised LLM context composition departs from CONTEXT_POLICY — a section the policy does not declare, or an enforced section over its derived budget (context-policy conformance backstop)',
+      'v5 context: realised LLM context composition departs from CONTEXT_POLICY — a section the policy does not declare, an enforced section over its derived budget, or an always_expected section that went dark (under-emit) (context-policy conformance backstop)',
     );
   } catch {
     // Observe-only: a telemetry fault must never break a turn.

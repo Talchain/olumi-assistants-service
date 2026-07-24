@@ -2157,8 +2157,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isAddOptionIntentChip =
       (ingress.source === 'chip_click' || ingress.source === 'chip') &&
       ingress.chip?.intent === 'add_option';
-    const isNonReadinessTypedChipClickForExecutor =
-      (isTypedChipClick && !isReadinessChipClick) || isAddOptionIntentChip;
+    // egress-F1 (2026-07-24) — NARROW the #658 door widening. Routing a
+    // fell-through add_option to the executor is correct ONLY for the
+    // stale/diverged referee decline (`fell_through:not_held`): the executor has
+    // no add-option capability, so for the gm_off / commit_failed / malformed-spec
+    // / turn-context-read-failure legs the executor is a DEAD END — those legs
+    // regain their pre-#658 fallback, the free-text edit LLM lane. `let` so the
+    // add-option arm below can promote it to `true` for the `not_held` leg only.
+    // A typed action_type chip click stays unconditionally executor-bound.
+    let isNonReadinessTypedChipClickForExecutor =
+      isTypedChipClick && !isReadinessChipClick;
 
     if (isReadinessChipClick) {
       // Read the PERSISTED scenario graph (the same authority the run_analysis
@@ -2223,12 +2231,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // `ActionType`, so it is not caught by the typed-chip-click arms above.
     //
     // The transaction reuses the SAME referee gate + `graph_management_held_v1`
-    // pending + `executeGmHeldResume` confirm the free-text edit uses; a
-    // missing/malformed/unresolved spec, GM not live, a stale frame, or a
-    // failed commit falls through BENIGNLY to the existing edit path with
-    // `fell_through` telemetry — never a silent coercion, never a dead end.
-    // Same predicate the executor-door guard was widened with above (R2(a)) —
-    // reused here so the add-option arm and the door guard cannot drift apart.
+    // pending + `executeGmHeldResume` confirm the free-text edit uses. The
+    // fall-through destination is per-leg (egress-F1, 2026-07-24): a
+    // stale/diverged referee decline (`fell_through:not_held`) routes to the
+    // EXECUTOR (the #658 intent — an LLM edit against a diverged frame is unsafe),
+    // set via `isNonReadinessTypedChipClickForExecutor` below; every other leg
+    // (GM not live, missing/malformed/unresolved spec, turn-context read failure,
+    // failed commit) falls through to the existing free-text EDIT path — its
+    // only working fallback, since the executor cannot add an option. Never a
+    // silent coercion, never a dead end.
     const isTypedAddOptionChip = isAddOptionIntentChip;
     if (isTypedAddOptionChip) {
       const addOptionGmMode = config.features.graphManagementMode;
@@ -2362,13 +2373,23 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             request_id: requestId,
             outcome: 'fell_through:commit_failed',
           });
-          // fall through to the existing edit path below.
+          // commit_failed keeps its pre-#658 fallback: the free-text edit path
+          // (leave the executor-door flag false).
         } else {
           emit(TelemetryEvents.V5AddOptionTransaction, {
             request_id: requestId,
             outcome: `fell_through:${addOptionOutcome.reason}`,
           });
-          // fall through to the existing edit path below.
+          // Route ONLY the stale/diverged referee decline (`not_held`) to the
+          // executor (egress-F1): an LLM edit against a diverged frame is the
+          // exact unsafe case #658 closed. Every other skip reason (gm_not_live,
+          // no_graph_hash, unreadable_graph, malformed/unresolved spec) keeps its
+          // pre-#658 fallback — the free-text edit lane — so it is not stranded at
+          // the executor, which has no add-option capability.
+          if (addOptionOutcome.reason === 'not_held') {
+            isNonReadinessTypedChipClickForExecutor = true;
+          }
+          // else: fall through to the existing edit path below.
         }
       }
     }

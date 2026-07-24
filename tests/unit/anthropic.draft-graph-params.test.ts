@@ -1465,3 +1465,126 @@ describe("OpenAI draft_graph — unaffected by Anthropic structured outputs chan
     expect(meta?.finish_reason).toBe("length");
   });
 });
+
+// =============================================================================
+// F1/F2 (2026-07-24) — per-attempt max_tokens re-derivation from the LIVE clock
+//
+// The runaway abort-retry loop must derive the FINAL attempt's max_tokens from
+// the budget that ACTUALLY remains (F1), and re-derive the abort authorization
+// per withRetry invocation (F2) — so a late final attempt truncates AT max_tokens
+// INSIDE the wall (salvage/lean-retry reachable) instead of hanging to the
+// overall timeout. These tests drive a controlled clock so real wall-time need
+// not pass.
+// =============================================================================
+
+describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation", () => {
+  let mockNow = 0;
+  let nowSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  // >8000 chars, NO `"from":` — trips the char-gate runaway detector before edges.
+  const RUNAWAY_NODES_CHUNK =
+    '{"nodes":[{"id":"n1","kind":"factor","label":"' + "x".repeat(8_200) + '"}';
+
+  function runawayStream(_body: unknown, options?: { signal?: AbortSignal }) {
+    const signal = options?.signal;
+    async function* gen() {
+      if (signal?.aborted) throw new Error("aborted");
+      yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: RUNAWAY_NODES_CHUNK } };
+    }
+    const it = gen();
+    return { [Symbol.asyncIterator]: () => it, finalMessage: async () => ({ content: [], stop_reason: "end_turn", usage: {} }), abort: () => {} };
+  }
+
+  function throwingStream(status: number) {
+    return (_body: unknown, _options?: unknown) => {
+      async function* gen(): AsyncGenerator<never> {
+        const e = new Error("Service temporarily unavailable") as Error & { status: number };
+        e.status = status;
+        throw e;
+        // eslint-disable-next-line no-unreachable
+        yield undefined as never;
+      }
+      const it = gen();
+      return { [Symbol.asyncIterator]: () => it, finalMessage: async () => ({ content: [], stop_reason: "end_turn", usage: {} }), abort: () => {} };
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    mockNow = 1_000_000;
+    nowSpy = vi.spyOn(Date, "now").mockImplementation(() => mockNow);
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+  });
+
+  afterEach(() => {
+    nowSpy?.mockRestore();
+    streamSpy.mockReset();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("F1 — after runaway aborts consume budget, the FINAL attempt caps max_tokens to the LIVE remaining wall (→ salvage, not a 504)", async () => {
+    // 3 runaway attempts each advance the clock 25s; the 4th is the FINAL attempt
+    // (remaining 35s < DETECT+MIN_RETRY 55s → no early abort), and completes.
+    let call = 0;
+    streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
+      const n = call++;
+      mockNow += 25_000; // this attempt consumed ~25s of wall-clock
+      if (n < 3) return runawayStream(body, options);
+      return makeFakeStream(VALID_GRAPH_JSON)(body, options as any); // final attempt completes
+    });
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+
+    // The draft SUCCEEDED via the completing final attempt (salvage path reachable).
+    expect(result).toBeDefined();
+    expect(Array.isArray((result as any).graph?.nodes ?? (result as any).nodes)).toBe(true);
+
+    expect(streamSpy).toHaveBeenCalledTimes(4);
+    // Attempts 1-3 run with detection ON (not final) → max_tokens unchanged at 8550.
+    expect(streamSpy.mock.calls[0][0].max_tokens).toBe(8550);
+    expect(streamSpy.mock.calls[1][0].max_tokens).toBe(8550);
+    expect(streamSpy.mock.calls[2][0].max_tokens).toBe(8550);
+    // FINAL attempt: remaining = 110000 - 75000 = 35000ms → affordable (35-15)*90 = 1800.
+    // Pre-fix this stayed 8550 → a runaway needs ~82-91s to reach it while 35s
+    // remained → guaranteed overall-timeout (the A2killer class).
+    expect(streamSpy.mock.calls[3][0].max_tokens).toBe(1800);
+  });
+
+  it("F2 — a transient retry that consumes budget re-derives the window per invocation (final attempt squeezed + capped)", async () => {
+    // timeoutMs 60s: attempt-1 window (60s > 55s) authorizes detection. The first
+    // withRetry invocation throws a transient 503 and burns 30s; the SECOND
+    // invocation must re-read the clock (remaining 30s < 55s → FINAL, capped),
+    // NOT reuse the stale loop-top authorization.
+    let call = 0;
+    streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
+      const n = call++;
+      if (n === 0) {
+        mockNow += 30_000; // the transient attempt burned 30s before failing
+        return throwingStream(503)(body, options);
+      }
+      return makeFakeStream(VALID_GRAPH_JSON)(body, options as any);
+    });
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    const result = await draftGraphWithAnthropic(
+      { brief: "Should I hire a contractor or full-time employee?", docs: [], seed: 17, model: "claude-sonnet-4-6" },
+      { timeoutMs: 60_000 },
+    );
+
+    expect(result).toBeDefined();
+    expect(streamSpy).toHaveBeenCalledTimes(2);
+    // First invocation: remaining 60000 → affordable (60-15)*90 = 4050, detection on (not final).
+    expect(streamSpy.mock.calls[0][0].max_tokens).toBe(4050);
+    // Second invocation (post-transient): remaining 30000 → FINAL, capped to
+    // affordable (30-15)*90 = 1350. Pre-fix it stayed 4050 with detection still on.
+    expect(streamSpy.mock.calls[1][0].max_tokens).toBe(1350);
+  });
+});

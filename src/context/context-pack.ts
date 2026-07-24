@@ -207,7 +207,13 @@ export function computeCacheBoundary(pack: DraftProvenanceDescriptor): CacheBoun
 /** Default seed when none provided by request or config */
 const DEFAULT_SEED = 0;
 
-export interface AssembleContextPackInput {
+// egress-F4 (2026-07-24): DISAMBIGUATED from the V5 model-facing
+// `AssembleContextPackInput` (context-pack-assembler.ts). Two same-named exported
+// interfaces with different shapes are the generateGraphHash-twins conflation
+// class — the draft-provenance input carries its own name so the wrong-import
+// trap the namesake-twin kill (#662 P4) closed for the function is closed for the
+// input type too.
+export interface AssembleDraftProvenanceInput {
   capability: Capability;
   brief: string;
   seedGraph?: unknown;
@@ -244,7 +250,7 @@ export interface AssembleContextPackInput {
  * The context_hash is computed last, covering the entire pack.
  * Deterministic: same inputs always produce the same context_hash.
  */
-export function assembleDraftProvenanceDescriptor(input: AssembleContextPackInput): DraftProvenanceDescriptor {
+export function assembleDraftProvenanceDescriptor(input: AssembleDraftProvenanceInput): DraftProvenanceDescriptor {
   const clarificationHash = input.clarificationAnswers && input.clarificationAnswers.length > 0
     ? hashClarificationAnswers(input.clarificationAnswers)
     : undefined;

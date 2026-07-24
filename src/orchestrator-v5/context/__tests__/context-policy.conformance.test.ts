@@ -35,6 +35,8 @@ import {
   POLICY_VERBATIM_TURNS,
   POLICY_MAX_PROJECTED_OPTIONS,
   POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+  POLICY_EDIT_GRAPH_JSON_CAP,
+  POLICY_EDIT_CONVERSATION_CAP,
   type ContextCallSite,
   type ContextPolicyTripwireLogger,
 } from '../context-policy.js';
@@ -59,6 +61,8 @@ import { buildUserMessage } from '../../routing/route-with-tool-use.js';
 import {
   serialiseEditContextForLLMWithMeta,
   EDIT_CONTEXT_BRIEF_CHAR_CAP,
+  EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES,
+  EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS,
 } from '../../../orchestrator/context/serialise.js';
 import { DECISION_REVIEW_MAX_BRIEF_CHARS } from '../../../cee/decision-review/invoke.js';
 import { composeEditClarifyResponse } from '../../compose/edit-clarify-response.js';
@@ -161,6 +165,15 @@ describe('context-policy — local-const replicas PINNED to their originals (fai
   });
   it('POLICY_MAX_PROJECTED_OPTIONS === MAX_PROJECTED_OPTIONS', () => {
     expect(POLICY_MAX_PROJECTED_OPTIONS).toBe(MAX_PROJECTED_OPTIONS);
+  });
+  // egress-F5 (2026-07-24): the two edit-cap replicas were docstring-claimed to
+  // equal the serialise defaults but NOT pinned — a fail-silent telemetry_only
+  // mirror. Now pinned to the exported single source.
+  it('POLICY_EDIT_GRAPH_JSON_CAP === EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES', () => {
+    expect(POLICY_EDIT_GRAPH_JSON_CAP).toBe(EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES);
+  });
+  it('POLICY_EDIT_CONVERSATION_CAP === EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS', () => {
+    expect(POLICY_EDIT_CONVERSATION_CAP).toBe(EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS);
   });
 });
 
@@ -465,6 +478,7 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
     expect(findContextPolicyDivergences('routing', clean)).toEqual({
       unknown_sections: [],
       over_budget_sections: [],
+      missing_sections: [],
     });
   });
 
@@ -501,7 +515,7 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
     // so it never flags — but a section the policy does not declare IS seen.
     expect(
       findContextPolicyDivergences('draft_graph', { brief: 500_000 }),
-    ).toEqual({ unknown_sections: [], over_budget_sections: [] });
+    ).toEqual({ unknown_sections: [], over_budget_sections: [], missing_sections: [] });
     expect(
       findContextPolicyDivergences('draft_graph', { brief: 1_000, mystery: 42 }).unknown_sections,
     ).toEqual(['mystery']); // POSITIVE CONTROL — a stray section on the draft site is seen
@@ -510,7 +524,7 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
   it('draft_coaching is silent on its declared brief + graph, but sees a stray', () => {
     expect(
       findContextPolicyDivergences('draft_coaching', { brief: 400_000, graph: 90_000 }),
-    ).toEqual({ unknown_sections: [], over_budget_sections: [] });
+    ).toEqual({ unknown_sections: [], over_budget_sections: [], missing_sections: [] });
     expect(
       findContextPolicyDivergences('draft_coaching', { brief: 10, graph: 10, causal: 5 }).unknown_sections,
     ).toEqual(['causal']);
@@ -520,6 +534,7 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
     expect(findContextPolicyDivergences('some_future_site', { anything: 9_999 })).toEqual({
       unknown_sections: [],
       over_budget_sections: [],
+      missing_sections: [],
     });
   });
 
@@ -529,6 +544,27 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
     ]);
     expect(
       findContextPolicyDivergences('edit_graph', { graph_json: 90_000 }).over_budget_sections,
+    ).toEqual([]);
+  });
+
+  it('POSITIVE CONTROL (egress-F3) — an always_expected section that went dark (under-emit) is SEEN', () => {
+    // edit_graph declares graph_json always_expected (a graph is always present
+    // on an edit turn). Present → clean.
+    expect(
+      findContextPolicyDivergences('edit_graph', {
+        brief: 500,
+        graph_json: 1_200,
+        conversation: 300,
+      }).missing_sections,
+    ).toEqual([]);
+    // Suppress graph_json (the section silently stopped being emitted) → under-emit fires.
+    expect(
+      findContextPolicyDivergences('edit_graph', { brief: 500, conversation: 300 }).missing_sections,
+    ).toEqual(['graph_json']);
+    // A legitimately-conditional absence (conversation on a first edit) stays SILENT —
+    // only always_expected sections are absence-checked.
+    expect(
+      findContextPolicyDivergences('edit_graph', { brief: 500, graph_json: 1_200 }).missing_sections,
     ).toEqual([]);
   });
 });
@@ -543,6 +579,26 @@ describe('runtime tripwire — emitContextPolicyDivergence (observe-only)', () =
     const { calls, logger } = fakeLogger();
     emitContextPolicyDivergence('routing', { brief: 100, display_analysis: 2_000 }, 5_000, 'req-1', 'scn-1', logger);
     expect(calls).toHaveLength(0);
+  });
+
+  it('POSITIVE CONTROL (egress-F3) — fires an UNDER-emit event when an always_expected section is absent, silent when present', () => {
+    // Suppress graph_json on an edit turn → one under-emit event.
+    const { calls, logger } = fakeLogger();
+    emitContextPolicyDivergence('edit_graph', { brief: 500, conversation: 300 }, 800, 'req-x', 'scn-x', logger);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].payload.missing_section_count).toBe(1);
+    expect(calls[0].payload.missing_sections).toEqual(['graph_json']);
+    // Revert: include graph_json → clean, silent (the divergence clears).
+    const { calls: calls2, logger: logger2 } = fakeLogger();
+    emitContextPolicyDivergence(
+      'edit_graph',
+      { brief: 500, graph_json: 1_200, conversation: 300 },
+      2_000,
+      'req-y',
+      'scn-y',
+      logger2,
+    );
+    expect(calls2).toHaveLength(0);
   });
 
   it('POSITIVE CONTROL — fires ONE structured event carrying the divergent NAMES (never values)', () => {
@@ -617,6 +673,22 @@ describe('namesake-twin kill — assembleContextPack resolves to exactly ONE exp
     expect(body).toContain('export interface DraftProvenanceDescriptor');
     expect(body).not.toMatch(/export\s+(?:async\s+)?function\s+assembleContextPack\b/);
     expect(body).not.toMatch(/export\s+interface\s+ContextPackV1\b/);
+    // egress-F4 (2026-07-24): the draft-side INPUT type must not resurrect the
+    // `AssembleContextPackInput` name (the V5 assembler owns it); it carries the
+    // disambiguated `AssembleDraftProvenanceInput`.
+    expect(body).toContain('export interface AssembleDraftProvenanceInput');
+    expect(body).not.toMatch(/export\s+interface\s+AssembleContextPackInput\b/);
+  });
+
+  it('exactly one exported AssembleContextPackInput DEFINITION exists in src/ (the V5 assembler)', () => {
+    // egress-F4 (2026-07-24): pin the input-type name to a single owner, the same
+    // way the function name is pinned — a second same-named exported interface is
+    // the type-twin the #662 P4 kill claimed to close but left open.
+    const INPUT_DEF_RE = /^export\s+interface\s+AssembleContextPackInput\b/m;
+    const defs = walkTsFiles(SRC_ROOT)
+      .filter((f) => INPUT_DEF_RE.test(readFileSync(f, 'utf8')))
+      .map((f) => f.slice(f.indexOf('/src/') + 1).replace(/\\/g, '/'));
+    expect(defs).toEqual(['src/orchestrator-v5/context/context-pack-assembler.ts']);
   });
 });
 
@@ -725,6 +797,7 @@ describe('draft_coaching — OBSERVED against the live coaching-pass emit', () =
     expect(findContextPolicyDivergences('draft_coaching', sectionChars)).toEqual({
       unknown_sections: [],
       over_budget_sections: [],
+      missing_sections: [],
     });
   });
 });

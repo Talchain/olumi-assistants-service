@@ -1065,11 +1065,16 @@ export function composeCagedField<T>(
  * present as a non-empty computed structure. Defensive + fail-closed: absent or
  * non-`'computed'` ⇒ false.
  */
-function deriveCompanionClaimSafe(fact: RunAnalysisHandlerFact, field: string): boolean {
+export function deriveCompanionClaimSafe(fact: RunAnalysisHandlerFact, field: string): boolean {
   const enrichment = readRecord((fact.result as Record<string, unknown>).enrichment);
   if (enrichment === null) return false;
   const status = enrichment[`${field}_status`];
-  if (typeof status === 'string') return status === 'computed';
+  // Fail CLOSED on ANY present status, not only a string one (egress-F2,
+  // 2026-07-24). A present-but-malformed `<field>_status` (object/number/bool —
+  // e.g. an upstream enrichment drift to `{state:'computed'}`) must DENY, not
+  // fall through to the presence-of-value branch and read as claim-safe. Only a
+  // genuinely absent status defers to the value-presence heuristic below.
+  if (status !== undefined) return status === 'computed';
   const value = enrichment[field];
   if (Array.isArray(value)) return value.length > 0;
   return value !== undefined && value !== null;
