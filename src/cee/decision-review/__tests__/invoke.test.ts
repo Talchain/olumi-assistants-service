@@ -178,7 +178,11 @@ describe('invokeDecisionReview — UU-16 regression guards', () => {
 
   it('RIDER-B — a per-call model override routes as a per_call source; the default path is unchanged', async () => {
     const adapter = makeAdapterStub('{"narrative_summary":"ok"}', { name: 'anthropic', model: 'claude-sonnet-5' });
-    vi.mocked(routerMod.getAdapterWithResolution).mockReturnValue({ adapter, resolution: MOCK_RESOLUTION });
+    // Cast to the resolution return type (the stub omits unused LLMAdapter methods)
+    // so this new line adds no typecheck-drift beyond the file's existing baseline.
+    vi.mocked(routerMod.getAdapterWithResolution).mockReturnValue(
+      { adapter, resolution: MOCK_RESOLUTION } as unknown as ReturnType<typeof routerMod.getAdapterWithResolution>,
+    );
 
     // Override present → model + per_call origin threaded to the router.
     await invokeDecisionReview(baseInput(), { requestId: 'req-ab', timeoutMs: 15_000, model: 'claude-sonnet-5' });
