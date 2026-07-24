@@ -53,6 +53,10 @@ import {
   DISPLAY_ANALYSIS_TRUNCATION_ORDER,
 } from '../format/format-analysis-for-context.js';
 import { CONTEXT_PACK_BRIEF_CHAR_CAP } from './context-pack-schema.js';
+// Derived (cycle-safe: draft-attachment imports neither this module nor
+// context-budget-telemetry) — the draft `attached_document` row bounds the doc
+// at the SAME enforced cap the fail-closed builder throws on. Derive, don't mirror.
+import { DRAFT_ATTACHMENT_MAX_BYTES } from '../../adapters/llm/draft-attachment.js';
 import { log } from '../../utils/telemetry.js';
 
 // ---------------------------------------------------------------------------
@@ -138,6 +142,7 @@ export type ContextSource =
   | 'isl_results'
   | 'deterministic_coaching'
   | 'focus'
+  | 'attached_document'
   | 'aggregate'
   | 'none';
 
@@ -377,8 +382,18 @@ const DRAFT_STRUCTURAL: ContextPolicy = {
   total_char_budget: null,
   sections: [
     { name: 'brief', source: 'brief', projection: 'effectiveBrief (buildRefinementBrief on refine turns) — UNCAPPED', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    // Native document attachment (D-59-7). A user-attached PDF/text carried as a
+    // native Anthropic `document` block, bracketed in the untrusted-content
+    // envelope inside the draft user message. CONDITIONAL (only when a document is
+    // attached → always_expected:false, so its absence on a brief-only draft is
+    // not a divergence). ENFORCED: buildDraftDocumentBlock fail-closes an oversize
+    // document → 4xx BEFORE the call, so the realised size can never exceed the
+    // cap; the budget is DERIVED from that SAME DRAFT_ATTACHMENT_MAX_BYTES constant
+    // (a decoded-BYTE ceiling). Its live count + token estimate are disclosed on
+    // the `cee.draft.document_attached` seam (anthropic.ts).
+    { name: 'attached_document', source: 'attached_document', projection: 'native Anthropic document block (base64 pdf / text), untrusted-bracketed — no text extraction', char_budget: DRAFT_ATTACHMENT_MAX_BYTES, enforcement: 'enforced', cut_rank: null, model_facing: true, always_expected: false },
   ],
-  note: 'POST wave-1 lean structural draft (draftGraph). Least-budgeted assembler: brief is uncapped (no enforcement constant → telemetry_only, never a false enforced). docs + seed graph also feed the prompt; S0 measures brief only (draft-graph-dispatch:489).',
+  note: 'POST wave-1 lean structural draft (draftGraph). brief is uncapped (no enforcement constant → telemetry_only, never a false enforced). attached_document (D-59-7): the model-native doc-attach — carried as a native Anthropic document block, ENFORCED at DRAFT_ATTACHMENT_MAX_BYTES (fail-closed 4xx), CONDITIONAL, disclosed on cee.draft.document_attached. Legacy text-preview docs (grounding flag, default off) + seed graph also feed the prompt; S0 measures brief only (draft-graph-dispatch:489).',
 };
 
 /**
