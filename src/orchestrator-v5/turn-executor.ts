@@ -774,6 +774,13 @@ export async function runTurnExecutor(
   // counts). Undefined on paths that never commit (e.g. early error exits) —
   // honest absence, the frame's pending block then carries no lifecycle.
   let pendingLifecycleForRun: FramePendingLifecycle | undefined;
+  // F2/F3 composition — the TRUSTWORTHY canonical graph resolved at the graph-
+  // commit chokepoint (after the strict reread on a degraded read). commitTurn
+  // derives the CAS expected-base hash from THIS when set, so a degraded read
+  // that was re-resolved still yields a correct expected base (present) or a
+  // legitimately-null expected (proven-absent first write) — never a stale null
+  // from `context.persistedGraph` (which stays null on a degraded read).
+  let resolvedCanonicalGraphForCommit: { readonly graph: unknown | null } | undefined;
   const commitTurn = async (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
@@ -785,12 +792,20 @@ export async function runTurnExecutor(
     // which may be the very graph being written (trusted base rule; see
     // graph-cas-conflict.ts). Computed only for graph-bearing commits with
     // the mode on, so flag-off / graph-free commits pay zero hashing.
-    // buildTurnContext degrades a failed scenarios read to null, which maps
-    // to expected=null → `no_expected`/`first_write` — categories that are
-    // never enforced, so a degraded read can never block a write.
+    // F3 — derive whenever the resolved CAS capability needs an expected base
+    // (app hook on OR RPC enforcing); byte-identical to the old
+    // `graphCasMode !== 'off'` gate for every valid config, and closes the
+    // RPC=enforce+MODE=off hole (also boot-rejected). F2 composition — derive
+    // from the chokepoint-resolved graph when set (correct even after a degraded
+    // read whose strict reread re-proved the base); fall back to
+    // `context.persistedGraph` for commit paths that never hit the chokepoint
+    // (meta.graph undefined ⇒ expected stays undefined anyway).
+    const expectedBaseGraph = resolvedCanonicalGraphForCommit
+      ? resolvedCanonicalGraphForCommit.graph
+      : context.persistedGraph;
     const expectedGraphCasHashes =
-      meta.graph !== undefined && config.features.graphCasMode !== 'off'
-        ? computeExpectedGraphCasHashes(context.persistedGraph)
+      meta.graph !== undefined && config.features.graphCas.requiresExpectedHash
+        ? computeExpectedGraphCasHashes(expectedBaseGraph)
         : undefined;
     const result = await commitDirectAnswer(
       resp,
@@ -8285,6 +8300,18 @@ export async function runTurnExecutor(
             'V5 TurnExecutor — canonical graph read degraded; strict reread performed at the graph-write chokepoint (fail-closed; adopt only when the reread proves ABSENT)',
           );
         }
+
+        // F3 composition — publish the PROVEN persisted graph so commitTurn's
+        // CAS expected-base hash is derived from a trustworthy value even after
+        // a degraded read (present → real base; absent → legitimate null).
+        resolvedCanonicalGraphForCommit = {
+          graph:
+            canonicalRead.status === 'ok_present'
+              ? canonicalRead.graph
+              : canonicalRead.status === 'degraded'
+                ? (degradedRereadGraph ?? null)
+                : null,
+        };
 
         if (!handlerMutated) {
           // rows A / C / E
