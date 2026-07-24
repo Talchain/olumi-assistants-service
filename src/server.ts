@@ -47,7 +47,9 @@ import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
 import { getAdapter, warmProviderConfigCache, getMaxTokensFromConfig } from "./adapters/llm/router.js";
 import { validateDraftThinkingAffordability } from "./adapters/llm/draft-budget.js";
-import { validateModelsAtStartup, getEnabledModelsSummary, validateDraftModelRegistered } from "./config/models.js";
+import { validateModelsAtStartup, getEnabledModelsSummary, validateModelsRegistered } from "./config/models.js";
+import { DEFAULT_SUMMARY_MODEL } from "./orchestrator-v5/rolling-summary/summary-types.js";
+import { DEFAULT_DECOMPOSE_MODEL } from "./cee/decision-review/decompose.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
@@ -254,16 +256,42 @@ export async function build() {
   };
   log.info({ event: 'config.task_models', ...effectiveTaskModels }, 'Effective task model assignments (env overrides applied)');
 
-  // Boot fail-loud assertion (Lane F, 2026-07-23; DRAFTING-COMPONENT-DESIGN Q4
-  // D10 derive-don't-mirror): the resolved DEFAULT draft model must be a
-  // registered, ENABLED model in the registry. A typo or a retired model id in
-  // the draft_graph model config would otherwise only surface as a failure at
-  // the first draft request. Reads the registry directly (never a hand mirror),
-  // logs ERROR and continues in the same fire-but-continue style as the
-  // draft-token / thinking affordability asserts below.
-  for (const draftModelError of validateDraftModelRegistered(effectiveTaskModels.draft_graph)) {
-    log.error({ event: 'config.draft_model_registered' }, draftModelError);
+  // Boot fail-loud drift guard (Lane F 2026-07-23, EXTENDED to all call sites
+  // 2026-07-24 — ROADMAP 1.185(a) rec-2 / MODEL-ROUTING-POLICY D10;
+  // DRAFTING-COMPONENT-DESIGN Q4 derive-don't-mirror): EVERY checked-in default
+  // model id must be a registered, ENABLED registry entry. A typo, a retired id,
+  // or an absent-default (the trap-12 class that left claude-opus-4-8 out of the
+  // registry) would otherwise only surface as a 400/500 at the first request on
+  // that path. The batch is DERIVED from the real sources — every
+  // TASK_MODEL_DEFAULTS value plus the two router-bypass defaults
+  // (rolling-summary, decision-review decompose) — so it cannot silently agree
+  // with a stale hand-list. Reads the registry directly, logs ERROR and
+  // continues in the same fire-but-continue style as the draft-token / thinking
+  // affordability asserts below (a config the runtime clamps has already made
+  // safe should not brick the pod on boot).
+  const modelDefaultChecks: Array<{ label: string; modelId: string | null | undefined }> = [
+    // Effective draft model (env override applied) — preserves the Lane-F check.
+    { label: 'draft_graph (effective)', modelId: effectiveTaskModels.draft_graph },
+    // Every checked-in task default (the mirrors most likely to drift).
+    ...Object.entries(TASK_MODEL_DEFAULTS).map(([task, modelId]) => ({
+      label: `task_default:${task}`,
+      modelId,
+    })),
+    // Router-bypass defaults: the two resolvers that don't consult
+    // TASK_MODEL_DEFAULTS (summariser + decision-review decompose).
+    { label: 'rolling_summary_default', modelId: DEFAULT_SUMMARY_MODEL },
+    { label: 'decision_review_decompose_default', modelId: DEFAULT_DECOMPOSE_MODEL },
+  ];
+  const modelRegistryErrors = validateModelsRegistered(modelDefaultChecks);
+  for (const modelError of modelRegistryErrors) {
+    log.error({ event: 'config.model_registered' }, modelError);
   }
+  log.info(
+    { event: 'config.model_registry_guard', checked: modelDefaultChecks.length, errors: modelRegistryErrors.length },
+    modelRegistryErrors.length === 0
+      ? `Model registry drift guard armed: all ${modelDefaultChecks.length} default model ids registered + enabled`
+      : `Model registry drift guard armed: ${modelRegistryErrors.length} of ${modelDefaultChecks.length} default model ids FAILED (see config.model_registered errors)`,
+  );
 
   // Log all resolved timeout values at startup for diagnostics
   const resolvedTimeouts = getResolvedTimeouts();
