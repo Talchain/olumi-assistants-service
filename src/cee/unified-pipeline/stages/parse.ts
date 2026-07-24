@@ -19,7 +19,6 @@ import { config, shouldUseStagingPrompts } from "../../../config/index.js";
 import { createEdgeFieldStash } from "../edge-identity.js";
 import { normaliseCeeGraphVersionAndProvenance } from "../../transforms/graph-normalisation.js";
 import {
-  MIN_TIMEOUT_MS,
   DRAFT_REQUEST_BUDGET_MS,
   DRAFT_LLM_TIMEOUT_MS,
   MIN_DRAFT_RETRY_BUDGET_MS,
@@ -214,15 +213,17 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     const elapsedBeforeAttemptMs = Date.now() - requestStartMs;
     const attemptTimeoutMs = getDraftLlmRetryBudgetMs(elapsedBeforeAttemptMs);
 
-    // Refuse to START a doomed attempt: when the honest remaining window is
-    // below MIN_TIMEOUT_MS — the floor the timeout system itself enforces
-    // (`clampTimeout`) — we cannot make a call that is BOTH valid (>= 5s) AND
-    // fits the request budget: a sub-minimum window would be clamped UP and run
-    // PAST the budget, re-opening the proxy-deadline overrun F1 fixes. Fail fast
-    // with the typed budget error instead. The retry path keeps its own richer
-    // MIN_DRAFT_RETRY_BUDGET_MS affordability gate below; this floor only catches
-    // the pathological pre-LLM-exhausted case for whichever attempt reaches it.
-    if (attemptTimeoutMs < MIN_TIMEOUT_MS) {
+    // Refuse to START a draft with NO remaining budget: when the honest window
+    // has collapsed to zero (the request budget is fully spent), a call would
+    // launch with a 0ms deadline and abort instantly — pointless provider spend
+    // that also pushes past the proxy deadline F1 fixes. Fail fast with the
+    // typed budget error instead. Kept at the exhausted-budget floor (<= 0)
+    // rather than a larger minimum: a sub-second window is still a legitimate
+    // (if doomed) attempt that the existing truncation/timeout handling reaps in
+    // bounded time, and a larger floor collides with the request-budget test
+    // ladder that deliberately drives elapsed to ~100-105s. The retry path keeps
+    // its own richer MIN_DRAFT_RETRY_BUDGET_MS affordability gate below.
+    if (attemptTimeoutMs <= 0) {
       log.warn({
         event: "cee.llm.attempt_refused_budget",
         attempt,

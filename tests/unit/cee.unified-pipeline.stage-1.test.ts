@@ -839,10 +839,10 @@ describe("runStageParse", () => {
       expect(callOpts.timeoutMs).toBeGreaterThan(105_000);
     });
 
-    it("refuses to START the draft when the request budget is already exhausted (no LLM call, typed budget error)", async () => {
+    it("refuses to START the draft when the request budget is fully exhausted (no LLM call, typed budget error)", async () => {
       setupMocks();
-      // ~118s of a 120s budget already spent → the remaining window is below
-      // MIN_TIMEOUT_MS; the attempt must fail fast BEFORE calling the provider.
+      // ~118s of a 120s budget already spent → the honest remaining window has
+      // collapsed to zero; the attempt must fail fast BEFORE calling the provider.
       const ctx = makeCtx({ opts: { schemaVersion: "v3" as const, requestStartMs: Date.now() - 118_000 } });
 
       await expect(runStageParse(ctx)).rejects.toBeInstanceOf(RequestBudgetExceededError);
