@@ -19,6 +19,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   DecisionRecordSignInRequiredError,
   DecisionRecordStoreError,
+  DECISION_RECORDS_HARD_CAP,
   SupabaseDecisionRecordStore,
   type CreateDecisionRecordWrite,
 } from '../store-adapter.js';
@@ -116,5 +117,92 @@ describe('SupabaseDecisionRecordStore.createRecord', () => {
     const { client } = makeClient({ data: { deduped: false, event_id: null } });
     const store = new SupabaseDecisionRecordStore(client);
     await expect(store.createRecord(WRITE)).rejects.toBeInstanceOf(DecisionRecordStoreError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// retrieveRecords (P6, ROADMAP 1.199) — the scenario-scoped read
+// ---------------------------------------------------------------------------
+
+interface ReadCapture {
+  from?: string;
+  select?: string;
+  eq?: [string, unknown];
+  order?: [string, unknown];
+  limit?: number;
+}
+
+function makeReadClient(result: { data?: unknown; error?: unknown }): {
+  client: SupabaseClient;
+  capture: ReadCapture;
+} {
+  const capture: ReadCapture = {};
+  const builder = {
+    select(cols: string) { capture.select = cols; return builder; },
+    eq(col: string, val: unknown) { capture.eq = [col, val]; return builder; },
+    order(col: string, opts: unknown) { capture.order = [col, opts]; return builder; },
+    limit(n: number) { capture.limit = n; return Promise.resolve({ data: result.data ?? null, error: result.error ?? null }); },
+  };
+  const client = {
+    from(table: string) { capture.from = table; return builder; },
+  } as unknown as SupabaseClient;
+  return { client, capture };
+}
+
+const READ_ROW = {
+  record_id: '11111111-1111-5111-8111-111111111111',
+  scenario_id: 'scen-target',
+  owner_user_id: 'should-not-be-selected',
+  created_at: '2026-07-24T10:00:00+00:00',
+  decision: { chosen_option_label: 'Hire locally', chosen_option_id: 'opt', graph_hash: 'aag_v1:sha256:x' },
+  prediction: { statement: 'Local hiring leads.', confidence_source: 'model_derived' },
+};
+
+describe('SupabaseDecisionRecordStore.retrieveRecords (scenario-scoped read)', () => {
+  it('scopes the query to the scenario at the bytes (.eq scenario_id), newest-first, hard-capped', async () => {
+    const { client, capture } = makeReadClient({ data: [READ_ROW] });
+    const store = new SupabaseDecisionRecordStore(client);
+    const out = await store.retrieveRecords('scen-target');
+    expect(capture.from).toBe('decision_records');
+    // The ONLY thing preventing a cross-scenario/cross-user read under the
+    // service-role client that bypasses RLS:
+    expect(capture.eq).toEqual(['scenario_id', 'scen-target']);
+    expect(capture.order).toEqual(['created_at', { ascending: false }]);
+    expect(capture.limit).toBe(DECISION_RECORDS_HARD_CAP);
+    // owner_user_id is never selected (not projected).
+    expect(capture.select).not.toContain('owner_user_id');
+    expect(out).toHaveLength(1);
+    expect(out[0].record_id).toBe(READ_ROW.record_id);
+    expect(out[0].decision.chosen_option_label).toBe('Hire locally');
+  });
+
+  it('an explicit limit is honoured but still hard-capped', async () => {
+    const { client, capture } = makeReadClient({ data: [] });
+    const store = new SupabaseDecisionRecordStore(client);
+    await store.retrieveRecords('scen-x', { limit: 3 });
+    expect(capture.limit).toBe(3);
+    await store.retrieveRecords('scen-x', { limit: 9_999 });
+    expect(capture.limit).toBe(DECISION_RECORDS_HARD_CAP); // never above the cap
+  });
+
+  it('DEFENCE-IN-DEPTH — drops any row whose scenario_id does not match the query filter', async () => {
+    const { client } = makeReadClient({ data: [READ_ROW, { ...READ_ROW, record_id: 'x', scenario_id: 'OTHER-scenario' }] });
+    const store = new SupabaseDecisionRecordStore(client);
+    const out = await store.retrieveRecords('scen-target');
+    expect(out).toHaveLength(1);
+    expect(out.every((r) => r.scenario_id === 'scen-target')).toBe(true);
+  });
+
+  it('drops malformed rows (missing decision/prediction) without throwing', async () => {
+    const { client } = makeReadClient({ data: [READ_ROW, { record_id: 'y', scenario_id: 'scen-target' }] });
+    const store = new SupabaseDecisionRecordStore(client);
+    const out = await store.retrieveRecords('scen-target');
+    expect(out).toHaveLength(1);
+  });
+
+  it('a query error throws a typed store error (never silent empty)', async () => {
+    const { client } = makeReadClient({ error: { message: 'relation blew up' } });
+    const store = new SupabaseDecisionRecordStore(client);
+    await expect(store.retrieveRecords('scen-target')).rejects.toBeInstanceOf(DecisionRecordStoreError);
   });
 });

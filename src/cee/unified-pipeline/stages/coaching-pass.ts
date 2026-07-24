@@ -32,6 +32,7 @@ import type { StageContext } from "../types.js";
 import { log } from "../../../utils/telemetry.js";
 import { extractJson } from "../../../utils/json-extractor.js";
 import { normaliseLegacyCoachingValues } from "../../../adapters/llm/normalise-legacy-coaching.js";
+import { emitContextBudget } from "../../../orchestrator-v5/context/context-budget-telemetry.js";
 import {
   DRAFT_REQUEST_BUDGET_MS,
   LLM_POST_PROCESSING_HEADROOM_MS,
@@ -101,10 +102,15 @@ const COACHING_SYSTEM = [
   "Use only node ids that appear in the provided graph.",
 ].join("\n");
 
-function buildCoachingUserMessage(brief: string, graph: unknown): string {
+/**
+ * Project a MINIMAL structural view (node id/kind/label + edge from/to) so the
+ * coaching call is cheap and the model coaches on structure, not prose. Shared
+ * by {@link buildCoachingUserMessage} and the draft_coaching context-budget
+ * emit so the measured `graph` section is EXACTLY what the model saw (derived,
+ * never a second hand-measured copy).
+ */
+function projectStructuralGraph(graph: unknown): { nodes: unknown[]; edges: unknown[] } {
   const g = graph as { nodes?: unknown[]; edges?: unknown[] };
-  // Project a MINIMAL structural view (id/kind/label + edge from/to) so the
-  // coaching call is cheap and the model coaches on structure, not prose.
   const nodes = Array.isArray(g?.nodes)
     ? g.nodes.map((n) => {
         const node = n as { id?: unknown; kind?: unknown; label?: unknown };
@@ -117,12 +123,16 @@ function buildCoachingUserMessage(brief: string, graph: unknown): string {
         return { from: edge.from, to: edge.to };
       })
     : [];
+  return { nodes, edges };
+}
+
+function buildCoachingUserMessage(brief: string, graph: unknown): string {
   return [
     "BRIEF:",
     brief,
     "",
     "GRAPH (structure only):",
-    JSON.stringify({ nodes, edges }),
+    JSON.stringify(projectStructuralGraph(graph)),
   ].join("\n");
 }
 
@@ -188,6 +198,33 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
         signal: ctx.opts.signal,
       },
     );
+
+    // draft_coaching context-policy telemetry (ROADMAP 1.199, P4): this is the
+    // SECOND draft-class LLM call site — emit its per-section budget so it is
+    // OBSERVABLE in `v5.context_budget` and the divergence tripwire covers it,
+    // exactly like the structural draft emit (draft-graph-dispatch:482). The two
+    // measured sections are the model-facing BRIEF + the STRUCTURE-ONLY graph
+    // projection (the same object the message carried — derived, not re-measured);
+    // both are declared `telemetry_only`, so a healthy pass stays silent.
+    // Observe-only: emitContextBudget never throws (the pass is strictly non-fatal).
+    const structuralGraphChars = JSON.stringify(projectStructuralGraph(ctx.graph)).length;
+    emitContextBudget({
+      call_site: "draft_coaching",
+      model: result.model ?? null,
+      prompt_version: null,
+      prompt_hash: null,
+      request_id: ctx.requestId,
+      scenario_id: (ctx.input as { scenario_id?: string } | undefined)?.scenario_id ?? null,
+      section_chars: { brief: ctx.effectiveBrief.length, graph: structuralGraphChars },
+      total_chars: ctx.effectiveBrief.length + structuralGraphChars,
+      truncations: [],
+      summary_lag_turns: null,
+      ui_narrowed: null,
+      usage: {
+        input_tokens: result.usage?.input_tokens,
+        output_tokens: result.usage?.output_tokens,
+      },
+    });
 
     const parsed = extractJson(result.content) as
       | { coaching?: unknown; causal_claims?: unknown }

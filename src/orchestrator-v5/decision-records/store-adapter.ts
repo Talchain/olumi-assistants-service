@@ -118,10 +118,71 @@ export interface DecisionRecordWriteOutcome {
   readonly event_id: string | null;
 }
 
-/** Store port — the capture hook depends on this interface, not the class,
- *  so tests inject hand-rolled fakes without a Supabase client. */
+// ---------------------------------------------------------------------------
+// Read (ROADMAP 1.199, P6 — knowledge-over-time). The capture side is
+// write-only; this is the bounded READ slice that lets prior DECISIONS (not
+// just prior turns) reach the coach. A DIRECT service-role table SELECT, not an
+// RPC (no read RPC exists, and adding one needs a Paul-gated migration).
+// ---------------------------------------------------------------------------
+
+/**
+ * A read-projection of a stored decision record — only the fields the
+ * knowledge-over-time projection needs (never the full row). `decision` /
+ * `prediction` are the JSONB columns (DecisionRecordDecisionSchema /
+ * DecisionRecordPredictionSchema shapes); read defensively as records.
+ */
+export interface DecisionRecordRead {
+  readonly record_id: string;
+  readonly scenario_id: string;
+  /** ISO timestamptz — the capture time (provenance anchor for the projection). */
+  readonly created_at: string;
+  readonly decision: Record<string, unknown>;
+  readonly prediction: Record<string, unknown>;
+}
+
+export interface RetrieveDecisionRecordsOpts {
+  /** Max records to return (most-recent-first). Hard-capped by the adapter. */
+  readonly limit?: number;
+}
+
+/** Store port — the capture hook + the P6 read depend on this interface, not
+ *  the class, so tests inject hand-rolled fakes without a Supabase client. */
 export interface DecisionRecordStorePort {
   createRecord(write: CreateDecisionRecordWrite): Promise<DecisionRecordWriteOutcome>;
+  /**
+   * Read the most-recent decision records FOR ONE SCENARIO, newest-first.
+   * MUST scope by scenario_id at the query — the service-role client bypasses
+   * RLS, so the scenario filter is the ONLY thing preventing a cross-scenario /
+   * cross-user read (P6 adversarial guard). Bounded by {@link DECISION_RECORDS_HARD_CAP}.
+   */
+  retrieveRecords(
+    scenarioId: string,
+    opts?: RetrieveDecisionRecordsOpts,
+  ): Promise<DecisionRecordRead[]>;
+}
+
+/**
+ * Hard ceiling on records read into any projection — fits the 1800/3000-char
+ * budgets comfortably and bounds the SELECT regardless of the caller's `limit`.
+ */
+export const DECISION_RECORDS_HARD_CAP = 8;
+
+/** Columns the read projection needs — NEVER `owner_user_id` (not projected). */
+const DECISION_RECORD_READ_COLUMNS = 'record_id, scenario_id, created_at, decision, prediction';
+
+function isPlainObject(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+/** Coerce one raw SELECT row into a typed read, or null when malformed. */
+function parseReadRow(row: unknown): DecisionRecordRead | null {
+  if (!isPlainObject(row)) return null;
+  const { record_id, scenario_id, created_at, decision, prediction } = row;
+  if (typeof record_id !== 'string' || record_id.length === 0) return null;
+  if (typeof scenario_id !== 'string' || scenario_id.length === 0) return null;
+  if (typeof created_at !== 'string' || created_at.length === 0) return null;
+  if (!isPlainObject(decision) || !isPlainObject(prediction)) return null;
+  return { record_id, scenario_id, created_at, decision, prediction };
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +222,43 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
       throw mapRpcError('create_decision_record', error);
     }
     return parseWriteOutcome('create_decision_record', data);
+  }
+
+  async retrieveRecords(
+    scenarioId: string,
+    opts?: RetrieveDecisionRecordsOpts,
+  ): Promise<DecisionRecordRead[]> {
+    const requested = opts?.limit;
+    const limit =
+      typeof requested === 'number' && Number.isFinite(requested) && requested > 0
+        ? Math.min(Math.floor(requested), DECISION_RECORDS_HARD_CAP)
+        : DECISION_RECORDS_HARD_CAP;
+    // SCOPE AT THE BYTES (P6 adversarial guard): .eq('scenario_id', …) is the
+    // ONLY thing between this service-role read and every other scenario's
+    // records — the client bypasses RLS. Newest-first uses the existing
+    // (scenario_id, created_at DESC) index. Never SELECT owner_user_id.
+    const { data, error } = await this.client
+      .from('decision_records')
+      .select(DECISION_RECORD_READ_COLUMNS)
+      .eq('scenario_id', scenarioId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) {
+      throw new DecisionRecordStoreError(
+        `retrieveRecords for scenario ${scenarioId} failed: ${errMsg(error)}`,
+        { cause: error },
+      );
+    }
+    if (!Array.isArray(data)) return [];
+    const out: DecisionRecordRead[] = [];
+    for (const row of data) {
+      const parsed = parseReadRow(row);
+      // Defence-in-depth: a row whose scenario_id does not match the query
+      // filter is impossible (the .eq is server-side), but re-assert here so a
+      // future query change can never silently widen the scope.
+      if (parsed !== null && parsed.scenario_id === scenarioId) out.push(parsed);
+    }
+    return out;
   }
 }
 

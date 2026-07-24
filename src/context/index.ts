@@ -65,7 +65,7 @@ export {
 export {
   type Capability,
   type RetrievalMode,
-  type ContextPackV1,
+  type DraftProvenanceDescriptor,
   type CacheBoundary,
   type ClarificationAnswer,
   type RelevantConfig,
@@ -76,5 +76,5 @@ export {
   hashConfig,
   hashPromptContent,
   computeCacheBoundary,
-  assembleContextPack,
+  assembleDraftProvenanceDescriptor,
 } from './context-pack.js';

@@ -206,6 +206,8 @@ import {
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import { emitContextBudget } from './context/context-budget-telemetry.js';
+import { getDecisionRecordStore, loadOlderRelevantFactsSection } from './decision-records/index.js';
+import { POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET } from './context/context-policy.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 import {
   buildAnalysisFromPriorFacts,
@@ -1663,6 +1665,31 @@ export async function runTurnExecutor(
         requestId,
       });
       summaryLagForBudget = summaryInjection.lagTurns;
+      // Knowledge-over-time (ROADMAP 1.199, P6): read this scenario's prior
+      // DECISION RECORDS (not just prior turns) and project a bounded, disclosed
+      // slice into the pack's `older_relevant_facts`. Mirrors the rolling-summary
+      // injection above (async load → the assembler stays synchronous and only
+      // places the section). Fire-safe end-to-end: getDecisionRecordStore() throws
+      // only when SUPABASE_* creds are absent (tests / misconfig), the loader
+      // swallows read/projection faults — either way the section is simply OMITTED
+      // and the pack is byte-identical to pre-P6 for record-less scenarios. The
+      // read is scenario-scoped at the bytes (retrieveRecords .eq('scenario_id')).
+      let olderRelevantFactsSection: string | undefined;
+      if (context.session_id) {
+        try {
+          const projection = await loadOlderRelevantFactsSection({
+            store: getDecisionRecordStore(),
+            scenarioId: context.session_id,
+            charBudget: POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+            requestId,
+          });
+          olderRelevantFactsSection = projection?.text;
+        } catch {
+          // getDecisionRecordStore() threw (no SUPABASE_* creds) — omit the
+          // section; a knowledge-read must never fail a turn.
+          olderRelevantFactsSection = undefined;
+        }
+      }
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
@@ -1724,6 +1751,9 @@ export async function runTurnExecutor(
         // 0 when a section is present but earned no coverage (floor /
         // memory-hole refusal).
         summarisedTurns: summaryInjection.summarisedTurns,
+        // Knowledge-over-time (P6): the pre-projected decision-records slice
+        // (undefined ⇒ pack key absent ⇒ byte-identity for record-less scenarios).
+        olderRelevantFacts: olderRelevantFactsSection,
       });
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
@@ -5733,6 +5763,11 @@ export async function runTurnExecutor(
             // always present so the dashboard shows the layer arriving
             // (03 §1 pre-declared the 1,300-char routing budget for it).
             conversation_summary: packJsonChars(contextPack.conversation_summary),
+            // Knowledge-over-time (P6): the decision-records read slice. Always
+            // present (0 when the scenario has no records) so the dashboard shows
+            // the layer arriving; bounded by POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET
+            // (enforced), so the divergence tripwire stays silent on healthy turns.
+            older_relevant_facts: packJsonChars(contextPack.older_relevant_facts),
             brief: packJsonChars(contextPack.brief),
             display_analysis: packJsonChars(contextPack.display_analysis),
             display_graph: packJsonChars(contextPack.display_graph),

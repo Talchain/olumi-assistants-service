@@ -36,12 +36,16 @@
  * whose number is genuinely hand-written with no importable ceiling is tagged
  * `telemetry_only` — the honest label, never a false `enforced` (Q5).
  *
- * ── Scope (wave-5 P1-P3) ───────────────────────────────────────────────────
- * Six call sites are declared here: coach_converse, edit_graph,
- * repair_edit_graph, decision_review, chip_run, clarify. The two DRAFT rows
- * (draft_structural, draft_coaching) are POST-wave-1 (the draft train is
- * mid-flight); P4 widens {@link ContextCallSite} additively and adds them, plus
- * the namesake-twin kill. This module makes no claim about the draft path.
+ * ── Scope (wave-5 P1-P4) ───────────────────────────────────────────────────
+ * Eight call sites are declared here: coach_converse, edit_graph,
+ * repair_edit_graph, decision_review, draft_structural, draft_coaching,
+ * chip_run, clarify — all six turn classes (draft splits into the lean
+ * structural call + the post-draft coaching pass, 6 LLM + 2 deterministic).
+ * P4 (POST wave-1) added the two DRAFT rows and performed the namesake-twin
+ * kill (the draft-provenance builder was renamed to
+ * `assembleDraftProvenanceDescriptor` so exactly one exported
+ * `assembleContextPack` — the V5 model-facing one — remains repo-wide, pinned
+ * by the conformance test).
  */
 
 import {
@@ -75,16 +79,25 @@ const POLICY_EDIT_CONVERSATION_CAP = 4_000;
 const T_ROUTING_CONVERSATION = 34_000;
 const T_ROUTING_CONVERSATION_SUMMARY = 1_300;
 const T_ROUTING_DISPLAY_GRAPH = 8_000;
-const T_ROUTING_OLDER_FACTS = 3_000; // I-15 pre-declared slot (unpopulated)
 const T_ROUTING_REST = 2_500;
 const T_ROUTING_TOTAL = 55_000;
 const T_EDIT_CONVERSATION_SUMMARY = 1_300;
 const T_EDIT_TOTAL = 16_300;
 const T_DR_GRAPH_JSON = 16_000;
 const T_DR_ISL_RESULTS = 16_000;
-const T_DR_DECISION_RECORDS = 1_800; // I-15 pre-declared slot (unpopulated)
 const T_DR_CONVERSATION_SUMMARY = 1_300;
 const T_DR_TOTAL = 43_100;
+
+// Knowledge-over-time READ budgets (P6). These are ENFORCED ceilings: they are
+// the exact `charBudget` the decision-records projection (projectDecisionRecords)
+// cuts at + discloses. The policy row and the projection SHARE this ONE constant
+// (the projection imports it), so the declared budget and the live cut can never
+// drift — derive-don't-mirror. (Formerly the unpopulated telemetry targets
+// T_ROUTING_OLDER_FACTS / T_DR_DECISION_RECORDS.)
+/** coach_converse `older_relevant_facts` cut ceiling (projection charBudget). */
+export const POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET = 3_000;
+/** decision_review `decision_records` cut ceiling (projection charBudget). */
+export const POLICY_DECISION_REVIEW_RECORDS_CHAR_BUDGET = 1_800;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,6 +108,8 @@ export type ContextCallSite =
   | 'edit_graph'
   | 'repair_edit_graph'
   | 'decision_review'
+  | 'draft_structural' // = budget-telemetry's 'draft_graph'; the lean structural draft call (POST wave-1)
+  | 'draft_coaching' // the post-draft coaching pass (drafting Lane B, ROADMAP 1.197) — separate bounded LLM call
   | 'chip_run' // DETERMINISTIC — asserts no LLM adapter call
   | 'clarify'; // DETERMINISTIC — asserts no LLM adapter call
 
@@ -184,11 +199,12 @@ export interface ContextPolicy {
  * anchor. Sections are declared in MODEL-FACING serialised order (the order
  * `buildUserMessage` emits), which is load-bearing: the rolling summary sits
  * LAST, BELOW hard structured state, so facts beat summary (A22 Q1). The two
- * ENFORCED sections are `brief` (CONTEXT_PACK_BRIEF_CHAR_CAP) and
+ * ENFORCED sections are `brief` (CONTEXT_PACK_BRIEF_CHAR_CAP),
  * `display_analysis` (DISPLAY_ANALYSIS_CHAR_BUDGET, disclosed truncation ladder
- * {@link DISPLAY_ANALYSIS_TRUNCATION_ORDER}). `older_relevant_facts` is the
- * I-15 knowledge-over-time reservation — declared `unpopulated` so the P6 read
- * has a governed shape to fill, never an ungoverned new slot.
+ * {@link DISPLAY_ANALYSIS_TRUNCATION_ORDER}), and — since P6 — `older_relevant_facts`
+ * (the I-15 knowledge-over-time read: prior DECISION RECORDS, projected + cut +
+ * disclosed at {@link POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET}). It sits among
+ * the hard state, ABOVE the rolling summary, so durable facts beat the summary.
  */
 const COACH_CONVERSE: ContextPolicy = {
   call_site: 'coach_converse',
@@ -204,6 +220,11 @@ const COACH_CONVERSE: ContextPolicy = {
     { name: 'brief', source: 'brief', projection: 'projectBrief', char_budget: CONTEXT_PACK_BRIEF_CHAR_CAP, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'conversation', source: 'conversation_window', projection: 'projectConversation', char_budget: T_ROUTING_CONVERSATION, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'recent_changes', source: 'recent_changes', projection: 'recent-changes summary (recent-changes.ts authority)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    // Knowledge-over-time (P6): the decision-records read slice, serialised among
+    // the hard state (buildUserMessage keeps it in `...rest`, ABOVE the appended
+    // conversation_summary → facts beat summary). ENFORCED: projectDecisionRecords
+    // cuts + discloses at POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET (the SAME const).
+    { name: 'older_relevant_facts', source: 'decision_records', projection: 'projectDecisionRecords (bounded + disclosed truncation)', char_budget: POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'coaching', source: 'coaching_cache', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'compound_detected', source: 'compound', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'compound_pattern_matched', source: 'compound', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
@@ -213,11 +234,10 @@ const COACH_CONVERSE: ContextPolicy = {
     { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `formatAnalysisForContext (disclosed truncation: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'conversation_summary', source: 'rolling_summary', char_budget: T_ROUTING_CONVERSATION_SUMMARY, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
-    // Budget slots that are NOT themselves model-facing prompt keys:
-    { name: 'older_relevant_facts', source: 'decision_records', char_budget: T_ROUTING_OLDER_FACTS, enforcement: 'unpopulated', cut_rank: null, model_facing: false },
+    // Budget slot that is NOT itself a model-facing prompt key:
     { name: 'rest', source: 'aggregate', char_budget: T_ROUTING_REST, enforcement: 'telemetry_only', cut_rank: null, model_facing: false },
   ],
-  note: 'The one good assembler; harness anchor. buildUserMessage renames display_analysis→analysis, display_graph→graph; conversation_summary is appended LAST (facts-beat-summary).',
+  note: 'The one good assembler; harness anchor. buildUserMessage renames display_analysis→analysis, display_graph→graph; conversation_summary is appended LAST (facts-beat-summary). older_relevant_facts (P6 decision-records read) sits with the hard state, above the summary.',
 };
 
 /**
@@ -291,10 +311,71 @@ const DECISION_REVIEW: ContextPolicy = {
     { name: 'deterministic_coaching', source: 'deterministic_coaching', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'decision_context', source: 'analysis_enrichment', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'flip_threshold_data', source: 'analysis_enrichment', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
-    { name: 'decision_records', source: 'decision_records', char_budget: T_DR_DECISION_RECORDS, enforcement: 'unpopulated', cut_rank: null, model_facing: false },
+    // Knowledge-over-time (P6): the decision-records reservation. Its budget is
+    // wired to POLICY_DECISION_REVIEW_RECORDS_CHAR_BUDGET (the projection's cut
+    // ceiling) so the read has a governed shape to fill, but it stays
+    // `unpopulated` here: this gpt-4.1 path is activation-gated (I-7, the standing
+    // keep-gpt-4.1 A/B ruling) and cannot be live-verified in this write scope, so
+    // flipping it `enforced` before a live-provable population would be a false
+    // guarantee (the exact theatre P5 retires). coach_converse carries the LIVE
+    // read; this row is filled the day the decision_review activation is resolved.
+    { name: 'decision_records', source: 'decision_records', char_budget: POLICY_DECISION_REVIEW_RECORDS_CHAR_BUDGET, enforcement: 'unpopulated', cut_rank: null, model_facing: false },
     { name: 'conversation_summary', source: 'rolling_summary', char_budget: T_DR_CONVERSATION_SUMMARY, enforcement: 'unpopulated', cut_rank: null, model_facing: false },
   ],
-  note: 'Declare-only; activation gated by the standing keep-gpt-4.1 A/B ruling (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW), untouched here. brief:2000 derived from DECISION_REVIEW_MAX_BRIEF_CHARS — the 8000 telemetry claim dies (ROADMAP 1.199).',
+  note: 'Declare-only; activation gated by the standing keep-gpt-4.1 A/B ruling (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW), untouched here. brief:2000 derived from DECISION_REVIEW_MAX_BRIEF_CHARS — the 8000 telemetry claim dies (ROADMAP 1.199). decision_records reservation wired to the P6 projection budget but unpopulated (see section note).',
+};
+
+/**
+ * draft_structural — the LEAN structural draft call (POST wave-1, ROADMAP
+ * 1.197). `parse.ts` calls `draftAdapter.draftGraph({ brief, docs, seed })`;
+ * the served draft grammar now emits STRUCTURE ONLY (coaching + causal_claims
+ * were removed — reproduced by {@link DRAFT_COACHING} instead). The draft is
+ * the least-budgeted assembler by design: the brief is passed UNCAPPED (no
+ * enforcement constant bounds it — declaring it `enforced` would be a false
+ * guarantee), so `brief` is `telemetry_only`. The draft path has no
+ * conversation window (`memory_window: null`) and no total budget. Its S0
+ * instrumentation (`handlers/draft-graph-dispatch.ts:482`) decomposes the
+ * model-facing prompt as `brief` only (the retrieved `docs` + seed graph also
+ * feed the prompt but are not separately measured on that seam).
+ */
+const DRAFT_STRUCTURAL: ContextPolicy = {
+  call_site: 'draft_structural',
+  turn_class: 'draft (structural graph)',
+  llm: true,
+  model_ref: 'draft.structural',
+  memory_window: null,
+  total_char_budget: null,
+  sections: [
+    { name: 'brief', source: 'brief', projection: 'effectiveBrief (buildRefinementBrief on refine turns) — UNCAPPED', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+  ],
+  note: 'POST wave-1 lean structural draft (draftGraph). Least-budgeted assembler: brief is uncapped (no enforcement constant → telemetry_only, never a false enforced). docs + seed graph also feed the prompt; S0 measures brief only (draft-graph-dispatch:489).',
+};
+
+/**
+ * draft_coaching — the post-draft coaching pass (drafting Lane B, ROADMAP
+ * 1.197; `stages/coaching-pass.ts`, wired into the unified pipeline between
+ * Repair and Package). A SEPARATE bounded LLM call
+ * (`buildCoachingUserMessage(effectiveBrief, graph)`) that RE-PRODUCES the
+ * coaching + causal_claims the lean draft grammar no longer emits, from the
+ * already-drafted structure. STRICTLY NON-FATAL and budget-gated (skips when
+ * the request budget cannot fit it; timeout ≤30s; maxTokens 2500). Its
+ * model-facing context is two sections — the BRIEF and a STRUCTURE-ONLY graph
+ * projection (node id/kind/label + edge from/to). Both are `telemetry_only`
+ * (bounded by the pass's own token cap, not a per-section char cut). This row
+ * is the first new consumer BORN declaring its policy row.
+ */
+const DRAFT_COACHING: ContextPolicy = {
+  call_site: 'draft_coaching',
+  turn_class: 'draft-coaching (post-draft pass)',
+  llm: true,
+  model_ref: 'draft.coaching',
+  memory_window: null,
+  total_char_budget: null,
+  sections: [
+    { name: 'brief', source: 'brief', projection: 'effectiveBrief (verbatim)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'graph', source: 'graph', projection: 'structure-only projection (node id/kind/label + edge from/to)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+  ],
+  note: 'Drafting Lane B — reproduces coaching + causal_claims from the drafted structure in a separate bounded (2500-tok, ≤30s) non-fatal LLM call. Model-facing: brief + structure-only graph. Born declaring (ROADMAP 1.199 policy-first discipline).',
 };
 
 /**
@@ -338,6 +419,8 @@ export const CONTEXT_POLICY: Readonly<Record<ContextCallSite, ContextPolicy>> = 
   edit_graph: EDIT_GRAPH,
   repair_edit_graph: REPAIR_EDIT_GRAPH,
   decision_review: DECISION_REVIEW,
+  draft_structural: DRAFT_STRUCTURAL,
+  draft_coaching: DRAFT_COACHING,
   chip_run: CHIP_RUN,
   clarify: CLARIFY,
 };
@@ -347,16 +430,18 @@ export const CONTEXT_POLICY: Readonly<Record<ContextCallSite, ContextPolicy>> = 
 // ---------------------------------------------------------------------------
 
 /**
- * The `context-budget-telemetry` call-site names. Maps to a policy row where
- * one exists; `draft_graph` has no policy row in wave-5 (POST wave-1, P4) and
- * is passed through as instrumented-only, byte-identical to before.
+ * The `context-budget-telemetry` call-site names. Every telemetry site now maps
+ * to a policy row (P4 closed the draft gap): `draft_graph` (the structural draft
+ * emit at draft-graph-dispatch:482) backs `draft_structural`, and the post-draft
+ * coaching pass emits under the new `draft_coaching` site.
  */
 export type BudgetTelemetryCallSite =
   | 'routing'
   | 'edit_graph'
   | 'repair_edit_graph'
   | 'decision_review'
-  | 'draft_graph';
+  | 'draft_graph'
+  | 'draft_coaching';
 
 /** Which policy row backs each telemetry call site (null ⇒ not yet migrated). */
 const TELEMETRY_TO_POLICY: Readonly<Record<BudgetTelemetryCallSite, ContextCallSite | null>> = {
@@ -364,7 +449,8 @@ const TELEMETRY_TO_POLICY: Readonly<Record<BudgetTelemetryCallSite, ContextCallS
   edit_graph: 'edit_graph',
   repair_edit_graph: 'repair_edit_graph',
   decision_review: 'decision_review',
-  draft_graph: null, // POST wave-1 (P4)
+  draft_graph: 'draft_structural', // P4: the structural draft emit (uncapped brief → zero divergence)
+  draft_coaching: 'draft_coaching', // P4: the post-draft coaching pass emit
 };
 
 export interface DerivedSiteBudget {

@@ -426,6 +426,17 @@ export interface ContextPack {
    */
   readonly conversation_summary?: ContextPackConversationSummary;
   /**
+   * Knowledge-over-time (ROADMAP 1.199, P6): a bounded, disclosed projection of
+   * the scenario's prior DECISION RECORDS (not just prior turns) — one line per
+   * recorded decision `[date] Chose "<option>": <rationale>`. Populated by the
+   * turn-executor's fire-safe decision-records loader and bounded to
+   * {@link POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET}. The key is ABSENT when the
+   * scenario has no records (byte-identity for record-less scenarios). Placed
+   * among hard structured state (above the rolling summary) so durable facts
+   * beat the summary — the CONTEXT_POLICY declares it `enforced`/model-facing.
+   */
+  readonly older_relevant_facts?: string;
+  /**
    * Curated summary of the most recent successful mutations from
    * `prior_facts`, in newest-first order. Capped at three entries with
    * each summary truncated to 80 chars. Non-mutation facts and noop
@@ -628,6 +639,15 @@ export interface AssembleContextPackInput {
    * that discloses nothing). Null/undefined → marker unchanged.
    */
   readonly summarisedTurns?: number | null;
+  /**
+   * Knowledge-over-time (P6): the pre-projected `older_relevant_facts` section
+   * text, built by the turn-executor's fire-safe decision-records loader
+   * (loadOlderRelevantFactsSection) — mirroring how `conversationSummary` is
+   * pre-loaded. The assembler stays synchronous and only PLACES it. Omitted
+   * (undefined) when the scenario has no records or the read failed → the pack
+   * key is absent → byte-identity for record-less scenarios.
+   */
+  readonly olderRelevantFacts?: string;
 }
 
 /**
@@ -850,6 +870,14 @@ export function assembleContextPackWithSummary(
       ? { conversation_summary: input.conversationSummary }
       : {}),
     recent_changes: projectRecentChanges(input.priorFacts),
+    // Knowledge-over-time (P6): the decision-records read slice. Placed with the
+    // hard structured state (above the rolling summary, which buildUserMessage
+    // re-appends LAST) so durable prior DECISIONS beat the summary. Conditional
+    // spread — key ABSENT when the loader supplied nothing (no records / read
+    // failed) so record-less scenarios serialise byte-identically to pre-P6.
+    ...(input.olderRelevantFacts !== undefined
+      ? { older_relevant_facts: input.olderRelevantFacts }
+      : {}),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,
     compound_pattern_matched: compound.telemetry.pattern_matched,

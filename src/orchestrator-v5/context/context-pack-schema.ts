@@ -480,6 +480,14 @@ export const ContextPackSchema = z
      * absent otherwise — byte-identity with pre-S4 packs).
      */
     conversation_summary: ContextPackConversationSummarySchema.optional(),
+    /**
+     * Knowledge-over-time (ROADMAP 1.199, P6): the pre-projected, bounded,
+     * disclosed decision-records read slice. Present ONLY when the scenario has
+     * prior decision records (key absent otherwise — byte-identity for
+     * record-less scenarios). A plain string (the loader owns projection +
+     * truncation disclosure).
+     */
+    older_relevant_facts: z.string().optional(),
     recent_changes: z.array(RecentMutationSchema).readonly(),
     coaching: CoachingCacheSchema,
     compound_detected: z.boolean(),
