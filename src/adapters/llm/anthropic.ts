@@ -26,10 +26,9 @@ import {
   DRAFT_RUNAWAY_STALL_MS,
   DRAFT_RUNAWAY_HARD_CEILING_MS,
   DRAFT_RUNAWAY_DRIFT_WARN_MS,
-  DRAFT_RUNAWAY_MIN_RETRY_MS,
-  DRAFT_MAX_RUNAWAY_RETRIES,
   DRAFT_EDGES_REACHED_RE,
   isEdgesTimeDrifting,
+  hasRoomForAnotherAbortableAttempt,
 } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
@@ -1158,9 +1157,9 @@ export async function draftGraphWithAnthropic(
       // withRetry transient inside the closure can only push further past the
       // floor, so this never skips a still-viable attempt.
       const remainingAtLoopTop = effectiveTimeout - (Date.now() - startTime);
-      const willBeFinalAttempt = !(
-        remainingAtLoopTop > DRAFT_RUNAWAY_HARD_CEILING_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
-        runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES
+      const willBeFinalAttempt = !hasRoomForAnotherAbortableAttempt(
+        remainingAtLoopTop,
+        runawayAbortCount,
       );
       const finalAttemptAffordableTokens = resolveDraftMaxTokens(
         Math.max(0, remainingAtLoopTop),
@@ -1228,9 +1227,10 @@ export async function draftGraphWithAnthropic(
           // is never thrown away. Reserving the ceiling (not DETECT_MS) preserves
           // the F2 invariant that the final window is never squeezed below
           // MIN_RETRY (DETECTOR-FIX, 2026-07-24).
-          const canRetryAgain =
-            remainingBudgetMs > DRAFT_RUNAWAY_HARD_CEILING_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
-            runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES;
+          const canRetryAgain = hasRoomForAnotherAbortableAttempt(
+            remainingBudgetMs,
+            runawayAbortCount,
+          );
           const attemptDetectDeadlineMs = canRetryAgain ? DRAFT_RUNAWAY_DETECT_MS : null;
           // On the FINAL attempt (no early abort, non-thinking), cap max_tokens to
           // what the LIVE remaining wall can actually generate (F1, 2026-07-24;
