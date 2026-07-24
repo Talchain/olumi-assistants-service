@@ -42,6 +42,7 @@ import { buildLLMRawTrace } from "../../llm-output-store.js";
 import { SERVICE_VERSION } from "../../../version.js";
 import { assembleDraftProvenanceDescriptor } from "../../../context/context-pack.js";
 import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.js";
+import { enforceCoachingContract } from "../../../adapters/llm/coaching-contract-conformance.js";
 import { sanitiseCoachingProse } from "../../../orchestrator-v5/compose/output-safety.js";
 import { scanCoachingForIdLeakage } from "../../validation/coaching-safety-scanner.js";
 import type { DraftCoaching } from "../../../orchestrator/types.js";
@@ -311,20 +312,26 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     }
   }
 
-  // ── Step 2c: Default missing strengthen_item fields ───────────────────────
-  // LLM structured output schema does not include action_type, but the Zod
-  // response schema (DraftGraphOutput) requires it. v0.11.0 schema
-  // amendment: `StrengthenItemActionType` canonical enum is
-  // `add_option | add_constraint | add_risk | reframe_goal`. Pre-v0.11.0
-  // default `"improve"` was outside the canonical enum and would fail the
-  // tightened Zod parse. Default to `"add_constraint"` — the most generic
-  // canonical action when the LLM gives no signal.
-  if (ctx.coaching && Array.isArray((ctx.coaching as any).strengthen_items)) {
-    for (const item of (ctx.coaching as any).strengthen_items) {
-      if (!item.action_type) {
-        item.action_type = "add_constraint";
-      }
-    }
+  // ── Step 2c: Force coaching onto the declared contract ────────────────────
+  // THE seam every coaching producer passes through — the post-draft coaching
+  // pass, the draft-LLM fallback path, and the status-quo item injected just
+  // above — so one call covers all of them.
+  //
+  // Was: a missing-`action_type` default only. That let a PRESENT but
+  // off-contract value straight through, which is how the live draft-graph
+  // response came to violate `CEEDraftGraphResponseV1Schema` on 8 of 9
+  // successful drafts (`verification_status: failed_degraded`, day-3 matrix
+  // 2026-07-24). The coaching pass's prompt vocabulary had drifted from
+  // `StrengthenItemActionType` / `BiasType` and nothing checked it.
+  //
+  // `enforceCoachingContract` subsumes the old default (a missing action_type
+  // still resolves to the generic canonical member) and additionally rejects
+  // off-contract values — coercing action categories, DROPPING unnameable bias
+  // labels rather than fabricating a different bias. Membership is derived from
+  // the contract enums, not mirrored. See the module header for the full
+  // rationale.
+  if (ctx.coaching) {
+    enforceCoachingContract(ctx.coaching, ctx.requestId);
   }
 
   // ── Step 3: Validate causal claims against post-STRP graph (Phase 2B) ────
