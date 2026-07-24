@@ -130,7 +130,16 @@ export type InternalFailure =
   // is declared in the contract but not enabled in this build." Maps to
   // wire FEATURE_NOT_ENABLED so clients see a stable typed code rather
   // than a generic INTERNAL_ERROR.
-  | 'UNSUPPORTED_ACTION';
+  | 'UNSUPPORTED_ACTION'
+  // F4 (Codex deep-review) — an atomic (or app-side) graph CAS conflict:
+  // the commit was rejected because the write's base graph diverged from the
+  // current server graph (SQLSTATE OLGC1 → GraphStaleWriteError). Distinct
+  // from STATE_COMMIT_FAILED (a generic RPC/infra failure): this is a
+  // recoverable divergence whose recovery is refresh-and-reconfirm, NOT a
+  // blind retry (which would resubmit the same stale base and re-conflict).
+  // Maps to wire GRAPH_DIVERGED (an existing BoundaryErrorCode the UI already
+  // renders) → HTTP 409, so a conflict is never flattened to a raw 500.
+  | 'GRAPH_WRITE_CONFLICT';
 
 // Mapping internal → wire code. The contamination case is NOT listed here —
 // sanitiser handles it in-band, response remains a success.
@@ -174,6 +183,10 @@ export const INTERNAL_TO_WIRE: Record<InternalFailure, FailureTypeLiteral> = {
   HANDLER_RESULT_INVALID: 'INTERNAL_ERROR',
   UNHANDLED: 'INTERNAL_ERROR',
   UNSUPPORTED_ACTION: 'FEATURE_NOT_ENABLED',
+  // F4 — a real graph CAS conflict surfaces as GRAPH_DIVERGED (→ HTTP 409),
+  // NOT INTERNAL_ERROR (→ 500). The route carries refresh-reconfirm recovery
+  // metadata alongside it.
+  GRAPH_WRITE_CONFLICT: 'GRAPH_DIVERGED',
 };
 
 // Telemetry shape for `turn_executor.started` and `turn_executor.completed`.

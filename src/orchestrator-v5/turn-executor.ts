@@ -53,7 +53,12 @@ import {
   type AnswerKind,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
-import { buildTurnContext, loadPersistedGraphStrict } from './build-turn-context.js';
+import {
+  buildTurnContext,
+  loadPersistedGraphStrict,
+  GraphStaleWriteError,
+  type CanonicalGraphReadState,
+} from './build-turn-context.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -770,6 +775,13 @@ export async function runTurnExecutor(
   // counts). Undefined on paths that never commit (e.g. early error exits) —
   // honest absence, the frame's pending block then carries no lifecycle.
   let pendingLifecycleForRun: FramePendingLifecycle | undefined;
+  // F2/F3 composition — the TRUSTWORTHY canonical graph resolved at the graph-
+  // commit chokepoint (after the strict reread on a degraded read). commitTurn
+  // derives the CAS expected-base hash from THIS when set, so a degraded read
+  // that was re-resolved still yields a correct expected base (present) or a
+  // legitimately-null expected (proven-absent first write) — never a stale null
+  // from `context.persistedGraph` (which stays null on a degraded read).
+  let resolvedCanonicalGraphForCommit: { readonly graph: unknown | null } | undefined;
   const commitTurn = async (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
@@ -781,12 +793,20 @@ export async function runTurnExecutor(
     // which may be the very graph being written (trusted base rule; see
     // graph-cas-conflict.ts). Computed only for graph-bearing commits with
     // the mode on, so flag-off / graph-free commits pay zero hashing.
-    // buildTurnContext degrades a failed scenarios read to null, which maps
-    // to expected=null → `no_expected`/`first_write` — categories that are
-    // never enforced, so a degraded read can never block a write.
+    // F3 — derive whenever the resolved CAS capability needs an expected base
+    // (app hook on OR RPC enforcing); byte-identical to the old
+    // `graphCasMode !== 'off'` gate for every valid config, and closes the
+    // RPC=enforce+MODE=off hole (also boot-rejected). F2 composition — derive
+    // from the chokepoint-resolved graph when set (correct even after a degraded
+    // read whose strict reread re-proved the base); fall back to
+    // `context.persistedGraph` for commit paths that never hit the chokepoint
+    // (meta.graph undefined ⇒ expected stays undefined anyway).
+    const expectedBaseGraph = resolvedCanonicalGraphForCommit
+      ? resolvedCanonicalGraphForCommit.graph
+      : context.persistedGraph;
     const expectedGraphCasHashes =
-      meta.graph !== undefined && config.features.graphCasMode !== 'off'
-        ? computeExpectedGraphCasHashes(context.persistedGraph)
+      meta.graph !== undefined && config.features.graphCas.requiresExpectedHash
+        ? computeExpectedGraphCasHashes(expectedBaseGraph)
         : undefined;
     const result = await commitDirectAnswer(
       resp,
@@ -8225,19 +8245,98 @@ export async function runTurnExecutor(
         const incoming =
           requestGraph !== null && requestGraph.nodes.length > 0 ? requestGraph : null;
 
-        // `hasServerModel` — a persisted graph carrying >=1 node.
-        const persisted = context.persistedGraph;
-        const hasServerModel =
-          persisted !== null &&
-          persisted !== undefined &&
-          typeof persisted === 'object' &&
-          !Array.isArray(persisted) &&
-          Array.isArray((persisted as Record<string, unknown>).nodes) &&
-          ((persisted as Record<string, unknown>).nodes as unknown[]).length > 0;
+        // A persisted graph counts as a server model when it carries >=1 node.
+        const graphHasNodes = (g: unknown): boolean =>
+          g !== null &&
+          g !== undefined &&
+          typeof g === 'object' &&
+          !Array.isArray(g) &&
+          Array.isArray((g as Record<string, unknown>).nodes) &&
+          ((g as Record<string, unknown>).nodes as unknown[]).length > 0;
+
+        // F2 (Codex deep-review) — TRUSTWORTHY `hasServerModel`.
+        //
+        // The old derivation read `context.persistedGraph` directly, so a
+        // DEGRADED canonical read (which collapses persistedGraph to null) was
+        // indistinguishable from a genuinely ABSENT graph. Rows A and B then
+        // adopted the client `graph_state` over a real (but unread) server
+        // model. We now resolve the discriminated read state; production sets
+        // `context.persistedGraphRead`, and legacy hand-built contexts derive a
+        // safe state from `persistedGraph` (present → ok_present, else
+        // ok_absent — the pre-fix behaviour for those, no degraded case).
+        const canonicalRead: CanonicalGraphReadState =
+          context.persistedGraphRead ??
+          (context.persistedGraph != null
+            ? { status: 'ok_present', graph: context.persistedGraph }
+            : { status: 'ok_absent' });
+
+        // On a DEGRADED read the true state is UNKNOWN (null must NOT read as
+        // "no server model"). Strict-reread the canonical graph at THIS write
+        // chokepoint:
+        //   • reread succeeds  → the state is now PROVEN (present/absent).
+        //   • reread ALSO fails → the state stays UNKNOWN (`readUnknown`). We
+        //     then FAIL CLOSED WITHOUT clobbering, but WITHOUT failing a turn
+        //     that merely carried graph_state for adoption: the NON-MUTATE adopt
+        //     is SKIPPED (write no graph; the turn still commits — the adopt
+        //     defers to a turn whose read works), and a MUTATE fails the commit
+        //     (can't merge onto an unknown base — the pre-existing rows-D/F
+        //     behaviour). Never adopt/clobber on an unproven-absent read.
+        let hasServerModel: boolean;
+        let readUnknown = false;
+        let degradedRereadGraph: unknown | null | undefined;
+        if (canonicalRead.status === 'ok_present') {
+          hasServerModel = graphHasNodes(canonicalRead.graph);
+        } else if (canonicalRead.status === 'ok_absent') {
+          hasServerModel = false;
+        } else {
+          try {
+            degradedRereadGraph = await loadPersistedGraphStrict(context.session_id);
+            hasServerModel = graphHasNodes(degradedRereadGraph);
+            log.warn(
+              {
+                event: 'v5.turn_executor.canonical_read_degraded_reread',
+                request_id: requestId,
+                scenario_id: context.session_id,
+                error_code: canonicalRead.errorCode,
+                reread_has_server_model: hasServerModel,
+              },
+              'V5 TurnExecutor — canonical graph read degraded; strict reread performed at the graph-write chokepoint (adopt only when the reread proves ABSENT)',
+            );
+          } catch (err) {
+            readUnknown = true;
+            hasServerModel = false;
+            log.warn(
+              {
+                event: 'v5.turn_executor.canonical_read_degraded_reread',
+                request_id: requestId,
+                scenario_id: context.session_id,
+                error_code: canonicalRead.errorCode,
+                reread_failed: true,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'V5 TurnExecutor — canonical graph read degraded AND strict reread failed; state unknown — fail closed (skip adopt on non-mutate, refuse the commit on mutate)',
+            );
+          }
+        }
+
+        // F3 composition — publish the PROVEN persisted graph so commitTurn's
+        // CAS expected-base hash is derived from a trustworthy value (only when
+        // the read is KNOWN; on an unknown read no graph is written so no
+        // expected base is needed).
+        if (!readUnknown) {
+          resolvedCanonicalGraphForCommit = {
+            graph:
+              canonicalRead.status === 'ok_present'
+                ? canonicalRead.graph
+                : canonicalRead.status === 'degraded'
+                  ? (degradedRereadGraph ?? null)
+                  : null,
+          };
+        }
 
         if (!handlerMutated) {
           // rows A / C / E
-          if (!hasServerModel && incoming !== null) {
+          if (!readUnknown && !hasServerModel && incoming !== null) {
             // ROW A — ADOPT. First-touch: no server model, the client holds the
             // only graph. Persist it VERBATIM (identity-preserving — a std<=0
             // is floored later at the compute-load seam, never here, so the
@@ -8258,11 +8357,21 @@ export async function runTurnExecutor(
           }
           // rows C / E — nothing to adopt (no incoming), OR a server model
           // exists (never overwrite it with client graph_state — the
-          // trusted-base rule, :778). Write no graph, exactly as today.
+          // trusted-base rule, :778), OR the read is UNKNOWN (skip adopt rather
+          // than clobber a model we cannot see). Write no graph, exactly as today.
           return mutated;
         }
 
         // rows B / D / F — a D1 handler mutated the graph this turn.
+        if (readUnknown) {
+          // MUTATE on an UNKNOWN read — cannot safely merge onto an unknown base
+          // (would risk corrupting canonical state). Fail closed (the
+          // pre-existing rows-D/F behaviour) → STATE_COMMIT_FAILED, whole txn
+          // rolls back, nothing half-lands.
+          throw new Error(
+            `V5 D1 — refusing to persist mutated graph for scenario ${context.session_id}: canonical read degraded (${canonicalRead.status === 'degraded' ? canonicalRead.errorCode : 'unknown'}) and strict reread failed (merge base unavailable)`,
+          );
+        }
         let persistedBase: unknown;
         if (!hasServerModel && incoming !== null) {
           // ROW B — adopt-then-edit: an edit ON a first-touch graph. The handler
@@ -8271,6 +8380,10 @@ export async function runTurnExecutor(
           // (NOT the empty persisted read) so incoming's top-level fields
           // (options[], goal_node_id, goal_constraints) survive the merge.
           persistedBase = incoming;
+        } else if (degradedRereadGraph !== undefined) {
+          // rows D / F on a DEGRADED read — reuse the strict reread already
+          // performed above (single round trip, no TOCTOU vs `hasServerModel`).
+          persistedBase = degradedRereadGraph;
         } else {
           // rows D / F — today's behaviour: strict-read the persisted graph. A
           // degraded/unavailable read FAILS CLOSED here (→ STATE_COMMIT_FAILED;
@@ -8642,6 +8755,39 @@ export async function runTurnExecutor(
       // `commitGmHeldResume`'s catch).
       if (effectiveTurnGraphSetPreCommit) {
         effectiveTurnGraph = preCommitEffectiveTurnGraph;
+      }
+      // F4 (Codex deep-review) — PRESERVE the CAS-conflict subtype at this
+      // boundary. A GraphStaleWriteError (the base graph diverged; whole txn
+      // rolled back, nothing clobbered) must NOT flatten to STATE_COMMIT_FAILED
+      // → INTERNAL_ERROR → HTTP 500. Map it to GRAPH_WRITE_CONFLICT →
+      // GRAPH_DIVERGED (→ the route returns HTTP 409) and carry explicit
+      // refresh-and-reconfirm recovery metadata so the UI can refresh canonical
+      // state and reconfirm rather than blind-retrying the same stale base.
+      if (error instanceof GraphStaleWriteError) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            conflict_category: error.conflict_category,
+            err: serialiseError(error),
+          },
+          'V5 TurnExecutor — graph CAS conflict on commit (typed 409-class refresh-reconfirm, nothing clobbered)',
+        );
+        failureType = INTERNAL_TO_WIRE.GRAPH_WRITE_CONFLICT;
+        response = buildFailureResponse(
+          'GRAPH_WRITE_CONFLICT',
+          context.stage,
+          {
+            phase: 'commit',
+            // Additive recovery contract (tolerant-parser passthrough) — A2's
+            // UI refresh/reconfirm leg reads these; NO schemas publish needed.
+            recovery_action: 'refresh_and_reconfirm',
+            conflict_category: error.conflict_category,
+            expected_base_graph_hash: error.expected_base_graph_hash ?? null,
+          },
+          recoveryCtx(),
+        );
+        return finalizeRun();
       }
       log.error(
         { request_id: requestId, err: serialiseError(error) },

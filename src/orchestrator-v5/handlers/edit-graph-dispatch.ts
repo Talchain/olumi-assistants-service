@@ -1811,7 +1811,13 @@ export async function dispatchEditGraph(
     // `strictBase` null = genuinely-empty scenarios.graph → expected hashes
     // {null, null} ("server base read, no graph") → `first_write` when the
     // graph is still absent at write time, `no_expected` otherwise.
-    if (config.features.graphCasMode !== 'off') {
+    // F3 — derive the expected base whenever the resolved CAS capability needs
+    // it (app hook on OR RPC enforcing), not just when the app hook is on. For
+    // valid configs this equals the old `graphCasMode !== 'off'` gate; it closes
+    // the RPC=enforce+MODE=off hole (that combo is also boot-rejected). The
+    // strict read above already fails closed on a degraded read, so no expected
+    // hash is ever manufactured from a failed read.
+    if (config.features.graphCas.requiresExpectedHash) {
       expectedGraphCasHashes = computeExpectedGraphCasHashes(strictBase ?? null);
     }
     gmFrameBase = strictBase ?? graphState;

@@ -49,6 +49,12 @@ interface AppendWrite {
 const appendCalls: AppendWrite[] = [];
 let currentPersistedGraph: unknown = null;
 let failNextAppend = false;
+// F2 — degraded-read injection. `failGraphAndBriefTextRead` makes the
+// context-build read (loadGraphAndBriefText) throw (a DEGRADED canonical read);
+// `failLoadGraph` makes the strict reread (loadGraph) at the write chokepoint
+// throw too (the reread ALSO fails → fail-closed).
+let failGraphAndBriefTextRead = false;
+let failLoadGraph = false;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
@@ -77,11 +83,23 @@ vi.mock('../session/index.js', () => ({
       entries_invalidated: [],
     }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => currentPersistedGraph,
-    loadGraphAndBriefText: async () => ({
-      graph: currentPersistedGraph,
-      briefText: null,
-    }),
+    loadGraph: async () => {
+      if (failLoadGraph) {
+        throw new Error('loadGraph failed (injected): strict reread degraded');
+      }
+      return currentPersistedGraph;
+    },
+    loadGraphAndBriefText: async () => {
+      if (failGraphAndBriefTextRead) {
+        // A degraded canonical read at context-build time. build-turn-context
+        // catches this → persistedGraph:null + read:{status:'degraded'}.
+        throw new Error('loadGraphAndBriefText failed (injected): canonical read degraded');
+      }
+      return {
+        graph: currentPersistedGraph,
+        briefText: null,
+      };
+    },
     ensureScenarioExists: async () => ({ user_id: null }),
   }),
   resetSessionStoreForTests: () => undefined,
@@ -154,6 +172,8 @@ beforeEach(() => {
   appendCalls.length = 0;
   currentPersistedGraph = null;
   failNextAppend = false;
+  failGraphAndBriefTextRead = false;
+  failLoadGraph = false;
 });
 
 afterEach(() => {
@@ -406,5 +426,85 @@ describe('row B — first-touch + mutating handler (merge base = incoming)', () 
     expect(mutated?.observed_state?.value).toBe(1);
     // …and incoming's goal_node_id survived the merge (base = incoming, not empty).
     expect(committed.goal_node_id).toBe(ECHO_GRAPH_STATE.goal_node_id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2 (Codex deep-review) — a DEGRADED canonical read must never masquerade as
+// "no server model". Pre-fix, `persistedGraph: null` conflated "read failed"
+// with "no graph", so adopt-on-first-touch clobbered a real server model on a
+// transient read failure. RED-first: these go RED against the pre-fix chokepoint
+// (which adopts on a degraded read).
+// ---------------------------------------------------------------------------
+
+describe('F2 — degraded canonical read (must not clobber a server model)', () => {
+  it('the Codex probe: rich persisted graph + read throws + divergent incoming → does NOT adopt (server model intact)', async () => {
+    // A real server model exists, but the context-build read is degraded.
+    currentPersistedGraph = clone(RICH_PERSISTED_GRAPH);
+    const pristine = JSON.stringify(currentPersistedGraph);
+    failGraphAndBriefTextRead = true; // context read degrades → persistedGraph:null
+    // The strict reread at the write chokepoint SUCCEEDS and sees the model.
+    failLoadGraph = false;
+
+    await runTurnExecutor(
+      payload('what do you think of my decision?', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01'),
+      'req-f2-degraded-nomodel-clobber',
+      {
+        routingAdapter: textRoutingAdapter('Here is what I see.'),
+        graphState: clone(ECHO_GRAPH_STATE) as never, // divergent from persisted
+      },
+    );
+
+    // Post-fix: the reread proved a server model exists → NO adopt; the commit
+    // carried no graph and the server model is byte-intact.
+    // Pre-fix: degraded→null→hasServerModel=false→Row A adopts ECHO→RED here.
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.graph).toBeUndefined();
+    expect(JSON.stringify(currentPersistedGraph)).toBe(pristine);
+  });
+
+  it('fail-closed (non-mutate): degraded read AND the strict reread also fails → SKIP adopt (turn commits, but NO graph written — never clobber)', async () => {
+    currentPersistedGraph = null; // unknown; we must not assume absent
+    failGraphAndBriefTextRead = true; // context read degrades
+    failLoadGraph = true; // the reread at the chokepoint ALSO throws
+
+    await runTurnExecutor(
+      payload('thoughts?', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb02'),
+      'req-f2-degraded-reread-fails',
+      {
+        routingAdapter: textRoutingAdapter('Sure.'),
+        graphState: clone(ECHO_GRAPH_STATE) as never,
+      },
+    );
+
+    // Post-fix: the read state is UNKNOWN, so the adopt is SKIPPED — the turn
+    // still commits (a conversational turn must not 500 over a transient read),
+    // but writes NO graph (never clobber an unseen model). Pre-fix:
+    // degraded→null→Row A adopts ECHO → a graph write → RED here.
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.graph).toBeUndefined();
+    expect(currentPersistedGraph).toBeNull();
+  });
+
+  it('degraded read but reread PROVES absent → adopt still proceeds (no over-restriction of legit first-touch)', async () => {
+    currentPersistedGraph = null; // genuinely absent
+    failGraphAndBriefTextRead = true; // context read degrades…
+    failLoadGraph = false; // …but the strict reread succeeds and returns null (absent)
+
+    await runTurnExecutor(
+      payload('any thoughts on my model?', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb03'),
+      'req-f2-degraded-reread-absent-adopts',
+      {
+        routingAdapter: textRoutingAdapter('A few.'),
+        graphState: clone(ECHO_GRAPH_STATE) as never,
+      },
+    );
+
+    // The reread proved the graph is absent → first-touch adopt is SAFE and
+    // proceeds. Guards the REFUTE: fix must not break legit truly-absent adopt.
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.graph).toBeDefined();
+    const committed = appendCalls[0]!.graph as { nodes: unknown[] };
+    expect(committed.nodes).toHaveLength((ECHO_GRAPH_STATE.nodes as unknown[]).length);
   });
 });

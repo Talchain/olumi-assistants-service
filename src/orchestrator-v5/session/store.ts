@@ -375,14 +375,27 @@ export class StateCommitFailedError extends Error {
 export class GraphStaleWriteError extends StateCommitFailedError {
   /** Closed-enum conflict category from graph-cas-conflict.ts. */
   readonly conflict_category: string;
+  /**
+   * F4 — the identity hash of the base graph the rejected write was built on
+   * (the caller's stale base). Non-sensitive identity fingerprint; carried
+   * onto the 409 envelope so the UI can surface what it had before it refreshes
+   * canonical state and reconfirms. Undefined when no expected base was
+   * supplied (e.g. an app-side categorisation with no incoming hash).
+   */
+  readonly expected_base_graph_hash: string | undefined;
 
   constructor(
     message: string,
-    opts: { conflict_category: string; cause?: unknown },
+    opts: {
+      conflict_category: string;
+      cause?: unknown;
+      expected_base_graph_hash?: string;
+    },
   ) {
     super(message, { cause: opts.cause });
     this.name = 'GraphStaleWriteError';
     this.conflict_category = opts.conflict_category;
+    this.expected_base_graph_hash = opts.expected_base_graph_hash;
   }
 }
 

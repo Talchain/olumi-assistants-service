@@ -310,6 +310,68 @@ function createGraphCasRpcMode(
 }
 
 /**
+ * F3 (Codex deep-review) — ONE boot-resolved graph-CAS capability.
+ *
+ * Two switches used to be orthogonal:
+ *   - `CEE_V5_GRAPH_CAS_MODE`  (appMode) — the app-side observe/enforce hook,
+ *     and the ONLY thing that gated whether callers DERIVE an expected-base
+ *     hash for a graph write.
+ *   - `CEE_V5_GRAPH_CAS_RPC`   (rpcMode) — the atomic in-transaction RPC CAS.
+ *
+ * So a deploy could set `RPC=enforce` while `MODE=off`: callers derived NO
+ * expected hash, the store sent SQL `NULL`, and the migration fell through to
+ * an UNCONDITIONAL update — `enforce` compared nothing (enforcement theatre).
+ *
+ * Resolving both into ONE capability makes the coupling explicit and is done
+ * once at parse:
+ *   - `requiresExpectedHash` — callers MUST derive a trusted expected-base hash
+ *     for graph-bearing commits. True whenever the app hook is on OR the RPC is
+ *     enforcing, so an enforcing RPC NEVER runs with a null expected. For every
+ *     VALID config this equals `appMode !== 'off'` (a valid enforce config
+ *     always has an app mode), i.e. byte-identical to the old caller gate.
+ *   - `assertGraphCasCapabilityValid` — the BOOT-REJECT (called from
+ *     `validateConfig()` at startup, never on lazy config access): rejects the
+ *     foot-gun combo `RPC=enforce` + `MODE=off`. Staging runs `MODE=observe` +
+ *     `RPC=enforce`, which PASSES.
+ */
+export interface GraphCasCapability {
+  readonly appMode: "off" | "observe" | "enforce";
+  readonly rpcMode: "off" | "shadow" | "enforce";
+  readonly rpcEnforce: boolean;
+  readonly requiresExpectedHash: boolean;
+}
+
+/** Pure resolution of the two CAS switches into one capability (no I/O, no throw). */
+export function resolveGraphCasCapability(
+  appMode: "off" | "observe" | "enforce",
+  rpcMode: "off" | "shadow" | "enforce",
+): GraphCasCapability {
+  const rpcEnforce = rpcMode === "enforce";
+  // Derive an expected base whenever the app hook wants it OR the atomic RPC is
+  // enforcing — this closes the "enforce with a null expected" hole even if the
+  // boot guard is ever relaxed (belt-and-suspenders; a no-op for valid configs).
+  const requiresExpectedHash = appMode !== "off" || rpcEnforce;
+  return { appMode, rpcMode, rpcEnforce, requiresExpectedHash };
+}
+
+/**
+ * BOOT-REJECT invalid CAS combinations. Called from `validateConfig()` at
+ * server startup so the process fails fast (never on lazy config access, so
+ * unit tests can still read the parsed capability for any combination).
+ */
+export function assertGraphCasCapabilityValid(cap: GraphCasCapability): void {
+  if (cap.rpcEnforce && cap.appMode === "off") {
+    throw new Error(
+      "Invalid graph-CAS configuration: CEE_V5_GRAPH_CAS_RPC=enforce requires " +
+        "CEE_V5_GRAPH_CAS_MODE to be 'observe' or 'enforce'. With MODE=off no caller " +
+        "derives an expected-base hash, so the atomic enforce RPC receives a NULL " +
+        "expected and the DB update falls through to UNCONDITIONAL — enforcement theatre. " +
+        "Set CEE_V5_GRAPH_CAS_MODE=observe (the staging posture) or turn RPC enforce off.",
+    );
+  }
+}
+
+/**
  * Environment-enforced three-state mode for the Graph Management live wiring
  * (CEE_GRAPH_MANAGEMENT_MODE). Values: 'off' | 'shadow' | 'live'
  * (lowercased + trimmed). Mirrors `createEnvEnforcedMode` (the A3 CAS flag)
@@ -742,7 +804,13 @@ const ConfigSchema = z.object({
     // was EXECUTED on staging 2026-07-14 (Paul-authorised); in an environment
     // without the RPCs every store call degrades to a swallowed error, never
     // a turn failure.
-  }),
+  }).transform((f) => ({
+    // F3 — resolve the single graph-CAS capability ONCE at parse. Non-throwing
+    // here (the BOOT-REJECT lives in validateConfig() so lazy config access in
+    // tests never fails); callers read `config.features.graphCas`.
+    ...f,
+    graphCas: resolveGraphCasCapability(f.graphCasMode, f.graphCasRpc),
+  })),
 
   // Prompt Cache Configuration
   promptCache: z.object({
@@ -1931,6 +1999,11 @@ export function validateConfig(): Config {
   // The Proxy will parse and validate the config
   const validated = config.server;
   void validated; // Use the value to satisfy linter
+  // F3 — BOOT-REJECT invalid graph-CAS combinations (e.g. RPC=enforce +
+  // MODE=off, which would send a null expected hash to the enforcing RPC and
+  // silently fall through to an unconditional update). Startup-only so lazy
+  // config access in tests still resolves the capability.
+  assertGraphCasCapabilityValid(config.features.graphCas);
   return config;
 }
 

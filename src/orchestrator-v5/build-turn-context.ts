@@ -62,9 +62,34 @@ import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
-import { SessionReadError, type SessionStore } from './session/store.js';
+import { SessionReadError, GraphStaleWriteError, type SessionStore } from './session/store.js';
+// F4 — re-exported so turn-executor can detect a CAS conflict at its commit
+// boundary WITHOUT importing session/store directly (the state-write-invariant
+// guard bounds that import surface to session/, commit.ts, build-turn-context).
+export { GraphStaleWriteError };
 import { getSessionStore } from './session/index.js';
 import type { PendingAction } from './session/pending-action.js';
+
+/**
+ * F2 (Codex deep-review) — discriminated canonical graph-read state.
+ *
+ * `persistedGraph: null` used to conflate two very different facts: "the
+ * canonical read SUCCEEDED and no graph is stored" (adopt-on-first-touch is
+ * SAFE) versus "the canonical read FAILED / degraded" (adopting the client's
+ * `graph_state` would CLOBBER a real server model we simply could not see).
+ * The adopt chokepoint derived `hasServerModel` from the nullable value, so a
+ * transient read failure masqueraded as "no server model" and let Row A / Row B
+ * overwrite authoritative state.
+ *
+ * This explicit state removes the conflation:
+ *   - `ok_present` — read succeeded, a graph exists (carries it).
+ *   - `ok_absent`  — read succeeded, no graph stored (first-touch adopt SAFE).
+ *   - `degraded`   — the read threw; the true state is UNKNOWN (fail closed).
+ */
+export type CanonicalGraphReadState =
+  | { readonly status: 'ok_present'; readonly graph: unknown }
+  | { readonly status: 'ok_absent' }
+  | { readonly status: 'degraded'; readonly errorCode: string };
 
 export interface EnrichedTurnContext extends TurnContext {
   /**
@@ -132,6 +157,21 @@ export interface EnrichedTurnContext extends TurnContext {
    * scenarioBriefText behaviour).
    */
   readonly persistedGraph: unknown | null;
+  /**
+   * F2 (Codex deep-review) — the discriminated result of the canonical
+   * `scenarios.graph` read that produced {@link persistedGraph}. Consumed by
+   * the graph-commit chokepoint (turn-executor `graphForCommit`) so that a
+   * DEGRADED read is never treated as "no server model" (which would let
+   * adopt-on-first-touch clobber authoritative state). `persistedGraph` stays
+   * as-is (null on degraded) for the read-only projections (DecisionContext,
+   * coaching, freshness) that legitimately degrade to "no graph".
+   *
+   * Optional on the type (mirrors `most_recent_pending_actions`) so the many
+   * hand-constructed test contexts keep compiling; production `buildTurnContext`
+   * always sets it, and the chokepoint derives a safe fallback from
+   * `persistedGraph` when it is absent.
+   */
+  readonly persistedGraphRead?: CanonicalGraphReadState;
   /**
    * V5 Wave 2: pending actions emitted by the most recent prior turn.
    * Populated from `SessionStore.readMostRecentPendingActions`. Empty
@@ -498,6 +538,7 @@ export async function buildTurnContext(
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
+    persistedGraphRead: scenarioState.read,
     most_recent_pending_actions: mostRecentPendingActions,
     decision_context: decisionContext,
     coaching_state: coachingState,
@@ -756,10 +797,24 @@ async function fetchPersistedScenarioState(
   scenarioId: string,
   requestId: string,
   store: SessionStore | undefined,
-): Promise<{ readonly graph: unknown | null; readonly briefText: string | null }> {
-  if (!store) return { graph: null, briefText: null };
+): Promise<{
+  readonly graph: unknown | null;
+  readonly briefText: string | null;
+  readonly read: CanonicalGraphReadState;
+}> {
+  // No store: nothing is (or can be) persisted for this scenario, and the
+  // commit path cannot run without a store, so this is a genuine ABSENT read
+  // for adopt purposes — never a degraded read that could mask a server model.
+  if (!store) return { graph: null, briefText: null, read: { status: 'ok_absent' } };
   try {
-    return await store.loadGraphAndBriefText(scenarioId);
+    const result = await store.loadGraphAndBriefText(scenarioId);
+    // ok_present only when a graph is actually stored; a null graph (row
+    // absent or graph column null) is a SUCCESSFUL read of an absent graph.
+    const read: CanonicalGraphReadState =
+      result.graph != null
+        ? { status: 'ok_present', graph: result.graph }
+        : { status: 'ok_absent' };
+    return { graph: result.graph, briefText: result.briefText, read };
   } catch (error) {
     const errorCode = error instanceof SessionReadError ? error.code : undefined;
     const message = error instanceof Error ? error.message : String(error);
@@ -773,7 +828,15 @@ async function fetchPersistedScenarioState(
       error_code: errorCode ?? 'unknown',
       severity: 'warning',
     });
-    return { graph: null, briefText: null };
+    // F2 — a DEGRADED read must NOT collapse to "no graph" at the adopt
+    // chokepoint. `graph`/`briefText` stay null for the read-only projections
+    // (they legitimately degrade), but `read` carries the true `degraded`
+    // state so the write path fails closed instead of clobbering.
+    return {
+      graph: null,
+      briefText: null,
+      read: { status: 'degraded', errorCode: errorCode ?? 'unknown' },
+    };
   }
 }
 

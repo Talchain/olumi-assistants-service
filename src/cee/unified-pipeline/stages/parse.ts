@@ -198,13 +198,47 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     attempt += 1;
     const requestId = attempt === 1 ? `draft_${Date.now()}` : `draft_retry_${Date.now()}`;
 
-    // Attempt 1 gets the full single-attempt cap; any retry (timeout or
-    // strength-default) is CAPPED to what is still affordable inside
-    // DRAFT_REQUEST_BUDGET_MS — never a fresh full window. An uncapped retry
-    // produced the 2026-07-20 211s worst case against a 125s proxy deadline.
-    const attemptTimeoutMs = attempt === 1
-      ? effectiveLlmTimeout
-      : getDraftLlmRetryBudgetMs(Date.now() - requestStartMs);
+    // F1 (Codex deep-review) — EVERY attempt's LLM window honours elapsed
+    // request time. `getDraftLlmRetryBudgetMs(elapsed)` returns
+    // min(DRAFT_LLM_TIMEOUT_MS, remainingRequestBudgetMs(elapsed)) — the
+    // single-attempt cap clamped to the request budget still unspent. Attempt 1
+    // USED to take the full cap regardless of pre-LLM elapsed time, so a request
+    // that spent (e.g.) 15s on ingress / prompt-load / preprocessing still
+    // launched a full-length attempt 1 and could reach the ~125s proxy deadline
+    // before validation/packaging finished — a 504, or a provider success paid
+    // for and then discarded by the Step-11 budget guard. Deriving attempt 1
+    // from the SAME primitive as the retry closes that. The adapter derives
+    // max_tokens from THIS window (`resolveDraftMaxTokens(timeoutMs)`), so a
+    // shortened window also lowers the token budget — no separate max_tokens site.
+    const elapsedBeforeAttemptMs = Date.now() - requestStartMs;
+    const attemptTimeoutMs = getDraftLlmRetryBudgetMs(elapsedBeforeAttemptMs);
+
+    // Refuse to START a draft with NO remaining budget: when the honest window
+    // has collapsed to zero (the request budget is fully spent), a call would
+    // launch with a 0ms deadline and abort instantly — pointless provider spend
+    // that also pushes past the proxy deadline F1 fixes. Fail fast with the
+    // typed budget error instead. Kept at the exhausted-budget floor (<= 0)
+    // rather than a larger minimum: a sub-second window is still a legitimate
+    // (if doomed) attempt that the existing truncation/timeout handling reaps in
+    // bounded time, and a larger floor collides with the request-budget test
+    // ladder that deliberately drives elapsed to ~100-105s. The retry path keeps
+    // its own richer MIN_DRAFT_RETRY_BUDGET_MS affordability gate below.
+    if (attemptTimeoutMs <= 0) {
+      log.warn({
+        event: "cee.llm.attempt_refused_budget",
+        attempt,
+        attempt_timeout_ms: attemptTimeoutMs,
+        elapsed_since_request_start_ms: elapsedBeforeAttemptMs,
+        request_id: ctx.requestId,
+      }, "Draft attempt refused to start — remaining request budget cannot fund a draft (fail fast, no LLM call)");
+      throw new RequestBudgetExceededError(
+        `Request budget exhausted before the draft LLM call could start (only ${Math.round(attemptTimeoutMs / 1000)}s remained of the ${Math.round(DRAFT_REQUEST_BUDGET_MS / 1000)}s budget)`,
+        DRAFT_REQUEST_BUDGET_MS,
+        elapsedBeforeAttemptMs,
+        "pre_llm_draft",
+        ctx.requestId,
+      );
+    }
 
     try {
       const draftThinking = config.cee.thinking?.draftGraphEnabled
@@ -419,6 +453,11 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
       // through to the typed error + honest retry copy below. Attempt-1-only; no
       // double-spend beyond one retry.
       if (isTruncation && attempt === 1 && !leanDraftRetried) {
+        // The max_tokens the adapter actually derived for attempt 1 comes from
+        // `attemptTimeoutMs` (resolveDraftMaxTokens), but this affordability
+        // comparison keeps using the full single-attempt cap as the CEILING it
+        // guards against — a conservative bound (never understates attempt 1's
+        // budget), so the anti-doom gate only ever errs toward NOT retrying.
         const attempt1EffectiveMaxTokens = Math.min(
           getAffordableDraftTokens(effectiveLlmTimeout),
           DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,

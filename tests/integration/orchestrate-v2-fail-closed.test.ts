@@ -20,6 +20,9 @@ import type { FastifyInstance } from 'fastify';
 
 import { setTestSink } from '../../src/utils/telemetry.js';
 import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
+// F4 — the REAL error class (session/store.js is NOT mocked here, so the
+// executor's `instanceof GraphStaleWriteError` check matches this one).
+import { GraphStaleWriteError } from '../../src/orchestrator-v5/session/store.js';
 
 const SCENARIO = 'b0000000-0000-4000-8000-000000000001';
 
@@ -59,6 +62,8 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
 
 // Mutable: lets tests flip between "commit succeeds" and "commit fails".
 let commitShouldFail = false;
+// F4 — flip to make the commit raise a graph CAS conflict (OLGC1-class).
+let commitShouldConflict = false;
 
 // ROADMAP 1.148 — importOriginal-spread + complete shared store mock
 // (derive, don't mirror): real module exports stay real; the store double
@@ -73,6 +78,16 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
     getSessionStore: () =>
       createMockSessionStore({
         append: async () => {
+          if (commitShouldConflict) {
+            // OLGC1-class: the base graph diverged; whole txn rolled back.
+            throw new GraphStaleWriteError(
+              'append_turn_atomic_v3 rejected a stale graph write (SQLSTATE OLGC1) — refresh and reconfirm.',
+              {
+                conflict_category: 'rpc_cas_conflict',
+                expected_base_graph_hash: 'deadbeefcafe0001',
+              },
+            );
+          }
           if (commitShouldFail) {
             const err = new Error('append_turn_atomic RPC failed: simulated persistence outage');
             err.name = 'StateCommitFailedError';
@@ -144,6 +159,7 @@ describe('POST /orchestrate/v2/turn — Group 3 Task B fail-closed on commit fai
     events = [];
     llmCallCount = 0;
     commitShouldFail = false;
+    commitShouldConflict = false;
   });
 
   it('commit success path: HTTP 200, retryable is NOT relevant (no error envelope)', async () => {
@@ -185,6 +201,46 @@ describe('POST /orchestrate/v2/turn — Group 3 Task B fail-closed on commit fai
     expect(completed).toHaveLength(1);
     expect(completed[0]!.data.commit_performed).toBe(false);
     expect(completed[0]!.data.failure_type).toBe('INTERNAL_ERROR');
+  });
+
+  // F4 (Codex deep-review) — a graph CAS conflict must surface as HTTP 409 +
+  // GRAPH_DIVERGED with refresh-reconfirm recovery metadata, NOT a flattened
+  // 500/INTERNAL_ERROR. RED-first: pre-fix GraphStaleWriteError (extends
+  // StateCommitFailedError) hits the generic catch → STATE_COMMIT_FAILED →
+  // INTERNAL_ERROR → 500.
+  it('graph CAS conflict (OLGC1): HTTP 409 + GRAPH_DIVERGED + refresh-reconfirm recovery metadata', async () => {
+    commitShouldConflict = true;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest('b5555555-5555-4555-8555-555555555555'),
+    });
+    // 409, not the uniform 500.
+    expect(res.statusCode).toBe(409);
+    const body = JSON.parse(res.body);
+    const parsed = BoundaryErrorSchema.parse(body);
+    expect(parsed.error).toBe('GRAPH_DIVERGED');
+    expect(parsed.details).toMatchObject({
+      reason: 'graph_write_conflict',
+      failure_type: 'GRAPH_DIVERGED',
+      recovery_action: 'refresh_and_reconfirm',
+      conflict_category: 'rpc_cas_conflict',
+      expected_base_graph_hash: 'deadbeefcafe0001',
+    });
+    const completed = events.filter((e) => e.event === 'turn_executor.completed');
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.data.commit_performed).toBe(false);
+    expect(completed[0]!.data.failure_type).toBe('GRAPH_DIVERGED');
+  });
+
+  it('graph CAS conflict does NOT re-invoke the LLM (no silent retry loop)', async () => {
+    commitShouldConflict = true;
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest('b6666666-6666-4666-8666-666666666666'),
+    });
+    expect(llmCallCount).toBe(1);
   });
 
   it('commit failure does NOT re-invoke the LLM (no silent retry loop)', async () => {

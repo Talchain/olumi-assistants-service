@@ -1825,6 +1825,10 @@ export type V5RouteReply = {
   200: FinalisedV5Response;
   400: BoundaryError;
   401: BoundaryError;
+  // F4 — a graph CAS write conflict (GRAPH_DIVERGED) returns 409, not the
+  // uniform 500, so the UI can branch to refresh-and-reconfirm rather than a
+  // generic infra-failure retry.
+  409: BoundaryError;
   422: BoundaryError;
   500: BoundaryError;
 };
@@ -4114,16 +4118,43 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // ("the analysis ran but didn't save" vs "we couldn't frame the
       // decision"). `stages_completed` is positioned *after* stage inside
       // details, preserving the pre-refactor insertion order.
+      // F4 — a graph CAS conflict (GRAPH_DIVERGED) is NOT an infra failure: it
+      // is a recoverable divergence. Return HTTP 409 with the explicit
+      // refresh-and-reconfirm recovery metadata (lifted from the failure
+      // response's error block) instead of the uniform 500, so the UI can
+      // refresh canonical state and reconfirm rather than blind-retrying the
+      // same stale base. All other commit failures keep the uniform 500.
+      const isGraphConflict = failureType === 'GRAPH_DIVERGED';
+      const conflictRecovery = isGraphConflict
+        ? extractGraphConflictRecovery(run.response)
+        : undefined;
       const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
         validator: 'turn_commit',
-        reason: 'state_commit_failed_or_turn_runtime_failure',
+        reason: isGraphConflict
+          ? 'graph_write_conflict'
+          : 'state_commit_failed_or_turn_runtime_failure',
         retryable,
         requestId,
         stage: ingress.stage,
         errorCode: failureType ?? 'INTERNAL_ERROR',
-        preStageExtras: { failure_type: failureType },
+        preStageExtras: {
+          failure_type: failureType,
+          ...(conflictRecovery ?? {}),
+        },
         postStageExtras: { stages_completed: run.telemetry.stages_completed },
       });
+      if (isGraphConflict) {
+        log.warn(
+          {
+            request_id: requestId,
+            failure_type: failureType,
+            stages_completed: run.telemetry.stages_completed,
+          },
+          'V5 turn — graph CAS conflict; returning 409 with refresh-reconfirm BoundaryError envelope',
+        );
+        // 409: recoverable divergence — nothing clobbered (txn rolled back).
+        return reply.code(409).send(boundaryError);
+      }
       log.error(
         {
           request_id: requestId,
@@ -4216,5 +4247,35 @@ function extractRetryableFlag(response: unknown): boolean {
   const details = (errBlock as { details?: unknown }).details;
   if (!details || typeof details !== 'object') return false;
   return (details as { retryable?: unknown }).retryable === true;
+}
+
+/**
+ * F4 — pull the graph-CAS-conflict recovery metadata (recovery_action,
+ * conflict_category, expected_base_graph_hash) out of the failure response's
+ * error-block details so it can be forwarded onto the 409 BoundaryError
+ * envelope (A2's UI refresh/reconfirm leg reads it). Returns undefined on any
+ * shape drift — the 409 status alone still carries the recoverable signal.
+ */
+function extractGraphConflictRecovery(
+  response: unknown,
+): Record<string, unknown> | undefined {
+  if (!response || typeof response !== 'object') return undefined;
+  const blocks = (response as { blocks?: unknown }).blocks;
+  if (!Array.isArray(blocks) || blocks.length === 0) return undefined;
+  const errBlock = blocks.find(
+    (b: unknown) =>
+      b != null && typeof b === 'object' && (b as { type?: unknown }).type === 'error',
+  );
+  if (!errBlock || typeof errBlock !== 'object') return undefined;
+  const details = (errBlock as { details?: unknown }).details;
+  if (!details || typeof details !== 'object') return undefined;
+  const d = details as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  if (typeof d.recovery_action === 'string') out.recovery_action = d.recovery_action;
+  if (typeof d.conflict_category === 'string') out.conflict_category = d.conflict_category;
+  if ('expected_base_graph_hash' in d) {
+    out.expected_base_graph_hash = d.expected_base_graph_hash;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
