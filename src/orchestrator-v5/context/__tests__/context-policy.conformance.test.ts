@@ -41,6 +41,7 @@ import {
   type ContextPolicyTripwireLogger,
 } from '../context-policy.js';
 import { projectDecisionRecords } from '../../decision-records/project.js';
+import { DRAFT_ATTACHMENT_MAX_BYTES } from '../../../adapters/llm/draft-attachment.js';
 
 import { runStageCoachingPass } from '../../../cee/unified-pipeline/stages/coaching-pass.js';
 import * as telemetry from '../../../utils/telemetry.js';
@@ -233,11 +234,15 @@ describe('deriveContextSectionBudgets — routing preserved, edit drift fixed, d
     expect(derived.repair_edit_graph.sections).toEqual(derived.edit_graph.sections);
   });
 
-  it('draft_graph maps to draft_structural but stays instrumented-only (uncapped brief → no budgets)', () => {
-    // P4 mapped draft_graph → draft_structural, whose only section (brief) is
-    // telemetry_only with char_budget null, so the derived view is still empty:
-    // the structural draft carries NO enforced cut, honestly.
-    expect(derived.draft_graph).toEqual({ sections: {}, total: null });
+  it('draft_graph maps to draft_structural; brief stays uncapped but attached_document is enforced (D-59-7)', () => {
+    // P4 mapped draft_graph → draft_structural. brief is telemetry_only (char_budget
+    // null → not in the derived view). D-59-7 added attached_document — the ONLY
+    // enforced draft section, DERIVED from DRAFT_ATTACHMENT_MAX_BYTES (the same
+    // fail-closed cap), so the derived view now carries exactly that one bound.
+    expect(derived.draft_graph).toEqual({
+      sections: { attached_document: DRAFT_ATTACHMENT_MAX_BYTES },
+      total: null,
+    });
   });
 
   it('draft_coaching (the post-draft pass) is instrumented-only too', () => {
@@ -711,19 +716,36 @@ describe('namesake-twin kill — assembleContextPack resolves to exactly ONE exp
 
 describe('draft rows — declared, no false enforced, memory-window-less', () => {
   for (const site of ['draft_structural', 'draft_coaching'] as const) {
-    it(`${site} is an LLM row with NO conversation window and NO enforced section (uncapped by design)`, () => {
+    it(`${site} is an LLM row with NO conversation window and NO total budget`, () => {
       const row = CONTEXT_POLICY[site];
       expect(row.llm).toBe(true);
       expect(row.memory_window).toBeNull();
       expect(row.total_char_budget).toBeNull();
-      // The draft path is the least-budgeted assembler: NO section may claim a
-      // false `enforced` (there is no per-section cut site on the draft prompt).
+      // The draft prose sections (brief / graph) are the least-budgeted assembler:
+      // no per-section prose cut site, so none may claim a false `enforced`. The
+      // ONE exception is draft_structural's attached_document — it has a REAL
+      // fail-closed cut site (DRAFT_ATTACHMENT_MAX_BYTES), so `enforced` there is
+      // TRUE, not theatre. Every OTHER section stays telemetry_only + null.
       for (const s of row.sections) {
+        if (s.name === 'attached_document') continue;
         expect(s.enforcement).toBe('telemetry_only');
         expect(s.char_budget).toBeNull();
       }
     });
   }
+
+  it('draft_structural.attached_document is a TRUE enforced section derived from the fail-closed cap (D-59-7)', () => {
+    const doc = CONTEXT_POLICY.draft_structural.sections.find((s) => s.name === 'attached_document');
+    expect(doc).toBeDefined();
+    // Enforced because buildDraftDocumentBlock throws a 4xx on oversize BEFORE the
+    // call — a real cut site — and the budget is the SAME constant (derive, not mirror).
+    expect(doc?.enforcement).toBe('enforced');
+    expect(doc?.char_budget).toBe(DRAFT_ATTACHMENT_MAX_BYTES);
+    expect(doc?.model_facing).toBe(true);
+    // CONDITIONAL: absent on a brief-only draft, so it must NOT be always_expected
+    // (else a healthy no-document draft would false-fire the under-emit tripwire).
+    expect(doc?.always_expected).not.toBe(true);
+  });
 
   it('draft_structural declares the structural emit key (brief), matching draft-graph-dispatch:489', () => {
     const declared = declaredSectionNames('draft_structural');

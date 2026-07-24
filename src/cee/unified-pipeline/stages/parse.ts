@@ -5,11 +5,17 @@
  * Calls existing functions from their current locations — no logic rewrite.
  */
 
-import type { StageContext } from "../types.js";
+import type { StageContext, DraftInputWithCeeExtras } from "../types.js";
 import type { DraftGraphResult } from "../../../adapters/llm/types.js";
 import type { DocPreview } from "../../../services/docProcessing.js";
 import type { GraphT } from "../../../schemas/graph.js";
 import { groundAttachments, buildRefinementBrief } from "../../../routes/assist.draft-graph.js";
+import {
+  buildDraftDocumentBlock,
+  DraftAttachmentError,
+  type BuiltDraftAttachment,
+  type DraftAttachmentKind,
+} from "../../../adapters/llm/draft-attachment.js";
 import { calcConfidence } from "../../../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../../../utils/costGuard.js";
 import { getAdapterWithResolution } from "../../../adapters/llm/router.js";
@@ -58,6 +64,39 @@ import { DRAFT_SOFT_NODE_CAP, DRAFT_SOFT_EDGE_CAP } from "../../draft/anthropic-
  * 12. Repair budget computation
  * 13. Draft cost calculation
  */
+/** Wire payload shape for a single attachment (base64 string or `{ data, encoding }`). */
+type RawAttachmentPayload = string | { data?: unknown; encoding?: unknown };
+
+/**
+ * Resolve the FIRST attached document to a `{kind, name, base64}` input for the
+ * native document-block builder (D-59-7). The slice carries ONE document (the
+ * simplest honest transport). Returns undefined when there is no attachment or
+ * its payload is missing (brief-only draft — matches the legacy grounding skip;
+ * a missing payload is a client-shape gap, not a document CONTENT failure).
+ */
+function resolveFirstDraftAttachment(
+  input: DraftInputWithCeeExtras,
+  rawBody: unknown,
+): { kind: DraftAttachmentKind; name: string; base64: string } | undefined {
+  const first = input.attachments?.[0];
+  if (!first) return undefined;
+  const payloads = (rawBody as { attachment_payloads?: Record<string, RawAttachmentPayload> } | null | undefined)
+    ?.attachment_payloads;
+  const payload = payloads?.[first.id];
+  if (payload === undefined || payload === null) return undefined;
+  let base64: string;
+  if (typeof payload === "string") {
+    base64 = payload;
+  } else if (typeof payload.data === "string") {
+    // Only base64 payloads are supported for the native block; a non-base64
+    // encoding would be re-flagged INVALID_BASE64 by the strict decoder.
+    base64 = payload.data;
+  } else {
+    return undefined;
+  }
+  return { kind: first.kind as DraftAttachmentKind, name: first.name, base64 };
+}
+
 export async function runStageParse(ctx: StageContext): Promise<void> {
   log.info({ requestId: ctx.requestId, stage: "parse" }, "Unified pipeline: Stage 1 (Parse) started");
 
@@ -75,6 +114,46 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
       }),
     };
     return;
+  }
+
+  // ── Step 1b: Native document attachment (D-59-7) ─────────────────────────
+  // The model-native doc-attach path: carry the FIRST attached document as a
+  // native Anthropic `document` block (no parser build — Anthropic reads the
+  // PDF/text natively). It is the DEFAULT and SUPERSEDES the legacy `grounding`
+  // text-preview path. Gate on `docs.length === 0`: grounding (Step 1) is off by
+  // default (→ empty docs) so native carries the document; when grounding IS on
+  // and produced text previews, native stands down — exactly one path ever
+  // carries the document (no double-send). Fail-closed: an oversize / unparseable
+  // document → a typed 4xx with honest copy, never a silent drop.
+  let draftAttachment: BuiltDraftAttachment | undefined;
+  if (docs.length === 0) {
+    const attInput = resolveFirstDraftAttachment(ctx.input, ctx.rawBody);
+    if (attInput) {
+      // Disclosure (not a silent drop): the slice carries ONE document. If more
+      // were attached, record that the extras were not carried natively so it is
+      // observable rather than silent. (Multi-document is a follow-up; A2 ask.)
+      const totalAttachments = ctx.input.attachments?.length ?? 0;
+      if (totalAttachments > 1) {
+        log.warn(
+          { requestId: ctx.requestId, total_attachments: totalAttachments, carried: 1, redacted: true },
+          "draft: multiple documents attached; the native doc-attach slice carries the first only",
+        );
+      }
+      try {
+        draftAttachment = buildDraftDocumentBlock(attInput);
+      } catch (error) {
+        if (error instanceof DraftAttachmentError) {
+          ctx.earlyReturn = {
+            statusCode: error.httpStatus,
+            body: buildCeeErrorResponse("CEE_VALIDATION_FAILED", error.message, {
+              requestId: ctx.requestId,
+            }),
+          };
+          return;
+        }
+        throw error;
+      }
+    }
   }
 
   // ── Step 2: Confidence ──────────────────────────────────────────────────
@@ -272,6 +351,9 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           currencyInstruction: ctx.input.currencyInstruction,
           ...(systemDirective ? { systemDirective } : {}),
           ...(draftThinking ? { thinking: draftThinking } : {}),
+          // Native document attachment (D-59-7). Anthropic-native; other adapters
+          // ignore it. Undefined ⇒ brief-only draft (byte-identical to before).
+          ...(draftAttachment ? { attachment: draftAttachment } : {}),
         },
         {
           requestId,

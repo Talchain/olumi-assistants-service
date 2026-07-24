@@ -44,6 +44,7 @@ import {
 } from './shared-schemas.js';
 import { extractZodIssues } from '../../schemas/llmExtraction.js';
 import { buildDraftGraphSchema } from '../../cee/draft/anthropic-graph-schema.js';
+import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
 
 export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
 import { resolveAnthropicModel } from "./model-fallback.js";
@@ -66,6 +67,13 @@ export type DraftArgs = {
   systemDirective?: string;
   /** Extended thinking configuration. When enabled, temperature is forced to 1 and structured outputs are disabled. */
   thinking?: ThinkingConfig;
+  /**
+   * Native document attachment (D-59-7). Pre-built + validated + size-capped by
+   * the pipeline. When present, the draft user message becomes a content-block
+   * array with the document bracketed in the untrusted-content envelope; when
+   * absent, the user message stays a plain string (byte-identical to before).
+   */
+  attachment?: BuiltDraftAttachment;
 };
 
 // PERF 2.1 - Anthropic prompt caching:
@@ -385,7 +393,7 @@ function measureTruncatedDraftAnatomy(text: string): {
 // Defense-in-depth cap on total document context chars (grounding module enforces 50k upstream)
 const MAX_DOC_CONTEXT_CHARS = 60_000;
 
-async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): Promise<{ system: AnthropicSystemBlock[]; userContent: string }> {
+async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean }): Promise<{ system: AnthropicSystemBlock[]; userContent: string; attachmentBlocks?: Anthropic.ContentBlockParam[] }> {
   let docContext = "";
   if (args.docs.length) {
     const parts: string[] = [];
@@ -431,6 +439,11 @@ ${args.brief}
   return {
     system: buildSystemBlocks(systemPrompt, { operation: "draft_graph" }),
     userContent,
+    // Native document attachment (D-59-7): the untrusted-bracketed document block
+    // sequence. Present only when a document was attached; appended to the user
+    // message AFTER the brief text block by buildCallParams. Absent ⇒ user
+    // message stays a plain string (byte-identical to the pre-slice shape).
+    ...(args.attachment ? { attachmentBlocks: args.attachment.envelopeBlocks } : {}),
   };
 }
 
@@ -808,6 +821,23 @@ export async function draftGraphWithAnthropic(
 
   log.info({ brief_chars: args.brief.length, doc_count: args.docs.length, model, idempotency_key: idempotencyKey, prompt_id: promptMeta.taskId, prompt_hash: promptMeta.prompt_hash, prompt_source: promptMeta.source }, "calling Anthropic for draft");
 
+  // Budget-honesty disclosure (D-59-7): count the attached document's size + token
+  // estimate and declare them on a dedicated seam. The context-policy `attached_document`
+  // row bounds this at DRAFT_ATTACHMENT_MAX_BYTES (the SAME enforced cap). Names/counts
+  // only — never the document bytes (redacted).
+  if (args.attachment) {
+    const m = args.attachment.meta;
+    log.info({
+      event: "cee.draft.document_attached",
+      kind: m.kind,
+      media_type: m.media_type,
+      doc_bytes: m.bytes,
+      doc_tokens_est: m.tokens_est,
+      cap_bytes: DRAFT_ATTACHMENT_MAX_BYTES,
+      redacted: true,
+    }, "draft: native document attached (budget-honest disclosure)");
+  }
+
   // CEE_PROMPT_DEBUG_ENABLED: log prompt hash, source metadata, and system prompt preview
   if (config.cee.promptDebugEnabled) {
     const systemText = prompt.system.map((b: any) => (typeof b === 'string' ? b : b.text ?? '')).join('');
@@ -855,12 +885,23 @@ export async function draftGraphWithAnthropic(
     function buildCallParams(useStructuredOutputs: boolean): {
       body: Anthropic.MessageCreateParamsNonStreaming;
     } {
+      // Native document attachment (D-59-7): when a document was attached, the
+      // user message is a content-block ARRAY — the brief text FIRST, then the
+      // untrusted-content-bracketed document block(s). The document sits in the
+      // USER message, AFTER the frozen system cache breakpoint (buildSystemBlocks
+      // holds the only cache_control), so it never busts the cached system prefix.
+      // With no attachment, content stays the plain STRING — byte-identical to the
+      // pre-slice draft call (no-document regression invariant).
+      const userMessageContent: string | Anthropic.ContentBlockParam[] =
+        prompt.attachmentBlocks && prompt.attachmentBlocks.length > 0
+          ? [{ type: "text", text: prompt.userContent }, ...prompt.attachmentBlocks]
+          : prompt.userContent;
       const body: Anthropic.MessageCreateParamsNonStreaming = {
         model,
         max_tokens: maxTokens,
         temperature: draftTemperature,
         system: prompt.system,
-        messages: [{ role: "user", content: prompt.userContent }],
+        messages: [{ role: "user", content: userMessageContent }],
         ...(useStructuredOutputs
           ? {
               output_config: {
@@ -4096,6 +4137,8 @@ export class AnthropicAdapter implements LLMAdapter {
         currencyInstruction: args.currencyInstruction,
         systemDirective: args.systemDirective,
         thinking: args.thinking,
+        // Native document attachment (D-59-7). Anthropic-native; carried through.
+        attachment: args.attachment,
       },
       { collector: opts.collector, refreshPrompts: opts.bypassCache, forceDefault: opts.forceDefault, signal: opts.signal ?? opts.abortSignal, timeoutMs: opts.timeoutMs, maxTokensCeiling: opts.maxTokensCeiling }
     );

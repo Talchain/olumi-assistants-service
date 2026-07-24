@@ -9,6 +9,7 @@ import type { GraphT } from "../../schemas/graph.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { CorrectionCollector } from "../../cee/corrections.js";
 import type { ObservabilityCollector } from "../../cee/observability/index.js";
+import type { BuiltDraftAttachment } from "./draft-attachment.js";
 
 /**
  * Usage metrics returned by LLM calls for cost tracking and telemetry.
@@ -61,6 +62,15 @@ export interface DraftGraphArgs {
    * When enabled, temperature is automatically set to 1 and structured outputs are disabled.
    */
   thinking?: ThinkingConfig;
+  /**
+   * Native document attachment (model-native doc-attach slice, D-59-7). A
+   * user-attached PDF/text carried as a native Anthropic `document` content
+   * block, ALREADY built + validated + size-capped by the pipeline (fail-closed
+   * at the boundary → 4xx). Anthropic only — non-Anthropic adapters ignore it
+   * (the block is Anthropic-native; the default draft model is Claude). When
+   * absent, the draft user message is a plain string (byte-identical to before).
+   */
+  attachment?: BuiltDraftAttachment;
 }
 
 /**
