@@ -1834,9 +1834,17 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
     // remains reachable: the F2 test immediately below drives it through a
     // withRetry transient (503), which this change does not touch.
     //
-    // MUTATION-CHECK: revert `canRetryAgain` to bare
-    // `hasRoomForAnotherAbortableAttempt` and this goes RED — attempt 2 stays
-    // abortable, a third call appears, and its cap drops below 4,000.
+    // ⚠ MUTATION-CHECK, HONESTLY SCOPED. This test is a pin for the INVARIANT,
+    // not for the abort-authorisation call site: it was RUN against a reverted
+    // `canRetryAgain` (bare `hasRoomForAnotherAbortableAttempt`) and stayed
+    // GREEN, because at a 4,000 ceiling with 25s burns attempt 2 completes under
+    // either rule. Saying otherwise would be exactly the theatre this estate
+    // keeps paying for, so it is written down instead.
+    //
+    // The call site's real, verified mutation-check is the DEFAULT-REGIME test in
+    // `src/adapters/llm/__tests__/draft-detector-attachment-aware.test.ts`
+    // ("the same runaway is NOT aborted"), which goes RED on that revert; the
+    // predicate itself is pinned by the sweep in draft-skip-gate-alignment.test.ts.
     let call = 0;
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
       const n = call++;
