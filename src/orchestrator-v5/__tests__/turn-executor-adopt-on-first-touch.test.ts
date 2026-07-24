@@ -463,7 +463,7 @@ describe('F2 — degraded canonical read (must not clobber a server model)', () 
     expect(JSON.stringify(currentPersistedGraph)).toBe(pristine);
   });
 
-  it('fail-closed: degraded read AND the strict reread also fails → nothing persists (no half-land)', async () => {
+  it('fail-closed (non-mutate): degraded read AND the strict reread also fails → SKIP adopt (turn commits, but NO graph written — never clobber)', async () => {
     currentPersistedGraph = null; // unknown; we must not assume absent
     failGraphAndBriefTextRead = true; // context read degrades
     failLoadGraph = true; // the reread at the chokepoint ALSO throws
@@ -477,9 +477,12 @@ describe('F2 — degraded canonical read (must not clobber a server model)', () 
       },
     );
 
-    // Post-fix: the chokepoint throws (fail-closed) → STEP 7 catch → nothing
-    // persists. Pre-fix: degraded→null→Row A adopts ECHO→append recorded→RED.
-    expect(appendCalls).toHaveLength(0);
+    // Post-fix: the read state is UNKNOWN, so the adopt is SKIPPED — the turn
+    // still commits (a conversational turn must not 500 over a transient read),
+    // but writes NO graph (never clobber an unseen model). Pre-fix:
+    // degraded→null→Row A adopts ECHO → a graph write → RED here.
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.graph).toBeUndefined();
     expect(currentPersistedGraph).toBeNull();
   });
 

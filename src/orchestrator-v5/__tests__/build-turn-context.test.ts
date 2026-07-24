@@ -60,6 +60,7 @@ describe('buildTurnContext', () => {
       prior_facts_with_turn: _pfwt,
       scenarioBriefText: _sb,
       persistedGraph: _pg,
+      persistedGraphRead: _pgr,
       most_recent_pending_actions: _mrpa,
       decision_context: _dc,
       coaching_state: _cs,

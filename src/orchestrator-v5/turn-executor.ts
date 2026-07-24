@@ -8270,12 +8270,19 @@ export async function runTurnExecutor(
             ? { status: 'ok_present', graph: context.persistedGraph }
             : { status: 'ok_absent' });
 
-        // On a DEGRADED read the true state is UNKNOWN, so we must NOT treat
-        // null as "no server model". Strict-reread the canonical graph at THIS
-        // write chokepoint. A reread that ALSO fails FAILS CLOSED (throws →
-        // STATE_COMMIT_FAILED, whole txn rolls back) — never adopt/clobber on an
-        // unproven-absent read. The reread value is reused as the D/F merge base.
+        // On a DEGRADED read the true state is UNKNOWN (null must NOT read as
+        // "no server model"). Strict-reread the canonical graph at THIS write
+        // chokepoint:
+        //   • reread succeeds  → the state is now PROVEN (present/absent).
+        //   • reread ALSO fails → the state stays UNKNOWN (`readUnknown`). We
+        //     then FAIL CLOSED WITHOUT clobbering, but WITHOUT failing a turn
+        //     that merely carried graph_state for adoption: the NON-MUTATE adopt
+        //     is SKIPPED (write no graph; the turn still commits — the adopt
+        //     defers to a turn whose read works), and a MUTATE fails the commit
+        //     (can't merge onto an unknown base — the pre-existing rows-D/F
+        //     behaviour). Never adopt/clobber on an unproven-absent read.
         let hasServerModel: boolean;
+        let readUnknown = false;
         let degradedRereadGraph: unknown | null | undefined;
         if (canonicalRead.status === 'ok_present') {
           hasServerModel = graphHasNodes(canonicalRead.graph);
@@ -8284,39 +8291,52 @@ export async function runTurnExecutor(
         } else {
           try {
             degradedRereadGraph = await loadPersistedGraphStrict(context.session_id);
+            hasServerModel = graphHasNodes(degradedRereadGraph);
+            log.warn(
+              {
+                event: 'v5.turn_executor.canonical_read_degraded_reread',
+                request_id: requestId,
+                scenario_id: context.session_id,
+                error_code: canonicalRead.errorCode,
+                reread_has_server_model: hasServerModel,
+              },
+              'V5 TurnExecutor — canonical graph read degraded; strict reread performed at the graph-write chokepoint (adopt only when the reread proves ABSENT)',
+            );
           } catch (err) {
-            throw new Error(
-              `V5 adopt/commit — refusing to write graph for scenario ${context.session_id}: canonical read degraded (${canonicalRead.errorCode}) and strict reread failed (${err instanceof Error ? err.message : String(err)})`,
+            readUnknown = true;
+            hasServerModel = false;
+            log.warn(
+              {
+                event: 'v5.turn_executor.canonical_read_degraded_reread',
+                request_id: requestId,
+                scenario_id: context.session_id,
+                error_code: canonicalRead.errorCode,
+                reread_failed: true,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              'V5 TurnExecutor — canonical graph read degraded AND strict reread failed; state unknown — fail closed (skip adopt on non-mutate, refuse the commit on mutate)',
             );
           }
-          hasServerModel = graphHasNodes(degradedRereadGraph);
-          log.warn(
-            {
-              event: 'v5.turn_executor.canonical_read_degraded_reread',
-              request_id: requestId,
-              scenario_id: context.session_id,
-              error_code: canonicalRead.errorCode,
-              reread_has_server_model: hasServerModel,
-            },
-            'V5 TurnExecutor — canonical graph read degraded; strict reread performed at the graph-write chokepoint (fail-closed; adopt only when the reread proves ABSENT)',
-          );
         }
 
         // F3 composition — publish the PROVEN persisted graph so commitTurn's
-        // CAS expected-base hash is derived from a trustworthy value even after
-        // a degraded read (present → real base; absent → legitimate null).
-        resolvedCanonicalGraphForCommit = {
-          graph:
-            canonicalRead.status === 'ok_present'
-              ? canonicalRead.graph
-              : canonicalRead.status === 'degraded'
-                ? (degradedRereadGraph ?? null)
-                : null,
-        };
+        // CAS expected-base hash is derived from a trustworthy value (only when
+        // the read is KNOWN; on an unknown read no graph is written so no
+        // expected base is needed).
+        if (!readUnknown) {
+          resolvedCanonicalGraphForCommit = {
+            graph:
+              canonicalRead.status === 'ok_present'
+                ? canonicalRead.graph
+                : canonicalRead.status === 'degraded'
+                  ? (degradedRereadGraph ?? null)
+                  : null,
+          };
+        }
 
         if (!handlerMutated) {
           // rows A / C / E
-          if (!hasServerModel && incoming !== null) {
+          if (!readUnknown && !hasServerModel && incoming !== null) {
             // ROW A — ADOPT. First-touch: no server model, the client holds the
             // only graph. Persist it VERBATIM (identity-preserving — a std<=0
             // is floored later at the compute-load seam, never here, so the
@@ -8337,11 +8357,21 @@ export async function runTurnExecutor(
           }
           // rows C / E — nothing to adopt (no incoming), OR a server model
           // exists (never overwrite it with client graph_state — the
-          // trusted-base rule, :778). Write no graph, exactly as today.
+          // trusted-base rule, :778), OR the read is UNKNOWN (skip adopt rather
+          // than clobber a model we cannot see). Write no graph, exactly as today.
           return mutated;
         }
 
         // rows B / D / F — a D1 handler mutated the graph this turn.
+        if (readUnknown) {
+          // MUTATE on an UNKNOWN read — cannot safely merge onto an unknown base
+          // (would risk corrupting canonical state). Fail closed (the
+          // pre-existing rows-D/F behaviour) → STATE_COMMIT_FAILED, whole txn
+          // rolls back, nothing half-lands.
+          throw new Error(
+            `V5 D1 — refusing to persist mutated graph for scenario ${context.session_id}: canonical read degraded (${canonicalRead.status === 'degraded' ? canonicalRead.errorCode : 'unknown'}) and strict reread failed (merge base unavailable)`,
+          );
+        }
         let persistedBase: unknown;
         if (!hasServerModel && incoming !== null) {
           // ROW B — adopt-then-edit: an edit ON a first-touch graph. The handler
