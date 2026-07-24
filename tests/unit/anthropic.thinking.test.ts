@@ -240,7 +240,11 @@ describe("chatWithAnthropic — thinking (edit_graph path)", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not include thinking block when thinking is absent", async () => {
+  it("sends an EXPLICIT thinking:{type:'disabled'} when thinking is absent (R1/D-61: adaptive thinking off by default)", async () => {
+    // R1 (D-61, 2026-07-24): a chat call with no explicit thinking arg previously
+    // OMITTED the field, so Sonnet-5 adaptive thinking ran and ate the caller
+    // budget (the decision_review class). The adapter now ALWAYS transmits an
+    // explicit posture — here, disabled — rather than leaving it ambiguous.
     const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
     await chatWithAnthropic({
       system: "sys",
@@ -249,7 +253,7 @@ describe("chatWithAnthropic — thinking (edit_graph path)", () => {
     });
 
     const [body] = mockCreate.mock.calls[0];
-    expect(body.thinking).toBeUndefined();
+    expect(body.thinking).toEqual({ type: "disabled" });
     expect(body.temperature).toBe(0);
   });
 
