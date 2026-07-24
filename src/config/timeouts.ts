@@ -568,11 +568,20 @@ export const MIN_DRAFT_RETRY_BUDGET_MS = parseTimeoutEnv("MIN_DRAFT_RETRY_BUDGET
  *  (~105s, inside every outer deadline) while EARLY failures — the only case
  *  a retry can actually help — keep an affordable, capped second attempt.
  */
+/**
+ * Milliseconds of REQUEST budget remaining after `elapsedMs`, once the LLM
+ * post-processing headroom is reserved (never negative). THE single primitive
+ * for "how much request budget is left" — extracted (altitude 2 / reuse F2,
+ * 2026-07-24) because the 2026-07-20 staging outage came from re-deriving this
+ * exact arithmetic inconsistently across sites (draft retry gate, coaching-pass
+ * gate, repair gate). All three now derive from here.
+ */
+export function remainingRequestBudgetMs(elapsedMs: number): number {
+  return Math.max(0, DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS - elapsedMs);
+}
+
 export function getDraftLlmRetryBudgetMs(elapsedMs: number): number {
-  return Math.min(
-    DRAFT_LLM_TIMEOUT_MS,
-    Math.max(0, DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS - elapsedMs),
-  );
+  return Math.min(DRAFT_LLM_TIMEOUT_MS, remainingRequestBudgetMs(elapsedMs));
 }
 
 /**

@@ -1658,38 +1658,49 @@ export async function runTurnExecutor(
       // memory-hole guard (Codex r2 blocker 1) verify watermark coverage
       // and REFUSE the block (disclosed-absence note) when unabsorbed turns
       // fall outside the verbatim slice.
-      const summaryInjection = await loadConversationSummaryForInjection({
-        scenarioId: context.session_id,
-        windowTurnsNewestFirst: context.prior_turns,
-        windowDepth: CONTEXT_PACK_RECENT_TURNS_CAP,
-        requestId,
-      });
-      summaryLagForBudget = summaryInjection.lagTurns;
       // Knowledge-over-time (ROADMAP 1.199, P6): read this scenario's prior
       // DECISION RECORDS (not just prior turns) and project a bounded, disclosed
       // slice into the pack's `older_relevant_facts`. Mirrors the rolling-summary
-      // injection above (async load → the assembler stays synchronous and only
-      // places the section). Fire-safe end-to-end: getDecisionRecordStore() throws
-      // only when SUPABASE_* creds are absent (tests / misconfig), the loader
-      // swallows read/projection faults — either way the section is simply OMITTED
-      // and the pack is byte-identical to pre-P6 for record-less scenarios. The
-      // read is scenario-scoped at the bytes (retrieveRecords .eq('scenario_id')).
-      let olderRelevantFactsSection: string | undefined;
-      if (context.session_id) {
-        try {
-          const projection = await loadOlderRelevantFactsSection({
-            store: getDecisionRecordStore(),
-            scenarioId: context.session_id,
-            charBudget: POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
-            requestId,
-          });
-          olderRelevantFactsSection = projection?.text;
-        } catch {
-          // getDecisionRecordStore() threw (no SUPABASE_* creds) — omit the
-          // section; a knowledge-read must never fail a turn.
-          olderRelevantFactsSection = undefined;
-        }
-      }
+      // injection (async load → the assembler stays synchronous and only places
+      // the section). Fire-safe end-to-end: getDecisionRecordStore() throws only
+      // when SUPABASE_* creds are absent (tests / misconfig), the loader swallows
+      // read/projection faults — either way the section is simply OMITTED and the
+      // pack is byte-identical to pre-P6 for record-less scenarios. The read is
+      // scenario-scoped at the bytes (retrieveRecords .eq('scenario_id')).
+      //
+      // The two reads are independent scenario-scoped round trips (session
+      // summaries vs decision_records), so fire them CONCURRENTLY and await once
+      // — total added latency is max(), not sum (efficiency F3, 2026-07-24). The
+      // decision-records leg keeps its own try/catch → resolves undefined on any
+      // fault, so Promise.all rejects only if the summary read does, exactly as
+      // the prior sequential `await loadConversationSummaryForInjection` did.
+      const olderFactsPromise: Promise<string | undefined> = context.session_id
+        ? (async () => {
+            try {
+              const projection = await loadOlderRelevantFactsSection({
+                store: getDecisionRecordStore(),
+                scenarioId: context.session_id,
+                charBudget: POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+                requestId,
+              });
+              return projection?.text;
+            } catch {
+              // getDecisionRecordStore() threw (no SUPABASE_* creds) — omit the
+              // section; a knowledge-read must never fail a turn.
+              return undefined;
+            }
+          })()
+        : Promise.resolve(undefined);
+      const [summaryInjection, olderRelevantFactsSection] = await Promise.all([
+        loadConversationSummaryForInjection({
+          scenarioId: context.session_id,
+          windowTurnsNewestFirst: context.prior_turns,
+          windowDepth: CONTEXT_PACK_RECENT_TURNS_CAP,
+          requestId,
+        }),
+        olderFactsPromise,
+      ]);
+      summaryLagForBudget = summaryInjection.lagTurns;
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,

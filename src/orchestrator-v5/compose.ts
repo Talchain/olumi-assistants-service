@@ -303,6 +303,23 @@ function buildBlocksFromFacts(
   let currentTurnRunAnalysisHandled = false;
   let uiDirectiveEmitted = false;
 
+  // At most ONE ui_directive per turn (N=1 latch). Owns the latch + push + set so
+  // the emit protocol lives in one place (simplification F4, 2026-07-24) rather
+  // than three copy-pasted blocks. `buildFocusInspectorDirective` dispatches on
+  // fact.fact_type internally.
+  const tryEmitUiDirective = (
+    fact: HandlerFact,
+    lookup: GraphNodeLookup,
+    fresh: OlumiResponse['blocks'],
+  ): void => {
+    if (uiDirectiveEmitted) return;
+    const directive = buildFocusInspectorDirective(fact, lookup, fresh);
+    if (directive !== null) {
+      blocks.push(directive);
+      uiDirectiveEmitted = true;
+    }
+  };
+
   for (const fact of facts) {
     if (fact.fact_type === 'run_analysis') {
       currentTurnRunAnalysisHandled = true;
@@ -347,13 +364,7 @@ function buildBlocksFromFacts(
         // wave-3 wired. The shared `lookup` carries the hash-gated persisted
         // snapshot fallback — in production the only source that resolves labels.
         // At most ONE directive per turn (`uiDirectiveEmitted` latch, N=1).
-        if (!uiDirectiveEmitted) {
-          const directive = buildFocusInspectorDirective(fact, lookup, freshBlocks);
-          if (directive !== null) {
-            blocks.push(directive);
-            uiDirectiveEmitted = true;
-          }
-        }
+        tryEmitUiDirective(fact, lookup, freshBlocks);
         if (lifecycle !== undefined) {
           emitLifecycle(lifecycle, {
             lifecycle_state: 'emitted_fresh',
@@ -409,12 +420,7 @@ function buildBlocksFromFacts(
       // EXCLUDED inside the builder (UI drops those patches — fail-open avoided).
       // N=1 latch; lookup built lazily only when no directive has fired yet.
       if (!uiDirectiveEmitted) {
-        const mutationLookup = buildGraphNodeLookupFromGraph(persistedGraph);
-        const directive = buildFocusInspectorDirective(fact, mutationLookup, EMPTY_FRESH_BLOCKS);
-        if (directive !== null) {
-          blocks.push(directive);
-          uiDirectiveEmitted = true;
-        }
+        tryEmitUiDirective(fact, buildGraphNodeLookupFromGraph(persistedGraph), EMPTY_FRESH_BLOCKS);
       }
     } else if (fact.fact_type === 'what_would_flip') {
       // Wave-4 δ2 (ROADMAP 1.202) row 4 — a what_would_flip turn (precondition
@@ -422,12 +428,7 @@ function buildBlocksFromFacts(
       // the turn-start persisted graph; fail-closed on unmet precondition / no
       // flip factor / unresolved id. N=1 latch.
       if (!uiDirectiveEmitted) {
-        const flipLookup = buildGraphNodeLookupFromGraph(persistedGraph);
-        const directive = buildFocusInspectorDirective(fact, flipLookup, EMPTY_FRESH_BLOCKS);
-        if (directive !== null) {
-          blocks.push(directive);
-          uiDirectiveEmitted = true;
-        }
+        tryEmitUiDirective(fact, buildGraphNodeLookupFromGraph(persistedGraph), EMPTY_FRESH_BLOCKS);
       }
     }
   }

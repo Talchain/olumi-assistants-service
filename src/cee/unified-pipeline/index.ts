@@ -37,6 +37,22 @@ import { runStageBoundary } from "./stages/boundary.js";
 import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
 import { runValidationPipeline } from "../validation-pipeline/index.js";
 
+/**
+ * Stamp coaching_status 'complete' at a terminal exit UNLESS the coaching pass
+ * already owns a terminal marker: 'skipped_budget' (Lane C2, budget skip) or
+ * 'failed_degraded' (draft-F3, ran-and-errored). Consolidates the two identical
+ * preserve-guards at the pipeline's fallback + main exits (simplification F6,
+ * 2026-07-24) so a marker can never be clobbered on only one path.
+ */
+function markCoachingCompleteUnlessTerminal(outcome: PipelineOutcome): void {
+  if (
+    outcome.coaching_status !== 'skipped_budget' &&
+    outcome.coaching_status !== 'failed_degraded'
+  ) {
+    outcome.coaching_status = 'complete';
+  }
+}
+
 function buildInitialContext(
   input: DraftInputWithCeeExtras,
   rawBody: unknown,
@@ -884,16 +900,9 @@ export async function runUnifiedPipeline(
       timings.boundary_ms = stageElapsed(t6);
       // Return the packaged V1 response without boundary transform
       const fallback = ctx.ceeResponse ?? { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
-      // Preserve a deliberate budget-skip marker (Lane C2) OR a ran-and-errored
-      // coaching-pass marker (draft-F3, 2026-07-24) on this fallback path — both
-      // are terminal statuses the coaching pass owns; only stamp 'complete' when
-      // neither was set.
-      if (
-        ctx.pipelineOutcome.coaching_status !== 'skipped_budget' &&
-        ctx.pipelineOutcome.coaching_status !== 'failed_degraded'
-      ) {
-        ctx.pipelineOutcome.coaching_status = 'complete';
-      }
+      // Preserve a coaching-pass terminal marker (skipped_budget / failed_degraded)
+      // on this fallback path; else stamp 'complete'.
+      markCoachingCompleteUnlessTerminal(ctx.pipelineOutcome);
       attachPipelineOutcome(fallback, ctx.pipelineOutcome);
       finalise(fallback);
       return { statusCode: 200, body: fallback };
@@ -914,16 +923,10 @@ export async function runUnifiedPipeline(
     }
 
     // Coaching status: if we got here with a response, coaching passed — UNLESS
-    // the post-draft coaching pass deliberately skipped for budget (Lane C2) or
-    // ran and errored (draft-F3, 2026-07-24). Either terminal marker must survive
-    // to the response body so probes and A2's async-ingest lane can distinguish
-    // budget-skips and degraded passes from a genuinely-complete one.
-    if (
-      ctx.pipelineOutcome.coaching_status !== 'skipped_budget' &&
-      ctx.pipelineOutcome.coaching_status !== 'failed_degraded'
-    ) {
-      ctx.pipelineOutcome.coaching_status = 'complete';
-    }
+    // the post-draft coaching pass owns a terminal marker (skipped_budget /
+    // failed_degraded), which must survive to the response body so probes and
+    // A2's async-ingest lane can distinguish it from a genuinely-complete pass.
+    markCoachingCompleteUnlessTerminal(ctx.pipelineOutcome);
 
     attachPipelineOutcome(ctx.finalResponse, ctx.pipelineOutcome);
     finalise(ctx.finalResponse);

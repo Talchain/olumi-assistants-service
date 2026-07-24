@@ -61,6 +61,12 @@ vi.mock("../../src/config/timeouts.js", async (importOriginal) => ({
   DRAFT_LLM_TIMEOUT_MS: 105_000,
   LLM_POST_PROCESSING_HEADROOM_MS: 15_000,
   REPAIR_TIMEOUT_MS: 10_000,
+  // The repair gate now DERIVES its remaining budget via remainingRequestBudgetMs
+  // (2026-07-24 budget-primitive consolidation). That function closes over the
+  // module's REAL constants, so a plain constant override above does not reach
+  // inside it — override the derived function too, consistently with the two
+  // budget constants above, so the mocked headroom (15s) actually applies.
+  remainingRequestBudgetMs: (elapsedMs: number) => Math.max(0, 120_000 - 15_000 - elapsedMs),
   getJitteredRetryDelayMs: vi.fn().mockReturnValue(0),
 }));
 
