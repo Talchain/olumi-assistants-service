@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
@@ -260,14 +260,20 @@ function stripComments(src: string): string {
 function execGrepSrc(symbol: string): string[] {
   const out: string[] = [];
   const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir)) {
-      if (entry === '__tests__' || entry === 'node_modules' || entry === 'generated') continue;
-      const abs = join(dir, entry);
-      if (statSync(abs).isDirectory()) {
+    // `withFileTypes` classifies each entry from the SAME directory read that
+    // produced it. A separate `statSync(path)` followed by `readFileSync(path)`
+    // is a check-then-use race (CodeQL js/file-system-race) — avoided by
+    // construction rather than suppressed.
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const name = entry.name;
+      if (name === '__tests__' || name === 'node_modules' || name === 'generated') continue;
+      const abs = join(dir, name);
+      if (entry.isDirectory()) {
         walk(abs);
         continue;
       }
-      if (!entry.endsWith('.ts') || entry.endsWith('.test.ts')) continue;
+      if (!entry.isFile()) continue;
+      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue;
       if (stripComments(readFileSync(abs, 'utf8')).includes(symbol)) {
         out.push(abs.slice(REPO_ROOT.length + 1));
       }
