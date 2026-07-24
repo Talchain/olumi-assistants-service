@@ -19,6 +19,7 @@ import {
 import { calcConfidence } from "../../../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../../../utils/costGuard.js";
 import { getAdapterWithResolution } from "../../../adapters/llm/router.js";
+import { getModelProvider } from "../../../config/models.js";
 import { recordModelResolution } from "../../../orchestrator-v5/debug/turn-debug-store.js";
 import { getSystemPromptMeta } from "../../../adapters/llm/prompt-loader.js";
 import { config, shouldUseStagingPrompts } from "../../../config/index.js";
@@ -231,9 +232,53 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     resolution_source: draftResolution.resolution_source,
   });
 
+  // ── Step 5b: attachment / adapter compatibility (fail-closed, F-1) ────────
+  // The native document block (Step 1a) is Anthropic-native — only a Claude
+  // model reads it. If a document was attached but the resolved draft model is
+  // NOT Anthropic (a per-call `model` override, or a store modelConfig override,
+  // to another provider), that provider IGNORES the block: the draft would be
+  // generated brief-only and the user would believe the document was considered
+  // — a SILENT drop of user-supplied source material, violating the slice's own
+  // "never a silent drop" invariant (draft-attachment.ts). Refuse fail-closed
+  // with honest copy rather than pretend. The live DEFAULT draft model is Claude
+  // (model-routing.ts), so this NEVER fires on the default journey — only on a
+  // non-Anthropic override combined with an attachment.
+  if (draftAttachment && getModelProvider(draftAdapter.model) !== "anthropic") {
+    log.warn(
+      {
+        event: "cee.draft.attachment_model_incompatible",
+        requestId: ctx.requestId,
+        resolved_model: draftAdapter.model,
+        resolution_source: draftResolution.resolution_source,
+        attachment_kind: draftAttachment.meta.kind,
+      },
+      "draft: a document was attached but the resolved model is not Anthropic — the native document block would be ignored; refusing fail-closed (never a silent drop)",
+    );
+    ctx.earlyReturn = {
+      statusCode: 400,
+      body: buildCeeErrorResponse(
+        "CEE_VALIDATION_FAILED",
+        `Attached documents require the default model. The draft model was overridden to "${draftAdapter.model}", which cannot read attachments — remove the attachment or drop the model override.`,
+        { requestId: ctx.requestId },
+      ),
+    };
+    return;
+  }
+
   // ── Step 6: Cost guard ──────────────────────────────────────────────────
   const promptChars = ctx.effectiveBrief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);
-  const tokensIn = estimateTokens(promptChars);
+  // F-2: the native document (Step 1a) is real input the model is billed for, but
+  // it rides an Anthropic `document` block OUTSIDE `docs`/`promptChars`, so the
+  // guard was blind to it — up to ~131k tokens for a 512KB doc, under-counting
+  // per-request input spend by up to ~50x. Count it here (Step 5b already refused
+  // a non-Anthropic model, so a `draftAttachment` at this point IS sent): use the
+  // computed `meta.tokens_est` for text kinds; for PDF (page-based, not derivable
+  // without the parse the slice avoids) fall back to a conservative bytes-derived
+  // estimate so the guard never UNDER-counts a document (fail-closed on spend).
+  const attachmentTokens = draftAttachment
+    ? draftAttachment.meta.tokens_est ?? estimateTokens(draftAttachment.meta.bytes)
+    : 0;
+  const tokensIn = estimateTokens(promptChars) + attachmentTokens;
   const tokensOut = estimateTokens(1200);
 
   if (!allowedCostUSD(tokensIn, tokensOut, draftAdapter.model)) {

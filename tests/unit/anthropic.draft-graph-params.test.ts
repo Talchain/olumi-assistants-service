@@ -1039,8 +1039,9 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
 
     const [body] = streamSpy.mock.calls[0];
     const affordable = getAffordableDraftTokens(32_000);
-    // Thinking is dropped rather than shipped unaffordable — no thinking block sent.
-    expect(body).not.toHaveProperty("thinking");
+    // Thinking is dropped rather than shipped unaffordable — F-5 (FINAL-SWEEP): the
+    // draft now sends an EXPLICIT disabled posture rather than omitting the field.
+    expect(body.thinking).toEqual({ type: "disabled" });
     expect(body.max_tokens).toBeLessThanOrEqual(affordable);
     // Disabled thinking reverts temperature to 0 (thinking requires temperature=1).
     expect(body.temperature).toBe(0);
@@ -1871,11 +1872,13 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
   });
 
   it("PART-2 SKIP-GATE: a post-abort FINAL attempt whose window can't fund a viable graph is SKIPPED (honest fast fail), not run", async () => {
-    // DETECTOR-FIX part 2 (F4 rec-c). Two runaway aborts each burn 35s → the 3rd
-    // would-be-final attempt has remaining 40s, which affords (40-15)*90 = 2250
-    // tokens < the 2700-token converged-graph floor. Rather than burn ~30s on a
-    // sub-viable 0-edge generation (the 89s hard-fail chain), the loop fails FAST
-    // with the typed error — WITHOUT a 3rd stream call.
+    // DETECTOR-FIX part 2 (F4 rec-c) + FINAL-SWEEP F-4 reserve reconciliation.
+    // The reserve is now HARD_CEILING(30) + MIN_RETRY(45) = 75s (derived, was 65s),
+    // so an abort is authorized only while the post-abort final can afford the
+    // 2700-token floor. Drive the skip-gate with an explicit 112s budget and 35s
+    // burns: attempt 1 (112>75 → abort, →77s) and attempt 2 (77>75 → abort, →42s)
+    // are authorized; attempt 3's would-be-final window is 42s, affording
+    // (42-15)*90 = 2430 < 2700 → SKIPPED with the typed error, WITHOUT a 3rd call.
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
       mockNow += 35_000; // each abortable attempt burns 35s of wall-clock
       return runawayStream(body, options); // char-gate runaway (no edges)
@@ -1883,10 +1886,13 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
 
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
     await expect(
-      draftGraphWithAnthropic({
-        brief: "Should I hire a contractor or full-time employee?",
-        docs: [], seed: 17, model: "claude-sonnet-4-6",
-      }),
+      draftGraphWithAnthropic(
+        {
+          brief: "Should I hire a contractor or full-time employee?",
+          docs: [], seed: 17, model: "claude-sonnet-4-6",
+        },
+        { timeoutMs: 112_000 },
+      ),
     ).rejects.toThrow(/final attempt unaffordable|converged-graph floor/);
 
     // MUTATION-CHECK: with the skip-gate reverted, the 3rd attempt RUNS as the

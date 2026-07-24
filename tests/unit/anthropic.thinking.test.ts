@@ -360,7 +360,9 @@ describe("draftGraphWithAnthropic — thinking", () => {
     });
 
     const [body] = mockStream.mock.calls[0];
-    expect(body.thinking).toBeUndefined();
+    // F-5 (FINAL-SWEEP): the draft body now sends an EXPLICIT disabled posture
+    // (never omits the field) so a thinking-class model can't run adaptive thinking.
+    expect(body.thinking).toEqual({ type: "disabled" });
     expect(body.temperature).toBe(0);
   });
 
@@ -409,7 +411,8 @@ describe("draftGraphWithAnthropic — thinking", () => {
     });
 
     const [body] = mockStream.mock.calls[0];
-    expect(body.thinking).toBeUndefined();
+    // F-5 (FINAL-SWEEP): explicit disabled posture even when thinking is dropped.
+    expect(body.thinking).toEqual({ type: "disabled" });
     expect(body.temperature).toBe(0);
 
     warnSpy.mockRestore();

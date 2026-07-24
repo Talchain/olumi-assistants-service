@@ -5,7 +5,8 @@ import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
-import { rejectsSamplingParams } from "../../config/models.js";
+import { anthropicTemperatureFor } from "../../config/models.js";
+import { wrapUntrusted } from "./untrusted-envelope.js";
 import { getDefaultModelForTask } from "../../config/model-routing.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
@@ -26,10 +27,10 @@ import {
   DRAFT_RUNAWAY_STALL_MS,
   DRAFT_RUNAWAY_HARD_CEILING_MS,
   DRAFT_RUNAWAY_DRIFT_WARN_MS,
-  DRAFT_RUNAWAY_MIN_RETRY_MS,
-  DRAFT_MAX_RUNAWAY_RETRIES,
   DRAFT_EDGES_REACHED_RE,
   isEdgesTimeDrifting,
+  hasRoomForAnotherAbortableAttempt,
+  draftAttachmentDetectorAllowance,
 } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
@@ -409,7 +410,7 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
       parts.push(part);
     }
     if (parts.length) {
-      docContext = `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${parts.join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`;
+      docContext = "\n\n" + wrapUntrusted("## Attached Documents", parts.join("\n\n"));
     }
   }
 
@@ -427,10 +428,7 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
   const systemDirective = args.systemDirective
     ? `\n\n${args.systemDirective}`
     : "";
-  const userContent = `## Brief
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${args.brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
+  const userContent = `${wrapUntrusted("## Brief", args.brief)}${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
@@ -759,15 +757,12 @@ export async function draftGraphWithAnthropic(
     }
   }
   // Anthropic requires temperature=1 when extended thinking is active.
-  // Sonnet 5 / Opus 4.7+ / Fable 5 REJECT any explicit sampling param with a 400 —
-  // omit temperature entirely for them (undefined is dropped from the request body
-  // by the SDK's JSON serialisation). This is the 4th sampling-param call site; it
-  // mirrors the chat / chat_with_tools / stream paths (rejectsSamplingParams gate
-  // takes precedence over the thinking=1 rule). Future consolidation: the four sites
-  // inline the same ternary — a shared helper is the obvious de-mirror.
-  const draftTemperature = rejectsSamplingParams(model)
-    ? undefined
-    : (draftThinkingEnabled ? 1 : 0);
+  // Temperature policy single-sourced in anthropicTemperatureFor (FINAL-SWEEP F2 —
+  // this de-mirrors the shared ternary the comment used to flag as "the obvious
+  // de-mirror"). The draft has no caller-supplied temperature, so requested is
+  // omitted (defaults to 0); the rejects-sampling gate takes precedence over
+  // thinking=1.
+  const draftTemperature = anthropicTemperatureFor(model, { thinking: draftThinkingEnabled });
 
   // Structured Outputs feature flag — only active when both the flag is on AND the
   // selected model is in the supported allowlist AND thinking is not enabled
@@ -912,7 +907,19 @@ export async function draftGraphWithAnthropic(
               },
             }
           : {}),
-        ...(draftThinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: draftThinkingBudget } } : {}),
+        // F-5 (FINAL-SWEEP, 2026-07-24) — send an EXPLICIT thinking posture even
+        // when disabled (never OMIT the field). Previously the draft body dropped
+        // `thinking` when off, so a thinking-class model (Sonnet-5) routed to
+        // draft_graph — a per-call `model` override today, one registry edit after
+        // #665 — would run ADAPTIVE thinking on the draft: it burns the affordable
+        // token budget invisibly AND its thinking deltas do not refresh the stall
+        // clock, so the detector false-aborts mid-think (detectionActive keys on the
+        // explicit config flag, not model behaviour). Explicit-disabled closes both,
+        // and makes the chat path's R1 idiom (below) a TRUE mirror. Live-probed:
+        // the API accepts `thinking:{type:'disabled'}` with and without output_config.
+        ...(draftThinkingEnabled
+          ? { thinking: { type: 'enabled', budget_tokens: draftThinkingBudget } }
+          : { thinking: { type: 'disabled' } }),
       };
       // Returns only `{ body }`: the streamed loop constructs its own per-attempt
       // signal + Idempotency-Key header (streamOneDraftAttempt), so the old
@@ -996,6 +1003,19 @@ export async function draftGraphWithAnthropic(
       // nodes (healthy-but-heavy), NOT a runaway; only a stream that has gone
       // silent (no delta for DRAFT_RUNAWAY_STALL_MS) is a constrained-decode thrash.
       let lastDeltaAt = attemptStart;
+      // Whether the stream has begun producing output (first event seen). Until
+      // then we are in TTFB / prompt-processing (heavier for a document), which is
+      // NOT a decode stall — so the stall gate must not fire against `attemptStart`
+      // before any event arrives (FINAL-SWEEP F-3: exempt TTFB from the stall clock).
+      let streamingStarted = false;
+      // FINAL-SWEEP F-3 — attachment-aware detector allowance. The stall/ceiling
+      // deadlines + char gate were fitted on a NO-DOC corpus; a native document
+      // inflates TTFB + doc-grounded prose. Widen them by a BOUNDED, size-scaled
+      // allowance (0 when no document) so a HEALTHY large-doc draft is not false-
+      // aborted, while a genuine runaway WITH a document still dies within
+      // ceiling+extraMs / gate+extraChars.
+      const { extraMs: attachAllowanceMs, extraChars: attachAllowanceChars } =
+        draftAttachmentDetectorAllowance(args.attachment?.meta.bytes);
       let stallTimer: ReturnType<typeof setTimeout> | undefined;
       let ceilingTimer: ReturnType<typeof setTimeout> | undefined;
       const clearDetectTimers = () => {
@@ -1018,17 +1038,24 @@ export async function draftGraphWithAnthropic(
       const detectionActive = detectDeadlineMs != null && !draftThinkingEnabled;
       if (detectionActive) {
         stallTimer = setTimeout(() => {
-          if (!edgesReached && !runaway && Date.now() - lastDeltaAt >= DRAFT_RUNAWAY_STALL_MS) {
+          // Only a stall AFTER streaming has begun is a decode thrash; before the
+          // first event we are in TTFB (heavier for a document) — never a stall.
+          if (
+            streamingStarted &&
+            !edgesReached &&
+            !runaway &&
+            Date.now() - lastDeltaAt >= DRAFT_RUNAWAY_STALL_MS
+          ) {
             runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "stall" };
             perAttempt.abort();
           }
-        }, detectDeadlineMs as number);
+        }, (detectDeadlineMs as number) + attachAllowanceMs);
         ceilingTimer = setTimeout(() => {
           if (!edgesReached && !runaway) {
             runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "time" };
             perAttempt.abort();
           }
-        }, DRAFT_RUNAWAY_HARD_CEILING_MS);
+        }, DRAFT_RUNAWAY_HARD_CEILING_MS + attachAllowanceMs);
       }
 
       try {
@@ -1037,6 +1064,13 @@ export async function draftGraphWithAnthropic(
           headers: { "Idempotency-Key": attemptIdempotencyKey },
         });
         for await (const event of stream) {
+          // First event of ANY type marks the start of streaming: reset the stall
+          // clock here so TTFB (prompt-processing, heavier for a document) never
+          // reads as a decode stall (FINAL-SWEEP F-3).
+          if (!streamingStarted) {
+            streamingStarted = true;
+            lastDeltaAt = Date.now();
+          }
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             acc += event.delta.text;
             // Forward progress — refresh the stall clock so an actively-emitting
@@ -1064,7 +1098,11 @@ export async function draftGraphWithAnthropic(
               // corpus is creeping toward the abort ceiling. WARN so a rising rate
               // is caught BEFORE it becomes a false-abort. Derived from the live
               // measurement vs the ceiling-anchored threshold (no hand-mirror).
-              if (isEdgesTimeDrifting(timeToEdgesMs)) {
+              // Discount the attachment TTFB allowance so a HEALTHY document draft
+              // (legitimately slower to first edge) does not flood this WARN and
+              // turn the drift alarm into noise (FINAL-SWEEP F-3); a doc draft that
+              // drifts BEYOND its size-scaled allowance still trips it.
+              if (isEdgesTimeDrifting(timeToEdgesMs - attachAllowanceMs)) {
                 log.warn({
                   event: "cee.llm.draft_edges_time_drift",
                   model,
@@ -1073,7 +1111,7 @@ export async function draftGraphWithAnthropic(
                   hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
                 }, "[Anthropic] draft_graph reached edges in the SLOW TAIL — time-to-edges is approaching the runaway ceiling; a rising rate of this WARN means the healthy corpus is drifting and the ceiling may need re-derivation (F4-class early alarm)");
               }
-            } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS) {
+            } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS + attachAllowanceChars) {
               runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "chars" };
               brokeForChars = true;
               perAttempt.abort();
@@ -1158,9 +1196,9 @@ export async function draftGraphWithAnthropic(
       // withRetry transient inside the closure can only push further past the
       // floor, so this never skips a still-viable attempt.
       const remainingAtLoopTop = effectiveTimeout - (Date.now() - startTime);
-      const willBeFinalAttempt = !(
-        remainingAtLoopTop > DRAFT_RUNAWAY_HARD_CEILING_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
-        runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES
+      const willBeFinalAttempt = !hasRoomForAnotherAbortableAttempt(
+        remainingAtLoopTop,
+        runawayAbortCount,
       );
       const finalAttemptAffordableTokens = resolveDraftMaxTokens(
         Math.max(0, remainingAtLoopTop),
@@ -1228,9 +1266,10 @@ export async function draftGraphWithAnthropic(
           // is never thrown away. Reserving the ceiling (not DETECT_MS) preserves
           // the F2 invariant that the final window is never squeezed below
           // MIN_RETRY (DETECTOR-FIX, 2026-07-24).
-          const canRetryAgain =
-            remainingBudgetMs > DRAFT_RUNAWAY_HARD_CEILING_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
-            runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES;
+          const canRetryAgain = hasRoomForAnotherAbortableAttempt(
+            remainingBudgetMs,
+            runawayAbortCount,
+          );
           const attemptDetectDeadlineMs = canRetryAgain ? DRAFT_RUNAWAY_DETECT_MS : null;
           // On the FINAL attempt (no early abort, non-thinking), cap max_tokens to
           // what the LIVE remaining wall can actually generate (F1, 2026-07-24;
@@ -2230,14 +2269,8 @@ async function buildRepairPrompt(args: RepairArgs): Promise<{ system: AnthropicS
   const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
   const currencyInstruction = (args as any).currencyInstruction ?? "";
-  const userContent = `Brief:
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${briefText}
-[END_UNTRUSTED_USER_CONTENT]
-Docs:
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${docsText}
-[END_UNTRUSTED_USER_CONTENT]
+  const userContent = `${wrapUntrusted("Brief:", briefText)}
+${wrapUntrusted("Docs:", docsText)}
 Attempt: ${attempt} of ${maxAttempts}
 ${escalationText}
 ## Violations Found
@@ -2591,10 +2624,7 @@ async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: Anthropi
     : "";
 
   const currencyInstruction = (args as any).currencyInstruction ?? "";
-  const userContent = `## Brief
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${args.brief}
-[END_UNTRUSTED_USER_CONTENT]
+  const userContent = `${wrapUntrusted("## Brief", args.brief)}
 ${previousContext}${currencyInstruction}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
@@ -2805,7 +2835,7 @@ async function buildCritiquePrompt(args: CritiqueArgs): Promise<{ system: Anthro
     2
   );
 
-  const briefContext = args.brief ? `\n\n## Original Brief\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${args.brief}\n[END_UNTRUSTED_USER_CONTENT]` : "";
+  const briefContext = args.brief ? "\n\n" + wrapUntrusted("## Original Brief", args.brief) : "";
   const focusContext = args.focus_areas?.length
     ? `\n\n## Focus Areas\nPrioritize issues in: ${args.focus_areas.join(", ")}`
     : "";
@@ -2989,7 +3019,7 @@ export async function explainDiffWithAnthropic(
 Given this patch:
 ${JSON.stringify(args.patch, null, 2)}
 
-${args.brief ? `Context:\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${args.brief}\n[END_UNTRUSTED_USER_CONTENT]` : ""}
+${args.brief ? wrapUntrusted("Context:", args.brief) : ""}
 ${args.graph_summary ? `Graph has ${args.graph_summary.node_count} nodes and ${args.graph_summary.edge_count} edges.` : ""}
 
 Generate a JSON array of rationales explaining why each change was made. Each rationale should have:
@@ -3181,12 +3211,12 @@ export async function chatWithAnthropic(
   // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
   const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
   const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
-  // Anthropic requires temperature=1 when extended thinking is active.
-  // Sonnet 5 / Opus 4.7+ / Fable 5 REJECT any explicit sampling param with a 400 —
-  // omit temperature entirely for them (undefined is dropped from the request).
-  const temperature = rejectsSamplingParams(model)
-    ? undefined
-    : (thinkingEnabled ? 1 : (args.temperature ?? 0));
+  // Temperature policy (rejects-sampling gate → omit; thinking → 1; else caller's
+  // value) is single-sourced in anthropicTemperatureFor (FINAL-SWEEP F2).
+  const temperature = anthropicTemperatureFor(model, {
+    requested: args.temperature,
+    thinking: thinkingEnabled,
+  });
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   // Structured-outputs model capability = the shared allowlist OR the
@@ -3294,8 +3324,9 @@ export async function chatWithAnthropic(
         // chatWithAnthropic caller that wants thinking off) previously OMITTED the
         // field, so Sonnet-5 adaptive thinking ran and ate the budget. Now the
         // request ALWAYS carries an explicit posture (enabled OR disabled), never
-        // ambiguous — mirroring the draft path's explicit-posture idiom. Extended
-        // thinking is opt-IN via an explicit `thinking:{type:'enabled'}`.
+        // ambiguous. The draft path carries the SAME explicit-disabled posture
+        // (F-5, buildDraftPrompt above) — the two are now consistent by construction.
+        // Extended thinking is opt-IN via an explicit `thinking:{type:'enabled'}`.
         ...(thinkingEnabled
           ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } }
           : { thinking: { type: 'disabled' } }),
@@ -3501,12 +3532,12 @@ export async function chatWithToolsAnthropic(
   // When thinking budget is set, auto-raise max_tokens to budget + 1024 minimum
   const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
   const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
-  // Anthropic requires temperature=1 when extended thinking is active.
-  // Sonnet 5 / Opus 4.7+ / Fable 5 REJECT any explicit sampling param with a 400 —
-  // omit temperature entirely for them (undefined is dropped from the request).
-  const temperature = rejectsSamplingParams(model)
-    ? undefined
-    : (thinkingEnabled ? 1 : (args.temperature ?? 0));
+  // Temperature policy (rejects-sampling gate → omit; thinking → 1; else caller's
+  // value) is single-sourced in anthropicTemperatureFor (FINAL-SWEEP F2).
+  const temperature = anthropicTemperatureFor(model, {
+    requested: args.temperature,
+    thinking: thinkingEnabled,
+  });
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   const idempotencyKey = args.requestId || makeIdempotencyKey();
@@ -3806,12 +3837,12 @@ export async function* streamChatWithToolsAnthropic(
   const thinkingEnabled = thinkingRequested && isThinkingSupported(model, 'stream_chat_with_tools');
   const thinkingBudget = thinkingEnabled ? (args.thinking as { type: 'enabled'; budget_tokens: number }).budget_tokens : 0;
   const maxTokens = Math.max(args.maxTokens ?? 4096, thinkingEnabled ? thinkingBudget + 1024 : 0);
-  // Anthropic requires temperature=1 when extended thinking is active.
-  // Sonnet 5 / Opus 4.7+ / Fable 5 REJECT any explicit sampling param with a 400 —
-  // omit temperature entirely for them (undefined is dropped from the request).
-  const temperature = rejectsSamplingParams(model)
-    ? undefined
-    : (thinkingEnabled ? 1 : (args.temperature ?? 0));
+  // Temperature policy (rejects-sampling gate → omit; thinking → 1; else caller's
+  // value) is single-sourced in anthropicTemperatureFor (FINAL-SWEEP F2).
+  const temperature = anthropicTemperatureFor(model, {
+    requested: args.temperature,
+    thinking: thinkingEnabled,
+  });
   const timeoutMs = args.timeoutMs ?? TIMEOUT_MS;
 
   const startTime = Date.now();

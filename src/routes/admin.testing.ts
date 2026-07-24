@@ -18,7 +18,7 @@ import { getPromptStore, isPromptStoreHealthy } from '../prompts/store.js';
 import { interpolatePrompt } from '../prompts/schema.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
-import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking, rejectsSamplingParams } from '../config/models.js';
+import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking, anthropicTemperatureFor } from '../config/models.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
 import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
@@ -317,13 +317,13 @@ async function callAnthropicWithPrompt(
   // RIDER-A / D-60 (2026-07-24): models that REJECT explicit sampling params
   // (Sonnet 5, Opus 4.7+, Fable 5) 400 on ANY temperature — this admin harness
   // was the 5th #651-family call site missing the gate, so a decision_review A/B
-  // arm on claude-sonnet-5 could not even be measured. Omit temperature entirely
-  // for those models (undefined is dropped from the request body by the SDK's
-  // JSON serialisation); the gate takes precedence over the thinking=1 rule,
-  // mirroring the anthropic.ts draft/chat/stream idiom.
-  const effectiveTemperature: number | undefined = rejectsSamplingParams(model)
-    ? undefined
-    : (hasExtendedThinking ? 1 : (temperature ?? 0));
+  // arm on claude-sonnet-5 could not even be measured. The temperature policy is
+  // now single-sourced in anthropicTemperatureFor (FINAL-SWEEP F2) so a call site
+  // physically cannot omit the gate again.
+  const effectiveTemperature: number | undefined = anthropicTemperatureFor(model, {
+    requested: temperature,
+    thinking: hasExtendedThinking,
+  });
   // Reported value on the result envelope (number | null contract).
   const reportedTemperature: number | null = effectiveTemperature ?? null;
 

@@ -579,6 +579,29 @@ export function rejectsSamplingParams(modelId: string): boolean {
 }
 
 /**
+ * The temperature to send on an Anthropic request for `modelId`, or `undefined`
+ * to OMIT it entirely.
+ *
+ * SINGLE SOURCE for the omit-sampling-param consequence (FINAL-SWEEP, 2026-07-24;
+ * Codex quality F2). The `rejectsSamplingParams(model) ? undefined : (thinking ? 1
+ * : requested)` ternary was hand-copied at FIVE Anthropic call sites (draft, chat,
+ * stream chat, stream-with-tools, the admin harness), and a new site kept
+ * forgetting it — the admin harness was the 5th catch, a request that 400s without
+ * the gate. Folding the consequence here means a call site physically cannot omit
+ * the gate. Rules (in order): a model that rejects sampling params gets no
+ * temperature; extended thinking requires temperature=1; otherwise the caller's
+ * requested value (default 0, deterministic).
+ */
+export function anthropicTemperatureFor(
+  modelId: string,
+  opts: { requested?: number | null; thinking: boolean },
+): number | undefined {
+  if (rejectsSamplingParams(modelId)) return undefined;
+  if (opts.thinking) return 1;
+  return opts.requested ?? 0;
+}
+
+/**
  * Check if a model is allowed for client API requests.
  *
  * Returns false if:

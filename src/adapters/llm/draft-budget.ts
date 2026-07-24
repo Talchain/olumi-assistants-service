@@ -33,8 +33,15 @@
  * value, and the truncation signal is a provider fact.
  */
 
-import { getAffordableDraftTokens, DRAFT_LLM_TIMEOUT_MS } from "../../config/timeouts.js";
+import {
+  getAffordableDraftTokens,
+  DRAFT_LLM_TIMEOUT_MS,
+  LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+  DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S,
+  DRAFT_TTFB_SAFETY_OVERHEAD_S,
+} from "../../config/timeouts.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { DRAFT_ATTACHMENT_MAX_BYTES } from "./draft-attachment.js";
 
 // Guard floor for an EXPLICITLY-configured draft max_tokens set too low —
 // a complex 15-node graph with coaching, causal claims, and goal constraints
@@ -330,6 +337,40 @@ export const DRAFT_RUNAWAY_HARD_CEILING_MS = 30_000;
 // (and so is NOT stalled) before it can blow the hard ceiling.
 export const DRAFT_RUNAWAY_DETECT_CHARS = 8_000;
 
+// ── ATTACHMENT-AWARE DETECTOR ALLOWANCE (FINAL-SWEEP, 2026-07-24; Codex F-3) ──
+// Every threshold above was fitted on a NO-DOC corpus (the native doc-attach
+// feature did not exist when they were measured). #670/#671 then made a native
+// document the PRIMARY draft path WITHOUT touching them. A document inflates the
+// input side two ways the no-doc thresholds don't model:
+//   • TTFB / prompt-processing — the fixed no-doc component is already ~13.26s
+//     (timeouts.ts); a 512KB doc adds parse + processing on top, pushing time-to-
+//     edges past the 30s ceiling and the 20s stall deadline (→ false abort).
+//   • Doc-grounded prose volume — richer node descriptions before the first edge
+//     can cross the 8000-char gate (only +13% over the no-doc healthy max).
+// Both are proportional to the document's SIZE, which is known at request time
+// (meta.bytes, capped at DRAFT_ATTACHMENT_MAX_BYTES). Derive a BOUNDED allowance,
+// scaled linearly by size, added to the detect/stall/ceiling deadlines + the char
+// gate. Bounded so a genuine runaway WITH a document still dies within a fixed
+// extra budget (ceiling+MS_MAX / chars+CHARS_MAX at the cap), never indefinitely.
+export const DRAFT_ATTACHMENT_DETECT_ALLOWANCE_MS_MAX = 20_000;
+export const DRAFT_ATTACHMENT_DETECT_ALLOWANCE_CHARS_MAX = 4_000;
+
+export function draftAttachmentDetectorAllowance(attachmentBytes: number | undefined): {
+  readonly extraMs: number;
+  readonly extraChars: number;
+} {
+  if (typeof attachmentBytes !== "number" || !Number.isFinite(attachmentBytes) || attachmentBytes <= 0) {
+    return { extraMs: 0, extraChars: 0 };
+  }
+  // Fraction of the max-size document (clamped at 1.0 — the parse layer already
+  // rejects > DRAFT_ATTACHMENT_MAX_BYTES; this is a belt-and-suspenders clamp).
+  const sizeFraction = Math.min(1, attachmentBytes / DRAFT_ATTACHMENT_MAX_BYTES);
+  return {
+    extraMs: Math.round(sizeFraction * DRAFT_ATTACHMENT_DETECT_ALLOWANCE_MS_MAX),
+    extraChars: Math.round(sizeFraction * DRAFT_ATTACHMENT_DETECT_ALLOWANCE_CHARS_MAX),
+  };
+}
+
 // DRIFT TRIPWIRE (the alarm that was MISSING on 2026-07-24). Derived from the
 // hard ceiling (0.6× = 60% of the way to an abort) rather than a hand-mirrored
 // corpus constant, so it cannot silently drift out of sync with the gate. A
@@ -364,19 +405,50 @@ export const DRAFT_MAX_RUNAWAY_RETRIES = 5;
 // the FINAL attempt then runs to the full remaining window with NO early abort,
 // so a late-but-legitimate completion is never discarded and the existing
 // salvage (closeTruncatedJson) still applies to a natural max_tokens truncation.
-// 35s is the observed healthy completion ceiling (~34.8s), so the final attempt
-// gets a full healthy window.
 //
-// ⚠ COMPOSITE UPDATED (DETECTOR-FIX, 2026-07-24): the retry-authorization in the
-// adapter (`canRetryAgain`) reserves HARD_CEILING_MS + this, NOT DETECT_MS + this
-// as before. Progress-awareness means an abortable attempt can now consume up to
-// the hard ceiling (30s) before aborting, not just DETECT_MS (20s), so the budget
-// that authorizes "there is room for a full retry after this abort" must reserve
-// the ceiling — otherwise the final window could be squeezed below this floor
-// (an F2-class invariant break). With the ~110s draft budget this affords ~2
-// aborts + a final ≥ this floor (30 + 30 + ≥50); at the runaway rate this is the
-// abort-retry lever.
-export const DRAFT_RUNAWAY_MIN_RETRY_MS = 35_000;
+// ⚠ RECONCILED TO THE SKIP-GATE FLOOR (FINAL-SWEEP, 2026-07-24; Codex F-4). This
+// value is now DERIVED, not a hand-typed 35s, because the retry-authorization
+// (`hasRoomForAnotherAbortableAttempt`, reserving HARD_CEILING_MS + this) and the
+// final-attempt SKIP-GATE were contradicting each other. `canRetryAgain` reserved
+// only 35s, promising a post-abort final ≥ 35s; but the skip-gate refuses any
+// final that affords fewer than LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR (2,700) tokens,
+// which in time is (2700/90 + 15s) = 45s. So an abort landing the final window in
+// [35s, 45s) was AUTHORIZED by canRetryAgain and then REFUSED by the skip-gate —
+// converting a single (possibly false) abort into a total request failure with
+// budget unspent. Deriving this from the SAME primitives the skip-gate's token
+// floor uses (LEAN floor / throughput-floor + TTFB overhead) makes the two agree
+// BY CONSTRUCTION: an abort is authorized only when its promised final window can
+// actually afford a converged graph. Evaluates to 45,000ms today; it tracks the
+// floor automatically if any of those primitives change (derive, never mirror).
+export const DRAFT_RUNAWAY_MIN_RETRY_MS = Math.ceil(
+  (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S +
+    DRAFT_TTFB_SAFETY_OVERHEAD_S) *
+    1000,
+);
+
+/**
+ * Shared retry-reserve predicate (FINAL-SWEEP, 2026-07-24; Codex F-4 + quality
+ * F1). TRUE when the remaining budget has room for a full ABORTABLE attempt (one
+ * that, under progress-aware detection, may consume up to the HARD CEILING before
+ * aborting) PLUS a viable final retry after it — reserving HARD_CEILING_MS +
+ * DRAFT_RUNAWAY_MIN_RETRY_MS — AND the runaway-retry backstop is not yet hit.
+ *
+ * Single source for BOTH sites that previously hand-copied this arithmetic on two
+ * clock reads microseconds apart: the loop-top skip-gate (`willBeFinalAttempt =
+ * !hasRoom(...)`) and the in-closure abort authorization (`canRetryAgain =
+ * hasRoom(...)`). They were byte-identical thresholds a lockstep-edit hazard kept
+ * drifting (the reserve itself just moved DETECT→HARD_CEILING); one function makes
+ * a future change land at both callers at once.
+ */
+export function hasRoomForAnotherAbortableAttempt(
+  remainingMs: number,
+  runawayAbortCount: number,
+): boolean {
+  return (
+    remainingMs > DRAFT_RUNAWAY_HARD_CEILING_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
+    runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES
+  );
+}
 
 // Structural "reached the edges array" probe over the accumulated stream text.
 // Edge objects carry `"from":`; healthy drafts emit ≥1, runaways emit 0 (the

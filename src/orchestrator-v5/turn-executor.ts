@@ -798,16 +798,78 @@ export async function runTurnExecutor(
     // `graphCasMode !== 'off'` gate for every valid config, and closes the
     // RPC=enforce+MODE=off hole (also boot-rejected). F2 composition — derive
     // from the chokepoint-resolved graph when set (correct even after a degraded
-    // read whose strict reread re-proved the base); fall back to
-    // `context.persistedGraph` for commit paths that never hit the chokepoint
-    // (meta.graph undefined ⇒ expected stays undefined anyway).
-    const expectedBaseGraph = resolvedCanonicalGraphForCommit
-      ? resolvedCanonicalGraphForCommit.graph
-      : context.persistedGraph;
-    const expectedGraphCasHashes =
-      meta.graph !== undefined && config.features.graphCas.requiresExpectedHash
-        ? computeExpectedGraphCasHashes(expectedBaseGraph)
-        : undefined;
+    // read whose strict reread re-proved the base).
+    //
+    // FINAL-SWEEP (pre-handover) — CLOSE THE HELD-APPLY CLOBBER AT THE FLOOR.
+    // The GM held-execute / consent-apply writers (:2119, :2342) return via
+    // `finalizeRun()` BEFORE the graph-write chokepoint (:8239), so on those
+    // paths `resolvedCanonicalGraphForCommit` is unset. On a HEALTHY read the
+    // fallback below is `context.persistedGraph` (the real server-read base) —
+    // correct, unchanged. But on a DEGRADED canonical read `context.persistedGraph`
+    // is NULL, so the fallback would derive `{null,null}` → CAS category
+    // `no_expected` → the RPC receives a NULL expected base → an UNCONDITIONAL
+    // write that SILENTLY CLOBBERS any concurrently-advanced server graph (the
+    // exact F2 defect, at the held writers the chokepoint fix never covered).
+    // Restore the protection a degraded read strips, for EVERY non-chokepoint
+    // graph commit: when a graph write arrives unresolved on a degraded read
+    // (and CAS is meant to protect), strict-reread the canonical graph —
+    //   • reread FAILS               → state unknown → FAIL CLOSED (throw).
+    //   • reread proves a SERVER MODEL exists (non-null identity) → we cannot
+    //     safely referee a pre-mutated full graph against a base we could not
+    //     read at turn start (the merge that makes this safe runs ONLY at the
+    //     chokepoint, rows D/F) → FAIL CLOSED rather than clobber it.
+    //   • reread proves ABSENT       → nothing to clobber → proceed (first-write).
+    // NOTE: the strict reread cannot be used AS the expected base here (unlike
+    // the chokepoint, which re-merges the mutation onto it) — a bare reread
+    // equals the store's pre-write current graph, so CAS would tautologically
+    // `match` and the clobber would still land; hence FAIL CLOSED on a present
+    // model, never adopt it. On a healthy read this whole branch is inert.
+    let expectedGraphCasHashes: ReturnType<typeof computeExpectedGraphCasHashes> | undefined;
+    if (meta.graph !== undefined && config.features.graphCas.requiresExpectedHash) {
+      const persistedRead = context.persistedGraphRead;
+      if (!resolvedCanonicalGraphForCommit && persistedRead?.status === 'degraded') {
+        let rereadGraph: unknown | null;
+        try {
+          rereadGraph = await loadPersistedGraphStrict(context.session_id);
+        } catch (err) {
+          log.warn(
+            {
+              event: 'v5.turn_executor.commit_floor_degraded_reread_failed',
+              request_id: requestId,
+              scenario_id: context.session_id,
+              error_code: persistedRead.errorCode,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            'V5 commit floor — canonical read degraded AND strict reread failed; refusing the graph write (fail closed, nothing half-lands)',
+          );
+          throw new Error(
+            `V5 commit floor — refusing graph write for scenario ${context.session_id}: canonical read degraded (${persistedRead.errorCode}) and strict reread failed (${err instanceof Error ? err.message : String(err)})`,
+          );
+        }
+        const rereadHashes = computeExpectedGraphCasHashes(rereadGraph);
+        if (rereadHashes.expectedGraphIdentityHash !== null) {
+          log.warn(
+            {
+              event: 'v5.turn_executor.commit_floor_degraded_reread_blocked',
+              request_id: requestId,
+              scenario_id: context.session_id,
+              error_code: persistedRead.errorCode,
+            },
+            'V5 commit floor — canonical read degraded; strict reread found an existing server model; refusing to clobber it with a non-chokepoint graph write (fail closed)',
+          );
+          throw new Error(
+            `V5 commit floor — refusing graph write for scenario ${context.session_id}: canonical read degraded (${persistedRead.errorCode}) and strict reread proved an existing server model (no trusted merge base outside the write chokepoint)`,
+          );
+        }
+        // Reread proved ABSENT — a genuine first-write, nothing to clobber.
+        expectedGraphCasHashes = rereadHashes;
+      } else {
+        const expectedBaseGraph = resolvedCanonicalGraphForCommit
+          ? resolvedCanonicalGraphForCommit.graph
+          : context.persistedGraph;
+        expectedGraphCasHashes = computeExpectedGraphCasHashes(expectedBaseGraph);
+      }
+    }
     const result = await commitDirectAnswer(
       resp,
       {

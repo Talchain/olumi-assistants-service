@@ -18,6 +18,7 @@
 
 import { getSystemPrompt } from '../../adapters/llm/prompt-loader.js';
 import { getAdapter, getMaxTokensFromConfig } from '../../adapters/llm/router.js';
+import { wrapUntrusted } from '../../adapters/llm/untrusted-envelope.js';
 import { extractJsonFromResponse } from '../../utils/json-extractor.js';
 import { log } from '../../utils/telemetry.js';
 import { VALIDATION_PIPELINE_TIMEOUT_MS } from '../../config/timeouts.js';
@@ -60,8 +61,7 @@ export async function callValidateGraph(
   // ── User message (JSON format per prompt spec) ─────────────────────────────
   // Wrap the brief in untrusted-content markers to defend against prompt
   // injection — the brief is user-controlled input.
-  const wrappedBrief =
-    `[BEGIN_UNTRUSTED_USER_CONTENT]\n${brief}\n[END_UNTRUSTED_USER_CONTENT]`;
+  const wrappedBrief = wrapUntrusted('', brief);
   const userMessagePayload: Pass2UserMessage = { brief: wrappedBrief, nodes, edges };
   const userMessage = JSON.stringify(userMessagePayload, null, 2);
 
