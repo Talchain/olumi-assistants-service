@@ -1876,9 +1876,7 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
     // tokens < the 2700-token converged-graph floor. Rather than burn ~30s on a
     // sub-viable 0-edge generation (the 89s hard-fail chain), the loop fails FAST
     // with the typed error — WITHOUT a 3rd stream call.
-    let call = 0;
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
-      call++;
       mockNow += 35_000; // each abortable attempt burns 35s of wall-clock
       return runawayStream(body, options); // char-gate runaway (no edges)
     });
