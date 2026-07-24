@@ -41,6 +41,7 @@ import {
   DRAFT_TTFB_SAFETY_OVERHEAD_S,
 } from "../../config/timeouts.js";
 import { getMaxTokensFromConfig } from "./router.js";
+import { DRAFT_ATTACHMENT_MAX_BYTES } from "./draft-attachment.js";
 
 // Guard floor for an EXPLICITLY-configured draft max_tokens set too low —
 // a complex 15-node graph with coaching, causal claims, and goal constraints
@@ -335,6 +336,40 @@ export const DRAFT_RUNAWAY_HARD_CEILING_MS = 30_000;
 // nodes array. This is the signal that catches a runaway which keeps emitting
 // (and so is NOT stalled) before it can blow the hard ceiling.
 export const DRAFT_RUNAWAY_DETECT_CHARS = 8_000;
+
+// ── ATTACHMENT-AWARE DETECTOR ALLOWANCE (FINAL-SWEEP, 2026-07-24; Codex F-3) ──
+// Every threshold above was fitted on a NO-DOC corpus (the native doc-attach
+// feature did not exist when they were measured). #670/#671 then made a native
+// document the PRIMARY draft path WITHOUT touching them. A document inflates the
+// input side two ways the no-doc thresholds don't model:
+//   • TTFB / prompt-processing — the fixed no-doc component is already ~13.26s
+//     (timeouts.ts); a 512KB doc adds parse + processing on top, pushing time-to-
+//     edges past the 30s ceiling and the 20s stall deadline (→ false abort).
+//   • Doc-grounded prose volume — richer node descriptions before the first edge
+//     can cross the 8000-char gate (only +13% over the no-doc healthy max).
+// Both are proportional to the document's SIZE, which is known at request time
+// (meta.bytes, capped at DRAFT_ATTACHMENT_MAX_BYTES). Derive a BOUNDED allowance,
+// scaled linearly by size, added to the detect/stall/ceiling deadlines + the char
+// gate. Bounded so a genuine runaway WITH a document still dies within a fixed
+// extra budget (ceiling+MS_MAX / chars+CHARS_MAX at the cap), never indefinitely.
+export const DRAFT_ATTACHMENT_DETECT_ALLOWANCE_MS_MAX = 20_000;
+export const DRAFT_ATTACHMENT_DETECT_ALLOWANCE_CHARS_MAX = 4_000;
+
+export function draftAttachmentDetectorAllowance(attachmentBytes: number | undefined): {
+  readonly extraMs: number;
+  readonly extraChars: number;
+} {
+  if (typeof attachmentBytes !== "number" || !Number.isFinite(attachmentBytes) || attachmentBytes <= 0) {
+    return { extraMs: 0, extraChars: 0 };
+  }
+  // Fraction of the max-size document (clamped at 1.0 — the parse layer already
+  // rejects > DRAFT_ATTACHMENT_MAX_BYTES; this is a belt-and-suspenders clamp).
+  const sizeFraction = Math.min(1, attachmentBytes / DRAFT_ATTACHMENT_MAX_BYTES);
+  return {
+    extraMs: Math.round(sizeFraction * DRAFT_ATTACHMENT_DETECT_ALLOWANCE_MS_MAX),
+    extraChars: Math.round(sizeFraction * DRAFT_ATTACHMENT_DETECT_ALLOWANCE_CHARS_MAX),
+  };
+}
 
 // DRIFT TRIPWIRE (the alarm that was MISSING on 2026-07-24). Derived from the
 // hard ceiling (0.6× = 60% of the way to an abort) rather than a hand-mirrored

@@ -29,6 +29,7 @@ import {
   DRAFT_EDGES_REACHED_RE,
   isEdgesTimeDrifting,
   hasRoomForAnotherAbortableAttempt,
+  draftAttachmentDetectorAllowance,
 } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
@@ -995,6 +996,19 @@ export async function draftGraphWithAnthropic(
       // nodes (healthy-but-heavy), NOT a runaway; only a stream that has gone
       // silent (no delta for DRAFT_RUNAWAY_STALL_MS) is a constrained-decode thrash.
       let lastDeltaAt = attemptStart;
+      // Whether the stream has begun producing output (first event seen). Until
+      // then we are in TTFB / prompt-processing (heavier for a document), which is
+      // NOT a decode stall — so the stall gate must not fire against `attemptStart`
+      // before any event arrives (FINAL-SWEEP F-3: exempt TTFB from the stall clock).
+      let streamingStarted = false;
+      // FINAL-SWEEP F-3 — attachment-aware detector allowance. The stall/ceiling
+      // deadlines + char gate were fitted on a NO-DOC corpus; a native document
+      // inflates TTFB + doc-grounded prose. Widen them by a BOUNDED, size-scaled
+      // allowance (0 when no document) so a HEALTHY large-doc draft is not false-
+      // aborted, while a genuine runaway WITH a document still dies within
+      // ceiling+extraMs / gate+extraChars.
+      const { extraMs: attachAllowanceMs, extraChars: attachAllowanceChars } =
+        draftAttachmentDetectorAllowance(args.attachment?.meta.bytes);
       let stallTimer: ReturnType<typeof setTimeout> | undefined;
       let ceilingTimer: ReturnType<typeof setTimeout> | undefined;
       const clearDetectTimers = () => {
@@ -1017,17 +1031,24 @@ export async function draftGraphWithAnthropic(
       const detectionActive = detectDeadlineMs != null && !draftThinkingEnabled;
       if (detectionActive) {
         stallTimer = setTimeout(() => {
-          if (!edgesReached && !runaway && Date.now() - lastDeltaAt >= DRAFT_RUNAWAY_STALL_MS) {
+          // Only a stall AFTER streaming has begun is a decode thrash; before the
+          // first event we are in TTFB (heavier for a document) — never a stall.
+          if (
+            streamingStarted &&
+            !edgesReached &&
+            !runaway &&
+            Date.now() - lastDeltaAt >= DRAFT_RUNAWAY_STALL_MS
+          ) {
             runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "stall" };
             perAttempt.abort();
           }
-        }, detectDeadlineMs as number);
+        }, (detectDeadlineMs as number) + attachAllowanceMs);
         ceilingTimer = setTimeout(() => {
           if (!edgesReached && !runaway) {
             runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "time" };
             perAttempt.abort();
           }
-        }, DRAFT_RUNAWAY_HARD_CEILING_MS);
+        }, DRAFT_RUNAWAY_HARD_CEILING_MS + attachAllowanceMs);
       }
 
       try {
@@ -1036,6 +1057,13 @@ export async function draftGraphWithAnthropic(
           headers: { "Idempotency-Key": attemptIdempotencyKey },
         });
         for await (const event of stream) {
+          // First event of ANY type marks the start of streaming: reset the stall
+          // clock here so TTFB (prompt-processing, heavier for a document) never
+          // reads as a decode stall (FINAL-SWEEP F-3).
+          if (!streamingStarted) {
+            streamingStarted = true;
+            lastDeltaAt = Date.now();
+          }
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             acc += event.delta.text;
             // Forward progress — refresh the stall clock so an actively-emitting
@@ -1063,7 +1091,11 @@ export async function draftGraphWithAnthropic(
               // corpus is creeping toward the abort ceiling. WARN so a rising rate
               // is caught BEFORE it becomes a false-abort. Derived from the live
               // measurement vs the ceiling-anchored threshold (no hand-mirror).
-              if (isEdgesTimeDrifting(timeToEdgesMs)) {
+              // Discount the attachment TTFB allowance so a HEALTHY document draft
+              // (legitimately slower to first edge) does not flood this WARN and
+              // turn the drift alarm into noise (FINAL-SWEEP F-3); a doc draft that
+              // drifts BEYOND its size-scaled allowance still trips it.
+              if (isEdgesTimeDrifting(timeToEdgesMs - attachAllowanceMs)) {
                 log.warn({
                   event: "cee.llm.draft_edges_time_drift",
                   model,
@@ -1072,7 +1104,7 @@ export async function draftGraphWithAnthropic(
                   hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
                 }, "[Anthropic] draft_graph reached edges in the SLOW TAIL — time-to-edges is approaching the runaway ceiling; a rising rate of this WARN means the healthy corpus is drifting and the ceiling may need re-derivation (F4-class early alarm)");
               }
-            } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS) {
+            } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS + attachAllowanceChars) {
               runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "chars" };
               brokeForChars = true;
               perAttempt.abort();
