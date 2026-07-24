@@ -1,12 +1,29 @@
 /**
- * Token Budget Calculator and Context Budget Enforcement
+ * Token Budget Calculator + a PATHOLOGICAL-INPUT SAFETY VALVE (ROADMAP 1.199, P5).
  *
- * Budget allocation:
- * - System prompt + tools: ~20%
- * - Graph: ~25%
- * - Analysis: ~15%
- * - Conversation (incl. event log): ~30%
- * - Buffer: ~10%
+ * ⚠ WHAT THIS IS — the honest label (budget-honesty, Q5). `enforceContextBudget`
+ * is NOT the per-turn context-shaping policy. On the LIVE V5 seam
+ * (context-budget-enforcement.ts:126) it is handed ONLY `graph_compact` +
+ * `analysis_response`, and it only trims those two sections when a graph/analysis
+ * is pathologically large — a coarse backstop against an oversized compact graph,
+ * not the mechanism that shapes a normal turn. The real per-turn shaping is the
+ * ENFORCED per-section budgets declared in the CONTEXT_POLICY (the 4000-char
+ * `display_analysis` cut, the brief caps) — see
+ * orchestrator-v5/context/context-policy.ts.
+ *
+ * The former 5→3→1 CONVERSATION-trim ladder was DELETED here (P5): it was wired
+ * to NOTHING on the live seam — the only caller passes no `messages`
+ * (context-budget-enforcement.ts:129-131, its `AssemblyEnforcementContext`
+ * carries no messages field), and the V1/V4 routes that once passed a
+ * conversation are dead. Dead code that reads as a live backstop is the
+ * guarantee-theatre class (platform CLAUDE.md — the "dead ceiling masquerading
+ * as the live policy" defect); it is removed rather than left as a false valve.
+ * The live conversation-window bound is the verbatim-turns cap
+ * (CONTEXT_PACK_RECENT_TURNS_CAP), declared in the policy's `memory_window`.
+ *
+ * calculateTokenBudget below is a general token-allocation CALCULATOR (still
+ * used for the graph/analysis sub-budgets); its allocations name all sections
+ * for completeness, but `enforceContextBudget` acts on graph + analysis only.
  *
  * Heuristic: 4 chars per token (sufficient for PoC).
  */
@@ -90,20 +107,19 @@ function estimateTokensForValue(value: unknown): number {
 // ============================================================================
 
 /**
- * The subset of EnrichedContext fields that budget enforcement manages.
- * Budget enforcement operates on compact representations — not raw graph/analysis.
- * Uses graph_compact and analysis_response (compact) — not the raw graph/analysis fields.
+ * The subset of EnrichedContext fields this safety valve manages.
+ * `enforceContextBudget` operates on the COMPACT graph/analysis representations
+ * ONLY — never on the conversation window (that is the O-2 / rolling-summary
+ * lane's surface; the verbatim-turns cap in the CONTEXT_POLICY bounds it). The
+ * former `messages` / `event_log_summary` fields were removed with the dead
+ * conversation-trim ladder (P5) — they were consumed by nothing else.
  */
 export interface BudgetEnforcementContext {
-  // Compact graph — may be trimmed if over budget
+  // Compact graph — may be trimmed if pathologically over budget
   graph_compact?: GraphV3Compact | null;
-  // Compact analysis summary — may be trimmed if over budget
+  // Compact analysis summary — may be trimmed if pathologically over budget
   analysis_response?: AnalysisResponseSummary | null;
-  // Trimmed conversation messages
-  messages?: Array<{ role: string; content: string }>;
-  // Event log summary (counted within conversation budget, not trimmed)
-  event_log_summary?: string;
-  // Pass-through fields (not touched by budget enforcement)
+  // Pass-through fields (not touched by this safety valve)
   [key: string]: unknown;
 }
 
@@ -202,15 +218,12 @@ function trimCompactEdgeExists(edge: GraphV3Compact['edges'][number]): GraphV3Co
 }
 
 /**
- * Enforce context budget on an enriched context.
+ * Pathological-input safety valve for the COMPACT graph/analysis sections.
  *
- * Budget allocation (% of maxTokens):
- * - System prompt + tools: ~20% (fixed, not controlled here)
- * - Graph compact: ~25% → trim on excess
- * - Analysis compact: ~15% → trim on excess
- * - Conversation (5 turns): ~30% → reduce to 3, then 1 turn
- * - Event log summary: included in conversation budget
- * - Buffer: ~10% reserved
+ * Trims ONLY `graph_compact` and `analysis_response` when they are
+ * pathologically large. It does NOT shape the conversation window (the 5→3→1
+ * conversation-trim ladder was deleted in P5 — it was dead on the live seam;
+ * the verbatim-turns cap in the CONTEXT_POLICY bounds the window instead).
  *
  * Trimming behaviour (graph — preserves user-visible state as long as possible):
  * - Pass 1: drop plain_interpretation from edges (convenience text, raw numbers remain)
@@ -223,8 +236,6 @@ function trimCompactEdgeExists(edge: GraphV3Compact['edges'][number]): GraphV3Co
  *
  * Analysis trimming:
  * - Drop constraint_tensions, reduce top_drivers to 3
- *
- * Conversation trimming: reduce to 3 turns, then 1 turn (always keep latest)
  *
  * This function NEVER throws. On any error, it logs and returns the context unchanged.
  *
@@ -345,34 +356,13 @@ export function enforceContextBudget<T extends BudgetEnforcementContext>(
       }
     }
 
-    // --- Conversation budget enforcement ---
-    const messages = result.messages ?? [];
-    const convTokens = estimateTokensForValue(messages)
-      + (result.event_log_summary ? estimateTokens(result.event_log_summary as string) : 0);
-    if (convTokens > budget.conversation) {
-      let reduced = messages.length;
-
-      if (messages.length > 3) {
-        reduced = 3;
-        log.warn(
-          { convTokens, convBudget: budget.conversation, originalCount: messages.length },
-          'enforceContextBudget: conversation over budget — reducing to 3 turns',
-        );
-      }
-
-      // Check again after reducing to 3
-      const after3Tokens = estimateTokensForValue(messages.slice(-3));
-      if (reduced === 3 && after3Tokens > budget.conversation) {
-        reduced = 1;
-        log.warn(
-          { convTokens: after3Tokens, convBudget: budget.conversation },
-          'enforceContextBudget: conversation still over budget — reducing to 1 turn',
-        );
-      }
-
-      // Always keep the latest `reduced` messages
-      result = { ...result, messages: messages.slice(-reduced) };
-    }
+    // NOTE (P5, ROADMAP 1.199): the conversation-window budget enforcement
+    // (the 5→3→1 message-trim ladder) was DELETED here. It was unreachable on
+    // the live V5 seam — the sole caller (context-budget-enforcement.ts:126)
+    // passes only graph_compact + analysis_response, never `messages` — so it
+    // was a dead backstop that read as a live guarantee. The conversation
+    // window is bounded by the verbatim-turns cap (CONTEXT_PACK_RECENT_TURNS_CAP,
+    // declared in the CONTEXT_POLICY's memory_window), not here.
 
     return result;
   } catch (err) {

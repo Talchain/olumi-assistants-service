@@ -19,6 +19,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
 
 import {
   CONTEXT_POLICY,
@@ -31,8 +34,15 @@ import {
   POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP,
   POLICY_VERBATIM_TURNS,
   POLICY_MAX_PROJECTED_OPTIONS,
+  POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+  type ContextCallSite,
   type ContextPolicyTripwireLogger,
 } from '../context-policy.js';
+import { projectDecisionRecords } from '../../decision-records/project.js';
+
+import { runStageCoachingPass } from '../../../cee/unified-pipeline/stages/coaching-pass.js';
+import * as telemetry from '../../../utils/telemetry.js';
+import type { StageContext } from '../../../cee/unified-pipeline/types.js';
 
 import {
   assembleContextPack,
@@ -210,8 +220,15 @@ describe('deriveContextSectionBudgets — routing preserved, edit drift fixed, d
     expect(derived.repair_edit_graph.sections).toEqual(derived.edit_graph.sections);
   });
 
-  it('draft_graph passes through instrumented-only (POST wave-1; P4)', () => {
+  it('draft_graph maps to draft_structural but stays instrumented-only (uncapped brief → no budgets)', () => {
+    // P4 mapped draft_graph → draft_structural, whose only section (brief) is
+    // telemetry_only with char_budget null, so the derived view is still empty:
+    // the structural draft carries NO enforced cut, honestly.
     expect(derived.draft_graph).toEqual({ sections: {}, total: null });
+  });
+
+  it('draft_coaching (the post-draft pass) is instrumented-only too', () => {
+    expect(derived.draft_coaching).toEqual({ sections: {}, total: null });
   });
 });
 
@@ -279,6 +296,63 @@ describe('coach_converse anchor — realised composition matches the declared po
     expect(strayObserved).toContain('mystery_injected_section');
     const undeclared = strayObserved.filter((k) => !declared.includes(k));
     expect(undeclared).toContain('mystery_injected_section'); // the check goes RED on a stray
+  });
+});
+
+// ---------------------------------------------------------------------------
+// coach_converse older_relevant_facts (P6) — knowledge-over-time read slice
+// ---------------------------------------------------------------------------
+
+describe('coach_converse older_relevant_facts — the P6 read slice is declared, enforced, derived', () => {
+  const section = CONTEXT_POLICY.coach_converse.sections.find((s) => s.name === 'older_relevant_facts');
+
+  it('is a MODEL-FACING, ENFORCED section (no longer an unpopulated reservation)', () => {
+    expect(section).toBeDefined();
+    expect(section!.model_facing).toBe(true);
+    expect(section!.enforcement).toBe('enforced');
+    expect(section!.source).toBe('decision_records');
+  });
+
+  it('its budget is DERIVED from the SAME constant the projection cuts at (derive-don\'t-mirror)', () => {
+    // The policy row and projectDecisionRecords both key on this ONE constant,
+    // so the declared ceiling and the live cut can never drift.
+    expect(section!.char_budget).toBe(POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET);
+    // Proof the projection actually honours it (the enforced cut discriminates):
+    const many = Array.from({ length: 8 }, (_, i) => ({
+      record_id: `r${i}`,
+      scenario_id: 'scen',
+      created_at: `2026-07-0${i + 1}T00:00:00Z`,
+      decision: { chosen_option_label: `Option ${i}`, chosen_option_id: 'o', graph_hash: 'x' },
+      prediction: { statement: 'z'.repeat(400), confidence_source: 'model_derived' },
+    }));
+    const projected = projectDecisionRecords(many, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET)!;
+    expect(projected.text.length).toBeLessThanOrEqual(POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET);
+    expect(projected.truncated).toBe(true); // the cut fired
+  });
+
+  it('it is declared ABOVE conversation_summary among model-facing sections (facts beat summary)', () => {
+    const modelFacing = CONTEXT_POLICY.coach_converse.sections.filter((s) => s.model_facing).map((s) => s.name);
+    expect(modelFacing.indexOf('older_relevant_facts')).toBeLessThan(modelFacing.indexOf('conversation_summary'));
+  });
+
+  it('OBSERVED — a pack WITH the read slice serialises older_relevant_facts among declared keys; WITHOUT it the key is ABSENT (byte-identity)', () => {
+    const withFacts = assembleContextPack({
+      payload: makeMessagePayload({ scenario_id: 'scen-p6', message: 'what should I do?' }),
+      priorTurns: [],
+      priorFacts: [],
+      analysis: ANCHOR_ANALYSIS,
+      brief: ANCHOR_BRIEF,
+      olderRelevantFacts: 'Prior decisions recorded on this scenario (most recent first):\n- [2026-07-01] Chose "Bootstrap": keep runway',
+    });
+    const observedWith = observeSerialisedKeys(buildUserMessage(withFacts, 'what should I do?'));
+    expect(observedWith).toContain('older_relevant_facts');
+    // still a subsequence of the declared model-facing order
+    expect(isSubsequence(observedWith, modelFacingSectionKeys('coach_converse'))).toBe(true);
+
+    // WITHOUT records → the pack key is absent (record-less scenarios byte-identical).
+    const withoutFacts = assembleAnchorPack();
+    const observedWithout = observeSerialisedKeys(buildUserMessage(withoutFacts, 'what should I do?'));
+    expect(observedWithout).not.toContain('older_relevant_facts');
   });
 });
 
@@ -422,8 +496,28 @@ describe('runtime tripwire — findContextPolicyDivergences', () => {
     expect(d.unknown_sections).toEqual([]);
   });
 
-  it('an unmapped call site (draft_graph, POST wave-1) yields no divergence', () => {
-    expect(findContextPolicyDivergences('draft_graph', { anything: 9_999 })).toEqual({
+  it('draft_graph (now → draft_structural) is silent on its declared uncapped brief', () => {
+    // P4 mapped it: an uncapped brief of ANY size is declared telemetry_only,
+    // so it never flags — but a section the policy does not declare IS seen.
+    expect(
+      findContextPolicyDivergences('draft_graph', { brief: 500_000 }),
+    ).toEqual({ unknown_sections: [], over_budget_sections: [] });
+    expect(
+      findContextPolicyDivergences('draft_graph', { brief: 1_000, mystery: 42 }).unknown_sections,
+    ).toEqual(['mystery']); // POSITIVE CONTROL — a stray section on the draft site is seen
+  });
+
+  it('draft_coaching is silent on its declared brief + graph, but sees a stray', () => {
+    expect(
+      findContextPolicyDivergences('draft_coaching', { brief: 400_000, graph: 90_000 }),
+    ).toEqual({ unknown_sections: [], over_budget_sections: [] });
+    expect(
+      findContextPolicyDivergences('draft_coaching', { brief: 10, graph: 10, causal: 5 }).unknown_sections,
+    ).toEqual(['causal']);
+  });
+
+  it('a truly unmapped call site yields no divergence', () => {
+    expect(findContextPolicyDivergences('some_future_site', { anything: 9_999 })).toEqual({
       unknown_sections: [],
       over_budget_sections: [],
     });
@@ -480,5 +574,176 @@ describe('runtime tripwire — emitContextPolicyDivergence (observe-only)', () =
     expect(() =>
       emitContextPolicyDivergence('routing', { unknown_x: 1 }, 1, 'r', 's', thrower),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Namesake-twin kill (P4) — exactly ONE exported assembleContextPack repo-wide
+// ---------------------------------------------------------------------------
+
+const SRC_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..'); // → src/
+
+function walkTsFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules') continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkTsFiles(full));
+    else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) out.push(full);
+  }
+  return out;
+}
+
+/** Matches an EXPORTED definition of `assembleContextPack` (function or const),
+ *  not a re-export/alias/import — the DEFINITION is the symbol's identity. */
+const EXPORT_ASSEMBLE_DEF_RE =
+  /^export\s+(?:async\s+)?function\s+assembleContextPack\b|^export\s+const\s+assembleContextPack\b/m;
+
+describe('namesake-twin kill — assembleContextPack resolves to exactly ONE exported symbol', () => {
+  it('exactly one exported assembleContextPack DEFINITION exists in src/ (the V5 model-facing one)', () => {
+    const defs = walkTsFiles(SRC_ROOT)
+      .filter((f) => EXPORT_ASSEMBLE_DEF_RE.test(readFileSync(f, 'utf8')))
+      .map((f) => f.slice(f.indexOf('/src/') + 1).replace(/\\/g, '/'));
+    // RED at c930f05c (two defs: the V5 assembler + the draft-provenance twin);
+    // GREEN after the twin was renamed to assembleDraftProvenanceDescriptor.
+    // A future re-collision (a second exported def) turns this RED again.
+    expect(defs).toEqual(['src/orchestrator-v5/context/context-pack-assembler.ts']);
+  });
+
+  it('the draft-provenance builder is exported under its DISAMBIGUATED name only', () => {
+    const draftFile = join(SRC_ROOT, 'context/context-pack.ts');
+    const body = readFileSync(draftFile, 'utf8');
+    expect(body).toContain('export function assembleDraftProvenanceDescriptor');
+    expect(body).toContain('export interface DraftProvenanceDescriptor');
+    expect(body).not.toMatch(/export\s+(?:async\s+)?function\s+assembleContextPack\b/);
+    expect(body).not.toMatch(/export\s+interface\s+ContextPackV1\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Draft rows (P4) — structural + coaching are declared, telemetry_only, observed
+// ---------------------------------------------------------------------------
+
+describe('draft rows — declared, no false enforced, memory-window-less', () => {
+  for (const site of ['draft_structural', 'draft_coaching'] as const) {
+    it(`${site} is an LLM row with NO conversation window and NO enforced section (uncapped by design)`, () => {
+      const row = CONTEXT_POLICY[site];
+      expect(row.llm).toBe(true);
+      expect(row.memory_window).toBeNull();
+      expect(row.total_char_budget).toBeNull();
+      // The draft path is the least-budgeted assembler: NO section may claim a
+      // false `enforced` (there is no per-section cut site on the draft prompt).
+      for (const s of row.sections) {
+        expect(s.enforcement).toBe('telemetry_only');
+        expect(s.char_budget).toBeNull();
+      }
+    });
+  }
+
+  it('draft_structural declares the structural emit key (brief), matching draft-graph-dispatch:489', () => {
+    const declared = declaredSectionNames('draft_structural');
+    expect(declared.has('brief')).toBe(true);
+  });
+
+  it('draft_coaching declares the coaching-pass emit keys (brief + structure-only graph)', () => {
+    const declared = declaredSectionNames('draft_coaching');
+    for (const key of ['brief', 'graph']) {
+      expect(declared.has(key), `${key} emitted by the coaching pass but not declared`).toBe(true);
+    }
+  });
+});
+
+describe('draft_coaching — OBSERVED against the live coaching-pass emit', () => {
+  it('the real runStageCoachingPass emits section_chars whose keys == the declared draft_coaching sections', async () => {
+    const captured: Array<{ event: unknown; payload: Record<string, unknown> }> = [];
+    const emitSpy = vi
+      .spyOn(telemetry, 'emit')
+      .mockImplementation((event: unknown, payload: unknown) => {
+        captured.push({ event, payload: payload as Record<string, unknown> });
+      });
+
+    const brief = 'Should we hire locally or offshore? Budget £250k.';
+    // A node carrying a NON-structural field: the structure-only projection must
+    // DROP it, so the observed `graph` chars are strictly less than the full graph.
+    const graph = {
+      nodes: [
+        { id: 'dec', kind: 'decision', label: 'Hire?', rationale: 'x'.repeat(500) },
+        { id: 'goal', kind: 'goal', label: 'Revenue' },
+      ],
+      edges: [{ from: 'dec', to: 'goal', weight: 0.7, belief: 0.9 }],
+    };
+    let seenUserMessage = '';
+    const fakeAdapter = {
+      chat: async (args: { userMessage: string }) => {
+        seenUserMessage = args.userMessage;
+        return {
+          content: '{"coaching":null,"causal_claims":[]}',
+          model: 'test-coaching-model',
+          usage: { input_tokens: 20, output_tokens: 8 },
+        };
+      },
+    };
+    const ctx = {
+      coaching: undefined,
+      draftAdapter: fakeAdapter,
+      graph,
+      opts: { requestStartMs: Date.now(), signal: undefined },
+      start: Date.now(),
+      effectiveBrief: brief,
+      requestId: 'req-draft-coaching-conformance',
+      input: { scenario_id: 'scen-draft-coaching' },
+      pipelineOutcome: {},
+    } as unknown as StageContext;
+
+    await runStageCoachingPass(ctx);
+    emitSpy.mockRestore();
+
+    const budgetEvents = captured.filter(
+      (c) => (c.payload as { call_site?: string }).call_site === 'draft_coaching',
+    );
+    expect(budgetEvents).toHaveLength(1);
+    const sectionChars = budgetEvents[0].payload.section_chars as Record<string, number>;
+
+    // OBSERVED keys == DECLARED keys (derive-don't-mirror: the emit is the source).
+    const declared = declaredSectionNames('draft_coaching');
+    for (const key of Object.keys(sectionChars)) {
+      expect(declared.has(key), `emitted ${key} not declared`).toBe(true);
+    }
+    expect(new Set(Object.keys(sectionChars))).toEqual(new Set(['brief', 'graph']));
+
+    // brief chars are the verbatim brief; graph chars are the STRUCTURE-ONLY
+    // projection (< the full graph JSON — the 500-char rationale was dropped).
+    expect(sectionChars.brief).toBe(brief.length);
+    expect(sectionChars.graph).toBeLessThan(JSON.stringify(graph).length);
+    // POSITIVE CONTROL: the actual message the model saw carries BRIEF + GRAPH
+    // markers and NOT the dropped non-structural field.
+    expect(seenUserMessage).toContain('BRIEF:');
+    expect(seenUserMessage).toContain('GRAPH (structure only):');
+    expect(seenUserMessage).not.toContain('rationale');
+
+    // And a realistic emit produces ZERO policy divergence (acceptance (1)).
+    expect(findContextPolicyDivergences('draft_coaching', sectionChars)).toEqual({
+      unknown_sections: [],
+      over_budget_sections: [],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// No false `enforced` anywhere (P5 budget-honesty invariant, all rows)
+// ---------------------------------------------------------------------------
+
+describe('budget honesty — every `enforced` section is backed by an importable/pinned ceiling', () => {
+  it('no section claims `enforced` without a non-null char_budget (a false guarantee)', () => {
+    for (const site of Object.keys(CONTEXT_POLICY) as ContextCallSite[]) {
+      for (const s of CONTEXT_POLICY[site].sections) {
+        if (s.enforcement === 'enforced') {
+          expect(
+            s.char_budget,
+            `${site}.${s.name} is enforced but carries no budget ceiling`,
+          ).not.toBeNull();
+        }
+      }
+    }
   });
 });

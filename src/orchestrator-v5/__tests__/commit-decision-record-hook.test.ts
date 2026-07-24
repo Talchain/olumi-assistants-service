@@ -33,6 +33,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 const { storeMock } = vi.hoisted(() => ({
   storeMock: {
     createRecord: vi.fn(),
+    retrieveRecords: vi.fn(async () => []),
     getStoreCalls: 0,
     throwOnGet: false,
   },
@@ -44,7 +45,7 @@ vi.mock('../decision-records/index.js', () => ({
     if (storeMock.throwOnGet) {
       throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set');
     }
-    return { createRecord: storeMock.createRecord };
+    return { createRecord: storeMock.createRecord, retrieveRecords: storeMock.retrieveRecords };
   }),
 }));
 

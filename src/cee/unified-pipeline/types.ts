@@ -9,7 +9,7 @@ import type { FastifyRequest } from "fastify";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
 import type { PipelineCheckpoint } from "../pipeline-checkpoints.js";
-import type { ContextPackV1 } from "../../context/context-pack.js";
+import type { DraftProvenanceDescriptor } from "../../context/context-pack.js";
 import type { EdgeFieldStash } from "./edge-identity.js";
 import type { RiskCoefficientCorrection } from "../transforms/risk-normalisation.js";
 import type { EdgeFormat } from "./utils/edge-format.js";
@@ -185,7 +185,7 @@ export interface StageContext {
   fieldDeletions?: FieldDeletionEvent[];
 
   // ── ContextPack v1 (Stream C — assembled in Stage 5 Package) ──
-  contextPack?: ContextPackV1;
+  contextPack?: DraftProvenanceDescriptor;
 
   // ── Pipeline outcome (Track 1: progressive degradation) ──
   pipelineOutcome: PipelineOutcome;
@@ -313,7 +313,7 @@ export interface PlanAnnotationCheckpoint {
   open_questions: string[];
   /**
    * DEPRECATED: Remove after Stream D Review Pass ships (target: v1.14).
-   * Use context_hash from ContextPackV1 (provenance.context_hash) instead.
+   * Use context_hash from DraftProvenanceDescriptor (provenance.context_hash) instead.
    *
    * Legacy hash of input context (brief + seed only — incomplete).
    * Renamed from `context_hash` to make migration grep-able.

@@ -40,7 +40,7 @@ import {
 } from "../../pipeline-checkpoints.js";
 import { buildLLMRawTrace } from "../../llm-output-store.js";
 import { SERVICE_VERSION } from "../../../version.js";
-import { assembleContextPack } from "../../../context/context-pack.js";
+import { assembleDraftProvenanceDescriptor } from "../../../context/context-pack.js";
 import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.js";
 import { sanitiseCoachingProse } from "../../../orchestrator-v5/compose/output-safety.js";
 import { scanCoachingForIdLeakage } from "../../validation/coaching-safety-scanner.js";
@@ -887,7 +887,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       ? Number(rawSeed)
       : undefined;
 
-  const contextPack = assembleContextPack({
+  const contextPack = assembleDraftProvenanceDescriptor({
     capability: "draft_graph",
     brief: ctx.effectiveBrief,
     seedGraph: (ctx.input as any).previous_graph,
