@@ -267,7 +267,18 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
 
   // ── Step 6: Cost guard ──────────────────────────────────────────────────
   const promptChars = ctx.effectiveBrief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);
-  const tokensIn = estimateTokens(promptChars);
+  // F-2: the native document (Step 1a) is real input the model is billed for, but
+  // it rides an Anthropic `document` block OUTSIDE `docs`/`promptChars`, so the
+  // guard was blind to it — up to ~131k tokens for a 512KB doc, under-counting
+  // per-request input spend by up to ~50x. Count it here (Step 5b already refused
+  // a non-Anthropic model, so a `draftAttachment` at this point IS sent): use the
+  // computed `meta.tokens_est` for text kinds; for PDF (page-based, not derivable
+  // without the parse the slice avoids) fall back to a conservative bytes-derived
+  // estimate so the guard never UNDER-counts a document (fail-closed on spend).
+  const attachmentTokens = draftAttachment
+    ? draftAttachment.meta.tokens_est ?? estimateTokens(draftAttachment.meta.bytes)
+    : 0;
+  const tokensIn = estimateTokens(promptChars) + attachmentTokens;
   const tokensOut = estimateTokens(1200);
 
   if (!allowedCostUSD(tokensIn, tokensOut, draftAdapter.model)) {
