@@ -62,7 +62,11 @@ import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
 
 import { getTurnExecutorBudgets } from './budgets.js';
-import { SessionReadError, type SessionStore } from './session/store.js';
+import { SessionReadError, GraphStaleWriteError, type SessionStore } from './session/store.js';
+// F4 — re-exported so turn-executor can detect a CAS conflict at its commit
+// boundary WITHOUT importing session/store directly (the state-write-invariant
+// guard bounds that import surface to session/, commit.ts, build-turn-context).
+export { GraphStaleWriteError };
 import { getSessionStore } from './session/index.js';
 import type { PendingAction } from './session/pending-action.js';
 

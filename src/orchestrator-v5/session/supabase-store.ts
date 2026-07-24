@@ -242,7 +242,11 @@ export class SupabaseSessionStore implements SessionStore {
           `append_turn_atomic_v3 rejected a stale graph write for scenario ${write.scenario_id} ` +
             `(SQLSTATE ${GRAPH_CAS_RPC_CONFLICT_SQLSTATE}) — refresh and reconfirm. ` +
             'Atomic in-transaction CAS: the whole turn rolled back, nothing clobbered.',
-          { conflict_category: 'rpc_cas_conflict', cause: error },
+          {
+            conflict_category: 'rpc_cas_conflict',
+            cause: error,
+            expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
+          },
         );
       }
       throw new StateCommitFailedError(
@@ -333,7 +337,10 @@ export class SupabaseSessionStore implements SessionStore {
         `graph CAS enforce: stale write blocked pre-RPC for scenario ${write.scenario_id} ` +
           `(category=${evaluation.category}, reason=${evaluation.reason}). ` +
           'App-side best-effort check (SELECT-then-write), not an atomicity guarantee.',
-        { conflict_category: evaluation.category },
+        {
+          conflict_category: evaluation.category,
+          expected_base_graph_hash: write.expectedGraphIdentityHash ?? undefined,
+        },
       );
     }
   }

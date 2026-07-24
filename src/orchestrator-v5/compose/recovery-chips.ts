@@ -58,7 +58,12 @@ export type RecoveryFailureType =
   | 'HANDLER_ERROR'
   | 'ZOD_REPAIR_FAILED'
   | 'DECISION_REVIEW_FAILED'
-  | 'LLM_DENIAL';
+  | 'LLM_DENIAL'
+  // F4 — a graph CAS write conflict. Recovery is refresh-and-reconfirm, NOT a
+  // blind retry (a plain "Try again" would resubmit the same stale base and
+  // re-conflict). The refresh/reconfirm UI leg is A2's; this chip is an honest
+  // placeholder that reloads the canvas rather than replaying the stale edit.
+  | 'GRAPH_WRITE_CONFLICT';
 
 export interface RecoveryChipInput {
   readonly failureType: RecoveryFailureType;
@@ -137,6 +142,19 @@ export function buildRecoveryChip(input: RecoveryChipInput): RecoveryChipResult 
         assistantText: "I wasn't able to help with that. Could you rephrase?",
         chips: [retryPromptChip(promptMessage)],
       };
+    case 'GRAPH_WRITE_CONFLICT':
+      return {
+        assistantText:
+          'This decision was changed elsewhere while you were editing, so your change was not applied. ' +
+          'Refresh to see the latest version, then re-apply your change.',
+        chips: [
+          {
+            id: chipId('prompt', 'refresh_graph_conflict'),
+            label: 'Refresh',
+            message: 'Refresh the decision to the latest version.',
+          },
+        ],
+      };
   }
 }
 
@@ -177,6 +195,8 @@ export function recoveryFailureTypeFromInternal(
       return 'LLM_UNAVAILABLE';
     case 'LLM_SCHEMA_VIOLATION':
       return cause === 'schema_repair_failed' ? 'ZOD_REPAIR_FAILED' : 'LLM_UNAVAILABLE';
+    case 'GRAPH_WRITE_CONFLICT':
+      return 'GRAPH_WRITE_CONFLICT';
     case 'LLM_REQUEST_INVALID':
     case 'STATE_COMMIT_FAILED':
     case 'HANDLER_INVOCATION_FAILED':

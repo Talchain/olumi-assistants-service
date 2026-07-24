@@ -56,6 +56,7 @@ import { commitDirectAnswer, computeRequestHash } from './commit.js';
 import {
   buildTurnContext,
   loadPersistedGraphStrict,
+  GraphStaleWriteError,
   type CanonicalGraphReadState,
 } from './build-turn-context.js';
 import {
@@ -8724,6 +8725,39 @@ export async function runTurnExecutor(
       // `commitGmHeldResume`'s catch).
       if (effectiveTurnGraphSetPreCommit) {
         effectiveTurnGraph = preCommitEffectiveTurnGraph;
+      }
+      // F4 (Codex deep-review) — PRESERVE the CAS-conflict subtype at this
+      // boundary. A GraphStaleWriteError (the base graph diverged; whole txn
+      // rolled back, nothing clobbered) must NOT flatten to STATE_COMMIT_FAILED
+      // → INTERNAL_ERROR → HTTP 500. Map it to GRAPH_WRITE_CONFLICT →
+      // GRAPH_DIVERGED (→ the route returns HTTP 409) and carry explicit
+      // refresh-and-reconfirm recovery metadata so the UI can refresh canonical
+      // state and reconfirm rather than blind-retrying the same stale base.
+      if (error instanceof GraphStaleWriteError) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            conflict_category: error.conflict_category,
+            err: serialiseError(error),
+          },
+          'V5 TurnExecutor — graph CAS conflict on commit (typed 409-class refresh-reconfirm, nothing clobbered)',
+        );
+        failureType = INTERNAL_TO_WIRE.GRAPH_WRITE_CONFLICT;
+        response = buildFailureResponse(
+          'GRAPH_WRITE_CONFLICT',
+          context.stage,
+          {
+            phase: 'commit',
+            // Additive recovery contract (tolerant-parser passthrough) — A2's
+            // UI refresh/reconfirm leg reads these; NO schemas publish needed.
+            recovery_action: 'refresh_and_reconfirm',
+            conflict_category: error.conflict_category,
+            expected_base_graph_hash: error.expected_base_graph_hash ?? null,
+          },
+          recoveryCtx(),
+        );
+        return finalizeRun();
       }
       log.error(
         { request_id: requestId, err: serialiseError(error) },
