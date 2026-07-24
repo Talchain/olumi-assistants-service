@@ -103,7 +103,7 @@ import { groundAttachments, buildRefinementBrief } from "../../src/routes/assist
 import { calcConfidence, shouldClarify } from "../../src/utils/confidence.js";
 import { allowedCostUSD } from "../../src/utils/costGuard.js";
 import { getAdapter, getAdapterWithResolution } from "../../src/adapters/llm/router.js";
-import { UpstreamTimeoutError, ClientDisconnectError } from "../../src/adapters/llm/errors.js";
+import { UpstreamTimeoutError, ClientDisconnectError, RequestBudgetExceededError } from "../../src/adapters/llm/errors.js";
 import { createEdgeFieldStash } from "../../src/cee/unified-pipeline/edge-identity.js";
 import { normaliseCeeGraphVersionAndProvenance } from "../../src/cee/transforms/graph-normalisation.js";
 import { config } from "../../src/config/index.js";
@@ -803,5 +803,51 @@ describe("runStageParse", () => {
       // Must have retried (2 attempts)
       expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
     }
+  });
+
+  // ── F1 (Codex deep-review): every attempt's timeout honours elapsed ───────
+  // Mock budget: DRAFT_LLM_TIMEOUT_MS=105s cap, request budget 120s, headroom
+  // reserved so the real getDraftLlmRetryBudgetMs (spread from source) returns
+  // min(110s, 110s-elapsed). RED-first: pre-fix attempt 1 took the full cap
+  // regardless of pre-LLM elapsed time.
+  describe("F1 — attempt 1 honours pre-LLM elapsed request time", () => {
+    it("caps attempt 1's timeout to the remaining request budget (15s pre-LLM elapsed → well below the single-attempt cap)", async () => {
+      setupMocks();
+      // 15s of the request budget already spent before the LLM stage.
+      const ctx = makeCtx({ opts: { schemaVersion: "v3" as const, requestStartMs: Date.now() - 15_000 } });
+
+      await runStageParse(ctx);
+
+      expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(1);
+      const callOpts = mockAdapter.draftGraph.mock.calls[0][1] as { timeoutMs: number };
+      // Pre-fix: attempt 1 = the full 105s cap (RED here). Post-fix: capped to
+      // ~95s remaining (min(cap, budget-headroom-elapsed)).
+      expect(callOpts.timeoutMs).toBeLessThan(105_000);
+      expect(callOpts.timeoutMs).toBeGreaterThan(90_000);
+      expect(callOpts.timeoutMs).toBeLessThanOrEqual(96_000);
+    });
+
+    it("attempt 1 at ~zero elapsed is (near) the full single-attempt window — no regression for a fresh request", async () => {
+      setupMocks();
+      const ctx = makeCtx({ opts: { schemaVersion: "v3" as const, requestStartMs: Date.now() } });
+
+      await runStageParse(ctx);
+
+      const callOpts = mockAdapter.draftGraph.mock.calls[0][1] as { timeoutMs: number };
+      // ~0 elapsed → min(110s cap, ~110s remaining) ≈ the full window; the fix
+      // never SHORTENS a fresh first attempt.
+      expect(callOpts.timeoutMs).toBeGreaterThan(105_000);
+    });
+
+    it("refuses to START the draft when the request budget is already exhausted (no LLM call, typed budget error)", async () => {
+      setupMocks();
+      // ~118s of a 120s budget already spent → the remaining window is below
+      // MIN_TIMEOUT_MS; the attempt must fail fast BEFORE calling the provider.
+      const ctx = makeCtx({ opts: { schemaVersion: "v3" as const, requestStartMs: Date.now() - 118_000 } });
+
+      await expect(runStageParse(ctx)).rejects.toBeInstanceOf(RequestBudgetExceededError);
+      // Pre-fix: attempt 1 ignored elapsed → the provider WAS called (RED).
+      expect(mockAdapter.draftGraph).not.toHaveBeenCalled();
+    });
   });
 });
