@@ -519,6 +519,28 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
         `Graph failed post-enforcement validation (${postValidationErrorCount} topology error(s))`,
         {
           requestId,
+          // HONEST RETRY (2026-07-24, draft-honesty lane). Fail-closing here is
+          // correct and unchanged — an invalid model is never shipped. What was
+          // wrong was the CONTRACT the user got: no `retryable` and no
+          // `recovery` meant the envelope defaulted to `retryable: false` /
+          // `recovery: null`, i.e. a hard dead end. The day-3 matrix caught this
+          // on a brief that drafted CLEANLY twice in the same run (46s and 60s)
+          // and hit this gate once — the failure is stochastic model topology,
+          // not a bad brief, so RETRY is the honest primary lever, exactly as it
+          // is for the truncation-400 (see unified-pipeline/index.ts).
+          retryable: true,
+          recovery: {
+            // No "be more specific" / "simplify" blame line: the brief is not
+            // the fault, and a vaguer brief makes the model INFER more, which is
+            // the cruel inversion documented in the 2026-07-23 firefight.
+            suggestion:
+              "Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you — this is usually transient. Try again.",
+            hints: [
+              "Retrying the same brief usually succeeds",
+              "If it keeps happening, state the outcome you are optimising for explicitly",
+              "Naming how each consideration affects that outcome helps the model connect them",
+            ],
+          },
           details: {
             validation_errors: revalidation.errors.map((e) => ({
               code: e.code,

@@ -32,6 +32,10 @@ import type { StageContext } from "../types.js";
 import { log } from "../../../utils/telemetry.js";
 import { extractJson } from "../../../utils/json-extractor.js";
 import { normaliseLegacyCoachingValues } from "../../../adapters/llm/normalise-legacy-coaching.js";
+import {
+  CANONICAL_ACTION_TYPES,
+  CANONICAL_BIAS_TYPES,
+} from "../../../adapters/llm/coaching-contract-conformance.js";
 import { emitContextBudget } from "../../../orchestrator-v5/context/context-budget-telemetry.js";
 import { remainingRequestBudgetMs } from "../../../config/timeouts.js";
 import { escapeUntrustedDelimiters } from "../../../adapters/llm/untrusted-envelope.js";
@@ -62,7 +66,13 @@ const COACHING_PASS_MIN_BUDGET_MS = 28_000;
 // Own timeout ceiling; capped to the remaining window below.
 const COACHING_PASS_TIMEOUT_MS = 30_000;
 
-const COACHING_SYSTEM = [
+/**
+ * The coaching-pass system prompt. EXPORTED so the drift pin in
+ * `src/adapters/llm/__tests__/coaching-contract-conformance.test.ts` can assert
+ * that its enum vocabularies are the contract's — a prompt that recites an enum
+ * is a mirror, and this one drifted silently for a day (see below).
+ */
+export const COACHING_SYSTEM = [
   "You are a decision-analysis coach. You are given a decision brief and the",
   "causal decision graph that was drafted from it (nodes + edges). Produce",
   "concise coaching that helps the user strengthen their decision, plus the",
@@ -78,8 +88,15 @@ const COACHING_SYSTEM = [
   '        "id": string,                         // short slug, e.g. "add-status-quo"',
   '        "label": string,                      // short imperative title',
   '        "detail": string,                     // one sentence of why/how',
-  '        "action_type": string,                // one of: add_option, add_factor, add_constraint, add_edge, clarify_goal, quantify',
-  '        "bias_category": string               // optional, e.g. anchoring, overconfidence, availability',
+  // The two vocabularies here are DERIVED from the shared contract enums
+  // (`StrengthenItemActionType` / `BiasType`), never hand-typed. The hand-typed
+  // version of these lines is exactly what drifted: it offered SIX action types
+  // where the contract has four (only two overlapping), and `availability`,
+  // which is not a BiasType. Result: 8 of 9 successful drafts shipped a
+  // response that violated the declared schema (day-3 matrix, 2026-07-24). A
+  // prompt that recites an enum is a mirror — derive it (CLAUDE.md trap 12).
+  `        "action_type": string,                // one of: ${CANONICAL_ACTION_TYPES.join(", ")}`,
+  `        "bias_category": string               // optional, one of: ${CANONICAL_BIAS_TYPES.join(", ")}`,
   "      }",
   "    ],",
   '    "widening_log": {',
@@ -88,7 +105,12 @@ const COACHING_SYSTEM = [
   '      "brief_completeness": "complete" | "partial" | "thin"',
   "    },",
   '    "bias_signals": [                          // 0-3, may be empty',
-  '      { "type": string, "detail": string, "target": string }',
+  // Same derivation: `type` carries the SAME BiasType vocabulary as
+  // bias_category above. Leaving it unconstrained is why `availability` leaked
+  // here too. A signal whose type is off-contract is DROPPED downstream (a bias
+  // label is a claim about the user — it is never silently re-labelled), so an
+  // unconstrained vocabulary here costs real coaching.
+  `      { "type": string, "detail": string, "target": string }   // type: one of: ${CANONICAL_BIAS_TYPES.join(", ")}`,
   "    ]",
   "  },",
   '  "causal_claims": [                           // 0-8 claims present in the graph, may be empty',

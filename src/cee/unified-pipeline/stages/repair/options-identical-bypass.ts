@@ -82,19 +82,33 @@ export function runOptionsIdenticalBypass(ctx: StageContext): boolean {
   const interventionSignature: string | null =
     typeof violationContext.signature === "string" ? violationContext.signature : null;
 
-  // Build the user-facing recovery payload. Copy is intentionally
-  // generic-but-specific: pricing is the most common trigger (per the
-  // failing staging traffic) but the same wording covers any decision
-  // where options need distinct numeric or qualitative differentiators.
+  // Build the user-facing recovery payload.
+  //
+  // DOMAIN-HARDCODING REMOVED (2026-07-24, draft-honesty lane). The copy used
+  // to assert "For a pricing decision, give a price for each option (e.g. Low =
+  // £49/month, Mid = £99/month, High = £199/month)" on EVERY firing, on the
+  // reasoning that pricing was the most common trigger. Live probe
+  // (STARTER-BRIEF-VALIDATION-2026-07-24, reqs 25f0c95f / a7c24c91) served that
+  // pricing script on a BUILD-VS-BUY brief. Recovery copy that names the wrong
+  // domain is worse than none: it tells the user to do something irrelevant to
+  // the decision they are actually making. The guidance is now domain-neutral
+  // and names the KIND of differentiator instead of inventing one.
+  //
+  // RETRYABLE (same lane): the envelope previously defaulted to
+  // `retryable: false`, so this was a hard dead end — but the same briefs draft
+  // cleanly on other attempts (2/5 in the live run), because identical
+  // intervention signatures are a stochastic model outcome, not a property of
+  // the brief. Retry is honest, and it is offered ALONGSIDE the real user
+  // lever rather than instead of it.
   const recovery = {
     suggestion:
-      "Your options need at least one distinct value to compare. " +
-      "For a pricing decision, give a price for each option " +
-      "(e.g. Low = £49/month, Mid = £99/month, High = £199/month).",
+      "Your options came out looking identical, so there was nothing to compare — " +
+      "this often clears on a retry. If it happens again, give each option at least " +
+      "one value that differs from the others.",
     hints: [
-      "Give each option at least one unique value (price, headcount, timeline, scope).",
-      "Use specific numbers rather than vague descriptions.",
-      "Or describe how each option differs from the others in plain language.",
+      "Retrying the same brief often produces distinct options",
+      "Give each option at least one unique value — whichever dimension your decision turns on (cost, time, scope, capacity, risk)",
+      "Or describe in plain language how each option differs from the others",
     ],
   };
 
@@ -104,6 +118,7 @@ export function runOptionsIdenticalBypass(ctx: StageContext): boolean {
     {
       requestId: ctx.requestId,
       reason: "options_identical_unrepairable_by_llm",
+      retryable: true,
       recovery,
     },
   );
