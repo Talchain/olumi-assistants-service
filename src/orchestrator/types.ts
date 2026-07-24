@@ -799,15 +799,15 @@ export interface ConversationContext {
   analysis_inputs?: AnalysisInputs | null;
   conversational_state?: ConversationalState;
   /**
-   * Context Architecture v2 S2 (ROADMAP 1.73, 02 §Seam 1): the persisted
-   * decision brief (`scenarios.brief_text`), projected to the edit-lane
-   * slice — first EDIT_CONTEXT_BRIEF_CHAR_CAP chars, truncation DISCLOSED
-   * via the same {text, truncated, original_chars} shape the routing
-   * ContextPack uses (ContextPackBriefSchema). Populated by
-   * dispatchEditGraph ONLY when CEE_CONTEXT_BRIEF_ALL_SITES is on and a
-   * brief exists; absent otherwise (flag-off byte-identity). Rendered as
-   * `## Decision Brief` by serialiseEditContextForLLM; repair_edit_graph
-   * inherits automatically (same contextSection).
+   * Context Architecture v2 S2 (ROADMAP 1.199): the persisted decision brief
+   * (`scenarios.brief_text`), projected to the edit-lane slice — first
+   * EDIT_CONTEXT_BRIEF_CHAR_CAP chars, truncation DISCLOSED via the same
+   * {text, truncated, original_chars} shape the routing ContextPack uses
+   * (ContextPackBriefSchema). Populated by dispatchEditGraph UNCONDITIONALLY
+   * when a brief exists (S2 shipped ON, no-dark-launches); absent otherwise
+   * (no-brief byte-identity). Rendered as `## Decision Brief` by
+   * serialiseEditContextForLLM; repair_edit_graph inherits automatically
+   * (same contextSection).
    */
   brief?: { text: string; truncated: boolean; original_chars: number } | null;
 }
