@@ -786,8 +786,12 @@ export async function draftGraphWithAnthropic(
     );
   }
 
-  // V04: Generate idempotency key for request traceability
-  const idempotencyKey = makeIdempotencyKey();
+  // V04: Generate idempotency key for request traceability. `let` (not `const`)
+  // because the structured-outputs→prompt-only rebuild (so_reject) changes the
+  // request body and must NOT reuse the key that carried the rejected structured
+  // body — a provider that honours Idempotency-Key replay would otherwise replay
+  // the 400 and break the graceful degradation (F8, 2026-07-24).
+  let idempotencyKey = makeIdempotencyKey();
   const startTime = Date.now();
 
   // Debug: Log model parameters for runtime validation (mirrors OpenAI adapter pattern)
@@ -938,6 +942,13 @@ export async function draftGraphWithAnthropic(
       // edges well under the deadline). Recorded on success, surfaced on meta.
       let timeToEdgesMs: number | null = null;
       let runaway: { chars: number; elapsedMs: number; trigger: "time" | "chars" } | null = null;
+      // True only when the char gate broke the loop mid-stream (a definite
+      // runaway). Distinguishes that from the time gate firing between the last
+      // delta and iterator-done on a stream that actually COMPLETED (F5 race,
+      // 2026-07-24): the char break is unrecoverable, but a cleanly-finished
+      // stream whose finalMessage is available must be preferred over discarding
+      // it as a runaway.
+      let brokeForChars = false;
       let detectTimer: ReturnType<typeof setTimeout> | undefined;
 
       // Timer-armed time gate: fires even if the model stops emitting deltas (a
@@ -979,6 +990,7 @@ export async function draftGraphWithAnthropic(
               }, "[Anthropic] draft_graph reached the edges array — healthy generation past the nodes bottleneck");
             } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS) {
               runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "chars" };
+              brokeForChars = true;
               perAttempt.abort();
               break;
             }
@@ -986,7 +998,13 @@ export async function draftGraphWithAnthropic(
         }
         if (detectTimer) clearTimeout(detectTimer);
         abortController.signal.removeEventListener("abort", relayOverallAbort);
-        if (runaway) return { kind: "runaway", ...runaway };
+        // Char-gate runaway is unrecoverable → return it. A time-gate runaway that
+        // fired AFTER the last delta while the iterator still finished cleanly
+        // (F5 race) falls through: the stream completed, so prefer its
+        // finalMessage over regenerating a draft we already have. If the timer
+        // aborted the stream mid-flight, finalMessage() rejects and the catch
+        // re-classifies it as a runaway (unchanged).
+        if (runaway && brokeForChars) return { kind: "runaway", ...runaway };
         const message = await stream.finalMessage();
         return { kind: "complete", message, timeToEdgesMs };
       } catch (streamErr) {
@@ -1010,16 +1028,17 @@ export async function draftGraphWithAnthropic(
     let response: Anthropic.Message | undefined;
     let runawayAbortCount = 0;
     let streamTimeToEdgesMs: number | null = null;
+    // Last live-clock remaining budget observed inside the attempt closure — used
+    // only for the runaway telemetry below (the authoritative window is derived
+    // per invocation inside the closure).
+    let lastRemainingBudgetMs = effectiveTimeout;
+    // Count of stream invocations across the whole draft call (including
+    // withRetry's transient inner retries). The FIRST invocation has consumed no
+    // budget, so its window ≈ effectiveTimeout and the attempt-1 max_tokens
+    // derivation already fits — the F1 cap only LOWERS on a LATER invocation
+    // whose predecessors actually burned budget.
+    let streamInvocations = 0;
     for (let attempt = 1; response === undefined; attempt++) {
-      const remainingBudgetMs = effectiveTimeout - (Date.now() - startTime);
-      // Keep early-aborting only while there is budget for a detect PLUS a full
-      // healthy retry after it; otherwise this is the FINAL attempt and runs to
-      // the whole remaining window (no early abort) so a late completion /
-      // salvage is never thrown away.
-      const canRetryAgain =
-        remainingBudgetMs > DRAFT_RUNAWAY_DETECT_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
-        runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES;
-      const detectDeadlineMs = canRetryAgain ? DRAFT_RUNAWAY_DETECT_MS : null;
       // Fresh idempotency key per RETRY so the provider RE-GENERATES rather than
       // replaying the doomed generation for the same key (retries would be
       // pointless otherwise); attempt 1 keeps the original key for logging
@@ -1027,7 +1046,50 @@ export async function draftGraphWithAnthropic(
       const attemptIdempotencyKey = attempt === 1 ? idempotencyKey : makeIdempotencyKey();
 
       const attemptResult = await withRetry(
-        () => streamOneDraftAttempt(body as Anthropic.MessageStreamParams, attemptIdempotencyKey, detectDeadlineMs),
+        () => {
+          streamInvocations++;
+          // Re-derive the abort authorization AND max_tokens from the LIVE clock
+          // on EVERY invocation (F2, 2026-07-24). withRetry's transient retries +
+          // backoff consume request budget, so a window computed once at the loop
+          // top can authorize an early abort that no longer leaves room for the
+          // retry it promised (worst case squeezing the "final" window toward
+          // zero). Reading Date.now() here binds the decision to the budget that
+          // actually remains at the moment the attempt starts.
+          const remainingBudgetMs = effectiveTimeout - (Date.now() - startTime);
+          lastRemainingBudgetMs = remainingBudgetMs;
+          // Keep early-aborting only while there is budget for a detect PLUS a full
+          // healthy retry after it; otherwise this is the FINAL attempt and runs to
+          // the whole remaining window (no early abort) so a late completion /
+          // salvage is never thrown away.
+          const canRetryAgain =
+            remainingBudgetMs > DRAFT_RUNAWAY_DETECT_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
+            runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES;
+          const attemptDetectDeadlineMs = canRetryAgain ? DRAFT_RUNAWAY_DETECT_MS : null;
+          // On the FINAL attempt (no early abort, non-thinking), cap max_tokens to
+          // what the LIVE remaining wall can actually generate (F1, 2026-07-24;
+          // the A2killer class). Previously max_tokens stayed the attempt-1
+          // derivation (~affordable-for-effectiveTimeout), so a persistent
+          // pre-edges runaway on a late final attempt needed ~82-91s to reach the
+          // cap while < that remained → the overall AbortController fired first
+          // (504-class, partial text discarded, salvage/lean-retry unreachable).
+          // Capping to the live window makes the runaway truncate AT max_tokens
+          // INSIDE the wall → closeTruncatedJson salvage / the lean retry apply.
+          // Only ever LOWERS the attempt-1 value (Math.min), never raises past
+          // affordability. Thinking keeps its clamped max_tokens (the API requires
+          // max_tokens > budget_tokens, and detection is off under thinking so no
+          // final-attempt squeeze applies).
+          let attemptBody = body as Anthropic.MessageStreamParams;
+          if (attemptDetectDeadlineMs === null && !draftThinkingEnabled && streamInvocations > 1) {
+            const finalMaxTokens = Math.min(
+              maxTokens,
+              resolveDraftMaxTokens(Math.max(0, remainingBudgetMs), opts?.maxTokensCeiling).effective,
+            );
+            if (finalMaxTokens !== (body as { max_tokens?: number }).max_tokens) {
+              attemptBody = { ...(body as Anthropic.MessageStreamParams), max_tokens: finalMaxTokens };
+            }
+          }
+          return streamOneDraftAttempt(attemptBody, attemptIdempotencyKey, attemptDetectDeadlineMs);
+        },
         { adapter: "anthropic", model, operation: "draft_graph" },
       );
 
@@ -1052,12 +1114,18 @@ export async function draftGraphWithAnthropic(
           schema_bytes: JSON.stringify(draftGraphSchema).length,
         });
         useStructuredOutputs = false;
+        // Fresh key for the prompt-only rebuild: the body differs from the
+        // rejected structured request, so it must not ride the same
+        // Idempotency-Key (F8, 2026-07-24). buildCallParams reads `idempotencyKey`
+        // for the header, so reassign BEFORE rebuilding.
+        idempotencyKey = makeIdempotencyKey();
         ({ body } = buildCallParams(false));
         attempt--; // the prompt-only rebuild is not a runaway attempt
         continue;
       }
-      // kind === "runaway": early-abort fired (only possible when detectDeadlineMs
-      // was non-null, i.e. canRetryAgain was true) → budget for a retry exists.
+      // kind === "runaway": early-abort fired (only possible when the attempt's
+      // detect deadline was non-null, i.e. canRetryAgain was true at invocation
+      // time) → budget for a retry exists.
       runawayAbortCount++;
       log.warn({
         event: "cee.llm.draft_runaway_aborted",
@@ -1068,7 +1136,7 @@ export async function draftGraphWithAnthropic(
         trigger: attemptResult.trigger,
         detect_ms: DRAFT_RUNAWAY_DETECT_MS,
         detect_chars: DRAFT_RUNAWAY_DETECT_CHARS,
-        remaining_budget_ms: remainingBudgetMs,
+        remaining_budget_ms: lastRemainingBudgetMs,
       }, "[Anthropic] draft_graph runaway detected EARLY (still in nodes, no edges emitted) — aborted the doomed attempt and retrying a fresh generation within the remaining budget (Lane C streamed abort-retry)");
     }
 

@@ -69,7 +69,7 @@ export {
   type CacheBoundary,
   type ClarificationAnswer,
   type RelevantConfig,
-  type AssembleContextPackInput,
+  type AssembleDraftProvenanceInput,
   computeHash,
   computeStringHash,
   hashClarificationAnswers,

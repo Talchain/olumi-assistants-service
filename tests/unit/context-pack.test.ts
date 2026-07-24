@@ -18,7 +18,7 @@ import {
   hashConfig,
   hashPromptContent,
   computeCacheBoundary,
-  type AssembleContextPackInput,
+  type AssembleDraftProvenanceInput,
   type DraftProvenanceDescriptor,
   type RelevantConfig,
 } from "../../src/context/context-pack.js";
@@ -35,7 +35,7 @@ const BASE_CONFIG: RelevantConfig = {
   clarifierEnabled: false,
 };
 
-const BASE_INPUT: AssembleContextPackInput = {
+const BASE_INPUT: AssembleDraftProvenanceInput = {
   capability: "draft_graph",
   brief: "Should we expand into the European market given current tariff uncertainty and supply chain constraints?",
   resolvedModel: { route: "default", id: "openai/gpt-4o" },
@@ -45,7 +45,7 @@ const BASE_INPUT: AssembleContextPackInput = {
   config: BASE_CONFIG,
 };
 
-function buildInput(overrides: Partial<AssembleContextPackInput> = {}): AssembleContextPackInput {
+function buildInput(overrides: Partial<AssembleDraftProvenanceInput> = {}): AssembleDraftProvenanceInput {
   return { ...BASE_INPUT, ...overrides };
 }
 

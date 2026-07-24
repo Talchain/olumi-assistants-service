@@ -884,8 +884,14 @@ export async function runUnifiedPipeline(
       timings.boundary_ms = stageElapsed(t6);
       // Return the packaged V1 response without boundary transform
       const fallback = ctx.ceeResponse ?? { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
-      // Preserve a deliberate budget-skip marker (Lane C2) on this fallback path.
-      if (ctx.pipelineOutcome.coaching_status !== 'skipped_budget') {
+      // Preserve a deliberate budget-skip marker (Lane C2) OR a ran-and-errored
+      // coaching-pass marker (draft-F3, 2026-07-24) on this fallback path — both
+      // are terminal statuses the coaching pass owns; only stamp 'complete' when
+      // neither was set.
+      if (
+        ctx.pipelineOutcome.coaching_status !== 'skipped_budget' &&
+        ctx.pipelineOutcome.coaching_status !== 'failed_degraded'
+      ) {
         ctx.pipelineOutcome.coaching_status = 'complete';
       }
       attachPipelineOutcome(fallback, ctx.pipelineOutcome);
@@ -908,10 +914,14 @@ export async function runUnifiedPipeline(
     }
 
     // Coaching status: if we got here with a response, coaching passed — UNLESS
-    // the post-draft coaching pass deliberately skipped for budget (Lane C2),
-    // in which case that terminal marker must survive to the response body so
-    // probes and A2's async-ingest lane can count budget-skips.
-    if (ctx.pipelineOutcome.coaching_status !== 'skipped_budget') {
+    // the post-draft coaching pass deliberately skipped for budget (Lane C2) or
+    // ran and errored (draft-F3, 2026-07-24). Either terminal marker must survive
+    // to the response body so probes and A2's async-ingest lane can distinguish
+    // budget-skips and degraded passes from a genuinely-complete one.
+    if (
+      ctx.pipelineOutcome.coaching_status !== 'skipped_budget' &&
+      ctx.pipelineOutcome.coaching_status !== 'failed_degraded'
+    ) {
       ctx.pipelineOutcome.coaching_status = 'complete';
     }
 

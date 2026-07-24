@@ -283,10 +283,20 @@ export function projectBriefForEdit(
  * established over earlier turns in the same request. `context.messages`
  * (prior turns, oldest-first) is now rendered as `## Recent Conversation`.
  */
+/**
+ * Default serialiser caps for the edit-context render. Exported as the SINGLE
+ * source (egress-F5, 2026-07-24) so the context-policy telemetry replicas
+ * (`POLICY_EDIT_GRAPH_JSON_CAP` / `POLICY_EDIT_CONVERSATION_CAP`) are
+ * conformance-pinned to THESE values rather than being a hand-maintained mirror
+ * that drifts silently (CLAUDE.md trap #12).
+ */
+export const EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES = 8000;
+export const EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS = 4000;
+
 export function serialiseEditContextForLLM(
   context: ConversationContext,
-  maxGraphBytes: number = 8000,
-  maxConversationChars: number = 4000,
+  maxGraphBytes: number = EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES,
+  maxConversationChars: number = EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS,
 ): string {
   return serialiseEditContextForLLMWithMeta(context, maxGraphBytes, maxConversationChars).text;
 }
@@ -307,8 +317,8 @@ export interface SerialisedEditContext {
 /** Metadata form of {@link serialiseEditContextForLLM}. */
 export function serialiseEditContextForLLMWithMeta(
   context: ConversationContext,
-  maxGraphBytes: number = 8000,
-  maxConversationChars: number = 4000,
+  maxGraphBytes: number = EDIT_CONTEXT_GRAPH_JSON_DEFAULT_BYTES,
+  maxConversationChars: number = EDIT_CONTEXT_CONVERSATION_DEFAULT_CHARS,
 ): SerialisedEditContext {
   const briefSlice = context.brief ?? null;
   const sections: string[] = [];

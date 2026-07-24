@@ -110,3 +110,53 @@ describe("runStageCoachingPass — regression-safety invariants", () => {
     ).resolves.toBeUndefined();
   });
 });
+
+// =============================================================================
+// draft-F3 (2026-07-24) — coaching_status honesty. A pass that RAN and ERRORED
+// (throw / no-JSON / unusable-JSON) must record 'failed_degraded' so A2's async
+// coaching-ingest lane can tell it apart from a genuinely-complete pass. Before
+// this the errored paths wrote NOTHING and index.ts stamped 'complete'.
+// =============================================================================
+describe("runStageCoachingPass — coaching_status (draft-F3)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function ctxWithOutcome(overrides: Record<string, unknown> = {}): any {
+    return makeCtx({ pipelineOutcome: { coaching_status: "partial" }, ...overrides });
+  }
+
+  it("throw → coaching_status = 'failed_degraded'", async () => {
+    const ctx = ctxWithOutcome({ draftAdapter: adapterThrowing(new Error("upstream 500")) });
+    await runStageCoachingPass(ctx);
+    expect(ctx.pipelineOutcome.coaching_status).toBe("failed_degraded");
+  });
+
+  it("no parseable JSON → coaching_status = 'failed_degraded'", async () => {
+    const ctx = ctxWithOutcome({ draftAdapter: adapterReturning("not json at all") });
+    await runStageCoachingPass(ctx);
+    expect(ctx.pipelineOutcome.coaching_status).toBe("failed_degraded");
+  });
+
+  it("JSON without usable coaching/causal_claims → coaching_status = 'failed_degraded'", async () => {
+    const ctx = ctxWithOutcome({ draftAdapter: adapterReturning('{"unrelated":1}') });
+    await runStageCoachingPass(ctx);
+    expect(ctx.pipelineOutcome.coaching_status).toBe("failed_degraded");
+  });
+
+  it("a genuinely-complete pass does NOT mark failed_degraded (stays for index.ts to stamp 'complete')", async () => {
+    const ctx = ctxWithOutcome({
+      draftAdapter: adapterReturning('{"causal_claims":[{"from":"n1","to":"n2","direction":"increases"}]}'),
+    });
+    await runStageCoachingPass(ctx);
+    expect(ctx.pipelineOutcome.coaching_status).not.toBe("failed_degraded");
+  });
+
+  it("never clobbers a 'skipped_budget' terminal marker", async () => {
+    // Force the budget gate to skip: a requestStartMs far in the past.
+    const ctx = ctxWithOutcome({
+      draftAdapter: adapterThrowing(new Error("should not be called")),
+      opts: { requestStartMs: Date.now() - 10_000_000 },
+    });
+    await runStageCoachingPass(ctx);
+    expect(ctx.pipelineOutcome.coaching_status).toBe("skipped_budget");
+  });
+});
