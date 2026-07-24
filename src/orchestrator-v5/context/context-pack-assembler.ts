@@ -84,7 +84,12 @@ import {
 
 // Recent turns cap for the conversation projection. Spec §10 bounds this at
 // five for token budget. Any trim beyond is caller's concern.
-export const CONTEXT_PACK_RECENT_TURNS_CAP = 5;
+// Verbatim conversation memory window (D-59-11, the anticipated "S5 flip",
+// 2026-07-24): raised 5 → 8 per the context design. Turns beyond this window are
+// summarised by the rolling summary; the boundary is exercised by
+// context-pack-assembler.test.ts. POLICY_VERBATIM_TURNS mirrors this and is pinned
+// equal by the context-policy conformance test — move both together.
+export const CONTEXT_PACK_RECENT_TURNS_CAP = 8;
 
 /**
  * Context v2 S1: mirror of commit.ts `CONVERSATION_TEXT_CAP` (the persist-

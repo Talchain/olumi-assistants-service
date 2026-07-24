@@ -176,6 +176,21 @@ describe('invokeDecisionReview — UU-16 regression guards', () => {
     expect(result.resolution.resolved_model).toBe('gpt-4.1');
   });
 
+  it('RIDER-B — a per-call model override routes as a per_call source; the default path is unchanged', async () => {
+    const adapter = makeAdapterStub('{"narrative_summary":"ok"}', { name: 'anthropic', model: 'claude-sonnet-5' });
+    vi.mocked(routerMod.getAdapterWithResolution).mockReturnValue({ adapter, resolution: MOCK_RESOLUTION });
+
+    // Override present → model + per_call origin threaded to the router.
+    await invokeDecisionReview(baseInput(), { requestId: 'req-ab', timeoutMs: 15_000, model: 'claude-sonnet-5' });
+    expect(routerMod.getAdapterWithResolution).toHaveBeenLastCalledWith('decision_review', 'claude-sonnet-5', 'per_call');
+
+    vi.mocked(routerMod.getAdapterWithResolution).mockClear();
+
+    // Override ABSENT → EXACTLY the single-arg default call (byte-identical, no live switch).
+    await invokeDecisionReview(baseInput(), { requestId: 'req-default', timeoutMs: 15_000 });
+    expect(routerMod.getAdapterWithResolution).toHaveBeenLastCalledWith('decision_review');
+  });
+
   it('forwards requestId and timeoutMs to the adapter chat call', async () => {
     const adapter = makeAdapterStub('{"narrative_summary":"ok"}');
     vi.mocked(routerMod.getAdapterWithResolution).mockReturnValue({

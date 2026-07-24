@@ -44,7 +44,7 @@ import { runValidationPipeline } from "../validation-pipeline/index.js";
  * preserve-guards at the pipeline's fallback + main exits (simplification F6,
  * 2026-07-24) so a marker can never be clobbered on only one path.
  */
-function markCoachingCompleteUnlessTerminal(outcome: PipelineOutcome): void {
+export function markCoachingCompleteUnlessTerminal(outcome: PipelineOutcome): void {
   if (
     outcome.coaching_status !== 'skipped_budget' &&
     outcome.coaching_status !== 'failed_degraded'
@@ -868,7 +868,13 @@ export async function runUnifiedPipeline(
         error: packageErr?.message ?? 'unknown',
         degraded: true,
       });
-      ctx.pipelineOutcome.coaching_status = 'failed_degraded';
+      // F7 (2026-07-24): a Stage 5 PACKAGE failure is NOT a coaching failure.
+      // Coaching may have succeeded and an unrelated packaging op (bias payload,
+      // schema transform) threw. coaching_status stays owned by the coaching
+      // path — stamp its real terminal status here (complete when it succeeded,
+      // or its preserved skipped_budget / failed_degraded marker); the package
+      // degradation is already signalled by the stage:'package' warning above.
+      markCoachingCompleteUnlessTerminal(ctx.pipelineOutcome);
       timings.package_ms = stageElapsed(t5);
       // Return the structurally valid graph without packaging
       const fallback = { graph: ctx.graph, rationales: ctx.rationales, confidence: ctx.confidence };
