@@ -71,6 +71,20 @@ export const CONTEXT_PACK_VERSION_LITERAL = '2.0' as const;
 export const CONTEXT_PACK_BRIEF_CHAR_CAP = 2000;
 
 /**
+ * Verbatim conversation memory window — the number of most-recent turns the
+ * ContextPack carries in full (turns beyond it are folded into the rolling
+ * summary). Raised 5 → 8 per the D-59-11 "S5 flip" (2026-07-24).
+ *
+ * SINGLE SOURCE OF TRUTH (FINAL-SWEEP, 2026-07-24; Codex quality F4). Previously
+ * this literal was hand-typed in BOTH the assembler (CONTEXT_PACK_RECENT_TURNS_CAP)
+ * and the policy (POLICY_VERBATIM_TURNS) with a "move both together" comment and a
+ * conformance test pinning them equal — the exact hand-mirror trap-12 hazard. It
+ * now lives in this cycle-safe leaf (both the assembler and the policy already
+ * import from here) and both derive from it, so it CANNOT drift.
+ */
+export const CONTEXT_PACK_RECENT_TURNS_CAP = 8;
+
+/**
  * Lane 28 — the projected decision brief carried on the ContextPack. Strict:
  * `text` is non-empty and hard-bounded at {@link CONTEXT_PACK_BRIEF_CHAR_CAP}
  * (the bound is enforced, not advisory); `truncated` + `original_chars`

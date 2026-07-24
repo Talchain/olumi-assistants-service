@@ -52,7 +52,7 @@ import {
   DISPLAY_ANALYSIS_CHAR_BUDGET,
   DISPLAY_ANALYSIS_TRUNCATION_ORDER,
 } from '../format/format-analysis-for-context.js';
-import { CONTEXT_PACK_BRIEF_CHAR_CAP } from './context-pack-schema.js';
+import { CONTEXT_PACK_BRIEF_CHAR_CAP, CONTEXT_PACK_RECENT_TURNS_CAP } from './context-pack-schema.js';
 // Derived (cycle-safe: draft-attachment imports neither this module nor
 // context-budget-telemetry) — the draft `attached_document` row bounds the doc
 // at the SAME enforced cap the fail-closed builder throws on. Derive, don't mirror.
@@ -68,8 +68,8 @@ import { log } from '../../utils/telemetry.js';
 export const POLICY_EDIT_BRIEF_CHAR_CAP = 1_000;
 /** = `DECISION_REVIEW_MAX_BRIEF_CHARS` (cee/decision-review/invoke.ts). Pinned. */
 export const POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP = 2_000;
-/** = `CONTEXT_PACK_RECENT_TURNS_CAP` (context-pack-assembler.ts). Pinned. Raised 5→8 with the cap (D-59-11 S5 flip, 2026-07-24). */
-export const POLICY_VERBATIM_TURNS = 8;
+/** DERIVED from `CONTEXT_PACK_RECENT_TURNS_CAP` (context-pack-schema.ts, the single source) — no longer a hand-typed mirror (FINAL-SWEEP F4). */
+export const POLICY_VERBATIM_TURNS = CONTEXT_PACK_RECENT_TURNS_CAP;
 /** = `MAX_PROJECTED_OPTIONS` (context-pack-assembler.ts). Pinned. */
 export const POLICY_MAX_PROJECTED_OPTIONS = 12;
 /**

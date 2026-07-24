@@ -69,6 +69,7 @@ import {
 import { config, isProduction, isTest } from '../../config/index.js';
 import {
   CONTEXT_PACK_BRIEF_CHAR_CAP,
+  CONTEXT_PACK_RECENT_TURNS_CAP,
   ContextPackSchema,
 } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
@@ -82,14 +83,12 @@ import {
   type CoachingStatePack,
 } from './canonical-analysis-state.js';
 
-// Recent turns cap for the conversation projection. Spec §10 bounds this at
-// five for token budget. Any trim beyond is caller's concern.
-// Verbatim conversation memory window (D-59-11, the anticipated "S5 flip",
-// 2026-07-24): raised 5 → 8 per the context design. Turns beyond this window are
-// summarised by the rolling summary; the boundary is exercised by
-// context-pack-assembler.test.ts. POLICY_VERBATIM_TURNS mirrors this and is pinned
-// equal by the context-policy conformance test — move both together.
-export const CONTEXT_PACK_RECENT_TURNS_CAP = 8;
+// Recent turns cap for the conversation projection — the verbatim memory window.
+// SINGLE SOURCE is now `context-pack-schema.ts` (FINAL-SWEEP F4); re-exported here
+// so existing importers (context-pack-assembler.test.ts, context-budget-
+// enforcement.test.ts) keep their import path, and POLICY_VERBATIM_TURNS derives
+// from the same constant — no hand-mirror to move in lockstep.
+export { CONTEXT_PACK_RECENT_TURNS_CAP } from './context-pack-schema.js';
 
 /**
  * Context v2 S1: mirror of commit.ts `CONVERSATION_TEXT_CAP` (the persist-
