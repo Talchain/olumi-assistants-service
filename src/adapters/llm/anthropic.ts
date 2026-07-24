@@ -6,6 +6,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { anthropicTemperatureFor } from "../../config/models.js";
+import { wrapUntrusted } from "./untrusted-envelope.js";
 import { getDefaultModelForTask } from "../../config/model-routing.js";
 import { emit, log, TelemetryEvents } from "../../utils/telemetry.js";
 import { normaliseLegacyCoachingValues } from "./normalise-legacy-coaching.js";
@@ -409,7 +410,7 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
       parts.push(part);
     }
     if (parts.length) {
-      docContext = `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${parts.join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`;
+      docContext = "\n\n" + wrapUntrusted("## Attached Documents", parts.join("\n\n"));
     }
   }
 
@@ -427,10 +428,7 @@ async function buildDraftPrompt(args: DraftArgs, opts?: { forceDefault?: boolean
   const systemDirective = args.systemDirective
     ? `\n\n${args.systemDirective}`
     : "";
-  const userContent = `## Brief
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${args.brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
+  const userContent = `${wrapUntrusted("## Brief", args.brief)}${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
   // If forceDefault is true, skip store/cache and use hardcoded default directly
@@ -2271,14 +2269,8 @@ async function buildRepairPrompt(args: RepairArgs): Promise<{ system: AnthropicS
   const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
   const currencyInstruction = (args as any).currencyInstruction ?? "";
-  const userContent = `Brief:
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${briefText}
-[END_UNTRUSTED_USER_CONTENT]
-Docs:
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${docsText}
-[END_UNTRUSTED_USER_CONTENT]
+  const userContent = `${wrapUntrusted("Brief:", briefText)}
+${wrapUntrusted("Docs:", docsText)}
 Attempt: ${attempt} of ${maxAttempts}
 ${escalationText}
 ## Violations Found
@@ -2632,10 +2624,7 @@ async function buildClarifyPrompt(args: ClarifyArgs): Promise<{ system: Anthropi
     : "";
 
   const currencyInstruction = (args as any).currencyInstruction ?? "";
-  const userContent = `## Brief
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${args.brief}
-[END_UNTRUSTED_USER_CONTENT]
+  const userContent = `${wrapUntrusted("## Brief", args.brief)}
 ${previousContext}${currencyInstruction}`;
 
   // Load system prompt from prompt management system (with fallback to registered defaults)
@@ -2846,7 +2835,7 @@ async function buildCritiquePrompt(args: CritiqueArgs): Promise<{ system: Anthro
     2
   );
 
-  const briefContext = args.brief ? `\n\n## Original Brief\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${args.brief}\n[END_UNTRUSTED_USER_CONTENT]` : "";
+  const briefContext = args.brief ? "\n\n" + wrapUntrusted("## Original Brief", args.brief) : "";
   const focusContext = args.focus_areas?.length
     ? `\n\n## Focus Areas\nPrioritize issues in: ${args.focus_areas.join(", ")}`
     : "";
@@ -3030,7 +3019,7 @@ export async function explainDiffWithAnthropic(
 Given this patch:
 ${JSON.stringify(args.patch, null, 2)}
 
-${args.brief ? `Context:\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${args.brief}\n[END_UNTRUSTED_USER_CONTENT]` : ""}
+${args.brief ? wrapUntrusted("Context:", args.brief) : ""}
 ${args.graph_summary ? `Graph has ${args.graph_summary.node_count} nodes and ${args.graph_summary.edge_count} edges.` : ""}
 
 Generate a JSON array of rationales explaining why each change was made. Each rationale should have:

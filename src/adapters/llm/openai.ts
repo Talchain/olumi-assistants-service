@@ -16,6 +16,7 @@ import { contentDigest } from "../../utils/redaction.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { resolveDraftMaxTokens, isDraftTruncated } from "./draft-budget.js";
+import { wrapUntrusted } from "./untrusted-envelope.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
 import {
@@ -303,14 +304,8 @@ async function buildRepairPrompt(
   const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
 
   const currencyInstruction = options?.currencyInstruction ?? "";
-  const userContent = `Brief:
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${briefText}
-[END_UNTRUSTED_USER_CONTENT]
-Docs:
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${docsText}
-[END_UNTRUSTED_USER_CONTENT]
+  const userContent = `${wrapUntrusted("Brief:", briefText)}
+${wrapUntrusted("Docs:", docsText)}
 Attempt: ${attempt} of ${maxAttempts}
 ${escalationText}
 ## Violations Found
@@ -567,7 +562,7 @@ export class OpenAIAdapter implements LLMAdapter {
         parts.push(part);
       }
       if (parts.length) {
-        docContext = `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${parts.join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`;
+        docContext = "\n\n" + wrapUntrusted("## Attached Documents", parts.join("\n\n"));
       }
     }
     const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
@@ -578,10 +573,7 @@ export class OpenAIAdapter implements LLMAdapter {
     // fix so this path does not silently drop the directive now that it is
     // threaded via systemDirective rather than concatenated into `brief`.
     const systemDirective = args.systemDirective ? `\n\n${args.systemDirective}` : "";
-    const userContent = `## Brief
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
+    const userContent = `${wrapUntrusted("## Brief", brief)}${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();

@@ -34,6 +34,7 @@ import { extractJson } from "../../../utils/json-extractor.js";
 import { normaliseLegacyCoachingValues } from "../../../adapters/llm/normalise-legacy-coaching.js";
 import { emitContextBudget } from "../../../orchestrator-v5/context/context-budget-telemetry.js";
 import { remainingRequestBudgetMs } from "../../../config/timeouts.js";
+import { escapeUntrustedDelimiters } from "../../../adapters/llm/untrusted-envelope.js";
 
 // Bounded so the pass cannot itself run away or blow the request budget. The
 // coaching payload is small (b2b anatomy: coaching ~529 tok + causal ~209 tok),
@@ -110,15 +111,10 @@ const COACHING_SYSTEM = [
   "single JSON object specified above.",
 ].join("\n");
 
-// Reserved untrusted-content delimiters that appear literally in a coaching
-// prompt. Any occurrence INSIDE user/model content (a brief, a node label) is
-// neutralised so it cannot forge an envelope boundary (F11, 2026-07-24).
-const UNTRUSTED_MARKER_RE = /\[(?:BEGIN|END)_UNTRUSTED_[A-Z_]*\]/gi;
-function escapeUntrustedDelimiters(text: string): string {
-  // Swap the square brackets of any marker-shaped token so it is no longer a
-  // valid delimiter, while keeping the text human-/model-readable as data.
-  return text.replace(UNTRUSTED_MARKER_RE, (m) => m.replace(/\[/g, '(').replace(/\]/g, ')'));
-}
+// `escapeUntrustedDelimiters` (F11, 2026-07-24) is now the shared single source
+// in adapters/llm/untrusted-envelope.ts — imported above, no longer a local copy
+// (FINAL-SWEEP F3). The coaching message keeps its own two-marker structure
+// (USER_CONTENT for the brief + GRAPH_DATA for the graph) built below.
 
 /**
  * Project a MINIMAL structural view (node id/kind/label + edge from/to) so the
