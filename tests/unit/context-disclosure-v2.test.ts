@@ -26,6 +26,7 @@ import {
 import {
   projectConversation,
   PERSISTED_MESSAGE_CAP,
+  CONTEXT_PACK_RECENT_TURNS_CAP,
 } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 import { ContextPackSchema } from '../../src/orchestrator-v5/context/context-pack-schema.js';
@@ -177,7 +178,7 @@ describe('window disclosure (projectConversation) — always on', () => {
   it('default (no opts): conversation gains {window: {shown, available}}', () => {
     const turns = Array.from({ length: 9 }, (_, i) => turnFixture(i));
     const projected = projectConversation(turns, false);
-    expect(projected.window).toEqual({ shown: 5, available: 9 });
+    expect(projected.window).toEqual({ shown: CONTEXT_PACK_RECENT_TURNS_CAP, available: 9 });
 
     const cuts = emitSpy.mock.calls
       .filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5ContextTruncation)
@@ -217,7 +218,7 @@ describe('window disclosure (projectConversation) — always on', () => {
     expect(parsed.success).toBe(true);
     // .strict() must not silently strip the disclosure fields.
     if (parsed.success) {
-      expect((parsed.data as Record<string, unknown>).window).toEqual({ shown: 5, available: 9 });
+      expect((parsed.data as Record<string, unknown>).window).toEqual({ shown: CONTEXT_PACK_RECENT_TURNS_CAP, available: 9 });
     }
   });
 });

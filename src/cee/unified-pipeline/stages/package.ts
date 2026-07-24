@@ -452,6 +452,31 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     ...(Array.isArray(ctx.topologyPlan) ? { topology_plan: ctx.topologyPlan } : {}),
   };
 
+  // ── F6 (2026-07-24): coaching_status honesty — decide from VALIDATED counts ──
+  // The coaching pass (Stage 4.5) marks `attached=true` for ANY non-null
+  // container — including `{"coaching":{},"causal_claims":[{}]}`, which Stage 5
+  // narrows to canonical-empty coaching and drops the invalid claim. Deciding the
+  // terminal status from pre-validation presence then wrongly stamped 'complete'.
+  // Own the complete-vs-degraded call HERE, from the SAME validators Stage 5 uses
+  // (hasMeaningfulCoaching + validateCausalClaims) — deriving, never a second
+  // mirror of the narrowing. When the pass ATTACHED content that validates to
+  // nothing usable, the honest status is 'failed_degraded'. Scope-tight: fires
+  // ONLY when the pass attached (so a never-ran / budget-skipped / no-adapter path
+  // is untouched — index.ts stamps those), and never clobbers 'skipped_budget'.
+  const coachingPassAttached =
+    (ctx.coaching !== undefined && ctx.coaching !== null) || ctx.causalClaims !== undefined;
+  const coachingUsable =
+    (sanitisedCoaching != null && hasMeaningfulCoaching(sanitisedCoaching)) ||
+    validatedCausalClaims.length > 0;
+  if (
+    coachingPassAttached &&
+    !coachingUsable &&
+    ctx.pipelineOutcome &&
+    ctx.pipelineOutcome.coaching_status !== 'skipped_budget'
+  ) {
+    ctx.pipelineOutcome.coaching_status = 'failed_degraded';
+  }
+
   // ── Step 4: Apply response caps ──────────────────────────────────────────
   const { cappedPayload, limits } = applyResponseCaps(payload);
 

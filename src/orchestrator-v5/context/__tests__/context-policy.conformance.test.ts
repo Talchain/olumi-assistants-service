@@ -447,6 +447,19 @@ describe('deterministic rows (chip_run, clarify) — llm:false invariant + zero 
     }
   });
 
+  it('F10 — chip_run declares its conditional decision_review delegation; clarify is unconditionally deterministic', () => {
+    // chip_run's dispatch is deterministic, but under the await flag it delegates
+    // ONE decision_review child call — declared so llm:false is honest across config.
+    expect(CONTEXT_POLICY.chip_run.conditional_llm_delegation).toEqual({
+      flag: 'V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW',
+      child_call_site: 'decision_review',
+    });
+    // The delegated child MUST be a real, llm:true call site.
+    expect(CONTEXT_POLICY[CONTEXT_POLICY.chip_run.conditional_llm_delegation!.child_call_site].llm).toBe(true);
+    // clarify has no such delegation — it is unconditionally zero-LLM.
+    expect(CONTEXT_POLICY.clarify.conditional_llm_delegation).toBeUndefined();
+  });
+
   it('POSITIVE CONTROL — the invariant would SEE a deterministic row carrying sections', () => {
     // Prove the invariant discriminates: a deterministic row with any section
     // fails the "no model-facing context" check.
@@ -790,7 +803,10 @@ describe('draft_coaching — OBSERVED against the live coaching-pass emit', () =
     // POSITIVE CONTROL: the actual message the model saw carries BRIEF + GRAPH
     // markers and NOT the dropped non-structural field.
     expect(seenUserMessage).toContain('BRIEF:');
-    expect(seenUserMessage).toContain('GRAPH (structure only):');
+    // F11 (2026-07-24): the graph header now carries the untrusted-data note;
+    // assert the stable prefix so the conformance is not coupled to the wording.
+    expect(seenUserMessage).toContain('GRAPH (structure only');
+    expect(seenUserMessage).toContain('[BEGIN_UNTRUSTED_GRAPH_DATA]');
     expect(seenUserMessage).not.toContain('rationale');
 
     // And a realistic emit produces ZERO policy divergence (acceptance (1)).

@@ -140,6 +140,15 @@ export interface InvokeDecisionReviewOptions {
   readonly requestId: string;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
+  /**
+   * RIDER-B / D-60 (2026-07-24): OVERRIDE-ONLY per-call model for the
+   * decision_review A/B lever. When set, the review runs on this model instead
+   * of the task-resolved default (routed as a `per_call` precedence source).
+   * When ABSENT the behaviour is byte-identical to before — the default pin is
+   * unchanged; this threads NO live model switch, only the ability to measure a
+   * candidate arm on demand.
+   */
+  readonly model?: string;
 }
 
 export interface DecisionReviewInvokeResult {
@@ -473,7 +482,13 @@ export async function invokeDecisionReview(
 
   const userMessage = buildDecisionReviewUserMessage(input, margin);
 
-  const { adapter, resolution } = getAdapterWithResolution('decision_review');
+  // RIDER-B: thread an OPTIONAL per-call model override (A/B lever). Absent ⇒
+  // EXACTLY `getAdapterWithResolution('decision_review')` (default path
+  // byte-identical, no extra positional args); present ⇒ the override resolves
+  // as a `per_call` source — measure-a-candidate-arm only, no live default flip.
+  const { adapter, resolution } = options.model
+    ? getAdapterWithResolution('decision_review', options.model, 'per_call')
+    : getAdapterWithResolution('decision_review');
   const configuredMaxTokens = getMaxTokensFromConfig('decision_review');
   const maxTokens = configuredMaxTokens ?? 4096;
 

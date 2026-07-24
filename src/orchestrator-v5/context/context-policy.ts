@@ -64,8 +64,8 @@ import { log } from '../../utils/telemetry.js';
 export const POLICY_EDIT_BRIEF_CHAR_CAP = 1_000;
 /** = `DECISION_REVIEW_MAX_BRIEF_CHARS` (cee/decision-review/invoke.ts). Pinned. */
 export const POLICY_DECISION_REVIEW_BRIEF_CHAR_CAP = 2_000;
-/** = `CONTEXT_PACK_RECENT_TURNS_CAP` (context-pack-assembler.ts). Pinned. */
-export const POLICY_VERBATIM_TURNS = 5;
+/** = `CONTEXT_PACK_RECENT_TURNS_CAP` (context-pack-assembler.ts). Pinned. Raised 5→8 with the cap (D-59-11 S5 flip, 2026-07-24). */
+export const POLICY_VERBATIM_TURNS = 8;
 /** = `MAX_PROJECTED_OPTIONS` (context-pack-assembler.ts). Pinned. */
 export const POLICY_MAX_PROJECTED_OPTIONS = 12;
 /**
@@ -201,6 +201,20 @@ export interface ContextPolicy {
     readonly verbatim_turns: number; // DERIVED from CONTEXT_PACK_RECENT_TURNS_CAP
     readonly rolling_summary: boolean; // does this site inject the rolling summary?
   } | null;
+  /**
+   * F10 (2026-07-24): a call site whose OWN dispatch is deterministic (`llm:false`)
+   * but which MAY delegate ONE child LLM call under a named feature flag. The row
+   * stays `llm:false` — it composes no model-facing context itself — but declaring
+   * the conditional child makes `llm:false` HONEST across supported configuration
+   * (conformance exercises the real dispatcher with the flag both off and on).
+   * Absent ⇒ the site is unconditionally deterministic (zero child LLM calls).
+   */
+  readonly conditional_llm_delegation?: {
+    /** The env feature flag that enables the child call (off ⇒ zero LLM). */
+    readonly flag: string;
+    /** The delegated LLM call site (its own row carries `llm:true`). */
+    readonly child_call_site: ContextCallSite;
+  };
   /** Human note (e.g. activation-gated, deterministic-composer). */
   readonly note?: string;
 }
@@ -410,7 +424,17 @@ const CHIP_RUN: ContextPolicy = {
   memory_window: null,
   total_char_budget: null,
   sections: [],
-  note: 'DETERMINISTIC — no model-facing context, no LLM call. Conformance asserts zero adapter calls on the chip dispatch path.',
+  // F10 (2026-07-24): the chip dispatch itself is deterministic (zero model-facing
+  // context), but under V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW it delegates ONE
+  // child call to `decision_review` (enrichRunAnalysisWithDecisionReview → LLM).
+  // Declared so `llm:false` is not read as "provably zero-LLM across all config";
+  // conformance invokes the REAL chip dispatcher with the flag off (zero LLM) and
+  // on (one decision_review child).
+  conditional_llm_delegation: {
+    flag: 'V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW',
+    child_call_site: 'decision_review',
+  },
+  note: 'DETERMINISTIC dispatch — no model-facing context. Zero LLM by default; under V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW it delegates ONE decision_review child call (conditional_llm_delegation). Conformance asserts zero adapter calls flag-off and the child call flag-on.',
 };
 
 /**

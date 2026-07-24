@@ -176,9 +176,10 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('S4 activation — the 5-turn cliff is closed by the rolling summary', () => {
-  it('8-turn conversation: turn-1 fact falls off the verbatim window but arrives via the summary, disclosed', async () => {
+  it('beyond-window conversation: turn-1 fact falls off the verbatim window but arrives via the summary, disclosed', async () => {
     const store = new InMemoryStore();
-    const history = historyNewestFirst(8);
+    // cap+3 turns → exactly 3 fall off the window whatever the cap (derive-don't-mirror).
+    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
 
     // Maintain half — the REAL input-builder feeds the full history to the
     // summariser (regen: no prior). The deriving model can only echo the
@@ -189,7 +190,7 @@ describe('S4 activation — the 5-turn cliff is closed by the rolling summary', 
     const { pack, prompt } = await assembleLive(history, store, 'So where should we hold it?');
 
     // THE CLIFF (pre-activation this was the WHOLE story): the verbatim
-    // 5-turn window does NOT carry the turn-1 fact...
+    // window does NOT carry the turn-1 fact...
     expect(JSON.stringify(pack.conversation)).not.toContain(EARLY_FACT);
 
     // ...but the summary section now does (QUALITY: the named value itself,
@@ -205,8 +206,8 @@ describe('S4 activation — the 5-turn cliff is closed by the rolling summary', 
     // DISCLOSURE (#536 extension): the "N of M turns included" marker now
     // says how many of the not-shown turns arrive as the summary.
     expect(pack.conversation.window).toEqual({
-      shown: 5,
-      available: 8,
+      shown: CONTEXT_PACK_RECENT_TURNS_CAP,
+      available: CONTEXT_PACK_RECENT_TURNS_CAP + 3,
       summarised: 3,
     });
 
@@ -216,7 +217,7 @@ describe('S4 activation — the 5-turn cliff is closed by the rolling summary', 
 
   it('the summary is byte-bounded and passes the budget seam untouched (precedence: never trimmed)', async () => {
     const store = new InMemoryStore();
-    const history = historyNewestFirst(8);
+    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
     await maintain(history, store, derivingModel());
 
     const { pack } = await assembleLive(history, store, 'And the catering?');
@@ -315,7 +316,7 @@ describe('S4 activation — positive control (≤ window: byte-identical, no sto
 describe('S4 activation — summarised marker never overclaims', () => {
   it('floor summary (model failed at bootstrap): section discloses itself, summarised is 0', async () => {
     const store = new InMemoryStore();
-    const history = historyNewestFirst(8);
+    const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
     const failing: SummariserModel = {
       summarise: vi.fn(async () => {
         throw new Error('model down');
@@ -331,8 +332,8 @@ describe('S4 activation — summarised marker never overclaims', () => {
     // A floor absorbed NO conversation history — claiming summarised:3
     // would be the exact lying-coverage class this lane must not ship.
     expect(pack.conversation.window).toEqual({
-      shown: 5,
-      available: 8,
+      shown: CONTEXT_PACK_RECENT_TURNS_CAP,
+      available: CONTEXT_PACK_RECENT_TURNS_CAP + 3,
       summarised: 0,
     });
   });

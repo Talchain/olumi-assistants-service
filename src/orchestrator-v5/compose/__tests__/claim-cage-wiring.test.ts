@@ -93,7 +93,12 @@ describe('composeCagedField — the field-level cage chokepoint (σ)', () => {
 
 // ── Byte-inert live wiring through the lens builder ──────────────────────────
 const GRAPH_HASH = 'gh_a1b2c3d4e5f60001';
+// CTX omits `freshness` — after F8 (2026-07-24) that means the cage sees an
+// ABSENT verdict and DENIES (not_fresh), no longer defaulted to 'fresh'.
 const CTX: BlockBuildCtx = { created_at: '2026-07-23T15:00:00.000Z', graph_hash_at_generation: GRAPH_HASH };
+// Explicit fresh verdict — the positive control for the ALLOW path on the wired
+// lens-builder path (an allow-list typo or an over-eager cage would fail HERE).
+const CTX_FRESH: BlockBuildCtx = { ...CTX, freshness: 'fresh' };
 
 // Dominant-driver fact → sensitivity lens → grounds in factor_sensitivity (ALLOW-LISTED).
 function dominantDriverFact(): RunAnalysisHandlerFact {
@@ -136,8 +141,9 @@ function winProbModerateFact(): RunAnalysisHandlerFact {
 }
 
 describe('buildLensSuggestionCoachingBlock — cage consult is LIVE + byte-inert (σ)', () => {
-  it('emits the SAME prose-only strengthen block (byte-inert) AND fires an allow cage event for the allow-listed grounding field', () => {
-    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX);
+  it('FRESH verdict: the SAME prose-only strengthen block (byte-inert) AND an allow cage event for the allow-listed grounding field', () => {
+    // Positive control on the wired path — an explicit fresh verdict.
+    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX_FRESH);
     // Byte-inert: the block is unchanged by the cage consult (prose-only, no value).
     expect(block).not.toBeNull();
     expect(block!.coaching_kind).toBe('strengthen');
@@ -148,6 +154,17 @@ describe('buildLensSuggestionCoachingBlock — cage consult is LIVE + byte-inert
     const evt = cageEvents();
     expect(evt).toHaveLength(1);
     expect(evt[0]!.data).toMatchObject({ field: 'factor_sensitivity', decision: 'allowed' });
+  });
+
+  it('F8 — an OMITTED freshness verdict DENIES (not_fresh), not defaulted to fresh', () => {
+    // CTX omits `freshness`. Before F8 the live caller supplied `?? 'fresh'`, so
+    // this allow-listed + companion-safe grounding field would have passed the
+    // cage. With F8 it must DENY with not_fresh — deny-by-default at the caller.
+    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX);
+    expect(block).not.toBeNull(); // still byte-inert — the block always emits
+    const evt = cageEvents();
+    expect(evt).toHaveLength(1);
+    expect(evt[0]!.data).toMatchObject({ field: 'factor_sensitivity', decision: 'denied', reason: 'not_fresh' });
   });
 
   it('STAGING-OBSERVABLE DENIAL: a pre-mortem lens grounded in option_comparison fires a not_allowlisted deny event, block still emits', () => {

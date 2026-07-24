@@ -32,6 +32,7 @@ import {
 import {
   projectBrief,
   projectConversation,
+  CONTEXT_PACK_RECENT_TURNS_CAP,
 } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
 import { capConversationText, CONVERSATION_TEXT_CAP } from '../../src/orchestrator-v5/commit.js';
@@ -392,7 +393,7 @@ describe('cut site: window slice (projectConversation)', () => {
   it('emits a DISCLOSED window-slice truncation event when prior turns exceed the cap', () => {
     const turns = Array.from({ length: 9 }, (_, i) => turnFixture(i));
     const projected = projectConversation(turns, false);
-    expect(projected.recent_turns).toHaveLength(5);
+    expect(projected.recent_turns).toHaveLength(CONTEXT_PACK_RECENT_TURNS_CAP);
 
     const cuts = eventsNamed(TelemetryEvents.V5ContextTruncation).filter(
       (e) => e.section === 'conversation',
@@ -406,7 +407,7 @@ describe('cut site: window slice (projectConversation)', () => {
     const chars = (t: ReturnType<typeof turnFixture>) =>
       (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0);
     expect(cuts[0].original_chars).toBe(turns.reduce((a, t) => a + chars(t), 0));
-    expect(cuts[0].kept_chars).toBe(turns.slice(0, 5).reduce((a, t) => a + chars(t), 0));
+    expect(cuts[0].kept_chars).toBe(turns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP).reduce((a, t) => a + chars(t), 0));
   });
 
   it('emits nothing at or under the cap', () => {

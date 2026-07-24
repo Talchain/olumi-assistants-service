@@ -1040,6 +1040,13 @@ export async function draftGraphWithAnthropic(
     // derivation already fits — the F1 cap only LOWERS on a LATER invocation
     // whose predecessors actually burned budget.
     let streamInvocations = 0;
+    // F5 (2026-07-24): the max_tokens ACTUALLY applied to the attempt that
+    // produced `response`. Starts at the outer `maxTokens` and is re-bound inside
+    // the retry closure to the per-attempt `attemptBody.max_tokens` — so a
+    // late-final attempt whose cap the F1 squeeze LOWERED (1,800/3,150 vs 8,550)
+    // is reported HONESTLY in logs/salvage/error/metadata, not as the outer cap.
+    // The operational lowering existed since F1; F5 makes it OBSERVABLE.
+    let actualMaxTokens = maxTokens;
     for (let attempt = 1; response === undefined; attempt++) {
       // Fresh idempotency key per RETRY so the provider RE-GENERATES rather than
       // replaying the doomed generation for the same key (retries would be
@@ -1090,6 +1097,12 @@ export async function draftGraphWithAnthropic(
               attemptBody = { ...(body as Anthropic.MessageStreamParams), max_tokens: finalMaxTokens };
             }
           }
+          // F5: bind the reported cap to what THIS attempt actually sends. On a
+          // late final attempt attemptBody carries the lowered max_tokens; on any
+          // other attempt it is the outer maxTokens. Set here (not only in the
+          // lowering branch) so every attempt — including withRetry's transient
+          // re-invocations — leaves actualMaxTokens equal to the cap it applied.
+          actualMaxTokens = (attemptBody as { max_tokens?: number }).max_tokens ?? maxTokens;
           return streamOneDraftAttempt(attemptBody, attemptIdempotencyKey, attemptDetectDeadlineMs);
         },
         { adapter: "anthropic", model, operation: "draft_graph" },
@@ -1207,7 +1220,7 @@ export async function draftGraphWithAnthropic(
       log.error({
         event: "cee.llm.draft_truncated_max_tokens",
         model,
-        max_tokens: maxTokens,
+        max_tokens: actualMaxTokens, // F5: the per-attempt cap that actually applied
         output_tokens: response.usage.output_tokens,
         timeout_ms: effectiveTimeout,
         affordable_tokens: affordableDraftTokens,
@@ -1282,7 +1295,7 @@ export async function draftGraphWithAnthropic(
               log.warn({
                 event: "cee.llm.draft_truncation_salvaged",
                 model,
-                max_tokens: maxTokens,
+                max_tokens: actualMaxTokens, // F5: the per-attempt cap that actually applied
                 output_tokens: response.usage.output_tokens,
                 salvaged_bytes: repaired.length,
                 original_bytes: content.text.length,
@@ -1302,7 +1315,7 @@ export async function draftGraphWithAnthropic(
           // requests never returned at all — they hung to the timeout).
           throw Object.assign(
             new UpstreamNonJsonError(
-              `anthropic draft_graph output truncated at max_tokens=${maxTokens} (stop_reason=max_tokens, ` +
+              `anthropic draft_graph output truncated at max_tokens=${actualMaxTokens} (stop_reason=max_tokens, ` +
               `output_tokens=${response.usage.output_tokens}) — runaway generation returned truncated JSON ` +
               `inside the ${effectiveTimeout}ms timeout instead of hanging to it`,
               "anthropic",
@@ -1395,7 +1408,7 @@ export async function draftGraphWithAnthropic(
       // Name the truncation so the runaway-generation case stays diagnosable
       // on this path too, not just on the parse-failure path above.
       const truncationPrefix = truncatedAtMaxTokens
-        ? `anthropic draft_graph output truncated at max_tokens=${maxTokens} (stop_reason=max_tokens, ` +
+        ? `anthropic draft_graph output truncated at max_tokens=${actualMaxTokens} (stop_reason=max_tokens, ` +
           `output_tokens=${response.usage.output_tokens}) — truncated JSON failed schema validation — `
         : '';
 
@@ -1615,7 +1628,7 @@ export async function draftGraphWithAnthropic(
         cache_status: promptMeta.cache_status,
         use_staging_mode: promptMeta.use_staging_mode,
         temperature: 0,
-        max_tokens: maxTokens,
+        max_tokens: actualMaxTokens, // F5: report the per-attempt cap that produced this response
         seed: args.seed,
         token_usage: {
           prompt_tokens: response.usage.input_tokens,

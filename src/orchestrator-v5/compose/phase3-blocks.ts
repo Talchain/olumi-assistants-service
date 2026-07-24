@@ -1065,6 +1065,41 @@ export function composeCagedField<T>(
  * present as a non-empty computed structure. Defensive + fail-closed: absent or
  * non-`'computed'` ⇒ false.
  */
+/**
+ * F9 (2026-07-24): strict per-field value schemas for the three allow-listed
+ * companion fields ({@link TIER2_CANDIDATE_FIELDS}). When the explicit
+ * `<field>_status` is ABSENT, the OLD heuristic admitted ANY non-null scalar/object
+ * or non-empty array as claim-safe — so `confidence_tier: ""`, `robustness: {}`,
+ * `confidence_tier: false`, `confidence_tier: 0` and `factor_sensitivity: [{}]` all
+ * passed. These validate the VALUE strictly instead.
+ *
+ * DERIVED from the real PLoT enrichment shape (a factor_id-bearing sensitivity row,
+ * a non-empty tier LABEL, a non-empty robustness object) — deliberately NOT the
+ * ENRICH_FACTORS *input* namesake `FactorSensitivityInput` ({factor_id, elasticity,
+ * rank}), which the live `enrichment.factor_sensitivity` does not carry (it uses
+ * influence_score/influence_rank/confidence) — binding to it would over-block a
+ * legitimately-computed value. A NEW allow-listed field with no entry here fails
+ * CLOSED (deny), the safe default for a claim-safety cage.
+ */
+const COMPANION_VALUE_SCHEMAS: Readonly<Record<string, (value: unknown) => boolean>> = Object.freeze({
+  // A confidence tier LABEL — a non-empty, non-whitespace string.
+  confidence_tier: (value) => typeof value === 'string' && value.trim().length > 0,
+  // A non-empty array of factor-sensitivity rows, each an object bearing a
+  // non-empty string `factor_id`. Rejects `[]` and `[{}]`.
+  factor_sensitivity: (value) =>
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((row) => {
+      const r = readRecord(row);
+      return r !== null && typeof r.factor_id === 'string' && r.factor_id.length > 0;
+    }),
+  // A non-empty object. Rejects `{}`, scalars and arrays.
+  robustness: (value) => {
+    const r = readRecord(value);
+    return r !== null && Object.keys(r).length > 0;
+  },
+});
+
 export function deriveCompanionClaimSafe(fact: RunAnalysisHandlerFact, field: string): boolean {
   const enrichment = readRecord((fact.result as Record<string, unknown>).enrichment);
   if (enrichment === null) return false;
@@ -1072,12 +1107,13 @@ export function deriveCompanionClaimSafe(fact: RunAnalysisHandlerFact, field: st
   // Fail CLOSED on ANY present status, not only a string one (egress-F2,
   // 2026-07-24). A present-but-malformed `<field>_status` (object/number/bool —
   // e.g. an upstream enrichment drift to `{state:'computed'}`) must DENY, not
-  // fall through to the presence-of-value branch and read as claim-safe. Only a
-  // genuinely absent status defers to the value-presence heuristic below.
+  // fall through to the value branch and read as claim-safe. Only a genuinely
+  // absent status defers to the strict per-field value schema below.
   if (status !== undefined) return status === 'computed';
-  const value = enrichment[field];
-  if (Array.isArray(value)) return value.length > 0;
-  return value !== undefined && value !== null;
+  // F9: absent status ⇒ validate the VALUE against its strict field schema
+  // (never the old loose non-null/non-empty-array heuristic).
+  const validate = COMPANION_VALUE_SCHEMAS[field];
+  return validate !== undefined && validate(enrichment[field]);
 }
 
 export function buildLensSuggestionCoachingBlock(
@@ -1135,7 +1171,11 @@ export function buildLensSuggestionCoachingBlock(
   void composeCagedField(selection.groundingField, undefined, {
     tier2Enabled: TIER2_ACTIVATION_ENABLED,
     companionStatusClaimSafe: deriveCompanionClaimSafe(fact, selection.groundingField),
-    freshness: ctx.freshness ?? 'fresh',
+    // F8 (2026-07-24): pass ctx.freshness UNCHANGED. The cage denies absent
+    // freshness (not_fresh) by design — the removed `?? 'fresh'` default turned
+    // an OMITTED verdict into a claim-usable one, defeating the deny-by-default
+    // freshness lock at the live caller. Deny-by-default now holds end-to-end.
+    freshness: ctx.freshness,
   });
 
   emit(TelemetryEvents.V5LensSuggestionEmitted, {
