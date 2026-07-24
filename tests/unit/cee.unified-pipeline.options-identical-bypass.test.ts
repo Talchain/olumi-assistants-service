@@ -102,7 +102,15 @@ describe("runOptionsIdenticalBypass", () => {
     expect(details.repair_skip_reason).toBe("options_identical_unrepairable_by_llm");
   });
 
-  it("attaches user-facing recovery payload with pricing example", () => {
+  it("attaches user-facing recovery payload that is DOMAIN-NEUTRAL and retryable", () => {
+    // CHANGED 2026-07-24 (draft-honesty lane). This test previously asserted
+    // `expect(recovery.suggestion).toMatch(/£49|£99|£199/)` — it PINNED a
+    // hardcoded pricing script into copy that fires on every OPTIONS_IDENTICAL,
+    // whatever the decision is about. The live probe
+    // (STARTER-BRIEF-VALIDATION-2026-07-24, reqs 25f0c95f / a7c24c91) served
+    // that pricing script on a BUILD-VS-BUY brief. Recovery copy naming the
+    // wrong domain is worse than none — it instructs the user to do something
+    // irrelevant. The test now pins the OPPOSITE: no domain script may appear.
     const ctx = makeCtx({
       remainingViolations: [
         { code: "OPTIONS_IDENTICAL", context: { optionIds: ["opt_a", "opt_b"] } },
@@ -113,11 +121,27 @@ describe("runOptionsIdenticalBypass", () => {
 
     const body = ctx.earlyReturn?.body as Record<string, unknown>;
     const recovery = body.recovery as { suggestion?: string; hints?: string[] };
-    expect(recovery.suggestion).toContain("distinct value");
-    // User-facing copy must include a concrete pricing example (per the spec).
-    expect(recovery.suggestion).toMatch(/£49|£99|£199/);
+
+    // POSITIVE CONTROL: there IS copy to inspect, so the absence assertions
+    // below are not vacuous.
+    expect(typeof recovery.suggestion).toBe("string");
+    expect(recovery.suggestion!.length).toBeGreaterThan(20);
     expect(Array.isArray(recovery.hints)).toBe(true);
     expect(recovery.hints!.length).toBeGreaterThan(0);
+
+    const copy = [recovery.suggestion, ...recovery.hints!].join(" ");
+    // No currency figures, no per-month price ladder, no assertion about what
+    // KIND of decision the user is making.
+    expect(copy).not.toMatch(/£|\$|€|\/month/);
+    expect(copy.toLowerCase()).not.toContain("pricing decision");
+    expect(copy.toLowerCase()).not.toContain("give a price");
+
+    // The real user lever survives, stated neutrally.
+    expect(copy.toLowerCase()).toContain("unique value");
+    // Retry is offered: the same brief drafts cleanly on other attempts, so a
+    // hard dead end (retryable defaults to false on omission) was dishonest.
+    expect(body.retryable).toBe(true);
+    expect(String(recovery.hints![0]).toLowerCase()).toContain("retry");
   });
 
   it("records a non-degraded warning on pipelineOutcome (hard fail, no partial graph)", () => {
