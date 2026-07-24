@@ -100,59 +100,69 @@ function resolveFirstDraftAttachment(
 export async function runStageParse(ctx: StageContext): Promise<void> {
   log.info({ requestId: ctx.requestId, stage: "parse" }, "Unified pipeline: Stage 1 (Parse) started");
 
-  // ── Step 1: Ground attachments ──────────────────────────────────────────
-  let docs: DocPreview[];
-  try {
-    const result = await groundAttachments(ctx.input, ctx.rawBody);
-    docs = result.docs;
-  } catch (error) {
-    const err = error instanceof Error ? error : new Error(String(error));
-    ctx.earlyReturn = {
-      statusCode: 400,
-      body: buildCeeErrorResponse("CEE_VALIDATION_FAILED", `Attachment processing failed: ${err.message}`, {
-        requestId: ctx.requestId,
-      }),
-    };
-    return;
+  // ── Step 1a: Native document attachment (D-59-7) — PRIMARY document path ──
+  // The model-native doc-attach bet: carry the FIRST attached document as a
+  // native Anthropic `document` block (no parser build — Anthropic reads the
+  // PDF/text natively). This SUPERSEDES the legacy `grounding` text-preview
+  // parser (Step 1b), which runs ONLY when native carries nothing — so exactly
+  // one path ever carries the document (no double-send; the parser is bypassed
+  // for every attachment native carries, whether or not the grounding flag is
+  // on). Native touches NO config, so it is deterministic regardless of the
+  // grounding env posture. Fail-closed: an oversize / unparseable / empty
+  // document → a typed 4xx with honest copy, never a silent drop.
+  //
+  // LIMITATION (documented, out of slice scope): the native block is
+  // Anthropic-native, so it is consumed only when the draft model is a Claude
+  // model (the live default, model-routing.ts). If the draft model is overridden
+  // to a non-Anthropic provider AND a document is attached, that provider ignores
+  // the block — the document is not consumed (A2/follow-up).
+  let draftAttachment: BuiltDraftAttachment | undefined;
+  const attInput = resolveFirstDraftAttachment(ctx.input, ctx.rawBody);
+  if (attInput) {
+    // Disclosure (not a silent drop): the slice carries ONE document. If more
+    // were attached, record that the extras were not carried so it is observable
+    // rather than silent. (Multi-document is a follow-up; A2 ask.)
+    const totalAttachments = ctx.input.attachments?.length ?? 0;
+    if (totalAttachments > 1) {
+      log.warn(
+        { requestId: ctx.requestId, total_attachments: totalAttachments, carried: 1, redacted: true },
+        "draft: multiple documents attached; the native doc-attach slice carries the first only",
+      );
+    }
+    try {
+      draftAttachment = buildDraftDocumentBlock(attInput);
+    } catch (error) {
+      if (error instanceof DraftAttachmentError) {
+        ctx.earlyReturn = {
+          statusCode: error.httpStatus,
+          body: buildCeeErrorResponse("CEE_VALIDATION_FAILED", error.message, {
+            requestId: ctx.requestId,
+          }),
+        };
+        return;
+      }
+      throw error;
+    }
   }
 
-  // ── Step 1b: Native document attachment (D-59-7) ─────────────────────────
-  // The model-native doc-attach path: carry the FIRST attached document as a
-  // native Anthropic `document` block (no parser build — Anthropic reads the
-  // PDF/text natively). It is the DEFAULT and SUPERSEDES the legacy `grounding`
-  // text-preview path. Gate on `docs.length === 0`: grounding (Step 1) is off by
-  // default (→ empty docs) so native carries the document; when grounding IS on
-  // and produced text previews, native stands down — exactly one path ever
-  // carries the document (no double-send). Fail-closed: an oversize / unparseable
-  // document → a typed 4xx with honest copy, never a silent drop.
-  let draftAttachment: BuiltDraftAttachment | undefined;
-  if (docs.length === 0) {
-    const attInput = resolveFirstDraftAttachment(ctx.input, ctx.rawBody);
-    if (attInput) {
-      // Disclosure (not a silent drop): the slice carries ONE document. If more
-      // were attached, record that the extras were not carried natively so it is
-      // observable rather than silent. (Multi-document is a follow-up; A2 ask.)
-      const totalAttachments = ctx.input.attachments?.length ?? 0;
-      if (totalAttachments > 1) {
-        log.warn(
-          { requestId: ctx.requestId, total_attachments: totalAttachments, carried: 1, redacted: true },
-          "draft: multiple documents attached; the native doc-attach slice carries the first only",
-        );
-      }
-      try {
-        draftAttachment = buildDraftDocumentBlock(attInput);
-      } catch (error) {
-        if (error instanceof DraftAttachmentError) {
-          ctx.earlyReturn = {
-            statusCode: error.httpStatus,
-            body: buildCeeErrorResponse("CEE_VALIDATION_FAILED", error.message, {
-              requestId: ctx.requestId,
-            }),
-          };
-          return;
-        }
-        throw error;
-      }
+  // ── Step 1b: Legacy grounding text-preview — FALLBACK ONLY ────────────────
+  // Runs only when native did NOT carry a document (no attachment, or a payload
+  // native could not resolve). Native supersedes the parser for every document
+  // it carries, so this never double-processes the native document.
+  let docs: DocPreview[] = [];
+  if (!draftAttachment) {
+    try {
+      const result = await groundAttachments(ctx.input, ctx.rawBody);
+      docs = result.docs;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ctx.earlyReturn = {
+        statusCode: 400,
+        body: buildCeeErrorResponse("CEE_VALIDATION_FAILED", `Attachment processing failed: ${err.message}`, {
+          requestId: ctx.requestId,
+        }),
+      };
+      return;
     }
   }
 
