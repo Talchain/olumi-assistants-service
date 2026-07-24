@@ -190,6 +190,81 @@ describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () 
     expect(runUnifiedPipelineMock).toHaveBeenCalledTimes(1);
   });
 
+  it('TRUNCATION on the PRODUCT path carries the honest recovery copy AND the pinned flat recovery_suggestion', async () => {
+    // ⭐ 2026-07-25, skip-gate lane. The 2026-07-24 re-probe reported the product
+    // path failing with "a bare 500 ... none of the honest recovery copy".
+    // Verified at source: HALF of that is wrong — `handleDraftGraph` already
+    // lifts `body.recovery` onto the throw and the route already writes it to
+    // `details.recovery`. What was genuinely missing is the PINNED FLAT field
+    // name `recovery_suggestion` (@talchain/schemas 0.19.0, DGAI #383), which
+    // `/assist/v1/draft-graph` ships at the top level of its error body and this
+    // route did not — so a consumer implemented against the assist contract
+    // found nothing here. This test pins BOTH halves so neither can regress.
+    //
+    // ⚠ STILL OPEN, deliberately not asserted as fixed: this response has no
+    // `assistant_text`, so the user sees nothing until DGAI renders the field.
+    // That is a UI-side change, outside this lane's write slot.
+    const recovery = {
+      suggestion:
+        'The draft grew past the time budget and was cut off before it finished, so nothing was saved.',
+      hints: [
+        'One retry is worth trying — but if it fails the same way again, more retries will not help',
+        'Narrowing the scope reliably fixes it: one decision at a time, with fewer options',
+      ],
+    };
+    runUnifiedPipelineMock.mockResolvedValueOnce({
+      statusCode: 400,
+      body: {
+        schema: 'cee.error.v1',
+        code: 'CEE_LLM_VALIDATION_FAILED',
+        message: 'The draft needed more output tokens than the request budget affords and was truncated',
+        retryable: true,
+        source: 'cee',
+        request_id: 'pipeline-internal-id',
+        reason: 'llm_truncated_max_tokens',
+        recovery,
+        recovery_suggestion: recovery.suggestion,
+        details: { reason: 'llm_truncated_max_tokens' },
+      },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '33333333-3333-4333-8333-3333fc010009',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+
+    // A truncation is a service-side over-generation, not a client input error.
+    expect(body.details.reason).toBe('draft_graph_cee_llm_validation_failed');
+    expect(body.retryable).toBe(true);
+
+    // The nested object (pre-existing behaviour — pinned so it cannot silently go).
+    expect(body.details.recovery).toEqual(recovery);
+
+    // ⭐ THE NEW FIELD — same sentence, same pinned name as `/assist`.
+    expect(body.details.recovery_suggestion).toBe(recovery.suggestion);
+
+    // The copy that was measured false (18 retries / 0 successes) must not be
+    // reachable on this route either.
+    const allCopy = [body.details.recovery.suggestion, ...body.details.recovery.hints]
+      .join(' ')
+      .toLowerCase();
+    expect(allCopy).not.toMatch(/usually (succeeds|works)/);
+
+    expect(() => BoundaryErrorSchema.parse(body)).not.toThrow();
+  });
+
   it('mocked runUnifiedPipeline returns { code: "CEE_TIMEOUT" } → 504-shaped reason, retryable=true', async () => {
     runUnifiedPipelineMock.mockResolvedValueOnce({
       statusCode: 504,

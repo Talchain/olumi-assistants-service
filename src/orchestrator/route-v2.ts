@@ -3190,6 +3190,27 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         const postStageExtras: Record<string, unknown> = {};
         if (pipelineDetails) Object.assign(postStageExtras, pipelineDetails);
         if (pipelineRecovery) postStageExtras.recovery = pipelineRecovery;
+        // PINNED FLAT MIRROR (2026-07-25). `/assist/v1/draft-graph` already ships
+        // `recovery_suggestion` at the top level of its error body — the field
+        // name pinned by @talchain/schemas 0.19.0 (Wave-2 ask 7, DGAI #383) so
+        // consumers stop passthrough-sniffing fallback names for the one
+        // user-facing sentence. The turn route carried the nested
+        // `details.recovery` object but NOT that pinned name, so a consumer
+        // implemented against the assist contract found nothing here. Same
+        // sentence, same field name, both routes — derived from `recovery`, not
+        // restated, so the two cannot drift.
+        //
+        // ⚠ WHAT THIS DOES NOT FIX, stated plainly: this route still answers a
+        // failed draft with HTTP 500 + a BoundaryError, which has no
+        // `assistant_text` — so the copy is on the wire but the user sees
+        // nothing until DGAI renders it. Making the failure speak in the
+        // conversation is a UI-side render change (or a turn-committing
+        // direct_answer 200 here, which would need the turn/state commit this
+        // path deliberately skips on failure); both are outside this lane's
+        // write slot and are NOT claimed as done.
+        if (pipelineRecovery && typeof pipelineRecovery.suggestion === 'string') {
+          postStageExtras.recovery_suggestion = pipelineRecovery.suggestion;
+        }
         if (pipelineErrorCode) postStageExtras.pipeline_error_code = pipelineErrorCode;
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'draft_graph_pipeline',

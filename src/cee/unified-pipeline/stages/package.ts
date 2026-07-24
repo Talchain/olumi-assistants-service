@@ -39,6 +39,7 @@ import {
   assembleCeeProvenance,
 } from "../../pipeline-checkpoints.js";
 import { buildLLMRawTrace } from "../../llm-output-store.js";
+import { buildLlmMetadataProjection } from "../llm-metadata-projection.js";
 import { SERVICE_VERSION } from "../../../version.js";
 import { assembleDraftProvenanceDescriptor } from "../../../context/context-pack.js";
 import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.js";
@@ -794,27 +795,10 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       risk_coefficient_corrections: ctx.riskCoefficientCorrections.length,
       corrections: ctx.riskCoefficientCorrections.length > 0 ? ctx.riskCoefficientCorrections : undefined,
     },
-    llm_metadata: ctx.llmMeta
-      ? {
-          model: ctx.llmMeta.model ?? ctx.draftAdapter?.model,
-          prompt_version: ctx.llmMeta.prompt_version,
-          prompt_text_version: ctx.llmMeta.prompt_text_version,
-          prompt_hash: ctx.llmMeta.prompt_hash,
-          duration_ms: ctx.llmMeta.provider_latency_ms,
-          finish_reason: ctx.llmMeta.finish_reason,
-          response_chars: ctx.llmMeta.raw_llm_text?.length,
-          token_usage: ctx.llmMeta.token_usage,
-          temperature: ctx.llmMeta.temperature,
-          max_tokens: ctx.llmMeta.max_tokens,
-          seed: ctx.llmMeta.seed,
-          reasoning_effort: ctx.llmMeta.reasoning_effort,
-          instance_id: ctx.llmMeta.instance_id,
-          cache_age_ms: ctx.llmMeta.cache_age_ms,
-          cache_status: ctx.llmMeta.cache_status,
-          use_staging_mode: ctx.llmMeta.use_staging_mode,
-          structured_outputs_used: ctx.llmMeta.structured_outputs_used,
-        }
-      : { model: ctx.draftAdapter?.model },
+    // ONE projection, shared with the error surface in unified-pipeline/index.ts
+    // — see llm-metadata-projection.ts for why this stopped being written out by
+    // hand (the two keep-lists had drifted and both dropped runaway_abort_count).
+    llm_metadata: buildLlmMetadataProjection(ctx.llmMeta, ctx.draftAdapter?.model),
     validation_summary: ctx.validationSummary,
     transforms: ctx.transforms.length > 0 ? ctx.transforms : undefined,
     corrections: ctx.collector.hasCorrections() ? ctx.collector.getCorrections() : undefined,

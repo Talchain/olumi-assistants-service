@@ -1136,6 +1136,18 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
   const RUNAWAY_NODES_BLOB =
     '{"nodes":[{"id":"n1","kind":"factor","label":"' + "x".repeat(8600) + '"}';
 
+  // ⚠ ARMED REGIME (skip-gate alignment, 2026-07-25). The abort is now authorised
+  // only when the post-abort window can RE-FUND the cap being abandoned
+  // (`isAbortableRetryViable`) — aborting into a window that cannot is how 60s of
+  // a 110s budget got burned on a doomed 3,150-token final attempt (`/assist`
+  // A2killer 0/18, 2026-07-24). At the FULL attempt-1 cap (8,550 at the 110s
+  // timeout) NO abort is ever re-fundable, so the ladder is correctly silent
+  // there — see the DEFAULT-REGIME test in draft-detector-attachment-aware.test.ts.
+  // The detector tests below therefore pass an explicit `maxTokensCeiling` to put
+  // the adapter in the regime where the ladder IS armed. What they assert — that
+  // the char / stall / hard-ceiling gates fire and retry — is unchanged.
+  const ARMED_LADDER_OPTS = { maxTokensCeiling: 5_000 } as const;
+
   it("CHAR-GATE: a runaway (no edges past the char budget) is aborted and RETRIED, and the retry succeeds", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
@@ -1153,7 +1165,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       docs: [],
       seed: 17,
       model: "claude-sonnet-4-6",
-    });
+    }, ARMED_LADDER_OPTS);
 
     // The doomed attempt was aborted and a fresh generation retried → success.
     expect(streamSpy).toHaveBeenCalledTimes(2);
@@ -1178,7 +1190,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       docs: [],
       seed: 17,
       model: "claude-sonnet-4-6",
-    });
+    }, ARMED_LADDER_OPTS);
 
     const key1 = streamSpy.mock.calls[0][1]?.headers?.["Idempotency-Key"];
     const key2 = streamSpy.mock.calls[1][1]?.headers?.["Idempotency-Key"];
@@ -1213,7 +1225,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
         docs: [],
         seed: 17,
         model: "claude-sonnet-4-6",
-      });
+      }, ARMED_LADDER_OPTS);
 
       // Advance past the stall/ceiling window (>30s) so the progress-aware gate
       // fires on the silent (stalled) attempt, aborts it, and the retry runs (its
@@ -1328,7 +1340,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       const promise = draftGraphWithAnthropic({
         brief: "Should I hire a contractor or full-time employee?",
         docs: [], seed: 17, model: "claude-sonnet-4-6",
-      });
+      }, ARMED_LADDER_OPTS);
       await vi.advanceTimersByTimeAsync(35_000);
       const result = await promise;
 
@@ -1801,17 +1813,35 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
     vi.unstubAllEnvs();
   });
 
-  it("F1 — after runaway aborts consume budget, the FINAL attempt caps max_tokens to the LIVE remaining wall (→ salvage, not a 504)", async () => {
-    // DETECTOR-FIX (2026-07-24): the retry-authorization now reserves the HARD
-    // CEILING (30s) + MIN_RETRY (35s) = 65s, not DETECT_MS (20s) + 35s = 55s —
-    // because a progress-aware abortable attempt can consume up to the ceiling.
-    // 2 runaway attempts each advance the clock 25s; the 3rd is the FINAL attempt
-    // (remaining 60s < HARD_CEILING+MIN_RETRY 65s → no early abort), and completes.
+  it("THE NEW INVARIANT: a post-abort final attempt is NEVER handed a cap below the one that was abandoned", async () => {
+    // ⚠ THIS REPLACES THE ORIGINAL F1 RUNAWAY ASSERTION, WHICH IS NOW UNREACHABLE
+    // BY CONSTRUCTION — recorded, not quietly rewritten.
+    //
+    // F1 used to assert: 2 runaway aborts burn 50s, then the FINAL attempt's cap
+    // is SQUEEZED from 8,550 to aff(60s) = 4,050. That squeeze IS the live defect
+    // (`/assist` A2killer 0/18, 2026-07-24: caps 3,146-3,826 against an 8,550-token
+    // attempt) — a final attempt funded at ~37% of the budget that was abandoned
+    // truncates by construction. The aligned gate makes the state unreachable:
+    //   * a final attempt may run only when `finalCap >= abandonedCap`;
+    //   * "squeeze observable" means `finalCap <  abandonedCap`;
+    // so "squeezed" and "permitted to run" are now mutually exclusive.
+    //
+    // What is asserted instead is the invariant that replaced it, plus the thing
+    // F1 actually cared about: the ladder still reaches a COMPLETING final attempt
+    // (salvage/success stays reachable — this is not a 504 regression).
+    //
+    // The F1 SQUEEZE MECHANISM ITSELF IS STILL COVERED, on the path where it
+    // remains reachable: the F2 test immediately below drives it through a
+    // withRetry transient (503), which this change does not touch.
+    //
+    // MUTATION-CHECK: revert `canRetryAgain` to bare
+    // `hasRoomForAnotherAbortableAttempt` and this goes RED — attempt 2 stays
+    // abortable, a third call appears, and its cap drops below 4,000.
     let call = 0;
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
       const n = call++;
       mockNow += 25_000; // this attempt consumed ~25s of wall-clock
-      if (n < 2) return runawayStream(body, options);
+      if (n < 1) return runawayStream(body, options);
       return makeFakeStream(VALID_GRAPH_JSON)(body, options as any); // final attempt completes
     });
 
@@ -1821,22 +1851,24 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
       docs: [],
       seed: 17,
       model: "claude-sonnet-4-6",
-    });
+    // 4,000 < aff(110s - 30s) = 5,850, so an abort IS re-fundable → ladder armed.
+    }, { maxTokensCeiling: 4_000 });
 
     // The draft SUCCEEDED via the completing final attempt (salvage path reachable).
     expect(result).toBeDefined();
     expect(Array.isArray((result as any).graph?.nodes ?? (result as any).nodes)).toBe(true);
 
-    expect(streamSpy).toHaveBeenCalledTimes(3);
-    // Attempts 1-2 run with detection ON (not final) → max_tokens unchanged at 8550.
-    expect(streamSpy.mock.calls[0][0].max_tokens).toBe(8550);
-    expect(streamSpy.mock.calls[1][0].max_tokens).toBe(8550);
-    // FINAL attempt: remaining = 110000 - 50000 = 60000ms → affordable (60-15)*90 = 4050.
-    // Pre-fix this stayed 8550 → a runaway needs ~82-91s to reach it while 60s
-    // remained → guaranteed overall-timeout (the A2killer class). Also RED if the
-    // canRetryAgain threshold is reverted to DETECT_MS (55s): attempt 3 would then
-    // stay abortable (60 > 55) and never reach this capped-final path.
-    expect(streamSpy.mock.calls[2][0].max_tokens).toBe(4050);
+    // POSITIVE CONTROL — the runaway really fired; without it the cap assertions
+    // below would be comparing two ordinary first attempts.
+    expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(1);
+    expect(streamSpy).toHaveBeenCalledTimes(2);
+
+    const abandonedCap = streamSpy.mock.calls[0][0].max_tokens;
+    const finalCap = streamSpy.mock.calls[1][0].max_tokens;
+    expect(abandonedCap).toBe(4_000);
+    // ⭐ THE INVARIANT: the attempt that follows an abort is never starved below
+    // the one it replaces. Pre-fix this was 4,050 against an 8,550 abandonment.
+    expect(finalCap).toBeGreaterThanOrEqual(abandonedCap);
   });
 
   it("F2 — a transient retry that consumes budget re-derives the window per invocation (final attempt squeezed + capped)", async () => {
@@ -1872,13 +1904,18 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
   });
 
   it("PART-2 SKIP-GATE: a post-abort FINAL attempt whose window can't fund a viable graph is SKIPPED (honest fast fail), not run", async () => {
-    // DETECTOR-FIX part 2 (F4 rec-c) + FINAL-SWEEP F-4 reserve reconciliation.
-    // The reserve is now HARD_CEILING(30) + MIN_RETRY(45) = 75s (derived, was 65s),
-    // so an abort is authorized only while the post-abort final can afford the
-    // 2700-token floor. Drive the skip-gate with an explicit 112s budget and 35s
-    // burns: attempt 1 (112>75 → abort, →77s) and attempt 2 (77>75 → abort, →42s)
-    // are authorized; attempt 3's would-be-final window is 42s, affording
-    // (42-15)*90 = 2430 < 2700 → SKIPPED with the typed error, WITHOUT a 3rd call.
+    // DETECTOR-FIX part 2 (F4 rec-c) + FINAL-SWEEP F-4 reserve reconciliation,
+    // re-armed for the 2026-07-25 skip-gate alignment.
+    //
+    // The gate's floor is now `max(2_700, abandonedCap)` rather than a bare 2,700
+    // (the bare floor is what let a 3,150-token final run against an 8,550-token
+    // abandonment, 18 times out of 18). At the FULL attempt-1 cap no abort is
+    // authorised at all, so this scenario is driven with an explicit
+    // `maxTokensCeiling` of 2,880 — chosen so BOTH aborts are re-fundable
+    // (aff(112-30=82s) = 6,030 ≥ 2,880 ✓; aff(77-30=47s) = 2,880 ≥ 2,880 ✓) and
+    // the third would-be-final window of 42s affords only (42-15)*90 = 2,430,
+    // which is below BOTH the 2,700 floor and the 2,880 cap it would replace →
+    // SKIPPED with the typed error, WITHOUT a 3rd call.
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
       mockNow += 35_000; // each abortable attempt burns 35s of wall-clock
       return runawayStream(body, options); // char-gate runaway (no edges)
@@ -1891,12 +1928,59 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
           brief: "Should I hire a contractor or full-time employee?",
           docs: [], seed: 17, model: "claude-sonnet-4-6",
         },
-        { timeoutMs: 112_000 },
+        { timeoutMs: 112_000, maxTokensCeiling: 2_880 },
       ),
     ).rejects.toThrow(/final attempt unaffordable|converged-graph floor/);
 
     // MUTATION-CHECK: with the skip-gate reverted, the 3rd attempt RUNS as the
     // (token-starved) final → streamSpy would be 3 and the error message differs.
     expect(streamSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("SKIP-GATE ALIGNMENT: the gate now fires on a window that CLEARS the 2,700 floor but cannot re-fund the abandoned attempt", async () => {
+    // ⭐ THE LIVE DEFECT, AS A TEST. The sibling case above was already caught by
+    // the old bare-floor gate (2,430 < 2,700). This one is the case that was NOT:
+    // an abort ladder that leaves a window affording ~3,150 tokens — comfortably
+    // ABOVE 2,700, and therefore waved through — against an attempt that had
+    // 5,000. That is precisely the shape of all 18 live `/assist` A2killer
+    // failures on 2026-07-24 (caps 3,146-3,826 vs an 8,550-token abandonment).
+    //
+    // Budget: 110s, ceiling 5,000, each abortable attempt burns 30s.
+    //   attempt 1: remaining 110s; post-abort 80s affords min(5850,5000)=5000 ≥ 5000 ✓ → abort, →80s
+    //   attempt 2: remaining  80s; post-abort 50s affords min(3150,5000)=3150 < 5000 ✗ → FINAL, runs
+    // …so the ladder self-limits to two attempts and the second is NOT starved.
+    // To reach a genuinely starved final, burn harder: 40s per attempt.
+    //   attempt 1: remaining 110s; post-abort 80s affords 5000 ≥ 5000 ✓ → abort, →70s
+    //   attempt 2: loop top 70s → NOT final (70 < 75 reserve ⇒ final) … it IS final
+    //              and affords aff(70s) = 4,950 < 5,000 → SKIPPED.
+    // 4,950 clears the 2,700 floor by 2,250 tokens: the OLD gate would have run it.
+    //
+    // MUTATION-CHECK: restore the bare
+    // `finalAttemptAffordableTokens < LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR` and this
+    // goes RED — 4,950 >= 2,700, so the doomed attempt runs and streamSpy hits 2.
+    streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
+      mockNow += 40_000;
+      return runawayStream(body, options);
+    });
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    let err: unknown;
+    try {
+      await draftGraphWithAnthropic(
+        { brief: "Should I hire a contractor or full-time employee?", docs: [], seed: 17, model: "claude-sonnet-4-6" },
+        { timeoutMs: 110_000, maxTokensCeiling: 5_000 },
+      );
+    } catch (e) {
+      err = e;
+    }
+
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).toMatch(/final attempt unaffordable/);
+    // The honest numbers are ON the error: what the window affords, and the bar.
+    expect(message).toContain("4950 tokens");
+    expect(message).toContain("5000-token cap");
+    // Exactly ONE generation ran — the doomed second was refused, not burned.
+    expect(streamSpy).toHaveBeenCalledTimes(1);
   });
 });
