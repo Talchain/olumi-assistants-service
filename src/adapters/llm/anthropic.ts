@@ -3247,11 +3247,17 @@ export async function chatWithAnthropic(
         // tight caller budgets (the V6 dual-draft M2 review measured ~60s
         // with adaptive thinking vs its 25s timeout). Live-probed 2026-07-14:
         // the API accepts thinking:{type:'disabled'} alongside output_config.
+        //
+        // R1 (D-61, 2026-07-24): DEFAULT to explicit-disabled — a caller that
+        // passes NO thinking arg (the decision_review chat call, and every other
+        // chatWithAnthropic caller that wants thinking off) previously OMITTED the
+        // field, so Sonnet-5 adaptive thinking ran and ate the budget. Now the
+        // request ALWAYS carries an explicit posture (enabled OR disabled), never
+        // ambiguous — mirroring the draft path's explicit-posture idiom. Extended
+        // thinking is opt-IN via an explicit `thinking:{type:'enabled'}`.
         ...(thinkingEnabled
           ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } }
-          : args.thinking?.type === 'disabled'
-            ? { thinking: { type: 'disabled' } }
-            : {}),
+          : { thinking: { type: 'disabled' } }),
       };
       const headers: Record<string, string> = {
         "Idempotency-Key": idempotencyKey,

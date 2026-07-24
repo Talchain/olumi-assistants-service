@@ -1437,6 +1437,28 @@ describe("chatWithAnthropic — output_config.format contract", () => {
     expect(headers["anthropic-beta"]).toBeUndefined();
   });
 
+  it("R1 (D-61): a chat call with NO explicit thinking arg sends thinking:{type:'disabled'} — Sonnet-5 adaptive thinking is off by default (the decision_review call class)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    // No `thinking` arg — exactly how the decision_review chat call (and other
+    // budget-sensitive chat callers) invoke the adapter. The request MUST carry an
+    // explicit disabled posture, not omit the field (which lets adaptive thinking
+    // run and eat the budget — D-61). MUTATION-CHECK: reverting the `: {}` fallback
+    // leaves thinking undefined and turns this RED.
+    await chatWithAnthropic({
+      system: "You are a test assistant.",
+      userMessage: "Test message",
+      model: "claude-sonnet-4-6",
+    });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body] = createSpy.mock.calls[0];
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
   it("does NOT send output_config for claude-sonnet-5 without a per-call override (shared-allowlist live-safety pin)", async () => {
     // claude-sonnet-5 is deliberately NOT in STRUCTURED_OUTPUTS_SUPPORTED_MODELS:
     // that SHARED set also keys buildStrictAnthropicTools (strict tool calling,
