@@ -912,7 +912,19 @@ export async function draftGraphWithAnthropic(
               },
             }
           : {}),
-        ...(draftThinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: draftThinkingBudget } } : {}),
+        // F-5 (FINAL-SWEEP, 2026-07-24) — send an EXPLICIT thinking posture even
+        // when disabled (never OMIT the field). Previously the draft body dropped
+        // `thinking` when off, so a thinking-class model (Sonnet-5) routed to
+        // draft_graph — a per-call `model` override today, one registry edit after
+        // #665 — would run ADAPTIVE thinking on the draft: it burns the affordable
+        // token budget invisibly AND its thinking deltas do not refresh the stall
+        // clock, so the detector false-aborts mid-think (detectionActive keys on the
+        // explicit config flag, not model behaviour). Explicit-disabled closes both,
+        // and makes the chat path's R1 idiom (below) a TRUE mirror. Live-probed:
+        // the API accepts `thinking:{type:'disabled'}` with and without output_config.
+        ...(draftThinkingEnabled
+          ? { thinking: { type: 'enabled', budget_tokens: draftThinkingBudget } }
+          : { thinking: { type: 'disabled' } }),
       };
       // Returns only `{ body }`: the streamed loop constructs its own per-attempt
       // signal + Idempotency-Key header (streamOneDraftAttempt), so the old
@@ -3326,8 +3338,9 @@ export async function chatWithAnthropic(
         // chatWithAnthropic caller that wants thinking off) previously OMITTED the
         // field, so Sonnet-5 adaptive thinking ran and ate the budget. Now the
         // request ALWAYS carries an explicit posture (enabled OR disabled), never
-        // ambiguous — mirroring the draft path's explicit-posture idiom. Extended
-        // thinking is opt-IN via an explicit `thinking:{type:'enabled'}`.
+        // ambiguous. The draft path carries the SAME explicit-disabled posture
+        // (F-5, buildDraftPrompt above) — the two are now consistent by construction.
+        // Extended thinking is opt-IN via an explicit `thinking:{type:'enabled'}`.
         ...(thinkingEnabled
           ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } }
           : { thinking: { type: 'disabled' } }),
