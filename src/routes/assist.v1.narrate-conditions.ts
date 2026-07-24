@@ -42,7 +42,7 @@ export default async function route(app: FastifyInstance) {
 
     // Rate limiting
     const rateKey = keyId || req.ip || "unknown";
-    const { allowed, retryAfterSeconds } = rateLimiter.tryConsume(rateKey);
+    const { allowed, retryAfterSeconds } = rateLimiter.tryConsume(rateKey, keyId);
     if (!allowed) {
       const errorBody = buildCeeErrorResponse(
         "CEE_RATE_LIMIT",
