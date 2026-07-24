@@ -304,24 +304,13 @@ const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - Every option needs a complete path to goal: option → controllable → outcome/risk → goal
 - 2–6 options maximum`;
 
-// v8 stringified aux fields (2026-07-07, Lane 26): appended to the user
-// message ONLY when structured outputs is active. Historically it told the
-// model to emit coaching / causal_claims as JSON-encoded STRING fields.
-//
 // v12 (2026-07-23, lean-draft contract, ROADMAP 1.197): the draft grammar is
-// STRUCTURE ONLY — `coaching`, `causal_claims`, and `topology_plan` are all
-// dropped from the sent schema (buildDraftGraphSchema), and the top-level
-// object is `additionalProperties:false`, so every one of them is now
-// UNEMITTABLE. Per the v11 topology_plan lesson, this reminder must NEVER
-// instruct the model to emit an unemittable key (that prompt/grammar
-// contradiction is exactly what wastes tokens and confuses the model), so the
-// reminder is now EMPTY. The append site is retained as an inert no-op so the
-// call shape is unchanged; if a future field is ever re-added to the grammar as
-// a stringified aux field, restore the instruction here. The prompt-only
-// fallback path never appended this reminder, so its behaviour is unchanged
-// (the served prompt still describes coaching for that rare path, and
-// parseStringifiedAuxFields() accepts it at ingress).
-const STRUCTURED_OUTPUTS_AUX_STRING_REMINDER = ``;
+// STRUCTURE ONLY — coaching / causal_claims / topology_plan are dropped from the
+// sent schema and the object is additionalProperties:false, so the old v8
+// "emit aux fields as stringified JSON" reminder became an empty-string no-op
+// and was deleted (simplification F2, 2026-07-24). If a future field is ever
+// re-added to the grammar as a stringified aux field, restore the instruction at
+// the buildCallParams user-message content site (recoverable from git history).
 
 /**
  * Structural anatomy of a TRUNCATED draft response (v12, 2026-07-23).
@@ -854,23 +843,13 @@ export async function draftGraphWithAnthropic(
      */
     function buildCallParams(useStructuredOutputs: boolean): {
       body: Anthropic.MessageCreateParamsNonStreaming;
-      options: { signal: AbortSignal; headers: Record<string, string> };
     } {
       const body: Anthropic.MessageCreateParamsNonStreaming = {
         model,
         max_tokens: maxTokens,
         temperature: draftTemperature,
         system: prompt.system,
-        // v8: in structured mode the grammar forces the aux fields to be
-        // strings — append the JSON-string instruction so the string CONTENT
-        // is the JSON the system prompt describes. Omitted on the prompt-only
-        // path (incl. the 400 fallback rebuild), where objects are expected.
-        messages: [{
-          role: "user",
-          content: useStructuredOutputs
-            ? prompt.userContent + STRUCTURED_OUTPUTS_AUX_STRING_REMINDER
-            : prompt.userContent,
-        }],
+        messages: [{ role: "user", content: prompt.userContent }],
         ...(useStructuredOutputs
           ? {
               output_config: {
@@ -883,10 +862,11 @@ export async function draftGraphWithAnthropic(
           : {}),
         ...(draftThinkingEnabled ? { thinking: { type: 'enabled', budget_tokens: draftThinkingBudget } } : {}),
       };
-      const headers: Record<string, string> = {
-        "Idempotency-Key": idempotencyKey,
-      };
-      return { body, options: { signal: abortController.signal, headers } };
+      // Returns only `{ body }`: the streamed loop constructs its own per-attempt
+      // signal + Idempotency-Key header (streamOneDraftAttempt), so the old
+      // `options: { signal, headers }` return had no reader — dead remnant of the
+      // removed non-streaming messages.create(body, options) path (simplification F1).
+      return { body };
     }
 
     let useStructuredOutputs = structuredOutputsEnabled;
@@ -936,6 +916,16 @@ export async function draftGraphWithAnthropic(
 
       const attemptStart = Date.now();
       let acc = "";
+      // Start of the not-yet-cleared window for the edges probe. The probe scans
+      // only the freshly-appended tail plus an overlap so a `"from"\s*:` match
+      // straddling a delta boundary is never missed — O(n) over the whole draft
+      // instead of re-scanning the ever-growing accumulator from index 0 on every
+      // delta through the long nodes phase (efficiency F1, 2026-07-24). The
+      // overlap (32) comfortably exceeds the longest realistic `"from"` + optional
+      // whitespace + `:`; a false-negative here would false-abort a healthy draft,
+      // so it is deliberately generous.
+      let edgesProbeOffset = 0;
+      const EDGES_PROBE_OVERLAP = 32;
       let edgesReached = false;
       // Time from stream start to the first edge — the empirical signal that
       // validates DRAFT_RUNAWAY_DETECT_MS live (a healthy draft should reach
@@ -972,7 +962,7 @@ export async function draftGraphWithAnthropic(
         for await (const event of stream) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             acc += event.delta.text;
-            if (!edgesReached && DRAFT_EDGES_REACHED_RE.test(acc)) {
+            if (!edgesReached && DRAFT_EDGES_REACHED_RE.test(acc.slice(edgesProbeOffset))) {
               // Past the nodes bottleneck — this is a healthy generation; cancel
               // the detector and let the stream complete.
               edgesReached = true;
@@ -993,6 +983,11 @@ export async function draftGraphWithAnthropic(
               brokeForChars = true;
               perAttempt.abort();
               break;
+            }
+            // Advance the edges-probe window, keeping an overlap so the next scan
+            // still catches a `"from"\s*:` that straddles this delta boundary.
+            if (!edgesReached) {
+              edgesProbeOffset = Math.max(edgesProbeOffset, acc.length - EDGES_PROBE_OVERLAP);
             }
           }
         }
@@ -1116,8 +1111,8 @@ export async function draftGraphWithAnthropic(
         useStructuredOutputs = false;
         // Fresh key for the prompt-only rebuild: the body differs from the
         // rejected structured request, so it must not ride the same
-        // Idempotency-Key (F8, 2026-07-24). buildCallParams reads `idempotencyKey`
-        // for the header, so reassign BEFORE rebuilding.
+        // Idempotency-Key (F8, 2026-07-24). The next attempt=1 iteration reads
+        // this via `attemptIdempotencyKey`, so reassign before it re-enters.
         idempotencyKey = makeIdempotencyKey();
         ({ body } = buildCallParams(false));
         attempt--; // the prompt-only rebuild is not a runaway attempt

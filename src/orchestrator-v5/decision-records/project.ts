@@ -89,13 +89,24 @@ export function projectDecisionRecords(
   // Accumulate against a REDUCED ceiling so the disclosure line + JSON wrapper
   // still fit under the real budget (see BUDGET_SAFETY_HEADROOM).
   const accumulationCeiling = Math.max(SECTION_HEADER.length, charBudget - BUDGET_SAFETY_HEADROOM);
+
+  // Project each usable record ONCE (simplification F7 / 2026-07-24): both the
+  // inclusion loop and the total-projectable count read this array, instead of
+  // re-running projectOneLine (date regex + trim + slice) over every record a
+  // second time purely to count omissions.
+  const projectedLines: Array<{ line: string; cut: boolean }> = [];
+  for (const record of usable) {
+    const projected = projectOneLine(record);
+    if (projected !== null) projectedLines.push(projected);
+  }
+  // totalCount = usable records that COULD have been projected (had a usable
+  // option+statement), so the disclosure reflects real omissions, not skips.
+  const projectableTotal = projectedLines.length;
+
   let anyRationaleCut = false;
   let body = SECTION_HEADER;
   let included = 0;
-
-  for (const record of usable) {
-    const projected = projectOneLine(record);
-    if (projected === null) continue;
+  for (const projected of projectedLines) {
     const candidate = `${body}\n${projected.line}`;
     if (candidate.length > accumulationCeiling) break;
     body = candidate;
@@ -105,12 +116,6 @@ export function projectDecisionRecords(
 
   if (included === 0) return null;
 
-  // totalCount = usable records that COULD have been projected (had a usable
-  // option+statement), so the disclosure reflects real omissions, not skips.
-  const projectableTotal = usable.reduce(
-    (acc, r) => acc + (projectOneLine(r) !== null ? 1 : 0),
-    0,
-  );
   const omitted = projectableTotal - included;
   const truncated = omitted > 0 || anyRationaleCut;
   let text = body;

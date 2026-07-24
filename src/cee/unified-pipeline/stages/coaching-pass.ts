@@ -33,10 +33,7 @@ import { log } from "../../../utils/telemetry.js";
 import { extractJson } from "../../../utils/json-extractor.js";
 import { normaliseLegacyCoachingValues } from "../../../adapters/llm/normalise-legacy-coaching.js";
 import { emitContextBudget } from "../../../orchestrator-v5/context/context-budget-telemetry.js";
-import {
-  DRAFT_REQUEST_BUDGET_MS,
-  LLM_POST_PROCESSING_HEADROOM_MS,
-} from "../../../config/timeouts.js";
+import { remainingRequestBudgetMs } from "../../../config/timeouts.js";
 
 // Bounded so the pass cannot itself run away or blow the request budget. The
 // coaching payload is small (b2b anatomy: coaching ~529 tok + causal ~209 tok),
@@ -126,12 +123,16 @@ function projectStructuralGraph(graph: unknown): { nodes: unknown[]; edges: unkn
   return { nodes, edges };
 }
 
-function buildCoachingUserMessage(brief: string, graph: unknown): string {
+function buildCoachingUserMessage(brief: string, structuralGraphJson: string): string {
   // Mark the user-authored brief as untrusted (draft-F7, 2026-07-24) with the
   // SAME [BEGIN/END]_UNTRUSTED_USER_CONTENT idiom the main draft path uses
   // (anthropic.ts buildDraftPrompt, adopted per #595 review P2). This is the
   // second brief-carrying LLM call site; without the bracketing a brief bearing
   // prompt-injection could steer the coaching model with system authority.
+  // Takes the ALREADY-serialised structural graph (efficiency F4 / simplification
+  // F5, 2026-07-24): the caller stringifies projectStructuralGraph(ctx.graph) ONCE
+  // and reuses .length for the telemetry section count, instead of re-projecting
+  // + re-stringifying the whole graph a second time.
   return [
     "BRIEF:",
     "[BEGIN_UNTRUSTED_USER_CONTENT]",
@@ -139,7 +140,7 @@ function buildCoachingUserMessage(brief: string, graph: unknown): string {
     "[END_UNTRUSTED_USER_CONTENT]",
     "",
     "GRAPH (structure only):",
-    JSON.stringify(projectStructuralGraph(graph)),
+    structuralGraphJson,
   ].join("\n");
 }
 
@@ -173,10 +174,12 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
     return;
   }
 
-  // ── Budget gate (mirrors parse.ts retry-budget discipline) ────────────────
+  // ── Budget gate — derive the remaining request budget from the ONE shared
+  // primitive (altitude 2 / reuse F2, 2026-07-24) so this gate can never drift
+  // from the draft/repair gates (the 2026-07-20 outage class). ────────────────
   const requestStartMs = ctx.opts.requestStartMs ?? ctx.start;
   const elapsed = Date.now() - requestStartMs;
-  const remaining = DRAFT_REQUEST_BUDGET_MS - elapsed - LLM_POST_PROCESSING_HEADROOM_MS;
+  const remaining = remainingRequestBudgetMs(elapsed);
   if (remaining < COACHING_PASS_MIN_BUDGET_MS) {
     // PROBE- + INGEST-READABLE MARKER: record the budget-skip on the pipeline
     // outcome, which rides to the response body as `_pipeline_outcome.
@@ -208,11 +211,15 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
   const timeoutMs = Math.min(COACHING_PASS_TIMEOUT_MS, remaining);
 
   const startTime = Date.now();
+  // Project + serialise the structural graph ONCE (efficiency F4 / simplification
+  // F5): the message and the telemetry char count share this exact string, so the
+  // "derived, not re-measured" claim below is now literally true.
+  const structuralGraphJson = JSON.stringify(projectStructuralGraph(ctx.graph));
   try {
     const result = await ctx.draftAdapter.chat(
       {
         system: COACHING_SYSTEM,
-        userMessage: buildCoachingUserMessage(ctx.effectiveBrief, ctx.graph),
+        userMessage: buildCoachingUserMessage(ctx.effectiveBrief, structuralGraphJson),
         temperature: 0,
         maxTokens: COACHING_PASS_MAX_TOKENS,
       },
@@ -231,7 +238,7 @@ export async function runStageCoachingPass(ctx: StageContext): Promise<void> {
     // projection (the same object the message carried — derived, not re-measured);
     // both are declared `telemetry_only`, so a healthy pass stays silent.
     // Observe-only: emitContextBudget never throws (the pass is strictly non-fatal).
-    const structuralGraphChars = JSON.stringify(projectStructuralGraph(ctx.graph)).length;
+    const structuralGraphChars = structuralGraphJson.length;
     emitContextBudget({
       call_site: "draft_coaching",
       model: result.model ?? null,

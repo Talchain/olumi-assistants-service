@@ -21,7 +21,6 @@ import { normaliseCeeGraphVersionAndProvenance } from "../../transforms/graph-no
 import {
   DRAFT_REQUEST_BUDGET_MS,
   DRAFT_LLM_TIMEOUT_MS,
-  LLM_POST_PROCESSING_HEADROOM_MS,
   MIN_DRAFT_RETRY_BUDGET_MS,
   LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
   DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
@@ -30,6 +29,7 @@ import {
   getAffordableDraftTokens,
   getJitteredRetryDelayMs,
   isLeanRetryAffordable,
+  remainingRequestBudgetMs,
 } from "../../../config/timeouts.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamTimeoutError } from "../../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../../validation/pipeline.js";
@@ -674,7 +674,10 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   // Calculate effective repair timeout: min(configured, remaining - 2s safety margin).
   // If no time budget remains, skip repair entirely.
   const REPAIR_SAFETY_MARGIN_MS = 2_000;
-  const remainingForRepair = DRAFT_REQUEST_BUDGET_MS - totalElapsed - LLM_POST_PROCESSING_HEADROOM_MS;
+  // Shared primitive — same "request budget left" derivation as the draft/coaching
+  // gates (altitude 2 / reuse F2, 2026-07-24). Clamped ≥0; the skip decision below
+  // is unchanged (a negative window already skipped repair).
+  const remainingForRepair = remainingRequestBudgetMs(totalElapsed);
   const effectiveRepairTimeout = Math.min(REPAIR_TIMEOUT_MS, remainingForRepair - REPAIR_SAFETY_MARGIN_MS);
   ctx.skipRepairDueToBudget = effectiveRepairTimeout <= 0;
   ctx.repairTimeoutMs = ctx.skipRepairDueToBudget ? 0 : effectiveRepairTimeout;

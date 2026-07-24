@@ -548,6 +548,21 @@ export interface ContextPolicyDivergence {
  * silent). Unmapped call sites (draft_graph) and unknown inputs → no divergence.
  * Never reads or returns any VALUE beyond the numeric char counts already given.
  */
+// Per-site section-name index, memoised at module load (efficiency F6,
+// 2026-07-24): CONTEXT_POLICY rows are frozen constants, so rebuilding the
+// name→section Map on every LLM call (this function runs once per call via the
+// emitContextBudget seam) allocated a fresh Map + N entries over an immutable
+// input. Lazily filled per site the first time it is queried.
+const SECTION_BY_NAME_CACHE = new Map<ContextCallSite, ReadonlyMap<string, ContextSectionPolicy>>();
+function sectionByName(policySite: ContextCallSite): ReadonlyMap<string, ContextSectionPolicy> {
+  let cached = SECTION_BY_NAME_CACHE.get(policySite);
+  if (cached === undefined) {
+    cached = new Map(CONTEXT_POLICY[policySite].sections.map((s) => [s.name, s]));
+    SECTION_BY_NAME_CACHE.set(policySite, cached);
+  }
+  return cached;
+}
+
 export function findContextPolicyDivergences(
   callSite: string,
   sectionChars: Readonly<Record<string, number>>,
@@ -556,7 +571,7 @@ export function findContextPolicyDivergences(
   const policySite = TELEMETRY_TO_POLICY[callSite as BudgetTelemetryCallSite];
   if (!policySite) return empty;
   const policy = CONTEXT_POLICY[policySite];
-  const byName = new Map(policy.sections.map((s) => [s.name, s]));
+  const byName = sectionByName(policySite);
   const unknown: string[] = [];
   const overBudget: string[] = [];
   for (const [name, chars] of Object.entries(sectionChars)) {
