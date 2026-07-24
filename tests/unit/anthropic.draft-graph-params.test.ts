@@ -186,6 +186,54 @@ function makeFakeStream(jsonText: string, opts: FakeStreamOpts = {}) {
   };
 }
 
+// DETECTOR-FIX (2026-07-24): a fake stream that emits deltas at SCHEDULED fake
+// times, so a test can model a draft that is actively-but-slowly emitting (the
+// progress-aware detector must NOT abort it) or a slow-sparse no-edges runaway
+// (the hard ceiling must). Each step's `atMs` is absolute from stream start; the
+// generator awaits real setTimeouts that `vi.advanceTimersByTimeAsync` drives.
+// Space steps < DRAFT_RUNAWAY_STALL_MS apart to model continuous progress.
+function makeTimedStream(
+  steps: Array<{ text: string; atMs: number }>,
+  finalJson: string,
+  finalOpts: FakeStreamOpts = {},
+) {
+  return (_body: unknown, options?: { signal?: AbortSignal; headers?: Record<string, string> }) => {
+    const signal = options?.signal;
+    async function* gen() {
+      let prev = 0;
+      for (const step of steps) {
+        const wait = step.atMs - prev;
+        prev = step.atMs;
+        if (wait > 0) {
+          await new Promise<void>((resolve, reject) => {
+            if (signal?.aborted) return reject(makeAbortError());
+            const t = setTimeout(resolve, wait);
+            signal?.addEventListener("abort", () => { clearTimeout(t); reject(makeAbortError()); }, { once: true });
+          });
+        }
+        if (signal?.aborted) throw makeAbortError();
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: step.text } };
+      }
+    }
+    const iterator = gen();
+    return {
+      [Symbol.asyncIterator]: () => iterator,
+      finalMessage: async () => ({
+        content: [{ type: "text", text: finalJson }],
+        stop_reason: finalOpts.stop_reason ?? "end_turn",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 200,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          ...(finalOpts.usage ?? {}),
+        },
+      }),
+      abort: () => {},
+    };
+  };
+}
+
 // Minimal valid graph JSON that passes normaliseDraftResponse + schema validation
 const VALID_GRAPH_JSON = JSON.stringify({
   nodes: [
@@ -1140,15 +1188,16 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     expect(key1).not.toBe(key2);
   });
 
-  it("TIME-GATE: a silent-thrash runaway (no edges, stops emitting deltas) is aborted at the deadline and RETRIED", async () => {
+  it("STALL-GATE: a silent-thrash runaway (no edges, stops emitting deltas) is aborted by the progress-aware stall gate and RETRIED", async () => {
     vi.useFakeTimers();
     try {
       vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
       vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
 
       // Attempt 1 emits a small nodes-only chunk (no edges), then goes silent —
-      // burning wall-clock without structural progress. Only a timer-armed gate
-      // (not an in-loop delta check) can catch this. Attempt 2 succeeds.
+      // burning wall-clock without forward progress. The progress-aware stall gate
+      // (DRAFT_RUNAWAY_DETECT_MS + no delta for DRAFT_RUNAWAY_STALL_MS) catches
+      // this; an in-loop delta check alone could not. Attempt 2 succeeds.
       streamSpy
         .mockImplementationOnce(makeFakeStream('{"nodes":[{"id":"n1","kind":"factor","label":"a"}', {
           chunks: ['{"nodes":[{"id":"n1","kind":"factor","label":"a"}'],
@@ -1165,8 +1214,10 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
         model: "claude-sonnet-4-6",
       });
 
-      // Advance past the detection deadline (30s) so the timer fires, aborts the
-      // hung attempt, and the retry runs (its stream resolves synchronously).
+      // Advance past the stall/ceiling window (>30s) so the progress-aware gate
+      // fires on the silent (stalled) attempt, aborts it, and the retry runs (its
+      // stream resolves synchronously). The stall gate trips first at ~20s (no
+      // delta for ≥8s); the 30s hard ceiling is the backstop.
       await vi.advanceTimersByTimeAsync(31_000);
       const result = await promise;
 
@@ -1207,6 +1258,128 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // The time-to-edges was measured (the empirical signal that validates the
     // detection deadline live).
     expect(typeof (result.meta as { time_to_edges_ms?: number }).time_to_edges_ms).toBe("number");
+  });
+
+  // ---------------------------------------------------------------------------
+  // DETECTOR-FIX (2026-07-24, F4 live adjudication) — PROGRESS-AWARE detection.
+  // Both-direction proof: today's healthy-but-slow profile must NOT abort; the
+  // runaway sub-types must still abort.
+  // ---------------------------------------------------------------------------
+
+  it("NO FALSE ABORT (slow-healthy tail): a draft actively emitting PAST 20s that reaches edges at ~22s is NOT aborted (the F4 fix)", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+      vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+      // Continuous nodes deltas every 4s (< DRAFT_RUNAWAY_STALL_MS 8s ⇒ never
+      // "stalled"), total < 8000 chars, reaching the edges array at 22s — PAST the
+      // old 20s blanket gate that clipped exactly this slow-healthy tail (live p100
+      // 19.57s, p90 19.3s). Progress-aware ⇒ left to complete.
+      const steps = [
+        { text: '{"nodes":[{"id":"n1","label":"' + "y".repeat(400) + '"}', atMs: 4_000 },
+        { text: ',{"id":"n2","label":"' + "y".repeat(400) + '"}', atMs: 8_000 },
+        { text: ',{"id":"n3","label":"' + "y".repeat(400) + '"}', atMs: 12_000 },
+        { text: ',{"id":"n4","label":"' + "y".repeat(400) + '"}', atMs: 16_000 },
+        { text: ',{"id":"n5","label":"' + "y".repeat(400) + '"}', atMs: 20_000 },
+        { text: '],"edges":[{"from":"n1","to":"n2"}]}', atMs: 22_000 },
+      ];
+      streamSpy.mockImplementationOnce(makeTimedStream(steps, VALID_GRAPH_JSON));
+
+      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      const promise = draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [], seed: 17, model: "claude-sonnet-4-6",
+      });
+      await vi.advanceTimersByTimeAsync(25_000);
+      const result = await promise;
+
+      // MUTATION-CHECK: with the OLD 20s blanket time gate this draft aborts at 20s
+      // (runaway_abort_count ≥ 1, streamSpy ≥ 2). Progress-aware ⇒ exactly 1 call, 0 aborts.
+      expect(streamSpy).toHaveBeenCalledTimes(1);
+      expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(0);
+      expect(result.graph.nodes.length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("HARD-CEILING: an actively-emitting no-edges runaway (never stalls, under the char budget) is aborted at the 30s ceiling and RETRIED", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+      vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+      const { log } = await import("../../src/utils/telemetry.js");
+      const warnSpy = vi.spyOn(log, "warn");
+
+      // A small nodes delta every 4s (never "stalled") with NO edges and well under
+      // the 8000-char gate — the slow-sparse runaway the stall + char gates cannot
+      // catch. Only the absolute hard ceiling (30s) bounds it. Attempt 2 succeeds.
+      const steps = Array.from({ length: 12 }, (_v, i) => ({
+        text: (i === 0 ? '{"nodes":[' : ",") + '{"id":"n' + i + '","label":"z"}',
+        atMs: 4_000 * (i + 1), // 4,8,…,48s
+      }));
+      streamSpy
+        .mockImplementationOnce(makeTimedStream(steps, "{}", { stop_reason: "max_tokens" }))
+        .mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON));
+
+      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      const promise = draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [], seed: 17, model: "claude-sonnet-4-6",
+      });
+      await vi.advanceTimersByTimeAsync(35_000);
+      const result = await promise;
+
+      expect(streamSpy).toHaveBeenCalledTimes(2);
+      expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(1);
+      // The abort came from the hard CEILING (trigger "time"), NOT stall or chars.
+      const abortLog = warnSpy.mock.calls.find(
+        (c) => (c[0] as { event?: string })?.event === "cee.llm.draft_runaway_aborted",
+      );
+      expect(abortLog).toBeDefined();
+      expect((abortLog![0] as { trigger?: string }).trigger).toBe("time");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("DRIFT TRIPWIRE: a healthy draft reaching edges in the slow tail (≥18s) emits the drift WARN (the alarm missing 2026-07-24)", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+      vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+      const { log } = await import("../../src/utils/telemetry.js");
+      const warnSpy = vi.spyOn(log, "warn");
+
+      // Reaches edges at 18.5s — past DRAFT_RUNAWAY_DRIFT_WARN_MS (18s) but not
+      // aborted (well under the 30s ceiling). Should complete AND WARN.
+      const steps = [
+        { text: '{"nodes":[{"id":"n1","label":"y"}', atMs: 4_000 },
+        { text: ',{"id":"n2","label":"y"}', atMs: 8_000 },
+        { text: ',{"id":"n3","label":"y"}', atMs: 12_000 },
+        { text: ',{"id":"n4","label":"y"}', atMs: 16_000 },
+        { text: '],"edges":[{"from":"n1","to":"n2"}]}', atMs: 18_500 },
+      ];
+      streamSpy.mockImplementationOnce(makeTimedStream(steps, VALID_GRAPH_JSON));
+
+      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      const promise = draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [], seed: 17, model: "claude-sonnet-4-6",
+      });
+      await vi.advanceTimersByTimeAsync(22_000);
+      const result = await promise;
+
+      expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(0);
+      const driftLog = warnSpy.mock.calls.find(
+        (c) => (c[0] as { event?: string })?.event === "cee.llm.draft_edges_time_drift",
+      );
+      expect(driftLog).toBeDefined();
+      expect((driftLog![0] as { time_to_edges_ms?: number }).time_to_edges_ms).toBeGreaterThanOrEqual(18_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1262,6 +1435,28 @@ describe("chatWithAnthropic — output_config.format contract", () => {
     // No beta header
     const headers: Record<string, string> = opts?.headers ?? {};
     expect(headers["anthropic-beta"]).toBeUndefined();
+  });
+
+  it("R1 (D-61): a chat call with NO explicit thinking arg sends thinking:{type:'disabled'} — Sonnet-5 adaptive thinking is off by default (the decision_review call class)", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+
+    // No `thinking` arg — exactly how the decision_review chat call (and other
+    // budget-sensitive chat callers) invoke the adapter. The request MUST carry an
+    // explicit disabled posture, not omit the field (which lets adaptive thinking
+    // run and eat the budget — D-61). MUTATION-CHECK: reverting the `: {}` fallback
+    // leaves thinking undefined and turns this RED.
+    await chatWithAnthropic({
+      system: "You are a test assistant.",
+      userMessage: "Test message",
+      model: "claude-sonnet-4-6",
+    });
+
+    expect(createSpy).toHaveBeenCalledOnce();
+    const [body] = createSpy.mock.calls[0];
+    expect(body.thinking).toEqual({ type: "disabled" });
   });
 
   it("does NOT send output_config for claude-sonnet-5 without a per-call override (shared-allowlist live-safety pin)", async () => {
@@ -1606,13 +1801,16 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
   });
 
   it("F1 — after runaway aborts consume budget, the FINAL attempt caps max_tokens to the LIVE remaining wall (→ salvage, not a 504)", async () => {
-    // 3 runaway attempts each advance the clock 25s; the 4th is the FINAL attempt
-    // (remaining 35s < DETECT+MIN_RETRY 55s → no early abort), and completes.
+    // DETECTOR-FIX (2026-07-24): the retry-authorization now reserves the HARD
+    // CEILING (30s) + MIN_RETRY (35s) = 65s, not DETECT_MS (20s) + 35s = 55s —
+    // because a progress-aware abortable attempt can consume up to the ceiling.
+    // 2 runaway attempts each advance the clock 25s; the 3rd is the FINAL attempt
+    // (remaining 60s < HARD_CEILING+MIN_RETRY 65s → no early abort), and completes.
     let call = 0;
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
       const n = call++;
       mockNow += 25_000; // this attempt consumed ~25s of wall-clock
-      if (n < 3) return runawayStream(body, options);
+      if (n < 2) return runawayStream(body, options);
       return makeFakeStream(VALID_GRAPH_JSON)(body, options as any); // final attempt completes
     });
 
@@ -1628,22 +1826,25 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
     expect(result).toBeDefined();
     expect(Array.isArray((result as any).graph?.nodes ?? (result as any).nodes)).toBe(true);
 
-    expect(streamSpy).toHaveBeenCalledTimes(4);
-    // Attempts 1-3 run with detection ON (not final) → max_tokens unchanged at 8550.
+    expect(streamSpy).toHaveBeenCalledTimes(3);
+    // Attempts 1-2 run with detection ON (not final) → max_tokens unchanged at 8550.
     expect(streamSpy.mock.calls[0][0].max_tokens).toBe(8550);
     expect(streamSpy.mock.calls[1][0].max_tokens).toBe(8550);
-    expect(streamSpy.mock.calls[2][0].max_tokens).toBe(8550);
-    // FINAL attempt: remaining = 110000 - 75000 = 35000ms → affordable (35-15)*90 = 1800.
-    // Pre-fix this stayed 8550 → a runaway needs ~82-91s to reach it while 35s
-    // remained → guaranteed overall-timeout (the A2killer class).
-    expect(streamSpy.mock.calls[3][0].max_tokens).toBe(1800);
+    // FINAL attempt: remaining = 110000 - 50000 = 60000ms → affordable (60-15)*90 = 4050.
+    // Pre-fix this stayed 8550 → a runaway needs ~82-91s to reach it while 60s
+    // remained → guaranteed overall-timeout (the A2killer class). Also RED if the
+    // canRetryAgain threshold is reverted to DETECT_MS (55s): attempt 3 would then
+    // stay abortable (60 > 55) and never reach this capped-final path.
+    expect(streamSpy.mock.calls[2][0].max_tokens).toBe(4050);
   });
 
   it("F2 — a transient retry that consumes budget re-derives the window per invocation (final attempt squeezed + capped)", async () => {
-    // timeoutMs 60s: attempt-1 window (60s > 55s) authorizes detection. The first
-    // withRetry invocation throws a transient 503 and burns 30s; the SECOND
-    // invocation must re-read the clock (remaining 30s < 55s → FINAL, capped),
-    // NOT reuse the stale loop-top authorization.
+    // timeoutMs 70s: attempt-1 window (70s > HARD_CEILING+MIN_RETRY 65s) authorizes
+    // detection. The first withRetry invocation throws a transient 503 and burns
+    // 30s; the SECOND invocation must re-read the clock (remaining 40s < 65s →
+    // FINAL, capped), NOT reuse the stale loop-top authorization. The transient is
+    // a 503 (not a runaway abort), so the part-2 skip-gate (gated on
+    // runawayAbortCount>=1) does not fire — the squeezed final still runs+caps.
     let call = 0;
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
       const n = call++;
@@ -1657,15 +1858,39 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
     const result = await draftGraphWithAnthropic(
       { brief: "Should I hire a contractor or full-time employee?", docs: [], seed: 17, model: "claude-sonnet-4-6" },
-      { timeoutMs: 60_000 },
+      { timeoutMs: 70_000 },
     );
 
     expect(result).toBeDefined();
     expect(streamSpy).toHaveBeenCalledTimes(2);
-    // First invocation: remaining 60000 → affordable (60-15)*90 = 4050, detection on (not final).
-    expect(streamSpy.mock.calls[0][0].max_tokens).toBe(4050);
-    // Second invocation (post-transient): remaining 30000 → FINAL, capped to
-    // affordable (30-15)*90 = 1350. Pre-fix it stayed 4050 with detection still on.
-    expect(streamSpy.mock.calls[1][0].max_tokens).toBe(1350);
+    // First invocation: remaining 70000 → affordable (70-15)*90 = 4950, detection on (not final).
+    expect(streamSpy.mock.calls[0][0].max_tokens).toBe(4950);
+    // Second invocation (post-transient): remaining 40000 → FINAL, capped to
+    // affordable (40-15)*90 = 2250. Pre-fix it stayed 4950 with detection still on.
+    expect(streamSpy.mock.calls[1][0].max_tokens).toBe(2250);
+  });
+
+  it("PART-2 SKIP-GATE: a post-abort FINAL attempt whose window can't fund a viable graph is SKIPPED (honest fast fail), not run", async () => {
+    // DETECTOR-FIX part 2 (F4 rec-c). Two runaway aborts each burn 35s → the 3rd
+    // would-be-final attempt has remaining 40s, which affords (40-15)*90 = 2250
+    // tokens < the 2700-token converged-graph floor. Rather than burn ~30s on a
+    // sub-viable 0-edge generation (the 89s hard-fail chain), the loop fails FAST
+    // with the typed error — WITHOUT a 3rd stream call.
+    streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
+      mockNow += 35_000; // each abortable attempt burns 35s of wall-clock
+      return runawayStream(body, options); // char-gate runaway (no edges)
+    });
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await expect(
+      draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [], seed: 17, model: "claude-sonnet-4-6",
+      }),
+    ).rejects.toThrow(/final attempt unaffordable|converged-graph floor/);
+
+    // MUTATION-CHECK: with the skip-gate reverted, the 3rd attempt RUNS as the
+    // (token-starved) final → streamSpy would be 3 and the error message differs.
+    expect(streamSpy).toHaveBeenCalledTimes(2);
   });
 });

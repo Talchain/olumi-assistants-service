@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Agent, fetch as undiciFetch } from "undici";
-import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S, LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
@@ -23,9 +23,13 @@ import {
   isDraftTruncated,
   DRAFT_RUNAWAY_DETECT_MS,
   DRAFT_RUNAWAY_DETECT_CHARS,
+  DRAFT_RUNAWAY_STALL_MS,
+  DRAFT_RUNAWAY_HARD_CEILING_MS,
+  DRAFT_RUNAWAY_DRIFT_WARN_MS,
   DRAFT_RUNAWAY_MIN_RETRY_MS,
   DRAFT_MAX_RUNAWAY_RETRIES,
   DRAFT_EDGES_REACHED_RE,
+  isEdgesTimeDrifting,
 } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
@@ -909,7 +913,7 @@ export async function draftGraphWithAnthropic(
       detectDeadlineMs: number | null,
     ): Promise<
       | { kind: "complete"; message: Anthropic.Message; timeToEdgesMs: number | null }
-      | { kind: "runaway"; chars: number; elapsedMs: number; trigger: "time" | "chars" }
+      | { kind: "runaway"; chars: number; elapsedMs: number; trigger: "time" | "chars" | "stall" }
       | { kind: "so_reject"; error: unknown }
     > {
       // Per-attempt controller: aborted either by our runaway detector OR by the
@@ -938,27 +942,52 @@ export async function draftGraphWithAnthropic(
       // validates DRAFT_RUNAWAY_DETECT_MS live (a healthy draft should reach
       // edges well under the deadline). Recorded on success, surfaced on meta.
       let timeToEdgesMs: number | null = null;
-      let runaway: { chars: number; elapsedMs: number; trigger: "time" | "chars" } | null = null;
+      let runaway: { chars: number; elapsedMs: number; trigger: "time" | "chars" | "stall" } | null = null;
       // True only when the char gate broke the loop mid-stream (a definite
-      // runaway). Distinguishes that from the time gate firing between the last
-      // delta and iterator-done on a stream that actually COMPLETED (F5 race,
+      // runaway). Distinguishes that from a timer firing between the last delta
+      // and iterator-done on a stream that actually COMPLETED (F5 race,
       // 2026-07-24): the char break is unrecoverable, but a cleanly-finished
       // stream whose finalMessage is available must be preferred over discarding
       // it as a runaway.
       let brokeForChars = false;
-      let detectTimer: ReturnType<typeof setTimeout> | undefined;
+      // Wall-clock of the last text delta — the PROGRESS signal (DETECTOR-FIX,
+      // 2026-07-24). A no-edges stream still receiving deltas is advancing through
+      // nodes (healthy-but-heavy), NOT a runaway; only a stream that has gone
+      // silent (no delta for DRAFT_RUNAWAY_STALL_MS) is a constrained-decode thrash.
+      let lastDeltaAt = attemptStart;
+      let stallTimer: ReturnType<typeof setTimeout> | undefined;
+      let ceilingTimer: ReturnType<typeof setTimeout> | undefined;
+      const clearDetectTimers = () => {
+        if (stallTimer) { clearTimeout(stallTimer); stallTimer = undefined; }
+        if (ceilingTimer) { clearTimeout(ceilingTimer); ceilingTimer = undefined; }
+      };
 
-      // Timer-armed time gate: fires even if the model stops emitting deltas (a
-      // silent constrained-decode thrash still burns wall-clock), which an
-      // in-loop check alone could not catch.
+      // PROGRESS-AWARE detection (DETECTOR-FIX, 2026-07-24; replaces the blanket
+      // 20s time gate that was false-aborting the slow-healthy tail — F4 live
+      // adjudication). Two timer-armed gates (both fire even under a SILENT thrash
+      // that stops emitting deltas, which an in-loop check alone could not catch),
+      // plus the in-loop char gate below:
+      //   1. STALL gate @ DRAFT_RUNAWAY_DETECT_MS — aborts only if no edges AND the
+      //      stream has made NO forward progress for DRAFT_RUNAWAY_STALL_MS. A draft
+      //      actively emitting nodes at 19s is left to run (the false-abort fix).
+      //   2. HARD CEILING @ DRAFT_RUNAWAY_HARD_CEILING_MS — absolute no-edges bound,
+      //      set comfortably above the live healthy p100 (19.57s) so it never clips
+      //      a healthy draft; catches an actively-emitting slow-sparse runaway the
+      //      stall gate would miss, and bounds every abortable attempt's wall-cost.
       const detectionActive = detectDeadlineMs != null && !draftThinkingEnabled;
       if (detectionActive) {
-        detectTimer = setTimeout(() => {
+        stallTimer = setTimeout(() => {
+          if (!edgesReached && !runaway && Date.now() - lastDeltaAt >= DRAFT_RUNAWAY_STALL_MS) {
+            runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "stall" };
+            perAttempt.abort();
+          }
+        }, detectDeadlineMs as number);
+        ceilingTimer = setTimeout(() => {
           if (!edgesReached && !runaway) {
             runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "time" };
             perAttempt.abort();
           }
-        }, detectDeadlineMs as number);
+        }, DRAFT_RUNAWAY_HARD_CEILING_MS);
       }
 
       try {
@@ -969,14 +998,17 @@ export async function draftGraphWithAnthropic(
         for await (const event of stream) {
           if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
             acc += event.delta.text;
+            // Forward progress — refresh the stall clock so an actively-emitting
+            // draft is never judged a silent thrash (DETECTOR-FIX, 2026-07-24).
+            lastDeltaAt = Date.now();
             if (!edgesReached && DRAFT_EDGES_REACHED_RE.test(acc.slice(edgesProbeOffset))) {
               // Past the nodes bottleneck — this is a healthy generation; cancel
               // the detector and let the stream complete.
               edgesReached = true;
               timeToEdgesMs = Date.now() - attemptStart;
-              if (detectTimer) { clearTimeout(detectTimer); detectTimer = undefined; }
-              // Live validation of DRAFT_RUNAWAY_DETECT_MS: a healthy draft must
-              // reach the edges array well under the deadline. Queryable in Render
+              clearDetectTimers();
+              // Live validation of the detector deadline: a healthy draft must
+              // reach the edges array well under the ceiling. Queryable in Render
               // logs (structural metrics only — no brief content).
               log.info({
                 event: "cee.llm.draft_edges_reached",
@@ -984,7 +1016,22 @@ export async function draftGraphWithAnthropic(
                 time_to_edges_ms: timeToEdgesMs,
                 chars: acc.length,
                 detect_ms: detectDeadlineMs,
+                hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
               }, "[Anthropic] draft_graph reached the edges array — healthy generation past the nodes bottleneck");
+              // DRIFT TRIPWIRE (the alarm missing 2026-07-24): a healthy draft
+              // reaching edges deep in the slow tail is the early signal the live
+              // corpus is creeping toward the abort ceiling. WARN so a rising rate
+              // is caught BEFORE it becomes a false-abort. Derived from the live
+              // measurement vs the ceiling-anchored threshold (no hand-mirror).
+              if (isEdgesTimeDrifting(timeToEdgesMs)) {
+                log.warn({
+                  event: "cee.llm.draft_edges_time_drift",
+                  model,
+                  time_to_edges_ms: timeToEdgesMs,
+                  drift_warn_ms: DRAFT_RUNAWAY_DRIFT_WARN_MS,
+                  hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
+                }, "[Anthropic] draft_graph reached edges in the SLOW TAIL — time-to-edges is approaching the runaway ceiling; a rising rate of this WARN means the healthy corpus is drifting and the ceiling may need re-derivation (F4-class early alarm)");
+              }
             } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS) {
               runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "chars" };
               brokeForChars = true;
@@ -998,7 +1045,7 @@ export async function draftGraphWithAnthropic(
             }
           }
         }
-        if (detectTimer) clearTimeout(detectTimer);
+        clearDetectTimers();
         abortController.signal.removeEventListener("abort", relayOverallAbort);
         // Char-gate runaway is unrecoverable → return it. A time-gate runaway that
         // fired AFTER the last delta while the iterator still finished cleanly
@@ -1010,7 +1057,7 @@ export async function draftGraphWithAnthropic(
         const message = await stream.finalMessage();
         return { kind: "complete", message, timeToEdgesMs };
       } catch (streamErr) {
-        if (detectTimer) clearTimeout(detectTimer);
+        clearDetectTimers();
         abortController.signal.removeEventListener("abort", relayOverallAbort);
         // WE aborted this attempt for a runaway (perAttempt aborted, overall
         // still live) — classify as a runaway retry, not an error.
@@ -1054,6 +1101,72 @@ export async function draftGraphWithAnthropic(
       // identity, and withRetry's transient retries reuse it (idempotent).
       const attemptIdempotencyKey = attempt === 1 ? idempotencyKey : makeIdempotencyKey();
 
+      // FINAL-ATTEMPT SKIP-GATE (DETECTOR-FIX part 2, 2026-07-24; F4 live
+      // adjudication rec-c). After runaway aborts have consumed budget, a FINAL
+      // attempt whose remaining window affords fewer tokens than a converged
+      // graph needs (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR — the observed 12-14-node
+      // /2206-2601-token band, floored just above) cannot produce a valid draft
+      // even if the model behaves: the F1 cap would starve it below the tokens
+      // required to reach edges (every such capped final = edges=0 → salvage
+      // fails → ~89s hard-fail, the exact chain probes 2/3/… reproduced). Flooring
+      // the cap UP is unsafe — it re-opens the wall-overflow 504 the F1 cap closed
+      // — so we SKIP the doomed attempt and fail FAST with the same typed error it
+      // would eventually throw, honestly, instead of burning the window. Gated on
+      // runawayAbortCount>=1 so attempt 1 (and any small-timeout direct caller)
+      // always runs at least once. Decided at the loop top on the live clock; a
+      // withRetry transient inside the closure can only push further past the
+      // floor, so this never skips a still-viable attempt.
+      const remainingAtLoopTop = effectiveTimeout - (Date.now() - startTime);
+      const willBeFinalAttempt = !(
+        remainingAtLoopTop > DRAFT_RUNAWAY_HARD_CEILING_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
+        runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES
+      );
+      const finalAttemptAffordableTokens = resolveDraftMaxTokens(
+        Math.max(0, remainingAtLoopTop),
+        opts?.maxTokensCeiling,
+      ).effective;
+      if (
+        runawayAbortCount >= 1 &&
+        willBeFinalAttempt &&
+        !draftThinkingEnabled &&
+        finalAttemptAffordableTokens < LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR
+      ) {
+        const skipElapsedMs = Date.now() - startTime;
+        log.error({
+          event: "cee.llm.draft_final_attempt_skipped",
+          model,
+          remaining_budget_ms: remainingAtLoopTop,
+          affordable_tokens: finalAttemptAffordableTokens,
+          viable_floor_tokens: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+          runaway_abort_count: runawayAbortCount,
+          elapsed_ms: skipElapsedMs,
+        }, "[Anthropic] draft_graph FINAL attempt SKIPPED — remaining budget affords fewer tokens than a converged graph needs; failing fast (honest) instead of burning the window on a sub-viable 0-edge generation (DETECTOR-FIX part 2, F4)");
+        throw Object.assign(
+          new UpstreamNonJsonError(
+            `anthropic draft_graph final attempt unaffordable — remaining budget ${remainingAtLoopTop}ms affords ` +
+            `${finalAttemptAffordableTokens} tokens < the ${LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR}-token converged-graph ` +
+            `floor after ${runawayAbortCount} runaway abort(s); failing fast instead of a doomed sub-viable generation`,
+            "anthropic",
+            "draft_graph",
+            skipElapsedMs,
+            "",
+            undefined,
+            undefined,
+            idempotencyKey,
+          ),
+          {
+            _llm_meta: {
+              model,
+              prompt_version: promptMeta.prompt_version,
+              prompt_hash: promptMeta.prompt_hash,
+              temperature: draftTemperature,
+              provider_latency_ms: skipElapsedMs,
+              finish_reason: "skipped_unaffordable_final",
+            },
+          },
+        );
+      }
+
       const attemptResult = await withRetry(
         () => {
           streamInvocations++;
@@ -1066,12 +1179,16 @@ export async function draftGraphWithAnthropic(
           // actually remains at the moment the attempt starts.
           const remainingBudgetMs = effectiveTimeout - (Date.now() - startTime);
           lastRemainingBudgetMs = remainingBudgetMs;
-          // Keep early-aborting only while there is budget for a detect PLUS a full
-          // healthy retry after it; otherwise this is the FINAL attempt and runs to
-          // the whole remaining window (no early abort) so a late completion /
-          // salvage is never thrown away.
+          // Keep early-aborting only while there is budget for a full abortable
+          // attempt (which, under progress-aware detection, can consume up to the
+          // HARD CEILING before aborting — not just DETECT_MS) PLUS a full healthy
+          // retry after it; otherwise this is the FINAL attempt and runs to the
+          // whole remaining window (no early abort) so a late completion / salvage
+          // is never thrown away. Reserving the ceiling (not DETECT_MS) preserves
+          // the F2 invariant that the final window is never squeezed below
+          // MIN_RETRY (DETECTOR-FIX, 2026-07-24).
           const canRetryAgain =
-            remainingBudgetMs > DRAFT_RUNAWAY_DETECT_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
+            remainingBudgetMs > DRAFT_RUNAWAY_HARD_CEILING_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
             runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES;
           const attemptDetectDeadlineMs = canRetryAgain ? DRAFT_RUNAWAY_DETECT_MS : null;
           // On the FINAL attempt (no early abort, non-thinking), cap max_tokens to
@@ -1148,11 +1265,13 @@ export async function draftGraphWithAnthropic(
         attempt,
         elapsed_ms: attemptResult.elapsedMs,
         partial_chars: attemptResult.chars,
-        trigger: attemptResult.trigger,
+        trigger: attemptResult.trigger, // "stall" | "chars" | "time" (hard ceiling)
         detect_ms: DRAFT_RUNAWAY_DETECT_MS,
         detect_chars: DRAFT_RUNAWAY_DETECT_CHARS,
+        stall_ms: DRAFT_RUNAWAY_STALL_MS,
+        hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
         remaining_budget_ms: lastRemainingBudgetMs,
-      }, "[Anthropic] draft_graph runaway detected EARLY (still in nodes, no edges emitted) — aborted the doomed attempt and retrying a fresh generation within the remaining budget (Lane C streamed abort-retry)");
+      }, "[Anthropic] draft_graph runaway detected EARLY (still in nodes, no edges emitted) — aborted the doomed attempt and retrying a fresh generation within the remaining budget (Lane C streamed abort-retry, progress-aware)");
     }
 
     clearTimeout(timeoutId);
@@ -3128,11 +3247,17 @@ export async function chatWithAnthropic(
         // tight caller budgets (the V6 dual-draft M2 review measured ~60s
         // with adaptive thinking vs its 25s timeout). Live-probed 2026-07-14:
         // the API accepts thinking:{type:'disabled'} alongside output_config.
+        //
+        // R1 (D-61, 2026-07-24): DEFAULT to explicit-disabled — a caller that
+        // passes NO thinking arg (the decision_review chat call, and every other
+        // chatWithAnthropic caller that wants thinking off) previously OMITTED the
+        // field, so Sonnet-5 adaptive thinking ran and ate the budget. Now the
+        // request ALWAYS carries an explicit posture (enabled OR disabled), never
+        // ambiguous — mirroring the draft path's explicit-posture idiom. Extended
+        // thinking is opt-IN via an explicit `thinking:{type:'enabled'}`.
         ...(thinkingEnabled
           ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } }
-          : args.thinking?.type === 'disabled'
-            ? { thinking: { type: 'disabled' } }
-            : {}),
+          : { thinking: { type: 'disabled' } }),
       };
       const headers: Record<string, string> = {
         "Idempotency-Key": idempotencyKey,

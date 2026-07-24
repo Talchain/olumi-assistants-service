@@ -248,7 +248,8 @@ export function isDraftTruncated(finishSignal: string | null | undefined): boole
   return finishSignal === "max_tokens" || finishSignal === "length";
 }
 
-// ── EARLY RUNAWAY DETECTION (Lane C, 2026-07-23) ─────────────────────────────
+// ── EARLY RUNAWAY DETECTION (Lane C, 2026-07-23; PROGRESS-AWARE recalibration
+//    DETECTOR-FIX, 2026-07-24, ROADMAP 1.205(a)) ───────────────────────────────
 // The residual draft-failure class after the wave-1 demand-reduction contract
 // (WAVE1-DRAFT-BUILD anatomy): a generation that cuts INSIDE the `nodes` array
 // with ZERO edges emitted, burning the full ~8550-token budget over ~82-91s.
@@ -263,55 +264,92 @@ export function isDraftTruncated(finishSignal: string | null | undefined): boole
 // every runaway emits 0 edges (measureTruncatedDraftAnatomy over 4 live 400s).
 // So "runaway" == "still in nodes (no `"from":` seen) past a derived deadline".
 //
-// Thresholds DERIVED from the wave1 capture corpus (n=19 healthy successes +
-// 4 runaways), recorded here so they are not a hand-picked sentinel (the 6800
-// lesson — CLAUDE.md trap; derive from measured data, never a magic number):
-//   - healthy draft-call TOTAL wall duration:  23.6s – 34.8s   (max 34,803ms)
-//   - healthy nodes-section serialized chars:  4141 – 6896     (max 6896)
-//   - runaway:  8550 tok, 0 edges, 82-91s, visible output 9526-23281 chars
+// ⚠ CORPUS RECALIBRATED (DETECTOR-FIX, 2026-07-24). The F4 live adjudication
+// (hunter-draft.md §F4) proved the day-1 corpus was STALE and the old blanket
+// 20s time gate was aborting HEALTHY drafts. FRESH live distribution,
+// `cee.llm.draft_edges_reached` n=16 over 3h on cee-staging (tip 5d9afbb0,
+// structured_outputs=true, claude-sonnet-4-6, prompt v195):
+//   - healthy time-to-edges:  min 12.4s · p50 15.4s · p90 19.3s · p100 19.57s
+//     (25% ≥18s; 4/16 ≥19s — the slow-healthy tail now BRUSHES a 20s gate,
+//      431ms margin). The old "healthy max 15.4s (n=10)" was stale by ~4.2s.
+//   - healthy nodes-section serialized chars:  4141 – 7078 (edges reached at
+//     4082-4820; direct false-abort captures at 5178/5334/7012/7078 chars were
+//     actively-generating drafts KILLED at the old 20s wall before `"from":`).
+//   - runaway:  8550 tok, 0 edges, 82-91s, visible output 9526-23281 chars.
+//
+// THE FIX (root-cause, NOT "bump the number"): the wall-clock gate cannot tell
+// "slower/heavier generation" from "runaway", so it is made PROGRESS-AWARE.
+// A no-edges stream is a runaway only when it is ALSO not making forward
+// progress (stalled) OR has ballooned past the char budget OR has blown the
+// absolute ceiling — an actively-emitting draft still advancing through nodes at
+// 19s is NOT clipped. Three orthogonal signals, no single one trusted (the
+// progress signal alone is spoofable by a runaway that keeps emitting — it is
+// backstopped by the char gate and the hard ceiling):
 //
 // NONE of these are env-gated (no new flags; the streamed abort-retry ships ON,
 // rollback = code revert — consistent with the rest of this seam).
 
-// Time deadline: a draft still in the nodes array (no edges) at this point
-// cannot be a healthy draft. Armed as a timer, so a silent-thrash runaway that
-// stops emitting deltas is still caught.
-//
-// 20s (2026-07-23, D-54-2 ruling — REVERT of Lane C2's margin-optimal 24s).
-// History: day-1 30s (conservative, derived from the only data then available —
-// the wave1 healthy TOTAL-duration ceiling 34.8s, streaming time-to-edges being
-// unmeasurable pre-deploy) → round-1 TIGHTENED to 20s → Lane C2 round-2 RAISED to
-// 24s ("margin-optimal" = max healthy time-to-edges 15.4s + ~8s, to widen the
-// false-abort margin) → D-54-2 REVERTS to 20s.
-//
-// Why revert (Lane C2's own live acceptance, build 206cbc2f, 2× 12-probe):
-//   - The false-abort margin that motivated 24s is NOT binding: ZERO false-aborts
-//     were observed, and every healthy draft reached edges ≤15.4s — comfortably
-//     under BOTH 20s and 24s (`cee.llm.draft_edges_reached`, n=10: max 15.4s). So
-//     the extra ~4s of head-of-draft margin bought nothing measurable.
-//   - 24s TRADES AWAY final-attempt budget. The A2killer 504s are pure
-//     runaway-density: 3 consecutive aborts, then a no-early-abort final attempt
-//     that runs out of wall-clock. After 3 aborts at 24s (~72s spent) the final
-//     gets only ~38s — SHORTER than a clean A2killer draft (~44-52s), so a
-//     clean-but-slow final is cut → 504. At 20s the final gets ~50s, enough to
-//     complete. Combined A2killer 2/6 (24s) vs the 20s deployed 3/6 — within n=6
-//     noise, but the arithmetic and the abort anatomy point the same way: 20s
-//     leaves more final-attempt budget for the residual runaway-dense briefs.
-//
-// Still below the 34.8s healthy-completion floor and the ~82s runaway floor (both
-// runaway sub-types keep generating with 0 edges past 82s), so a genuine runaway
-// is still caught early. The coaching pass no longer competes for this window
-// (Lane C2 made it strictly best-effort — coaching-pass.ts), so the detector is
-// tuned purely for final-attempt budget, not to reserve a coaching slot. Attempt
-// count is unchanged vs 24s in the ~110s draft budget (~3-4 attempts).
-// `cee.llm.draft_edges_reached` keeps validating this floor live.
+// STALL-CHECK deadline: the point after which a no-edges stream that has made NO
+// forward progress (see DRAFT_RUNAWAY_STALL_MS) is judged a silent runaway. This
+// is NO LONGER a blanket abort (the 2026-07-24 false-abort defect) — a draft
+// actively emitting deltas past this point is left to run to the hard ceiling
+// (below), which sits comfortably above the live healthy p100. Kept at 20s: it
+// is only the moment stall-checking begins, and every healthy draft either has
+// reached edges by 19.57s (cancelling detection) or is still emitting (not
+// stalled), so 20s never clips a healthy draft under the progress gate.
 export const DRAFT_RUNAWAY_DETECT_MS = 20_000;
 
-// Char budget: max healthy nodes-section = 6896 chars; runaway visible minimum
-// = 9526 chars. 8000 sits above the healthy max (+16%) and below the runaway
-// min (-16%), catching a TEXT-heavy runaway before the time deadline. Gated on
-// "no edges yet", so it only ever fires while still in the nodes array.
+// Silent-thrash discriminator: a no-edges stream that has emitted NO new text
+// for this long is a constrained-decode thrash burning wall-clock, not a healthy
+// generation (real streams emit tokens continuously every ~50-200ms; no healthy
+// draft pauses whole seconds mid-stream). Set generously (8s ≫ any healthy
+// inter-delta gap) so it NEVER trips a progressing draft; the hard ceiling is
+// the ultimate backstop, so a conservative value here costs only detection
+// latency, never a false abort. Checked at DRAFT_RUNAWAY_DETECT_MS and again at
+// the ceiling.
+export const DRAFT_RUNAWAY_STALL_MS = 8_000;
+
+// ABSOLUTE per-attempt no-edges ceiling — the pure-time backstop that bounds
+// every abortable attempt (so the retry-budget arithmetic in the adapter has a
+// hard upper limit on time consumed before an abort). DERIVED from the fresh
+// live distribution: p100 19.57s + ~10.4s margin = 30s. Clearing the live
+// healthy p100 with comfortable headroom is what removes the false-abort of the
+// slow-healthy tail (edges reached at up to 19.57s, and a hair beyond under
+// drift): a still-emitting healthy draft has until 30s to reach edges before the
+// ceiling fires, versus the old 20s blanket gate that clipped it. The drift
+// tripwire (DRAFT_RUNAWAY_DRIFT_WARN_MS) warns long before the live p90 could
+// creep up to this. Catches the (unobserved) slow-sparse runaway the stall and
+// char gates would miss.
+export const DRAFT_RUNAWAY_HARD_CEILING_MS = 30_000;
+
+// Char budget: max healthy nodes-section = 7078 chars (fresh); runaway visible
+// minimum = 9526 chars. 8000 sits above the healthy max (+13%) and below the
+// runaway min (-16%), catching a TEXT-heavy (ballooning) runaway independent of
+// wall-clock. Gated on "no edges yet", so it only ever fires while still in the
+// nodes array. This is the signal that catches a runaway which keeps emitting
+// (and so is NOT stalled) before it can blow the hard ceiling.
 export const DRAFT_RUNAWAY_DETECT_CHARS = 8_000;
+
+// DRIFT TRIPWIRE (the alarm that was MISSING on 2026-07-24). Derived from the
+// hard ceiling (0.6× = 60% of the way to an abort) rather than a hand-mirrored
+// corpus constant, so it cannot silently drift out of sync with the gate. A
+// healthy draft reaching edges past this point is in the slow tail (fresh p50
+// 15.4s < 18s < fresh p90 19.3s — it fires on today's slow-healthy quartile,
+// 4/16 ≥18s, exactly the population the stale 20s gate was clipping). A RISING
+// rate of these WARNs is the early signal that the live p90 is creeping toward
+// the ceiling and the corpus is drifting — surface it BEFORE it becomes a
+// false-abort, which is precisely what did not happen today.
+export const DRAFT_RUNAWAY_DRIFT_WARN_MS = Math.round(DRAFT_RUNAWAY_HARD_CEILING_MS * 0.6);
+
+/**
+ * Drift tripwire predicate: is this healthy draft's time-to-edges deep enough
+ * into the slow tail to warrant a drift WARN? Pure + derived (live measurement
+ * vs the ceiling-anchored threshold), never a hand-maintained list — so it fails
+ * loud on real drift and cannot rot into a false-green mirror.
+ */
+export function isEdgesTimeDrifting(timeToEdgesMs: number | null | undefined): boolean {
+  return typeof timeToEdgesMs === "number" && timeToEdgesMs >= DRAFT_RUNAWAY_DRIFT_WARN_MS;
+}
 
 // Defensive backstop on the number of runaway retries (independent of the
 // budget guard): the budget guard alone terminates the loop only because real
@@ -322,13 +360,22 @@ export const DRAFT_RUNAWAY_DETECT_CHARS = 8_000;
 // real budget this cap never binds (only ~3 attempts fit the ~110s window).
 export const DRAFT_MAX_RUNAWAY_RETRIES = 5;
 
-// Stop early-aborting once the remaining budget is below DETECT_MS + this: the
-// FINAL attempt then runs to the full remaining window with NO early abort, so
-// a late-but-legitimate completion is never discarded and the existing salvage
-// (closeTruncatedJson) still applies to a natural max_tokens truncation. 35s is
-// the observed healthy ceiling (~34.8s), so the final attempt gets a full
-// healthy window. With the ~110s draft budget this affords ~3 attempts
-// (30 + 30 + ≤50); at the corpus runaway rate this is the abort-retry lever.
+// Stop early-aborting once the remaining budget is below HARD_CEILING_MS + this:
+// the FINAL attempt then runs to the full remaining window with NO early abort,
+// so a late-but-legitimate completion is never discarded and the existing
+// salvage (closeTruncatedJson) still applies to a natural max_tokens truncation.
+// 35s is the observed healthy completion ceiling (~34.8s), so the final attempt
+// gets a full healthy window.
+//
+// ⚠ COMPOSITE UPDATED (DETECTOR-FIX, 2026-07-24): the retry-authorization in the
+// adapter (`canRetryAgain`) reserves HARD_CEILING_MS + this, NOT DETECT_MS + this
+// as before. Progress-awareness means an abortable attempt can now consume up to
+// the hard ceiling (30s) before aborting, not just DETECT_MS (20s), so the budget
+// that authorizes "there is room for a full retry after this abort" must reserve
+// the ceiling — otherwise the final window could be squeezed below this floor
+// (an F2-class invariant break). With the ~110s draft budget this affords ~2
+// aborts + a final ≥ this floor (30 + 30 + ≥50); at the runaway rate this is the
+// abort-retry lever.
 export const DRAFT_RUNAWAY_MIN_RETRY_MS = 35_000;
 
 // Structural "reached the edges array" probe over the accumulated stream text.
