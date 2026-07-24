@@ -53,7 +53,11 @@ import {
   type AnswerKind,
 } from './compose.js';
 import { commitDirectAnswer, computeRequestHash } from './commit.js';
-import { buildTurnContext, loadPersistedGraphStrict } from './build-turn-context.js';
+import {
+  buildTurnContext,
+  loadPersistedGraphStrict,
+  type CanonicalGraphReadState,
+} from './build-turn-context.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -8225,15 +8229,62 @@ export async function runTurnExecutor(
         const incoming =
           requestGraph !== null && requestGraph.nodes.length > 0 ? requestGraph : null;
 
-        // `hasServerModel` — a persisted graph carrying >=1 node.
-        const persisted = context.persistedGraph;
-        const hasServerModel =
-          persisted !== null &&
-          persisted !== undefined &&
-          typeof persisted === 'object' &&
-          !Array.isArray(persisted) &&
-          Array.isArray((persisted as Record<string, unknown>).nodes) &&
-          ((persisted as Record<string, unknown>).nodes as unknown[]).length > 0;
+        // A persisted graph counts as a server model when it carries >=1 node.
+        const graphHasNodes = (g: unknown): boolean =>
+          g !== null &&
+          g !== undefined &&
+          typeof g === 'object' &&
+          !Array.isArray(g) &&
+          Array.isArray((g as Record<string, unknown>).nodes) &&
+          ((g as Record<string, unknown>).nodes as unknown[]).length > 0;
+
+        // F2 (Codex deep-review) — TRUSTWORTHY `hasServerModel`.
+        //
+        // The old derivation read `context.persistedGraph` directly, so a
+        // DEGRADED canonical read (which collapses persistedGraph to null) was
+        // indistinguishable from a genuinely ABSENT graph. Rows A and B then
+        // adopted the client `graph_state` over a real (but unread) server
+        // model. We now resolve the discriminated read state; production sets
+        // `context.persistedGraphRead`, and legacy hand-built contexts derive a
+        // safe state from `persistedGraph` (present → ok_present, else
+        // ok_absent — the pre-fix behaviour for those, no degraded case).
+        const canonicalRead: CanonicalGraphReadState =
+          context.persistedGraphRead ??
+          (context.persistedGraph != null
+            ? { status: 'ok_present', graph: context.persistedGraph }
+            : { status: 'ok_absent' });
+
+        // On a DEGRADED read the true state is UNKNOWN, so we must NOT treat
+        // null as "no server model". Strict-reread the canonical graph at THIS
+        // write chokepoint. A reread that ALSO fails FAILS CLOSED (throws →
+        // STATE_COMMIT_FAILED, whole txn rolls back) — never adopt/clobber on an
+        // unproven-absent read. The reread value is reused as the D/F merge base.
+        let hasServerModel: boolean;
+        let degradedRereadGraph: unknown | null | undefined;
+        if (canonicalRead.status === 'ok_present') {
+          hasServerModel = graphHasNodes(canonicalRead.graph);
+        } else if (canonicalRead.status === 'ok_absent') {
+          hasServerModel = false;
+        } else {
+          try {
+            degradedRereadGraph = await loadPersistedGraphStrict(context.session_id);
+          } catch (err) {
+            throw new Error(
+              `V5 adopt/commit — refusing to write graph for scenario ${context.session_id}: canonical read degraded (${canonicalRead.errorCode}) and strict reread failed (${err instanceof Error ? err.message : String(err)})`,
+            );
+          }
+          hasServerModel = graphHasNodes(degradedRereadGraph);
+          log.warn(
+            {
+              event: 'v5.turn_executor.canonical_read_degraded_reread',
+              request_id: requestId,
+              scenario_id: context.session_id,
+              error_code: canonicalRead.errorCode,
+              reread_has_server_model: hasServerModel,
+            },
+            'V5 TurnExecutor — canonical graph read degraded; strict reread performed at the graph-write chokepoint (fail-closed; adopt only when the reread proves ABSENT)',
+          );
+        }
 
         if (!handlerMutated) {
           // rows A / C / E
@@ -8271,6 +8322,10 @@ export async function runTurnExecutor(
           // (NOT the empty persisted read) so incoming's top-level fields
           // (options[], goal_node_id, goal_constraints) survive the merge.
           persistedBase = incoming;
+        } else if (degradedRereadGraph !== undefined) {
+          // rows D / F on a DEGRADED read — reuse the strict reread already
+          // performed above (single round trip, no TOCTOU vs `hasServerModel`).
+          persistedBase = degradedRereadGraph;
         } else {
           // rows D / F — today's behaviour: strict-read the persisted graph. A
           // degraded/unavailable read FAILS CLOSED here (→ STATE_COMMIT_FAILED;
