@@ -685,6 +685,87 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     }
   });
 
+  // ---------------------------------------------------------------------------
+  // Prompt-cache observability (2026-07-24). The draft system prefix is already
+  // sent as an ephemeral cache block (buildSystemBlocks) and the streamed
+  // finalMessage already CARRIES usage.cache_read/creation — but the "draft
+  // complete" log never surfaced it, so warm-cache hits were unmeasurable from
+  // Render logs. These pin that the tokens are now logged, and that adding the
+  // log did NOT change the cached request bytes.
+  // ---------------------------------------------------------------------------
+  it("logs Anthropic prompt-cache tokens on the 'draft complete' line for a warm-cache read, without altering the cached request", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+    // Pin the ephemeral system cache block on (repo default, and set true on
+    // cee-staging) so the byte-invariance assertion below is deterministic.
+    vi.stubEnv("ANTHROPIC_PROMPT_CACHE_ENABLED", "true");
+
+    // Warm read: the streamed finalMessage reports a cache READ (>0) and no
+    // fresh creation — a cache HIT.
+    streamSpy.mockImplementation(
+      makeFakeStream(VALID_GRAPH_JSON, {
+        usage: { cache_read_input_tokens: 2560, cache_creation_input_tokens: 0 },
+      })
+    );
+
+    // Same reset module graph as the adapter import below, so the spy lands on
+    // the exact `log` instance the adapter calls.
+    const { log } = await import("../../src/utils/telemetry.js");
+    const infoSpy = vi.spyOn(log, "info");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+
+    const draftCompleteCall = infoSpy.mock.calls.find((c) => c[1] === "draft complete");
+    expect(draftCompleteCall).toBeDefined();
+    const payload = draftCompleteCall![0] as Record<string, unknown>;
+    expect(payload.cache_read_input_tokens).toBe(2560);
+    expect(payload.cache_creation_input_tokens).toBe(0);
+    expect(payload.cache_hit).toBe(true);
+    expect(payload.input_tokens).toBe(100);
+    expect(payload.output_tokens).toBe(200);
+
+    // Byte-invariance: the observability change is a pure read of usage — the
+    // request still sends the ephemeral system cache block unchanged.
+    const [body] = streamSpy.mock.calls[0] as [{ system: Array<{ cache_control?: unknown }> }];
+    expect(Array.isArray(body.system)).toBe(true);
+    expect(body.system[0].cache_control).toEqual({ type: "ephemeral" });
+  });
+
+  it("reports a cold cache write (creation>0, read=0) on 'draft complete' as cache_hit:false", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+
+    streamSpy.mockImplementation(
+      makeFakeStream(VALID_GRAPH_JSON, {
+        usage: { cache_read_input_tokens: 0, cache_creation_input_tokens: 2560 },
+      })
+    );
+
+    const { log } = await import("../../src/utils/telemetry.js");
+    const infoSpy = vi.spyOn(log, "info");
+
+    const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+    await draftGraphWithAnthropic({
+      brief: "Should I hire a contractor or full-time employee?",
+      docs: [],
+      seed: 17,
+      model: "claude-sonnet-4-6",
+    });
+
+    const draftCompleteCall = infoSpy.mock.calls.find((c) => c[1] === "draft complete");
+    expect(draftCompleteCall).toBeDefined();
+    const payload = draftCompleteCall![0] as Record<string, unknown>;
+    expect(payload.cache_creation_input_tokens).toBe(2560);
+    expect(payload.cache_read_input_tokens).toBe(0);
+    expect(payload.cache_hit).toBe(false);
+  });
+
   it("uses system parameter (not first user message) for the prompt", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
