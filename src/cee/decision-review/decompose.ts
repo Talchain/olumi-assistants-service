@@ -591,10 +591,14 @@ function labelTokenMatches(narrativeTok: string, labelTok: string): boolean {
  * list a human must remember to sync with reality drifts silently and the drift
  * reads as green. The tolerance is derived from the label's own tokens.
  */
-export function narrativeNamesOption(narrative: string, label: string): boolean {
-  const labelToks = normaliseTokens(label);
+/**
+ * Core token-run match: does `narrToks` contain `labelToks` as a contiguous run
+ * (tolerating inflection, see {@link labelTokenMatches})? Both sides are already
+ * tokenised, so a caller matching one narrative against many labels can tokenise
+ * each side exactly once (F5 hoist — see {@link claimedNonWinnerLeaders}).
+ */
+function tokensNameOption(narrToks: readonly string[], labelToks: readonly string[]): boolean {
   if (labelToks.length === 0) return false;
-  const narrToks = normaliseTokens(narrative);
   if (narrToks.length < labelToks.length) return false;
   for (let i = 0; i <= narrToks.length - labelToks.length; i += 1) {
     let all = true;
@@ -607,6 +611,10 @@ export function narrativeNamesOption(narrative: string, label: string): boolean 
     if (all) return true;
   }
   return false;
+}
+
+export function narrativeNamesOption(narrative: string, label: string): boolean {
+  return tokensNameOption(normaliseTokens(narrative), normaliseTokens(label));
 }
 
 function sentenceList(text: string): string[] {
@@ -630,15 +638,23 @@ function claimedNonWinnerLeaders(
 ): string[] {
   if (winnerLabel.length === 0 || optionLabels.length < 2) return [];
   const wrong: string[] = [];
+  const winnerLower = winnerLabel.toLowerCase();
+  // F5 hoist: the candidate labels are loop-invariant. Tokenise each once here
+  // rather than re-tokenising both label AND sentence on every
+  // narrativeNamesOption(sentence, l) call inside the per-sentence loop.
+  const candidates = optionLabels
+    .filter((l) => l.length > 2)
+    .map((l) => ({ label: l, toks: normaliseTokens(l) }));
   for (const sentence of sentenceList(narrative)) {
     if (!WIN_CUE.test(sentence)) continue;
     if (WIN_NEGATION_CUE.test(sentence)) continue;
     // Only OVERALL crownings are wrong-winner candidates; a per-dimension /
     // historical / attention sentence that merely names the runner-up is not.
     if (isNonCrowningWinSentence(sentence)) continue;
-    const named = optionLabels.filter((l) => l.length > 2 && narrativeNamesOption(sentence, l));
-    if (named.length === 1 && named[0]!.toLowerCase() !== winnerLabel.toLowerCase()) {
-      wrong.push(named[0]!);
+    const sentenceToks = normaliseTokens(sentence);
+    const named = candidates.filter((c) => tokensNameOption(sentenceToks, c.toks));
+    if (named.length === 1 && named[0]!.label.toLowerCase() !== winnerLower) {
+      wrong.push(named[0]!.label);
     }
   }
   return wrong;

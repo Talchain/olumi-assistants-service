@@ -159,7 +159,7 @@ export default async function route(app: FastifyInstance) {
 
     // Rate limiting using shared infrastructure
     const rateKey = keyId || req.ip || "unknown";
-    const { allowed, retryAfterSeconds } = rateLimiter.tryConsume(rateKey);
+    const { allowed, retryAfterSeconds } = rateLimiter.tryConsume(rateKey, keyId);
 
     if (!allowed) {
       const errorBody = buildReviewErrorResponse(
