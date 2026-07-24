@@ -1578,8 +1578,37 @@ export async function draftGraphWithAnthropic(
       },
     });
 
+    // Anthropic prompt-cache observability (2026-07-24). The draft system prefix
+    // is sent as an ephemeral cache block (buildSystemBlocks, gated on
+    // config.promptCache.anthropicEnabled — default true, and set true on
+    // cee-staging). The draft path already RETURNED usage.cache_read/creation
+    // (see the `usage` object below) but never LOGGED it, so warm-cache hits were
+    // unmeasurable from Render logs — unlike the coach path (emitV5PromptCache)
+    // and chatWithToolsAnthropic (its "successful" cache_hit line). Fold the same
+    // fields into the existing "draft complete" line to close that gap. This is a
+    // pure read of response.usage: ZERO change to the request bytes sent upstream
+    // (the cache_control on prompt.system is unchanged).
+    const draftCacheCreationTokens = response.usage.cache_creation_input_tokens ?? 0;
+    const draftCacheReadTokens = response.usage.cache_read_input_tokens ?? 0;
+    const draftHasCacheMetrics = draftCacheCreationTokens > 0 || draftCacheReadTokens > 0;
     log.info(
-      { nodes: graph.nodes.length, edges: graph.edges.length, roots: roots.length, leaves: leaves.length },
+      {
+        nodes: graph.nodes.length,
+        edges: graph.edges.length,
+        roots: roots.length,
+        leaves: leaves.length,
+        provider: "anthropic",
+        model,
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        provider_latency_ms: providerLatencyMs,
+        structured_outputs_used: useStructuredOutputs,
+        ...(draftHasCacheMetrics ? {
+          cache_creation_input_tokens: draftCacheCreationTokens,
+          cache_read_input_tokens: draftCacheReadTokens,
+          cache_hit: draftCacheReadTokens > 0,
+        } : {}),
+      },
       "draft complete"
     );
 
