@@ -20,6 +20,7 @@ import {
   draftAttachmentDetectorAllowance,
   DRAFT_ATTACHMENT_DETECT_ALLOWANCE_MS_MAX,
   DRAFT_ATTACHMENT_DETECT_ALLOWANCE_CHARS_MAX,
+  DRAFT_MAX_RUNAWAY_RETRIES,
 } from '../draft-budget.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES } from '../draft-attachment.js';
 
@@ -177,12 +178,17 @@ describe('draft_graph runaway detector — attachment-aware char gate (F-3)', ()
     expect(h.callCount).toBeGreaterThan(1); // aborted + retried (the gate fired)
   });
 
-  it('DEFAULT REGIME: the same runaway is NOT aborted — one generation gets the whole window, and still fails honestly', async () => {
-    // The behaviour change, pinned as a first-class expectation rather than left
-    // implicit. With attempt 1 at the full affordable cap, no abort can be
-    // re-funded, so the doomed abort-retry ladder does not run: exactly ONE
-    // stream invocation, and the draft still fails (no corrupt draft is
-    // accepted — validation, not the abort, is what guarantees that).
+  it('⭐ DEFAULT REGIME: the runaway IS aborted and retried — and the ladder still terminates', async () => {
+    // ⚠ FLIPPED 2026-07-25 (FAST-ABORT). This test previously pinned
+    // `h.callCount === 1` — "no abort can be re-funded, so the ladder does not
+    // run". That WAS the live behaviour (`runaway_abort_count: 0` on all 30
+    // observations), and it was the defect: the abort was gated on the retry
+    // being able to re-fund the ABANDONED CAP, which is arithmetically
+    // impossible at default configuration. A runaway never reaches the edges
+    // array, so its cap says nothing about what a retry needs; the gate now asks
+    // whether the post-abort window can fund a CONVERGED draft (<=2,271 tokens
+    // measured). See config/timeouts.ts and
+    // `parallel-briefs/TOKEN-CEILING-EXPERIMENT-2026-07-25.md`.
     h.nodesPreEdgeChars = 13_000;
     h.runaway = true;
 
@@ -194,7 +200,16 @@ describe('draft_graph runaway detector — attachment-aware char gate (F-3)', ()
       threw = true;
     });
 
+    // A persistent runaway still FAILS — the abort buys retries, not a fake
+    // success. Zero-corrupt is guaranteed by validation, not by the abort.
     expect(threw).toBe(true);
-    expect(h.callCount).toBe(1);
+    // …but it is now retried rather than swallowing the whole window on one
+    // doomed generation. This harness resolves streams synchronously, so no wall
+    // clock is consumed and the TIME reserve never binds; the loop therefore
+    // terminates on `DRAFT_MAX_RUNAWAY_RETRIES` (5 aborts + 1 final attempt).
+    // That defensive backstop existing is exactly why a zero-elapsed provider
+    // cannot spin here.
+    expect(h.callCount).toBe(DRAFT_MAX_RUNAWAY_RETRIES + 1);
+    expect(h.callCount).toBeGreaterThan(1);
   });
 });

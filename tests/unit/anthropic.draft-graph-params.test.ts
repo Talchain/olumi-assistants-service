@@ -1357,7 +1357,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     }
   });
 
-  it("DRIFT TRIPWIRE: a healthy draft reaching edges in the slow tail (≥18s) emits the drift WARN (the alarm missing 2026-07-24)", async () => {
+  it("DRIFT TRIPWIRE: a healthy draft reaching edges in the slow tail emits the drift WARN (the alarm missing 2026-07-24)", async () => {
     vi.useFakeTimers();
     try {
       vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
@@ -1365,14 +1365,19 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
       const { log } = await import("../../src/utils/telemetry.js");
       const warnSpy = vi.spyOn(log, "warn");
 
-      // Reaches edges at 18.5s — past DRAFT_RUNAWAY_DRIFT_WARN_MS (18s) but not
-      // aborted (well under the 30s ceiling). Should complete AND WARN.
+      // ⚠ RE-DERIVED 2026-07-25 (FAST-ABORT). The tripwire was 0.6 x ceiling
+      // (18s at a 30s ceiling); at the new 25s ceiling that formula would give
+      // 15s — BELOW the healthy p50 — and WARN on most healthy drafts. It is now
+      // anchored to the observed healthy p100 (21,258 ms). This draft reaches
+      // edges at 22s: past the tripwire, still under the 25s ceiling, so it must
+      // COMPLETE and WARN. The last delta before the 20s stall check is at 16s
+      // (gap 4s < the 8s stall threshold), so the stall gate must not fire.
       const steps = [
         { text: '{"nodes":[{"id":"n1","label":"y"}', atMs: 4_000 },
         { text: ',{"id":"n2","label":"y"}', atMs: 8_000 },
         { text: ',{"id":"n3","label":"y"}', atMs: 12_000 },
         { text: ',{"id":"n4","label":"y"}', atMs: 16_000 },
-        { text: '],"edges":[{"from":"n1","to":"n2"}]}', atMs: 18_500 },
+        { text: '],"edges":[{"from":"n1","to":"n2"}]}', atMs: 22_000 },
       ];
       streamSpy.mockImplementationOnce(makeTimedStream(steps, VALID_GRAPH_JSON));
 
@@ -1381,7 +1386,7 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
         brief: "Should I hire a contractor or full-time employee?",
         docs: [], seed: 17, model: "claude-sonnet-4-6",
       });
-      await vi.advanceTimersByTimeAsync(22_000);
+      await vi.advanceTimersByTimeAsync(24_000);
       const result = await promise;
 
       expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(0);
@@ -1389,7 +1394,39 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
         (c) => (c[0] as { event?: string })?.event === "cee.llm.draft_edges_time_drift",
       );
       expect(driftLog).toBeDefined();
-      expect((driftLog![0] as { time_to_edges_ms?: number }).time_to_edges_ms).toBeGreaterThanOrEqual(18_000);
+      expect((driftLog![0] as { time_to_edges_ms?: number }).time_to_edges_ms).toBeGreaterThanOrEqual(21_258);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("⭐ A SLOW-BUT-HEALTHY draft at 21.26s — the corpus p100 — is NOT aborted by the 25s ceiling", async () => {
+    // The false-abort guard, as a first-class test. The detector was reverted
+    // once (2026-07-24) for clipping exactly this population, so lowering the
+    // ceiling 30s -> 25s must be pinned against the slowest healthy draft ever
+    // measured (21,258 ms). It must COMPLETE, with zero aborts.
+    vi.useFakeTimers();
+    try {
+      vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+      vi.stubEnv("CEE_ANTHROPIC_STRUCTURED_OUTPUTS", "false");
+      const steps = [
+        { text: '{"nodes":[{"id":"n1","label":"y"}', atMs: 5_000 },
+        { text: ',{"id":"n2","label":"y"}', atMs: 11_000 },
+        { text: ',{"id":"n3","label":"y"}', atMs: 17_000 },
+        { text: '],"edges":[{"from":"n1","to":"n2"}]}', atMs: 21_258 },
+      ];
+      streamSpy.mockImplementationOnce(makeTimedStream(steps, VALID_GRAPH_JSON));
+
+      const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
+      const promise = draftGraphWithAnthropic({
+        brief: "Should I hire a contractor or full-time employee?",
+        docs: [], seed: 17, model: "claude-sonnet-4-6",
+      });
+      await vi.advanceTimersByTimeAsync(24_000);
+      const result = await promise;
+
+      expect((result.meta as { runaway_abort_count?: number }).runaway_abort_count).toBe(0);
+      expect(streamSpy).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
@@ -1913,19 +1950,19 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
 
   it("PART-2 SKIP-GATE: a post-abort FINAL attempt whose window can't fund a viable graph is SKIPPED (honest fast fail), not run", async () => {
     // DETECTOR-FIX part 2 (F4 rec-c) + FINAL-SWEEP F-4 reserve reconciliation,
-    // re-armed for the 2026-07-25 skip-gate alignment.
+    // RE-DERIVED for the 2026-07-25 fast-abort yardstick (ceiling 25s, floor
+    // 3,581 = the evidence-derived converged-draft requirement).
     //
-    // The gate's floor is now `max(2_700, abandonedCap)` rather than a bare 2,700
-    // (the bare floor is what let a 3,150-token final run against an 8,550-token
-    // abandonment, 18 times out of 18). At the FULL attempt-1 cap no abort is
-    // authorised at all, so this scenario is driven with an explicit
-    // `maxTokensCeiling` of 2,880 — chosen so BOTH aborts are re-fundable
-    // (aff(112-30=82s) = 6,030 ≥ 2,880 ✓; aff(77-30=47s) = 2,880 ≥ 2,880 ✓) and
-    // the third would-be-final window of 42s affords only (42-15)*90 = 2,430,
-    // which is below BOTH the 2,700 floor and the 2,880 cap it would replace →
-    // SKIPPED with the typed error, WITHOUT a 3rd call.
+    //   budget 120s, ceiling 4,000, each abortable attempt burns 38s of clock:
+    //   attempt 1: remaining 120s → post-abort 95s affords min(7200,4000)=4,000
+    //              ≥ 3,581 ✓ → abort authorised, clock → 82s
+    //   attempt 2: remaining  82s (> the 79.789s reserve, so NOT final) →
+    //              post-abort 57s affords min(3780,4000)=3,780 ≥ 3,581 ✓ → abort,
+    //              clock → 44s
+    //   attempt 3: remaining  44s → FINAL, affords (44-15)*90 = 2,610 < 3,581
+    //              → SKIPPED with the typed error, WITHOUT a 3rd call.
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
-      mockNow += 35_000; // each abortable attempt burns 35s of wall-clock
+      mockNow += 38_000; // each abortable attempt burns 38s of wall-clock
       return runawayStream(body, options); // char-gate runaway (no edges)
     });
 
@@ -1936,36 +1973,33 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
           brief: "Should I hire a contractor or full-time employee?",
           docs: [], seed: 17, model: "claude-sonnet-4-6",
         },
-        { timeoutMs: 112_000, maxTokensCeiling: 2_880 },
+        { timeoutMs: 120_000, maxTokensCeiling: 4_000 },
       ),
-    ).rejects.toThrow(/final attempt unaffordable|converged-graph floor/);
+    ).rejects.toThrow(/final attempt unaffordable|converged-draft floor/);
 
     // MUTATION-CHECK: with the skip-gate reverted, the 3rd attempt RUNS as the
     // (token-starved) final → streamSpy would be 3 and the error message differs.
     expect(streamSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("SKIP-GATE ALIGNMENT: the gate now fires on a window that CLEARS the 2,700 floor but cannot re-fund the abandoned attempt", async () => {
-    // ⭐ THE LIVE DEFECT, AS A TEST. The sibling case above was already caught by
-    // the old bare-floor gate (2,430 < 2,700). This one is the case that was NOT:
-    // an abort ladder that leaves a window affording ~3,150 tokens — comfortably
-    // ABOVE 2,700, and therefore waved through — against an attempt that had
-    // 5,000. That is precisely the shape of all 18 live `/assist` A2killer
-    // failures on 2026-07-24 (caps 3,146-3,826 vs an 8,550-token abandonment).
+  it("⭐ THE LIVE 3,150: a final window that CLEARS the legacy 2,700 floor but cannot fund a CONVERGED draft is skipped", async () => {
+    // ⭐ THE LIVE DEFECT, AS A TEST — and now pinned on the actual live number.
+    // All 18 `/assist` A2killer failures on 2026-07-24 died on a final attempt
+    // funded at 3,146-3,826 tokens; 15 of them at exactly aff(50s) = 3,150.
+    // 3,150 comfortably CLEARS the bare 2,700 floor, which is why the pre-#675
+    // gate waved it through — and it is still below the 3,581 tokens a converged
+    // draft is measured to require, so it is still refused. The verdict on the
+    // case that mattered is unchanged; only the reason is now true.
     //
-    // Budget: 110s, ceiling 5,000, each abortable attempt burns 30s.
-    //   attempt 1: remaining 110s; post-abort 80s affords min(5850,5000)=5000 ≥ 5000 ✓ → abort, →80s
-    //   attempt 2: remaining  80s; post-abort 50s affords min(3150,5000)=3150 < 5000 ✗ → FINAL, runs
-    // …so the ladder self-limits to two attempts and the second is NOT starved.
-    // To reach a genuinely starved final, burn harder: 40s per attempt.
-    //   attempt 1: remaining 110s; post-abort 80s affords 5000 ≥ 5000 ✓ → abort, →70s
-    //   attempt 2: loop top 70s → NOT final (70 < 75 reserve ⇒ final) … it IS final
-    //              and affords aff(70s) = 4,950 < 5,000 → SKIPPED.
-    // 4,950 clears the 2,700 floor by 2,250 tokens: the OLD gate would have run it.
+    //   budget 90s, ceiling 5,000, each abortable attempt burns 40s:
+    //   attempt 1: remaining 90s → post-abort 65s affords min(4500,5000)=4,500
+    //              ≥ 3,581 ✓ → abort, clock → 50s
+    //   attempt 2: remaining 50s → FINAL (50s < the 79.789s reserve), affords
+    //              min(3150,5000) = 3,150 → 2,700 ≤ 3,150 < 3,581 → SKIPPED.
     //
     // MUTATION-CHECK: restore the bare
     // `finalAttemptAffordableTokens < LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR` and this
-    // goes RED — 4,950 >= 2,700, so the doomed attempt runs and streamSpy hits 2.
+    // goes RED — 3,150 >= 2,700, so the doomed attempt runs and streamSpy hits 2.
     streamSpy.mockImplementation((body: unknown, options?: { signal?: AbortSignal }) => {
       mockNow += 40_000;
       return runawayStream(body, options);
@@ -1976,7 +2010,7 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
     try {
       await draftGraphWithAnthropic(
         { brief: "Should I hire a contractor or full-time employee?", docs: [], seed: 17, model: "claude-sonnet-4-6" },
-        { timeoutMs: 110_000, maxTokensCeiling: 5_000 },
+        { timeoutMs: 90_000, maxTokensCeiling: 5_000 },
       );
     } catch (e) {
       err = e;
@@ -1986,8 +2020,10 @@ describe("draftGraphWithAnthropic — F1/F2 live-budget max_tokens re-derivation
     const message = (err as Error).message;
     expect(message).toMatch(/final attempt unaffordable/);
     // The honest numbers are ON the error: what the window affords, and the bar.
-    expect(message).toContain("4950 tokens");
-    expect(message).toContain("5000-token cap");
+    expect(message).toContain("3150 tokens");
+    expect(message).toContain("3581-token converged-draft floor");
+    // …and it clears the legacy floor, which is the whole point of the case.
+    expect(3_150).toBeGreaterThanOrEqual(2_700);
     // Exactly ONE generation ran — the doomed second was refused, not burned.
     expect(streamSpy).toHaveBeenCalledTimes(1);
   });

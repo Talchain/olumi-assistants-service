@@ -727,11 +727,140 @@ export function isDraftRetryAffordable(
  * `Math.max` away from re-encoding the rule with the wrong floor, which is
  * exactly what happened in the Anthropic adapter and cost the drafting bar.
  * `tests/unit/draft-token-affordability.test.ts` FAILS LOUDLY if any module
- * outside this file and `draft-budget.ts` (which derives
- * `DRAFT_RUNAWAY_MIN_RETRY_MS` from it arithmetically) imports the raw constant.
+ * outside this file imports the raw constant.
  */
 export function viableDraftRetryFloorTokens(priorAttemptMaxTokens: number): number {
   return Math.max(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, priorAttemptMaxTokens);
+}
+
+// ---------------------------------------------------------------------------
+// ⭐ THE RUNAWAY-RETRY YARDSTICK (FAST-ABORT, 2026-07-25)
+//
+// `isDraftRetryAffordable` above compares the next attempt's budget against the
+// cap the PREVIOUS attempt abandoned. For a NATURAL max_tokens truncation that
+// is the right comparison — the model genuinely committed to a graph larger than
+// its cap, so a smaller cap re-truncates by construction.
+//
+// ⚠ IT IS THE WRONG COMPARISON FOR A RUNAWAY ABORT, and applying it there
+// switched the early-abort detector OFF in the only regime that matters.
+// Measured, 29 live runs + a 30th (`parallel-briefs/
+// TOKEN-CEILING-EXPERIMENT-2026-07-25.md`, settled — do not re-derive):
+//
+//   * 17 runaways. `time_to_edges_ms` NULL on 17/17; schema error
+//     `edges: Required` on 17/17. The generation NEVER REACHED THE EDGES ARRAY.
+//   * `completion_tokens == the cap, EXACTLY` on 17/17 — at 8,550, at 12,000 AND
+//     at 16,000. ZERO runaways terminated in the extra room at any ceiling. A
+//     runaway has no size it is trying to reach; it consumes what it is given.
+//   * 12/12 terminations reached edges in 12,350-21,199 ms and finished the whole
+//     graph in 1,652-2,271 completion tokens, 14-16 nodes / 23-29 edges / 4
+//     options / 1 goal, at EVERY ceiling. The extra budget is never touched.
+//
+// So a runaway abort carries NO information about how large a graph the model
+// needed. Sizing its retry from the abandoned cap demands
+// `aff(110s - ceiling) >= 8,550`, which is arithmetically impossible, so
+// `runaway_abort_count` was 0 on every one of the 30 observations: the cure was
+// built, correct, and unreachable.
+//
+// THE CORRECTED YARDSTICK: what does a SUCCESSFUL draft actually need? Derived
+// from the corpus maximum with an explicit headroom factor — never hand-picked,
+// and pinned in `src/adapters/llm/__tests__/draft-fast-abort-yardstick.test.ts`
+// against the full census of successful drafts, so editing either constant
+// without editing the corpus FAILS LOUD.
+//
+// ⚠ THIS DOES NOT WEAKEN #675. The resulting floor (3,581) is STRICTER than the
+// 2,700-token floor #675 shipped, and `Math.max` keeps that floor as a hard lower
+// bound. Both properties #675 wanted still hold: no retry is funded below what a
+// real draft costs, and no abort is authorised into a window the next gate will
+// refuse (`DRAFT_RUNAWAY_MIN_RETRY_MS` is re-derived from THIS floor).
+// ---------------------------------------------------------------------------
+
+/**
+ * The largest completion-token count ever observed on a SUCCESSFUL draft.
+ *
+ * Complete census (n=15), not a sample: the 12 terminations of the 2026-07-25
+ * token-ceiling matrix (1,652 / 1,793 / 1,802 / 1,894 / 1,922 / 1,941 / 1,975 /
+ * 2,041 / 2,073 / 2,168 / 2,214 / 2,271), the 30th post-fix observation (2,055),
+ * and the 2 successes from this lane's own pre-merge `/assist` baseline on
+ * `b9e02bd` (1,953 and **2,387**). Every one produced a well-formed graph
+ * (14-16 nodes, 23-29 edges, 4 options, exactly 1 goal, zero orphans) matching
+ * the known-good `/assist` comparator. The band is tight and INDEPENDENT of the
+ * ceiling offered — 8,550, 12,000 and 16,000 all produced the same ~2,000-token
+ * graph.
+ *
+ * ⚠ THE PIN ALREADY EARNED ITS KEEP. This constant was 2,271 when the fix was
+ * written. The lane's own acceptance baseline then observed 2,387 — a LARGER
+ * successful draft than anything in the recorded corpus — so the constant, and
+ * everything derived from it, moved. That is the mechanism working: a value
+ * claiming to be "the largest ever observed" must be re-derived the moment a
+ * larger one is observed, not left to rot into a false claim.
+ *
+ * A recalibrator MUST update the census in the pin test alongside this value;
+ * the pin asserts they agree and FAILS LOUD if they drift apart.
+ */
+export const OBSERVED_MAX_CONVERGED_DRAFT_TOKENS = 2_387;
+
+/**
+ * Headroom multiplier applied to the observed maximum when deciding whether a
+ * window can fund a real draft.
+ *
+ * 1.5 is a deliberate, stated choice rather than a fitted one: the corpus is
+ * n=15 over two briefs, so the true upper tail is not pinned down, and 1.5x the
+ * observed max (3,581) sits comfortably above the largest draft ever seen while
+ * still being ~2.4x smaller than the 8,550-token cap the old rule demanded. The
+ * cost of being generous here is a rung of the retry ladder; the cost of being
+ * mean is a retry that truncates — so the margin leans generous.
+ *
+ * The corpus max moving 2,271 -> 2,387 mid-lane is exactly why a FACTOR, not a
+ * hand-picked absolute, is the right shape here: the floor tracked it without
+ * anyone re-deciding a number.
+ */
+export const DRAFT_RETRY_HEADROOM_FACTOR = 1.5;
+
+/**
+ * The slowest time-to-edges ever observed on a HEALTHY draft, pooled across all
+ * three live corpora: 19,570 ms (DETECTOR-FIX, 2026-07-24,
+ * `cee.llm.draft_edges_reached` n=16), 21,199 ms (2026-07-25 token-ceiling
+ * matrix, n=12), and **21,258 ms** (this lane's own pre-merge `/assist`
+ * baseline on `b9e02bd`, n=2). Pooled p100 = 21,258 over n=30.
+ *
+ * This is the number the abort ceiling must clear and the drift tripwire is
+ * anchored to. Both live in `draft-budget.ts` and are asserted against this
+ * value; a threshold BELOW it aborts healthy drafts, which is exactly why the
+ * blanket 20s gate was reverted on 2026-07-24. The 25,000 ms ceiling still
+ * clears this by 3,742 ms.
+ */
+export const OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS = 21_258;
+
+/**
+ * The token floor a RUNAWAY-ABORT retry must be able to afford — the evidence-
+ * derived requirement for a successful draft, floored at the shipped anti-doom
+ * floor so this can never become a laxer gate than #675's.
+ */
+export function viableRunawayRetryFloorTokens(): number {
+  return Math.max(
+    LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+    Math.ceil(OBSERVED_MAX_CONVERGED_DRAFT_TOKENS * DRAFT_RETRY_HEADROOM_FACTOR),
+  );
+}
+
+/**
+ * ⭐ May another generation be funded after a RUNAWAY ABORT?
+ *
+ * The runaway-specific twin of `isDraftRetryAffordable`. Same intent — never fund
+ * a generation that cannot succeed — measured against the right thing: what a
+ * converged draft costs, not what the abandoned attempt was allowed to spend.
+ *
+ * Deliberately takes NO `priorAttemptMaxTokens`: there is no such thing as a
+ * "prior demand" for a generation that never emitted an edge, and accepting the
+ * parameter would invite a future edit to start comparing against it again.
+ *
+ * Runtime call sites: `draft-budget.ts` (`isAbortableRetryViable` and
+ * `shouldSkipDoomedFinalAttempt`, both consumed by the Anthropic adapter loop).
+ * The lean retry in `parse.ts` Step 7 keeps `isDraftRetryAffordable` — it fires
+ * on a natural truncation, where the prior cap IS a demand signal.
+ */
+export function isRunawayRetryAffordable(nextAttemptAffordableTokens: number): boolean {
+  return nextAttemptAffordableTokens >= viableRunawayRetryFloorTokens();
 }
 
 // ---------------------------------------------------------------------------
