@@ -17,11 +17,15 @@
  *    turns retrievable exactly) — so even a degraded regen re-reads the ground
  *    truth behind every standing slot entry, never the slot text alone.
  *
- * Turn ordinals: in INCREMENTAL mode the prior summary's cited turns are
+ * Ordinals label UTTERANCES, not turns (see turnUnits): a turn carrying both a
+ * user and an assistant message consumes TWO ordinals, so every `[tN]` names
+ * exactly one speaker and provenance can record WHO said a thing.
+ * In INCREMENTAL mode the prior summary's cited turns are
  * labelled first (t1..tJ — provenance carry: carried entries render with
  * their stamps so the model can echo them and the maintainer resolves them
- * back to real ids), then shown turns continue tJ+1..tK (oldest SHOWN first).
- * In REGEN mode ordinals label shown turns only (full history re-anchors).
+ * back to real ids), then shown utterances continue tJ+1..tK (oldest SHOWN
+ * first). In REGEN mode ordinals label shown utterances only (full history
+ * re-anchors).
  * The model cites them in `[tN]` stamps; resolveProvenance (parse-summary
  * consumer, in the maintainer) maps ordinals → real turn ids via `ordinalMap`.
  * Refs the model invents that aren't in the map are dropped — stored
@@ -35,7 +39,7 @@ import {
   SUMMARY_REGEN_INTERVAL,
   SUMMARY_SCHEMA_VERSION,
 } from './summary-types.js';
-import type { RollingSummary } from './summary-types.js';
+import type { RollingSummary, SummarySpeaker } from './summary-types.js';
 
 /** The turn shape the builder needs (a normalised, chronological slice of
  *  SessionTurnWithContent — the maintainer reverses readRecent's newest-first). */
@@ -52,8 +56,16 @@ export interface SummariserInput {
   readonly mode: SummariserMode;
   /** The user message fed to the summariser model (turns + prior summary). */
   readonly userMessage: string;
-  /** ordinal ('t1'…) → the real turn it labels; used to resolve provenance. */
-  readonly ordinalMap: ReadonlyMap<string, { turn_id: string; created_at: string }>;
+  /** ordinal ('t1'…) → the real UTTERANCE it labels; used to resolve
+   *  provenance. `speaker` is present for every shown utterance (one speaker
+   *  per ordinal — see turnUnits) and ABSENT for a carried prior-summary
+   *  citation, which refers to a turn rather than to one utterance. Absent
+   *  therefore means UNKNOWN, never "no speaker" — the attribution gate
+   *  declines to fire on unknowns rather than guessing. */
+  readonly ordinalMap: ReadonlyMap<
+    string,
+    { turn_id: string; created_at: string; speaker?: SummarySpeaker }
+  >;
   /** The newest turn absorbed — the write watermark. Null only when there are
    *  no turns at all (the maintainer skips the write in that case). */
   readonly watermark: { turn_id: string; created_at: string } | null;
@@ -85,11 +97,33 @@ function turnChars(t: SummariserTurn): number {
   return (t.user_message?.length ?? 0) + (t.assistant_message?.length ?? 0);
 }
 
-function renderTurn(ordinal: string, t: SummariserTurn): string {
-  const parts = [`[${ordinal}]`];
-  if (t.user_message) parts.push(`USER: ${t.user_message}`);
-  if (t.assistant_message) parts.push(`ASSISTANT: ${t.assistant_message}`);
-  return parts.join('\n');
+/**
+ * SPEAKER-SCOPED CITATION UNITS (2026-07-25 attribution fix).
+ *
+ * A turn is NOT the citation atom — an UTTERANCE is. Previously one `[tN]`
+ * label covered a turn containing BOTH `USER: …` and `ASSISTANT: …`, so:
+ *   - the model was handed a unit with two speakers in it and could fuse them
+ *     (the observed defect fused a user's challenge with an unrelated
+ *     assistant reply into "The assistant acknowledged it cannot back up those
+ *     names" — a concession the assistant never made); and
+ *   - provenance was speaker-blind BY CONSTRUCTION: a stored entry's
+ *     source_turn_ids could never say WHICH speaker a claim came from, so no
+ *     layer could check an attribution against anything.
+ *
+ * Now each utterance gets its OWN ordinal. The `t\d+` grammar is unchanged —
+ * parse-summary.ts and every stored shape are untouched — but every ordinal
+ * now names exactly one speaker, so the model cannot cite a two-speaker unit
+ * and assemble.ts can DERIVE the speaker set for each entry.
+ */
+function turnUnits(t: SummariserTurn): Array<{ speaker: SummarySpeaker; text: string }> {
+  const units: Array<{ speaker: SummarySpeaker; text: string }> = [];
+  if (t.user_message) units.push({ speaker: 'user', text: t.user_message });
+  if (t.assistant_message) units.push({ speaker: 'assistant', text: t.assistant_message });
+  return units;
+}
+
+function renderUnit(ordinal: string, unit: { speaker: SummarySpeaker; text: string }): string {
+  return `[${ordinal}] ${unit.speaker === 'user' ? 'USER' : 'ASSISTANT'}: ${unit.text}`;
 }
 
 /** All source_turn_ids cited across the prior summary's slots (R3 anchors). */
@@ -303,7 +337,10 @@ export function buildSummariserInput(args: {
     shown = after.length > 0 ? after : [watermarkTurn];
   }
 
-  const ordinalMap = new Map<string, { turn_id: string; created_at: string }>();
+  const ordinalMap = new Map<
+    string,
+    { turn_id: string; created_at: string; speaker?: SummarySpeaker }
+  >();
 
   // Provenance carry (incremental only): assign ordinals to the prior
   // summary's cited turns FIRST, so carried entries keep resolvable stamps
@@ -324,12 +361,24 @@ export function buildSummariserInput(args: {
     }
   }
 
+  // One ordinal per UTTERANCE (not per turn) — see turnUnits. A turn with both
+  // a user and an assistant message therefore consumes two ordinals, and every
+  // ordinal names exactly one speaker.
   const renderedTurns: string[] = [];
-  shown.forEach((t, i) => {
-    const ordinal = `t${carriedOrdinalByTurnId.size + i + 1}`;
-    ordinalMap.set(ordinal, { turn_id: t.turn_id, created_at: t.created_at });
-    renderedTurns.push(renderTurn(ordinal, t));
-  });
+  let nextOrdinal = carriedOrdinalByTurnId.size + 1;
+  for (const t of shown) {
+    const rendered: string[] = [];
+    for (const unit of turnUnits(t)) {
+      const ordinal = `t${nextOrdinal++}`;
+      ordinalMap.set(ordinal, {
+        turn_id: t.turn_id,
+        created_at: t.created_at,
+        speaker: unit.speaker,
+      });
+      rendered.push(renderUnit(ordinal, unit));
+    }
+    if (rendered.length > 0) renderedTurns.push(rendered.join('\n'));
+  }
 
   const sections: string[] = [];
   if (mode === 'incremental') {

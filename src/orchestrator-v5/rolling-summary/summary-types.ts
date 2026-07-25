@@ -41,6 +41,49 @@ export const ROLLING_SUMMARY_SLOT_LABELS: Record<RollingSummarySlot, string> = {
   OPEN: 'OPEN',
 };
 
+/**
+ * RETENTION POLICY per slot — which slots hold DURABLE fact that an update
+ * pass may never empty, and which are legitimately transient.
+ *
+ * Motivation (measured, 2026-07-25): on a user turn that CHALLENGES or DOUBTS
+ * recorded history ("I think your last answer was made up… were you inventing
+ * them?"), the summariser rewrote `RESOLVED` from a slot holding eight named
+ * decision records to `(none)` — 57/57 samples against 0/16 on neutral control
+ * turns. `(none)` is not a silence: for a non-floor summary the injector
+ * documents the bare marker as "the summariser looked and found none"
+ * (inject.ts), so the erasure is stored and injected as an AFFIRMATIVE claim
+ * that no settled history exists. A user expressing doubt about their own
+ * decision history caused that history to be deleted and denied.
+ *
+ * parse-summary.ts already rejects a MISSING slot for exactly this reason
+ * ("the missing slots were stored as '(none)', silently erasing prior
+ * memory"). A slot the model emits but EMPTIES produces the identical stored
+ * outcome; the existing guard caught the typo case and missed the semantic
+ * one. See retention.ts.
+ *
+ * `true` ⇒ once non-empty, an update may not empty it (reject and keep prior).
+ * `false` ⇒ emptying is a legitimate transition:
+ *   - OPEN: an open question getting answered SHOULD empty the slot.
+ *   - FRAME: required and never empty in practice; parse rejects a missing one.
+ *
+ * Exhaustive `Record` BY DESIGN (trap 12 — derive, or fail loud): adding a
+ * fifth slot to ROLLING_SUMMARY_SLOTS without deciding its retention policy is
+ * a COMPILE error, not a silent default.
+ */
+export const SLOT_RETENTION_REQUIRED: Record<RollingSummarySlot, boolean> = {
+  FRAME: false,
+  CONSTRAINTS: true,
+  RESOLVED: true,
+  OPEN: false,
+};
+
+/** Which participant produced an utterance. The summariser input labels every
+ *  citable unit with exactly one of these (build-input.ts), so a stored
+ *  entry's attribution is DERIVED from provenance rather than read out of the
+ *  model's prose. */
+export const SUMMARY_SPEAKERS = ['user', 'assistant'] as const;
+export type SummarySpeaker = (typeof SUMMARY_SPEAKERS)[number];
+
 // ---------------------------------------------------------------------------
 // Bounds & cadence constants (all revisable by measurement, not by wire change).
 // ---------------------------------------------------------------------------
@@ -95,6 +138,12 @@ export interface RollingSummaryEntry {
   readonly text: string;
   /** Source turn id(s) [R3]. May be empty for FRAME. */
   readonly source_turn_ids: readonly string[];
+  /** DERIVED speaker attribution — which participants' utterances this entry
+   *  cites, resolved from the summariser input's ordinal map (the source of
+   *  truth), never parsed out of the model's prose. Absent on rows written
+   *  before speaker-scoped citation units existed, and on entries that cited
+   *  nothing. Consumed by retention.ts's attribution gate. */
+  readonly source_speakers?: readonly SummarySpeaker[];
 }
 
 export interface RollingSummarySlotBlock {
@@ -134,6 +183,11 @@ export interface RollingSummary {
 const RollingSummaryEntrySchema = z.object({
   text: z.string(),
   source_turn_ids: z.array(z.string()).default([]),
+  // Optional, not defaulted: rows written before speaker-scoped citation units
+  // have no speaker provenance, and "absent" must stay distinguishable from
+  // "cited nothing" (the attribution gate treats an absent set as UNKNOWN, not
+  // as proof of a user-only citation).
+  source_speakers: z.array(z.enum(SUMMARY_SPEAKERS)).optional(),
 });
 
 const RollingSummarySlotBlockSchema = z.object({

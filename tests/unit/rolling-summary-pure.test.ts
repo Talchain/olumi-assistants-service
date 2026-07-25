@@ -172,8 +172,12 @@ describe('buildSummariserInput — regeneration from FULL history (R1)', () => {
       ...Array.from({ length: 24 }, (_, i) => turn(i + 2)),
     ];
     const input = buildSummariserInput({ mode: 'regen', priorSummary: null, chronologicalTurns: turns });
-    // The full history is shown — 25 ordinals, and turn-1's constraint is in the prompt.
-    expect(input.ordinalMap.size).toBe(25);
+    // The full history is shown — all 25 TURNS, and turn-1's constraint is in
+    // the prompt. Assert on distinct turns, not on ordinal count: since
+    // 2026-07-25 an ordinal labels one UTTERANCE, so each of these turns
+    // (which carry both a user and an assistant message) consumes two. The
+    // claim under test is coverage of the full history, not the label count.
+    expect(new Set([...input.ordinalMap.values()].map((v) => v.turn_id)).size).toBe(25);
     expect(input.userMessage).toContain('keep the Berlin office open');
     expect(input.cappedFallback).toBe(false);
     expect(input.watermark?.turn_id).toBe('turn-25');
@@ -286,8 +290,13 @@ describe('buildSummariserInput — regeneration from FULL history (R1)', () => {
       version: 2, generator: 'incremental', schema_version: SUMMARY_SCHEMA_VERSION,
     };
     const input = buildSummariserInput({ mode: 'incremental', priorSummary: prior, chronologicalTurns: turns });
-    // Only turns 5 and 6 are after the watermark.
-    expect(input.ordinalMap.size).toBe(2);
+    // Only turns 5 and 6 are after the watermark. Asserted on distinct turn
+    // ids rather than ordinal count — an ordinal labels one UTTERANCE since
+    // 2026-07-25, so these two two-speaker turns consume four labels. What is
+    // under test is WHICH turns are shown.
+    expect(new Set([...input.ordinalMap.values()].map((v) => v.turn_id))).toEqual(
+      new Set(['turn-5', 'turn-6']),
+    );
     expect(input.userMessage).toContain('user message 5');
     expect(input.userMessage).toContain('user message 6');
     expect(input.userMessage).not.toContain('user message 3');

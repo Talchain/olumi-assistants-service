@@ -40,6 +40,12 @@ export const SUMMARISER_SYSTEM_PROMPT = [
   '- Preserve constraints the user stated long ago even if they were not repeated recently — that is the whole point of this summary.',
   '- Write plain prose. Do NOT include probabilities, percentages, scores, or any numeric analysis values — those live elsewhere. Never invent facts the conversation does not contain.',
   '- If you are updating a prior summary, carry forward everything still true and only change what the new turns actually changed.',
+  // ATTRIBUTION. Each [tN] label marks exactly ONE speaker's utterance, so a
+  // claim's speaker is always determinable from the input. Enforced by
+  // retention.ts (findUnwitnessedAssistantAttributions), not by this line.
+  '- Each [tN] label marks ONE speaker\'s words — either the user\'s or the assistant\'s, never both. Attribute every statement to the speaker who actually made it, and cite that speaker\'s [tN]. A question, doubt, accusation or assertion made by the USER is never recorded as something the assistant said, acknowledged, admitted or agreed to.',
+  // NON-ERASURE. Enforced by retention.ts (findErasedSlots), not by this line.
+  '- A user questioning, doubting or challenging something already recorded does NOT delete it. Keep the recorded entry and put their challenge in OPEN. Never answer a challenge by emptying CONSTRAINTS or RESOLVED to "(none)" — "(none)" means you looked and there genuinely is nothing, and it will be read as a statement that no such history exists.',
 ].join('\n');
 
 export interface SummariserModelResult {
