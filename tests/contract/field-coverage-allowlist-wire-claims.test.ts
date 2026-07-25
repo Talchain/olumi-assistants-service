@@ -143,10 +143,22 @@ function buildClientSurface(): ReadonlySet<string> {
     surface.add(p);
   }
 
-  // C. captures — envelope shapes the V3 transform alone does not produce
+  // C. captures — envelope shapes the V3 transform alone does not produce.
+  //
+  // The V3 transform is AUTHORITATIVE for the `trace` subtree, so no capture may
+  // contribute a `trace.*` path. Without this rule the union masks the very
+  // change the test exists to detect: gating `repair_summary` on `includeDebug`
+  // removes it from source A, but a capture recorded before the gate keeps it in
+  // the surface, and the claim stays "serialized" forever. That is a fixture
+  // pinning the old wire shape — the failure mode this whole file is about.
+  // Verified by mutation: with this rule, gating the real emission flips the
+  // assertion; without it, the suite stayed red no matter what the code did.
   for (const file of CAPTURE_FIXTURES) {
     const json = JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, file), "utf8"));
-    for (const p of walk(json, "")) surface.add(p);
+    for (const p of walk(json, "")) {
+      if (p === "trace" || p.startsWith("trace.")) continue;
+      surface.add(p);
+    }
   }
 
   // B. real code — the enrichment keep-list projection over the staging capture
