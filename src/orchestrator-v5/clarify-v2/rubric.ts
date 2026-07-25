@@ -92,6 +92,27 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     /\b(?:goal|objective|aim|purpose|target (?:is|of)|success (?:looks like|means|criterion|metric|is (?:defined|measured))|so that|in order to)\b/i,
     /\bto (?:increase|grow|improve|boost|reduce|cut|lower|save|protect|retain|maximise|maximize|minimise|minimize|accelerate|win|achieve|hit|reach)\b/i,
     /\bwe (?:want|need|hope|are trying|are aiming) to\b/i,
+    // PREFERENCE / PRIORITY constructions — how a real person actually states
+    // an objective ("I care most about profit in 2 years", "what matters most
+    // is margin", "my priority is cash", "we're optimising for retention").
+    // The end-to-end journey (2026-07-25, Finding #4) brought a brief ending
+    // "I care most about profit in 2 years"; goal scored MISSING on 5 of 5
+    // fresh users, so the first thing every new customer saw was a question
+    // asking for the goal they had just given, offering "grow revenue" and
+    // "cut costs" — neither of which was it. The drafter then named the goal
+    // exactly right ("Maximise 2-Year Net Profit"), so the information was
+    // there the whole time and only the rubric could not see it.
+    //
+    // PRECISION over recall, per the round-2 calibration direction B: an
+    // INTENSIFIER is required on the "care about" arm, so "I care most about
+    // profit" satisfies goal while a bare "I care about my team" (a value, not
+    // an objective) does not. Every arm is anchored to a first-person subject
+    // or an explicit priority noun so no adjectival use can fire.
+    /\b(?:I|we)\s+(?:really\s+)?care\s+(?:most|mainly|mostly|primarily|above all)\s+about\b/i,
+    /\bwhat\s+(?:I|we)\s+care\s+(?:most\s+)?about\b/i,
+    /\bwhat\s+matters\s+most\b/i,
+    /\b(?:my|our)\s+(?:main\s+|top\s+|number one\s+|overriding\s+)?priority\s+(?:is|here is)\b/i,
+    /\b(?:optimis|optimiz)(?:e|es|ed|ing)\s+for\b/i,
   ],
   options: [
     /\b(?:versus|vs\.?|alternative(?:s|ly)?|either|instead of|rather than|compared? (?:to|with)|(?:choice|choos(?:e|ing)|decid(?:e|ing)) between|option[s]? (?:are|would be|include))\b/i,

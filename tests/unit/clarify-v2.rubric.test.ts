@@ -114,6 +114,43 @@ describe("clarify_v2 rubric — completeness table", () => {
       "Should we introduce a four-day week at the company?",
       ["goal", "options", "timeframe"],
     ],
+    // ── Preference-goal credit (end-to-end journey 2026-07-25, Finding #4).
+    // Direction A: a first-person PRIORITY statement IS a stated goal, and the
+    // journey's verbatim brief must now be complete — 5 of 5 fresh users were
+    // asked for the goal they had just given, offered "grow revenue" / "cut
+    // costs", neither of which was it. Direction B: an intensifier is required,
+    // so a bare "I care about ..." (a value, not an objective) must NOT silence
+    // a thin brief.
+    [
+      "preference goal: the journey's VERBATIM brief is complete (was: missing goal)",
+      "We run a 12-person specialty coffee roastery in Bristol. Wholesale to cafes is about 70% of our revenue but the margins are thin, and one single account is a quarter of that. I have around 80k I could invest. I'm trying to decide between opening our own retail shop, pushing a direct-to-consumer subscription, or just doubling down on wholesale and hiring another sales rep. I care most about profit in 2 years but I don't want to bet the company.",
+      [],
+    ],
+    [
+      "preference goal: 'what matters most is' satisfies goal",
+      "Should we renew with the incumbent vendor or move to the challenger this quarter? What matters most is total cost over 3 years.",
+      [],
+    ],
+    [
+      "preference goal: 'our priority is' satisfies goal",
+      "Do we ship the rewrite or patch the current stack next month? Our priority is uptime, and we have £40k to spend.",
+      [],
+    ],
+    [
+      "preference goal: 'optimising for' satisfies goal",
+      "Should we run 2 campaigns or 5 this quarter? We are optimising for qualified pipeline on a £30k budget.",
+      [],
+    ],
+    [
+      "preference precision: a bare 'I care about' (no intensifier) does NOT fake a goal",
+      "Should we introduce hot-desking at the company? I care about the team.",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "preference precision: 'the target account list' still does not fake a goal alongside a preference-free brief",
+      "Do we go after the target account list this 2026 or focus on the one big account? I care about growth.",
+      ["goal", "quantities"],
+    ],
   ];
 
   it.each(TABLE)("%s", (_name, brief, expectedMissing) => {
