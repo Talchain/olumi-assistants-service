@@ -22,7 +22,7 @@ import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, sup
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
 import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
-import { ADMIN_LLM_TIMEOUT_MS, ADMIN_REASONING_TIMEOUT_MS, ADMIN_REASONING_HIGH_TIMEOUT_MS } from '../config/timeouts.js';
+import { ADMIN_LLM_TIMEOUT_MS, ADMIN_REASONING_TIMEOUT_MS, ADMIN_REASONING_HIGH_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, getAffordableDraftTokens } from '../config/timeouts.js';
 
 /**
  * Check if a model requires max_completion_tokens instead of max_tokens.
@@ -1688,4 +1688,318 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // =========================== END SSE CANARY ================================
+
+  // BEGIN DRAFT TOKEN-CEILING EXPERIMENT (diagnostic instrument, 2026-07-25)
+  // ---------------------------------------------------------------------------
+  // PURPOSE: settle ONE question that decides whether async drafting is the right
+  // cure — when a draft runaway is given a MUCH larger token ceiling, does it
+  // TERMINATE (stop_reason "end_turn" below the cap) or does it just keep going
+  // (stop_reason "max_tokens" at the cap again)?
+  //
+  // The evidence lane (ASYNC-EVIDENCE-LANE-2026-07-25) established that drafting
+  // failures on the current build are perfectly BIMODAL: ~1,970-2,090 completion
+  // tokens => a finished draft, ~8,467-8,502 => a runaway truncated at the
+  // ~8,550 cap. Because `getAffordableDraftTokens(ms) = (ms/1000 - 15) * 90`
+  // DERIVES the cap from the LLM window, buying time buys tokens (180s => 14,850).
+  // Whether that rescues the runaways is unknown and unmeasured. This route
+  // measures it.
+  //
+  // ⚠ THE LEVER IS THE WINDOW, AND IT IS PER-CALL ONLY. Nothing here mutates
+  // config. `window_ms` is threaded straight into the draft call's `timeoutMs`
+  // opt; `resolveDraftMaxTokens(timeoutMs)` in the adapter then derives the cap
+  // from it via the SAME function the product path uses (derive, don't mirror —
+  // this route must never restate a token number). BROWSER_PROXY_TIMEOUT_MS,
+  // DRAFT_REQUEST_BUDGET_MS, ROUTE_TIMEOUT_MS and every other live budget are
+  // untouched; the product path is byte-identical with or without this block.
+  //
+  // WHY IT IS ASYNC (start + poll) RATHER THAN ONE LONG POST: a 16,000-token
+  // generation runs ~3 minutes with NO socket activity, and Fastify's
+  // `connectionTimeout` (= ROUTE_TIMEOUT_MS, 135s) reaps idle sockets. The SSE
+  // canary already PROVED (2026-07-25, blocker B13) that in-process work
+  // survives client disconnect on this runtime, so the ledger-and-poll shape is
+  // measured-viable rather than assumed.
+  //
+  // Admin-keyed (x-admin-key header — this route is hit DIRECTLY, so unlike the
+  // canary it needs no body-key escape hatch). Emits NO new telemetry events
+  // (the registry is frozen): `log` only, never `emit`.
+  //
+  // TO REMOVE: delete this block and its test file. Nothing else references it.
+  // ===========================================================================
+
+  interface CeilingRunGraphSummary {
+    nodes: number;
+    edges: number;
+    options: number;
+    node_types: Record<string, number>;
+    /** Ids of nodes typed as the decision goal — "is there a goal node?" */
+    goal_node_ids: string[];
+    max_label_chars: number;
+    graph_bytes: number;
+  }
+
+  interface CeilingRun {
+    run_id: string;
+    label: string;
+    started_at_iso: string;
+    /** The lever. Threaded into the draft call's timeoutMs opt, nothing else. */
+    window_ms: number;
+    /** DERIVED from window_ms by the same function the product path uses. */
+    derived_max_tokens: number;
+    status: 'running' | 'done' | 'error';
+    finished_at_iso: string | null;
+    latency_ms: number | null;
+    model: string | null;
+    /** The cap the attempt that produced the result ACTUALLY sent (F5 meta). */
+    max_tokens_applied: number | null;
+    /** "end_turn" = the generation TERMINATED. "max_tokens" = it did not. */
+    stop_reason: string | null;
+    completion_tokens: number | null;
+    prompt_tokens: number | null;
+    runaway_abort_count: number | null;
+    time_to_edges_ms: number | null;
+    /** True when a truncated draft was recovered by closing partial JSON. A
+     *  salvaged graph is NOT a terminated generation — scoring must separate
+     *  them or a truncation reads as a success. */
+    salvaged_from_truncation: boolean | null;
+    provider_latency_ms: number | null;
+    coaching_present: boolean | null;
+    graph: CeilingRunGraphSummary | null;
+    /** Full graph JSON, admin-only, for the "is the graph any GOOD?" question. */
+    graph_json: unknown;
+    error_name: string | null;
+    error_message: string | null;
+    error_llm_meta: unknown;
+  }
+
+  // 300s is the ceiling the BROWSER_PROXY_TIMEOUT_MS Zod schema already permits;
+  // the derived cap at 300s is getAffordableDraftTokens(300_000) — recompute, do
+  // not pin. 20s floor keeps a degenerate window from being a silent no-op run.
+  const CEILING_WINDOW_MIN_MS = 20_000;
+  const CEILING_WINDOW_MAX_MS = 300_000;
+  const CEILING_RUN_RETENTION = 100;
+  const ceilingRuns = new Map<string, CeilingRun>();
+
+  function rememberCeilingRun(run: CeilingRun): void {
+    ceilingRuns.set(run.run_id, run);
+    while (ceilingRuns.size > CEILING_RUN_RETENTION) {
+      const oldest = ceilingRuns.keys().next().value;
+      if (oldest === undefined) break;
+      ceilingRuns.delete(oldest);
+    }
+  }
+
+  function summariseCeilingGraph(graph: unknown): CeilingRunGraphSummary | null {
+    if (!graph || typeof graph !== 'object') return null;
+    const g = graph as Record<string, unknown>;
+    const nodes = Array.isArray(g.nodes) ? (g.nodes as Array<Record<string, unknown>>) : [];
+    const edges = Array.isArray(g.edges) ? (g.edges as Array<Record<string, unknown>>) : [];
+    const options = Array.isArray(g.options) ? (g.options as unknown[]) : [];
+    const nodeTypes: Record<string, number> = {};
+    const goalIds: string[] = [];
+    let maxLabelChars = 0;
+    for (const n of nodes) {
+      const t = typeof n?.type === 'string' ? n.type : 'unknown';
+      nodeTypes[t] = (nodeTypes[t] ?? 0) + 1;
+      if (t === 'goal' || t === 'objective' || t === 'decision') {
+        if (typeof n.id === 'string') goalIds.push(n.id);
+      }
+      const label = typeof n?.label === 'string' ? n.label : '';
+      if (label.length > maxLabelChars) maxLabelChars = label.length;
+    }
+    let bytes = 0;
+    try {
+      bytes = JSON.stringify(graph).length;
+    } catch {
+      bytes = -1;
+    }
+    return {
+      nodes: nodes.length,
+      edges: edges.length,
+      options: options.length,
+      node_types: nodeTypes,
+      goal_node_ids: goalIds,
+      max_label_chars: maxLabelChars,
+      graph_bytes: bytes,
+    };
+  }
+
+  /**
+   * Run ONE draft at the requested window and record everything the two
+   * questions need. Never throws — every outcome lands in the ledger.
+   */
+  async function executeCeilingRun(run: CeilingRun, brief: string, modelOverride?: string): Promise<void> {
+    const t0 = Date.now();
+    // Dynamic import so the adapter/router module graph is not pulled into this
+    // route's import-time cost (and so removing this block removes the edge).
+    const { getAdapterWithResolution } = await import('../adapters/llm/router.js');
+    try {
+      const { adapter } = getAdapterWithResolution('draft_graph', modelOverride);
+      run.model = adapter.model;
+      const result = await adapter.draftGraph(
+        { brief, docs: [], seed: 17 },
+        {
+          requestId: `ceiling_${run.run_id}`,
+          // ⭐ THE LEVER. The adapter derives max_tokens from exactly this.
+          timeoutMs: run.window_ms,
+          // NO maxTokensCeiling: the product default (DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL)
+          // is itself getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS), i.e. a no-op
+          // Math.min against affordability. Passing a ceiling derived from the
+          // DEFAULT window would silently re-impose the 8,550 cap this experiment
+          // exists to lift, so the run would measure nothing.
+        },
+      );
+      const meta = (result.meta ?? {}) as Record<string, unknown>;
+      const usage = (meta.token_usage ?? {}) as Record<string, unknown>;
+      run.max_tokens_applied = typeof meta.max_tokens === 'number' ? meta.max_tokens : null;
+      run.stop_reason = typeof meta.finish_reason === 'string' ? meta.finish_reason : null;
+      run.completion_tokens = typeof usage.completion_tokens === 'number' ? usage.completion_tokens : null;
+      run.prompt_tokens = typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : null;
+      run.runaway_abort_count = typeof meta.runaway_abort_count === 'number' ? meta.runaway_abort_count : null;
+      run.time_to_edges_ms = typeof meta.time_to_edges_ms === 'number' ? meta.time_to_edges_ms : null;
+      run.salvaged_from_truncation = meta.salvaged_from_truncation === true;
+      run.provider_latency_ms = typeof meta.provider_latency_ms === 'number' ? meta.provider_latency_ms : null;
+      run.coaching_present = result.coaching !== undefined && result.coaching !== null;
+      run.graph = summariseCeilingGraph(result.graph);
+      run.graph_json = result.graph;
+      run.status = 'done';
+    } catch (err) {
+      const e = err as Error & { _llm_meta?: Record<string, unknown> };
+      run.status = 'error';
+      run.error_name = e?.name ?? 'Error';
+      run.error_message = (e?.message ?? String(err)).slice(0, 800);
+      const m = e?._llm_meta;
+      if (m && typeof m === 'object') {
+        run.error_llm_meta = m;
+        const usage = (m.token_usage ?? {}) as Record<string, unknown>;
+        run.max_tokens_applied = typeof m.max_tokens === 'number' ? m.max_tokens : run.max_tokens_applied;
+        run.stop_reason = typeof m.finish_reason === 'string' ? m.finish_reason : run.stop_reason;
+        run.completion_tokens = typeof usage.completion_tokens === 'number' ? usage.completion_tokens : run.completion_tokens;
+        run.prompt_tokens = typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : run.prompt_tokens;
+        run.runaway_abort_count = typeof m.runaway_abort_count === 'number' ? m.runaway_abort_count : run.runaway_abort_count;
+        run.time_to_edges_ms = typeof m.time_to_edges_ms === 'number' ? m.time_to_edges_ms : run.time_to_edges_ms;
+        run.provider_latency_ms = typeof m.provider_latency_ms === 'number' ? m.provider_latency_ms : run.provider_latency_ms;
+      }
+    } finally {
+      run.latency_ms = Date.now() - t0;
+      run.finished_at_iso = new Date().toISOString();
+      log.info(
+        {
+          event: 'cee.draft_ceiling.run_complete',
+          run_id: run.run_id,
+          label: run.label,
+          window_ms: run.window_ms,
+          derived_max_tokens: run.derived_max_tokens,
+          max_tokens_applied: run.max_tokens_applied,
+          stop_reason: run.stop_reason,
+          completion_tokens: run.completion_tokens,
+          runaway_abort_count: run.runaway_abort_count,
+          salvaged_from_truncation: run.salvaged_from_truncation,
+          status: run.status,
+          latency_ms: run.latency_ms,
+          nodes: run.graph?.nodes ?? null,
+          edges: run.graph?.edges ?? null,
+        },
+        'draft-ceiling: run complete',
+      );
+    }
+  }
+
+  /**
+   * POST /admin/v1/draft-ceiling
+   *
+   * Body: { brief, window_ms, label?, model? }. Starts ONE draft at the given
+   * window and returns immediately with a run_id — the generation continues
+   * after this response is sent (survival proven by the SSE canary).
+   */
+  app.post('/admin/v1/draft-ceiling', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const brief = typeof body.brief === 'string' ? body.brief.trim() : '';
+    if (!brief) {
+      return reply.status(400).send({ error: 'brief_required' });
+    }
+    const windowMs = clampNumber(
+      body.window_ms,
+      DRAFT_LLM_TIMEOUT_MS,
+      CEILING_WINDOW_MIN_MS,
+      CEILING_WINDOW_MAX_MS,
+    );
+    const runId = createHash('sha256')
+      .update(`${Date.now()}:${Math.random()}`)
+      .digest('hex')
+      .slice(0, 16);
+
+    const run: CeilingRun = {
+      run_id: runId,
+      label: typeof body.label === 'string' ? body.label.slice(0, 64) : 'unlabelled',
+      started_at_iso: new Date().toISOString(),
+      window_ms: windowMs,
+      // DERIVED, never restated — same function the adapter and the product
+      // path use, so this reported number cannot drift from the applied one.
+      derived_max_tokens: getAffordableDraftTokens(windowMs),
+      status: 'running',
+      finished_at_iso: null,
+      latency_ms: null,
+      model: null,
+      max_tokens_applied: null,
+      stop_reason: null,
+      completion_tokens: null,
+      prompt_tokens: null,
+      runaway_abort_count: null,
+      time_to_edges_ms: null,
+      salvaged_from_truncation: null,
+      provider_latency_ms: null,
+      coaching_present: null,
+      graph: null,
+      graph_json: null,
+      error_name: null,
+      error_message: null,
+      error_llm_meta: null,
+    };
+    rememberCeilingRun(run);
+
+    void executeCeilingRun(run, brief, typeof body.model === 'string' ? body.model : undefined);
+
+    return reply.status(202).send({
+      run_id: runId,
+      label: run.label,
+      window_ms: run.window_ms,
+      derived_max_tokens: run.derived_max_tokens,
+    });
+  });
+
+  /**
+   * POST /admin/v1/draft-ceiling/status
+   *
+   * Reads the ledger. With `run_id`, returns that run (including the full graph
+   * when `include_graph` is true). Without, returns the recent runs WITHOUT
+   * their graphs so a poll stays small.
+   */
+  app.post('/admin/v1/draft-ceiling/status', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const runId = typeof body.run_id === 'string' ? body.run_id : null;
+
+    if (!runId) {
+      return reply.status(200).send({
+        count: ceilingRuns.size,
+        runs: Array.from(ceilingRuns.values())
+          .slice(-20)
+          .map(({ graph_json: _graphJson, ...rest }) => rest),
+      });
+    }
+    const run = ceilingRuns.get(runId);
+    if (!run) {
+      return reply.status(404).send({ error: 'run_not_found', run_id: runId });
+    }
+    if (body.include_graph === true) {
+      return reply.status(200).send(run);
+    }
+    const { graph_json: _graphJson, ...rest } = run;
+    return reply.status(200).send(rest);
+  });
+
+  // ==================== END DRAFT TOKEN-CEILING EXPERIMENT ===================
 }
