@@ -36,6 +36,7 @@ import {
   createJsonStringRunScanner,
   buildFailedCallLlmMeta,
   DRAFT_RUNAWAY_MAX_STRING_CHARS,
+  DRAFT_RUNAWAY_RETRY_TEMPERATURE,
   type DraftRunawayTrigger,
 } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
@@ -1051,6 +1052,21 @@ export async function draftGraphWithAnthropic(
       //      set comfortably above the live healthy p100 (19.57s) so it never clips
       //      a healthy draft; catches an actively-emitting slow-sparse runaway the
       //      stall gate would miss, and bounds every abortable attempt's wall-cost.
+      // ⚠ THE ACTIVATION WINDOW, STATED (F5, /code-review 2026-07-25). "The
+      // runaway CLASS is closed" is true only INSIDE this condition, and it has
+      // two exits that are easy to read past:
+      //
+      //  1. THE FINAL ATTEMPT. `detectDeadlineMs` is null when no retry is
+      //     affordable, so the guard is off. Deliberate — aborting with nothing
+      //     to fund a retry with buys nothing — but it means the last attempt of
+      //     every exhausted request runs unguarded.
+      //  2. EXTENDED THINKING. Thinking also disables structured outputs
+      //     (:~777), so that configuration has NEITHER #681's grammar fix NOR
+      //     #682's per-string guard. It is a DOUBLE-uncovered state, not a
+      //     single one, and nothing else in the codebase says so. It is not
+      //     reachable on staging today (`CEE_DRAFT_GRAPH_THINKING_BUDGET` is
+      //     unset there, verified against the Render API 2026-07-25), which is
+      //     the only reason this is a note rather than a defect.
       const detectionActive = detectDeadlineMs != null && !draftThinkingEnabled;
       if (detectionActive) {
         stallTimer = setTimeout(() => {
@@ -1220,6 +1236,14 @@ export async function draftGraphWithAnthropic(
     // is reported HONESTLY in logs/salvage/error/metadata, not as the outer cap.
     // The operational lowering existed since F1; F5 makes it OBSERVABLE.
     let actualMaxTokens = maxTokens;
+    // Same idea for the temperature (F3, 2026-07-25). A post-runaway-abort retry
+    // is sent at DRAFT_RUNAWAY_RETRY_TEMPERATURE so it can actually differ from
+    // the generation that just failed, so the outer `draftTemperature` is no
+    // longer what every attempt sends — and the SUCCESS metadata used to report a
+    // hard-coded literal `0`, which was already wrong under extended thinking
+    // (temperature 1). Reported honestly from the attempt that produced the
+    // response, like `actualMaxTokens`.
+    let actualTemperature = draftTemperature;
     for (let attempt = 1; response === undefined; attempt++) {
       // Fresh idempotency key per RETRY so the provider RE-GENERATES rather than
       // replaying the doomed generation for the same key (retries would be
@@ -1319,7 +1343,7 @@ export async function draftGraphWithAnthropic(
               model,
               promptVersion: promptMeta.prompt_version,
               promptHash: promptMeta.prompt_hash,
-              temperature: draftTemperature,
+              temperature: actualTemperature,
               providerLatencyMs: skipElapsedMs,
               finishReason: "skipped_unaffordable_final",
               streamed: true,
@@ -1395,12 +1419,40 @@ export async function draftGraphWithAnthropic(
               attemptBody = { ...(body as Anthropic.MessageStreamParams), max_tokens: finalMaxTokens };
             }
           }
+          // ⭐ F3 (2026-07-25): A RETRY AFTER A RUNAWAY ABORT MUST BE ABLE TO
+          // DIFFER. Every attempt used to be sent at temperature 0, so the
+          // "abort the doomed generation and re-roll" mechanism re-sent a
+          // byte-identical request to a near-deterministic decode — the retry
+          // could reproduce the same runaway, spend the next abort, and land on
+          // the skip gate (F1). The pathology is a degenerate repetition loop,
+          // which low-temperature decoding is what gets STUCK in; see
+          // DRAFT_RUNAWAY_RETRY_TEMPERATURE for why 1 and why the blast radius
+          // is only the already-doomed population.
+          //
+          // Routed through `anthropicTemperatureFor` so the rejects-sampling
+          // gate is applied here too — a model that takes no temperature still
+          // gets none, and this does not become a sixth copy of that ternary.
+          if (runawayAbortCount >= 1 && !draftThinkingEnabled) {
+            const retryTemperature = anthropicTemperatureFor(model, {
+              thinking: false,
+              requested: DRAFT_RUNAWAY_RETRY_TEMPERATURE,
+            });
+            if (
+              retryTemperature !== undefined &&
+              retryTemperature !== (attemptBody as { temperature?: number }).temperature
+            ) {
+              attemptBody = { ...attemptBody, temperature: retryTemperature };
+            }
+          }
           // F5: bind the reported cap to what THIS attempt actually sends. On a
           // late final attempt attemptBody carries the lowered max_tokens; on any
           // other attempt it is the outer maxTokens. Set here (not only in the
           // lowering branch) so every attempt — including withRetry's transient
           // re-invocations — leaves actualMaxTokens equal to the cap it applied.
           actualMaxTokens = (attemptBody as { max_tokens?: number }).max_tokens ?? maxTokens;
+          // Same rule for the temperature: report what was SENT, not what was
+          // derived at the top of the call.
+          actualTemperature = (attemptBody as { temperature?: number }).temperature;
           return streamOneDraftAttempt(attemptBody, attemptIdempotencyKey, attemptDetectDeadlineMs);
         },
         { adapter: "anthropic", model, operation: "draft_graph" },
@@ -1519,7 +1571,7 @@ export async function draftGraphWithAnthropic(
       model,
       promptVersion: promptMeta.prompt_version,
       promptHash: promptMeta.prompt_hash,
-      temperature: draftTemperature,
+      temperature: actualTemperature,
       providerLatencyMs,
       finishReason: stopReason,
       maxTokens: actualMaxTokens,
@@ -1982,7 +2034,11 @@ export async function draftGraphWithAnthropic(
         cache_age_ms: promptMeta.cache_age_ms,
         cache_status: promptMeta.cache_status,
         use_staging_mode: promptMeta.use_staging_mode,
-        temperature: 0,
+        // ⚠ WAS A HARD-CODED `0` (fixed 2026-07-25 alongside F3). The literal was
+        // already a lie under extended thinking, where the API forces temperature
+        // 1, and became one for every post-runaway-abort retry. Reported from the
+        // attempt that actually produced this response.
+        temperature: actualTemperature,
         max_tokens: actualMaxTokens, // F5: report the per-attempt cap that produced this response
         seed: args.seed,
         token_usage: {

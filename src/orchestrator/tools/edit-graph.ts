@@ -292,9 +292,15 @@ function getMaxPatchOperations(): number {
 // see ChatArgs.structuredOutputsUserReminder). The v2 schema forces
 // operations[].value / .old_value to be strings — this reminder tells the
 // model to put the JSON-ENCODED payload inside those strings rather than
-// prose or a raw (ungrammatical, schema-rejected) object. Mirrors
-// STRUCTURED_OUTPUTS_AUX_STRING_REMINDER in adapters/llm/anthropic.ts
-// (Lane 26, draft_graph). Omitted on the prompt-only fallback path, where
+// prose or a raw (ungrammatical, schema-rejected) object.
+//
+// ⚠ CORRECTED 2026-07-25 (F7). This used to say it "Mirrors
+// STRUCTURED_OUTPUTS_AUX_STRING_REMINDER in adapters/llm/anthropic.ts (Lane 26,
+// draft_graph)". No such identifier exists — the draft-side reminder was deleted
+// on 2026-07-24 once the lean-draft contract made it a no-op. This constant is
+// the only live instance of the pattern, not a copy of one.
+//
+// Omitted on the prompt-only fallback path, where
 // the system prompt's existing object-shaped examples apply unchanged —
 // parseStringifiedOperationPayload() accepts both shapes at ingress.
 const EDIT_GRAPH_STRUCTURED_OUTPUTS_VALUE_REMINDER = `
