@@ -1065,6 +1065,13 @@ function canReachGoalViaAllowed(
 
     for (const edge of edges) {
       if (edge === excludeEdge) continue;
+      // Adopt the estate's directed-edge policy (`src/graph/reachability.ts`).
+      // A bidirected edge is an unmeasured common cause, not a causal path
+      // (`schemas/graph.ts:333-335`), so it must not vouch for an outcome
+      // "already having a valid path to goal" and thereby authorise deleting a
+      // forbidden shortcut. The kind whitelist below is a DELIBERATE extra
+      // narrowing and is retained; only the edge policy is shared.
+      if (!isDirectedEdge(edge)) continue;
       if (edge.from !== current) continue;
       const toKind = nodeKindMap.get(edge.to);
       if (!toKind) continue;
