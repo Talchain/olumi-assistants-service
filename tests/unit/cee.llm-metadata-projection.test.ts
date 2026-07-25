@@ -92,6 +92,27 @@ describe('DRIFT PIN — neither surface may hand-write its own keep-list again',
     expect(src).toContain('llm_metadata: buildLlmMetadataProjection(');
   });
 
+  it('the Anthropic draft path attaches ONE shared `_llm_meta` object, not per-throw copies', () => {
+    // ⚠ FOUND LIVE, 2026-07-25, minutes after the projection fix deployed. The
+    // adapter had a THIRD hand-built `_llm_meta` at the schema-validation throw:
+    // a field-for-field duplicate of `failedCallLlmMeta` MINUS `max_tokens`,
+    // `runaway_abort_count` and `time_to_edges_ms`. And that is the LIVE
+    // truncation path — a generation cut at max_tokens usually still yields text
+    // the extractor turns into a partial object, which fails schema validation
+    // there, not at the parse throw. So every truncation-400 on staging 65813b6
+    // STILL shipped without the cap or the abort count. Same mirror, one file
+    // downstream of the one that was just closed.
+    //
+    // Exactly ONE inline `_llm_meta: {` literal is permitted: the final-attempt
+    // SKIP-GATE, which throws BEFORE any provider response exists and therefore
+    // genuinely cannot share the response-derived object.
+    const src = read('src/adapters/llm/anthropic.ts');
+    const inlineLiterals = src.match(/_llm_meta:\s*\{/g) ?? [];
+    expect(inlineLiterals).toHaveLength(1);
+    // …and the shared object is what the response-path throws carry.
+    expect(src).toContain('_llm_meta: failedCallLlmMeta');
+  });
+
   it('exactly one module builds the projection — a third call site is fine, a second BUILDER is not', () => {
     // The builder is identified by the literal key list it owns. If a surface
     // starts writing `llm_metadata: {` with an inline object again, this fails.
