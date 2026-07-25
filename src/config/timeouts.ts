@@ -608,7 +608,7 @@ export function getDraftLlmRetryBudgetMs(elapsedMs: number): number {
  * give attempt 1 the full affordable budget so the 6,800–8,550-token drafts
  * SUCCEED on attempt 1, and handle the residual true-runaway (>8,550-token)
  * class with salvage-or-fail-fast (`closeTruncatedJson` in the adapter +
- * `isLeanRetryAffordable` below) instead of a doomed sub-budget retry. The old
+ * `isDraftRetryAffordable` below) instead of a doomed sub-budget retry. The old
  * "lean-retry reachability" rationale is RETIRED with this raise.
  *
  * The cap is applied at the adapter (`resolveDraftMaxTokens` ceiling arg,
@@ -670,35 +670,68 @@ export const DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL = parseIntEnv(
 export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 2_700;
 
 /**
- * ANTI-DOOM GUARD (2026-07-23 firefight): may a lean corrective retry fire?
+ * ⭐ THE ANTI-DOOM GUARD — the SINGLE definition of "is another draft generation
+ * worth funding?" Every retry/abort/skip decision in the draft path routes
+ * through this one function. Do NOT re-express it, and do NOT compare against
+ * `LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR` anywhere else (see the drift pin in
+ * `tests/unit/draft-token-affordability.test.ts`).
  *
- * A max_tokens truncation means attempt 1 committed to a graph too large to
- * finish inside `attempt1EffectiveMaxTokens` output tokens. Retrying into a
- * budget SMALLER than the one that just overflowed is doomed by construction —
- * a model that could not fit `attempt1EffectiveMaxTokens` re-truncates in
- * anything less, burning ~30s of the request budget on a result guaranteed to
- * fail (the exact 2026-07-23 draft-down mechanism: a 6,800-token attempt-1
- * truncation retried at only ~3,178 tokens → re-truncate → 400 at ~89s).
+ * A generation that ended without a usable graph — truncated at max_tokens, or
+ * aborted by the runaway detector — committed to a graph it could not finish
+ * inside `priorAttemptMaxTokens` output tokens. Funding the NEXT generation with
+ * a budget SMALLER than that is doomed by construction: a model that could not
+ * fit `priorAttemptMaxTokens` re-truncates in anything less, burning ~30s of the
+ * request budget on a result guaranteed to fail (the exact 2026-07-23 draft-down
+ * mechanism: a 6,800-token attempt-1 truncation retried at only ~3,178 tokens →
+ * re-truncate → 400 at ~89s).
  *
- * So the retry may fire ONLY when the remaining affordable window can fund AT
- * LEAST the attempt that overflowed — `>= attempt1EffectiveMaxTokens` — and
- * still clears the lean floor. In the default regime (attempt 1 now uses the
- * FULL affordable budget) this is essentially never true, so the doomed sub-
- * budget retry cannot fire; truncation is handled by salvage-or-fail-fast
+ * So the next generation may be funded ONLY when the remaining affordable window
+ * can pay for AT LEAST the attempt that failed — `>= priorAttemptMaxTokens` —
+ * and still clears the converged-graph floor. In the default regime (attempt 1
+ * uses the FULL affordable budget) this is essentially never true, so no doomed
+ * sub-budget generation can fire; truncation is handled by salvage-or-fail-fast
  * instead. The invariant is independent of the sentinel's value, so it holds
  * even if an operator lowers `CEE_DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL`.
  *
+ * ⚠ RENAMED + GENERALISED (2026-07-25, skip-gate alignment). It used to be
+ * `isLeanRetryAffordable` and govern ONE call site (parse.ts Step 7's lean
+ * retry). The SAME rule was independently hand-encoded in the Anthropic
+ * adapter's final-attempt skip-gate with a WEAKER floor (a bare `< 2_700`,
+ * dropping the `>= priorAttemptMaxTokens` half) — two encodings of one rule with
+ * different floors, the estate's dominant defect class. Because 3,150 ≥ 2,700
+ * the adapter gate never fired, so a doomed final attempt was allowed to run at
+ * ~37% of the budget that had just been abandoned; it truncated by construction,
+ * ~90s in, every time (measured: `/assist` A2killer 0/18 on 2026-07-24, caps
+ * 3,146–3,826). The name no longer says "lean" because the rule is not lean-
+ * retry-specific: it governs the lean retry, the adapter's abort authorisation,
+ * AND the adapter's final-attempt skip-gate.
+ *
  * Pure + exported so the gate arithmetic is unit-testable and mutation-checkable
- * in isolation (the runtime call site is `parse.ts` Step 7).
+ * in isolation. Runtime call sites: `parse.ts` Step 7 (lean retry), and
+ * `draft-budget.ts` (`isAbortableRetryViable` / `shouldSkipDoomedFinalAttempt`,
+ * consumed by the Anthropic adapter loop).
  */
-export function isLeanRetryAffordable(
-  leanAffordableTokens: number,
-  attempt1EffectiveMaxTokens: number,
+export function isDraftRetryAffordable(
+  nextAttemptAffordableTokens: number,
+  priorAttemptMaxTokens: number,
 ): boolean {
-  return (
-    leanAffordableTokens >=
-    Math.max(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, attempt1EffectiveMaxTokens)
-  );
+  return nextAttemptAffordableTokens >= viableDraftRetryFloorTokens(priorAttemptMaxTokens);
+}
+
+/**
+ * The token floor `isDraftRetryAffordable` actually checks against, exported so
+ * call sites can NAME the number in an error message or a log without importing
+ * `LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR` and re-deriving the `Math.max`.
+ *
+ * That is the whole point: a call site that imports the raw constant is one
+ * `Math.max` away from re-encoding the rule with the wrong floor, which is
+ * exactly what happened in the Anthropic adapter and cost the drafting bar.
+ * `tests/unit/draft-token-affordability.test.ts` FAILS LOUDLY if any module
+ * outside this file and `draft-budget.ts` (which derives
+ * `DRAFT_RUNAWAY_MIN_RETRY_MS` from it arithmetically) imports the raw constant.
+ */
+export function viableDraftRetryFloorTokens(priorAttemptMaxTokens: number): number {
+  return Math.max(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, priorAttemptMaxTokens);
 }
 
 // ---------------------------------------------------------------------------

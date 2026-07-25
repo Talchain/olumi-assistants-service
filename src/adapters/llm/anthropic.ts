@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Agent, fetch as undiciFetch } from "undici";
-import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S, LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S, viableDraftRetryFloorTokens } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
@@ -30,6 +30,8 @@ import {
   DRAFT_EDGES_REACHED_RE,
   isEdgesTimeDrifting,
   hasRoomForAnotherAbortableAttempt,
+  isAbortableRetryViable,
+  shouldSkipDoomedFinalAttempt,
   draftAttachmentDetectorAllowance,
 } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
@@ -1182,19 +1184,26 @@ export async function draftGraphWithAnthropic(
 
       // FINAL-ATTEMPT SKIP-GATE (DETECTOR-FIX part 2, 2026-07-24; F4 live
       // adjudication rec-c). After runaway aborts have consumed budget, a FINAL
-      // attempt whose remaining window affords fewer tokens than a converged
-      // graph needs (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR — the observed 12-14-node
-      // /2206-2601-token band, floored just above) cannot produce a valid draft
-      // even if the model behaves: the F1 cap would starve it below the tokens
+      // attempt whose remaining window cannot fund a generation at least as
+      // large as the attempt that was abandoned cannot produce a valid draft
+      // even if the model behaves: the F1 cap starves it below the tokens
       // required to reach edges (every such capped final = edges=0 → salvage
-      // fails → ~89s hard-fail, the exact chain probes 2/3/… reproduced). Flooring
-      // the cap UP is unsafe — it re-opens the wall-overflow 504 the F1 cap closed
-      // — so we SKIP the doomed attempt and fail FAST with the same typed error it
-      // would eventually throw, honestly, instead of burning the window. Gated on
-      // runawayAbortCount>=1 so attempt 1 (and any small-timeout direct caller)
-      // always runs at least once. Decided at the loop top on the live clock; a
-      // withRetry transient inside the closure can only push further past the
-      // floor, so this never skips a still-viable attempt.
+      // fails → ~89s hard-fail, the exact chain probes 2/3/… reproduced).
+      // Flooring the cap UP is unsafe — it re-opens the wall-overflow 504 the F1
+      // cap closed — so we SKIP the doomed attempt and fail FAST with the same
+      // typed error it would eventually throw, honestly, instead of burning the
+      // window. Decided at the loop top on the live clock; a withRetry transient
+      // inside the closure can only push further past the floor, so this never
+      // skips a still-viable attempt.
+      //
+      // ⚠ ALIGNED 2026-07-25. The condition used to be a hand-written
+      // `finalAttemptAffordableTokens < LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR` —
+      // the SAME rule config/timeouts.ts states as
+      // `>= max(2_700, priorAttemptMaxTokens)`, re-encoded here with the
+      // `priorAttemptMaxTokens` half DROPPED. Because 3,150 >= 2,700 it never
+      // fired, and the doomed attempt ran anyway (A2killer 0/18, 2026-07-24).
+      // Now delegated to `shouldSkipDoomedFinalAttempt`, which is built on the
+      // one shared `isDraftRetryAffordable` — no second floor exists to drift.
       const remainingAtLoopTop = effectiveTimeout - (Date.now() - startTime);
       const willBeFinalAttempt = !hasRoomForAnotherAbortableAttempt(
         remainingAtLoopTop,
@@ -1204,27 +1213,39 @@ export async function draftGraphWithAnthropic(
         Math.max(0, remainingAtLoopTop),
         opts?.maxTokensCeiling,
       ).effective;
+      // The cap the attempt that was just abandoned actually applied. Rebound
+      // per invocation inside the retry closure, so at the loop top it is the
+      // PREVIOUS attempt's cap — "the budget that just overflowed", read from
+      // what was really sent rather than restated.
+      const priorAttemptMaxTokens = actualMaxTokens;
       if (
-        runawayAbortCount >= 1 &&
-        willBeFinalAttempt &&
-        !draftThinkingEnabled &&
-        finalAttemptAffordableTokens < LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR
+        shouldSkipDoomedFinalAttempt({
+          runawayAbortCount,
+          willBeFinalAttempt,
+          thinkingEnabled: draftThinkingEnabled,
+          finalAttemptAffordableTokens,
+          priorAttemptMaxTokens,
+        })
       ) {
         const skipElapsedMs = Date.now() - startTime;
+        const viableFloorTokens = viableDraftRetryFloorTokens(priorAttemptMaxTokens);
         log.error({
           event: "cee.llm.draft_final_attempt_skipped",
           model,
           remaining_budget_ms: remainingAtLoopTop,
           affordable_tokens: finalAttemptAffordableTokens,
-          viable_floor_tokens: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+          viable_floor_tokens: viableFloorTokens,
+          prior_attempt_max_tokens: priorAttemptMaxTokens,
           runaway_abort_count: runawayAbortCount,
           elapsed_ms: skipElapsedMs,
-        }, "[Anthropic] draft_graph FINAL attempt SKIPPED — remaining budget affords fewer tokens than a converged graph needs; failing fast (honest) instead of burning the window on a sub-viable 0-edge generation (DETECTOR-FIX part 2, F4)");
+        }, "[Anthropic] draft_graph FINAL attempt SKIPPED — remaining budget cannot fund a generation as large as the attempt that was abandoned; failing fast (honest) instead of burning the window on a sub-viable 0-edge generation (DETECTOR-FIX part 2, F4; floor aligned 2026-07-25)");
         throw Object.assign(
           new UpstreamNonJsonError(
             `anthropic draft_graph final attempt unaffordable — remaining budget ${remainingAtLoopTop}ms affords ` +
-            `${finalAttemptAffordableTokens} tokens < the ${LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR}-token converged-graph ` +
-            `floor after ${runawayAbortCount} runaway abort(s); failing fast instead of a doomed sub-viable generation`,
+            `${finalAttemptAffordableTokens} tokens < the ${viableFloorTokens}-token viable floor ` +
+            `(the converged-graph floor, raised to the ${priorAttemptMaxTokens}-token cap of the abandoned ` +
+            `attempt) after ${runawayAbortCount} runaway abort(s); failing fast instead of a doomed ` +
+            `sub-viable generation`,
             "anthropic",
             "draft_graph",
             skipElapsedMs,
@@ -1241,6 +1262,12 @@ export async function draftGraphWithAnthropic(
               temperature: draftTemperature,
               provider_latency_ms: skipElapsedMs,
               finish_reason: "skipped_unaffordable_final",
+              // The abort count is the CAUSE of this skip — without it on the
+              // wire the whole two-abort account had to be reverse-engineered
+              // from cap arithmetic (2026-07-24 re-probe, §HONEST LIMITS).
+              streamed: true,
+              runaway_abort_count: runawayAbortCount,
+              max_tokens: finalAttemptAffordableTokens,
             },
           },
         );
@@ -1266,9 +1293,22 @@ export async function draftGraphWithAnthropic(
           // is never thrown away. Reserving the ceiling (not DETECT_MS) preserves
           // the F2 invariant that the final window is never squeezed below
           // MIN_RETRY (DETECTOR-FIX, 2026-07-24).
-          const canRetryAgain = hasRoomForAnotherAbortableAttempt(
+          //
+          // ⚠ ALIGNED 2026-07-25 — the time-reserve above is necessary but NOT
+          // sufficient. It only knows the 2,700-token floor; it does not know
+          // that a retry funded BELOW the cap of the attempt being abandoned is
+          // doomed. Authorising an abort the skip-gate will then refuse is how
+          // 60s of a 110s window got burned for nothing. `isAbortableRetryViable`
+          // adds the missing half from the one shared rule, so the abort decision
+          // and the skip-gate can no longer disagree. `maxTokens` is the right
+          // comparator here: an ABORTABLE attempt is by definition not the final
+          // one, so it always runs at the outer derived cap (the final-attempt
+          // squeeze below applies only when this is false) — no circularity.
+          const canRetryAgain = isAbortableRetryViable(
             remainingBudgetMs,
             runawayAbortCount,
+            maxTokens,
+            opts?.maxTokensCeiling,
           );
           const attemptDetectDeadlineMs = canRetryAgain ? DRAFT_RUNAWAY_DETECT_MS : null;
           // On the FINAL attempt (no early abort, non-thinking), cap max_tokens to
@@ -1393,6 +1433,14 @@ export async function draftGraphWithAnthropic(
     // response trace and diagnosis required Render log access. Same shape as
     // the existing schema-error `_llm_meta` (consumed by parse.ts:~426 and
     // `extractToolLLMTelemetry`).
+    //
+    // ⚠ 2026-07-25: `max_tokens` and `runaway_abort_count` ADDED. They were on
+    // the SUCCESS meta only, so on a truncation — the one case where the cap is
+    // the whole story — the wire carried `finish_reason: max_tokens` with no cap
+    // and no abort count. The 2026-07-24 re-probe had to INFER the cap from
+    // `completion_tokens` (valid only because generation is cut exactly at the
+    // cap) and infer "two 30s aborts" from `aff(50_000) = 3,150` arithmetic. Both
+    // are now stated facts on the response, not reconstructions.
     const failedCallLlmMeta = {
       model,
       prompt_version: promptMeta.prompt_version,
@@ -1400,6 +1448,10 @@ export async function draftGraphWithAnthropic(
       temperature: draftTemperature,
       provider_latency_ms: providerLatencyMs,
       finish_reason: stopReason,
+      max_tokens: actualMaxTokens,
+      streamed: true,
+      runaway_abort_count: runawayAbortCount,
+      time_to_edges_ms: streamTimeToEdgesMs,
       token_usage: {
         prompt_tokens: response.usage.input_tokens,
         completion_tokens: response.usage.output_tokens,

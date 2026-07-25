@@ -39,6 +39,7 @@ import {
   LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
   DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S,
   DRAFT_TTFB_SAFETY_OVERHEAD_S,
+  isDraftRetryAffordable,
 } from "../../config/timeouts.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { DRAFT_ATTACHMENT_MAX_BYTES } from "./draft-attachment.js";
@@ -447,6 +448,124 @@ export function hasRoomForAnotherAbortableAttempt(
   return (
     remainingMs > DRAFT_RUNAWAY_HARD_CEILING_MS + DRAFT_RUNAWAY_MIN_RETRY_MS &&
     runawayAbortCount < DRAFT_MAX_RUNAWAY_RETRIES
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⭐ SKIP-GATE ALIGNMENT (2026-07-25). The two decisions the adapter's draft
+// loop makes about "should another generation be funded?" — the ABORT
+// authorisation and the FINAL-ATTEMPT skip-gate — now both route through the
+// single anti-doom rule (`isDraftRetryAffordable`, config/timeouts.ts).
+//
+// THE DEFECT THEY FIX. The rule existed twice with DIFFERENT floors:
+//   * timeouts.ts  — `>= max(2_700, priorAttemptMaxTokens)`  (both halves)
+//   * anthropic.ts — `< 2_700`                               (floor half only)
+// Since 3,150 >= 2,700 the adapter's gate NEVER fired, so after two 30s runaway
+// aborts had burned 60s of the 110s window the "final" attempt was funded at
+// getAffordableDraftTokens(50_000) = 3,150 tokens — ~37% of the 8,550-token
+// budget the aborted attempts had — and truncated by construction ~90s in.
+// Measured 2026-07-24: /assist A2killer 0/18, observed caps 3,146-3,826, with
+// 15 of 18 inside a FOUR-token band at 3,146-3,149. That is not model variance;
+// it is this arithmetic.
+//
+// WHY BOTH SITES AND NOT JUST THE GATE. Fixing only the skip-gate converts a
+// ~90s guaranteed failure into a ~60s honest one — real, but it still throws two
+// 30s aborts away first. The abort that CREATED the doomed window was itself
+// authorised by a weaker rule (`hasRoomForAnotherAbortableAttempt` alone, which
+// only knows about the 2,700 floor). Aborting into a window the skip-gate will
+// then refuse is the same contradiction #673 fixed for the 35s/45s pair, one
+// level up. Both sites must agree or the clock still burns.
+//
+// THE CONSEQUENCE, STATED PLAINLY (this is a behaviour change, not a no-op):
+// in the DEFAULT regime attempt 1 takes the FULL affordable budget (8,550
+// tokens at the 110s timeout), and no post-abort window can ever re-fund 8,550
+// — aff(110s - 30s) = 5,850 < 8,550. So the runaway abort-retry ladder does not
+// fire at all at default configuration: the draft gets ONE generation with the
+// WHOLE window instead of three partial ones. That is the arithmetic telling us
+// the ladder was never viable in this regime, and it is the same conclusion
+// `isDraftRetryAffordable`'s own doc already reached for the lean retry ("in the
+// default regime this is essentially never true"). The mechanism is NOT dead
+// code — it re-arms whenever attempt 1 runs at a REDUCED cap (an operator
+// lowering CEE_DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL, or any caller passing a
+// `maxTokensCeiling`), because then a post-abort window CAN re-fund that
+// smaller cap. Derived, not switched: no flag, no env gate.
+//
+// THE WALL IS STILL RESPECTED. The 504-class the abort ladder was blamed for is
+// closed by the F1 max_tokens derivation, not by aborting: attempt 1's cap is
+// getAffordableDraftTokens(window) by construction, so a runaway truncates AT
+// max_tokens INSIDE the wall and `closeTruncatedJson` salvage still applies.
+// ---------------------------------------------------------------------------
+
+/**
+ * May the adapter EARLY-ABORT the in-flight attempt and fund another one?
+ *
+ * TRUE only when BOTH hold:
+ *  1. the remaining budget reserves a full abortable attempt plus a retry
+ *     (`hasRoomForAnotherAbortableAttempt`), AND
+ *  2. the window the abort would actually leave behind can fund a generation at
+ *     least as large as the one being abandoned (`isDraftRetryAffordable`).
+ *
+ * (2) is the half that was missing. Without it the adapter aborts into a window
+ * it has already been told is too small, then either burns it on a doomed
+ * generation (the defect) or refuses it at the skip-gate (budget spent, nothing
+ * to show). Note the post-abort window is measured from the HARD CEILING, not
+ * DETECT_MS: a progress-aware abort may consume up to the ceiling before firing,
+ * so the ceiling is the honest worst case — the same reserve
+ * `hasRoomForAnotherAbortableAttempt` uses, derived from the same constant.
+ *
+ * @param remainingMs live remaining window for the whole draft call
+ * @param runawayAbortCount aborts already spent on this call
+ * @param currentAttemptMaxTokens the max_tokens the IN-FLIGHT attempt is running
+ *   with (an abortable attempt is by definition non-final, so this is the outer
+ *   derived cap — no circularity with the final-attempt squeeze)
+ * @param maxTokensCeiling optional caller ceiling, threaded so the post-abort
+ *   affordability is computed against the budget the retry would REALLY get
+ */
+export function isAbortableRetryViable(
+  remainingMs: number,
+  runawayAbortCount: number,
+  currentAttemptMaxTokens: number,
+  maxTokensCeiling?: number,
+): boolean {
+  if (!hasRoomForAnotherAbortableAttempt(remainingMs, runawayAbortCount)) return false;
+  const postAbortWindowMs = Math.max(0, remainingMs - DRAFT_RUNAWAY_HARD_CEILING_MS);
+  const postAbortAffordableTokens = resolveDraftMaxTokens(
+    postAbortWindowMs,
+    maxTokensCeiling,
+  ).effective;
+  return isDraftRetryAffordable(postAbortAffordableTokens, currentAttemptMaxTokens);
+}
+
+/**
+ * Must the adapter SKIP the final attempt and fail fast?
+ *
+ * TRUE when aborts have already been spent and the final window cannot fund a
+ * generation at least as large as the attempt that was abandoned. Skipping is
+ * the honest outcome: the same typed error the doomed attempt would throw ~30s
+ * later, thrown now, with the budget unspent rather than burned.
+ *
+ * Gated on `runawayAbortCount >= 1` so attempt 1 — and any small-timeout direct
+ * caller — always runs at least once: a first attempt has nothing to compare
+ * against and refusing it would turn a short-timeout call into a no-op.
+ *
+ * Flooring the cap UP instead of skipping is NOT an option: it re-opens the
+ * wall-overflow 504 that deriving max_tokens from the timeout closed.
+ */
+export function shouldSkipDoomedFinalAttempt(params: {
+  readonly runawayAbortCount: number;
+  readonly willBeFinalAttempt: boolean;
+  readonly thinkingEnabled: boolean;
+  readonly finalAttemptAffordableTokens: number;
+  readonly priorAttemptMaxTokens: number;
+}): boolean {
+  if (params.runawayAbortCount < 1) return false;
+  if (!params.willBeFinalAttempt) return false;
+  // Thinking keeps its clamped max_tokens and runs with detection off, so the
+  // final-attempt squeeze this gate guards against never applies to it.
+  if (params.thinkingEnabled) return false;
+  return !isDraftRetryAffordable(
+    params.finalAttemptAffordableTokens,
+    params.priorAttemptMaxTokens,
   );
 }
 

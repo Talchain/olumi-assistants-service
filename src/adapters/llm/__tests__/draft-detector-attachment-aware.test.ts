@@ -149,9 +149,42 @@ describe('draft_graph runaway detector — attachment-aware char gate (F-3)', ()
     expect(h.callCount).toBe(1);
   });
 
-  it('REFUTE — a genuine runaway WITH a document still dies (13000 chars, no edge, crosses the raised gate)', async () => {
+  it('REFUTE — a genuine runaway WITH a document still trips the raised gate and dies (13000 chars, no edge)', async () => {
+    // ⚠ UPDATED 2026-07-25 (skip-gate alignment). The abort is now authorised
+    // only when the post-abort window can RE-FUND the cap being abandoned
+    // (`isAbortableRetryViable`) — because aborting into a window that cannot is
+    // how 60s of a 110s budget got burned for nothing (A2killer 0/18). At the
+    // FULL attempt-1 cap no abort can ever be re-funded, so the ladder is
+    // correctly silent there; the test therefore lowers attempt 1's cap via
+    // `maxTokensCeiling` to put the detector in the regime where it IS armed.
+    // The claim under test is unchanged: the raised char gate is BOUNDED.
     h.nodesPreEdgeChars = 13_000; // > 12000 raised gate → still a runaway
     h.runaway = true; // never emits an edge
+
+    // aff(120s) = 9,450; aff(120s - 30s ceiling) = 6,750. A 6,000-token attempt-1
+    // cap is therefore re-fundable after an abort → the ladder is armed.
+    let threw = false;
+    await draftGraphWithAnthropic(
+      { brief: 'Should we launch A or B?', docs: [], seed: 1, attachment: bigAttachment() },
+      { timeoutMs: 120_000, forceDefault: true, maxTokensCeiling: 6_000 },
+    ).catch(() => {
+      threw = true;
+    });
+
+    // The raised gate is BOUNDED: a 13000-char no-edge stream still trips it, the
+    // attempt aborts, and (all retries hitting the same runaway) the draft fails.
+    expect(threw).toBe(true);
+    expect(h.callCount).toBeGreaterThan(1); // aborted + retried (the gate fired)
+  });
+
+  it('DEFAULT REGIME: the same runaway is NOT aborted — one generation gets the whole window, and still fails honestly', async () => {
+    // The behaviour change, pinned as a first-class expectation rather than left
+    // implicit. With attempt 1 at the full affordable cap, no abort can be
+    // re-funded, so the doomed abort-retry ladder does not run: exactly ONE
+    // stream invocation, and the draft still fails (no corrupt draft is
+    // accepted — validation, not the abort, is what guarantees that).
+    h.nodesPreEdgeChars = 13_000;
+    h.runaway = true;
 
     let threw = false;
     await draftGraphWithAnthropic(
@@ -161,9 +194,7 @@ describe('draft_graph runaway detector — attachment-aware char gate (F-3)', ()
       threw = true;
     });
 
-    // The raised gate is BOUNDED: a 13000-char no-edge stream still trips it, the
-    // attempt aborts, and (all retries hitting the same runaway) the draft fails.
     expect(threw).toBe(true);
-    expect(h.callCount).toBeGreaterThan(1); // aborted + retried (the gate fired)
+    expect(h.callCount).toBe(1);
   });
 });

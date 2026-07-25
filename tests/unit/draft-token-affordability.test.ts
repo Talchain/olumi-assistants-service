@@ -40,7 +40,7 @@ import {
   LLM_POST_PROCESSING_HEADROOM_MS,
   DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
   LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
-  isLeanRetryAffordable,
+  isDraftRetryAffordable,
 } from "../../src/config/timeouts.js";
 
 describe("recalibrated constants — evidence-pinned against the settled two-parameter model, not free parameters", () => {
@@ -288,7 +288,7 @@ describe("resolveDraftMaxTokens — effective max_tokens can NEVER exceed the af
 // briefs truncated needlessly; the "lean retry" it freed ran at only ~3,178
 // tokens (< half the 6,800 that overflowed), re-truncated, and 400'd at ~89s.
 // The fix: attempt 1 uses the FULL affordable budget, and no retry may fire into
-// a budget SMALLER than the attempt that overflowed (isLeanRetryAffordable);
+// a budget SMALLER than the attempt that overflowed (isDraftRetryAffordable);
 // truncation is handled by salvage-or-fail-fast instead.
 // ---------------------------------------------------------------------------
 
@@ -319,33 +319,33 @@ describe("attempt-1 uses the full affordable budget (raised sentinel)", () => {
   });
 });
 
-describe("isLeanRetryAffordable — never retry into a budget smaller than the attempt that overflowed", () => {
+describe("isDraftRetryAffordable — never retry into a budget smaller than the attempt that overflowed", () => {
   it("BLOCKS the exact 2026-07-23 doomed retry: a 6,800-token attempt-1 truncation, ~3,178 tokens left → no retry", () => {
     // attempt1EffectiveMaxTokens = 6,800; the lean window afforded only 3,178.
-    expect(isLeanRetryAffordable(3_178, 6_800)).toBe(false);
+    expect(isDraftRetryAffordable(3_178, 6_800)).toBe(false);
   });
 
   it("BLOCKS a retry after a FULL-budget attempt-1 (8,550) with any smaller window", () => {
-    expect(isLeanRetryAffordable(3_178, 8_550)).toBe(false);
-    expect(isLeanRetryAffordable(8_549, 8_550)).toBe(false);
+    expect(isDraftRetryAffordable(3_178, 8_550)).toBe(false);
+    expect(isDraftRetryAffordable(8_549, 8_550)).toBe(false);
   });
 
   it("ALLOWS a retry only when the remaining budget funds AT LEAST the attempt that overflowed", () => {
-    expect(isLeanRetryAffordable(8_550, 8_550)).toBe(true);
-    expect(isLeanRetryAffordable(9_000, 8_550)).toBe(true);
+    expect(isDraftRetryAffordable(8_550, 8_550)).toBe(true);
+    expect(isDraftRetryAffordable(9_000, 8_550)).toBe(true);
   });
 
   it("still enforces the lean floor even for a tiny attempt-1 budget (belt-and-braces lower bound)", () => {
     // If an operator set a very low sentinel, the retry must still clear the
     // lean floor — the guard is max(floor, attempt1), never below the floor.
-    expect(isLeanRetryAffordable(2_699, 1_000)).toBe(false); // below the 2,700 floor
-    expect(isLeanRetryAffordable(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, 1_000)).toBe(true);
+    expect(isDraftRetryAffordable(2_699, 1_000)).toBe(false); // below the 2,700 floor
+    expect(isDraftRetryAffordable(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, 1_000)).toBe(true);
   });
 
   it("RECOMPUTED INVARIANT: the authorized budget is always >= the overflowed attempt AND >= the floor", () => {
     for (const attempt1 of [1_000, 2_700, 6_800, 8_550]) {
       for (const lean of [0, 2_699, 2_700, 3_178, 6_800, 8_550, 9_000]) {
-        const allowed = isLeanRetryAffordable(lean, attempt1);
+        const allowed = isDraftRetryAffordable(lean, attempt1);
         const required = Math.max(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, attempt1);
         expect(allowed).toBe(lean >= required);
       }

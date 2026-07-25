@@ -588,7 +588,7 @@ describe("runStageParse", () => {
     // window that affords ~2,970 tokens — but attempt 1 used the FULL affordable
     // budget (8,550). Retrying into 2,970 (< half of 8,550) re-truncates: a model
     // that could not fit 8,550 never fits 2,970. The anti-doom guard
-    // (isLeanRetryAffordable) forbids it, so the typed truncation error
+    // (isDraftRetryAffordable) forbids it, so the typed truncation error
     // propagates immediately (fail fast) instead of burning a doomed second call.
     const elapsedMs = 62_000;
     const window = getDraftLlmRetryBudgetMs(elapsedMs); // 110_000 - 62_000 = 48_000

@@ -25,6 +25,7 @@ import { createCorrectionCollector } from "../corrections.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamNonJsonError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
+import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
 import type { DraftGraphTimings } from "../../orchestrator-v5/telemetry/turn-timings.js";
 
 import { runStageParse } from "./stages/parse.js";
@@ -286,14 +287,13 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
         ...baseTrace,
         pipeline: {
           ...basePipeline,
-          llm_metadata: {
-            model: ctx.llmMeta.model ?? ctx.draftAdapter?.model,
-            prompt_version: ctx.llmMeta.prompt_version,
-            prompt_hash: ctx.llmMeta.prompt_hash,
-            duration_ms: ctx.llmMeta.provider_latency_ms,
-            finish_reason: ctx.llmMeta.finish_reason,
-            token_usage: ctx.llmMeta.token_usage,
-          },
+          // ONE projection, shared with the success surface in stages/package.ts.
+          // This list used to be a SIX-key hand-written subset of the success
+          // surface's fifteen, so a failed draft's response omitted `max_tokens`
+          // (the cap that caused the truncation) and `runaway_abort_count` (the
+          // aborts that starved it) — the two fields a truncation diagnosis
+          // actually needs. See llm-metadata-projection.ts.
+          llm_metadata: buildLlmMetadataProjection(ctx.llmMeta, ctx.draftAdapter?.model),
         },
       },
     };
@@ -338,20 +338,33 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
   // exact failure. The honest levers are demand reduction and retry.
   const truncatedAtMaxTokens =
     (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true;
-  // HONEST COPY (2026-07-23 firefight). The failure is transient model
-  // over-generation (the draft ran past the token/time budget), NOT a bad brief.
-  // RETRY is the primary, honest lever. Do NOT tell the user to "simplify" or
-  // "be more specific" — a vaguer/simpler brief gives the model less to anchor
-  // on, so it INFERS more factors and options, produces a LARGER graph, and is
-  // MORE likely to truncate again (the cruel inversion; see the firefight RCA).
-  // The only secondary hint narrows SCOPE (a single decision / fewer options =
-  // a smaller graph), never DETAIL.
+  // HONEST COPY (2026-07-23 firefight, CORRECTED 2026-07-25).
+  //
+  // The failure is the draft outgrowing the token/time budget, NOT a bad brief.
+  // Do NOT tell the user to "simplify" or "be more specific" — a vaguer brief
+  // gives the model less to anchor on, so it INFERS more factors and options,
+  // produces a LARGER graph, and is MORE likely to truncate again (the cruel
+  // inversion; see the firefight RCA). That part of the 2026-07-23 copy stands.
+  //
+  // ⚠ WHAT WAS WITHDRAWN: the lead hint used to read "Retrying the same brief
+  // usually succeeds". It was measured on 2026-07-24 and it is FALSE — the
+  // identical brief was retried 18 times against staging and succeeded 0 times,
+  // each attempt costing the user ~90s and real provider spend. Copy that
+  // invites an unbounded retry loop is worse than no copy: it is the product
+  // lying about its own recovery odds. The word "usually" was never measured;
+  // it was inferred from the failure being *classified* transient.
+  //
+  // Retry is still offered — `retryable: true` is correct, a truncation is not a
+  // client input error — but it is offered ONCE and honestly bounded. The
+  // reliable lever is scope narrowing, which genuinely shrinks the graph the
+  // model commits to; it is not the cruel inversion because it removes
+  // DECISIONS and OPTIONS, not DETAIL.
   const truncationRecovery = {
     suggestion:
-      "The draft ran past the time budget and was cut off before it finished — this is usually transient. Try again.",
+      "The draft grew past the time budget and was cut off before it finished, so nothing was saved.",
     hints: [
-      "Retrying the same brief usually succeeds",
-      "If it keeps happening, focus on a single decision with fewer options",
+      "One retry is worth trying — but if it fails the same way again, more retries will not help",
+      "Narrowing the scope reliably fixes it: one decision at a time, with fewer options",
       "A very broad brief with many options takes longer to draft",
     ],
   };

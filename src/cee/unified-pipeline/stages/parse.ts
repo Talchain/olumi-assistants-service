@@ -29,13 +29,13 @@ import {
   DRAFT_REQUEST_BUDGET_MS,
   DRAFT_LLM_TIMEOUT_MS,
   MIN_DRAFT_RETRY_BUDGET_MS,
-  LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+  viableDraftRetryFloorTokens,
   DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
   REPAIR_TIMEOUT_MS,
   getDraftLlmRetryBudgetMs,
   getAffordableDraftTokens,
   getJitteredRetryDelayMs,
-  isLeanRetryAffordable,
+  isDraftRetryAffordable,
   remainingRequestBudgetMs,
 } from "../../../config/timeouts.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamTimeoutError } from "../../../adapters/llm/errors.js";
@@ -580,7 +580,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
       // reach this catch at all.
       //
       // A lean corrective retry is only a fallback, and ONLY when it is NOT
-      // doomed: `isLeanRetryAffordable` forbids retrying into a budget SMALLER
+      // doomed: `isDraftRetryAffordable` forbids retrying into a budget SMALLER
       // than the attempt that overflowed (`attempt1EffectiveMaxTokens`). Retrying
       // a 6,800-token truncation at ~3,178 tokens (< half) was the exact
       // 2026-07-23 draft-down mechanism — the model that could not fit 6,800
@@ -604,7 +604,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           Date.now() - requestStartMs + leanRetryDelayMs,
         );
         const leanAffordableTokens = getAffordableDraftTokens(leanRetryWindowMs);
-        if (isLeanRetryAffordable(leanAffordableTokens, attempt1EffectiveMaxTokens)) {
+        if (isDraftRetryAffordable(leanAffordableTokens, attempt1EffectiveMaxTokens)) {
           leanDraftRetried = true;
           // OBSERVABILITY HONESTY: a structured pino LOG, not a registered
           // TelemetryEvents entry — detection is Render log search
@@ -616,7 +616,11 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
             lean_retry_window_ms: leanRetryWindowMs,
             lean_affordable_tokens: leanAffordableTokens,
             attempt1_effective_max_tokens: attempt1EffectiveMaxTokens,
-            lean_tokens_floor: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+            // The EFFECTIVE floor this gate checked, not the bare constant: it
+            // is max(converged-graph floor, attempt-1 cap). Logging the bare
+            // 2,700 understated the real bar and is the same half-a-rule that
+            // made the adapter's gate silent (skip-gate alignment, 2026-07-25).
+            lean_tokens_floor: viableDraftRetryFloorTokens(attempt1EffectiveMaxTokens),
             elapsed_since_request_start_ms: Date.now() - requestStartMs,
             request_id: ctx.requestId,
           }, "Draft truncated at max_tokens — retrying once with a lean directive (demand reduction)");
@@ -633,7 +637,7 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           lean_retry_window_ms: leanRetryWindowMs,
           lean_affordable_tokens: leanAffordableTokens,
           attempt1_effective_max_tokens: attempt1EffectiveMaxTokens,
-          lean_tokens_floor: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+          lean_tokens_floor: viableDraftRetryFloorTokens(attempt1EffectiveMaxTokens),
           elapsed_since_request_start_ms: Date.now() - requestStartMs,
           request_id: ctx.requestId,
         }, "Lean retry skipped — remaining budget is smaller than attempt 1 (would re-truncate); failing fast with honest copy");
