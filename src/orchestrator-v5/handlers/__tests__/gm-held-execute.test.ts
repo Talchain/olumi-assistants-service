@@ -313,11 +313,35 @@ describe('executeGmHeldResume', () => {
     value: { from: 'risk_dq', to: 'g-profit', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' },
   };
 
+  /**
+   * ⚠ CHANGED 2026-07-25 — and the change is the point of this comment.
+   *
+   * These two cases used to assert `not.toBe('executed')`: a `data`-spelled or
+   * slash-keyed value op made the WHOLE batch refuse. That was correct when the
+   * held-lane canonicaliser was gated OFF behind
+   * `CEE_GM_HELD_VALUE_CANONICALISATION` (never set on any Render service), so
+   * these spellings were genuinely unlandable and refusing was the honest
+   * outcome.
+   *
+   * The canonicaliser is now unconditional, so BOTH of these spellings are
+   * translated onto `observed_state` and the batch applies for real. Asserting
+   * "must not execute" here would now be pinning the absence of the repair —
+   * i.e. pinning the defect. The tests are therefore RE-POINTED, not deleted:
+   *
+   *   - the two repairable spellings assert the REPAIR (below), and
+   *   - the atomicity doctrine they were protecting keeps its own test, using a
+   *     spelling that genuinely cannot be translated (`goal_constraints` — a
+   *     sanctioned referee root, but undeclared on `NodeV3`, so the re-parse
+   *     strips it and `batchFullyLanded` must still refuse the whole batch).
+   *
+   * The doctrine is unchanged: no silent partial apply, ever. What changed is
+   * how many batches are unlandable in the first place.
+   */
   it.each([
     ['data spelling', { op: 'update_node', path: 'fac_setup', value: { data: { value: 0.5 } } }],
     ['slash-keyed spelling', { op: 'update_node', path: 'fac_setup', value: { 'observed_state/value': 0.5 } }],
   ])(
-    'P1b: mixed batch whose tunable value op (%s) is stripped by canonicalisation refuses the WHOLE batch (no partial apply)',
+    'P1b: mixed batch whose tunable value op (%s) is now CANONICALISED — it applies for real, whole batch',
     (_label, tunable) => {
       const outcome = executeGmHeldResume(
         executeInput({
@@ -326,11 +350,53 @@ describe('executeGmHeldResume', () => {
           currentGraphHash: hashOf(VALUE_GRAPH),
         }),
       );
-      // Must NOT execute a partial: the structural ops landing while the
-      // value silently drops is exactly the trust-spine defect.
-      expect(outcome.status).not.toBe('executed');
+
+      expect(outcome.status).toBe('executed');
+      if (outcome.status !== 'executed') return;
+
+      // The value ACTUALLY moved — not merely "did not refuse".
+      const fac = (outcome.mutatedGraph.nodes as Array<Record<string, unknown>>).find(
+        (n) => n.id === 'fac_setup',
+      )!;
+      expect((fac.observed_state as Record<string, unknown>).value).toBe(0.5);
+
+      // …and no junk spelling was persisted alongside it.
+      expect(Object.keys(fac)).not.toContain('data');
+      expect(Object.keys(fac).some((k) => k.includes('/'))).toBe(false);
+
+      // …and the structural siblings landed in the SAME confirm.
+      expect(
+        (outcome.mutatedGraph.nodes as Array<Record<string, unknown>>).some((n) => n.id === 'risk_dq'),
+      ).toBe(true);
     },
   );
+
+  it('P1b: an UNTRANSLATABLE value op still refuses the WHOLE batch (no partial apply)', () => {
+    // `goal_constraints` is a sanctioned referee root, so the batch really
+    // reaches the confirm — but it is undeclared on `NodeV3`, so the re-parse
+    // strips it and the canonicaliser (which only knows observed_state
+    // spellings) leaves it verbatim. This is the arm that keeps the atomicity
+    // doctrine honest now that the repairable spellings above apply.
+    const outcome = executeGmHeldResume(
+      executeInput({
+        operations: [
+          {
+            op: 'update_node',
+            path: 'fac_setup',
+            value: { goal_constraints: [{ label: 'Keep complexity low' }] },
+          },
+          RISK_ADD,
+          RISK_LINK,
+        ] as never,
+        currentGraph: VALUE_GRAPH,
+        currentGraphHash: hashOf(VALUE_GRAPH),
+      }),
+    );
+
+    // The structural ops landing while the value silently drops is exactly the
+    // trust-spine defect. The whole batch must refuse.
+    expect(outcome.status).not.toBe('executed');
+  });
 
   it('P1b control: a tunable value op that DOES survive (observed_state) still executes the mixed batch and sets the value', () => {
     const outcome = executeGmHeldResume(
