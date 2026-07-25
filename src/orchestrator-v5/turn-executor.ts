@@ -1466,6 +1466,13 @@ export async function runTurnExecutor(
       readonly partsDetected: number;
       readonly partsUncovered: number;
     } | null = null;
+    // Companion stash for 'unmapped' parts (limit/cap clauses no operation in
+    // this estate can express). Separate from the structural notice above
+    // because it is computed UNCONDITIONALLY — see the assignment site.
+    let partAccountingUnmappedNotice: {
+      readonly notice: string;
+      readonly partsUncovered: number;
+    } | null = null;
     // Resumed pending action, if the short-confirm pre-route synthesised
     // a tool_call. Cleared after the commit-success consumed-telemetry
     // emit. Null on every other path.
@@ -4413,6 +4420,34 @@ export async function runTurnExecutor(
         }
       }
 
+      // Unmapped remainder (#697 follow-up, 2026-07-25 — journey Finding #5).
+      // DELIBERATELY UNCONDITIONAL, unlike the structural notice above.
+      // A limit clause always carries its own number, so a value+limit message
+      // has >= 2 quantities and `tryDeterministicValueUpdate` ALWAYS bails
+      // (`nonNullQuantities.length > 1` -> `ambiguous_quantity`,
+      // deterministic-value-update.ts). The value half is therefore served by
+      // LLM tool-use routing, not the deterministic pre-route — so stashing
+      // this inside the `deterministicValueUpdate.matched` gate above would be
+      // machinery that can never execute. Verified live on staging cfdab0f:
+      // "set the Retail Shop Capital Deployment to 55000 and cap the spend at
+      // 50k" applied the value and said nothing about the cap.
+      // The APPEND site (STEP 3.5) still gates on
+      // `proposedHandlerId === 'set_factor_value'`, so this only ever lands on
+      // a turn that really did serve a value edit.
+      {
+        const unmappedDecomposition = decomposeEditMessage(payload.message);
+        const unmappedNotice = buildUnmappedPartsNotice(
+          unmappedDecomposition.unmappedParts,
+          unmappedDecomposition.accountableParts.length,
+        );
+        if (unmappedNotice !== null) {
+          partAccountingUnmappedNotice = {
+            notice: unmappedNotice,
+            partsUncovered: unmappedDecomposition.unmappedParts.length,
+          };
+        }
+      }
+
       // V5 D1 golden-path closure (A3.1): the original (pre-guard)
       // dispatch is what the pre-route function alone would have
       // produced. The guards below (kind check + registry executable)
@@ -6848,23 +6883,31 @@ export async function runTurnExecutor(
         // notice is null unless intake decomposition found structural
         // part(s), so ordinary value updates are byte-identical.
         if (
-          partAccountingStructuralNotice !== null &&
+          (partAccountingStructuralNotice !== null ||
+            partAccountingUnmappedNotice !== null) &&
           proposedHandlerId === 'set_factor_value'
         ) {
+          const notices = [
+            partAccountingStructuralNotice?.notice,
+            partAccountingUnmappedNotice?.notice,
+          ].filter((n): n is string => typeof n === 'string');
           handlerOutcome = {
             ...handlerOutcome,
-            assistant_text:
-              `${handlerOutcome.assistant_text} ${partAccountingStructuralNotice.notice}`.trim(),
+            assistant_text: `${handlerOutcome.assistant_text} ${notices.join(' ')}`.trim(),
           };
+          const partsDetected =
+            (partAccountingStructuralNotice?.partsDetected ?? 0) +
+            (partAccountingUnmappedNotice?.partsUncovered ?? 0);
+          const partsUncovered =
+            (partAccountingStructuralNotice?.partsUncovered ?? 0) +
+            (partAccountingUnmappedNotice?.partsUncovered ?? 0);
           emit(TelemetryEvents.V5EditGraphPartAccounting, {
             request_id: requestId,
             scenario_id: context.session_id,
             dispatch_path: 'deterministic_value_update',
-            parts_detected: partAccountingStructuralNotice.partsDetected,
-            parts_covered:
-              partAccountingStructuralNotice.partsDetected -
-              partAccountingStructuralNotice.partsUncovered,
-            parts_uncovered: partAccountingStructuralNotice.partsUncovered,
+            parts_detected: partsDetected,
+            parts_covered: partsDetected - partsUncovered,
+            parts_uncovered: partsUncovered,
             missing_target_count: 0,
             substitution_blocked: false,
             disclosure_appended: true,
