@@ -29,12 +29,29 @@
  *  4. An UNTRANSLATABLE spelling REFUSES VISIBLY rather than silently
  *     succeeding. Strip-and-succeed is the defect; strip-and-refuse is honest.
  *  5. CONTROL: canonical-spelling ops are entirely unaffected.
- *  6. CONTROL: flag OFF reproduces the legacy behaviour byte-for-byte.
+ *  6. CONTROL: the DEFECT MECHANISM is still present and visible — proven by
+ *     driving the raw applier directly, so the assertions above cannot go
+ *     vacuous.
+ *
+ * ── 2026-07-25: the gate is gone ────────────────────────────────────────────
+ * This behaviour was gated on `CEE_VALUE_OP_CANONICALISATION`, default OFF and
+ * never set on any Render service — so the defect described above was live on
+ * 100% of real edits, and a sweep of every persisted graph found FOUR false
+ * successes it caused. It is now unconditional.
+ *
+ * The two "flag OFF" tests this file used to carry were POSITIVE CONTROLS, not
+ * decoration: they proved the junk key and the unmoved value were really there
+ * to be seen, so that the absence assertions meant something. They have been
+ * REPLACED (not deleted) with controls that drive `applyPatchOperations`
+ * directly. Same discriminating power, no dependency on a switch that no longer
+ * exists — and derived from the source of truth rather than from a flag.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 import { handleEditGraph } from '../edit-graph.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
+import { applyPatchOperations } from '../../patch-applier.js';
+import type { GraphV3T } from '../../../schemas/cee-v3.js';
 import type { ConversationContext } from '../../types.js';
 import type { LLMAdapter } from '../../../adapters/llm/types.js';
 
@@ -127,29 +144,14 @@ function observedOf(graph: unknown): Record<string, unknown> {
   return factorOf(graph).observed_state as Record<string, unknown>;
 }
 
-// ── flag control ────────────────────────────────────────────────────────────
+// ── no flag control ─────────────────────────────────────────────────────────
 //
-// Drive the REAL env var through the config parser (the held spec's pattern),
-// never `config.cee.<key> = …` directly. Mutating the parsed object bypasses
-// `config/index.ts` entirely, so a MISSPELLED `CEE_VALUE_OP_CANONICALISATION`
-// in the env→config mapping would leave every test in this file green and tsc
-// clean — mutation-proven. Going through the env var makes that typo fail loud.
+// This file used to drive `CEE_VALUE_OP_CANONICALISATION` through the real env
+// var so a misspelling in the env→config mapping would fail loud. The mapping
+// is gone with the gate, so there is nothing left to misspell — the behaviour
+// is reached by calling `handleEditGraph`, which is what these tests already do.
 
-const FLAG = 'CEE_VALUE_OP_CANONICALISATION';
-
-async function setFlag(value: 'true' | 'false' | undefined): Promise<void> {
-  if (value === undefined) delete process.env[FLAG];
-  else process.env[FLAG] = value;
-  const { _resetConfigCache } = await import('../../../config/index.js');
-  _resetConfigCache();
-}
-
-beforeEach(async () => {
-  await setFlag('true');
-});
-
-afterEach(async () => {
-  await setFlag(undefined);
+afterEach(() => {
   vi.restoreAllMocks();
 });
 
@@ -400,67 +402,49 @@ describe('B5 — the promoted graph is the PARSED one', () => {
    * reason that has nothing to do with the promotion, hunk 2 could be reverted,
    * and the suite would stay green.
    *
-   * This control proves the key IS there to be seen: with the flag OFF the
-   * legacy path promotes the raw candidate, and `data` is persisted. So the
-   * pair together says "the key exists, and hunk 2 is what removes it."
+   * This control proves the key IS there to be seen.
+   *
+   * ⚠ 2026-07-25: it used to prove that by setting the flag OFF and showing the
+   * legacy path persisted `data`. The flag is gone. Rather than delete the
+   * control — which would leave the absence assertion above unable to fail for
+   * the right reason — it is re-expressed one layer down, against the two
+   * functions that actually produce the effect:
+   *
+   *   `applyPatchOperations`  WRITES the undeclared `data` key onto the node
+   *   `GraphV3.safeParse`     STRIPS it
+   *
+   * That is the whole mechanism. If `applyAddNode` is ever hardened to drop
+   * undeclared keys, THIS test goes red and tells you the absence assertion
+   * above has gone vacuous — which is exactly what the flag-OFF version did.
    */
-  it('POSITIVE CONTROL — flag OFF, the undeclared `data` key IS persisted', async () => {
-    await setFlag('false');
+  it('POSITIVE CONTROL — the raw applier DOES write the undeclared `data` key', () => {
+    const ops = [
+      {
+        op: 'add_node',
+        path: 'fac_risk',
+        value: {
+          id: 'fac_risk',
+          kind: 'factor',
+          label: 'Data Quality Risk',
+          data: { value: 0.4, unit: 'index' },
+        },
+      },
+    ];
 
-    const ctx = {
-      graph: INTERVENTION_GRAPH,
-      analysis_response: null,
-      framing: null,
-      messages: [],
-      scenario_id: 'scn-b5-add-ctl',
-    } as unknown as ConversationContext;
+    const raw = applyPatchOperations(INTERVENTION_GRAPH as unknown as GraphV3T, ops as never);
+    const rawAdded = raw.nodes.find((n) => n.id === 'fac_risk')! as Record<string, unknown>;
 
-    const result = await handleEditGraph(
-      ctx,
-      'Add a data quality risk that affects total cost',
-      makeAdapter(
-        editResponse([
-          {
-            op: 'add_node',
-            path: '/nodes/fac_risk',
-            value: {
-              id: 'fac_risk',
-              kind: 'factor',
-              label: 'Data Quality Risk',
-              data: { value: 0.4, unit: 'index' },
-            },
-            old_value: null,
-            impact: 'moderate',
-            rationale: 'Add the risk factor.',
-          },
-          {
-            op: 'add_edge',
-            path: '/edges/opt_a->fac_risk',
-            value: { from: 'opt_a', to: 'fac_risk', strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
-            old_value: null,
-            impact: 'moderate',
-            rationale: 'Wire the option to the risk.',
-          },
-          {
-            op: 'add_edge',
-            path: '/edges/fac_risk->goal_g',
-            value: { from: 'fac_risk', to: 'goal_g', strength: { mean: -0.3, std: 0.1 }, exists_probability: 0.8, effect_direction: 'negative' },
-            old_value: null,
-            impact: 'moderate',
-            rationale: 'Wire the risk to the goal.',
-          },
-        ]),
-      ),
-      'req-b5-add-ctl',
-      'turn-b5-add-ctl',
-    );
+    // The PRESENCE the absence assertion above must be capable of seeing.
+    expect(rawAdded).toHaveProperty('data');
+    expect(rawAdded.data).toEqual({ value: 0.4, unit: 'index' });
 
-    expect(result.wasRejected).toBe(false);
-    const nodes = (result.appliedGraph as unknown as { nodes: Array<Record<string, unknown>> }).nodes;
-    const added = nodes.find((n) => n.id === 'fac_risk')!;
-
-    // The presence the absence assertion above must be capable of seeing.
-    expect(added).toHaveProperty('data');
+    // …and the parse is what removes it — so promoting the parsed graph is the
+    // thing that makes the absence true, not some unrelated hardening.
+    const parsed = GraphV3.safeParse(raw);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    const parsedAdded = parsed.data.nodes.find((n) => n.id === 'fac_risk')! as Record<string, unknown>;
+    expect(parsedAdded).not.toHaveProperty('data');
   });
 
   it('lands the intervention canonically AND persists no slash-keyed residue', async () => {
@@ -609,14 +593,45 @@ describe('B5 — controls: canonical spellings and flag-off are unaffected', () 
     expect(factorOf(result.appliedGraph).label).toBe('Setup Complexity (revised)');
   });
 
-  it('FLAG OFF — reproduces the legacy silent no-op byte-for-byte', async () => {
-    await setFlag('false');
+  /**
+   * POSITIVE CONTROL for the whole file (trap 13).
+   *
+   * ⚠ 2026-07-25: this REPLACES `FLAG OFF — reproduces the legacy silent no-op
+   * byte-for-byte`, which set the kill-switch and pinned the defect so the
+   * switch was proven to restore the old path. There is no switch any more, but
+   * the control it provided is still needed: without it, "the value is 0.5"
+   * could be true because the fixture was always going to end up at 0.5, and
+   * every assertion in this file would be satisfied by an applier that ignored
+   * the op entirely.
+   *
+   * So the defect mechanism is demonstrated directly instead. Feed the RAW,
+   * uncanonicalised op — the exact shape the live pipeline emits — to
+   * `applyPatchOperations` and observe the two halves of the false success:
+   *
+   *   1. `observed_state.value` does NOT move
+   *   2. a dead root-level `data/value` key IS written
+   *
+   * This is the presence every absence in this file is measured against, and it
+   * is the mechanism that produced four false successes in persisted data.
+   */
+  it('POSITIVE CONTROL — the raw op silently no-ops and leaves a dead junk key', () => {
+    const rawOp = [{ op: 'update_node', path: 'fac_setup', value: { 'data/value': 0.5 } }];
 
-    const result = await runEdit(editResponse([promptTaughtValueOp(0.5)]));
+    const raw = applyPatchOperations(buildGraph() as unknown as GraphV3T, rawOp as never);
+    const node = raw.nodes.find((n) => n.id === 'fac_setup')! as Record<string, unknown>;
 
-    // The legacy behaviour this lane is fixing: reported applied, value unmoved.
-    // Pinned so the kill-switch is proven to actually restore the old path.
-    expect(result.wasRejected).toBe(false);
-    expect(observedOf(result.appliedGraph).value).toBe(0.2);
+    // (1) the value the user asked for never reached the field that is read
+    expect((node.observed_state as Record<string, unknown>).value).toBe(0.2);
+    // (2) …it went to a root-level key with a slash in it instead
+    expect(node['data/value']).toBe(0.5);
+
+    // …and the parse silently STRIPS that key rather than erroring, which is
+    // why the pre-fix code could report the edit applied.
+    const parsed = GraphV3.safeParse(raw);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    const parsedNode = parsed.data.nodes.find((n) => n.id === 'fac_setup')! as Record<string, unknown>;
+    expect(parsedNode).not.toHaveProperty('data/value');
+    expect((parsedNode.observed_state as Record<string, unknown>).value).toBe(0.2);
   });
 });

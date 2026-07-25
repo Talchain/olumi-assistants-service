@@ -36,9 +36,9 @@
  *  - interventions as a canonical top-level `node.interventions` record on the
  *    `add_node` value — `NodeV3.interventions` is a declared field GraphV3
  *    preserves, and `batchFullyLanded` verifies an `add_node` by node PRESENCE,
- *    so the bundle lands without depending on any encoder or the
- *    `CEE_GM_HELD_VALUE_CANONICALISATION` flag (that canonicaliser deliberately
- *    EXCLUDES interventions);
+ *    so the bundle lands without depending on any encoder or on the held-lane
+ *    value-op canonicaliser (which deliberately EXCLUDES interventions —
+ *    `encodeOptionInterventionsForEdit` owns that subtree);
  *  - structural edges (decision->option, option->factor) with the shared
  *    `STRUCTURAL_EDGE_DEFAULTS` (topology, strength 1.0), since the confirm path
  *    does not run `enforceStructuralEdgeDefaults`.

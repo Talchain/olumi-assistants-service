@@ -20,7 +20,10 @@
  * identically, but the SLASH-KEYED `data/value` shape is the one the live
  * pipeline emits.
  *
- * THE FIX (flag `CEE_GM_HELD_VALUE_CANONICALISATION`, default OFF):
+ * THE FIX (UNCONDITIONAL since 2026-07-25; was the flag
+ * `CEE_GM_HELD_VALUE_CANONICALISATION`, default OFF and never set on any
+ * Render service, so this lane's repair had been dark since it shipped while
+ * its REFUSAL — `batchFullyLanded` — was ungated and live):
  * `canonicaliseValueOps` translates those spellings to the one GraphV3
  * preserves — a MERGE onto the node's existing `observed_state` (PLoT's own
  * `update_node` semantics are `deepMerge`, so siblings like `unit` / `cap` /
@@ -32,27 +35,23 @@
  * An op the canonicaliser cannot translate is left verbatim and the guard
  * still refuses the whole batch (pinned below).
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { evaluateEditGraphMutations } from '../edit-graph-referee-gate.js';
 import { executeGmHeldResume, readGmHeldResume } from '../gm-held-execute.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { parseEditGraphResponse } from '../../../orchestrator/tools/edit-graph.js';
+import { canonicaliseValueOps } from '../../../orchestrator/canonicalise-value-ops.js';
 
-// ── flag helpers (pattern: ui-directive-emit.test.ts) ───────────────────────
-
-const FLAG = 'CEE_GM_HELD_VALUE_CANONICALISATION';
-
-async function setFlag(value: 'true' | 'false' | undefined): Promise<void> {
-  if (value === undefined) delete process.env[FLAG];
-  else process.env[FLAG] = value;
-  const { _resetConfigCache } = await import('../../../config/index.js');
-  _resetConfigCache();
-}
-
-afterEach(async () => {
-  await setFlag(undefined);
-});
+// ── no flag helpers ─────────────────────────────────────────────────────────
+//
+// This file used to drive `CEE_GM_HELD_VALUE_CANONICALISATION` through the real
+// env var. The gate is gone (2026-07-25) and the behaviour is unconditional, so
+// the "flag OFF" arms have been REPLACED rather than deleted: each one is now a
+// direct assertion on `canonicaliseValueOps` itself — the module that decides
+// whether an op is translated. That is a strictly better discriminator than the
+// flag was, because it is derived from the source of truth instead of from a
+// switch a reader has to trust. See the notes on the individual tests.
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -187,8 +186,7 @@ describe('R1 — a held mixed batch whose value op is data-spelled APPLIES on co
     old_value: { 'data/value': 0.1 },
   };
 
-  it('flag ON: the value CHANGES on the persisted graph and the structural sibling lands', async () => {
-    await setFlag('true');
+  it('the value CHANGES on the persisted graph and the structural sibling lands', async () => {
     const outcome = holdThenConfirm([LIVE_VALUE_OP, RISK_ADD, RISK_LINK]);
 
     expect(outcome.status).toBe('executed');
@@ -227,16 +225,38 @@ describe('R1 — a held mixed batch whose value op is data-spelled APPLIES on co
     expect(outcome.fact.result.operations_count).toBe(3);
   });
 
-  it('flag OFF: byte-identical to #509 — the whole batch is still honestly refused', async () => {
-    await setFlag('false');
-    const outcome = holdThenConfirm([LIVE_VALUE_OP, RISK_ADD, RISK_LINK]);
-    expect(outcome).toEqual({ status: 'apply_failed', reason: 'incomplete_apply' });
-  });
+  /**
+   * REPLACES the old "flag OFF: byte-identical to #509" arm.
+   *
+   * That test set the kill-switch and asserted the batch was still refused. It
+   * was the POSITIVE CONTROL for the test above: it proved the batch is one the
+   * held lane genuinely could not land, so that "it executes now" means the
+   * canonicaliser is what changed — not that the fixture was landable all along.
+   *
+   * The switch is gone, but the control must not go with it, or the test above
+   * becomes an assertion that some batch executes, which is nearly vacuous. So
+   * the control is re-expressed against the module that actually decides:
+   * `canonicaliseValueOps` must REPORT this op as translated, and the raw
+   * (untranslated) spelling must be one `GraphV3` strips.
+   */
+  it('POSITIVE CONTROL — the op above is one the lane could NOT land untranslated', () => {
+    const { operations, translatedCount } = canonicaliseValueOps(
+      [LIVE_VALUE_OP, RISK_ADD, RISK_LINK] as never,
+      VALUE_GRAPH as never,
+    );
 
-  it('flag DEFAULT (absent): OFF — the capability ships dark', async () => {
-    await setFlag(undefined);
-    const outcome = holdThenConfirm([LIVE_VALUE_OP, RISK_ADD, RISK_LINK]);
-    expect(outcome).toEqual({ status: 'apply_failed', reason: 'incomplete_apply' });
+    // The canonicaliser is what moves this op — exactly one op was rewritten.
+    expect(translatedCount).toBe(1);
+
+    // Before translation the write targets a node-ROOT key with a slash in it,
+    // which is undeclared on NodeV3 and therefore stripped by the re-parse.
+    // That strip is the defect; this is the presence the absence relies on.
+    expect(Object.keys(LIVE_VALUE_OP.value)).toEqual(['data/value']);
+
+    // After translation it targets `observed_state`, which GraphV3 preserves.
+    const rewritten = (operations as Array<{ value: Record<string, unknown> }>)[0];
+    expect(Object.keys(rewritten.value)).toEqual(['observed_state']);
+    expect((rewritten.value.observed_state as Record<string, unknown>).value).toBe(0.5);
   });
 
   it.each([
@@ -245,8 +265,7 @@ describe('R1 — a held mixed batch whose value op is data-spelled APPLIES on co
     ['slash-keyed observed_state/value', { 'observed_state/value': 0.5 }],
     ['dotted observed_state.value', { 'observed_state.value': 0.5 }],
     ['dotted data.value', { 'data.value': 0.5 }],
-  ])('flag ON: %s applies the value', async (_label, value) => {
-    await setFlag('true');
+  ])('%s applies the value', async (_label, value) => {
     const outcome = holdThenConfirm([
       { op: 'update_node', path: 'fac_setup', value },
       RISK_ADD,
@@ -264,61 +283,72 @@ describe('R1 — a held mixed batch whose value op is data-spelled APPLIES on co
 // ── no regression on the cases that already worked ──────────────────────────
 
 describe('R1 — blast radius: the currently-working cases are unchanged', () => {
-  it('canonical observed_state spelling: flag ON produces a graph IDENTICAL to flag OFF', async () => {
+  /**
+   * These three tests used to run the same batch twice — flag OFF, then flag ON
+   * — and assert the two graphs were `toEqual`. With the gate deleted there is
+   * no OFF run to compare against, so the property is now asserted where it
+   * actually lives: `canonicaliseValueOps` must be the IDENTITY on these ops.
+   *
+   * `translatedCount === 0` is the same claim the two-run comparison was making
+   * ("this batch is not affected"), stated directly and without needing a
+   * switch. It is also strictly sharper: the old form would have passed if BOTH
+   * runs were wrong in the same way, and this form cannot.
+   *
+   * The deep-equality on the returned ops is kept because
+   * `canonicalise-value-ops.ts` returns a shallow COPY of the array on the
+   * zero-translation path (its own doc comment claims it returns the input by
+   * reference — that comment is wrong; the elements are identical references
+   * but the array is not). Element identity is what downstream consumers see,
+   * so that is what is asserted.
+   */
+  function assertIdentity(ops: unknown[]) {
+    const { operations, translatedCount } = canonicaliseValueOps(
+      ops as never,
+      VALUE_GRAPH as never,
+    );
+    expect(translatedCount).toBe(0);
+    expect(operations).toEqual(ops);
+    operations.forEach((op, i) => expect(op).toBe(ops[i]));
+  }
+
+  it('canonical observed_state spelling: the canonicaliser is the identity', () => {
     const ops = [
       { op: 'update_node', path: 'fac_setup', value: { observed_state: { value: 0.5 } } },
       RISK_ADD,
       RISK_LINK,
     ];
-    await setFlag('false');
-    const off = holdThenConfirm(ops);
-    await setFlag('true');
-    const on = holdThenConfirm(ops);
-    expect(off.status).toBe('executed');
-    expect(on.status).toBe('executed');
-    if (off.status !== 'executed' || on.status !== 'executed') return;
-    // Byte-identical: the canonicaliser is the IDENTITY on canonical ops,
-    // including the (pre-existing) whole-object replace semantics.
-    expect(on.mutatedGraph).toEqual(off.mutatedGraph);
-    expect(nodeOf(on.mutatedGraph as Record<string, unknown>, 'fac_setup').observed_state).toEqual({
-      value: 0.5,
-    });
+    assertIdentity(ops);
+
+    // …and it still applies, with the (pre-existing) whole-object replace.
+    const outcome = holdThenConfirm(ops);
+    expect(outcome.status).toBe('executed');
+    if (outcome.status !== 'executed') return;
+    expect(
+      nodeOf(outcome.mutatedGraph as Record<string, unknown>, 'fac_setup').observed_state,
+    ).toEqual({ value: 0.5 });
   });
 
-  it('pure-structural hold: flag ON produces a graph IDENTICAL to flag OFF', async () => {
+  it('pure-structural hold: the canonicaliser is the identity', () => {
     const ops = [RISK_ADD, RISK_LINK];
-    await setFlag('false');
-    const off = holdThenConfirm(ops);
-    await setFlag('true');
-    const on = holdThenConfirm(ops);
-    expect(off.status).toBe('executed');
-    expect(on.status).toBe('executed');
-    if (off.status !== 'executed' || on.status !== 'executed') return;
-    expect(on.mutatedGraph).toEqual(off.mutatedGraph);
+    assertIdentity(ops);
+    expect(holdThenConfirm(ops).status).toBe('executed');
   });
 
-  it('a non-value node field (description) is untouched by the canonicaliser', async () => {
+  it('a non-value node field (description) is untouched by the canonicaliser', () => {
     const ops = [
       { op: 'update_node', path: 'fac_setup', value: { description: 'Quarterly complexity' } },
       RISK_ADD,
       RISK_LINK,
     ];
-    await setFlag('false');
-    const off = holdThenConfirm(ops);
-    await setFlag('true');
-    const on = holdThenConfirm(ops);
-    if (off.status !== 'executed' || on.status !== 'executed') {
-      throw new Error('both must execute');
-    }
-    expect(on.mutatedGraph).toEqual(off.mutatedGraph);
+    assertIdentity(ops);
+    expect(holdThenConfirm(ops).status).toBe('executed');
   });
 });
 
 // ── the guard must still bite ───────────────────────────────────────────────
 
 describe('R1 — atomicity doctrine: batchFullyLanded still refuses what it cannot land', () => {
-  it('flag ON: an op in a spelling the canonicaliser does NOT translate still refuses the WHOLE batch', async () => {
-    await setFlag('true');
+  it('an op in a spelling the canonicaliser does NOT translate still refuses the WHOLE batch', () => {
     // `goal_constraints` is a SANCTIONED referee root (so the batch really
     // holds and reaches the confirm) but is undeclared on NodeV3, so the
     // re-parse strips it. The canonicaliser leaves it verbatim — it is not an
@@ -336,8 +366,7 @@ describe('R1 — atomicity doctrine: batchFullyLanded still refuses what it cann
     expect(outcome).toEqual({ status: 'apply_failed', reason: 'incomplete_apply' });
   });
 
-  it('flag ON: a value op targeting an interventions path is NOT rewritten (that subtree has its own reader)', async () => {
-    await setFlag('true');
+  it('a value op targeting an interventions path is NOT rewritten (that subtree has its own reader)', () => {
     // `extractInterventionUpdates` consumes the `data.interventions` spelling
     // FROM THE OP. Rewriting it to observed_state would break that reader, so
     // the canonicaliser leaves it alone and the guard refuses honestly.

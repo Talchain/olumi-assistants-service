@@ -2514,9 +2514,19 @@ export async function handleEditGraph(
     // exactly as `executeGmHeldResume` does it. Ops the canonicaliser cannot
     // translate are left VERBATIM so the landed-op postcondition below can
     // refuse them honestly rather than strip-and-succeed.
-    const opsToApply: PatchOperation[] = config.cee.valueOpCanonicalisationEnabled
-      ? canonicaliseValueOps(operations, context.graph).operations
-      : operations;
+    //
+    // UNCONDITIONAL since 2026-07-25. This was gated on
+    // `CEE_VALUE_OP_CANONICALISATION` (default OFF), which meant the defect
+    // above was live on every real edit. A sweep of all persisted graphs found
+    // FOUR false successes — the number the user asked for written onto the
+    // node as a dead `data/value` key while `observed_state.value` never moved,
+    // and the turn reporting the edit as APPLIED. Freshest 2026-07-23:
+    // "Change the monthly cashflow factor to 0.42" → reported applied, value
+    // still 0.5. Pinned by
+    // `__tests__/persisted-false-success-2026-07-23.test.ts`.
+    //
+    // Rollback is a code revert, not an env flip (no dark launches).
+    const opsToApply: PatchOperation[] = canonicaliseValueOps(operations, context.graph).operations;
 
     let candidateGraph: GraphV3T | undefined;
     try {
@@ -3240,15 +3250,24 @@ export async function handleEditGraph(
     // fail visibly — never strip-and-succeed.
     // `baseValid` is REQUIRED here, not incidental. Without it this block
     // re-parses a graph the synthesis block above deliberately DECLINED to
-    // parse, silently reversing the V5 H5 narrowing: with the flag ON, ANY
-    // edit — including a trivial rename — on a scenario whose base graph fails
-    // strict GraphV3 would return SYNTHESIZED_GRAPH_INVALID, leaving the
-    // scenario permanently uneditable behind copy that invites a rephrase that
-    // can never succeed. When the base is invalid we skip BOTH the re-parse
-    // and the postcondition and fall through to the legacy promotion — the
-    // pre-B5 behaviour exactly.
+    // parse, silently reversing the V5 H5 narrowing: ANY edit — including a
+    // trivial rename — on a scenario whose base graph fails strict GraphV3
+    // would return SYNTHESIZED_GRAPH_INVALID, leaving the scenario permanently
+    // uneditable behind copy that invites a rephrase that can never succeed.
+    // When the base is invalid we skip BOTH the re-parse and the postcondition
+    // and fall through to the legacy promotion — the pre-B5 behaviour exactly.
+    // Measured over every persisted graph: 98.1% have a valid base, so this
+    // block engages on essentially all real traffic.
+    //
+    // UNCONDITIONAL since 2026-07-25 (was `CEE_VALUE_OP_CANONICALISATION`).
+    // The postcondition ships with the canonicaliser above and NOT on its own
+    // switch — deliberately. Measured on the real op corpus: postcondition
+    // WITHOUT the rewriter refuses batches the rewriter would have repaired;
+    // the two together refuse none of them. Shipping the refusal without the
+    // repair is a strictly worse user outcome, and shipping the repair without
+    // the refusal leaves the strip-and-succeed class open for untranslatable
+    // spellings. They are one behaviour change. Do not split them.
     if (
-      config.cee.valueOpCanonicalisationEnabled &&
       appliedGraph &&
       appliedGraphSynthesisedLocally &&
       baseValid

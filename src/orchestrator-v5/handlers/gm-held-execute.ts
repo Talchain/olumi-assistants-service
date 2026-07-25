@@ -45,7 +45,6 @@ import {
   canonicaliseValueOps,
   batchFullyLanded,
 } from '../../orchestrator/canonicalise-value-ops.js';
-import { config } from '../../config/index.js';
 import {
   PatchOperationsArraySchema,
   type ValidatedPatchOperation,
@@ -326,7 +325,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     return { status: 'referee_blocked', governing: decision.governing };
   }
 
-  // ── 2b. Canonicalise value-op field spellings (R1 residual, flag-gated) ─
+  // ── 2b. Canonicalise value-op field spellings (R1 residual) ────────────
   // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op
   // in the edit pipeline's non-canonical field spelling (`{ data: { value } }`,
   // slash-keyed `data/value`, dotted `observed_state.value`) is Object.assign-
@@ -334,12 +333,22 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // silently no-ops while structural siblings land, which #509 refuses WHOLE.
   // Translating those spellings to the one GraphV3 preserves (a merge onto
   // observed_state) makes the value actually apply. Runs AFTER the re-referee
-  // (verdict + telemetry byte-identical) and BEFORE the apply. Flag OFF (the
-  // default) returns the operations unchanged by reference — byte-identical to
-  // #509. The atomicity guard below still backstops any op left untranslated.
-  const opsToApply: PatchOperation[] = config.cee.gmHeldValueCanonicalisationEnabled
-    ? canonicaliseValueOps(operations, input.currentGraph).operations
-    : operations;
+  // (verdict + telemetry byte-identical) and BEFORE the apply. The atomicity
+  // guard below still backstops any op left untranslated.
+  //
+  // UNCONDITIONAL since 2026-07-25 (was `CEE_GM_HELD_VALUE_CANONICALISATION`,
+  // default OFF). This lane's POSTCONDITION (`batchFullyLanded`, below) has
+  // always been ungated, so the gate left the held lane running the refusal
+  // WITHOUT the repair — it declined confirmed batches it could have applied.
+  // Replayed over all 43 real held batches (`pending_actions` where
+  // `handler_id = graph_management_held_v1`): rewriter OFF = 21 land / 2
+  // refuse; rewriter ON = 23 land / 0 refuse; batches that flipped from
+  // landing to refusing = ZERO. One of the two repairs is a real user who
+  // confirmed "Yes, go ahead" on 2026-07-18, was declined, retried five times,
+  // and whose factor value is unchanged in the database to this day.
+  //
+  // Rollback is a code revert, not an env flip (no dark launches).
+  const opsToApply: PatchOperation[] = canonicaliseValueOps(operations, input.currentGraph).operations;
 
   // ── 3. Apply through the existing apply path ──────────────────────────
   let mutatedGraph: PersistedGraphV3T;
