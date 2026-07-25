@@ -72,8 +72,24 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *     NO deploy, so CI alone can never be the whole gate.
  */
 const SERVED_PROMPT_PATH = join(HERE, 'fixtures', 'served-orchestrator-prompt.txt');
-const SERVED_PROMPT_SHA256_16 = '4e8e69f3d721c864'; // orchestrator_default v119
+const SERVED_PROMPT_SHA256_16 = 'adcc5128d4e6e6bc'; // orchestrator_default v120
 const SERVED_PROMPT = readFileSync(SERVED_PROMPT_PATH, 'utf8');
+
+/**
+ * PERMANENT historical control fixture — `orchestrator_default` v119
+ * (`4e8e69f3d721c864`), the prompt that was live when the coach denied stored
+ * decision records and called its own correct answer a fabrication.
+ *
+ * It is pinned SEPARATELY from the live snapshot on purpose. The positive
+ * controls below must keep proving this gate catches the ORIGINAL defect no
+ * matter how many times the served prompt is re-pinned. When the live snapshot
+ * moved v119 -> v120 those controls silently went VACUOUS (v120 sanctions
+ * `older_relevant_facts`, so "the gate catches it" was passing by testing
+ * nothing) — the exact trap #13 shape, inside the controls written to prevent it.
+ */
+const HISTORICAL_V119_PATH = join(HERE, 'fixtures', 'served-orchestrator-prompt-v119-historical.txt');
+const HISTORICAL_V119_SHA256_16 = '4e8e69f3d721c864';
+const HISTORICAL_V119 = readFileSync(HISTORICAL_V119_PATH, 'utf8');
 
 function shortSha256(s: string): string {
   return createHash('sha256').update(s).digest('hex').slice(0, 16);
@@ -93,6 +109,13 @@ const MODEL_FACING_CORPUS = [
   SUMMARY_PRECEDENCE_INSTRUCTION,
 ].join('\n\n');
 
+/** The same corpus composition, built from the v119 historical control prompt. */
+const HISTORICAL_V119_CORPUS = [
+  HISTORICAL_V119,
+  COACHING_CONTEXT_INSTRUCTION,
+  SUMMARY_PRECEDENCE_INSTRUCTION,
+].join('\n\n');
+
 /**
  * Waivers for divergences already FOUND and TRIAGED but not yet fixed (the
  * prompt is owned by another lane). Each is keyed to the prompt hash it was
@@ -107,19 +130,14 @@ const KNOWN_UNSANCTIONED: ReadonlyArray<{
   readonly note: string;
 }> = [
   {
-    field: 'older_relevant_facts',
-    promptSha: '4e8e69f3d721c864',
-    note: 'THE MOTIVATING DEFECT. Pack gained the field 2026-07-24 (#662); served prompt authored 2026-07-23. Coach denies stored decision records and calls its own correct answer a fabrication. Prompt fix owned by the coach-prompt lane.',
-  },
-  {
     field: 'brief',
-    promptSha: '4e8e69f3d721c864',
-    note: 'FOUND BY THIS GATE. The user\'s OWN persisted decision brief (Lane 28) is model-facing and prose-bearing; the served prompt contains ZERO occurrences of "brief" (case-insensitive). Same defect class, previously unnoticed.',
+    promptSha: 'adcc5128d4e6e6bc',
+    note: "FOUND BY THIS GATE, STILL OPEN AT v120. The user's OWN persisted decision brief (Lane 28) is model-facing and prose-bearing; v120 contains ZERO occurrences of \"brief\" (case-insensitive) in 25,149 chars, exactly as v119 did. v120 fixed older_relevant_facts and did not touch this. Same defect class, same closed-world instructions.",
   },
   {
     field: 'analysis.staleness_reason',
-    promptSha: '4e8e69f3d721c864',
-    note: 'FOUND BY THIS GATE (PHANTOM — the INVERSE drift). The served prompt tells the model to use "analysis.staleness_reason (acknowledge before citing results)", but state-trust phase 0 deliberately removed that field from the prompt-visible projection (context-pack-schema.ts header, and ContextPackAnalysisSchema is .strict() so it CANNOT reappear). The model is instructed to acknowledge staleness from a field that is structurally absent on every turn.',
+    promptSha: 'adcc5128d4e6e6bc',
+    note: 'FOUND BY THIS GATE (PHANTOM — the INVERSE drift), STILL OPEN AT v120. The served prompt tells the model to use "analysis.staleness_reason (acknowledge before citing results)", but state-trust phase 0 deliberately removed that field from the prompt-visible projection and ContextPackAnalysisSchema is .strict(), so it CANNOT reappear. A dead instruction on every turn. Carried unchanged from v119 into v120.',
   },
 ];
 
@@ -388,8 +406,10 @@ const SERIALISED = observeSerialised(buildUserMessage(PACK, USER_MESSAGE));
 const LIVE_SHA = shortSha256(SERVED_PROMPT);
 
 describe('prompt ↔ pack sanction gate', () => {
-  it('IDENTITY — the checked-in served-prompt snapshot is the bytes it claims to be', () => {
+  it('IDENTITY — both pinned prompts are the bytes they claim to be', () => {
     expect(shortSha256(SERVED_PROMPT)).toBe(SERVED_PROMPT_SHA256_16);
+    // The historical control fixture must never silently drift either.
+    expect(shortSha256(HISTORICAL_V119)).toBe(HISTORICAL_V119_SHA256_16);
   });
 
   it('FIXTURE_COMPLETENESS — the fixture populates every schema-declared key (this gate can never be blind)', () => {
@@ -452,13 +472,22 @@ describe('prompt ↔ pack sanction gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', () => {
-  it('THE HISTORICAL CASE — served prompt v119 + a pack carrying older_relevant_facts is CAUGHT', () => {
+  it('THE HISTORICAL CASE — prompt v119 + a pack carrying older_relevant_facts is CAUGHT', () => {
     // Exactly the 2026-07-25 production state: prompt 4e8e69f3d721c864 (authored
     // 07-23) against a pack carrying the field #662 added on 07-24. NO waivers.
-    expect(SERVED_PROMPT_SHA256_16).toBe('4e8e69f3d721c864');
+    // Driven from the PERMANENT v119 fixture, so re-pinning the served prompt
+    // can never make this control vacuous (it did, once — see the fixture note).
+    expect(shortSha256(HISTORICAL_V119)).toBe('4e8e69f3d721c864');
     expect(Object.keys(SERIALISED)).toContain('older_relevant_facts');
-    const found = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
+    const found = findUnsanctionedFields(HISTORICAL_V119_CORPUS, SERIALISED, USER_MESSAGE);
     expect(found).toContain('older_relevant_facts');
+  });
+
+  it('THE FIX IS VERIFIED INDEPENDENTLY — the SERVED prompt now sanctions older_relevant_facts', () => {
+    // The counterpart to the control above: same pack, same rules, the prompt
+    // lane's v120. This is the gate ratifying someone else's fix at the bytes.
+    const found = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
+    expect(found).not.toContain('older_relevant_facts');
   });
 
   it('THE TEMPORAL REPRODUCTION — the gate is QUIET before #662 and goes RED the moment #662 lands', () => {
@@ -466,11 +495,11 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
     const prePack = assembleMaximalPack({ olderRelevantFacts: undefined });
     const preSerialised = observeSerialised(buildUserMessage(prePack, USER_MESSAGE));
     expect(Object.keys(preSerialised)).not.toContain('older_relevant_facts');
-    const before = findUnsanctionedFields(MODEL_FACING_CORPUS, preSerialised, USER_MESSAGE);
+    const before = findUnsanctionedFields(HISTORICAL_V119_CORPUS, preSerialised, USER_MESSAGE);
     expect(before).not.toContain('older_relevant_facts');
 
-    // #662 lands — the same prompt, the pack gains the field.
-    const after = findUnsanctionedFields(MODEL_FACING_CORPUS, SERIALISED, USER_MESSAGE);
+    // #662 lands — the same (v119) prompt, the pack gains the field.
+    const after = findUnsanctionedFields(HISTORICAL_V119_CORPUS, SERIALISED, USER_MESSAGE);
     expect(after).toContain('older_relevant_facts');
     // ...and it is a NEW divergence, not pre-existing noise.
     expect(after.filter((f) => !before.includes(f))).toEqual(['older_relevant_facts']);
@@ -479,11 +508,11 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
   it('DISCRIMINATION — the gate responds to the PROMPT side: naming the field turns it GREEN', () => {
     // Proves the gate is not firing for some pack-side reason. Same pack, same
     // rules; the ONLY change is a prompt that sanctions the field.
-    const fixedPrompt = SERVED_PROMPT.replace(
+    const fixedPrompt = HISTORICAL_V119.replace(
       'Use when present: parsed_quantities',
       'Use when present: older_relevant_facts (stored decision records for this scenario — authoritative), parsed_quantities',
     );
-    expect(fixedPrompt).not.toBe(SERVED_PROMPT); // the edit actually applied
+    expect(fixedPrompt).not.toBe(HISTORICAL_V119); // the edit actually applied
     const corpus = [fixedPrompt, COACHING_CONTEXT_INSTRUCTION, SUMMARY_PRECEDENCE_INSTRUCTION].join('\n\n');
     expect(findUnsanctionedFields(corpus, SERIALISED, USER_MESSAGE)).not.toContain('older_relevant_facts');
     // and `brief` — unnamed by that edit — is STILL caught (no blanket pass).
@@ -513,7 +542,7 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
     expect(applyWaivers(phantom, LIVE_SHA)).toEqual([]);
 
     // AFTER A RE-PIN: every waiver expires and every divergence resurfaces.
-    expect(applyWaivers(sanction, otherSha).sort()).toEqual(['brief', 'older_relevant_facts']);
+    expect(applyWaivers(sanction, otherSha).sort()).toEqual(['brief']);
     expect(applyWaivers(phantom, otherSha)).toEqual(['analysis.staleness_reason']);
 
     // No waiver is inert: each one is doing real suppression work today.
@@ -529,11 +558,13 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
       'compound_pattern_matched', 'compound_segments', 'system_event',
       'conversation', 'conversation_summary', 'coaching_context',
       'recent_changes', 'analysis', 'graph', 'parsed_quantities',
+      'older_relevant_facts', // sanctioned by v120
     ]) {
       expect(found, `${quiet} should not fire`).not.toContain(quiet);
     }
-    // Exactly two live findings, both real, both triaged.
-    expect(found.sort()).toEqual(['brief', 'older_relevant_facts']);
+    // One live sanction finding at v120: older_relevant_facts was FIXED by the
+    // prompt lane; `brief` was not touched and remains open.
+    expect(found.sort()).toEqual(['brief']);
   });
 
   it('FIXTURE-BLINDNESS CONTROL — an unpopulated field is CAUGHT, not silently skipped', () => {

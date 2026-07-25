@@ -34,8 +34,12 @@ const SNAPSHOT_PATH = resolve(
   REPO_ROOT,
   'src/orchestrator-v5/context/__tests__/fixtures/served-orchestrator-prompt.txt',
 );
+const HISTORICAL_PATH = resolve(
+  REPO_ROOT,
+  'src/orchestrator-v5/context/__tests__/fixtures/served-orchestrator-prompt-v119-historical.txt',
+);
 
-/** The real served prompt at the time the sanction gate was ratified. */
+/** The prompt that was live during the record-denial defect — the permanent control. */
 const V119_HASH = '4e8e69f3d721c864';
 
 // ---------------------------------------------------------------------------
@@ -59,7 +63,7 @@ describe('evaluateDrift — the comparison discriminates', () => {
     // This is the exact event the alarm exists for: a PMS re-pin, no deploy,
     // no commit — the snapshot silently describes a prompt we no longer serve.
     const v = evaluateDrift({
-      liveHash: 'adcc5128d4e6e6bc', // a different served prompt
+      liveHash: 'adcc5128d4e6e6bc', // v120 — the REAL re-pin this alarm caught live
       snapshotHash: V119_HASH,
       version: 120,
       liveChars: 25_149,
@@ -82,10 +86,18 @@ describe('evaluateDrift — the comparison discriminates', () => {
     expect(v.ok).toBe(false);
   });
 
-  it('the pinned snapshot on disk is the bytes the sanction gate ratified', () => {
+  it('the pinned snapshot exists and the HISTORICAL control fixture is still v119', () => {
     expect(existsSync(SNAPSHOT_PATH)).toBe(true);
-    // Derived from the file, so a re-snapshot without re-ratification is visible here.
-    expect(shortSha256(readFileSync(SNAPSHOT_PATH, 'utf8'))).toBe(V119_HASH);
+    // The LIVE snapshot's identity is owned by the sanction gate's own IDENTITY
+    // test (one source of truth — asserting it here too would be a second
+    // hand-maintained copy of the pin, which is the defect class this estate
+    // keeps re-learning). It legitimately moves on every re-ratification: it
+    // has already gone v119 -> v120.
+    expect(shortSha256(readFileSync(SNAPSHOT_PATH, 'utf8'))).toMatch(/^[0-9a-f]{16}$/);
+    // The HISTORICAL fixture, by contrast, must NEVER move — it is the
+    // permanent control proving the gate catches the original record-denial
+    // defect regardless of how often the served prompt is re-pinned.
+    expect(shortSha256(readFileSync(HISTORICAL_PATH, 'utf8'))).toBe(V119_HASH);
   });
 });
 
