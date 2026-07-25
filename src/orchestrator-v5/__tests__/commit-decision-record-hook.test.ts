@@ -33,7 +33,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 const { storeMock } = vi.hoisted(() => ({
   storeMock: {
     createRecord: vi.fn(),
-    retrieveRecords: vi.fn(async () => []),
+    retrieveRecords: vi.fn(async () => ({ records: [], totalCount: 0 })),
     getStoreCalls: 0,
     throwOnGet: false,
   },

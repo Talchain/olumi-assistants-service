@@ -56,6 +56,7 @@ export type {
   DecisionRecordWriteOutcome,
   DecisionRecordStorePort,
   DecisionRecordRead,
+  DecisionRecordReadPage,
   RetrieveDecisionRecordsOpts,
 } from './store-adapter.js';
 export {

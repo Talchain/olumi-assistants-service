@@ -211,7 +211,11 @@ import {
 import { loadConversationSummaryForInjection } from './rolling-summary/inject.js';
 import { compactGraphForContextPack } from './context/compact-graph-for-contextpack.js';
 import { emitContextBudget } from './context/context-budget-telemetry.js';
-import { getDecisionRecordStore, loadOlderRelevantFactsSection } from './decision-records/index.js';
+import {
+  getDecisionRecordStore,
+  loadOlderRelevantFactsSection,
+  type DecisionRecordsProjection,
+} from './decision-records/index.js';
 import { POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET } from './context/context-policy.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 import {
@@ -1147,6 +1151,10 @@ export async function runTurnExecutor(
    * `v5.context_budget.summary_lag_turns` at the routing emit site.
    */
   let summaryLagForBudget: number | null = null;
+  // Knowledge-over-time (P6): the decision-records projection, carried to the
+  // `v5.context_budget` emit so a dropped record is observable WITHOUT reading
+  // model prose. Null until the read runs / when the scenario has no records.
+  let olderFactsProjectionForBudget: DecisionRecordsProjection | null = null;
   /**
    * V5 Coaching Context Pack v1 — shared deterministic post-check for the two
    * LLM-authored coaching compose branches (coach / converse). When the
@@ -1756,16 +1764,21 @@ export async function runTurnExecutor(
       // decision-records leg keeps its own try/catch → resolves undefined on any
       // fault, so Promise.all rejects only if the summary read does, exactly as
       // the prior sequential `await loadConversationSummaryForInjection` did.
-      const olderFactsPromise: Promise<string | undefined> = context.session_id
+      //
+      // The projection OBJECT is kept, not just its `.text`. Discarding
+      // `truncated`/`totalCount`/`includedCount` here was the third of the
+      // three cuts that made a dropped decision record invisible: the signal
+      // reached no telemetry and no UI, so `v5.context_budget.truncations`
+      // reported `[]` on the very turn a record was evicted.
+      const olderFactsPromise: Promise<DecisionRecordsProjection | undefined> = context.session_id
         ? (async () => {
             try {
-              const projection = await loadOlderRelevantFactsSection({
+              return await loadOlderRelevantFactsSection({
                 store: getDecisionRecordStore(),
                 scenarioId: context.session_id,
                 charBudget: POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
                 requestId,
               });
-              return projection?.text;
             } catch {
               // getDecisionRecordStore() threw (no SUPABASE_* creds) — omit the
               // section; a knowledge-read must never fail a turn.
@@ -1773,7 +1786,7 @@ export async function runTurnExecutor(
             }
           })()
         : Promise.resolve(undefined);
-      const [summaryInjection, olderRelevantFactsSection] = await Promise.all([
+      const [summaryInjection, olderRelevantFactsProjection] = await Promise.all([
         loadConversationSummaryForInjection({
           scenarioId: context.session_id,
           windowTurnsNewestFirst: context.prior_turns,
@@ -1783,6 +1796,7 @@ export async function runTurnExecutor(
         olderFactsPromise,
       ]);
       summaryLagForBudget = summaryInjection.lagTurns;
+      olderFactsProjectionForBudget = olderRelevantFactsProjection ?? null;
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
@@ -1846,7 +1860,7 @@ export async function runTurnExecutor(
         summarisedTurns: summaryInjection.summarisedTurns,
         // Knowledge-over-time (P6): the pre-projected decision-records slice
         // (undefined ⇒ pack key absent ⇒ byte-identity for record-less scenarios).
-        olderRelevantFacts: olderRelevantFactsSection,
+        olderRelevantFacts: olderRelevantFactsProjection?.text,
       });
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
@@ -5894,6 +5908,27 @@ export async function runTurnExecutor(
               kept_chars: t.kept_chars,
               disclosed: true,
             })),
+            // Knowledge-over-time (P6): a decision record dropped by the read's
+            // SQL LIMIT used to be invisible on every channel — this event's
+            // `truncations` read `[]` while a record was being evicted, because
+            // the projection's own `truncated` flag was discarded at the call
+            // site. It is DERIVED from the projection, never re-estimated.
+            ...(olderFactsProjectionForBudget?.truncated === true
+              ? [
+                  {
+                    section: 'older_relevant_facts',
+                    // Records dropped at the SQL LIMIT never entered the
+                    // process, so their chars are unknowable and are not
+                    // fabricated: these two are equal on a pure record drop and
+                    // differ only when the CHAR budget also cut.
+                    original_chars: olderFactsProjectionForBudget.projectableChars,
+                    kept_chars: olderFactsProjectionForBudget.bodyChars,
+                    original_records: olderFactsProjectionForBudget.totalCount,
+                    kept_records: olderFactsProjectionForBudget.includedCount,
+                    disclosed: true,
+                  },
+                ]
+              : []),
           ];
           // S8u tolerance (02 Seam 4 [R8]): the UI's pre-narrowing marker
           // rides INSIDE the analysis_state passthrough carrier. Absent on
