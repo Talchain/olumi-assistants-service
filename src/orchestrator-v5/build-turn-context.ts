@@ -106,6 +106,24 @@ export interface EnrichedTurnContext extends TurnContext {
    */
   readonly prior_turns: readonly SessionTurnWithContent[];
   /**
+   * How many conversation turns EXIST for this scenario — the store's pre-cap
+   * count, not `prior_turns.length`.
+   *
+   * `prior_turns` is a WINDOW (`SESSION_READ_WINDOW_TURNS`, default 20). Its
+   * length was being reported to the LLM as the conversation's total length,
+   * so on a 78-turn scenario the coach said "Total turn count on record for
+   * this conversation is 20" (live probe, build `f00b8ef`, 2026-07-25).
+   *
+   * `null` means UNKNOWN — the count read failed or the store predates
+   * `countTurns` (test mocks). Consumers must then suppress any total rather
+   * than substituting `prior_turns.length`; substituting it is the defect.
+   *
+   * Optional on the type so the many hand-constructed test contexts keep
+   * compiling (mirrors `most_recent_pending_actions`); production
+   * `buildTurnContext` always sets it.
+   */
+  readonly prior_turns_total?: number | null;
+  /**
    * Handler facts for prior_turns (V5 Group 1: used by coaching-cache
    * reader to resolve decision_review enrichment and last coaching signal).
    * Order matches prior_turns (newest-first). Empty array when no prior
@@ -346,7 +364,14 @@ export async function buildTurnContext(
   };
 
   const store = options.sessionStore ?? tryGetSessionStore(requestId, payload.scenario_id);
-  const priorTurns = await fetchPriorTurns(payload.scenario_id, requestId, store);
+  // The window and its true size are read CONCURRENTLY — the count must not
+  // add a serial round-trip to the turn's critical path. `fetchPriorTurns`
+  // returns a window capped at SESSION_READ_WINDOW_TURNS; `fetchPriorTurnsTotal`
+  // returns how many turns actually exist (or null when unknown).
+  const [priorTurns, priorTurnsTotal] = await Promise.all([
+    fetchPriorTurns(payload.scenario_id, requestId, store),
+    fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
+  ]);
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
   // turn PROVABLY continues a prior conversation — the chip can only exist if a
   // prior assistant turn rendered it — so zero prior turns under this scenario_id
@@ -534,6 +559,7 @@ export async function buildTurnContext(
   return {
     ...baseContext,
     prior_turns: priorTurns,
+    prior_turns_total: priorTurnsTotal,
     prior_facts: priorFacts,
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
@@ -902,6 +928,44 @@ async function fetchPriorTurns(
       severity: 'warning',
     });
     return [];
+  }
+}
+
+/**
+ * How many conversation turns EXIST for this scenario (pre-cap), or `null`
+ * when that cannot be established.
+ *
+ * `null` is the honest "I don't know" — the ContextPack projection suppresses
+ * the total rather than substituting the window length. Substituting the
+ * window length is precisely the falsehood this read exists to remove, so the
+ * degraded path must NOT be assume-good; it is telemetered like every other
+ * session-read degradation and the pack falls back to a numberless disclosure.
+ */
+async function fetchPriorTurnsTotal(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<number | null> {
+  // Absent method = a test mock predating countTurns. Production
+  // SupabaseSessionStore always implements it, so this is not a live path;
+  // it degrades to "unknown", never to a fabricated total.
+  if (!store?.countTurns) return null;
+  try {
+    return await store.countTurns(scenarioId);
+  } catch (error) {
+    const errorCode = error instanceof SessionReadError ? error.code : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
+      'V5 buildTurnContext: session.countTurns failed — conversation total will be reported as unknown',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorCode ?? 'unknown',
+      severity: 'warning',
+    });
+    return null;
   }
 }
 

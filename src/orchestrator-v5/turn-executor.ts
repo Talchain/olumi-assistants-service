@@ -1811,6 +1811,12 @@ export async function runTurnExecutor(
       const { contextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
+        // How many turns the conversation ACTUALLY has. `prior_turns` is a
+        // read window (SESSION_READ_WINDOW_TURNS, default 20); reporting its
+        // length as the conversation's length made the pack — and the coach —
+        // state a false total past 20 turns. `null`/undefined = unknown, and
+        // the projection discloses the gap without inventing a number.
+        priorTurnsTotal: context.prior_turns_total,
         // V5 product-state continuity (foamy-bee tranche): thread
         // prior_facts so the assembler can project the `recent_changes`
         // summary. Without this, follow-up state-queries ("what update

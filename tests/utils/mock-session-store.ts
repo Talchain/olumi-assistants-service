@@ -52,6 +52,9 @@ export function createMockSessionStore(
   const complete: Required<SessionStore> = {
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
+    // Consistent with the empty `readRecent` above: no turns read, none
+    // stored. Tests probing the beyond-window disclosure override it.
+    countTurns: async () => 0,
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     invalidateScoped: async (_scenarioId, scope) => ({

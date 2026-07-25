@@ -228,7 +228,14 @@ describe('context budget enforcement at assembly (O-3)', () => {
       analysis: null,
     });
     expect(pack.conversation.recent_turns).toHaveLength(CONTEXT_PACK_RECENT_TURNS_CAP);
-    expect(pack.conversation.window).toEqual({ shown: CONTEXT_PACK_RECENT_TURNS_CAP, available });
+    // The two window counts are what this guard is about — assert them by
+    // name rather than by whole-object equality, so the additive disclosure
+    // string (`notice`, emitted whenever turns exist that the pack does not
+    // show) does not read as a budget cut. This call supplies no
+    // `priorTurnsTotal`, so the numbers stay the window's own length.
+    expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    expect(pack.conversation.window?.available).toBe(available);
+    expect(pack.conversation.window?.summarised).toBeUndefined();
     expect(pack.conversation.turn_count).toBe(available);
   });
 

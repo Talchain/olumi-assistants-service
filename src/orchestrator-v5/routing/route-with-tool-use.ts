@@ -1227,6 +1227,14 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (conversation_summary !== undefined) {
     parts.push('', SUMMARY_PRECEDENCE_INSTRUCTION);
   }
+  // Decision records — CODE-OWNED, a sibling of the two instructions above,
+  // gated by the same condition that put the section on the pack. It replaces
+  // a hand-typed clause in the PMS-served orchestrator prompt that asserted
+  // the OPPOSITE of what the section says about itself; see
+  // OLDER_RELEVANT_FACTS_INSTRUCTION for the archaeology.
+  if (contextPack.older_relevant_facts !== undefined) {
+    parts.push('', OLDER_RELEVANT_FACTS_INSTRUCTION);
+  }
   parts.push('', '## User turn', message);
   return parts.join('\n');
 }
@@ -1346,6 +1354,42 @@ export const SUMMARY_PRECEDENCE_INSTRUCTION = [
   '- Treat CONSTRAINTS & PREFERENCES and OPEN entries as the user’s standing context; do not relitigate RESOLVED threads unless the user reopens them.',
   '- Never echo the [t:…] provenance stamps, turn identifiers, or the slot labels into user-facing text.',
   '- If the summary carries a staleness note, prefer the verbatim conversation turns for anything recent.',
+].join('\n');
+
+/**
+ * Decision-record semantics — CODE-OWNED at this locus, a sibling of
+ * {@link SUMMARY_PRECEDENCE_INSTRUCTION}, appended to the routing user message
+ * only when the `older_relevant_facts` section is on the pack. British English.
+ *
+ * **Why it lives in code.** The same sanction was hand-typed into the
+ * PMS-served orchestrator prompt, and on 2026-07-25 it drifted from the field
+ * it describes inside TWENTY MINUTES: at 14:31 (#690) `older_relevant_facts`
+ * gained an `[INCOMPLETE — N decisions are on record … Do not describe this
+ * list as complete]` line whenever the store's cap hides records; at ~15:00 a
+ * separately-authored prompt version (v120) shipped, still saying of that same
+ * field *"it is the complete set you hold"*. Two lanes, neither aware of the
+ * other, and both live on the same turn. Worse, v120's acceptance evidence
+ * (438 offline replays) predated the disclosure entirely, so the completeness
+ * clause was never measured against the field it describes.
+ *
+ * A sanction that must be kept in step BY HAND, in a different system, on a
+ * different release cadence, is the estate's dominant defect shape. Here it is
+ * emitted by the same condition that puts the section on the pack, from the
+ * same repo and the same commit as the projection that writes the section —
+ * so the two cannot drift.
+ *
+ * The section's own `[INCOMPLETE …]` line remains the authority on the numbers;
+ * this block only says how to READ the section, and never states a count of its
+ * own (a count here would be a second owner of the same number — the very
+ * failure mode being removed). Exported for the byte-level serialisation tests.
+ */
+export const OLDER_RELEVANT_FACTS_INSTRUCTION = [
+  '## Decision records (durable storage — authoritative, and possibly partial)',
+  'The `older_relevant_facts` block above is the scenario’s stored decision records, retrieved from durable storage. Treat what it contains as established fact rather than conversational memory, and never describe a listed record as unverified, ungrounded or fabricated.',
+  '- The block states its own completeness. If it carries an `[INCOMPLETE …]` line, that line is authoritative: more records exist than are shown, and the total it gives is the true total. Do not describe the visible list as complete, and do not answer a "how many" question by counting the entries you can see.',
+  '- With no such line, the entries shown are all the records held for this scenario, so if a decision is not listed say plainly that it is not among your records rather than inferring one.',
+  '- Records that exist but are not shown must not be reconstructed, guessed at, or described by content. Say that an earlier record exists and is not in view.',
+  '- Never quote the `[INCOMPLETE …]` line, the block’s internal field names, or record identifiers into user-facing text — state the substance in plain language.',
 ].join('\n');
 
 // -----------------------------------------------------------------------

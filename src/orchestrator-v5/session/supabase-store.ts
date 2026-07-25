@@ -488,6 +488,42 @@ export class SupabaseSessionStore implements SessionStore {
     return turns;
   }
 
+  /**
+   * Pre-cap turn total for the scenario — see {@link SessionStore.countTurns}
+   * for why this is a separate read rather than a `count` rider on
+   * {@link readRecent}'s SELECT (that SELECT is skipped on an LRU hit, which
+   * is exactly the beyond-window case).
+   *
+   * `head: true` sends no rows at all: PostgREST answers with `Content-Range`
+   * only. The COUNT runs over the same `(scenario_id, created_at DESC)` index
+   * `readRecent` already uses, filtered to one scenario's handful of rows.
+   *
+   * Throws when the count is missing or malformed. There is no fallback on
+   * purpose: falling back to the window length is the falsehood this method
+   * removes, so an assume-good default here would reintroduce it silently.
+   */
+  async countTurns(scenarioId: string): Promise<number> {
+    // SCOPE AT THE BYTES: `.eq('scenario_id', …)` is the only thing between
+    // this service-role read and every other scenario's turns — the client
+    // bypasses RLS. Select the narrowest column; `head: true` returns none.
+    const { count, error } = await this.client
+      .from('v5_conversation_turns')
+      .select('turn_id', { count: 'exact', head: true })
+      .eq('scenario_id', scenarioId);
+    if (error) {
+      throw new SessionReadError(`countTurns(${scenarioId}) failed: ${errMsg(error)}`, {
+        cause: error,
+        code: errCode(error),
+      });
+    }
+    if (typeof count !== 'number' || !Number.isFinite(count) || count < 0) {
+      throw new SessionReadError(
+        `countTurns(${scenarioId}): PostgREST returned no exact count (got ${String(count)})`,
+      );
+    }
+    return count;
+  }
+
   async readFactsFor(
     conversationTurnRowIds: readonly string[],
     handlerId?: V5ActionType,

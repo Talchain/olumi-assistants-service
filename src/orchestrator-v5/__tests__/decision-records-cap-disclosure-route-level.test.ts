@@ -35,6 +35,7 @@ import type {
 import type { DecisionRecordRead } from '../decision-records/store-adapter.js';
 
 import { setTestSink } from '../../utils/telemetry.js';
+import { OLDER_RELEVANT_FACTS_INSTRUCTION } from '../routing/route-with-tool-use.js';
 
 const SCENARIO_ID = randomUUID();
 
@@ -153,6 +154,21 @@ function routingUserMessage(calls: ChatWithToolsArgs[]): string {
   return typeof user!.content === 'string' ? user!.content : JSON.stringify(user!.content);
 }
 
+/**
+ * The `older_relevant_facts` section AS SERIALISED into the routing prompt.
+ *
+ * Scoping matters: the pack now carries a SECOND, unrelated honesty
+ * disclosure — the conversation window's own `[INCOMPLETE …]` line — so a
+ * whole-prompt `not.toContain('INCOMPLETE')` would fail on a disclosure about
+ * a different field entirely. Asserting on this section's own bytes keeps the
+ * negative control measuring the thing it names.
+ */
+function olderRelevantFactsSection(prompt: string): string {
+  const json = prompt.slice(prompt.indexOf('{'), prompt.lastIndexOf('}') + 1);
+  const pack = JSON.parse(json) as { older_relevant_facts?: string };
+  return pack.older_relevant_facts ?? '';
+}
+
 function budgetTruncations(): Array<Record<string, unknown>> {
   return events
     .filter((e) => e.event === 'v5.context_budget')
@@ -188,9 +204,23 @@ describe('decision-records cap — route-level: a dropped record is disclosed AN
     // (1) The model-facing shape. Pre-fix this section listed 8 records under a
     // header reading as a complete record, with no disclosure of any kind.
     expect(prompt).toContain('Prior decisions recorded on this scenario');
-    expect(prompt).toContain('INCOMPLETE');
-    expect(prompt).toContain('9 decisions are on record');
-    expect(prompt).toContain('the true total is 9');
+    // Scoped to THIS section's bytes: the pack also carries a conversation-
+    // window disclosure using the same [INCOMPLETE …] marker, so an
+    // unscoped match would no longer prove the RECORDS section disclosed.
+    const section = olderRelevantFactsSection(prompt);
+    expect(section).toContain('INCOMPLETE');
+    expect(section).toContain('9 decisions are on record');
+    expect(section).toContain('the true total is 9');
+
+    // (1b) And the CODE-OWNED sanction telling the model how to read that
+    // section rides the same turn. Until 2026-07-25 this rule lived only in
+    // the PMS-served prompt, where it drifted to the OPPOSITE claim ("it is
+    // the complete set you hold", v120) within twenty minutes of the
+    // [INCOMPLETE …] line landing. Asserting it HERE — through the real
+    // turn-executor → routing chain — is what proves the emission is
+    // reachable, not merely defined.
+    expect(prompt).toContain(OLDER_RELEVANT_FACTS_INSTRUCTION);
+    expect(prompt).not.toContain('the complete set you hold');
 
     // (2) The telemetry shape. Pre-fix `truncations` was `[]` on this exact
     // turn, because the call site discarded the projection's `truncated` flag.
@@ -222,8 +252,13 @@ describe('decision-records cap — route-level: a dropped record is disclosed AN
     expect(prompt).toContain('Prior decisions recorded on this scenario');
     expect(prompt).toContain('Option 8');
     expect(prompt).toContain('Option 1'); // the oldest at a full cap
-    expect(prompt).not.toContain('INCOMPLETE');
-    expect(prompt).not.toContain('the true total is');
+    // Scoped to THIS section's bytes — see olderRelevantFactsSection. The
+    // positive control above proves the instrument sees a presence, so these
+    // are measured absences.
+    const section = olderRelevantFactsSection(prompt);
+    expect(section).toContain('Option 1');
+    expect(section).not.toContain('INCOMPLETE');
+    expect(section).not.toContain('the true total is');
 
     expect(budgetTruncations().filter((t) => t.section === 'older_relevant_facts')).toHaveLength(0);
     expect(

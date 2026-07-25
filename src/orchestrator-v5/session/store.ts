@@ -161,6 +161,39 @@ export interface SessionStore {
   // conversation projection reads the new fields.
   readRecent(scenarioId: string, limit?: number): Promise<readonly SessionTurnWithContent[]>;
   /**
+   * The PRE-CAP number of conversation turns stored for this scenario — how
+   * many rows `v5_conversation_turns` holds, before {@link readRecent}'s
+   * `LIMIT` throws the older ones away.
+   *
+   * This exists because `readRecent` returns a WINDOW and the ContextPack was
+   * reporting that window's length as the conversation's total length. On a
+   * 78-turn scenario the pack said `turn_count: 20` and the coach told the
+   * user, verbatim, "Total turn count on record for this conversation is 20"
+   * (live probe, build `f00b8ef`, 2026-07-25). The three window numbers agreed
+   * with each other and were jointly false, so no conformance check could see
+   * it. Same defect shape as the decision-record cap fixed in #690, one table
+   * over.
+   *
+   * DELIBERATELY A SEPARATE READ, not a `count: 'exact'` rider on the
+   * `readRecent` SELECT: that SELECT does not run on every turn. The LRU cache
+   * short-circuits it whenever `cached.turns.length >= limit`, which is
+   * precisely the beyond-window case this number exists to describe — so a
+   * count carried on that query would be absent or stale exactly when it
+   * matters, and cacheing + incrementing it on write would make it a
+   * hand-maintained mirror of the table. This is one indexed COUNT per turn,
+   * derived from the source of truth every time.
+   *
+   * MUST throw rather than return an approximation: the caller degrades to
+   * "total unknown" and suppresses the total, which is honest. A silent
+   * fallback to the window length would reproduce the exact falsehood.
+   *
+   * Optional on the interface so existing test mocks aren't forced to
+   * implement it (mirrors {@link readFactsWithTurnFor}); buildTurnContext
+   * treats absence as "total unknown". Production (`SupabaseSessionStore`)
+   * always implements it.
+   */
+  countTurns?(scenarioId: string): Promise<number>;
+  /**
    * Load handler facts for a set of prior conversation turns.
    *
    * **Important:** `conversationTurnRowIds` must be the `v5_conversation_turns.id`
