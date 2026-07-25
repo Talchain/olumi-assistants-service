@@ -11,6 +11,7 @@
 import { log } from "../utils/telemetry.js";
 import type { GraphT, NodeT, EdgeT, FactorDataT, OptionDataT } from "../schemas/graph.js";
 import { isDirectedEdge } from "../schemas/graph.js";
+import { validatorNodePath } from "./violation-paths.js";
 import {
   type GraphValidationInput,
   type GraphValidationResult,
@@ -459,7 +460,7 @@ function validateTopology(
         code: "GOAL_HAS_OUTGOING",
         severity: "error",
         message: `Goal node "${goal.id}" must not have outgoing edges`,
-        path: `nodesById.${goal.id}`,
+        path: validatorNodePath(goal.id),
         context: { outgoingTo: outgoing },
       });
     }
@@ -474,7 +475,7 @@ function validateTopology(
         code: "DECISION_HAS_INCOMING",
         severity: "error",
         message: `Decision node "${decision.id}" must not have incoming edges`,
-        path: `nodesById.${decision.id}`,
+        path: validatorNodePath(decision.id),
         context: { incomingFrom: incoming },
       });
     }
@@ -600,7 +601,7 @@ function validateReachability(
           code: "EXEMPT_UNREACHABLE_OUTCOME_RISK",
           severity: "info",
           message: `Outcome/risk "${node.label ?? node.id}" has no controllable path from decision — decision influence is limited`,
-          path: `nodesById.${node.id}`,
+          path: validatorNodePath(node.id),
           context: { kind: node.kind, nodeId: node.id, reason },
         });
         continue;
@@ -610,7 +611,7 @@ function validateReachability(
         code: "UNREACHABLE_FROM_DECISION",
         severity: "error",
         message: `Node "${node.id}" is not reachable from decision`,
-        path: `nodesById.${node.id}`,
+        path: validatorNodePath(node.id),
         context: { kind: node.kind },
       });
     }
@@ -625,7 +626,7 @@ function validateReachability(
         code: "NO_PATH_TO_GOAL",
         severity: "error",
         message: `Node "${node.id}" has no path to goal`,
-        path: `nodesById.${node.id}`,
+        path: validatorNodePath(node.id),
         context: { kind: node.kind },
       });
     }
@@ -730,7 +731,7 @@ function validateFactorData(
           code: "CONTROLLABLE_MISSING_DATA",
           severity: "error",
           message: `Controllable factor "${factor.id}" missing required data: ${missing.join(", ")}`,
-          path: `nodesById.${factor.id}`,
+          path: validatorNodePath(factor.id),
           context: { missing },
         });
       }
@@ -745,7 +746,7 @@ function validateFactorData(
           code: "OBSERVABLE_MISSING_DATA",
           severity: "error",
           message: `Observable factor "${factor.id}" missing required data: ${missing.join(", ")}`,
-          path: `nodesById.${factor.id}`,
+          path: validatorNodePath(factor.id),
           context: { missing },
         });
       }
@@ -760,7 +761,7 @@ function validateFactorData(
           code: "OBSERVABLE_EXTRA_DATA",
           severity: "error",
           message: `Observable factor "${factor.id}" should not have: ${extra.join(", ")}`,
-          path: `nodesById.${factor.id}`,
+          path: validatorNodePath(factor.id),
           context: { extra },
         });
       }
@@ -776,7 +777,7 @@ function validateFactorData(
           code: "EXTERNAL_HAS_DATA",
           severity: "error",
           message: `External factor "${factor.id}" should not have: ${extra.join(", ")}`,
-          path: `nodesById.${factor.id}`,
+          path: validatorNodePath(factor.id),
           context: { extra },
         });
       }
@@ -788,7 +789,7 @@ function validateFactorData(
         code: "CATEGORY_MISMATCH",
         severity: "error",
         message: `Factor "${factor.id}" declares category "${info.explicitCategory}" but structure indicates "${info.category}"`,
-        path: `nodesById.${factor.id}`,
+        path: validatorNodePath(factor.id),
         context: { explicit: info.explicitCategory, inferred: info.category },
       });
     }
@@ -831,7 +832,7 @@ function validateSemantic(
         code: "NO_EFFECT_PATH",
         severity: "error",
         message: `Option "${option.id}" has no controllable factors with path to goal`,
-        path: `nodesById.${option.id}`,
+        path: validatorNodePath(option.id),
         context: { targets: optionTargets },
       });
     }
@@ -872,7 +873,7 @@ function validateSemantic(
           code: "INVALID_INTERVENTION_REF",
           severity: "error",
           message: `Option "${option.id}" references non-existent node: ${factorId}`,
-          path: `nodesById.${option.id}.data.interventions`,
+          path: `${validatorNodePath(option.id)}.data.interventions`,
           context: { factorId },
         });
       } else if (targetNode.kind !== "factor") {
@@ -880,7 +881,7 @@ function validateSemantic(
           code: "INVALID_INTERVENTION_REF",
           severity: "error",
           message: `Option "${option.id}" intervention references non-factor node: ${factorId} (kind: ${targetNode.kind})`,
-          path: `nodesById.${option.id}.data.interventions`,
+          path: `${validatorNodePath(option.id)}.data.interventions`,
           context: { factorId, actualKind: targetNode.kind },
         });
       }
@@ -907,7 +908,7 @@ function validateSemantic(
           code: "GOAL_NUMBER_AS_FACTOR",
           severity: "error",
           message: `Factor "${label}" appears to be a goal target value, not a causal factor`,
-          path: `nodesById.${factor.id}`,
+          path: validatorNodePath(factor.id),
           context: {
             label,
             factorId: factor.id,
@@ -979,7 +980,7 @@ function validateNumeric(graph: GraphT): ValidationIssue[] {
           code: "NAN_VALUE",
           severity: "error",
           message: `Factor "${node.id}" has invalid numeric value: ${data.value}`,
-          path: `nodesById.${node.id}.data.value`,
+          path: `${validatorNodePath(node.id)}.data.value`,
           context: { value: data.value },
         });
       }
@@ -988,7 +989,7 @@ function validateNumeric(graph: GraphT): ValidationIssue[] {
           code: "NAN_VALUE",
           severity: "error",
           message: `Factor "${node.id}" has invalid baseline: ${data.baseline}`,
-          path: `nodesById.${node.id}.data.baseline`,
+          path: `${validatorNodePath(node.id)}.data.baseline`,
           context: { value: data.baseline },
         });
       }
@@ -1003,7 +1004,7 @@ function validateNumeric(graph: GraphT): ValidationIssue[] {
               code: "NAN_VALUE",
               severity: "error",
               message: `Option "${node.id}" has invalid intervention value for ${factorId}: ${value}`,
-              path: `nodesById.${node.id}.data.interventions.${factorId}`,
+              path: `${validatorNodePath(node.id)}.data.interventions.${factorId}`,
               context: { factorId, value },
             });
           }
@@ -1186,7 +1187,7 @@ function collectWarnings(
         code: "EMPTY_UNCERTAINTY_DRIVERS",
         severity: "warn",
         message: `Controllable factor "${factor.id}" has empty uncertainty_drivers`,
-        path: `nodesById.${factor.id}.data.uncertainty_drivers`,
+        path: `${validatorNodePath(factor.id)}.data.uncertainty_drivers`,
       });
     }
   }
