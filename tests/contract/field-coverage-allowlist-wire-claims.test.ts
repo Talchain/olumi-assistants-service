@@ -63,10 +63,16 @@ import path from "node:path";
 import { transformResponseToV3 } from "../../src/cee/transforms/schema-v3.js";
 import type { V1DraftGraphResponse } from "../../src/cee/transforms/schema-v2.js";
 import { toSafeTransportEnrichment } from "../../src/orchestrator-v5/compose.js";
-import allowlist from "./field-coverage.allowlist.json" with { type: "json" };
 
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const FIXTURE_DIR = path.join(REPO_ROOT, "tests/fixtures/cross-service");
+
+// Read via fs rather than a JSON import attribute: the `with { type: "json" }`
+// form raises TS2823 under the repo-wide tsc config and would add a new file to
+// the typecheck-drift baseline.
+const allowlist: unknown = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "field-coverage.allowlist.json"), "utf8"),
+);
 
 const CLASSIFIED_CATEGORIES = [
   "diagnostic_allowed",

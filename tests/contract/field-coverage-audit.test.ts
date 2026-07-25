@@ -330,7 +330,7 @@ describe("field-coverage audit (v1)", () => {
     };
     const allowedPaths = new Set<string>();
     for (const cat of CLASSIFIED_CATEGORIES) {
-      const map = typedAllowlist[cat] as Readonly<Record<string, string>>;
+      const map = typedAllowlist[cat] as Readonly<Record<string, AllowlistEntry>>;
       for (const k of Object.keys(map)) allowedPaths.add(k);
     }
 
@@ -370,7 +370,7 @@ describe("field-coverage audit (v1)", () => {
     // schema-drift detector the brief asks for.
     const allowedPaths = new Set<string>();
     for (const cat of CLASSIFIED_CATEGORIES) {
-      const map = typedAllowlist[cat] as Readonly<Record<string, string>>;
+      const map = typedAllowlist[cat] as Readonly<Record<string, AllowlistEntry>>;
       for (const k of Object.keys(map)) allowedPaths.add(k);
     }
 
