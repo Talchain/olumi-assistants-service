@@ -109,6 +109,7 @@ import {
 import {
   accountEditParts,
   buildMultiPartRejectionClarify,
+  buildUnmappedPartsNotice,
   buildPartAccountingDisclosure,
   buildReplayOverflowNotice,
   buildSubstitutionClarify,
@@ -2619,6 +2620,38 @@ export async function dispatchEditGraph(
       paDisclosureAppended = true;
     }
   }
+  // Unmapped-part disclosure (#697 follow-up, 2026-07-25 — journey Finding #5).
+  // A quantified limit/cap clause ("cap the upfront spend at 50k") has NO
+  // operation in this lane's vocabulary, so it can never be "covered" and the
+  // conservation accounting above cannot see it: it decomposes to a
+  // non-accountable part, which is exactly why the observed compound left it
+  // in silence while the other half was held. Disclosed here, at the SAME
+  // seam and before the same egress guard, so applied / held / rejected /
+  // no-op branches are all covered. Deliberately NOT gated on
+  // `!editResult.wasRejected`: two of the three observed failures ended on the
+  // generic cajole, which is precisely where the silence was worst.
+  const unmappedNotice = buildUnmappedPartsNotice(
+    partDecomposition.unmappedParts,
+    partDecomposition.accountableParts.length,
+  );
+  if (unmappedNotice !== null) {
+    response = {
+      ...response,
+      assistant_text: appendLapseNotice(response.assistant_text, unmappedNotice),
+    };
+    emit(TelemetryEvents.V5EditGraphPartAccounting, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'edit_graph_unmapped_parts',
+      parts_detected: partDecomposition.unmappedParts.length,
+      parts_covered: 0,
+      parts_uncovered: partDecomposition.unmappedParts.length,
+      missing_target_count: 0,
+      substitution_blocked: false,
+      disclosure_appended: true,
+    });
+  }
+
   if (partAccounting !== null) {
     emit(TelemetryEvents.V5EditGraphPartAccounting, {
       request_id: requestId,

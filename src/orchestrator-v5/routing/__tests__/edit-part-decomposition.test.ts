@@ -21,6 +21,7 @@ import {
   buildReplayOverflowNotice,
   buildStructuralRemainderNotice,
   buildSubstitutionClarify,
+  buildUnmappedPartsNotice,
   decomposeEditMessage,
   oxfordJoin,
   type PatchOperationLike,
@@ -29,6 +30,10 @@ import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
+import {
+  isValueUpdatePhrasing,
+  shouldSuppressEditDispatchForValueUpdate,
+} from '../../../orchestrator/routing/value-update-gate.js';
 
 /** The exact compound message from the 2026-07-20 dress rehearsal (wire 012). */
 const REHEARSAL_MESSAGE =
@@ -634,5 +639,197 @@ describe('buildReplayOverflowNotice — F8 chip-cap disclosure copy', () => {
     expect(notice).toMatch(/add a risk called Attrition/);
     expect(findForbiddenPhraseHit(notice)).toBeNull();
     expect(findSuccessClaimHit(notice)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 'unmapped' parts — journey Finding #5, the silent half-drop (2026-07-25)
+// ---------------------------------------------------------------------------
+//
+// RED-first target: on staging build bdb7a97 the message
+//   "cap the upfront spend at 50k, and add a risk called Head Roaster Departure"
+// replied with the held risk and said NOTHING about the cap. Every assertion
+// below fails if the disclosure is removed; the corpus invariant fails if the
+// new kind is allowed to touch routing.
+
+describe("'unmapped' limit clauses — the silent half-drop", () => {
+  /**
+   * The three compound messages the end-to-end journey observed failing, in the
+   * journey's own words. Each is a two-part request whose limit/cap half the
+   * grammar could not see.
+   */
+  const JOURNEY_COMPOUNDS: ReadonlyArray<readonly [string, string]> = [
+    [
+      'row 1 (cap + add option)',
+      'cap the upfront spend at 50k, and add a fourth option to drop the big account',
+    ],
+    [
+      'row 2 (cap + add risk) — the SILENT one',
+      'cap the upfront spend at 50k, and add a risk called Head Roaster Departure',
+    ],
+  ];
+
+  it.each(JOURNEY_COMPOUNDS)(
+    'classifies the limit half as unmapped and discloses it: %s',
+    (_name, message) => {
+      const d = decomposeEditMessage(message);
+      expect(d.unmappedParts.length).toBe(1);
+      expect(d.unmappedParts[0]!.text).toContain('cap the upfront spend at 50k');
+      // The other half is still served by the ordinary grammar.
+      expect(d.accountableParts.length).toBeGreaterThanOrEqual(1);
+
+      const notice = buildUnmappedPartsNotice(d.unmappedParts, d.accountableParts.length);
+      expect(notice).not.toBeNull();
+      expect(notice!).toContain('cap the upfront spend at 50k');
+      expect(notice!).toContain("haven't taken forward");
+      // No promise the product cannot keep: a solo limit clause is live-proven
+      // NOT to be picked up, so the "tell me that part on its own and I'll pick
+      // it up" tail must not appear here.
+      expect(notice!).not.toContain("I'll pick it up");
+      expect(findForbiddenPhraseHit(notice!)).toBeNull();
+      expect(findSuccessClaimHit(notice!)).toBeNull();
+    },
+  );
+
+  it('recognises the other quantified limit phrasings', () => {
+    const cases = [
+      'keep the marketing spend under 20k',
+      'spend no more than 50k on the shop',
+      'limit the retail build to 30k',
+      'restrict the capital outlay to £25,000',
+    ];
+    for (const c of cases) {
+      const d = decomposeEditMessage(`add a risk called Attrition and ${c}`);
+      expect(d.unmappedParts.length, `expected unmapped for: ${c}`).toBe(1);
+    }
+  });
+
+  it('does NOT claim unquantified limit words (they stay non-disclosing)', () => {
+    // No numeric bound -> not a limit request this lane can be sure about.
+    for (const c of [
+      'limit the options we compare',
+      'add a factor called Capacity cap',
+      'tell me what constrains the decision',
+    ]) {
+      const d = decomposeEditMessage(`add a risk called Attrition and ${c}`);
+      expect(d.unmappedParts.length, `expected NO unmapped for: ${c}`).toBe(0);
+    }
+  });
+
+  it('stays silent when the turn served nothing (no false "you also asked" framing)', () => {
+    const d = decomposeEditMessage('cap the upfront spend at 50k');
+    expect(d.unmappedParts.length).toBe(1);
+    expect(d.accountableParts.length).toBe(0);
+    expect(buildUnmappedPartsNotice(d.unmappedParts, d.accountableParts.length)).toBeNull();
+  });
+
+  it('pluralises without breaking either egress detector', () => {
+    const d = decomposeEditMessage(
+      'add a risk called Attrition and cap the upfront spend at 50k and keep marketing under 20k',
+    );
+    expect(d.unmappedParts.length).toBe(2);
+    const notice = buildUnmappedPartsNotice(d.unmappedParts, d.accountableParts.length)!;
+    expect(notice).toContain('these parts');
+    expect(findForbiddenPhraseHit(notice)).toBeNull();
+    expect(findSuccessClaimHit(notice)).toBeNull();
+  });
+
+  /**
+   * ⭐ CORPUS INVARIANT — the routing no-op proof.
+   *
+   * `accountableParts.length` and `mixedValueStructural` select the serving
+   * lane (`shouldSuppressEditDispatchForValueUpdate`) and gate the whole
+   * conservation-accounting block (`>= 2`). The 'unmapped' kind is only ever
+   * claimed from segments that would otherwise be 'other', and both kinds are
+   * non-accountable, so BOTH signals must be unchanged for every message —
+   * including messages that contain limit clauses.
+   *
+   * Positive control: the corpus must contain messages that DO produce
+   * unmapped parts, otherwise this invariant is vacuous.
+   */
+  it('changes NO routing signal on any message, including limit-bearing ones', () => {
+    const corpus = [
+      // limit-bearing (the new class) — the positive control for this test
+      'cap the upfront spend at 50k, and add a risk called Head Roaster Departure',
+      'set churn to 5% and cap the spend at 50k',
+      'keep the marketing spend under 20k and remove the Shipping costs factor',
+      'limit the retail build to 30k',
+      // the estate's existing pins — must be untouched
+      REHEARSAL_MESSAGE,
+      'set churn to 5% and run the analysis',
+      'Change Support cost to 30 and remove any doubt',
+      'Set churn to 5% and add a hard constraint on churn',
+      'set churn to 5%',
+      'increase price by 10%',
+      'add a factor called Shipping and handling and set Cost to 3',
+      'remove the Shipping costs factor and remove the Packaging factor',
+      'thanks — and can you bump cost, also I think the risk factor is wrong?',
+      'update the model to be more realistic',
+    ];
+
+    let sawUnmapped = 0;
+    for (const message of corpus) {
+      const d = decomposeEditMessage(message);
+      if (d.unmappedParts.length > 0) sawUnmapped += 1;
+      // Derived recomputation of the PRE-CHANGE definitions: accountable was
+      // `kind !== 'other'`, and an unmapped segment was an 'other' segment.
+      const preChangeAccountable = d.parts.filter(
+        (p) => p.kind !== 'other' && p.kind !== 'unmapped',
+      );
+      const preChangeHasValue = preChangeAccountable.some((p) => p.kind === 'value');
+      const preChangeHasStructural = preChangeAccountable.some(
+        (p) =>
+          p.kind === 'structural_add' || p.kind === 'structural_remove' || p.kind === 'link',
+      );
+      expect(d.accountableParts.length, `accountable drifted on: ${message}`).toBe(
+        preChangeAccountable.length,
+      );
+      expect(d.mixedValueStructural, `mixedValueStructural drifted on: ${message}`).toBe(
+        preChangeHasValue && preChangeHasStructural,
+      );
+      // Disjointness: an unmapped part is never accountable.
+      for (const u of d.unmappedParts) {
+        expect(d.accountableParts).not.toContain(u);
+      }
+    }
+    // Positive control — the corpus must actually exercise the new class.
+    expect(sawUnmapped).toBeGreaterThanOrEqual(4);
+  });
+
+  it('leaves the value-update suppressor byte-identical on limit-bearing messages', () => {
+    for (const m of [
+      'set churn to 5% and cap the spend at 50k',
+      'set churn to 5%',
+      'cap the upfront spend at 50k',
+      REHEARSAL_MESSAGE,
+    ]) {
+      const d = decomposeEditMessage(m);
+      // The suppressor reads ONLY mixedValueStructural (value-update-gate.ts:413).
+      expect(shouldSuppressEditDispatchForValueUpdate(m)).toBe(
+        isValueUpdatePhrasing(m) && !d.mixedValueStructural,
+      );
+    }
+  });
+});
+
+/**
+ * KNOWN RESIDUAL, pinned deliberately so it cannot rot into a silent surprise:
+ * segmentation is untouched by the 'unmapped' work. `COMMA_VERB_SEAM` splits a
+ * bare comma only when a listed EDIT verb follows, and the limit verbs are not
+ * on that list, so "add a risk called X, cap spend at 50k" stays ONE segment
+ * and the cap is not disclosed. Widening the seam list would change
+ * segmentation for every message, which is exactly the class of change the
+ * corpus invariant above cannot police, so it is deliberately out of scope.
+ * Both journey compounds used ", and " / " and ", which do split.
+ */
+describe("'unmapped' — disclosed residual: comma-only seams", () => {
+  it('does not split a bare-comma limit clause (documented gap, not a regression)', () => {
+    const d = decomposeEditMessage('add a risk called Attrition, cap the upfront spend at 50k');
+    expect(d.unmappedParts.length).toBe(0);
+    // …whereas the conjunction form DOES disclose.
+    const withAnd = decomposeEditMessage(
+      'add a risk called Attrition and cap the upfront spend at 50k',
+    );
+    expect(withAnd.unmappedParts.length).toBe(1);
   });
 });

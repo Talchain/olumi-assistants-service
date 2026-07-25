@@ -359,3 +359,63 @@ describe('single-part messages are untouched', () => {
     expect(partAccountingEvents()).toHaveLength(0);
   });
 });
+
+// ── 4. Unmapped parts: the journey's silent half-drop (2026-07-25) ───
+//
+// RED-first target, reproduced live on staging build bdb7a97:
+//   "cap the upfront spend at 50k, and add a risk called Head Roaster Departure"
+// → "I'm holding these changes rather than applying them straight away: add
+//    risk 'Head Roaster Departure' …" and NOT ONE WORD about the cap.
+// The limit clause has no operation in this lane's vocabulary, so it is a
+// non-accountable part: `accountableParts.length` was 1 and the whole
+// accounting block (gated on >= 2) never engaged. The disclosure below is
+// what the user must now see in the SAME turn.
+
+describe('unmapped parts are disclosed in the same turn', () => {
+  const JOURNEY_MESSAGE =
+    'cap the upfront spend at 50k, and add a new factor called Shipping costs that reduces EU Market Demand';
+
+  it('the served half narrates AND the dropped limit half is named', async () => {
+    setMode('live');
+    const { response } = await runDispatch(JOURNEY_MESSAGE, [
+      ADD_SHIPPING_NODE,
+      LEGITIMATE_EDGE,
+    ]);
+    const text = (response as { assistant_text: string }).assistant_text;
+    // The user's own words for the part that did not land.
+    expect(text).toContain('cap the upfront spend at 50k');
+    expect(text).toMatch(/haven'?t taken forward/i);
+    // …and it is honest about why, without promising a re-send will work.
+    expect(text).toMatch(/nothing in it enforces/i);
+    expect(text).not.toMatch(/I'?ll pick it up/i);
+
+    const ev = partAccountingEvents().find(
+      (e) => e.data.dispatch_path === 'edit_graph_unmapped_parts',
+    );
+    expect(ev, 'unmapped-part accounting event must be emitted').toBeDefined();
+    expect(ev!.data.parts_uncovered).toBe(1);
+    expect(ev!.data.disclosure_appended).toBe(true);
+  });
+
+  it('a message with NOTHING else in it grows no disclosure (no false partial framing)', async () => {
+    setMode('live');
+    const { response } = await runDispatch('cap the upfront spend at 50k', []);
+    const text = (response as { assistant_text: string }).assistant_text;
+    expect(text).not.toMatch(/haven'?t taken forward/i);
+    expect(
+      partAccountingEvents().filter(
+        (e) => e.data.dispatch_path === 'edit_graph_unmapped_parts',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('an ordinary compound with no limit clause is byte-identical (no unmapped event)', async () => {
+    setMode('live');
+    await runDispatch(EXISTING_TARGET_MESSAGE, [ADD_SHIPPING_NODE, LEGITIMATE_EDGE]);
+    expect(
+      partAccountingEvents().filter(
+        (e) => e.data.dispatch_path === 'edit_graph_unmapped_parts',
+      ),
+    ).toHaveLength(0);
+  });
+});

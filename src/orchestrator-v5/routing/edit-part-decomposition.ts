@@ -69,11 +69,48 @@ export type EditPartKind =
   | 'structural_add'
   | 'structural_remove'
   | 'link'
+  /**
+   * A clause with a recognisable, POSITIVELY-CLASSIFIED edit intent that this
+   * lane has no operation vocabulary for, so no returned operation can ever
+   * cover it (#697 follow-up, 2026-07-25). Today: quantified limit/cap
+   * clauses only — see {@link UNMAPPED_LIMIT_VERB_PATTERN}.
+   *
+   * NOT accountable (see {@link PART_KIND_ACCOUNTABLE}) — attribution against
+   * operations is meaningless for a request no operation can express, and
+   * making it accountable would move the `accountableParts.length >= 2`
+   * routing gate and `mixedValueStructural`. It is instead DISCLOSED by
+   * {@link buildUnmappedPartsNotice} whenever the same message also carried
+   * something this lane could act on, so the user is never told about half
+   * their request and left to assume the rest landed.
+   *
+   * ⚠ ADDING A MEMBER: requires an at-the-bytes proof that NO live path
+   * serves the phrasing. A servable intent misfiled here would tell the user
+   * their edit was dropped when it landed, which is worse than silence.
+   */
+  | 'unmapped'
   /** A clause with a conjunction seam but no recognisable edit intent
    *  ("run the analysis", "tell me more"). NEVER accounted — other
    *  machinery owns those; failing closed on low confidence here would
-   *  spray clarifies over legitimate messages. */
+   *  spray clarifies over legitimate messages. This is the FALL-THROUGH
+   *  (classifySegment's final return), never a positive classification. */
   | 'other';
+
+/**
+ * Which kinds participate in conservation accounting. An ALLOWLIST keyed by
+ * the kind union, so TypeScript forces every future kind to declare itself
+ * (derive, don't mirror — a `!== 'other'` blacklist silently enrolled any new
+ * kind into the `>= 2` routing gate and `mixedValueStructural`, which select
+ * the serving lane in value-update-gate.ts). New kinds default to NOT
+ * accountable, which is the direction that cannot change routing by accident.
+ */
+const PART_KIND_ACCOUNTABLE: Readonly<Record<EditPartKind, boolean>> = {
+  value: true,
+  structural_add: true,
+  structural_remove: true,
+  link: true,
+  unmapped: false,
+  other: false,
+};
 
 export interface DecomposedEditPart {
   /** Document-order index over ALL segments (including 'other'). */
@@ -98,8 +135,16 @@ export interface DecomposedEditPart {
 
 export interface EditPartDecomposition {
   readonly parts: readonly DecomposedEditPart[];
-  /** Parts that participate in conservation accounting (kind !== 'other'). */
+  /** Parts that participate in conservation accounting (see
+   *  {@link PART_KIND_ACCOUNTABLE}). */
   readonly accountableParts: readonly DecomposedEditPart[];
+  /**
+   * Positively-classified sub-requests this lane has no operation for, so no
+   * returned operation can cover them. Disclosed rather than accounted — see
+   * the 'unmapped' member of {@link EditPartKind} and
+   * {@link buildUnmappedPartsNotice}. Disjoint from `accountableParts`.
+   */
+  readonly unmappedParts: readonly DecomposedEditPart[];
   /**
    * True when the message mixes >= 1 value part with >= 1 structural/link
    * part — the exact scope #549's compound VALUE detector is blind to.
@@ -160,6 +205,48 @@ const RELATIONAL_VERB_PATTERN =
 /** Standalone link clause ("link it to Gross margin"). */
 const LINK_VERB_PATTERN =
   /\b(?:link|connect)\b[^,;.]*?\bto\s+(?:the\s+)?["'‘’“”]?(.{1,60}?)["'‘’“”]?(?=$|[,.;:!?])/i;
+
+/**
+ * Quantified LIMIT / CAP clauses — "cap the upfront spend at 50k", "keep
+ * marketing under 20k", "spend no more than 50k on the shop".
+ *
+ * WHY THESE ARE 'unmapped' AND NOT 'value' (verified at the bytes, 2026-07-25):
+ *  - `PatchOperation` (orchestrator/types.ts) has exactly five ops —
+ *    add_node / add_edge / update_node / remove_node / remove_edge. None of
+ *    them expresses a BOUND on a value, so no operation the edit lane can
+ *    return could ever cover such a clause.
+ *  - value-update-gate.ts clause D re-admits constraint intent ONLY for the
+ *    explicit noun "constraint(s)" (`CONSTRAINT_PATTERN_SOURCE`), which these
+ *    phrasings do not carry, so they are not routed to `add_constraint`
+ *    either. The gate's own doc states the reason: "the V4 edit_graph lane
+ *    has no constraint operation whatsoever."
+ *  - Live probe on staging build bdb7a97 (2026-07-25): "cap the upfront spend
+ *    at 50k" sent ALONE returned a non-sequitur clarify and changed nothing;
+ *    sent as half of a compound it was silently dropped while the other half
+ *    was held — the defect this classification exists to disclose.
+ *
+ * Both a limit VERB (or limit PHRASE) and a numeric token are required, so
+ * unquantified uses ("limit the options we compare", "add a factor called
+ * Capacity cap") stay 'other' and behave exactly as they do today.
+ */
+const UNMAPPED_LIMIT_VERB_PATTERN =
+  /\b(?:cap|caps|capped|capping|limit|limits|limited|limiting|restrict|restricts|restricted|restricting|constrain|constrains|constrained|constraining)\b/i;
+
+/** Limit phrasings that carry no limit verb ("no more than 50k", "at most 20k"). */
+const UNMAPPED_LIMIT_PHRASE_PATTERN =
+  /\b(?:no\s+more\s+than|no\s+higher\s+than|no\s+lower\s+than|at\s+most|at\s+least|not\s+exceed|maximum\s+of|minimum\s+of|max\s+of|min\s+of)\b/i;
+
+/** "keep/hold X under|below|above|over <number>" — a bound without a limit verb. */
+const UNMAPPED_KEEP_BOUND_PATTERN = new RegExp(
+  `\\b(?:keep|keeps|keeping|hold|holds|holding|stay|stays|staying)\\b[^,;.]{0,60}?\\b(?:under|below|above|over|beneath|within|beyond)\\s+${NUMERIC_TOKEN_SOURCE}`,
+  'i',
+);
+
+/** The numeric bound a limit clause must carry to be claimed as 'unmapped'. */
+const UNMAPPED_BOUND_CONNECTOR_PATTERN = new RegExp(
+  `\\b(?:at|to|of|under|below|above|over|beneath|within|beyond|than)\\s+${NUMERIC_TOKEN_SOURCE}`,
+  'i',
+);
 
 /** Removal-target extraction ("remove the Shipping costs factor"). */
 const REMOVE_TARGET_PATTERN =
@@ -449,6 +536,23 @@ function classifySegment(segment: string, index: number): DecomposedEditPart {
     return { index, text: segment, kind: 'link', namedTargets, newLabels };
   }
 
+  // UNMAPPED: a quantified limit/cap clause. Checked LAST, immediately before
+  // the fall-through, so it can only ever claim a segment that would otherwise
+  // be 'other' — every clause the grammar above classifies is untouched, and
+  // both 'unmapped' and 'other' are non-accountable, so `accountableParts` and
+  // `mixedValueStructural` (and therefore every routing decision that reads
+  // them) are byte-identical for EVERY input. Pinned by the corpus invariant
+  // test in __tests__/edit-part-decomposition.test.ts.
+  if (
+    (UNMAPPED_LIMIT_VERB_PATTERN.test(segment) &&
+      UNMAPPED_BOUND_CONNECTOR_PATTERN.test(segment)) ||
+    (UNMAPPED_LIMIT_PHRASE_PATTERN.test(segment) &&
+      UNMAPPED_BOUND_CONNECTOR_PATTERN.test(segment)) ||
+    UNMAPPED_KEEP_BOUND_PATTERN.test(segment)
+  ) {
+    return { index, text: segment, kind: 'unmapped', namedTargets, newLabels };
+  }
+
   return { index, text: segment, kind: 'other', namedTargets, newLabels };
 }
 
@@ -459,7 +563,8 @@ function classifySegment(segment: string, index: number): DecomposedEditPart {
 export function decomposeEditMessage(message: string): EditPartDecomposition {
   const segments = splitIntoSegments(message);
   const parts = segments.map((segment, i) => classifySegment(segment, i));
-  const accountableParts = parts.filter((p) => p.kind !== 'other');
+  const accountableParts = parts.filter((p) => PART_KIND_ACCOUNTABLE[p.kind]);
+  const unmappedParts = parts.filter((p) => p.kind === 'unmapped');
   const hasValue = accountableParts.some((p) => p.kind === 'value');
   const hasStructural = accountableParts.some(
     (p) => p.kind === 'structural_add' || p.kind === 'structural_remove' || p.kind === 'link',
@@ -467,6 +572,7 @@ export function decomposeEditMessage(message: string): EditPartDecomposition {
   return {
     parts,
     accountableParts,
+    unmappedParts,
     mixedValueStructural: hasValue && hasStructural,
   };
 }
@@ -863,6 +969,51 @@ export function buildPartAccountingDisclosure(
 
   if (sentences.length === 0) return null;
   return sentences.join(' ');
+}
+
+/**
+ * DISCLOSURE for the 'unmapped' parts of a compound message (#697 follow-up,
+ * 2026-07-25 — the end-to-end journey's Finding #5).
+ *
+ * THE DEFECT THIS CLOSES. On staging build `bdb7a97`, "cap the upfront spend
+ * at 50k, and add a risk called Head Roaster Departure" replied with the held
+ * risk proposal and said NOTHING about the cap. The conservation law could not
+ * see it: the cap clause carries no verb in any grammar above, so it fell
+ * through to 'other', `accountableParts.length` was 1, and the whole
+ * accounting block (edit-graph-dispatch.ts, gated on `>= 2`) never engaged.
+ * The user asked for two things, got one, and was told nothing about the
+ * other. Several turns later the same product could state accurately that the
+ * cap "was never applied" and that "nothing in the graph currently enforces
+ * it" — so the information was always available; only the turn that owed it
+ * stayed silent. This builder says it at the time.
+ *
+ * Returns null when there is no unmapped part, and null when the message
+ * carried NOTHING this lane could act on (`accountableCount === 0`): a turn
+ * that served nothing already owns its own clarify copy, and "I haven't taken
+ * forward this part" framing would imply another part landed.
+ *
+ * Copy discipline as elsewhere in this file: British English, no em dashes,
+ * no internal vocabulary, and deliberately NOT reusing the "Tell me that part
+ * on its own and I'll pick it up" tail — the same live probe proved a solo
+ * limit clause does NOT get picked up, and a promise the product cannot keep
+ * is the defect wearing a friendlier face. Swept against both egress
+ * detectors (FORBIDDEN_USER_FACING_PHRASES, SUCCESS_CLAIM_PATTERNS).
+ */
+export function buildUnmappedPartsNotice(
+  unmappedParts: readonly DecomposedEditPart[],
+  accountableCount: number,
+): string | null {
+  if (unmappedParts.length === 0) return null;
+  if (accountableCount === 0) return null;
+  const many = unmappedParts.length > 1;
+  const clauses = oxfordJoin(unmappedParts.map((p) => `"${clampClause(p.text)}"`));
+  return (
+    `I haven't taken forward ${many ? 'these parts' : 'this part'} of your request: ` +
+    `${clauses}. I can't set ${many ? 'limits' : 'a limit'} like that in the model here, ` +
+    `so nothing in it enforces ${many ? 'them' : 'that'}. If ${many ? 'they matter' : 'it matters'} ` +
+    `to the decision, tell me and I'll add ${many ? 'them as factors or risks' : 'it as a factor or a risk'} ` +
+    `you can weigh.`
+  );
 }
 
 /**
