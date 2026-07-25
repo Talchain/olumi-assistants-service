@@ -61,6 +61,7 @@ import {
   ANTHROPIC_OPTIONAL_PARAM_LIMIT,
   DRAFT_SOFT_EDGE_CAP,
   DRAFT_SOFT_NODE_CAP,
+  RUNAWAY_PRONE_NODE_DATA_KEYS,
   buildDraftGraphSchema,
   countOptionalParams,
   countUnionParams,
@@ -345,8 +346,18 @@ describe("v12 — buildDraftGraphSchema() (structure-only: topology_plan + coach
 
   it("spends NO optional-parameter slot and shrinks the grammar", () => {
     const v12 = buildDraftGraphSchema();
-    // Removing REQUIRED string properties cannot add optional params.
-    expect(countOptionalParams(v12)).toBe(countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
+    // ⚠ FLIP, DISCLOSED (v13, 2026-07-25). This assertion used to read
+    // `toBe(countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA))` — the v12 cut
+    // removed only REQUIRED top-level keys, so the optional count was unchanged.
+    // v13 additionally removes `data.display_value`, which IS optional (it is
+    // not in node.data's `required` list), so the sent grammar now spends
+    // strictly FEWER optional slots than the base. Re-aimed rather than
+    // deleted: the property the test exists to protect is "the sent grammar
+    // never spends MORE of the 24-slot budget than the base", and that is now
+    // asserted directly and derived, not mirrored against a literal.
+    const baseOptional = countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
+    expect(countOptionalParams(v12)).toBe(baseOptional - RUNAWAY_PRONE_NODE_DATA_KEYS.length);
+    expect(countOptionalParams(v12)).toBeLessThanOrEqual(baseOptional);
     expect(countOptionalParams(v12)).toBeLessThanOrEqual(ANTHROPIC_OPTIONAL_PARAM_LIMIT);
     // Union budget untouched (all three were plain strings, not unions).
     expect(countUnionParams(v12)).toBe(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
