@@ -165,6 +165,9 @@ beforeEach(() => {
     performed: true as const,
     persisted_row_id: 'row-1',
     graphPersisted: true,
+    // §3.2: the analysis hash of the bytes actually written. This echo mock
+    // persists nothing, so `null` is the honest value.
+    persistedAnalysisGraphHash: null,
     pendingLifecycle: {
       priorCount: 0,
       consumedCount: 0,
