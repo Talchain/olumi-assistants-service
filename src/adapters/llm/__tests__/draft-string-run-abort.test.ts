@@ -124,8 +124,7 @@ describe('⭐ the per-string-value ceiling ABORTS a runaway and the abort is vis
     h.runawayFirstAttempt = true;
 
     const result = await draftGraphWithAnthropic(
-      { brief: 'SaaS customer support is getting overwhelmed.', docs: [] },
-      { requestId: 'string-run-abort-1' },
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
     );
 
     // THE MECHANISM EXECUTED: a second generation was started, which only
@@ -164,8 +163,7 @@ describe('⭐ the per-string-value ceiling ABORTS a runaway and the abort is vis
     h.runawayFirstAttempt = false;
 
     const result = await draftGraphWithAnthropic(
-      { brief: 'SaaS customer support is getting overwhelmed.', docs: [] },
-      { requestId: 'string-run-abort-control' },
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
     );
 
     expect(h.callCount).toBe(1);
