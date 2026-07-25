@@ -136,7 +136,10 @@ import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
-import { impliesOptionInterventionEdit } from './routing/option-intervention-guard.js';
+import {
+  collectOptionGuardLabels,
+  impliesOptionInterventionEdit,
+} from './routing/option-intervention-guard.js';
 import { detectConfigureOptionIntent } from './routing/configure-option-intent.js';
 import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
 import {
@@ -6162,17 +6165,15 @@ export async function runTurnExecutor(
       if (
         validationResult.valid &&
         proposedHandlerId === 'set_factor_value' &&
-        impliesOptionInterventionEdit(
-          userMessageForTurn ?? '',
-          graphLookupForValidate
-            ? graphLookupForValidate
-                .listEntitiesByKind('option')
-                .map((entity) => entity.label)
-                .filter((label): label is string =>
-                  typeof label === 'string' && label.trim().length > 0,
-                )
-            : [],
-        )
+        ((): boolean => {
+          if (!graphLookupForValidate) return false;
+          const guardLabels = collectOptionGuardLabels(graphLookupForValidate);
+          return impliesOptionInterventionEdit(
+            userMessageForTurn ?? '',
+            guardLabels.optionLabels,
+            guardLabels.nonOptionLabels,
+          );
+        })()
       ) {
         validationResult = {
           valid: false,

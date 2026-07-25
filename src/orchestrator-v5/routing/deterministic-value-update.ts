@@ -65,7 +65,10 @@ import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
-import { impliesOptionInterventionEdit } from './option-intervention-guard.js';
+import {
+  collectOptionGuardLabels,
+  impliesOptionInterventionEdit,
+} from './option-intervention-guard.js';
 
 const EDIT_VERB_PATTERN =
   /\b(increase|decrease|reduce|raise|lower|set|change|update|make|adjust)\b/i;
@@ -471,11 +474,14 @@ export function tryDeterministicValueUpdate(
   // see the SkipReason doc for why (this pre-route would otherwise
   // substring-match the shared factor named alongside the option and
   // confidently misroute onto it).
-  const optionLabelsForGate = graphLookup
-    .listEntitiesByKind('option')
-    .map((entity) => entity.label)
-    .filter((label): label is string => typeof label === 'string' && label.trim().length > 0);
-  if (impliesOptionInterventionEdit(message, optionLabelsForGate)) {
+  const guardLabels = collectOptionGuardLabels(graphLookup);
+  if (
+    impliesOptionInterventionEdit(
+      message,
+      guardLabels.optionLabels,
+      guardLabels.nonOptionLabels,
+    )
+  ) {
     return { matched: false, skip_reason: 'option_intervention_edit' };
   }
 
@@ -867,13 +873,14 @@ export function tryCompoundValueUpdate(
     }
   }
 
-  const optionLabelsForGate = graphLookup
-    .listEntitiesByKind('option')
-    .map((entity) => entity.label)
-    .filter(
-      (label): label is string => typeof label === 'string' && label.trim().length > 0,
-    );
-  if (impliesOptionInterventionEdit(message, optionLabelsForGate)) {
+  const guardLabels = collectOptionGuardLabels(graphLookup);
+  if (
+    impliesOptionInterventionEdit(
+      message,
+      guardLabels.optionLabels,
+      guardLabels.nonOptionLabels,
+    )
+  ) {
     return { matched: false, skip_reason: 'option_intervention_edit' };
   }
 
@@ -1128,11 +1135,14 @@ export function tryDeicticValueUpdate(
   // with option-intervention framing ("Increase that factor within the
   // Outsource option to £50k") must reach the LLM's option_configuration
   // routing, not resolve deterministically onto the selected factor.
-  const optionLabelsForGate = graphLookup
-    .listEntitiesByKind('option')
-    .map((entity) => entity.label)
-    .filter((label): label is string => typeof label === 'string' && label.trim().length > 0);
-  if (impliesOptionInterventionEdit(message, optionLabelsForGate)) {
+  const guardLabels = collectOptionGuardLabels(graphLookup);
+  if (
+    impliesOptionInterventionEdit(
+      message,
+      guardLabels.optionLabels,
+      guardLabels.nonOptionLabels,
+    )
+  ) {
     return { matched: false, skip_reason: 'option_intervention_edit' };
   }
   if (selectedFactorIds.length === 0) {
