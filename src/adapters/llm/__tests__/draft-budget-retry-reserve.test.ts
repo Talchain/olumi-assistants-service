@@ -55,17 +55,17 @@ describe('F-4 — abort authorization is reconciled to the skip-gate floor', () 
     // ⚠ RE-AIMED 2026-07-25 (FAST-ABORT). The floor the two runaway gates check
     // moved from LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR (2,700) to the evidence-
     // derived converged-draft requirement (`viableRunawayRetryFloorTokens()`,
-    // 3,407). This time-domain twin tracks THAT floor — the whole point of the
+    // 3,581). This time-domain twin tracks THAT floor — the whole point of the
     // F-4 derivation is that the two cannot disagree, so it must follow it.
-    // Leaving it at 45,000 would re-open the contradiction in [45.0s, 52.86s).
+    // Leaving it at 45,000 would re-open the contradiction in [45.0s, 54.79s).
     const derived = Math.ceil(
       (viableRunawayRetryFloorTokens() / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S +
         DRAFT_TTFB_SAFETY_OVERHEAD_S) *
         1000,
     );
     expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(derived);
-    // Sanity: with today's primitives that is 52.856s (the gate's time floor).
-    expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(52_856);
+    // Sanity: with today's primitives that is 54.789s (the gate's time floor).
+    expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(54_789);
     // …and it is still strictly above what the OLD 2,700 floor implied, so the
     // reserve only ever became MORE conservative, never less.
     expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBeGreaterThan(

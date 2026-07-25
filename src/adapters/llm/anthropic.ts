@@ -1310,7 +1310,7 @@ export async function draftGraphWithAnthropic(
           // armed and `runaway_abort_count` was 0 on all 30 live observations.
           // A runaway never reaches the edges array, so its cap is not a demand
           // signal; the question that matters is whether the post-abort window
-          // can fund a CONVERGED draft, which the corpus puts at <=2,271 tokens.
+          // can fund a CONVERGED draft, which the corpus puts at <=2,387 tokens.
           const canRetryAgain = isAbortableRetryViable(
             remainingBudgetMs,
             runawayAbortCount,

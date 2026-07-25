@@ -38,7 +38,7 @@
  * (`runaway_abort_count: 0` on all 30 observations).
  *
  * The RUNAWAY gates therefore now use `isRunawayRetryAffordable` (an evidence-
- * derived converged-draft requirement, 3,407 — STRICTER than the 2,700 floor
+ * derived converged-draft requirement, 3,581 — STRICTER than the 2,700 floor
  * #675 shipped). The tests below that asserted the prior-cap yardstick are
  * re-aimed, individually annotated, and the flipped expectations are stated
  * openly rather than quietly deleted. What #675 established that STILL HOLDS —
@@ -92,7 +92,7 @@ describe('THE REGRESSION — the exact live A2killer arithmetic must still be re
 
   it('THE #675 FIX STILL HOLDS: a 3,150-token final attempt is SKIPPED, not run', () => {
     // The live defect, still refused — now because 3,150 cannot fund a converged
-    // draft (3,407 required), rather than because it cannot re-fund 8,550. Same
+    // draft (3,581 required), rather than because it cannot re-fund 8,550. Same
     // verdict on the case that mattered, from a premise that is actually true.
     expect(
       shouldSkipDoomedFinalAttempt({
@@ -133,15 +133,15 @@ describe('THE REGRESSION — the exact live A2killer arithmetic must still be re
         finalAttemptAffordableTokens: cap,
       }),
     );
-    // ⚠ FLIPPED, AND STATED PLAINLY: this used to assert all 18. 3,419 and 3,826
-    // clear the converged-draft requirement (3,407) and are now funded — which is
-    // right: a 3,419-token budget can produce the 2,271-token graph that is the
-    // largest any successful draft has ever needed. #675 refused them only
+    // ⚠ FLIPPED, AND STATED PLAINLY: this used to assert all 18. 3,826 clears the
+    // converged-draft requirement (3,581) and is now funded — which is right: a
+    // 3,826-token budget can produce the 2,387-token graph that is the largest
+    // any successful draft has ever needed. #675 refused them only
     // because it measured against the 8,550-token cap of an attempt that never
     // emitted an edge. The dominant band (15 of 18 inside 3,146-3,149) is
     // entirely refused, and that band is what failed 18/18 live.
-    expect(skipped).toHaveLength(16);
-    expect(observedCaps.filter((c) => !skipped.includes(c) || c >= 3_407)).toContain(3_826);
+    expect(skipped).toHaveLength(17);
+    expect(observedCaps.filter((c) => !skipped.includes(c) || c >= 3_581)).toContain(3_826);
     for (const cap of observedCaps.filter((c) => c <= 3_149)) {
       expect(isRunawayRetryAffordable(cap)).toBe(false);
     }
@@ -178,7 +178,7 @@ describe('shouldSkipDoomedFinalAttempt — the preconditions that keep it from o
   });
 
   it('is exactly the negation of the shared runaway rule wherever its preconditions hold', () => {
-    for (const affordable of [0, 1_500, 2_699, 2_700, 3_150, 3_406, 3_407, 6_800, FULL_CAP, FULL_CAP + 1]) {
+    for (const affordable of [0, 1_500, 2_699, 2_700, 3_150, 3_580, 3_581, 6_800, FULL_CAP, FULL_CAP + 1]) {
       expect(
         shouldSkipDoomedFinalAttempt({
           runawayAbortCount: 1,
@@ -195,14 +195,14 @@ describe('shouldSkipDoomedFinalAttempt — the preconditions that keep it from o
     // the parameter type, so a future edit cannot quietly start comparing
     // against it again without changing the signature. Type-level, plus this
     // behavioural check that the decision is a pure function of the budget.
-    for (const affordable of [1_000, 3_406, 3_407, 10_000]) {
+    for (const affordable of [1_000, 3_580, 3_581, 10_000]) {
       const verdict = shouldSkipDoomedFinalAttempt({
         runawayAbortCount: 3,
         willBeFinalAttempt: true,
         thinkingEnabled: false,
         finalAttemptAffordableTokens: affordable,
       });
-      expect(verdict).toBe(affordable < 3_407);
+      expect(verdict).toBe(affordable < 3_581);
     }
   });
 });
@@ -235,8 +235,8 @@ describe('isAbortableRetryViable — the abort must not create a window the skip
     // gate is computed against that — a ceiling far below the requirement still
     // refuses the abort.
     expect(isAbortableRetryViable(DRAFT_LLM_TIMEOUT_MS, 0, 6_000)).toBe(true);
-    expect(isAbortableRetryViable(DRAFT_LLM_TIMEOUT_MS, 0, 3_407)).toBe(true);
-    expect(isAbortableRetryViable(DRAFT_LLM_TIMEOUT_MS, 0, 3_406)).toBe(false);
+    expect(isAbortableRetryViable(DRAFT_LLM_TIMEOUT_MS, 0, 3_581)).toBe(true);
+    expect(isAbortableRetryViable(DRAFT_LLM_TIMEOUT_MS, 0, 3_580)).toBe(false);
   });
 
   it('still respects the time reserve and the runaway backstop', () => {

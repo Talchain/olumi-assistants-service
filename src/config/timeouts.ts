@@ -767,7 +767,7 @@ export function viableDraftRetryFloorTokens(priorAttemptMaxTokens: number): numb
 // against the full census of successful drafts, so editing either constant
 // without editing the corpus FAILS LOUD.
 //
-// ⚠ THIS DOES NOT WEAKEN #675. The resulting floor (3,407) is STRICTER than the
+// ⚠ THIS DOES NOT WEAKEN #675. The resulting floor (3,581) is STRICTER than the
 // 2,700-token floor #675 shipped, and `Math.max` keeps that floor as a hard lower
 // bound. Both properties #675 wanted still hold: no retry is funded below what a
 // real draft costs, and no abort is authorised into a window the next gate will
@@ -777,43 +777,59 @@ export function viableDraftRetryFloorTokens(priorAttemptMaxTokens: number): numb
 /**
  * The largest completion-token count ever observed on a SUCCESSFUL draft.
  *
- * Complete census (n=13), not a sample: the 12 terminations of the 2026-07-25
+ * Complete census (n=15), not a sample: the 12 terminations of the 2026-07-25
  * token-ceiling matrix (1,652 / 1,793 / 1,802 / 1,894 / 1,922 / 1,941 / 1,975 /
- * 2,041 / 2,073 / 2,168 / 2,214 / 2,271) plus the 30th post-fix observation
- * (2,055). Every one produced a well-formed graph (14-16 nodes, 23-29 edges,
- * 4 options, exactly 1 goal, zero orphans) matching the known-good `/assist`
- * comparator. The band is remarkably tight and is INDEPENDENT of the ceiling
- * offered — 8,550, 12,000 and 16,000 all produced the same ~2,000-token graph.
+ * 2,041 / 2,073 / 2,168 / 2,214 / 2,271), the 30th post-fix observation (2,055),
+ * and the 2 successes from this lane's own pre-merge `/assist` baseline on
+ * `b9e02bd` (1,953 and **2,387**). Every one produced a well-formed graph
+ * (14-16 nodes, 23-29 edges, 4 options, exactly 1 goal, zero orphans) matching
+ * the known-good `/assist` comparator. The band is tight and INDEPENDENT of the
+ * ceiling offered — 8,550, 12,000 and 16,000 all produced the same ~2,000-token
+ * graph.
+ *
+ * ⚠ THE PIN ALREADY EARNED ITS KEEP. This constant was 2,271 when the fix was
+ * written. The lane's own acceptance baseline then observed 2,387 — a LARGER
+ * successful draft than anything in the recorded corpus — so the constant, and
+ * everything derived from it, moved. That is the mechanism working: a value
+ * claiming to be "the largest ever observed" must be re-derived the moment a
+ * larger one is observed, not left to rot into a false claim.
  *
  * A recalibrator MUST update the census in the pin test alongside this value;
- * the pin asserts they agree.
+ * the pin asserts they agree and FAILS LOUD if they drift apart.
  */
-export const OBSERVED_MAX_CONVERGED_DRAFT_TOKENS = 2_271;
+export const OBSERVED_MAX_CONVERGED_DRAFT_TOKENS = 2_387;
 
 /**
  * Headroom multiplier applied to the observed maximum when deciding whether a
  * window can fund a real draft.
  *
  * 1.5 is a deliberate, stated choice rather than a fitted one: the corpus is
- * n=13 over two briefs, so the true upper tail is not pinned down, and 1.5x the
- * observed max (3,407) sits comfortably above the largest draft ever seen while
- * still being ~2.5x smaller than the 8,550-token cap the old rule demanded. The
+ * n=15 over two briefs, so the true upper tail is not pinned down, and 1.5x the
+ * observed max (3,581) sits comfortably above the largest draft ever seen while
+ * still being ~2.4x smaller than the 8,550-token cap the old rule demanded. The
  * cost of being generous here is a rung of the retry ladder; the cost of being
  * mean is a retry that truncates — so the margin leans generous.
+ *
+ * The corpus max moving 2,271 -> 2,387 mid-lane is exactly why a FACTOR, not a
+ * hand-picked absolute, is the right shape here: the floor tracked it without
+ * anyone re-deciding a number.
  */
 export const DRAFT_RETRY_HEADROOM_FACTOR = 1.5;
 
 /**
- * The slowest time-to-edges ever observed on a HEALTHY draft, pooled across both
- * live corpora: 21,199 ms (2026-07-25 matrix, n=12) vs 19,570 ms (DETECTOR-FIX
- * corpus, 2026-07-24, `cee.llm.draft_edges_reached` n=16). Pooled p100 = 21,199.
+ * The slowest time-to-edges ever observed on a HEALTHY draft, pooled across all
+ * three live corpora: 19,570 ms (DETECTOR-FIX, 2026-07-24,
+ * `cee.llm.draft_edges_reached` n=16), 21,199 ms (2026-07-25 token-ceiling
+ * matrix, n=12), and **21,258 ms** (this lane's own pre-merge `/assist`
+ * baseline on `b9e02bd`, n=2). Pooled p100 = 21,258 over n=30.
  *
  * This is the number the abort ceiling must clear and the drift tripwire is
  * anchored to. Both live in `draft-budget.ts` and are asserted against this
  * value; a threshold BELOW it aborts healthy drafts, which is exactly why the
- * blanket 20s gate was reverted on 2026-07-24.
+ * blanket 20s gate was reverted on 2026-07-24. The 25,000 ms ceiling still
+ * clears this by 3,742 ms.
  */
-export const OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS = 21_199;
+export const OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS = 21_258;
 
 /**
  * The token floor a RUNAWAY-ABORT retry must be able to afford — the evidence-

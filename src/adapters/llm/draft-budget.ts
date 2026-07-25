@@ -327,12 +327,12 @@ export const DRAFT_RUNAWAY_STALL_MS = 8_000;
 // false-aborting the slow-healthy tail, and 30s was chosen as that corpus's
 // p100 (19,570 ms) + ~10.4s. The pooled live evidence is now:
 //
-//   healthy time-to-edges p100 = 21,199 ms   (OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS,
+//   healthy time-to-edges p100 = 21,258 ms   (OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS,
 //                                             pooled n=28 over both live corpora)
 //   runaway  time-to-edges     = NEVER reached, 17/17, at ceilings of 8,550 /
 //                                12,000 / 16,000 tokens over 73-140s
 //
-// so 25,000 ms clears everything ever measured by 3,801 ms (+17.9%) and still
+// so 25,000 ms clears everything ever measured by 3,742 ms (+17.6%) and still
 // catches 17/17 runaways — the populations do not overlap at all, they are
 // separated by "reached edges at all", not by a rate.
 //
@@ -471,12 +471,12 @@ export const DRAFT_MAX_RUNAWAY_RETRIES = 5;
 //
 // ⭐ RE-DERIVED (FAST-ABORT, 2026-07-25). The token floor the two gates check has
 // moved from LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR (2,700) to
-// viableRunawayRetryFloorTokens() (3,407 — the evidence-derived requirement for a
+// viableRunawayRetryFloorTokens() (3,581 — the evidence-derived requirement for a
 // SUCCESSFUL draft, see config/timeouts.ts), so this time-domain twin MUST move
 // with it. Leaving it at the 45,000ms the old floor implied would re-open the
-// #673 contradiction one rung along: a post-abort window in [45.0s, 52.86s) would
+// #673 contradiction one rung along: a post-abort window in [45.0s, 54.79s) would
 // be AUTHORIZED by this reserve and then REFUSED by the gate. Evaluates to
-// 52,856ms today.
+// 54,789ms today.
 export const DRAFT_RUNAWAY_MIN_RETRY_MS = Math.ceil(
   (viableRunawayRetryFloorTokens() / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S +
     DRAFT_TTFB_SAFETY_OVERHEAD_S) *
@@ -551,10 +551,10 @@ export function hasRoomForAnotherAbortableAttempt(
 // 8,550 AND 12,000 AND 16,000, with 30-60s of window still unspent. A runaway
 // has no size it is trying to reach. Its cap tells you nothing about demand.
 //
-// What a retry actually needs is what a SUCCESSFUL draft costs: 1,652-2,271
-// tokens over 13 observations, identical at every ceiling. That is the quantity
+// What a retry actually needs is what a SUCCESSFUL draft costs: 1,652-2,387
+// tokens over 15 observations, identical at every ceiling. That is the quantity
 // `isRunawayRetryAffordable` measures (corpus max x an explicit headroom factor,
-// floored at #675's own 2,700 so it can never be laxer — today 3,407).
+// floored at #675's own 2,700 so it can never be laxer — today 3,581).
 //
 // BOTH #675 PROPERTIES STILL HOLD, and both are asserted in
 // `__tests__/draft-fast-abort-yardstick.test.ts`:
@@ -575,7 +575,7 @@ export function hasRoomForAnotherAbortableAttempt(
 //   attempt 1 — 110s window, 8,550 cap, aborts at <=25s if no edges
 //   attempt 2 —  85s window, 8,550 cap, aborts at <=25s if no edges
 //   attempt 3 —  60s window, 4,050 cap (final squeeze), runs out; salvage applies
-// A fourth rung would afford aff(35s) = 1,800 < 3,407 and is refused — the
+// A fourth rung would afford aff(35s) = 1,800 < 3,581 and is refused — the
 // ladder terminates on the anti-doom rule, not by luck. Derived, not switched:
 // no flag, no env gate.
 // ---------------------------------------------------------------------------

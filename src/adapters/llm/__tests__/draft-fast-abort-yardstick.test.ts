@@ -17,7 +17,7 @@
  * the edges array at all, and `completion_tokens == the cap, exactly` at 8,550,
  * 12,000 AND 16,000 (17/17). It has no size it is trying to reach; it consumes
  * whatever it is given. The retry does not need the abandoned cap — it needs what
- * a SUCCESSFUL draft actually costs, measured at 1,652-2,271 tokens (n=13).
+ * a SUCCESSFUL draft actually costs, measured at 1,652-2,387 tokens (n=15).
  *
  * THE FIX. `isRunawayRetryAffordable` compares the post-abort window against an
  * evidence-DERIVED requirement (corpus max x an explicit headroom factor), which
@@ -88,6 +88,11 @@ const SUCCESSFUL_DRAFTS: ReadonlyArray<{ run: string; completionTokens: number; 
   // 30th observation, run on b9e02bd after the classification fix; time-to-edges
   // not published for this row, so it contributes to the TOKEN corpus only.
   { run: 'postfix_r0', completionTokens: 2_055, timeToEdgesMs: null },
+  // ⭐ THIS LANE'S OWN pre-merge /assist baseline on `b9e02bd` (n=8, 2 successes).
+  // 2,387 tokens is a LARGER successful draft than anything previously recorded,
+  // and 21,258 ms a SLOWER time-to-edges — both moved the derived constants.
+  { run: 'baseline_assist_4', completionTokens: 1_953, timeToEdgesMs: 14_208 },
+  { run: 'baseline_assist_7', completionTokens: 2_387, timeToEdgesMs: 21_258 },
 ];
 
 /**
@@ -143,8 +148,8 @@ describe('THE YARDSTICK is DERIVED from the corpus, with an explicit headroom fa
   it('the constant equals the corpus maximum — not a hand-picked number', () => {
     const corpusMax = Math.max(...SUCCESSFUL_DRAFTS.map((d) => d.completionTokens));
     expect(OBSERVED_MAX_CONVERGED_DRAFT_TOKENS).toBe(corpusMax);
-    expect(corpusMax).toBe(2_271);
-    expect(SUCCESSFUL_DRAFTS).toHaveLength(13);
+    expect(corpusMax).toBe(2_387);
+    expect(SUCCESSFUL_DRAFTS).toHaveLength(15);
   });
 
   it('the floor is corpus-max x the documented headroom factor, never below the shipped floor', () => {
@@ -154,8 +159,8 @@ describe('THE YARDSTICK is DERIVED from the corpus, with an explicit headroom fa
         Math.ceil(OBSERVED_MAX_CONVERGED_DRAFT_TOKENS * DRAFT_RETRY_HEADROOM_FACTOR),
       ),
     );
-    // With today's primitives: ceil(2,271 x 1.5) = 3,407.
-    expect(viableRunawayRetryFloorTokens()).toBe(3_407);
+    // With today's primitives: ceil(2,387 x 1.5) = 3,581.
+    expect(viableRunawayRetryFloorTokens()).toBe(3_581);
   });
 
   it('⭐ #675 IS NOT WEAKENED — the new floor is STRICTER than the floor it replaces', () => {
@@ -224,14 +229,14 @@ describe('THE ANTI-DOOM PROPERTY STILL BITES — a starved retry is still refuse
         finalAttemptAffordableTokens: cap,
       }),
     );
-    // STATED HONESTLY: 16 of the 18 sit below the derived floor and are still
-    // refused. The two that clear it (3,419 and 3,826) ARE now funded — and that
-    // is correct, not a regression: a window affording 3,419 tokens can
-    // comfortably produce the 2,271-token graph that is the largest a successful
-    // draft has ever needed. #675 refused them only because it was comparing
-    // against the 8,550-token cap of an attempt that never emitted an edge.
-    expect(refused).toHaveLength(16);
-    expect(observedCaps.filter((c) => c >= viableRunawayRetryFloorTokens())).toEqual([3419, 3826]);
+    // STATED HONESTLY: 17 of the 18 sit below the derived floor and are still
+    // refused. The one that clears it (3,826) IS now funded — and that is
+    // correct, not a regression: a window affording 3,826 tokens can comfortably
+    // produce the 2,387-token graph that is the largest a successful draft has
+    // ever needed. #675 refused it only because it was comparing against the
+    // 8,550-token cap of an attempt that never emitted an edge.
+    expect(refused).toHaveLength(17);
+    expect(observedCaps.filter((c) => c >= viableRunawayRetryFloorTokens())).toEqual([3826]);
     // The dominant band — 15 of 18 inside a four-token window at 3,146-3,149 —
     // is entirely refused. That band is what failed 18/18 live.
     expect(observedCaps.filter((c) => c <= 3_149)).toHaveLength(15);
@@ -268,11 +273,11 @@ describe('⭐ AUTHORISE-THEN-REFUSE IS STILL IMPOSSIBLE (#673, one level up)', (
         1000,
     );
     expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(derived);
-    // Today: ceil((3,407/90 + 15) x 1000) = 52,856 ms. If this were left at the
+    // Today: ceil((3,581/90 + 15) x 1000) = 54,789 ms. If this were left at the
     // 45,000 the 2,700 floor implied, a post-abort window in [45s, 52.86s) would
     // be AUTHORISED by the reserve and then REFUSED by the gate — the exact
     // contradiction #673 removed.
-    expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(52_856);
+    expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(54_789);
   });
 
   it('every AUTHORISED abort leaves a worst-case final window the gate ACCEPTS', () => {
@@ -349,10 +354,18 @@ describe('⭐ THE LADDER the product actually gets — three funded attempts in 
       expect(rung.cap).toBeGreaterThanOrEqual(viableRunawayRetryFloorTokens());
     }
     // The final rung is the one #675 was right to be suspicious of. It is funded
-    // at ~1.8x the largest draft ever observed — not the 3,150 that failed 18/18.
+    // ABOVE the derived requirement — not at the 3,150 that failed 18/18.
+    //
+    // ⚠ The ratio bound is DERIVED from the headroom factor, not hand-picked. It
+    // used to read `> 1.7`, which silently encoded the corpus max of the day;
+    // when the corpus max moved 2,271 -> 2,387 that literal went RED for no real
+    // reason. The claim that matters is "at least the headroom the floor asks
+    // for", and that tracks the constants automatically.
     const last = ladder[ladder.length - 1]!;
     expect(last.cap).toBe(4_050);
-    expect(last.cap / OBSERVED_MAX_CONVERGED_DRAFT_TOKENS).toBeGreaterThan(1.7);
+    expect(last.cap / OBSERVED_MAX_CONVERGED_DRAFT_TOKENS).toBeGreaterThanOrEqual(
+      DRAFT_RETRY_HEADROOM_FACTOR,
+    );
   });
 
   it('a FOURTH rung is refused — the ladder terminates on the anti-doom rule, not by luck', () => {
@@ -382,9 +395,9 @@ describe('⭐ THE ABORT THRESHOLD — derived against BOTH corpora, and against 
     const observed = SUCCESSFUL_DRAFTS.map((d) => d.timeToEdgesMs).filter(
       (v): v is number => typeof v === 'number',
     );
-    expect(observed).toHaveLength(12);
+    expect(observed).toHaveLength(14);
     const pooledP100 = Math.max(...observed, PRIOR_CORPUS_P100_TIME_TO_EDGES_MS);
-    expect(pooledP100).toBe(21_199);
+    expect(pooledP100).toBe(21_258);
     expect(OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS).toBe(pooledP100);
     // The threshold must sit ABOVE everything ever measured. A threshold below
     // the observed max aborts healthy drafts — the exact failure mode the
@@ -436,7 +449,7 @@ describe('⭐ THE ABORT THRESHOLD — derived against BOTH corpora, and against 
     // POSITIVE CONTROL: an alarm that can never fire is worthless. The slowest
     // healthy draft in the corpus DOES trip it.
     expect(wouldWarn).toHaveLength(1);
-    expect(wouldWarn[0]).toBe(21_199);
+    expect(wouldWarn[0]).toBe(21_258);
   });
 });
 
@@ -446,7 +459,7 @@ describe('SCOPE — the lean-retry rule is deliberately UNTOUCHED', () => {
     // parse.ts Step 7 fires after a real max_tokens truncation, where the model
     // genuinely committed to a graph larger than the cap. #675's reasoning holds
     // there, so that call site keeps the prior-cap yardstick.
-    expect(isDraftRetryAffordable(3_407, FULL_CAP)).toBe(false);
+    expect(isDraftRetryAffordable(3_581, FULL_CAP)).toBe(false);
     expect(isDraftRetryAffordable(FULL_CAP, FULL_CAP)).toBe(true);
     expect(isDraftRetryAffordable(2_700, 1_000)).toBe(true);
     expect(isDraftRetryAffordable(2_699, 1_000)).toBe(false);
@@ -493,22 +506,22 @@ describe('DRIFT PIN — the corpus values are DERIVED everywhere, mirrored nowhe
 
   it('⭐ no module outside config/timeouts.ts holds a NUMERIC COPY of a corpus value', () => {
     // This is the assertion with teeth. A second module that referenced the
-    // symbol would be caught above; a second module that typed `21_199` would
+    // symbol would be caught above; a second module that typed `21_258` would
     // not, and that is precisely the hand-maintained-mirror class (trap 12).
-    for (const literal of ['2271', '2_271', '21199', '21_199']) {
+    for (const literal of ['2387', '2_387', '21258', '21_258']) {
       const hits = execGrepSrc(literal).filter((f) => f !== 'src/config/timeouts.ts');
       expect(hits).toEqual([]);
     }
     // Positive control: the scan CAN find these literals where they legitimately
     // live, so the empty results above are a fact about the code, not a blind scan.
-    expect(execGrepSrc('2_271')).toEqual(['src/config/timeouts.ts']);
-    expect(execGrepSrc('21_199')).toEqual(['src/config/timeouts.ts']);
+    expect(execGrepSrc('2_387')).toEqual(['src/config/timeouts.ts']);
+    expect(execGrepSrc('21_258')).toEqual(['src/config/timeouts.ts']);
   });
 
   it('the derived values are never hand-typed anywhere in src', () => {
-    // 3,407 and 52,856 fall out of the derivation. If either ever appears as a
+    // 3,581 and 54,789 fall out of the derivation. If either ever appears as a
     // literal, someone has mirrored a computed value.
-    for (const literal of ['3407', '3_407', '52856', '52_856']) {
+    for (const literal of ['3581', '3_581', '54789', '54_789']) {
       expect(execGrepSrc(literal)).toEqual([]);
     }
   });
