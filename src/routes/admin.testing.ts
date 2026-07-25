@@ -1466,4 +1466,226 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
     const summary = getModelErrorSummary();
     return reply.status(200).send(summary);
   });
+
+  // ===========================================================================
+  // BEGIN SSE INFRASTRUCTURE CANARY  (diagnostic instrument, 2026-07-25)
+  // ---------------------------------------------------------------------------
+  // PURPOSE: measure where a long-lived SSE response actually dies, and whether
+  // CEE keeps working after the downstream client disconnects. It answers two
+  // questions that decide whether staged/async drafting is even buildable:
+  //   (1) which intermediary (Netlify edge / Cloudflare / Render / Fastify's own
+  //       requestTimeout) terminates a 180s stream, and at what elapsed time;
+  //   (2) whether in-process work survives a client disconnect (durable-job
+  //       viability).
+  //
+  // NO LLM CALLS. NO COST. Pure timer. Admin-keyed.
+  //
+  // The route is mounted under /orchestrate/ ON PURPOSE: the Netlify edge
+  // function only proxies /bff/orchestrate/* (netlify.toml), so this is the only
+  // prefix that can traverse the real product chain. It is NOT part of the V5
+  // orchestrator — it lives here, on the admin/testing surface, and the transport
+  // invariant script (scripts/validate-transport-invariants.sh) scans only
+  // src/orchestrator-v5/ and src/orchestrator/route-v2.ts, so this cannot and
+  // does not relax that invariant.
+  //
+  // The admin key may be supplied in the BODY because the Netlify edge function
+  // forwards only a five-header allowlist (content-type, accept, x-correlation-id,
+  // x-request-id, x-user-id) and would strip x-admin-key. The comparison itself
+  // still goes through verifyAdminKey — one source of truth for the constant-time
+  // check, the IP allowlist and the auth telemetry.
+  //
+  // TO REMOVE: delete this block and its test file. Nothing else references it.
+  // ===========================================================================
+
+  interface CanaryRun {
+    run_id: string;
+    started_at_iso: string;
+    duration_ms: number;
+    interval_ms: number;
+    /** Highest seq the TIMER produced — advances regardless of socket state. */
+    last_seq_produced: number;
+    /** Highest seq the SOCKET accepted — stops advancing once the client goes. */
+    last_seq_flushed: number;
+    /** Elapsed ms at which the downstream socket closed, or null if still open. */
+    disconnected_at_ms: number | null;
+    /** Ticks produced AFTER the disconnect — the survival signal (blocker B13). */
+    ticks_after_disconnect: number;
+    completed: boolean;
+    ended_at_ms: number | null;
+    end_reason: string | null;
+  }
+
+  const CANARY_MAX_DURATION_MS = 300_000;
+  const CANARY_RUN_RETENTION = 50;
+  const canaryRuns = new Map<string, CanaryRun>();
+
+  function rememberCanaryRun(run: CanaryRun): void {
+    canaryRuns.set(run.run_id, run);
+    while (canaryRuns.size > CANARY_RUN_RETENTION) {
+      const oldest = canaryRuns.keys().next().value;
+      if (oldest === undefined) break;
+      canaryRuns.delete(oldest);
+    }
+  }
+
+  /**
+   * Accept the admin key from the body when the header is absent, then delegate
+   * to verifyAdminKey so the actual comparison stays in one place.
+   */
+  function verifyCanaryAdmin(request: FastifyRequest, reply: FastifyReply): boolean {
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    if (!request.headers['x-admin-key'] && typeof body.admin_key === 'string') {
+      request.headers['x-admin-key'] = body.admin_key;
+    }
+    return verifyAdminKey(request, reply, 'read');
+  }
+
+  function clampNumber(raw: unknown, fallback: number, min: number, max: number): number {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    return Math.min(max, Math.max(min, Math.floor(n)));
+  }
+
+  /**
+   * POST /orchestrate/v2/sse-canary
+   *
+   * Emits response headers at t=0, then a NUMBERED SSE frame every interval_ms,
+   * then a terminal frame at duration_ms. Keeps producing ticks after a client
+   * disconnect so the run ledger can prove whether work survives the socket.
+   */
+  app.post('/orchestrate/v2/sse-canary', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyCanaryAdmin(request, reply)) return;
+
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const durationMs = clampNumber(body.duration_ms, 180_000, 1_000, CANARY_MAX_DURATION_MS);
+    const intervalMs = clampNumber(body.interval_ms, 10_000, 500, 60_000);
+    const runId = createHash('sha256')
+      .update(`${Date.now()}:${Math.random()}`)
+      .digest('hex')
+      .slice(0, 16);
+
+    const t0 = Date.now();
+    const run: CanaryRun = {
+      run_id: runId,
+      started_at_iso: new Date(t0).toISOString(),
+      duration_ms: durationMs,
+      interval_ms: intervalMs,
+      last_seq_produced: 0,
+      last_seq_flushed: -1,
+      disconnected_at_ms: null,
+      ticks_after_disconnect: 0,
+      completed: false,
+      ended_at_ms: null,
+      end_reason: null,
+    };
+    rememberCanaryRun(run);
+
+    // Headers at t=0 — this is the property that defeats a response-HEADER wall.
+    reply.raw.setHeader('X-Olumi-Canary-Run', runId);
+    reply.raw.setHeader('X-Olumi-Canary-Duration-Ms', String(durationMs));
+    reply.raw.writeHead(200, {
+      'content-type': 'text/event-stream',
+      connection: 'keep-alive',
+      'cache-control': 'no-cache',
+      'x-accel-buffering': 'no',
+    });
+
+    const writeFrame = (seq: number, kind: string): void => {
+      const elapsed = Date.now() - t0;
+      const payload = JSON.stringify({
+        seq,
+        kind,
+        elapsed_ms: elapsed,
+        server_time: new Date().toISOString(),
+        run_id: runId,
+      });
+      try {
+        // reply.raw.write returns false when backpressured and throws once the
+        // socket is destroyed; either way the TICK still counted as produced.
+        const ok = reply.raw.write(`event: ${kind}\ndata: ${payload}\n\n`);
+        if (ok) run.last_seq_flushed = seq;
+      } catch {
+        /* socket gone — the ledger already recorded the produced tick */
+      }
+    };
+
+    // seq 0 at t=0, before any wait.
+    writeFrame(0, 'canary');
+
+    reply.raw.on('close', () => {
+      if (run.disconnected_at_ms === null && !run.completed) {
+        run.disconnected_at_ms = Date.now() - t0;
+        log.info(
+          { run_id: runId, disconnected_at_ms: run.disconnected_at_ms, last_seq: run.last_seq_produced },
+          'sse-canary: downstream disconnected — continuing to produce ticks',
+        );
+      }
+    });
+
+    await new Promise<void>((resolve) => {
+      const timer = setInterval(() => {
+        const elapsed = Date.now() - t0;
+        if (elapsed >= durationMs) {
+          clearInterval(timer);
+          run.last_seq_produced += 1;
+          if (run.disconnected_at_ms !== null) run.ticks_after_disconnect += 1;
+          writeFrame(run.last_seq_produced, 'done');
+          run.completed = true;
+          run.ended_at_ms = elapsed;
+          run.end_reason = 'duration_reached';
+          try {
+            reply.raw.end();
+          } catch {
+            /* already gone */
+          }
+          log.info(
+            {
+              run_id: runId,
+              ended_at_ms: elapsed,
+              last_seq_produced: run.last_seq_produced,
+              last_seq_flushed: run.last_seq_flushed,
+              disconnected_at_ms: run.disconnected_at_ms,
+              ticks_after_disconnect: run.ticks_after_disconnect,
+            },
+            'sse-canary: run complete',
+          );
+          resolve();
+          return;
+        }
+        run.last_seq_produced += 1;
+        if (run.disconnected_at_ms !== null) run.ticks_after_disconnect += 1;
+        writeFrame(run.last_seq_produced, 'canary');
+      }, intervalMs);
+      timer.unref?.();
+    });
+  });
+
+  /**
+   * POST /orchestrate/v2/sse-canary/status
+   *
+   * Reads the ledger for a run. This is the READER that makes the survival claim
+   * checkable: ticks_after_disconnect > 0 proves the process kept doing work
+   * after the downstream socket closed.
+   */
+  app.post('/orchestrate/v2/sse-canary/status', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!verifyCanaryAdmin(request, reply)) return;
+
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const runId = typeof body.run_id === 'string' ? body.run_id : null;
+
+    if (!runId) {
+      return reply.status(200).send({
+        runs: Array.from(canaryRuns.values()).slice(-10),
+        count: canaryRuns.size,
+      });
+    }
+
+    const run = canaryRuns.get(runId);
+    if (!run) {
+      return reply.status(404).send({ error: 'run_not_found', run_id: runId });
+    }
+    return reply.status(200).send(run);
+  });
+
+  // =========================== END SSE CANARY ================================
 }
