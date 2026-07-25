@@ -370,9 +370,16 @@ export interface ChatArgs {
    * active (flag on + model in the structured-outputs allowlist + thinking
    * disabled) — the caller decides whether structured mode needs extra
    * instruction (e.g. "emit these fields as JSON-encoded strings") without
-   * the adapter needing to know per-call-site schema semantics. Mirrors
-   * the `STRUCTURED_OUTPUTS_AUX_STRING_REMINDER` pattern already used by
-   * the draft_graph path (Lane 26). Non-Anthropic adapters ignore this field.
+   * the adapter needing to know per-call-site schema semantics.
+   *
+   * ⚠ CORRECTED 2026-07-25 (F7). This used to cite
+   * `STRUCTURED_OUTPUTS_AUX_STRING_REMINDER` "already used by the draft_graph
+   * path" as the established precedent. That identifier does not exist: the
+   * draft reminder became a no-op under the v12 lean-draft contract and was
+   * deleted on 2026-07-24. The only live user of this field is
+   * `EDIT_GRAPH_STRUCTURED_OUTPUTS_VALUE_REMINDER`
+   * (orchestrator/tools/edit-graph.ts). Non-Anthropic adapters ignore this
+   * field.
    */
   structuredOutputsUserReminder?: string;
   /**

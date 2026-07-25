@@ -461,6 +461,40 @@ export function isEdgesTimeDrifting(timeToEdgesMs: number | null | undefined): b
 // real budget this cap never binds (only ~3 attempts fit the ~110s window).
 export const DRAFT_MAX_RUNAWAY_RETRIES = 5;
 
+// ---------------------------------------------------------------------------
+// ⭐ THE RUNAWAY RETRY MUST BE ABLE TO DIFFER (F3, 2026-07-25)
+//
+// THE DEFECT. `anthropicTemperatureFor(model, { thinking: false })` returns
+// `opts.requested ?? 0`, and the draft supplies no requested value — so every
+// draft attempt, including every post-abort retry, was sent at temperature 0.
+// A retry that re-sends a byte-identical request to a near-deterministic decode
+// is not a re-roll; it is the same generation again. The whole cost model the
+// abort-and-retry mechanism is justified by ("a false abort costs 25s and buys a
+// properly-funded retry") assumes the retry can produce something different.
+// Confirmed on the wire 2026-07-25: deployed staging reports `temperature: 0` on
+// `trace.pipeline.llm_metadata`.
+//
+// WHY 1, AND WHY THIS IS NOT A MAGIC NUMBER.
+//  1. The pathology being escaped is a DEGENERATE REPETITION LOOP — U+200B runs,
+//     a repeated phrase, "← display only.  " over and over (10/10 characterised
+//     runaways). Greedy/low-temperature decoding is what gets STUCK in those;
+//     raising temperature is the standard escape, not a gamble.
+//  2. It is not a new value on this path. The draft call already sends
+//     temperature 1 whenever extended thinking is enabled — the API requires it —
+//     so temperature-1 drafting is a configuration this service already ships.
+//  3. Anthropic's range is 0-1, so this is "maximally decorrelated from the
+//     attempt that just failed", which is exactly the property a retry needs.
+//
+// ⭐ BLAST RADIUS IS EXACTLY THE POPULATION THAT IS OTHERWISE DOOMED. It applies
+// only to attempts made AFTER a runaway abort. The first attempt of every
+// request is byte-identical to before, and the healthy population — all 30 live
+// observations carried `runaway_abort_count: 0` — never sees it.
+//
+// Routed through `anthropicTemperatureFor` at the call site, so a model that
+// rejects sampling params still gets NO temperature field: this cannot become a
+// sixth hand-copy of that gate.
+export const DRAFT_RUNAWAY_RETRY_TEMPERATURE = 1;
+
 // Stop early-aborting once the remaining budget is below HARD_CEILING_MS + this:
 // the FINAL attempt then runs to the full remaining window with NO early abort,
 // so a late-but-legitimate completion is never discarded and the existing
@@ -727,6 +761,84 @@ export function buildFailedCallLlmMeta(input: FailedCallLlmMetaInput): Record<st
     time_to_edges_ms: input.timeToEdgesMs,
     token_usage: input.tokenUsage,
   };
+}
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ ONE CLASSIFIER FOR "OUR BUDGET, NOT YOUR BRIEF" (F1, 2026-07-25)
+//
+// THE DEFECT IT REPLACES. The pipeline decided which recovery copy a failed
+// draft gets by reading a property each throw site had to REMEMBER to attach:
+//
+//     (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true
+//
+// Five failure routes throw here; four set it and the fifth — the
+// `skipped_unaffordable_final` gate, i.e. the runaway-abort budget running out —
+// did not, because no generation was ever cut at max_tokens on that path so the
+// flag's own name did not fit. The consequence was not a missing diagnostic. It
+// was the user being told "Provide a clearer, more specific decision brief"
+// (with `retryable: false`) for a failure caused entirely by CEE aborting its
+// own generations — the CRUEL INVERSION that `unified-pipeline/index.ts` names
+// by that phrase twelve lines above the branch that committed it. #682's fourth
+// abort trigger, deliberately ungated on `edgesReached`, strictly raised the
+// rate at which users reached it.
+//
+// WHY A PREDICATE AND NOT A FIFTH FLAG. Adding `truncated_at_max_tokens: true`
+// to the skip throw fixes today's instance and leaves tomorrow's: the next
+// failure route is one more thing to remember, and a forgotten flag fails
+// SILENTLY toward blaming the user. That is the hand-maintained mirror class.
+//
+// THIS DERIVES INSTEAD, from `_llm_meta` — which every failure route already
+// builds through `buildFailedCallLlmMeta` above, and which
+// `tests/unit/cee.llm-metadata-projection.test.ts` already pins against
+// hand-built copies. A new throw site that follows the existing rule ("build the
+// meta with the builder") is classified correctly WITHOUT knowing this function
+// exists. `runaway_abort_count >= 1` is the load-bearing signal because it is a
+// FACT ABOUT WHAT HAPPENED (CEE abandoned N generations on its own guard), not a
+// label someone chose — labels drift, and a `finish_reason` allowlist would be
+// the same mirror one level down.
+//
+// The explicit flag is still honoured, first: the truncation routes set it, the
+// OpenAI adapter sets it, and existing tests pin it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Was this draft failure caused by CEE's own demand/budget machinery rather
+ * than by the brief?
+ *
+ * TRUE for: a generation cut at the derived token cap, and a call whose runaway
+ * guard aborted one or more generations (including the skip-gate that fails
+ * fast once those aborts have exhausted the window). Those failures share one
+ * recovery story — retry once, then narrow scope — and must NEVER receive the
+ * "be clearer / be more specific" copy, which increases output-token demand and
+ * steers the user straight back into the same failure.
+ *
+ * FALSE for: a draft that produced unparseable or schema-invalid output with no
+ * aborts and no truncation. That is the case the vague-brief copy was written
+ * for, and it stays exactly as it was.
+ */
+export function isDemandNotBriefFailure(err: unknown): boolean {
+  if (err === null || typeof err !== "object") return false;
+  const candidate = err as { truncated_at_max_tokens?: unknown; _llm_meta?: unknown };
+
+  // 1. The explicit structured flag the truncation throw sites attach.
+  if (candidate.truncated_at_max_tokens === true) return true;
+
+  // 2. DERIVED from the canonical failed-call meta — no throw site has to
+  //    remember anything for this arm to work.
+  const meta = candidate._llm_meta;
+  if (meta === null || typeof meta !== "object") return false;
+  const bag = meta as { runaway_abort_count?: unknown; finish_reason?: unknown };
+
+  // CEE abandoned at least one generation on its own runaway guard. Whatever
+  // happened afterwards, the honest account is "the draft outgrew our budget",
+  // never "your brief was vague".
+  if (typeof bag.runaway_abort_count === "number" && bag.runaway_abort_count >= 1) return true;
+
+  // Belt and braces for a truncation whose route forgot the explicit flag:
+  // the same `isDraftTruncated` rule the adapters classify stop reasons with.
+  if (typeof bag.finish_reason === "string" && isDraftTruncated(bag.finish_reason)) return true;
+
+  return false;
 }
 
 // Structural "reached the edges array" probe over the accumulated stream text.

@@ -28,19 +28,23 @@ import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest
 import {
   DRAFT_RUNAWAY_MAX_STRING_CHARS,
   DRAFT_RUNAWAY_DETECT_CHARS,
+  DRAFT_RUNAWAY_RETRY_TEMPERATURE,
 } from '../draft-budget.js';
 
 const h = vi.hoisted(() => ({
   callCount: 0,
   /** Attempt 1 emits a single oversized JSON string value when true. */
   runawayFirstAttempt: true,
+  /** The request body of every attempt, in order — F3 reads the temperatures. */
+  sentBodies: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@anthropic-ai/sdk', () => {
   class MockAnthropic {
     messages = {
-      stream: () => {
+      stream: (body: Record<string, unknown>) => {
         h.callCount += 1;
+        h.sentBodies.push(body);
         return makeStream(h.callCount);
       },
     };
@@ -116,6 +120,7 @@ afterAll(async () => {
 afterEach(() => {
   h.callCount = 0;
   h.runawayFirstAttempt = true;
+  h.sentBodies = [];
   vi.restoreAllMocks();
 });
 
@@ -171,5 +176,63 @@ describe('⭐ the per-string-value ceiling ABORTS a runaway and the abort is vis
     expect(meta.runaway_abort_count).toBe(0);
     expect(meta.runaway_abort_triggers).toEqual([]);
     expect(result.graph.nodes.length).toBeGreaterThan(0);
+  });
+});
+
+describe('⭐ F3 — the retry after a runaway abort CAN differ from the attempt that failed', () => {
+  it('sends the post-abort retry at a higher temperature than the attempt it is replacing', async () => {
+    // THE DEFECT (F3, /code-review 2026-07-25): every attempt was sent at
+    // temperature 0, so "abort the doomed generation and re-roll" re-sent a
+    // byte-identical request to a near-deterministic decode. A LEGITIMATE long
+    // string is deterministic input, so the retry reproduced it and aborted
+    // again — burning every remaining abort and, if the window ran out, landing
+    // on the F1 dead end. The docstring justifying the 25x ceiling explicitly
+    // claimed "a false abort costs 25s and buys a properly-funded retry"; it
+    // bought a duplicate.
+    h.runawayFirstAttempt = true;
+
+    await draftGraphWithAnthropic(
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
+    );
+
+    expect(h.sentBodies).toHaveLength(2);
+    const [first, retry] = h.sentBodies;
+
+    // Attempt 1 is UNCHANGED — deterministic drafting for the healthy
+    // population is not what this fix trades away.
+    expect(first.temperature).toBe(0);
+
+    // The retry is decorrelated from the generation that just failed.
+    expect(retry.temperature).toBe(DRAFT_RUNAWAY_RETRY_TEMPERATURE);
+    expect(retry.temperature).not.toBe(first.temperature);
+  });
+
+  it('POSITIVE CONTROL — an unaborted draft is still sent at temperature 0', async () => {
+    // Without this, the assertion above would pass just as well if the adapter
+    // simply raised the temperature of every draft.
+    h.runawayFirstAttempt = false;
+
+    await draftGraphWithAnthropic(
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
+    );
+
+    expect(h.sentBodies).toHaveLength(1);
+    expect(h.sentBodies[0].temperature).toBe(0);
+  });
+
+  it('the SUCCESS metadata reports the temperature that was actually sent, not a literal', async () => {
+    // `_llm_meta.temperature` was a hard-coded `0` on the success path, which was
+    // already wrong under extended thinking (the API forces 1) and became wrong
+    // for every post-abort retry. A metadata field that cannot change is not
+    // metadata.
+    h.runawayFirstAttempt = true;
+
+    const result = await draftGraphWithAnthropic(
+      { brief: 'SaaS customer support is getting overwhelmed.', docs: [], seed: 17 },
+    );
+
+    const meta = result.meta as Record<string, unknown>;
+    expect(meta.temperature).toBe(DRAFT_RUNAWAY_RETRY_TEMPERATURE);
+    expect(meta.temperature).toBe((h.sentBodies.at(-1) as Record<string, unknown>).temperature);
   });
 });

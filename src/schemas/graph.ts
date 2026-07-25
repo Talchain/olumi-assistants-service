@@ -44,8 +44,16 @@ export const FactorType = z.enum(["cost", "price", "time", "probability", "reven
 /**
  * How a factor's value was extracted. Hoisted out of `FactorData` (2026-07-25) so
  * the SENT draft grammar can DERIVE its enum from this one declaration rather
- * than re-typing the member list — the value set now has exactly one home, and
- * `anthropic-graph-schema.ts` reads `.options` off it.
+ * than re-typing the member list — `anthropic-graph-schema.ts` reads `.options`
+ * off it.
+ *
+ * ⚠ "EXACTLY ONE HOME" WAS OVERCLAIMED, CORRECTED 2026-07-25 (F8). This is one
+ * home for the DRAFT LLM BOUNDARY, which validates through `shared-schemas.ts` →
+ * `NodeData` → here, so the grammar and its validator do agree. The V3 WIRE
+ * schema keeps its own unpinned copy (`cee-v3.ts` — a byte-identical
+ * `z.enum([...])` for extractionType, and `FactorTypeV3` beside `FactorType`).
+ * Those are not derived from this and will not fail loud if they drift. Do not
+ * inherit the stronger claim.
  */
 export const ExtractionType = z.enum(["explicit", "inferred", "range", "observed"]);
 
@@ -64,6 +72,33 @@ export const ExtractionType = z.enum(["explicit", "inferred", "range", "observed
  * text that nothing constrains, and the prompt's promise is unenforced.
  */
 export const PriorDistribution = z.enum(["uniform"]);
+
+/**
+ * Is `value` a distribution family this build's grammar can express?
+ *
+ * ⚠ THE COUPLING ABOVE HAS NO COMPILE-TIME ALARM, AND CANNOT HAVE ONE (F4,
+ * /code-review 2026-07-25). `PriorDistribution` reads like the other two hoisted
+ * enums, but it is NOT the same shape:
+ *
+ *   * `ExtractionType` / `FactorType` are read by the downstream validator, so
+ *     the grammar and the validator genuinely cannot disagree.
+ *   * `prior.distribution` is validated by `cee-v3.ts` as `z.string()` — FREE
+ *     TEXT. Nothing reads this enum except the grammar. It is therefore a
+ *     hand-typed mirror of a PMS-SERVED PROMPT, and that prompt is re-pinnable
+ *     WITHOUT A CEE DEPLOY. No test in this repo can see the served prompt.
+ *
+ * So the drift alarm has to be a RUNTIME one, at the boundary where a real
+ * emitted value arrives. Called from the V3 transform (`transforms/schema-v3.ts`)
+ * for every prior that reaches the pipeline. Deliberately a DETECTOR, not a
+ * rejector: a second distribution family is a prompt decision, and silently 400ing
+ * live drafts is a worse failure than loudly passing the value through.
+ *
+ * Derived from `PriorDistribution.options`, so adding a member here retires the
+ * alarm for that member automatically — never re-type the list.
+ */
+export function isKnownPriorDistribution(value: unknown): boolean {
+  return typeof value === "string" && (PriorDistribution.options as readonly string[]).includes(value);
+}
 
 /**
  * Factor category classification (V12.4+).

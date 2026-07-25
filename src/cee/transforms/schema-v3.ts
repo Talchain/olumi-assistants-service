@@ -32,6 +32,7 @@ import {
   type EdgeHint,
 } from "../extraction/intervention-extractor.js";
 import { normalizeToId } from "../utils/id-normalizer.js";
+import { PriorDistribution, isKnownPriorDistribution } from "../../schemas/graph.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { validateV3Response } from "../validation/v3-validator.js";
 import { config } from "../../config/index.js";
@@ -244,6 +245,31 @@ export function transformNodeToV3(
   // repair. ISL needs prior ranges to run Monte Carlo sampling on external factors.
   const nodePrior = (node as any).prior;
   if (nodePrior && typeof nodePrior === "object") {
+    // ⭐ PROMPT/GRAMMAR DRIFT ALARM (F4, /code-review 2026-07-25).
+    //
+    // `PriorDistribution` (schemas/graph.ts) is a ONE-MEMBER enum in the SENT
+    // draft grammar, and its only justification is that the PMS-served
+    // `draft_graph` prompt promises `distribution` is always "uniform". That
+    // prompt is re-pinnable WITHOUT a CEE deploy, and the actual validator
+    // (`cee-v3.ts`) types the field as `z.string()` — free text. So the
+    // grammar's claim that "the grammar and the validator cannot disagree" is
+    // FALSE for this one field, and nothing in this repo can prove otherwise at
+    // build time.
+    //
+    // Without this, a prompt that taught a second family would drift silently:
+    // on the structured path the grammar would force "uniform" and the prior
+    // would be MISLABELLED downstream rather than rejected; on the prompt-only
+    // fallback (no grammar) the new value would pass through untouched. Both
+    // read as green. So the alarm is a RUNTIME one, at the boundary where a real
+    // value arrives, and it is LOUD rather than assume-good.
+    if (!isKnownPriorDistribution((nodePrior as any).distribution)) {
+      log.error({
+        event: "cee.draft.prior_distribution_drift",
+        node_id: v3Node.id,
+        observed_distribution: (nodePrior as any).distribution,
+        grammar_distributions: [...PriorDistribution.options],
+      }, "[V3] prior.distribution is OUTSIDE the value set the sent draft grammar can express — the served draft_graph prompt and PriorDistribution (schemas/graph.ts) have drifted apart. Add the family to PriorDistribution, or re-pin the prompt. The value is passed through unchanged: a prompt decision must not 400 live drafts.");
+    }
     v3Node.prior = nodePrior;
   }
 

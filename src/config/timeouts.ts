@@ -906,8 +906,30 @@ export const OBSERVED_MAX_HEALTHY_DRAFT_STRING_CHARS = 76;
  *     healthy max, a factor that would be reckless on the token yardstick costs
  *     nothing in detection power: 25x still fires within the first few percent
  *     of any real runaway.
- *  3. THE ERROR COSTS ARE ASYMMETRIC. A false abort costs 25s and buys a
- *     properly-funded retry. A missed runaway costs the whole request.
+ *  3. THE ERROR COSTS ARE ASYMMETRIC. A missed runaway costs the whole request.
+ *
+ * ⚠ CORRECTED 2026-07-25 (F3). Point 3 used to read "A false abort costs 25s and
+ * buys a properly-funded retry" — and that was WRONG for the case it was
+ * defending against, in two compounding ways:
+ *
+ *   (a) THE RETRY WAS NOT A RE-ROLL. Every draft attempt was sent at temperature
+ *       0 (`anthropicTemperatureFor(model, {thinking:false})` → `requested ?? 0`;
+ *       confirmed on the wire, deployed staging reports `temperature: 0`). A
+ *       LEGITIMATE long string is deterministic input to a near-deterministic
+ *       decode, so the retry reproduced it and false-aborted again — a false
+ *       abort cost EVERY remaining abort, not 25s. Now fixed at the mechanism:
+ *       a post-abort retry is sent at `DRAFT_RUNAWAY_RETRY_TEMPERATURE`
+ *       (draft-budget.ts), so it CAN differ. The cost model above is true again
+ *       only because of that change — do not restore the old sentence without it.
+ *   (b) THE ABORTED STREAM IS STILL DISCARDED. `streamOneDraftAttempt` returns
+ *       `{kind:"runaway"}` without `acc`, and the `closeTruncatedJson` salvage
+ *       runs only on the max_tokens path. Because this trigger is deliberately
+ *       ungated on `edgesReached`, it can fire on a stream whose `nodes` AND
+ *       `edges` are already complete. Salvage is NOT attempted here on purpose:
+ *       the string that tripped the ceiling is, in 10 of 10 characterised cases,
+ *       the runaway itself, and salvaging would write it into the user's graph.
+ *       The honest statement of the trade is "a false abort discards a possibly-
+ *       complete stream and spends one abort", not "costs 25s".
  *
  * So the margin leans hard toward never false-aborting, and still catches the
  * class by an enormous margin. If a legitimate string ever DOES exceed the

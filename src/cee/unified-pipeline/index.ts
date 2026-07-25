@@ -24,6 +24,7 @@ import { config } from "../../config/index.js";
 import { createCorrectionCollector } from "../corrections.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamNonJsonError, UpstreamHTTPError } from "../../adapters/llm/errors.js";
+import { isDemandNotBriefFailure } from "../../adapters/llm/draft-budget.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
 import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
 import type { DraftGraphTimings } from "../../orchestrator-v5/telemetry/turn-timings.js";
@@ -327,17 +328,26 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     };
   }
 
-  // Truncation classification (S-AUDIT-2026-07-20 probe, aggravator 1): the
-  // adapter flags generations cut at the derived token budget
-  // (stop_reason=max_tokens) with a STRUCTURED property — message-prefix
-  // matching cannot carry this (the truncation note breaks the anchored
-  // `^anthropic_response_invalid_schema` regex below). A truncated draft is a
-  // demand-exceeds-budget failure, not a vague-brief failure, and the two need
-  // OPPOSITE recovery copy: asking a truncated-draft user to be "more
-  // specific" increases output-token demand and steers them back into the
-  // exact failure. The honest levers are demand reduction and retry.
-  const truncatedAtMaxTokens =
-    (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true;
+  // Demand-vs-brief classification (S-AUDIT-2026-07-20 probe, aggravator 1;
+  // GENERALISED F1, 2026-07-25). A draft that outgrew CEE's token/time budget is
+  // a demand-exceeds-budget failure, not a vague-brief failure, and the two need
+  // OPPOSITE recovery copy: asking such a user to be "more specific" increases
+  // output-token demand and steers them back into the exact failure. Message-
+  // prefix matching cannot carry this (the truncation note breaks the anchored
+  // `^anthropic_response_invalid_schema` regex below), so the classification is
+  // structural.
+  //
+  // ⚠ WHY THIS IS NO LONGER AN INLINE PROPERTY READ. It used to be
+  // `err.truncated_at_max_tokens === true` — a flag every adapter throw site had
+  // to REMEMBER to attach. The `skipped_unaffordable_final` route (the runaway-
+  // abort budget running out) did not attach it, so an entirely CEE-side failure
+  // was served as `reason: llm_non_json`, `retryable: false`, "Provide a
+  // clearer, more specific decision brief" — the cruel inversion this very
+  // comment block warns about, committed by the branch below it. #682's fourth
+  // abort trigger raised the rate of it. `isDemandNotBriefFailure` DERIVES the
+  // answer from the canonical `_llm_meta` every failure route already builds
+  // (`buildFailedCallLlmMeta`), so a future throw site cannot silently opt out.
+  const demandNotBriefFailure = isDemandNotBriefFailure(err);
   // HONEST COPY (2026-07-23 firefight, CORRECTED 2026-07-25).
   //
   // The failure is the draft outgrowing the token/time budget, NOT a bad brief.
@@ -369,33 +379,63 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     ],
   };
 
-  // Upstream non-JSON: LLM returned unparseable content — either a generation
-  // truncated at the derived token budget (flag above) or garbage output from
-  // a nonsensical brief.
+  // The copy for the OTHER class: output that genuinely could not be parsed or
+  // validated, with no truncation and no runaway abort behind it. Hoisted
+  // alongside `truncationRecovery` because it was written out twice below and
+  // the two copies had to be kept in step by hand.
+  const vagueBriefRecovery = {
+    suggestion: "Provide a clearer, more specific decision brief.",
+    hints: [
+      "State the specific decision you are trying to make",
+      "List 2-3 concrete options you are considering",
+      "Describe what success looks like",
+    ],
+  };
+
+  /**
+   * ⭐ THE RECOVERY CONTRACT, STATED ONCE for both 400 routes.
+   *
+   * `buildCeeErrorResponse` ends with `retryable: options.retryable ?? false`,
+   * so an OMITTED `retryable` is NOT a missing field on the wire — it is an
+   * explicit "do not retry". The old `...(flag ? { retryable: true } : {})`
+   * spread therefore told every runaway-aborted user not to retry a failure
+   * where one retry is the honest lever. Passing it unconditionally makes both
+   * answers deliberate.
+   *
+   * The demand class deliberately keeps ONE reason string rather than minting a
+   * second value: `route-v2.ts:mapDraftGraphPipelineReason` derives the V5 turn
+   * surface's retryable from `reason` alone, and a new value would need a new
+   * hand-maintained branch over there to be treated the same way (trap 12).
+   * Keeping the string means the V5 surface is fixed by this change too.
+   *
+   * @param briefFailureReason the reason to use when the failure really is the
+   *   brief — the only thing that differs between the two routes.
+   */
+  const recoveryContract = (briefFailureReason: string) => ({
+    reason: demandNotBriefFailure ? "llm_truncated_max_tokens" : briefFailureReason,
+    retryable: demandNotBriefFailure,
+    recovery: demandNotBriefFailure ? truncationRecovery : vagueBriefRecovery,
+  });
+
+  // Upstream non-JSON: LLM returned unparseable content — either a draft that
+  // outgrew CEE's budget (classified above) or garbage output from a
+  // nonsensical brief.
   if (err instanceof UpstreamNonJsonError) {
-    log.warn({ error: err, requestId: ctx.requestId, truncated_at_max_tokens: truncatedAtMaxTokens }, "Unified pipeline: LLM returned non-JSON response");
+    // Both facts logged: the derived VERDICT that now selects the copy, and the
+    // raw adapter flag under its original key so existing log queries built on
+    // `truncated_at_max_tokens` keep resolving instead of silently returning
+    // nothing. They are different facts, not two copies of one.
+    log.warn({ error: err, requestId: ctx.requestId, demand_not_brief_failure: demandNotBriefFailure, truncated_at_max_tokens: (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true }, "Unified pipeline: LLM returned non-JSON response");
     return {
       statusCode: 400,
       body: withLlmTrace(buildCeeErrorResponse(
         "CEE_LLM_VALIDATION_FAILED",
-        truncatedAtMaxTokens
+        demandNotBriefFailure
           ? "The draft needed more output tokens than the request budget affords and was truncated"
           : "LLM response could not be parsed — the brief may be too vague or nonsensical",
         {
           requestId: ctx.requestId,
-          reason: truncatedAtMaxTokens ? "llm_truncated_max_tokens" : "llm_non_json",
-          // Truncation is transient model over-generation — retry IS the lever.
-          ...(truncatedAtMaxTokens ? { retryable: true } : {}),
-          recovery: truncatedAtMaxTokens
-            ? truncationRecovery
-            : {
-                suggestion: "Provide a clearer, more specific decision brief.",
-                hints: [
-                  "State the specific decision you are trying to make",
-                  "List 2-3 concrete options you are considering",
-                  "Describe what success looks like",
-                ],
-              },
+          ...recoveryContract("llm_non_json"),
         },
       )),
     };
@@ -424,34 +464,28 @@ function mapPipelineError(error: unknown, ctx: StageContext): UnifiedPipelineRes
     /^(?:openai|anthropic)_(?:response_invalid_schema|empty_response)/.test(err.message ?? "") ||
     err.message === "draft_graph_missing_result";
 
-  // `truncatedAtMaxTokens` joins the condition because the adapter PREFIXES
+  // `demandNotBriefFailure` joins the condition because the adapter PREFIXES
   // the schema-invalid message with the truncation note, which breaks the
   // anchored regex above — pre-flag, a truncated-then-schema-invalid draft
   // fell through to the untyped 500 below with no recovery at all.
-  if (isLlmSchemaOrEmptyError || truncatedAtMaxTokens) {
-    log.warn({ error: err, requestId: ctx.requestId, truncated_at_max_tokens: truncatedAtMaxTokens }, "Unified pipeline: LLM response failed schema validation");
+  //
+  // ⚠ 2026-07-25: broadened from the raw truncation flag to the derived
+  // classifier. A draft that CEE runaway-aborted and that then failed to parse
+  // or validate matched neither the anchored regex nor the flag, so it landed on
+  // the untyped 500 — `retryable: false` with `recovery` absent entirely, which
+  // is the worst shape this estate ships. It now lands here with honest copy.
+  if (isLlmSchemaOrEmptyError || demandNotBriefFailure) {
+    log.warn({ error: err, requestId: ctx.requestId, demand_not_brief_failure: demandNotBriefFailure, truncated_at_max_tokens: (err as { truncated_at_max_tokens?: unknown }).truncated_at_max_tokens === true }, "Unified pipeline: LLM response failed schema validation");
     return {
       statusCode: 400,
       body: withLlmTrace(buildCeeErrorResponse(
         "CEE_LLM_VALIDATION_FAILED",
-        truncatedAtMaxTokens
+        demandNotBriefFailure
           ? "The draft needed more output tokens than the request budget affords and was truncated"
           : "LLM produced a response that does not match the expected graph schema",
         {
           requestId: ctx.requestId,
-          reason: truncatedAtMaxTokens ? "llm_truncated_max_tokens" : "llm_schema_invalid",
-          // Truncation is transient model over-generation — retry IS the lever.
-          ...(truncatedAtMaxTokens ? { retryable: true } : {}),
-          recovery: truncatedAtMaxTokens
-            ? truncationRecovery
-            : {
-                suggestion: "Provide a clearer, more specific decision brief.",
-                hints: [
-                  "State the specific decision you are trying to make",
-                  "List 2-3 concrete options you are considering",
-                  "Describe what success looks like",
-                ],
-              },
+          ...recoveryContract("llm_schema_invalid"),
         },
       )),
     };

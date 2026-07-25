@@ -137,7 +137,10 @@ const VALID_EFFECT_DIRECTIONS: Set<string> = new Set(EffectDirection.options);
 const FACTOR_TYPE_DEFAULT = "other" as const;
 const EXTRACTION_TYPE_DEFAULT = "inferred" as const;
 
-// extractionType enum is inline on FactorData — derive from schema
+// Derived from the schema, never re-typed. (The old wording said the enum is
+// "inline on FactorData"; it was hoisted to `ExtractionType` in schemas/graph.ts
+// on 2026-07-25 so the sent draft grammar could derive from it too. This read
+// resolves through FactorData either way — comment corrected, not the code.)
 const VALID_EXTRACTION_TYPES: Set<string> = new Set(
   FactorData.shape.extractionType.unwrap().options
 );

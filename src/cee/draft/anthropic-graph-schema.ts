@@ -175,6 +175,18 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
               // (`schemas/graph.ts`), never re-typed here: the grammar and the
               // validator cannot disagree about the value set, because there is
               // only one value set.
+              //
+              // ⚠ SCOPE OF THAT CLAIM, CORRECTED 2026-07-25 (F4). It is TRUE for
+              // `extractionType` and `factor_type` — the draft LLM boundary
+              // validates through `shared-schemas.ts` → `NodeData` →
+              // `graph.ts`, so these two really are one value set. It is FALSE
+              // for `prior.distribution` below: no validator reads
+              // `PriorDistribution`, the wire schema types that field as
+              // `z.string()`, and the enum mirrors a PMS-SERVED PROMPT that can
+              // be re-pinned without a deploy. Do not read this paragraph as
+              // covering that one — see the runtime drift alarm in
+              // `transforms/schema-v3.ts`, which exists because nothing here can
+              // cover it.
               extractionType: { type: "string", enum: [...ExtractionType.options] },
               factor_type: { type: "string", enum: [...FactorType.options] },
               uncertainty_drivers: { type: "array", items: { type: "string" } },
@@ -357,11 +369,19 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
     //    widening_log?, bias_signals?}; legacy shapes converted by
     //    normalise-legacy-coaching.ts, canonical CoachingSchema downstream.
     // No `description` keywords (by-construction invariant + grammar-size
-    // budget): the JSON-string instruction to the model rides on the user
-    // message instead — STRUCTURED_OUTPUTS_AUX_STRING_REMINDER in
-    // adapters/llm/anthropic.ts, appended only when structured outputs is
-    // active. This keeps the wire schema byte-identical to the live-verified
+    // budget). This keeps the wire schema byte-identical to the live-verified
     // compiling probe shape (3,194B, HTTP 200 on claude-sonnet-4-6).
+    //
+    // ⚠ CORRECTED 2026-07-25 (F7). This used to say the JSON-string instruction
+    // "rides on the user message instead — STRUCTURED_OUTPUTS_AUX_STRING_REMINDER
+    // in adapters/llm/anthropic.ts". THERE IS NO SUCH IDENTIFIER, and there is no
+    // such instruction: the v12 lean-draft contract dropped coaching /
+    // causal_claims / topology_plan from the SENT grammar, which made the old v8
+    // reminder an empty-string no-op, and it was deleted on 2026-07-24
+    // (simplification F2 — see the note beside DRAFT_COMPLIANCE_REMINDER in
+    // adapters/llm/anthropic.ts, which is the surviving record). So the three
+    // string-typed keys below are simply NOT SENT today. If one is ever restored
+    // to the grammar, the instruction has to be restored with it.
     causal_claims: { type: "string" },
     topology_plan: { type: "string" },
     coaching: { type: "string" },
@@ -670,13 +690,18 @@ export function buildDraftGraphSchema(): DraftGraphSchemaObject {
 // introduce. That is per-request cost for a compile-time property. Running it
 // ONCE at module load makes it strictly stronger (it now fails the process
 // rather than logging into a stream nobody reads) and free on the hot path.
-for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
+// F6 (2026-07-25): ONE rebuild, hoisted out of the loop. It used to sit inside
+// the `for`, so the whole grammar was rebuilt once PER KEY — harmless at
+// length 1, pointless work the moment the list grows.
+{
   const builtData = nodeDataObjectOf(buildDraftGraphSchema());
-  if (builtData && key in builtData.properties) {
-    throw new Error(
-      `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
-      `draft grammar after buildDraftGraphSchema(). The runaway-prone field cut did not land.`
-    );
+  for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
+    if (builtData && key in builtData.properties) {
+      throw new Error(
+        `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
+        `draft grammar after buildDraftGraphSchema(). The runaway-prone field cut did not land.`
+      );
+    }
   }
 }
 
