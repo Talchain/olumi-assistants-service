@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Agent, fetch as undiciFetch } from "undici";
-import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S, viableDraftRetryFloorTokens } from "../../config/timeouts.js";
+import { HTTP_CLIENT_TIMEOUT_MS, DRAFT_LLM_TIMEOUT_MS, UNDICI_CONNECT_TIMEOUT_MS, DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S, DRAFT_TTFB_SAFETY_OVERHEAD_S, viableRunawayRetryFloorTokens } from "../../config/timeouts.js";
 import { config } from "../../config/index.js";
 import type { DocPreview } from "../../services/docProcessing.js";
 import type { GraphT, NodeT, EdgeT } from "../../schemas/graph.js";
@@ -1198,12 +1198,16 @@ export async function draftGraphWithAnthropic(
       //
       // ⚠ ALIGNED 2026-07-25. The condition used to be a hand-written
       // `finalAttemptAffordableTokens < LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR` —
-      // the SAME rule config/timeouts.ts states as
-      // `>= max(2_700, priorAttemptMaxTokens)`, re-encoded here with the
-      // `priorAttemptMaxTokens` half DROPPED. Because 3,150 >= 2,700 it never
-      // fired, and the doomed attempt ran anyway (A2killer 0/18, 2026-07-24).
-      // Now delegated to `shouldSkipDoomedFinalAttempt`, which is built on the
-      // one shared `isDraftRetryAffordable` — no second floor exists to drift.
+      // one rule with two encodings and two different floors. It is now
+      // delegated to `shouldSkipDoomedFinalAttempt`; no second floor exists.
+      //
+      // ⭐ RE-AIMED (FAST-ABORT, 2026-07-25). This gate only ever runs after a
+      // RUNAWAY ABORT (`runawayAbortCount >= 1`), and a runaway never reached
+      // the edges array — so the cap it was abandoned at is not a demand signal
+      // and no longer decides here. The gate now asks the answerable question:
+      // can this window fund a CONVERGED draft (>= the evidence-derived
+      // requirement, `viableRunawayRetryFloorTokens()`)? `priorAttemptMaxTokens`
+      // is still logged as forensics — it just does not gate.
       const remainingAtLoopTop = effectiveTimeout - (Date.now() - startTime);
       const willBeFinalAttempt = !hasRoomForAnotherAbortableAttempt(
         remainingAtLoopTop,
@@ -1224,11 +1228,10 @@ export async function draftGraphWithAnthropic(
           willBeFinalAttempt,
           thinkingEnabled: draftThinkingEnabled,
           finalAttemptAffordableTokens,
-          priorAttemptMaxTokens,
         })
       ) {
         const skipElapsedMs = Date.now() - startTime;
-        const viableFloorTokens = viableDraftRetryFloorTokens(priorAttemptMaxTokens);
+        const viableFloorTokens = viableRunawayRetryFloorTokens();
         log.error({
           event: "cee.llm.draft_final_attempt_skipped",
           model,
@@ -1238,14 +1241,14 @@ export async function draftGraphWithAnthropic(
           prior_attempt_max_tokens: priorAttemptMaxTokens,
           runaway_abort_count: runawayAbortCount,
           elapsed_ms: skipElapsedMs,
-        }, "[Anthropic] draft_graph FINAL attempt SKIPPED — remaining budget cannot fund a generation as large as the attempt that was abandoned; failing fast (honest) instead of burning the window on a sub-viable 0-edge generation (DETECTOR-FIX part 2, F4; floor aligned 2026-07-25)");
+        }, "[Anthropic] draft_graph FINAL attempt SKIPPED — remaining budget cannot fund a CONVERGED draft (the evidence-derived requirement); failing fast (honest) instead of burning the window on a sub-viable 0-edge generation (DETECTOR-FIX part 2, F4; yardstick re-aimed 2026-07-25)");
         throw Object.assign(
           new UpstreamNonJsonError(
             `anthropic draft_graph final attempt unaffordable — remaining budget ${remainingAtLoopTop}ms affords ` +
-            `${finalAttemptAffordableTokens} tokens < the ${viableFloorTokens}-token viable floor ` +
-            `(the converged-graph floor, raised to the ${priorAttemptMaxTokens}-token cap of the abandoned ` +
-            `attempt) after ${runawayAbortCount} runaway abort(s); failing fast instead of a doomed ` +
-            `sub-viable generation`,
+            `${finalAttemptAffordableTokens} tokens < the ${viableFloorTokens}-token converged-draft floor ` +
+            `(derived from the largest successful draft ever observed, with headroom) after ` +
+            `${runawayAbortCount} runaway abort(s) at a ${priorAttemptMaxTokens}-token cap; failing fast ` +
+            `instead of a doomed sub-viable generation`,
             "anthropic",
             "draft_graph",
             skipElapsedMs,
@@ -1295,19 +1298,22 @@ export async function draftGraphWithAnthropic(
           // MIN_RETRY (DETECTOR-FIX, 2026-07-24).
           //
           // ⚠ ALIGNED 2026-07-25 — the time-reserve above is necessary but NOT
-          // sufficient. It only knows the 2,700-token floor; it does not know
-          // that a retry funded BELOW the cap of the attempt being abandoned is
-          // doomed. Authorising an abort the skip-gate will then refuse is how
-          // 60s of a 110s window got burned for nothing. `isAbortableRetryViable`
-          // adds the missing half from the one shared rule, so the abort decision
-          // and the skip-gate can no longer disagree. `maxTokens` is the right
-          // comparator here: an ABORTABLE attempt is by definition not the final
-          // one, so it always runs at the outer derived cap (the final-attempt
-          // squeeze below applies only when this is false) — no circularity.
+          // sufficient: authorising an abort the skip-gate will then refuse is
+          // how 60s of a 110s window got burned for nothing.
+          // `isAbortableRetryViable` adds the missing half, so the abort decision
+          // and the skip-gate can no longer disagree.
+          //
+          // ⭐ RE-AIMED (FAST-ABORT, 2026-07-25). It used to also require the
+          // post-abort window to re-fund `maxTokens` — the cap of the attempt
+          // being abandoned — which at default configuration is arithmetically
+          // impossible (aff(110s-25s) = 6,300 < 8,550), so this branch NEVER
+          // armed and `runaway_abort_count` was 0 on all 30 live observations.
+          // A runaway never reaches the edges array, so its cap is not a demand
+          // signal; the question that matters is whether the post-abort window
+          // can fund a CONVERGED draft, which the corpus puts at <=2,271 tokens.
           const canRetryAgain = isAbortableRetryViable(
             remainingBudgetMs,
             runawayAbortCount,
-            maxTokens,
             opts?.maxTokensCeiling,
           );
           const attemptDetectDeadlineMs = canRetryAgain ? DRAFT_RUNAWAY_DETECT_MS : null;

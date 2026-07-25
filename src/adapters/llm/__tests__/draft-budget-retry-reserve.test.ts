@@ -32,6 +32,7 @@ import {
   LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
   DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S,
   DRAFT_TTFB_SAFETY_OVERHEAD_S,
+  viableRunawayRetryFloorTokens,
 } from '../../../config/timeouts.js';
 
 describe('hasRoomForAnotherAbortableAttempt — the shared retry-reserve predicate (F1)', () => {
@@ -51,14 +52,28 @@ describe('hasRoomForAnotherAbortableAttempt — the shared retry-reserve predica
 
 describe('F-4 — abort authorization is reconciled to the skip-gate floor', () => {
   it('DRAFT_RUNAWAY_MIN_RETRY_MS is DERIVED from the skip-gate token floor (not a hand-typed mirror)', () => {
+    // ⚠ RE-AIMED 2026-07-25 (FAST-ABORT). The floor the two runaway gates check
+    // moved from LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR (2,700) to the evidence-
+    // derived converged-draft requirement (`viableRunawayRetryFloorTokens()`,
+    // 3,407). This time-domain twin tracks THAT floor — the whole point of the
+    // F-4 derivation is that the two cannot disagree, so it must follow it.
+    // Leaving it at 45,000 would re-open the contradiction in [45.0s, 52.86s).
     const derived = Math.ceil(
-      (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S +
+      (viableRunawayRetryFloorTokens() / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S +
         DRAFT_TTFB_SAFETY_OVERHEAD_S) *
         1000,
     );
     expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(derived);
-    // Sanity: with today's primitives that is 45s (the skip-gate's time floor).
-    expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(45_000);
+    // Sanity: with today's primitives that is 52.856s (the gate's time floor).
+    expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBe(52_856);
+    // …and it is still strictly above what the OLD 2,700 floor implied, so the
+    // reserve only ever became MORE conservative, never less.
+    expect(DRAFT_RUNAWAY_MIN_RETRY_MS).toBeGreaterThan(
+      Math.ceil(
+        (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S +
+          DRAFT_TTFB_SAFETY_OVERHEAD_S) * 1000,
+      ),
+    );
   });
 
   it('every AUTHORIZED abort leaves a worst-case final window the skip-gate ACCEPTS (RED on the pre-fix 35s reserve)', () => {
@@ -71,6 +86,10 @@ describe('F-4 — abort authorization is reconciled to the skip-gate floor', () 
       const affordable = getAffordableDraftTokens(finalWindow);
       // The skip-gate refuses a final that affords < the viable floor; a fix that
       // authorizes an abort but leaves a sub-viable final is the F-4 contradiction.
+      // Asserted against the floor the gate ACTUALLY checks (re-aimed 2026-07-25),
+      // not the weaker constant — a sweep pinned to a floor the gate no longer
+      // uses would pass while the contradiction was live.
+      expect(affordable).toBeGreaterThanOrEqual(viableRunawayRetryFloorTokens());
       expect(affordable).toBeGreaterThanOrEqual(LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR);
     }
   });

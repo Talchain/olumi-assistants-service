@@ -36,10 +36,11 @@
 import {
   getAffordableDraftTokens,
   DRAFT_LLM_TIMEOUT_MS,
-  LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
   DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S,
   DRAFT_TTFB_SAFETY_OVERHEAD_S,
-  isDraftRetryAffordable,
+  OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS,
+  isRunawayRetryAffordable,
+  viableRunawayRetryFloorTokens,
 } from "../../config/timeouts.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import { DRAFT_ATTACHMENT_MAX_BYTES } from "./draft-attachment.js";
@@ -319,16 +320,35 @@ export const DRAFT_RUNAWAY_STALL_MS = 8_000;
 
 // ABSOLUTE per-attempt no-edges ceiling — the pure-time backstop that bounds
 // every abortable attempt (so the retry-budget arithmetic in the adapter has a
-// hard upper limit on time consumed before an abort). DERIVED from the fresh
-// live distribution: p100 19.57s + ~10.4s margin = 30s. Clearing the live
-// healthy p100 with comfortable headroom is what removes the false-abort of the
-// slow-healthy tail (edges reached at up to 19.57s, and a hair beyond under
-// drift): a still-emitting healthy draft has until 30s to reach edges before the
-// ceiling fires, versus the old 20s blanket gate that clipped it. The drift
-// tripwire (DRAFT_RUNAWAY_DRIFT_WARN_MS) warns long before the live p90 could
-// creep up to this. Catches the (unobserved) slow-sparse runaway the stall and
-// char gates would miss.
-export const DRAFT_RUNAWAY_HARD_CEILING_MS = 30_000;
+// hard upper limit on time consumed before an abort).
+//
+// ⭐ RE-DERIVED 30,000 -> 25,000 (FAST-ABORT, 2026-07-25). Read the history
+// before touching this: the blanket 20s gate was REVERTED on 2026-07-24 for
+// false-aborting the slow-healthy tail, and 30s was chosen as that corpus's
+// p100 (19,570 ms) + ~10.4s. The pooled live evidence is now:
+//
+//   healthy time-to-edges p100 = 21,199 ms   (OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS,
+//                                             pooled n=28 over both live corpora)
+//   runaway  time-to-edges     = NEVER reached, 17/17, at ceilings of 8,550 /
+//                                12,000 / 16,000 tokens over 73-140s
+//
+// so 25,000 ms clears everything ever measured by 3,801 ms (+17.9%) and still
+// catches 17/17 runaways — the populations do not overlap at all, they are
+// separated by "reached edges at all", not by a rate.
+//
+// WHY A THINNER MARGIN IS CORRECT NOW, AND WAS NOT IN JULY. On 2026-07-24 a
+// false abort was FATAL: the yardstick bug (see config/timeouts.ts) meant the
+// post-abort attempt was funded at ~3,150 tokens and failed by construction, so
+// every false abort destroyed a request. With the yardstick corrected a false
+// abort costs 25s and buys a properly-funded 6,300-token retry. That changes
+// what the margin is protecting against, and the arithmetic then favours 25s:
+// at 25s the 110s window funds THREE attempts, at 30s only TWO. At the measured
+// per-attempt success rate (13/30 = 0.433) that is ~0.80 vs ~0.68 — and 25s
+// still wins even if a fifth of healthy drafts were false-aborted (~0.72).
+//
+// Do NOT lower this below OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS; the pin in
+// `__tests__/draft-fast-abort-yardstick.test.ts` fails loud if anyone does.
+export const DRAFT_RUNAWAY_HARD_CEILING_MS = 25_000;
 
 // Char budget: max healthy nodes-section = 7078 chars (fresh); runaway visible
 // minimum = 9526 chars. 8000 sits above the healthy max (+13%) and below the
@@ -372,16 +392,43 @@ export function draftAttachmentDetectorAllowance(attachmentBytes: number | undef
   };
 }
 
-// DRIFT TRIPWIRE (the alarm that was MISSING on 2026-07-24). Derived from the
-// hard ceiling (0.6× = 60% of the way to an abort) rather than a hand-mirrored
-// corpus constant, so it cannot silently drift out of sync with the gate. A
-// healthy draft reaching edges past this point is in the slow tail (fresh p50
-// 15.4s < 18s < fresh p90 19.3s — it fires on today's slow-healthy quartile,
-// 4/16 ≥18s, exactly the population the stale 20s gate was clipping). A RISING
-// rate of these WARNs is the early signal that the live p90 is creeping toward
-// the ceiling and the corpus is drifting — surface it BEFORE it becomes a
-// false-abort, which is precisely what did not happen today.
-export const DRAFT_RUNAWAY_DRIFT_WARN_MS = Math.round(DRAFT_RUNAWAY_HARD_CEILING_MS * 0.6);
+// DRIFT TRIPWIRE (the alarm that was MISSING on 2026-07-24). A RISING rate of
+// these WARNs is the early signal that the live p100 is creeping toward the
+// ceiling and the corpus is drifting — surfaced BEFORE it becomes a false-abort.
+//
+// ⭐ RE-ANCHORED (FAST-ABORT, 2026-07-25) — a direct consequence of lowering the
+// ceiling, not a separate change. It used to be `0.6 × HARD_CEILING`. At a
+// 25,000 ms ceiling that is 15,000 ms, which is BELOW the healthy p50 (15.4s):
+// the tripwire would have WARNed on more than half of all healthy drafts and
+// become precisely the alarm-everyone-learns-to-ignore this estate keeps
+// hunting. Anchored instead to the pooled observed healthy p100 — "this draft
+// took longer to reach edges than anything ever measured, and is eating the
+// ceiling's margin". Still derived from live measurement (one constant, one
+// home, in config/timeouts.ts), still strictly below the ceiling so it warns
+// before it aborts, and it fires on 1 of the 12 corpus drafts rather than 7.
+export const DRAFT_RUNAWAY_DRIFT_WARN_MS = OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS;
+
+// Fail-loud coherence pin: a tripwire at or past the ceiling can never warn
+// before the abort it is supposed to pre-empt. Asserted at module load so a
+// future edit to either constant cannot silently produce a dead alarm.
+if (DRAFT_RUNAWAY_DRIFT_WARN_MS >= DRAFT_RUNAWAY_HARD_CEILING_MS) {
+  throw new Error(
+    `draft-budget: DRAFT_RUNAWAY_DRIFT_WARN_MS (${DRAFT_RUNAWAY_DRIFT_WARN_MS}ms) must be strictly below ` +
+    `DRAFT_RUNAWAY_HARD_CEILING_MS (${DRAFT_RUNAWAY_HARD_CEILING_MS}ms) — a drift alarm that cannot fire ` +
+    `before the abort it warns about is a dead alarm.`,
+  );
+}
+
+// Fail-loud corpus pin: the abort ceiling must sit ABOVE the slowest healthy
+// draft ever measured. A ceiling below it aborts healthy generations — the exact
+// defect that got the blanket 20s gate reverted on 2026-07-24.
+if (DRAFT_RUNAWAY_HARD_CEILING_MS <= OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS) {
+  throw new Error(
+    `draft-budget: DRAFT_RUNAWAY_HARD_CEILING_MS (${DRAFT_RUNAWAY_HARD_CEILING_MS}ms) must exceed the slowest ` +
+    `healthy time-to-edges ever observed (${OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS}ms) — a lower ceiling ` +
+    `false-aborts healthy drafts (2026-07-24 revert class).`,
+  );
+}
 
 /**
  * Drift tripwire predicate: is this healthy draft's time-to-edges deep enough
@@ -419,10 +466,19 @@ export const DRAFT_MAX_RUNAWAY_RETRIES = 5;
 // budget unspent. Deriving this from the SAME primitives the skip-gate's token
 // floor uses (LEAN floor / throughput-floor + TTFB overhead) makes the two agree
 // BY CONSTRUCTION: an abort is authorized only when its promised final window can
-// actually afford a converged graph. Evaluates to 45,000ms today; it tracks the
-// floor automatically if any of those primitives change (derive, never mirror).
+// actually afford a converged graph. It tracks the floor automatically if any of
+// those primitives change (derive, never mirror).
+//
+// ⭐ RE-DERIVED (FAST-ABORT, 2026-07-25). The token floor the two gates check has
+// moved from LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR (2,700) to
+// viableRunawayRetryFloorTokens() (3,407 — the evidence-derived requirement for a
+// SUCCESSFUL draft, see config/timeouts.ts), so this time-domain twin MUST move
+// with it. Leaving it at the 45,000ms the old floor implied would re-open the
+// #673 contradiction one rung along: a post-abort window in [45.0s, 52.86s) would
+// be AUTHORIZED by this reserve and then REFUSED by the gate. Evaluates to
+// 52,856ms today.
 export const DRAFT_RUNAWAY_MIN_RETRY_MS = Math.ceil(
-  (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S +
+  (viableRunawayRetryFloorTokens() / DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S +
     DRAFT_TTFB_SAFETY_OVERHEAD_S) *
     1000,
 );
@@ -476,24 +532,52 @@ export function hasRoomForAnotherAbortableAttempt(
 // then refuse is the same contradiction #673 fixed for the 35s/45s pair, one
 // level up. Both sites must agree or the clock still burns.
 //
-// THE CONSEQUENCE, STATED PLAINLY (this is a behaviour change, not a no-op):
-// in the DEFAULT regime attempt 1 takes the FULL affordable budget (8,550
-// tokens at the 110s timeout), and no post-abort window can ever re-fund 8,550
-// — aff(110s - 30s) = 5,850 < 8,550. So the runaway abort-retry ladder does not
-// fire at all at default configuration: the draft gets ONE generation with the
-// WHOLE window instead of three partial ones. That is the arithmetic telling us
-// the ladder was never viable in this regime, and it is the same conclusion
-// `isDraftRetryAffordable`'s own doc already reached for the lean retry ("in the
-// default regime this is essentially never true"). The mechanism is NOT dead
-// code — it re-arms whenever attempt 1 runs at a REDUCED cap (an operator
-// lowering CEE_DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL, or any caller passing a
-// `maxTokensCeiling`), because then a post-abort window CAN re-fund that
-// smaller cap. Derived, not switched: no flag, no env gate.
+// ⭐ THE YARDSTICK WAS WRONG, AND THAT WAS THE WHOLE DEFECT (FAST-ABORT,
+// 2026-07-25). #675 (above) was right that a doomed retry must never be funded,
+// and right that both sites must agree. It measured the wrong quantity.
+//
+// Comparing the post-abort window against the ABANDONED CAP demands
+// aff(110s - ceiling) >= 8,550, which is arithmetically impossible — so #675's
+// own doc concluded "the ladder does not fire at all at default configuration".
+// Live confirmation, 30 observations: `runaway_abort_count: 0` on every one.
+// The detector was built, correct, and switched off.
+//
+// The premise behind the abandoned-cap yardstick is "a model that could not fit
+// N tokens re-truncates in anything less" — a statement about a generation that
+// TRIED to fit a graph and overflowed. A runaway is not that. Measured over 29
+// live runs (parallel-briefs/TOKEN-CEILING-EXPERIMENT-2026-07-25.md): 17/17
+// runaways never emitted a single edge (`time_to_edges_ms` NULL, schema error
+// `edges: Required`), and consumed `completion_tokens == the cap, EXACTLY` at
+// 8,550 AND 12,000 AND 16,000, with 30-60s of window still unspent. A runaway
+// has no size it is trying to reach. Its cap tells you nothing about demand.
+//
+// What a retry actually needs is what a SUCCESSFUL draft costs: 1,652-2,271
+// tokens over 13 observations, identical at every ceiling. That is the quantity
+// `isRunawayRetryAffordable` measures (corpus max x an explicit headroom factor,
+// floored at #675's own 2,700 so it can never be laxer — today 3,407).
+//
+// BOTH #675 PROPERTIES STILL HOLD, and both are asserted in
+// `__tests__/draft-fast-abort-yardstick.test.ts`:
+//   1. NO DOOMED RETRY. The gate is STRICTER than the floor #675 shipped, and a
+//      window affording less than a real draft is still refused at both sites —
+//      17 of the 18 live caps that motivated #675 (3,146-3,826) are still
+//      skipped.
+//   2. NO AUTHORISE-THEN-REFUSE. `DRAFT_RUNAWAY_MIN_RETRY_MS` is re-derived from
+//      this same floor, so an abort is authorised only when the window it leaves
+//      passes the gate that runs next (swept over the whole domain in the test).
 //
 // THE WALL IS STILL RESPECTED. The 504-class the abort ladder was blamed for is
-// closed by the F1 max_tokens derivation, not by aborting: attempt 1's cap is
-// getAffordableDraftTokens(window) by construction, so a runaway truncates AT
+// closed by the F1 max_tokens derivation, not by aborting: every attempt's cap is
+// getAffordableDraftTokens(its window) by construction, so a runaway truncates AT
 // max_tokens INSIDE the wall and `closeTruncatedJson` salvage still applies.
+//
+// RESULTING LADDER at default configuration (110s window, 25s ceiling):
+//   attempt 1 — 110s window, 8,550 cap, aborts at <=25s if no edges
+//   attempt 2 —  85s window, 8,550 cap, aborts at <=25s if no edges
+//   attempt 3 —  60s window, 4,050 cap (final squeeze), runs out; salvage applies
+// A fourth rung would afford aff(35s) = 1,800 < 3,407 and is refused — the
+// ladder terminates on the anti-doom rule, not by luck. Derived, not switched:
+// no flag, no env gate.
 // ---------------------------------------------------------------------------
 
 /**
@@ -502,29 +586,23 @@ export function hasRoomForAnotherAbortableAttempt(
  * TRUE only when BOTH hold:
  *  1. the remaining budget reserves a full abortable attempt plus a retry
  *     (`hasRoomForAnotherAbortableAttempt`), AND
- *  2. the window the abort would actually leave behind can fund a generation at
- *     least as large as the one being abandoned (`isDraftRetryAffordable`).
+ *  2. the window the abort would actually leave behind can fund a CONVERGED
+ *     draft (`isRunawayRetryAffordable`) — the evidence-derived requirement,
+ *     not the cap being abandoned.
  *
- * (2) is the half that was missing. Without it the adapter aborts into a window
- * it has already been told is too small, then either burns it on a doomed
- * generation (the defect) or refuses it at the skip-gate (budget spent, nothing
- * to show). Note the post-abort window is measured from the HARD CEILING, not
- * DETECT_MS: a progress-aware abort may consume up to the ceiling before firing,
- * so the ceiling is the honest worst case — the same reserve
+ * The post-abort window is measured from the HARD CEILING, not DETECT_MS: a
+ * progress-aware abort may consume up to the ceiling before firing, so the
+ * ceiling is the honest worst case — the same reserve
  * `hasRoomForAnotherAbortableAttempt` uses, derived from the same constant.
  *
  * @param remainingMs live remaining window for the whole draft call
  * @param runawayAbortCount aborts already spent on this call
- * @param currentAttemptMaxTokens the max_tokens the IN-FLIGHT attempt is running
- *   with (an abortable attempt is by definition non-final, so this is the outer
- *   derived cap — no circularity with the final-attempt squeeze)
  * @param maxTokensCeiling optional caller ceiling, threaded so the post-abort
  *   affordability is computed against the budget the retry would REALLY get
  */
 export function isAbortableRetryViable(
   remainingMs: number,
   runawayAbortCount: number,
-  currentAttemptMaxTokens: number,
   maxTokensCeiling?: number,
 ): boolean {
   if (!hasRoomForAnotherAbortableAttempt(remainingMs, runawayAbortCount)) return false;
@@ -533,20 +611,26 @@ export function isAbortableRetryViable(
     postAbortWindowMs,
     maxTokensCeiling,
   ).effective;
-  return isDraftRetryAffordable(postAbortAffordableTokens, currentAttemptMaxTokens);
+  return isRunawayRetryAffordable(postAbortAffordableTokens);
 }
 
 /**
  * Must the adapter SKIP the final attempt and fail fast?
  *
- * TRUE when aborts have already been spent and the final window cannot fund a
- * generation at least as large as the attempt that was abandoned. Skipping is
- * the honest outcome: the same typed error the doomed attempt would throw ~30s
- * later, thrown now, with the budget unspent rather than burned.
+ * TRUE when runaway aborts have already been spent and the final window cannot
+ * fund a converged draft. Skipping is the honest outcome: the same typed error
+ * the doomed attempt would throw ~25s later, thrown now, with the budget unspent
+ * rather than burned.
  *
- * Gated on `runawayAbortCount >= 1` so attempt 1 — and any small-timeout direct
- * caller — always runs at least once: a first attempt has nothing to compare
- * against and refusing it would turn a short-timeout call into a no-op.
+ * Gated on `runawayAbortCount >= 1`, so this gate ONLY ever judges an attempt
+ * that follows a RUNAWAY ABORT — which is exactly why it must use the runaway
+ * yardstick and not `isDraftRetryAffordable`'s prior-cap one. Attempt 1 — and any
+ * small-timeout direct caller — always runs at least once.
+ *
+ * Deliberately takes NO `priorAttemptMaxTokens`: the aborted attempt never
+ * reached the edges array, so its cap is not a demand signal and must not be
+ * allowed back into this decision. The adapter still LOGS it (it is useful
+ * forensics), it just does not decide on it.
  *
  * Flooring the cap UP instead of skipping is NOT an option: it re-opens the
  * wall-overflow 504 that deriving max_tokens from the timeout closed.
@@ -556,17 +640,13 @@ export function shouldSkipDoomedFinalAttempt(params: {
   readonly willBeFinalAttempt: boolean;
   readonly thinkingEnabled: boolean;
   readonly finalAttemptAffordableTokens: number;
-  readonly priorAttemptMaxTokens: number;
 }): boolean {
   if (params.runawayAbortCount < 1) return false;
   if (!params.willBeFinalAttempt) return false;
   // Thinking keeps its clamped max_tokens and runs with detection off, so the
   // final-attempt squeeze this gate guards against never applies to it.
   if (params.thinkingEnabled) return false;
-  return !isDraftRetryAffordable(
-    params.finalAttemptAffordableTokens,
-    params.priorAttemptMaxTokens,
-  );
+  return !isRunawayRetryAffordable(params.finalAttemptAffordableTokens);
 }
 
 // Structural "reached the edges array" probe over the accumulated stream text.
