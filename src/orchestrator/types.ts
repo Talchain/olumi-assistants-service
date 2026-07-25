@@ -719,6 +719,19 @@ export interface FramingBlockData {
  * Evidence block — research findings from web search, grounded with citations.
  * Produced by research_topic tool. Claims and mapping suggestions are best-effort;
  * never auto-applied to the model — advisory only.
+ *
+ * ⚠ NO PRODUCER SINCE 2026-07-22. The `research_topic` tool that filled this shape was deleted
+ * in `f957d6d8` (V1-belt sweep collateral — it met the "zero live-V5 importers" bar because V5
+ * never ported it). Only `createEvidenceBlock()` in `blocks/factory.ts` names it, and that has
+ * zero callers.
+ *
+ * RETAINED DELIBERATELY, and it is the most load-bearing of the research orphans: the SHIPPED
+ * contract's `EvidenceBlock` (`@talchain/schemas` boundary/blocks.ts) describes an evidence
+ * *gap* and carries no `sources[]`, no `url`, no `findings` — so today there is no wire shape
+ * that can carry back what a research call actually found. The `sources[].{title,url}`,
+ * `claims[].source_url` and `confidence_note` fields below are the drafted answer to exactly
+ * that gap. Deleting this would discard a contract proposal, not dead weight.
+ * See `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` (programme docs, sibling dir — untracked) §2.1 and §2.3.
  */
 export interface EvidenceBlockData {
   query: string;

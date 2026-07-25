@@ -237,8 +237,9 @@ describe("prompt environment resolution (Gate 0: DD_ENV decoupling)", () => {
       // degraded reason, because staging-serving-production is the
       // deliberately-unflagged safe direction.
       //
-      // Not hypothetical: tools/conversation-harness/staging-parity.env.example:85
-      // ships `PROMPTS_USE_STAGING=`.
+      // Not hypothetical: tools/conversation-harness/staging-parity.env.example
+      // ships a bare `PROMPTS_USE_STAGING=` row. (Cited by KEY, not by line
+      // number — the line-number form of this citation had already drifted.)
       process.env.OLUMI_ENV = "staging";
       process.env.PROMPTS_ENVIRONMENT = "staging";
       process.env.PROMPTS_USE_STAGING = "";
