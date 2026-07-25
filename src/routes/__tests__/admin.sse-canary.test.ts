@@ -172,7 +172,14 @@ describe('SSE canary — survival after downstream disconnect (blocker B13)', ()
       body: JSON.stringify({ admin_key: TEST_KEY, run_id: runId }),
     });
     expect(statusRes.status).toBe(200);
-    const run = await statusRes.json();
+    const run = (await statusRes.json()) as {
+      disconnected_at_ms: number | null;
+      ticks_after_disconnect: number;
+      completed: boolean;
+      end_reason: string | null;
+      last_seq_produced: number;
+      last_seq_flushed: number;
+    };
 
     expect(run.disconnected_at_ms).not.toBeNull();
     // THE signal: work produced after the socket closed.
