@@ -54,6 +54,10 @@ import {
   SUMMARY_PRECEDENCE_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+// ONE shared extractor. This gate and the context-policy conformance anchor read
+// the same serialised bytes; a private copy here would be a third variant of a
+// parser whose naive form was a real defect in the anchor (see the helper's note).
+import { observeSerialisedPack } from './observe-serialised-pack.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -147,31 +151,6 @@ const KNOWN_UNSANCTIONED: ReadonlyArray<{
 
 /** Keys `buildUserMessage` deliberately strips before serialising. */
 const STRIPPED_BY_SERIALISER = ['display_analysis', 'display_graph', 'analysis_state'] as const;
-
-/** Ordered top-level keys of the serialised `## ContextPack` JSON, brace-matched
- *  so appended instruction blocks cannot corrupt the parse. */
-function observeSerialised(msg: string): Record<string, unknown> {
-  const marker = '## ContextPack\n';
-  const rest = msg.slice(msg.indexOf(marker) + marker.length);
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  for (let i = 0; i < rest.length; i++) {
-    const c = rest[i]!;
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === '\\') esc = true;
-      else if (c === '"') inStr = false;
-      continue;
-    }
-    if (c === '"') inStr = true;
-    else if (c === '{') depth++;
-    else if (c === '}' && --depth === 0) {
-      return JSON.parse(rest.slice(0, i + 1)) as Record<string, unknown>;
-    }
-  }
-  throw new Error('unterminated ContextPack JSON');
-}
 
 /**
  * DERIVED severity discriminator: does this field's REALISED serialised value
@@ -402,7 +381,7 @@ function applyWaivers(found: string[], promptSha: string): string[] {
 // ---------------------------------------------------------------------------
 
 const PACK = assembleMaximalPack();
-const SERIALISED = observeSerialised(buildUserMessage(PACK, USER_MESSAGE));
+const SERIALISED = observeSerialisedPack(buildUserMessage(PACK, USER_MESSAGE));
 const LIVE_SHA = shortSha256(SERVED_PROMPT);
 
 describe('prompt ↔ pack sanction gate', () => {
@@ -493,7 +472,7 @@ describe('POSITIVE CONTROLS — the gate catches the defect that motivated it', 
   it('THE TEMPORAL REPRODUCTION — the gate is QUIET before #662 and goes RED the moment #662 lands', () => {
     // Pre-#662: the assembler omits the key entirely for record-less scenarios.
     const prePack = assembleMaximalPack({ olderRelevantFacts: undefined });
-    const preSerialised = observeSerialised(buildUserMessage(prePack, USER_MESSAGE));
+    const preSerialised = observeSerialisedPack(buildUserMessage(prePack, USER_MESSAGE));
     expect(Object.keys(preSerialised)).not.toContain('older_relevant_facts');
     const before = findUnsanctionedFields(HISTORICAL_V119_CORPUS, preSerialised, USER_MESSAGE);
     expect(before).not.toContain('older_relevant_facts');
