@@ -65,7 +65,7 @@ import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 // replaced by the locked-template fallback — the drift pin lives in
 // scaffold-disclosure.test.ts.
 import {
-  SCAFFOLD_DISCLOSURE_RE_SRC,
+  SCAFFOLD_ANY_DISCLOSURE_RE_SRC,
   SCAFFOLD_DISCLOSURE_MAX_CHARS,
 } from './scaffold-disclosure.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
@@ -1532,7 +1532,7 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
 // narration tail and status suffix — mirroring the handler's
 // `summary + buildScaffoldDisclosureSuffix(...)` append order.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_DISCLOSURE_RE_SRC})?`;
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?`;
 
 /**
  * Anchored form of the scaffold-disclosure grammar, for the locked-template
@@ -1540,7 +1540,7 @@ const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${RED
  * text may carry EXACTLY one whole disclosure suffix after the template
  * literal — nothing else.
  */
-const SCAFFOLD_SUFFIX_ONLY_REGEX = new RegExp(`^(?:${SCAFFOLD_DISCLOSURE_RE_SRC})$`);
+const SCAFFOLD_SUFFIX_ONLY_REGEX = new RegExp(`^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})$`);
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three
 // claim-safe bodies emitted by cautionReasonText. Pinned verbatim so

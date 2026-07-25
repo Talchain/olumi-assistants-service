@@ -230,14 +230,25 @@ describe('turn-executor — D-ask-1 scaffold live wiring (M4, routed execute pat
       scaffoldedOptions?: readonly ScaffoldedOptionRecord[];
     };
     expect(enricherInput.scaffoldedOptions).toBeDefined();
+    // 2026-07-25: the record now also carries the DERIVED `in_comparison`
+    // verdict — `true` here because this mock PLoT client returns a record
+    // for `opt_new`, so the arm genuinely reached the comparison. The strict
+    // toEqual is kept (a silently-added field is the drift class this
+    // assertion exists to catch); the expectation is updated at source
+    // rather than relaxed to toMatchObject.
     expect(enricherInput.scaffoldedOptions).toEqual([
       {
         option_id: 'opt_new',
         label: 'New Option',
         factor_ids: ['fac_m'],
         value_defaulted: true,
+        in_comparison: true,
       },
     ]);
+    // Discriminating control: the stamp is DERIVED, not a constant. The same
+    // wiring with an engine that dropped the arm must stamp `false` — pinned
+    // in run-analysis-scaffold-unconfigured.test.ts against the golden
+    // fixture, whose records contain only opt_a / opt_b.
   });
 
   it('non-scaffolded run (all options configured): no configure chip, no scaffoldedOptions on the enricher input', async () => {

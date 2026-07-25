@@ -75,7 +75,10 @@ import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js'
 import { AnalysisNotReadyError } from './analysis-ready-core.js';
 import { scaffoldUnconfiguredOptions } from './scaffold-unconfigured-options.js';
 import { isRecommendableOption } from './recommendable-option.js';
-import { buildScaffoldDisclosureSuffix } from '../../coaching/scaffold-disclosure.js';
+import {
+  buildScaffoldDisclosureForPartition,
+  partitionScaffoldedByAnalysisPresence,
+} from '../../coaching/scaffold-disclosure.js';
 import {
   buildAnalysisResultHeadline,
   describeAnalysisHeadline,
@@ -730,6 +733,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // and rejected 'computed' from real staging as analysis_not_completed.
     const analysisStatus = readAnalysisStatus(response);
     const resultRecords = readResultRecords(response);
+    // D-ask-1 disclosure honesty (2026-07-25): the option ids that ACTUALLY
+    // reached the comparison. Read off the same records the win-probability
+    // map and the leader selection are built from, so "was it analysed?" and
+    // "is it in the numbers the user sees?" cannot answer differently.
+    const analysedOptionIds = readAnalysedOptionIds(resultRecords);
     const statusOutcome = evaluateAnalysisStatus(analysisStatus, resultRecords, {
       request_id: invocation.requestId,
     });
@@ -823,9 +831,37 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // suffix), matching the registry egress grammar in
     // analysis-result-headline.ts so the disclosure survives to the wire on
     // both the chat receipt and the analysis_result block.
+    //
+    // 2026-07-25 — the claim is now DERIVED FROM THE RETURNED RESULT, not
+    // from the scaffold's intent. Reproduced on deployed staging (scenario
+    // 454c14fb…, CEE 74c785f): a scaffolded option can be scaffolded and
+    // still not reach `option_comparison`, because the scaffold's neutral
+    // rule ("the factor's current position") coincides with how the drafter
+    // defines the baseline / status-quo option, so PLoT/ISL removes the arm
+    // (`IDENTICAL_OPTIONS_DEDUPED`). The summary then told the user
+    // "Placeholder values were used for 'X'" while X was absent from the
+    // comparison AND from `win_probabilities`. The partition below reads
+    // what actually came back, so any downstream filter — dedup today, a
+    // status gate or a future rule tomorrow — is disclosed automatically
+    // instead of being mirrored here (trap-12).
+    const scaffoldPresence = partitionScaffoldedByAnalysisPresence(
+      scaffoldOutcome.scaffolded,
+      analysedOptionIds,
+    );
+    if (scaffoldPresence.omitted.length > 0) {
+      emit(TelemetryEvents.V5RunAnalysisOptionsScaffolded, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        // Redacted: ids + counts only — no labels, no magnitudes.
+        scaffolded_option_ids: scaffoldPresence.omitted.map((s) => s.option_id),
+        scaffolded_factor_counts: scaffoldPresence.omitted.map((s) => s.factor_ids.length),
+        option_count: snapshot.options.length,
+        outcome: 'omitted_from_comparison',
+      });
+    }
     const scaffoldDisclosure =
       scaffoldOutcome.scaffolded.length > 0
-        ? buildScaffoldDisclosureSuffix(scaffoldOutcome.scaffolded)
+        ? buildScaffoldDisclosureForPartition(scaffoldPresence)
         : '';
     const summary = `${headline ?? template}${scaffoldDisclosure}`;
 
@@ -910,8 +946,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // D-ask-1 (2.11 P0-1): internal channel (never the wire envelope
       // directly) — the turn-executor / chip-click dispatch thread this to
       // the chip generator so the success turn offers the configure chip.
+      // Stamped with the derived `in_comparison` verdict so the
+      // decision-review prompt disclosure inherits it without a second
+      // channel (see partitionScaffoldedByAnalysisPresence).
       ...(scaffoldOutcome.scaffolded.length > 0
-        ? { __scaffolded_options: scaffoldOutcome.scaffolded }
+        ? { __scaffolded_options: scaffoldPresence.stamped }
         : {}),
     };
   };
@@ -1146,6 +1185,26 @@ export function readResultRecords(response: V2RunResponseEnvelope): ReadonlyArra
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+/**
+ * The set of option ids present in the returned per-option records.
+ *
+ * Deliberately id-only (never labels): the scaffold record carries
+ * `option_id`, and matching on ids avoids the label-collision class. An
+ * empty set means the envelope carried no readable option identity — the
+ * caller MUST treat that as "cannot derive", never as "everything was
+ * omitted" (trap-13: prove a PRESENCE before asserting an ABSENCE).
+ */
+export function readAnalysedOptionIds(
+  records: ReadonlyArray<Record<string, unknown>>,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const record of records) {
+    const id = record.option_id;
+    if (typeof id === 'string' && id.length > 0) ids.add(id);
+  }
+  return ids;
 }
 
 /**
