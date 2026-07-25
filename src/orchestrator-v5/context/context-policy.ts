@@ -265,6 +265,20 @@ const COACH_CONVERSE: ContextPolicy = {
     { name: 'compound_pattern_matched', source: 'compound', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'parsed_quantities', source: 'quantities', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'system_event', source: 'system_event', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    // ── Three CONDITIONAL model-facing sections, declared 2026-07-25 ──────────
+    // These have been serialised into the routing prompt for some time but were
+    // MISSING from this row, so the policy under-declared what the model
+    // actually receives. The anchor conformance could not see the omission: its
+    // fixture never populated them, AND its key-extraction helper threw on any
+    // pack that carried `coaching_context` / `conversation_summary` (see
+    // ./__tests__/observe-serialised-pack.ts). Both halves are fixed together —
+    // declaring these without fixing the helper would have been unverifiable.
+    // All three are legitimately CONDITIONAL, so none is `always_expected`.
+    // None carries an enforceable ceiling, so all are honestly `telemetry_only`
+    // with a null budget rather than a false `enforced` (Q5).
+    { name: 'context_budget', source: 'budget_disclosure', projection: 'applyContextBudgetToAssemblyInputs disclosure (key ABSENT when nothing was trimmed)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'compound_segments', source: 'compound', projection: 'detectCompound segments (present IFF compound_detected)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
+    { name: 'coaching_context', source: 'coaching_context', projection: 'CoachingStatePack (hash-free prompt-safe canonical state; unconditional since O-7 wave 2 but absent when no freshness verdict was derived)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // display_analysis serialises under the `analysis` key; display_graph under `graph`.
     { name: 'display_analysis', serialised_as: 'analysis', source: 'analysis_enrichment', projection: `formatAnalysisForContext (disclosed truncation: ${DISPLAY_ANALYSIS_TRUNCATION_ORDER.join('→')})`, char_budget: DISPLAY_ANALYSIS_CHAR_BUDGET, enforcement: 'enforced', cut_rank: null, model_facing: true },
     { name: 'display_graph', serialised_as: 'graph', source: 'graph', projection: 'formatGraphForContext', char_budget: T_ROUTING_DISPLAY_GRAPH, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },

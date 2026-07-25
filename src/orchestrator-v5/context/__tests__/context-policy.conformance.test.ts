@@ -69,6 +69,7 @@ import { DECISION_REVIEW_MAX_BRIEF_CHARS } from '../../../cee/decision-review/in
 import { composeEditClarifyResponse } from '../../compose/edit-clarify-response.js';
 import * as llmRouter from '../../../adapters/llm/router.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
+import { observeSerialisedKeys, observeSerialisedPack } from './observe-serialised-pack.js';
 import type { ConversationContext } from '../../../orchestrator/types.js';
 
 // ---------------------------------------------------------------------------
@@ -100,22 +101,32 @@ function assembleAnchorPack(overrideBrief: string | null = ANCHOR_BRIEF): Contex
     priorFacts: [],
     analysis: ANCHOR_ANALYSIS,
     ...(overrideBrief !== null ? { brief: overrideBrief } : {}),
+    // The two CONDITIONAL model-facing sections. Until this was added, the
+    // anchor never populated them, and the local key-extraction helper THREW on
+    // any pack that carried them (buildUserMessage appends a code-owned
+    // instruction block between the JSON and the `## User turn` marker) — so
+    // this anchor was structurally unable to observe either branch it claims to
+    // cover. Populating them is what makes the claim true.
+    conversationSummary: {
+      text: 'FRAME: a hiring decision. RESOLVED: two options sit on the canvas.',
+      current_to_turn_id: 't-anchor',
+      lag_turns: 2,
+      stale: false,
+    } as never,
+    coachingContext: {
+      analysis_present: true,
+      freshness: 'fresh',
+      readiness_status: 'ready',
+      rerun_required: false,
+      usable_for_prose: true,
+      usable_for_chips: true,
+      blocked: false,
+      actionable_blocker_count: 0,
+    } as never,
   });
 }
 
-/** Extract the ordered top-level keys of the serialised `## ContextPack` JSON. */
-function observeSerialisedKeys(userMessage: string): string[] {
-  const marker = '## ContextPack\n';
-  const start = userMessage.indexOf(marker);
-  expect(start).toBeGreaterThanOrEqual(0);
-  const jsonStart = start + marker.length;
-  // The JSON blob runs to the next blank-line-delimited section ('\n\n## ').
-  const rest = userMessage.slice(jsonStart);
-  const end = rest.indexOf('\n\n## User turn');
-  const jsonText = end >= 0 ? rest.slice(0, end) : rest;
-  const parsed = JSON.parse(jsonText) as Record<string, unknown>;
-  return Object.keys(parsed);
-}
+
 
 /** Is `observed` a subsequence of `declared` (same relative order)? */
 function isSubsequence(observed: string[], declared: string[]): boolean {
@@ -297,14 +308,55 @@ describe('coach_converse anchor — realised composition matches the declared po
   });
 
   it('enforced sections respect their budgets on the fixture', () => {
-    const parsed = JSON.parse(
-      userMessage.slice(
-        userMessage.indexOf('## ContextPack\n') + '## ContextPack\n'.length,
-        userMessage.indexOf('\n\n## User turn'),
-      ),
-    ) as Record<string, unknown>;
+    const parsed = observeSerialisedPack(userMessage);
     expect(JSON.stringify(parsed.brief).length).toBeLessThanOrEqual(CONTEXT_PACK_BRIEF_CHAR_CAP + 200);
     expect(JSON.stringify(parsed.analysis).length).toBeLessThanOrEqual(DISPLAY_ANALYSIS_CHAR_BUDGET + 500);
+  });
+
+  // ── The branches this anchor could not previously observe ────────────────
+  // Everything below exists because the anchor's key-extraction helper THREW on
+  // any pack carrying `coaching_context` / `conversation_summary`, so the two
+  // conditional model-facing sections sat outside its reach entirely. Not
+  // concealment: this anchor PREDATES both sections and its commit message
+  // claims nothing false — it was correct when written and the pack grew under it.
+
+  it('the anchor fixture ACTUALLY carries both conditional model-facing sections', () => {
+    // Without this, extending the fixture could silently stop working and every
+    // assertion below would pass by covering nothing.
+    expect(observed).toContain('coaching_context');
+    expect(observed).toContain('conversation_summary');
+  });
+
+  it('REGRESSION PIN — the naive slice-to-marker extraction THROWS on this pack', () => {
+    // The exact code this file used to carry. It must stay provably broken, so
+    // nobody reintroduces it believing it works: buildUserMessage appends a
+    // code-owned instruction block between the pack JSON and `## User turn`.
+    const naive = (msg: string): unknown =>
+      JSON.parse(
+        msg.slice(
+          msg.indexOf('## ContextPack\n') + '## ContextPack\n'.length,
+          msg.indexOf('\n\n## User turn'),
+        ),
+      );
+    expect(() => naive(userMessage)).toThrow();
+    // ...and the shared helper handles the same input correctly.
+    expect(Object.keys(observeSerialisedPack(userMessage)).length).toBeGreaterThan(0);
+  });
+
+  it('POSITIVE CONTROL — a stray key is caught ON THE conditional branches (not just the plain pack)', () => {
+    // The stray sits AFTER coaching_context in insertion order, so it is only
+    // reachable at all if the extractor survives the appended instruction blocks.
+    const strayPack = {
+      ...pack,
+      stray_on_conditional_branch: { boom: 1 },
+    } as unknown as ContextPack;
+    const strayMsg = buildUserMessage(strayPack, 'what should I do?');
+    // Both instruction blocks are present in the message being parsed.
+    expect(strayMsg).toContain('## Coaching state');
+    expect(strayMsg).toContain('## Conversation summary');
+    const strayObserved = observeSerialisedKeys(strayMsg);
+    expect(strayObserved).toContain('stray_on_conditional_branch');
+    expect(strayObserved.filter((k) => !declared.includes(k))).toContain('stray_on_conditional_branch');
   });
 
   it('POSITIVE CONTROL — a stray section injected into the pack is SEEN as undeclared', () => {
