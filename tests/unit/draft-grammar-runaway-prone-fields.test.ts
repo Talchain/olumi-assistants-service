@@ -128,7 +128,8 @@ describe("draft grammar — runaway-prone free-text fields are unemittable", () 
     // still carries the key.
     const withField = JSON.parse(JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
     const data = nodeDataObject(withField);
-    expect(Object.keys(data.properties)).toContain(RUNAWAY_PRONE_NODE_DATA_KEYS[0]);
+    expect(data, "the control schema must still carry a node.data object").toBeTruthy();
+    expect(Object.keys(data!.properties)).toContain(RUNAWAY_PRONE_NODE_DATA_KEYS[0]);
 
     // …and the SENT schema, run through the identical predicate, does not.
     const sentData = nodeDataObject(buildDraftGraphSchema() as unknown as AnyRec);
