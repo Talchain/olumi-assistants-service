@@ -9,6 +9,12 @@
  */
 
 import type { GraphT, NodeT, EdgeT } from "../../../../schemas/graph.js";
+// The single reachability kernel. This module previously carried a private
+// byte-duplicate of `status-quo-fix.ts`'s `hasPathToGoal`, and neither filtered
+// `edge_type` — so a bidirected edge (an unmeasured confounder, never a causal
+// path) counted as a route to the goal, and the wiring decision below disagreed
+// with the validators that judge it.
+import { canReachAnyGoal as hasPathToGoal } from "../../../../graph/reachability.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { neutralCausalEdge } from "../../utils/edge-format.js";
 import { log } from "../../../../utils/telemetry.js";
@@ -62,40 +68,6 @@ function buildReachableFactorSet(
     }
   }
   return reachable;
-}
-
-/**
- * Check if a factor has a path to any goal node via BFS through edges.
- */
-function hasPathToGoal(
-  factorId: string,
-  edges: readonly EdgeT[],
-  goalIds: Set<string>,
-): boolean {
-  const forward = new Map<string, string[]>();
-  for (const edge of edges) {
-    const list = forward.get(edge.from) ?? [];
-    list.push(edge.to);
-    forward.set(edge.from, list);
-  }
-
-  const visited = new Set<string>();
-  const queue = [factorId];
-  visited.add(factorId);
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    if (goalIds.has(current)) return true;
-
-    for (const next of forward.get(current) ?? []) {
-      if (!visited.has(next)) {
-        visited.add(next);
-        queue.push(next);
-      }
-    }
-  }
-
-  return false;
 }
 
 /**
