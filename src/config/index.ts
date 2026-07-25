@@ -1344,6 +1344,20 @@ const ConfigSchema = z.object({
   }),
 
   // Research (web search for evidence gathering)
+  //
+  // ⚠ THIS BLOCK IS A SPEC, NOT LIVE CONFIG. NOTHING READS IT.
+  // Its reader (`orchestrator/tools/research-topic.ts` + `research-client.ts`, 412 lines) was
+  // DELETED on 2026-07-22 in `f957d6d8` as collateral in the V1-belt sweep — it met that sweep's
+  // "zero live-V5 importers" bar because V5 never ported it, not because it was broken.
+  // Retained deliberately as the committed spec for the rebuild: see
+  // `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` §2.1 — Olumi programme docs, a sibling
+  // directory of this repo and NOT tracked in any repo as of 2026-07-25, so every fact this
+  // comment relies on is restated above rather than delegated to it.
+  // Derive, don't trust this note: `grep -rln "config\.research" --include="*.ts" src` → this file
+  // only (positive control `config.proxy` → 6 files). If that grep ever returns a second file,
+  // research has been reconnected and this comment is stale — delete it.
+  // The matching `RESEARCH_*` env vars were removed from the cee-staging Render dashboard on
+  // 2026-07-25; `RESEARCH_ENABLED=true` had been live-set against no reader.
   research: z.object({
     enabled: booleanString.default(false),                                 // RESEARCH_ENABLED — master switch
     model: z.string().default('gpt-4o'),                                   // RESEARCH_MODEL — model for Responses API
@@ -1735,6 +1749,8 @@ function parseConfig(): Config {
     testing: {
       isVitest: env.VITEST,
     },
+    // ⚠ SPEC, NOT LIVE CONFIG — the reader was deleted in `f957d6d8` (2026-07-22).
+    // See the `research:` schema block above, which carries the full note.
     research: {
       enabled: env.RESEARCH_ENABLED,
       model: env.RESEARCH_MODEL,
@@ -1771,7 +1787,9 @@ function parseConfig(): Config {
       // override an explicit `PROMPTS_ENVIRONMENT=staging`, with no mismatch
       // and no degraded reason (the staging-serves-production direction is
       // deliberately unflagged as the safe one). That is exactly the shape
-      // shipped in tools/conversation-harness/staging-parity.env.example:85.
+      // shipped in tools/conversation-harness/staging-parity.env.example, which
+      // carries a bare `PROMPTS_USE_STAGING=` row. (Cited by KEY, not by line
+      // number — the line-number form of this citation had already drifted.)
       //
       // Normalising blank → undefined here is the ONLY place the distinction
       // still exists; by the time the value reaches resolvePromptEnvironment()

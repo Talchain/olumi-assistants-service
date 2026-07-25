@@ -158,7 +158,7 @@
 | `VALIDATION_CACHE_ENABLED` | `false` | services/validateClientWithCache.ts | No | |
 | `PERF_METRICS_ENABLED` | `true` | plugins/performance-monitoring.ts | No | |
 | `SHARE_STORAGE_INMEMORY` | `false` | utils/share-storage.ts | No | |
-| `RESEARCH_ENABLED` | `false` | orchestrator/tools/research-topic.ts | No | |
+| `RESEARCH_ENABLED` | `false` | ⚠ **NOTHING — no reader** | No | `orchestrator/tools/research-topic.ts` was **deleted 2026-07-22 in `f957d6d8`**. The `config.research` block in `config/index.ts` survives as a **spec for the rebuild**, not as live config. Was live-set `true` on cee-staging against no reader; **removed from the Render dashboard 2026-07-25**, along with `RESEARCH_MODEL`. See `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` (programme docs, sibling dir — untracked) §2.1. |
 
 ---
 
