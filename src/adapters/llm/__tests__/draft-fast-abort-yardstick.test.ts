@@ -288,29 +288,27 @@ describe('⭐ AUTHORISE-THEN-REFUSE IS STILL IMPOSSIBLE (#673, one level up)', (
     let authorised = 0;
     for (let remaining = 0; remaining <= 250_000; remaining += 500) {
       for (const ceiling of [undefined, DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL, 4_000]) {
-        for (const currentCap of [1_500, 3_407, 5_850, FULL_CAP]) {
-          if (!isAbortableRetryViable(remaining, 1, currentCap, ceiling)) continue;
-          authorised++;
-          const postAbortAffordable = resolveDraftMaxTokens(
-            Math.max(0, remaining - DRAFT_RUNAWAY_HARD_CEILING_MS),
-            ceiling,
-          ).effective;
-          expect(
-            shouldSkipDoomedFinalAttempt({
-              runawayAbortCount: 2,
-              willBeFinalAttempt: true,
-              thinkingEnabled: false,
-              finalAttemptAffordableTokens: postAbortAffordable,
-            }),
-          ).toBe(false);
-        }
+        if (!isAbortableRetryViable(remaining, 1, ceiling)) continue;
+        authorised++;
+        const postAbortAffordable = resolveDraftMaxTokens(
+          Math.max(0, remaining - DRAFT_RUNAWAY_HARD_CEILING_MS),
+          ceiling,
+        ).effective;
+        expect(
+          shouldSkipDoomedFinalAttempt({
+            runawayAbortCount: 2,
+            willBeFinalAttempt: true,
+            thinkingEnabled: false,
+            finalAttemptAffordableTokens: postAbortAffordable,
+          }),
+        ).toBe(false);
       }
     }
     // POSITIVE CONTROL: the sweep above is an ABSENCE claim ("no authorised abort
     // is later refused"). It is vacuous unless the sweep actually authorises
     // aborts. It must authorise many, including at the product configuration.
     expect(authorised).toBeGreaterThan(100);
-    expect(isAbortableRetryViable(DRAFT_LLM_TIMEOUT_MS, 1, FULL_CAP, DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL)).toBe(true);
+    expect(isAbortableRetryViable(DRAFT_LLM_TIMEOUT_MS, 1, DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL)).toBe(true);
   });
 });
 
@@ -330,7 +328,7 @@ describe('⭐ THE LADDER the product actually gets — three funded attempts in 
         thinkingEnabled: false,
         finalAttemptAffordableTokens: affordable,
       });
-      const abortArmed = isAbortableRetryViable(remaining, aborts, FULL_CAP, ceiling);
+      const abortArmed = isAbortableRetryViable(remaining, aborts, ceiling);
       // The adapter squeezes the cap to the live window only on the FINAL attempt.
       const cap = abortArmed ? Math.min(FULL_CAP, ceiling) : Math.min(FULL_CAP, affordable);
       out.push({ attempt, windowMs: remaining, cap, abortArmed, skipped });
