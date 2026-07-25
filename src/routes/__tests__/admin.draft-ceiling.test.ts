@@ -200,6 +200,31 @@ describe('draft token-ceiling experiment — what the ledger must record', () =>
     expect(run.graph_json).toBeTruthy();
   });
 
+  it('classifies nodes by `kind` — the key graphs actually use — not only `type`', async () => {
+    // The wire shape is {id, kind, label, provenance}. Reading only `type`
+    // classified EVERY node as "unknown" and reported ZERO goal nodes on a graph
+    // that had one — the extractor-trap class that mis-scored two prior lanes.
+    nextDraftBehaviour = async () => ({
+      graph: {
+        nodes: [
+          { id: 'goal_support', kind: 'goal', label: 'Sustainable support quality' },
+          { id: 'opt_hire', kind: 'option', label: 'Hire two engineers' },
+          { id: 'opt_helpcentre', kind: 'option', label: 'Build a help centre' },
+          { id: 'fac_volume', kind: 'factor', label: 'Ticket volume' },
+        ],
+        edges: [{ from: 'fac_volume', to: 'goal_support' }],
+      },
+      meta: { finish_reason: 'end_turn', token_usage: { completion_tokens: 2000, prompt_tokens: 170, total_tokens: 2170 } },
+    });
+    const res = await start({ brief: BRIEF, window_ms: 148_334 });
+    const run = await awaitRun((res.json() as { run_id: string }).run_id, true);
+    const graph = run.graph as { node_types: Record<string, number>; goal_node_ids: string[] };
+
+    expect(graph.goal_node_ids).toEqual(['goal_support']);
+    expect(graph.node_types).toMatchObject({ goal: 1, option: 2, factor: 1 });
+    expect(graph.node_types.unknown).toBeUndefined();
+  });
+
   it('does NOT let a SALVAGED truncation read as a terminated generation', async () => {
     nextDraftBehaviour = async () => ({
       graph: { nodes: [{ id: 'n1', type: 'factor' }], edges: [] },

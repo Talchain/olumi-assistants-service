@@ -1798,7 +1798,12 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
     const goalIds: string[] = [];
     let maxLabelChars = 0;
     for (const n of nodes) {
-      const t = typeof n?.type === 'string' ? n.type : 'unknown';
+      // ⚠ Graph nodes carry `kind`, NOT `type` (see the /assist wire shape:
+      // `{id, kind, label, provenance}`). Reading only `type` silently classified
+      // every node as "unknown" and reported ZERO goal nodes on graphs that had
+      // one — the extractor-trap class that mis-scored two prior lanes in this
+      // arc. Read `kind` first, fall back to `type`, and never assume either.
+      const t = typeof n?.kind === 'string' ? n.kind : typeof n?.type === 'string' ? n.type : 'unknown';
       nodeTypes[t] = (nodeTypes[t] ?? 0) + 1;
       if (t === 'goal' || t === 'objective' || t === 'decision') {
         if (typeof n.id === 'string') goalIds.push(n.id);
