@@ -27,6 +27,7 @@ import { classifyAddRiskIntent } from './edit-templates/classify-add-risk.js';
 import { buildAddRiskClarification } from './edit-templates/add-risk-template.js';
 import { wouldExceedAddRiskLimits } from '../../orchestrator/graph-structure-validator.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   buildEditGraphHandlerFact,
   buildGenericEditGraphHandlerFact,
@@ -1821,16 +1822,38 @@ export async function dispatchEditGraph(
       expectedGraphCasHashes = computeExpectedGraphCasHashes(strictBase ?? null);
     }
     gmFrameBase = strictBase ?? graphState;
-    persistedPostEditGraph = mergeAppliedGraphForPersistence({
-      appliedGraph: editResult.appliedGraph!,
-      // null here = a GENUINELY empty scenarios.graph (the strict read
-      // succeeded); merge() then uses the ingress fallback base. A degraded
-      // read never reaches this line — it threw above.
-      persistedBase: strictBase ?? null,
-      ingressBase: graphState,
-      requestId,
-      scenarioId: payload.scenario_id,
-    });
+    // Design §3.2 — PROJECT INTO THE PERSISTED FORM HERE, before anything in
+    // this dispatch derives a hash from it. `commitDirectAnswer` applies the
+    // three persist passes (intercept repair, option-intervention
+    // normalisation, options[] reconcile) and all three mutate fields
+    // `computeAnalysisAffectingGraphHash` projects. Hashing the pre-projection
+    // merge — as this dispatch used to — advertised a graph that was never
+    // stored to freshness, to the pending re-pin (`graph_hash`) and to the
+    // hold thread-through (`graphHashAfterCommit`).
+    //
+    // Applying it at the point `persistedPostEditGraph` is FINALISED (rather
+    // than at each of its readers) keeps the property the comment above
+    // claims: this one object is both what gets persisted AND what every
+    // current-graph-hash in this dispatch derives from. The projection is
+    // idempotent, so the commit's own re-projection is a byte-identical no-op.
+    persistedPostEditGraph = projectGraphForPersistence(
+      mergeAppliedGraphForPersistence({
+        appliedGraph: editResult.appliedGraph!,
+        // null here = a GENUINELY empty scenarios.graph (the strict read
+        // succeeded); merge() then uses the ingress fallback base. A degraded
+        // read never reaches this line — it threw above.
+        persistedBase: strictBase ?? null,
+        ingressBase: graphState,
+        requestId,
+        scenarioId: payload.scenario_id,
+      }),
+      {
+        scenarioId: payload.scenario_id,
+        turnId: payload.turn_id,
+        turnClass: payload.turn_class,
+        source: 'edit_graph',
+      },
+    );
   }
 
   let freshness: FreshnessDerivation;
@@ -3048,6 +3071,16 @@ export async function dispatchEditGraph(
       duration_ms: Date.now() - startedAt,
       handler_facts: editGraphFact ? [editGraphFact] : [],
       graph: graphForCommit,
+      // Terminal-invariant DELTA baseline: the pre-edit graph this turn built
+      // on — the strict server read when it loaded, else the ingress echo (the
+      // same frame-authority base the referee gate uses). Threading it lets the
+      // commit refuse a violation THIS edit introduced while absorbing one the
+      // scenario already carried, so a legacy/migration-era graph stays
+      // editable (`edit-graph.ts:2750-2755`). Omitted on a non-writing turn,
+      // where there is nothing to check.
+      ...(graphForCommit !== undefined
+        ? { baseGraphForInvariants: gmFrameBase }
+        : {}),
       // A3 graph CAS: expected-base hashes from the strict server read above
       // (undefined when no applied mutation / mode off — the CAS hook only
       // runs for graph-bearing writes, and `graph` is only set on applied
