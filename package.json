@@ -33,6 +33,7 @@
     "lint": "eslint .",
     "lint:typecheck": "pnpm lint && pnpm typecheck",
     "check:schemas-resolution": "node scripts/check-schemas-resolution.mjs",
+    "verify:served-prompt": "node scripts/verify-served-prompt.mjs",
     "pretypecheck": "pnpm openapi:generate && pnpm check:schemas-resolution",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "typecheck:src": "pnpm typecheck",
