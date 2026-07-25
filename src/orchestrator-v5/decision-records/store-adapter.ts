@@ -32,6 +32,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import { log } from '../../utils/telemetry.js';
 import type {
   DecisionRecordAnalysisSummary,
   DecisionRecordConfidenceSourceLiteral,
@@ -145,6 +146,30 @@ export interface RetrieveDecisionRecordsOpts {
   readonly limit?: number;
 }
 
+/**
+ * One page of the scenario-scoped read: the rows the LIMIT actually returned,
+ * PLUS how many rows exist behind that LIMIT.
+ *
+ * The page shape exists because returning a bare array made a whole class of
+ * truth unrepresentable: with 9 records stored and a LIMIT of 8, the process
+ * received 8 rows and had NO way to know a 9th existed, so every downstream
+ * "how many decisions are on record" answer was derived from the post-cap
+ * array and was FALSE (verified live on build `55c64ed`: the coach was asked
+ * point-blank for the total, answered "8", and called the list "the full
+ * record"). {@link totalCount} is the pre-cap ground truth that makes the
+ * honest answer derivable.
+ */
+export interface DecisionRecordReadPage {
+  /** The rows actually read — newest-first, at most the effective limit. */
+  readonly records: readonly DecisionRecordRead[];
+  /**
+   * How many records EXIST for this scenario, independent of the LIMIT.
+   * PostgREST's `Prefer: count=exact` total, which is computed after the
+   * `scenario_id` filter and BEFORE the limit.
+   */
+  readonly totalCount: number;
+}
+
 /** Store port — the capture hook + the P6 read depend on this interface, not
  *  the class, so tests inject hand-rolled fakes without a Supabase client. */
 export interface DecisionRecordStorePort {
@@ -154,11 +179,14 @@ export interface DecisionRecordStorePort {
    * MUST scope by scenario_id at the query — the service-role client bypasses
    * RLS, so the scenario filter is the ONLY thing preventing a cross-scenario /
    * cross-user read (P6 adversarial guard). Bounded by {@link DECISION_RECORDS_HARD_CAP}.
+   *
+   * Returns a {@link DecisionRecordReadPage}, never a bare array: a caller that
+   * cannot see past the LIMIT cannot tell the user the truth about it.
    */
   retrieveRecords(
     scenarioId: string,
     opts?: RetrieveDecisionRecordsOpts,
-  ): Promise<DecisionRecordRead[]>;
+  ): Promise<DecisionRecordReadPage>;
 }
 
 /**
@@ -227,7 +255,7 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
   async retrieveRecords(
     scenarioId: string,
     opts?: RetrieveDecisionRecordsOpts,
-  ): Promise<DecisionRecordRead[]> {
+  ): Promise<DecisionRecordReadPage> {
     const requested = opts?.limit;
     const limit =
       typeof requested === 'number' && Number.isFinite(requested) && requested > 0
@@ -237,9 +265,18 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
     // ONLY thing between this service-role read and every other scenario's
     // records — the client bypasses RLS. Newest-first uses the existing
     // (scenario_id, created_at DESC) index. Never SELECT owner_user_id.
-    const { data, error } = await this.client
+    //
+    // `count: 'exact'` sends `Prefer: count=exact`; PostgREST answers with the
+    // row total AFTER the scenario filter and BEFORE the LIMIT, in the
+    // Content-Range header, without shipping the extra rows. Verified against
+    // the live staging PostgREST on a 9-record scenario before this was
+    // written: `…&order=created_at.desc&limit=8` + `Prefer: count=exact`
+    // → `HTTP/2 206`, `content-range: 0-7/9` (eight rows, true total nine).
+    // Cost is one COUNT over the same (scenario_id, created_at DESC) index the
+    // SELECT already uses, on a per-scenario handful of rows.
+    const { data, error, count } = await this.client
       .from('decision_records')
-      .select(DECISION_RECORD_READ_COLUMNS)
+      .select(DECISION_RECORD_READ_COLUMNS, { count: 'exact' })
       .eq('scenario_id', scenarioId)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -249,7 +286,7 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
         { cause: error },
       );
     }
-    if (!Array.isArray(data)) return [];
+    if (!Array.isArray(data)) return { records: [], totalCount: 0 };
     const out: DecisionRecordRead[] = [];
     for (const row of data) {
       const parsed = parseReadRow(row);
@@ -258,7 +295,34 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
       // future query change can never silently widen the scope.
       if (parsed !== null && parsed.scenario_id === scenarioId) out.push(parsed);
     }
-    return out;
+    // The count is the ONLY pre-cap truth available; a missing one is not
+    // routed around silently. Falling back to the row count reproduces exactly
+    // the pre-fix behaviour (a cap drop would go undisclosed), so it WARNS —
+    // an assume-good fallback here is the defect this whole change removes.
+    let totalCount = out.length;
+    if (typeof count === 'number' && Number.isFinite(count) && count >= out.length) {
+      totalCount = count;
+    } else if (count !== null && count !== undefined) {
+      log.warn(
+        {
+          event: 'v5.decision_records.exact_count_unusable',
+          scenario_id: scenarioId,
+          count,
+          rows: out.length,
+        },
+        'DecisionRecords — PostgREST returned an unusable exact count; falling back to the row count (a cap drop may go undisclosed on this turn)',
+      );
+    } else {
+      log.warn(
+        {
+          event: 'v5.decision_records.exact_count_absent',
+          scenario_id: scenarioId,
+          rows: out.length,
+        },
+        'DecisionRecords — no exact count on the read; falling back to the row count (a cap drop may go undisclosed on this turn)',
+      );
+    }
+    return { records: out, totalCount };
   }
 }
 

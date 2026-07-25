@@ -343,9 +343,18 @@ describe('coach_converse older_relevant_facts — the P6 read slice is declared,
       decision: { chosen_option_label: `Option ${i}`, chosen_option_id: 'o', graph_hash: 'x' },
       prediction: { statement: 'z'.repeat(400), confidence_source: 'model_derived' },
     }));
-    const projected = projectDecisionRecords(many, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET)!;
+    const projected = projectDecisionRecords(many, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET, many.length)!;
     expect(projected.text.length).toBeLessThanOrEqual(POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET);
     expect(projected.truncated).toBe(true); // the cut fired
+    // ...but be precise about WHICH cut: at 8 records the RATIONALE cap is the
+    // only thing that can fire (RATIONALE_LINE_CHAR_CAP bounds each line, so 8
+    // records cannot overflow 3000 chars on rationale alone). Asserting
+    // `truncated` here without naming the cut is how a blind control reads as
+    // green — the measurement lane's C1 finding, 2026-07-25.
+    expect(projected.includedCount).toBe(8);
+    expect(projected.totalCount).toBe(8);
+    expect(projected.text).not.toContain('INCOMPLETE'); // no RECORD was dropped
+    expect(projected.text).toContain('…'); // a rationale WAS cut
   });
 
   it('it is declared ABOVE conversation_summary among model-facing sections (facts beat summary)', () => {

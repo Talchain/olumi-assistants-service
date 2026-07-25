@@ -16,6 +16,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+import * as telemetry from '../../../utils/telemetry.js';
+
 import {
   DecisionRecordSignInRequiredError,
   DecisionRecordStoreError,
@@ -127,21 +129,40 @@ describe('SupabaseDecisionRecordStore.createRecord', () => {
 interface ReadCapture {
   from?: string;
   select?: string;
+  selectOpts?: unknown;
   eq?: [string, unknown];
   order?: [string, unknown];
   limit?: number;
 }
 
-function makeReadClient(result: { data?: unknown; error?: unknown }): {
+/**
+ * Models PostgREST's answer to a limited SELECT carrying `Prefer: count=exact`:
+ * `data` is the LIMITed page, `count` is the total AFTER the filters and
+ * BEFORE the limit. Verified against the live staging PostgREST on a 9-record
+ * scenario before this was written: `…&order=created_at.desc&limit=8` +
+ * `Prefer: count=exact` → `HTTP/2 206`, `content-range: 0-7/9`.
+ *
+ * `count` is a REQUIRED field of the fake's result, deliberately: a mock that
+ * silently omitted it would encode exactly the defect this read now closes.
+ */
+function makeReadClient(result: { data?: unknown; error?: unknown; count?: number | null }): {
   client: SupabaseClient;
   capture: ReadCapture;
 } {
   const capture: ReadCapture = {};
+  const rows = Array.isArray(result.data) ? result.data : null;
   const builder = {
-    select(cols: string) { capture.select = cols; return builder; },
+    select(cols: string, opts?: unknown) { capture.select = cols; capture.selectOpts = opts; return builder; },
     eq(col: string, val: unknown) { capture.eq = [col, val]; return builder; },
     order(col: string, opts: unknown) { capture.order = [col, opts]; return builder; },
-    limit(n: number) { capture.limit = n; return Promise.resolve({ data: result.data ?? null, error: result.error ?? null }); },
+    limit(n: number) {
+      capture.limit = n;
+      return Promise.resolve({
+        data: result.data ?? null,
+        error: result.error ?? null,
+        count: result.count !== undefined ? result.count : (rows?.length ?? null),
+      });
+    },
   };
   const client = {
     from(table: string) { capture.from = table; return builder; },
@@ -162,7 +183,7 @@ describe('SupabaseDecisionRecordStore.retrieveRecords (scenario-scoped read)', (
   it('scopes the query to the scenario at the bytes (.eq scenario_id), newest-first, hard-capped', async () => {
     const { client, capture } = makeReadClient({ data: [READ_ROW] });
     const store = new SupabaseDecisionRecordStore(client);
-    const out = await store.retrieveRecords('scen-target');
+    const page = await store.retrieveRecords('scen-target');
     expect(capture.from).toBe('decision_records');
     // The ONLY thing preventing a cross-scenario/cross-user read under the
     // service-role client that bypasses RLS:
@@ -171,9 +192,48 @@ describe('SupabaseDecisionRecordStore.retrieveRecords (scenario-scoped read)', (
     expect(capture.limit).toBe(DECISION_RECORDS_HARD_CAP);
     // owner_user_id is never selected (not projected).
     expect(capture.select).not.toContain('owner_user_id');
-    expect(out).toHaveLength(1);
-    expect(out[0].record_id).toBe(READ_ROW.record_id);
-    expect(out[0].decision.chosen_option_label).toBe('Hire locally');
+    // The pre-cap total must be REQUESTED, or the caller cannot know what the
+    // LIMIT hid from it (the 2026-07-25 silent-drop defect).
+    expect(capture.selectOpts).toEqual({ count: 'exact' });
+    expect(page.records).toHaveLength(1);
+    expect(page.records[0].record_id).toBe(READ_ROW.record_id);
+    expect(page.records[0].decision.chosen_option_label).toBe('Hire locally');
+  });
+
+  it('reports the PRE-CAP total from the exact count, not the number of rows returned', async () => {
+    // What the live wire does with 9 stored and a LIMIT of 8: eight rows back,
+    // `content-range: 0-7/9`.
+    const eightRows = Array.from({ length: 8 }, (_, i) => ({ ...READ_ROW, record_id: `r${i}` }));
+    const { client } = makeReadClient({ data: eightRows, count: 9 });
+    const store = new SupabaseDecisionRecordStore(client);
+    const page = await store.retrieveRecords('scen-target');
+    expect(page.records).toHaveLength(8);
+    expect(page.totalCount).toBe(9); // NOT 8 — the truth behind the LIMIT
+  });
+
+  it('a MISSING exact count degrades to the row count but WARNS (never a silent assume-good)', async () => {
+    const warn = vi.spyOn(telemetry.log, 'warn').mockImplementation(() => undefined);
+    const { client } = makeReadClient({ data: [READ_ROW], count: null });
+    const store = new SupabaseDecisionRecordStore(client);
+    const page = await store.retrieveRecords('scen-target');
+    expect(page.totalCount).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect((warn.mock.calls[0][0] as Record<string, unknown>).event).toBe(
+      'v5.decision_records.exact_count_absent',
+    );
+    warn.mockRestore();
+  });
+
+  it('an exact count SMALLER than the rows returned is rejected as unusable (and warns)', async () => {
+    const warn = vi.spyOn(telemetry.log, 'warn').mockImplementation(() => undefined);
+    const { client } = makeReadClient({ data: [READ_ROW, { ...READ_ROW, record_id: 'r2' }], count: 1 });
+    const store = new SupabaseDecisionRecordStore(client);
+    const page = await store.retrieveRecords('scen-target');
+    expect(page.totalCount).toBe(2); // never below what we actually hold
+    expect((warn.mock.calls[0][0] as Record<string, unknown>).event).toBe(
+      'v5.decision_records.exact_count_unusable',
+    );
+    warn.mockRestore();
   });
 
   it('an explicit limit is honoured but still hard-capped', async () => {
@@ -188,16 +248,16 @@ describe('SupabaseDecisionRecordStore.retrieveRecords (scenario-scoped read)', (
   it('DEFENCE-IN-DEPTH — drops any row whose scenario_id does not match the query filter', async () => {
     const { client } = makeReadClient({ data: [READ_ROW, { ...READ_ROW, record_id: 'x', scenario_id: 'OTHER-scenario' }] });
     const store = new SupabaseDecisionRecordStore(client);
-    const out = await store.retrieveRecords('scen-target');
-    expect(out).toHaveLength(1);
-    expect(out.every((r) => r.scenario_id === 'scen-target')).toBe(true);
+    const page = await store.retrieveRecords('scen-target');
+    expect(page.records).toHaveLength(1);
+    expect(page.records.every((r) => r.scenario_id === 'scen-target')).toBe(true);
   });
 
   it('drops malformed rows (missing decision/prediction) without throwing', async () => {
     const { client } = makeReadClient({ data: [READ_ROW, { record_id: 'y', scenario_id: 'scen-target' }] });
     const store = new SupabaseDecisionRecordStore(client);
-    const out = await store.retrieveRecords('scen-target');
-    expect(out).toHaveLength(1);
+    const page = await store.retrieveRecords('scen-target');
+    expect(page.records).toHaveLength(1);
   });
 
   it('a query error throws a typed store error (never silent empty)', async () => {

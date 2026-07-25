@@ -89,6 +89,14 @@ export interface ContextTruncationRecord {
   readonly original_chars: number;
   readonly kept_chars: number;
   readonly disclosed: boolean;
+  /**
+   * Item counts, for sections cut by ITEM rather than by chars (the
+   * decision-records read drops whole records at the SQL LIMIT, whose chars
+   * never enter the process and must not be invented). Absent on char-only
+   * cuts. Additive: char-cut producers are unchanged.
+   */
+  readonly original_records?: number;
+  readonly kept_records?: number;
 }
 
 /**
@@ -198,6 +206,9 @@ export interface ContextTruncationArgs {
   readonly section: string;
   readonly original_chars: number;
   readonly kept_chars: number;
+  /** Item counts for item-wise cuts — see {@link ContextTruncationRecord}. */
+  readonly original_records?: number;
+  readonly kept_records?: number;
   /** Bounded enum-ish string, e.g. 'hard_slice' | 'window_slice'. */
   readonly strategy: string;
   /** Whether the LLM can SEE that the cut happened (in-band disclosure). */
@@ -214,6 +225,8 @@ export function emitContextTruncation(args: ContextTruncationArgs): void {
       section: args.section,
       original_chars: args.original_chars,
       kept_chars: args.kept_chars,
+      ...(args.original_records === undefined ? {} : { original_records: args.original_records }),
+      ...(args.kept_records === undefined ? {} : { kept_records: args.kept_records }),
       strategy: args.strategy,
       disclosed: args.disclosed,
       request_id: args.request_id ?? null,
