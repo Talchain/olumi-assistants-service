@@ -25,6 +25,16 @@ export declare const TRACKED_KEY: string;
 export declare function shortSha256(s: string): string;
 
 /**
+ * PURE consistency discriminator: did every sample agree on what is served?
+ * A disagreement means different instances are serving different coach prompts
+ * (observed live during the 2026-07-25 v119->v120 re-pin) and is reported as a
+ * distinct condition, never as settled drift.
+ */
+export declare function evaluateConsistency(
+  samples: Array<{ version: string | number; hash: string | undefined | null }>,
+): { consistent: boolean; message: string };
+
+/**
  * PURE drift discriminator. Returns `{ ok: false }` when the served prompt is
  * not the pinned snapshot (or when no live hash was available at all — a
  * degraded PMS is never a pass). Never throws, never reads the network.

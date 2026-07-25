@@ -26,7 +26,12 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
 
-import { evaluateDrift, shortSha256, TRACKED_KEY } from '../../../scripts/verify-served-prompt.mjs';
+import {
+  evaluateDrift,
+  evaluateConsistency,
+  shortSha256,
+  TRACKED_KEY,
+} from '../../../scripts/verify-served-prompt.mjs';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
 const WORKFLOW_PATH = resolve(REPO_ROOT, '.github/workflows/served-prompt-drift.yml');
@@ -98,6 +103,46 @@ describe('evaluateDrift — the comparison discriminates', () => {
     // permanent control proving the gate catches the original record-denial
     // defect regardless of how often the served prompt is re-pinned.
     expect(shortSha256(readFileSync(HISTORICAL_PATH, 'utf8'))).toBe(V119_HASH);
+  });
+});
+
+describe('evaluateConsistency — a split across instances is its OWN finding', () => {
+  it('agreeing samples are consistent', () => {
+    const s = [
+      { version: 120, hash: 'adcc5128d4e6e6bc' },
+      { version: 120, hash: 'adcc5128d4e6e6bc' },
+      { version: 120, hash: 'adcc5128d4e6e6bc' },
+    ];
+    expect(evaluateConsistency(s).consistent).toBe(true);
+  });
+
+  it('POSITIVE CONTROL — the REAL 2026-07-25 split is caught and NAMED, not reported as drift', () => {
+    // Observed live during the v119->v120 re-pin: consecutive reads of
+    // /admin/prompts/status returned 119, 120, 119, 120. CEE staging runs
+    // multiple instances and the prompt loader caches ~5 min, so for that
+    // window the service served TWO DIFFERENT coach prompts depending on which
+    // instance took the turn.
+    const s = [
+      { version: 119, hash: '4e8e69f3d721c864' },
+      { version: 120, hash: 'adcc5128d4e6e6bc' },
+      { version: 119, hash: '4e8e69f3d721c864' },
+    ];
+    const v = evaluateConsistency(s);
+    expect(v.consistent).toBe(false);
+    expect(v.message).toContain('NOT CONSISTENT ACROSS INSTANCES');
+    // Both observed prompts must be named, or the operator cannot act.
+    expect(v.message).toContain('v119/4e8e69f3d721c864');
+    expect(v.message).toContain('v120/adcc5128d4e6e6bc');
+    // It must NOT be mislabelled as settled drift — different operational state.
+    expect(v.message).not.toContain('SERVED PROMPT DRIFT');
+  });
+
+  it('a same-version/different-hash split is caught too (a re-upload under one version)', () => {
+    const s = [
+      { version: 120, hash: 'adcc5128d4e6e6bc' },
+      { version: 120, hash: 'ffffffffffffffff' },
+    ];
+    expect(evaluateConsistency(s).consistent).toBe(false);
   });
 });
 

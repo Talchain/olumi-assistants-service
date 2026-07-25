@@ -45,6 +45,42 @@ export function shortSha256(s) {
 }
 
 /**
+ * How many times to sample the served prompt before judging it.
+ *
+ * OBSERVED LIVE (2026-07-25, during the v119->v120 re-pin): consecutive reads
+ * of /admin/prompts/status returned 119, then 120, then 119, then 120. CEE
+ * staging runs MULTIPLE INSTANCES and the prompt loader caches with a ~5-minute
+ * TTL, so after a PMS re-pin the instances flip at different moments. For that
+ * window the service genuinely serves TWO DIFFERENT COACH PROMPTS depending on
+ * which instance takes the turn.
+ *
+ * A single sample cannot tell that apart from a settled drift, and would make
+ * this alarm flap. Sampling lets the alarm name the condition instead.
+ */
+const SAMPLES = 3;
+
+/**
+ * PURE discriminator: did every sample agree on what is being served?
+ * Disagreement is its OWN finding — a settled drift and a mid-propagation
+ * split are different operational states and must not be reported as the same
+ * thing. Never throws, never reads the network.
+ */
+export function evaluateConsistency(samples) {
+  const seen = [...new Set(samples.map((s) => `v${s.version}/${s.hash}`))];
+  if (seen.length <= 1) return { consistent: true, message: '' };
+  return {
+    consistent: false,
+    message:
+      `SERVED PROMPT IS NOT CONSISTENT ACROSS INSTANCES.\n` +
+      `  ${SAMPLES} samples returned: ${seen.join(', ')}\n` +
+      `Different instances are serving DIFFERENT coach prompts, so a user's turn\n` +
+      `gets one or the other depending on which instance takes it. Usually a PMS\n` +
+      `re-pin still propagating (loader TTL ~5 min) — re-run to confirm it settles.\n` +
+      `If it persists, the pin did not reach every instance.`,
+  };
+}
+
+/**
  * PURE discriminator: does the live served prompt match the pinned snapshot?
  * Returns `{ ok, message }`. Never throws, never reads the network.
  */
@@ -90,27 +126,37 @@ async function main() {
     die(`cannot read the checked-in served-prompt snapshot at ${SNAPSHOT_PATH}: ${e.message}`);
   }
 
-  let res;
-  try {
-    res = await fetch(`${base}/admin/prompts/status`, {
-      headers: { 'X-Admin-Key': adminKey },
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (e) {
-    die(`could not reach ${base}/admin/prompts/status: ${e.message}. Not skipping.`);
-  }
-  if (!res.ok) die(`${base}/admin/prompts/status returned HTTP ${res.status}`);
+  const samples = [];
+  for (let i = 0; i < SAMPLES; i++) {
+    let res;
+    try {
+      res = await fetch(`${base}/admin/prompts/status`, {
+        headers: { 'X-Admin-Key': adminKey },
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (e) {
+      die(`could not reach ${base}/admin/prompts/status: ${e.message}. Not skipping.`);
+    }
+    if (!res.ok) die(`${base}/admin/prompts/status returned HTTP ${res.status}`);
 
-  let body;
-  try {
-    body = await res.json();
-  } catch (e) {
-    die(`status body is not JSON: ${e.message}`);
+    let body;
+    try {
+      body = await res.json();
+    } catch (e) {
+      die(`status body is not JSON: ${e.message}`);
+    }
+    const r = (body.keys ?? []).find((k) => k.key === TRACKED_KEY);
+    if (!r) {
+      die(`no '${TRACKED_KEY}' row in /admin/prompts/status — the tracked key moved or PMS is degraded`);
+    }
+    samples.push({ version: r.version, hash: r.sent_hash ?? r.content_hash, chars: r.content_chars });
   }
-  const row = (body.keys ?? []).find((k) => k.key === TRACKED_KEY);
-  if (!row) {
-    die(`no '${TRACKED_KEY}' row in /admin/prompts/status — the tracked key moved or PMS is degraded`);
-  }
+
+  // A split across instances is a DIFFERENT operational state from settled
+  // drift, and is reported as such rather than flapping the drift verdict.
+  const consistency = evaluateConsistency(samples);
+  if (!consistency.consistent) die(consistency.message);
+  const row = { version: samples[0].version, sent_hash: samples[0].hash, content_chars: samples[0].chars };
 
   // `sent_hash` is the hash of what was last actually SENT to the model; fall
   // back to `content_hash` (resolved-but-not-yet-sent) only if the service has
