@@ -102,6 +102,8 @@
  * Serialized size FALLS 3,194B → 2,974B (grammar budget improves).
  */
 
+import { FactorType, ExtractionType, PriorDistribution } from "../../schemas/graph.js";
+
 // ── DRAFT CARDINALITY SOFT CAPS (v12 — 2026-07-23, lean-draft contract) ──
 // Derived from the measured converged-draft distribution (n=17 success corpus:
 // 10–17 nodes / 13–38 edges across every brief class), set ABOVE the observed
@@ -158,11 +160,23 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           data: nullableObject(
             {
               value: { type: "number" },
-              // v7: enums pruned to plain strings (grammar-size budget).
-              // Downstream Zod/normalisers own the value sets; the prompt
-              // still instructs the canonical values.
-              extractionType: { type: "string" },
-              factor_type: { type: "string" },
+              // ── v14 (2026-07-25): ENUMS RESTORED, DERIVED FROM THE ZOD ──
+              // v7 pruned these to plain strings for the grammar-size budget
+              // (the comment said so), NOT because a hard limit forbade them.
+              // An `enum` costs NEITHER a union slot (9/16) NOR an optional
+              // slot (22/24) — ONLY serialized bytes. Restoring them closes
+              // free-text fields the model can loop inside, for bytes alone.
+              // The byte and enum-value costs are MEASURED AND PINNED in
+              // tests/unit/anthropic-graph-schema-grammar-budget.test.ts rather
+              // than restated here: a hand-typed numeral in a comment is exactly
+              // the drift this file's other pins exist to prevent.
+              //
+              // DERIVED from the SAME Zod objects the downstream validator uses
+              // (`schemas/graph.ts`), never re-typed here: the grammar and the
+              // validator cannot disagree about the value set, because there is
+              // only one value set.
+              extractionType: { type: "string", enum: [...ExtractionType.options] },
+              factor_type: { type: "string", enum: [...FactorType.options] },
               uncertainty_drivers: { type: "array", items: { type: "string" } },
               interventions: {
                 type: "array",
@@ -210,6 +224,20 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
                 },
               },
               raw_value: { type: "number" },
+              // ⚠ `unit` STAYS FREE TEXT — v14 deliberately did NOT enumerate it,
+              // against the initial plan, on measured evidence.
+              // The proposal was to derive an enum from the set `display-value.ts`
+              // hand-lists (CURRENCY_SYMBOLS + time units + "%"). Across a 20-draft
+              // live corpus (2026-07-25) the model emitted `"£"` x7 and **`"scale"`
+              // x4** — and `"scale"` is not in that set, so the enum would have made
+              // 4 of 11 observed unit emissions UNGRAMMATICAL. The model would then
+              // omit the unit or mislabel it, and `synthesiseDisplayValue` would
+              // render a bare number instead of a captioned one.
+              // The codebase already documents this: display-value.ts's priority-5
+              // branch exists FOR arbitrary units and names "6 developers" /
+              // "18 months" as the case it serves.
+              // The per-string-value ceiling covers this field instead — which is
+              // the whole point of having a mechanism rather than a field list.
               unit: { type: "string" },
               cap: { type: "number" },
               // Encoding map for categorical factor labels (v191+).
@@ -234,7 +262,11 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           // ── Prior (external factors) ───────────────────────────────────
           prior: nullableObject(
             {
-              distribution: { type: "string" },
+              // v14 (2026-07-25): one-member enum, DERIVED. The served prompt
+              // already states "distribution is always \"uniform\" in current
+              // version" and 35/35 live emissions agree — this makes the
+              // grammar enforce the promise the prompt already makes.
+              distribution: { type: "string", enum: [...PriorDistribution.options] },
               range_min: { type: "number" },
               range_max: { type: "number" },
             },
@@ -454,10 +486,18 @@ export type DraftGraphSchemaObject = {
 // module load instead.
 const TOPOLOGY_PLAN_KEY = 'topology_plan';
 const DEFERRED_AUX_KEYS = [TOPOLOGY_PLAN_KEY, 'coaching', 'causal_claims'] as const;
+// ⚠ THESE ANCHORS NOW THROW (2026-07-25). They were `console.error`, which in a
+// Fastify process at import time is a line nobody reads — an anchor that cannot
+// stop anything is the guarantee-theatre class this estate keeps hunting, and
+// the thing it guards is the SILENT return of a runaway-prone field into the
+// sent grammar. The unit suite asserts every anchor holds, so a genuine
+// violation is caught in CI long before it could fail a boot.
+// The UNION / OPTIONAL guardrails further below deliberately stay
+// `console.error`: they warn about Anthropic's limits, which may not even apply
+// (structured outputs can be off), and crashing on them was never intended.
 for (const key of DEFERRED_AUX_KEYS) {
   if (!(key in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
-
-    console.error(
+    throw new Error(
       `[anthropic-graph-schema] ANCHOR MISSING: '${key}' is not a property of ` +
       `ANTHROPIC_DRAFT_GRAPH_SCHEMA. buildDraftGraphSchema() would silently return an ` +
       `unchanged schema (${key} would leak back into the grammar). Update the v12 builder.`
@@ -535,8 +575,7 @@ function nodeDataObjectOf(schema: {
 
 for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
   if (!(key in (nodeDataObjectOf(ANTHROPIC_DRAFT_GRAPH_SCHEMA)?.properties ?? {}))) {
-
-    console.error(
+    throw new Error(
       `[anthropic-graph-schema] ANCHOR MISSING: '${key}' is not a property of ` +
       `ANTHROPIC_DRAFT_GRAPH_SCHEMA's node.data object. buildDraftGraphSchema() would ` +
       `silently return an unchanged grammar (${key} would leak back in). Update the v13 builder.`
@@ -584,7 +623,18 @@ export function buildDraftGraphSchema(): DraftGraphSchemaObject {
   const nodeItems = (nodes as { items: Record<string, unknown> }).items;
   const itemProps = nodeItems.properties as Record<string, unknown>;
   const dataProp = itemProps.data as { anyOf: unknown[] };
-  const dataObject = dataProp.anyOf[0] as { properties: Record<string, unknown>; required?: string[] };
+  // Read the node-`data` object through the SAME accessor the anchors and the
+  // post-condition use, so a future change to that path lands in one place
+  // instead of three. (The enclosing `built` spread shares structure with the
+  // base object here — `clonedDataObject` below is what makes the edit
+  // copy-on-write, so reading via the helper is equivalent and not aliased.)
+  const dataObject = nodeDataObjectOf(built);
+  if (!dataObject) {
+    throw new Error(
+      `[anthropic-graph-schema] STRUCTURE MISSING: nodes.items.properties.data.anyOf[0] is not ` +
+      `reachable on the built schema, so the runaway-prone node-data cut cannot be applied.`
+    );
+  }
 
   const clonedDataObject = {
     ...dataObject,
@@ -609,20 +659,25 @@ export function buildDraftGraphSchema(): DraftGraphSchemaObject {
     },
   };
 
-  // POST-CONDITION (trap-15: verify the write LANDED, never assume the edit ran).
-  // Assert against the BUILT object, not the intent.
-  const builtData = nodeDataObjectOf(built);
-  for (const key of dropped) {
-    if (builtData && key in builtData.properties) {
-
-      console.error(
-        `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
-        `draft grammar after buildDraftGraphSchema(). The runaway-prone field cut did not land.`
-      );
-    }
-  }
-
   return built;
+}
+
+// POST-CONDITION (trap-15: verify the write LANDED, never assume the edit ran).
+// Asserted against the BUILT object, not the intent.
+//
+// ⚠ MOVED OUT OF THE BUILDER (2026-07-25). It ran on EVERY call — i.e. on every
+// draft — to catch a defect that only an edit to `buildDraftGraphSchema()` can
+// introduce. That is per-request cost for a compile-time property. Running it
+// ONCE at module load makes it strictly stronger (it now fails the process
+// rather than logging into a stream nobody reads) and free on the hot path.
+for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
+  const builtData = nodeDataObjectOf(buildDraftGraphSchema());
+  if (builtData && key in builtData.properties) {
+    throw new Error(
+      `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
+      `draft grammar after buildDraftGraphSchema(). The runaway-prone field cut did not land.`
+    );
+  }
 }
 
 // ── Union-count guardrail ──────────────────────────────────────────────

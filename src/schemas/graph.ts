@@ -42,6 +42,30 @@ export const NodeKind = z.enum(["goal", "decision", "option", "outcome", "risk",
 export const FactorType = z.enum(["cost", "price", "time", "probability", "revenue", "demand", "quality", "other"]);
 
 /**
+ * How a factor's value was extracted. Hoisted out of `FactorData` (2026-07-25) so
+ * the SENT draft grammar can DERIVE its enum from this one declaration rather
+ * than re-typing the member list — the value set now has exactly one home, and
+ * `anthropic-graph-schema.ts` reads `.options` off it.
+ */
+export const ExtractionType = z.enum(["explicit", "inferred", "range", "observed"]);
+
+/**
+ * Prior distribution family for external factors.
+ *
+ * ONE member, deliberately. The served prompt states the invariant itself —
+ * draft_graph "distribution is always \"uniform\" in current version" — and every
+ * worked example in every prompt version emits it; measured 35/35 "uniform" over
+ * a 20-draft live corpus (2026-07-25). Declaring it here lets the draft grammar
+ * enforce what the prompt already promises, at a cost of one enum value.
+ *
+ * ⚠ COUPLED TO THE PROMPT BY DESIGN. If a future prompt teaches a second family,
+ * it must be added HERE in the same change — the grammar would otherwise make the
+ * new value ungrammatical. That coupling is the point: today the field is free
+ * text that nothing constrains, and the prompt's promise is unenforced.
+ */
+export const PriorDistribution = z.enum(["uniform"]);
+
+/**
  * Factor category classification (V12.4+).
  * - controllable: Has incoming edge from option node, options set this value
  * - observable: No option edge but has known current state (data.value)
@@ -72,7 +96,7 @@ export const FactorData = z.object({
     max: z.number()
   }).optional(),
   /** How the value was extracted (explicit, inferred, range, observed) */
-  extractionType: z.enum(["explicit", "inferred", "range", "observed"]).optional(),
+  extractionType: ExtractionType.optional(),
   /** Extraction confidence (0-1) for uncertainty derivation */
   confidence: z.number().min(0).max(1).optional(),
   /** For range extractions: minimum bound */

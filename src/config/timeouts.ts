@@ -693,7 +693,7 @@ export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 2_700;
  * instead. The invariant is independent of the sentinel's value, so it holds
  * even if an operator lowers `CEE_DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL`.
  *
- * ⚠ RENAMED + GENERALISED (2026-07-25, skip-gate alignment). It used to be
+ * ⚠ RENAMED (2026-07-25, skip-gate alignment). It used to be
  * `isLeanRetryAffordable` and govern ONE call site (parse.ts Step 7's lean
  * retry). The SAME rule was independently hand-encoded in the Anthropic
  * adapter's final-attempt skip-gate with a WEAKER floor (a bare `< 2_700`,
@@ -702,14 +702,38 @@ export const LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR = 2_700;
  * the adapter gate never fired, so a doomed final attempt was allowed to run at
  * ~37% of the budget that had just been abandoned; it truncated by construction,
  * ~90s in, every time (measured: `/assist` A2killer 0/18 on 2026-07-24, caps
- * 3,146–3,826). The name no longer says "lean" because the rule is not lean-
- * retry-specific: it governs the lean retry, the adapter's abort authorisation,
- * AND the adapter's final-attempt skip-gate.
+ * 3,146–3,826).
+ *
+ * ⚠⚠ THIS DOCSTRING WAS ITSELF DRIFTED, AND IS CORRECTED HERE (2026-07-25,
+ * runaway-class-guard lane). Within hours of being written it claimed to be
+ * "the SINGLE definition… EVERY retry/abort/skip decision routes through this
+ * one function", said "do NOT re-express it", and listed `draft-budget.ts`
+ * (`isAbortableRetryViable` / `shouldSkipDoomedFinalAttempt`) as runtime call
+ * sites. The FAST-ABORT commit then re-aimed both of those onto
+ * `isRunawayRetryAffordable` — deliberately, and correctly (see THE
+ * RUNAWAY-RETRY YARDSTICK below). **All three claims were false at the bytes:**
+ * `draft-budget.ts` names this function only in prose (`:514`, `:627`), and the
+ * SOLE runtime caller is `parse.ts:607`. A maintainer trusting the file's own
+ * stated authority got the wrong control-flow model of the draft path — the
+ * hand-maintained-mirror class, applied to a docstring.
+ *
+ * ⇒ THE ACCURATE STATEMENT. There are TWO affordability rules, because there are
+ * two genuinely different questions, and each has exactly one home:
+ *   * THIS function — "the previous attempt TRUNCATED at a cap it committed to.
+ *     Can the next one afford at least that?" Prior cap IS a demand signal.
+ *     Runtime call site: `parse.ts` Step 7 (lean retry). One.
+ *   * `isRunawayRetryAffordable` — "the previous attempt was ABORTED before it
+ *     emitted an edge, so its cap signals nothing. Can the next one afford what
+ *     a CONVERGED draft actually costs?" Runtime call sites: `draft-budget.ts`
+ *     (`isAbortableRetryViable`, `shouldSkipDoomedFinalAttempt`).
+ * They are not a fork: they share ONE floor (`LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR`,
+ * via `Math.max` in both), and the drift pin in
+ * `tests/unit/draft-token-affordability.test.ts` still fails loudly if any module
+ * outside this file imports that raw constant. What must NOT be re-expressed is
+ * either RULE — not "all affordability decisions", which was never true.
  *
  * Pure + exported so the gate arithmetic is unit-testable and mutation-checkable
- * in isolation. Runtime call sites: `parse.ts` Step 7 (lean retry), and
- * `draft-budget.ts` (`isAbortableRetryViable` / `shouldSkipDoomedFinalAttempt`,
- * consumed by the Anthropic adapter loop).
+ * in isolation.
  */
 export function isDraftRetryAffordable(
   nextAttemptAffordableTokens: number,
@@ -830,6 +854,66 @@ export const DRAFT_RETRY_HEADROOM_FACTOR = 1.5;
  * clears this by 3,742 ms.
  */
 export const OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS = 21_258;
+
+/**
+ * The longest SINGLE JSON string token a HEALTHY draft has ever been observed to
+ * emit, in raw stream characters.
+ *
+ * ⭐ THE CORPUS (n=20, complete census of a purpose-built measurement, not a
+ * sample), measured live on `ea4229c1` against `/assist/v1/draft-graph` across
+ * SIX brief classes — A2killer x10, vague, moderate, complex, plus two briefs
+ * built specifically to stress the LONGEST string fields the grammar can emit
+ * (a categorical brief to drive `data.encoding_map`, and one carrying verbatim
+ * numeric targets to drive `goal_constraints[].source_quote`):
+ *
+ *   max = 76  `uncertainty_drivers[1]` — "Infrastructure maturity varies across
+ *              UK, US-East, US-West, EU-Central, APAC"
+ *   next = 60 `node.label` · 59 `uncertainty_drivers[1]` · 55/54/50/48 labels
+ *   `goal_constraints[].source_quote` topped out at 48; `encoding_map` was not
+ *   emitted at all on any of the 20.
+ *
+ * ⚠ THE FIRST DERIVATION OF THIS NUMBER WAS WRONG, AND IS RECORDED AS SUCH. A
+ * field-aware locator read `uncertainty_drivers` from `node.data` (where the
+ * SENT grammar puts it) and scored the corpus max at 47 — normalisation moves
+ * the field to `node.observed_state`. It was caught ONLY because a second,
+ * field-list-independent raw-byte locator was run over the same captures and
+ * disagreed (76 vs 47). Two locators, always: the extractor trap has now flipped
+ * a verdict in four consecutive lanes, this one included.
+ *
+ * ⚠ AND THE FIELD IT LANDED IN IS THE POINT. `uncertainty_drivers[]` is exactly
+ * the residual the altitude review named as the sharpest un-closable risk — an
+ * unbounded array of unbounded strings, with no formatter and no grammar lever.
+ * It is also, measurably, where the longest healthy string already lives.
+ */
+export const OBSERVED_MAX_HEALTHY_DRAFT_STRING_CHARS = 76;
+
+/**
+ * Headroom multiplier applied to the observed maximum to get the per-string
+ * abort ceiling.
+ *
+ * ⚠ THIS IS DELIBERATELY MUCH LARGER THAN `DRAFT_RETRY_HEADROOM_FACTOR` (1.5),
+ * and the asymmetry is the argument, not an oversight:
+ *
+ *  1. THE TAIL HERE IS GENUINELY UNEXPLORED. The token corpus measures a
+ *     whole-graph AGGREGATE and is tightly clustered (1,652-2,387 over n=15) —
+ *     1.5x is honest there. This corpus measures a per-field MAXIMUM whose tail
+ *     is not pinned down at all: `source_quote` quotes the USER'S BRIEF (bounded
+ *     only by `message.max(10000)`), and `encoding_map` is a JSON-stringified
+ *     record whose escaped length scales with category count. NEITHER appeared
+ *     at length in the 20 drafts, so neither is bounded by this evidence.
+ *  2. THE POPULATIONS ARE ~400x APART. A runaway puts the ENTIRE budget inside
+ *     one string — 8,550 tokens is >30,000 characters. Against a 76-character
+ *     healthy max, a factor that would be reckless on the token yardstick costs
+ *     nothing in detection power: 25x still fires within the first few percent
+ *     of any real runaway.
+ *  3. THE ERROR COSTS ARE ASYMMETRIC. A false abort costs 25s and buys a
+ *     properly-funded retry. A missed runaway costs the whole request.
+ *
+ * So the margin leans hard toward never false-aborting, and still catches the
+ * class by an enormous margin. If a legitimate string ever DOES exceed the
+ * ceiling, the corpus above is what must be re-derived — not this factor.
+ */
+export const DRAFT_STRING_RUN_HEADROOM_FACTOR = 25;
 
 /**
  * The token floor a RUNAWAY-ABORT retry must be able to afford — the evidence-

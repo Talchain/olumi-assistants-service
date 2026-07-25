@@ -33,6 +33,10 @@ import {
   isAbortableRetryViable,
   shouldSkipDoomedFinalAttempt,
   draftAttachmentDetectorAllowance,
+  createJsonStringRunScanner,
+  buildFailedCallLlmMeta,
+  DRAFT_RUNAWAY_MAX_STRING_CHARS,
+  type DraftRunawayTrigger,
 } from "./draft-budget.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
@@ -963,7 +967,7 @@ export async function draftGraphWithAnthropic(
       detectDeadlineMs: number | null,
     ): Promise<
       | { kind: "complete"; message: Anthropic.Message; timeToEdgesMs: number | null }
-      | { kind: "runaway"; chars: number; elapsedMs: number; trigger: "time" | "chars" | "stall" }
+      | { kind: "runaway"; chars: number; elapsedMs: number; trigger: DraftRunawayTrigger; stringChars?: number }
       | { kind: "so_reject"; error: unknown }
     > {
       // Per-attempt controller: aborted either by our runaway detector OR by the
@@ -992,14 +996,24 @@ export async function draftGraphWithAnthropic(
       // validates DRAFT_RUNAWAY_DETECT_MS live (a healthy draft should reach
       // edges well under the deadline). Recorded on success, surfaced on meta.
       let timeToEdgesMs: number | null = null;
-      let runaway: { chars: number; elapsedMs: number; trigger: "time" | "chars" | "stall" } | null = null;
-      // True only when the char gate broke the loop mid-stream (a definite
-      // runaway). Distinguishes that from a timer firing between the last delta
-      // and iterator-done on a stream that actually COMPLETED (F5 race,
-      // 2026-07-24): the char break is unrecoverable, but a cleanly-finished
-      // stream whose finalMessage is available must be preferred over discarding
-      // it as a runaway.
-      let brokeForChars = false;
+      let runaway: { chars: number; elapsedMs: number; trigger: DraftRunawayTrigger; stringChars?: number } | null = null;
+      // ⭐ PER-STRING-VALUE SCANNER (the CLASS closure, 2026-07-25). Single-pass,
+      // O(1) per character, fed the same deltas as the accumulator. See
+      // draft-budget.ts for why ONE unbounded string — not repetition, and not
+      // total volume — is the invariant that holds on 10 of 10 characterised
+      // failures, and why it is the only signal that can cover `label` and
+      // `uncertainty_drivers[]`, which the grammar can never bound.
+      const stringRunScanner = createJsonStringRunScanner();
+      // True only when an IN-LOOP gate broke the stream mid-flight (a definite
+      // runaway: the per-string-value ceiling or the total-char gate).
+      // Distinguishes that from a TIMER firing between the last delta and
+      // iterator-done on a stream that actually COMPLETED (F5 race, 2026-07-24):
+      // a mid-stream break is unrecoverable, but a cleanly-finished stream whose
+      // finalMessage is available must be preferred over discarding it as a
+      // runaway. Renamed from `brokeForChars` when the string ceiling landed —
+      // the flag now covers two triggers, and a name that says "chars" invites
+      // the next gate to add a THIRD boolean instead of reusing this one.
+      let brokeMidStream = false;
       // Wall-clock of the last text delta — the PROGRESS signal (DETECTOR-FIX,
       // 2026-07-24). A no-edges stream still receiving deltas is advancing through
       // nodes (healthy-but-heavy), NOT a runaway; only a stream that has gone
@@ -1078,6 +1092,29 @@ export async function draftGraphWithAnthropic(
             // Forward progress — refresh the stall clock so an actively-emitting
             // draft is never judged a silent thrash (DETECTOR-FIX, 2026-07-24).
             lastDeltaAt = Date.now();
+            // ⭐ PER-STRING-VALUE CEILING — checked FIRST, and NOT gated on
+            // `!edgesReached`. Both are deliberate:
+            //  * FIRST, because it is the earliest honest signal available: a
+            //    single string past the ceiling is already a settled runaway,
+            //    whatever the clock or the total volume says.
+            //  * UNGATED on edges, because the class is field-agnostic. The
+            //    total-char gate below only ever fires inside the nodes array
+            //    (it was fitted on the nodes section), so a runaway inside a
+            //    `goal_constraints[].label` / `.source_quote` — emitted AFTER
+            //    the edges array, where every timer has already been
+            //    cancelled — has NO early abort at all today. This closes that.
+            const stringRunChars = stringRunScanner.push(event.delta.text);
+            if (detectionActive && !runaway && stringRunChars >= DRAFT_RUNAWAY_MAX_STRING_CHARS) {
+              runaway = {
+                chars: acc.length,
+                elapsedMs: Date.now() - attemptStart,
+                trigger: "string",
+                stringChars: stringRunChars,
+              };
+              brokeMidStream = true;
+              perAttempt.abort();
+              break;
+            }
             if (!edgesReached && DRAFT_EDGES_REACHED_RE.test(acc.slice(edgesProbeOffset))) {
               // Past the nodes bottleneck — this is a healthy generation; cancel
               // the detector and let the stream complete.
@@ -1115,7 +1152,7 @@ export async function draftGraphWithAnthropic(
               }
             } else if (detectionActive && !edgesReached && !runaway && acc.length >= DRAFT_RUNAWAY_DETECT_CHARS + attachAllowanceChars) {
               runaway = { chars: acc.length, elapsedMs: Date.now() - attemptStart, trigger: "chars" };
-              brokeForChars = true;
+              brokeMidStream = true;
               perAttempt.abort();
               break;
             }
@@ -1128,13 +1165,13 @@ export async function draftGraphWithAnthropic(
         }
         clearDetectTimers();
         abortController.signal.removeEventListener("abort", relayOverallAbort);
-        // Char-gate runaway is unrecoverable → return it. A time-gate runaway that
-        // fired AFTER the last delta while the iterator still finished cleanly
-        // (F5 race) falls through: the stream completed, so prefer its
-        // finalMessage over regenerating a draft we already have. If the timer
-        // aborted the stream mid-flight, finalMessage() rejects and the catch
-        // re-classifies it as a runaway (unchanged).
-        if (runaway && brokeForChars) return { kind: "runaway", ...runaway };
+        // An IN-LOOP runaway break is unrecoverable → return it. A time-gate
+        // runaway that fired AFTER the last delta while the iterator still
+        // finished cleanly (F5 race) falls through: the stream completed, so
+        // prefer its finalMessage over regenerating a draft we already have. If
+        // the timer aborted the stream mid-flight, finalMessage() rejects and the
+        // catch re-classifies it as a runaway (unchanged).
+        if (runaway && brokeMidStream) return { kind: "runaway", ...runaway };
         const message = await stream.finalMessage();
         return { kind: "complete", message, timeToEdgesMs };
       } catch (streamErr) {
@@ -1157,6 +1194,14 @@ export async function draftGraphWithAnthropic(
 
     let response: Anthropic.Message | undefined;
     let runawayAbortCount = 0;
+    // WHICH gates fired, oldest first. `runaway_abort_count` alone says an abort
+    // happened but not why — and "why" is the whole diagnosis (a `string` abort
+    // is a per-value runaway; a `chars` abort is a cardinality explosion; a
+    // `time`/`stall` abort is neither). Rides the same meta as the count so a
+    // guard that fires is VISIBLE ON THE WIRE, not only in Render logs — a guard
+    // whose firing cannot be observed is indistinguishable from one that never
+    // fires, which is the class this lane exists to close.
+    const runawayAbortTriggers: DraftRunawayTrigger[] = [];
     let streamTimeToEdgesMs: number | null = null;
     // Last live-clock remaining budget observed inside the attempt closure — used
     // only for the runaway telemetry below (the authoritative window is derived
@@ -1258,20 +1303,30 @@ export async function draftGraphWithAnthropic(
             idempotencyKey,
           ),
           {
-            _llm_meta: {
+            // ⚠ WAS THE FOURTH HAND-BUILT COPY OF THIS SHAPE (2026-07-25). It
+            // was authored ~400 lines above the commit that deleted the THIRD
+            // one, on the same night, with the same defect: two keys short
+            // (`time_to_edges_ms`, `token_usage`). Now derived from the shared
+            // builder, so a key added to the canonical meta reaches THIS route
+            // too. There is no response on this path — the attempt is skipped
+            // before it is made — so the response-derived keys are simply
+            // absent rather than a different literal.
+            //
+            // The abort count is the CAUSE of this skip; without it on the wire
+            // the whole two-abort account had to be reverse-engineered from cap
+            // arithmetic (2026-07-24 re-probe, §HONEST LIMITS).
+            _llm_meta: buildFailedCallLlmMeta({
               model,
-              prompt_version: promptMeta.prompt_version,
-              prompt_hash: promptMeta.prompt_hash,
+              promptVersion: promptMeta.prompt_version,
+              promptHash: promptMeta.prompt_hash,
               temperature: draftTemperature,
-              provider_latency_ms: skipElapsedMs,
-              finish_reason: "skipped_unaffordable_final",
-              // The abort count is the CAUSE of this skip — without it on the
-              // wire the whole two-abort account had to be reverse-engineered
-              // from cap arithmetic (2026-07-24 re-probe, §HONEST LIMITS).
+              providerLatencyMs: skipElapsedMs,
+              finishReason: "skipped_unaffordable_final",
               streamed: true,
-              runaway_abort_count: runawayAbortCount,
-              max_tokens: finalAttemptAffordableTokens,
-            },
+              runawayAbortCount,
+              runawayAbortTriggers,
+              maxTokens: finalAttemptAffordableTokens,
+            }),
           },
         );
       }
@@ -1385,19 +1440,32 @@ export async function draftGraphWithAnthropic(
       // detect deadline was non-null, i.e. canRetryAgain was true at invocation
       // time) → budget for a retry exists.
       runawayAbortCount++;
+      runawayAbortTriggers.push(attemptResult.trigger);
       log.warn({
         event: "cee.llm.draft_runaway_aborted",
         model,
         attempt,
         elapsed_ms: attemptResult.elapsedMs,
         partial_chars: attemptResult.chars,
-        trigger: attemptResult.trigger, // "stall" | "chars" | "time" (hard ceiling)
+        trigger: attemptResult.trigger, // "string" | "stall" | "chars" | "time" (hard ceiling)
+        // Present only on a "string" abort: the length of the single JSON string
+        // token that tripped the ceiling. This is the number that distinguishes
+        // a per-value runaway from every other failure at a glance.
+        string_chars: attemptResult.stringChars,
+        max_string_chars: DRAFT_RUNAWAY_MAX_STRING_CHARS,
         detect_ms: DRAFT_RUNAWAY_DETECT_MS,
         detect_chars: DRAFT_RUNAWAY_DETECT_CHARS,
         stall_ms: DRAFT_RUNAWAY_STALL_MS,
         hard_ceiling_ms: DRAFT_RUNAWAY_HARD_CEILING_MS,
         remaining_budget_ms: lastRemainingBudgetMs,
-      }, "[Anthropic] draft_graph runaway detected EARLY (still in nodes, no edges emitted) — aborted the doomed attempt and retrying a fresh generation within the remaining budget (Lane C streamed abort-retry, progress-aware)");
+        // ⚠ The message below no longer says "still in nodes, no edges emitted".
+        // That was true of every PRE-2026-07-25 trigger (all three were
+        // `!edgesReached`-gated) and is FALSE for the per-string-value trigger,
+        // which is deliberately ungated on edges. A log line that misstates the
+        // condition it fired under is the trap-14 class — an honest label
+        // overwritten by a stale one — and it would have sent the next diagnosis
+        // looking in the nodes array for a runaway that was in goal_constraints.
+      }, "[Anthropic] draft_graph runaway detected EARLY — aborted the doomed attempt and retrying a fresh generation within the remaining budget. See `trigger`: \"string\" = ONE JSON string value passed the per-value ceiling (may occur at ANY point in the stream, including after the edges array); \"chars\" = total nodes-phase volume; \"stall\"/\"time\" = no edges within the progress/ceiling deadlines");
     }
 
     clearTimeout(timeoutId);
@@ -1447,23 +1515,24 @@ export async function draftGraphWithAnthropic(
     // `completion_tokens` (valid only because generation is cut exactly at the
     // cap) and infer "two 30s aborts" from `aff(50_000) = 3,150` arithmetic. Both
     // are now stated facts on the response, not reconstructions.
-    const failedCallLlmMeta = {
+    const failedCallLlmMeta = buildFailedCallLlmMeta({
       model,
-      prompt_version: promptMeta.prompt_version,
-      prompt_hash: promptMeta.prompt_hash,
+      promptVersion: promptMeta.prompt_version,
+      promptHash: promptMeta.prompt_hash,
       temperature: draftTemperature,
-      provider_latency_ms: providerLatencyMs,
-      finish_reason: stopReason,
-      max_tokens: actualMaxTokens,
+      providerLatencyMs,
+      finishReason: stopReason,
+      maxTokens: actualMaxTokens,
       streamed: true,
-      runaway_abort_count: runawayAbortCount,
-      time_to_edges_ms: streamTimeToEdgesMs,
-      token_usage: {
+      runawayAbortCount,
+      runawayAbortTriggers,
+      timeToEdgesMs: streamTimeToEdgesMs,
+      tokenUsage: {
         prompt_tokens: response.usage.input_tokens,
         completion_tokens: response.usage.output_tokens,
         total_tokens: response.usage.input_tokens + response.usage.output_tokens,
       },
-    };
+    });
     if (truncatedAtMaxTokens) {
       // Runaway ANATOMY (v12, 2026-07-23): the corpus could never answer whether
       // a runaway is a COUNT explosion (many nodes/edges) or PER-ELEMENT prose
@@ -1933,6 +2002,11 @@ export async function draftGraphWithAnthropic(
         // healthy draft reaches the edges array well under the deadline).
         streamed: true,
         runaway_abort_count: runawayAbortCount,
+        // WHICH gates fired (2026-07-25). A count without a trigger cannot tell
+        // a per-value runaway (`string`) from a cardinality one (`chars`) from a
+        // slow-but-healthy one (`time`/`stall`) — and on a SUCCESS this is the
+        // only record that the guard fired at all before the draft converged.
+        runaway_abort_triggers: runawayAbortTriggers,
         time_to_edges_ms: streamTimeToEdgesMs,
         provider_latency_ms: providerLatencyMs,
         node_kinds_raw_json: rawNodeKinds,

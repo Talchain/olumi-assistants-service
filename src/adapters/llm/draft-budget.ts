@@ -28,6 +28,16 @@
  *     10000 + 1024 = 11024 > affordable ~8550). The clamp reduces the thinking
  *     budget instead, so the effective request is provably ≤ affordable.
  *
+ *  4. RUNAWAY DETECTION PRIMITIVES — the thresholds and the per-string-value
+ *     scanner the streamed Anthropic draft loop consults. All DERIVED from live
+ *     corpora in config/timeouts.ts, each with a fail-loud module-load pin, so a
+ *     threshold cannot silently become one that never fires (or one that
+ *     false-aborts).
+ *
+ *  5. THE FAILED-CALL `_llm_meta` BUILDER (`buildFailedCallLlmMeta`) — one shape
+ *     for every failure route on every provider. It was hand-written four times
+ *     and the copies drifted; see the note at the function.
+ *
  * NONE of these constants are env-gated (no new flags): affordability is derived
  * from config/timeouts.ts, the clamp is arithmetic over the derived affordable
  * value, and the truncation signal is a provider fact.
@@ -39,6 +49,8 @@ import {
   DRAFT_THROUGHPUT_FLOOR_TOKENS_PER_S,
   DRAFT_TTFB_SAFETY_OVERHEAD_S,
   OBSERVED_MAX_HEALTHY_TIME_TO_EDGES_MS,
+  OBSERVED_MAX_HEALTHY_DRAFT_STRING_CHARS,
+  DRAFT_STRING_RUN_HEADROOM_FACTOR,
   isRunawayRetryAffordable,
   viableRunawayRetryFloorTokens,
 } from "../../config/timeouts.js";
@@ -649,8 +661,237 @@ export function shouldSkipDoomedFinalAttempt(params: {
   return !isRunawayRetryAffordable(params.finalAttemptAffordableTokens);
 }
 
+// ---------------------------------------------------------------------------
+// ⭐ ONE BUILDER FOR THE FAILED-CALL `_llm_meta` (2026-07-25)
+//
+// This shape was hand-written FOUR times. The 2026-07-25 projection lane killed
+// the third copy (`anthropic.ts` ~:1678, "a field-for-field duplicate MINUS
+// max_tokens, runaway_abort_count and time_to_edges_ms") — and a FOURTH was
+// authored ~400 lines up in the SAME file on the SAME night, two keys short
+// (`time_to_edges_ms`, `token_usage`), on the `skipped_unaffordable_final`
+// throw. Same file, same night, same class, by the work fixing that class.
+//
+// The cost is exact: every key added to the canonical meta (three were added
+// that night; `runaway_abort_triggers` is added by this lane) silently fails to
+// reach whichever copy nobody remembered — so the observability just repaired is
+// absent on one failure route, and absence reads as "the guard never fired".
+//
+// Deriving all of them from this one function means a new key lands on EVERY
+// failure surface or on none. Response-derived fields are OPTIONAL because the
+// skip path throws BEFORE any response exists — that is the only real difference
+// between the sites, and it is expressed as an absent key rather than a
+// different literal.
+//
+// This is the cross-provider seam by design: `openai.ts` builds the same shape.
+// ---------------------------------------------------------------------------
+
+export interface FailedCallLlmMetaInput {
+  readonly model: string;
+  readonly promptVersion?: string;
+  readonly promptHash?: string;
+  readonly temperature?: number;
+  readonly providerLatencyMs: number;
+  readonly finishReason?: string;
+  readonly maxTokens?: number;
+  readonly streamed?: boolean;
+  readonly runawayAbortCount?: number;
+  /** Ordered triggers of the runaway aborts spent on this call, oldest first. */
+  readonly runawayAbortTriggers?: readonly string[];
+  readonly timeToEdgesMs?: number | null;
+  readonly tokenUsage?: {
+    readonly prompt_tokens: number;
+    readonly completion_tokens: number;
+    readonly total_tokens: number;
+  };
+}
+
+/**
+ * Build the `_llm_meta` bag attached to a FAILED draft call.
+ *
+ * Consumed by `parse.ts` into `ctx.llmMeta` and projected onto the wire by
+ * `buildLlmMetadataProjection` — so a key omitted here is a key invisible on
+ * `trace.pipeline.llm_metadata` for that failure route.
+ */
+export function buildFailedCallLlmMeta(input: FailedCallLlmMetaInput): Record<string, unknown> {
+  return {
+    model: input.model,
+    prompt_version: input.promptVersion,
+    prompt_hash: input.promptHash,
+    temperature: input.temperature,
+    provider_latency_ms: input.providerLatencyMs,
+    finish_reason: input.finishReason,
+    max_tokens: input.maxTokens,
+    streamed: input.streamed,
+    runaway_abort_count: input.runawayAbortCount,
+    runaway_abort_triggers: input.runawayAbortTriggers,
+    time_to_edges_ms: input.timeToEdgesMs,
+    token_usage: input.tokenUsage,
+  };
+}
+
 // Structural "reached the edges array" probe over the accumulated stream text.
 // Edge objects carry `"from":`; healthy drafts emit ≥1, runaways emit 0 (the
 // same signal measureTruncatedDraftAnatomy tallies as approx_edges). NOT global
 // (used with .test(); a global flag would advance lastIndex across calls).
 export const DRAFT_EDGES_REACHED_RE = /"from"\s*:/;
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ THE PER-STRING-VALUE CEILING — the CLASS closure (2026-07-25)
+//
+// WHAT THE CLASS ACTUALLY IS. `ea4229c1` dropped `data.display_value` from the
+// sent grammar and took drafting 5/16 -> 16/16. That move CANNOT BE REPEATED:
+// it was safe only because the field was display-only AND had a deterministic
+// replacement (`synthesiseDisplayValue`, capped at 50 chars). Neither holds for
+// what is left — `label` is REQUIRED and load-bearing, and
+// `uncertainty_drivers[]` is an unbounded array of unbounded strings. Neither
+// can be dropped; neither has a formatter. Without a mechanism, the 100% is one
+// field-migration away from 69% with no grammar lever remaining.
+//
+// THE INVARIANT, true of 10 of 10 characterised failures: ONE JSON STRING VALUE
+// CONSUMED THE ENTIRE TOKEN BUDGET. The repeated payload varied (U+200B runs,
+// "← display only.  ", a whole repeated sentence); the SHAPE never did. That
+// invariant is:
+//   * period-agnostic — phrase loops, character runs AND a non-repeating ramble
+//     all trip it, where an identical-char-run guard catches only 5 of 10;
+//   * field-agnostic — it covers `label` and `uncertainty_drivers[]`, which the
+//     grammar can NEVER bound (`maxLength` is accepted by the compiler but not
+//     enforced at generation and is stripped by enforceAnthropicSchemaCompliance;
+//     `maxItems` 400s outright — both re-probed at the wire 2026-07-25);
+//   * DERIVED from a corpus we already collect, not a hand-picked number.
+//
+// NOT A NEW MECHANISM — a new TRIGGER on the existing detector. The stream loop
+// already accumulates, already owns `perAttempt.abort()`, and already has a
+// total-char gate. The scanner below is O(1) per delta character.
+//
+// ⚠ WHY THE TOTAL-CHAR GATE IS KEPT, NOT RETIRED — the "strictly dominates"
+// premise is INCOMPLETE, and the difference matters. Both gates measure chars,
+// but they cover DIFFERENT runaway classes:
+//   * per-value  — ONE string consumes the budget. 10/10 characterised failures.
+//   * total-char — MANY well-formed elements consume the budget (a CARDINALITY
+//     explosion). No string is long; every string is fine. The per-value ceiling
+//     is structurally blind to it.
+// A count runaway is not hypothetical-only: the grammar cannot cap array length
+// (`maxItems` 400s), which is exactly why DRAFT_SOFT_NODE_CAP / _EDGE_CAP exist
+// as a post-parse drift alarm. Retiring the total gate would leave that class
+// with NO early abort at all. It is kept as the backstop for the class only it
+// can see, and the pin below asserts the two cannot collapse into one another.
+// ---------------------------------------------------------------------------
+
+/**
+ * Incremental single-pass scanner for the longest JSON string token in a stream.
+ *
+ * Fed the raw text deltas in order; returns, per delta, the greatest number of
+ * characters accumulated inside ANY single string token at any point during that
+ * delta (including a string that opened in an earlier delta and is still open,
+ * and one that opens and closes inside this delta). Zero when no string is open
+ * and none was seen.
+ *
+ * Honours backslash escapes, so `\"` does NOT close the string — without that a
+ * runaway containing an escaped quote would silently reset the counter and the
+ * guard would never fire.
+ *
+ * Counts RAW STREAM CHARACTERS, not decoded ones: a `\u200b` escape counts 6, not 1. That
+ * is deliberate — the quantity being bounded is the output budget the string is
+ * consuming, and the raw form is what is actually spent.
+ *
+ * Counts every JSON string token, key or value. Keys in this grammar are bounded
+ * by construction (the longest is `goal_threshold_unit`, 19 chars) and the
+ * ceiling is orders of magnitude above that, so in practice it can only ever
+ * fire on a value.
+ *
+ * Pure state machine, no regex, no allocation, O(1) per character — it runs on
+ * every delta of every draft, so it must not be the thing that costs latency.
+ */
+/**
+ * The gate that ended an abortable draft attempt.
+ *  * `string` — ONE JSON string token passed DRAFT_RUNAWAY_MAX_STRING_CHARS
+ *    (the per-value class: 10/10 characterised failures).
+ *  * `chars`  — the TOTAL nodes-phase char gate (the cardinality class).
+ *  * `stall`  — no delta for DRAFT_RUNAWAY_STALL_MS (constrained-decode thrash).
+ *  * `time`   — the absolute no-edges hard ceiling.
+ * Exported so the adapter's ledger, the wire meta and the tests share ONE
+ * definition of the trigger set rather than three string unions.
+ */
+export type DraftRunawayTrigger = "string" | "chars" | "stall" | "time";
+
+export interface JsonStringRunScanner {
+  /** Feed the next delta. Returns the longest string-token run seen in it. */
+  push(delta: string): number;
+}
+
+export function createJsonStringRunScanner(): JsonStringRunScanner {
+  let inString = false;
+  let escaped = false;
+  let run = 0;
+
+  return {
+    push(delta: string): number {
+      let maxRun = inString ? run : 0;
+      for (let i = 0; i < delta.length; i++) {
+        const c = delta[i];
+        if (!inString) {
+          if (c === '"') {
+            inString = true;
+            escaped = false;
+            run = 0;
+          }
+          continue;
+        }
+        if (escaped) {
+          escaped = false;
+          run += 1;
+        } else if (c === "\\") {
+          escaped = true;
+          run += 1;
+        } else if (c === '"') {
+          inString = false;
+          run = 0;
+          continue;
+        } else {
+          run += 1;
+        }
+        if (run > maxRun) maxRun = run;
+      }
+      return maxRun;
+    },
+  };
+}
+
+/**
+ * The abort ceiling for a single JSON string token in the draft stream.
+ *
+ * DERIVED — observed healthy maximum x an explicit headroom factor, following
+ * the shipped `OBSERVED_MAX_CONVERGED_DRAFT_TOKENS x DRAFT_RETRY_HEADROOM_FACTOR`
+ * pattern. Never hand-picked; the corpus lives in `config/timeouts.ts` beside the
+ * other observed maxima and the census is pinned in
+ * `__tests__/draft-string-run-guard.test.ts`, so editing the constant without
+ * editing the corpus FAILS LOUD.
+ */
+export const DRAFT_RUNAWAY_MAX_STRING_CHARS = Math.ceil(
+  OBSERVED_MAX_HEALTHY_DRAFT_STRING_CHARS * DRAFT_STRING_RUN_HEADROOM_FACTOR,
+);
+
+// Fail-loud corpus pin: a ceiling at or below the longest string a healthy draft
+// has ever emitted aborts healthy drafts — the 2026-07-24 revert class, one
+// dimension along. Asserted at module load so no future edit can quietly produce
+// a false-abort gate.
+if (DRAFT_RUNAWAY_MAX_STRING_CHARS <= OBSERVED_MAX_HEALTHY_DRAFT_STRING_CHARS) {
+  throw new Error(
+    `draft-budget: DRAFT_RUNAWAY_MAX_STRING_CHARS (${DRAFT_RUNAWAY_MAX_STRING_CHARS}) must exceed the ` +
+    `longest string a healthy draft has ever emitted (${OBSERVED_MAX_HEALTHY_DRAFT_STRING_CHARS}) — ` +
+    `a lower ceiling false-aborts healthy drafts.`,
+  );
+}
+
+// Fail-loud dead-alarm pin. A per-value ceiling at or above the TOTAL-char gate
+// could never fire first inside the nodes phase: the total gate would always win
+// and the per-value trigger would be a mechanism that exists but never executes —
+// the guarantee-theatre class this lane exists to close. Strictly below, so the
+// per-value gate is genuinely the earlier signal on the class it owns.
+if (DRAFT_RUNAWAY_MAX_STRING_CHARS >= DRAFT_RUNAWAY_DETECT_CHARS) {
+  throw new Error(
+    `draft-budget: DRAFT_RUNAWAY_MAX_STRING_CHARS (${DRAFT_RUNAWAY_MAX_STRING_CHARS}) must be strictly ` +
+    `below DRAFT_RUNAWAY_DETECT_CHARS (${DRAFT_RUNAWAY_DETECT_CHARS}) — a per-value ceiling the total-char ` +
+    `gate always reaches first is a trigger that can never fire.`,
+  );
+}

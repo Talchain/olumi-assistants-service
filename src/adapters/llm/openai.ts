@@ -15,7 +15,7 @@ import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./nor
 import { contentDigest } from "../../utils/redaction.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { resolveDraftMaxTokens, isDraftTruncated } from "./draft-budget.js";
+import { resolveDraftMaxTokens, isDraftTruncated, buildFailedCallLlmMeta } from "./draft-budget.js";
 import { wrapUntrusted } from "./untrusted-envelope.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
@@ -678,19 +678,24 @@ export class OpenAIAdapter implements LLMAdapter {
       // still parses+validates; otherwise fail FAST and TYPED (truncated_at_max_tokens)
       // so the runaway case is diagnosable rather than looking like generic non-JSON.
       const truncatedAtMaxTokens = isDraftTruncated(finishReason);
-      const failedCallLlmMeta = {
+      // Same shape as the Anthropic failure meta, built by the SAME function
+      // (draft-budget.ts is already the cross-provider draft seam). It was a
+      // seventh hand-copy; a key added for one provider silently skipped the
+      // other. Streaming-only keys are absent here because the OpenAI draft path
+      // is not streamed — an honest absence, not a mirrored zero.
+      const failedCallLlmMeta = buildFailedCallLlmMeta({
         model: this.model,
-        prompt_version: promptMeta.prompt_version,
-        prompt_hash: promptMeta.prompt_hash,
+        promptVersion: promptMeta.prompt_version,
+        promptHash: promptMeta.prompt_hash,
         temperature,
-        provider_latency_ms: _elapsedMs,
-        finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
-        token_usage: {
+        providerLatencyMs: _elapsedMs,
+        finishReason: typeof finishReason === 'string' ? finishReason : undefined,
+        tokenUsage: {
           prompt_tokens: response.usage?.prompt_tokens ?? 0,
           completion_tokens: response.usage?.completion_tokens ?? 0,
           total_tokens: response.usage?.total_tokens ?? ((response.usage?.prompt_tokens ?? 0) + (response.usage?.completion_tokens ?? 0)),
         },
-      };
+      });
       if (truncatedAtMaxTokens) {
         log.error({
           event: "cee.llm.draft_truncated_max_tokens",
