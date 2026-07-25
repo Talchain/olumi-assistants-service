@@ -1669,19 +1669,19 @@ export async function draftGraphWithAnthropic(
       const schemaError = Object.assign(
         new Error(`${truncationPrefix}anthropic_response_invalid_schema: ${details || 'unknown validation error'}`),
         {
-          _llm_meta: {
-            model,
-            prompt_version: promptMeta.prompt_version,
-            prompt_hash: promptMeta.prompt_hash,
-            temperature: draftTemperature,
-            provider_latency_ms: providerLatencyMs,
-            finish_reason: (response as any)?.stop_reason ?? (response as any)?.stopReason,
-            token_usage: {
-              prompt_tokens: response.usage.input_tokens,
-              completion_tokens: response.usage.output_tokens,
-              total_tokens: response.usage.input_tokens + response.usage.output_tokens,
-            },
-          },
+          // ⚠ WAS A THIRD HAND-BUILT COPY of `failedCallLlmMeta` (2026-07-25).
+          // It was a field-for-field duplicate MINUS `max_tokens`,
+          // `runaway_abort_count` and `time_to_edges_ms` — so the diagnostics
+          // added to the shared object never reached this path. That matters
+          // because this IS the live truncation path: a generation cut at
+          // max_tokens usually still yields text the robust extractor turns
+          // into a partial object, which then fails schema validation HERE, not
+          // at the parse throw above. Measured on staging 65813b6 immediately
+          // after deploy: every truncation-400 carried finish_reason and
+          // token_usage but NO max_tokens and NO runaway_abort_count — the
+          // exact gap that day's fix was meant to close, still open one copy
+          // downstream. Same mirror, one file away.
+          _llm_meta: failedCallLlmMeta,
           // Structured truncation flag: `truncationPrefix` breaks the
           // pipeline's `^anthropic_response_invalid_schema` message anchor, so
           // without the flag a truncated-then-schema-invalid draft fell
