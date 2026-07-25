@@ -215,11 +215,9 @@ describe('S4 activation — the 5-turn cliff is closed by the rolling summary', 
 
     // DISCLOSURE (#536 extension): the "N of M turns included" marker now
     // says how many of the not-shown turns arrive as the summary.
-    expect(pack.conversation.window).toEqual({
-      shown: CONTEXT_PACK_RECENT_TURNS_CAP,
-      available: CONTEXT_PACK_RECENT_TURNS_CAP + 3,
-      summarised: 3,
-    });
+    expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    expect(pack.conversation.window?.available).toBe(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
+    expect(pack.conversation.window?.summarised).toBe(3);
 
     // The code-owned facts-beat-summary precedence instruction rides along.
     expect(prompt).toContain(SUMMARY_PRECEDENCE_INSTRUCTION);
@@ -341,10 +339,8 @@ describe('S4 activation — summarised marker never overclaims', () => {
     expect(pack.conversation_summary!.note).toContain('NOT yet summarised');
     // A floor absorbed NO conversation history — claiming summarised:3
     // would be the exact lying-coverage class this lane must not ship.
-    expect(pack.conversation.window).toEqual({
-      shown: CONTEXT_PACK_RECENT_TURNS_CAP,
-      available: CONTEXT_PACK_RECENT_TURNS_CAP + 3,
-      summarised: 0,
-    });
+    expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    expect(pack.conversation.window?.available).toBe(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
+    expect(pack.conversation.window?.summarised).toBe(0);
   });
 });

@@ -268,11 +268,18 @@ const ContextPackConversationSchema = z
     // turns arrive via `conversation_summary` instead of vanishing —
     // present IFF a summary section was injected (0 there is honest: a
     // floor / withheld block absorbs nothing).
+    // `available` is the conversation's PRE-CAP length (the store's exact
+    // count), NOT the length of the read window — it was the latter until
+    // 2026-07-25, which made a 78-turn conversation report 20.
+    // `notice` is the code-owned in-band disclosure emitted by
+    // `projectConversation` whenever turns exist that the pack does not show;
+    // it travels with the numbers it describes so it cannot drift from them.
     window: z
       .object({
         shown: z.number().int().nonnegative(),
         available: z.number().int().nonnegative(),
         summarised: z.number().int().nonnegative().optional(),
+        notice: z.string().min(1).optional(),
       })
       .strict()
       .optional(),

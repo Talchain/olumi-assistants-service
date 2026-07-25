@@ -334,8 +334,24 @@ export interface ContextPackConversation {
    */
   readonly window?: {
     readonly shown: number;
+    /**
+     * How many turns the conversation ACTUALLY has — the store's pre-cap
+     * count, not the length of the read window. Until 2026-07-25 this was
+     * `priorTurns.length`, i.e. the window's own size, so a 78-turn
+     * conversation reported `available: 20` and the coach told the user its
+     * total was 20.
+     */
     readonly available: number;
     readonly summarised?: number;
+    /**
+     * The one in-band disclosure line, present IFF turns exist that this pack
+     * does not show verbatim. Code-owned and emitted by the same function that
+     * computes the numbers, so it cannot drift from them (the estate's
+     * `HISTORY_CAP_DISCLOSURE` / decision-record `[INCOMPLETE …]` pattern).
+     * A number alone leaves the coach free to describe the visible turns as
+     * the whole conversation; this says not to, in words.
+     */
+    readonly notice?: string;
   };
   /**
    * Boolean flag indicating that the next user turn is expected to confirm
@@ -533,6 +549,17 @@ export interface AssembleContextPackInput {
   // projectConversation can surface user_message / assistant_message to the
   // LLM. SessionTurnWithContent ⊇ SessionTurn.
   readonly priorTurns: readonly SessionTurnWithContent[];
+  /**
+   * How many turns the scenario ACTUALLY has (`EnrichedTurnContext.
+   * prior_turns_total`) — the store's pre-cap count. `priorTurns` above is a
+   * window capped at `SESSION_READ_WINDOW_TURNS` (default 20), so its length
+   * is NOT the conversation's length.
+   *
+   * `null`/absent = unknown (count read failed, or a legacy/test store). The
+   * projection then states the shortfall WITHOUT a number instead of falling
+   * back to the window length — that fallback is the defect.
+   */
+  readonly priorTurnsTotal?: number | null;
   /**
    * Prior handler facts (newest-first), used to project the
    * `recent_changes` summary into the LLM-facing ContextPack. Optional
@@ -838,6 +865,7 @@ export function assembleContextPackWithSummary(
   const projectedConversation = projectConversation(
     input.priorTurns,
     input.pendingConfirmation ?? false,
+    input.priorTurnsTotal,
   );
   const conversation =
     input.conversationSummary !== undefined &&
@@ -1547,6 +1575,17 @@ function isFiniteSensitivity(value: unknown): value is number {
 export function projectConversation(
   priorTurns: readonly SessionTurnWithContent[],
   pendingConfirmation: boolean,
+  /**
+   * The scenario's PRE-CAP turn total. `priorTurns` is a read window
+   * (`SESSION_READ_WINDOW_TURNS`, default 20) — its length is the window's
+   * size, never the conversation's. Omitted/`null` = unknown; the disclosure
+   * then states the shortfall without a number rather than substituting the
+   * window length, which is the falsehood this parameter removes.
+   *
+   * Optional so the edit-graph dispatch call site (which reads only
+   * `recent_turns`) is unchanged.
+   */
+  totalStored?: number | null,
 ): ContextPackConversation {
   // Context v2 (02 §Disclosure fix 2): window + per-turn `truncated`
   // disclosure is now UNCONDITIONAL — the pack always tells the LLM how much
@@ -1615,13 +1654,79 @@ export function projectConversation(
   }
 
   // Window disclosure (02 §Disclosure fix 2, now unconditional): the LLM
-  // learns history exists beyond the window, so "earlier in this
+  // learns how much history exists beyond the window, so "earlier in this
   // conversation" can be said honestly instead of hallucinating certainty.
+  //
+  // `available` and `turn_count` are the CONVERSATION's length, from the
+  // store's pre-cap count. They used to be `priorTurns.length` — the READ
+  // WINDOW's length — which made both numbers false past the window and made
+  // them false CONSISTENTLY (shown + summarised summed to them exactly), so
+  // no cross-field check could catch it. Live on build `f00b8ef`, a 78-turn
+  // scenario produced "Total turn count on record for this conversation is
+  // 20". Unknown total ⇒ fall back to the window length for the numbers but
+  // NEVER let the disclosure claim it is the whole conversation.
+  const totalKnown =
+    typeof totalStored === 'number' && Number.isFinite(totalStored) && totalStored >= 0;
+  // A total below the window length is incoherent (rows cannot vanish between
+  // the two reads in a way that shrinks history) — most likely a stale or
+  // wrong count. Take the larger: never report FEWER turns than are visibly
+  // present in this very pack.
+  const total = totalKnown ? Math.max(totalStored as number, priorTurns.length) : priorTurns.length;
+  const notice = conversationWindowNotice({
+    shown: recent.length,
+    total,
+    totalKnown,
+    windowCapped: priorTurns.length > recent.length,
+  });
   return {
     recent_turns: recent,
-    turn_count: priorTurns.length,
+    turn_count: total,
     last_tool_used: lastTool?.handler_id ?? null,
     pending_confirmation: pendingConfirmation,
-    window: { shown: recent.length, available: priorTurns.length },
+    window: {
+      shown: recent.length,
+      available: total,
+      ...(notice !== null ? { notice } : {}),
+    },
   };
+}
+
+/**
+ * The one in-band conversation-window disclosure, or `null` when this pack
+ * genuinely shows the whole conversation.
+ *
+ * Code-owned and computed by the same call that computes `shown`/`available`,
+ * so the sentence and the numbers cannot drift apart — the estate's
+ * `HISTORY_CAP_DISCLOSURE` / decision-record `[INCOMPLETE …]` pattern, applied
+ * to the cap that did not disclose. It states BOTH numbers for the same reason
+ * the decision-record line does: a disclosure that only says "some turns are
+ * not shown" still leaves the coach free to count the visible turns and assert
+ * that as the total, which is the failure it replaces.
+ */
+function conversationWindowNotice(args: {
+  readonly shown: number;
+  readonly total: number;
+  readonly totalKnown: boolean;
+  readonly windowCapped: boolean;
+}): string | null {
+  const { shown, total, totalKnown, windowCapped } = args;
+  if (!totalKnown) {
+    // The count read failed. We still know history was cut whenever the read
+    // window itself over-ran the projected slice — say so WITHOUT a number
+    // rather than passing off the window length as the total.
+    if (!windowCapped) return null;
+    return (
+      `[INCOMPLETE — the ${shown} most recent turns are shown above and earlier turns exist that ` +
+      `are not shown. The true total could not be read this turn. Do not describe the turns above ` +
+      `as the whole conversation, and do not state a total number of turns or exchanges.]`
+    );
+  }
+  if (total <= shown) return null;
+  const notShown = total - shown;
+  return (
+    `[INCOMPLETE — ${total} turns are on record for this conversation; the ${shown} most recent ` +
+    `are shown above and ${notShown} earlier ${notShown === 1 ? 'one is' : 'ones are'} not shown. ` +
+    `Do not describe the turns above as the whole conversation; if asked how many turns or ` +
+    `exchanges are on record, the true total is ${total}.]`
+  );
 }

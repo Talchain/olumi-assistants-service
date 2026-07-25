@@ -178,7 +178,13 @@ describe('window disclosure (projectConversation) — always on', () => {
   it('default (no opts): conversation gains {window: {shown, available}}', () => {
     const turns = Array.from({ length: 9 }, (_, i) => turnFixture(i));
     const projected = projectConversation(turns, false);
-    expect(projected.window).toEqual({ shown: CONTEXT_PACK_RECENT_TURNS_CAP, available: 9 });
+    // Numbers asserted by name: the window also carries an additive
+    // `notice` (the code-owned in-band disclosure) whenever turns exist
+    // that the projection does not show. No `totalStored` is passed here,
+    // so the counts stay the window's own length.
+    expect(projected.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    expect(projected.window?.available).toBe(9);
+    expect(projected.window?.notice).toContain('INCOMPLETE');
 
     const cuts = emitSpy.mock.calls
       .filter((c: readonly unknown[]) => c[0] === TelemetryEvents.V5ContextTruncation)
@@ -190,6 +196,8 @@ describe('window disclosure (projectConversation) — always on', () => {
   it('a window that fits (<= cap) still discloses shown === available', () => {
     const turns = Array.from({ length: 3 }, (_, i) => turnFixture(i));
     const projected = projectConversation(turns, false);
+    // A conversation that fits shows everything, so there is nothing to
+    // disclose — the notice key must be ABSENT, not an empty string.
     expect(projected.window).toEqual({ shown: 3, available: 3 });
     // No overflow → no window_slice cut event.
     const cuts = emitSpy.mock.calls.filter(
@@ -218,7 +226,11 @@ describe('window disclosure (projectConversation) — always on', () => {
     expect(parsed.success).toBe(true);
     // .strict() must not silently strip the disclosure fields.
     if (parsed.success) {
-      expect((parsed.data as Record<string, unknown>).window).toEqual({ shown: CONTEXT_PACK_RECENT_TURNS_CAP, available: 9 });
+      const window = (parsed.data as { window?: Record<string, unknown> }).window;
+      expect(window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+      expect(window?.available).toBe(9);
+      // .strict() must not strip the disclosure STRING either.
+      expect(typeof window?.notice).toBe('string');
     }
   });
 });
