@@ -14,7 +14,7 @@
 
 import type { HandlerValidationRegistry, PreconditionCheck } from './validator.js';
 import { SetFactorValueValueSchema } from '../tools/handlers/set-factor-value.js';
-import { SCAFFOLD_DISCLOSURE_RE_SRC } from '../coaching/scaffold-disclosure.js';
+import { SCAFFOLD_ANY_DISCLOSURE_RE_SRC } from '../coaching/scaffold-disclosure.js';
 import {
   AddConstraintLabelSchema,
   AddConstraintTypeSchema,
@@ -92,7 +92,7 @@ const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
 // match as too permissive.
 const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
 // Compiled once; source is the disclosure's own published grammar.
-const SCAFFOLD_DISCLOSURE_EXTRACT_RE = new RegExp(SCAFFOLD_DISCLOSURE_RE_SRC);
+const SCAFFOLD_DISCLOSURE_EXTRACT_RE = new RegExp(SCAFFOLD_ANY_DISCLOSURE_RE_SRC);
 const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   if (
     outcome === null ||

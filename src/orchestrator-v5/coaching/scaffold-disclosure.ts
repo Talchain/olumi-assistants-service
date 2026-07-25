@@ -64,6 +64,20 @@ export interface ScaffoldedOptionRecord {
    * values are DEFAULTS, not user-provided numbers.
    */
   readonly value_defaulted: true;
+  /**
+   * Stamped by `run_analysis` AFTER the analysis returns: did this option
+   * actually reach the returned `option_comparison[]`?
+   *
+   * Optional so every producer that has no result to consult yet (the
+   * scaffold itself, `computeScaffoldPlan`'s pre-run readiness projection)
+   * emits records unchanged, and every consumer that ignores it behaves
+   * exactly as before. `false` is the case this field exists for: an option
+   * the scaffold filled placeholders for that the engine then dropped —
+   * live on staging via `IDENTICAL_OPTIONS_DEDUPED` (see
+   * {@link partitionScaffoldedByAnalysisPresence}). `undefined` means "not
+   * derivable", never "absent".
+   */
+  readonly in_comparison?: boolean;
 }
 
 /**
@@ -90,10 +104,28 @@ export const SCAFFOLD_LABEL_MAX_CHARS = 40;
  * template is rejected at build time instead.
  */
 export function safeScaffoldOptionLabel(label: string | null | undefined): string | null {
+  return safeLabelForSuffix(label, labelledSuffix);
+}
+
+/**
+ * The OMITTED-form counterpart of {@link safeScaffoldOptionLabel}. Same
+ * mechanism, different composed suffix: a label is only usable in the
+ * "left out of this comparison" copy when THAT sentence survives egress.
+ * The two forms have different literal text, so a label safe in one is not
+ * automatically safe in the other and each must be probed against its own.
+ */
+function safeOmittedOptionLabel(label: string | null | undefined): string | null {
+  return safeLabelForSuffix(label, omittedLabelledSuffix);
+}
+
+function safeLabelForSuffix(
+  label: string | null | undefined,
+  build: (label: string) => string,
+): string | null {
   if (typeof label !== 'string') return null;
   const clean = sanitiseLabel(label, '');
   if (clean === null) return null;
-  return composedSuffixSurvivesEgress(labelledSuffix(clean)) ? clean : null;
+  return composedSuffixSurvivesEgress(build(clean)) ? clean : null;
 }
 
 /**
@@ -101,6 +133,11 @@ export function safeScaffoldOptionLabel(label: string | null | undefined): strin
  * egress: single-line, matches this module's published grammar exactly, and
  * passes the shared content defences. The generic and plural forms are
  * probed always-surviving by the scaffold-disclosure test suite.
+ *
+ * The grammar probed is {@link SCAFFOLD_ANY_DISCLOSURE_RE_SRC} — the SAME
+ * union the registry egress and the validation-registry salvage compile —
+ * so both the placeholder and the omitted sentence are covered by one
+ * published source, and neither can drift out of the allowlist silently.
  */
 function composedSuffixSurvivesEgress(suffix: string): boolean {
   if (suffix.includes('\n') || suffix.includes('\r')) return false;
@@ -112,7 +149,7 @@ function composedSuffixSurvivesEgress(suffix: string): boolean {
 // the bottom of this module, next to the budget it documents).
 let scaffoldSuffixExactRegex: RegExp | null = null;
 function SCAFFOLD_SUFFIX_EXACT_REGEX(): RegExp {
-  scaffoldSuffixExactRegex ??= new RegExp(`^(?:${SCAFFOLD_DISCLOSURE_RE_SRC})$`);
+  scaffoldSuffixExactRegex ??= new RegExp(`^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})$`);
   return scaffoldSuffixExactRegex;
 }
 
@@ -144,6 +181,95 @@ function pluralSuffix(count: number): string {
   );
 }
 
+// ── OMITTED form (2026-07-25) ───────────────────────────────────────────
+// A scaffolded option can be SCAFFOLDED and still not reach the results.
+// Reproduced on deployed staging 2026-07-25 (scenario 454c14fb…, CEE
+// 74c785f): the scaffold's neutral rule is "the factor's own observed_state
+// numbers — the factor's current position", and the drafter defines the
+// baseline / status-quo option as exactly the factors at their current
+// observed values. The two definitions coincide, so PLoT/ISL removes the
+// scaffolded arm as a duplicate:
+//
+//   IDENTICAL_OPTIONS_DEDUPED — "Option 'Franchise the Leeds Location' has
+//   identical interventions to 'Stay at Current Location (Status Quo)' and
+//   was removed. Analysis proceeds with deduplicated options."
+//
+// The user's option was then absent from `option_comparison` and from
+// `win_probabilities`, while the summary asserted "Placeholder values were
+// used for 'Franchise the Leeds Location'". These sentences are the honest
+// alternative for that case; which one ships is DERIVED from the returned
+// result (see {@link partitionScaffoldedByAnalysisPresence}), never
+// predicted from PLoT's dedup rule — predicting it would be exactly the
+// hand-maintained mirror that produced the false claim.
+function omittedLabelledSuffix(label: string): string {
+  return (
+    ` '${label}' was left out of this comparison because it has no values set. ` +
+    `To include it, say '${buildConfigureOptionChipMessage(label)}'`
+  );
+}
+
+function omittedGenericSingleSuffix(): string {
+  return (
+    ` One of your options was left out of this comparison because it has no values set. ` +
+    `To include it, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
+  );
+}
+
+function omittedPluralSuffix(count: number): string {
+  return (
+    ` ${count} of your options were left out of this comparison because they have no values set. ` +
+    `To include them, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
+  );
+}
+
+/**
+ * Split the scaffold records by whether the option ACTUALLY reached the
+ * analysis result.
+ *
+ * Derived, not mirrored (trap-12): `analysedOptionIds` is read off the
+ * returned `option_comparison[]` — the source of truth for what was
+ * compared — so if a downstream filter (dedup, status gate, a future rule)
+ * removes an arm, the disclosure follows automatically. Nothing here models
+ * PLoT's dedup semantics.
+ *
+ * Positive control built into the mechanism (trap-13): an ABSENCE is only
+ * asserted when a PRESENCE was seen. When `analysedOptionIds` is empty the
+ * result carries no readable option identity at all, so no absence can be
+ * derived and every record is classified `analysed` — the pre-existing copy,
+ * which is the fail-safe direction (it makes no new claim).
+ */
+export interface ScaffoldPresencePartition {
+  /** Scaffolded AND present in the returned comparison. */
+  readonly analysed: readonly ScaffoldedOptionRecord[];
+  /** Scaffolded but ABSENT from the returned comparison. */
+  readonly omitted: readonly ScaffoldedOptionRecord[];
+  /**
+   * Every record in its ORIGINAL order, each stamped with `in_comparison`.
+   * This is what `run_analysis` puts on the `__scaffolded_options` channel,
+   * so downstream disclosure surfaces (the decision-review prompt) inherit
+   * the verdict WITHOUT a second channel and without re-deriving it.
+   */
+  readonly stamped: readonly ScaffoldedOptionRecord[];
+}
+
+export function partitionScaffoldedByAnalysisPresence(
+  scaffolded: readonly ScaffoldedOptionRecord[],
+  analysedOptionIds: ReadonlySet<string>,
+): ScaffoldPresencePartition {
+  if (analysedOptionIds.size === 0) {
+    return { analysed: scaffolded, omitted: [], stamped: scaffolded };
+  }
+  const analysed: ScaffoldedOptionRecord[] = [];
+  const omitted: ScaffoldedOptionRecord[] = [];
+  const stamped: ScaffoldedOptionRecord[] = [];
+  for (const record of scaffolded) {
+    const present = analysedOptionIds.has(record.option_id);
+    (present ? analysed : omitted).push(record);
+    stamped.push({ ...record, in_comparison: present });
+  }
+  return { analysed, omitted, stamped };
+}
+
 /**
  * Build the disclosure suffix appended to the run_analysis summary /
  * assistant_text when the scaffold filled placeholder interventions.
@@ -160,6 +286,37 @@ export function buildScaffoldDisclosureSuffix(
   // >99 is structurally impossible (NODE_LIMIT); clamp so the `\d{1,2}`
   // grammar slot can never be exceeded into a silent fallback.
   return pluralSuffix(Math.min(scaffolded.length, 99));
+}
+
+/**
+ * Build the suffix for scaffolded options that did NOT reach the comparison.
+ * Same shape rules as {@link buildScaffoldDisclosureSuffix}; different claim.
+ */
+export function buildScaffoldOmittedSuffix(
+  omitted: readonly ScaffoldedOptionRecord[],
+): string {
+  if (omitted.length === 0) return '';
+  if (omitted.length === 1) {
+    const label = safeOmittedOptionLabel(omitted[0].label);
+    return label !== null ? omittedLabelledSuffix(label) : omittedGenericSingleSuffix();
+  }
+  return omittedPluralSuffix(Math.min(omitted.length, 99));
+}
+
+/**
+ * The WHOLE scaffold disclosure for one run, composed from the presence
+ * partition. TOTAL over the partition: all-analysed keeps today's copy
+ * byte-for-byte, all-omitted ships only the honest omission sentence, and
+ * the mixed case ships both in that order (matching the grammar union's
+ * `placeholder-then-omitted` alternation).
+ */
+export function buildScaffoldDisclosureForPartition(
+  partition: ScaffoldPresencePartition,
+): string {
+  return (
+    buildScaffoldDisclosureSuffix(partition.analysed) +
+    buildScaffoldOmittedSuffix(partition.omitted)
+  );
 }
 
 /**
@@ -195,25 +352,40 @@ export function buildScaffoldPromptDisclosure(
   scaffolded: readonly ScaffoldedOptionRecord[],
 ): string {
   if (scaffolded.length === 0) return '';
-  const lines = scaffolded.map((record) => {
-    const name =
-      record.label !== null
-        ? (sanitiseLabel(record.label, record.option_id) ?? record.option_id)
-        : record.option_id;
+  // Reads the `in_comparison` stamp `run_analysis` applied — a record with
+  // no stamp is "not derivable", which keeps the pre-existing line. Without
+  // this split the review is told an option carries placeholder numbers
+  // when it carries NO numbers, and can narrate an arm absent from the data.
+  const analysed = scaffolded.filter((r) => r.in_comparison !== false);
+  const omitted = scaffolded.filter((r) => r.in_comparison === false);
+  const nameOf = (record: ScaffoldedOptionRecord): string =>
+    record.label !== null
+      ? (sanitiseLabel(record.label, record.option_id) ?? record.option_id)
+      : record.option_id;
+  const lines = analysed.map((record) => {
     const factorCount = record.factor_ids.length;
     return (
-      `Option '${name}' had no user-provided values, so the analysis used neutral ` +
+      `Option '${nameOf(record)}' had no user-provided values, so the analysis used neutral ` +
       `placeholder interventions on ${factorCount} factor${factorCount === 1 ? '' : 's'} ` +
       `(value_defaulted). Its numbers are defaults, not user data.`
     );
   });
-  return (
-    `${lines.join('\n')}\n` +
-    'Because placeholder values shift every option\'s relative position, treat the WHOLE ' +
-    'comparison as illustrative until the scaffolded option(s) are configured. Never present ' +
-    'a scaffolded option\'s numbers as real or user-provided; caveat any comparison that ' +
-    'involves them.'
+  const omittedLines = omitted.map(
+    (record) =>
+      `Option '${nameOf(record)}' had no user-provided values and is NOT in the option ` +
+      `comparison — it was left out of this analysis and has NO numbers. Never state or ` +
+      `imply a result, ranking, or probability for it.`,
   );
+  const allLines = [...lines, ...omittedLines];
+  const tail =
+    analysed.length > 0
+      ? 'Because placeholder values shift every option\'s relative position, treat the WHOLE ' +
+        'comparison as illustrative until the scaffolded option(s) are configured. Never present ' +
+        'a scaffolded option\'s numbers as real or user-provided; caveat any comparison that ' +
+        'involves them.'
+      : 'The comparison covers only the options listed in the analysis data. Do not describe the ' +
+        'omitted option(s) as compared, ranked, or scored.';
+  return `${allLines.join('\n')}\n${tail}`;
 }
 
 /**
@@ -237,12 +409,42 @@ export const SCAFFOLD_DISCLOSURE_RE_SRC =
   `To set real values, say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'`;
 
 /**
+ * Grammar source for the OMITTED suffix. Same three shapes, same pinned
+ * `Help me configure …` exemplar, so the honest-omission copy is held to
+ * exactly the discipline the placeholder copy is.
+ */
+export const SCAFFOLD_OMITTED_RE_SRC =
+  ` (?:'[^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS}}' was|One of your options was|\\d{1,2} of your options were) ` +
+  'left out of this comparison because (?:it has|they have) no values set\\. ' +
+  `To include (?:it|them), say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'`;
+
+/**
+ * The union every consumer compiles — the registry egress allowlist tail,
+ * the validation-registry salvage, and this module's own build-time
+ * survival probe. Ordered `placeholder [omitted] | omitted` to match
+ * {@link buildScaffoldDisclosureForPartition}'s append order, so the mixed
+ * case is matchable as ONE tail rather than needing a second optional slot
+ * in every consumer's pattern.
+ */
+export const SCAFFOLD_ANY_DISCLOSURE_RE_SRC =
+  `(?:${SCAFFOLD_DISCLOSURE_RE_SRC}(?:${SCAFFOLD_OMITTED_RE_SRC})?|${SCAFFOLD_OMITTED_RE_SRC})`;
+
+/**
  * Egress budget the allowlist length cap is extended by — computed from the
  * worst-case builder outputs (never hand-estimated), so an over-budget
  * disclosure cannot silently knock the summary back to the fallback.
+ *
+ * Covers the mixed case: the worst-case placeholder suffix AND the
+ * worst-case omitted suffix can both ride on one summary.
  */
-export const SCAFFOLD_DISCLOSURE_MAX_CHARS = Math.max(
-  labelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
-  genericSingleSuffix().length,
-  pluralSuffix(99).length,
-);
+export const SCAFFOLD_DISCLOSURE_MAX_CHARS =
+  Math.max(
+    labelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
+    genericSingleSuffix().length,
+    pluralSuffix(99).length,
+  ) +
+  Math.max(
+    omittedLabelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
+    omittedGenericSingleSuffix().length,
+    omittedPluralSuffix(99).length,
+  );
