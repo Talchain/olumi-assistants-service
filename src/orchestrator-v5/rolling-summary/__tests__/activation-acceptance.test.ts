@@ -103,11 +103,21 @@ class InMemoryStore implements RollingSummaryStorePort {
  * A summariser that DERIVES its four slots from the input it is given —
  * the constraint slot echoes the "must be" sentence (and its [tN] ordinal)
  * ONLY if the maintainer actually fed it the turn that contains it.
+ *
+ * NAMED DEPENDENCY (2026-07-25): this fake reads the summariser input's
+ * RENDERING, so it is coupled to build-input.ts's `renderUnit`. That coupling
+ * was invisible until speaker-scoped citation units changed the layout from
+ *     [t1]\nUSER: …\nASSISTANT: …      (one ordinal, two speakers)
+ * to  [t1] USER: …\n[t2] ASSISTANT: …  (one ordinal per speaker)
+ * and this fixture silently stopped matching — "(none)" instead of the
+ * constraint, so the acceptance assertion went RED. The separator is now
+ * `\s*` so both layouts match, and this note exists so the next renderer
+ * change is a visible decision rather than a surprise RED.
  */
 function derivingModel(): SummariserModel {
   return {
     summarise: vi.fn(async (userMessage: string) => {
-      const m = /\[(t\d+)\]\nUSER: ([^\n]*must be[^\n]*)/.exec(userMessage);
+      const m = /\[(t\d+)\]\s*USER: ([^\n]*must be[^\n]*)/.exec(userMessage);
       const constraints = m
         ? `CONSTRAINTS & PREFERENCES: ${m[2]} [${m[1]}]`
         : 'CONSTRAINTS & PREFERENCES: (none)';

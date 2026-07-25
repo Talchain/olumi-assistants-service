@@ -20,7 +20,14 @@
  *  - REJECT-AND-KEEP-PRIOR: a summariser emitting outside the four-slot schema
  *    (including ANY missing slot — Codex r2 blocker 2) is rejected; the prior
  *    summary is kept (or the deterministic floor seeded when there is no
- *    prior) — never a garbage write, never silent slot erasure.
+ *    prior) — never a garbage write, never silent slot erasure. Since
+ *    2026-07-25 this also covers an assistant attribution the pass's own
+ *    provenance does not witness (retention.ts).
+ *  - RETENTION / NO SILENT ERASURE (2026-07-25): a pass that EMPTIES a slot
+ *    holding durable fact does not delete it — assemble.ts carries the prior
+ *    entries forward and `carried_forward_slots` fires. Measured trigger: a
+ *    user turn merely DOUBTING recorded history emptied RESOLVED 57/57
+ *    against 0/16 on neutral controls.
  *  - SINGLE-FLIGHT + COALESCING (Codex r2 fix 4b): at most one pass in flight
  *    per scenario; commits landing mid-flight coalesce into one rerun
  *    (latest-wins — each pass re-reads full history). In-process only; the
@@ -38,10 +45,13 @@ import type { SummariserTurn } from './build-input.js';
 import { buildDeterministicFloor } from './deterministic-floor.js';
 import { getRollingSummaryModel, getRollingSummaryStore } from './index.js';
 import { parseSummaryOutput } from './parse-summary.js';
+import type { ParsedSummarySlot, SummaryParseReject } from './parse-summary.js';
+import { findErasedSlots, findUnwitnessedAssistantAttributions } from './retention.js';
 import type { SummariserModel } from './summariser.js';
 import type { RollingSummaryStorePort } from './store-adapter.js';
 
 import { SUMMARY_FULL_HISTORY_READ_LIMIT } from './summary-types.js';
+import type { SummarySpeaker } from './summary-types.js';
 
 /** Read the full persisted history off the hot-path window. readRecent is
  *  unclamped (verified); a large limit is effectively "full history" for any
@@ -92,6 +102,35 @@ type MaintainStatus =
   | 'model_error_kept_prior'
   | 'no_turns'
   | 'error';
+
+/**
+ * Run the durable-memory write gates over a well-formed parse. Returns the
+ * reject reason, or null to proceed. Logs WHAT was caught (slot names /
+ * offending text) at debug so a firing gate is diagnosable, while the frozen
+ * telemetry event stays content-free.
+ */
+function gateParsedSummary(
+  parsedSlots: readonly ParsedSummarySlot[],
+  ordinalMap: ReadonlyMap<
+    string,
+    { turn_id: string; created_at: string; speaker?: SummarySpeaker }
+  >,
+  args: MaintainRollingSummaryArgs,
+): SummaryParseReject | null {
+  const unwitnessed = findUnwitnessedAssistantAttributions(parsedSlots, ordinalMap);
+  if (unwitnessed.length > 0) {
+    log.warn(
+      {
+        scenario_id: args.scenarioId,
+        turn_id: args.turnId,
+        slots: unwitnessed.map((u) => u.slot),
+      },
+      'RollingSummary — REJECTED: the pass attributed a speech act to the assistant that its own provenance does not witness; keeping prior summary',
+    );
+    return 'unwitnessed_assistant_attribution';
+  }
+  return null;
+}
 
 function toSummariserTurn(t: MaintainerTurn): SummariserTurn {
   return {
@@ -271,17 +310,49 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
 
     // --- parse + reject-or-write ---------------------------------------
     const parsed = parseSummaryOutput(modelText);
-    if (!parsed.ok) {
+
+    // DURABLE-MEMORY WRITE GATES (retention.ts). Two ways an otherwise
+    // well-formed summary writes a FALSEHOOD about the user's own history —
+    // handled DIFFERENTLY, because one is repairable and the other is not.
+    //
+    //   1. ERASURE — the pass EMPTIES a slot that held durable fact. Measured
+    //      57/57 on a turn where the user merely DOUBTED the records, against
+    //      0/16 on neutral controls; the stored `(none)` is injected as "the
+    //      summariser looked and found none", so the coach then denies records
+    //      the system still holds. REPAIRED, not rejected: assemble.ts carries
+    //      the prior slot forward (see `priorForRetention`). The rest of the
+    //      pass is usually correct on that same turn — it moves the user's
+    //      challenge into OPEN — and freezing the whole summary every time a
+    //      user expresses doubt is its own degradation.
+    //
+    //   2. UNWITNESSED ATTRIBUTION — the text attributes a speech act to the
+    //      ASSISTANT while its own provenance cites only the USER (a user's
+    //      challenge persisted as an assistant's concession). NOT repairable:
+    //      the offending claim is inside generated prose. Takes the existing
+    //      reject-and-keep-prior path — the prior summary is still TRUE
+    //      memory and the lag machinery discloses the staleness in-band.
+    const gateReject: SummaryParseReject | null = parsed.ok
+      ? gateParsedSummary(parsed.slots, input.ordinalMap, args)
+      : null;
+    const carriedForward = parsed.ok ? findErasedSlots(prior, parsed.slots) : [];
+    if (carriedForward.length > 0) {
+      log.warn(
+        { scenario_id: args.scenarioId, turn_id: args.turnId, carried_forward_slots: carriedForward },
+        'RollingSummary — the pass would have emptied a slot holding durable memory; carrying the prior entries forward',
+      );
+    }
+    if (!parsed.ok || gateReject !== null) {
+      const reason = parsed.ok ? gateReject! : parsed.reason;
       if (prior !== null) {
         log.debug(
-          { scenario_id: args.scenarioId, turn_id: args.turnId, reject_reason: parsed.reason },
+          { scenario_id: args.scenarioId, turn_id: args.turnId, reject_reason: reason },
           'RollingSummary — summariser output rejected (off-contract); keeping prior summary',
         );
         emitUpdated(args, {
           status: 'rejected_kept_prior',
           mode,
           duration_ms: Date.now() - startedAt,
-          reject_reason: parsed.reason,
+          reject_reason: reason,
           usage,
         });
         return;
@@ -297,7 +368,7 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
         status: 'floor',
         mode,
         duration_ms: Date.now() - startedAt,
-        reject_reason: parsed.reason,
+        reject_reason: reason,
         usage,
       });
       return;
@@ -317,6 +388,8 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
       // completeness. Telemetry below keeps the two causes DISTINCT
       // (`history_capped` vs `capped_fallback`).
       historyCapped: historyCapped || input.cappedFallback,
+      // Retention: carry forward any durable-fact slot this pass emptied.
+      priorForRetention: prior,
     });
     const outcome = await store.upsertSummary(args.scenarioId, summary);
     emitUpdated(args, {
@@ -327,6 +400,7 @@ async function runMaintainPass(args: MaintainRollingSummaryArgs): Promise<void> 
       chars: summary.text.length,
       capped_fallback: input.cappedFallback,
       history_capped: historyCapped,
+      carried_forward_slots: carriedForward.length,
       usage,
     });
   } catch (err) {
@@ -385,6 +459,11 @@ function emitUpdated(
     readonly chars?: number;
     readonly capped_fallback?: boolean;
     readonly history_capped?: boolean;
+    /** How many durable-fact slots this pass EMPTIED and had carried forward
+     *  from the prior summary (retention.ts). Non-zero means the summariser
+     *  tried to delete recorded history — loud by design; a persistent
+     *  non-zero stream is a summariser regression, not a user event. */
+    readonly carried_forward_slots?: number;
     readonly reject_reason?: string;
     readonly error_name?: string;
     readonly usage?: { input_tokens?: number; output_tokens?: number };
@@ -402,6 +481,7 @@ function emitUpdated(
       chars: fields.chars ?? null,
       capped_fallback: fields.capped_fallback ?? null,
       history_capped: fields.history_capped ?? null,
+      carried_forward_slots: fields.carried_forward_slots ?? null,
       reject_reason: fields.reject_reason ?? null,
       error_name: fields.error_name ?? null,
       input_tokens: fields.usage?.input_tokens ?? null,
