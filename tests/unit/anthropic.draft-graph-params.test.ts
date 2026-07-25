@@ -1250,7 +1250,28 @@ describe("draftGraphWithAnthropic — request payload construction", () => {
     // 6896, but BELOW the 8000 char budget), THEN a chunk that opens the edges
     // array (`"from":`). The detector must NOT fire: healthy drafts are not
     // clipped. finalMessage returns a clean valid graph.
-    const bigNodesChunk = '{"nodes":[{"id":"n1","kind":"factor","label":"' + "y".repeat(7400) + '"}';
+    //
+    // ⚠ FIXTURE REBUILT 2026-07-25, and the old one CONTRADICTED THIS TEST'S OWN
+    // NAME. It produced its 7,500 chars as a SINGLE 7,400-character node label —
+    // which is not "a large healthy draft" at all, it is verbatim the runaway
+    // shape (one string value consuming the budget; the live healthy maximum for
+    // any single string is 76 chars over a 20-draft corpus). The per-string-value
+    // ceiling correctly classified it as a runaway, which is how the
+    // contradiction surfaced.
+    // Rebuilt to generate the same TOTAL volume the way a genuinely verbose
+    // healthy draft does — MANY nodes, each with realistic short strings. That
+    // preserves exactly the property this test exists to protect ("total nodes
+    // volume below the char budget must not abort") and stops the fixture
+    // asserting something it never demonstrated.
+    const realisticNodes: string[] = [];
+    for (let i = 0; realisticNodes.join(',').length < 7_400; i++) {
+      realisticNodes.push(
+        `{"id":"fac_${i}","kind":"factor","label":"Support capacity driver ${i}",` +
+        `"data":{"value":0.5,"extractionType":"inferred","factor_type":"cost",` +
+        `"uncertainty_drivers":["Historical volume is a weak predictor of peak load"]}}`,
+      );
+    }
+    const bigNodesChunk = '{"nodes":[' + realisticNodes.join(',');
     const edgesChunk = '],"edges":[{"from":"n1","to":"n2"}]}';
     streamSpy.mockImplementationOnce(makeFakeStream(VALID_GRAPH_JSON, {
       chunks: [bigNodesChunk, edgesChunk],

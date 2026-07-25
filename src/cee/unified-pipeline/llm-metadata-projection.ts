@@ -73,6 +73,12 @@ export function buildLlmMetadataProjection(
     // detector's deadline is being tripped by genuinely slow drafts.
     streamed: llmMeta.streamed,
     runaway_abort_count: llmMeta.runaway_abort_count,
+    // WHICH gates fired, oldest first — "string" (one JSON string value passed
+    // the per-value ceiling), "chars" (total nodes-phase volume), "stall",
+    // "time". Added 2026-07-25 with the per-string-value guard: a guard whose
+    // firing is invisible on the wire is indistinguishable from one that never
+    // fires, and the fast-abort detector spent weeks in exactly that state.
+    runaway_abort_triggers: llmMeta.runaway_abort_triggers,
     time_to_edges_ms: llmMeta.time_to_edges_ms,
     salvaged_from_truncation: llmMeta.salvaged_from_truncation,
   };

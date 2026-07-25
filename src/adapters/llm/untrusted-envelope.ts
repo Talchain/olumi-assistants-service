@@ -11,10 +11,28 @@
  * could forge the boundary and present natural language as trusted instructions.
  *
  * `wrapUntrusted(label, text)` is the single source: it brackets AND escapes, so
- * F11's hardening now lands EVERYWHERE and a new wrapping site cannot forget it
- * (change-the-mechanism, not another hand-copy). Escaping is a no-op on text that
- * contains no marker token, so a marker-free brief is byte-identical to the prior
- * inline envelope — only an actual boundary-forgery attempt is neutralised.
+ * a call site that USES IT cannot forget the hardening (change-the-mechanism, not
+ * another hand-copy). Escaping is a no-op on text that contains no marker token,
+ * so a marker-free brief is byte-identical to the prior inline envelope — only an
+ * actual boundary-forgery attempt is neutralised.
+ *
+ * ⚠ CORRECTED 2026-07-25 — THIS DOCSTRING OVERSTATED ITS OWN COVERAGE. It claimed
+ * the hardening "lands EVERYWHERE and a new wrapping site cannot forget it".
+ * **Two sites still hand-build the envelope**, and both are known and deliberate:
+ *
+ *   1. `draft-attachment.ts:93` — a NATIVE DOCUMENT block. The payload is a
+ *      structured content block, not one string, so it cannot pass through a
+ *      `(label, text) => string` signature at all. **Genuinely outside this
+ *      function's reach; the claim must simply be softer.**
+ *   2. `coaching-pass.ts:183-190` — needs the `GRAPH_DATA` marker family, and
+ *      `wrapUntrusted` hardcodes `USER_CONTENT`. **Absorbable**: a `family`
+ *      parameter would fold it in. Rowed, not done here (out of lane scope).
+ *
+ * `UNTRUSTED_MARKER_RE` below already matches BOTH families, so the escaping
+ * primitive is complete even where the wrapper is not — which is why this is a
+ * false-coverage-claim defect and not a security hole. But a guarantee that
+ * overstates its coverage is the thing this estate is trying to stop shipping:
+ * the next reader audits the call sites, finds two, and mistrusts the rest.
  */
 
 /**

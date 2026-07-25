@@ -107,8 +107,15 @@ describe('DRIFT PIN — neither surface may hand-write its own keep-list again',
     // SKIP-GATE, which throws BEFORE any provider response exists and therefore
     // genuinely cannot share the response-derived object.
     const src = read('src/adapters/llm/anthropic.ts');
+    // ⭐ TIGHTENED 1 -> 0 (2026-07-25). The one remaining inline literal was the
+    // `skipped_unaffordable_final` throw — a FOURTH hand-built copy of this shape,
+    // authored ~400 lines from the commit that deleted the third, and two keys
+    // short of the canonical meta (`time_to_edges_ms`, `token_usage`). It now
+    // derives from `buildFailedCallLlmMeta` like every other site, so the honest
+    // count is ZERO and this pin can finally forbid the pattern outright instead
+    // of tolerating one instance of it.
     const inlineLiterals = src.match(/_llm_meta:\s*\{/g) ?? [];
-    expect(inlineLiterals).toHaveLength(1);
+    expect(inlineLiterals, 'a hand-built `_llm_meta: { ... }` literal has reappeared — use buildFailedCallLlmMeta (draft-budget.ts) so a key added to the canonical meta reaches EVERY failure route').toHaveLength(0);
     // …and the shared object is what the response-path throws carry.
     expect(src).toContain('_llm_meta: failedCallLlmMeta');
   });

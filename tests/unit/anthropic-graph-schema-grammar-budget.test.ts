@@ -66,6 +66,7 @@ import {
   countOptionalParams,
   countUnionParams,
 } from "../../src/cee/draft/anthropic-graph-schema.js";
+import { FactorType, ExtractionType, PriorDistribution } from "../../src/schemas/graph.js";
 
 // ── Budgets (post-v8 measured values) ───────────────────────────────────────
 // Measured on 2026-07-07 (v8): 3,194 bytes, 9 unions, 5 enums / 17 values,
@@ -93,7 +94,19 @@ const OPTIONAL_PARAMS_BUDGET = 24; // Anthropic hard limit
 // structured outputs in production (400 → silent prompt-only fallback on
 // every draft). To add one, you must take one back into a `required` list.
 const OPTIONAL_PARAMS_TRIPWIRE = 23; // v9 measured 23; 1 slot of headroom left
-const ENUM_VALUES_TRIPWIRE = 20; // v8 measured 17 + headroom
+// ⭐ RAISED 20 -> 34 (v14, 2026-07-25) — a DELIBERATE, LIVE-VERIFIED spend, not a
+// ratchet slipped to make a test pass. v7 pruned `data.extractionType`,
+// `data.factor_type` and `prior.distribution` to plain strings for the
+// grammar-size budget (its own comment says so), NOT because any hard limit
+// forbade enums. Restoring them removes three free-text fields a runaway can
+// loop inside, and an `enum` spends NEITHER a union slot NOR an optional slot —
+// only bytes, measured below.
+// LIVE-VERIFIED, as this file's own instructions require: the SENT schema
+// compiled HTTP 200 at 2,926 B on claude-sonnet-4-6 via
+// scripts/probe-grammar-compile.mjs (2026-07-25), still 268 B UNDER the
+// known-PASS 3,194 B shape and 613 B under the known-FAIL 3,539 B one.
+// 30 measured + 4 headroom.
+const ENUM_VALUES_TRIPWIRE = 34;
 // Object-schema count is pinned EXACTLY: the live bisect showed structural
 // surface is the dominant compile cost, and a 9-object variant of this
 // family already failed. Adding any object schema must be a deliberate,
@@ -279,6 +292,38 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — grammar-size budget", () => {
       required: [],
     };
     expect(countOptionalParams(overBudget)).toBe(2);
+  });
+
+  it("v14: the restored enums cost ONLY bytes — no union slot, no optional slot", () => {
+    // The whole argument for restoring them. If a future edit makes an enum
+    // spend a union or optional slot, that argument is void and this fails.
+    const stats = measure();
+    expect(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA)).toBe(9);
+    expect(stats.optionalProps).toBe(22);
+    // The three restored value sets are DERIVED from schemas/graph.ts, never
+    // re-typed. A drifted copy is the estate's dominant defect class, so assert
+    // identity against the Zod source rather than against literals.
+    const nodeData = (ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as {
+      properties: { nodes: { items: { properties: Record<string, { anyOf?: Array<{ properties: Record<string, { enum?: string[] }> }> }> } } };
+    }).properties.nodes.items.properties;
+    const dataProps = nodeData.data.anyOf![0].properties;
+    expect(dataProps.extractionType.enum).toEqual([...ExtractionType.options]);
+    expect(dataProps.factor_type.enum).toEqual([...FactorType.options]);
+    expect(nodeData.prior.anyOf![0].properties.distribution.enum).toEqual([...PriorDistribution.options]);
+  });
+
+  it("v14: `data.unit` is deliberately NOT an enum (measured: the model emits units outside the formatter's list)", () => {
+    // Do not "fix" this by enumerating it. Across a 20-draft live corpus
+    // (2026-07-25) the model emitted "£" x7 and "scale" x4; "scale" is not in
+    // display-value.ts's currency/time/percent set, so an enum derived from that
+    // set would make 4 of 11 observed emissions ungrammatical — the model would
+    // then omit the unit and the UI would render a bare number.
+    // display-value.ts's priority-5 branch exists precisely FOR arbitrary units.
+    // The per-string-value ceiling covers this field instead.
+    const dataProps = (ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as {
+      properties: { nodes: { items: { properties: { data: { anyOf: Array<{ properties: Record<string, { enum?: string[] }> }> } } } } };
+    }).properties.nodes.items.properties.data.anyOf[0].properties;
+    expect(dataProps.unit.enum).toBeUndefined();
   });
 
   it("load-bearing enums are retained (kind, category, operator, effect_direction)", () => {

@@ -130,6 +130,17 @@ export interface DraftGraphResult {
     // validates the runaway-detection deadline live.
     streamed?: boolean;
     runaway_abort_count?: number;
+    /**
+     * WHICH gates fired, oldest first (2026-07-25, per-string-value guard).
+     * `"string"` = one JSON string value passed DRAFT_RUNAWAY_MAX_STRING_CHARS
+     * (the per-value runaway class) · `"chars"` = the total nodes-phase volume
+     * gate (the cardinality class) · `"stall"` · `"time"`. The count alone
+     * cannot distinguish these, and the distinction IS the diagnosis.
+     * Typed as `readonly string[]` rather than the adapter's `DraftRunawayTrigger`
+     * union: this is a cross-provider result bag, and narrowing it here would
+     * make the shared type depend on one provider's trigger set.
+     */
+    runaway_abort_triggers?: readonly string[];
     time_to_edges_ms?: number | null;
 
     // Safe diagnostics

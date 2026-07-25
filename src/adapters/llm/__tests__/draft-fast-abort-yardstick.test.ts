@@ -534,6 +534,56 @@ describe('DRIFT PIN — the corpus values are DERIVED everywhere, mirrored nowhe
   });
 });
 
+// ---------------------------------------------------------------------------
+describe('⭐ THE PROSE NUMERALS ARE PINNED (2026-07-25) — a comment is a mirror too', () => {
+  // THE HOLE THIS CLOSES. The drift scanner above STRIPS COMMENTS (by design —
+  // it hunts executable references), so every hand-typed numeral in prose is
+  // UNGUARDED BY CONSTRUCTION. The load-bearing one is `DRAFT_RUNAWAY_MIN_RETRY_MS`
+  // — "Evaluates to 54,789ms today" — which a maintainer reads INSTEAD of doing
+  // the arithmetic, and which silently rots the moment the floor it derives from
+  // moves. The floor moved twice in one night (2,700 -> 3,581, via a corpus max
+  // that moved 2,271 -> 2,387).
+  //
+  // Rather than delete the numbers (they are genuinely useful in the argument),
+  // DERIVE them and assert the prose still says what the code computes. If a
+  // constant moves and the prose does not follow, this fails and names the file.
+  const NUMERALS: ReadonlyArray<{ file: string; written: string; derive: () => string }> = [
+    {
+      file: 'src/adapters/llm/draft-budget.ts',
+      written: '54,789ms',
+      derive: () => `${DRAFT_RUNAWAY_MIN_RETRY_MS.toLocaleString('en-US')}ms`,
+    },
+    {
+      file: 'src/adapters/llm/draft-budget.ts',
+      written: '3,581',
+      derive: () => viableRunawayRetryFloorTokens().toLocaleString('en-US'),
+    },
+    {
+      file: 'src/config/timeouts.ts',
+      written: '3,581',
+      derive: () => viableRunawayRetryFloorTokens().toLocaleString('en-US'),
+    },
+  ];
+
+  for (const { file, written, derive } of NUMERALS) {
+    it(`${file} prose says "${written}", and the code still computes it`, () => {
+      // 1. The derived value must equal what the prose claims.
+      expect(derive()).toBe(written.replace('ms', '') + (written.endsWith('ms') ? 'ms' : ''));
+      // 2. ANCHOR (trap-15): the numeral must actually BE in the file, or this
+      //    pin is a no-op that passes forever against nothing.
+      const src = readFileSync(join(REPO_ROOT, file), 'utf8');
+      expect(src, `${file} no longer contains the prose numeral "${written}" — either the prose was reworded (update this pin) or the pin has gone silent`).toContain(written);
+    });
+  }
+
+  it('POSITIVE CONTROL — the pin can SEE a numeral that does not match', () => {
+    // Trap #13. A pin that has never failed on a wrong value proves nothing.
+    const src = readFileSync(join(REPO_ROOT, 'src/adapters/llm/draft-budget.ts'), 'utf8');
+    expect(src).not.toContain('54,790ms');
+    expect(`${(DRAFT_RUNAWAY_MIN_RETRY_MS + 1).toLocaleString('en-US')}ms`).not.toBe('54,789ms');
+  });
+});
+
 /** Strip comments so the scan matches EXECUTABLE references only. */
 function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
