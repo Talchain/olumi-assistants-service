@@ -251,12 +251,24 @@ function pathVariants(path: string): string[] {
   return [path, path.replace(/\[\]/g, "")];
 }
 
+/**
+ * v2 entry shape. `wire` is the machine-checked serialisation claim; it is
+ * enforced against a code-derived client surface by
+ * tests/contract/field-coverage-allowlist-wire-claims.test.ts, which is also
+ * where the v1 prose-drift defect (`trace.repair_summary`) is documented.
+ * This file only cares that each entry carries a justification.
+ */
+interface AllowlistEntry {
+  readonly wire: "serialized" | "internal";
+  readonly why: string;
+}
+
 interface Allowlist {
   audited_fields: ReadonlyArray<string>;
-  diagnostic_allowed: Readonly<Record<string, string>>;
-  machine_routing_allowed: Readonly<Record<string, string>>;
-  structured_pointer_allowed: Readonly<Record<string, string>>;
-  currently_unrendered_but_intentional: Readonly<Record<string, string>>;
+  diagnostic_allowed: Readonly<Record<string, AllowlistEntry>>;
+  machine_routing_allowed: Readonly<Record<string, AllowlistEntry>>;
+  structured_pointer_allowed: Readonly<Record<string, AllowlistEntry>>;
+  currently_unrendered_but_intentional: Readonly<Record<string, AllowlistEntry>>;
 }
 
 const typedAllowlist = allowlist as unknown as Allowlist;
@@ -281,18 +293,22 @@ describe("field-coverage audit (v1)", () => {
 
   it("allowlist classification categories are object maps with non-empty justifications and no wildcard paths", () => {
     for (const category of CLASSIFIED_CATEGORIES) {
-      const entries = typedAllowlist[category] as Readonly<Record<string, string>>;
+      const entries = typedAllowlist[category] as Readonly<Record<string, AllowlistEntry>>;
       expect(
         entries !== null && typeof entries === "object" && !Array.isArray(entries),
-        `category ${category} must be an object map (path → justification), not an array`,
+        `category ${category} must be an object map (path → entry), not an array`,
       ).toBe(true);
-      for (const [path, justification] of Object.entries(entries)) {
+      for (const [path, entry] of Object.entries(entries)) {
         expect(
           path.includes("*"),
           `wildcard path '${path}' in ${category} — entries must be specific paths, not wildcards`,
         ).toBe(false);
         expect(
-          typeof justification === "string" && justification.trim().length > 0,
+          entry !== null && typeof entry === "object" && !Array.isArray(entry),
+          `path '${path}' in ${category} must be an object { wire, why } — v1's bare-string form could not be machine-checked`,
+        ).toBe(true);
+        expect(
+          typeof entry.why === "string" && entry.why.trim().length > 0,
           `path '${path}' in ${category} has no justification — every entry must explain why the field is intentionally not consumed by UI`,
         ).toBe(true);
       }
