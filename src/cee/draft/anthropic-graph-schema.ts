@@ -465,6 +465,85 @@ for (const key of DEFERRED_AUX_KEYS) {
   }
 }
 
+// ── RUNAWAY-PRONE NODE-DATA KEYS (v13 — 2026-07-25) ──────────────────────
+// `data.display_value` is the field the draft runaway actually lives in.
+//
+// Re-probed at the wire against api.anthropic.com with the SERVED prompt
+// (draft_graph v195, 59,293 chars), THIS builder's output, claude-sonnet-4-6,
+// temperature 0, thinking disabled, max_tokens 8550 — the live request minus
+// CEE. The control arm reproduced the live failure (5/16 usable) and every
+// characterised failure had the same anatomy:
+//
+//   …"factor_type":"cost","display_value":"No additional headcount hired yet
+//   (baseline)  ␣␣␣… (8,113 more U+200B ZERO WIDTH SPACE) …
+//
+// A character-repetition loop INSIDE the string value of `display_value`.
+// 10 of 10 characterised failures ended in this field (the repeated payload
+// varies — U+200B runs, "← display only.  ", "No additional headcount hired in
+// place currently." — the field never does), always in the SIXTH node, the
+// first `factor`. The entire token budget is spent inside one string of one
+// field. That is why time_to_edges was NULL 17/17, why the schema error was
+// always `edges: Required`, why completion_tokens == cap EXACTLY at 8,550 /
+// 12,000 / 16,000, and why raising the ceiling rescued nothing: an
+// unterminated string has no length it is trying to reach.
+//
+// Measured effect of removing it (four arms, same brief/prompt/model, run
+// concurrently so provider drift hits all arms equally):
+//   control (today's live request)                       5/16 = 31%
+//   temperature 0 -> 0.5                                  3/8  = 38%
+//   two-call nodes-then-edges decomposition               5/8  = 63%
+//   THIS CHANGE                                         16/16 = 100%   p ~ 1.4e-5
+//   CONTROL: drop a DIFFERENT unconstrained free-text
+//            string (data.encoding_map)                   2/8  = 25%
+// The encoding_map arm is the load-bearing control: if the benefit were "a
+// smaller grammar" or "one less optional param" it would have moved too. It did
+// not. The effect is specific to the field the loop happens in.
+//
+// SAFE because the field is display-only and already has a DETERMINISTIC
+// replacement. The served prompt says so itself (v195 line 392: "display_value
+// is display-only; never affects inference or intervention logic"), and
+// `formatGraphForContext` (orchestrator-v5/format/format-graph-for-context.ts)
+// already prefers an existing `display_value` and SYNTHESISES one via
+// `synthesiseDisplayValue` (cee/factor-extraction/display-value.ts, capped at
+// 50 chars) when absent. This routes the field from "free prose the model
+// writes, bounded by nothing" to "a deterministic formatter, bounded at 50
+// characters" — the better answer independent of the runaway.
+//
+// The grammar CANNOT bound the string instead: `maxLength` is accepted by the
+// structured-outputs compiler but not enforced at generation time, and is
+// stripped by enforceAnthropicSchemaCompliance; `maxItems` 400s outright
+// (re-probed at the wire 2026-07-25, still rejected). Removal is the only
+// grammar-level lever that exists.
+//
+// SCOPE — do not over-read this. `label`, `uncertainty_drivers[]`, `unit` and
+// `encoding_map` remain unconstrained strings by construction. 16/16 at the
+// wire is evidence the loop did not migrate; it is not proof that it cannot.
+//
+// Anchor assertion (trap-15: a tool that cannot fail is theatre). The builder
+// removes keys BY NAME from a NESTED object; a rename would make it a silent
+// no-op that leaks the field straight back into the grammar.
+export const RUNAWAY_PRONE_NODE_DATA_KEYS = ['display_value'] as const;
+
+/** The node-`data` object schema (the non-null branch of its anyOf). */
+function nodeDataObjectOf(schema: {
+  properties: Record<string, unknown>;
+}): { properties: Record<string, unknown>; required?: string[] } | undefined {
+  const nodes = schema.properties.nodes as { items?: { properties?: Record<string, unknown> } } | undefined;
+  const data = nodes?.items?.properties?.data as { anyOf?: unknown[] } | undefined;
+  return data?.anyOf?.[0] as { properties: Record<string, unknown>; required?: string[] } | undefined;
+}
+
+for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
+  if (!(key in (nodeDataObjectOf(ANTHROPIC_DRAFT_GRAPH_SCHEMA)?.properties ?? {}))) {
+
+    console.error(
+      `[anthropic-graph-schema] ANCHOR MISSING: '${key}' is not a property of ` +
+      `ANTHROPIC_DRAFT_GRAPH_SCHEMA's node.data object. buildDraftGraphSchema() would ` +
+      `silently return an unchanged grammar (${key} would leak back in). Update the v13 builder.`
+    );
+  }
+}
+
 /**
  * The draft-graph JSON schema actually sent to Anthropic.
  *
@@ -477,6 +556,11 @@ for (const key of DEFERRED_AUX_KEYS) {
  * the bounded post-draft coaching pass. All three deferred keys are dropped
  * from the sent grammar's `properties` and `required` here; the base object is
  * never mutated (so the guard counts + anchors keep their single source).
+ * v13 (2026-07-25): ALSO drops the runaway-prone node-`data` free-text keys —
+ * see RUNAWAY_PRONE_NODE_DATA_KEYS above. Because the node-`data` object
+ * carries `additionalProperties: false`, removing the key makes it
+ * UNEMITTABLE, not merely unrequired — which is the whole point: an optional
+ * field the model still chooses to write can still loop inside it.
  */
 export function buildDraftGraphSchema(): DraftGraphSchemaObject {
   const deferred = new Set<string>(DEFERRED_AUX_KEYS);
@@ -486,11 +570,59 @@ export function buildDraftGraphSchema(): DraftGraphSchemaObject {
     ),
   );
 
-  return {
+  const built: DraftGraphSchemaObject = {
     ...ANTHROPIC_DRAFT_GRAPH_SCHEMA,
     properties,
     required: ANTHROPIC_DRAFT_GRAPH_SCHEMA.required.filter((k) => !deferred.has(k)),
   };
+
+  // v13 — the node-data cut. Deep-clone ONLY the path being edited, so the base
+  // object is never mutated (it stays the single source for the guard counts,
+  // the anchors, and what CEE tolerates at ingress).
+  const dropped = new Set<string>(RUNAWAY_PRONE_NODE_DATA_KEYS);
+  const nodes = built.properties.nodes as Record<string, unknown>;
+  const nodeItems = (nodes as { items: Record<string, unknown> }).items;
+  const itemProps = nodeItems.properties as Record<string, unknown>;
+  const dataProp = itemProps.data as { anyOf: unknown[] };
+  const dataObject = dataProp.anyOf[0] as { properties: Record<string, unknown>; required?: string[] };
+
+  const clonedDataObject = {
+    ...dataObject,
+    properties: Object.fromEntries(
+      Object.entries(dataObject.properties).filter(([k]) => !dropped.has(k)),
+    ),
+    ...(dataObject.required
+      ? { required: dataObject.required.filter((k) => !dropped.has(k)) }
+      : {}),
+  };
+  built.properties = {
+    ...built.properties,
+    nodes: {
+      ...nodes,
+      items: {
+        ...nodeItems,
+        properties: {
+          ...itemProps,
+          data: { ...dataProp, anyOf: [clonedDataObject, ...dataProp.anyOf.slice(1)] },
+        },
+      },
+    },
+  };
+
+  // POST-CONDITION (trap-15: verify the write LANDED, never assume the edit ran).
+  // Assert against the BUILT object, not the intent.
+  const builtData = nodeDataObjectOf(built);
+  for (const key of dropped) {
+    if (builtData && key in builtData.properties) {
+
+      console.error(
+        `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
+        `draft grammar after buildDraftGraphSchema(). The runaway-prone field cut did not land.`
+      );
+    }
+  }
+
+  return built;
 }
 
 // ── Union-count guardrail ──────────────────────────────────────────────
