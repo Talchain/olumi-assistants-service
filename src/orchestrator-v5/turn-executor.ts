@@ -93,6 +93,7 @@ import {
 import type { CompoundUpdatePart } from './routing/deterministic-value-update.js';
 import {
   buildStructuralRemainderNotice,
+  buildUnmappedPartsNotice,
   decomposeEditMessage,
 } from './routing/edit-part-decomposition.js';
 import {
@@ -4378,21 +4379,37 @@ export async function runTurnExecutor(
         deterministicValueUpdate.dispatch === 'set_factor_value'
       ) {
         const editDecomposition = decomposeEditMessage(payload.message);
-        if (editDecomposition.mixedValueStructural) {
-          // The telemetry event is emitted at the STEP 3.5 APPEND site —
-          // where the disclosure verifiably lands on the receipt — never
-          // here, so the event can never claim a disclosure a downgraded
-          // turn did not carry.
-          const notice = buildStructuralRemainderNotice(editDecomposition);
-          if (notice !== null) {
-            partAccountingStructuralNotice = {
-              notice,
-              partsDetected: editDecomposition.accountableParts.length,
-              partsUncovered: editDecomposition.accountableParts.filter(
-                (p) => p.kind !== 'value',
-              ).length,
-            };
-          }
+        // The telemetry event is emitted at the STEP 3.5 APPEND site —
+        // where the disclosure verifiably lands on the receipt — never
+        // here, so the event can never claim a disclosure a downgraded
+        // turn did not carry.
+        const structuralNotice = editDecomposition.mixedValueStructural
+          ? buildStructuralRemainderNotice(editDecomposition)
+          : null;
+        // Unmapped remainder (#697 follow-up, 2026-07-25 — journey Finding #5).
+        // "set X to 30 and cap the spend at 50k" reports
+        // mixedValueStructural=false (a limit clause is not structural), so the
+        // suppressor routes the whole message HERE, the value half is served,
+        // and the cap half terminated nowhere and was never mentioned. Same
+        // silent-half-drop class as the edit lane's; same DISCLOSED-PARTIAL
+        // remedy, at the same append site.
+        const unmappedNotice = buildUnmappedPartsNotice(
+          editDecomposition.unmappedParts,
+          editDecomposition.accountableParts.length,
+        );
+        const combinedNotice = [structuralNotice, unmappedNotice]
+          .filter((n): n is string => n !== null)
+          .join(' ');
+        if (combinedNotice.length > 0) {
+          partAccountingStructuralNotice = {
+            notice: combinedNotice,
+            partsDetected:
+              editDecomposition.accountableParts.length +
+              editDecomposition.unmappedParts.length,
+            partsUncovered:
+              editDecomposition.accountableParts.filter((p) => p.kind !== 'value').length +
+              editDecomposition.unmappedParts.length,
+          };
         }
       }
 
