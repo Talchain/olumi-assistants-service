@@ -760,6 +760,13 @@ export const TelemetryEvents = {
   // completed instead of 422-blocking. Redacted: option ids + per-option
   // factor counts only — no labels, no magnitudes.
   V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
+  // T1 — a user-ratified hard constraint was APPLIED and then never evaluated
+  // to decision grade (PLoT CONSTRAINT_OUT_OF_DOMAIN /
+  // CONSTRAINT_TARGET_UNRELIABLE / withheld constraint block). The
+  // leading-option claim is withheld and the unchecked condition is disclosed.
+  // Redacted: constraint ids + producer codes only — no labels, no thresholds,
+  // no units, no user text.
+  V5RunAnalysisConstraintUnevaluated: "v5.run_analysis.constraint_unevaluated",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
   // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
   V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",

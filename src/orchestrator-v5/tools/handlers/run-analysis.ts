@@ -47,7 +47,12 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
-import { deriveWinnerConstraintInfeasibility } from '../../../orchestrator/context/constraint-feasibility.js';
+import {
+  deriveConstraintEvaluationGap,
+  deriveWinnerConstraintInfeasibility,
+  readRatifiedConstraints,
+} from '../../../orchestrator/context/constraint-feasibility.js';
+import { buildConstraintGapDisclosure } from '../../coaching/constraint-gap-disclosure.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
@@ -801,10 +806,49 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       statusOutcome.kind === 'ok' || statusOutcome.kind === 'partial' || statusOutcome.kind === 'unknown'
         ? statusOutcome.kind
         : 'ok';
+    // T1 — a user-ratified hard constraint that was APPLIED and then never
+    // evaluated to decision grade. PLoT already computes and ships this
+    // verdict (`inference_warnings` codes CONSTRAINT_OUT_OF_DOMAIN /
+    // CONSTRAINT_TARGET_UNRELIABLE, `constraints_status: 'unavailable'`, and
+    // the per-option `constraint_probabilities` it withholds); we READ it off
+    // the wire and never re-derive it. The ratified set comes from CEE's own
+    // persisted `goal_constraints` — the only record of what the user agreed
+    // to. With no ratified constraints this is byte-identical to before.
+    //
+    // Distinct from `constraint_infeasible` below: that means "the leader
+    // breaks a limit we DID check"; this means "we never checked the limit".
+    // `deriveWinnerConstraintInfeasibility` cannot cover this case — it fails
+    // OPEN when constraint probabilities are absent, which is precisely what
+    // PLoT withholds on the suppressed-unreliable path.
+    const constraintGap = deriveConstraintEvaluationGap(
+      response as Record<string, unknown>,
+      // Prefer the snapshot's own `goal_constraints` — that is the exact array
+      // this handler forwards to PLoT (see the plotPayload assembly above), so
+      // "we asked PLoT to enforce it" and "PLoT never scored it" are compared
+      // against the same bytes. Falls back to the persisted graph for snapshots
+      // that carry the constraints only there.
+      readRatifiedConstraints(
+        snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
+      ),
+    );
+    if (constraintGap.unevaluated) {
+      emit(TelemetryEvents.V5RunAnalysisConstraintUnevaluated, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        // Redacted: ids + codes only — no labels, no thresholds, no units.
+        constraint_ids: constraintGap.constraints.map((c) => c.constraint_id),
+        codes: constraintGap.codes,
+      });
+    }
+
     const headlineInput = {
       enrichment: response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
       status_kind: headlineStatusKind,
+      // T1: withhold the confident "{X} currently leads" claim while any
+      // ratified condition is unchecked. A recommendation must not exist
+      // unless every user-ratified hard constraint is decision-grade.
+      constraint_unevaluated: constraintGap.unevaluated,
       // Trust-spine board #1 (CEE half): withhold the confident "{X} currently
       // leads" headline when the leading option violates a hard constraint.
       // Gate default OFF → always false → byte-identical headline path.
@@ -863,7 +907,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       scaffoldOutcome.scaffolded.length > 0
         ? buildScaffoldDisclosureForPartition(scaffoldPresence)
         : '';
-    const summary = `${headline ?? template}${scaffoldDisclosure}`;
+    // T1 disclosure: names exactly which ratified condition was not evaluated
+    // and gives a deterministic repair step. Appended after the scaffold
+    // disclosure so the unchecked-condition statement is the LAST thing in the
+    // primary message — the headline has already been withheld above, so the
+    // message can no longer lead with an option while this is present.
+    const constraintGapDisclosure = constraintGap.unevaluated
+      ? buildConstraintGapDisclosure(constraintGap.constraints)
+      : '';
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
