@@ -270,6 +270,21 @@ export interface AnalysisResultHeadlineInput {
    * grammar.
    */
   readonly constraint_infeasible?: boolean;
+  /**
+   * T1. True when a user-ratified hard constraint was applied but never
+   * evaluated to decision grade (computed by the run_analysis handler via
+   * `deriveConstraintEvaluationGap` in constraint-feasibility.ts, reading
+   * PLoT's own `inference_warnings` codes / `constraints_status` / per-option
+   * `constraint_probabilities`). When true the headline WITHHOLDS the
+   * confident "{X} currently leads" claim — a recommendation must not exist
+   * while one of the user's stated conditions is unchecked.
+   *
+   * DISTINCT FROM {@link constraint_infeasible}: that one means "the leader
+   * breaks a limit we DID check"; this one means "we never checked the limit
+   * at all". Different claims, different copy, different telemetry reason.
+   * Omitted / false ⇒ no change (byte-identical).
+   */
+  readonly constraint_unevaluated?: boolean;
 }
 
 /**
@@ -318,6 +333,12 @@ export type HeadlineFallbackReason =
   // constraint, so the confident-lead headline is withheld (see
   // AnalysisResultHeadlineInput.constraint_infeasible).
   | 'constraint_infeasible'
+  // T1: a user-ratified hard constraint was applied but never evaluated to
+  // decision grade, so the confident-lead headline is withheld (see
+  // AnalysisResultHeadlineInput.constraint_unevaluated). Deliberately separate
+  // from `constraint_infeasible` — "we never checked your limit" and "the
+  // leader breaks your limit" must never be conflated in telemetry.
+  | 'constraint_unevaluated'
   | 'unknown';
 
 export interface HeadlineDescriptor {
@@ -403,6 +424,30 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       descriptor: {
         case: null,
         reason: 'constraint_infeasible',
+        has_leading_option: true,
+        has_clean_label: true,
+        has_driver: false,
+        has_fragility: false,
+        margin_bucket: null,
+      },
+    };
+  }
+
+  // T1: a user-ratified hard constraint was APPLIED and then never evaluated
+  // to decision grade (PLoT CONSTRAINT_OUT_OF_DOMAIN /
+  // CONSTRAINT_TARGET_UNRELIABLE / withheld constraint block). A recommendation
+  // must not exist while a stated condition is unchecked, so the confident
+  // "{X} currently leads" claim is WITHHELD here for the same reason as
+  // `constraint_infeasible` — but it is a DIFFERENT claim and carries its own
+  // reason code so telemetry can never conflate "the leader breaks your limit"
+  // with "we never checked your limit". The copy naming the unchecked
+  // condition and its repair step is composed by the run_analysis handler.
+  if (input.constraint_unevaluated === true) {
+    return {
+      text: null,
+      descriptor: {
+        case: null,
+        reason: 'constraint_unevaluated',
         has_leading_option: true,
         has_clean_label: true,
         has_driver: false,

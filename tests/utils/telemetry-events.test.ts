@@ -637,6 +637,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5RoutingForcedPillOutcome: "v5.routing.forced_pill_outcome",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
+        V5RunAnalysisConstraintUnevaluated: "v5.run_analysis.constraint_unevaluated",
         V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
         V5RunAnalysisTimings: "v5.run_analysis.timings",
         V5TurnStageTimings: "v5.turn_executor.stage_timings",
@@ -1422,6 +1423,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // summary (diagnostic-only, no Datadog metric; redacted option ids +
         // factor counts). Live emit site: run-analysis.ts step 2.55.
         TelemetryEvents.V5RunAnalysisOptionsScaffolded,
+        // T1 — a user-ratified hard constraint was applied and never evaluated
+        // to decision grade (diagnostic-only, no Datadog metric; redacted
+        // constraint ids + producer codes, no labels/thresholds/units).
+        // Live emit site: run-analysis.ts, alongside the headline input.
+        TelemetryEvents.V5RunAnalysisConstraintUnevaluated,
         // Track S 0.13c-4 — persist-site intercept repair summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5GraphPersistInterceptRepair,
@@ -2048,6 +2054,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.routing_bounded_fallback",
         "v5.run_analysis.intercept_guard",
         "v5.run_analysis.options_scaffolded",
+        "v5.run_analysis.constraint_unevaluated",
         "v5.graph_persist.intercept_repair",
         "v5.run_analysis.timings",
         "v5.turn_executor.stage_timings",

@@ -1260,3 +1260,131 @@ describe('run_analysis headline — no verbatim wire-block duplication (Area D)'
     expect(JSON.stringify(stripped)).not.toContain(headline);
   });
 });
+
+// ---------------------------------------------------------------------------
+// T1 — a hard constraint can be "applied", rejected as meaningless by the
+// engine, and still omitted from the recommendation.
+//
+// Reported 1/1 on live staging: the user asks for total three-year cost below
+// £2,500; CEE replies "Added constraint: …"; PLoT returns
+// CONSTRAINT_OUT_OF_DOMAIN and withholds goal-fit under
+// CONSTRAINT_TARGET_UNRELIABLE; CEE nevertheless leads with "MacBook Pro
+// currently leads by 18 percentage points" and discloses nothing in the
+// primary message.
+//
+// Required behaviour: while any user-ratified hard constraint is not
+// decision-grade, (a) no leading-option language, (b) state which condition
+// was not evaluated, (c) offer a deterministic repair step.
+// ---------------------------------------------------------------------------
+
+describe('run_analysis handler — T1 unevaluated hard constraint', () => {
+  const RATIFIED_GRAPH = {
+    nodes: [{ id: 'g', kind: 'goal', label: 'Goal' }],
+    edges: [],
+    goal_constraints: [
+      {
+        constraint_id: 'constraint_out_total_cost_max',
+        node_id: 'out_total_cost',
+        operator: '<=',
+        value: 2500,
+        label: 'Total three-year cost',
+        unit: '£',
+        provenance: 'explicit',
+      },
+    ],
+  };
+
+  function suppressedEnvelope(extra?: Record<string, unknown>) {
+    return {
+      ...(JSON.parse(JSON.stringify(happyFixture)) as Record<string, unknown>),
+      constraints_status: 'unavailable',
+      inference_warnings: [
+        {
+          code: 'CONSTRAINT_OUT_OF_DOMAIN',
+          message: 'Constraint threshold 2500 is outside the target domain [0,1].',
+          severity: 'warning',
+        },
+      ],
+      ...extra,
+    };
+  }
+
+  it('POSITIVE CONTROL: the same fixture with NO ratified constraint still leads with the option — so the absence assertions below can observe a presence', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(suppressedEnvelope() as unknown as V2RunResponseEnvelope),
+      // Default snapshot graph carries NO goal_constraints.
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    // The engine's constraint warning alone must NOT change the message when
+    // the user ratified nothing — this is the byte-parity guarantee, and it
+    // is what proves the assertions in the next test are not vacuous.
+    expect(outcome.assistant_text).toContain('currently leads');
+    expect(outcome.assistant_text).not.toContain('was not checked');
+  });
+
+  it('(a) withholds leading-option language, (b) names the unevaluated condition, (c) offers a repair step', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(suppressedEnvelope() as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(makeScenarioSnapshot({ graph: RATIFIED_GRAPH, rawPersistedGraph: RATIFIED_GRAPH })),
+    });
+    const outcome = await handler(makeInvocation());
+
+    // (a) No recommendation may exist while a stated condition is unchecked.
+    expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).not.toContain('percentage points');
+
+    // (b) Exactly which user condition was not evaluated.
+    expect(outcome.assistant_text).toContain('was not checked');
+    expect(outcome.assistant_text).toContain('Total three-year cost');
+
+    // (c) A deterministic repair step.
+    expect(outcome.assistant_text).toContain('run the analysis again');
+
+    // The fact's summary is the same string the user sees.
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+    expect(fact.result.summary).toBe(outcome.assistant_text);
+  });
+
+  it('S3 — a ratified constraint that PLoT simply never scored (no warning code at all) is still disclosed', async () => {
+    // No inference_warnings, no constraints_status: the ONLY evidence is that
+    // the ratified constraint id appears in no option's constraint_probabilities.
+    // "Applied, then silently unscored" is the same broken promise to the user.
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(makeScenarioSnapshot({ graph: RATIFIED_GRAPH, rawPersistedGraph: RATIFIED_GRAPH })),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).toContain('Total three-year cost');
+  });
+
+  it('PRODUCTION LOCATION: constraints ratified on the snapshot\'s own goal_constraints (the array forwarded to PLoT) are read', async () => {
+    // build-turn-context lifts graph.goal_constraints to the snapshot top
+    // level, and run-analysis forwards THAT array to PLoT. Reading it here
+    // compares "what we asked PLoT to enforce" against "what PLoT scored"
+    // using the same bytes. A fixture that only populated the graph would
+    // pass while production silently read nothing.
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(suppressedEnvelope() as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(
+        makeScenarioSnapshot({ goal_constraints: RATIFIED_GRAPH.goal_constraints }),
+      ),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).not.toContain('currently leads');
+    expect(outcome.assistant_text).toContain('Total three-year cost');
+  });
+
+  it('negative: no ratified constraints ⇒ byte-identical to the pre-T1 message', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toBe(
+      'Option A currently leads by 24 percentage points because Price is the strongest driver.',
+    );
+  });
+});
