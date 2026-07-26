@@ -242,6 +242,9 @@ import {
   selectRunAnalysisFact,
   type FreshnessDerivation,
 } from './context/freshness.js';
+// T1 claim safety — READ the verdict the run_analysis handler stamped on the
+// fact. This file never derives it (CLAUDE.md trap #12).
+import { readMayNameLeadingOption } from '../orchestrator/context/constraint-feasibility.js';
 import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
@@ -349,6 +352,22 @@ import { assessAnalysisReadiness } from './tools/handlers/analysis-ready-core.js
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
+  /**
+   * T1 claim safety — may this turn NAME a leading option?
+   *
+   * `false` means the constraint verdict withheld the claim, so any copy on
+   * `response` that names or presumes a leader contradicts the turn's own
+   * confirmation. Threaded to `sendFinalised200` → `EgressSanitiseOpts` so the
+   * layer-3 guard can measure the residue (observe-only; see
+   * `compose/leading-option-egress-guard.ts`).
+   *
+   * READ from the stamp the run_analysis handler persisted on the fact, never
+   * re-derived (CLAUDE.md trap #12). Optional HERE and defaulted to `true` at
+   * the route: a turn that produced no run_analysis fact withheld nothing, and
+   * `true` is the honest statement of that. The REQUIRED-ness that matters is
+   * on `EgressSanitiseOpts`, where forgetting it disarms the guard.
+   */
+  mayNameLeadingOption?: boolean;
   /**
    * V5 finaliser contract: pre-computed structural readiness from the
    * per-turn graph (`graphStateForTurn` parsed via GraphV3 +
@@ -1032,6 +1051,19 @@ export async function runTurnExecutor(
   // `freshness` uses. Outer-let so `finalizeRun` can surface it on the run
   // result; stays undefined until the post-dispatch assembly point.
   let canonicalStateForRun: CanonicalAnalysisState | undefined;
+  // T1 claim safety — the turn's own answer to "may a leading option be named",
+  // surfaced on the run result so route-v2 can arm the layer-3 egress guard.
+  //
+  // Outer-let for the same reason as `canonicalStateForRun` above:
+  // `handlerFactsForCommit` lives in the execute branch's inner scope and is
+  // not visible from `finalizeRun`. Set ONCE, at the post-dispatch assembly
+  // point, from the fact array compose is about to build blocks from.
+  //
+  // Defaults to `true`: a turn that ran no analysis withheld no
+  // leading-option claim, so there is no withheld claim for the guard to
+  // contradict. This is NOT the fail-open case — where a run_analysis fact IS
+  // in play and carries no stamp, `readMayNameLeadingOption` fails CLOSED.
+  let mayNameLeadingOptionForRun = true;
   // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): the
   // canonical verdict assembled pre-dispatch for the flag-gated coaching prompt
   // pack. Reused in the coaching compose branches for the deterministic
@@ -7457,6 +7489,25 @@ export async function runTurnExecutor(
         hashForPostHandlerFreshness,
         currentGraphOptionIdsForPostHandler,
       );
+      // T1 claim safety — READ the permission off the SAME fact array and via
+      // the SAME canonical selector the freshness derivation just used, so the
+      // permission and the prose it governs describe the same analysis.
+      // `selectRunAnalysisFact` is what compose's lifecycle resolution uses
+      // too. No fact ⇒ leave the `true` default (nothing was withheld);
+      // a fact with no stamp ⇒ `readMayNameLeadingOption` returns false.
+      {
+        const selectedForClaimSafety = selectRunAnalysisFact([
+          ...handlerFactsForCommit,
+          ...context.prior_facts,
+        ]);
+        if (selectedForClaimSafety !== null) {
+          const f = selectedForClaimSafety.fact;
+          mayNameLeadingOptionForRun =
+            f.fact_type === 'run_analysis'
+              ? readMayNameLeadingOption(f.result.enrichment)
+              : true;
+        }
+      }
       emitFreshnessTelemetry(
         freshness,
         {
@@ -9438,6 +9489,10 @@ export async function runTurnExecutor(
     const answerKind: AnswerKind = isFunctionalAnswer ? 'functional' : 'substantive';
     return {
       response,
+      // T1 claim safety — set at the post-dispatch assembly point from the
+      // stamp the run_analysis handler persisted on the fact. Never derived
+      // here or there (CLAUDE.md trap #12); see the declaration above.
+      mayNameLeadingOption: mayNameLeadingOptionForRun,
       analysisReady: analysisReadyForTurn,
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),

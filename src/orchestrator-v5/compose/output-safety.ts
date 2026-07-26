@@ -58,6 +58,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { finalizeChips } from './chip-finalizer.js';
 import { guardLoopingChipsAtEgress } from './looping-chip-guard.js';
+import { guardLeadingOptionClaimsAtEgress } from './leading-option-egress-guard.js';
 
 // ----------------------------------------------------------------------------
 // Per-string scrubber — moved to neutral location so V4 + CEE pipeline can
@@ -102,6 +103,24 @@ export interface EgressSanitiseOpts {
    * user message"; omission is not an option the type checker allows.
    */
   readonly userMessage: string | null;
+  /**
+   * T1 claim safety, LAYER 3 — may THIS turn name a leading option?
+   *
+   * `false` means the constraint verdict withheld the claim, so any copy on the
+   * envelope naming or presuming a leader contradicts the turn's own
+   * confirmation. The guard reports that (observe-only today) — see
+   * `leading-option-egress-guard.ts`.
+   *
+   * REQUIRED, same rationale as `exitPath` and `userMessage` above: an optional
+   * field is one a future caller silently forgets, and a claim-safety guard a
+   * caller can forget to arm is theatre. Turns with no analysis pass `true` —
+   * an explicit, honest "nothing was withheld on this turn"; omission is not an
+   * option the type checker allows.
+   *
+   * The value is READ from the verdict the run_analysis handler stamped on the
+   * fact; it is never re-derived here (CLAUDE.md trap #12).
+   */
+  readonly mayNameLeadingOption: boolean;
 }
 
 /**
@@ -172,6 +191,31 @@ export function sanitiseOlumiResponseForEgress(
     insights: response.insights.map((i) => sanitiseInsight(i, collect)),
     ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
   };
+
+  // T1 claim safety, LAYER 3 — the loud egress guard.
+  //
+  // ORDERING IS LOAD-BEARING. This runs at the egress chokepoint, which is
+  // strictly AFTER `compose/terminology-rewrite.ts` (applied to every Phase-3
+  // prose field at `phase3-blocks.ts` → `validateProseAndSchemaOrDrop`). That
+  // rewrite turns "recommendation" into "leading option" and "the winner" into
+  // "the leading option" — OUR OWN SAFETY PASS MANUFACTURES THE BANNED
+  // LANGUAGE. A scan placed upstream of it would read clean prose and pass a
+  // response that ships "leading option" to the user.
+  //
+  // If you reorder this pipeline: the guard must stay after every pass that can
+  // edit user-facing prose. Moving it earlier silently reopens the hole, and no
+  // test upstream of the rewrite can see it. See the guard module's docstring.
+  //
+  // OBSERVE-ONLY (`enforce: false`): it reports and returns the response
+  // unchanged. It never throws — a 500 is worse than the prose it is watching
+  // for. Sits below the sanitised envelope's construction so it scans the exact
+  // object that is about to be serialized.
+  guardLeadingOptionClaimsAtEgress(sanitised, {
+    requestId: opts.requestId,
+    exitPath: opts.exitPath,
+    mayNameLeadingOption: opts.mayNameLeadingOption,
+    enforce: false,
+  });
 
   for (const m of allMatches) {
     log.warn(

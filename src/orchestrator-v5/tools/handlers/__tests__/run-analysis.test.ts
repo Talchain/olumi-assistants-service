@@ -22,6 +22,11 @@ import * as talchainSchemas from '@talchain/schemas/orchestrator';
 import type { PLoTClient, PLoTClientRunOpts } from '../../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
+// T1 claim safety — the stamp's owning module (single source of the key name).
+import {
+  CEE_CLAIM_SAFETY_ENRICHMENT_KEY,
+  readMayNameLeadingOption,
+} from '../../../../orchestrator/context/constraint-feasibility.js';
 
 import type { HandlerInvocation } from '../../registry.js';
 import {
@@ -176,7 +181,38 @@ describe('run_analysis handler — happy path', () => {
     expect(fact.result.win_probabilities).toEqual({ 'Option A': 0.62, 'Option B': 0.38 });
   });
 
-  it('fact.result.enrichment equals the validated V2RunResponse byte-for-byte (Resolution 2)', async () => {
+  /**
+   * RE-POINTED 2026-07-26 (T1 claim safety, layer 2) — read this before
+   * loosening it further.
+   *
+   * The invariant WAS "fact.result.enrichment equals the validated
+   * V2RunResponse byte-for-byte". It is now: **PLoT's response verbatim, PLUS
+   * EXACTLY ONE CEE-owned `__cee_`-namespaced key, and nothing else.**
+   *
+   * That is a TIGHTER statement than the old one, not a weaker one: the old
+   * test permitted no exception and therefore said nothing about what a future
+   * exception would be allowed to look like. This one pins the exception to a
+   * single, namespaced, enumerable key — so a second CEE key, an un-namespaced
+   * key, or any edit to a PLoT field all still fail here.
+   *
+   * WHY THE EXCEPTION EXISTS. "May a leading option be named" is a fact about
+   * the analysis and must be readable on every path that rebuilds prose from
+   * the fact — including the prior-fact lifecycle rebuild, which runs no
+   * handler and so has no `HandlerOutcome` to thread. Its correct home is a
+   * first-class `constraint_verdict` field on `RunAnalysisResultSchema`, which
+   * is `.strict()` in the vendored `@talchain/schemas`, so adding it needs a
+   * package release blocked behind V5-CI-01. `enrichment` is `z.record` and
+   * passes strict unchanged. See `CEE_CLAIM_SAFETY_ENRICHMENT_KEY`.
+   *
+   * The pass-through itself is UNCHANGED: the handler still builds and
+   * schema-validates `enrichment: response as Record<string, unknown>` verbatim
+   * (which `scripts/validate-handler-ownership.sh` §6 still enforces), and the
+   * stamp is applied afterwards as a separate, named step.
+   *
+   * WHEN V5-CI-01 UNBLOCKS: move the verdict to the fact field, delete the
+   * stamp, and restore the plain byte-for-byte assertion below.
+   */
+  it('fact.result.enrichment is the validated V2RunResponse verbatim PLUS exactly one CEE key', async () => {
     const responseSnapshot = JSON.parse(JSON.stringify(happyFixture)) as V2RunResponseEnvelope;
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(responseSnapshot),
@@ -187,10 +223,34 @@ describe('run_analysis handler — happy path', () => {
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
 
-    // Deep equality — no projection, no stripping, no field reordering that
-    // would change JSON.stringify byte output.
-    expect(fact.result.enrichment).toEqual(responseSnapshot);
-    expect(JSON.stringify(fact.result.enrichment)).toBe(JSON.stringify(responseSnapshot));
+    const enrichment = fact.result.enrichment as Record<string, unknown>;
+
+    // 1. EXACTLY ONE added key, and it is CEE-namespaced. A second key, or one
+    //    without the `__cee_` prefix, fails here.
+    const added = Object.keys(enrichment).filter(
+      (k) => !Object.prototype.hasOwnProperty.call(responseSnapshot, k),
+    );
+    expect(added).toEqual([CEE_CLAIM_SAFETY_ENRICHMENT_KEY]);
+    expect(added.every((k) => k.startsWith('__cee_'))).toBe(true);
+
+    // 2. Every PLoT field is untouched — no projection, no stripping, and no
+    //    field reordering that would change JSON.stringify byte output. This is
+    //    the original assertion, applied to the pass-through half.
+    const passthrough = { ...enrichment };
+    delete passthrough[CEE_CLAIM_SAFETY_ENRICHMENT_KEY];
+    expect(passthrough).toEqual(responseSnapshot);
+    expect(JSON.stringify(passthrough)).toBe(JSON.stringify(responseSnapshot));
+
+    // 3. The stamp carries the verdict, not a placeholder. This fixture ratifies
+    //    no hard constraint, so the verdict is `not_applicable` and the leading
+    //    option MAY be named — the positive control for the whole mechanism.
+    //    Without it a stamp of `{}` would satisfy (1) and (2) and the read side
+    //    would fail closed on every healthy run.
+    expect(enrichment[CEE_CLAIM_SAFETY_ENRICHMENT_KEY]).toEqual({
+      may_name_leading_option: true,
+      constraint_verdict_state: 'not_applicable',
+    });
+    expect(readMayNameLeadingOption(enrichment)).toBe(true);
   });
 
   it('fact carries fact_type=run_analysis, fact_version=1, noop=false', async () => {

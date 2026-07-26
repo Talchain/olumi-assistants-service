@@ -69,6 +69,17 @@ function dominantFact(overrides: { leadingOptionId?: string | null; noop?: boole
       enrichment: {
         graph: GRAPH,
         confidence_tier: 'strong',
+        // T1 claim safety — the fixture must DECLARE its constraint verdict.
+        // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without
+        // it, dropping every leader-presuming block. `evaluated_feasible` is the branch this
+        // fixture must reach: the ui_directive ladder's row-2 gate reads the LENS
+        // block's SURVIVAL, and the `strengthen` lens block is exactly what a
+        // withheld verdict drops — so an unstamped fixture silently exercises the
+        // row-3 `highlight` fallback instead of the row-2 `focus` it asserts.
+        __cee_claim_safety: {
+          may_name_leading_option: true,
+          constraint_verdict_state: 'evaluated_feasible',
+        },
         factor_sensitivity: [
           { factor_id: 'fac_a', influence_score: 0.8, influence_rank: 1, confidence: 0.9 },
           { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 },
@@ -93,6 +104,17 @@ function healthyFact(): HandlerFact {
       enrichment: {
         graph: GRAPH,
         confidence_tier: 'strong',
+        // T1 claim safety — the fixture must DECLARE its constraint verdict.
+        // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without
+        // it, dropping every leader-presuming block. `evaluated_feasible` is the branch this
+        // fixture must reach: the ui_directive ladder's row-2 gate reads the LENS
+        // block's SURVIVAL, and the `strengthen` lens block is exactly what a
+        // withheld verdict drops — so an unstamped fixture silently exercises the
+        // row-3 `highlight` fallback instead of the row-2 `focus` it asserts.
+        __cee_claim_safety: {
+          may_name_leading_option: true,
+          constraint_verdict_state: 'evaluated_feasible',
+        },
         // Three balanced factors — no single one exceeds the 50% dominance
         // share, so NO lens fires (the genuine no-lens case).
         factor_sensitivity: [

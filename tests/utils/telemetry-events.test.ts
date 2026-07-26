@@ -606,6 +606,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphFalseSuccessRewritten: "v5.edit_graph.false_success_rewritten",
         V5InterceptedChipClarify: "v5.edit_graph.intercepted_chip_clarify",
         V5InterceptedVagueEdit: "v5.edit_graph.intercepted_vague_edit",
+        // T1 layer 3 — a turn that WITHHELD the leading-option claim shipped copy
+        // asserting one anyway, caught at the V5 egress chokepoint. Ships
+        // OBSERVE-ONLY; the `dropped` boolean tag separates detection from
+        // enforcement (same contract as V5DecisionReviewContractViolation).
+        V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
         V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
         V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
@@ -932,6 +937,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.shape_check_warnings": [TelemetryEvents.CeeDecisionReviewShapeCheckWarnings],
         // POST-parse contract gate — reason-tagged counter (primary rule code).
         "v5.decision_review.contract_violation": [TelemetryEvents.V5DecisionReviewContractViolation],
+        "v5.egress.leading_option_claim_withheld_violated": [TelemetryEvents.V5LeadingOptionClaimAtEgress],
 
         // Graph Readiness events (v2.3)
         "cee.graph_readiness.requested": [TelemetryEvents.CeeGraphReadinessRequested],
@@ -2039,6 +2045,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.intercepted_chip_clarify",
         "v5.edit_graph.intercepted_vague_edit",
         "v5.egress.forbidden_phrase_detected",
+        "v5.egress.leading_option_claim_withheld_violated",
         "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
         "v5.explicit_generate_received",

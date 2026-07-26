@@ -748,6 +748,22 @@ function sendFinalised200(
      * omission. `null` is the honest value when there is no user message.
      */
     readonly userMessage: string | null;
+    /**
+     * T1 claim safety, LAYER 3 — may THIS turn name a leading option?
+     *
+     * `false` means the constraint verdict withheld the claim, so any copy on
+     * the envelope naming or presuming a leader contradicts the turn's own
+     * confirmation. Threaded straight to the egress sanitiser, which reports it
+     * (observe-only) — see `orchestrator-v5/compose/leading-option-egress-guard.ts`.
+     *
+     * REQUIRED, same rationale as `userMessage` above: every dispatch path must
+     * state the permission, so no path can disarm the guard by omission. Paths
+     * that ran no analysis pass `true` — the honest "nothing was withheld on
+     * this turn". The value is READ from the verdict the run_analysis handler
+     * stamped on the fact (`run.mayNameLeadingOption`), never re-derived here
+     * (CLAUDE.md trap #12).
+     */
+    readonly mayNameLeadingOption: boolean;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -873,15 +889,16 @@ function sendFinalised200(
     requestId,
     exitPath,
     userMessage: ctx.userMessage,
+    mayNameLeadingOption: ctx.mayNameLeadingOption,
   });
   const egress = validateEgress(candidateSanitised, requestId);
   let wireBody = egress.ok
     ? finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+        sanitiseOlumiResponseForEgress(egress.value, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
         ctx,
       )
     : finaliseV5Response(
-        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+        sanitiseOlumiResponseForEgress(egress.fallback, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
         ctx,
       );
   if (!egress.ok) {
@@ -931,7 +948,7 @@ function sendFinalised200(
       _timings: timingsBlock,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       ctx,
     );
   }
@@ -972,7 +989,7 @@ function sendFinalised200(
       _diagnostic_trace: stampedTrace,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       ctx,
     );
   }
@@ -1042,7 +1059,7 @@ function sendFinalised200(
         _context_summary: contextSummary,
       };
       wireBody = finaliseV5Response(
-        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
         ctx,
       );
     }
@@ -1063,7 +1080,7 @@ function sendFinalised200(
       _reasoning: ctx.reasoning,
     };
     wireBody = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       ctx,
     );
   }
@@ -1093,7 +1110,7 @@ function sendFinalised200(
       _answer_shape: ctx.answerShape,
     };
     const withShape = finaliseV5Response(
-      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+      sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       ctx,
     );
     const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
@@ -1173,7 +1190,7 @@ function sendFinalised200(
         _answer_shape: synth,
       };
       const withSynth = finaliseV5Response(
-        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage }),
+        sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
         ctx,
       );
       const synthFinalText =
@@ -1523,7 +1540,10 @@ function sendEditGraphRecovery(
     answerKind: 'functional',
     assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
     stage,
-  }), { graph: null, answerKind: 'functional', userMessage });
+  // T1 claim safety: an edit_graph recovery runs no analysis, so it withheld no
+  // leading-option claim. `true` is the honest statement of that, not a
+  // fail-open — the withhold only exists where a verdict was derived.
+  }), { graph: null, answerKind: 'functional', userMessage, mayNameLeadingOption: true });
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -1948,6 +1968,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return sendFinalised200(reply, requestId, 'system_event', sysResult.response, {
         analysisReady: sysResult.analysisReady,
         graph: sysResult.graph,
+        // T1 claim safety: this path runs no analysis, so it withheld no
+        // leading-option claim. `true` is the honest statement of that, not a
+        // fail-open — the withhold only exists where a verdict was derived.
+        mayNameLeadingOption: true,
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: system-event copy is
         // functional (receipts/notices) and must ship plain (omission now shapes).
         answerKind: 'functional',
@@ -2010,6 +2034,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'handler_recovered') {
           return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
             graph: cc.graph,
+            // T1 claim safety: this path runs no analysis, so it withheld no
+            // leading-option claim. `true` is the honest statement of that, not a
+            // fail-open — the withhold only exists where a verdict was derived.
+            mayNameLeadingOption: true,
             // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: chip-click recovery
             // copy is functional and must ship plain (omission would now SHAPE).
             answerKind: 'functional',
@@ -2059,6 +2087,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
           analysisReady: cc.analysisReady,
           graph: cc.graph,
+          // T1 claim safety — READ off the chip dispatch's own run_analysis fact
+          // stamp (see DispatchChipClickRunAnalysisResult). Defaults `true` for
+          // the non-run_analysis chip outcomes, which derive no verdict.
+          mayNameLeadingOption: cc.mayNameLeadingOption ?? true,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: thread the chip
           // answer's declared kind, DEFAULTING to 'functional' when the dispatch
@@ -2212,6 +2244,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // egress label sanitiser has nothing to resolve.
       return sendFinalised200(reply, requestId, 'readiness_intake', readiness.response, {
         graph: null,
+        // T1 claim safety: this path runs no analysis, so it withheld no
+        // leading-option claim. `true` is the honest statement of that, not a
+        // fail-open — the withhold only exists where a verdict was derived.
+        mayNameLeadingOption: true,
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: readiness-intake copy is
         // functional (receipt / question) and must ship plain.
         answerKind: 'functional',
@@ -2364,6 +2400,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             });
             return sendFinalised200(reply, requestId, 'add_option_transaction', addOptionWire, {
               graph: null,
+              // T1 claim safety: this path runs no analysis, so it withheld no
+              // leading-option claim. `true` is the honest statement of that, not a
+              // fail-open — the withhold only exists where a verdict was derived.
+              mayNameLeadingOption: true,
               // ROADMAP 1.132 (F1) — held-proposal copy is functional
               // (a receipt/question) and must ship plain.
               answerKind: 'functional',
@@ -2828,6 +2868,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       } as import('@talchain/schemas/boundary').OlumiResponse;
       return sendFinalised200(reply, requestId, 'explicit_generate_no_brief', declineResponse, {
         graph: null,
+        // T1 claim safety: this path runs no analysis, so it withheld no
+        // leading-option claim. `true` is the honest statement of that, not a
+        // fail-open — the withhold only exists where a verdict was derived.
+        mayNameLeadingOption: true,
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: decline copy is
         // functional and must ship plain.
         answerKind: 'functional',
@@ -2956,6 +3000,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         wireResponse,
         {
           graph: null,
+          // T1 claim safety: this path runs no analysis, so it withheld no
+          // leading-option claim. `true` is the honest statement of that, not a
+          // fail-open — the withhold only exists where a verdict was derived.
+          mayNameLeadingOption: true,
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: this decline/offer
           // copy is functional and must ship plain.
           answerKind: 'functional',
@@ -3051,6 +3099,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       if (cv2 !== null && cv2.kind === 'respond') {
         return sendFinalised200(reply, requestId, 'clarify_v2', cv2.response, {
           graph: null,
+          // T1 claim safety: this path runs no analysis, so it withheld no
+          // leading-option claim. `true` is the honest statement of that, not a
+          // fail-open — the withhold only exists where a verdict was derived.
+          mayNameLeadingOption: true,
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a clarify QUESTION is
           // functional and must ship plain, never behind progressive disclosure.
           answerKind: 'functional',
@@ -3116,6 +3168,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
+          // T1 claim safety: this path runs no analysis, so it withheld no
+          // leading-option claim. `true` is the honest statement of that, not a
+          // fail-open — the withhold only exists where a verdict was derived.
+          mayNameLeadingOption: true,
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a draft-graph turn's
           // artifact is the GRAPH (draft_graph block), not the intro prose. Mark
           // functional AND rely on the draft_graph block-primary egress guard.
@@ -3506,6 +3562,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         });
         return sendFinalised200(reply, requestId, 'edit_graph', noProposalResponse, {
           graph: null,
+          // T1 claim safety: this path runs no analysis, so it withheld no
+          // leading-option claim. `true` is the honest statement of that, not a
+          // fail-open — the withhold only exists where a verdict was derived.
+          mayNameLeadingOption: true,
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
           // functional and must ship plain.
           answerKind: 'functional',
@@ -3540,6 +3600,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // T1 claim safety: this path runs no analysis, so it withheld no
+        // leading-option claim. `true` is the honest statement of that, not a
+        // fail-open — the withhold only exists where a verdict was derived.
+        mayNameLeadingOption: true,
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
         // copy is functional and must ship plain.
         answerKind: 'functional',
@@ -3590,6 +3654,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       );
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // T1 claim safety: this path runs no analysis, so it withheld no
+        // leading-option claim. `true` is the honest statement of that, not a
+        // fail-open — the withhold only exists where a verdict was derived.
+        mayNameLeadingOption: true,
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
         // copy is functional and must ship plain.
         answerKind: 'functional',
@@ -3616,6 +3684,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
+        // T1 claim safety: this path runs no analysis, so it withheld no
+        // leading-option claim. `true` is the honest statement of that, not a
+        // fail-open — the withhold only exists where a verdict was derived.
+        mayNameLeadingOption: true,
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
         // copy is functional and must ship plain.
         answerKind: 'functional',
@@ -3768,6 +3840,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
           analysisReady: eg.analysisReady,
           graph: eg.graph,
+          // T1 claim safety: this path runs no analysis, so it withheld no
+          // leading-option claim. `true` is the honest statement of that, not a
+          // fail-open — the withhold only exists where a verdict was derived.
+          mayNameLeadingOption: true,
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
           // functional (add-option / edit confirmation) and must ship plain.
           answerKind: 'functional',
@@ -3859,6 +3935,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         composeProcessMetaIntakeResponse(),
         {
           graph: null,
+          // T1 claim safety: this path runs no analysis, so it withheld no
+          // leading-option claim. `true` is the honest statement of that, not a
+          // fail-open — the withhold only exists where a verdict was derived.
+          mayNameLeadingOption: true,
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: process-meta intake
           // copy is functional and must ship plain.
           answerKind: 'functional',
@@ -4048,6 +4128,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
           return sendFinalised200(reply, requestId, 'frame_no_brief_guard', commitResult.response, {
             graph: null,
+            // T1 claim safety: this path runs no analysis, so it withheld no
+            // leading-option claim. `true` is the honest statement of that, not a
+            // fail-open — the withhold only exists where a verdict was derived.
+            mayNameLeadingOption: true,
             // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: guard/commit copy is
             // functional and must ship plain.
             answerKind: 'functional',
@@ -4078,6 +4162,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       }
       return sendFinalised200(reply, requestId, 'frame_no_brief_guard', guardResponse, {
         graph: null,
+        // T1 claim safety: this path runs no analysis, so it withheld no
+        // leading-option claim. `true` is the honest statement of that, not a
+        // fail-open — the withhold only exists where a verdict was derived.
+        mayNameLeadingOption: true,
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: guard decline copy is
         // functional and must ship plain.
         answerKind: 'functional',
@@ -4210,6 +4298,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     return sendFinalised200(reply, requestId, 'turn_executor', run.response, {
       analysisReady: run.analysisReady,
       graph: turnGraph,
+      // T1 claim safety — READ off the executor's run result, which took it
+      // from the stamp the run_analysis handler persisted on the fact.
+      // Never re-derived at the route (CLAUDE.md trap #12).
+      mayNameLeadingOption: run.mayNameLeadingOption ?? true,
       ...(run.freshness ? { freshness: run.freshness } : {}),
       requestStartedAt: routeStartedAt,
       scenarioId: ingress.scenario_id,

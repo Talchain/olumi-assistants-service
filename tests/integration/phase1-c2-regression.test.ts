@@ -194,11 +194,32 @@ describe('phase 1 C2 regression — run_analysis via tool-use produces same Hand
     // run_analysis. Strip those coaching fields before the byte-for-byte
     // equality check so this regression guard (PLoT → enrichment
     // passthrough) still holds without mis-firing on coaching-signal noise.
-    const { coaching_signal_id, coaching_signal_turn_id, coaching_signal_produced_at, ...enrichmentWithoutCoaching } =
-      write.handler_facts[0]!.result.enrichment as Record<string, unknown>;
-    void coaching_signal_id;  
+    // T1 claim safety (2026-07-26): `__cee_claim_safety` is the run_analysis
+    // handler's stamp of the constraint verdict — "may a leading option be
+    // named" — persisted with the analysis facts so every path that rebuilds
+    // prose from them READS one verdict instead of deriving a second
+    // (CLAUDE.md trap #12). Same posture as the coaching-signal fields above:
+    // CEE-owned, added at this layer, stripped before the PLoT-passthrough
+    // equality check. Its correct home is a `constraint_verdict` field on
+    // RunAnalysisResultSchema, blocked behind V5-CI-01 (the schema is
+    // `.strict()`); see CEE_CLAIM_SAFETY_ENRICHMENT_KEY.
+    const {
+      coaching_signal_id,
+      coaching_signal_turn_id,
+      coaching_signal_produced_at,
+      __cee_claim_safety,
+      ...enrichmentWithoutCoaching
+    } = write.handler_facts[0]!.result.enrichment as Record<string, unknown>;
+    void coaching_signal_id;
     void coaching_signal_turn_id;
     void coaching_signal_produced_at;
+    // Asserted (not merely discarded) so the strip cannot hide an ABSENT stamp:
+    // a missing stamp fails the read side CLOSED and would silently suppress
+    // every leader-presuming block on a healthy run.
+    expect(__cee_claim_safety).toEqual({
+      may_name_leading_option: true,
+      constraint_verdict_state: 'not_applicable',
+    });
     expect(enrichmentWithoutCoaching).toEqual(plotResponse);
   });
 });

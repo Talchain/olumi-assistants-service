@@ -37,7 +37,10 @@ import {
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
-import { deriveWinnerConstraintInfeasibility } from '../../orchestrator/context/constraint-feasibility.js';
+import {
+  deriveWinnerConstraintInfeasibility,
+  readMayNameLeadingOption,
+} from '../../orchestrator/context/constraint-feasibility.js';
 import { config } from '../../config/index.js';
 import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 // Graph-label readers relocated to a lean, dependency-free context module so
@@ -555,15 +558,51 @@ function buildInvokeInput(
   const runnerUp = selectRunnerUp(chosenSource, winner);
 
   // Trust-spine board #1 (CEE half): when the leading option violates a hard
-  // constraint, flag the winner infeasible + suppress the recommendation
-  // framing so the decision-review prompt does not present it as a clean pick.
-  // Gate default OFF → byte-identical. Detection single-sourced (both wire
-  // shapes) in constraint-feasibility.ts, keyed on the SAME winner id.
+  // constraint, flag the winner infeasible so the decision-review prompt does
+  // not present it as a clean pick. Detection single-sourced (both wire shapes)
+  // in constraint-feasibility.ts, keyed on the SAME winner id.
+  //
+  // `constraint_infeasible` is the NARROW claim — "the leader breaks a limit we
+  // DID check" — and it stays keyed on its own predicate, behind its own gate,
+  // because the prompt uses it to say something specific about a checked limit.
   if (config.features.constraintInfeasibleGate) {
     const feasibility = deriveWinnerConstraintInfeasibility(enrichment, winner.id);
     if (feasibility.infeasible) {
-      winner = { ...winner, constraint_infeasible: true, recommendation_suppressed: true };
+      winner = { ...winner, constraint_infeasible: true };
     }
+  }
+
+  // T1 claim safety — `recommendation_suppressed` is the WIDE claim: "we cannot
+  // stand behind naming a leader at all". It is now keyed on the ONE constraint
+  // verdict, read off the stamp the run_analysis handler persisted
+  // (`deriveConstraintVerdict`, the single owner), instead of on
+  // `deriveWinnerConstraintInfeasibility`.
+  //
+  // WHY THIS CHANGED. Keyed on the infeasibility predicate it fired for exactly
+  // ONE of the three withholding states — `evaluated_infeasible` — and never for
+  // `unevaluated` or `identity_unresolved`. That is the G-CEE-1 defect in
+  // miniature: on the live `unevaluated` run (staging 1c078f0) the suppression
+  // flag existed, was correct, and simply did not fire, so the prompt was told
+  // to name a winner and `blocks[1].body` came back "The MacBook Pro leads by a
+  // margin of about 52 percentage points" underneath "no option can be put
+  // forward yet".
+  //
+  // Suppressing HERE is the earliest possible point: it stops the leader claim
+  // being AUTHORED, so it is never written into `enrichment.decision_review` and
+  // never persisted onto the fact. Every later layer (the compose funnel, the
+  // egress guard) then has nothing to catch. Those layers stay in place for the
+  // facts already stored and for producers this one does not own.
+  //
+  // Fails closed via `readMayNameLeadingOption`. `buildInvokeInput` is reached
+  // only from `enrichRunAnalysisWithDecisionReview`, which runs on the
+  // run_analysis fact the handler just stamped, so the stamp is always present
+  // on the production path.
+  //
+  // Deliberately NOT behind `constraintInfeasibleGate`: that flag governs the
+  // narrow infeasibility claim above. A claim-safety withhold that a feature
+  // flag can switch off is not a withhold.
+  if (!readMayNameLeadingOption(enrichment)) {
+    winner = { ...winner, recommendation_suppressed: true };
   }
 
   // Build label/unit lookups from enrichment.graph.nodes[]. The graph is

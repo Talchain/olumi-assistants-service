@@ -779,6 +779,23 @@ export const TelemetryEvents = {
   // only — no labels, no thresholds, no units, no user text.
   V5RunAnalysisConstraintIdentityUnresolved:
     "v5.run_analysis.constraint_identity_unresolved",
+  // T1 LAYER 3 — a turn that WITHHELD the leading-option claim shipped copy
+  // asserting one anyway, caught at the single V5 egress chokepoint
+  // (`sanitiseOlumiResponseForEgress`). This is the residue meter for the whole
+  // defect class: layers 1 and 2 gate the producers we know about, and this
+  // counts the ones we do not. A non-zero rate names an ungated producer.
+  //
+  // SHIPS OBSERVE-ONLY. The `dropped` boolean separates a safety-ENFORCED drop
+  // from telemetry-only DETECTION — same contract as
+  // `V5DecisionReviewContractViolation` — so the observe-only period and the
+  // enforcing period are distinguishable on the dashboard instead of inferred.
+  //
+  // Privacy contract (R-004): `request_id` / `exit_path` are routing-key
+  // strings; `reason` is the primary matched pattern code from the guard's own
+  // bounded vocabulary; `hit_count` is a finite integer; `dropped` is a
+  // boolean. The matched PROSE and the user's decision content never appear —
+  // field paths travel on the `log.error` payload only.
+  V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
   // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
   V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
@@ -3343,6 +3360,20 @@ export function emit(event: string, data: Event) {
           // telemetry-only count-cap breaches on the A/B dashboard (D-11).
           datadogClient.increment("v5.decision_review.contract_violation", 1, {
             reason: String((eventData.reason as string) || "unknown"),
+            dropped: String(eventData.dropped === true),
+          });
+          break;
+        }
+
+        case TelemetryEvents.V5LeadingOptionClaimAtEgress: {
+          // T1 layer 3. `reason` is the PRIMARY matched pattern code (bounded
+          // by LEADER_CLAIM_PATTERNS); the full set and the field paths travel
+          // on the log payload. `dropped` separates the observe-only period
+          // (false) from enforcement (true) — the whole point of shipping this
+          // guard dark first is that the two are countable apart.
+          datadogClient.increment("v5.egress.leading_option_claim_withheld_violated", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
+            exit_path: String((eventData.exit_path as string) || "unknown"),
             dropped: String(eventData.dropped === true),
           });
           break;

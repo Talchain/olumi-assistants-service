@@ -158,6 +158,18 @@ interface FactOverrides {
 function productionShapedFact(overrides: FactOverrides = {}): RunAnalysisHandlerFact {
   const enrichment: Record<string, unknown> = {
     analysis_status: 'completed',
+    // T1 claim safety — the fixture must DECLARE its constraint verdict.
+    // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without it,
+    // dropping every leader-presuming card (narrative / robustness /
+    // scenario_context / pre_mortem / flip_threshold and the `strengthen` lens
+    // block). `evaluated_feasible` is the branch this fixture must reach: the
+    // leader may be named, so those cards ship and the assertions below are
+    // about block CONSTRUCTION, not about claim safety. A fixture that omitted
+    // this would pass its absence assertions for the wrong reason.
+    __cee_claim_safety: {
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    },
     option_comparison_status: 'computed',
     factor_sensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.8 }],
     robustness: { level: 'moderate' },

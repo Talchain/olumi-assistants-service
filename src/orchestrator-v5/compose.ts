@@ -29,12 +29,11 @@ import {
   type BlockBuildCtx,
   type GraphNodeLookup,
 } from './compose/phase3-blocks.js';
-// T1 claim safety — the SINGLE owner of "may a leading option be named".
-// Derived here rather than re-implemented (CLAUDE.md trap #12).
-import {
-  deriveConstraintVerdict,
-  readRatifiedConstraints,
-} from '../orchestrator/context/constraint-feasibility.js';
+// T1 claim safety — the SINGLE owner of "may a leading option be named" is
+// `deriveConstraintVerdict`, called ONCE in the run_analysis handler and
+// stamped onto the fact there. This funnel READS that stamp; it does not
+// re-derive (CLAUDE.md trap #12).
+import { readMayNameLeadingOption } from '../orchestrator/context/constraint-feasibility.js';
 import { buildFocusInspectorDirective } from './compose/ui-directive.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
@@ -733,11 +732,32 @@ function rebuildPhase3BlocksFresh(
   // T1 CLAIM SAFETY — THE SINGLE FUNNEL.
   //
   // Every Phase-3 block reaches the wire through this one function, on BOTH the
-  // current-turn branch and the prior-fact lifecycle branch. That is why the
-  // verdict is DERIVED here rather than threaded in as a boolean: the
-  // prior-fact path runs no handler, so it has no `HandlerOutcome` and no
-  // `__leading_option_claim_withheld` to thread — a flag would have left half
-  // the paths ungated, which is how this defect class keeps recurring.
+  // current-turn branch (:354) and the prior-fact lifecycle branch (:926).
+  //
+  // The permission is READ FROM THE FACT, never re-derived here. The verdict is
+  // a FACT ABOUT THE ANALYSIS, computed exactly once — at the single
+  // `deriveConstraintVerdict` call in the run_analysis handler — and stamped
+  // onto the fact's enrichment there. Both branches above read the same
+  // persisted bytes, so they cannot disagree.
+  //
+  // WHY NOT RE-DERIVE HERE (this function's previous shape, and the reason it
+  // was reworked): `deriveConstraintVerdict` needs the RATIFIED constraint set,
+  // and the handler and this funnel do not read it from the same place. The
+  // handler reads `snapshot.goal_constraints` — the exact array it forwarded to
+  // PLoT. This funnel would have to read `rawPersistedGraphForLevers`, which is
+  // `undefined` whenever the current-turn branch's hash gate fails
+  // (`fallbackForFact`, :341) — and an empty ratified set collapses the verdict
+  // to `not_applicable`, i.e. it FAILS OPEN and silently re-permits the claim.
+  // Two derivations over different inputs are how one HTTP response ends up
+  // contradicting itself (CLAUDE.md trap #12).
+  //
+  // WHY NOT A THREADED BOOLEAN: the prior-fact branch runs no handler, so it has
+  // no `HandlerOutcome` and no `__leading_option_claim_withheld` to thread — a
+  // flag would have left half the paths ungated.
+  //
+  // FAILS CLOSED. An unstamped fact (every fact written before this change) is
+  // treated as WITHHELD — see `readMayNameLeadingOption` for why "unknown" must
+  // not read as "verified".
   //
   // Live-proven harm (G-CEE-1 walk, staging 1c078f0): the confirmation said
   // "no option can be put forward yet" while `blocks[1].body` said "The MacBook
@@ -753,12 +773,9 @@ function rebuildPhase3BlocksFresh(
   // silently strip useful content, and the egress guard is the layer that
   // catches an unrecognised producer LOUDLY. Layer 2 suppresses what we know is
   // unsafe; Layer 3 alarms on what we do not.
-  const verdict = deriveConstraintVerdict(
-    asRecord((fact.result as Record<string, unknown>).enrichment),
-    readRatifiedConstraints(rawPersistedGraphForLevers),
-    typeof fact.result.leading_option_id === 'string' ? fact.result.leading_option_id : null,
-  );
-  if (verdict.mayNameLeadingOption) return built;
+  if (readMayNameLeadingOption((fact.result as Record<string, unknown>).enrichment)) {
+    return built;
+  }
   return built.filter((block) => !presumesLeadingOption(block));
 }
 
@@ -777,13 +794,6 @@ function rebuildPhase3BlocksFresh(
  * `assumption`, `bias`, `evidence_priority`, `assumption_check`,
  * `calibration_prompt`, `orientation`, and every `evidence` block.
  */
-/** Local shape-read; kept local to avoid an import cycle through coaching/. */
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
 const LEADER_PRESUMING_CARD_KINDS: ReadonlySet<string> = new Set([
   'narrative',
   'robustness',

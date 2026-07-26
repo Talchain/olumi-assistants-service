@@ -292,6 +292,15 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
           graph: STANDARD_GRAPH,
           factor_sensitivity: STANDARD_FACTOR_SENSITIVITY,
           decision_review: { ...RICH_DECISION_REVIEW, produced_at: '2026-05-16T15:00:00.000Z' },
+          // T1 claim safety — the fixture must DECLARE its constraint verdict.
+          // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without
+          // it, dropping every leader-presuming block. `evaluated_feasible` is the branch
+          // this fixture must reach: the per-card_kind COUNTS asserted below are a
+          // statement about block CONSTRUCTION, so the leader must be nameable.
+          __cee_claim_safety: {
+            may_name_leading_option: true,
+            constraint_verdict_state: 'evaluated_feasible',
+          },
         },
         graph_hash_at_run: PHASE3_GRAPH_HASH,
         computed_at: '2026-05-16T14:59:00.000Z',
