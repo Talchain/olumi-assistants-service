@@ -194,6 +194,36 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     "[proxy-v5] Browser proxy registered: POST /proxy/v5/turn",
   );
 
+  // State the auth posture of this deployment out loud, at boot.
+  //
+  // With CEE_REQUIRE_USER_JWT off, this route accepts turns that carry NO
+  // caller identity whatsoever. The origin allowlist above does not change
+  // that: Origin is a browser-only defence and any non-browser client can
+  // send whatever Origin it likes. Owned scenarios are still protected by the
+  // pre-flight ownership check (build-turn-context.ts), but GUEST scenarios
+  // (scenarios.user_id IS NULL) have no owner to check against, so anyone
+  // holding a guest scenario's UUID can read its conversation and append
+  // turns to it.
+  //
+  // This was reported twice by independent reviewers before anyone noticed,
+  // because nothing in the running system ever said it. A posture this open
+  // should be visible in the boot log of every environment that has it, so
+  // that turning it off is a decision someone makes rather than one that
+  // silently persists. Non-fatal by design: it is the accepted PoC posture,
+  // not a misconfiguration.
+  if (config.auth?.requireUserJwt !== true) {
+    log.warn(
+      {
+        require_user_jwt: false,
+        originCount: allowedOrigins.size,
+      },
+      "[proxy-v5] AUTH POSTURE: unauthenticated turns are ACCEPTED (CEE_REQUIRE_USER_JWT is off). " +
+        "Origin is not authentication — a non-browser client can forge it. Guest scenarios " +
+        "(user_id IS NULL) are readable and writable by anyone holding the scenario UUID. " +
+        "Owned scenarios remain protected by the pre-flight ownership check.",
+    );
+  }
+
   // NOTE: OPTIONS preflight is handled by @fastify/cors (registered in server.ts
   // with preflightContinue: false). That plugin intercepts OPTIONS before route
   // handlers, so a manual app.options() here would be dead code. The CORS

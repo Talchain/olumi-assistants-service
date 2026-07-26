@@ -1105,13 +1105,33 @@ async function fetchPriorFacts(
  *
  *   Stored owner NULL (a guest scenario — VITE_AUTH_MODE=guest):
  *     - Any caller (anonymous or identified) → `{ ok: true }`. There is no
- *       ownership concept for an unowned scenario; this openness is a
- *       product feature, not a leak.
+ *       ownership concept for an unowned scenario.
+ *       ⚠ This openness is a deliberate product decision AND a real
+ *       disclosure/mutation surface: anyone holding a guest scenario's UUID
+ *       can read its conversation and append turns to it. It is NOT closed
+ *       here because nothing on the guest wire distinguishes the legitimate
+ *       guest from any other caller — the guest journey carries no cookie,
+ *       no token and no header. Closing it needs a client-side credential
+ *       (a UI change), not a CEE change. Do not re-describe this as "a
+ *       product feature, not a leak": it is both, and the second half is
+ *       what an earlier version of this comment taught readers to skip.
  *
- *   RPC errors (network, DB down, permission), any caller:
- *     - Treated as skipped and the turn proceeds (`{ ok: true, skipped }`).
- *       `append_turn_atomic` is the last line of defence and will still
- *       surface a genuine missing-scenario as STATE_COMMIT_FAILED.
+ *   Store NOT CONFIGURED (`getSessionStore()` throws — no Supabase in this
+ *   environment), any caller:
+ *     - Skipped, turn proceeds (`{ ok: true, skipped }`). There is no
+ *       persistence here, therefore no stored owner to protect.
+ *
+ *   Ownership RPC FAILS against a CONFIGURED store, any caller:
+ *     - Fail CLOSED (`{ ok: false, reason: 'scenario_ownership_unverifiable' }`,
+ *       route 422). We asked who owns this scenario and could not find out;
+ *       proceeding would grant access we cannot justify.
+ *       This previously failed OPEN, on the stated grounds that
+ *       "`append_turn_atomic` is the last line of defence". That premise is
+ *       false for ownership: append_turn_atomic (v1/v2/v3) reads `user_id`
+ *       FROM the scenarios row to denormalise it onto the turn and never
+ *       compares it to any caller identity — it guards scenario EXISTENCE,
+ *       not ownership. So the open path removed the ownership check with
+ *       nothing behind it, and did so exactly when the DB was unhealthy.
  *
  * ⚠ Caller-ownership check is PoC-grade only. See ensureScenarioExists
  * on SessionStore and the migration file header for the production-
@@ -1121,7 +1141,11 @@ export type PreflightResult =
   | { readonly ok: true; readonly skipped?: boolean }
   | {
       readonly ok: false;
-      readonly reason: 'scenario_owned_by_other_user' | 'scenario_requires_authenticated_owner';
+      readonly reason:
+        | 'scenario_owned_by_other_user'
+        | 'scenario_requires_authenticated_owner'
+        /** The store is configured but could not tell us who owns the row. */
+        | 'scenario_ownership_unverifiable';
     };
 
 export async function preflightEnsureScenario(
@@ -1130,11 +1154,15 @@ export async function preflightEnsureScenario(
   requestId: string,
   sessionStore?: SessionStore,
 ): Promise<PreflightResult> {
-  let authoritativeUserId: string | null;
+  // Resolving the store and QUERYING it are separated on purpose: they are
+  // different failures with opposite correct answers. "No store configured"
+  // means this environment has no persistence and therefore no stored owner
+  // to protect — skipping is right. "Store configured but the query failed"
+  // means the ownership oracle is unavailable — skipping there would silently
+  // delete the ownership check for the duration of the incident.
+  let store: SessionStore;
   try {
-    const store = sessionStore ?? getSessionStore();
-    const result = await store.ensureScenarioExists(scenarioId, userId);
-    authoritativeUserId = result.user_id;
+    store = sessionStore ?? getSessionStore();
   } catch (e) {
     log.debug(
       {
@@ -1143,9 +1171,50 @@ export async function preflightEnsureScenario(
         err_name: e instanceof Error ? e.name : 'unknown',
         err_message: e instanceof Error ? e.message : String(e),
       },
-      'V5 pre-flight ensureScenarioExists skipped (store unavailable or RPC error)',
+      'V5 pre-flight ensureScenarioExists skipped (no session store configured)',
     );
     return { ok: true, skipped: true };
+  }
+
+  // A store that does not implement the oracle AT ALL (reduced test doubles,
+  // partial stores) is the same class of fact as "no store configured": there
+  // is no check to perform, so there is nothing to fail closed ON. This is
+  // deliberately a structural check and NOT a catch of TypeError — catching
+  // the TypeError would also swallow a genuine TypeError thrown from INSIDE a
+  // working oracle, which is exactly the failure we must refuse on.
+  if (typeof store.ensureScenarioExists !== 'function') {
+    log.debug(
+      { request_id: requestId, scenario_id: scenarioId },
+      'V5 pre-flight ensureScenarioExists skipped (store does not implement the ownership oracle)',
+    );
+    return { ok: true, skipped: true };
+  }
+
+  let authoritativeUserId: string | null;
+  try {
+    const result = await store.ensureScenarioExists(scenarioId, userId);
+    authoritativeUserId = result.user_id;
+  } catch (e) {
+    // Fail CLOSED. Logged at WARN, not DEBUG: a control that has stopped
+    // functioning is an operational event, not a debugging detail.
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        caller_identified: userId !== null,
+        err_name: e instanceof Error ? e.name : 'unknown',
+        err_code: e instanceof SessionReadError ? e.code : undefined,
+        err_message: e instanceof Error ? e.message : String(e),
+      },
+      'V5 pre-flight: ownership oracle unavailable (ensureScenarioExists failed) — refusing turn (fail closed)',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: e instanceof SessionReadError ? (e.code ?? 'unknown') : 'unknown',
+      severity: 'error',
+    });
+    return { ok: false, reason: 'scenario_ownership_unverifiable' };
   }
 
   // Ownership is enforced ONLY when the scenario has a stored owner. A null
