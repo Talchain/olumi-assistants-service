@@ -40,6 +40,7 @@ import {
   mayNameLeadingOptionForFact,
   projectTransportEnrichmentForWithheldClaim,
 } from './compose/withheld-claim-projection.js';
+import { textNamesLeadingOption } from './compose/leading-option-egress-guard.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
@@ -817,7 +818,57 @@ function rebuildPhase3BlocksFresh(
   if (mayNameLeadingOptionForFact(fact)) {
     return built;
   }
-  return built.filter((block) => !presumesLeadingOption(block));
+  return built
+    .filter((block) => !presumesLeadingOption(block))
+    .map(projectEvidenceGapForWithheldClaim);
+}
+
+/**
+ * Drop ONE `evidence_gap` string that presupposes a leading option, keeping the
+ * rest of its block.
+ *
+ * WHY THIS IS A FIELD PROJECTION AND NOT A BLOCK DROP. `evidence` blocks are in
+ * the deliberately-ABSENT list above ("they carry no comparative claim, and
+ * dropping them would cost the user real content on exactly the turn they most
+ * need it"), and that judgement is still right: the block's `factor_label`,
+ * `suggested_technique` and `impact_if_gathered` are what the withheld
+ * disclosure is inviting the user to act on. But the POST-#711/#712 live walk
+ * found the kind-level assumption is not universally true — `caseINF.run`,
+ * `blocks[7].evidence_gap`:
+ *
+ *   "Shifts in hardware pricing and availability could alter the total cost
+ *    calculation and potentially change **the leading option**."
+ *
+ * on an `evaluated_infeasible` (withheld) turn. That is a genuine
+ * presupposition that a leading option exists — NOT the POST-710 §7.1 false
+ * positive, which was the ordinary noun "team leads". 1 occurrence across 11
+ * withheld bodies, so it is a low-rate producer, not a systematic one.
+ *
+ * The field is LLM-authored (`source_handler: 'decision_review_enricher'`,
+ * verbatim from `decision_review.evidence_enhancements`), so there is no
+ * template to gate — the same condition that makes the leader-presuming CARDS
+ * undroppable-in-part. Here, though, the leader claim is confined to ONE named
+ * field, so the honest minimum is to drop that field rather than the block:
+ * per-field, not whole-response, which is the rule the egress guard's own
+ * enforcement note lays down.
+ *
+ * Scanned with the SHARED vocabulary (`textNamesLeadingOption`), so this gate
+ * and the alarm that measures the residue cannot drift apart.
+ */
+function projectEvidenceGapForWithheldClaim(
+  block: OlumiResponse['blocks'][number],
+): OlumiResponse['blocks'][number] {
+  const candidate = block as { type?: unknown; evidence_gap?: unknown };
+  if (
+    candidate.type !== 'evidence' ||
+    typeof candidate.evidence_gap !== 'string' ||
+    !textNamesLeadingOption(candidate.evidence_gap)
+  ) {
+    return block;
+  }
+  const { evidence_gap: _dropped, ...rest } = block as Record<string, unknown>;
+  void _dropped;
+  return rest as OlumiResponse['blocks'][number];
 }
 
 /**

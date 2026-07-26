@@ -796,6 +796,26 @@ export const TelemetryEvents = {
   // boolean. The matched PROSE and the user's decision content never appear —
   // field paths travel on the `log.error` payload only.
   V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
+
+  // G-CEE-1 — the EXPLANATION-ANSWER gate (compose/withheld-explanation-answer.ts).
+  //
+  // Unlike the egress guard above, this one ENFORCES: on a turn whose persisted
+  // constraint verdict withholds the leading-option claim, an explanation
+  // handler's answer that names a leader is REPLACED with deterministic
+  // withheld copy before it reaches the user. Fires once per projected answer.
+  //
+  // This is the meter for the rerun no-op leak the POST-#711/#712 live walk
+  // found (4/4 no-op bodies named the leader in `assistant_text`; 3/4 also
+  // dropped the disclosure). A non-zero `leader_claim_replaced` rate is the
+  // model still trying; a non-zero `disclosure_appended` rate is it dropping
+  // the disclosure. Both are expected to be non-zero — the gate is what makes
+  // them harmless, so silence here would mean the gate is not being reached,
+  // not that the model has reformed.
+  //
+  // Privacy contract (R-004): `reason` is from this module's own bounded
+  // vocabulary; `handler_id` is a registry key; the lengths are finite
+  // integers. The answer PROSE and the user's decision content never appear.
+  V5WithheldExplanationAnswerProjected: "v5.explanation.withheld_answer_projected",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
   // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
   V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",

@@ -65,6 +65,7 @@ import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
 import type {
   ConstraintVerdict,
+  ConstraintVerdictState,
   RatifiedConstraint,
 } from '../../orchestrator/context/constraint-feasibility.js';
 
@@ -221,10 +222,39 @@ function composeDisclosure(
  * same way the scaffold and reduced-samples disclosures do.
  */
 export function buildConstraintDisclosure(verdict: ConstraintVerdict): string {
-  switch (verdict.state) {
+  return buildConstraintDisclosureFromState(verdict.state, verdict.constraints);
+}
+
+/**
+ * The same disclosure, built from a state + constraint list that were READ
+ * back rather than derived on this turn.
+ *
+ * WHY THIS EXISTS. {@link buildConstraintDisclosure} takes the whole verdict
+ * because the run_analysis turn HAS one — it just derived it. A later turn that
+ * merely NARRATES that analysis (the rerun no-op / explanation path) does not:
+ * only `may_name_leading_option` + `constraint_verdict_state` are persisted on
+ * the fact (`PersistedClaimSafety` — `constraints` is deliberately not stored,
+ * "a second copy of a label is a second thing to drift"). So the caller reads
+ * the STATE off the fact and the LABELS off the same persisted `goal_constraints`
+ * the original derivation read, and hands both here.
+ *
+ * That is a read-back, not a second derivation: the state — the part that
+ * decides WHICH sentence is true, and the part #703 got wrong twice — is never
+ * recomputed. Only the labels are re-resolved, from the one array that is their
+ * sole record (`readRatifiedConstraints`).
+ *
+ * The switch stays HERE, exhaustive, and is now the ONLY one: both entry points
+ * share it, so a sixth state is a compile error on one line rather than a
+ * silently-silent disclosure on two paths.
+ */
+export function buildConstraintDisclosureFromState(
+  state: ConstraintVerdictState,
+  constraints: readonly RatifiedConstraint[],
+): string {
+  switch (state) {
     case 'unevaluated':
     case 'identity_unresolved':
-      return buildVoice(verdict.state, verdict.constraints);
+      return buildVoice(state, constraints);
     case 'not_applicable':
     case 'evaluated_feasible':
       // Nothing happened to the user's conditions that needs saying.

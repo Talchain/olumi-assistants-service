@@ -87,8 +87,42 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
   { code: 'best_option', re: /\bbest\s+option\b/i },
   { code: 'winner', re: /\bwinners?\b/i },
-  { code: 'ahead', re: /\bis\s+ahead\b/i },
-  { code: 'top_choice', re: /\btop\s+choice\b/i },
+  { code: 'ahead', re: /\b(?:is|are|was|were)\s+ahead\b/i },
+  { code: 'top_choice', re: /\btop\s+(?:choice|option)\b/i },
+  /**
+   * SECOND RECORDED DIVERGENCE from the walk's matcher — and the one that
+   * makes this list able to see the defect it was extended for.
+   *
+   * The POST-#711/#712 walk's headline leak is, verbatim from `case1e`:
+   *
+   *   "Standardise on MacBook Pro **comes out ahead, leading in** 44% of
+   *    simulations, with Standardise on Dell XPS close behind at 34% …"
+   *
+   * Checked pattern by pattern, that sentence matches **NOTHING** in this list
+   * as it stood: `leads` misses "leading", `leading_option` misses "leading
+   * in", `the_lead` misses, `is\s+ahead` misses "comes out ahead", and the
+   * band tier's four adverbs miss a bare "ahead". The four live bodies were
+   * caught only INCIDENTALLY, by other sentences in the same answer ("The lead
+   * is not stable", "take the lead"). Had the model emitted the leader claim
+   * alone, this vocabulary would have passed it — and the walk's own §3.3
+   * would have read as a clean turn.
+   *
+   * The additions below are taken from matcher-v3's BAND tier
+   * (`WALK-2026-07-26-POST-71112.md` §1.1), which is strictly richer than what
+   * this module had: it carries `marginally|narrowly|comfortably` alongside the
+   * original four, plus `ahead by`, `out in front`, `top option` and `comes out
+   * on top`. `comes out ahead` and `leading in` are additions beyond even that
+   * — they are the live string, and matcher-v3 would also have missed them.
+   *
+   * DIRECTION OF THE DIVERGENCE, stated so a future reader does not have to
+   * re-derive it: this guard is now strictly STRONGER than the walk's matcher.
+   * A hit here that the matcher does not see is expected and is not a defect in
+   * either instrument; the reverse would be.
+   */
+  { code: 'comes_out_ahead', re: /\bcomes?\s+out\s+(?:ahead|on\s+top)\b/i },
+  { code: 'leading_in', re: /\bleading\s+in\b/i },
+  { code: 'ahead_by', re: /\bahead\s+by\b/i },
+  { code: 'out_in_front', re: /\bout\s+in\s+front\b/i },
   /**
    * The PRODUCER'S BAND PHRASING, and the one deliberate divergence from the
    * walk's matcher noted above.
@@ -105,8 +139,37 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * than the matcher — a one-directional divergence, recorded here rather than
    * left for a future reader to discover as a mystery hit.
    */
-  { code: 'band_ahead', re: /\b(?:slightly|clearly|well|far)\s+ahead\b/i },
+  {
+    code: 'band_ahead',
+    re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b/i,
+  },
 ];
+
+/**
+ * Does ONE string name or presume a leading option?
+ *
+ * The string-level reading of {@link LEADER_CLAIM_PATTERNS}, exported so the
+ * PRODUCER-side gates test prose against the SAME vocabulary this alarm
+ * measures the residue with. Two consumers today:
+ *   - `compose/withheld-explanation-answer.ts` (the explanation-answer gate);
+ *   - the per-field `evidence_gap` projection in `compose.ts`.
+ *
+ * THIS IS NOT "WIDENING THE GUARD" — the module docstring's instruction is
+ * "FIX THE PRODUCER … Do NOT widen this guard instead: it is the alarm, not the
+ * fix", and that still holds: `guardLeadingOptionClaimsAtEgress` remains
+ * observe-only and drops nothing. What is shared here is the VOCABULARY, not
+ * the enforcement. Sharing it is the point — a producer gate built on its own
+ * private pattern copy would drift from the alarm, and the first symptom would
+ * be a leak this module reports and the gate silently permits (CLAUDE.md trap
+ * #12: derive, don't mirror).
+ *
+ * Every pattern is non-global, so `.test` carries no `lastIndex` state and this
+ * is safe to call repeatedly on the same or different strings.
+ */
+export function textNamesLeadingOption(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  return LEADER_CLAIM_PATTERNS.some(({ re }) => re.test(value));
+}
 
 /** One detected claim. `sample` is NEVER logged or emitted — triage only. */
 export interface LeaderClaimHit {
