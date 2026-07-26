@@ -206,23 +206,142 @@ export interface RatifiedConstraint {
   readonly label: string | null;
 }
 
-export interface ConstraintEvaluationGap {
+/**
+ * The constraint verdict for one analysis turn. ONE meaning, five answers.
+ *
+ * WHY AN ENUM AND NOT A BOOLEAN. #703 modelled "was the user's hard constraint
+ * honoured?" as a single `unevaluated` boolean. Both of its branches turned out
+ * to be wrong for a real producer state:
+ *
+ *   - `true` on a constraint-IDENTITY failure tells the user their condition
+ *     was never checked, on a run where the engine plainly DID check
+ *     something. False statement, and it costs a valid recommendation.
+ *   - `false` on that same failure (the first attempt at fixing it) reads as
+ *     "no gap" and restores a confident leading-option claim, which asserts
+ *     the user's condition holds on evidence CEE has just admitted it cannot
+ *     read. Also a false statement, and the more dangerous of the two.
+ *
+ * There is no correct boolean, because "we could not tell" is a third answer.
+ * Every state below therefore declares its own leading-option answer in
+ * {@link MAY_NAME_LEADING_OPTION} rather than leaving callers to infer it.
+ */
+export type ConstraintVerdictState =
   /**
-   * True when at least one user-ratified hard constraint was NOT evaluated to
-   * decision grade. While true, no recommendation may be asserted.
+   * Nothing to withhold for: the user ratified no hard constraints AND the
+   * producer's own constraint scoring gives no reason to hold the leader back.
+   * Byte-identical to the pre-T1 product on this path.
    */
-  readonly unevaluated: boolean;
-  /** Producer-shipped codes that evidenced the gap (deduped, sorted). */
+  | 'not_applicable'
+  /**
+   * Every ratified constraint was scored under an id we recognise, and the
+   * leading option clears the violation floor. THE RECOMMENDATION SURVIVES.
+   * (With no leading option id the leader half is vacuous — see
+   * {@link deriveConstraintVerdict}.)
+   */
+  | 'evaluated_feasible'
+  /**
+   * The producer scored constraints and the leading option breaks one. "The
+   * leader does not satisfy a limit we checked" is assertable; naming it as the
+   * answer is not.
+   */
+  | 'evaluated_infeasible'
+  /**
+   * At least one ratified constraint was NOT evaluated to decision grade, on
+   * evidence that cannot be confused with a keying failure: either the producer
+   * said so explicitly (a not-decision-grade code, or
+   * `constraints_status: 'unavailable'`), or the id spaces demonstrably line up
+   * elsewhere and this constraint still has no score. "Your condition was not
+   * checked" is assertable HERE AND NOWHERE ELSE.
+   */
+  | 'unevaluated'
+  /**
+   * The producer plainly evaluated constraints, but NOT ONE of the ids it
+   * returned reconciles with anything we ratified.
+   *
+   * The seam is unenforced: CEE's persisted `constraint_id` meets PLoT's map
+   * keys across an untyped `z.record` enrichment boundary that nothing
+   * validates, and PLoT does not promise that key is CEE's id — it resolves
+   * positionally, then by `node_id`+`operator`, then falls back to a
+   * `` `${node_id}_${operator}` `` composite. So the only observable is "these
+   * two id spaces do not intersect", and from that observable "the engine
+   * checked YOUR condition" and "the engine checked a different condition" are
+   * indistinguishable.
+   *
+   * Consequently this state asserts NEITHER claim. It does not say the
+   * condition went unchecked, and it does not certify constraint-safety — so
+   * the leading option is withheld. The user-facing disclosure says the system
+   * could not reconcile which condition was evaluated, and nothing more.
+   */
+  | 'identity_unresolved';
+
+/**
+ * May a leading option be NAMED as the answer, per state? Exhaustive by
+ * construction — `Record<ConstraintVerdictState, boolean>` makes a new state
+ * without a declared answer a compile error rather than a silent `undefined`.
+ *
+ * Exactly two states permit it, and both mean "verified": either there was
+ * nothing to verify, or everything the user ratified was verified and holds.
+ * Every other state is some flavour of "we cannot stand behind that claim".
+ */
+export const MAY_NAME_LEADING_OPTION: Readonly<
+  Record<ConstraintVerdictState, boolean>
+> = Object.freeze({
+  not_applicable: true,
+  evaluated_feasible: true,
+  evaluated_infeasible: false,
+  unevaluated: false,
+  identity_unresolved: false,
+});
+
+export interface ConstraintVerdict {
+  /** Which of the five answers this turn's producer evidence selects. */
+  readonly state: ConstraintVerdictState;
+  /**
+   * The state's declared leading-option answer, copied onto every verdict so
+   * callers read it instead of re-deriving it from `state` (and disagreeing).
+   * Always `MAY_NAME_LEADING_OPTION[state]`.
+   */
+  readonly mayNameLeadingOption: boolean;
+  /** Producer-shipped not-decision-grade codes (deduped, sorted); else `[]`. */
   readonly codes: readonly string[];
-  /** The ratified constraints with no usable evaluation, in graph order. */
+  /**
+   * The ratified constraints this verdict is ABOUT, in graph order:
+   *   - `unevaluated` — the ones with no usable evaluation (all of them when a
+   *     code or an 'unavailable' status condemns the whole block);
+   *   - `identity_unresolved` — the full ratified set, i.e. the ids we could
+   *     not reconcile. NOTE: these are NOT "unchecked" constraints, and copy
+   *     built from them must not say so;
+   *   - every other state — empty.
+   */
   readonly constraints: readonly RatifiedConstraint[];
+  /**
+   * The leading option's DETECTED infeasibility — carried on every state, not
+   * just `evaluated_infeasible`, so a run that is both `unevaluated` and led by
+   * an option breaking a scored constraint loses nothing to the precedence
+   * order below. `null` when the leader is feasible, or when feasibility could
+   * not be computed at all (no leading option id, no matching option entry, or
+   * no constraint probabilities — {@link deriveWinnerConstraintInfeasibility}
+   * fails open in all three).
+   */
+  readonly leaderInfeasibility: WinnerConstraintFeasibility | null;
 }
 
-const NO_GAP: ConstraintEvaluationGap = Object.freeze({
-  unevaluated: false,
-  codes: Object.freeze([]) as readonly string[],
-  constraints: Object.freeze([]) as readonly RatifiedConstraint[],
-});
+function verdict(
+  state: ConstraintVerdictState,
+  parts: {
+    codes?: readonly string[];
+    constraints?: readonly RatifiedConstraint[];
+    leaderInfeasibility?: WinnerConstraintFeasibility | null;
+  } = {},
+): ConstraintVerdict {
+  return {
+    state,
+    mayNameLeadingOption: MAY_NAME_LEADING_OPTION[state],
+    codes: parts.codes ?? [],
+    constraints: parts.constraints ?? [],
+    leaderInfeasibility: parts.leaderInfeasibility ?? null,
+  };
+}
 
 /**
  * Read the user-ratified hard constraints.
@@ -256,7 +375,20 @@ export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
   return out;
 }
 
-/** Collect every constraint id PLoT returned a satisfaction probability for. */
+/**
+ * Collect every constraint id PLoT returned a satisfaction probability for.
+ *
+ * TWO sources, deliberately — reading only the per-option map threw away the
+ * producer's own canonical answer:
+ *   1. per-option `constraint_probabilities` keys (both wire shapes);
+ *   2. top-level `constraint_results[].constraint_id`, which is an EXPLICIT
+ *      `constraint_id` field rather than a map key, and is therefore the
+ *      keying-independent statement of "which constraints did the engine
+ *      score" (present on the live doctrine-B wire — see
+ *      tests/fixtures/cross-service/plot-to-cee.doctrine-b.code-derived.json).
+ * Taking both means a per-option keying quirk alone cannot make a scored
+ * constraint look unscored.
+ */
 function collectEvaluatedConstraintIds(
   envelope: Record<string, unknown>,
 ): Set<string> {
@@ -266,6 +398,14 @@ function collectEvaluatedConstraintIds(
       for (const { id } of readConstraintSatisfactionProbs(entry as Record<string, unknown>)) {
         seen.add(id);
       }
+    }
+  }
+  const results = envelope.constraint_results;
+  if (Array.isArray(results)) {
+    for (const entry of results) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const id = readString((entry as Record<string, unknown>).constraint_id);
+      if (id !== null) seen.add(id);
     }
   }
   return seen;
@@ -291,7 +431,8 @@ function collectNotDecisionGradeCodes(
 }
 
 /**
- * Did any user-ratified hard constraint fail to reach decision grade?
+ * THE constraint verdict for one analysis turn — the single owner of the
+ * meaning "was the user's hard constraint honoured?".
  *
  * DEFECT THIS EXISTS TO CLOSE (reported 1/1 on live staging): a user asks for
  * "total three-year cost below £2,500"; CEE replies "Added constraint: …";
@@ -301,47 +442,105 @@ function collectNotDecisionGradeCodes(
  * stated condition was accepted, silently discarded by the engine, and the
  * product asserted a recommendation anyway.
  *
- * Why {@link deriveWinnerConstraintInfeasibility} cannot catch this: it
- * FAILS OPEN when no constraint probabilities are present (`probs.length === 0
- * → infeasible: false`). PLoT's suppressed-unreliable variant withholds
- * exactly those probabilities, so the suppressed case is indistinguishable
- * from the no-constraints case at that predicate. This one distinguishes them
- * by consulting what the user ratified.
+ * Every signal is READ FROM THE PRODUCER — the codes, the status field, the
+ * per-option probabilities and the top-level `constraint_results` are all
+ * PLoT's own output. Nothing here re-derives a verdict PLoT already computed,
+ * and nothing here mirrors PLoT's key-resolution rule (CLAUDE.md trap #12):
+ * where that rule produces ids CEE cannot reconcile, the verdict SAYS SO
+ * ({@link ConstraintVerdictState} `identity_unresolved`) instead of guessing.
  *
- * Every signal is READ FROM THE PRODUCER — the codes, the status field and the
- * per-option probabilities are all PLoT's own output. Nothing here re-derives
- * a verdict PLoT already computed.
+ * PRECEDENCE, most-certain evidence first. Exactly one state is returned:
  *
- * Fires iff at least one constraint was ratified AND any of:
- *   (S1) a not-decision-grade CODE is on the wire;
- *   (S2) `constraints_status` is explicitly `'unavailable'`;
- *   (S3) a ratified constraint id has NO satisfaction probability anywhere in
- *        the option results — applied, then silently unscored.
+ *   1. (S1/S2) An explicit producer verdict — a not-decision-grade CODE, or
+ *      `constraints_status: 'unavailable'` — condemns the whole constraint
+ *      block, so every ratified constraint is `unevaluated`. This outranks the
+ *      identity question because the producer has told us in words that it did
+ *      not reach decision grade; no id reconciliation is needed to believe it.
+ *   2. Evaluations present but ZERO reconcile ⇒ `identity_unresolved`. Zero
+ *      overlap is required: a single match proves the id spaces DO line up, so
+ *      any remaining unscored constraint is genuinely unscored.
+ *   3. (S3) A ratified constraint with no score, where step 2 did not fire ⇒
+ *      `unevaluated` for exactly those constraints. This is the honest "applied,
+ *      then silently unscored" case, and it covers "nothing was scored at all"
+ *      (no evaluations ⇒ no id space to reconcile ⇒ no ambiguity).
+ *   4. Otherwise every ratified constraint was scored, and the LEADER decides:
+ *      `evaluated_infeasible` if it breaks one, else `evaluated_feasible`.
  *
- * With no ratified constraints this returns {@link NO_GAP} and every caller is
- * byte-identical to its pre-T1 behaviour.
+ * `unevaluated` outranks `evaluated_infeasible` when both are true (constraint
+ * A scored and violated, constraint B never scored): the unevaluated disclosure
+ * is the one that names a condition and offers a repair step, and the
+ * infeasibility is not lost — it is carried on
+ * {@link ConstraintVerdict.leaderInfeasibility} in every state.
+ *
+ * Why {@link deriveWinnerConstraintInfeasibility} cannot cover the gap on its
+ * own: it FAILS OPEN when no constraint probabilities are present
+ * (`probs.length === 0 → infeasible: false`). PLoT's suppressed-unreliable
+ * variant withholds exactly those probabilities, so the suppressed case is
+ * indistinguishable from the no-constraints case at that predicate. This
+ * function distinguishes them by consulting what the user ratified.
+ *
+ * With no ratified constraints the only question left is the pre-T1 one — does
+ * the producer's own scoring show the leader breaking a constraint? — so the
+ * result is `evaluated_infeasible` or `not_applicable`, and every caller stays
+ * byte-identical to its pre-T1 behaviour. `not_applicable` therefore means
+ * "nothing to withhold for", NOT merely "no ratified constraints"; collapsing
+ * it to the latter would silently un-fix trust-spine board #1.
+ *
+ * PURE. The `CEE_CONSTRAINT_INFEASIBLE_GATE` feature flag is enforced by the
+ * callers, exactly as it is for {@link deriveWinnerConstraintInfeasibility}, so
+ * this function stays trivially testable and the gate keeps one owner.
  */
-export function deriveConstraintEvaluationGap(
+export function deriveConstraintVerdict(
   envelope: Record<string, unknown>,
   ratified: readonly RatifiedConstraint[],
-): ConstraintEvaluationGap {
-  if (ratified.length === 0) return NO_GAP;
+  leadingOptionId: string | null | undefined,
+): ConstraintVerdict {
+  // Computed unconditionally so it can be carried on every state (see
+  // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
+  const leaderRaw = deriveWinnerConstraintInfeasibility(envelope, leadingOptionId);
+  const leader = leaderRaw.infeasible ? leaderRaw : null;
+
+  if (ratified.length === 0) {
+    return leaderRaw.infeasible
+      ? verdict('evaluated_infeasible', { leaderInfeasibility: leaderRaw })
+      : verdict('not_applicable');
+  }
 
   const codes = collectNotDecisionGradeCodes(envelope);
   const statusUnavailable =
     readString(envelope.constraints_status) === "unavailable";
+
+  // 1. The producer's own explicit verdict on the whole block.
+  if (codes.length > 0 || statusUnavailable) {
+    return verdict('unevaluated', {
+      codes,
+      constraints: [...ratified],
+      leaderInfeasibility: leader,
+    });
+  }
+
   const evaluated = collectEvaluatedConstraintIds(envelope);
   const unscored = ratified.filter((c) => !evaluated.has(c.constraint_id));
 
-  if (codes.length === 0 && !statusUnavailable && unscored.length === 0) {
-    return NO_GAP;
+  // 2. Evaluations exist; not one of them is an id we ratified.
+  if (evaluated.size > 0 && unscored.length === ratified.length) {
+    return verdict('identity_unresolved', {
+      constraints: [...ratified],
+      leaderInfeasibility: leader,
+    });
   }
 
-  // A code or an 'unavailable' status condemns the whole constraint block —
-  // PLoT withholds it wholesale — so every ratified constraint is unevaluated.
-  // Otherwise only the specifically-unscored ones are.
-  const affected =
-    codes.length > 0 || statusUnavailable ? [...ratified] : unscored;
+  // 3. Genuinely unscored — either nothing was evaluated at all, or the
+  //    overlap above proves the id spaces line up and these still have no score.
+  if (unscored.length > 0) {
+    return verdict('unevaluated', {
+      constraints: unscored,
+      leaderInfeasibility: leader,
+    });
+  }
 
-  return { unevaluated: true, codes, constraints: affected };
+  // 4. Everything the user ratified was scored. The leader decides.
+  return leaderRaw.infeasible
+    ? verdict('evaluated_infeasible', { leaderInfeasibility: leaderRaw })
+    : verdict('evaluated_feasible');
 }
