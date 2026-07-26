@@ -171,6 +171,45 @@ if [ -z "$ENRICHMENT_OK" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 6b. The CEE-owned claim-safety stamp is the ONLY post-validation edit
+#
+# T1 claim safety (2026-07-26) added ONE CEE-owned key to the fact's
+# enrichment: `__cee_claim_safety`, the run_analysis handler's record of the
+# constraint verdict ("may a leading option be named"). It is applied AFTER
+# `RunAnalysisHandlerFactSchema.safeParse`, so §6 above still sees — and still
+# enforces — the untouched byte-for-byte pass-through.
+#
+# The correct home is a first-class `constraint_verdict` field on
+# `RunAnalysisResultSchema`, which is `.strict()` in the vendored
+# `@talchain/schemas`; adding it needs a package release blocked behind
+# V5-CI-01. Same wall, and the same `__`-channel workaround, as
+# `HandlerOutcome.__validation_beat`.
+#
+# This guard pins the exception to exactly that ONE key, so a future
+# post-validation edit to enrichment — a second CEE key, or an un-namespaced
+# one — fails HERE rather than quietly eroding the pass-through invariant into
+# "the handler may add whatever it likes after validation".
+STAMP_HELPER='stampClaimSafetyOnEnrichment'
+STAMP_COUNT=$(grep -c "$STAMP_HELPER(" "$HANDLER_FILE" || true)
+# 1 import + 1 call site.
+if [ "$STAMP_COUNT" -gt 2 ]; then
+  fail "result.enrichment is stamped more than once (found $STAMP_COUNT ${STAMP_HELPER} references)" \
+    'The claim-safety stamp is applied EXACTLY ONCE, at the single deriveConstraintVerdict call.'
+fi
+
+UNNAMESPACED_ENRICHMENT_WRITES=$(
+  grep -nE 'enrichment:\s*\{\s*\.\.\.' "$HANDLER_FILE" \
+  || true
+)
+if [ -n "$UNNAMESPACED_ENRICHMENT_WRITES" ]; then
+  fail 'run_analysis handler spreads into result.enrichment inline' \
+    "$UNNAMESPACED_ENRICHMENT_WRITES
+Enrichment must stay the verbatim PLoT pass-through at schema-validation time.
+The ONLY permitted addition is the post-validation ${STAMP_HELPER} stamp, which
+namespaces its key as CEE-owned (\`__cee_\`). See CEE_CLAIM_SAFETY_ENRICHMENT_KEY."
+fi
+
+# ---------------------------------------------------------------------------
 # 7. Placeholder scenario-reader must NOT be the production default when a
 #    handler is registered on a newer surface (Resolution 1 / classifier
 #    prompt update). The placeholder (`NOT_WIRED_SCENARIO_READER`) exists

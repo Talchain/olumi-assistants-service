@@ -458,7 +458,7 @@ describe("/orchestrate/v2/turn — substitute composition primitives", () => {
     const scrubbed = sanitiseOlumiResponseForEgress(dirty, {
       graph: null,
       requestId: "test",
-      exitPath: "test", userMessage: null,
+      exitPath: "test", userMessage: null, mayNameLeadingOption: true,
     });
     expect(scrubbed.assistant_text).not.toContain("fac_revenue");
   });

@@ -50,6 +50,7 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   deriveConstraintVerdict,
   readRatifiedConstraints,
+  stampClaimSafetyOnEnrichment,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
@@ -1011,6 +1012,49 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       );
     }
 
+    // --- 7b. Stamp the constraint verdict onto the fact ------------------
+    //
+    // T1 claim safety, LAYER 2. "May a leading option be named" is a FACT
+    // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and read
+    // back on every path that rebuilds prose from them — rather than
+    // re-derived at each call site, which is how two surfaces end up
+    // contradicting each other inside one HTTP response (CLAUDE.md trap #12).
+    //
+    // Live-proven harm this closes (G-CEE-1 walk, staging 1c078f0): the
+    // confirmation said "no option can be put forward yet" while
+    // `blocks[1].body` in the SAME response said "The MacBook Pro leads by a
+    // margin of about 52 percentage points".
+    //
+    // Applied AFTER validation, deliberately, so the schema-validated
+    // `factCandidate` keeps `enrichment` as the byte-for-byte PLoT
+    // pass-through the handler-ownership invariant requires
+    // (`scripts/validate-handler-ownership.sh` §6) — the stamp is a separate,
+    // named, CEE-owned step, not a quiet edit of the pass-through. Re-parsed
+    // below so the stamped fact is proven schema-legal on the same schema the
+    // read path will apply (`enrichment` is `z.record`, so it is).
+    //
+    // See `CEE_CLAIM_SAFETY_ENRICHMENT_KEY` for why this rides `enrichment`
+    // and not a first-class `result.constraint_verdict` field (INTERIM: the
+    // result schema is `.strict()`; the fix needs a schemas release blocked
+    // behind V5-CI-01).
+    const stampedFact: RunAnalysisHandlerFact = {
+      ...parsed.data,
+      result: {
+        ...parsed.data.result,
+        enrichment: stampClaimSafetyOnEnrichment(
+          parsed.data.result.enrichment,
+          constraintVerdict,
+        ),
+      },
+    };
+    const stampedParsed = RunAnalysisHandlerFactSchema.safeParse(stampedFact);
+    if (!stampedParsed.success) {
+      throw new HandlerResultInvalidError(
+        'Claim-safety-stamped RunAnalysisHandlerFact failed schema validation',
+        stampedParsed.error,
+      );
+    }
+
     // --- 8. Emit HandlerOutcome ------------------------------------------
     // Fix 4 (observability): per-handler PLoT timings travel back to the
     // turn-executor via the typed `__plot_timings` slot on HandlerOutcome
@@ -1029,7 +1073,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // surface in default-OFF production.
     return {
       assistant_text: summary,
-      handler_facts: [parsed.data],
+      handler_facts: [stampedParsed.data],
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
       // D-ask-1 (2.11 P0-1): internal channel (never the wire envelope

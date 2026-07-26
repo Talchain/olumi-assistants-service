@@ -67,7 +67,11 @@ import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  selectRunAnalysisFact,
 } from '../context/freshness.js';
+// T1 claim safety — READ the verdict the run_analysis handler stamped on the
+// fact. This file never derives it (CLAUDE.md trap #12).
+import { readMayNameLeadingOption } from '../../orchestrator/context/constraint-feasibility.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -221,6 +225,18 @@ export type DispatchChipClickRunAnalysisResult =
        * chip answers exactly as it shapes the turn_executor advice-gate answers.
        */
       readonly answerKind?: AnswerKind;
+      /**
+       * T1 claim safety — may THIS chip-click turn name a leading option?
+       *
+       * The run_analysis chip runs a real analysis, so this path can withhold
+       * the leading-option claim exactly as the routed path can. READ from the
+       * stamp the run_analysis handler persisted on the fact; never re-derived
+       * (CLAUDE.md trap #12). route-v2 threads it into `sendFinalised200` so the
+       * layer-3 egress guard is armed on this path too — the coaching slot
+       * defect (#709) reached the wire through a dispatch path that had been
+       * overlooked, and the two paths must not drift again.
+       */
+      readonly mayNameLeadingOption?: boolean;
     }
   | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined; readonly graph: GraphV3T | null }
   | {
@@ -928,6 +944,17 @@ export async function dispatchChipClickRunAnalysis(
         // ROADMAP 1.132 (F1) — the run_analysis chip response is a receipt +
         // coaching blocks, not a prose answer: functional (stays plain).
         answerKind: 'functional' as AnswerKind,
+        // T1 claim safety — READ off the just-produced run_analysis fact, using
+        // the SAME canonical selector the routed path uses. Never re-derived
+        // (CLAUDE.md trap #12). No fact ⇒ `true` (this turn withheld nothing);
+        // a fact with no stamp ⇒ `readMayNameLeadingOption` fails CLOSED.
+        mayNameLeadingOption: ((): boolean => {
+          const selected = selectRunAnalysisFact([...enrichedFacts, ...context.prior_facts]);
+          if (selected === null) return true;
+          return selected.fact.fact_type === 'run_analysis'
+            ? readMayNameLeadingOption(selected.fact.result.enrichment)
+            : true;
+        })(),
       };
     } catch (err) {
       log.error(

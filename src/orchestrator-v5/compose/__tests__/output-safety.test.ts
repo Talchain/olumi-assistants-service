@@ -230,7 +230,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
   it('scrubs assistant_text', () => {
     const out = sanitiseOlumiResponseForEgress(
       emptyResponse({ assistant_text: 'See fac_delivery_cost for details.' }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     expect(out.assistant_text).toBe('See Delivery Cost for details.');
   });
@@ -258,6 +258,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           requestId: 'req-1',
           exitPath: 'test',
           userMessage: 'Set Key Talent Attrition to 0.8.',
+          mayNameLeadingOption: true,
         },
       );
       expect(out.suggested_actions).toEqual([]);
@@ -279,6 +280,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           requestId: 'req-1',
           exitPath: 'test',
           userMessage: 'Set Key Talent Attrition to 0.8.',
+          mayNameLeadingOption: true,
         },
       );
       expect(out.suggested_actions).toHaveLength(1);
@@ -290,6 +292,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
         requestId: 'req-1',
         exitPath: 'test',
         userMessage: 'Set Key Talent Attrition to 0.8.',
+        mayNameLeadingOption: true,
       };
       const once = sanitiseOlumiResponseForEgress(
         emptyResponse({
@@ -315,7 +318,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
       emptyResponse({
         blocks: [{ type: 'text', content: 'See fac_delivery_cost.' }],
       }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     expect(out.blocks[0]).toEqual({ type: 'text', content: 'See Delivery Cost.' });
   });
@@ -333,7 +336,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('analysis_result');
@@ -356,7 +359,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('explanation');
@@ -385,7 +388,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('comparison');
@@ -418,7 +421,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('flip_analysis');
@@ -443,7 +446,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     expect(out.blocks[0]).toEqual({
       type: 'error',
@@ -465,7 +468,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     expect(out.suggested_actions[0]).toEqual({
       id: 'chip_run_analysis', // untouched
@@ -480,7 +483,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
       emptyResponse({
         insights: [{ id: 'insight_fac_churn', text: 'fac_churn rising.' }],
       }),
-      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     expect(out.insights[0]).toEqual({
       id: 'insight_fac_churn',
@@ -494,14 +497,14 @@ describe('sanitiseOlumiResponseForEgress', () => {
       blocks: [{ type: 'text', content: 'See fac_delivery_cost.' }],
     });
     const inputCopy = JSON.parse(JSON.stringify(input));
-    sanitiseOlumiResponseForEgress(input, { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null });
+    sanitiseOlumiResponseForEgress(input, { graph: makeGraph(), requestId: 'req-1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true });
     expect(input).toEqual(inputCopy);
   });
 
   it('emits v5.egress_id_leak telemetry with prefix and exit_path only (no raw ID)', () => {
     sanitiseOlumiResponseForEgress(
       emptyResponse({ assistant_text: 'See fac_delivery_cost.' }),
-      { graph: makeGraph(), requestId: 'req-egress-1', exitPath: 'edit_graph', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-egress-1', exitPath: 'edit_graph', userMessage: null, mayNameLeadingOption: true },
     );
     expect(warnSpy).toHaveBeenCalled();
     const call = warnSpy.mock.calls.find((c) => {
@@ -528,6 +531,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
     const out = sanitiseOlumiResponseForEgress(clean, {
       graph: makeGraph(),
       requestId: 'req-clean',
+      mayNameLeadingOption: true,
     });
     expect(out.assistant_text).toBe('The leading option performs best.');
     const egressCall = warnSpy.mock.calls.find(
@@ -551,6 +555,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
     const out = sanitiseOlumiResponseForEgress(fallback, {
       graph: null,
       requestId: 'req-fallback',
+      mayNameLeadingOption: true,
     });
     expect(out).toEqual(fallback);
     const egressCall = warnSpy.mock.calls.find(
@@ -566,7 +571,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
       emptyResponse({
         assistant_text: 'Movement on fac_delivery_cost would shift opt_offshore_partner.',
       }),
-      { graph: null, requestId: 'req-null-graph', exitPath: 'test', userMessage: null },
+      { graph: null, requestId: 'req-null-graph', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     expect(out.assistant_text).toBe(
       'Movement on the relevant factor would shift the relevant option.',
@@ -579,7 +584,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
         assistant_text:
           'I noticed fac_delivery_cost has a strong negative effect on goal_revenue.',
       }),
-      { graph: makeGraph(), requestId: 'req-regression', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-regression', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     expect(out.assistant_text).toBe(
       'I noticed Delivery Cost has a strong negative effect on Revenue.',
@@ -615,7 +620,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-r1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-r1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('review_card');
@@ -655,7 +660,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-c1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-c1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('coaching');
@@ -694,7 +699,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-e1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-e1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('evidence');
@@ -740,7 +745,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-x1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-x1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('exercise');
@@ -778,7 +783,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-x2', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-x2', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('exercise');
@@ -814,7 +819,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-hp1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-hp1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('held_proposal');
@@ -845,7 +850,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: null, requestId: 'req-hp2', exitPath: 'test', userMessage: null },
+      { graph: null, requestId: 'req-hp2', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('held_proposal');
@@ -869,7 +874,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-ud1', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-ud1', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('ui_directive');
@@ -896,7 +901,7 @@ describe('sanitiseOlumiResponseForEgress', () => {
           },
         ],
       }),
-      { graph: makeGraph(), requestId: 'req-ud2', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-ud2', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
     const block = out.blocks[0]!;
     expect(block.type).toBe('ui_directive');
@@ -1192,6 +1197,7 @@ describe('leg κ(a) — top-level graph_hash on egress', () => {
       requestId: 'req-kappa-a',
       exitPath: 'test',
       userMessage: null,
+      mayNameLeadingOption: true,
     });
     const expected = computeAnalysisAffectingGraphHash(
       graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
@@ -1206,13 +1212,14 @@ describe('leg κ(a) — top-level graph_hash on egress', () => {
       requestId: 'req-kappa-a-null',
       exitPath: 'test',
       userMessage: null,
+      mayNameLeadingOption: true,
     });
     expect((out as { graph_hash?: string }).graph_hash).toBeUndefined();
   });
 
   it('IDEMPOTENT: re-running the chokepoint keeps the same graph_hash (the 4x re-entry contract)', () => {
     const graph = makeGraph();
-    const opts = { graph, requestId: 'req-kappa-a-idem', exitPath: 'test', userMessage: null };
+    const opts = { graph, requestId: 'req-kappa-a-idem', exitPath: 'test', userMessage: null, mayNameLeadingOption: true };
     const once = sanitiseOlumiResponseForEgress(emptyResponse({ assistant_text: 'hi' }), opts);
     const twice = sanitiseOlumiResponseForEgress(once, opts);
     expect((twice as { graph_hash?: string }).graph_hash).toBe(

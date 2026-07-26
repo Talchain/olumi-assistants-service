@@ -544,3 +544,116 @@ export function deriveConstraintVerdict(
     ? verdict('evaluated_infeasible', { leaderInfeasibility: leaderRaw })
     : verdict('evaluated_feasible');
 }
+
+// ===========================================================================
+// T1 — PERSISTING the verdict alongside the analysis facts
+// ===========================================================================
+
+/**
+ * The key CEE stamps its own claim-safety verdict under, inside the
+ * run_analysis fact's `result.enrichment`.
+ *
+ * INTERIM SHAPE — read this before copying the pattern.
+ *
+ * The CORRECT home is a first-class `constraint_verdict` field on
+ * `RunAnalysisResultSchema`. It cannot go there today: that schema is
+ * `.strict()` in the vendored `@talchain/schemas` package
+ * (`dist/orchestrator/handler-results.js`, `RunAnalysisResultSchema … }).strict()`),
+ * so an extra key on `result` fails BOTH the handler's own
+ * `RunAnalysisHandlerFactSchema.safeParse` on write AND
+ * `HandlerFactSchema.safeParse` on every read
+ * (`session/supabase-store.ts` `readFactsWithTurnFor`, which THROWS
+ * `SessionReadError` rather than skipping). Moving it therefore needs a
+ * schemas package release, which is blocked behind V5-CI-01 (GitHub Packages
+ * auth). The same wall is recorded verbatim on
+ * `HandlerOutcome.__validation_beat` (`tools/registry.ts`).
+ *
+ * `enrichment` is `z.record(z.string(), z.unknown())`, so it passes strict
+ * unchanged. The `__cee_` prefix marks the key as CEE-OWNED: `enrichment` is
+ * otherwise PLoT's bytes, and a reader must be able to tell at a glance that
+ * this one is not. It is a sibling of `decision_review`, which the
+ * turn-executor already writes into the same record
+ * (`turn-executor.ts` `patchRunAnalysisDecisionReviewNull`,
+ * `enrichRunAnalysisWithDecisionReview`), so this is an established channel at
+ * this layer rather than a new one.
+ *
+ * It never reaches the wire: `toSafeTransportEnrichment` (`compose.ts`)
+ * projects enrichment through the `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`
+ * allowlist, and this key is deliberately absent from it.
+ *
+ * TARGET: `RunAnalysisResultSchema.constraint_verdict`. Delete this key and
+ * its two helpers when V5-CI-01 unblocks the release.
+ */
+export const CEE_CLAIM_SAFETY_ENRICHMENT_KEY = '__cee_claim_safety';
+
+/**
+ * The persisted projection of {@link ConstraintVerdict} — the FACT ABOUT THE
+ * ANALYSIS that "may a leading option be named" is.
+ *
+ * Only the two fields any consumer needs are stored. `constraints` and
+ * `leaderInfeasibility` carry user labels and producer detail; they are
+ * deliberately NOT persisted here, because nothing downstream of the single
+ * derivation reads them and a second copy of a label is a second thing to
+ * drift.
+ */
+export interface PersistedClaimSafety {
+  /** Verbatim {@link ConstraintVerdict.mayNameLeadingOption}. */
+  readonly may_name_leading_option: boolean;
+  /** Verbatim {@link ConstraintVerdict.state}, for telemetry and triage. */
+  readonly constraint_verdict_state: ConstraintVerdictState;
+}
+
+/**
+ * Stamp the verdict onto a run_analysis fact's `enrichment` record.
+ *
+ * Called EXACTLY ONCE, in `run_analysis`, immediately after the single
+ * `deriveConstraintVerdict` call that owns this meaning. Every other surface
+ * READS the stamp (see {@link readMayNameLeadingOption}) rather than deriving
+ * its own — two derivations can see different inputs (the handler reads
+ * `snapshot.goal_constraints`; compose would read a hash-gated persisted graph
+ * that is `undefined` whenever the gate fails) and produce an internally
+ * inconsistent response, which is the exact defect class this closes
+ * (CLAUDE.md trap #12).
+ *
+ * Pure: returns a new record, never mutates the input.
+ */
+export function stampClaimSafetyOnEnrichment(
+  enrichment: Record<string, unknown> | undefined,
+  verdict: ConstraintVerdict,
+): Record<string, unknown> {
+  const stamp: PersistedClaimSafety = {
+    may_name_leading_option: verdict.mayNameLeadingOption,
+    constraint_verdict_state: verdict.state,
+  };
+  return { ...(enrichment ?? {}), [CEE_CLAIM_SAFETY_ENRICHMENT_KEY]: stamp };
+}
+
+/**
+ * Read "may a leading option be named" off a persisted analysis fact's
+ * `enrichment`. FAILS CLOSED.
+ *
+ * Absent, malformed, or carrying a non-boolean ⇒ `false` (withheld). That is
+ * not defensive padding, it is the only safe reading:
+ *
+ *   - Every fact written BEFORE this change is unstamped, and for those the
+ *     verdict is genuinely unknown. "Unknown" and "verified feasible" are
+ *     different claims, and only the second licenses naming a leader.
+ *   - A future write path that forgets to stamp is a bug. Failing open would
+ *     make that bug silent and re-open the P0 (G-CEE-1 walk, staging
+ *     `1c078f0`): "no option can be put forward yet" printed directly above
+ *     "The MacBook Pro leads by a margin of about 52 percentage points".
+ *
+ * The cost of the closed default is content, not correctness: a rebuilt view
+ * of a historic analysis drops its leader-presuming cards. The cost of an open
+ * default is the product asserting a recommendation it has just told the user
+ * it cannot make.
+ */
+export function readMayNameLeadingOption(enrichment: unknown): boolean {
+  if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {
+    return false;
+  }
+  const stamp = (enrichment as Record<string, unknown>)[CEE_CLAIM_SAFETY_ENRICHMENT_KEY];
+  if (stamp === null || typeof stamp !== 'object' || Array.isArray(stamp)) return false;
+  const value = (stamp as Record<string, unknown>).may_name_leading_option;
+  return value === true;
+}
