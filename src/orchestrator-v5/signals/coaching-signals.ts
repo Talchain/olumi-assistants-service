@@ -104,6 +104,28 @@ const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
 };
 
 /**
+ * Read the constraint verdict's own "may a leading option be named"
+ * declaration off the handler outcome's internal channel
+ * (`HandlerOutcome.__leading_option_claim_withheld`, registry.ts).
+ *
+ * The parameter widens `SuccessfulHandlerOutcome` — which is a deliberately
+ * narrowed brand carrying only the three contract fields — with the optional
+ * channel, so this is a typed read and not a cast. The runtime object IS the
+ * handler's outcome, so the field is present when the handler set it; the
+ * route-level test proves that end to end rather than assuming it.
+ *
+ * Absent ⇒ not withheld, so every non-run_analysis handler and every
+ * pre-existing caller stays byte-identical.
+ */
+function leadingOptionClaimWithheld(
+  outcome: SuccessfulHandlerOutcome & {
+    readonly __leading_option_claim_withheld?: boolean;
+  },
+): boolean {
+  return outcome.__leading_option_claim_withheld === true;
+}
+
+/**
  * ROADMAP 2.73 — rerun acknowledgment copy, derived from the shared
  * `compareRuns` delta (reuse, not a parallel diff). Register mirrors the
  * run-comparison gate's `composeComparison` so the two rerun surfaces
@@ -179,7 +201,35 @@ export function detectCoachingSignal(
 
   // run_analysis branch.
   if (input.proposedHandlerId === 'run_analysis') {
+    // T1 claim safety. When the constraint verdict forbids naming a leading
+    // option, BOTH texts below become false statements: the first-run copy
+    // tells the user to "explore the leading option", and the rerun copy names
+    // the option outright ("{label} still leads"). The confirmation directly
+    // above them has just said no option can be put forward.
+    //
+    // This is not caught by the egress allowlist — that governs only the
+    // confirmation segment of `assistant_text`; this piece is a separate
+    // compose slot. So the claim-safety machinery built for the headline is
+    // bypassed by the sentence underneath it unless the signal itself is aware.
+    //
+    // The verdict's own `mayNameLeadingOption` declaration arrives on the
+    // handler outcome; nothing here re-derives it (CLAUDE.md trap #12).
+    const leaderWithheld = leadingOptionClaimWithheld(input.outcome);
+
     if (!hasPriorSuccessfulRunAnalysis(input.priorFacts)) {
+      // SUPPRESSED, not reworded. The whole of this signal's value is the
+      // "explore the leading option" nudge, and on a withheld turn there is no
+      // leading option to explore. A replacement sentence would either repeat
+      // the confirmation's repair step or put a second, competing
+      // call-to-action on the same screen — and across the three withholding
+      // states, which have three different causes, any single re-diagnosis
+      // would be wrong for two of them. The confirmation already names the
+      // condition and says what to do; the honest coaching here is none.
+      //
+      // Telemetry does not go dark: the verdict's own events
+      // (v5.run_analysis.constraint_unevaluated /
+      // .constraint_identity_unresolved) already count these turns.
+      if (leaderWithheld) return null;
       return {
         signal_id: 'FIRST_ANALYSIS_COMPLETE',
         coaching_text: COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}),
@@ -191,11 +241,19 @@ export function detectCoachingSignal(
     // rerun acknowledgment whose text derives from the shared compareRuns
     // comparator (prior fact vs this turn's fact); when either run cannot
     // be projected the copy degrades to a comparison-free acknowledgment.
+    //
+    // On a withheld turn the comparison is not merely unsayable, it is
+    // unmakeable: every branch of `composeRerunText` that says anything
+    // NAMES an option. So the withheld turn reuses that same comparison-free
+    // degrade — the run is still acknowledged, no leader is asserted, and the
+    // signal id is unchanged so the telemetry series does not go dark.
     return {
       signal_id: 'RERUN_ANALYSIS_COMPLETE',
-      coaching_text: COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
-        runDelta: buildRerunDelta(input),
-      }),
+      coaching_text: leaderWithheld
+        ? composeRerunText(null)
+        : COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
+            runDelta: buildRerunDelta(input),
+          }),
     };
   }
 

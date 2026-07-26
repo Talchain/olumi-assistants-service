@@ -75,6 +75,9 @@ const READY_GRAPH = {
  */
 function plotEnvelope(opts: {
   constraintKey?: string;
+  /** Satisfaction probability written under `constraintKey`. 0 ⇒ the leader
+   *  violates it, which selects `evaluated_infeasible`. */
+  constraintProb?: number;
   constraintsStatus?: string;
   warningCodes?: readonly string[];
 }): Record<string, unknown> {
@@ -89,7 +92,7 @@ function plotEnvelope(opts: {
     ...(withProbs
       ? {
           constraint_probabilities: { [opts.constraintKey!]: prob },
-          probability_of_joint_goal: 0.9,
+          probability_of_joint_goal: prob === 0 ? 0 : 0.9,
         }
       : {}),
   });
@@ -101,8 +104,8 @@ function plotEnvelope(opts: {
       ? { inference_warnings: opts.warningCodes.map((code) => ({ code })) }
       : {}),
     option_comparison: [
-      option('opt_hire', 'Hire Marketing Manager', 0.72, 0.91),
-      option('opt_hold', 'Hold', 0.28, 0.88),
+      option('opt_hire', 'Hire Marketing Manager', 0.72, opts.constraintProb ?? 0.91),
+      option('opt_hold', 'Hold', 0.28, opts.constraintProb ?? 0.88),
     ],
     response_hash: 'sha256:fixture-top',
   };
@@ -110,12 +113,64 @@ function plotEnvelope(opts: {
 
 /** Swapped per test, before the inject. */
 let plotResponse: Record<string, unknown> = plotEnvelope({});
+/**
+ * A prior successful run selects the RE-RUN coaching signal instead of the
+ * first-run one. BOTH the turn row and the fact are required: `buildTurnContext`
+ * loads `prior_facts` by FK from `priorTurns.map(t => t.id)`, so seeding facts
+ * alone yields an empty `prior_facts` and the turn silently takes the FIRST-run
+ * branch. (Found by mutation: a re-run-only revert changed nothing until this
+ * was fixed.)
+ */
+let priorTurns: Array<Record<string, unknown>> = [];
+let priorFacts: Array<Record<string, unknown>> = [];
+
+const PRIOR_RUN_ANALYSIS_TURN = {
+  id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  scenario_id: SCENARIO_ID,
+  user_id: null,
+  turn_id: 'prior-turn-run-analysis',
+  turn_class: 'handler',
+  handler_id: 'run_analysis',
+  request_hash: 'sha256:prior-ra',
+  response_emitted: true,
+  llm_calls_used: 1,
+  duration_ms: 200,
+  created_at: new Date(Date.now() - 60_000).toISOString(),
+};
+
+function priorRunAnalysisFact(): Record<string, unknown> {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_hire',
+      summary: 'Prior analysis result',
+      computed_at: new Date(Date.now() - 60_000).toISOString(),
+      enrichment: {
+        analysis_status: 'completed',
+        option_comparison: [
+          { option_id: 'opt_hire', option_label: 'Hire Marketing Manager', win_probability: 0.72, outcome_mean: 0.5 },
+          { option_id: 'opt_hold', option_label: 'Hold', win_probability: 0.28, outcome_mean: 0.3 },
+        ],
+      },
+      win_probabilities: { opt_hire: 0.72, opt_hold: 0.28 },
+    },
+  };
+}
+
+/** Seed a prior successful run: BOTH the turn row and its fact. */
+function seedPriorRun(): void {
+  priorTurns = [PRIOR_RUN_ANALYSIS_TURN];
+  priorFacts = [priorRunAnalysisFact()];
+}
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
-    readRecent: async () => [],
-    readFactsFor: async () => [],
+    readRecent: async () => priorTurns,
+    readFactsFor: async () => priorFacts,
     loadGraph: async () => READY_GRAPH,
     loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
@@ -215,6 +270,13 @@ interface WireTurn {
    * that proves an `assistant_text` assertion is not vacuous.
    */
   blockSummary: string;
+  /**
+   * The COACHING segment — the last `\n\n`-delimited piece when one fired.
+   * `composeToolCallResponse` joins [orientation?, confirmation, coaching?],
+   * and the egress allowlist governs ONLY the confirmation, so the two slots
+   * must be asserted separately.
+   */
+  coaching: string;
 }
 
 async function runAnalysisTurn(app: FastifyInstance): Promise<WireTurn> {
@@ -242,6 +304,10 @@ async function runAnalysisTurn(app: FastifyInstance): Promise<WireTurn> {
     raw: res.body,
     assistantText,
     confirmation: assistantText.split('\n\n')[0] ?? '',
+    coaching: (() => {
+      const segs = assistantText.split('\n\n');
+      return segs.length > 1 ? segs[segs.length - 1]! : '';
+    })(),
     blockSummary: typeof block?.summary === 'string' ? block.summary : '',
   };
 }
@@ -262,6 +328,8 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     routeWithToolUseMock.mockReset();
     routeWithToolUseMock.mockResolvedValue(routedRunAnalysis());
     plotResponse = plotEnvelope({});
+    priorTurns = [];
+    priorFacts = [];
   });
   afterEach(() => {
     setTestSink(null);
@@ -369,4 +437,158 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // template rather than "Hire Marketing Manager currently leads".
     expect(turn.assistantText).not.toContain('currently leads');
   });
+});
+
+/**
+ * THE COACHING TAIL — the second producer of claims about the same state.
+ *
+ * The confirmation above says "no option can be put forward yet". The composer
+ * then appends the STEP-5 coaching piece to the SAME `assistant_text`, and that
+ * copy presumes the very leader the confirmation declined to name — on a re-run
+ * it names the option outright. Observed verbatim before the fix:
+ *
+ *   [0] "Ran analysis on your current scenario. One of the conditions you set
+ *        was not checked: “Total three-year cost”. … so no option can be put
+ *        forward yet. Re-state that limit … then run the analysis again."
+ *   [1] "Your first analysis is ready. Take a moment to explore the leading
+ *        option and the factors shaping it before acting on the result."
+ *
+ * WHY NO EXISTING DEFENCE CAUGHT IT: `isAllowedRunAnalysisAssistantText`
+ * governs only the CONFIRMATION segment. The coaching piece is a separate
+ * compose slot that never passes through it, so every defence built for the
+ * headline is bypassed one line underneath.
+ *
+ * The gate is `mayNameLeadingOption === false`, NOT a list of state names, so a
+ * future withholding state is covered without touching this code. All three
+ * current withholding states are exercised below for the same reason the enum
+ * exists: they reach this slot by one path.
+ */
+const LEADING_OPTION_LANGUAGE: readonly RegExp[] = [
+  /explore the leading option/i,
+  /\bstill leads\b/i,
+  /\bnow leads\b/i,
+  /\bled before\b/i,
+  /its lead has (?:widened|narrowed)/i,
+  /the result is unchanged/i,
+];
+
+/** The three states in which the verdict forbids naming a leading option. */
+const WITHHOLDING_STATES = [
+  {
+    state: 'unevaluated',
+    envelope: () =>
+      plotEnvelope({ constraintsStatus: 'unavailable', warningCodes: ['CONSTRAINT_OUT_OF_DOMAIN'] }),
+  },
+  {
+    state: 'identity_unresolved',
+    envelope: () => plotEnvelope({ constraintKey: 'out_total_cost_<=' }),
+  },
+  {
+    state: 'evaluated_infeasible',
+    envelope: () =>
+      plotEnvelope({ constraintKey: 'constraint_out_total_cost_max', constraintProb: 0 }),
+  },
+] as const;
+
+describe('withhold paths: the coaching tail must not presume a leading option', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => app.close());
+  beforeEach(() => {
+    setTestSink(() => {});
+    routeWithToolUseMock.mockReset();
+    routeWithToolUseMock.mockResolvedValue(routedRunAnalysis());
+    plotResponse = plotEnvelope({});
+    priorTurns = [];
+    priorFacts = [];
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.clearAllMocks();
+  });
+
+  describe('POSITIVE CONTROLS — the test can fail in BOTH directions', () => {
+    // Without these, every `not.toMatch` below would pass on a turn that
+    // emitted no coaching at all. These assert the copy IS present on
+    // `evaluated_feasible`, so a fix that simply deleted all coaching fails.
+
+    it('evaluated_feasible, FIRST run: the coaching copy IS still present', () => {
+      plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
+      return runAnalysisTurn(app).then((turn) => {
+        expect(turn.status).toBe(200);
+        expect(turn.coaching).toMatch(/explore the leading option/i);
+      });
+    });
+
+    it('evaluated_feasible, RE-RUN: the coaching copy names the option', () => {
+      // Also proves the re-run branch is genuinely reached — the first-run copy
+      // is asserted ABSENT, so a fixture that silently fell back to the
+      // first-run signal fails here instead of passing the withhold assertions
+      // below for the wrong reason.
+      plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
+      seedPriorRun();
+      return runAnalysisTurn(app).then((turn) => {
+        expect(turn.status).toBe(200);
+        expect(turn.coaching).not.toMatch(/your first analysis is ready/i);
+        expect(turn.coaching).toContain('Hire Marketing Manager');
+      });
+    });
+  });
+
+  for (const { state, envelope } of WITHHOLDING_STATES) {
+    describe(`${state}`, () => {
+      it('FIRST analysis: no leading-option language in the serialised bytes', async () => {
+        plotResponse = envelope();
+        const turn = await runAnalysisTurn(app);
+        expect(turn.status).toBe(200);
+        for (const pattern of LEADING_OPTION_LANGUAGE) {
+          expect(turn.assistantText).not.toMatch(pattern);
+        }
+        expect(turn.assistantText).not.toContain('Hire Marketing Manager');
+      });
+
+      it('RE-RUN: no leading-option language in the serialised bytes', async () => {
+        // The worse case: `composeRerunText` NAMES the option in four of its
+        // five branches, on a turn whose claim-safety machinery just withheld
+        // exactly that claim.
+        plotResponse = envelope();
+        seedPriorRun();
+        const turn = await runAnalysisTurn(app);
+        expect(turn.status).toBe(200);
+        for (const pattern of LEADING_OPTION_LANGUAGE) {
+          expect(turn.assistantText).not.toMatch(pattern);
+        }
+        expect(turn.assistantText).not.toContain('Hire Marketing Manager');
+      });
+
+      it('FIRST analysis: the coaching slot is SUPPRESSED, not reworded', async () => {
+        // The confirmation already names the condition and gives the repair
+        // step. A replacement sentence would be a second, competing
+        // call-to-action on the same screen.
+        plotResponse = envelope();
+        const turn = await runAnalysisTurn(app);
+        expect(turn.coaching).toBe('');
+        // …and the confirmation is still there, so the screen is not empty.
+        expect(turn.confirmation.length).toBeGreaterThan(0);
+      });
+
+      it('RE-RUN: the comparison-free acknowledgement survives', async () => {
+        // This one is KEPT rather than suppressed: "your earlier result has
+        // been replaced" is information the confirmation does not carry, and it
+        // presumes no leader. It is `composeRerunText`'s own existing degrade,
+        // reused rather than written.
+        plotResponse = envelope();
+        seedPriorRun();
+        const turn = await runAnalysisTurn(app);
+        expect(turn.coaching).toBe(
+          'This was a re-run. It replaces the earlier result as the current analysis.',
+        );
+      });
+    });
+  }
 });
