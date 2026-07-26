@@ -702,4 +702,50 @@ describe("POST /proxy/v5/turn", () => {
       });
     });
   });
+
+  // ---- Auth-posture disclosure at boot ----
+  //
+  // The unauthenticated-access posture was reported twice by independent
+  // reviewers before anyone noticed it, because nothing in the running system
+  // ever stated it. These pin that a deployment which accepts unauthenticated
+  // turns SAYS SO at boot, and — just as important — that a deployment which
+  // does not accept them stays quiet, so the warning keeps meaning something.
+
+  describe("auth-posture disclosure at registration", () => {
+    it("warns at boot that unauthenticated turns are accepted when the JWT gate is off", async () => {
+      const { log } = await import("../../utils/telemetry.js");
+      vi.mocked(log.warn).mockClear();
+      mockConfig.auth.requireUserJwt = false;
+
+      app = buildApp();
+      await app.ready();
+
+      const warned = vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) => String(c[1]).includes("AUTH POSTURE"));
+      expect(warned).toHaveLength(1);
+      // The message must name the actual exposure, not just the flag.
+      expect(String(warned[0][1])).toContain("Guest scenarios");
+      expect(String(warned[0][1])).toContain("Origin is not authentication");
+      expect(warned[0][0]).toMatchObject({ require_user_jwt: false });
+    });
+
+    it("NEGATIVE CONTROL: stays silent when the JWT gate is on", async () => {
+      // Without this, the assertion above would pass against a route that
+      // warns unconditionally — which would be a warning that carries no
+      // information about the deployment it is describing.
+      const { log } = await import("../../utils/telemetry.js");
+      vi.mocked(log.warn).mockClear();
+      mockConfig.auth.requireUserJwt = true;
+
+      app = buildApp();
+      await app.ready();
+      mockConfig.auth.requireUserJwt = false;
+
+      const warned = vi
+        .mocked(log.warn)
+        .mock.calls.filter((c) => String(c[1]).includes("AUTH POSTURE"));
+      expect(warned).toHaveLength(0);
+    });
+  });
 });

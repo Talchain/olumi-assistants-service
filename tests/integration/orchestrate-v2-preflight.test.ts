@@ -299,27 +299,56 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
     expect(parsed.details).toMatchObject({ field: 'user_id' });
   });
 
-  it('on an RPC error, pre-flight silently skips and TurnExecutor is the last line of defence', async () => {
+  it('on an RPC error, pre-flight REFUSES the turn (fail closed) and TurnExecutor never starts', async () => {
+    // CHANGED 2026-07-26 (Lane S). This previously asserted 200 — "pre-flight
+    // silently skips and TurnExecutor is the last line of defence". The
+    // premise was verified and is FALSE for ownership: append_turn_atomic
+    // (v1/v2/v3) reads user_id FROM the scenarios row to denormalise it onto
+    // the turn and never compares it to any caller identity. It guards
+    // scenario EXISTENCE, not ownership. So the skip removed the ownership
+    // check with nothing behind it, and did so exactly when the database was
+    // unhealthy — the only remaining bypass for the one control that works.
+    //
+    // The turn is now refused with a distinct reason. Note this is asserted
+    // for a caller who genuinely IS the owner: identity does not rescue the
+    // turn, because an unanswered oracle cannot confirm ownership and a
+    // caller-supplied id proves nothing on its own.
     storeState.throwOnEnsure = new Error('transient supabase outage');
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: buildRequest(SCENARIO_OWNED_BY_CALLER, USER_CALLER),
     });
-    expect(res.statusCode).toBe(200);
-    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(1);
+    expect(res.statusCode).toBe(422);
+    const parsed = BoundaryErrorSchema.parse(JSON.parse(res.body));
+    expect(parsed.error).toBe('INGRESS_CONTRACT_VIOLATION');
+    expect(parsed.validator).toBe('scenario_preflight');
+    expect(parsed.details).toMatchObject({ reason: 'scenario_ownership_unverifiable' });
+    // The refusal must happen BEFORE any execution — no LLM spend, no writes.
+    expect(events.filter((e) => e.event === 'turn_executor.started')).toHaveLength(0);
   });
 
   // ─────────────────────────────────────────────────────────────────────
   // Edge-case verification (pre-merge review)
   // ─────────────────────────────────────────────────────────────────────
 
-  it('edge case 2 — preflight RPC fails AND commit RPC fails: 500 BoundaryError, NOT silent 200', async () => {
-    // Simulates realistic "Supabase outage": ensure_scenario_exists errors,
-    // then append_turn_atomic also errors. Without the fail-closed invariant
-    // (route-v2.ts commit-check), a TurnExecutor whose commit failed would
-    // otherwise emit 200 + well-formed OlumiResponse, silently corrupting
-    // the session. The commit-check guarantees 500 + typed BoundaryError.
+  it('edge case 2 — full Supabase outage (preflight RPC + commit RPC both fail): typed refusal, NEVER a silent 200', async () => {
+    // Simulates a realistic "Supabase outage": ensure_scenario_exists errors,
+    // and append_turn_atomic would also error.
+    //
+    // CHANGED 2026-07-26 (Lane S). The asserted status moved 500 → 422 and
+    // the refusal now comes from the PRE-FLIGHT rather than the commit-check,
+    // because the pre-flight no longer proceeds past an unanswerable
+    // ownership oracle. That is a strict improvement for the same outage:
+    // the turn is refused before any LLM spend or write attempt instead of
+    // after one.
+    //
+    // The invariant this test exists to protect — "an outage must never
+    // produce a silent 200 + well-formed OlumiResponse" — is UNCHANGED and
+    // still asserted at the bottom. The commit-check path it used to reach
+    // (STATE_COMMIT_FAILED → 500 + validator 'turn_commit') is NOT left
+    // uncovered: 'edge case 3' below drives exactly that path, with the
+    // preflight RPC succeeding and only append_turn_atomic failing.
     storeState.throwOnEnsure = new Error('ensure_scenario_exists: transient outage');
     storeState.throwOnAppend = new MockStateCommitFailedError(
       'append_turn_atomic RPC failed: transient outage',
@@ -330,24 +359,15 @@ describe('POST /orchestrate/v2/turn — upsert-on-append pre-flight', () => {
       url: '/orchestrate/v2/turn',
       payload: buildRequest(SCENARIO_OWNED_BY_CALLER, USER_CALLER),
     });
-    expect(res.statusCode).toBe(500);
+    expect(res.statusCode).toBe(422);
     const body = JSON.parse(res.body);
     const parsed = BoundaryErrorSchema.parse(body);
-    // The internal class STATE_COMMIT_FAILED maps to wire code
-    // INTERNAL_ERROR (see INTERNAL_TO_WIRE in orchestrator-v5/types.ts).
-    // The original class is preserved in details.failure_type so clients
-    // that want the granular signal can read it there.
-    expect(parsed.error).toBe('INTERNAL_ERROR');
+    expect(parsed.error).toBe('INGRESS_CONTRACT_VIOLATION');
     expect(parsed.boundary).toBe('B1');
-    expect(parsed.direction).toBe('egress');
-    expect(parsed.validator).toBe('turn_commit');
-    // STATE_COMMIT_FAILED is a retryable class — the wire flag must say so.
-    expect(parsed.retryable).toBe(true);
-    expect(parsed.details).toMatchObject({
-      reason: 'state_commit_failed_or_turn_runtime_failure',
-      failure_type: 'INTERNAL_ERROR',
-    });
-    // Belt-and-braces: the response must NEVER be a 200 with an
+    expect(parsed.direction).toBe('ingress');
+    expect(parsed.validator).toBe('scenario_preflight');
+    expect(parsed.details).toMatchObject({ reason: 'scenario_ownership_unverifiable' });
+    // Belt-and-braces, unchanged: the response must NEVER be a 200 with an
     // OlumiResponse body under these conditions.
     expect(body).not.toHaveProperty('turn_id');
     expect(body).not.toHaveProperty('blocks');
