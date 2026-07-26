@@ -15,6 +15,7 @@
 import type { HandlerValidationRegistry, PreconditionCheck } from './validator.js';
 import { SetFactorValueValueSchema } from '../tools/handlers/set-factor-value.js';
 import { SCAFFOLD_ANY_DISCLOSURE_RE_SRC } from '../coaching/scaffold-disclosure.js';
+import { CONSTRAINT_GAP_DISCLOSURE_RE_SRC } from '../coaching/constraint-gap-disclosure.js';
 import {
   AddConstraintLabelSchema,
   AddConstraintTypeSchema,
@@ -93,6 +94,13 @@ const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
 const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
 // Compiled once; source is the disclosure's own published grammar.
 const SCAFFOLD_DISCLOSURE_EXTRACT_RE = new RegExp(SCAFFOLD_ANY_DISCLOSURE_RE_SRC);
+// T1: the same honesty floor for the constraint-gap disclosure. A run whose
+// ratified condition was never evaluated may not render undisclosed either, so
+// if the composed summary is rejected the gap sentence is salvaged onto the
+// fallback exactly as the scaffold one is — and the COMBINED result is
+// re-checked against the allowlist before shipping, so the salvage cannot
+// smuggle through content the allowlist just rejected.
+const CONSTRAINT_GAP_EXTRACT_RE = new RegExp(CONSTRAINT_GAP_DISCLOSURE_RE_SRC);
 const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   if (
     outcome === null ||
@@ -115,10 +123,21 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   // allowlist rejected through the backstop itself). Genuine builder
   // disclosures pass; a poisoned disclosure-shaped slice falls back bare.
   if (typeof candidate === 'string') {
-    const disclosure = candidate.match(SCAFFOLD_DISCLOSURE_EXTRACT_RE);
-    if (disclosure) {
-      const combined = RUN_ANALYSIS_FALLBACK_TEXT + disclosure[0];
+    // Salvage in the handler's own append order (scaffold, then gap) so the
+    // combined text is a shape the allowlist's template branch recognises.
+    // Either, neither, or both may be present.
+    const scaffold = candidate.match(SCAFFOLD_DISCLOSURE_EXTRACT_RE)?.[0] ?? '';
+    const gap = candidate.match(CONSTRAINT_GAP_EXTRACT_RE)?.[0] ?? '';
+    if (scaffold.length > 0 || gap.length > 0) {
+      const combined = RUN_ANALYSIS_FALLBACK_TEXT + scaffold + gap;
       if (isAllowedRunAnalysisAssistantText(combined)) return combined;
+      // A poisoned slice in one disclosure must not cost us the other: retry
+      // with each alone before giving up on disclosure entirely.
+      for (const only of [gap, scaffold]) {
+        if (only.length === 0) continue;
+        const single = RUN_ANALYSIS_FALLBACK_TEXT + only;
+        if (isAllowedRunAnalysisAssistantText(single)) return single;
+      }
     }
   }
   return RUN_ANALYSIS_FALLBACK_TEXT;
