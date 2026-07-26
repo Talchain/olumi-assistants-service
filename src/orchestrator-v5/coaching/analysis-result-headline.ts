@@ -68,6 +68,18 @@ import {
   SCAFFOLD_ANY_DISCLOSURE_RE_SRC,
   SCAFFOLD_DISCLOSURE_MAX_CHARS,
 } from './scaffold-disclosure.js';
+// T1 (constraint applied then never evaluated): the gap disclosure is the
+// SECOND suffix that may ride on a run_analysis summary, and it needs exactly
+// the same three pieces of plumbing as the scaffold one — a published grammar
+// (below, in TAIL_PATTERN and TEMPLATE_SUFFIX_ONLY_REGEX), a length budget
+// (MAX_ASSISTANT_TEXT_CHARS), and a build-time survival probe in its own
+// builder. Shipped without them, it was rejected here and the user received
+// only the locked template: the withheld-claim half of the fix survived while
+// the "which condition, and how to repair it" half never reached the wire.
+import {
+  CONSTRAINT_GAP_DISCLOSURE_RE_SRC,
+  CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS,
+} from './constraint-gap-disclosure.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
 // their own leaf module so the scaffold-disclosure BUILDER validates its
 // composed suffix against the SAME functions this egress allowlist applies
@@ -144,7 +156,12 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // D-ask-1 (2.11 P0-1): the scaffold disclosure suffix rides AFTER every
   // other tail. Budgeted from the builder's own worst case so an honest
   // disclosure can never knock the summary back to the bland fallback.
-  SCAFFOLD_DISCLOSURE_MAX_CHARS;
+  SCAFFOLD_DISCLOSURE_MAX_CHARS +
+  // T1: the constraint-gap disclosure rides after the scaffold one (matching
+  // the handler's append order), and can co-occur with it — a scaffolded run
+  // may also have an unevaluated ratified constraint. Same rule: budgeted from
+  // the builder's own worst case, never hand-estimated.
+  CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -1622,15 +1639,24 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
 // narration tail and status suffix — mirroring the handler's
 // `summary + buildScaffoldDisclosureSuffix(...)` append order.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?`;
+// T1: the constraint-gap disclosure composes LAST of all — after the scaffold
+// disclosure — mirroring `${headline ?? template}${scaffoldDisclosure}${
+// constraintGapDisclosure}` in the run_analysis handler.
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?`;
 
 /**
- * Anchored form of the scaffold-disclosure grammar, for the locked-template
- * branch of {@link isAllowedRunAnalysisAssistantText}: a template-shaped
- * text may carry EXACTLY one whole disclosure suffix after the template
- * literal — nothing else.
+ * Anchored form of the DISCLOSURE grammars, for the locked-template branch of
+ * {@link isAllowedRunAnalysisAssistantText}: a template-shaped text may carry
+ * the scaffold disclosure, the T1 constraint-gap disclosure, or both in the
+ * handler's append order — and nothing else.
+ *
+ * Both slots are optional here, but the caller only reaches this regex when the
+ * remainder after the template literal is non-empty (`text.length >
+ * template.length`), so an empty match cannot admit a bare template twice.
  */
-const SCAFFOLD_SUFFIX_ONLY_REGEX = new RegExp(`^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})$`);
+const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
+  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?$`,
+);
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three
 // claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
@@ -1744,17 +1770,18 @@ export function isAllowedRunAnalysisAssistantText(text: unknown): boolean {
   if (text.length === 0 || text.length > MAX_ASSISTANT_TEXT_CHARS) return false;
   if (text.includes('\n') || text.includes('\r')) return false;
   if (RUN_ANALYSIS_LOCKED_TEMPLATES.has(text)) return true;
-  // D-ask-1 (2.11 P0-1): a locked template may carry EXACTLY one scaffold
-  // disclosure suffix (the headline path composes it via TAIL_PATTERN
-  // instead). The content defences still bite on the label slot — a
-  // disclosure whose label smuggles an internal id / raw decimal /
-  // forbidden vocabulary is rejected whole, and the builder's
-  // safeScaffoldOptionLabel is what keeps honest labels out of that trap.
+  // D-ask-1 (2.11 P0-1) + T1: a locked template may carry the scaffold
+  // disclosure suffix and/or the constraint-gap disclosure suffix (the headline
+  // path composes them via TAIL_PATTERN instead). The content defences still
+  // bite on the label slots — a disclosure whose label smuggles an internal id
+  // / raw decimal / forbidden vocabulary is rejected whole, and each builder's
+  // own survival probe (safeScaffoldOptionLabel; buildConstraintDisclosure's
+  // degrade-to-count-only) is what keeps honest labels out of that trap.
   for (const template of RUN_ANALYSIS_LOCKED_TEMPLATES) {
     if (
       text.length > template.length &&
       text.startsWith(template) &&
-      SCAFFOLD_SUFFIX_ONLY_REGEX.test(text.slice(template.length))
+      TEMPLATE_SUFFIX_ONLY_REGEX.test(text.slice(template.length))
     ) {
       return passesAssistantTextContentDefences(text);
     }

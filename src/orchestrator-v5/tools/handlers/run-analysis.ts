@@ -51,7 +51,7 @@ import {
   deriveConstraintVerdict,
   readRatifiedConstraints,
 } from '../../../orchestrator/context/constraint-feasibility.js';
-import { buildConstraintGapDisclosure } from '../../coaching/constraint-gap-disclosure.js';
+import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
@@ -941,15 +941,17 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       scaffoldOutcome.scaffolded.length > 0
         ? buildScaffoldDisclosureForPartition(scaffoldPresence)
         : '';
-    // T1 disclosure: names exactly which ratified condition was not evaluated
-    // and gives a deterministic repair step. Appended after the scaffold
-    // disclosure so the unchecked-condition statement is the LAST thing in the
-    // primary message — the headline has already been withheld above, so the
-    // message can no longer lead with an option while this is present.
-    const constraintGapDisclosure =
-      constraintVerdict.state === 'unevaluated'
-        ? buildConstraintGapDisclosure(constraintVerdict.constraints)
-        : '';
+    // T1 disclosure. The VERDICT is passed whole: which sentence is honest
+    // depends on which state the producer evidence selected, and that pairing
+    // is made inside the builder rather than here — `unevaluated` names the
+    // condition that was not checked and gives the units repair step;
+    // `identity_unresolved` says the results could not be matched to the
+    // conditions set, and asks for a re-statement instead. Every other state
+    // discloses nothing. Appended after the scaffold disclosure so it is the
+    // LAST thing in the primary message — the headline has already been
+    // withheld above, so the message can no longer lead with an option while
+    // this is present.
+    const constraintGapDisclosure = buildConstraintDisclosure(constraintVerdict);
     const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
