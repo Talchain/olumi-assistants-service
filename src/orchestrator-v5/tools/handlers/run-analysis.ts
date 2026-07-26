@@ -50,7 +50,7 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   deriveConstraintVerdict,
   readRatifiedConstraints,
-  stampClaimSafetyOnEnrichment,
+  projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
 import type { PLoTClient } from '../../../orchestrator/plot-client.js';
@@ -1000,58 +1000,49 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // rather than emitting an empty string.
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
         computed_at: runComputedAt,
+        // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
+        // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and
+        // read back on every path that rebuilds from them, rather than
+        // re-derived at each call site (which is how two surfaces end up
+        // contradicting each other inside one HTTP response — CLAUDE.md trap
+        // #12).
+        //
+        // FIRST-CLASS since @talchain/schemas 0.25.0. It rode
+        // `enrichment.__cee_claim_safety` from #710 until this release, because
+        // `RunAnalysisResultSchema` is `.strict()` and the field could not be
+        // added without a package release (blocked behind V5-CI-01). This is
+        // that release, and the contract's `ConstraintVerdictSchema` mirrors
+        // `PersistedClaimSafety` verbatim — enforced at compile time by the
+        // drift bolt in constraint-feasibility.ts.
+        //
+        // Written HERE, inside the validated fact, not bolted on afterwards:
+        // the field is CEE-OWNED and sits alongside the other CEE-owned fields
+        // (`graph_hash_at_run`, `computed_at`), so the handler-ownership
+        // invariant that `enrichment` is byte-for-byte PLoT
+        // (`scripts/validate-handler-ownership.sh` §6) is satisfied by
+        // construction instead of by a second parse.
+        //
+        // Live-proven harm this closes (G-CEE-1 walk, staging 1c078f0): the
+        // confirmation said "no option can be put forward yet" while
+        // `blocks[1].body` in the SAME response said "The MacBook Pro leads by
+        // a margin of about 52 percentage points".
+        constraint_verdict: projectClaimSafety(constraintVerdict),
       },
     };
 
     // --- 7. Zod-validate the fact ----------------------------------------
+    //
+    // ONE parse, not two. Until 0.25.0 the claim-safety verdict had to be
+    // bolted onto `enrichment` AFTER this parse and the fact re-validated,
+    // because `RunAnalysisResultSchema` is `.strict()` and had no home for it.
+    // The verdict is now a declared member of that schema, so it is validated
+    // by this parse like every other CEE-owned field — and the second
+    // safeParse it needed is gone with it.
     const parsed = RunAnalysisHandlerFactSchema.safeParse(factCandidate);
     if (!parsed.success) {
       throw new HandlerResultInvalidError(
         'Constructed RunAnalysisHandlerFact failed schema validation',
         parsed.error,
-      );
-    }
-
-    // --- 7b. Stamp the constraint verdict onto the fact ------------------
-    //
-    // T1 claim safety, LAYER 2. "May a leading option be named" is a FACT
-    // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and read
-    // back on every path that rebuilds prose from them — rather than
-    // re-derived at each call site, which is how two surfaces end up
-    // contradicting each other inside one HTTP response (CLAUDE.md trap #12).
-    //
-    // Live-proven harm this closes (G-CEE-1 walk, staging 1c078f0): the
-    // confirmation said "no option can be put forward yet" while
-    // `blocks[1].body` in the SAME response said "The MacBook Pro leads by a
-    // margin of about 52 percentage points".
-    //
-    // Applied AFTER validation, deliberately, so the schema-validated
-    // `factCandidate` keeps `enrichment` as the byte-for-byte PLoT
-    // pass-through the handler-ownership invariant requires
-    // (`scripts/validate-handler-ownership.sh` §6) — the stamp is a separate,
-    // named, CEE-owned step, not a quiet edit of the pass-through. Re-parsed
-    // below so the stamped fact is proven schema-legal on the same schema the
-    // read path will apply (`enrichment` is `z.record`, so it is).
-    //
-    // See `CEE_CLAIM_SAFETY_ENRICHMENT_KEY` for why this rides `enrichment`
-    // and not a first-class `result.constraint_verdict` field (INTERIM: the
-    // result schema is `.strict()`; the fix needs a schemas release blocked
-    // behind V5-CI-01).
-    const stampedFact: RunAnalysisHandlerFact = {
-      ...parsed.data,
-      result: {
-        ...parsed.data.result,
-        enrichment: stampClaimSafetyOnEnrichment(
-          parsed.data.result.enrichment,
-          constraintVerdict,
-        ),
-      },
-    };
-    const stampedParsed = RunAnalysisHandlerFactSchema.safeParse(stampedFact);
-    if (!stampedParsed.success) {
-      throw new HandlerResultInvalidError(
-        'Claim-safety-stamped RunAnalysisHandlerFact failed schema validation',
-        stampedParsed.error,
       );
     }
 
@@ -1073,7 +1064,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // surface in default-OFF production.
     return {
       assistant_text: summary,
-      handler_facts: [stampedParsed.data],
+      handler_facts: [parsed.data],
       llm_calls_used: 0,
       ...(timingsEnabled ? { __plot_timings: plotTimings } : {}),
       // D-ask-1 (2.11 P0-1): internal channel (never the wire envelope

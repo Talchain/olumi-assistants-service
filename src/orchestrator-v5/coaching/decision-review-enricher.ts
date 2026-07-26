@@ -39,7 +39,7 @@ import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
 import {
   deriveWinnerConstraintInfeasibility,
-  readMayNameLeadingOption,
+  readMayNameLeadingOptionFromResult,
 } from '../../orchestrator/context/constraint-feasibility.js';
 import { config } from '../../config/index.js';
 import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
@@ -201,6 +201,12 @@ export async function enrichRunAnalysisWithDecisionReview(
     enrichment,
     fact.result.leading_option_id,
     scaffoldDisclosure,
+    // T1 claim safety, read from the FACT (typed `result.constraint_verdict`
+    // first, interim `enrichment.__cee_claim_safety` second, fail-closed on
+    // neither). This is the only place that can see it: `buildInvokeInput`
+    // receives `enrichment` alone, and since schemas 0.25.0 the verdict is a
+    // SIBLING of that record, not a member of it.
+    readMayNameLeadingOptionFromResult(fact.result),
   );
   if (!invokeInput) {
     skipTelemetry(input, 'no_winner', {
@@ -492,15 +498,39 @@ export function buildInvokeInputForTests(
   enrichment: Record<string, unknown>,
   leadingOptionId: string | null,
   scaffoldDisclosure?: string,
+  /**
+   * T1 claim safety. THREADED, not re-read from `enrichment`: since
+   * @talchain/schemas 0.25.0 the verdict lives on `result.constraint_verdict`,
+   * which this function never sees. Defaults to `true` so every pre-existing
+   * caller of this test seam keeps its licensed-claim behaviour; the
+   * production caller always passes the fact's real verdict.
+   */
+  mayNameLeadingOption = true,
 ): DecisionReviewInvokeInput | null {
-  return buildInvokeInput(brief, enrichment, leadingOptionId, scaffoldDisclosure);
+  return buildInvokeInput(brief, enrichment, leadingOptionId, scaffoldDisclosure, mayNameLeadingOption);
 }
 
 function buildInvokeInput(
   brief: string,
   enrichment: Record<string, unknown>,
   leadingOptionId: string | null,
-  scaffoldDisclosure?: string,
+  scaffoldDisclosure: string | undefined,
+  /**
+   * T1 claim safety — the turn's OWN answer to "may a leading option be
+   * named", read from the run_analysis fact by the caller.
+   *
+   * THREADED RATHER THAN RE-READ, and that is the fix this parameter exists
+   * for. It used to be derived here as
+   * `readMayNameLeadingOption(enrichment)`, which worked only while the
+   * verdict rode INSIDE the enrichment record as the interim
+   * `__cee_claim_safety` stamp. Schemas 0.25.0 moves it to
+   * `result.constraint_verdict` — a sibling of `enrichment`, invisible from
+   * here — so the old read would have silently returned `false` on EVERY
+   * turn, permitted or not, suppressing the recommendation universally with
+   * no error anywhere. Exactly the class of silent skew the parent CLAUDE.md
+   * calls the dominant risk at a boundary.
+   */
+  mayNameLeadingOption: boolean,
 ): DecisionReviewInvokeInput | null {
   // Phase 3A fix (2026-05-17): walk every available results source until
   // one can match `leading_option_id`. The previous "first non-empty
@@ -589,19 +619,31 @@ function buildInvokeInput(
   //
   // Suppressing HERE is the earliest possible point: it stops the leader claim
   // being AUTHORED, so it is never written into `enrichment.decision_review` and
-  // never persisted onto the fact. Every later layer (the compose funnel, the
-  // egress guard) then has nothing to catch. Those layers stay in place for the
-  // facts already stored and for producers this one does not own.
+  // never persisted onto the fact.
   //
-  // Fails closed via `readMayNameLeadingOption`. `buildInvokeInput` is reached
-  // only from `enrichRunAnalysisWithDecisionReview`, which runs on the
-  // run_analysis fact the handler just stamped, so the stamp is always present
-  // on the production path.
+  // ⚠ IT IS NOT A GATE, AND THE LIVE BYTES SAY SO. This flag is an INSTRUCTION
+  // TO A MODEL. On the POST-#710 walk (staging `227e0aa`, which carries this
+  // suppression) the withheld `unevaluated` turn ran its decision_review call —
+  // two LLM calls in `_diagnostic_trace.llm_calls`, `decision_review
+  // .produced_at` 8s after `decision_brief.created_at` — with
+  // `recommendation_suppressed: true` set, and the model returned
+  // *"Defer and Keep Current Machines (Status Quo) leads by about 35 percentage
+  // points…"* anyway, on 5/5 withheld bodies. Prompt-level suppression reduces
+  // the rate; it does not decide the outcome. The deterministic gate is the
+  // egress projection (ROADMAP 1.218, `compose/withheld-claim-projection.ts`),
+  // which drops this blob whole on a withheld turn. This stays because a claim
+  // never authored is strictly better than one dropped downstream.
+  //
+  // Fails closed via `readMayNameLeadingOptionFromResult` at the call site.
+  // `buildInvokeInput` is reached only from
+  // `enrichRunAnalysisWithDecisionReview`, which runs on the run_analysis fact
+  // the handler just wrote, so the verdict is always present on the production
+  // path.
   //
   // Deliberately NOT behind `constraintInfeasibleGate`: that flag governs the
   // narrow infeasibility claim above. A claim-safety withhold that a feature
   // flag can switch off is not a withhold.
-  if (!readMayNameLeadingOption(enrichment)) {
+  if (!mayNameLeadingOption) {
     winner = { ...winner, recommendation_suppressed: true };
   }
 

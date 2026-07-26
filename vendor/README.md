@@ -7,87 +7,95 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.23.0.tgz`
+### `talchain-schemas-0.25.0.tgz`
 
-> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.23.0`, pulled from
-> GitHub Packages via `npm pack @talchain/schemas@0.23.0`.** This is the named
-> CEE 0.23 absorption row (ROADMAP 1.188, wave-2 graph write/identity boundary
-> 1.192). 0.23.0 is ADDITIVE-ONLY over 0.22.0 (D-34: 538→538 symbols, zero
-> removed; a turn WITHOUT the new field still parses).
+> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.25.0`, pulled from
+> GitHub Packages via `npm pack @talchain/schemas@0.25.0`.** 0.23.0 → 0.25.0 is
+> **ADDITIVE-ONLY**: 201 → 205 exported symbols, **zero removed**, measured by
+> diffing every `export (const|type|interface|enum|function)` across both
+> packages' `dist/**/*.d.ts`. A fact or turn WITHOUT the new field still parses.
 
-The 0.23.0 surface over 0.22.0:
+The 0.25.0 surface over 0.23.0 — two independent waves, only one of which CEE
+adopts here:
 
-- **`graph_state?: GraphV3` on `MessageTurnPayloadSchema`** — the inbound
-  first-touch canvas graph (full GraphV3, not a hash ref — no server model to
-  fetch on first touch). Additive + `.strict()`-safe: CEE's B1 pre-flight
-  strips `graph_state` (with `analysis_state` / `user_id` / `selected_elements`)
-  from the body BEFORE `validateIngress` via
-  `V5_EXTENSION_FIELDS = Object.keys(V5RequestExtensionsSchema.shape)`
-  (`route-v2-preflight.ts`), then re-parses it CEE-side
-  (`request-extensions.ts` `GraphStateIngressSchema`) — the exact
-  strip-then-reparse pattern already proven for `selected_elements` since 0.22.
-  So the re-vendor cannot 422 a `graph_state`-bearing turn on a strict-schema
-  mismatch. The wave-2 adopt leg (turn-executor `graphForCommit`) then persists
-  it at first commit when there is no server model.
-- **F6 accommodation comment** on the turn payload (representative-singular wire
-  convention). Documentation only.
-- The 0.22 handshake set — `OlumiResponseSchema.graph_hash`,
-  `AnalysisResultBlockSchema.computed_against_hash`, the `GRAPH_DIVERGED` error
-  code — is carried forward unchanged; **wave-2 (leg κ) lights it CEE-side**
-  (map `freshness.current_graph_hash` → `graph_hash`; map the fact's
-  `graph_hash_at_run` → `computed_against_hash`). ⚠ `model_graph_hash` NEVER
-  existed (D-34) — it is referenced nowhere.
+- **`constraint_verdict?: ConstraintVerdict` on `RunAnalysisResultSchema`
+  (0.25.0)** — the reason for this re-vendor. `{ may_name_leading_option:
+  boolean, constraint_verdict_state: ConstraintVerdictState }`, `.strict()`,
+  **optional and staying optional** (every fact persisted before this release is
+  unstamped, and "unknown" is a different claim from "verified feasible"). It
+  mirrors CEE's `PersistedClaimSafety` interface verbatim — member names, types
+  and order — and the package's own docstring says so. CEE holds that mirror
+  to account with a bidirectional `extends` assertion in
+  `orchestrator/context/constraint-feasibility.ts`, so a future divergence fails
+  `pnpm typecheck` rather than silently skewing a wire field (parent CLAUDE.md
+  hazard 1).
+  Also exported: `ConstraintVerdictSchema`, `ConstraintVerdictStateSchema`, and
+  the `ConstraintVerdict` / `ConstraintVerdictState` types.
+- **`HealthManifestSchema` + `contracts/` (0.24.0, arch step 2 / S0)** — the four
+  fields every Olumi service must expose on its health endpoint, plus
+  `SCHEMA_SHA` / `CONTRACT_MANIFEST_SHA` / `SCHEMA_PACKAGE_VERSION` generated
+  constants, and the shipped `contracts/adoption-manifest.json`. **CEE consumes
+  NONE of it in this PR** — nothing imports `HealthManifestSchema`, and
+  `/healthz` is unchanged. Recorded here so the next reader knows the delta was
+  read, not skipped: adopting the health manifest is its own decision with its
+  own producer/consumer obligations.
 
-The `GoalConstraintSchema` → `LegacyGoalConstraintStubSchema` rename (0.22 #14)
-still has ZERO effect on CEE: every `GoalConstraintSchema` reference in CEE
-resolves to CEE's OWN local `src/schemas/assist.ts`, and no CEE file imports
-that name from `@talchain/schemas` (unchanged by 0.23).
+**Purpose — the 0.25 re-vendor RETIRES an interim shape, and that is the whole
+point.** From CEE #710 until now the T1 constraint verdict rode a CEE-owned key
+INSIDE the PLoT enrichment pass-through (`enrichment.__cee_claim_safety`),
+because `RunAnalysisResultSchema` is `.strict()` and there was nowhere else to
+put it — a documented, deliberate breach of the handler-ownership invariant
+("enrichment is byte-for-byte PLoT", `scripts/validate-handler-ownership.sh`
+§6), tolerated only while a schemas release was blocked behind V5-CI-01. CEE's
+own source named this field as the target: *"Delete this key and its two helpers
+when V5-CI-01 unblocks the release."* This release is that unblock, so:
+
+- **Write:** the single stamp site in `run_analysis` now writes
+  `result.constraint_verdict` inside the validated fact. The second
+  `safeParse` the bolt-on needed is deleted with it, and `enrichment` becomes a
+  TOTAL pass-through (`run-analysis.test.ts` tightened from "verbatim PLUS
+  exactly one CEE key" to "verbatim, zero added keys").
+- **Read:** `readMayNameLeadingOptionFromResult` reads the typed field FIRST and
+  falls back to the interim stamp for rows already persisted on staging. **No
+  data migration** (A1 ruling); fail-closed still applies to a fact carrying
+  neither. Exactly one of the two keys is ever present on a given fact, so this
+  is a migration ramp, not a mirror.
+- **Drift:** `__tests__/constraint-verdict-typed-field.test.ts` asserts a
+  newly-produced fact carries the typed field on BOTH verdict answers and that
+  the interim key is gone — so the interim cannot become permanent by neglect.
+
+⚠ **DEPLOYMENT NOTE — a brief rollover window, verified at the bytes.**
+`session/supabase-store.ts:612` (`readFactsWithTurnFor`) **THROWS
+`SessionReadError`** when a persisted payload fails `HandlerFactSchema`. During a
+rolling deploy of this change, an instance still pinned to 0.23.0 that reads a
+fact written by a 0.25.0 instance sees an undeclared `constraint_verdict` key on
+a `.strict()` schema and throws. The window is the deploy rollover only, it is
+self-healing (it ends when the last old instance drains), and it affects only a
+scenario whose next turn lands on an old instance. There is no shape that avoids
+it — writing BOTH keys does not help, because the failure is the EXTRA key, not
+a missing one. Flagged for the deploy, not worked around.
 
 > **Registry note.** CEE consumes the vendored tarball via
 > `file:./vendor/...`, never a registry version. Registry/publish state is
 > orthogonal to this pin — but the CONTENT here must match the
-> merged+published `0.23.0`.
+> merged+published `0.25.0`.
 
-**Purpose — the 0.23 re-vendor ENABLES the wave-2 (1.192) graph write/identity
-boundary.** Unlike the pure ingress-acceptance re-vendors before it, the 0.23
-re-vendor lands in one PR with the CEE code that consumes the new surface:
-
-- **Ingress:** `graph_state?: GraphV3` on `MessageTurnPayloadSchema`. CEE's B1
-  pre-flight STRIPS it (with `analysis_state`/`user_id`/`selected_elements`)
-  before `validateIngress` and re-parses it CEE-side via
-  `GraphStateIngressSchema` — so B1 `.strict()` cannot 422 a `graph_state`
-  turn on the schema bump (proven strip-then-reparse pattern, unchanged since
-  `selected_elements`). A turn WITHOUT `graph_state` still parses (fail-safe).
-- **Emission (wave-2 leg κ, in `compose/output-safety.ts` + `compose.ts` — NOT
-  the vendor swap):** the 0.22-shipped handshake fields
-  `OlumiResponseSchema.graph_hash` and `AnalysisResultBlockSchema.computed_against_hash`
-  are now MAPPED onto the wire from values CEE already computes
-  (`freshness.current_graph_hash` / the run-analysis fact's `graph_hash_at_run`).
-- **Adopt (wave-2 leg S2, in `turn-executor.ts` `graphForCommit`):** a
-  first-touch `graph_state` with no server model is PERSISTED at commit,
-  routing through the W2 chokepoint (repair + options[]-reconcile + CAS-stamp).
-
-0.22.0 → 0.23.0 is additive on the ingress surface: one new optional field on
-the turn payload; every pre-0.23.0 payload still parses. The prior EGRESS/ingress
-obligations (`signal_code`/`signal`, `framing_quality`, the Intent/`chip.id`/
-batched-`direct_graph_edit` accept-half in
-`tests/contract/schemas-0.22-ingress-surface.test.ts`) are carried forward
-unchanged.
-
-**Checksum verification:** `vendor/talchain-schemas-0.23.0.tgz.sha256`
+**Checksum verification:** `vendor/talchain-schemas-0.25.0.tgz.sha256`
 holds the canonical sha256 hash
-(`be49feb8037a963c9a3dcd2ec206b29672ae91e07d055f6aa2bdd99c034eca26`).
+(`5d7f567947aac1bcc6c7afe39f02ee401b9f7bbf20c423061c6bd27519708c4a`).
 The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
 tarball bytes against this manifest on every push. ✔ This hash is for the
-PUBLISHED `@talchain/schemas@0.23.0` tarball (`npm pack` from GitHub Packages,
-tag `v0.23.0`), replacing the prior `0.22.0` hash
-`adf17921…9e5f622d`.
+PUBLISHED `@talchain/schemas@0.25.0` tarball (`npm pack` from GitHub Packages),
+replacing the prior `0.23.0` hash `be49feb8…4eca26`.
 
 **Rollback path:** revert the vendor-refresh commit. Git history
-restores the prior `vendor/talchain-schemas-0.22.0.tgz`, its
+restores the prior `vendor/talchain-schemas-0.23.0.tgz`, its
 `.sha256` manifest, the prior `package.json` `file:` reference, and
-this README's prior state — the entire pin returns to v0.22.0 in one
-commit. Re-run `pnpm install` after the revert.
+this README's prior state — the entire pin returns to v0.23.0 in one
+commit. Re-run `pnpm install` after the revert. **NOTE:** a revert must also
+revert the CEE write path, or the handler emits a `constraint_verdict` key that
+0.23.0's `.strict()` result schema rejects on write AND on every later read.
+Revert the whole PR, never the vendor commit alone.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
@@ -98,9 +106,25 @@ adoption, 0.15.0 at the reasoning/held_proposal/ui_directive wave,
 draft-goal-constraints wave, 0.19.0 at the wave-2 producer fields,
 0.20.0 at the readiness/signal/framing_quality wave, 0.21.0 at the
 `what_changed` action-type wave, 0.22.0 at the Intent/chip.id +
-graph-identity-handshake + batched direct_graph_edit wave) are
+graph-identity-handshake + batched direct_graph_edit wave, 0.23.0 at
+the `graph_state` ingress / wave-2 graph write-identity boundary) are
 removed on each bump — only the currently-pinned version lives in
 `vendor/`.
+
+**⚠ OWED, CROSS-REPO, NOT DONE HERE:** the adoption-manifest row for
+`constraint_verdict` ships INSIDE this tarball
+(`contracts/adoption-manifest.json`) and its source of truth is
+`Talchain/olumi-schemas`, a different repo from this lane. It currently reads
+`"state": "declared"` with `producer_test: null` / `consumer_test: null`, and
+its own notes name this adoption as "ADOPTION STEP (owned by the CEE lane)".
+With this PR both halves are verified by named tests, so the truthful state per
+the manifest's own definitions is **`enforced`** ("both sides verified by named
+tests"). It is NOT edited here: rewriting a file inside a published, sha256-
+pinned vendor tarball would forge the published bytes and break the checksum
+discipline the pre-push hook enforces. Raise it as a schemas-repo PR with:
+`state: "enforced"`,
+`producer_test: "cee:src/orchestrator-v5/__tests__/constraint-verdict-typed-field.test.ts::§1 PRODUCER + DRIFT"`,
+`consumer_test: "cee:src/orchestrator-v5/__tests__/constraint-disclosure-route-level.test.ts::withhold paths: the STRUCTURED leader residue must not reach the wire"`.
 
 **How to update:**
 

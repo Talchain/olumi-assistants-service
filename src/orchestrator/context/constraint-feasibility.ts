@@ -31,6 +31,8 @@
  * dead on the live object wire — this module does not share that limitation.
  */
 
+import type { ConstraintVerdict as ContractConstraintVerdict } from "@talchain/schemas/orchestrator";
+
 import { readOptionResultSources } from "./option-result-source.js";
 
 export interface WinnerConstraintFeasibility {
@@ -550,39 +552,37 @@ export function deriveConstraintVerdict(
 // ===========================================================================
 
 /**
- * The key CEE stamps its own claim-safety verdict under, inside the
- * run_analysis fact's `result.enrichment`.
+ * The key CEE STAMPED its claim-safety verdict under, inside the run_analysis
+ * fact's `result.enrichment`, before `@talchain/schemas@0.25.0`.
  *
- * INTERIM SHAPE — read this before copying the pattern.
+ * ⚠ LEGACY READ PATH ONLY — NOTHING WRITES THIS ANY MORE. The verdict now
+ * rides the first-class {@link ConstraintVerdictSchema} field
+ * `result.constraint_verdict` (0.25.0), written by the single stamp site in
+ * `run_analysis`. Read via {@link readMayNameLeadingOptionFromResult}, which
+ * prefers the typed field and falls back HERE.
  *
- * The CORRECT home is a first-class `constraint_verdict` field on
- * `RunAnalysisResultSchema`. It cannot go there today: that schema is
- * `.strict()` in the vendored `@talchain/schemas` package
- * (`dist/orchestrator/handler-results.js`, `RunAnalysisResultSchema … }).strict()`),
- * so an extra key on `result` fails BOTH the handler's own
+ * WHY THE INTERIM EXISTED. `RunAnalysisResultSchema` is `.strict()`, so an
+ * extra key on `result` failed BOTH the handler's own
  * `RunAnalysisHandlerFactSchema.safeParse` on write AND
- * `HandlerFactSchema.safeParse` on every read
- * (`session/supabase-store.ts` `readFactsWithTurnFor`, which THROWS
- * `SessionReadError` rather than skipping). Moving it therefore needs a
- * schemas package release, which is blocked behind V5-CI-01 (GitHub Packages
- * auth). The same wall is recorded verbatim on
- * `HandlerOutcome.__validation_beat` (`tools/registry.ts`).
+ * `HandlerFactSchema.safeParse` on every read (`session/supabase-store.ts`
+ * `readFactsWithTurnFor:612`, which THROWS `SessionReadError` rather than
+ * skipping). Moving the field therefore needed a schemas release, which was
+ * blocked behind V5-CI-01. 0.25.0 IS that release, and it mirrors
+ * {@link PersistedClaimSafety} verbatim.
  *
- * `enrichment` is `z.record(z.string(), z.unknown())`, so it passes strict
- * unchanged. The `__cee_` prefix marks the key as CEE-OWNED: `enrichment` is
- * otherwise PLoT's bytes, and a reader must be able to tell at a glance that
- * this one is not. It is a sibling of `decision_review`, which the
- * turn-executor already writes into the same record
- * (`turn-executor.ts` `patchRunAnalysisDecisionReviewNull`,
- * `enrichRunAnalysisWithDecisionReview`), so this is an established channel at
- * this layer rather than a new one.
+ * WHY THIS KEY STILL HAS A READER, and why that is not the mirror trap.
+ * Every run_analysis fact persisted between #710 and the 0.25.0 adoption
+ * carries the interim stamp and nothing else. There is no data migration
+ * (A1 ruling), so dropping this reader would silently reclassify every one of
+ * those rows as "unknown" ⇒ withheld — costing real users their leader-presuming
+ * cards on a re-opened historic analysis, for no safety gain. The two keys are
+ * not two copies of a live meaning: exactly one of them is ever present on a
+ * given fact, and the newer wins. That is a migration ramp, not a mirror.
  *
- * It never reaches the wire: `toSafeTransportEnrichment` (`compose.ts`)
- * projects enrichment through the `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`
- * allowlist, and this key is deliberately absent from it.
- *
- * TARGET: `RunAnalysisResultSchema.constraint_verdict`. Delete this key and
- * its two helpers when V5-CI-01 unblocks the release.
+ * It never reached the wire either way: `toSafeTransportEnrichment`
+ * (`compose.ts`) projects enrichment through the
+ * `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` allowlist, and this key is deliberately
+ * absent from it.
  */
 export const CEE_CLAIM_SAFETY_ENRICHMENT_KEY = '__cee_claim_safety';
 
@@ -595,6 +595,11 @@ export const CEE_CLAIM_SAFETY_ENRICHMENT_KEY = '__cee_claim_safety';
  * deliberately NOT persisted here, because nothing downstream of the single
  * derivation reads them and a second copy of a label is a second thing to
  * drift.
+ *
+ * `@talchain/schemas@0.25.0`'s `ConstraintVerdictSchema` mirrors this interface
+ * VERBATIM — member names, types and order — and the package's own docstring
+ * says so. It is therefore assignable to the typed field with no adapter, and
+ * the compile-time assertion below is what keeps that true.
  */
 export interface PersistedClaimSafety {
   /** Verbatim {@link ConstraintVerdict.mayNameLeadingOption}. */
@@ -604,38 +609,64 @@ export interface PersistedClaimSafety {
 }
 
 /**
- * Stamp the verdict onto a run_analysis fact's `enrichment` record.
+ * FAIL-LOUD DRIFT BOLT (CLAUDE.md trap #12 — the mirror must break at build
+ * time, not silently). `PersistedClaimSafety` and the contract's
+ * `ConstraintVerdict` are two declarations of one shape in two repos. If a
+ * future schemas release changes the field names, the member types, or the
+ * state enum, THIS LINE fails `pnpm typecheck` — the gate — instead of the
+ * skew reaching a wire field nobody re-checked (parent CLAUDE.md hazard 1:
+ * "a value that validates in the producer can vanish at the consumer").
+ *
+ * Bidirectional on purpose: assignability in one direction alone would let the
+ * contract grow a member this interface never learns about.
+ */
+const _persistedClaimSafetyMatchesContract: ContractConstraintVerdict extends PersistedClaimSafety
+  ? PersistedClaimSafety extends ContractConstraintVerdict
+    ? true
+    : never
+  : never = true;
+void _persistedClaimSafetyMatchesContract;
+
+/**
+ * Project the verdict into the shape persisted on the fact.
  *
  * Called EXACTLY ONCE, in `run_analysis`, immediately after the single
  * `deriveConstraintVerdict` call that owns this meaning. Every other surface
- * READS the stamp (see {@link readMayNameLeadingOption}) rather than deriving
- * its own — two derivations can see different inputs (the handler reads
- * `snapshot.goal_constraints`; compose would read a hash-gated persisted graph
- * that is `undefined` whenever the gate fails) and produce an internally
+ * READS it (see {@link readMayNameLeadingOptionFromResult}) rather than
+ * deriving its own — two derivations can see different inputs (the handler
+ * reads `snapshot.goal_constraints`; compose would read a hash-gated persisted
+ * graph that is `undefined` whenever the gate fails) and produce an internally
  * inconsistent response, which is the exact defect class this closes
  * (CLAUDE.md trap #12).
  *
- * Pure: returns a new record, never mutates the input.
+ * Pure.
  */
-export function stampClaimSafetyOnEnrichment(
-  enrichment: Record<string, unknown> | undefined,
-  verdict: ConstraintVerdict,
-): Record<string, unknown> {
-  const stamp: PersistedClaimSafety = {
+export function projectClaimSafety(verdict: ConstraintVerdict): PersistedClaimSafety {
+  return {
     may_name_leading_option: verdict.mayNameLeadingOption,
     constraint_verdict_state: verdict.state,
   };
-  return { ...(enrichment ?? {}), [CEE_CLAIM_SAFETY_ENRICHMENT_KEY]: stamp };
 }
 
 /**
- * Read "may a leading option be named" off a persisted analysis fact's
- * `enrichment`. FAILS CLOSED.
+ * Read "may a leading option be named" off a persisted run_analysis fact's
+ * `result`. THE reader — every claim-safety surface calls this one.
  *
- * Absent, malformed, or carrying a non-boolean ⇒ `false` (withheld). That is
- * not defensive padding, it is the only safe reading:
+ * TYPED FIRST, INTERIM SECOND, FAIL CLOSED THIRD:
  *
- *   - Every fact written BEFORE this change is unstamped, and for those the
+ *   1. `result.constraint_verdict` — the 0.25.0 contract field, written by
+ *      every fact from this release onward.
+ *   2. `result.enrichment.__cee_claim_safety` — the interim stamp, present on
+ *      every fact persisted between #710 and this release. Kept as a FALLBACK
+ *      because there is no data migration (A1 ruling); see
+ *      {@link CEE_CLAIM_SAFETY_ENRICHMENT_KEY} for why that is a ramp and not
+ *      a mirror. Exactly one of the two is ever present on a given fact.
+ *   3. Neither ⇒ `false` (withheld).
+ *
+ * WHY CLOSED, unchanged from the interim reader and still the only safe
+ * reading:
+ *
+ *   - Every fact written before #710 carries neither, and for those the
  *     verdict is genuinely unknown. "Unknown" and "verified feasible" are
  *     different claims, and only the second licenses naming a leader.
  *   - A future write path that forgets to stamp is a bug. Failing open would
@@ -647,6 +678,24 @@ export function stampClaimSafetyOnEnrichment(
  * of a historic analysis drops its leader-presuming cards. The cost of an open
  * default is the product asserting a recommendation it has just told the user
  * it cannot make.
+ */
+export function readMayNameLeadingOptionFromResult(result: unknown): boolean {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return false;
+  const typed = (result as Record<string, unknown>).constraint_verdict;
+  if (typed !== null && typeof typed === 'object' && !Array.isArray(typed)) {
+    return (typed as Record<string, unknown>).may_name_leading_option === true;
+  }
+  return readMayNameLeadingOption((result as Record<string, unknown>).enrichment);
+}
+
+/**
+ * LEGACY reader — the interim `enrichment.__cee_claim_safety` stamp only.
+ *
+ * Kept exported because {@link readMayNameLeadingOptionFromResult} delegates to
+ * it and the fallback deserves its own test. Do NOT call it directly from a
+ * claim-safety surface: on a fact written from 0.25.0 onward it returns `false`
+ * for every turn, permitted or not, because nothing writes that key any more.
+ * Call the `FromResult` reader.
  */
 export function readMayNameLeadingOption(enrichment: unknown): boolean {
   if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {

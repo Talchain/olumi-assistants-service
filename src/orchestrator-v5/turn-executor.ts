@@ -244,7 +244,7 @@ import {
 } from './context/freshness.js';
 // T1 claim safety — READ the verdict the run_analysis handler stamped on the
 // fact. This file never derives it (CLAUDE.md trap #12).
-import { readMayNameLeadingOption } from '../orchestrator/context/constraint-feasibility.js';
+import { readMayNameLeadingOptionFromResult } from '../orchestrator/context/constraint-feasibility.js';
 import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
@@ -7504,7 +7504,7 @@ export async function runTurnExecutor(
           const f = selectedForClaimSafety.fact;
           mayNameLeadingOptionForRun =
             f.fact_type === 'run_analysis'
-              ? readMayNameLeadingOption(f.result.enrichment)
+              ? readMayNameLeadingOptionFromResult(f.result)
               : true;
         }
       }
