@@ -37,8 +37,15 @@
  * fails LOUD the moment source and register disagree, which is the property
  * trap #12 demands when derivation is not possible.
  *
- * ⚠ AND IT IS DELIBERATELY NOT ALL-GREEN-MEANS-SAFE. Nine sites below are
- * registered `ungated`, several of them carrying LLM-authored or
+ * ENUMERATOR SCOPE, stated so nobody reads this as covering more than it does:
+ * it scans `src/orchestrator-v5/turn-executor.ts` ONLY, for calls to exactly
+ * four functions — `composeAnswer`, `composeToolCallResponse`,
+ * `composeClarifyResponse`, `composeDirectAnswerResponse`. Compose sites in
+ * OTHER modules (notably `handlers/chip-click-dispatch.ts`, which has three)
+ * are OUT OF SCOPE and are not covered by any assertion here.
+ *
+ * ⚠ AND IT IS DELIBERATELY NOT ALL-GREEN-MEANS-SAFE. Eight of the twenty-five
+ * registered keys are `ungated`, several carrying LLM-authored or
  * analysis-derived prose. Those are OPEN GAPS, recorded rather than fixed in
  * this slice, so the next reader inherits an explicit list instead of
  * re-deriving it from a fourth live walk. `ungated` is a TODO, not a blessing
@@ -71,7 +78,24 @@ type VerdictStance = 'gated' | 'structural' | 'ungated';
  * The stances were assigned by reading each site, not by pattern-matching the
  * variable name. Where a site is `ungated`, the reason says what could leak.
  */
-const COMPOSE_SITE_REGISTER: Readonly<Record<string, { stance: VerdictStance; why: string }>> = {
+interface RegisteredSite {
+  readonly stance: VerdictStance;
+  readonly why: string;
+  /**
+   * How many CALL SITES share this key. Defaults to 1.
+   *
+   * ⚠ LOAD-BEARING (A5). Keys are the EXPRESSION feeding `assistant_text`, and
+   * several expressions repeat — `recoveryText` appears at three call sites,
+   * `recoveryAssistantText` and `ambiguousAssistantText` at two each. 29 sites
+   * collapse to 25 keys. Comparing SETS would let a NEW compose site that
+   * happens to reuse a registered variable name slip in and silently inherit
+   * that name's stance — the drift this file exists to catch, walking straight
+   * past it. The comparison is therefore a MULTISET (key -> count).
+   */
+  readonly count?: number;
+}
+
+const COMPOSE_SITE_REGISTER: Readonly<Record<string, RegisteredSite>> = {
   // ── THE GATED SITE — this PR ────────────────────────────────────────────
   confirmationForCompose: {
     stance: 'gated',
@@ -79,13 +103,21 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, { stance: VerdictStance; wh
   },
 
   // ── STRUCTURAL — deterministic copy with no comparative claim ───────────
-  recoveryAssistantText: { stance: 'structural', why: 'Bounded recovery copy from a constant builder.' },
+  recoveryAssistantText: {
+    stance: 'structural',
+    count: 2,
+    why: 'Bounded recovery copy from a constant builder (NOT the leader-serving buildBoundedFallbackCopyAndChips — verified separately).',
+  },
   'buildGmHeldAppliedReceipt(': { stance: 'structural', why: 'Goal-metric receipt; names a metric, never an option ranking.' },
   receiptText: { stance: 'structural', why: 'Mutation receipt; describes the edit just applied.' },
   noPendingAssistantText: { stance: 'structural', why: 'Pending-action recovery template.' },
   '"The analysis is no longer fresh': { stance: 'structural', why: 'Literal staleness copy.' },
   expiredAssistantText: { stance: 'structural', why: 'Pending-expiry template.' },
-  ambiguousAssistantText: { stance: 'structural', why: 'Clarify copy built from candidate labels.' },
+  ambiguousAssistantText: {
+    stance: 'structural',
+    count: 2,
+    why: 'Clarify copy built from candidate labels.',
+  },
   '`I can apply those one at a time': { stance: 'structural', why: 'Literal one-at-a-time copy.' },
   PROPOSAL_DISMISSAL_RESPONSE: { stance: 'structural', why: 'Module constant.' },
   '`Got it: I can add ${riskLabel} as a risk with ${driverLabel} as its m': {
@@ -95,9 +127,16 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, { stance: VerdictStance; wh
   'buildDeicticClarifyAssistantText(deicticDispatch.reason)': { stance: 'structural', why: 'Clarify template.' },
   'buildNonFactorKindRefusalText(': { stance: 'structural', why: 'Refusal template.' },
   'buildClarifyAssistantText(deterministicValueUpdate.candidates)': { stance: 'structural', why: 'Clarify template.' },
-  recoveryText: { stance: 'structural', why: 'buildBoundedFallbackCopyAndChips() — bounded constant copy.' },
+  recoveryText: {
+    stance: 'ungated',
+    count: 3,
+    why: "OPEN GAP, and NOT the 'bounded constant copy' an earlier revision of this register claimed. `buildBoundedFallbackCopyAndChips` (turn-executor.ts ~9700) calls composeExplainResultsFallback / composeWhatWouldFlipFallback whenever `projection?.leading_option` is present — i.e. it can serve the FULL deterministic leader answer, not a constant. Re-derived at the bytes after review flagged the sibling `assistantText` entry.",
+  },
   clarifyGuardedText: { stance: 'structural', why: 'Clarify question, entity-guarded.' },
-  assistantText: { stance: 'structural', why: 'Finalise-path bounded fallback.' },
+  assistantText: {
+    stance: 'ungated',
+    why: "OPEN GAP. Same helper as `recoveryText` — the finalise-path bounded fallback serves composeExplainResultsFallback's full leader answer on a routing degrade. Worse, this exit is reached on routing FAILURE, and `mayNameLeadingOptionForRun` is assigned only at the POST-HANDLER claim-safety read (declared `= true` at its outer-let), so a routing-failure exit hands the egress alarm `true`: no gate, no disclosure, and NO telemetry either. Pre-existing, NOT introduced by this PR — but the register previously called it `structural`, which converted an unknown gap into false assurance (CLAUDE.md trap #14). The fix is to hoist the claim-safety read to turn ENTRY so every exit carries the real permission; that is a SEPARATE slice, deliberately not widened into this PR.",
+  },
   'noAnalysisOutcome.assistant_text': { stance: 'structural', why: 'Fires only when NO analysis exists — there is no leader to name.' },
   'staleOutcome.assistant_text': { stance: 'structural', why: 'Stale-rerun recovery; suppresses cached insights by construction.' },
 
@@ -128,6 +167,20 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, { stance: VerdictStance; wh
   },
 };
 
+/** Count occurrences per key — the multiset the assertions compare. */
+function tally(keys: readonly string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const k of keys) out[k] = (out[k] ?? 0) + 1;
+  return out;
+}
+
+/** The register as a multiset, defaulting an absent `count` to 1. */
+function registerTally(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(COMPOSE_SITE_REGISTER)) out[k] = v.count ?? 1;
+  return out;
+}
+
 /** Enumerate compose calls and the expression feeding their user-facing text. */
 function enumerateComposeSites(source: string): string[] {
   const keys: string[] = [];
@@ -154,24 +207,35 @@ function enumerateComposeSites(source: string): string[] {
 describe('LAYER 2 drift — every compose site declares a verdict stance', () => {
   const source = readFileSync(TURN_EXECUTOR, 'utf8');
 
-  it('the SET of compose sites in source EXACTLY equals the register', () => {
-    const found = [...new Set(enumerateComposeSites(source))].sort();
-    const registered = Object.keys(COMPOSE_SITE_REGISTER).sort();
+  it('the MULTISET of compose sites in source EXACTLY equals the register', () => {
+    const found = tally(enumerateComposeSites(source));
+    const registered = registerTally();
 
-    // Both directions. A NEW compose site is the drift this file exists for;
-    // a STALE register entry means a site was removed and the register kept a
-    // reassuring line about code that no longer exists.
+    // Both directions, and by COUNT not just presence. A NEW compose site is
+    // the drift this file exists for; a STALE entry means the register kept a
+    // reassuring line about code that no longer exists; a COUNT change means a
+    // site was added or removed under an existing name — the case a set
+    // comparison is blind to.
     expect(
-      found.filter((k) => !registered.includes(k)),
-      'UNREGISTERED compose site(s) in turn-executor.ts. A new path that emits ' +
-        'assistant_text must declare whether it consumes the persisted constraint ' +
-        'verdict — see compose/withheld-explanation-answer.ts. This is the third ' +
-        'instance of that omission; do not make it the fourth.',
-    ).toEqual([]);
-    expect(
-      registered.filter((k) => !found.includes(k)),
-      'STALE register entry — the compose site it describes is gone from source.',
-    ).toEqual([]);
+      found,
+      'compose-site drift in turn-executor.ts. A path that emits assistant_text ' +
+        'must declare whether it consumes the persisted constraint verdict — see ' +
+        'compose/withheld-explanation-answer.ts. This is the third instance of ' +
+        'that omission; do not make it the fourth. (A count mismatch means a site ' +
+        'was added or removed under an ALREADY-REGISTERED expression name, which ' +
+        'would otherwise inherit that name\'s stance silently.)',
+    ).toEqual(registered);
+  });
+
+  it('POSITIVE CONTROL: a duplicate-NAME site is caught (the set-comparison blind spot)', () => {
+    // The A5 defect, pinned. Plant a second call site reusing an ALREADY
+    // REGISTERED expression. Under a set comparison this is invisible — the key
+    // is already present. Under the multiset it must show as a count change.
+    const planted = `${source}\n composeAnswer({ assistant_text: clarifyGuardedText, stage: 'analyse' });`;
+    const found = tally(enumerateComposeSites(planted));
+    expect(Object.keys(found)).toEqual(expect.arrayContaining(['clarifyGuardedText']));
+    expect(found['clarifyGuardedText']).toBe((registerTally()['clarifyGuardedText'] ?? 0) + 1);
+    expect(found).not.toEqual(registerTally());
   });
 
   it('never parses a compose site it cannot key (the scan is not silently blind)', () => {
@@ -201,9 +265,14 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // adding a tenth ungated site fails CI.
     expect(ungated).toEqual([
       'adviceOutcome.assistant_text',
+      // A2: re-derived from 'structural' after review. Both are
+      // buildBoundedFallbackCopyAndChips, which serves the deterministic
+      // LEADER answer whenever a projection with a leading_option exists.
+      'assistantText',
       'coachGuarded.assistant_text',
       'converseGuarded.assistant_text',
       'freshFollowupOutcome.assistant_text',
+      'recoveryText',
       'runComparisonOutcome.assistant_text',
       'stateQueryOutcome.assistant_text',
     ]);

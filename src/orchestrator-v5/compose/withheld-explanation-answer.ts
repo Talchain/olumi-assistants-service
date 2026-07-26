@@ -103,7 +103,7 @@
  * copy that cannot survive its own egress is inert in production.
  */
 
-import { textNamesLeadingOption } from './leading-option-egress-guard.js';
+import { textAssertsLeadingOption } from './leading-option-egress-guard.js';
 import { buildConstraintDisclosureFromState } from '../coaching/constraint-gap-disclosure.js';
 import type {
   ConstraintVerdictState,
@@ -183,7 +183,7 @@ export function projectExplanationAnswerForWithheldClaim(
   // LEADER CLAIM ⇒ replace wholesale. A leader-naming answer cannot be
   // repaired by appending to it: the contradiction the walk photographed
   // (`case1g`) was exactly a leader claim followed by the disclosure.
-  if (textNamesLeadingOption(original)) {
+  if (textAssertsLeadingOption(original)) {
     return {
       text: `${WITHHELD_EXPLANATION_OPENING}${tail}`,
       changed: true,
@@ -238,7 +238,7 @@ function assertSubstitutedCopyIsLeaderFree(): void {
     ),
   ];
   for (const [name, copy] of probes) {
-    if (textNamesLeadingOption(copy)) {
+    if (textAssertsLeadingOption(copy)) {
       throw new Error(
         `withheld-explanation-answer: substituted copy ${name} trips the shared ` +
           'leader vocabulary (compose/leading-option-egress-guard.ts ' +

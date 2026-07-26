@@ -119,6 +119,31 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * A hit here that the matcher does not see is expected and is not a defect in
    * either instrument; the reverse would be.
    */
+  /**
+   * THE REPO'S OWN DETERMINISTIC TEMPLATE — and the hole that proved a pattern
+   * list cannot be maintained by hand.
+   *
+   * `composeExplainResultsFallback` (explanation-fallback.ts) opens EVERY
+   * explanation fallback with `"${leading.label} performs best, with a
+   * probability of …"`. That string matched none of the patterns above, so the
+   * enforcement gate could not see the fallback it was written to cover — and
+   * the gate's own docstring quoted this very sentence as covered.
+   *
+   * The corridor that made it a live defect rather than a cosmetic miss:
+   * withheld turn → Sonnet's answer fails side-band validation → the handler
+   * substitutes THIS fallback → the scanner misses it → the gate takes the
+   * APPEND branch instead of REPLACE → the leader claim ships beside the
+   * disclosure denying it. The `case1g` shape, via the covered producer.
+   *
+   * ADDED BY, AND PINNED BY, A DERIVED CONTROL — not by inspection.
+   * `__tests__/leader-vocabulary-producer-control.test.ts` drives both
+   * deterministic fallbacks across their whole margin x stability x runner-up
+   * space and asserts the enforcement scanner sees each LEADER SENTENCE in
+   * isolation. Reword the template and that test fails in the same PR. This
+   * entry exists because that control demanded it; do not add speculative
+   * siblings here, add them when the control asks.
+   */
+  { code: 'performs_best', re: /\bperforms?\s+best\b/i },
   { code: 'comes_out_ahead', re: /\bcomes?\s+out\s+(?:ahead|on\s+top)\b/i },
   { code: 'leading_in', re: /\bleading\s+in\b/i },
   { code: 'ahead_by', re: /\bahead\s+by\b/i },
@@ -169,6 +194,60 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
 export function textNamesLeadingOption(value: string): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
   return LEADER_CLAIM_PATTERNS.some(({ re }) => re.test(value));
+}
+
+/**
+ * Spans that trip {@link LEADER_CLAIM_PATTERNS} while making NO claim about a
+ * leading option. Neutralised for ENFORCEMENT only — never for the alarm.
+ *
+ * WHY THE TWO READERS DIVERGE, and why this is not a second vocabulary.
+ * The alarm and the enforcer have opposite cost functions:
+ *
+ *   ALARM (observe-only)  a false positive costs one noisy log line. A false
+ *                         NEGATIVE costs a shipped contradiction. Bias wide.
+ *   ENFORCER (this PR)    a false positive DELETES real user content — it
+ *                         replaces a correct answer with withheld copy, or
+ *                         drops an evidence block. Bias precise.
+ *
+ * `\bleads\b` is the sharp case. It is correct for "MacBook Pro leads" and
+ * catastrophic for "higher capacity **leads to** faster delivery" or "your
+ * **team leads** will need to agree" — ordinary English that the enforcement
+ * path would silently destroy. POST-710 §7.1 already recorded "team leads" as a
+ * known false positive of this exact pattern; before this carve-out the
+ * enforcer inherited it and acted on it.
+ *
+ * CRUCIALLY this is a CARVE-OUT LIST, not a fork of the pattern set. Both
+ * readers run the SAME {@link LEADER_CLAIM_PATTERNS}; the enforcer merely blanks
+ * these spans first. A new leader phrasing is therefore added ONCE and both
+ * readers get it — the single-source property that keeps the gate tied to the
+ * alarm (and to the producer control in
+ * `__tests__/leader-vocabulary-producer-control.test.ts`).
+ */
+const ENFORCEMENT_FALSE_POSITIVE_SPANS: readonly RegExp[] = [
+  /** Causal "X leads to Y" — a statement about mechanism, not about ranking. */
+  /\bleads\s+to\b/gi,
+  /** The job title. "team lead(s)", "tech lead(s)", "engineering lead(s)". */
+  /\b(?:team|tech|engineering|project|squad)\s+leads?\b/gi,
+];
+
+/**
+ * Does one string ASSERT a leading option, for the purposes of ENFORCEMENT?
+ *
+ * Same vocabulary as {@link textNamesLeadingOption}, minus the documented
+ * false-positive spans above. This is the reader the two ENFORCING consumers
+ * use — `compose/withheld-explanation-answer.ts` and the `evidence_gap` filter
+ * in `compose.ts` — because both DELETE user-facing content when they fire.
+ *
+ * The observe-only egress guard keeps the wider net: it is measuring residue,
+ * and a slightly noisy alarm is the correct trade for one that cannot miss.
+ */
+export function textAssertsLeadingOption(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  let neutralised = value;
+  for (const re of ENFORCEMENT_FALSE_POSITIVE_SPANS) {
+    neutralised = neutralised.replace(re, ' ');
+  }
+  return textNamesLeadingOption(neutralised);
 }
 
 /** One detected claim. `sample` is NEVER logged or emitted — triage only. */

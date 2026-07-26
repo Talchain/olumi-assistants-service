@@ -40,7 +40,7 @@ import {
   mayNameLeadingOptionForFact,
   projectTransportEnrichmentForWithheldClaim,
 } from './compose/withheld-claim-projection.js';
-import { textNamesLeadingOption } from './compose/leading-option-egress-guard.js';
+import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
@@ -867,7 +867,7 @@ function evidenceGapPresumesLeadingOption(block: OlumiResponse['blocks'][number]
   return (
     candidate.type === 'evidence' &&
     typeof candidate.evidence_gap === 'string' &&
-    textNamesLeadingOption(candidate.evidence_gap)
+    textAssertsLeadingOption(candidate.evidence_gap)
   );
 }
 

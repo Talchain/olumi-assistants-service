@@ -58,6 +58,7 @@ import { setTestSink } from '../../utils/telemetry.js';
 // establishes).
 import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { buildConstraintDisclosureFromState } from '../coaching/constraint-gap-disclosure.js';
 
 const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
@@ -401,6 +402,69 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       const shapeJson = JSON.stringify(shape);
       expect(shapeJson).not.toContain('comes out ahead');
       expect(shapeJson).not.toContain('leading in 72%');
+    });
+
+    /**
+     * A4 — the `disclosure_appended` branch, which had ZERO coverage.
+     *
+     * Every other withheld case in this file trips the REPLACE branch, because
+     * every fixture answer names a leader. The APPEND branch is the 3/4 live
+     * failure mode — an answer that says nothing about who is winning but ALSO
+     * says nothing about the condition that was never checked. It is reachable
+     * whenever Sonnet writes a leader-free answer on a withheld turn, and until
+     * now nothing exercised it.
+     */
+    describe('APPEND branch — a clean answer keeps its content and GAINS the disclosure', () => {
+      /**
+       * Leader-free, and deliberately still VALID to the side-band validator
+       * (>= 80 chars, no forbidden internal term, no mutation language, no raw
+       * decimal) so the handler uses it verbatim and the gate sees the real
+       * thing rather than a fallback.
+       */
+      const CLEAN_ANSWER =
+        'Your latest run is current, so there is no need to run it again right now. ' +
+        'The result rests on how toolchain compatibility feeds into team effectiveness, ' +
+        'and that link is estimated rather than measured.';
+
+      it('retains the ORIGINAL answer verbatim AND appends the disclosure', async () => {
+        routeWithToolUseMock.mockResolvedValue(routedExplainResults(CLEAN_ANSWER));
+        const turn = await rerunTurn(app);
+
+        const collapse = (s: string): string => s.replace(/\s+/g, ' ').trim();
+        // APPEND, not REPLACE — the user keeps the answer they asked for. If the
+        // gate over-fired this would be the deterministic opening instead, and
+        // this assertion is what tells the two branches apart.
+        expect(collapse(turn.assistantText)).toContain(collapse(CLEAN_ANSWER));
+        expect(turn.assistantText).not.toContain('Your latest analysis is still current');
+        // …and the disclosure the live bodies dropped 3/4 of the time.
+        expect(turn.assistantText).toContain('Three-Year Total Cost of Ownership');
+        expect(turn.assistantText).toContain('was not checked');
+        expect(turn.assistantText).toContain(
+          'Re-state that limit against a measure recorded in the same units as the limit',
+        );
+      });
+
+      it('is IDEMPOTENT — an answer already carrying the disclosure is not double-stamped', async () => {
+        // The disclosure is DERIVED here, from the same builder the gate uses,
+        // rather than hand-copied — a hardcoded string would drift the moment
+        // the copy changed and this test would silently stop being about
+        // idempotency (CLAUDE.md trap #12).
+        const disclosure = buildConstraintDisclosureFromState('unevaluated', [
+          { constraint_id: RATIFIED_CONSTRAINT.constraint_id, label: RATIFIED_CONSTRAINT.label },
+        ]);
+        expect(disclosure.length, 'derived disclosure empty — the test below would be vacuous').toBeGreaterThan(80);
+
+        routeWithToolUseMock.mockResolvedValue(
+          routedExplainResults(`${CLEAN_ANSWER}${disclosure}`),
+        );
+        const turn = await rerunTurn(app);
+
+        // Exactly ONE copy. A naive append would emit the repair step twice,
+        // which reads as a stutter on the turn the user is already being told
+        // the least.
+        const occurrences = turn.assistantText.split('was not checked').length - 1;
+        expect(occurrences, 'the disclosure was appended to an answer that already had it').toBe(1);
+      });
     });
 
     it('NON-VACUITY: the turn really reached the explanation branch', async () => {
