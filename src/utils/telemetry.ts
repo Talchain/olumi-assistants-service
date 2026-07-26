@@ -767,6 +767,18 @@ export const TelemetryEvents = {
   // Redacted: constraint ids + producer codes only — no labels, no thresholds,
   // no units, no user text.
   V5RunAnalysisConstraintUnevaluated: "v5.run_analysis.constraint_unevaluated",
+  // T1 fail-loud: the producer returned constraint evaluations but NOT ONE of
+  // its ids reconciled with a constraint CEE ratified — an identity/keying
+  // divergence across the untyped enrichment seam. BOTH confident verdicts are
+  // withheld in that state ("your condition was not checked" and "your
+  // condition holds" are equally unsupported by zero id overlap), so the user
+  // loses a recommendation on every occurrence and this event is the only
+  // signal it happened. Deliberately NOT folded into
+  // `constraint_unevaluated` — a seam divergence logged as an engine failure to
+  // evaluate is a false accusation against the producer. Redacted: counts + ids
+  // only — no labels, no thresholds, no units, no user text.
+  V5RunAnalysisConstraintIdentityUnresolved:
+    "v5.run_analysis.constraint_identity_unresolved",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
   // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
   V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",

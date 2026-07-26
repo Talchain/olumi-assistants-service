@@ -48,8 +48,7 @@ import type {
 
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
-  deriveConstraintEvaluationGap,
-  deriveWinnerConstraintInfeasibility,
+  deriveConstraintVerdict,
   readRatifiedConstraints,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintGapDisclosure } from '../../coaching/constraint-gap-disclosure.js';
@@ -820,24 +819,46 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // `deriveWinnerConstraintInfeasibility` cannot cover this case — it fails
     // OPEN when constraint probabilities are absent, which is precisely what
     // PLoT withholds on the suppressed-unreliable path.
-    const constraintGap = deriveConstraintEvaluationGap(
-      response as Record<string, unknown>,
-      // Prefer the snapshot's own `goal_constraints` — that is the exact array
-      // this handler forwards to PLoT (see the plotPayload assembly above), so
-      // "we asked PLoT to enforce it" and "PLoT never scored it" are compared
-      // against the same bytes. Falls back to the persisted graph for snapshots
-      // that carry the constraints only there.
-      readRatifiedConstraints(
-        snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
-      ),
+    // Prefer the snapshot's own `goal_constraints` — that is the exact array
+    // this handler forwards to PLoT (see the plotPayload assembly above), so
+    // "we asked PLoT to enforce it" and "PLoT never scored it" are compared
+    // against the same bytes. Falls back to the persisted graph for snapshots
+    // that carry the constraints only there. Hoisted so the identity telemetry
+    // below can report what we actually asked for.
+    const ratifiedConstraints = readRatifiedConstraints(
+      snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
     );
-    if (constraintGap.unevaluated) {
+    // ONE verdict, five states, each declaring whether a leading option may be
+    // named. Both withholding predicates (never evaluated / the leader breaks a
+    // checked limit) and the seam's third answer (we could not reconcile which
+    // condition was evaluated) come from this single call, so no two surfaces
+    // can disagree about what the constraint evidence said.
+    const constraintVerdict = deriveConstraintVerdict(
+      response as Record<string, unknown>,
+      ratifiedConstraints,
+      leadingOptionId ?? null,
+    );
+    if (constraintVerdict.state === 'unevaluated') {
       emit(TelemetryEvents.V5RunAnalysisConstraintUnevaluated, {
         request_id: invocation.requestId,
         scenario_id: args.scenario_id,
         // Redacted: ids + codes only — no labels, no thresholds, no units.
-        constraint_ids: constraintGap.constraints.map((c) => c.constraint_id),
-        codes: constraintGap.codes,
+        constraint_ids: constraintVerdict.constraints.map((c) => c.constraint_id),
+        codes: constraintVerdict.codes,
+      });
+    }
+    if (constraintVerdict.state === 'identity_unresolved') {
+      // FAIL LOUD. PLoT scored constraints under ids that reconcile with
+      // nothing we ratified, so BOTH confident verdicts were withheld rather
+      // than asserted. That is the honest outcome, but it must be visible — an
+      // unmatched id space is a real contract divergence at an unenforced seam,
+      // and it costs the user a recommendation every time it happens.
+      emit(TelemetryEvents.V5RunAnalysisConstraintIdentityUnresolved, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        // Redacted: ids + counts only — no labels, no thresholds, no units.
+        ratified_constraint_ids: ratifiedConstraints.map((c) => c.constraint_id),
+        ratified_count: ratifiedConstraints.length,
       });
     }
 
@@ -848,16 +869,29 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // T1: withhold the confident "{X} currently leads" claim while any
       // ratified condition is unchecked. A recommendation must not exist
       // unless every user-ratified hard constraint is decision-grade.
-      constraint_unevaluated: constraintGap.unevaluated,
+      constraint_unevaluated: constraintVerdict.state === 'unevaluated',
+      // T1, the third answer: the producer evaluated constraints under ids we
+      // could not reconcile. Withheld under its own reason so "we could not
+      // tell" is never logged or worded as "the engine did not check".
+      constraint_identity_unresolved:
+        constraintVerdict.state === 'identity_unresolved',
       // Trust-spine board #1 (CEE half): withhold the confident "{X} currently
       // leads" headline when the leading option violates a hard constraint.
-      // Gate default OFF → always false → byte-identical headline path.
-      constraint_infeasible: config.features.constraintInfeasibleGate
-        ? deriveWinnerConstraintInfeasibility(
-            response as Record<string, unknown>,
-            leadingOptionId ?? '',
-          ).infeasible
-        : false,
+      //
+      // The gate stays. It is read HERE, at the caller, exactly as it is at the
+      // other two call sites (analysis-compact, decision-review-enricher) —
+      // `deriveConstraintVerdict` is pure, so the verdict is computed the same
+      // way whether or not the flag is on, and only the ACTING on it is gated.
+      // Retiring the flag is a real change to a claim-safety withhold's
+      // switch-off path and belongs in its own PR, not bundled with the verdict
+      // rewrite. NOTE for that PR: the comment previously on this line said
+      // "Gate default OFF → always false → byte-identical headline path", which
+      // had been false since 18 Jul (`constraintInfeasibleGate:
+      // booleanString.default(true)`, config/index.ts:728). Two identical stale
+      // claims remain, at analysis-compact.ts and decision-review-enricher.ts.
+      constraint_infeasible:
+        config.features.constraintInfeasibleGate &&
+        constraintVerdict.state === 'evaluated_infeasible',
       samples_reduced: samplesReduced,
       // Spine A backstop: the headline reads raw `factor_sensitivity` directly
       // (bypassing projectTopDrivers), so it must skip option-controlled levers.
@@ -912,9 +946,10 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // disclosure so the unchecked-condition statement is the LAST thing in the
     // primary message — the headline has already been withheld above, so the
     // message can no longer lead with an option while this is present.
-    const constraintGapDisclosure = constraintGap.unevaluated
-      ? buildConstraintGapDisclosure(constraintGap.constraints)
-      : '';
+    const constraintGapDisclosure =
+      constraintVerdict.state === 'unevaluated'
+        ? buildConstraintGapDisclosure(constraintVerdict.constraints)
+        : '';
     const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder

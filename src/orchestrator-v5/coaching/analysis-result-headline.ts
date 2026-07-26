@@ -272,8 +272,8 @@ export interface AnalysisResultHeadlineInput {
   readonly constraint_infeasible?: boolean;
   /**
    * T1. True when a user-ratified hard constraint was applied but never
-   * evaluated to decision grade (computed by the run_analysis handler via
-   * `deriveConstraintEvaluationGap` in constraint-feasibility.ts, reading
+   * evaluated to decision grade — the `unevaluated` state of the constraint
+   * verdict (`deriveConstraintVerdict` in constraint-feasibility.ts, reading
    * PLoT's own `inference_warnings` codes / `constraints_status` / per-option
    * `constraint_probabilities`). When true the headline WITHHOLDS the
    * confident "{X} currently leads" claim — a recommendation must not exist
@@ -285,6 +285,21 @@ export interface AnalysisResultHeadlineInput {
    * Omitted / false ⇒ no change (byte-identical).
    */
   readonly constraint_unevaluated?: boolean;
+  /**
+   * T1. True for the constraint verdict's `identity_unresolved` state: the
+   * producer plainly evaluated constraints, but not one of the ids it returned
+   * reconciles with anything the user ratified.
+   *
+   * THE THIRD ANSWER, and the reason this is not folded into either flag above.
+   * We cannot say the condition went unchecked (it may well have been checked
+   * under a key we cannot read) and we cannot certify constraint-safety (we
+   * cannot tell WHICH condition was checked). So the headline is withheld here
+   * too — naming a leader would assert the user's condition holds on evidence
+   * CEE has just admitted it cannot reconcile — but under its own reason code,
+   * because "we could not tell" must never be logged as either of the two
+   * confident verdicts. Omitted / false ⇒ no change (byte-identical).
+   */
+  readonly constraint_identity_unresolved?: boolean;
 }
 
 /**
@@ -339,6 +354,13 @@ export type HeadlineFallbackReason =
   // from `constraint_infeasible` — "we never checked your limit" and "the
   // leader breaks your limit" must never be conflated in telemetry.
   | 'constraint_unevaluated'
+  // T1: the producer evaluated constraints under ids that reconcile with
+  // nothing the user ratified, so neither "your condition was not checked" nor
+  // "your condition holds" is assertable and the confident-lead headline is
+  // withheld (see AnalysisResultHeadlineInput.constraint_identity_unresolved).
+  // Its own reason code, so a seam divergence can never be read off a dashboard
+  // as an engine failure to evaluate.
+  | 'constraint_identity_unresolved'
   | 'unknown';
 
 export interface HeadlineDescriptor {
@@ -448,6 +470,29 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       descriptor: {
         case: null,
         reason: 'constraint_unevaluated',
+        has_leading_option: true,
+        has_clean_label: true,
+        has_driver: false,
+        has_fragility: false,
+        margin_bucket: null,
+      },
+    };
+  }
+
+  // T1, the third answer: the producer evaluated constraints, but under ids
+  // that reconcile with nothing the user ratified. Withheld for the same
+  // claim-safety reason as the two above — naming a leader here asserts that
+  // the user's condition holds, on evidence CEE has just admitted it cannot
+  // read — but reported under its OWN reason, because conflating "we could not
+  // tell" with "the engine did not check" would turn an unenforced-seam
+  // divergence into a false accusation against the producer, on the dashboard
+  // and in the user-facing copy alike.
+  if (input.constraint_identity_unresolved === true) {
+    return {
+      text: null,
+      descriptor: {
+        case: null,
+        reason: 'constraint_identity_unresolved',
         has_leading_option: true,
         has_clean_label: true,
         has_driver: false,

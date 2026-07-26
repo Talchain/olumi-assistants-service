@@ -638,6 +638,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
         V5RunAnalysisConstraintUnevaluated: "v5.run_analysis.constraint_unevaluated",
+        V5RunAnalysisConstraintIdentityUnresolved:
+          "v5.run_analysis.constraint_identity_unresolved",
         V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
         V5RunAnalysisTimings: "v5.run_analysis.timings",
         V5TurnStageTimings: "v5.turn_executor.stage_timings",
@@ -1428,6 +1430,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // constraint ids + producer codes, no labels/thresholds/units).
         // Live emit site: run-analysis.ts, alongside the headline input.
         TelemetryEvents.V5RunAnalysisConstraintUnevaluated,
+        // T1 fail-loud — the producer scored constraints under ids that
+        // reconciled with NOTHING we ratified, so the leading option was
+        // withheld without either confident verdict being asserted
+        // (diagnostic-only, no Datadog metric; redacted ratified constraint ids
+        // + count, no labels/thresholds/units).
+        // Live emit site: run-analysis.ts, beside the unevaluated emit.
+        TelemetryEvents.V5RunAnalysisConstraintIdentityUnresolved,
         // Track S 0.13c-4 — persist-site intercept repair summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5GraphPersistInterceptRepair,
@@ -2055,6 +2064,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.run_analysis.intercept_guard",
         "v5.run_analysis.options_scaffolded",
         "v5.run_analysis.constraint_unevaluated",
+        "v5.run_analysis.constraint_identity_unresolved",
         "v5.graph_persist.intercept_repair",
         "v5.run_analysis.timings",
         "v5.turn_executor.stage_timings",
