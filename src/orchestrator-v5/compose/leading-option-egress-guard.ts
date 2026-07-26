@@ -87,8 +87,67 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'recommend', re: /\brecommend(s|ed|ation|ations)?\b/i },
   { code: 'best_option', re: /\bbest\s+option\b/i },
   { code: 'winner', re: /\bwinners?\b/i },
-  { code: 'ahead', re: /\bis\s+ahead\b/i },
-  { code: 'top_choice', re: /\btop\s+choice\b/i },
+  { code: 'ahead', re: /\b(?:is|are|was|were)\s+ahead\b/i },
+  { code: 'top_choice', re: /\btop\s+(?:choice|option)\b/i },
+  /**
+   * SECOND RECORDED DIVERGENCE from the walk's matcher — and the one that
+   * makes this list able to see the defect it was extended for.
+   *
+   * The POST-#711/#712 walk's headline leak is, verbatim from `case1e`:
+   *
+   *   "Standardise on MacBook Pro **comes out ahead, leading in** 44% of
+   *    simulations, with Standardise on Dell XPS close behind at 34% …"
+   *
+   * Checked pattern by pattern, that sentence matches **NOTHING** in this list
+   * as it stood: `leads` misses "leading", `leading_option` misses "leading
+   * in", `the_lead` misses, `is\s+ahead` misses "comes out ahead", and the
+   * band tier's four adverbs miss a bare "ahead". The four live bodies were
+   * caught only INCIDENTALLY, by other sentences in the same answer ("The lead
+   * is not stable", "take the lead"). Had the model emitted the leader claim
+   * alone, this vocabulary would have passed it — and the walk's own §3.3
+   * would have read as a clean turn.
+   *
+   * The additions below are taken from matcher-v3's BAND tier
+   * (`WALK-2026-07-26-POST-71112.md` §1.1), which is strictly richer than what
+   * this module had: it carries `marginally|narrowly|comfortably` alongside the
+   * original four, plus `ahead by`, `out in front`, `top option` and `comes out
+   * on top`. `comes out ahead` and `leading in` are additions beyond even that
+   * — they are the live string, and matcher-v3 would also have missed them.
+   *
+   * DIRECTION OF THE DIVERGENCE, stated so a future reader does not have to
+   * re-derive it: this guard is now strictly STRONGER than the walk's matcher.
+   * A hit here that the matcher does not see is expected and is not a defect in
+   * either instrument; the reverse would be.
+   */
+  /**
+   * THE REPO'S OWN DETERMINISTIC TEMPLATE — and the hole that proved a pattern
+   * list cannot be maintained by hand.
+   *
+   * `composeExplainResultsFallback` (explanation-fallback.ts) opens EVERY
+   * explanation fallback with `"${leading.label} performs best, with a
+   * probability of …"`. That string matched none of the patterns above, so the
+   * enforcement gate could not see the fallback it was written to cover — and
+   * the gate's own docstring quoted this very sentence as covered.
+   *
+   * The corridor that made it a live defect rather than a cosmetic miss:
+   * withheld turn → Sonnet's answer fails side-band validation → the handler
+   * substitutes THIS fallback → the scanner misses it → the gate takes the
+   * APPEND branch instead of REPLACE → the leader claim ships beside the
+   * disclosure denying it. The `case1g` shape, via the covered producer.
+   *
+   * ADDED BY, AND PINNED BY, A DERIVED CONTROL — not by inspection.
+   * `__tests__/leader-vocabulary-producer-control.test.ts` drives both
+   * deterministic fallbacks across their whole margin x stability x runner-up
+   * space and asserts the enforcement scanner sees each LEADER SENTENCE in
+   * isolation. Reword the template and that test fails in the same PR. This
+   * entry exists because that control demanded it; do not add speculative
+   * siblings here, add them when the control asks.
+   */
+  { code: 'performs_best', re: /\bperforms?\s+best\b/i },
+  { code: 'comes_out_ahead', re: /\bcomes?\s+out\s+(?:ahead|on\s+top)\b/i },
+  { code: 'leading_in', re: /\bleading\s+in\b/i },
+  { code: 'ahead_by', re: /\bahead\s+by\b/i },
+  { code: 'out_in_front', re: /\bout\s+in\s+front\b/i },
   /**
    * The PRODUCER'S BAND PHRASING, and the one deliberate divergence from the
    * walk's matcher noted above.
@@ -105,8 +164,91 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * than the matcher — a one-directional divergence, recorded here rather than
    * left for a future reader to discover as a mystery hit.
    */
-  { code: 'band_ahead', re: /\b(?:slightly|clearly|well|far)\s+ahead\b/i },
+  {
+    code: 'band_ahead',
+    re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b/i,
+  },
 ];
+
+/**
+ * Does ONE string name or presume a leading option?
+ *
+ * The string-level reading of {@link LEADER_CLAIM_PATTERNS}, exported so the
+ * PRODUCER-side gates test prose against the SAME vocabulary this alarm
+ * measures the residue with. Two consumers today:
+ *   - `compose/withheld-explanation-answer.ts` (the explanation-answer gate);
+ *   - the per-field `evidence_gap` projection in `compose.ts`.
+ *
+ * THIS IS NOT "WIDENING THE GUARD" — the module docstring's instruction is
+ * "FIX THE PRODUCER … Do NOT widen this guard instead: it is the alarm, not the
+ * fix", and that still holds: `guardLeadingOptionClaimsAtEgress` remains
+ * observe-only and drops nothing. What is shared here is the VOCABULARY, not
+ * the enforcement. Sharing it is the point — a producer gate built on its own
+ * private pattern copy would drift from the alarm, and the first symptom would
+ * be a leak this module reports and the gate silently permits (CLAUDE.md trap
+ * #12: derive, don't mirror).
+ *
+ * Every pattern is non-global, so `.test` carries no `lastIndex` state and this
+ * is safe to call repeatedly on the same or different strings.
+ */
+export function textNamesLeadingOption(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  return LEADER_CLAIM_PATTERNS.some(({ re }) => re.test(value));
+}
+
+/**
+ * Spans that trip {@link LEADER_CLAIM_PATTERNS} while making NO claim about a
+ * leading option. Neutralised for ENFORCEMENT only — never for the alarm.
+ *
+ * WHY THE TWO READERS DIVERGE, and why this is not a second vocabulary.
+ * The alarm and the enforcer have opposite cost functions:
+ *
+ *   ALARM (observe-only)  a false positive costs one noisy log line. A false
+ *                         NEGATIVE costs a shipped contradiction. Bias wide.
+ *   ENFORCER (this PR)    a false positive DELETES real user content — it
+ *                         replaces a correct answer with withheld copy, or
+ *                         drops an evidence block. Bias precise.
+ *
+ * `\bleads\b` is the sharp case. It is correct for "MacBook Pro leads" and
+ * catastrophic for "higher capacity **leads to** faster delivery" or "your
+ * **team leads** will need to agree" — ordinary English that the enforcement
+ * path would silently destroy. POST-710 §7.1 already recorded "team leads" as a
+ * known false positive of this exact pattern; before this carve-out the
+ * enforcer inherited it and acted on it.
+ *
+ * CRUCIALLY this is a CARVE-OUT LIST, not a fork of the pattern set. Both
+ * readers run the SAME {@link LEADER_CLAIM_PATTERNS}; the enforcer merely blanks
+ * these spans first. A new leader phrasing is therefore added ONCE and both
+ * readers get it — the single-source property that keeps the gate tied to the
+ * alarm (and to the producer control in
+ * `__tests__/leader-vocabulary-producer-control.test.ts`).
+ */
+const ENFORCEMENT_FALSE_POSITIVE_SPANS: readonly RegExp[] = [
+  /** Causal "X leads to Y" — a statement about mechanism, not about ranking. */
+  /\bleads\s+to\b/gi,
+  /** The job title. "team lead(s)", "tech lead(s)", "engineering lead(s)". */
+  /\b(?:team|tech|engineering|project|squad)\s+leads?\b/gi,
+];
+
+/**
+ * Does one string ASSERT a leading option, for the purposes of ENFORCEMENT?
+ *
+ * Same vocabulary as {@link textNamesLeadingOption}, minus the documented
+ * false-positive spans above. This is the reader the two ENFORCING consumers
+ * use — `compose/withheld-explanation-answer.ts` and the `evidence_gap` filter
+ * in `compose.ts` — because both DELETE user-facing content when they fire.
+ *
+ * The observe-only egress guard keeps the wider net: it is measuring residue,
+ * and a slightly noisy alarm is the correct trade for one that cannot miss.
+ */
+export function textAssertsLeadingOption(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  let neutralised = value;
+  for (const re of ENFORCEMENT_FALSE_POSITIVE_SPANS) {
+    neutralised = neutralised.replace(re, ' ');
+  }
+  return textNamesLeadingOption(neutralised);
+}
 
 /** One detected claim. `sample` is NEVER logged or emitted — triage only. */
 export interface LeaderClaimHit {

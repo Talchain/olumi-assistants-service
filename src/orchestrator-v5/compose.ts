@@ -40,6 +40,7 @@ import {
   mayNameLeadingOptionForFact,
   projectTransportEnrichmentForWithheldClaim,
 } from './compose/withheld-claim-projection.js';
+import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
@@ -817,7 +818,57 @@ function rebuildPhase3BlocksFresh(
   if (mayNameLeadingOptionForFact(fact)) {
     return built;
   }
-  return built.filter((block) => !presumesLeadingOption(block));
+  return built.filter(
+    (block) => !presumesLeadingOption(block) && !evidenceGapPresumesLeadingOption(block),
+  );
+}
+
+/**
+ * Does this `evidence` block's LLM-authored gap statement presuppose a leader?
+ *
+ * WHY `evidence` NEEDS A CONTENT TEST AT ALL. The kind list above deliberately
+ * keeps every `evidence` block ("they carry no comparative claim, and dropping
+ * them would cost the user real content on exactly the turn they most need
+ * it"). The POST-#711/#712 live walk found that kind-level assumption is not
+ * universally true — `caseINF.run`, `blocks[7].evidence_gap`:
+ *
+ *   "Shifts in hardware pricing and availability could alter the total cost
+ *    calculation and potentially change **the leading option**."
+ *
+ * on an `evaluated_infeasible` (withheld) turn. A genuine presupposition that a
+ * leading option exists — NOT the POST-710 §7.1 false positive, which was the
+ * ordinary noun "team leads". 1 occurrence across 11 withheld bodies: a
+ * low-rate producer, not a systematic one, so the block kind stays KEPT by
+ * default and only an offending instance is dropped.
+ *
+ * WHY THE WHOLE BLOCK AND NOT JUST THE FIELD — derived from the contract, not
+ * chosen. The first version of this gate dropped `evidence_gap` alone, on the
+ * egress guard's "per-field, not whole-response" reasoning. That is WRONG here:
+ * `@talchain/schemas` declares `evidence_gap: z.string().min(1)` on the
+ * evidence block (`dist/boundary/blocks.js`) — REQUIRED, not optional. A block
+ * missing it fails `OlumiResponseSchema` at egress, which would have degraded
+ * the entire response on exactly the withheld turns this gate exists to
+ * protect: a claim-safety fix that causes an egress failure is strictly worse
+ * than the prose it suppresses.
+ *
+ * So the block goes whole, which is also what compose already does with the
+ * leader-presuming CARDS, and for the identical stated reason: the text is
+ * LLM-authored (`source_handler: 'decision_review_enricher'`, verbatim from
+ * `decision_review.evidence_enhancements`) so "there is no template to gate and
+ * no substitution that can make that prose honest". The block's
+ * `suggested_technique` and `impact_if_gathered` are ABOUT the dropped gap
+ * statement, so they do not stand meaningfully without it either.
+ *
+ * Scanned with the SHARED vocabulary (`textNamesLeadingOption`), so this gate
+ * and the alarm that measures the residue cannot drift apart.
+ */
+function evidenceGapPresumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean {
+  const candidate = block as { type?: unknown; evidence_gap?: unknown };
+  return (
+    candidate.type === 'evidence' &&
+    typeof candidate.evidence_gap === 'string' &&
+    textAssertsLeadingOption(candidate.evidence_gap)
+  );
 }
 
 /**

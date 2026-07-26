@@ -689,6 +689,56 @@ export function readMayNameLeadingOptionFromResult(result: unknown): boolean {
 }
 
 /**
+ * Read the persisted verdict STATE off a run_analysis fact's `result`.
+ *
+ * The sibling of {@link readMayNameLeadingOptionFromResult}, walking the SAME
+ * two-step ladder (typed `result.constraint_verdict` first, interim
+ * `result.enrichment.__cee_claim_safety` second) so the boolean and the state
+ * can never be read from different stamps on one fact.
+ *
+ * WHY A SEPARATE READER, AND WHY IT RETURNS `null` RATHER THAN A STATE.
+ * The boolean's fail-closed default is `false` because "withhold" is always a
+ * safe action. A STATE has no such safe default: every one of the five states
+ * makes a positive claim about what happened to the user's condition, and
+ * inventing one would put a sentence on the screen that the evidence does not
+ * support — the exact conflation `ConstraintVerdictState`'s own docstring says
+ * there is "no correct boolean" for. `null` therefore means "not recorded", and
+ * the one consumer ({@link buildConstraintDisclosureFromState} via
+ * `compose/withheld-explanation-answer.ts`) degrades to leader-free copy with
+ * NO named condition rather than guessing a voice.
+ *
+ * Unknown or new state strings are rejected against {@link MAY_NAME_LEADING_OPTION}
+ * — the enum's own key set — rather than a hand-listed copy, so a sixth state
+ * added to the contract reads as `null` (honest absence) instead of silently
+ * flowing into an exhaustive switch that cannot handle it.
+ */
+export function readConstraintVerdictStateFromResult(
+  result: unknown,
+): ConstraintVerdictState | null {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return null;
+  const record = result as Record<string, unknown>;
+  const typed = record.constraint_verdict;
+  if (typed !== null && typeof typed === 'object' && !Array.isArray(typed)) {
+    return asVerdictState((typed as Record<string, unknown>).constraint_verdict_state);
+  }
+  const enrichment = record.enrichment;
+  if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {
+    return null;
+  }
+  const stamp = (enrichment as Record<string, unknown>)[CEE_CLAIM_SAFETY_ENRICHMENT_KEY];
+  if (stamp === null || typeof stamp !== 'object' || Array.isArray(stamp)) return null;
+  return asVerdictState((stamp as Record<string, unknown>).constraint_verdict_state);
+}
+
+/** Narrow an unknown to a contract state, or `null`. Derived from the enum. */
+function asVerdictState(value: unknown): ConstraintVerdictState | null {
+  if (typeof value !== 'string') return null;
+  return Object.prototype.hasOwnProperty.call(MAY_NAME_LEADING_OPTION, value)
+    ? (value as ConstraintVerdictState)
+    : null;
+}
+
+/**
  * LEGACY reader — the interim `enrichment.__cee_claim_safety` stamp only.
  *
  * Kept exported because {@link readMayNameLeadingOptionFromResult} delegates to

@@ -244,7 +244,12 @@ import {
 } from './context/freshness.js';
 // T1 claim safety — READ the verdict the run_analysis handler stamped on the
 // fact. This file never derives it (CLAUDE.md trap #12).
-import { readMayNameLeadingOptionFromResult } from '../orchestrator/context/constraint-feasibility.js';
+import {
+  readMayNameLeadingOptionFromResult,
+  readConstraintVerdictStateFromResult,
+  readRatifiedConstraints,
+} from '../orchestrator/context/constraint-feasibility.js';
+import { projectExplanationAnswerForWithheldClaim } from './compose/withheld-explanation-answer.js';
 import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
@@ -7653,10 +7658,65 @@ export async function runTurnExecutor(
       const toolCallAnswerKind: AnswerKind = isExplanationHandler
         ? 'substantive'
         : 'functional';
+      // G-CEE-1 — THE EXPLANATION-ANSWER CLAIM GATE. See
+      // `compose/withheld-explanation-answer.ts` for the full derivation of the
+      // path this closes (the rerun no-op leak: 4/4 live bodies named the
+      // leader in `assistant_text`, 3/4 dropped the disclosure).
+      //
+      // Placed HERE, immediately before compose, for three reasons:
+      //   1. it is downstream of `renderConfirmation`, so it sees the SAME
+      //      string the user will read — whether that came from Sonnet's
+      //      `answer_text` (used verbatim) or from the handler's deterministic
+      //      fallback (which names the leader too). One gate, both producers.
+      //   2. `mayNameLeadingOptionForRun` is assigned at the post-dispatch
+      //      claim-safety read ABOVE this point, so the permission is the one
+      //      the fact carries — not the `true` default, and not a re-derivation.
+      //   3. it is upstream of `composeToolCallResponse`, so the projected text
+      //      flows into `blocks[].summary` and the `_answer_shape` sidecar by
+      //      construction, instead of leaving those two to drift from
+      //      `assistant_text`.
+      //
+      // Scoped to EXPLANATION handlers: a mutation/run receipt is deterministic
+      // template copy that is already gated at its own producer, and running
+      // this over it would risk replacing an honest receipt.
+      let confirmationForCompose = confirmationText;
+      if (isExplanationHandler && !mayNameLeadingOptionForRun) {
+        // Read the STATE off the SAME fact the permission came from, via the
+        // SAME canonical selector — so the sentence and the permission describe
+        // one analysis. Labels come from the persisted `goal_constraints`, the
+        // sole record of what the user ratified (`readRatifiedConstraints`
+        // accepts the persisted graph directly).
+        const selectedForDisclosure = selectRunAnalysisFact([
+          ...handlerFactsForCommit,
+          ...context.prior_facts,
+        ]);
+        const verdictState =
+          selectedForDisclosure !== null &&
+          selectedForDisclosure.fact.fact_type === 'run_analysis'
+            ? readConstraintVerdictStateFromResult(selectedForDisclosure.fact.result)
+            : null;
+        const projected = projectExplanationAnswerForWithheldClaim(
+          confirmationText,
+          verdictState,
+          readRatifiedConstraints(context.persistedGraph ?? graphStateForTurn ?? null),
+        );
+        if (projected.changed) {
+          confirmationForCompose = projected.text;
+          emit(TelemetryEvents.V5WithheldExplanationAnswerProjected, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: proposedHandlerId,
+            reason: projected.reason,
+            constraint_verdict_state: verdictState ?? 'unreadable',
+            original_length: confirmationText.length,
+            projected_length: projected.text.length,
+          });
+        }
+      }
       composedOk = composeToolCallResponse({
         answerKind: toolCallAnswerKind,
         orientation: orientationForCompose,
-        confirmation: confirmationText,
+        confirmation: confirmationForCompose,
         coaching: coachingText,
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
