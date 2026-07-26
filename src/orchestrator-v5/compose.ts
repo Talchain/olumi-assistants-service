@@ -29,6 +29,12 @@ import {
   type BlockBuildCtx,
   type GraphNodeLookup,
 } from './compose/phase3-blocks.js';
+// T1 claim safety — the SINGLE owner of "may a leading option be named".
+// Derived here rather than re-implemented (CLAUDE.md trap #12).
+import {
+  deriveConstraintVerdict,
+  readRatifiedConstraints,
+} from '../orchestrator/context/constraint-feasibility.js';
 import { buildFocusInspectorDirective } from './compose/ui-directive.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
@@ -717,12 +723,83 @@ function rebuildPhase3BlocksFresh(
   // before reaching this helper, so a lens is never suggested off stale signals).
   // `selectLens` returns at most one, and null when nothing is justified.
   const lensSuggestion = buildLensSuggestionCoachingBlock(fact, ctx);
-  return [
+  const built = [
     ...buildReviewCardBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...buildCoachingBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx, interventionControlledFactorIds),
     ...(lensSuggestion !== null ? [lensSuggestion] : []),
   ];
+
+  // T1 CLAIM SAFETY — THE SINGLE FUNNEL.
+  //
+  // Every Phase-3 block reaches the wire through this one function, on BOTH the
+  // current-turn branch and the prior-fact lifecycle branch. That is why the
+  // verdict is DERIVED here rather than threaded in as a boolean: the
+  // prior-fact path runs no handler, so it has no `HandlerOutcome` and no
+  // `__leading_option_claim_withheld` to thread — a flag would have left half
+  // the paths ungated, which is how this defect class keeps recurring.
+  //
+  // Live-proven harm (G-CEE-1 walk, staging 1c078f0): the confirmation said
+  // "no option can be put forward yet" while `blocks[1].body` said "The MacBook
+  // Pro leads by a margin of about 52 percentage points". Both on one screen.
+  //
+  // The narrative / robustness / scenario_context / pre_mortem / flip_threshold
+  // card bodies are LLM-AUTHORED (verbatim `enrichment.decision_review`), and
+  // the served prompt explicitly instructs the model to name the winner and
+  // state the margin. There is no template to gate and no substitution that can
+  // make that prose honest, so the block is dropped whole.
+  //
+  // Unknown/new block kinds are deliberately KEPT here: over-suppression would
+  // silently strip useful content, and the egress guard is the layer that
+  // catches an unrecognised producer LOUDLY. Layer 2 suppresses what we know is
+  // unsafe; Layer 3 alarms on what we do not.
+  const verdict = deriveConstraintVerdict(
+    asRecord((fact.result as Record<string, unknown>).enrichment),
+    readRatifiedConstraints(rawPersistedGraphForLevers),
+    typeof fact.result.leading_option_id === 'string' ? fact.result.leading_option_id : null,
+  );
+  if (verdict.mayNameLeadingOption) return built;
+  return built.filter((block) => !presumesLeadingOption(block));
+}
+
+/**
+ * Block kinds whose prose names, ranks, or quantifies a leading option.
+ *
+ * Split by provenance, because the two halves are unfixable in different ways:
+ *   LLM-authored (`enrichment.decision_review`) — narrative, robustness,
+ *     scenario_context, pre_mortem, flip_threshold. The model is told to name
+ *     the winner and give the margin, so the copy cannot be constrained here.
+ *   Deterministic — the `strengthen` lens block, whose copy bank has five of
+ *     eight bodies asserting a leader (lens-selector.ts BODY_BY_RATIONALE).
+ *
+ * Kinds deliberately ABSENT (they carry no comparative claim, and dropping them
+ * would cost the user real content on exactly the turn they most need it):
+ * `assumption`, `bias`, `evidence_priority`, `assumption_check`,
+ * `calibration_prompt`, `orientation`, and every `evidence` block.
+ */
+/** Local shape-read; kept local to avoid an import cycle through coaching/. */
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+const LEADER_PRESUMING_CARD_KINDS: ReadonlySet<string> = new Set([
+  'narrative',
+  'robustness',
+  'scenario_context',
+  'pre_mortem',
+  'flip_threshold',
+]);
+const LEADER_PRESUMING_COACHING_KINDS: ReadonlySet<string> = new Set(['strengthen']);
+
+function presumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean {
+  const b = block as { card_kind?: unknown; coaching_kind?: unknown };
+  return (
+    (typeof b.card_kind === 'string' && LEADER_PRESUMING_CARD_KINDS.has(b.card_kind)) ||
+    (typeof b.coaching_kind === 'string' &&
+      LEADER_PRESUMING_COACHING_KINDS.has(b.coaching_kind))
+  );
 }
 
 /**
