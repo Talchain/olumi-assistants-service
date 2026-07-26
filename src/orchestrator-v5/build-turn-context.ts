@@ -1176,20 +1176,20 @@ export async function preflightEnsureScenario(
     return { ok: true, skipped: true };
   }
 
-  // A store that does not implement the oracle AT ALL (reduced test doubles,
-  // partial stores) is the same class of fact as "no store configured": there
-  // is no check to perform, so there is nothing to fail closed ON. This is
-  // deliberately a structural check and NOT a catch of TypeError — catching
-  // the TypeError would also swallow a genuine TypeError thrown from INSIDE a
-  // working oracle, which is exactly the failure we must refuse on.
-  if (typeof store.ensureScenarioExists !== 'function') {
-    log.debug(
-      { request_id: requestId, scenario_id: scenarioId },
-      'V5 pre-flight ensureScenarioExists skipped (store does not implement the ownership oracle)',
-    );
-    return { ok: true, skipped: true };
-  }
-
+  // NO structural `typeof store.ensureScenarioExists === 'function'` probe
+  // here, deliberately. A store that is PRESENT but cannot answer the
+  // ownership question is the oracle-unavailable case, not the
+  // no-persistence case: something was injected, it simply is not the thing
+  // that can answer. Skipping it would restore — for that store shape only —
+  // the exact fail-open the catch below exists to remove, and it would do so
+  // for a shape the interface forbids (`ensureScenarioExists` is REQUIRED on
+  // SessionStore), so the compiler offers no warning and only a DI
+  // mis-wiring produces it in production. The missing-method TypeError
+  // therefore falls into the same catch as an RPC failure and refuses the
+  // turn. Test doubles get completeness from `createMockSessionStore()`
+  // (tests/utils/mock-session-store.ts), which is typed
+  // `Required<SessionStore>` and fails the typecheck loudly on drift — that
+  // is where double-completeness belongs, not in a production branch.
   let authoritativeUserId: string | null;
   try {
     const result = await store.ensureScenarioExists(scenarioId, userId);

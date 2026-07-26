@@ -280,13 +280,24 @@ export interface SessionStore {
    * NULL user_id in that case.
    *
    * Returns the AUTHORITATIVE `user_id` (as stored in `public.scenarios`).
-   * Returns null for guest rows. Callers should skip the cross-tenant
-   * ownership check when either the caller userId or the returned value
-   * is null (no ownership concept in guest mode).
+   * Returns null for guest rows.
    *
-   * Read/RPC failures propagate as `SessionReadError`. The pre-flight
-   * treats those as "unknown" and fails-open (traffic continues; the
-   * later `append_turn_atomic` is the last line of defence).
+   * The cross-tenant ownership check is skipped when the RETURNED value is
+   * null (an unowned/guest row, which by design any caller may act on) —
+   * and ONLY then. It is NOT skipped when the CALLER's userId is null: a
+   * stored owner plus an anonymous caller is the IDOR case, and the
+   * either-null short-circuit that used to be documented here was the hole
+   * itself (an request that simply omitted `user_id` could act on any owned
+   * scenario). Closed 2026-07-26; see `preflightEnsureScenario`.
+   *
+   * Read/RPC failures propagate as `SessionReadError`, and the pre-flight
+   * fails CLOSED on them (refuses the turn, route 422). This doc previously
+   * said it "fails-open … the later `append_turn_atomic` is the last line of
+   * defence"; that premise was verified FALSE for ownership —
+   * `append_turn_atomic` (v1/v2/v3) reads `user_id` FROM the scenarios row to
+   * denormalise it onto the turn and never compares it to any caller
+   * identity, so it guards scenario EXISTENCE, not ownership. There is
+   * nothing behind this check.
    *
    * ⚠ PoC security posture — trust-the-caller on `userId`. CEE's HTTP
    * ingress is API-key + HMAC authenticated service-to-service; there
