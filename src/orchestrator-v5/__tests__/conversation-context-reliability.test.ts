@@ -264,7 +264,7 @@ describe('write side — stored assistant text equals the durable public (egress
     // finalise) THEN entity-id egress scrub (route chokepoint), same graph.
     const wireResponse = sanitiseOlumiResponseForEgress(
       makeResponse(applyEgressForbiddenPhraseGuard(text).text),
-      { graph: GRAPH_WITH_GOAL as never, requestId: 'test', exitPath: 'turn_executor', userMessage: null },
+      { graph: GRAPH_WITH_GOAL as never, requestId: 'test', exitPath: 'turn_executor', userMessage: null, mayNameLeadingOption: true },
     );
     expect(last()?.assistantMessage).toBe(wireResponse.assistant_text);
     // And concretely: the graph-resolved label is present, the raw ids are not.
