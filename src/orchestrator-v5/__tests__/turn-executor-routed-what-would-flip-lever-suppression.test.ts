@@ -135,6 +135,21 @@ function priorRunAnalysisFact(graph: typeof READY_GRAPH | typeof UNPINNED_GRAPH)
       summary: 'Ran analysis.',
       graph_hash_at_run: hash,
       computed_at: '2026-04-30T12:00:00.000Z',
+      // T1 claim safety — the verdict the run_analysis handler stamps on EVERY
+      // fact it writes (`projectClaimSafety`, run-analysis.ts). Stamped here for
+      // the same reason phase3-lifecycle.test.ts stamps its keep-list fixture:
+      // an UNSTAMPED fact FAILS CLOSED (`readMayNameLeadingOptionFromResult`),
+      // so without this the turn is treated as WITHHELDING a leading-option
+      // claim and the explanation-answer gate
+      // (`compose/withheld-explanation-answer.ts`) replaces the routed fallback
+      // prose wholesale. This file exists to pin LEVER suppression; it would
+      // otherwise silently measure the withheld projection instead — the exact
+      // wrong-branch defect TESTING-DISCIPLINE rule 1 was earned by. This
+      // fixture represents a healthy, feasible run, so it permits.
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible',
+      },
       enrichment: {
         analysis_status: 'computed',
         margin_pp: 24,
@@ -251,6 +266,21 @@ function priorFactWithDriversAndFlip(): Record<string, unknown> {
       summary: 'Ran analysis.',
       graph_hash_at_run: hash,
       computed_at: '2026-04-30T12:00:00.000Z',
+      // T1 claim safety — the verdict the run_analysis handler stamps on EVERY
+      // fact it writes (`projectClaimSafety`, run-analysis.ts). Stamped here for
+      // the same reason phase3-lifecycle.test.ts stamps its keep-list fixture:
+      // an UNSTAMPED fact FAILS CLOSED (`readMayNameLeadingOptionFromResult`),
+      // so without this the turn is treated as WITHHELDING a leading-option
+      // claim and the explanation-answer gate
+      // (`compose/withheld-explanation-answer.ts`) replaces the routed fallback
+      // prose wholesale. This file exists to pin LEVER suppression; it would
+      // otherwise silently measure the withheld projection instead — the exact
+      // wrong-branch defect TESTING-DISCIPLINE rule 1 was earned by. This
+      // fixture represents a healthy, feasible run, so it permits.
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible',
+      },
       enrichment: {
         analysis_status: 'computed',
         margin_pp: 24,
@@ -413,6 +443,13 @@ describe('P0b-2 — routed what_would_flip suppresses option-pinned levers (chip
         summary: 'Ran analysis.',
         graph_hash_at_run: hash,
         computed_at: '2026-04-30T12:00:00.000Z',
+        // See the sibling fixtures above for why this stamp is load-bearing:
+        // an unstamped fact fails closed and this lever-suppression pin would
+        // silently measure the withheld projection instead.
+        constraint_verdict: {
+          may_name_leading_option: true,
+          constraint_verdict_state: 'evaluated_feasible',
+        },
         enrichment: {
           analysis_status: 'computed',
           margin_pp: 24,

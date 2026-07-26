@@ -611,6 +611,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // OBSERVE-ONLY; the `dropped` boolean tag separates detection from
         // enforcement (same contract as V5DecisionReviewContractViolation).
         V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
+        V5WithheldExplanationAnswerProjected: "v5.explanation.withheld_answer_projected",
         V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
         V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
@@ -938,6 +939,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // POST-parse contract gate — reason-tagged counter (primary rule code).
         "v5.decision_review.contract_violation": [TelemetryEvents.V5DecisionReviewContractViolation],
         "v5.egress.leading_option_claim_withheld_violated": [TelemetryEvents.V5LeadingOptionClaimAtEgress],
+        "v5.explanation.withheld_answer_projected": [TelemetryEvents.V5WithheldExplanationAnswerProjected],
 
         // Graph Readiness events (v2.3)
         "cee.graph_readiness.requested": [TelemetryEvents.CeeGraphReadinessRequested],
@@ -2046,6 +2048,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.intercepted_vague_edit",
         "v5.egress.forbidden_phrase_detected",
         "v5.egress.leading_option_claim_withheld_violated",
+        "v5.explanation.withheld_answer_projected",
         "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
         "v5.explicit_generate_received",

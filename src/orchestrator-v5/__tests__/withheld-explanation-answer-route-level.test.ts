@@ -383,18 +383,24 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       );
     });
 
-    it('the projected answer reaches the BLOCK SUMMARY too, so the two slots agree', async () => {
+    it('the `_answer_shape` SIDECAR is clean too — it is derived from the projected text', async () => {
       const turn = await rerunTurn(app);
-      // The gate runs UPSTREAM of composeToolCallResponse, so blocks[].summary
-      // and assistant_text are projected together by construction. A gate placed
-      // after compose would fix one slot and leave the other contradicting it —
-      // which is the whole shape of this defect class.
-      const summaries = turn.blocks
-        .map((b) => b.summary)
-        .filter((s): s is string => typeof s === 'string');
-      for (const summary of summaries) {
-        expect(summary).not.toContain('comes out ahead');
-      }
+      const shape = (JSON.parse(turn.raw) as Record<string, any>)._answer_shape;
+
+      // Non-vacuity first: the sidecar must actually be on this response, or
+      // the absence assertion below is testing nothing. An explanation answer
+      // is classified `substantive`, so the route egress synthesises it.
+      expect(shape, '_answer_shape absent — the assertion below would be vacuous').toBeDefined();
+
+      // It matters that this is checked SEPARATELY from assistant_text. The
+      // sidecar is a distinct rendered surface (the walk's §3.3 read the leak
+      // off `_answer_shape.headline` and `.bullets`), and it is built by
+      // re-splitting the final text — so it is clean here only because the gate
+      // runs UPSTREAM of compose. A gate placed after compose would leave this
+      // carrying the claim the chat slot had just dropped.
+      const shapeJson = JSON.stringify(shape);
+      expect(shapeJson).not.toContain('comes out ahead');
+      expect(shapeJson).not.toContain('leading in 72%');
     });
 
     it('NON-VACUITY: the turn really reached the explanation branch', async () => {
