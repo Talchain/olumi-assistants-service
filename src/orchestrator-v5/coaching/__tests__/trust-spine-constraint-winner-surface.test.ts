@@ -89,7 +89,11 @@ describe('decision-review enricher — constraint-infeasible winner (config-gate
    */
   it('flag ON: marks the over-budget winner infeasible + suppressed', async () => {
     await setGate('true');
-    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium');
+    // The verdict is THREADED now, not re-read from `enrichment`: since
+    // @talchain/schemas 0.25.0 it lives on `result.constraint_verdict`, a
+    // SIBLING of the enrichment record that `buildInvokeInput` never sees.
+    // `false` is what the production caller passes on a withheld turn.
+    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium', undefined, false);
     expect(input).not.toBeNull();
     expect(input!.winner.id).toBe('opt_premium');
     expect(input!.winner.constraint_infeasible).toBe(true);
@@ -98,11 +102,13 @@ describe('decision-review enricher — constraint-infeasible winner (config-gate
 
   it('flag OFF: the NARROW infeasibility flag is gated off; the WIDE withhold is not', async () => {
     await setGate('false');
-    // This enrichment carries no `__cee_claim_safety` stamp, so the verdict is
-    // UNKNOWN and `readMayNameLeadingOption` fails CLOSED — which is the honest
-    // reading: "we did not record whether the leader may be named" is not
-    // "verified feasible". The gate does not, and must not, reach it.
-    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium');
+    // The fact carries NO verdict at all (neither the typed
+    // `result.constraint_verdict` nor the interim stamp), so
+    // `readMayNameLeadingOptionFromResult` fails CLOSED at the call site and
+    // threads `false` — the honest reading: "we did not record whether the
+    // leader may be named" is not "verified feasible". The feature flag does
+    // not, and must not, reach it.
+    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium', undefined, false);
     expect(input).not.toBeNull();
     expect(input!.winner.id).toBe('opt_premium');
     expect(input!.winner.constraint_infeasible).toBeUndefined();
@@ -115,14 +121,7 @@ describe('decision-review enricher — constraint-infeasible winner (config-gate
     // pass on an enricher that suppressed unconditionally — the exact
     // over-correction that would cost every healthy run its recommendation.
     await setGate('false');
-    const permitted = {
-      ...LIVE_WIRE_ENRICHMENT,
-      __cee_claim_safety: {
-        may_name_leading_option: true,
-        constraint_verdict_state: 'evaluated_feasible',
-      },
-    };
-    const input = buildInvokeInputForTests('brief', permitted, 'opt_premium');
+    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium', undefined, true);
     expect(input).not.toBeNull();
     expect(input!.winner.id).toBe('opt_premium');
     expect(input!.winner.constraint_infeasible).toBeUndefined();

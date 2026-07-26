@@ -83,7 +83,7 @@
     "@fastify/rate-limit": "^10.3.0",
     "@sentry/node": "^10.42.0",
     "@supabase/supabase-js": "^2.90.1",
-    "@talchain/schemas": "file:./vendor/talchain-schemas-0.23.0.tgz",
+    "@talchain/schemas": "file:./vendor/talchain-schemas-0.25.0.tgz",
     "archiver": "^7.0.1",
     "compromise": "^14.14.3",
     "compromise-numbers": "^1.4.0",

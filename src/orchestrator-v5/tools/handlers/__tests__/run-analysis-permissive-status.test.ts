@@ -23,6 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { RunAnalysisResultSchema } from '@talchain/schemas/orchestrator';
 
 import type { PLoTClient } from '../../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
@@ -280,17 +281,18 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type === 'run_analysis') {
       // Only the known schema fields should be present on result.
+      //
+      // DERIVED FROM THE SCHEMA, not mirrored from it (CLAUDE.md trap #12).
+      // This used to be a hand-written array, and it went stale the moment
+      // `constraint_verdict` was added in @talchain/schemas 0.25.0 — the
+      // failure mode a mirror always has. Reading `.shape` means a future
+      // contract field is admitted automatically and, more importantly, a field
+      // the handler invents that the CONTRACT does not declare still fails
+      // here, which is the assertion this test actually exists to make.
+      const declared = Object.keys(RunAnalysisResultSchema.shape);
       const resultKeys = Object.keys(fact.result).sort();
       for (const k of resultKeys) {
-        expect([
-          'scenario_id',
-          'leading_option_id',
-          'win_probabilities',
-          'summary',
-          'enrichment',
-          'graph_hash_at_run',
-          'computed_at',
-        ]).toContain(k);
+        expect(declared).toContain(k);
       }
     }
   });

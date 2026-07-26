@@ -135,7 +135,7 @@
 
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { readMayNameLeadingOption } from '../../orchestrator/context/constraint-feasibility.js';
+import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
 
 /**
  * Enrichment blobs dropped WHOLE from the wire on a withheld turn: prose
@@ -165,14 +165,17 @@ export const WITHHELD_DROPPED_DECISION_BRIEF_MEMBERS: readonly string[] = Object
 /**
  * May THIS analysis fact's turn name a leading option?
  *
- * Reads the ONE persisted verdict the run_analysis handler stamped
- * (`stampClaimSafetyOnEnrichment`), never re-derives it — two derivations over
- * different inputs are how one HTTP response ends up contradicting itself
- * (CLAUDE.md trap #12). FAILS CLOSED on an unstamped fact: see
- * `readMayNameLeadingOption` for why "unknown" must not read as "verified".
+ * Reads the ONE persisted verdict the run_analysis handler wrote, never
+ * re-derives it — two derivations over different inputs are how one HTTP
+ * response ends up contradicting itself (CLAUDE.md trap #12). Typed
+ * `result.constraint_verdict` first (schemas 0.25.0), the interim
+ * `enrichment.__cee_claim_safety` stamp second (facts persisted between #710
+ * and that release), FAILS CLOSED on neither — see
+ * `readMayNameLeadingOptionFromResult` for why "unknown" must not read as
+ * "verified".
  */
 export function mayNameLeadingOptionForFact(fact: RunAnalysisHandlerFact): boolean {
-  return readMayNameLeadingOption((fact.result as Record<string, unknown>).enrichment);
+  return readMayNameLeadingOptionFromResult(fact.result);
 }
 
 /**

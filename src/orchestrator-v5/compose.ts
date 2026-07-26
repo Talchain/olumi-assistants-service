@@ -31,9 +31,10 @@ import {
 } from './compose/phase3-blocks.js';
 // T1 claim safety — the SINGLE owner of "may a leading option be named" is
 // `deriveConstraintVerdict`, called ONCE in the run_analysis handler and
-// stamped onto the fact there. This funnel READS that stamp; it does not
-// re-derive (CLAUDE.md trap #12).
-import { readMayNameLeadingOption } from '../orchestrator/context/constraint-feasibility.js';
+// persisted on the fact there. This funnel READS that verdict; it does not
+// re-derive (CLAUDE.md trap #12). `mayNameLeadingOptionForFact` is the one
+// per-fact accessor, so the block funnel and the transport projection cannot
+// read it two different ways.
 import { buildFocusInspectorDirective } from './compose/ui-directive.js';
 import {
   mayNameLeadingOptionForFact,
@@ -796,7 +797,7 @@ function rebuildPhase3BlocksFresh(
   // flag would have left half the paths ungated.
   //
   // FAILS CLOSED. An unstamped fact (every fact written before this change) is
-  // treated as WITHHELD — see `readMayNameLeadingOption` for why "unknown" must
+  // treated as WITHHELD — see `readMayNameLeadingOptionFromResult` for why "unknown" must
   // not read as "verified".
   //
   // Live-proven harm (G-CEE-1 walk, staging 1c078f0): the confirmation said
@@ -813,7 +814,7 @@ function rebuildPhase3BlocksFresh(
   // silently strip useful content, and the egress guard is the layer that
   // catches an unrecognised producer LOUDLY. Layer 2 suppresses what we know is
   // unsafe; Layer 3 alarms on what we do not.
-  if (readMayNameLeadingOption((fact.result as Record<string, unknown>).enrichment)) {
+  if (mayNameLeadingOptionForFact(fact)) {
     return built;
   }
   return built.filter((block) => !presumesLeadingOption(block));

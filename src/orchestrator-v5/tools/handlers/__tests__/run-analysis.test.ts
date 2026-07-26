@@ -25,7 +25,7 @@ import type { V2RunResponseEnvelope } from '../../../../orchestrator/types.js';
 // T1 claim safety — the stamp's owning module (single source of the key name).
 import {
   CEE_CLAIM_SAFETY_ENRICHMENT_KEY,
-  readMayNameLeadingOption,
+  readMayNameLeadingOptionFromResult,
 } from '../../../../orchestrator/context/constraint-feasibility.js';
 
 import type { HandlerInvocation } from '../../registry.js';
@@ -212,7 +212,7 @@ describe('run_analysis handler — happy path', () => {
    * WHEN V5-CI-01 UNBLOCKS: move the verdict to the fact field, delete the
    * stamp, and restore the plain byte-for-byte assertion below.
    */
-  it('fact.result.enrichment is the validated V2RunResponse verbatim PLUS exactly one CEE key', async () => {
+  it('fact.result.enrichment is the validated V2RunResponse VERBATIM — zero added keys', async () => {
     const responseSnapshot = JSON.parse(JSON.stringify(happyFixture)) as V2RunResponseEnvelope;
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(responseSnapshot),
@@ -225,32 +225,43 @@ describe('run_analysis handler — happy path', () => {
 
     const enrichment = fact.result.enrichment as Record<string, unknown>;
 
-    // 1. EXACTLY ONE added key, and it is CEE-namespaced. A second key, or one
-    //    without the `__cee_` prefix, fails here.
+    // ═══════════════════════════════════════════════════════════════════════
+    // STRENGTHENED at @talchain/schemas 0.25.0, and the strengthening is the
+    // point of the release. This test previously read "…VERBATIM PLUS EXACTLY
+    // ONE CEE KEY" and asserted `added` equalled
+    // `['__cee_claim_safety']` — a documented, deliberate BREACH of the
+    // handler-ownership invariant ("enrichment is byte-for-byte PLoT",
+    // scripts/validate-handler-ownership.sh §6), tolerated only because
+    // `RunAnalysisResultSchema` was `.strict()` and the verdict had nowhere
+    // else to live. 0.25.0 gives it `result.constraint_verdict`, so the
+    // invariant is now satisfied EXACTLY and this assertion tightens from
+    // "one known exception" to "none".
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // 1. ZERO added keys. The pass-through is total.
     const added = Object.keys(enrichment).filter(
       (k) => !Object.prototype.hasOwnProperty.call(responseSnapshot, k),
     );
-    expect(added).toEqual([CEE_CLAIM_SAFETY_ENRICHMENT_KEY]);
-    expect(added.every((k) => k.startsWith('__cee_'))).toBe(true);
+    expect(added).toEqual([]);
+    // The interim key specifically is GONE — nothing writes it any more.
+    expect(CEE_CLAIM_SAFETY_ENRICHMENT_KEY in enrichment).toBe(false);
 
     // 2. Every PLoT field is untouched — no projection, no stripping, and no
-    //    field reordering that would change JSON.stringify byte output. This is
-    //    the original assertion, applied to the pass-through half.
-    const passthrough = { ...enrichment };
-    delete passthrough[CEE_CLAIM_SAFETY_ENRICHMENT_KEY];
-    expect(passthrough).toEqual(responseSnapshot);
-    expect(JSON.stringify(passthrough)).toBe(JSON.stringify(responseSnapshot));
+    //    field reordering that would change JSON.stringify byte output.
+    expect(enrichment).toEqual(responseSnapshot);
+    expect(JSON.stringify(enrichment)).toBe(JSON.stringify(responseSnapshot));
 
-    // 3. The stamp carries the verdict, not a placeholder. This fixture ratifies
-    //    no hard constraint, so the verdict is `not_applicable` and the leading
-    //    option MAY be named — the positive control for the whole mechanism.
-    //    Without it a stamp of `{}` would satisfy (1) and (2) and the read side
-    //    would fail closed on every healthy run.
-    expect(enrichment[CEE_CLAIM_SAFETY_ENRICHMENT_KEY]).toEqual({
+    // 3. The verdict carries a real answer, not a placeholder, and it is on the
+    //    CONTRACT field. This fixture ratifies no hard constraint, so the
+    //    verdict is `not_applicable` and the leading option MAY be named — the
+    //    positive control for the whole mechanism. Without it a verdict of `{}`
+    //    would satisfy (1) and (2) while the read side failed closed on every
+    //    healthy run.
+    expect(fact.result.constraint_verdict).toEqual({
       may_name_leading_option: true,
       constraint_verdict_state: 'not_applicable',
     });
-    expect(readMayNameLeadingOption(enrichment)).toBe(true);
+    expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(true);
   });
 
   it('fact carries fact_type=run_analysis, fact_version=1, noop=false', async () => {

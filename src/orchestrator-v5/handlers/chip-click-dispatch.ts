@@ -71,7 +71,7 @@ import {
 } from '../context/freshness.js';
 // T1 claim safety — READ the verdict the run_analysis handler stamped on the
 // fact. This file never derives it (CLAUDE.md trap #12).
-import { readMayNameLeadingOption } from '../../orchestrator/context/constraint-feasibility.js';
+import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -952,7 +952,7 @@ export async function dispatchChipClickRunAnalysis(
           const selected = selectRunAnalysisFact([...enrichedFacts, ...context.prior_facts]);
           if (selected === null) return true;
           return selected.fact.fact_type === 'run_analysis'
-            ? readMayNameLeadingOption(selected.fact.result.enrichment)
+            ? readMayNameLeadingOptionFromResult(selected.fact.result)
             : true;
         })(),
       };
