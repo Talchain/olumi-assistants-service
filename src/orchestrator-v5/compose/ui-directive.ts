@@ -207,6 +207,13 @@ function buildRunAnalysisDirective(
   // most need one, which is the over-suppression half of the acceptance
   // criteria. Rows 1 and 4 (mutation / flip) never name a leader and are
   // untouched.
+  //
+  // HONEST SIZING, so nobody scores this as the fix: the orchestrator's render
+  // probe found the `highlight` directive produces NO observable node styling
+  // at the deployed UI tip. This is HYGIENE — a directive that says "point at
+  // the leader" must not be emitted by the turn that just declined to name
+  // one — not the user-visible leak. The visible leak is the enrichment
+  // projection (compose/withheld-claim-projection.ts).
   if (!mayNameLeadingOptionForFact(fact)) {
     return suppressDirective('run_analysis', 'leading_option_claim_withheld');
   }

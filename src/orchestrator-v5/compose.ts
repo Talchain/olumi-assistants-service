@@ -676,14 +676,27 @@ function buildAnalysisResultBlock(
     type: 'analysis_result',
     summary,
     // `null` is the schema's own honest value here (`leading_option_id:
-    // z.string().nullable()`, boundary/blocks.ts) and is exactly what
+    // z.string().nullable()`, boundary/blocks.ts — the key is REQUIRED, so
+    // `null` is the strongest available "no leader is being put forward";
+    // omitting it would fail egress validation). It is also exactly what
     // ui-directive.ts's fail-closed ladder already reads as "no
     // recommendation". The FACT keeps the id — freshness, decision-record
     // capture and the Phase-3 rebuild all read it from there — so this changes
-    // what the USER is told, not what CEE knows. Live harm it removes: DGAI's
-    // `V5AnalysisResultBlock.tsx` renders a `data-leader="true"`
-    // win-probability pill straight off this field, so a visual leader marker
-    // survived every clean-prose withheld turn.
+    // what the USER is told, not what CEE knows.
+    //
+    // LIVE HARM IT REMOVES, per the orchestrator's render probe at UI
+    // `6d3f4611` / CEE `227e0aa`: this field drives the **"Leading option"
+    // canvas badge**, which rendered on a withheld turn directly alongside the
+    // withheld disclosure.
+    //
+    // ⚠ AND ONE HARM IT DOES NOT REMOVE — recorded because an earlier revision
+    // of this comment claimed it and was WRONG. `V5AnalysisResultBlock.tsx`'s
+    // `data-leader="true"` win-probability pill is DEAD CODE at the deployed
+    // tip: its comparison is option LABEL against option ID, so it can never be
+    // equal, and the probe measured ZERO fires across every run in both verdict
+    // classes. Citing it here would have been the most rhetorically useful
+    // sentence in the argument and the one nobody would have checked
+    // (CLAUDE.md trap 14's corollary).
     leading_option_id: mayNameLeadingOption ? leading_option_id : null,
     ...(win_probabilities !== undefined ? { win_probabilities } : {}),
     ...(transportEnrichment !== undefined

@@ -13,13 +13,47 @@
  *   `enrichment.decision_review.*`               leader prose on 7+ sub-paths
  *   `leading_option_id`                          the leader's id, verbatim
  *
- * The claim was withheld in words and asserted in structure. `headline_banded`
- * is the sharpest of the four: the UI's `normalizeHeadlineBanded()` consumes
- * exactly `band` + `leader_option_id` + `robustness_gated` to set
+ * The claim was withheld in words and asserted in structure.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ THIS IS NOT WIRE HYGIENE. IT IS RENDERED. The orchestrator's render probe
+ * (UI `6d3f4611` / CEE `227e0aa`) photographed a withheld `unevaluated` turn
+ * showing **"Standardise on MacBook Pro is slightly ahead."** as the hero
+ * headline DIRECTLY BELOW the withheld disclosure, plus a "Leading option"
+ * canvas badge — nine distinct leader surfaces, at counts identical to a
+ * permitted run.
+ *
+ * `decision_brief.headline_banded` is the sharpest of the five: its `.text`
+ * renders VERBATIM as that hero, and `normalizeHeadlineBanded()` consumes
+ * `band` + `leader_option_id` + `robustness_gated` to set
  * `DecisionVerdict.hasLeadingOption` — the single boolean that module's own
  * docstring says every surface must gate on before asserting a leading option.
- * CEE was handing the UI the producer-band licence to make the claim CEE had
- * just declined to make.
+ * (`robustness_gated` is recorded and gates nothing.) CEE handed the UI the
+ * producer-band licence to make the claim CEE had just declined to make.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * WHAT DROPPING `headline_banded` DOES AND DOES NOT DO — derived at the
+ * deployed UI tip's bytes (`src/lib/decisionVerdict.ts@6d3f4611`), because
+ * "it degrades gracefully" is a claim that has to be checked, not assumed:
+ *
+ *   DOES: `normalizeHeadlineBanded(undefined)` returns `null` at its FIRST
+ *     guard (`typeof raw !== 'object'`), so `bandApplies` is false and the
+ *     band authority never fires. No crash, no partial read — the same
+ *     no-leader shape the panel's own unused `noClearLeader` copy exists for.
+ *     And the verbatim hero string is gone with the field that carried it.
+ *   DOES NOT: make `hasLeadingOption` false. With no band and no producer
+ *     near-tie, the ladder falls to **Authority 3**, which DERIVES separation
+ *     from `win_probabilities` alone (`source: 'win_probability'`). On the live
+ *     `case1.run` body the gap is 0.567 − 0.221 = 0.346 ⇒ `clear` ⇒
+ *     `hasLeadingOption: true`.
+ *
+ * So this module stops CEE ASSERTING a leader. It does not stop the UI
+ * DERIVING one from the simulation's own numbers, and it was never going to:
+ * those numbers are computed facts the disclosure explicitly invites the user
+ * to act on, and they ship on `win_probabilities` / `option_comparison`
+ * regardless. "The UI renders, never derives" is the next slice and belongs in
+ * the UI repo. Stating it here so nobody reads a green CEE gate as a quiet
+ * screen.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * WHY DROP AND NOT REWRITE — and why that is *mirroring* #707, not departing
