@@ -211,3 +211,80 @@ describe('preflightEnsureScenario — ownership oracle availability', () => {
     expect(result.reason).not.toBe('scenario_requires_authenticated_owner');
   });
 });
+
+describe('preflightEnsureScenario — a store that cannot answer is not a store that need not be asked', () => {
+  /**
+   * A CONFIGURED store that does not implement the ownership oracle at all.
+   *
+   * This is the shape a DI mis-wiring produces: something real was injected,
+   * it just isn't the thing that can answer the ownership question. The cast
+   * is required precisely BECAUSE the interface makes `ensureScenarioExists`
+   * required (store.ts) — no type-correct caller can construct this, so the
+   * only way it reaches production is a wiring defect, which is exactly the
+   * case a security control must survive.
+   */
+  function storeMissingTheOracle(): SessionStore {
+    return {
+      loadGraphAndBriefText: vi.fn(async () => ({ graph: null, briefText: null })),
+    } as unknown as SessionStore;
+  }
+
+  // ---- POSITIVE CONTROL ----------------------------------------------------
+  // Prove the probe can observe an OPEN verdict before asserting a CLOSED one.
+  // Without this, the refusal assertion below would pass even if
+  // preflightEnsureScenario refused unconditionally.
+  it('POSITIVE CONTROL: the same probe reports ok:true for a store that DOES answer', async () => {
+    const result = await preflightEnsureScenario(
+      SCENARIO_ID,
+      null,
+      REQUEST_ID,
+      storeReturningOwner(null),
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('REFUSE (fail closed): a configured store missing ensureScenarioExists', async () => {
+    // The regression this pins: a `typeof store.ensureScenarioExists !==
+    // "function"` branch returned `{ ok: true, skipped: true }` here, which
+    // restored — for this store shape only — the same fail-open the oracle
+    // -failure path above was written to remove. "The store cannot answer"
+    // and "there is no store to ask" are different facts with opposite
+    // correct answers; only the SECOND may skip.
+    const result = await preflightEnsureScenario(
+      SCENARIO_ID,
+      null,
+      REQUEST_ID,
+      storeMissingTheOracle(),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('scenario_ownership_unverifiable');
+  });
+
+  it('REFUSE (fail closed): identity does not rescue it either', async () => {
+    const result = await preflightEnsureScenario(
+      SCENARIO_ID,
+      OWNER_ID,
+      REQUEST_ID,
+      storeMissingTheOracle(),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('scenario_ownership_unverifiable');
+  });
+
+  it('the refusal is NOT reported as skipped', async () => {
+    // The specific shape of the defect: `skipped: true` is the signal an
+    // operator (and the 422-vs-continue branch in route-v2-preflight.ts)
+    // reads as "no check was needed". It must never accompany a store that
+    // was present and simply could not answer.
+    const result = await preflightEnsureScenario(
+      SCENARIO_ID,
+      null,
+      REQUEST_ID,
+      storeMissingTheOracle(),
+    );
+    expect(result).not.toEqual({ ok: true, skipped: true });
+    expect('skipped' in result).toBe(false);
+  });
+});
