@@ -27,6 +27,14 @@
  * DETERMINISM: these tests never depend on real CPU load. A fake clock is
  * advanced from inside a wrapped rule's own `apply()`, so exactly the
  * targeted rule appears slow. There is no race.
+ *
+ * CLOCK — UPDATED FOR ROADMAP 1.232. The guards under test used to read
+ * `performance.now()` (wall time) and now read `process.cpuUsage()` (CPU time
+ * consumed), because wall time made the extractor's OUTPUT depend on host
+ * contention. The fakes below moved with the mechanism: they stub
+ * `process.cpuUsage`, so each test still drives exactly the fork it names.
+ * See `extract-quantities.load-determinism.test.ts` for the pin on the
+ * load-independence property itself.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,32 +48,48 @@ import {
 import { PATTERN_RULES, type PatternRule } from '../rules.js';
 import { log } from '../../../../utils/telemetry.js';
 
+/** Present `ms` of consumed CPU time to `cpuMs()` in extract-quantities.ts. */
+function cpuUsageAt(ms: number): NodeJS.CpuUsage {
+  return { user: Math.round(ms * 1000), system: 0 };
+}
+
 /**
- * Install a fake monotonic clock and return rules in which exactly
- * `slowRuleId` burns `burnMs` of fake time inside its own apply(). Because
- * the orchestrator samples the clock immediately before and after apply(),
- * only that rule's measured duration moves — deterministically.
- */
-/**
- * Freeze the clock so NO wall-clock budget can trip. Required for the
- * "undisturbed run" assertions: on a cold JIT or a loaded machine a real
- * `runExtraction` genuinely exceeds CQE_TOTAL_BUDGET_MS (observed at 86ms
- * for a single rule on first call, and >200ms total), so asserting
- * `degraded === false` against the real clock is a race, not a pin. This
- * is also direct evidence that the caps are tight enough to fire in
- * ordinary conditions, not only under pathological input.
+ * Freeze the clock so NO budget can trip, keeping the "undisturbed run"
+ * assertions hermetic rather than merely likely.
+ *
+ * HISTORY, because the reason changed and a stale reason is a false label.
+ * This helper originally froze `performance.now()`, and its comment recorded
+ * WHY: "on a cold JIT or a loaded machine a real `runExtraction` genuinely
+ * exceeds CQE_TOTAL_BUDGET_MS (observed at 86ms for a single rule on first
+ * call, and >200ms total), so asserting `degraded === false` against the real
+ * clock is a race, not a pin."
+ *
+ * That observation was correct, and it was the defect — not a fact of life to
+ * be worked around in test helpers. It was a wall clock counting time this
+ * process spent DESCHEDULED, and it leaked out of the tests into production
+ * and into `tests/integration/cqe-end-to-end.test.ts`, which flaked ~1 run in
+ * 2 (ROADMAP 1.232). The guards now measure CPU time, so a real extraction
+ * (~0.3ms of CPU, ~30ms cold) no longer approaches the 200ms budget however
+ * loaded the host is. The freeze is kept for hermeticity, not to dodge a
+ * race.
  */
 function withFrozenClock(): { restore: () => void } {
-  const spy = vi.spyOn(globalThis.performance, 'now').mockImplementation(() => 1000);
+  const spy = vi.spyOn(process, 'cpuUsage').mockImplementation(() => cpuUsageAt(1000));
   return { restore: () => spy.mockRestore() };
 }
 
+/**
+ * Install a fake CPU clock and return rules in which exactly `slowRuleId`
+ * burns `burnMs` of fake CPU time inside its own apply(). Because the
+ * orchestrator samples the clock immediately before and after apply(), only
+ * that rule's measured duration moves — deterministically.
+ */
 function withFakeClock(slowRuleId: string, burnMs: number): {
   rules: PatternRule[];
   restore: () => void;
 } {
   let t = 1000;
-  const spy = vi.spyOn(globalThis.performance, 'now').mockImplementation(() => t);
+  const spy = vi.spyOn(process, 'cpuUsage').mockImplementation(() => cpuUsageAt(t));
   const rules = PATTERN_RULES.map((rule) =>
     rule.id === slowRuleId
       ? ({
@@ -147,13 +171,13 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
   });
 
   // ---------------------------------------------------------------------
-  // THE CRITICAL CLASS: the per-rule wall-clock fork (L140) is the one
-  // measured firing under real load. A rule that ran to COMPLETION but
+  // THE CRITICAL CLASS: the per-rule cap fork (L140) is the one measured
+  // firing under real load. A rule that ran to COMPLETION but
   // slowly must keep its result — the regex already finished, so its
   // output is exactly as correct as an in-budget run.
   // ---------------------------------------------------------------------
-  describe('a SLOW but COMPLETED rule keeps its result (per-rule wall-clock fork)', () => {
-    it('"increase by about 10%" stays 0.1 when P6 exceeds its wall-clock cap', () => {
+  describe('a SLOW but COMPLETED rule keeps its result (per-rule cpu-time fork)', () => {
+    it('"increase by about 10%" stays 0.1 when P6 exceeds its cpu-time cap', () => {
       const { rules, restore } = withFakeClock('P6', CQE_REGEX_TIMEOUT_MS + 10);
       try {
         const { results, summary } = __runExtractionForTesting(
@@ -176,7 +200,7 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
           return (
             p.event === 'cqe.pattern_timeout' &&
             p.pattern_id === 'P6' &&
-            p.reason === 'wall_clock_exceeded'
+            p.reason === 'cpu_time_exceeded'
           );
         });
         expect(slowCalls).toHaveLength(1);
@@ -185,7 +209,7 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
       }
     });
 
-    it('"USD 1.2bn" stays 1200000000 when P8 exceeds its wall-clock cap', () => {
+    it('"USD 1.2bn" stays 1200000000 when P8 exceeds its cpu-time cap', () => {
       const { rules, restore } = withFakeClock('P8', CQE_REGEX_TIMEOUT_MS + 10);
       try {
         const { results, summary } = __runExtractionForTesting('USD 1.2bn', {

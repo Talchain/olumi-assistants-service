@@ -25,6 +25,12 @@ import { tracePattern } from './pattern-trace.js';
 // that COMPLETED slowly has a correct result, and discarding it reclaims no
 // latency (the work is already done) while re-opening the defect.
 //
+// CLOCK CHOICE — both budget forks measure CPU TIME CONSUMED, never wall
+// time. See `cpuMs()` for the full rationale; the short version is that this
+// function is pure and deterministic, so its OUTPUT must not depend on how
+// contended the host is, and a wall clock cannot tell "this regex is
+// backtracking catastrophically" apart from "this process was descheduled".
+//
 // Telemetry is emitted by the caller (context-pack-assembler) using the
 // summary returned here; this function itself does not emit events.
 
@@ -112,6 +118,7 @@ function runExtractionInternal(
   hooks: CqeTestHooks | undefined,
 ): CqeExtractionOutput {
   const startedAt = nowMs();
+  const cpuStartedAt = cpuMs();
   const originalLength = typeof rawMessage === 'string' ? rawMessage.length : 0;
   const emptySummary: CqeExtractionSummary = {
     message_length: originalLength,
@@ -139,13 +146,14 @@ function runExtractionInternal(
     let timedOut = false;
     let degraded = false;
     const patternsMatched = new Set<string>();
-    const budgetDeadline = startedAt + CQE_TOTAL_BUDGET_MS;
+    // CPU-time deadline, not a wall-clock one — see `cpuMs()`.
+    const budgetDeadline = cpuStartedAt + CQE_TOTAL_BUDGET_MS;
 
     const activeRules = hooks?.patternRules ?? PATTERN_RULES;
     const forcedTimeouts = hooks?.forceTimeoutPatterns ?? EMPTY_SET;
 
     for (const rule of activeRules) {
-      if (nowMs() > budgetDeadline) {
+      if (cpuMs() > budgetDeadline) {
         // The remaining rules never run, so the highest-fidelity reading of
         // any span they would have claimed is missing from the result set.
         // That IS degradation, and it is the one fork that used to exit
@@ -153,7 +161,7 @@ function runExtractionInternal(
         // that writes values into the user's graph.
         timedOut = true;
         degraded = true;
-        emitBudgetExhausted(rule.id, activeRules, nowMs() - startedAt);
+        emitBudgetExhausted(rule.id, activeRules, cpuMs() - cpuStartedAt);
         break;
       }
       if (forcedTimeouts.has(rule.id)) {
@@ -163,7 +171,7 @@ function runExtractionInternal(
         emitPatternTimeout(rule.id, 'forced_for_test');
         continue;
       }
-      const ruleStart = nowMs();
+      const ruleStart = cpuMs();
       let ruleMatches: CqePatternMatch[];
       try {
         ruleMatches = rule.apply(maskedText, { wordNumberReplacements: replacements });
@@ -174,7 +182,7 @@ function runExtractionInternal(
         );
         continue;
       }
-      const ruleDuration = nowMs() - ruleStart;
+      const ruleDuration = cpuMs() - ruleStart;
       if (ruleDuration > CQE_REGEX_TIMEOUT_MS) {
         // SLOW, but NOT degraded — and deliberately NOT `continue`.
         //
@@ -201,8 +209,18 @@ function runExtractionInternal(
         // The cumulative-cost concern the cap existed to serve is still
         // served — by the total-budget check at the top of this loop, which
         // runs BEFORE the next rule and so can actually prevent work.
+        //
+        // `ruleDuration` is CPU TIME, not wall time (see `cpuMs()`). On a
+        // wall clock this branch fired on a merely-contended host — measured
+        // at ~15 spurious trips per 18,000 extractions under 4x CPU
+        // oversubscription, for rules doing ~0.3ms of actual work. That is a
+        // broken alarm: it reported "redesign this regex" about a regex that
+        // was fine and a machine that was busy, and a signal that cries wolf
+        // is a signal nobody reads. On a CPU clock it fires only when a rule
+        // really did burn the budget, which is the redesign signal §5 asks
+        // for.
         timedOut = true;
-        emitPatternTimeout(rule.id, 'wall_clock_exceeded', ruleDuration);
+        emitPatternTimeout(rule.id, 'cpu_time_exceeded', ruleDuration);
       }
       if (ruleMatches.length === 0) {
         tracePattern(rule.id, false, null, ruleDuration);
@@ -278,15 +296,58 @@ function nowMs(): number {
   // Prefer a monotonic clock where available (always on Node 18+, always
   // in browsers). globalThis.performance satisfies the project's eslint
   // no-undef rule without a per-file ambient global.
+  //
+  // WALL TIME. Used for `summary.duration_ms` ONLY — how long the caller
+  // waited is a latency fact and wall time is the honest way to report it.
+  // It must never decide whether a rule runs; see `cpuMs()`.
   const perf = globalThis.performance;
   return perf !== undefined ? perf.now() : Date.now();
+}
+
+/**
+ * CPU time consumed by this process so far, in milliseconds.
+ *
+ * THIS is the clock both budget guards below use, and the reason is the
+ * whole point of ROADMAP 1.232.
+ *
+ * The guards exist to bound WORK — specifically a pattern regex backtracking
+ * catastrophically on adversarial input. Work is CPU. They were previously
+ * driven by `performance.now()`, which measures WALL time, and wall time on
+ * a contended host also counts every millisecond the process spent
+ * DESCHEDULED — time in which the extractor did nothing at all and no
+ * catastrophic backtracking was happening.
+ *
+ * That made a pure, deterministic, side-effect-free function's OUTPUT depend
+ * on how busy the machine was. The total-budget fork would `break` out of
+ * the rule loop, the highest-fidelity rules for a span never ran, and the
+ * compromise backstop re-claimed that span with a DIFFERENT NUMBER (measured:
+ * "set churn to 5% and cost to 50000" yields 0.05 on an idle host and 5 — a
+ * silent 100x error — on a loaded one). This repo had already measured the
+ * trigger and worked around it *in the tests* rather than in the source:
+ * see the `withFrozenClock` helper in `extract-quantities.degraded.test.ts`,
+ * whose comment records "on a cold JIT or a loaded machine a real
+ * runExtraction genuinely exceeds CQE_TOTAL_BUDGET_MS". Independently
+ * re-measured 2026-07-26 under 8x CPU oversubscription: 126ms of wall time
+ * accrued before rule #3 of 15 against a 200ms budget, for ~0.02ms of actual
+ * work.
+ *
+ * A CPU clock cannot be fooled this way: a process that is starved for 300ms
+ * accrues ~0.03ms of CPU (measured), while a regex that genuinely burns
+ * 200ms of CPU still trips the guard exactly as before. Resolution is 1
+ * microsecond and each call costs ~0.5us, i.e. ~20us added to an extraction
+ * whose median cost is ~60us — a price worth paying to stop a pure function
+ * returning different numbers on a busy laptop.
+ */
+function cpuMs(): number {
+  const usage = process.cpuUsage();
+  return (usage.user + usage.system) / 1000;
 }
 
 const EMPTY_SET: ReadonlySet<string> = new Set<string>();
 
 function emitPatternTimeout(
   patternId: string,
-  reason: 'wall_clock_exceeded' | 'forced_for_test',
+  reason: 'cpu_time_exceeded' | 'forced_for_test',
   durationMs?: number,
 ): void {
   log.warn(
@@ -298,6 +359,11 @@ function emitPatternTimeout(
       timeout: true,
       pattern_id: patternId,
       reason,
+      // CPU milliseconds consumed by this rule — the quantity that was
+      // actually compared against the cap. Renamed from the old
+      // `wall_clock_exceeded` reason when the guard moved off the wall clock
+      // (ROADMAP 1.232): a label that outlives the mechanism it names is how
+      // an honest signal turns into a false one.
       duration_ms: durationMs,
       timeout_cap_ms: CQE_REGEX_TIMEOUT_MS,
     },
@@ -328,6 +394,9 @@ function emitBudgetExhausted(
       first_skipped_pattern_id: firstSkippedId,
       skipped_pattern_ids: skipped,
       skipped_count: skipped.length,
+      // CPU milliseconds consumed before the budget tripped — the quantity
+      // compared against `total_budget_ms`, not the caller's wall-clock wait
+      // (which `summary.duration_ms` still reports). See `cpuMs()`.
       elapsed_ms: elapsedMs,
       total_budget_ms: CQE_TOTAL_BUDGET_MS,
     },
