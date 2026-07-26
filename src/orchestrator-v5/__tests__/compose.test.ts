@@ -74,6 +74,29 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
     answerKind: 'functional' as const,
   };
 
+  /**
+   * T1 claim safety — the persisted constraint verdict every production
+   * run_analysis fact carries (`stampClaimSafetyOnEnrichment`, the single call
+   * site in run-analysis.ts stamps unconditionally).
+   *
+   * Stamped on EVERY fixture below because since ROADMAP 1.218 the
+   * `analysis_result` block itself is gated on it: an unstamped fact FAILS
+   * CLOSED to `leading_option_id: null` with `decision_review` and the three
+   * leader-ranking `decision_brief` members dropped. These are TRANSPORT-shape
+   * tests, so they must reach the licensed branch or they would be asserting
+   * the withheld projection while claiming to describe the normal one
+   * (TESTING-DISCIPLINE rule 1).
+   *
+   * It does not disturb the "thin content" case: `__cee_claim_safety` is
+   * deliberately absent from `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`, so an
+   * enrichment carrying only the stamp still projects to `undefined` and the
+   * block still omits the key.
+   */
+  const CLAIM_SAFETY_STAMP = {
+    may_name_leading_option: true,
+    constraint_verdict_state: 'evaluated_feasible',
+  } as const;
+
   function runAnalysisFact(enrichment?: Record<string, unknown>): HandlerFact {
     return {
       fact_type: 'run_analysis',
@@ -83,7 +106,7 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
         scenario_id: 'scen-a',
         leading_option_id: 'opt-1',
         summary: 'Ran analysis on your current scenario.',
-        ...(enrichment !== undefined ? { enrichment } : {}),
+        enrichment: { ...(enrichment ?? {}), __cee_claim_safety: CLAIM_SAFETY_STAMP },
       },
     };
   }

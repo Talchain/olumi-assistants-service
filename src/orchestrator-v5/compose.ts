@@ -35,6 +35,10 @@ import {
 // re-derive (CLAUDE.md trap #12).
 import { readMayNameLeadingOption } from '../orchestrator/context/constraint-feasibility.js';
 import { buildFocusInspectorDirective } from './compose/ui-directive.js';
+import {
+  mayNameLeadingOptionForFact,
+  projectTransportEnrichmentForWithheldClaim,
+} from './compose/withheld-claim-projection.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
@@ -653,11 +657,34 @@ function buildAnalysisResultBlock(
 ): OlumiResponse['blocks'][number] {
   const { leading_option_id, summary, win_probabilities, enrichment, graph_hash_at_run } =
     fact.result;
-  const transportEnrichment = toSafeTransportEnrichment(enrichment);
+  // T1 CLAIM SAFETY — THE STRUCTURED HALF (ROADMAP 1.218).
+  //
+  // Layer 2 already drops the leader-presuming BLOCKS on a withheld turn
+  // (`rebuildPhase3BlocksFresh`). This block is the other thing every withheld
+  // turn ships, and the POST-#710 live walk measured it leaking on 5/5 withheld
+  // bodies: `leading_option_id` verbatim, plus the leader claim inside the
+  // enrichment blobs. Same verdict, same persisted stamp, same fail-closed
+  // read — see compose/withheld-claim-projection.ts for what is dropped, why
+  // `decision_review` goes whole while `decision_brief` does not, and why the
+  // honest variant is ABSENCE rather than synthesised copy.
+  const mayNameLeadingOption = mayNameLeadingOptionForFact(fact);
+  const safeTransport = toSafeTransportEnrichment(enrichment);
+  const transportEnrichment = mayNameLeadingOption
+    ? safeTransport
+    : projectTransportEnrichmentForWithheldClaim(safeTransport);
   return {
     type: 'analysis_result',
     summary,
-    leading_option_id,
+    // `null` is the schema's own honest value here (`leading_option_id:
+    // z.string().nullable()`, boundary/blocks.ts) and is exactly what
+    // ui-directive.ts's fail-closed ladder already reads as "no
+    // recommendation". The FACT keeps the id — freshness, decision-record
+    // capture and the Phase-3 rebuild all read it from there — so this changes
+    // what the USER is told, not what CEE knows. Live harm it removes: DGAI's
+    // `V5AnalysisResultBlock.tsx` renders a `data-leader="true"`
+    // win-probability pill straight off this field, so a visual leader marker
+    // survived every clean-prose withheld turn.
+    leading_option_id: mayNameLeadingOption ? leading_option_id : null,
     ...(win_probabilities !== undefined ? { win_probabilities } : {}),
     ...(transportEnrichment !== undefined
       ? { enrichment: transportEnrichment as typeof enrichment }

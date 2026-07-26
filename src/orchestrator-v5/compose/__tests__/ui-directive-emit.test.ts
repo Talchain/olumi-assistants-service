@@ -101,7 +101,20 @@ interface FactOverrides {
 }
 
 function runAnalysisFact(overrides: FactOverrides = {}): HandlerFact {
-  const enrichment: Record<string, unknown> = {};
+  const enrichment: Record<string, unknown> = {
+    // T1 claim safety — the persisted constraint verdict the run_analysis
+    // handler stamps on EVERY fact it writes (`stampClaimSafetyOnEnrichment`,
+    // the single call site in run-analysis.ts). It is not optional decoration:
+    // since ROADMAP 1.218 the ui_directive ladder's row-3 winner HIGHLIGHT
+    // reads it and FAILS CLOSED without it, so an unstamped fixture would
+    // exercise the withheld branch and assert zero directives while claiming to
+    // test the emitting one (TESTING-DISCIPLINE rule 1 — name the branch the
+    // fixture must reach). `evaluated_feasible` is that branch.
+    __cee_claim_safety: {
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    },
+  };
   if (overrides.graphNodes !== null) {
     enrichment.graph = { nodes: overrides.graphNodes ?? STANDARD_GRAPH.nodes, edges: [] };
   }

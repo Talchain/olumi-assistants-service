@@ -44,6 +44,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 
 import type { GraphNodeLookup, GraphNodeRef } from './phase3-blocks.js';
 import { selectLens, whatIfSuggestionExecutorAvailable } from './lens-selector.js';
+import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 import { config } from '../../config/index.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 
@@ -108,7 +109,15 @@ type UiDirectiveSuppressReason =
   | 'target_unresolved'
   | 'lens_subject_unresolved'
   | 'precondition_unmet'
-  | 'no_flip_factor';
+  | 'no_flip_factor'
+  /**
+   * T1 claim safety (ROADMAP 1.218): the turn's constraint verdict withholds
+   * the leading-option claim, so the row-3 winner HIGHLIGHT is not emitted.
+   * Distinct from `no_recommendation` on purpose — there IS a leader here and
+   * we are declining to point at it, which is a different operational fact
+   * from "the analysis produced none".
+   */
+  | 'leading_option_claim_withheld';
 
 function suppressDirective(factType: string, reason: UiDirectiveSuppressReason): null {
   emit(TelemetryEvents.V5UiDirectiveSuppressed, { fact_type: factType, reason });
@@ -182,6 +191,25 @@ function buildRunAnalysisDirective(
 
   // Row 3 — the shipped v1 recommended-option highlight (byte-unchanged path when
   // no lens is active: this IS the regression-proof floor).
+  //
+  // T1 CLAIM SAFETY (ROADMAP 1.218 / A1 ruling on row 1.215). GATED, and note
+  // which way round the live defect ran: the POST-#710 walk found the withheld
+  // bodies shipping `highlight → <the leader>` on 5/5, while every PERMITTED
+  // body shipped `focus → <a factor>` on 5/5. The one class of turn that must
+  // not name a leader was the only class telling the canvas to point at it —
+  // the inverse of the expected correlation, and not an accident: row 2's lens
+  // `focus` supersedes this highlight, and the lens block is itself
+  // leader-presuming, so layer 2 drops it on exactly these turns and the ladder
+  // falls through to here.
+  //
+  // Scoped to row 3 deliberately. Row 2's `focus` targets a FACTOR and asserts
+  // no leader; gating it too would cost the user their pointer on the turn they
+  // most need one, which is the over-suppression half of the acceptance
+  // criteria. Rows 1 and 4 (mutation / flip) never name a leader and are
+  // untouched.
+  if (!mayNameLeadingOptionForFact(fact)) {
+    return suppressDirective('run_analysis', 'leading_option_claim_withheld');
+  }
   const highlight = buildRecommendedOptionUiDirective(fact, lookup);
   if (highlight !== null) return emitDirective('run_analysis', highlight);
   return suppressDirective('run_analysis', 'no_recommendation');

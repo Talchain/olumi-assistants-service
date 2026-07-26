@@ -89,6 +89,23 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
   { code: 'winner', re: /\bwinners?\b/i },
   { code: 'ahead', re: /\bis\s+ahead\b/i },
   { code: 'top_choice', re: /\btop\s+choice\b/i },
+  /**
+   * The PRODUCER'S BAND PHRASING, and the one deliberate divergence from the
+   * walk's matcher noted above.
+   *
+   * `WALK-2026-07-26-POST-710.md` §7.2 found its own instrument blind here: on
+   * the two `unevaluated` bodies it "reported a leader claim it could not see",
+   * because `decision_brief.headline_banded.text` reads *"… is slightly
+   * ahead."* and `\bis\s+ahead\b` does not match it. The walk RECOMMENDED
+   * promoting this pattern and explicitly declined to apply it itself, because
+   * doing so would move its own 26 Jul comparability baseline.
+   *
+   * The guard has no such baseline to protect, and this is the field with a
+   * live UI reader chain (§4.2). Adding it makes the ALARM strictly stronger
+   * than the matcher — a one-directional divergence, recorded here rather than
+   * left for a future reader to discover as a mystery hit.
+   */
+  { code: 'band_ahead', re: /\b(?:slightly|clearly|well|far)\s+ahead\b/i },
 ];
 
 /** One detected claim. `sample` is NEVER logged or emitted — triage only. */
@@ -153,6 +170,64 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * The `analysis_result` block's enrichment blobs that can carry a leader claim.
+ *
+ * Scanned by a DEEP WALK, not a field list. That is a correction, and it is the
+ * whole point of this change (ROADMAP 1.218):
+ *
+ *   - `story_headlines` was read as `Array.isArray(...) ? … : []`. On the live
+ *     wire it is a DICT keyed by option id — verified `dict` on **10/10** bodies
+ *     of the POST-#710 archive. `Array.isArray` was false on every one, so the
+ *     loop body never ran and the guard never scanned the field carrying
+ *     "Leads under current modelling…". The walk's matcher saw it; the
+ *     production alarm did not.
+ *   - `decision_brief` was not scanned AT ALL — not `.headline`, not
+ *     `.headline_banded`, not `.robustness_caveat` — which is 3 of the leaking
+ *     strings on every withheld body.
+ *
+ * Both defects are the SAME defect: a hand-written path list that mirrored one
+ * remembered shape (CLAUDE.md trap #12). Walking every string under the two
+ * blobs removes the mirror instead of extending it — leader prose lives under
+ * DYNAMIC keys here (option ids, factor ids, edge ids), so no static list can
+ * stay complete. This layer drops nothing (observe-only), so a broad scan costs
+ * a false alarm at worst and cannot over-suppress.
+ */
+const ENRICHMENT_CLAIM_BLOBS: readonly string[] = ['decision_review', 'decision_brief'];
+
+/**
+ * Node budget for the deep walk, shared across the WHOLE response so total work
+ * is bounded even on a pathological envelope (this chokepoint is re-entered up
+ * to 4× per response). The live blobs measure ~1–2k nodes, so this is ~25×
+ * headroom.
+ *
+ * Exhaustion is reported as a HIT, never as a silent truncation: a scanner that
+ * quietly stops looking is the broken-alarm class this module exists to avoid.
+ */
+const ENRICHMENT_SCAN_NODE_BUDGET = 50_000;
+
+/** Walk every string under `value`, bounded by a shared node budget. */
+function scanDeep(
+  path: string,
+  value: unknown,
+  out: LeaderClaimHit[],
+  budget: { remaining: number },
+): void {
+  if (budget.remaining <= 0) return;
+  budget.remaining -= 1;
+  if (typeof value === 'string') {
+    scanString(path, value, out);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) scanDeep(`${path}[${i}]`, value[i], out, budget);
+    return;
+  }
+  const record = asRecord(value);
+  if (record === null) return;
+  for (const key of Object.keys(record)) scanDeep(`${path}.${key}`, record[key], out, budget);
+}
+
+/**
  * Collect every leading-option claim on the response.
  *
  * PURE and total — returns hits, decides nothing, logs nothing. Exported so
@@ -161,6 +236,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  */
 export function findLeaderClaims(response: OlumiResponse): LeaderClaimHit[] {
   const hits: LeaderClaimHit[] = [];
+  const budget = { remaining: ENRICHMENT_SCAN_NODE_BUDGET };
 
   // Top-level prose. `framing_question` is rendered VERBATIM by the UI and is
   // currently scanned by nothing at all.
@@ -187,21 +263,28 @@ export function findLeaderClaims(response: OlumiResponse): LeaderClaimHit[] {
       scanString(`blocks[${i}].${field}`, block[field], hits);
     }
 
-    // `blocks[0].enrichment.decision_review` — the analysis_result block's
-    // enrichment blob. NOT wire-data-only: `DecisionGuideAI/src/v5/
-    // applyV5State.ts` maps it onto `runMeta.ceeReviewV1` and renders it, so
-    // `narrative_summary` and `story_headlines` (an explicit per-option
-    // RANKING) reach the user's screen. The G-CEE-1 walk's matcher excluded
-    // this blob as "wire data, not rendered copy" — that exclusion was wrong,
-    // and the confirmation is cited above. Scanned here.
+    // `blocks[i].enrichment.{decision_review,decision_brief}` — the
+    // analysis_result block's enrichment blobs. NOT wire-data-only:
+    // `DecisionGuideAI/src/v5/applyV5State.ts` maps `decision_review` onto
+    // `runMeta.ceeReviewV1`, and `decision_brief.headline_banded` has an
+    // unbroken reader chain to `DecisionVerdict.hasLeadingOption` (the walk's
+    // §2(d)-ii trace at UI tip `6d3f4611`). The G-CEE-1 walk's original matcher
+    // excluded these blobs as "wire data, not rendered copy" — that exclusion
+    // was wrong. Deep-scanned here; see ENRICHMENT_CLAIM_BLOBS for why a deep
+    // walk and not a path list.
     const enrichment = asRecord(block.enrichment);
-    const review = enrichment === null ? null : asRecord(enrichment.decision_review);
-    if (review === null) continue;
-    scanString(`blocks[${i}].enrichment.decision_review.narrative_summary`, review.narrative_summary, hits);
-    const headlines = Array.isArray(review.story_headlines) ? review.story_headlines : [];
-    for (let h = 0; h < headlines.length; h += 1) {
-      scanString(`blocks[${i}].enrichment.decision_review.story_headlines[${h}]`, headlines[h], hits);
+    if (enrichment === null) continue;
+    for (const blob of ENRICHMENT_CLAIM_BLOBS) {
+      if (enrichment[blob] === undefined) continue;
+      scanDeep(`blocks[${i}].enrichment.${blob}`, enrichment[blob], hits, budget);
     }
+  }
+
+  // FAIL LOUD, never silently short. A truncated scan is a scan that stopped
+  // looking, and this module's whole job is to be the alarm the other layers
+  // are measured against.
+  if (budget.remaining <= 0) {
+    hits.push({ path: 'blocks[].enrichment', code: 'scan_budget_exhausted' });
   }
 
   return hits;
