@@ -1041,6 +1041,16 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       ...(scaffoldOutcome.scaffolded.length > 0
         ? { __scaffolded_options: scaffoldPresence.stamped }
         : {}),
+      // T1 claim safety, carried to the STEP-5 coaching detector. The egress
+      // allowlist governs only the confirmation segment of `assistant_text`;
+      // the coaching piece is a separate compose slot whose copy presumes a
+      // leading option ("explore the leading option"; on a re-run "{label}
+      // still leads"). Without this the turn withholds the claim in one
+      // sentence and asserts it by name in the next. The verdict's own
+      // declaration is passed rather than re-derived downstream.
+      ...(constraintVerdict.mayNameLeadingOption
+        ? {}
+        : { __leading_option_claim_withheld: true }),
     };
   };
 }

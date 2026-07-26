@@ -344,6 +344,28 @@ export interface HandlerOutcome {
   readonly __scaffolded_options?: ReadonlyArray<
     import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
   >;
+  /**
+   * T1 — set by `run_analysis` when the constraint verdict forbids naming a
+   * leading option (`!ConstraintVerdict.mayNameLeadingOption`: the
+   * `unevaluated`, `identity_unresolved` and `evaluated_infeasible` states).
+   * Internal channel on the same pattern as `__plot_timings` above.
+   *
+   * WHY IT EXISTS. The egress allowlist
+   * (`isAllowedRunAnalysisAssistantText`) governs only the CONFIRMATION
+   * segment of `assistant_text`. The STEP-5 coaching piece is a separate
+   * compose slot that never passes through it, and its copy bank presumes a
+   * leader — "explore the leading option", and on a re-run "{label} still
+   * leads". So a turn could withhold the leading-option claim in the
+   * confirmation and then assert it, by name, in the sentence directly
+   * underneath. Every defence built for the headline was bypassed one line
+   * later.
+   *
+   * The flag carries the verdict's OWN declaration to the coaching detector
+   * rather than having it re-derive one (CLAUDE.md trap #12) — there is one
+   * owner of "may a leading option be named", and it is
+   * `deriveConstraintVerdict`.
+   */
+  readonly __leading_option_claim_withheld?: boolean;
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;
