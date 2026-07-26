@@ -233,6 +233,20 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
           // `flip_value: null` that must survive verbatim, not be coerced.
           flip_thresholds: [{ factor_id: 'fac_x', flip_value: null }],
         };
+    // T1 claim safety — the persisted constraint verdict the run_analysis
+    // handler stamps on EVERY fact it writes. Stamped here (including on the
+    // `onlyLeak` fixture) because since ROADMAP 1.218 the transport projection
+    // is gated on it: an unstamped fact FAILS CLOSED, dropping
+    // `decision_review` whole and the three leader-ranking `decision_brief`
+    // members, so this keep-list fixture would silently measure the WITHHELD
+    // projection instead of the transport keep-list it exists to pin
+    // (TESTING-DISCIPLINE rule 1). `__cee_claim_safety` is not itself
+    // keep-listed, so it never reaches the wire and the `onlyLeak` case still
+    // projects to `undefined`.
+    enrichment.__cee_claim_safety = {
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    };
     if (!opts?.onlyLeak && opts?.withDecisionReview !== false) {
       enrichment.decision_review = { narrative_summary: 'ok' };
     }

@@ -100,6 +100,22 @@ const LEADER_DECISION_REVIEW = {
   // assertion below would pass vacuously (TESTING-DISCIPLINE rule 1).
   narrative_summary:
     'Hire Marketing Manager leads by a margin of about 52 percentage points, but this result relies on assumptions.',
+  /**
+   * A DICT keyed by option id — the shape the decision-review prompt's own
+   * OUTPUT_SCHEMA mandates (`story_headlines (Record<option_id, string>)`,
+   * `prompts/defaults.ts`) and the shape verified on 10/10 live bodies.
+   *
+   * It is here because the egress guard used to read it as
+   * `Array.isArray(review.story_headlines) ? … : []`, which is false for a
+   * dict — so the loop body never ran and the guard NEVER SCANNED the field
+   * carrying "Leads under current modelling…". A fixture that used an array
+   * would have passed against the broken walker (TESTING-DISCIPLINE rule 1:
+   * name the branch the fixture must reach).
+   */
+  story_headlines: {
+    opt_hire: 'Leads under current modelling, but the advantage rests on unverified assumptions.',
+    opt_hold: 'Trails on the current numbers.',
+  },
   robustness_explanation: {
     summary: 'The current result is not robust, as the lead depends on assumptions.',
   },
@@ -113,10 +129,60 @@ const LEADER_DECISION_REVIEW = {
   produced_at: '2026-07-26T09:00:00.000Z',
 };
 
+/**
+ * A `decision_brief` in the shape the LIVE producer emits — every field name,
+ * nesting and phrasing below is copied from `case1.run.response.json` in
+ * `acceptance-evidence/g-cee-1-constraint-verdict/raw-2026-07-26-post-710/`
+ * (CEE staging `227e0aa`, a withheld `unevaluated` turn), with the labels
+ * swapped for this file's own graph.
+ *
+ * Split deliberately into its THREE leader-ranking members and its
+ * non-comparative remainder, because the acceptance criteria weight
+ * over-suppression equally with the leak: the first group must vanish on a
+ * withheld turn, the second must survive it.
+ */
+const LEADER_DECISION_BRIEF = {
+  brief_id: '3194a5d7-5c72-4fad-8cc9-5a76fd9ddd07',
+  version: '1',
+  created_at: '2026-07-26T09:00:00.000Z',
+  // ── the three leader-ranking members ──────────────────────────────────────
+  headline:
+    'Hire Marketing Manager currently leads, but the outcome is highly uncertain. Gather evidence before deciding.',
+  headline_banded: {
+    text: 'Hire Marketing Manager is slightly ahead.',
+    band: 'slightly_ahead',
+    leader_option_id: 'opt_hire',
+    leader_label: 'Hire Marketing Manager',
+    runner_up_option_id: 'opt_hold',
+    runner_up_label: 'Hold',
+    win_probability_gap: 0.44,
+    robustness_gated: true,
+    doctrine: 'provisional_doctrine_v0',
+  },
+  robustness_caveat: {
+    text: 'This ranking was fragile under the perturbations tested — small changes to assumptions could change which option leads.',
+  },
+  // ── the non-comparative remainder (the over-suppression control) ──────────
+  options: [
+    { option_id: 'opt_hire', label: 'Hire Marketing Manager', win_probability: 0.72, rank: 1 },
+    { option_id: 'opt_hold', label: 'Hold', win_probability: 0.28, rank: 2 },
+  ],
+  top_drivers: [{ factor_label: 'Hiring pipeline health', sensitivity: 0.23, direction: 'positive' }],
+  key_assumptions: ['Hiring pipeline health'],
+  what_would_change: ['Hiring pipeline health → Customer growth'],
+  robustness: 'fragile',
+  warnings: [{ code: 'DOMINANT_FACTOR', message: 'One factor dominates.', severity: 'warning' }],
+  warning_codes: ['DOMINANT_FACTOR'],
+  defaulted_assumptions: [],
+  analysis_summary: { n_samples: 1000 },
+};
+
 function plotEnvelope(opts: {
   constraintKey?: string;
   /** Attach the leader-asserting decision_review (see above). */
   withDecisionReview?: boolean;
+  /** Attach the leader-asserting decision_brief (see above). */
+  withDecisionBrief?: boolean;
   /** Satisfaction probability written under `constraintKey`. 0 ⇒ the leader
    *  violates it, which selects `evaluated_infeasible`. */
   constraintProb?: number;
@@ -141,6 +207,12 @@ function plotEnvelope(opts: {
   return {
     meta: { seed_used: 1, n_samples: 1000, response_hash: 'sha256:fixture' },
     analysis_status: 'completed',
+    // Keep-listed, fixture-proven top-level field (compose.ts
+    // `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`). Present so the 1.218
+    // over-suppression controls have a SECOND keep-listed field to assert
+    // survives — otherwise "the keep-list still works" would rest on
+    // `option_comparison` alone.
+    option_comparison_status: 'computed',
     constraints_status: opts.constraintsStatus ?? 'computed',
     // The handler stores `enrichment` as a byte-for-byte pass-through of this
     // envelope, so a `decision_review` here lands on the fact exactly as the
@@ -149,6 +221,7 @@ function plotEnvelope(opts: {
     // route-level file reaches the LIVE-FAILING blocks without needing the
     // enricher's LLM call or its default-off await flag.
     ...(opts.withDecisionReview ? { decision_review: LEADER_DECISION_REVIEW } : {}),
+    ...(opts.withDecisionBrief ? { decision_brief: LEADER_DECISION_BRIEF } : {}),
     ...(opts.warningCodes && opts.warningCodes.length > 0
       ? { inference_warnings: opts.warningCodes.map((code) => ({ code })) }
       : {}),
@@ -816,20 +889,38 @@ describe('withhold paths: leader-presuming BLOCK PROSE must not reach the wire',
       .toEqual([]);
   });
 
-  it('LAYER 3: the KNOWN RESIDUAL — the enrichment blob still carries the leader prose', async () => {
-    // HONEST FINDING, not a passing grade. `decision_review` is on the
-    // `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` allowlist, so the blob reaches the
-    // wire on `blocks[].enrichment` even when layer 2 has dropped the CARDS
-    // built from it. DecisionGuideAI's `applyV5State` maps that blob onto
-    // `runMeta.ceeReviewV1` and RENDERS it, so this is user-visible.
+  it('LAYER 3: the FORMER residual — the enrichment blob no longer carries the leader prose', async () => {
+    // ═══════════════════════════════════════════════════════════════════════
+    // RE-POINTED AT SOURCE, ROADMAP 1.218. TESTING-DISCIPLINE rule 5 — the
+    // rationale lives here so a future reader needs no PR archaeology.
     //
-    // The G-CEE-1 walk's matcher excluded the blob as "wire data, not rendered
-    // copy" — which is why the walk scored three leaks and not four.
+    // WHAT THIS TEST USED TO ASSERT, verbatim:
     //
-    // Layer 3 ships OBSERVE-ONLY precisely so a residual like this is COUNTED
-    // on real staging traffic before anything starts deleting response fields.
-    // This test pins the residual so it cannot be forgotten, and it FAILS THE
-    // DAY IT IS FIXED — at which point delete it and assert the absence.
+    //     expect(hits.map((h) => h.path)).toEqual(
+    //       ['blocks[0].enrichment.decision_review.narrative_summary']);
+    //
+    // …under the heading "the KNOWN RESIDUAL — the enrichment blob STILL
+    // carries the leader prose", and it said of itself: "This test pins the
+    // residual so it cannot be forgotten, and it FAILS THE DAY IT IS FIXED —
+    // at which point delete it and assert the absence."
+    //
+    // THIS IS THAT DAY. The residual is fixed (compose/
+    // withheld-claim-projection.ts drops `decision_review` whole and the three
+    // leader-ranking members of `decision_brief` on a withheld turn), so the
+    // old expectation is inverted here rather than deleted: the shape it
+    // described is exactly the regression this file must keep catching.
+    //
+    // The assertion is NOT weakened in the process. It still reads the guard's
+    // own scanner over the SERIALISED bytes, it still enumerates every hit
+    // path rather than counting, and the guard's scan surface is now STRICTLY
+    // WIDER than it was when the old expectation was written (deep walk over
+    // `decision_review` AND `decision_brief`, fixing the `story_headlines`
+    // dict/array blindness) — so the zero below is measured by a bigger net,
+    // not a smaller one. Its non-vacuity control is the sibling
+    // `evaluated_feasible` test in the block above, which proves this same
+    // instrument, on this same route, still returns hits when the claim is
+    // licensed.
+    // ═══════════════════════════════════════════════════════════════════════
     const events: Array<{ name: string; data: Record<string, unknown> }> = [];
     setTestSink((name, data) => events.push({ name, data: data as Record<string, unknown> }));
 
@@ -838,25 +929,246 @@ describe('withhold paths: leader-presuming BLOCK PROSE must not reach the wire',
 
     const hits = findLeaderClaims(JSON.parse(turn.raw));
     expect(
-      hits.map((h) => h.path),
-      'the residual moved — re-derive this expectation from the bytes, do not widen it',
-    ).toEqual(['blocks[0].enrichment.decision_review.narrative_summary']);
+      hits.map((h) => `${h.path} (${h.code})`),
+      'a leading-option claim reached the wire on a withheld turn',
+    ).toEqual([]);
 
-    // …and the guard SAW it, reported it, and dropped NOTHING (observe-only).
+    // …and the alarm therefore stays SILENT, where it used to fire. This is the
+    // other half of the inversion: the guard is observe-only, so "no event" is
+    // the only observable that distinguishes a clean withheld turn from a
+    // leaking one.
     const fired = events.filter(
       (e) => e.name === 'v5.egress.leading_option_claim_withheld_violated',
     );
-    // TWO firings for ONE response, and that is the documented behaviour, not a
-    // bug: `sendFinalised200` re-enters the egress chokepoint (validate, then
-    // finalise), and the guard reports on every pass. Pinned here so a
-    // dashboard author reads it from a test rather than discovering it as a 2×
-    // inflation in the residue rate — count DISTINCT request_ids, not
-    // increments. See the multiplicity note in the guard module.
-    expect(fired.length).toBeGreaterThanOrEqual(1);
-    expect(new Set(fired.map((f) => f.data.request_id)).size).toBe(1);
-    for (const f of fired) {
-      expect(f.data.dropped, 'observe-only must report, never enforce').toBe(false);
-      expect(f.data.hit_count).toBe(1);
-    }
+    expect(fired.map((f) => f.data)).toEqual([]);
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROADMAP 1.218 — THE VERDICT GATES EVERY EGRESS SURFACE, NOT JUST PROSE.
+//
+// The POST-#710 live walk (staging `227e0aa`,
+// `acceptance-evidence/g-cee-1-constraint-verdict/WALK-2026-07-26-POST-710.md`)
+// closed the rendered-prose failure and measured what remained. On **5/5**
+// withheld bodies, the same HTTP response that said "no option can be put
+// forward yet" still carried:
+//
+//   blocks[0].leading_option_id                              `opt_status_quo`
+//   ui_directive                                    `highlight → opt_status_quo`
+//   …enrichment.decision_brief.headline             "… currently leads, …"
+//   …enrichment.decision_brief.headline_banded      { band: 'slightly_ahead',
+//                                                     leader_option_id: … }
+//   …enrichment.decision_review.*                   leader prose, 7+ sub-paths
+//
+// …while all 5 PERMITTED bodies shipped `focus → <a factor>`. The one class of
+// turn that must not name a leader was the only class pointing the canvas at
+// it.
+//
+// Asserted on the SERIALISED HTTP BYTES, past compose, the terminology
+// rewrite, the egress sanitiser and JSON serialisation (TESTING-DISCIPLINE
+// rule 3). Every absence below is paired with a POSITIVE CONTROL on
+// `evaluated_feasible` proving the same surface still carries its content when
+// the claim is licensed — over-suppression is a failure equal to the leak.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The `analysis_result` block off the wire. */
+function analysisBlockOf(raw: string): Record<string, any> {
+  const block = blocksOf(raw).find((b) => b.type === 'analysis_result');
+  if (block === undefined) throw new Error('no analysis_result block on the wire');
+  return block;
+}
+/** Every `ui_directive` block off the wire, flattened to `verb → target ids`. */
+function uiDirectivesOf(raw: string): string[] {
+  return blocksOf(raw)
+    .filter((b) => b.type === 'ui_directive')
+    .map((b) => `${b.verb} → ${(b.targets ?? []).map((t: Record<string, any>) => t.id).join('|')}`);
+}
+
+describe('withhold paths: the STRUCTURED leader residue must not reach the wire', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => app.close());
+  beforeEach(() => {
+    setTestSink(() => {});
+    routeWithToolUseMock.mockReset();
+    routeWithToolUseMock.mockResolvedValue(routedRunAnalysis());
+    plotResponse = plotEnvelope({});
+    priorTurns = [];
+    priorFacts = [];
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.clearAllMocks();
+  });
+
+  /** The healthy envelope: the ratified constraint scored under CEE's own id. */
+  const feasible = () =>
+    plotEnvelope({
+      constraintKey: 'constraint_out_total_cost_max',
+      withDecisionReview: true,
+      withDecisionBrief: true,
+    });
+
+  describe('POSITIVE CONTROLS — evaluated_feasible keeps every one of these surfaces', () => {
+    // Without these, all five absence assertions below would pass on a turn
+    // that shipped no enrichment, no directive and no leader id at all — which
+    // is precisely how an over-suppressing "fix" ships green while costing the
+    // user their whole analysis.
+
+    it('leading_option_id, the enrichment blobs and the brief all ride the wire', async () => {
+      plotResponse = feasible();
+      const turn = await runAnalysisTurn(app);
+      expect(turn.status).toBe(200);
+      const block = analysisBlockOf(turn.raw);
+
+      expect(block.leading_option_id).toBe('opt_hire');
+      expect(block.enrichment.decision_review).toBeDefined();
+      expect(block.enrichment.decision_review.narrative_summary).toContain('leads by a margin');
+      expect(block.enrichment.decision_brief.headline).toContain('currently leads');
+      expect(block.enrichment.decision_brief.headline_banded.leader_option_id).toBe('opt_hire');
+      expect(block.enrichment.decision_brief.headline_banded.band).toBe('slightly_ahead');
+      expect(block.enrichment.decision_brief.robustness_caveat.text).toContain('which option leads');
+    });
+
+    it('a ui_directive IS emitted on a permitted run', async () => {
+      plotResponse = feasible();
+      const turn = await runAnalysisTurn(app);
+      // The verb is whatever the §2.1 ladder selects for this fixture (row 2
+      // lens `focus` supersedes row 3 `highlight` when a lens block survives);
+      // this control asserts only that the ladder still REACHES an emission,
+      // which is the thing the withheld gate must not destroy for permitted
+      // turns.
+      expect(uiDirectivesOf(turn.raw).length).toBe(1);
+    });
+
+    it('the guard SEES the licensed claim — the instrument is not blind', async () => {
+      // The non-vacuity control for every `toEqual([])` below, and the specific
+      // proof that the two scan-surface defects this PR fixes are fixed: the
+      // `story_headlines` DICT (`Array.isArray` was false on 10/10 live bodies,
+      // so the loop body never ran) and `decision_brief` (not scanned at all).
+      // `findLeaderClaims` is the PURE scanner — it carries no verdict gate, so
+      // calling it on a permitted turn asserts the SCAN SURFACE directly.
+      plotResponse = feasible();
+      const turn = await runAnalysisTurn(app);
+      const paths = findLeaderClaims(JSON.parse(turn.raw)).map((h) => h.path);
+      expect(paths).toContain('blocks[0].enrichment.decision_review.narrative_summary');
+      expect(paths).toContain('blocks[0].enrichment.decision_review.story_headlines.opt_hire');
+      expect(paths).toContain('blocks[0].enrichment.decision_brief.headline');
+      expect(paths).toContain('blocks[0].enrichment.decision_brief.headline_banded.text');
+      expect(paths).toContain('blocks[0].enrichment.decision_brief.robustness_caveat.text');
+    });
+  });
+
+  for (const { state, envelope } of WITHHOLDING_STATES) {
+    describe(`${state}`, () => {
+      const withBlobs = () => ({
+        ...envelope(),
+        decision_review: LEADER_DECISION_REVIEW,
+        decision_brief: LEADER_DECISION_BRIEF,
+      });
+
+      it('(c) leading_option_id is NULL, not the leader id', async () => {
+        // DGAI's `V5AnalysisResultBlock.tsx` renders a `data-leader="true"`
+        // win-probability pill straight off this field, so the id surviving a
+        // clean-prose withheld turn is a VISUAL leader marker on the same
+        // screen as "no option can be put forward yet". `null` is the boundary
+        // schema's own value for the field (`z.string().nullable()`).
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        expect(turn.status).toBe(200);
+        expect(analysisBlockOf(turn.raw).leading_option_id).toBeNull();
+        expect(turn.raw).not.toContain('"leading_option_id":"opt_hire"');
+      });
+
+      it('(c) NO ui_directive points at the leading option', async () => {
+        // The walk's inverted correlation: `highlight → <leader>` on 5/5
+        // withheld bodies, `focus → <a factor>` on 5/5 permitted ones.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        for (const directive of uiDirectivesOf(turn.raw)) {
+          expect(directive, 'a directive pointed at the leading option').not.toContain('opt_hire');
+        }
+      });
+
+      it('(a) decision_brief ships WITHOUT its three leader-ranking members', async () => {
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        const brief = analysisBlockOf(turn.raw).enrichment?.decision_brief;
+        expect(brief, 'the brief itself must survive — see the control below').toBeDefined();
+        expect(brief.headline).toBeUndefined();
+        expect(brief.headline_banded).toBeUndefined();
+        expect(brief.robustness_caveat).toBeUndefined();
+        // …and the strings themselves are off the SERIALISED bytes, not merely
+        // off one parsed path.
+        expect(turn.raw).not.toContain('currently leads');
+        expect(turn.raw).not.toContain('is slightly ahead');
+        expect(turn.raw).not.toContain('could change which option leads');
+        expect(turn.raw).not.toContain('slightly_ahead');
+      });
+
+      it('(a) OVER-SUPPRESSION CONTROL: the rest of the brief still ships', async () => {
+        // The user needs the drivers, the assumptions and the warnings MOST on
+        // the turn where the recommendation is being withheld. A fix that
+        // dropped `decision_brief` whole would pass every absence assertion
+        // above; this is what stops it.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        const brief = analysisBlockOf(turn.raw).enrichment.decision_brief;
+        expect(brief.top_drivers).toBeDefined();
+        expect(brief.key_assumptions).toEqual(['Hiring pipeline health']);
+        expect(brief.what_would_change).toBeDefined();
+        expect(brief.warnings).toBeDefined();
+        expect(brief.analysis_summary).toBeDefined();
+        expect(brief.options).toBeDefined();
+        expect(turn.raw).toContain('Hiring pipeline health');
+      });
+
+      it('(b) the decision_review blob does not ship at all', async () => {
+        // Dropped WHOLE, not field-filtered: the blob is LLM-authored prose end
+        // to end and its leader claims land under DYNAMIC keys (option ids,
+        // factor ids, edge ids) on 7+ sub-paths across the live archive. A
+        // field allow-list over it is the hand-maintained mirror CLAUDE.md trap
+        // #12 is about. compose.ts already drops the CARDS built from this blob
+        // whole on these turns, for the same stated reason.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        expect(analysisBlockOf(turn.raw).enrichment?.decision_review).toBeUndefined();
+        expect(turn.raw).not.toContain('leads by a margin of about 52 percentage points');
+        expect(turn.raw).not.toContain('overtakes');
+      });
+
+      it('(b) OVER-SUPPRESSION CONTROL: the other keep-listed science still ships', async () => {
+        // `decision_review` going whole must not take the transport keep-list
+        // with it.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        const enrichment = analysisBlockOf(turn.raw).enrichment;
+        expect(enrichment.option_comparison).toBeDefined();
+        expect(enrichment.option_comparison_status).toBeDefined();
+        // …and the block's own non-enrichment payload is untouched.
+        expect(analysisBlockOf(turn.raw).win_probabilities).toBeDefined();
+        expect(analysisBlockOf(turn.raw).summary.length).toBeGreaterThan(0);
+      });
+
+      it('(d) THE WHOLE GATE: the guard finds ZERO leader claims anywhere', async () => {
+        // One assertion over the entire serialised envelope, using the
+        // production alarm's own scanner — so the route test and the guard
+        // cannot drift apart, and so a leak through a producer nobody has
+        // thought of yet fails HERE. Under the pre-1.218 code this returns the
+        // enrichment-blob paths; its non-vacuity control is the
+        // `evaluated_feasible` scanner test above.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        expect(
+          findLeaderClaims(JSON.parse(turn.raw)).map((h) => `${h.path} (${h.code})`),
+          'a leading-option claim survived to the wire on a withheld turn',
+        ).toEqual([]);
+      });
+    });
+  }
 });

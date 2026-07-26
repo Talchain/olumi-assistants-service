@@ -35,6 +35,10 @@ import {
 // re-derive (CLAUDE.md trap #12).
 import { readMayNameLeadingOption } from '../orchestrator/context/constraint-feasibility.js';
 import { buildFocusInspectorDirective } from './compose/ui-directive.js';
+import {
+  mayNameLeadingOptionForFact,
+  projectTransportEnrichmentForWithheldClaim,
+} from './compose/withheld-claim-projection.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
@@ -653,11 +657,47 @@ function buildAnalysisResultBlock(
 ): OlumiResponse['blocks'][number] {
   const { leading_option_id, summary, win_probabilities, enrichment, graph_hash_at_run } =
     fact.result;
-  const transportEnrichment = toSafeTransportEnrichment(enrichment);
+  // T1 CLAIM SAFETY — THE STRUCTURED HALF (ROADMAP 1.218).
+  //
+  // Layer 2 already drops the leader-presuming BLOCKS on a withheld turn
+  // (`rebuildPhase3BlocksFresh`). This block is the other thing every withheld
+  // turn ships, and the POST-#710 live walk measured it leaking on 5/5 withheld
+  // bodies: `leading_option_id` verbatim, plus the leader claim inside the
+  // enrichment blobs. Same verdict, same persisted stamp, same fail-closed
+  // read — see compose/withheld-claim-projection.ts for what is dropped, why
+  // `decision_review` goes whole while `decision_brief` does not, and why the
+  // honest variant is ABSENCE rather than synthesised copy.
+  const mayNameLeadingOption = mayNameLeadingOptionForFact(fact);
+  const safeTransport = toSafeTransportEnrichment(enrichment);
+  const transportEnrichment = mayNameLeadingOption
+    ? safeTransport
+    : projectTransportEnrichmentForWithheldClaim(safeTransport);
   return {
     type: 'analysis_result',
     summary,
-    leading_option_id,
+    // `null` is the schema's own honest value here (`leading_option_id:
+    // z.string().nullable()`, boundary/blocks.ts — the key is REQUIRED, so
+    // `null` is the strongest available "no leader is being put forward";
+    // omitting it would fail egress validation). It is also exactly what
+    // ui-directive.ts's fail-closed ladder already reads as "no
+    // recommendation". The FACT keeps the id — freshness, decision-record
+    // capture and the Phase-3 rebuild all read it from there — so this changes
+    // what the USER is told, not what CEE knows.
+    //
+    // LIVE HARM IT REMOVES, per the orchestrator's render probe at UI
+    // `6d3f4611` / CEE `227e0aa`: this field drives the **"Leading option"
+    // canvas badge**, which rendered on a withheld turn directly alongside the
+    // withheld disclosure.
+    //
+    // ⚠ AND ONE HARM IT DOES NOT REMOVE — recorded because an earlier revision
+    // of this comment claimed it and was WRONG. `V5AnalysisResultBlock.tsx`'s
+    // `data-leader="true"` win-probability pill is DEAD CODE at the deployed
+    // tip: its comparison is option LABEL against option ID, so it can never be
+    // equal, and the probe measured ZERO fires across every run in both verdict
+    // classes. Citing it here would have been the most rhetorically useful
+    // sentence in the argument and the one nobody would have checked
+    // (CLAUDE.md trap 14's corollary).
+    leading_option_id: mayNameLeadingOption ? leading_option_id : null,
     ...(win_probabilities !== undefined ? { win_probabilities } : {}),
     ...(transportEnrichment !== undefined
       ? { enrichment: transportEnrichment as typeof enrichment }
