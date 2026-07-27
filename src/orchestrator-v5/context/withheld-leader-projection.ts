@@ -165,22 +165,40 @@ export const WITHHELD_DROPPED_PACK_ANALYSIS_MEMBERS: readonly string[] =
  *
  * `null` in ⇒ `null` out: a turn with no analysis has no ranking to remove and
  * must not grow a note claiming one was withheld.
+ *
+ * WRITTEN AS A DESTRUCTURE, NOT A KEY LOOP, AND THAT IS DELIBERATE. A loop over
+ * `Object.entries` needs the input widened to `Record<string, unknown>` and the
+ * output narrowed back — a double cast that erases the type at exactly the kind
+ * of boundary `scripts/check-forbidden-boundary-patterns.sh` exists to contain,
+ * and that this programme's dominant hazard (silent field drop across a seam)
+ * is made of. Destructuring keeps the whole function type-checked end to end:
+ * rename a member on `DisplaySafeAnalysis` and this stops compiling, instead of
+ * silently ceasing to drop it.
+ *
+ * {@link WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS} is therefore a MIRROR of the
+ * destructure below. It is exported for the drift test, which asserts the two
+ * agree — the mirror fails loud rather than assuming good (trap #12).
  */
 export function projectDisplayAnalysisForWithheldClaim(
   display: DisplaySafeAnalysis | null,
 ): DisplaySafeAnalysis | null {
-  if (display === null || typeof display !== 'object') return display;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(display as unknown as Record<string, unknown>)) {
-    if (WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS.includes(key)) continue;
-    out[key] = value;
-  }
+  if (display === null) return null;
+  const {
+    leading_option: _leadingOption,
+    runner_up: _runnerUp,
+    margin: _margin,
+    options: _options,
+    ...rest
+  } = display;
+  void _leadingOption;
+  void _runnerUp;
+  void _margin;
+  void _options;
   // Never-silent: the note replaces what was removed, and is stamped even when
   // the source carried no ranking to begin with. A withheld turn says so
   // whether or not the producer happened to populate the fields — otherwise
   // the note's presence would leak which shape the producer sent.
-  out['leading_option_note'] = WITHHELD_LEADER_INPUT_NOTE;
-  return out as unknown as DisplaySafeAnalysis;
+  return { ...rest, leading_option_note: WITHHELD_LEADER_INPUT_NOTE };
 }
 
 /**
@@ -201,10 +219,11 @@ export function projectDisplayAnalysisForWithheldClaim(
 export function projectContextPackAnalysisForWithheldClaim(
   analysis: ContextPackAnalysis | null,
 ): ContextPackAnalysis | null {
-  if (analysis === null || typeof analysis !== 'object') return analysis;
-  const { options: _dropped, ...rest } = analysis as ContextPackAnalysis & {
-    options?: unknown;
-  };
+  if (analysis === null) return null;
+  // Same discipline as the display projection above: destructure, never widen
+  // to a record and cast back. `options` is already declared optional on
+  // `ContextPackAnalysis`, so no assertion is needed to remove it.
+  const { options: _dropped, ...rest } = analysis;
   void _dropped;
   return {
     ...(rest as ContextPackAnalysis),

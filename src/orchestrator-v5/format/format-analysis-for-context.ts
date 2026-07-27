@@ -232,6 +232,25 @@ export interface DisplaySafeAnalysis {
    * — constraint truthfulness outranks breadth, same doctrine as `goal_fit`.
    */
   readonly constraint_infeasible_note?: string;
+  /**
+   * T1 claim safety (ROADMAP 1.231) — the DISCLOSED absence of the option
+   * ranking on a turn whose persisted constraint verdict withholds the
+   * leading-option claim.
+   *
+   * NOT produced by {@link formatAnalysisForContext}: this formatter never sets
+   * it. It is stamped downstream by
+   * `context/withheld-leader-projection.ts`, which removes `leading_option`,
+   * `runner_up`, `margin` and the ranked `options` list and puts this in their
+   * place. Declared HERE, on the shape, rather than bolted on with a cast — the
+   * note is part of what a display-safe analysis can legitimately be, and
+   * declaring it is what lets the projection be written without erasing the
+   * type at the boundary (`scripts/check-forbidden-boundary-patterns.sh`).
+   *
+   * Same never-silent doctrine as `goal_fit` and `value_of_information_note`:
+   * an absent ranking with no explanation invites the model either to invent
+   * one or to read "no options exist".
+   */
+  readonly leading_option_note?: string;
 }
 
 /**
