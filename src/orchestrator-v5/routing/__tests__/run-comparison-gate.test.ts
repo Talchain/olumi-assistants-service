@@ -429,3 +429,79 @@ describe('tryRunComparisonGate — withheld copy vs the ALARM vocabulary (F1)', 
     expect(findLeaderClaims({ assistant_text: out.assistant_text } as never).length).toBeGreaterThan(0);
   });
 });
+
+// ── F3: the leader-change claim is about OPTION IDENTITY, not about the
+// display label. `graph-hash.ts` deliberately EXCLUDES labels from the
+// analysis-affecting hash (so a rename leaves freshness `fresh` and both runs
+// permitted), which means a pure rename used to reach the both-permitted arm
+// and assert "X came out ahead before, and Y now leads" about ONE option.
+describe('tryRunComparisonGate — leader identity is the option id, not the label (F3)', () => {
+  /** Legacy enrichment: labels + probabilities, NO `option_id` anywhere. */
+  function labelOnlyEnvelope(
+    options: Array<{ label: string; win: number }>,
+  ): V2RunResponseEnvelope {
+    return {
+      analysis_status: 'completed',
+      results: options.map((o) => ({ option_label: o.label, win_probability: o.win })),
+    } as unknown as V2RunResponseEnvelope;
+  }
+
+  const ask = (priorFacts: readonly HandlerFact[]) =>
+    tryRunComparisonGate({
+      message: 'What changed?',
+      priorFacts,
+      freshness: 'fresh',
+      mayNameLeadingOption: true,
+    });
+
+  it('F3 RED: a pure RENAME of the same leading option is not a leader change', () => {
+    // Same option_id 'a' leads both runs; only its label moved. The hash does
+    // not see labels, so this reaches the both-permitted comparison arm.
+    const before = runFact(envelope([
+      { id: 'a', label: 'Offshore', win: 0.62 },
+      { id: 'b', label: 'Onshore', win: 0.38 },
+    ]));
+    const after = runFact(envelope([
+      { id: 'a', label: 'Offshore (EU)', win: 0.62 },
+      { id: 'b', label: 'Onshore', win: 0.38 },
+    ]));
+    const out = ask([after, before]);
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.mode).toBe('compared');
+    expect(out.leading_option_changed).toBe(false);
+    expect(out.assistant_text).not.toContain('leading option has changed');
+    expect(out.assistant_text).not.toContain('came out ahead before');
+    expect(out.assistant_text).toContain('still leads');
+  });
+
+  it('TRUE-POSITIVE CONTROL: a real id change still asserts the change, with the new label', () => {
+    // Without this the assertion above would pass identically against a
+    // comparator that never reports a leader change at all.
+    const out = ask(TWO_RUNS);
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.leading_option_changed).toBe(true);
+    expect(out.assistant_text).toContain('leading option has changed');
+    expect(out.assistant_text).toContain('Onshore now leads');
+  });
+
+  it('F3 RED: legacy label-only enrichment never asserts a leader change on a label mismatch', () => {
+    // No `option_id` on either run ⇒ identity is INDETERMINATE. A false
+    // "nothing changed" is cheaper than a false "your leader changed".
+    const before = runFact(labelOnlyEnvelope([
+      { label: 'Offshore', win: 0.62 },
+      { label: 'Onshore', win: 0.38 },
+    ]));
+    const after = runFact(labelOnlyEnvelope([
+      { label: 'Offshore (EU)', win: 0.62 },
+      { label: 'Onshore', win: 0.38 },
+    ]));
+    const out = ask([after, before]);
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.mode).toBe('compared');
+    expect(out.leading_option_changed).toBe(false);
+    expect(out.assistant_text).not.toContain('leading option has changed');
+  });
+});

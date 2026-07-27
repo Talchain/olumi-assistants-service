@@ -104,19 +104,24 @@ function runAnalysisOutcomeWithEnvelope(
   return { assistant_text: 'done', handler_facts: [fact], llm_calls_used: 0 };
 }
 
-function priorRunAnalysisFactWithEnvelope(env: Record<string, unknown>): HandlerFact {
+function priorRunAnalysisFactWithEnvelope(
+  env: Record<string, unknown>,
+  /** `null` OMITS `computed_at` entirely — the legacy pre-0.10.0 shape. */
+  computedAt: string | null = '2026-07-01T00:00:00.000Z',
+): HandlerFact {
+  const result: Record<string, unknown> = {
+    scenario_id: 'scen-a',
+    leading_option_id: 'opt-1',
+    summary: 'prior',
+    enrichment: env,
+    graph_hash_at_run: 'hash-prior',
+  };
+  if (computedAt !== null) result.computed_at = computedAt;
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
     noop: false,
-    result: {
-      scenario_id: 'scen-a',
-      leading_option_id: 'opt-1',
-      summary: 'prior',
-      enrichment: env,
-      computed_at: '2026-07-01T00:00:00.000Z',
-      graph_hash_at_run: 'hash-prior',
-    },
+    result,
   } as unknown as HandlerFact;
 }
 
@@ -292,6 +297,64 @@ describe('detectCoachingSignal', () => {
       expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
       expect(detection?.coaching_text).toContain('Offshore led before');
       expect(detection?.coaching_text).toContain('Onshore now leads');
+    });
+
+    // ── F2 (same defect class as the comparison pair): the "previous run"
+    // this copy diffs against must be the canonical newest one, not whichever
+    // successful fact happens to sit first in the array.
+    it('F2 RED: diffs against the NEWEST prior run by computed_at, not the first in the array', () => {
+      const offshoreLeads = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const onshoreLeads = runEnvelope({
+        options: [
+          { id: 'b', label: 'Onshore', win: 0.62 },
+          { id: 'a', label: 'Offshore', win: 0.38 },
+        ],
+      });
+      // A legacy fact with no computed_at sits FIRST; the genuinely newest
+      // prior run sits second. Array position says "Offshore led before";
+      // the canonical ordering says the previous run already led with Onshore.
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcomeWithEnvelope(onshoreLeads),
+        contextPack: makeContextPack(),
+        priorFacts: [
+          priorRunAnalysisFactWithEnvelope(offshoreLeads, null),
+          priorRunAnalysisFactWithEnvelope(onshoreLeads, '2026-07-05T00:00:00.000Z'),
+        ],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text).toContain('Onshore still leads');
+      expect(detection?.coaching_text).not.toContain('Offshore led before');
+    });
+
+    // ── F3: a rename is not an outcome change.
+    it('F3: renaming the leading option does not produce "led before / now leads" copy', () => {
+      const priorEnv = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const currentEnv = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore (EU)', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text).not.toContain('led before');
+      expect(detection?.coaching_text).toContain('Offshore (EU) still leads');
     });
 
     it('fires with a NULL contextPack (chip-click path assembles no pack)', () => {

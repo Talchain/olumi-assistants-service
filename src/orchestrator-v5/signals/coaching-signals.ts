@@ -39,7 +39,7 @@ import {
 } from '../coaching/compare-runs.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { CoachingSignalId } from '../coaching/types.js';
-import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { selectRunAnalysisFact } from '../context/freshness.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
@@ -287,9 +287,13 @@ function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
  * current outcome unexpectedly carries no run_analysis fact); the caller
  * then degrades to comparison-free rerun copy.
  *
- * Prior selection uses `isSuccessfulRunAnalysisFact` (the same canonical
- * predicate the freshness / comparison layers use), scanning newest-first
- * per the build-turn-context loader convention.
+ * Prior selection calls `selectRunAnalysisFact` — the canonical newest-first
+ * selector the freshness verdict itself is derived from. It used to be
+ * `priorFacts.find(isSuccessfulRunAnalysisFact)`: the right PREDICATE but a
+ * private ORDERING (first by array position), which is the same drift #736
+ * fixed in `selectTwoNewestRunAnalysisFacts` — a legacy fact with no
+ * `computed_at`, or any timestamp skew, made this acknowledgment diff against
+ * a different "previous run" than the rest of the turn was reasoning about.
  */
 function buildRerunDelta(input: CoachingSignalInput): RunDelta | null {
   const currentFact = input.outcome.handler_facts.find(
@@ -297,7 +301,7 @@ function buildRerunDelta(input: CoachingSignalInput): RunDelta | null {
   );
   if (currentFact === undefined) return null;
 
-  const priorFact = input.priorFacts.find(isSuccessfulRunAnalysisFact);
+  const priorFact = selectRunAnalysisFact(input.priorFacts)?.fact;
   if (priorFact === undefined) return null;
 
   const prior = projectRunFact(priorFact);
