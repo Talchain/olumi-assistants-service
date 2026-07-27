@@ -374,8 +374,8 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
   });
 
   it('A3: nor by a sibling that ALSO shares the leader’s label (win_probability separates them)', () => {
-    // Hardest form: the sibling matches the crowned entry on both id and
-    // label, so only the third field of the anchor can reject it.
+    // The sibling matches the crowned entry on id AND label, so only the
+    // win_probability field of the anchor can reject it.
     const priorEnv = {
       analysis_status: 'completed',
       results: [
@@ -384,6 +384,28 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
       ],
     } as unknown as V2RunResponseEnvelope;
     const prior = projectEnv(priorEnv);
+    expect(prior.leader_option_id).toBeNull();
+  });
+
+  it('A3: nor by a sibling that shares the leader’s id AND win_probability (label separates them)', () => {
+    // ⚠ THIS CONTROL EXISTS BECAUSE ITS MUTANT DID NOT BITE WITHOUT IT.
+    // Removing the label conjunct left both constructions above still green —
+    // win_probability was rejecting the sibling in each. So the label anchor
+    // was UNPROVEN, and "one control per field" was a claim the suite did not
+    // support. Here the sibling ties the crowned entry on win_probability
+    // (which also makes their projected ids identical, so compact's
+    // lexicographic tiebreak keeps the first entry as winner), leaving the
+    // label as the only field that can tell them apart.
+    const priorEnv = {
+      analysis_status: 'completed',
+      results: [
+        { option_label: 'Offshore', win_probability: 0.62 }, // leader, NO id
+        { option_id: 'Offshore', option_label: 'Onshore', win_probability: 0.62 },
+      ],
+    } as unknown as V2RunResponseEnvelope;
+    const prior = projectEnv(priorEnv);
+    expect(prior.summary.winner.option_label).toBe('Offshore');
+    expect(prior.summary.winner.option_id).toBe('Offshore');
     expect(prior.leader_option_id).toBeNull();
   });
 
