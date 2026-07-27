@@ -220,9 +220,30 @@ function derivedComposeFileDomain(): string[] {
  * kept rather than collapsed for that reason. `gated` is a code path that
  * cannot emit the claim. `gated_by_input` is "the model was not given the
  * facts", which is strong against fabrication-from-data and NOT a proof about
- * every other channel the model can read (conversation history above all — a
- * leader named in an EARLIER turn's assistant message is still in the window).
- * That residual is stated in ROADMAP 1.231 rather than papered over here.
+ * the model's OUTPUT.
+ *
+ * ⚠ UPDATED 2026-07-27, AND THE OLD SENTENCE IS QUOTED RATHER THAN DELETED
+ * (trap #14 — never let a label drift out from under the claim it made). It
+ * read: *"…NOT a proof about every other channel the model can read
+ * (conversation history above all — a leader named in an EARLIER turn's
+ * assistant message is still in the window). That residual is stated in ROADMAP
+ * 1.231 rather than papered over here."*
+ *
+ * That residual was then MEASURED — `WALK-HISTORIC-PREP-2026-07-27.md` §10,
+ * build `b35d09de`, 2/5 samples — and CLOSED for the assistant side:
+ * `context/withheld-history-redaction.ts` redacts the ordering claims out of
+ * `conversation.recent_turns[].assistant_message` at the same pack chokepoint.
+ * THE INPUT SET IS NOW WIDER, NOT COMPLETE. What `gated_by_input` still does
+ * NOT cover, enumerated rather than implied:
+ *   - `conversation.recent_turns[].user_message` — the USER'S own words, left
+ *     verbatim by design (CEE asserting a claim ≠ the user restating one), and
+ *     not the self-reinforcing half.
+ *   - `conversation_summary` (the rolling summary) — its own ROADMAP row.
+ *   - `brief`, `coaching_context`, `recent_changes`, `parsed_quantities`,
+ *     `system_event`, `payload`, `display_graph` — never gated on this axis.
+ *   - the V4 edit-graph dispatch (`handlers/edit-graph-dispatch.ts:1261`),
+ *     which builds its OWN conversation slice for the edit LLM and has no
+ *     verdict to consume — it loads no prior facts.
  */
 type VerdictStance = 'gated' | 'gated_by_input' | 'structural' | 'ungated';
 
@@ -323,7 +344,15 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   },
   'converseGuarded.assistant_text': {
     stance: 'gated_by_input',
-    why: 'As coachGuarded above — the converse twin, same closure, same input gate.',
+    why:
+      'As coachGuarded above — the converse twin, same closure, same input gates. ' +
+      "⚠ 2026-07-27: the input set GREW. `WALK-HISTORIC-PREP-2026-07-27.md` §10 measured a " +
+      'residual leak on build `b35d09de` — AFTER #721 and #723 — sourced from ' +
+      '`conversation.recent_turns[].assistant_message`, which carries prior answers verbatim ' +
+      'into the routing prompt and SELF-REINFORCES (a leaked answer is persisted and feeds the ' +
+      'next turn). Closed by `context/withheld-history-redaction.ts`, applied at the SAME pack ' +
+      'chokepoint as the display_analysis gate. See the stance docstring for what the input set ' +
+      'still does NOT cover.',
   },
 };
 
@@ -771,7 +800,29 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // asserts something about the PACK, so the evidence is the projection call
     // at the assembly seam — not the compose site, which by definition has no
     // gate of its own.
+    //
+    // BOTH gates are required, and BOTH are pinned. Reverting either one leaves
+    // a register still claiming an input gate the pack no longer has — the
+    // honest-label-overwritten-by-a-false-one failure (trap #14). The second
+    // entry is the 2026-07-27 conversation-history gate.
     expect(source).toContain('projectDisplayAnalysisForWithheldClaim(');
+    expect(
+      source,
+      'the conversation-history input gate is gone from turn-executor.ts. Prior-turn ' +
+        'assistant prose would again reach the model verbatim on a withheld turn — the ' +
+        'channel WALK-HISTORIC-PREP-2026-07-27.md §10 measured leaking 2/5 AFTER #721 and ' +
+        '#723, and the one that self-reinforces.',
+    ).toContain('conversation: projectConversationForWithheldClaim(');
+  });
+
+  it('POSITIVE CONTROL: the conversation-gate evidence check can FAIL', () => {
+    // Rule 2, for the pin just added. Prove the `toContain` discriminates
+    // rather than passing against any source it is handed.
+    const gate = 'conversation: projectConversationForWithheldClaim(';
+    expect(source).toContain(gate);
+    expect(source.replace(gate, 'conversation: assembledContextPack.conversation, // (')).not.toContain(
+      gate,
+    );
   });
 
   it('POSITIVE CONTROL: the per-site gate evidence check can FAIL', () => {

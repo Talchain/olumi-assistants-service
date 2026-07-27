@@ -261,6 +261,11 @@ import {
   projectContextPackAnalysisForWithheldClaim,
   projectDisplayAnalysisForWithheldClaim,
 } from './context/withheld-leader-projection.js';
+// 2026-07-27 — INPUT-side claim safety, the CONVERSATION-HISTORY channel:
+// redact the ordering claims out of prior assistant messages on a withheld
+// turn, so a leaked answer cannot be read back to the model (and cannot
+// self-reinforce). Projection-side only; the stored turns are never mutated.
+import { projectConversationForWithheldClaim } from './context/withheld-history-redaction.js';
 import {
   projectExplanationAnswerForWithheldClaim,
   type WithheldExplanationReason,
@@ -2076,6 +2081,28 @@ export async function runTurnExecutor(
       //
       // PERMITTED TURNS ARE BYTE-IDENTICAL: `mayNameLeadingOptionForRun` is
       // `true` and the pack is passed through by reference, unchanged.
+      //
+      // ─────────────────────────────────────────────────────────────────────
+      // ⭐ 2026-07-27 — THE SECOND FIELD GATED AT THIS SAME CHOKEPOINT:
+      // `conversation`. The 1.231 gate above removes the leader from the
+      // model's view of the ANALYSIS; it says nothing about the model's view of
+      // its OWN PRIOR ANSWERS, and the compose-site register has recorded that
+      // residual in writing since it was built ("gated_by_input … is NOT a
+      // proof about every other channel the model can read — conversation
+      // history above all").
+      //
+      // `WALK-HISTORIC-PREP-2026-07-27.md` §10 measured it on build `b35d09de`,
+      // AFTER #721 and #723: `conversation.recent_turns[].assistant_message`
+      // carried historic leader prose verbatim into the routing prompt and the
+      // model recited it on 2/5 samples of a withheld turn. And the channel
+      // SELF-REINFORCES — a leaked answer is persisted and feeds the next
+      // turn's window, so one leak raises the odds of the next.
+      //
+      // Gated HERE, at the same expression, deliberately: two chokepoints for
+      // one permission is how a future branch acquires a pack that is gated on
+      // one axis and not the other. See
+      // `context/withheld-history-redaction.ts` for the reader (wider than the
+      // egress alarm's, and why), the marker, and the module-load probes.
       // ═════════════════════════════════════════════════════════════════════
       const contextPack: ContextPack = mayNameLeadingOptionForRun
         ? assembledContextPack
@@ -2084,6 +2111,9 @@ export async function runTurnExecutor(
             display_analysis: projectDisplayAnalysisForWithheldClaim(
               assembledContextPack.display_analysis,
               constraintVerdictStateForRun,
+            ),
+            conversation: projectConversationForWithheldClaim(
+              assembledContextPack.conversation,
             ),
           };
       cqeSummaryForLog = cqeSummary;
