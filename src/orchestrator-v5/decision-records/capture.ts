@@ -65,6 +65,8 @@ import { DecisionRecordAnalysisSummarySchema } from '@talchain/schemas/boundary'
 import type { DecisionRecordAnalysisSummary } from '@talchain/schemas/boundary';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
+import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
+import type { MayNameLeadingOptionVerdict } from '../context/claim-safety-read.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { getDecisionRecordStore } from './index.js';
 import { DecisionRecordSignInRequiredError } from './store-adapter.js';
@@ -340,6 +342,38 @@ export interface RecordDecisionRecordArgs {
 export async function recordDecisionRecordForCommit(
   args: RecordDecisionRecordArgs,
 ): Promise<void> {
+  // ⭐ THE CLAIM VERDICT, STAMPED AT CAPTURE — read from the SAME fact the
+  // record is projected from, at the one moment we still hold it.
+  //
+  // A decision record asserts `chosen_option_label` — a leading-option claim —
+  // and the constraint verdict on that very fact decides whether the turn was
+  // ENTITLED to name a leader. A record captured from a WITHHELD fact is a
+  // claim the turn itself refused to make, and nothing on the record said so.
+  // At review time the fact is long gone and the verdict is not re-derivable,
+  // so it is taken here or not at all.
+  //
+  // READ, never re-derived (CLAUDE.md trap #12): the shared per-fact reader is
+  // the one the turn-executor and the withheld-claim projection already use,
+  // so a third caller cannot walk a different ladder on the same fact.
+  //
+  // ⚠ WHY THE TELEMETRY EVENT AND NOT `write.prediction` — this is a REPORTED
+  // SUBSTITUTION, not the shape originally asked for. A new key on the
+  // persisted `prediction` is a THREE-hop contract change, and CEE owns only
+  // the middle hop:
+  //   1. `@talchain/schemas` `DecisionRecordPredictionSchema` is `.strict()`
+  //      (vendor/talchain-schemas-0.25.0 → dist/boundary/decision-record.js),
+  //      and `capture.test.ts` pins that it "stays armed";
+  //   2. `create_decision_record`'s `p_prediction` key whitelist — LIVE on
+  //      staging since 2026-07-11T18:46Z, not merely merged — raises 22023 on
+  //      any off-whitelist key, refusing the WHOLE record rather than
+  //      dropping the field, so a unilateral CEE key would take the entire
+  //      capture seam down;
+  //   3. the local `CreateDecisionRecordWrite` mirror in store-adapter.ts.
+  // Until hops 1 and 3 land (rowed, with the migration amendment), the verdict
+  // rides the capture event — which CEE owns outright, makes the withheld
+  // population countable TODAY, and is one line from the persisted field.
+  const claimVerdict = readMayNameLeadingOptionVerdictForFact(args.fact);
+
   try {
     const built = buildDecisionRecordWrite(args.fact, args.scenarioId);
     if (built.kind === 'skip') {
@@ -347,7 +381,7 @@ export async function recordDecisionRecordForCommit(
         { scenario_id: args.scenarioId, turn_id: args.turnId, skip_reason: built.reason },
         'DecisionRecords — capture skipped (fact carries no recordable decision; designed skip, not a fault)',
       );
-      emitCaptureEvent(args, { status: 'skipped', skip_reason: built.reason });
+      emitCaptureEvent(args, claimVerdict, { status: 'skipped', skip_reason: built.reason });
       return;
     }
     if (built.analysisSummaryDropped) {
@@ -387,7 +421,7 @@ export async function recordDecisionRecordForCommit(
 
     const store = getDecisionRecordStore();
     const outcome = await store.createRecord(built.write);
-    emitCaptureEvent(args, {
+    emitCaptureEvent(args, claimVerdict, {
       status: outcome.deduped ? 'deduped' : 'ok',
       record_id: outcome.record_id,
     });
@@ -399,7 +433,7 @@ export async function recordDecisionRecordForCommit(
         { scenario_id: args.scenarioId, turn_id: args.turnId },
         'DecisionRecords — create_decision_record refused (guest scenario, DR001; expected, not a fault)',
       );
-      emitCaptureEvent(args, { status: 'guest_refused' });
+      emitCaptureEvent(args, claimVerdict, { status: 'guest_refused' });
       return;
     }
     log.warn(
@@ -410,7 +444,7 @@ export async function recordDecisionRecordForCommit(
       },
       'DecisionRecords — capture hook failed (turn result unaffected)',
     );
-    emitCaptureEvent(args, {
+    emitCaptureEvent(args, claimVerdict, {
       status: 'error',
       error_name: err instanceof Error ? err.name : 'unknown',
     });
@@ -425,6 +459,7 @@ export async function recordDecisionRecordForCommit(
  */
 function emitCaptureEvent(
   args: RecordDecisionRecordArgs,
+  claimVerdict: MayNameLeadingOptionVerdict,
   fields: {
     readonly status: 'ok' | 'deduped' | 'skipped' | 'guest_refused' | 'error';
     readonly record_id?: string;
@@ -441,6 +476,14 @@ function emitCaptureEvent(
       record_id: fields.record_id ?? null,
       skip_reason: fields.skip_reason ?? null,
       error_name: fields.error_name ?? null,
+      // Claim verdict of the fact this record was projected from. Content-free
+      // and on EVERY status, including 'skipped' — a withheld analysis that
+      // never produced a record is part of the same population, and an event
+      // that only fires on the happy path cannot measure a withhold rate.
+      // Booleans + closed enums only; no labels, no probabilities.
+      may_name_leading_option: claimVerdict.may_name_leading_option,
+      constraint_verdict_state: claimVerdict.constraint_verdict_state,
+      claim_verdict_provenance: claimVerdict.provenance,
     });
   } catch (emitErr) {
     log.debug(

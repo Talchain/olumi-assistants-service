@@ -1094,6 +1094,13 @@ export const TelemetryEvents = {
   // MM WARN-spam lesson) — 'guest_refused' marks only the RPC's
   // authoritative DR001 on the fail-open path. Non-blocking contract:
   // capture/emit failures log and NEVER affect the turn result.
+  // Also carries the CLAIM VERDICT of the fact the record was projected from
+  // — `may_name_leading_option` (boolean), `constraint_verdict_state` (closed
+  // enum | null), `claim_verdict_provenance` (closed enum) — read via the
+  // shared per-fact reader, never re-derived. A record asserts a leading
+  // option; the verdict says whether the turn was entitled to. Present on
+  // EVERY status so a withhold RATE is derivable rather than only the
+  // happy-path count. Still content-free: booleans + closed enums.
   V5DecisionRecordCaptured: "v5.decision_records.record_captured",
 
   // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching

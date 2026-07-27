@@ -6616,6 +6616,22 @@ export async function runTurnExecutor(
         validationRegistry,
       );
 
+      // CONSUME THE REPAIRED PROPOSAL. The validator returns a copy carrying
+      // the graph's kind and label; until now every caller threw it away and
+      // the handler received the unrepaired object. No wrong output resulted
+      // — handlers read only `entity.id` and `parameters` (complete manifest:
+      // set-factor-value.ts, add-constraint.ts, adjust-edge-strength.ts) and
+      // re-resolve everything else from the graph themselves — but the gap
+      // was a loaded gun for the first consumer that reads `entity.kind` or
+      // `entity.label`, and the validator's own comment claimed the handler
+      // already got it. Rebinding here closes both, and it is what carries
+      // the graph's LABEL into the two validation errors raised BELOW this
+      // point (VALUE_UNIT_UNRESOLVED, OPTION_INTERVENTION_MISROUTE), whose
+      // `factor_label` details render into user prose via `safeLabel()`.
+      if (validationResult.valid) {
+        action = validationResult.proposal;
+      }
+
       // Entity-kind repair telemetry. The validator adopts the graph's kind
       // when the routing model mislabels an entity it resolved correctly
       // (see validator.ts). That turns a user-visible refusal into a silent
@@ -6623,6 +6639,26 @@ export async function runTurnExecutor(
       // routing-prompt signal, and without this line the fix would hide the
       // very behaviour that motivated it. Enum-valued kinds + system ids
       // only — no labels, matching the safe_details privacy contract.
+      //
+      // `repair_source` — the signal is only readable if we can tell WHOSE
+      // mislabel it was. Not every proposal reaching this validator came from
+      // the routing model: the deterministic short-confirm / ordinal / label
+      // pick / clarification-resume / typed-chip / value-update routes all
+      // SYNTHESISE one in-process, and `buildApplyProposedChangeProposal`
+      // guesses 'node'/'edge' from the handler id whenever its entity lookup
+      // comes back empty. A repair of CEE's own guess is not evidence about
+      // the routing prompt, and mixed into one count it silently inflates the
+      // very metric the prompt is tuned against.
+      //
+      // DERIVED, not mirrored (CLAUDE.md trap 12): `llmCallCount` is a
+      // REQUIRED field on RoutingToolCallResult documented as the number of
+      // chatWithTools invocations behind this result — 1 on a first-attempt
+      // success, 2 after REPAIR_ONCE. Zero therefore MEANS "no model was
+      // consulted", which is precisely "this proposal is ours". A new
+      // deterministic route cannot forget to opt in, because the compiler
+      // makes it declare the field and the honest value is 0.
+      const repairSource: 'model_proposal' | 'synthesis_guess' =
+        routingResult.llmCallCount === 0 ? 'synthesis_guess' : 'model_proposal';
       if (validationResult.valid && validationResult.kind_repair) {
         log.info(
           {
@@ -6633,6 +6669,9 @@ export async function runTurnExecutor(
             entity_id: validationResult.kind_repair.entity_id,
             proposed_kind: validationResult.kind_repair.proposed_kind,
             resolved_kind: validationResult.kind_repair.resolved_kind,
+            // Attribute NAMES only — never label values (privacy contract).
+            repaired_attributes: validationResult.kind_repair.repaired_attributes,
+            repair_source: repairSource,
           },
           'V5 TurnExecutor repaired proposal entity kind from graph',
         );

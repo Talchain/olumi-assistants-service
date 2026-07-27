@@ -135,6 +135,9 @@ describe('entity-kind repair — the two live failure modes now land', () => {
         entity_id: 'out_tco_efficiency',
         proposed_kind: 'constraint',
         resolved_kind: 'node',
+        // The model's label here already matched the graph's, so only the
+        // kind was overridden (resolved-label adoption; validator.ts).
+        repaired_attributes: ['kind'],
       });
     }
   });

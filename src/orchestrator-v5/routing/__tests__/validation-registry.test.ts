@@ -145,6 +145,9 @@ describe('run_analysis precondition', () => {
         entity_id: 'opt_a',
         proposed_kind: 'goal',
         resolved_kind: 'option',
+        // Kind AND label were both wrong on this fixture — resolved-label
+        // adoption overrode both, and the record discloses which.
+        repaired_attributes: ['kind', 'label'],
       });
     }
   });
