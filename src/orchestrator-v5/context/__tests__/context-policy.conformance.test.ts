@@ -395,7 +395,7 @@ describe('coach_converse older_relevant_facts — the P6 read slice is declared,
       decision: { chosen_option_label: `Option ${i}`, chosen_option_id: 'o', graph_hash: 'x' },
       prediction: { statement: 'z'.repeat(400), confidence_source: 'model_derived' },
     }));
-    const projected = projectDecisionRecords(many, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET, many.length)!;
+    const projected = projectDecisionRecords(many, POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET, many.length, true)!;
     expect(projected.text.length).toBeLessThanOrEqual(POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET);
     expect(projected.truncated).toBe(true); // the cut fired
     // ...but be precise about WHICH cut: at 8 records the RATIONALE cap is the

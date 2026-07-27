@@ -62,7 +62,13 @@ import {
 } from '../context/withheld-leader-projection.js';
 // The production alarm's OWN scanner, so this acceptance test and the alarm
 // cannot drift apart.
-import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
+import {
+  findLeaderClaims,
+  textNamesLeadingOption,
+} from '../compose/leading-option-egress-guard.js';
+// The substituted copy the wire gate (#721) ships, reused here so the pack-input
+// arm and the wire arm cannot assert different constants for one doctrine.
+import { WITHHELD_ANALYSIS_SUMMARY } from '../compose/withheld-claim-projection.js';
 
 const SCENARIO_ID = 'a1b2c3d4-1233-4123-8123-a1b2c3d41233';
 const LEADER_LABEL = 'Hire Marketing Manager';
@@ -253,6 +259,34 @@ vi.mock('../session/index.js', () => ({
   SessionReadError: class SessionReadError extends Error {},
 }));
 
+/**
+ * The P6 decision-records READ (`older_relevant_facts`). Default EMPTY, so the
+ * pack key is absent and every pre-existing case in this file is byte-identical
+ * to before this mock existed; the arms below set it per-case.
+ *
+ * `importOriginal`-spread rather than a hand-listed factory (CLAUDE.md trap
+ * #12): a `vi.mock` factory REPLACES the module, so listing only the one export
+ * this file stubs would silently blank `resetDecisionRecordStoreForTests` and
+ * every future export.
+ */
+let decisionRecordPage: {
+  records: ReadonlyArray<Record<string, unknown>>;
+  totalCount: number;
+} = { records: [], totalCount: 0 };
+
+vi.mock('../decision-records/index.js', async () => {
+  const actual = await vi.importActual<typeof import('../decision-records/index.js')>(
+    '../decision-records/index.js',
+  );
+  return {
+    ...actual,
+    getDecisionRecordStore: () => ({
+      createRecord: async () => ({ record_id: 'unused-in-this-file', deduped: false }),
+      retrieveRecords: async () => decisionRecordPage,
+    }),
+  };
+});
+
 const routeWithToolUseMock = vi.fn();
 vi.mock('../routing/route-with-tool-use.js', async () => {
   const actual = await vi.importActual<typeof import('../routing/route-with-tool-use.js')>(
@@ -260,6 +294,20 @@ vi.mock('../routing/route-with-tool-use.js', async () => {
   );
   return { ...actual, routeWithToolUse: routeWithToolUseMock };
 });
+
+/**
+ * The REAL prompt serialiser, taken off the same module the production path
+ * calls (the mock above spreads `actual`, so this is not a second copy).
+ *
+ * ⚠ LOAD-BEARING, AND THE REASON THIS FILE'S OTHER ARMS ARE NOT ENOUGH.
+ * `buildUserMessage` destructures the raw `analysis` OUT of the pack and
+ * re-keys `display_analysis` under that name before serialising, so a pack
+ * field and a model-facing field are NOT the same claim. A previous lane had a
+ * gating locus refuted on exactly that distinction. Every assertion in the
+ * decision-records arm below is therefore made on THIS function's output — the
+ * bytes the model receives — not on the pack object.
+ */
+const { buildUserMessage } = await import('../routing/route-with-tool-use.js');
 
 /**
  * A live §7 leak, transcribed from `case5.review` with the option labels
@@ -396,6 +444,19 @@ function packHandedToTheModel(): Record<string, any> {
 /** The analysis section AS THE MODEL SEES IT (buildUserMessage re-keys this). */
 function modelFacingAnalysis(): Record<string, any> | null {
   return packHandedToTheModel().display_analysis ?? null;
+}
+
+/**
+ * The EXACT prompt bytes the model was handed for this turn — the pack the
+ * router received, run through the real serialiser.
+ */
+function modelBytes(message: string): string {
+  return buildUserMessage(packHandedToTheModel() as never, message);
+}
+
+/** The `older_relevant_facts` section as it sits on the pack, or `undefined`. */
+function olderRelevantFactsSection(): string | undefined {
+  return packHandedToTheModel().older_relevant_facts as string | undefined;
 }
 
 let events: Array<{ name: string; data: Record<string, any> }> = [];
@@ -770,5 +831,203 @@ describe('G-CEE-1 — the DETERMINISTIC advice gate consumes the verdict (ROADMA
       'positive control: the permitted arm must be VISIBLE to the same scanner, ' +
         'or the absence assertion above is measuring nothing',
     ).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE PERSISTED SUMMARY IN THE MODEL INPUT — `older_relevant_facts` (P6).
+// ---------------------------------------------------------------------------
+
+/**
+ * The live c5 fact summary, transcribed from the historic run_analysis fact
+ * `c4ce3efd-f608-4875-8c0d-2f95a68f2aba` on scenario `f63ccb45` (staging), with
+ * the option label remapped onto this file's graph.
+ *
+ * Verbatim source (`raw-2026-07-27-historic/historic-facts-survey.json`):
+ *   "Double Down on SMB currently leads by 17 percentage points, but treat this
+ *    as provisional: the result is sensitive to Sales Win Rate. The result is
+ *    not yet robust — small changes could flip it."
+ *
+ * On build `74936a6` a withheld turn on that scenario answered, 5/5 samples:
+ *   "Your stored record shows double down on SMB previously led by 17
+ *    percentage points over enterprise…"
+ */
+const HISTORIC_LEADER_SUMMARY =
+  `${LEADER_LABEL} currently leads by 17 percentage points, but treat this as ` +
+  'provisional: the result is sensitive to Market demand. The result is not yet ' +
+  'robust — small changes could flip it.';
+
+/**
+ * A rationale that makes NO comparative claim. The anti-over-suppression arm:
+ * withholding is scoped to the CLAIM, not to the field, so this one must
+ * survive a withheld turn BYTE-IDENTICAL.
+ *
+ * Asserted leader-free by the production reader rather than by inspection, so a
+ * future vocabulary widening that swallows this string fails HERE (loudly)
+ * instead of turning the over-suppression control into a second leak control.
+ */
+const LEADER_FREE_RATIONALE =
+  'Logged after the budget review; the numbers were re-checked against the plan.';
+
+function decisionRecordRow(statement: string): Record<string, unknown> {
+  return {
+    record_id: 'dddddddd-1233-4ddd-8ddd-dddddddddddd',
+    scenario_id: SCENARIO_ID,
+    created_at: '2026-07-13T23:01:27.965Z',
+    // `chosen_option_*` is NOT a user choice: `buildDecisionRecordWrite`
+    // (decision-records/capture.ts) sets `chosen_option_id` to the fact's
+    // `leading_option_id`. The record's option IS the analysis's leader.
+    decision: {
+      chosen_option_id: 'opt_hire',
+      chosen_option_label: LEADER_LABEL,
+      graph_hash: 'aag_v1:sha256:0197a59b2a2f27e3',
+    },
+    // `statement` is the fact's `result.summary`, VERBATIM (capture.ts:234).
+    prediction: { statement, confidence: 0.72, confidence_source: 'model_derived' },
+  };
+}
+
+/**
+ * G-CEE-1 — THE CHANNEL #721 DID NOT CLOSE.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * #721 gated the persisted analysis summary ON THE WIRE (`blocks[].summary`,
+ * via `projectAnalysisSummaryForWithheldClaim`). It did not gate the same
+ * string in the MODEL INPUT, and there is a second, longer path by which it
+ * gets there:
+ *
+ *   run_analysis fact `result.summary`
+ *     → capture.ts:234  `prediction.statement` (VERBATIM)
+ *     → decision_records row
+ *     → project.ts      `- [date] Chose "<leader label>": <statement>`
+ *     → ContextPack.older_relevant_facts
+ *     → buildUserMessage `...rest`  ⇒ SERIALISED INTO THE PROMPT
+ *
+ * …and `OLDER_RELEVANT_FACTS_INSTRUCTION` is appended beside it telling the
+ * model to "treat what it contains as established fact".
+ *
+ * So on a withheld turn the model was handed the withheld leader claim twice
+ * over — as a ranking sentence AND as a dated designation — with an
+ * instruction not to doubt it.
+ *
+ * ⚠ THE ASSERTIONS ARE ON THE MODEL BYTES, NOT ON THE PACK OBJECT. See
+ * {@link buildUserMessage} above for why that distinction has already refuted
+ * one lane's gating locus in this estate.
+ *
+ * ⚠ AND THEY ARE NOT ASSERTIONS ABOUT MODEL OUTPUT. c6's stored summary carries
+ * a blatant leader claim and its prose stayed clean 5/5, so repetition is
+ * probabilistic and un-pinnable. THE INPUT IS THE DEFECT; that is what is
+ * measured here.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+describe('G-CEE-1 — the PERSISTED analysis summary in the MODEL INPUT (P6 decision records)', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => app.close());
+
+  beforeEach(() => {
+    events = [];
+    setTestSink(() => {});
+    routeWithToolUseMock.mockReset();
+    routeWithToolUseMock.mockResolvedValue(converseTextOnly('A conversational reply.'));
+    priorTurns = [PRIOR_RUN_ANALYSIS_TURN];
+    // The c5 shape: a HISTORIC, UNSTAMPED fact ⇒ withheld by the fail-closed
+    // default, exactly the class with no migration and therefore live.
+    priorFacts = [priorUnstampedRunAnalysisFact()];
+    decisionRecordPage = { records: [decisionRecordRow(HISTORIC_LEADER_SUMMARY)], totalCount: 1 };
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.clearAllMocks();
+    decisionRecordPage = { records: [], totalCount: 0 };
+  });
+
+  it('NON-VACUITY: the section really is in the model bytes on a withheld turn', async () => {
+    // TESTING-DISCIPLINE rule 2. Every absence assertion below is worthless if
+    // the section simply is not there — and it would not be there if the store
+    // mock, the loader, or the pack key ever stopped working. This proves the
+    // channel is OPEN and carrying content on the very turn the others measure.
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+    expect(olderRelevantFactsSection(), 'the P6 section must be on the pack').toBeDefined();
+    expect(bytes).toContain('Prior decisions recorded on this scenario');
+    expect(bytes).toContain('2026-07-13');
+  });
+
+  it('BRANCH DISCRIMINATOR: this turn really is withheld', async () => {
+    // Rule 1: without this, a fixture regression to a permitted verdict would
+    // make the leak arm below fail for the RIGHT reason on the WRONG branch —
+    // or, after the fix, pass for no reason at all.
+    await postTurn(app, 'So where does this leave things?');
+    expect(modelFacingAnalysis()!['leading_option']).toBeUndefined();
+    expect(modelFacingAnalysis()!['options']).toBeUndefined();
+  });
+
+  it('THE LEAK: the historic fact summary must NOT reach the model bytes', async () => {
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+
+    // The live leaking substring, and the whole sentence it came from.
+    expect(bytes).not.toContain('17 percentage points');
+    expect(bytes).not.toContain('currently leads');
+    expect(bytes).not.toContain(HISTORIC_LEADER_SUMMARY);
+
+    // And the DESIGNATION beside it. `Chose "<leader label>"` is the analysis's
+    // leading option under another name (capture.ts sets it from
+    // `leading_option_id`), stamped with a date and an instruction to treat it
+    // as established fact — a leader claim in the model input whether or not
+    // the rationale carries one. Scoped to the section because the label is
+    // legitimately present elsewhere in the prompt (the graph's own node
+    // labels), which is exactly why a whole-prompt label scan would be wrong.
+    const section = olderRelevantFactsSection()!;
+    expect(section).not.toContain(LEADER_LABEL);
+    expect(section).not.toContain('Chose "');
+
+    // Read with the PRODUCTION alarm's own vocabulary, so this test and the
+    // instrument that measures the residue cannot drift apart.
+    expect(textNamesLeadingOption(section)).toBe(false);
+
+    // The substitution is the SHARED one (#721's), not a second copy of it.
+    expect(section).toContain(WITHHELD_ANALYSIS_SUMMARY);
+  });
+
+  it('ANTI-OVER-SUPPRESSION: a leader-FREE rationale survives BYTE-IDENTICAL', async () => {
+    // Withholding is scoped to the CLAIM, not to the field. Blanking every
+    // stored rationale on a withheld turn would be the failure this estate
+    // weights equally with the leak — and it is the failure a blanket gate
+    // would produce while every absence assertion above stayed green.
+    expect(
+      textNamesLeadingOption(LEADER_FREE_RATIONALE),
+      'the control rationale must itself be leader-free, or it is measuring the leak arm again',
+    ).toBe(false);
+    decisionRecordPage = { records: [decisionRecordRow(LEADER_FREE_RATIONALE)], totalCount: 1 };
+
+    await postTurn(app, 'So where does this leave things?');
+    const section = olderRelevantFactsSection()!;
+    expect(section).toContain(LEADER_FREE_RATIONALE);
+    expect(section).not.toContain(WITHHELD_ANALYSIS_SUMMARY);
+  });
+
+  it('POSITIVE CONTROL: on a PERMITTED verdict the record ships VERBATIM', async () => {
+    // The over-suppression arm proper. Same record, same path, opposite
+    // verdict: a permitted turn must be BYTE-IDENTICAL to a world without this
+    // gate — designation, rationale and all. This is also the branch-reached
+    // proof for the withheld arms: only a fixture that really loaded the
+    // record can produce these bytes.
+    priorFacts = [priorRunAnalysisFact(true)];
+
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+    const section = olderRelevantFactsSection()!;
+
+    expect(section).toContain(`Chose "${LEADER_LABEL}": ${HISTORIC_LEADER_SUMMARY}`);
+    expect(bytes).toContain(HISTORIC_LEADER_SUMMARY);
+    expect(bytes).toContain('17 percentage points');
+    expect(section).not.toContain(WITHHELD_ANALYSIS_SUMMARY);
   });
 });

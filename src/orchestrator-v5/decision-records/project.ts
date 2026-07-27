@@ -22,6 +22,7 @@
 
 import { log } from '../../utils/telemetry.js';
 import { emitContextTruncation } from '../context/context-budget-telemetry.js';
+import { projectDecisionRecordForWithheldClaim } from '../context/withheld-leader-projection.js';
 import type {
   DecisionRecordRead,
   DecisionRecordStorePort,
@@ -81,17 +82,39 @@ function isoDate(createdAt: string): string {
   return m ? m[1] : createdAt;
 }
 
-function projectOneLine(record: DecisionRecordRead): { line: string; cut: boolean } | null {
+/**
+ * `mayNameLeadingOption === true` is the PASS-THROUGH branch and is byte-identical
+ * to this function before the claim-safety gate existed. On `false` both
+ * leader-bearing members go through
+ * {@link projectDecisionRecordForWithheldClaim} — the ONE place the doctrine
+ * and the shared substitution live.
+ *
+ * The char cap is applied AFTER the projection, deliberately: capping first
+ * would measure a budget against content that is then replaced, and a
+ * substituted rationale that happened to exceed the cap would ship uncapped.
+ */
+function projectOneLine(
+  record: DecisionRecordRead,
+  mayNameLeadingOption: boolean,
+): { line: string; cut: boolean } | null {
   const option = readString(record.decision, 'chosen_option_label');
   const statement = readString(record.prediction, 'statement');
   if (option === null || statement === null) return null; // never id-as-label / empty
-  let rationale = statement.trim();
+  const projected = mayNameLeadingOption
+    ? { optionLabel: option, rationale: statement }
+    : projectDecisionRecordForWithheldClaim(statement);
+  let rationale = projected.rationale.trim();
   let cut = false;
   if (rationale.length > RATIONALE_LINE_CHAR_CAP) {
     rationale = `${rationale.slice(0, RATIONALE_LINE_CHAR_CAP)}…`;
     cut = true;
   }
-  return { line: `- [${isoDate(record.created_at)}] Chose "${option}": ${rationale}`, cut };
+  // Key-absence doctrine applied to prose: a withheld line carries NO
+  // designation clause at all rather than an empty `Chose "": ` husk, which
+  // would tell the model a designation existed and was removed — and would put
+  // a shape no reader has ever seen into the prompt.
+  const designation = projected.optionLabel === null ? '' : `Chose "${projected.optionLabel}": `;
+  return { line: `- [${isoDate(record.created_at)}] ${designation}${rationale}`, cut };
 }
 
 const SECTION_HEADER = 'Prior decisions recorded on this scenario (most recent first):';
@@ -140,11 +163,20 @@ function disclosureLine(included: number, totalStored: number): string {
  * counts as NOT SHOWN rather than as "not really a record". Claiming
  * completeness because a row failed to render is the same falsehood in
  * miniature.
+ *
+ * `mayNameLeadingOption` is the turn's ONE persisted claim-safety verdict,
+ * threaded from the caller — this function never re-derives it, so the
+ * permission and the content it governs describe the same turn (CLAUDE.md trap
+ * #12). REQUIRED, with no default, for the same reason `totalStored` has none:
+ * an optional claim-permission is one a future call site silently forgets to
+ * supply, and the forgotten value would be the PERMISSIVE one. A caller that
+ * cannot answer fails typecheck instead of leaking.
  */
 export function projectDecisionRecords(
   records: readonly DecisionRecordRead[],
   charBudget: number,
   totalStored: number,
+  mayNameLeadingOption: boolean,
 ): DecisionRecordsProjection | null {
   const usable = records.slice(0, DECISION_RECORDS_HARD_CAP);
   // Defensive clamp: the total can never be smaller than what we were actually
@@ -172,7 +204,7 @@ export function projectDecisionRecords(
   // second time purely to count omissions.
   const projectedLines: Array<{ line: string; cut: boolean }> = [];
   for (const record of usable) {
-    const projected = projectOneLine(record);
+    const projected = projectOneLine(record, mayNameLeadingOption);
     if (projected !== null) projectedLines.push(projected);
   }
 
@@ -213,6 +245,11 @@ export interface LoadOlderRelevantFactsArgs {
   readonly store: Pick<DecisionRecordStorePort, 'retrieveRecords'>;
   readonly scenarioId: string;
   readonly charBudget: number;
+  /**
+   * The turn's persisted claim-safety verdict. REQUIRED — see
+   * {@link projectDecisionRecords} for why there is no default.
+   */
+  readonly mayNameLeadingOption: boolean;
   readonly requestId?: string | null;
 }
 
@@ -230,7 +267,12 @@ export async function loadOlderRelevantFactsSection(
       limit: DECISION_RECORDS_HARD_CAP,
     });
     if (page.totalCount === 0 && page.records.length === 0) return undefined;
-    const projection = projectDecisionRecords(page.records, args.charBudget, page.totalCount);
+    const projection = projectDecisionRecords(
+      page.records,
+      args.charBudget,
+      page.totalCount,
+      args.mayNameLeadingOption,
+    );
     if (projection === null) return undefined;
     // Emit at the CUT SITE, the moment content is dropped — the truncation
     // stream's stated contract. Before this the projection's own `truncated`

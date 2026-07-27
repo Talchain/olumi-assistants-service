@@ -116,6 +116,7 @@ import type { DisplaySafeAnalysis } from '../format/format-analysis-for-context.
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
 import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
+import { projectAnalysisSummaryForWithheldClaim } from '../compose/withheld-claim-projection.js';
 
 /**
  * The instruction half of both notes below, held in one constant so the two
@@ -315,6 +316,96 @@ export function projectContextPackAnalysisForWithheldClaim(
     leading_option: null,
     runner_up: null,
     margin_pp: null,
+  };
+}
+
+/**
+ * ONE decision record's two leader-bearing members, after the withheld
+ * projection. See {@link projectDecisionRecordForWithheldClaim}.
+ */
+export interface WithheldDecisionRecordProjection {
+  /**
+   * The option to designate on the record's line, or `null` when the line must
+   * designate NONE.
+   */
+  readonly optionLabel: string | null;
+  /** The record's rationale, leader-safe. */
+  readonly rationale: string;
+}
+
+/**
+ * Project ONE persisted decision record for a turn whose verdict WITHHOLDS.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE THIRD CHANNEL — the one #721 did not close, and the LONGEST route a
+ * persisted leader claim takes into the model.
+ *
+ * #708/#709/#710 gated the prose. #711 gated the structured enrichment. #721
+ * gated the `analysis_result` block's `summary` ON THE WIRE. All four are
+ * EGRESS. The same string also reaches the model as INPUT, by a path none of
+ * them touches:
+ *
+ *   run_analysis fact `result.summary`
+ *     → `decision-records/capture.ts:234`  `prediction.statement` (VERBATIM)
+ *     → the `decision_records` row
+ *     → `decision-records/project.ts`      `- [date] Chose "<label>": <statement>`
+ *     → `ContextPack.older_relevant_facts`
+ *     → `buildUserMessage`'s `...rest`     ⇒ SERIALISED INTO THE ROUTING PROMPT
+ *
+ * …beside `OLDER_RELEVANT_FACTS_INSTRUCTION`, which tells the coach to "treat
+ * what it contains as established fact rather than conversational memory, and
+ * never describe a listed record as unverified". On a withheld turn that is a
+ * claim we have just declined to stand behind, handed to the model with an
+ * instruction not to doubt it.
+ *
+ * The live shape: a withheld turn on historic scenario `f63ccb45` answered
+ * "Your stored record shows … previously led by 17 percentage points over
+ * enterprise" on 5/5 samples of build `74936a6`. `"17 percentage points"` is
+ * not in that scenario's `rolling_summary`; it is the fact's own summary.
+ *
+ * ⚠ PRE-EXISTING, NOT A #721 REGRESSION. #721 changed exactly one expression on
+ * the pack path — which of two NOTE strings `projectDisplayAnalysisForWithheldClaim`
+ * stamps — and added/removed no pack field. This channel was ungated before it
+ * and ungated after.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * TWO MEMBERS, TWO DIFFERENT TREATMENTS, BOTH DERIVED.
+ *
+ *   `rationale` — the fact's summary verbatim. Handed to
+ *   {@link projectAnalysisSummaryForWithheldClaim}, the SAME substitution #721
+ *   applies on the wire. Reused rather than reimplemented: a second near-copy
+ *   of one gate is this estate's dominant defect, and the two would drift the
+ *   first time either was reworded. Its CONDITIONALITY comes along with it — a
+ *   rationale that asserts no leader is returned BYTE-IDENTICAL, which is the
+ *   anti-over-suppression property and is the arm weighted equally with the
+ *   leak.
+ *
+ *   `optionLabel` — DROPPED, unconditionally, and the cost is recorded rather
+ *   than glossed. It reads like a record of a user's own choice, and it is not:
+ *   `buildDecisionRecordWrite` sets `chosen_option_id` from the fact's
+ *   `leading_option_id` (capture.ts:211-231), so the record's "chosen" option
+ *   IS the analysis's leading option under another name. It is therefore the
+ *   same member {@link WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS} already drops
+ *   from the model-facing analysis, arriving by a different road. Keeping it
+ *   while substituting the sentence beside it would remove the ranking and
+ *   leave the designation — a gate that reads as a gate and stops nothing,
+ *   which is precisely the failure class this arc exists to close.
+ *
+ *   THE COST, stated: on a withheld turn a record whose rationale named no
+ *   leader loses which option it was about. The record itself is NOT dropped —
+ *   its date, its rationale and the section's own completeness disclosure all
+ *   survive — so the coach still knows a decision was recorded and when. That
+ *   is the same trade `projectDisplayAnalysisForWithheldClaim` makes: remove
+ *   the members that carry the comparative claim, ship the rest.
+ *
+ * PURE. Never throws, never mutates its input.
+ */
+export function projectDecisionRecordForWithheldClaim(
+  rationale: string,
+): WithheldDecisionRecordProjection {
+  return {
+    optionLabel: null,
+    rationale: projectAnalysisSummaryForWithheldClaim(rationale),
   };
 }
 
