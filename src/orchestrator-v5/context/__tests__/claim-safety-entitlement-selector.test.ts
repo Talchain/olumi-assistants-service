@@ -195,24 +195,62 @@ describe('P0 REPRO: a withheld PARTIAL analysis must not be entitled to name a l
     }
   });
 
-  it('CONVERSE: a newer PARTIAL that PERMITS is honoured over an older withheld one', () => {
-    // The rule is "newest claim-bearing fact", not "withhold wins". Pinned so
-    // the fix cannot degenerate into a blanket withhold that happens to pass
-    // every test above.
-    const olderWithheld = fact({
-      status: 'completed',
-      computed_at: '2026-07-01T00:00:00.000Z',
-      verdict: WITHHELD,
-    });
+  it('CONVERSE: a newer PARTIAL that PERMITS is honoured — WHEN NOTHING ELSE IS DISPLAYED', () => {
+    // ⚠ CORRECTED BY F1, AND THE ORIGINAL VERSION OF THIS TEST WAS PINNING THE
+    // DEFECT. It used a two-fact fixture — an OLDER `completed` fact that
+    // WITHHELD plus a NEWER `partial` that PERMITTED — and asserted `true`.
+    //
+    // That assertion was right about ENTITLEMENT and blind to CONTENT. On
+    // exactly that input, `selectRunAnalysisFact` (the QUALITY selector, the
+    // one `buildAnalysisFromPriorFacts` uses) rejects the partial and projects
+    // the OLDER fact into `contextPack.analysis` and `display_analysis`. So the
+    // `true` this test pinned entitled the turn to name a leader that could
+    // only ever be the WITHHELD fact's leader — the partial's content is never
+    // displayed. The model-input chokepoint keys on this boolean, so the pack
+    // shipped unprojected and the egress alarm was armed to ignore it.
+    //
+    // The divergence fixture and its full derivation now live in
+    // `claim-safety-projection-divergence.test.ts`, which asserts `false` and
+    // `fail_closed_projected_analysis` on it.
+    //
+    // ⭐ #730'S RULING IS NOT REVERTED, AND THIS TEST STILL DEFENDS IT. The
+    // rule is still "newest claim-bearing fact", not "withhold wins" — it is
+    // now conjoined with the verdict of the fact the turn can actually SHOW.
+    // Strip the older fact and there is nothing else to show: the quality
+    // selector returns null, there is no second conjunct, and the newer
+    // permitting partial governs alone. That is the property this test exists
+    // to protect, isolated from the property it was accidentally also
+    // asserting, and it is the arm that goes red if F1's fix ever degenerates
+    // into a blanket withhold.
     const newerPartialPermitted = fact({
       status: 'partial',
       computed_at: '2026-07-03T00:00:00.000Z',
       verdict: PERMITTED,
     });
-    const v = readMayNameLeadingOptionVerdict([olderWithheld, newerPartialPermitted], ARRAY_ONLY);
+    // The premise, asserted rather than assumed: there is no displayable
+    // analysis here, which is what makes the entitlement fact govern alone.
+    expect(selectRunAnalysisFact([newerPartialPermitted])).toBeNull();
+
+    const v = readMayNameLeadingOptionVerdict([newerPartialPermitted], ARRAY_ONLY);
     expect(v.may_name_leading_option).toBe(true);
     expect(v.provenance).toBe('scenario_fact');
     expect(v.constraint_verdict_state).toBe('evaluated_feasible');
+
+    // …and the same, with an older fact present that ALSO permits. Divergence
+    // between the two selectors is not by itself a reason to withhold; only a
+    // withholding DISPLAYED fact is. Without this, F1's fix could have been
+    // "withhold on divergence" and still passed everything above.
+    const olderPermitted = fact({
+      status: 'completed',
+      computed_at: '2026-07-01T00:00:00.000Z',
+      verdict: PERMITTED,
+    });
+    const both = readMayNameLeadingOptionVerdict(
+      [olderPermitted, newerPartialPermitted],
+      ARRAY_ONLY,
+    );
+    expect(both.may_name_leading_option).toBe(true);
+    expect(both.provenance).toBe('scenario_fact');
   });
 
   // ── POSITIVE CONTROLS ─────────────────────────────────────────────────────

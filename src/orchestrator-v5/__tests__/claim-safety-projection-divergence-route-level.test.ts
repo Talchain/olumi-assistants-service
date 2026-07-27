@@ -295,7 +295,11 @@ function converseTextOnly(text: string) {
 
 const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
 
-async function postTurn(app: FastifyInstance, message: string) {
+async function postTurn(
+  app: FastifyInstance,
+  message: string,
+  turnClass: 'clarify' | 'frame' = 'clarify',
+) {
   const res = await app.inject({
     method: 'POST',
     url: '/orchestrate/v2/turn',
@@ -305,7 +309,7 @@ async function postTurn(app: FastifyInstance, message: string) {
       scenario_id: SCENARIO_ID,
       stage: 'analyse',
       message,
-      turn_class: 'clarify',
+      turn_class: turnClass,
       source: 'composer',
       graph_state: READY_GRAPH,
     },
@@ -448,23 +452,56 @@ describe('F1 — the DIVERGENCE state at the boundary', () => {
     expect(note as string).toContain('Do not name or imply any option as the answer');
   });
 
-  it('RED-FIRST: the Layer-3 alarm is ARMED WITH FALSE, so a leaked leader COUNTS', async () => {
-    // The half that made this defect silent. `guardLeadingOptionClaimsAtEgress`
-    // returns its input unchanged and emits NOTHING when the permission is
-    // `true`. In the divergence state the permission WAS `true`, so the model
-    // could recite A's withheld leader and the alarm recorded nothing at all.
+  it('RED-FIRST: the DETERMINISTIC advice gate stops naming the withheld leader', async () => {
+    // ⭐ THE STRONGEST ARM, because it is prose ON THE WIRE and no model is
+    // involved. `tryPostAnalysisAdviceGate` is a PRE-ROUTE that composes, in
+    // code, "the analysis currently favours X" from `contextPack.analysis` —
+    // which is A's projection. Input-gating the model cannot touch it; the site
+    // consumes `mayNameLeadingOptionForRun` directly, and in the divergence
+    // state that boolean was read off B.
     //
-    // Exactly ONE, for #730-E1's multiplicity reason: the scan belongs on the
-    // final `wireBody` in `sendFinalised200`, and more than one fire means it
-    // has been re-added to a re-entered chokepoint.
-    const { status } = await postTurn(app, QUESTION);
+    // BRANCH DISCRIMINATOR (rule 1): whether the router was called. The gate is
+    // a pre-route — serving WITHOUT the router is something only this branch
+    // can produce, and the permitted control below asserts it in that
+    // direction.
+    const { status, body } = await postTurn(app, 'What drove this result?', 'frame');
     expect(status).toBe(200);
-    const alarms = events.filter((e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress);
     expect(
-      alarms.length,
-      'the divergence turn must arm the egress alarm with the REAL permission, exactly once',
-    ).toBe(1);
-    expect(alarms[0]!.data['hit_count']).toBeGreaterThan(0);
+      body['assistant_text'],
+      'the deterministic composer must not name a leader the displayed analysis withheld',
+    ).not.toContain(A_LEADER_LABEL);
+    expect(JSON.stringify(body['blocks'] ?? [])).not.toContain('72%');
+  });
+
+  it('the Layer-3 alarm is ARMED WITH THE REAL PERMISSION — and what that does NOT prove', async () => {
+    // The arming value is `ctx.mayNameLeadingOption` — the SAME field
+    // `sendFinalised200` hands the guard and `_diagnostic_trace.claim_safety`
+    // publishes (route-v2.ts:1037 / :1324). So the wire assertion below IS the
+    // arming proof, and it is the one that moved: pre-fix the guard was armed
+    // with `true`, which makes it "a licensed no-op" on this turn.
+    //
+    // ⚠ STATED RATHER THAN DRESSED UP: on THIS turn shape the alarm still
+    // reports nothing, and not because the fix failed. The divergence fixture's
+    // newest fact is `partial`, so the coaching output post-check
+    // (`coaching-output-postcheck.ts:775`, the `pack.blocked` branch) REPLACES
+    // the model's prose with the degraded template before egress. The guard
+    // therefore has no leader claim to find, with or without this fix.
+    //
+    // That is a real and welcome second line of defence, and recording it is
+    // the honest move: it means the F1 harm on a converse turn is a MODEL-INPUT
+    // leak (proved above, on the serialised prompt) rather than a proven prose
+    // leak, while the deterministic advice gate arm above — which bypasses that
+    // post-check entirely — is the arm that proves user-facing prose moved.
+    const { status, body } = await postTurn(app, QUESTION);
+    expect(status).toBe(200);
+    expect(body['_diagnostic_trace']?.['claim_safety']?.['may_name_leading_option']).toBe(false);
+    // Non-vacuity for the paragraph above: assert the substitution really is
+    // what silenced the alarm, so a future change that stops substituting turns
+    // this red instead of leaving a stale explanation in place.
+    expect(findLeaderClaims({ assistant_text: body['assistant_text'] } as never)).toHaveLength(0);
+    expect(
+      events.filter((e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress),
+    ).toHaveLength(0);
   });
 
   it('RED-FIRST: the wire diagnostic NAMES the narrowing rather than hiding it', async () => {
@@ -501,6 +538,18 @@ describe('F1 — the DIVERGENCE state at the boundary', () => {
       expect(Array.isArray(analysis['options'])).toBe(true);
       expect(analysis['leading_option_note']).toBeUndefined();
       expect(JSON.stringify(analysis)).toContain('72%');
+    });
+
+    it('the DETERMINISTIC advice gate still SERVES, and names the leader', async () => {
+      // The positive control for the strongest arm. Without it, "the advice
+      // gate did not name the leader" could be true because the gate never ran
+      // — the `top_driver` lever-suppression trap this fixture shape has hit
+      // before. Serving WITHOUT the router is something only the gate can
+      // produce, so both halves are branch-proven.
+      const { status, body } = await postTurn(app, 'What drove this result?', 'frame');
+      expect(status).toBe(200);
+      expect(routeWithToolUseMock).not.toHaveBeenCalled();
+      expect(body['assistant_text']).toContain(A_LEADER_LABEL);
     });
 
     it('the alarm stays SILENT', async () => {
