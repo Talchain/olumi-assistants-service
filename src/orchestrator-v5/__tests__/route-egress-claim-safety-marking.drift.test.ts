@@ -40,6 +40,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTE_V2 = resolve(HERE, '../../orchestrator/route-v2.ts');
 const OUTPUT_SAFETY = resolve(HERE, '../compose/output-safety.ts');
 const CHIP_CLICK_DISPATCH = resolve(HERE, '../handlers/chip-click-dispatch.ts');
+const TURN_EXECUTOR = resolve(HERE, '../turn-executor.ts');
 
 interface SendCall {
   readonly offset: number;
@@ -117,7 +118,59 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
       'the turn_executor and chip_click exits must thread the verdict the run_analysis handler ' +
         'stamped on the fact. If one of these became a literal `true`, the guard would be blind ' +
         'on exactly the path the G-CEE-1 defect ships through.',
-    ).toEqual(['cc.mayNameLeadingOption', 'run.mayNameLeadingOption ?? true']);
+    ).toEqual(['cc.mayNameLeadingOption', 'run.mayNameLeadingOption']);
+  });
+
+  it('the turn_executor exit has NO `?? true` fallback left either, and cannot regrow one', () => {
+    // ═══════════════════════════════════════════════════════════════════════
+    // F6 — THE LAST INSTANCE OF THE FAMILY, closed 2026-07-27.
+    //
+    // `run.mayNameLeadingOption ?? true` survived the chip-click fix one line
+    // above it. Its own defence was that the default is DEAD: the ROADMAP 1.233
+    // hoist assigns `mayNameLeadingOptionForRun` at the declaration, so every
+    // exit carries a real value and the `??` never fires. That is exactly what
+    // makes it worth removing rather than tolerating — an unexercised default
+    // is a latent re-arming point, and the codebase's own comment on the
+    // sibling says so: "optional is what let the `?? true` exist".
+    //
+    // Same shape of fix as the chip exit: the field is now REQUIRED on
+    // `TurnExecutorRunResult`, so a new exit that forgets it fails to COMPILE.
+    // And, as there, the fix is a TYPE change — no runtime test would go red on
+    // a revert. Both halves are pinned from source, which is what discriminates.
+    // ═══════════════════════════════════════════════════════════════════════
+    expect(source).toContain('mayNameLeadingOption: run.mayNameLeadingOption,');
+    expect(
+      source,
+      'the turn_executor exit regrew a `?? true` fallback. The field is REQUIRED on ' +
+        'TurnExecutorRunResult — if a new exit cannot derive a verdict, derive one from the ' +
+        'persisted facts with readMayNameLeadingOptionForFacts; do not default open.',
+    ).not.toContain('run.mayNameLeadingOption ??');
+
+    const executor = readFileSync(TURN_EXECUTOR, 'utf8');
+    expect(executor).toMatch(/^\s{2}mayNameLeadingOption:\s*boolean;/m);
+    expect(
+      executor,
+      'mayNameLeadingOption was made optional again on TurnExecutorRunResult. Optional is ' +
+        'what the `?? true` at the route grew out of: a producer that forgets the field must ' +
+        'fail to compile, which is the doctrine EgressSanitiseOpts already applies.',
+    ).not.toMatch(/^\s{2}mayNameLeadingOption\?:/m);
+  });
+
+  it('POSITIVE CONTROL: the turn_executor `?? true` pin can FAIL', () => {
+    // Rule 2 — re-introduce the exact pre-F6 shape and prove both halves flip.
+    const reverted = source.replace(
+      'mayNameLeadingOption: run.mayNameLeadingOption,',
+      'mayNameLeadingOption: run.mayNameLeadingOption ?? true,',
+    );
+    expect(reverted).not.toContain('mayNameLeadingOption: run.mayNameLeadingOption,');
+    expect(reverted).toContain('run.mayNameLeadingOption ??');
+
+    const executor = readFileSync(TURN_EXECUTOR, 'utf8');
+    const revertedType = executor.replace(
+      /^(\s{2})mayNameLeadingOption: boolean;/m,
+      '$1mayNameLeadingOption?: boolean;',
+    );
+    expect(revertedType).toMatch(/^\s{2}mayNameLeadingOption\?:/m);
   });
 
   it('the chip_click exit has NO `?? true` fallback left, and cannot regrow one', () => {

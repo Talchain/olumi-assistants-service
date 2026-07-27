@@ -4344,7 +4344,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // T1 claim safety — READ off the executor's run result, which took it
       // from the stamp the run_analysis handler persisted on the fact.
       // Never re-derived at the route (CLAUDE.md trap #12).
-      mayNameLeadingOption: run.mayNameLeadingOption ?? true,
+      //
+      // F6 — the `?? true` is GONE and cannot regrow: the field is REQUIRED on
+      // `TurnExecutorRunResult`, so an exit that fails to carry it fails to
+      // compile. The default was dead (the ROADMAP 1.233 hoist populates the
+      // field on every exit) and that is exactly why it was dangerous: a
+      // latent, unexercised re-arming point that would have silently licensed
+      // the next exit family to ship unguarded.
+      mayNameLeadingOption: run.mayNameLeadingOption,
       // ROADMAP 1.233 — the Layer-2 gate's own verdict, for the diagnostic
       // trace only. Absent ⇒ stamped `null` ("the gate did not run"), which is
       // the honest reading for a permitted turn or a non-explanation handler.

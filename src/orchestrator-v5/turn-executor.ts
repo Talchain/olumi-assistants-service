@@ -251,7 +251,10 @@ import {
 // ROADMAP 1.233 — the ONE fact-array claim-safety read, shared by the turn-entry
 // hoist and the post-dispatch refinement so two read points can never become two
 // derivations. See `context/claim-safety-read.ts`.
-import { readMayNameLeadingOptionForFacts } from './context/claim-safety-read.js';
+import {
+  readConstraintVerdictStateForFacts,
+  readMayNameLeadingOptionForFacts,
+} from './context/claim-safety-read.js';
 // ROADMAP 1.231 — INPUT-side claim safety: strip the leader-designating fields
 // from what a withheld turn feeds the model (and the deterministic advice gate).
 import {
@@ -379,18 +382,28 @@ export interface TurnExecutorRunResult {
    * `compose/leading-option-egress-guard.ts`).
    *
    * READ from the stamp the run_analysis handler persisted on the fact, never
-   * re-derived (CLAUDE.md trap #12). Optional HERE and defaulted to `true` at
-   * the route: a turn that produced no run_analysis fact withheld nothing, and
-   * `true` is the honest statement of that. The REQUIRED-ness that matters is
-   * on `EgressSanitiseOpts`, where forgetting it disarms the guard.
+   * re-derived (CLAUDE.md trap #12).
    *
    * ROADMAP 1.233: this is now populated on EVERY exit, not just the execute
    * one. It used to be assigned only at the post-dispatch claim-safety read,
    * so coach / converse / clarify / bounded-fallback / routing-degrade exits
    * all shipped the `true` default and the guard returned their responses
    * untouched — an alarm that could not fire is not an alarm.
+   *
+   * ⚠ REQUIRED since 2026-07-27 (F6), and the `?? true` at the route is gone
+   * with it. It used to be optional here on the argument that "a turn that
+   * produced no run_analysis fact withheld nothing, and `true` is the honest
+   * statement of that" — which is true of the VALUE and irrelevant to the
+   * TYPE. `readMayNameLeadingOptionForFacts` already returns that honest `true`
+   * for a fact-less turn, at the hoist, on every exit. The optional therefore
+   * defaulted nothing that was not already set: it was a LATENT RE-ARMING
+   * POINT, the last of the family this codebase's own comment condemns ("an
+   * optional field is one a future caller silently forgets", and "optional is
+   * what let the `?? true` exist"). A new exit that forgets the field must fail
+   * to COMPILE, which is the doctrine `EgressSanitiseOpts` and the chip-click
+   * dispatch `ok` outcome already carry.
    */
-  mayNameLeadingOption?: boolean;
+  mayNameLeadingOption: boolean;
   /**
    * ROADMAP 1.233 — which branch the withheld-explanation claim gate took on
    * this turn, or ABSENT when the gate never ran (non-explanation handler, or
@@ -1145,6 +1158,18 @@ export async function runTurnExecutor(
   // declaration.
   // ═══════════════════════════════════════════════════════════════════════════
   let mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts(context.prior_facts);
+  // F2 — the STATE behind the permission, read off the SAME fact array by the
+  // SAME content-based selector, at the SAME point. The ContextPack input gate
+  // below needs it to choose between the ratified-condition note and the
+  // cause-free one: the unconditional note asserted "a condition the user
+  // ratified could not be checked against this result" on EVERY unstamped
+  // pre-#710 fact, including scenarios where nothing was ever ratified — a
+  // false factual premise handed to the coach, which converts the fail-closed
+  // default's cost from content into correctness. `const`, not `let`: the pack
+  // is assembled strictly below this and strictly above the post-dispatch
+  // re-read, so a second assignment would have no reader and would only invite
+  // the two answers to describe different facts.
+  const constraintVerdictStateForRun = readConstraintVerdictStateForFacts(context.prior_facts);
   // ROADMAP 1.233 — which projection the withheld-explanation gate applied on
   // this turn, if it ran. Surfaced on the run result so route-v2 can stamp it
   // onto the `_diagnostic_trace.claim_safety` block, which is the ONLY way an
@@ -2036,6 +2061,7 @@ export async function runTurnExecutor(
             ...assembledContextPack,
             display_analysis: projectDisplayAnalysisForWithheldClaim(
               assembledContextPack.display_analysis,
+              constraintVerdictStateForRun,
             ),
           };
       cqeSummaryForLog = cqeSummary;

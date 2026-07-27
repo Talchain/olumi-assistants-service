@@ -27,7 +27,11 @@
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
+import {
+  readConstraintVerdictStateFromResult,
+  readMayNameLeadingOptionFromResult,
+} from '../../orchestrator/context/constraint-feasibility.js';
+import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
 import { selectRunAnalysisFact } from './freshness.js';
 
 /**
@@ -71,4 +75,33 @@ export function readMayNameLeadingOptionForFacts(
   return fact.fact_type === 'run_analysis'
     ? readMayNameLeadingOptionFromResult(fact.result)
     : true;
+}
+
+/**
+ * Which verdict STATE did a turn grounded in THIS fact array record? (F2)
+ *
+ * The sibling of {@link readMayNameLeadingOptionForFacts}, and it exists for the
+ * same reason this module does: so the two answers come from the SAME fact,
+ * chosen by the SAME content-based selector. A note that described one analysis
+ * while the withholding described another would be a second derivation wearing
+ * a different hat (CLAUDE.md trap #12) — and the consumer here is copy that
+ * makes a factual claim about the user's own scenario, so the cost of the two
+ * disagreeing is a false sentence, not a cosmetic one.
+ *
+ * ONE DEFAULT, and it is `null` throughout — unlike the boolean's two. There is
+ * no honest state to invent for "no analysis" or "nothing recorded": every one
+ * of the five states makes a positive claim about what happened to the user's
+ * condition (see `readConstraintVerdictStateFromResult`, which returns `null`
+ * for exactly this reason). `null` means "not recorded", and the one consumer
+ * degrades to cause-free copy rather than guessing a voice.
+ */
+export function readConstraintVerdictStateForFacts(
+  facts: readonly HandlerFact[],
+): ConstraintVerdictState | null {
+  const selected = selectRunAnalysisFact(facts);
+  if (selected === null) return null;
+  const fact = selected.fact;
+  return fact.fact_type === 'run_analysis'
+    ? readConstraintVerdictStateFromResult(fact.result)
+    : null;
 }

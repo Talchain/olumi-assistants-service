@@ -38,6 +38,7 @@ import {
 import { buildFocusInspectorDirective } from './compose/ui-directive.js';
 import {
   mayNameLeadingOptionForFact,
+  projectAnalysisSummaryForWithheldClaim,
   projectTransportEnrichmentForWithheldClaim,
 } from './compose/withheld-claim-projection.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
@@ -676,7 +677,22 @@ function buildAnalysisResultBlock(
     : projectTransportEnrichmentForWithheldClaim(safeTransport);
   return {
     type: 'analysis_result',
-    summary,
+    // F1 — THE THIRD THING EVERY WITHHELD TURN SHIPS, AND THE ONE NO
+    // INSTRUMENT WAS POINTED AT.
+    //
+    // This field used to be emitted VERBATIM on both branches. On a fact this
+    // codebase writes today that is harmless — a withheld turn's summary comes
+    // from the gated headline builder. The failing input is a PRE-#708 fact:
+    // no `constraint_verdict`, no `__cee_claim_safety`, so the reader above
+    // fails CLOSED, and the persisted summary is pre-gate copy naming the
+    // leader. No migration exists, so the fail-closed default MANUFACTURED the
+    // G-CEE-1 contradiction on exactly the scenarios it was protecting — and
+    // `summary` was outside `BLOCK_PROSE_FIELDS` and outside `scanKey`'s key
+    // vocabulary, so the residue meter reported zero hits on the class.
+    //
+    // Conditional, never blanket: a leader-free summary ships byte-identical on
+    // a withheld turn. See `projectAnalysisSummaryForWithheldClaim`.
+    summary: mayNameLeadingOption ? summary : projectAnalysisSummaryForWithheldClaim(summary),
     // `null` is the schema's own honest value here (`leading_option_id:
     // z.string().nullable()`, boundary/blocks.ts — the key is REQUIRED, so
     // `null` is the strongest available "no leader is being put forward";
