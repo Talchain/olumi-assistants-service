@@ -110,9 +110,10 @@
   "code_constant_live_prompts": [
     {
       "name": "COACHING_SYSTEM",
-      "path": "src/cee/unified-pipeline/stages/coaching-pass.ts:75",
-      "trigger": "every draft turn (unified-pipeline/index.ts:897, unconditional)",
-      "gate": "none"
+      "path": "src/cee/unified-pipeline/stages/coaching-pass.ts:79",
+      "trigger": "every draft turn (call site unified-pipeline/index.ts:897 is unconditional, but the stage returns WITHOUT an LLM call when ctx.coaching is already set, when there is no draftAdapter, when the graph has no nodes, or when the remaining request budget is < 28,000 ms \u2014 coaching-pass.ts skip gates)",
+      "gate": "invocation: none (no env var / flag; see trigger for the four runtime skip gates). output: NOT none, and NOT uniform across surfaces \u2014 assistant_text is gated by the premature-recommendation lexicon in orchestrator-v5/coaching/copy-quality-gate.ts (gateFullResponse / gateAssumptionFragment); blocks[].body bias cards are gated by gateCoachingCardBody (content rules, drop-on-trip, added 2026-07-27); the raw /assist/v1/draft-graph HTTP response is ungated.",
+      "corrected": "2026-07-27 \u2014 the previous \"gate\": \"none\" was FALSE for assistant_text, which has carried the copy-quality lexicon all along, and \"unconditional\" was false for the stage. The register under-described the defence on the biggest user-visible surface and thereby mis-priced the risk (COACHING-SYSTEM-AUDIT-2026-07-27 R2/R4)."
     },
     {
       "name": "SUMMARISER_SYSTEM_PROMPT",

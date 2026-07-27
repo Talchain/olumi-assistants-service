@@ -47,7 +47,13 @@
  * already carry the complete drift story, and the event registry is frozen.)
  */
 
-import { BiasType, StrengthenItemActionType } from "@talchain/schemas";
+import {
+  BiasType,
+  BriefCompleteness,
+  StrengthenItemActionType,
+  CausalClaimSchema,
+  StrengthBand,
+} from "@talchain/schemas";
 import { emit, TelemetryEvents } from "../../utils/telemetry.js";
 
 /**
@@ -57,6 +63,64 @@ import { emit, TelemetryEvents } from "../../utils/telemetry.js";
  */
 export const CANONICAL_ACTION_TYPES: readonly string[] = StrengthenItemActionType.options;
 export const CANONICAL_BIAS_TYPES: readonly string[] = BiasType.options;
+
+/**
+ * ── causal_claims (added 2026-07-27, P0) ──────────────────────────────────
+ *
+ * WHY THESE LIVE HERE. The 2026-07-24 fix above derived the two COACHING
+ * vocabularies from the contract and pinned them with a drift test — and left
+ * the coaching-pass prompt's `causal_claims` line HAND-TYPED. It offered
+ * `"type": "direct"` (the contract's discriminator is `direct_effect`) and the
+ * retired 3-band `weak | moderate | strong` (the contract has been 4-band since
+ * schemas 0.11.0). Both mismatches are independently fatal, and
+ * `validateCausalClaims` calls `CausalClaimSchema.safeParse` raw, so EVERY claim
+ * the prompt produced was dropped, on every draft turn, from 2026-07-23 until
+ * this commit — ~209 completion tokens/turn generated and discarded.
+ *
+ * The hand-maintained mirror survived inside the very commit that removed its
+ * siblings (CLAUDE.md trap 12). So these are derived from the contract by the
+ * SAME mechanism, and the prompt interpolates them rather than reciting them.
+ */
+export const CANONICAL_STRENGTH_BANDS: readonly string[] = StrengthBand.options;
+
+/**
+ * The claim-type discriminators, read off the discriminated union itself
+ * (`optionsMap` is keyed by the discriminator value), so a new claim variant in
+ * a future contract appears here with no edit.
+ */
+export const CANONICAL_CAUSAL_CLAIM_TYPES: readonly string[] = [
+  ...CausalClaimSchema.optionsMap.keys(),
+].map(String);
+
+/**
+ * The one claim variant that carries `stated_strength` — the shape the coaching
+ * prompt asks for. DERIVED by asking each union member which fields it declares,
+ * never hand-typed: that is exactly the literal that drifted.
+ *
+ * Fails loud at module load if the contract stops having exactly one such
+ * variant, rather than silently rendering a prompt nobody can satisfy (the
+ * mirror must FAIL on drift, never assume-good).
+ */
+const strengthBearing = [...CausalClaimSchema.optionsMap.entries()]
+  .filter(([, schema]) => "stated_strength" in schema.shape)
+  .map(([discriminator]) => String(discriminator));
+if (strengthBearing.length !== 1) {
+  throw new Error(
+    `coaching-contract-conformance: expected EXACTLY ONE CausalClaim variant carrying ` +
+      `stated_strength, found ${strengthBearing.length} (${strengthBearing.join(" | ")}). ` +
+      `The contract moved — the coaching prompt's causal-claim shape must be re-derived.`,
+  );
+}
+export const STRENGTH_BEARING_CLAIM_TYPE: string = strengthBearing[0]!;
+
+/**
+ * `widening_log.brief_completeness` — the THIRD enum this prompt recited by
+ * hand. It happens to be correct today, which is exactly why it is worth
+ * deriving now: the causal-claims line was also correct once. Leaving a known
+ * mirror standing beside the one you just removed is how the 24 Jul fix created
+ * this 27 Jul P0.
+ */
+export const CANONICAL_BRIEF_COMPLETENESS: readonly string[] = BriefCompleteness.options;
 
 /**
  * The generic canonical action used when the model supplies an action category

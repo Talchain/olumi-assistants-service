@@ -33,6 +33,32 @@ export const DEFAULT_DRAFT_COACHING_LOG_PATH = resolve(
  * Append a draft-coaching record. Swallows I/O errors; never throws.
  * Observability-only sidecar; MC-29 log-and-continue policy does not apply
  * (this is not a boundary validator).
+ *
+ * ⚠⚠ BLOCKED DEPENDENCY — DO NOT WIRE THIS INTO PRODUCTION YET (P5, 2026-07-27).
+ *
+ * This writer has ZERO production callers. Verified at tip `60d234a6`, complete
+ * manifest, scope = whole repo excluding `node_modules`/`.git`, plus an
+ * unrestricted grep for the filename `v5-draft-graph-coaching`: every
+ * non-definition hit is under `__tests__/`. Claim type: **no-writer** — so
+ * {@link readLatestDraftCoaching} always returns null today.
+ *
+ * The READ end, however, is already wired: `coaching-cache-reader.ts` feeds
+ * `CoachingCache.draft_coaching` into ContextPack assembly. So the day a
+ * production caller lands here, **pre-analysis coaching starts flowing into
+ * POST-analysis prompts as apparent prior state** — and that coaching is
+ * produced by a prompt with no output-quality eval, on a turn where nothing has
+ * been computed. Speculation would be replayed downstream as though it were
+ * established context.
+ *
+ * PRECONDITION FOR WIRING: the coaching-output eval checks
+ * (`coaching-eval-checks.ts` — audit checks 1/2/5/7) green on the surface being
+ * replayed, and the bias-detail content gate (P1, `gateCoachingCardBody`)
+ * covering whatever reaches a user. This is a blocked dependency, not a TODO.
+ *
+ * ENFORCED, not merely documented: `__tests__/draft-coaching-log-writer-blocked.test.ts`
+ * derives the caller set from the source tree and goes RED the moment a
+ * non-test caller appears. Wiring it is therefore a deliberate act that must
+ * delete that pin, not something that can happen by accident.
  */
 export async function appendDraftCoaching(
   record: DraftCoaching,

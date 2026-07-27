@@ -200,3 +200,73 @@ describe('wave-2 ask 1 (0.19.0) — bias blocks carry the producer guidance sign
     }
   });
 });
+
+/**
+ * P1 (2026-07-27) — `bias_signals[].detail` reaches `blocks[].body` VERBATIM.
+ *
+ * Before this change it was the ONE LLM-authored string reaching a user-visible
+ * surface with no content gate on any path — the downstream treatment is
+ * `sanitiseBlock('coaching')`, which is entity-ID substring replacement and
+ * nothing else. The estate's own reasoning makes this the worst field to leave
+ * open: an unrecognised bias TYPE is dropped rather than re-labelled because
+ * "a bias label is a claim about the user's reasoning", yet the free-text
+ * explanation of that label shipped unread. Nothing stopped a detail reading
+ * "you're anchored on the tech-lead option, which is the weaker choice here" —
+ * a leader designation inside a bias card, on a turn where no analysis exists.
+ *
+ * MUTATION MAP:
+ *  - M5  remove the gateCoachingCardBody call from buildDraftBiasSignalBlocks
+ *        → "drops a card whose detail names a leading option" RED
+ */
+describe('P1 — bias card body content gate', () => {
+  it('drops a card whose detail names a leading option (M5)', () => {
+    const leaderNaming = {
+      type: 'anchoring',
+      detail: 'You are anchored on the tech-lead hire, which is the best option on cost',
+    };
+    expect(build([leaderNaming])).toEqual([]);
+  });
+
+  it('drops details carrying the other content offences, one card each', () => {
+    // premature recommendation (a different lexicon member)
+    expect(build([{ type: 'anchoring', detail: 'The clear winner here is the in-house build' }])).toEqual([]);
+    // internal entity id leak
+    expect(
+      build([{ type: 'anchoring', detail: 'The estimate leans on fac_initial_quote more than the brief warrants' }]),
+    ).toEqual([]);
+    // graph-shape language
+    expect(build([{ type: 'anchoring', detail: 'Several nodes in the diagram lack a supporting factor' }])).toEqual([]);
+  });
+
+  // ── POSITIVE CONTROL ────────────────────────────────────────────────────
+  // The gate must be a CONTENT gate, not a presentation gate. These are the
+  // repo's own real wire-shape details; every one ends with a full stop and one
+  // is 169 chars. gateAssumptionFragment rejects all of them (trailing
+  // punctuation / >150 chars) — which is exactly why it is NOT the gate used
+  // here. If a future edit swaps this for the fragment gate, this test goes RED
+  // rather than the bias-card surface silently going dark.
+  it('benign real details survive BYTE-IDENTICAL', () => {
+    const blocks = build([STATUS_QUO, ANCHORING]);
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]!.body).toBe(STATUS_QUO.detail);
+    expect(blocks[1]!.body).toBe(ANCHORING.detail);
+  });
+
+  it('a 169-char recorded detail ending in a full stop still ships', () => {
+    const recorded = {
+      type: 'narrow_framing',
+      detail:
+        'The brief frames this as a binary choice between two hire profiles without considering phased hiring, contractor augmentation, or reallocation of existing team capacity.',
+    };
+    expect(recorded.detail.length).toBe(169);
+    const [card] = build([recorded]);
+    expect(card!.body).toBe(recorded.detail);
+  });
+
+  it('a dropped card does not consume the cap — a later clean signal still emits', () => {
+    const dirty = { type: 'anchoring', detail: 'The best option is clearly the incumbent supplier' };
+    const blocks = build([dirty, STATUS_QUO]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.body).toBe(STATUS_QUO.detail);
+  });
+});
