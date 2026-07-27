@@ -336,9 +336,18 @@ function assertWithheldCopyIsLeaderFree(): void {
     // other run's leader, so the alarm is not armed on them today — but the
     // hazard the probe exists for is authorial, not situational: both were
     // written in the register of the sentence they replace, which is what makes
-    // an author reach for leader vocabulary. `run-comparison-gate.test.ts` pins
-    // that this list stays complete by reflecting over the module's exports,
+    // an author reach for leader vocabulary.
+    // `__tests__/run-comparison-per-run-authorization.test.ts` pins that this
+    // list stays complete by reflecting over the module's exports ('DERIVED:
+    // every exported WITHHELD_* constant is covered by the module-load probe'),
     // so a third constant cannot be added and left unprobed (CLAUDE.md #12).
+    // ⚠ FILE NAME CORRECTED 2026-07-27: this line named
+    // `run-comparison-gate.test.ts`, which contains no reflection at all. The
+    // pin was real and working; only the pointer was wrong — trap #14 (a label
+    // that does not match its mechanism) inside the module whose whole subject
+    // is that a mechanism's label must be true. A reader following it found
+    // nothing, and could have concluded the guarantee was absent or deleted the
+    // real pin as a duplicate.
     ['WITHHELD_PRIOR_LEADER_COMPARISON_TEXT', WITHHELD_PRIOR_LEADER_COMPARISON_TEXT],
     ['WITHHELD_CURRENT_LEADER_COMPARISON_TEXT', WITHHELD_CURRENT_LEADER_COMPARISON_TEXT],
     // The leader-free branches too: they ship on withheld turns as well, so a
