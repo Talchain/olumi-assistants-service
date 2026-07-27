@@ -37,7 +37,7 @@ import { buildGraphLookup } from '../graph-lookup-adapter.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../validation-registry.js';
 import { validateToolCall, type GraphLookup } from '../validator.js';
 import type { EntityKind, ProposalAction, ProposalEntity } from '../types.js';
-import type { GraphStateIngress } from '../../../types/graph-state-ingress.js';
+import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures — the real failing draft graph, verbatim from
