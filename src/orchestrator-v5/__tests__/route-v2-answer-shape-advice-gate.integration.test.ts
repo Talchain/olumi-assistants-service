@@ -85,6 +85,29 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
       scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_hire',
       summary: 'Prior analysis result',
+      // T1 claim safety (ROADMAP 1.233). REQUIRED on any fixture that expects
+      // leader-naming prose, and this is a re-point at source, not a baseline
+      // bump (TESTING-DISCIPLINE rule 5).
+      //
+      // The fixture models a COMPLETED analysis, but omitted the field that
+      // records whether the user's ratified constraints were checked against
+      // it. `readMayNameLeadingOptionFromResult` treats a completed analysis
+      // with no verdict as UNKNOWN and fails CLOSED — "unknown" and "verified
+      // feasible" are different claims and only the second licenses naming a
+      // leader. That default has been in force on the EXECUTE path since #710;
+      // 1.233 hoists the read to turn entry, so it now governs the
+      // deterministic non-execute composers too (advice gate, run comparison,
+      // bounded fallback), which is where this fixture's expectations live.
+      //
+      // Adding the stamp makes the fixture model what it always meant: a real,
+      // constraint-checked, feasible run. Its previous silence was under-
+      // specification, and the fact that removing this line turns the
+      // leader-naming assertions below red is the mutation check on the 1.233
+      // gates — proof they bite, delivered by the pre-existing suite.
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible' as const,
+      },
       graph_hash_at_run: READY_GRAPH_HASH,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
       enrichment: {

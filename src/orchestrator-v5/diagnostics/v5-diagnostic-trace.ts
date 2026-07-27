@@ -186,11 +186,68 @@ export interface V5DiagnosticTrace extends DiagnosticTrace {
    */
   coaching_delivery?: V5CoachingDelivery;
   /**
+   * T1 claim safety, made observable at the wire (ROADMAP 1.233). Stamped by
+   * route-v2 on every dispatch family from the values it already holds; see
+   * {@link V5ClaimSafety}.
+   */
+  claim_safety?: V5ClaimSafety;
+  /**
    * Schema version of the V5 trace envelope itself (NOT a prompt /
    * grammar version). Bumped on any breaking shape change. Exporters
    * read this to choose the right field projection.
    */
   trace_version: 1;
+}
+
+/**
+ * T1 claim safety as the WIRE can see it. ROADMAP 1.233.
+ *
+ * WHY THIS EXISTS. Every claim-safety mechanism this programme has shipped is
+ * server-side: the persisted verdict, the Layer-2 projection gate, and the
+ * Layer-3 egress alarm all live in logs. Three consecutive live acceptance
+ * walks were therefore forced to infer the mechanism from prose, and the
+ * POST-#713 walk hit the wall that inference always hits:
+ *
+ *   - it proved the REPLACE branch ONLY because that branch substitutes a
+ *     byte-identifiable exported constant;
+ *   - it recorded `unchanged` as "indistinguishable from 'gate never ran' at
+ *     the wire";
+ *   - it recorded the APPEND branch as **UNVERIFIED — never exercised**, and
+ *     named a telemetry read as the cheapest thing that would settle it;
+ *   - and on non-execute turns it could not use the alarm at all, because the
+ *     permission was the hardcoded `true` this same roadmap row removes.
+ *
+ * Two bounded scalars close all four. This is DIAGNOSTIC ONLY — it rides the
+ * flag-gated `_diagnostic_trace`, never `response`, and no product behaviour
+ * reads it. It is deliberately NOT a second derivation: both members are
+ * stamped from values route-v2 already holds for the egress guard.
+ *
+ * BOUNDED BY CONSTRUCTION (this is the cardinality contract): one boolean and
+ * one four-valued nullable enum. No ids, no labels, no free text, nothing that
+ * could carry the very claim it reports on.
+ */
+export interface V5ClaimSafety {
+  /**
+   * The permission the Layer-3 egress guard was armed with on this turn —
+   * the SAME value passed to `sanitiseOlumiResponseForEgress`, not a re-read.
+   * `false` = the persisted verdict withheld the leading-option claim.
+   */
+  may_name_leading_option: boolean;
+  /**
+   * Which branch the Layer-2 withheld-explanation gate took, or `null` when it
+   * did not run on this turn (non-explanation handler, permitted verdict, or a
+   * dispatch family that has no such gate).
+   *
+   * Typed as the string union rather than importing
+   * `WithheldExplanationReason` so this diagnostics module stays free of a
+   * compose-layer dependency; the drift risk is covered by the compile-time
+   * assignability check at the route seam, where the real type is in scope.
+   */
+  withheld_projection_reason:
+    | 'leader_claim_replaced'
+    | 'disclosure_appended'
+    | 'unchanged'
+    | null;
 }
 
 export type V5DiagnosticExitPath =

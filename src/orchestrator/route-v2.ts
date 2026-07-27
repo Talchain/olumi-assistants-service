@@ -95,6 +95,13 @@ import type {
   V5DiagnosticTrace,
 } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+// ROADMAP 1.233 — the Layer-2 gate's own reason type. Imported so the
+// `claim_safety.withheld_projection_reason` stamp below is checked against the
+// REAL union at compile time: the diagnostics module declares that member as a
+// string literal union to stay dependency-free, and this import is what makes
+// the two fail `pnpm typecheck` together if either drifts (CLAUDE.md trap #12 —
+// a mirror must break at build time, not silently).
+import type { WithheldExplanationReason } from '../orchestrator-v5/compose/withheld-explanation-answer.js';
 import {
   canonicalStateFromFreshness,
   type CanonicalAnalysisState,
@@ -764,6 +771,17 @@ function sendFinalised200(
      * (CLAUDE.md trap #12).
      */
     readonly mayNameLeadingOption: boolean;
+    /**
+     * ROADMAP 1.233 — which branch the Layer-2 withheld-explanation gate took,
+     * when the dispatch family HAS that gate and it ran. Optional and absent
+     * everywhere else: the turn-executor is the only producer today, and an
+     * absent value is stamped as `null` ("did not run"), which is honest for
+     * every other family rather than a fabricated `'unchanged'`.
+     *
+     * Diagnostic only — it reaches the wire solely inside the flag-gated
+     * `_diagnostic_trace.claim_safety`, never `response`.
+     */
+    readonly withheldExplanationReason?: WithheldExplanationReason;
   },
 ): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
@@ -982,6 +1000,23 @@ function sendFinalised200(
       correlation_ids: {
         ...traceForWire.correlation_ids,
         response_hash: computeResponseHash(wireBody),
+      },
+      // ROADMAP 1.233 — T1 claim safety, made readable by an HTTP acceptance
+      // walk. Stamped HERE because this is the ONE place every dispatch
+      // family's trace passes through on its way to the wire; wiring it into
+      // each builder instead would be the per-site enumeration that CLAUDE.md
+      // trap #12 (and this file's own EGRESS-DEFAULT INVERSION comment) says
+      // always misses a sibling.
+      //
+      // NOT a second derivation: `may_name_leading_option` is the SAME
+      // `ctx.mayNameLeadingOption` handed to `sanitiseOlumiResponseForEgress`
+      // on the lines above and below, so the trace cannot disagree with the
+      // guard it reports on. `withheld_projection_reason` is the gate's own
+      // returned `reason`, threaded through the run result — not re-inferred
+      // from the text.
+      claim_safety: {
+        may_name_leading_option: ctx.mayNameLeadingOption,
+        withheld_projection_reason: ctx.withheldExplanationReason ?? null,
       },
     };
     const augmented: OlumiResponseWithDebugFields = {
@@ -4302,6 +4337,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // from the stamp the run_analysis handler persisted on the fact.
       // Never re-derived at the route (CLAUDE.md trap #12).
       mayNameLeadingOption: run.mayNameLeadingOption ?? true,
+      // ROADMAP 1.233 — the Layer-2 gate's own verdict, for the diagnostic
+      // trace only. Absent ⇒ stamped `null` ("the gate did not run"), which is
+      // the honest reading for a permitted turn or a non-explanation handler.
+      ...(run.withheldExplanationReason !== undefined
+        ? { withheldExplanationReason: run.withheldExplanationReason }
+        : {}),
       ...(run.freshness ? { freshness: run.freshness } : {}),
       requestStartedAt: routeStartedAt,
       scenarioId: ingress.scenario_id,

@@ -62,14 +62,32 @@ const TURN_EXECUTOR = resolve(HERE, '../turn-executor.ts');
 /**
  * How a compose site stands with respect to the persisted constraint verdict.
  *
- *   gated       — the text is projected through the verdict before compose.
- *   structural  — the text CANNOT name a leading option: it is deterministic
- *                 copy built from a template/constant that carries no
- *                 comparative claim about options at all.
- *   ungated     — an OPEN GAP. The text can carry analysis-derived or
- *                 LLM-authored prose and is NOT verdict-projected today.
+ *   gated          — the site CONSUMES the verdict itself, on the OUTPUT side:
+ *                    it composes leader text from structured data in code, so
+ *                    it must read `mayNameLeadingOption` and suppress.
+ *   gated_by_input — the site emits LLM-authored prose, and the verdict is
+ *                    applied to the MODEL'S INPUT instead (ROADMAP 1.231): the
+ *                    leader-designating fields are stripped from the
+ *                    ContextPack's model-facing `display_analysis`, so the
+ *                    model cannot name a leader it never sees. There is no
+ *                    output-side scrub on these sites BY DESIGN — scrubbing
+ *                    conversational prose risks the over-suppression failure
+ *                    the acceptance criteria weight equally with the leak.
+ *   structural     — the text CANNOT name a leading option: it is deterministic
+ *                    copy built from a template/constant that carries no
+ *                    comparative claim about options at all.
+ *   ungated        — an OPEN GAP. The text can carry analysis-derived or
+ *                    LLM-authored prose and is NOT verdict-projected today.
+ *
+ * ⚠ `gated_by_input` IS A WEAKER GUARANTEE THAN `gated`, and the distinction is
+ * kept rather than collapsed for that reason. `gated` is a code path that
+ * cannot emit the claim. `gated_by_input` is "the model was not given the
+ * facts", which is strong against fabrication-from-data and NOT a proof about
+ * every other channel the model can read (conversation history above all — a
+ * leader named in an EARLIER turn's assistant message is still in the window).
+ * That residual is stated in ROADMAP 1.231 rather than papered over here.
  */
-type VerdictStance = 'gated' | 'structural' | 'ungated';
+type VerdictStance = 'gated' | 'gated_by_input' | 'structural' | 'ungated';
 
 /**
  * Every compose site in `turn-executor.ts`, keyed by the expression that
@@ -127,43 +145,48 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, RegisteredSite>> = {
   'buildDeicticClarifyAssistantText(deicticDispatch.reason)': { stance: 'structural', why: 'Clarify template.' },
   'buildNonFactorKindRefusalText(': { stance: 'structural', why: 'Refusal template.' },
   'buildClarifyAssistantText(deterministicValueUpdate.candidates)': { stance: 'structural', why: 'Clarify template.' },
-  recoveryText: {
-    stance: 'ungated',
-    count: 3,
-    why: "OPEN GAP, and NOT the 'bounded constant copy' an earlier revision of this register claimed. `buildBoundedFallbackCopyAndChips` (turn-executor.ts ~9700) calls composeExplainResultsFallback / composeWhatWouldFlipFallback whenever `projection?.leading_option` is present — i.e. it can serve the FULL deterministic leader answer, not a constant. Re-derived at the bytes after review flagged the sibling `assistantText` entry.",
-  },
   clarifyGuardedText: { stance: 'structural', why: 'Clarify question, entity-guarded.' },
-  assistantText: {
-    stance: 'ungated',
-    why: "OPEN GAP. Same helper as `recoveryText` — the finalise-path bounded fallback serves composeExplainResultsFallback's full leader answer on a routing degrade. Worse, this exit is reached on routing FAILURE, and `mayNameLeadingOptionForRun` is assigned only at the POST-HANDLER claim-safety read (declared `= true` at its outer-let), so a routing-failure exit hands the egress alarm `true`: no gate, no disclosure, and NO telemetry either. Pre-existing, NOT introduced by this PR — but the register previously called it `structural`, which converted an unknown gap into false assurance (CLAUDE.md trap #14). The fix is to hoist the claim-safety read to turn ENTRY so every exit carries the real permission; that is a SEPARATE slice, deliberately not widened into this PR.",
-  },
   'noAnalysisOutcome.assistant_text': { stance: 'structural', why: 'Fires only when NO analysis exists — there is no leader to name.' },
   'staleOutcome.assistant_text': { stance: 'structural', why: 'Stale-rerun recovery; suppresses cached insights by construction.' },
+  'freshFollowupOutcome.assistant_text': {
+    stance: 'structural',
+    why: "RE-DERIVED at the bytes from 'ungated' (ROADMAP 1.233 lane). The prior entry said it 'composes from the analysis projection'; it does not. `tryFreshAnalysisFollowupGuard`'s input type is `{message, readiness}` — no analysis reaches it — and its matched branch returns `assistant_text: RECAP_TEXT`, a module constant with ZERO interpolation (fresh-analysis-followup-guard.ts:172, :274). Structural by construction, not by inspection.",
+  },
+  'stateQueryOutcome.assistant_text': {
+    stance: 'structural',
+    why: "RE-DERIVED at the bytes from 'ungated' (ROADMAP 1.233 lane), and structural in the STRONGEST sense: the analysis projection is out of reach BY TYPE. `TryStateQueryGuardInput.contextPack` is `Pick<ContextPack, 'recent_changes'>` (state-query-guard.ts:267-270), so the guard cannot read `analysis` / `display_analysis` at all. Its two outputs are `NO_RECENT_CHANGES_TEXT` (constant, :354) and `composeRecentChangeAnswer` = `${head.summary}${tail}` (:337), where `head.summary` is a persisted MUTATION receipt (factor / constraint labels and values). A receipt may name an entity; it makes no comparison between options, which is the same standard the sibling add-risk echo entry is held to.",
+  },
 
-  // ── UNGATED — OPEN GAPS, recorded not fixed in this slice ───────────────
+  // ── GATED — sites that compose leader text from STRUCTURED data in code,
+  //    and therefore consume the verdict themselves. Input gating cannot help
+  //    these: there is no model to withhold the leader from. ─────────────────
+  recoveryText: {
+    stance: 'gated',
+    count: 3,
+    why: 'ROADMAP 1.233. `buildBoundedFallbackCopyAndChips` (turn-executor.ts ~9700) calls composeExplainResultsFallback / composeWhatWouldFlipFallback whenever a projection with a `leading_option` exists — the FULL deterministic leader answer, not a constant. Now guarded by `mayNameLeadingOptionForRun && projection?.leading_option`; withheld ⇒ falls through to the bounded copy, which makes no comparative claim. All three call sites share the one helper, so they are one gap and one fix.',
+  },
+  assistantText: {
+    stance: 'gated',
+    why: "ROADMAP 1.233. Same helper as `recoveryText`, so gated by the same conjunct. This entry also carried the register's own account of WHY the hoist was needed, and that account is now discharged: the exit is reached on routing FAILURE, and `mayNameLeadingOptionForRun` used to be assigned only at the post-handler claim-safety read (declared `= true` at its outer-let), so a routing-degrade turn shipped the deterministic leader answer with no gate, no disclosure, and a `true` permission that made the Layer-3 alarm a licensed no-op. The read is now HOISTED to turn entry, so every exit carries the real permission.",
+  },
+  'runComparisonOutcome.assistant_text': {
+    stance: 'gated',
+    why: 'ROADMAP 1.233. Zero LLM calls: `composeComparison` builds "The leading option has changed. X came out ahead before, and Y now leads." and the margin sentences straight from the two runs\' persisted enrichment. `tryRunComparisonGate` now takes a REQUIRED `mayNameLeadingOption` (required, not optional-defaulting-true, so a new call site cannot re-open the leak by omission) and suppresses the ordering + margin sentences while KEEPING the robustness-band shift and the driver-influence mover, which rank nothing and are the substance of "what changed?".',
+  },
+  'adviceOutcome.assistant_text': {
+    stance: 'gated',
+    why: "ROADMAP 1.233 — the sharpest of the eight. Zero LLM calls, and it reads the RAW handler-facing `contextPack.analysis` to compose \"Based on this model, the analysis currently favours ${leadingLabel}${probability}\" and \"It sits ahead of ${runnerLabel} by ${margin}\" — the exact sentence pair the POST-#713 walk captured live on a withheld scenario (case5.clarify, §7, with NO disclosure). Gated on the gate's INPUT, not by listing the leader-naming advice classes: the class list is a hand-maintained mirror (trap #12) and a class added later would inherit 'safe' silently. A null-leader projection makes the gate's own `evaluateAvailability` decline every class declaring `needs_leading_option` — including ones that do not exist yet — while readiness / evidence-gap classes keep serving.",
+  },
+
+  // ── GATED BY INPUT — LLM-authored prose; the verdict is applied to the
+  //    model's view of the analysis instead (ROADMAP 1.231). ────────────────
   'coachGuarded.assistant_text': {
     stance: 'ungated',
-    why: 'OPEN GAP. LLM-authored coach prose, composed from a ContextPack that carries analysis.leading_option / runner_up / margin_pp. Structurally the SAME defect as the one this PR fixes, on a sibling branch. Not induced by the POST-#711/#712 walk (which only reached the execute path), so it is UNVERIFIED rather than known-leaking.',
+    why: "ROADMAP 1.231 (A1's ruling: gate the input, not the output). Verbatim / sanitise-stripped LLM prose — there is no deterministic path to a leader here, so the leader can only arrive via what the model was GIVEN. Confirmed live-leaking by the POST-#713 walk (§7: 3/3 non-execute turns named the leader, one with a probability and no disclosure). Closed by stripping `leading_option` / `runner_up` / `margin` AND the ranked `options` table from the model-facing `display_analysis` on withheld turns. ⚠ THE ADDRESS MATTERS: the ruling named context-pack-assembler.ts:1533, but `buildUserMessage` (route-with-tool-use.ts:1185-1208) drops the raw `analysis` and re-keys `display_analysis` under that name, so gating :1533 alone would have left the model's actual view untouched. See context/withheld-leader-projection.ts.",
   },
   'converseGuarded.assistant_text': {
     stance: 'ungated',
-    why: 'OPEN GAP. As coachGuarded above — the converse twin.',
-  },
-  'runComparisonOutcome.assistant_text': {
-    stance: 'ungated',
-    why: 'OPEN GAP. Narrates a BEFORE/AFTER analysis comparison, i.e. explicitly about which option came out where.',
-  },
-  'adviceOutcome.assistant_text': {
-    stance: 'ungated',
-    why: 'OPEN GAP. Post-analysis advice gate; composes from the analysis projection.',
-  },
-  'freshFollowupOutcome.assistant_text': {
-    stance: 'ungated',
-    why: 'OPEN GAP. Fresh-analysis follow-up; composes from the analysis projection.',
-  },
-  'stateQueryOutcome.assistant_text': {
-    stance: 'ungated',
-    why: 'OPEN GAP. State-query guard; can describe the current analysis state.',
+    why: 'As coachGuarded above — the converse twin, same closure, same input gate.',
   },
 };
 
@@ -260,30 +283,71 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       .map(([k]) => k)
       .sort();
 
-    // This is a LEDGER, not a target. It is pinned so that closing a gap is a
-    // deliberate edit here (with the count going DOWN), and so that silently
-    // adding a tenth ungated site fails CI.
+    // ROADMAP 1.233 + 1.231 closed all eight. This stays pinned as an EMPTY
+    // ledger rather than being deleted: an empty assertion is what makes the
+    // NINTH ungated site fail CI the day someone adds one. A deleted test
+    // would let it in silently — which is the whole defect class this file is
+    // about.
+    // 1.233 closed six of the eight. The two remaining are the LLM-authored
+    // coach/converse pair, closed by the sibling input-gate commit (1.231).
     expect(ungated).toEqual([
-      'adviceOutcome.assistant_text',
-      // A2: re-derived from 'structural' after review. Both are
-      // buildBoundedFallbackCopyAndChips, which serves the deterministic
-      // LEADER answer whenever a projection with a leading_option exists.
-      'assistantText',
       'coachGuarded.assistant_text',
       'converseGuarded.assistant_text',
-      'freshFollowupOutcome.assistant_text',
-      'recoveryText',
-      'runComparisonOutcome.assistant_text',
-      'stateQueryOutcome.assistant_text',
     ]);
   });
 
-  it('the site this PR gated is registered GATED and really is projected in source', () => {
+  it('the EXECUTE-path gate is registered GATED and really is projected in source', () => {
     expect(COMPOSE_SITE_REGISTER['confirmationForCompose']!.stance).toBe('gated');
     // Non-vacuity: the register's claim is checked against the source, so a
     // future revert of the gate turns this red rather than leaving a register
     // entry asserting a protection that no longer exists.
     expect(source).toContain('projectExplanationAnswerForWithheldClaim(');
     expect(source).toContain('confirmation: confirmationForCompose,');
+  });
+
+  it('every GATED site really consumes the verdict in source (non-vacuity, per site)', () => {
+    // TESTING-DISCIPLINE rule 1 + CLAUDE.md trap #14: a register entry that
+    // ASSERTS a protection is worth nothing unless the assertion is checked
+    // against the code. Without this, reverting any one of these gates would
+    // leave a green suite and a register still claiming the site is safe —
+    // the precise shape of "an honest label overwritten by a false one".
+    //
+    // One required source fragment per gated site, chosen to be the line the
+    // gate actually turns on, so deleting the gate makes THIS test red.
+    const GATE_EVIDENCE: Readonly<Record<string, string>> = {
+      // buildBoundedFallbackCopyAndChips — serves recoveryText ×3 + assistantText
+      recoveryText: 'if (mayNameLeadingOptionForRun && projection?.leading_option) {',
+      assistantText: 'if (mayNameLeadingOptionForRun && projection?.leading_option) {',
+      'runComparisonOutcome.assistant_text': 'mayNameLeadingOption: mayNameLeadingOptionForRun,',
+      'adviceOutcome.assistant_text': 'projectContextPackAnalysisForWithheldClaim(contextPack.analysis)',
+    };
+    for (const [site, fragment] of Object.entries(GATE_EVIDENCE)) {
+      expect(COMPOSE_SITE_REGISTER[site]!.stance, `${site} must be registered gated`).toBe('gated');
+      expect(source, `${site}: the gate this register claims is absent from source`).toContain(
+        fragment,
+      );
+    }
+  });
+
+  it('POSITIVE CONTROL: the per-site gate evidence check can FAIL', () => {
+    // Rule 2 — an instrument that returns the same answer for "gated" and
+    // "could not look" is not an instrument. Prove the `toContain` above
+    // discriminates, by running it against a source with the gate removed.
+    const gate = 'if (mayNameLeadingOptionForRun && projection?.leading_option) {';
+    expect(source).toContain(gate);
+    const reverted = source.replace(gate, 'if (projection?.leading_option) {');
+    expect(reverted).not.toContain(gate);
+    // And the mutation is real: the reverted source is the PRE-1.233 shape.
+    expect(reverted).toContain('if (projection?.leading_option) {');
+  });
+
+  it('the claim-safety read is HOISTED, not post-handler only (ROADMAP 1.233)', () => {
+    // The load-bearing structural claim of 1.233, pinned against source: the
+    // permission is initialised from the persisted verdict at the DECLARATION,
+    // so every early exit carries it. A revert to `= true` fails here.
+    expect(source).toContain(
+      'let mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts(context.prior_facts);',
+    );
+    expect(source).not.toContain('let mayNameLeadingOptionForRun = true;');
   });
 });

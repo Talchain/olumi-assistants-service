@@ -245,11 +245,20 @@ import {
 // T1 claim safety — READ the verdict the run_analysis handler stamped on the
 // fact. This file never derives it (CLAUDE.md trap #12).
 import {
-  readMayNameLeadingOptionFromResult,
   readConstraintVerdictStateFromResult,
   readRatifiedConstraints,
 } from '../orchestrator/context/constraint-feasibility.js';
-import { projectExplanationAnswerForWithheldClaim } from './compose/withheld-explanation-answer.js';
+// ROADMAP 1.233 — the ONE fact-array claim-safety read, shared by the turn-entry
+// hoist and the post-dispatch refinement so two read points can never become two
+// derivations. See `context/claim-safety-read.ts`.
+import { readMayNameLeadingOptionForFacts } from './context/claim-safety-read.js';
+// ROADMAP 1.231 — INPUT-side claim safety: strip the leader-designating fields
+// from what a withheld turn feeds the model (and the deterministic advice gate).
+import { projectContextPackAnalysisForWithheldClaim } from './context/withheld-leader-projection.js';
+import {
+  projectExplanationAnswerForWithheldClaim,
+  type WithheldExplanationReason,
+} from './compose/withheld-explanation-answer.js';
 import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
@@ -371,8 +380,32 @@ export interface TurnExecutorRunResult {
    * the route: a turn that produced no run_analysis fact withheld nothing, and
    * `true` is the honest statement of that. The REQUIRED-ness that matters is
    * on `EgressSanitiseOpts`, where forgetting it disarms the guard.
+   *
+   * ROADMAP 1.233: this is now populated on EVERY exit, not just the execute
+   * one. It used to be assigned only at the post-dispatch claim-safety read,
+   * so coach / converse / clarify / bounded-fallback / routing-degrade exits
+   * all shipped the `true` default and the guard returned their responses
+   * untouched — an alarm that could not fire is not an alarm.
    */
   mayNameLeadingOption?: boolean;
+  /**
+   * ROADMAP 1.233 — which branch the withheld-explanation claim gate took on
+   * this turn, or ABSENT when the gate never ran (non-explanation handler, or
+   * a permitted verdict).
+   *
+   * Exists for one reason: to make the gate OBSERVABLE AT THE WIRE. Route-v2
+   * stamps it onto `_diagnostic_trace.claim_safety.withheld_projection_reason`.
+   * The POST-#713 acceptance walk could prove the REPLACE branch only because
+   * that branch happens to substitute a byte-identifiable exported constant,
+   * could not distinguish `unchanged` from "the gate never ran", and recorded
+   * the APPEND branch as **UNVERIFIED at any price** — its §9.8 says a
+   * telemetry read "would settle that gap immediately". This is that read,
+   * moved onto a surface an HTTP walk can see.
+   *
+   * INTERNAL ONLY as a run-result field; it reaches the wire solely through
+   * the flag-gated diagnostic trace, never through `response`.
+   */
+  withheldExplanationReason?: WithheldExplanationReason;
   /**
    * V5 finaliser contract: pre-computed structural readiness from the
    * per-turn graph (`graphStateForTurn` parsed via GraphV3 +
@@ -1059,16 +1092,65 @@ export async function runTurnExecutor(
   // T1 claim safety — the turn's own answer to "may a leading option be named",
   // surfaced on the run result so route-v2 can arm the layer-3 egress guard.
   //
-  // Outer-let for the same reason as `canonicalStateForRun` above:
-  // `handlerFactsForCommit` lives in the execute branch's inner scope and is
-  // not visible from `finalizeRun`. Set ONCE, at the post-dispatch assembly
-  // point, from the fact array compose is about to build blocks from.
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ROADMAP 1.233 — THE HOIST. Read at TURN ENTRY, refined post-dispatch.
   //
-  // Defaults to `true`: a turn that ran no analysis withheld no
-  // leading-option claim, so there is no withheld claim for the guard to
-  // contradict. This is NOT the fail-open case — where a run_analysis fact IS
-  // in play and carries no stamp, `readMayNameLeadingOption` fails CLOSED.
-  let mayNameLeadingOptionForRun = true;
+  // WHAT WAS WRONG. This was previously `= true` at the declaration and
+  // assigned ONLY at the post-dispatch claim-safety read (the block that now
+  // REFINES it, further down this function). Every exit that returns before
+  // that point — coach, converse, clarify, the bounded/recovery fallbacks, the
+  // routing-degrade corridor, every early validation exit — therefore handed
+  // `sanitiseOlumiResponseForEgress` a hardcoded `true`. Since the Layer-3
+  // egress guard returns its input unchanged whenever the permission is `true`
+  // (`compose/leading-option-egress-guard.ts`: `if (opts.mayNameLeadingOption)
+  // return response;`), the alarm on those exits was a LICENSED NO-OP: a
+  // coach-turn leak produced ZERO telemetry, so "the alarm is armed at every
+  // exit" was true of the WIRING and false of the MEANING.
+  //
+  // That is not a hypothesis. The POST-#713 live walk
+  // (`acceptance-evidence/g-cee-1-constraint-verdict/WALK-2026-07-27-POST-713.md`
+  // §7) captured 3/3 non-execute turns on a WITHHELD scenario naming the
+  // leading option, one of them (`case5.clarify`) with a probability and NO
+  // disclosure at all — and recorded, correctly, that the alarm log could not
+  // be used as evidence on those turns because of this exact default.
+  //
+  // WHAT THE HOIST DOES. The permission is now READ from `context.prior_facts`
+  // here, before any exit exists, via the SAME canonical selector
+  // (`selectRunAnalysisFact`) and the SAME reader
+  // (`readMayNameLeadingOptionFromResult`, the #712 typed-first / interim-stamp
+  // fallback) the post-dispatch block uses. One derivation, two read points —
+  // never two derivations (CLAUDE.md trap #12).
+  //
+  // THE TWO DEFAULTS, and why they are different things:
+  //   - NO run_analysis fact in the prior chain ⇒ `true`. There is no analysis,
+  //     therefore no leading option, therefore nothing to leak. Honest, not
+  //     fail-open.
+  //   - A run_analysis fact IS in the chain but carries no verdict stamp ⇒
+  //     `readMayNameLeadingOptionFromResult` returns FALSE. Fail-closed:
+  //     "unknown" and "verified feasible" are different claims and only the
+  //     second licenses naming a leader.
+  //
+  // WHY IT IS STILL RE-READ POST-DISPATCH. This turn may PRODUCE a
+  // run_analysis fact, which is newer than anything in `prior_facts` and is the
+  // one compose builds blocks from. The refinement below re-reads over
+  // `[...handlerFactsForCommit, ...context.prior_facts]` so an execute turn
+  // governs its own prose. The entry read is what every OTHER exit gets.
+  //
+  // PRECONDITION FOR 1.231. The ContextPack input gate (below, at assembly)
+  // reads this variable, so the entry read must precede pack assembly — it
+  // does: assembly happens inside the routing block, far below this
+  // declaration.
+  // ═══════════════════════════════════════════════════════════════════════════
+  let mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts(context.prior_facts);
+  // ROADMAP 1.233 — which projection the withheld-explanation gate applied on
+  // this turn, if it ran. Surfaced on the run result so route-v2 can stamp it
+  // onto the `_diagnostic_trace.claim_safety` block, which is the ONLY way an
+  // HTTP-level acceptance walk can observe the gate at all: the POST-#713 walk
+  // could prove REPLACE only because that branch happens to substitute a
+  // byte-identifiable constant, and could NOT verify APPEND at any price
+  // (§4.3, "UNVERIFIED — not a pass"). `null` = the gate did not run or made
+  // no change.
+  let withheldExplanationReasonForRun: WithheldExplanationReason | null = null;
   // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): the
   // canonical verdict assembled pre-dispatch for the flag-gated coaching prompt
   // pack. Reused in the coaching compose branches for the deterministic
@@ -5161,6 +5243,16 @@ export async function runTurnExecutor(
           message: payload.message,
           priorFacts: context.prior_facts,
           freshness: freshness?.freshness,
+          // ROADMAP 1.233 — CLAIM-SAFETY GATE. `runComparisonOutcome
+          // .assistant_text` was registered `ungated` by #713's drift ledger.
+          // This gate makes ZERO LLM calls and composes "The leading option has
+          // changed. X came out ahead before, and Y now leads." straight from
+          // the two runs' persisted enrichment, so the 1.231 input gate cannot
+          // reach it — there is no model to withhold the leader from. The
+          // permission is READ here (hoisted to turn entry) and consumed inside
+          // `composeComparison`, which suppresses the ordering and margin
+          // sentences and keeps the robustness / driver-influence ones.
+          mayNameLeadingOption: mayNameLeadingOptionForRun,
           // Spine A backstop: option-controlled levers must not be reported as
           // gaining/losing influence in run-comparison prose (the comparator
           // diffs the raw `top_drivers`, bypassing projectTopDrivers). Computed
@@ -5470,9 +5562,38 @@ export async function runTurnExecutor(
       // handler own the answer (with the deterministic composer still the routed
       // fallback). Non-pill turns are unaffected.
       if (routingResult === undefined && options.chipClickForcedIntent === undefined) {
+        // ROADMAP 1.233 — bound to a local so the gate's INPUT and the gate's
+        // TELEMETRY read the SAME object. Reporting `leading_option_present`
+        // off the raw pack while `missing_inputs` reports the projected input
+        // would have the one log line say the leader was present AND missing:
+        // a triager reading it would conclude the gate was broken. This estate
+        // has paid for exactly that class of mislabelling before (CLAUDE.md
+        // trap #14) — a wrong description of a mechanism teaches everyone to
+        // stop looking at it.
+        const analysisForAdviceGate = mayNameLeadingOptionForRun
+          ? contextPack.analysis
+          : projectContextPackAnalysisForWithheldClaim(contextPack.analysis);
         const adviceOutcome = tryPostAnalysisAdviceGate({
           message: payload.message,
-          analysis: contextPack.analysis,
+          // ROADMAP 1.233 — CLAIM-SAFETY GATE, applied to this gate's INPUT.
+          //
+          // `adviceOutcome.assistant_text` was registered `ungated` by #713's
+          // drift ledger, and it is the strongest of that list: this gate makes
+          // ZERO LLM calls and composes, in code, "Based on this model, the
+          // analysis currently favours ${leadingLabel}${probability}" and "It
+          // sits ahead of ${runnerLabel} by ${margin}" from THIS projection.
+          // The POST-#713 walk captured that exact sentence pair live on a
+          // withheld scenario (`case5.clarify`, §7) with no disclosure at all.
+          //
+          // Gated on the INPUT rather than by listing the leader-naming advice
+          // classes at this call site, because the class list is a
+          // hand-maintained mirror (CLAUDE.md trap #12) and a class added later
+          // would inherit "safe" silently. A null-leader projection makes the
+          // gate's OWN `evaluateAvailability` decline every class that declares
+          // `needs_leading_option` — including classes that do not exist yet —
+          // while readiness / evidence-gap classes, which need no leader, keep
+          // serving. See `context/withheld-leader-projection.ts`.
+          analysis: analysisForAdviceGate,
           // P0 deterministic post-analysis router: pass the per-turn
           // analysis-ready payload so readiness / evidence_gap classes
           // can compose qualitative copy from the same projection
@@ -5540,7 +5661,17 @@ export async function runTurnExecutor(
             && adviceOutcome.reason === 'data_unavailable_for_class'
               ? (adviceOutcome.missing_inputs ?? [])
               : null,
-          leading_option_present: !!contextPack.analysis?.leading_option,
+          // ROADMAP 1.233 — read off the projection the gate ACTUALLY got, so
+          // this field and `missing_inputs` above can never contradict each
+          // other. The distinct `leading_option_withheld` below is what keeps
+          // the two causes of a `false` here separable in triage.
+          leading_option_present: !!analysisForAdviceGate?.leading_option,
+          // ROADMAP 1.233 — WHY the leader is absent: the producer never had
+          // one (`false`) versus the constraint verdict withheld it (`true`).
+          // Without this the claim-safety gate is indistinguishable in the logs
+          // from a degraded analysis, and the rate of one would be read as the
+          // rate of the other.
+          leading_option_withheld: !mayNameLeadingOptionForRun,
           // Read `top_driver_present` from the SAME analysis projection that
           // powers `leading_option_present` above — NOT from whether the
           // matched advice copy consumed a driver label. The previous
@@ -7494,25 +7625,31 @@ export async function runTurnExecutor(
         hashForPostHandlerFreshness,
         currentGraphOptionIdsForPostHandler,
       );
-      // T1 claim safety — READ the permission off the SAME fact array and via
-      // the SAME canonical selector the freshness derivation just used, so the
-      // permission and the prose it governs describe the same analysis.
-      // `selectRunAnalysisFact` is what compose's lifecycle resolution uses
-      // too. No fact ⇒ leave the `true` default (nothing was withheld);
-      // a fact with no stamp ⇒ `readMayNameLeadingOption` returns false.
-      {
-        const selectedForClaimSafety = selectRunAnalysisFact([
-          ...handlerFactsForCommit,
-          ...context.prior_facts,
-        ]);
-        if (selectedForClaimSafety !== null) {
-          const f = selectedForClaimSafety.fact;
-          mayNameLeadingOptionForRun =
-            f.fact_type === 'run_analysis'
-              ? readMayNameLeadingOptionFromResult(f.result)
-              : true;
-        }
-      }
+      // T1 claim safety — REFINE the turn-entry read (ROADMAP 1.233, see the
+      // declaration) over the SAME fact array and via the SAME canonical
+      // selector the freshness derivation just used, so the permission and the
+      // prose it governs describe the same analysis.
+      //
+      // WHY A RE-READ AND NOT A FIRST READ. The entry hoist saw only
+      // `context.prior_facts`; an EXECUTE turn produces its own `run_analysis`
+      // fact, which is newer and is the one compose builds blocks from. This
+      // re-read is what makes an execute turn govern its own prose. Every other
+      // exit never reaches this line and keeps the entry value — which is the
+      // whole point of the hoist.
+      //
+      // ⚠ UNCONDITIONAL ASSIGNMENT, deliberately changed. The previous shape
+      // was `if (selected !== null) { … }`, which on a null selection LEFT the
+      // prior value. Under the old `= true` default that was a no-op. Under the
+      // hoist it would be a REGRESSION IN THE OPPOSITE DIRECTION: a turn whose
+      // prior chain withheld, but whose unified array selects nothing, would
+      // keep `false` and over-suppress. `readMayNameLeadingOptionForFacts`
+      // answers the null case honestly (`true` — no analysis, nothing to leak),
+      // so the assignment is unconditional and the two callers share one
+      // meaning.
+      mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts([
+        ...handlerFactsForCommit,
+        ...context.prior_facts,
+      ]);
       emitFreshnessTelemetry(
         freshness,
         {
@@ -7700,6 +7837,15 @@ export async function runTurnExecutor(
           verdictState,
           readRatifiedConstraints(context.persistedGraph ?? graphStateForTurn ?? null),
         );
+        // ROADMAP 1.233 — record the outcome WHETHER OR NOT it changed the
+        // text. `null` (the initial value) means the gate never ran; a
+        // non-null value means it ran and reached this verdict. That is
+        // exactly the discrimination the POST-#713 walk recorded as
+        // impossible at the wire (§4.3: "`unchanged` — 0 observable —
+        // indistinguishable from 'gate never ran'"), and it is the same
+        // read that turns the never-exercised APPEND branch from UNVERIFIED
+        // into observable. Bounded cardinality: four values including null.
+        withheldExplanationReasonForRun = projected.reason;
         if (projected.changed) {
           confirmationForCompose = projected.text;
           emit(TelemetryEvents.V5WithheldExplanationAnswerProjected, {
@@ -9549,10 +9695,20 @@ export async function runTurnExecutor(
     const answerKind: AnswerKind = isFunctionalAnswer ? 'functional' : 'substantive';
     return {
       response,
-      // T1 claim safety — set at the post-dispatch assembly point from the
-      // stamp the run_analysis handler persisted on the fact. Never derived
-      // here or there (CLAUDE.md trap #12); see the declaration above.
+      // T1 claim safety — READ (never derived here, CLAUDE.md trap #12) at
+      // TURN ENTRY from the persisted verdict, and refined post-dispatch on
+      // execute turns. ROADMAP 1.233: before the hoist this was the `true`
+      // default on every non-execute exit, which made the Layer-3 egress
+      // alarm a licensed no-op there. See the declaration above.
       mayNameLeadingOption: mayNameLeadingOptionForRun,
+      // ROADMAP 1.233 — the withheld-explanation gate's own verdict for this
+      // turn, or null when it never ran. Route-v2 stamps it onto
+      // `_diagnostic_trace.claim_safety` so an acceptance walk can read at the
+      // WIRE which branch fired, instead of inferring REPLACE from a
+      // byte-identifiable constant and being unable to see APPEND at all.
+      ...(withheldExplanationReasonForRun !== null
+        ? { withheldExplanationReason: withheldExplanationReasonForRun }
+        : {}),
       analysisReady: analysisReadyForTurn,
       ...(turnOutcome ? { turn_outcome: turnOutcome } : {}),
       ...(freshness ? { freshness } : {}),
@@ -9708,12 +9864,46 @@ export async function runTurnExecutor(
     // never mixed with a different run's evidence (SAME-SOURCE GUARANTEE). The
     // composers are the identical finaliser-safe ones used on the Sonnet-valid
     // path, so no forbidden-phrase or ordering risk is introduced here.
+    //
+    // ═════════════════════════════════════════════════════════════════════
+    // ROADMAP 1.233 — CLAIM-SAFETY GATE ON THIS HELPER. Read before editing.
+    //
+    // This helper is the single producer behind FOUR entries the #713 drift
+    // register pinned as `ungated` OPEN GAPS: `recoveryText` (3 call sites,
+    // ~8078 / ~8239 / ~8777) and `assistantText` (the finalise-path bounded
+    // fallback). They are one gap, not four — every one of them lands here.
+    //
+    // Why it needed a gate at all: `composeExplainResultsFallback` /
+    // `composeWhatWouldFlipFallback` are DETERMINISTIC composers that build
+    // the full leader answer ("X performs best…", leading option + margin +
+    // drivers + robustness) directly from STRUCTURED data — the projection's
+    // `leading_option`. So the 1.231 input gate cannot reach them: there is
+    // no model to withhold the leader from. Input gating governs prose the
+    // MODEL authors from the pack; this text is authored by CODE from
+    // `contextPack.analysis`, the raw handler-facing slot that
+    // `buildUserMessage` never serialises. A site that composes leader text
+    // from structured data must consume the VERDICT explicitly, and that is
+    // what the added conjunct does.
+    //
+    // Worse before the hoist: this exit is reached on routing FAILURE, and
+    // `mayNameLeadingOptionForRun` was assigned only post-handler — so a
+    // routing-degrade turn shipped the full deterministic leader answer with
+    // no gate, no disclosure, AND a `true` permission that made the Layer-3
+    // alarm a licensed no-op. The hoist supplies the real permission here;
+    // this conjunct consumes it.
+    //
+    // DEGRADE DIRECTION. Withheld ⇒ `deterministicAnalyticalAnswer` stays
+    // null ⇒ the helper falls through to its existing bounded copy, which
+    // makes no comparative claim. It does NOT fabricate a substitute leader
+    // sentence. Permitted turns are byte-identical — the conjunct is `true`
+    // and evaluation order is unchanged.
+    // ═════════════════════════════════════════════════════════════════════
     const forcedAnalyticalIntent = options.chipClickForcedIntent;
     let deterministicAnalyticalAnswer: string | null = null;
     if (forcedAnalyticalIntent && analysisFreshAndAvailable) {
       const projection =
         buildAnalysisProjectionSummary(contextPackForLog?.analysis ?? null) ?? undefined;
-      if (projection?.leading_option) {
+      if (mayNameLeadingOptionForRun && projection?.leading_option) {
         // SAME-SOURCE GUARANTEE: `analysisStateSource === 'request'` iff the
         // body carried `analysis_state` (see the request branch of
         // buildTurnContext, which sets it under `if (options.analysisState)`).
