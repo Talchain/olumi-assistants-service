@@ -122,6 +122,33 @@
  * exact path. The alarm is the drift detector; this list is not trusted to stay
  * complete on its own.
  *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ 2026-07-27 — THE ABOVE DERIVATION WAS COMPLETE FOR THE SURFACES IT WALKED
+ * AND INCOMPLETE AS COVERAGE, AND THAT DISTINCTION COST THREE WALKS.
+ *
+ * The POST-#710 walk it rests on scanned every STRING in `decision_review` and
+ * `decision_brief` with the egress guard's PROSE pattern set. Two leader
+ * designations are invisible to that instrument by construction, because they
+ * carry no prose at all:
+ *
+ *   `decision_brief.analysis_summary.{leading_option, win_probability}`
+ *   `robustness.{recommended_option_id, recommended_option_label,
+ *                near_tie.top_option_id}`
+ *
+ * Both are bare labels and ids. The claim is in the KEY. `WALK-2026-07-27-
+ * FINAL.md` §8 found them on 10/10 withheld bodies carrying an analysis block
+ * and present in BOTH prior archives — pre-existing, not a #716 regression, and
+ * missed because S1–S6 is a hand-kept list of five paths with no entry for
+ * either container. "S1–S6 all silent" was a true statement and was never the
+ * complete claim it read as.
+ *
+ * Both are now projected HERE, at this same funnel, by a KEY-NAME reader shared
+ * with the alarm ({@link keyDesignatesLeadingOption}) rather than by a second
+ * list. See {@link WITHHELD_DROPPED_ANALYSIS_SUMMARY_MEMBERS} for the full
+ * derivation, the complete member manifest behind it, and — stated rather than
+ * silently decided — what is deliberately KEPT.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
  * NOT IN SCOPE, stated rather than silently decided: `decision_brief.options[]`
  * keeps its `rank: 1|2|3`. Suppressing an ordering while the same block ships
  * `win_probabilities` and `option_comparison` (neither flagged by the walk, both
@@ -136,6 +163,7 @@
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
+import { keyDesignatesLeadingOption } from './leading-option-egress-guard.js';
 
 /**
  * Enrichment blobs dropped WHOLE from the wire on a withheld turn: prose
@@ -161,6 +189,132 @@ export const WITHHELD_DROPPED_DECISION_BRIEF_MEMBERS: readonly string[] = Object
   // "…small changes to assumptions could change which option leads."
   'robustness_caveat',
 ]);
+
+/**
+ * Members that are leader-designating ONLY BECAUSE OF THE OBJECT THEY SIT IN,
+ * and therefore cannot be recognised by {@link keyDesignatesLeadingOption}.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE 2026-07-27 ADDITION (WALK-2026-07-27-FINAL.md §8), AND WHY IT IS SPLIT IN
+ * TWO.
+ *
+ * The walk's derived S7 manifest — which finds the leader by
+ * `argmax(option_comparison.win_probability)` and then reports every path
+ * carrying THAT identity and no other option's — found four structured paths
+ * naming the leading option on **10 of 10** withheld bodies that carried an
+ * analysis block:
+ *
+ *   `decision_brief.analysis_summary.leading_option`   'Standardise on Dell XPS'
+ *   `decision_brief.analysis_summary.win_probability`  0.46625
+ *   `robustness.recommended_option_label`              'Standardise on Dell XPS'
+ *   `robustness.recommended_option_id` / `.near_tie.top_option_id`  'opt_dell'
+ *
+ * PRE-EXISTING, NOT A #716 REGRESSION: present in both prior archives, and
+ * missed by three walks because S1–S6 is a hand-kept list with no entry for
+ * either container and because the egress guard did not scan
+ * `enrichment.robustness` at all.
+ *
+ * Three of those four are recognised BY NAME and are dropped by the derived
+ * reader — nothing about them needs to be listed, and a fifth key name that
+ * does not exist yet is covered the day it ships. The remaining ones are
+ * different in kind: the KEY is innocent and the CONTAINER makes the claim.
+ *
+ *   `analysis_summary.win_probability` — the key says "a win probability". Its
+ *     container says "…of the leading option". Dropping `leading_option` while
+ *     keeping the number would leave the object asserting exactly the fact the
+ *     turn is withholding, one join away from the `win_probabilities` roster
+ *     that ships beside it. It is the second half of the same designation and
+ *     it goes with the first.
+ *   `near_tie.second_option_id` / `.tied_option_ids` — the honest content of
+ *     `near_tie` is WHETHER the top of the ranking is a tie (`is_tie`, `gap`,
+ *     `threshold`), and that ships unchanged. The IDENTITIES are the ordering
+ *     claim: `tied_option_ids` is the leader verbatim whenever it is a
+ *     singleton (the walk caught exactly that), and `second_option_id` is the
+ *     runner-up half of the pair the model-facing projection already drops
+ *     alongside `leading_option` (`context/withheld-leader-projection.ts`).
+ *     KEEP THE FACT, DROP THE IDENTITIES — one rule, applied uniformly, so
+ *     there is no per-field judgement to drift.
+ *
+ * ⚠ WHAT IS DELIBERATELY NOT HERE, stated rather than silently decided:
+ *
+ *   `analysis_summary.goal_fit` / `.robustness_band` — the complete member set
+ *     of `analysis_summary`, derived across all five archives (142 bodies, 65
+ *     enriched blocks) is exactly {`leading_option`, `win_probability`,
+ *     `goal_fit`, `robustness_band`}. Both survivors name no option and rank
+ *     nothing, and BOTH are on the explicit KEEP list of the model-facing
+ *     projection for the same reason. Same doctrine, same answer.
+ *   `robustness.confidence` — numerically equal to the leading option's win
+ *     probability, and the walk's manifest flags it for that reason. It is an
+ *     unlabelled scalar under a key that designates nobody; suppressing it
+ *     while `win_probabilities` and `option_comparison` ship the whole roster
+ *     verbatim would be theatre, which is this estate's dominant defect class.
+ *   `robustness.fragile_edges[].alternative_winner_id` / `_label` — the
+ *     COUNTERFACTUAL winner if that edge flips. Not the leader; the opposite of
+ *     the leader. It is the substance of a fragility finding, it is exactly
+ *     what a user needs on a turn where the recommendation is withheld, and PR
+ *     #717 landed a fix to carry it through the flip path days before this. The
+ *     `^` anchors on the key patterns exist to keep it.
+ *   `decision_brief.options[]` and its `rank` — unchanged and still out of
+ *     scope, for the reason the module docstring already gives.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Exported for the drift test, which asserts each entry really is dropped by the
+ * projection — a declared list that the code does not honour is the mirror
+ * failure this file's own docstring warns about (CLAUDE.md trap #12).
+ */
+export const WITHHELD_DROPPED_ANALYSIS_SUMMARY_MEMBERS: readonly string[] = Object.freeze([
+  'win_probability',
+]);
+
+/** See {@link WITHHELD_DROPPED_ANALYSIS_SUMMARY_MEMBERS}. */
+export const WITHHELD_DROPPED_NEAR_TIE_MEMBERS: readonly string[] = Object.freeze([
+  'second_option_id',
+  'tied_option_ids',
+]);
+
+/**
+ * The `robustness` members recognised by NAME rather than by container, listed
+ * here for the drift test ONLY — the projection does not read this constant, it
+ * reads {@link keyDesignatesLeadingOption}. The test asserts the shared reader
+ * still recognises every one, so a narrowing of the pattern family fails loudly
+ * here instead of silently reopening §8.
+ */
+export const WITHHELD_LEADER_DESIGNATING_KEYS_OBSERVED: readonly string[] = Object.freeze([
+  'leading_option',
+  'recommended_option_id',
+  'recommended_option_label',
+  'top_option_id',
+]);
+
+/**
+ * Drop every leader-designating member of one structured object, keeping the
+ * rest verbatim.
+ *
+ * TWO READERS, ONE FUNNEL. `keyDesignatesLeadingOption` is the shared,
+ * pattern-derived vocabulary the Layer-3 alarm scans with — so a key this drops
+ * is a key that alarm reports, and neither can drift from the other.
+ * `containerScopedMembers` carries the few members whose key name is innocent
+ * and whose container makes the claim; it is small, enumerated, and the alarm is
+ * its drift detector.
+ *
+ * A non-object payload is dropped whole rather than trusted — the same decision
+ * {@link projectDecisionBriefForWithheldClaim} already makes, for the same
+ * reason: this is an untyped `z.record` passthrough (parent CLAUDE.md hazard 2)
+ * and we cannot show what we cannot inspect.
+ */
+function projectLeaderDesignatingMembers(
+  source: unknown,
+  containerScopedMembers: readonly string[],
+): Record<string, unknown> | undefined {
+  if (source === null || typeof source !== 'object' || Array.isArray(source)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
+    if (keyDesignatesLeadingOption(key)) continue;
+    if (containerScopedMembers.includes(key)) continue;
+    out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 /**
  * May THIS analysis fact's turn name a leading option?
@@ -206,6 +360,48 @@ export function projectTransportEnrichmentForWithheldClaim(
       if (brief !== undefined) out[key] = brief;
       continue;
     }
+    // ROADMAP 1.218 extension (WALK-2026-07-27-FINAL.md §8). Handled HERE, in
+    // the one funnel that already owns `decision_brief` and `headline_banded`,
+    // rather than in a second suppression path beside it: two owners of one
+    // rule is how the estate ends up with two `generateGraphHash` twins.
+    if (key === 'robustness') {
+      const robustness = projectRobustnessForWithheldClaim(value);
+      if (robustness !== undefined) out[key] = robustness;
+      continue;
+    }
+    out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Drop the leader designations from one `enrichment.robustness` blob, keeping
+ * the fragility science verbatim.
+ *
+ * `near_tie` is projected recursively rather than dropped whole: `is_tie`,
+ * `gap` and `threshold` are the tie FACT and they are precisely the content a
+ * user needs on a withheld turn. Only the identities go.
+ */
+function projectRobustnessForWithheldClaim(
+  robustness: unknown,
+): Record<string, unknown> | undefined {
+  const projected = projectLeaderDesignatingMembers(robustness, []);
+  if (projected === undefined) return undefined;
+  if (!('near_tie' in projected)) return projected;
+
+  const nearTie = projectLeaderDesignatingMembers(
+    projected.near_tie,
+    WITHHELD_DROPPED_NEAR_TIE_MEMBERS,
+  );
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(projected)) {
+    if (key === 'near_tie') {
+      // `undefined` ⇒ nothing survived (or it was not an object) ⇒ omit the
+      // key, the shape a blob with no near-tie block already has. Never `{}`,
+      // which would positively assert an empty tie analysis.
+      if (nearTie !== undefined) out[key] = nearTie;
+      continue;
+    }
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
@@ -222,6 +418,19 @@ function projectDecisionBriefForWithheldClaim(brief: unknown): Record<string, un
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(brief as Record<string, unknown>)) {
     if (WITHHELD_DROPPED_DECISION_BRIEF_MEMBERS.includes(key)) continue;
+    // The derived reader on the brief's OWN keys, alongside the three-member
+    // list above. The three are prose members no key pattern can recognise; this
+    // covers a `decision_brief.leading_option` sibling arriving later, which is
+    // exactly how `analysis_summary` got here.
+    if (keyDesignatesLeadingOption(key)) continue;
+    if (key === 'analysis_summary') {
+      const summary = projectLeaderDesignatingMembers(
+        value,
+        WITHHELD_DROPPED_ANALYSIS_SUMMARY_MEMBERS,
+      );
+      if (summary !== undefined) out[key] = summary;
+      continue;
+    }
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;

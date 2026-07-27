@@ -37,19 +37,41 @@
  * fails LOUD the moment source and register disagree, which is the property
  * trap #12 demands when derivation is not possible.
  *
- * ENUMERATOR SCOPE, stated so nobody reads this as covering more than it does:
- * it scans `src/orchestrator-v5/turn-executor.ts` ONLY, for calls to exactly
- * four functions — `composeAnswer`, `composeToolCallResponse`,
- * `composeClarifyResponse`, `composeDirectAnswerResponse`. Compose sites in
- * OTHER modules (notably `handlers/chip-click-dispatch.ts`, which has three)
- * are OUT OF SCOPE and are not covered by any assertion here.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ ENUMERATOR SCOPE — WIDENED 2026-07-27, BECAUSE THE SCOPE WAS ITSELF A HOLE.
+ *
+ * This file previously scanned `turn-executor.ts` ONLY. That is not a detail:
+ * the assertion this file is best known for is `expect(ungated).toEqual([])`,
+ * and a reader who takes "0 ungated" as "no ungated compose site in CEE" is
+ * reading a number that was silently scoped to one file. The anti-drift
+ * instrument had the drift-shaped defect it exists to catch
+ * (`WALK-2026-07-27-FINAL.md` §11.6).
+ *
+ * NOW SCANNED, and the register is keyed by FILE so the scope is visible in the
+ * data rather than asserted in a comment:
+ *   - `src/orchestrator-v5/turn-executor.ts`  — 29 sites / 25 keys
+ *   - `src/orchestrator/route-v2.ts`          —  2 sites /  2 keys  (NEW)
+ *
+ * STILL OUT OF SCOPE, with the count DERIVED so the next reader inherits a
+ * number instead of a shrug: `src/orchestrator-v5/handlers/chip-click-dispatch.ts`
+ * has **3** compose sites (two literal failure strings, plus `confirmationText`,
+ * which forwards the run_analysis handler's own allowlisted headline and whose
+ * stance needs a derivation of `isAllowedRunAnalysisAssistantText` that this
+ * slice did not do). That is a KNOWN GAP, not a covered surface, and it is the
+ * next widening.
+ *
+ * The four scanned function names are unchanged: `composeAnswer`,
+ * `composeToolCallResponse`, `composeClarifyResponse`,
+ * `composeDirectAnswerResponse`.
+ * ═══════════════════════════════════════════════════════════════════════════
  *
  * ⚠ AND IT IS DELIBERATELY NOT ALL-GREEN-MEANS-SAFE. Eight of the twenty-five
- * registered keys are `ungated`, several carrying LLM-authored or
- * analysis-derived prose. Those are OPEN GAPS, recorded rather than fixed in
- * this slice, so the next reader inherits an explicit list instead of
- * re-deriving it from a fourth live walk. `ungated` is a TODO, not a blessing
- * (TESTING-DISCIPLINE rule 6: a stated limit is a to-do, not a hedge).
+ * turn-executor keys were `ungated` when this file was written, several carrying
+ * LLM-authored or analysis-derived prose. ROADMAP 1.233 + 1.231 closed all
+ * eight; the empty ledger is PINNED rather than deleted, because an empty
+ * assertion is what makes the ninth fail CI the day someone adds one. `ungated`
+ * is a TODO, not a blessing (TESTING-DISCIPLINE rule 6: a stated limit is a
+ * to-do, not a hedge).
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -58,6 +80,24 @@ import { dirname, resolve } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TURN_EXECUTOR = resolve(HERE, '../turn-executor.ts');
+
+/**
+ * Every file the enumerator scans, keyed by the label the register uses. Adding
+ * a file here without registering its sites fails the multiset assertion — which
+ * is the correct direction: widening the scan must never be able to widen it
+ * silently.
+ */
+const SCANNED_FILES: Readonly<Record<string, string>> = {
+  'turn-executor.ts': TURN_EXECUTOR,
+  'route-v2.ts': resolve(HERE, '../../orchestrator/route-v2.ts'),
+};
+
+/** The module the scan does NOT cover yet, and the count it would add. */
+const KNOWN_UNSCANNED = {
+  file: resolve(HERE, '../handlers/chip-click-dispatch.ts'),
+  label: 'handlers/chip-click-dispatch.ts',
+  siteCount: 3,
+} as const;
 
 /**
  * How a compose site stands with respect to the persisted constraint verdict.
@@ -113,7 +153,7 @@ interface RegisteredSite {
   readonly count?: number;
 }
 
-const COMPOSE_SITE_REGISTER: Readonly<Record<string, RegisteredSite>> = {
+const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   // ── THE GATED SITE — this PR ────────────────────────────────────────────
   confirmationForCompose: {
     stance: 'gated',
@@ -190,6 +230,38 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, RegisteredSite>> = {
   },
 };
 
+/**
+ * `src/orchestrator/route-v2.ts` — brought into scope 2026-07-27.
+ *
+ * Both sites are module-level string CONSTANTS with no interpolation, so
+ * `structural` here is a derivation and not an inspection: there is no
+ * expression that could carry an option label, let alone a comparison. The
+ * non-vacuity check below pins each literal against its own source, so a future
+ * edit that turns either into a template fails THIS test rather than shipping
+ * under a register entry still claiming it is safe (CLAUDE.md trap #14 — the
+ * honest label overwritten by a false one).
+ */
+const ROUTE_V2_SITES: Readonly<Record<string, RegisteredSite>> = {
+  EDIT_GRAPH_RECOVERY_TEXT: {
+    stance: 'structural',
+    why: "Module constant (route-v2.ts:1553), exported, zero interpolation: \"I can see you want to update the model, but I couldn't access the current graph…\". An edit-graph recovery notice — it never reaches an analysis, and there is no expression in it to carry one.",
+  },
+  NO_LIVE_PROPOSAL_TEXT: {
+    stance: 'structural',
+    why: 'Module constant (route-v2.ts:1853), zero interpolation: "I don\'t have a pending suggested update to apply…". Fires when no live proposal exists; names no option and makes no comparison.',
+  },
+};
+
+/**
+ * The register, KEYED BY FILE. The nesting is the scope statement: a reader of
+ * the `ungated` ledger can see exactly which files it speaks for, instead of
+ * inferring it from a comment that can go stale (which is what happened).
+ */
+const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
+  'turn-executor.ts': TURN_EXECUTOR_SITES,
+  'route-v2.ts': ROUTE_V2_SITES,
+};
+
 /** Count occurrences per key — the multiset the assertions compare. */
 function tally(keys: readonly string[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -197,10 +269,37 @@ function tally(keys: readonly string[]): Record<string, number> {
   return out;
 }
 
+/**
+ * Tally keys are `file::expression`, never the bare expression.
+ *
+ * Load-bearing for the same reason the multiset is (A5): two files can define
+ * the same expression name — `recoveryText` is not an unusual identifier — and a
+ * bare-key comparison would let a site in a NEWLY scanned file inherit the
+ * stance recorded for an identically-named site in another. Qualifying the key
+ * makes that impossible by construction rather than by nobody happening to
+ * choose the same name.
+ */
+function qualify(file: string, key: string): string {
+  return `${file}::${key}`;
+}
+
 /** The register as a multiset, defaulting an absent `count` to 1. */
 function registerTally(): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(COMPOSE_SITE_REGISTER)) out[k] = v.count ?? 1;
+  for (const [file, sites] of Object.entries(COMPOSE_SITE_REGISTER)) {
+    for (const [k, v] of Object.entries(sites)) out[qualify(file, k)] = v.count ?? 1;
+  }
+  return out;
+}
+
+/** Enumerate every scanned file, qualified. */
+function enumerateAllScannedSites(
+  sources: Readonly<Record<string, string>>,
+): string[] {
+  const out: string[] = [];
+  for (const [file, source] of Object.entries(sources)) {
+    for (const key of enumerateComposeSites(source)) out.push(qualify(file, key));
+  }
   return out;
 }
 
@@ -229,9 +328,12 @@ function enumerateComposeSites(source: string): string[] {
 
 describe('LAYER 2 drift — every compose site declares a verdict stance', () => {
   const source = readFileSync(TURN_EXECUTOR, 'utf8');
+  const sources: Record<string, string> = Object.fromEntries(
+    Object.entries(SCANNED_FILES).map(([label, path]) => [label, readFileSync(path, 'utf8')]),
+  );
 
   it('the MULTISET of compose sites in source EXACTLY equals the register', () => {
-    const found = tally(enumerateComposeSites(source));
+    const found = tally(enumerateAllScannedSites(sources));
     const registered = registerTally();
 
     // Both directions, and by COUNT not just presence. A NEW compose site is
@@ -241,13 +343,43 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // comparison is blind to.
     expect(
       found,
-      'compose-site drift in turn-executor.ts. A path that emits assistant_text ' +
-        'must declare whether it consumes the persisted constraint verdict — see ' +
-        'compose/withheld-explanation-answer.ts. This is the third instance of ' +
-        'that omission; do not make it the fourth. (A count mismatch means a site ' +
-        'was added or removed under an ALREADY-REGISTERED expression name, which ' +
-        'would otherwise inherit that name\'s stance silently.)',
+      'compose-site drift in a SCANNED file (see SCANNED_FILES). A path that emits ' +
+        'assistant_text must declare whether it consumes the persisted constraint ' +
+        'verdict — see compose/withheld-explanation-answer.ts. This is the third ' +
+        'instance of that omission; do not make it the fourth. (A count mismatch ' +
+        'means a site was added or removed under an ALREADY-REGISTERED expression ' +
+        "name, which would otherwise inherit that name's stance silently.)",
     ).toEqual(registered);
+  });
+
+  it('the scan really covers route-v2.ts, and route-v2.ts really has sites', () => {
+    // TESTING-DISCIPLINE rule 2 applied to the WIDENING itself. Adding a file to
+    // SCANNED_FILES that the enumerator finds nothing in would widen the scope
+    // on paper and change no measurement — the shape of a control that decays
+    // into a tautology (CLAUDE.md trap 12b). Pin that route-v2.ts contributes
+    // real, non-zero sites, so deleting them (or breaking the scan for that
+    // file) turns this red rather than reading as a clean widening.
+    const routeV2Keys = enumerateComposeSites(sources['route-v2.ts']!);
+    expect(routeV2Keys.length).toBeGreaterThan(0);
+    expect(routeV2Keys.sort()).toEqual(['EDIT_GRAPH_RECOVERY_TEXT', 'NO_LIVE_PROPOSAL_TEXT']);
+  });
+
+  it('names the surface it still does NOT cover, with a derived count', () => {
+    // The scope hole this widening only PARTLY closed, pinned as a number rather
+    // than left in prose. If chip-click-dispatch grows or loses a compose site,
+    // this fails and the next reader is told the register's ledger just changed
+    // meaning — instead of the count quietly drifting inside a docstring, which
+    // is exactly how the turn-executor-only scope survived three walks.
+    const unscanned = enumerateComposeSites(readFileSync(KNOWN_UNSCANNED.file, 'utf8'));
+    expect(unscanned).not.toContain('UNPARSEABLE');
+    expect(
+      unscanned.length,
+      `${KNOWN_UNSCANNED.label} is a KNOWN-UNSCANNED surface. Its site count changed, ` +
+        "so the register's `ungated: []` ledger now speaks for a different share of " +
+        'CEE than it did. Either widen SCANNED_FILES and register the sites, or update ' +
+        'this number deliberately.',
+    ).toBe(KNOWN_UNSCANNED.siteCount);
+    expect(Object.keys(SCANNED_FILES)).not.toContain(KNOWN_UNSCANNED.label);
   });
 
   it('POSITIVE CONTROL: a duplicate-NAME site is caught (the set-comparison blind spot)', () => {
@@ -255,9 +387,10 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // REGISTERED expression. Under a set comparison this is invisible — the key
     // is already present. Under the multiset it must show as a count change.
     const planted = `${source}\n composeAnswer({ assistant_text: clarifyGuardedText, stage: 'analyse' });`;
-    const found = tally(enumerateComposeSites(planted));
-    expect(Object.keys(found)).toEqual(expect.arrayContaining(['clarifyGuardedText']));
-    expect(found['clarifyGuardedText']).toBe((registerTally()['clarifyGuardedText'] ?? 0) + 1);
+    const key = qualify('turn-executor.ts', 'clarifyGuardedText');
+    const found = tally(enumerateAllScannedSites({ ...sources, 'turn-executor.ts': planted }));
+    expect(Object.keys(found)).toEqual(expect.arrayContaining([key]));
+    expect(found[key]).toBe((registerTally()[key] ?? 0) + 1);
     expect(found).not.toEqual(registerTally());
   });
 
@@ -274,25 +407,48 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     const planted = `${source}\n composeAnswer({ assistant_text: totallyNewLeakySite, stage: 'analyse' });`;
     const found = enumerateComposeSites(planted);
     expect(found).toContain('totallyNewLeakySite');
-    expect(Object.keys(COMPOSE_SITE_REGISTER)).not.toContain('totallyNewLeakySite');
+    expect(Object.keys(registerTally())).not.toContain(
+      qualify('turn-executor.ts', 'totallyNewLeakySite'),
+    );
   });
 
   it('records the OPEN GAPS explicitly, so the residue is a list and not a surprise', () => {
-    const ungated = Object.entries(COMPOSE_SITE_REGISTER)
-      .filter(([, v]) => v.stance === 'ungated')
-      .map(([k]) => k)
-      .sort();
+    const ungated: string[] = [];
+    for (const [file, sites] of Object.entries(COMPOSE_SITE_REGISTER)) {
+      for (const [k, v] of Object.entries(sites)) {
+        if (v.stance === 'ungated') ungated.push(qualify(file, k));
+      }
+    }
+    ungated.sort();
 
     // ROADMAP 1.233 + 1.231 closed all eight. This stays pinned as an EMPTY
     // ledger rather than being deleted: an empty assertion is what makes the
     // NINTH ungated site fail CI the day someone adds one. A deleted test
     // would let it in silently — which is the whole defect class this file is
     // about.
+    //
+    // ⚠ READ THE SCOPE WITH THE NUMBER. This `[]` now speaks for turn-executor.ts
+    // AND route-v2.ts — 31 sites / 27 keys — and NOT for
+    // handlers/chip-click-dispatch.ts (3 sites, pinned above). Before 2026-07-27
+    // it spoke for one file and said so nowhere.
     expect(ungated).toEqual([]);
   });
 
+  it('the ledger covers the surface it claims to — counts, derived', () => {
+    // The number behind the `[]`, pinned so "0 ungated" can never again be read
+    // as covering more than it measures. Both figures are DERIVED from source on
+    // every run; only the expectation is written down.
+    const sites = enumerateAllScannedSites(sources);
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(31);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(27);
+    expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
+      'route-v2.ts',
+      'turn-executor.ts',
+    ]);
+  });
+
   it('the EXECUTE-path gate is registered GATED and really is projected in source', () => {
-    expect(COMPOSE_SITE_REGISTER['confirmationForCompose']!.stance).toBe('gated');
+    expect(TURN_EXECUTOR_SITES['confirmationForCompose']!.stance).toBe('gated');
     // Non-vacuity: the register's claim is checked against the source, so a
     // future revert of the gate turns this red rather than leaving a register
     // entry asserting a protection that no longer exists.
@@ -317,7 +473,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       'adviceOutcome.assistant_text': 'projectContextPackAnalysisForWithheldClaim(contextPack.analysis)',
     };
     for (const [site, fragment] of Object.entries(GATE_EVIDENCE)) {
-      expect(COMPOSE_SITE_REGISTER[site]!.stance, `${site} must be registered gated`).toBe('gated');
+      expect(TURN_EXECUTOR_SITES[site]!.stance, `${site} must be registered gated`).toBe('gated');
       expect(source, `${site}: the gate this register claims is absent from source`).toContain(
         fragment,
       );
@@ -351,7 +507,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       ],
     ];
     for (const [site, rel, fragment] of STRUCTURAL_EVIDENCE) {
-      expect(COMPOSE_SITE_REGISTER[site]!.stance, `${site} must be registered structural`).toBe(
+      expect(TURN_EXECUTOR_SITES[site]!.stance, `${site} must be registered structural`).toBe(
         'structural',
       );
       const guardSource = readFileSync(resolve(HERE, rel), 'utf8');
@@ -377,13 +533,16 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
   });
 
   it('every GATED_BY_INPUT site is backed by a real input gate at the assembly seam', () => {
-    const byInput = Object.entries(COMPOSE_SITE_REGISTER)
-      .filter(([, v]) => v.stance === 'gated_by_input')
-      .map(([k]) => k)
-      .sort();
+    const byInput: string[] = [];
+    for (const [file, sites] of Object.entries(COMPOSE_SITE_REGISTER)) {
+      for (const [k, v] of Object.entries(sites)) {
+        if (v.stance === 'gated_by_input') byInput.push(qualify(file, k));
+      }
+    }
+    byInput.sort();
     expect(byInput).toEqual([
-      'coachGuarded.assistant_text',
-      'converseGuarded.assistant_text',
+      qualify('turn-executor.ts', 'coachGuarded.assistant_text'),
+      qualify('turn-executor.ts', 'converseGuarded.assistant_text'),
     ]);
     // Non-vacuity, same rationale as the gated check above. `gated_by_input`
     // asserts something about the PACK, so the evidence is the projection call

@@ -39,6 +39,7 @@ import { dirname, resolve } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTE_V2 = resolve(HERE, '../../orchestrator/route-v2.ts');
 const OUTPUT_SAFETY = resolve(HERE, '../compose/output-safety.ts');
+const CHIP_CLICK_DISPATCH = resolve(HERE, '../handlers/chip-click-dispatch.ts');
 
 interface SendCall {
   readonly offset: number;
@@ -94,8 +95,9 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
       unmarked.map((c) => `sendFinalised200@${c.offset}`),
       'route-v2 has a sendFinalised200 call whose ctx omits mayNameLeadingOption, so the ' +
         'layer-3 leading-option egress guard is DISARMED for that dispatch family. Thread the ' +
-        'dispatch result\'s own value (e.g. `run.mayNameLeadingOption ?? true`) if the path can ' +
-        'run an analysis; pass the literal `true` ONLY if it provably runs none.',
+        "dispatch result's own value if the path can run an analysis — as a REQUIRED field, " +
+        'not a `?? true` fallback, which is the shape that disarmed the chip exit until ' +
+        '2026-07-27. Pass the literal `true` ONLY if the path provably runs no analysis.',
     ).toEqual([]);
   });
 
@@ -115,7 +117,59 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
       'the turn_executor and chip_click exits must thread the verdict the run_analysis handler ' +
         'stamped on the fact. If one of these became a literal `true`, the guard would be blind ' +
         'on exactly the path the G-CEE-1 defect ships through.',
-    ).toEqual(['cc.mayNameLeadingOption ?? true', 'run.mayNameLeadingOption ?? true']);
+    ).toEqual(['cc.mayNameLeadingOption', 'run.mayNameLeadingOption ?? true']);
+  });
+
+  it('the chip_click exit has NO `?? true` fallback left, and cannot regrow one', () => {
+    // ═══════════════════════════════════════════════════════════════════════
+    // WALK-2026-07-27-FINAL.md §11.6, and the pin that makes the fix bite.
+    //
+    // This exit read `cc.mayNameLeadingOption ?? true` — the last surviving
+    // instance of the default the ROADMAP 1.233 hoist removed everywhere else.
+    // An exit that could not read a verdict handed the Layer-3 guard an explicit
+    // permission to ignore whatever the response said.
+    //
+    // ⚠ THE WALK'S SEVERITY CLAIM IS REFUTED, in the safe direction, and the
+    // refutation is recorded here because it changes what this test is for.
+    // It was NOT "live-reachable for every non-run_analysis chip outcome":
+    // `DETERMINISTIC_CHIP_ACTION_TYPES` has exactly one member, the dispatcher
+    // THROWS on anything else, and the union's single `outcome: 'ok'` producer
+    // always populated the field. The default was a LATENT re-arming point, not
+    // a live leak — real, and worth closing, and not what it was billed as.
+    //
+    // The fix is a TYPE change (the field is now required on the `ok` outcome),
+    // which means reverting it changes no runtime behaviour and no runtime test
+    // would go red. THIS is the instrument that discriminates: both halves are
+    // pinned from source, so a revert of either fails here.
+    // ═══════════════════════════════════════════════════════════════════════
+    expect(source).toContain('mayNameLeadingOption: cc.mayNameLeadingOption,');
+    expect(
+      source,
+      'the chip_click exit regrew a `?? true` fallback. The field is REQUIRED on the ' +
+        "dispatch's `ok` outcome — if a new outcome cannot derive a verdict, derive one " +
+        'from the persisted facts with readMayNameLeadingOptionForFacts; do not default open.',
+    ).not.toContain('cc.mayNameLeadingOption ??');
+
+    const dispatch = readFileSync(CHIP_CLICK_DISPATCH, 'utf8');
+    expect(dispatch).toMatch(/readonly mayNameLeadingOption:\s*boolean;/);
+    expect(
+      dispatch,
+      'mayNameLeadingOption was made optional again on the chip dispatch `ok` outcome. ' +
+        'Optional is what let the `?? true` exist: a producer that forgets the field must ' +
+        'fail to COMPILE, which is the same doctrine tryRunComparisonGate already applies.',
+    ).not.toMatch(/readonly mayNameLeadingOption\?:/);
+  });
+
+  it('POSITIVE CONTROL: the `?? true` pin can FAIL', () => {
+    // Rule 2 — an instrument that returns the same answer for "fixed" and
+    // "could not look" is not an instrument. Re-introduce the exact pre-fix
+    // shape and prove both halves of the assertion above flip.
+    const reverted = source.replace(
+      'mayNameLeadingOption: cc.mayNameLeadingOption,',
+      'mayNameLeadingOption: cc.mayNameLeadingOption ?? true,',
+    );
+    expect(reverted).not.toContain('mayNameLeadingOption: cc.mayNameLeadingOption,');
+    expect(reverted).toContain('cc.mayNameLeadingOption ??');
   });
 
   it('EgressSanitiseOpts declares mayNameLeadingOption as REQUIRED, not optional', () => {

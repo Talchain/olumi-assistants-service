@@ -174,7 +174,82 @@ const LEADER_DECISION_BRIEF = {
   warnings: [{ code: 'DOMINANT_FACTOR', message: 'One factor dominates.', severity: 'warning' }],
   warning_codes: ['DOMINANT_FACTOR'],
   defaulted_assumptions: [],
-  analysis_summary: { n_samples: 1000 },
+  /**
+   * ⚠ WAS `{ n_samples: 1000 }` — AN INVENTED SHAPE, AND THE REASON A LEAK RAN
+   * FOR THREE WALKS UNDER A GREEN SUITE.
+   *
+   * The LIVE producer emits exactly four members here, derived across all five
+   * archived corpora (142 bodies / 65 enriched blocks, every one of them):
+   * `leading_option`, `win_probability`, `robustness_band`, and `goal_fit` (on
+   * 40 of 65). `n_samples` is emitted by nothing. So the fixture asserted
+   * `analysis_summary` survived a withheld turn while carrying no leader
+   * designation to survive WITH — an over-suppression control that could not
+   * fail and a leak assertion that was never written.
+   *
+   * Values below are the `caseINF.run` shape from
+   * `acceptance-evidence/g-cee-1-constraint-verdict/raw-2026-07-27-final/`,
+   * relabelled onto this file's graph.
+   */
+  analysis_summary: {
+    leading_option: 'Hire Marketing Manager',
+    win_probability: 0.72,
+    goal_fit: 0,
+    robustness_band: 'fragile',
+  },
+};
+
+/**
+ * `enrichment.robustness`, in the LIVE shape — the blob the egress guard did
+ * not scan at all until 2026-07-27, and which names the leading option by ID
+ * AND by LABEL on every withheld body carrying an analysis block
+ * (`WALK-2026-07-27-FINAL.md` §8; present on 65/65 enriched blocks archived).
+ *
+ * Transcribed member-for-member from `caseINF.run.response.json`
+ * (`raw-2026-07-27-final/`), relabelled onto this file's graph. Split into the
+ * designations and the fragility science for the same reason the brief is: the
+ * first group must vanish on a withheld turn and the second must survive it.
+ *
+ * ⚠ `fragile_edges[].alternative_winner_id` / `_label` are IN this fixture
+ * DELIBERATELY, on the survive side. They name the COUNTERFACTUAL winner if
+ * that edge flips — not the leader, and the substance of a fragility finding.
+ * A suppression rule written with an unanchored `/winner/` would eat them, and
+ * the over-suppression control below is what would catch that.
+ */
+const LEADER_ROBUSTNESS = {
+  // ── the leader designations ───────────────────────────────────────────────
+  recommended_option_id: 'opt_hire',
+  recommended_option_label: 'Hire Marketing Manager',
+  near_tie: {
+    is_tie: false,
+    top_option_id: 'opt_hire',
+    second_option_id: 'opt_hold',
+    tied_option_ids: ['opt_hire'],
+    gap: 0.44,
+    threshold: 0.1,
+  },
+  // ── the fragility science (the over-suppression control) ──────────────────
+  is_robust: false,
+  level: 'low',
+  confidence: 0.72,
+  confidence_basis: 'recommendation_stability_uncalibrated',
+  display_verdict: 'fragile',
+  display_verdict_reason: 'small changes could flip this result',
+  robust_edges: [],
+  fragile_edges: [
+    {
+      edge_id: 'fac_capacity->goal_growth',
+      from_id: 'fac_capacity',
+      to_id: 'goal_growth',
+      from_label: 'Capacity',
+      to_label: 'Customer growth',
+      switch_probability: 0.535,
+      marginal_switch_probability: 0.17,
+      alternative_winner_id: 'opt_hold',
+      alternative_winner_label: 'Hold',
+      severity: 'error',
+      visible: true,
+    },
+  ],
 };
 
 function plotEnvelope(opts: {
@@ -183,6 +258,16 @@ function plotEnvelope(opts: {
   withDecisionReview?: boolean;
   /** Attach the leader-asserting decision_brief (see above). */
   withDecisionBrief?: boolean;
+  /**
+   * Attach the leader-designating `robustness` blob (see above).
+   *
+   * OPT-IN rather than always-on, deliberately: the tests written before
+   * 2026-07-27 assert an EMPTY hit list on turns that never carried this blob,
+   * and quietly adding it to them would change what those zeros mean. New
+   * assertions opt in; old ones keep measuring what they were written to
+   * measure.
+   */
+  withRobustness?: boolean;
   /** Satisfaction probability written under `constraintKey`. 0 ⇒ the leader
    *  violates it, which selects `evaluated_infeasible`. */
   constraintProb?: number;
@@ -222,6 +307,7 @@ function plotEnvelope(opts: {
     // enricher's LLM call or its default-off await flag.
     ...(opts.withDecisionReview ? { decision_review: LEADER_DECISION_REVIEW } : {}),
     ...(opts.withDecisionBrief ? { decision_brief: LEADER_DECISION_BRIEF } : {}),
+    ...(opts.withRobustness ? { robustness: LEADER_ROBUSTNESS } : {}),
     ...(opts.warningCodes && opts.warningCodes.length > 0
       ? { inference_warnings: opts.warningCodes.map((code) => ({ code })) }
       : {}),
@@ -1012,6 +1098,7 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
       constraintKey: 'constraint_out_total_cost_max',
       withDecisionReview: true,
       withDecisionBrief: true,
+      withRobustness: true,
     });
 
   describe('POSITIVE CONTROLS — evaluated_feasible keeps every one of these surfaces', () => {
@@ -1062,6 +1149,77 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
       expect(paths).toContain('blocks[0].enrichment.decision_brief.headline_banded.text');
       expect(paths).toContain('blocks[0].enrichment.decision_brief.robustness_caveat.text');
     });
+
+    it('the STRUCTURED designations ride the wire on a permitted run', async () => {
+      // The load-bearing half of the 2026-07-27 slice's over-suppression arm.
+      // The hoist already widened the suppression estate; a projection that ate
+      // these on a HEALTHY run would cost the user the recommendation itself,
+      // and every absence assertion below would still be green.
+      plotResponse = feasible();
+      const turn = await runAnalysisTurn(app);
+      const enrichment = analysisBlockOf(turn.raw).enrichment;
+
+      expect(enrichment.decision_brief.analysis_summary.leading_option).toBe(
+        'Hire Marketing Manager',
+      );
+      expect(enrichment.decision_brief.analysis_summary.win_probability).toBe(0.72);
+      expect(enrichment.robustness.recommended_option_id).toBe('opt_hire');
+      expect(enrichment.robustness.recommended_option_label).toBe('Hire Marketing Manager');
+      expect(enrichment.robustness.near_tie.top_option_id).toBe('opt_hire');
+      expect(enrichment.robustness.near_tie.second_option_id).toBe('opt_hold');
+      expect(enrichment.robustness.near_tie.tied_option_ids).toEqual(['opt_hire']);
+    });
+
+    it('the guard SEES the structured designation — the KEY reader is not blind', async () => {
+      // ═══════════════════════════════════════════════════════════════════════
+      // THE NON-VACUITY PROOF FOR THE WHOLE 2026-07-27 SLICE (TESTING-DISCIPLINE
+      // rule 1 / CLAUDE.md trap 13: an absence assertion must first prove it can
+      // see a presence).
+      //
+      // Every value below is a BARE OPTION LABEL or a BARE OPTION ID. None of
+      // them contains one word of comparative English, so `textNamesLeadingOption`
+      // — the reader every prior version of this guard used — returns false on all
+      // of them. That is precisely why three walks reported "S1–S6 all silent"
+      // over corpora carrying this: the claim is in the KEY, and no text matcher
+      // reads keys.
+      //
+      // These paths therefore appear here ONLY because `keyDesignatesLeadingOption`
+      // exists. Narrow that pattern family and this test goes red before the
+      // withheld assertions below start silently passing on an unscanned surface.
+      // ═══════════════════════════════════════════════════════════════════════
+      plotResponse = feasible();
+      const turn = await runAnalysisTurn(app);
+      const hits = findLeaderClaims(JSON.parse(turn.raw)).map((h) => `${h.path} (${h.code})`);
+
+      expect(hits).toContain(
+        'blocks[0].enrichment.decision_brief.analysis_summary.leading_option (key_leading_option)',
+      );
+      expect(hits).toContain(
+        'blocks[0].enrichment.robustness.recommended_option_id (key_recommended_option)',
+      );
+      expect(hits).toContain(
+        'blocks[0].enrichment.robustness.recommended_option_label (key_recommended_option)',
+      );
+      expect(hits).toContain(
+        'blocks[0].enrichment.robustness.near_tie.top_option_id (key_top_option)',
+      );
+      // …and the block's own leader id, which sat outside every scan surface in
+      // this module until the same change.
+      expect(hits).toContain('blocks[0].leading_option_id (key_leading_option)');
+    });
+
+    it('the guard does NOT read the counterfactual winner as a leader designation', async () => {
+      // The anchor control. `fragile_edges[].alternative_winner_label` is a bare
+      // option label under a key containing "winner"; an unanchored pattern
+      // family would report it, the projection sharing that family would then
+      // DROP it, and a fragility finding would lose the one field that says what
+      // flipping the edge does. PR #717 landed a fix to carry exactly this field
+      // through the flip path.
+      plotResponse = feasible();
+      const turn = await runAnalysisTurn(app);
+      const hits = findLeaderClaims(JSON.parse(turn.raw)).map((h) => h.path);
+      expect(hits.filter((p) => p.includes('alternative_winner'))).toEqual([]);
+    });
   });
 
   for (const { state, envelope } of WITHHOLDING_STATES) {
@@ -1070,6 +1228,7 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
         ...envelope(),
         decision_review: LEADER_DECISION_REVIEW,
         decision_brief: LEADER_DECISION_BRIEF,
+        robustness: LEADER_ROBUSTNESS,
       });
 
       it('(c) leading_option_id is NULL, not the leader id', async () => {
@@ -1126,6 +1285,81 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
         expect(brief.analysis_summary).toBeDefined();
         expect(brief.options).toBeDefined();
         expect(turn.raw).toContain('Hiring pipeline health');
+      });
+
+      it('(e) analysis_summary ships WITHOUT the leader and its win probability', async () => {
+        // WALK-2026-07-27-FINAL.md §8, channel 1 of 2. Present on 10/10 withheld
+        // bodies that carried an analysis block, and in BOTH prior archives —
+        // pre-existing, uncovered by S1–S6 because the hand-kept list has no
+        // entry for this container.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        const summary = analysisBlockOf(turn.raw).enrichment.decision_brief.analysis_summary;
+
+        expect(summary.leading_option).toBeUndefined();
+        expect(summary.win_probability).toBeUndefined();
+        // …and off the SERIALISED bytes, not merely off one parsed path. The
+        // label still appears elsewhere on a permitted-shaped envelope, so the
+        // assertion is scoped to the KEY that carries the designation.
+        expect(turn.raw).not.toContain('"leading_option":"Hire Marketing Manager"');
+      });
+
+      it('(e) OVER-SUPPRESSION CONTROL: the rest of analysis_summary still ships', async () => {
+        // The complete member manifest of this object across all five archives
+        // is {leading_option, win_probability, goal_fit, robustness_band}. Two
+        // go; two must stay — both name no option and rank nothing, and both are
+        // on the KEEP list of the model-facing projection for the same reason.
+        // Dropping `analysis_summary` whole would pass the assertion above.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        const summary = analysisBlockOf(turn.raw).enrichment.decision_brief.analysis_summary;
+
+        expect(summary, 'analysis_summary itself must survive').toBeDefined();
+        expect(summary.goal_fit).toBe(0);
+        expect(summary.robustness_band).toBe('fragile');
+      });
+
+      it('(f) enrichment.robustness ships WITHOUT the recommendation or the tie identities', async () => {
+        // WALK-2026-07-27-FINAL.md §8, channel 2 of 2 — and the blob the egress
+        // guard did not scan at all. `recommended_option_label` is the sharpest:
+        // a withheld turn declining to recommend an option, shipping a field
+        // called "recommended option label" with that option's name in it.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        const robustness = analysisBlockOf(turn.raw).enrichment.robustness;
+
+        expect(robustness, 'the blob itself must survive — see the control below').toBeDefined();
+        expect(robustness.recommended_option_id).toBeUndefined();
+        expect(robustness.recommended_option_label).toBeUndefined();
+        expect(robustness.near_tie.top_option_id).toBeUndefined();
+        expect(robustness.near_tie.second_option_id).toBeUndefined();
+        expect(robustness.near_tie.tied_option_ids).toBeUndefined();
+        expect(turn.raw).not.toContain('"recommended_option_label"');
+        expect(turn.raw).not.toContain('"top_option_id"');
+      });
+
+      it('(f) OVER-SUPPRESSION CONTROL: the fragility science survives intact', async () => {
+        // KEEP THE FACT, DROP THE IDENTITIES. `near_tie` still says whether the
+        // top of the ranking is a tie and by how much; the blob still says the
+        // result is fragile and which edge makes it so. This is the content a
+        // user needs MOST on the turn where the recommendation is withheld.
+        plotResponse = withBlobs();
+        const turn = await runAnalysisTurn(app);
+        const robustness = analysisBlockOf(turn.raw).enrichment.robustness;
+
+        expect(robustness.is_robust).toBe(false);
+        expect(robustness.level).toBe('low');
+        expect(robustness.confidence).toBe(0.72);
+        expect(robustness.display_verdict).toBe('fragile');
+        expect(robustness.display_verdict_reason).toBe('small changes could flip this result');
+        expect(robustness.near_tie.is_tie).toBe(false);
+        expect(robustness.near_tie.gap).toBe(0.44);
+        expect(robustness.near_tie.threshold).toBe(0.1);
+        // The counterfactual winner is NOT the leader and is NOT suppressed.
+        expect(robustness.fragile_edges).toHaveLength(1);
+        expect(robustness.fragile_edges[0].alternative_winner_id).toBe('opt_hold');
+        expect(robustness.fragile_edges[0].alternative_winner_label).toBe('Hold');
+        expect(robustness.fragile_edges[0].switch_probability).toBe(0.535);
       });
 
       it('(b) the decision_review blob does not ship at all', async () => {
