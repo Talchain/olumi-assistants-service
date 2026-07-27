@@ -52,6 +52,12 @@
  *   - `src/orchestrator-v5/turn-executor.ts`              — 29 sites / 25 keys
  *   - `src/orchestrator/route-v2.ts`                      —  2 sites /  2 keys
  *   - `src/orchestrator-v5/handlers/chip-click-dispatch.ts` — 3 sites / 3 keys (NEW 2026-07-27)
+ *   - `src/orchestrator-v5/compose/edit-clarify-response.ts`  —  1 site  /  1 key  (NEW 1.276)
+ *   - `src/orchestrator-v5/routing/post-analysis-label-intercept.ts` — 1 / 1 (NEW 1.276)
+ *
+ * 36 sites / 32 keys / 5 files, and `UNSCANNED_COMPOSE_FILES` is now EMPTY —
+ * so `expect(ungated).toEqual([])` finally speaks for every production compose
+ * site in `src/`, by derivation rather than by scope nobody had written down.
  *
  * The four scanned function names are unchanged: `composeAnswer`,
  * `composeToolCallResponse`, `composeClarifyResponse`,
@@ -112,6 +118,16 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
   'turn-executor.ts': TURN_EXECUTOR,
   'route-v2.ts': resolve(HERE, '../../orchestrator/route-v2.ts'),
   'handlers/chip-click-dispatch.ts': resolve(HERE, '../handlers/chip-click-dispatch.ts'),
+  // ROADMAP 1.276 — the two files `derivedComposeFileDomain()` surfaced on its
+  // first run and that nothing had ever named. Both now carry a DERIVED stance;
+  // `UNSCANNED_COMPOSE_FILES` is consequently empty, which is the strongest
+  // form of this register's claim: no production compose site in `src/` is
+  // outside the scan.
+  'compose/edit-clarify-response.ts': resolve(HERE, '../compose/edit-clarify-response.ts'),
+  'routing/post-analysis-label-intercept.ts': resolve(
+    HERE,
+    '../routing/post-analysis-label-intercept.ts',
+  ),
 };
 
 /**
@@ -126,28 +142,28 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
 const UNSCANNED_COMPOSE_FILES: Readonly<
   Record<string, { readonly siteCount: number; readonly keyable: boolean; readonly why: string }>
 > = {
-  'orchestrator-v5/routing/post-analysis-label-intercept.ts': {
-    siteCount: 1,
-    keyable: true,
-    why:
-      'ONE site: `assistant_text: composeExploreText(canonicalLabel)` (:331). Deterministic ' +
-      'exploration prompt built from ONE graph-node label — "It looks like you would like to ' +
-      'explore {label}. Would you like me to walk you through the analysis…" (:273-280). Reads ' +
-      'no analysis and makes no comparison, so it looks structural on inspection; it is left ' +
-      'UNREGISTERED rather than assumed, because this file exists to stop stances being ' +
-      'assigned by inspection-at-a-glance.',
-  },
-  'orchestrator-v5/compose/edit-clarify-response.ts': {
-    siteCount: 1,
-    keyable: false,
-    why:
-      'ONE site (:128) that the enumerator CANNOT KEY — it returns UNPARSEABLE. The site passes ' +
-      'the ES6 SHORTHAND property `assistant_text,` and the key regex requires `assistant_text:`. ' +
-      'That is an instrument limitation worth naming plainly: the enumerator is blind to ' +
-      'shorthand, so a scanned file adopting shorthand would key as UNPARSEABLE (caught — the ' +
-      '"never parses a compose site it cannot key" test) rather than be keyed wrongly. Widening ' +
-      'to this file therefore requires an enumerator change, which is a separate PR.',
-  },
+  // ⭐ EMPTY AS OF 2026-07-27 (ROADMAP 1.276), AND THE EMPTINESS IS THE POINT.
+  //
+  // Both former entries have been derived and registered:
+  //
+  //   - `routing/post-analysis-label-intercept.ts` was declared keyable but
+  //     left UNREGISTERED on the explicit grounds that "this file exists to
+  //     stop stances being assigned by inspection-at-a-glance". It now carries
+  //     a derived stance with its evidence — see POST_ANALYSIS_LABEL_INTERCEPT_SITES.
+  //   - `compose/edit-clarify-response.ts` was declared UNPARSEABLE because the
+  //     key regex required `assistant_text:` and the site uses the ES6
+  //     shorthand `assistant_text,`. That was an INSTRUMENT limitation, not a
+  //     property of the code, and the instrument has been widened rather than
+  //     the file excused. See EDIT_CLARIFY_SITES.
+  //
+  // The mechanism stays even though the list is empty: this is the declared
+  // REMAINDER, and the domain test below proves SCANNED_FILES ∪ this === the
+  // derived domain. An empty remainder therefore asserts something strictly
+  // stronger than "we looked at everything we remembered" — it asserts, by
+  // derivation, that no production compose site in `src/` is unscanned. A file
+  // may still be added here later, but only WITH its cost written down; it may
+  // never sit here by having been forgotten, because a forgotten file is in
+  // neither list and fails.
 };
 
 /**
@@ -466,10 +482,86 @@ const CHIP_CLICK_DISPATCH_SITES: Readonly<Record<string, RegisteredSite>> = {
  * the `ungated` ledger can see exactly which files it speaks for, instead of
  * inferring it from a comment that can go stale (which is what happened).
  */
+/**
+ * `src/orchestrator-v5/compose/edit-clarify-response.ts` — brought into scope
+ * 2026-07-27 (ROADMAP 1.276), and it required WIDENING THE INSTRUMENT first.
+ *
+ * This file was previously declared `keyable: false` / UNPARSEABLE. That was
+ * never a fact about the code — it was a fact about the enumerator, whose key
+ * regex required `assistant_text:` and so could not read the ES6 shorthand
+ * `assistant_text,` this site uses. Worth stating in the register itself,
+ * because "the instrument cannot read it" and "the site is hard to classify"
+ * look identical from the outside and only one of them is a reason to exclude.
+ */
+const EDIT_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
+  assistant_text: {
+    stance: 'structural',
+    why:
+      'ONE site (edit-clarify-response.ts:128-133), keyed `assistant_text` because the site uses ' +
+      'the ES6 shorthand property. The value is built two lines above as ' +
+      "`pieces.join(' ')` over at most THREE module string constants — LEAD_TEXT (\"The model " +
+      'is unchanged so far."), FRESHNESS_SUFFIX ("Your last analysis is still current.") and ' +
+      'CLOSING_TEXT ("Tell me the specific factor, edge, option, or value to change…") at ' +
+      ':98-101. ZERO interpolation: there is no expression in `assistant_text` that could carry ' +
+      'an option label, a probability, a margin or an ordering, so it cannot assert a leader ' +
+      'under any input. That is a STRONGER derivation than several sites already registered ' +
+      'structural (the add-risk echo interpolates two labels; this interpolates none). The only ' +
+      'input-dependent behaviour is whether FRESHNESS_SUFFIX is present, gated on the ' +
+      'caller-supplied boolean `input.priorAnalysisIsFresh`. ' +
+      'SCOPE NOTE, so a later reader does not think it was missed: the CHIPS this file builds ' +
+      'DO carry graph labels (`buildLabelChip` emits "Change {label}" / "For {label}, what value ' +
+      'should we use?", drawn from factor then option nodes), so option labels do reach the ' +
+      'response — on `suggested_actions`, which is not a channel this register keys. Both ' +
+      'upstream call sites (route-v2.ts:3660 chip_simplify, :3738 vague_edit) pass ' +
+      '`mayNameLeadingOption: true`, and on this path that is honest: the file makes zero LLM ' +
+      'calls (pinned by context-policy.conformance.test.ts) and reads no analysis.',
+  },
+};
+
+/**
+ * `src/orchestrator-v5/routing/post-analysis-label-intercept.ts` — brought into
+ * scope 2026-07-27 (ROADMAP 1.276). Previously `keyable: true` but deliberately
+ * UNREGISTERED, on the grounds that this file exists to stop stances being
+ * assigned by inspection-at-a-glance. Here is the derivation it was owed.
+ */
+const POST_ANALYSIS_LABEL_INTERCEPT_SITES: Readonly<Record<string, RegisteredSite>> = {
+  'composeExploreText(canonicalLabel)': {
+    stance: 'structural',
+    why:
+      'ONE site (post-analysis-label-intercept.ts:329-334, `assistant_text:` at :331). ' +
+      '`composeExploreText` (:273-280) is a fixed template with a SINGLE interpolation slot ' +
+      'carrying ONE canonical graph-node label: "It looks like you would like to explore ' +
+      '{label}. Would you like me to walk you through the analysis, look at what could change ' +
+      'the outcome, or run a pre-mortem?". No LLM involvement (the module docstring: "Pure ' +
+      'function. No I/O, no telemetry", and "Label matching uses ONLY canonical graph labels ' +
+      '(already user-authored). No LLM invention."). The three chips are frozen module ' +
+      'constants. It CAN name an option — `findLabelMatch` (:149-162) does not filter by ' +
+      '`node.kind`, so an option-kind node matches — but naming is not RANKING: the sentence ' +
+      'carries no comparison, no ordering, no probability and no margin, which is the same ' +
+      'standard already applied to the add-risk echo. The file additionally bans ' +
+      '"recommended"/"winner"/"winning option" in its own copy contract (:266). ' +
+      '⚠ REGISTERED RESIDUAL, and it is the reason this stance is worth writing down rather ' +
+      'than waving through. Unlike the edit-clarify path, this intercept fires ONLY when a ' +
+      'fresh prior analysis EXISTS — `if (!priorAnalysisIsFresh) return {matched:false}` at ' +
+      ':183-185 — so a verdict that may have WITHHELD provably exists on every turn that ' +
+      'reaches this compose site. Yet route-v2.ts:3720 passes `mayNameLeadingOption: true` ' +
+      'under a comment reading "this path runs no analysis, so it withheld no leading-option ' +
+      'claim". Running no analysis is not the same as no analysis existing. There is no live ' +
+      'leak, because the prose above cannot express a leader claim — but the Layer-3 alarm is ' +
+      'a LICENSED NO-OP on this exit, which is precisely the shape ROADMAP 1.233 fixed ' +
+      'elsewhere (see the `assistantText` entry: "a `true` permission that made the Layer-3 ' +
+      'alarm a licensed no-op"). Flagged here, NOT fixed here: threading a real verdict into ' +
+      'this exit is a behaviour change needing the turn context, and it belongs in its own ' +
+      'reviewed PR rather than riding along with an enumerator widening.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
   'handlers/chip-click-dispatch.ts': CHIP_CLICK_DISPATCH_SITES,
+  'compose/edit-clarify-response.ts': EDIT_CLARIFY_SITES,
+  'routing/post-analysis-label-intercept.ts': POST_ANALYSIS_LABEL_INTERCEPT_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -530,8 +622,31 @@ function enumerateComposeSites(source: string): string[] {
       }
     }
     const span = source.slice(open, j + 1);
-    const arg = /(?:assistant_text|confirmation):\s*([^\n,]+)/.exec(span);
-    keys.push(arg ? arg[1]!.trim().slice(0, 70) : 'UNPARSEABLE');
+    // ⚠ WIDENED 2026-07-27 (ROADMAP 1.276) TO PARSE ES6 SHORTHAND.
+    //
+    // The previous pattern was `/(?:assistant_text|confirmation):\s*([^\n,]+)/`
+    // — it REQUIRED a colon, so a site passing the shorthand property
+    // `assistant_text,` keyed as `UNPARSEABLE`. That is how
+    // `compose/edit-clarify-response.ts` came to be declared unscannable: not
+    // because its stance was hard to derive, but because the INSTRUMENT could
+    // not read the syntax. An enumerator blind to a language feature quietly
+    // narrows the register's domain to "sites written in the style the regex
+    // happened to be built for".
+    //
+    // The two branches, and why the key differs between them:
+    //   - `assistant_text: expr`  ⇒ key is `expr`, exactly as before.
+    //   - `assistant_text,`       ⇒ key is `assistant_text`, the identifier,
+    //     because under shorthand the identifier IS the expression.
+    // Verified key-identical on all 34 previously-scanned sites, so widening
+    // moves no existing key and cannot perturb the multiset for a non-semantic
+    // reason (the `slice(0, 70)`-of-raw-source keying is already fragile enough
+    // — see the header's Prettier-reflow note).
+    //
+    // `\b` prevents matching a longer identifier that merely ends in
+    // `assistant_text`; the `[,}]` lookahead branch is what admits shorthand
+    // both mid-object (`assistant_text,`) and last (`assistant_text }`).
+    const arg = /\b(assistant_text|confirmation)\s*(?::\s*([^\n,]+)|\s*[,}])/.exec(span);
+    keys.push(arg ? (arg[2] ?? arg[1]!).trim().slice(0, 70) : 'UNPARSEABLE');
   }
   return keys;
 }
@@ -585,6 +700,95 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       "'Could not run analysis. The analysis service is temporarily unavailab",
       'confirmationText',
     ]);
+  });
+
+  it('edit-clarify-response: the scan finds its ONE site, keyed via ES6 SHORTHAND', () => {
+    // The sibling anti-tautology pin for the file brought into scope by 1.276.
+    // ⭐ THIS IS ALSO THE WIDENING'S ACCEPTANCE TEST: before the key regex
+    // learned shorthand, this file's only site keyed `UNPARSEABLE`, which is
+    // why it sat in `UNSCANNED_COMPOSE_FILES` with `keyable: false`.
+    const keys = enumerateComposeSites(sources['compose/edit-clarify-response.ts']!);
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.sort()).toEqual(['assistant_text']);
+  });
+
+  it('post-analysis-label-intercept: the scan finds its ONE site', () => {
+    const keys = enumerateComposeSites(sources['routing/post-analysis-label-intercept.ts']!);
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.sort()).toEqual(['composeExploreText(canonicalLabel)']);
+  });
+
+  it('THE WIDENING: shorthand is parsed, and every pre-existing key is UNMOVED', () => {
+    // ⭐ THE TWO HALVES THAT MATTER, and the second is the one that could have
+    // broken the register for a non-semantic reason.
+    //
+    // (a) The enumerator now reads shorthand — in both the mid-object and the
+    //     final-property positions, and it does NOT match a longer identifier
+    //     that merely ends in `assistant_text`.
+    const wide = (span: string): string[] =>
+      enumerateComposeSites(`composeDirectAnswerResponse(${span})`);
+    expect(wide("{ answerKind: 'functional', assistant_text, stage: input.stage }")).toEqual([
+      'assistant_text',
+    ]);
+    expect(wide('{ stage, assistant_text }')).toEqual(['assistant_text']);
+    expect(wide('{ assistant_text: composeExploreText(label), stage }')).toEqual([
+      'composeExploreText(label)',
+    ]);
+    expect(wide('{ confirmation: confirmationText, coaching }')).toEqual(['confirmationText']);
+    expect(wide('{ stage: s, blocks: [] }')).toEqual(['UNPARSEABLE']);
+    // The `\b` guard: a longer identifier ending in the tracked name must not
+    // be mistaken for the tracked property.
+    expect(wide('{ draft_assistant_text: x, stage }')).toEqual(['UNPARSEABLE']);
+
+    // (b) NO EXISTING KEY MOVED. The register keys sites on
+    //     `expr.trim().slice(0, 70)` of RAW SOURCE, so a widening that
+    //     re-keyed even one site would fail the multiset assertion for a reason
+    //     that has nothing to do with a compose site drifting — the exact
+    //     fragility the header calls out about Prettier reflow. Re-derive the
+    //     OLD key for every site with the pre-1.276 regex and require equality
+    //     wherever the old regex could key at all.
+    const narrow = (span: string): string | null => {
+      const m = /(?:assistant_text|confirmation):\s*([^\n,]+)/.exec(span);
+      return m ? m[1]!.trim().slice(0, 70) : null;
+    };
+    let compared = 0;
+    for (const [label, src] of Object.entries(sources)) {
+      const pattern = /compose(?:Answer|ToolCallResponse|ClarifyResponse|DirectAnswerResponse)\(\{/g;
+      const newKeys = enumerateComposeSites(src);
+      let i = 0;
+      for (const m of src.matchAll(pattern)) {
+        const open = m.index! + m[0].length - 1;
+        let depth = 0;
+        let j = open;
+        for (; j < src.length; j++) {
+          const c = src[j];
+          if (c === '{') depth++;
+          else if (c === '}') {
+            depth--;
+            if (depth === 0) break;
+          }
+        }
+        const old = narrow(src.slice(open, j + 1));
+        if (old !== null) {
+          expect(newKeys[i], `${label} site ${i}: the widening RE-KEYED an existing site`).toBe(
+            old,
+          );
+          compared += 1;
+        }
+        i += 1;
+      }
+    }
+    // Anti-vacuity: this loop must actually have compared every site the OLD
+    // regex could key, not silently zero of them.
+    //
+    // 35 = all 36 sites MINUS the one shorthand site the old regex could not
+    // key. That single site is the entire behavioural delta of the widening,
+    // and this number says so precisely: 34 of the 35 are the previously
+    // scanned files, and the 35th is `post-analysis-label-intercept.ts`, which
+    // used `assistant_text:` and was therefore always keyable — it was
+    // unregistered for a different reason (nobody had derived its stance), and
+    // conflating the two exclusions is what this count prevents.
+    expect(compared, 'the re-key comparison compared nothing').toBe(35);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -660,7 +864,24 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // TESTING-DISCIPLINE rule 2: an instrument that returns the same answer for
     // "clean" and "could not look" is not an instrument. UNPARSEABLE would sail
     // through the set comparison as a single benign-looking key.
-    expect(enumerateComposeSites(source)).not.toContain('UNPARSEABLE');
+    //
+    // ⚠ WIDENED TO EVERY SCANNED FILE, 2026-07-27 (1.276). This assertion used
+    // to read only `source` (turn-executor.ts), so the one file in the estate
+    // that ACTUALLY keyed UNPARSEABLE — `compose/edit-clarify-response.ts`,
+    // via ES6 shorthand — was outside the assertion that exists to catch
+    // exactly that. The blindness was recorded honestly in
+    // `UNSCANNED_COMPOSE_FILES` rather than hidden, but it was recorded as a
+    // property of the FILE when it was a property of the ENUMERATOR. Now the
+    // enumerator reads shorthand and this checks all five.
+    for (const [label, src] of Object.entries(sources)) {
+      expect(
+        enumerateComposeSites(src),
+        `${label}: a compose site keyed UNPARSEABLE. The enumerator could not read the ` +
+          'expression feeding this site, so the register cannot speak for it — and an ' +
+          'unreadable site is indistinguishable from a clean one in the multiset comparison. ' +
+          'Widen the key regex; do not excuse the file.',
+      ).not.toContain('UNPARSEABLE');
+    }
   });
 
   it('POSITIVE CONTROL: the detector SEES a newly-added compose site', () => {
@@ -690,7 +911,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // about.
     //
     // ⚠ READ THE SCOPE WITH THE NUMBER. This `[]` speaks for turn-executor.ts,
-    // route-v2.ts AND handlers/chip-click-dispatch.ts — 34 sites / 30 keys — and
+    // route-v2.ts AND handlers/chip-click-dispatch.ts — 36 sites / 32 keys — and
     // NOT for the two files in UNSCANNED_COMPOSE_FILES (1 site each). The
     // difference from previous revisions is that the boundary is no longer a
     // sentence anyone has to keep true: the derived-domain test above fails if
@@ -708,11 +929,13 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // as covering more than it measures. Both figures are DERIVED from source on
     // every run; only the expectation is written down.
     const sites = enumerateAllScannedSites(sources);
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(34);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(30);
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(36);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(32);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
+      'compose/edit-clarify-response.ts',
       'handlers/chip-click-dispatch.ts',
       'route-v2.ts',
+      'routing/post-analysis-label-intercept.ts',
       'turn-executor.ts',
     ]);
   });
