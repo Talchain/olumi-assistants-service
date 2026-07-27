@@ -478,13 +478,15 @@ const ENRICHMENT_CLAIM_BLOBS: readonly string[] = [
  * `findLeaderClaims` CALL, so total work is bounded even on a pathological
  * envelope. The live blobs measure ~1–2k nodes, so this is ~25× headroom.
  *
- * ⚠ PER-CALL, NOT PER-RESPONSE — corrected 2026-07-27 (F9). This comment used
- * to say "shared across the WHOLE response". It is not: `findLeaderClaims`
- * allocates a FRESH `{ remaining }` on every invocation, and `sendFinalised200`
- * re-enters this chokepoint up to 4× per response, so a response gets up to 4×
- * this budget in total. Nothing depends on the stronger reading today, but a
- * future reader sizing the bound — or explaining a `scan_budget_exhausted`
- * count — would have been reasoning from a false statement about the mechanism.
+ * ⚠ PER-CALL, AND SINCE 2026-07-27 THAT IS ALSO PER-RESPONSE. The history is
+ * worth keeping because the entry was wrong twice in opposite directions.
+ * It first said "shared across the WHOLE response" (false — `findLeaderClaims`
+ * allocates a FRESH `{ remaining }` per invocation). F9 corrected that to "up
+ * to 4× this budget per response", which was closer but still wrong: the true
+ * re-entry count was 2–8, varying with which debug surfaces were enabled.
+ * ROADMAP 1.272 E1 then made the guard run ONCE per response, so per-call and
+ * per-response now coincide and a reader sizing the bound or explaining a
+ * `scan_budget_exhausted` count can use this number directly.
  *
  * Exhaustion is reported as a HIT, never as a silent truncation: a scanner that
  * quietly stops looking is the broken-alarm class this module exists to avoid.
@@ -667,16 +669,25 @@ export function guardLeadingOptionClaimsAtEgress(
       'constraint-feasibility.ts). Do NOT widen this guard instead: it is the alarm, not the fix.',
   );
 
-  // MULTIPLICITY, stated because a residue meter that is silently multiplied is
-  // worse than no meter: `sendFinalised200` re-enters this chokepoint up to 4×
-  // per response (validate, then finalise the validated-or-fallback envelope),
-  // and this event fires on EVERY pass that finds hits. A dashboard must
-  // therefore count DISTINCT `request_id`s, not raw increments.
+  // MULTIPLICITY: 1× PER RESPONSE. Corrected 2026-07-27 (ROADMAP 1.272 E1) —
+  // this comment previously instructed dashboard readers to count DISTINCT
+  // `request_id`s rather than raw increments, because `sendFinalised200`
+  // re-entered the guard "up to 4× per response".
   //
-  // Deliberately NOT deduped here: the alternative is request-scoped state in a
-  // pure module — a module-level Set keyed by request id, which leaks across
-  // requests and is a worse defect than a constant factor on a metric whose
-  // actionable payload (`hit_paths`) travels on the log line above.
+  // ⚠ THAT NUMBER WAS AN UNDERCOUNT, AND IT WAS LOAD-BEARING. The real figure
+  // was 2–8: one unconditional validate pass, exactly one of
+  // {validated, fallback}, and up to six CONDITIONAL re-attach passes
+  // (`_timings`, `_diagnostic_trace`, `_context_summary`, `_reasoning`,
+  // `_answer_shape`, synthesised shape). So the multiplier was not a constant
+  // at all — it varied with which debug surfaces were enabled in the
+  // environment, which is the worst shape a metric correction can take: a
+  // reader dividing by 4 got a different wrong answer per deployment.
+  //
+  // The fix was not to document the range. The guard now runs ONCE, on the
+  // final `wireBody` immediately before `reply.send` (see `sendFinalised200`),
+  // so raw increments and distinct `request_id`s are the same number and this
+  // event needs no correction factor at all. Dedup state in a pure module — the
+  // alternative previously ruled out here, correctly — is still not needed.
   emit(TelemetryEvents.V5LeadingOptionClaimAtEgress, {
     request_id: opts.requestId,
     exit_path: opts.exitPath,
