@@ -629,6 +629,87 @@ export class SupabaseSessionStore implements SessionStore {
     return out;
   }
 
+  /**
+   * The scenario's newest non-noop `run_analysis` fact — see
+   * {@link SessionStore.readNewestAnalysisFactFor} for WHY this is scoped to
+   * the scenario and not to the read window.
+   *
+   * SCOPE AT THE BYTES: `.eq('scenario_id', …)` is the only thing between this
+   * service-role read and every other scenario's facts — the client bypasses
+   * RLS. Same stance as `countTurns`.
+   *
+   * INDEX: `(scenario_id, handler_id, created_at DESC)`
+   * (`v5_handler_facts_scenario_handler_idx`, migration 20260417160000). The
+   * two `.eq()`s are the leading columns and `created_at DESC` is the third,
+   * so the `ORDER BY … LIMIT 1` is a single index descent with no sort.
+   * Live `EXPLAIN (ANALYZE)` on staging: `Index Scan using
+   * v5_handler_facts_scenario_handler_idx … rows=1`, cost 0.28..2.50.
+   *
+   * `handler_id`, not `payload->>'fact_type'`: the JSONB path is not indexed
+   * and would force a scenario-wide heap scan. They are the same value on
+   * every row — the write path fills both from the same fact (`mapFactsForRpc`
+   * → the RPC's `v_fact->>'handler_id'`), verified across all 1,600+ live rows
+   * (`run_analysis` 697, `explain_results` 380, …). `noop` is a real column
+   * for exactly this kind of SQL-level filtering.
+   *
+   * ⚠ DELIBERATELY NOT CACHED. `readRecent` consults `this.cache` first; this
+   * read must not, because the session LRU is process-local, has no TTL, and
+   * is invalidated only on the instance that performed the append
+   * (`invalidateAll` is a local `Map` operation). A cached permission could
+   * therefore be stale across instances — which is the SECOND independent
+   * route to the same guarantee-decay this method exists to close, and a route
+   * that can move the answer in BOTH directions. One indexed read per turn,
+   * derived from the source of truth every time; a cached copy of it would be
+   * the hand-maintained mirror (CLAUDE.md trap 12) all over again.
+   */
+  async readNewestAnalysisFactFor(scenarioId: string): Promise<HandlerFact | null> {
+    const { data, error } = await this.client
+      .from('v5_handler_facts')
+      .select('payload, noop')
+      .eq('scenario_id', scenarioId)
+      .eq('handler_id', 'run_analysis')
+      .eq('noop', false)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      // THROWS, never returns null on failure: "the scenario has no analysis"
+      // and "I could not look" are precisely the two states this whole change
+      // exists to stop conflating. The caller degrades explicitly.
+      throw new SessionReadError(
+        `readNewestAnalysisFactFor(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error, code: errCode(error) },
+      );
+    }
+
+    const rows = (data ?? []) as Array<{ payload: unknown; noop?: unknown }>;
+    const row = rows[0];
+    if (!row) return null;
+
+    // Same hydration contract as readFactsWithTurnFor: `payload` JSONB carries
+    // {fact_type, fact_version, result} while `noop` lives on its own column,
+    // and HandlerFactSchema is `.strict()` + requires `noop`. Rejoin before
+    // parsing or every row fails.
+    const payloadObj =
+      row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+        ? (row.payload as Record<string, unknown>)
+        : {};
+    const noop =
+      typeof row.noop === 'boolean'
+        ? row.noop
+        : typeof payloadObj.noop === 'boolean'
+          ? (payloadObj.noop as boolean)
+          : false;
+    const parsed = HandlerFactSchema.safeParse({ ...payloadObj, noop });
+    if (!parsed.success) {
+      throw new SessionReadError(
+        `readNewestAnalysisFactFor(${scenarioId}): payload failed HandlerFactSchema — ${parsed.error.message}`,
+        { cause: parsed.error },
+      );
+    }
+    return parsed.data;
+  }
+
   async invalidateScoped(
     scenarioId: string,
     scope: InvalidationScope,

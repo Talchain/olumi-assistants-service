@@ -772,6 +772,20 @@ function sendFinalised200(
      */
     readonly mayNameLeadingOption: boolean;
     /**
+     * WHERE the permission above came from, when the exit READ it from a fact
+     * rather than hardcoding it (2026-07-27).
+     *
+     * Optional and absent on the hardcoded-`true` exits by design: those turns
+     * consulted no analysis, so `null` at the wire is the honest statement.
+     * Stamping a provenance they did not earn would rebuild the exact
+     * indistinguishability this field exists to remove. Threaded from the run
+     * result, never re-derived here (CLAUDE.md trap #12).
+     */
+    readonly mayNameLeadingOptionProvenance?:
+      | 'scenario_fact'
+      | 'no_analysis_exists'
+      | 'fail_closed_truncated';
+    /**
      * ROADMAP 1.233 — which branch the Layer-2 withheld-explanation gate took,
      * when the dispatch family HAS that gate and it ran. Optional and absent
      * everywhere else: the turn-executor is the only producer today, and an
@@ -1016,6 +1030,14 @@ function sendFinalised200(
       // from the text.
       claim_safety: {
         may_name_leading_option: ctx.mayNameLeadingOption,
+        // The provenance discriminator (2026-07-27). Same single-derivation
+        // rule as the boolean beside it: threaded from the run result, never
+        // re-inferred here — the trace must not be able to disagree with the
+        // read it reports on. `null` on the exits that hand the route a
+        // hardcoded permission rather than a read one (fallback envelopes,
+        // pre-dispatch declines), which is itself the honest answer: those
+        // turns did not consult a fact.
+        verdict_provenance: ctx.mayNameLeadingOptionProvenance ?? null,
         withheld_projection_reason: ctx.withheldExplanationReason ?? null,
       },
     };
@@ -4352,6 +4374,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // latent, unexercised re-arming point that would have silently licensed
       // the next exit family to ship unguarded.
       mayNameLeadingOption: run.mayNameLeadingOption,
+      // …and its evidence. REQUIRED on the run result for the same reason the
+      // boolean is: a value reported without its provenance is a value no walk
+      // can falsify.
+      mayNameLeadingOptionProvenance: run.mayNameLeadingOptionProvenance,
       // ROADMAP 1.233 — the Layer-2 gate's own verdict, for the diagnostic
       // trace only. Absent ⇒ stamped `null` ("the gate did not run"), which is
       // the honest reading for a permitted turn or a non-explanation handler.

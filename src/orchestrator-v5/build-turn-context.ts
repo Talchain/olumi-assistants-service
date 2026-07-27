@@ -124,6 +124,34 @@ export interface EnrichedTurnContext extends TurnContext {
    */
   readonly prior_turns_total?: number | null;
   /**
+   * The SCENARIO's newest non-noop `run_analysis` fact — read past the window,
+   * `WHERE scenario_id = … ORDER BY created_at DESC LIMIT 1`.
+   *
+   * `prior_facts` below is a WINDOW: its facts are fetched by an `IN` over the
+   * 20 turn rows `readRecent` returned. The T1 claim-safety permission was
+   * read off that array, so a `run_analysis` fact whose parent turn had aged
+   * out was invisible and the "no analysis ⇒ nothing to withhold" branch fired
+   * on a scenario that DOES have a withheld analysis. This field is what lets
+   * the permission describe the scenario. Consumed ONLY through
+   * `readMayNameLeadingOptionVerdict` — never read directly, or it becomes a
+   * second derivation.
+   *
+   * `null` = the scenario has no such fact, OR the read did not run; those two
+   * are told apart by `newest_analysis_fact_read_ok`, never by this field.
+   *
+   * Optional on the type so hand-constructed test contexts keep compiling
+   * (mirrors `prior_turns_total`); production `buildTurnContext` always sets it.
+   */
+  readonly newest_analysis_fact?: HandlerFact | null;
+  /**
+   * Did the scenario-scoped analysis-fact read execute and succeed?
+   *
+   * `false` covers a thrown read AND a store that does not implement the
+   * method. It is the ONLY input that arms the fail-closed truncation guard,
+   * and it can only make the permission more restrictive — never less.
+   */
+  readonly newest_analysis_fact_read_ok?: boolean;
+  /**
    * Handler facts for prior_turns (V5 Group 1: used by coaching-cache
    * reader to resolve decision_review enrichment and last coaching signal).
    * Order matches prior_turns (newest-first). Empty array when no prior
@@ -368,9 +396,14 @@ export async function buildTurnContext(
   // add a serial round-trip to the turn's critical path. `fetchPriorTurns`
   // returns a window capped at SESSION_READ_WINDOW_TURNS; `fetchPriorTurnsTotal`
   // returns how many turns actually exist (or null when unknown).
-  const [priorTurns, priorTurnsTotal] = await Promise.all([
+  // The third read joins the same concurrent batch for the same reason: the T1
+  // claim-safety permission must describe the SCENARIO, and `priorTurns` is a
+  // 20-turn window. Concurrent ⇒ it costs the batch's max latency, not a
+  // serial addition.
+  const [priorTurns, priorTurnsTotal, newestAnalysisFactRead] = await Promise.all([
     fetchPriorTurns(payload.scenario_id, requestId, store),
     fetchPriorTurnsTotal(payload.scenario_id, requestId, store),
+    fetchNewestAnalysisFact(payload.scenario_id, requestId, store),
   ]);
   // V5 Conversation Context Reliability: continuity-gap guard. A 'chip'/'chip_click'
   // turn PROVABLY continues a prior conversation — the chip can only exist if a
@@ -560,6 +593,8 @@ export async function buildTurnContext(
     ...baseContext,
     prior_turns: priorTurns,
     prior_turns_total: priorTurnsTotal,
+    newest_analysis_fact: newestAnalysisFactRead.fact,
+    newest_analysis_fact_read_ok: newestAnalysisFactRead.readOk,
     prior_facts: priorFacts,
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
@@ -966,6 +1001,57 @@ async function fetchPriorTurnsTotal(
       severity: 'warning',
     });
     return null;
+  }
+}
+
+/**
+ * The SCENARIO's newest non-noop `run_analysis` fact, plus whether the read
+ * actually happened.
+ *
+ * WHY IT IS A SEPARATE READ FROM `fetchPriorFacts`. `fetchPriorFacts` loads
+ * facts by an `IN` over the WINDOWED turn row ids — so past
+ * `SESSION_READ_WINDOW_TURNS` (default 20) turns, the scenario's analysis fact
+ * is simply not there. The T1 claim-safety permission was read off that array
+ * while the channels it gates read the whole scenario (rolling summary
+ * `LIMIT 1000`; decision records scenario-wide), so on a long conversation a
+ * WITHHELD scenario shipped an ungated summary. This read makes the
+ * permission's scope match the content's scope. Same shape of fix, and the
+ * same justification, as `fetchPriorTurnsTotal`.
+ *
+ * ⚠ `readOk` IS NOT COSMETIC — it is what separates "the scenario has no
+ * analysis" from "I could not look". The first is an honest `true`; the second
+ * must not be allowed to masquerade as one, and it is the input that arms the
+ * fail-closed guard in `readMayNameLeadingOptionVerdict`. A store without the
+ * method (test mocks) is `readOk: false` for the same reason: absence of
+ * evidence is not evidence of absence.
+ *
+ * Never throws: a degraded fact read must not fail the turn. It degrades to
+ * `{fact: null, readOk: false}`, which is strictly MORE restrictive than the
+ * pre-fix behaviour, never less.
+ */
+async function fetchNewestAnalysisFact(
+  scenarioId: string,
+  requestId: string,
+  store: SessionStore | undefined,
+): Promise<{ readonly fact: HandlerFact | null; readonly readOk: boolean }> {
+  if (!store?.readNewestAnalysisFactFor) return { fact: null, readOk: false };
+  try {
+    const fact = await store.readNewestAnalysisFactFor(scenarioId);
+    return { fact, readOk: true };
+  } catch (error) {
+    const errorCode = error instanceof SessionReadError ? error.code : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn(
+      { request_id: requestId, scenario_id: scenarioId, error_code: errorCode, err: message },
+      'V5 buildTurnContext: session.readNewestAnalysisFactFor failed — claim-safety falls back to the window and may fail CLOSED',
+    );
+    emit(TelemetryEvents.SessionReadDegraded, {
+      request_id: requestId,
+      scenario_id: scenarioId,
+      error_code: errorCode ?? 'unknown',
+      severity: 'warning',
+    });
+    return { fact: null, readOk: false };
   }
 }
 

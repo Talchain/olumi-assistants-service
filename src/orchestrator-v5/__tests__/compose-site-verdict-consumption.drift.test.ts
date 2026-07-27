@@ -877,10 +877,43 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // The load-bearing structural claim of 1.233, pinned against source: the
     // permission is initialised from the persisted verdict at the DECLARATION,
     // so every early exit carries it. A revert to `= true` fails here.
-    expect(source).toContain(
+    expect(source).toContain('let mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(');
+    expect(source).not.toContain('let mayNameLeadingOptionForRun = true;');
+  });
+
+  it('the hoisted read is SCENARIO-scoped, not window-scoped (2026-07-27)', () => {
+    // ⭐ THE SECOND STRUCTURAL CLAIM, and it is a DIFFERENT one from the hoist.
+    // 1.233 fixed WHERE the permission is read (at the declaration, so every
+    // exit carries it). It did not fix WHAT is read: `context.prior_facts` is
+    // a `LIMIT SESSION_READ_WINDOW_TURNS` window, so past 20 turns the
+    // scenario's analysis fact was not loaded at all and the "no analysis ⇒
+    // true" branch fired on a WITHHELD scenario. Confirmed live on
+    // `f63ccb45-…`: rank 20 ⇒ `false`, rank 21 ⇒ `true`, zero store change.
+    //
+    // Both directions pinned. The scope must be PRESENT…
+    expect(source).toContain('const claimSafetyScope = claimSafetyScopeFromContext(context);');
+    // …and the window-scoped read must not come back, at EITHER read point.
+    // The post-dispatch refinement matters as much as the hoist: its
+    // unconditional assignment is only safe while its array is a superset of
+    // the entry array, which stops being true the moment it drops the scope.
+    expect(source).not.toContain('readMayNameLeadingOptionForFacts(context.prior_facts)');
+    expect(source).not.toContain('readMayNameLeadingOptionForFacts([');
+  });
+
+  it('POSITIVE CONTROL: the scenario-scope evidence check can FAIL', () => {
+    // Rule 2 — an instrument that cannot go red is not an instrument. Prove
+    // both halves discriminate by mutating the source they read.
+    const scope = 'const claimSafetyScope = claimSafetyScopeFromContext(context);';
+    expect(source).toContain(scope);
+    expect(source.replace(scope, 'const claimSafetyScope = null;')).not.toContain(scope);
+
+    // And the anti-regression half: a source that DID revert to the windowed
+    // read must trip the `not.toContain` above.
+    const reverted = source.replace(
+      'let mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(\n    context.prior_facts,\n    claimSafetyScope,\n  );',
       'let mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts(context.prior_facts);',
     );
-    expect(source).not.toContain('let mayNameLeadingOptionForRun = true;');
+    expect(reverted).toContain('readMayNameLeadingOptionForFacts(context.prior_facts)');
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1023,7 +1056,14 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // third caller gets the same answer BY CONSTRUCTION rather than by a
     // reviewer noticing", and the third caller got it by copy. Pinned in both
     // directions so the copy cannot come back.
-    expect(CHIP_CLICK).toContain('readMayNameLeadingOptionForFacts([');
+    expect(CHIP_CLICK).toContain('readMayNameLeadingOptionVerdict(');
     expect(CHIP_CLICK).not.toContain('selectRunAnalysisFact([...enrichedFacts');
+
+    // 2026-07-27 — and the SCOPE is shared too, not just the reader. Calling
+    // the shared function with a window-scoped input would give this exit a
+    // different permission from the routed path again: the same divergence the
+    // comment above says calling the shared reader was meant to end,
+    // reintroduced one layer down.
+    expect(CHIP_CLICK).toContain('claimSafetyScopeFromContext(context)');
   });
 });
