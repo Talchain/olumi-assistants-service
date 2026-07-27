@@ -61,6 +61,19 @@ function envelope(
   } as unknown as V2RunResponseEnvelope;
 }
 
+/**
+ * ⚠ THE `constraint_verdict` STAMP IS REQUIRED ON ANY FIXTURE THAT EXPECTS
+ * LEADER-NAMING PROSE — see the fuller note on the same helper in
+ * `src/orchestrator-v5/routing/__tests__/run-comparison-gate.test.ts`, and the
+ * #713 precedent in `turn-executor-what-changed-pill-dispatch.test.ts`.
+ *
+ * In this file the consumer is the `fresh + identical runs` case, whose
+ * "unchanged / still" honesty pin is leader-naming prose: the run-comparison
+ * gate now reads each compared run's OWN persisted verdict, and an unstamped
+ * completed analysis reads as "unknown" ⇒ withheld (fail-closed since #710).
+ * Stamping makes these fixtures model the constraint-checked, feasible runs
+ * they were always describing. A re-point at source, not a baseline bump.
+ */
 function runFact(env: V2RunResponseEnvelope, opts: { computedAt?: string; hash?: string | null } = {}): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -69,6 +82,10 @@ function runFact(env: V2RunResponseEnvelope, opts: { computedAt?: string; hash?:
       enrichment: env,
       computed_at: opts.computedAt ?? '2026-06-06T00:00:00.000Z',
       graph_hash_at_run: opts.hash === undefined ? 'a1b2c3d4e5f6a1b2' : opts.hash,
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible' as const,
+      },
     },
   } as unknown as HandlerFact;
 }

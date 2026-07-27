@@ -18,11 +18,44 @@ function envelope(options: Array<{ id: string; label: string; win: number }>, ba
   } as unknown as V2RunResponseEnvelope;
 }
 
+/**
+ * ⚠ THE `constraint_verdict` STAMP IS REQUIRED ON ANY FIXTURE THAT EXPECTS
+ * LEADER-NAMING PROSE. This is a re-point at source, not a baseline bump
+ * (TESTING-DISCIPLINE rule 5), and it has an exact precedent in this repo:
+ * `turn-executor-what-changed-pill-dispatch.test.ts`'s `makeRunFact` carries
+ * the same stamp for the same reason, added by #713.
+ *
+ * WHY IT IS NEEDED NOW. The gate's permission used to be a single turn-level
+ * boolean that these tests passed in directly, so the facts' OWN verdicts were
+ * never read. Per-run authorisation reads them: each compared run's leader is
+ * licensed by that run's persisted verdict conjoined with the turn's. An
+ * UNSTAMPED completed analysis is "unknown", not "verified feasible", and
+ * `readMayNameLeadingOptionFromResult` has fail-closed on it since #710 — so
+ * these fixtures were modelling a state that says "withhold" while asserting
+ * leader-naming output.
+ *
+ * The stamp makes the fixture model what it always meant: two real,
+ * constraint-checked, feasible runs. Its previous silence was
+ * under-specification. And removing this stamp turns the leader-naming
+ * assertions below red, which makes the fixture its own mutation check on the
+ * per-run gate — the pre-existing suite delivering the proof.
+ *
+ * The `ask(false)` arm below is unaffected: a withheld TURN still suppresses
+ * both runs, because the turn permission remains the outer conjunct.
+ */
 function runFact(env: V2RunResponseEnvelope): HandlerFact {
   return {
     fact_type: 'run_analysis',
     noop: false,
-    result: { enrichment: env, computed_at: '2026-06-06T00:00:00.000Z', graph_hash_at_run: 'h' },
+    result: {
+      enrichment: env,
+      computed_at: '2026-06-06T00:00:00.000Z',
+      graph_hash_at_run: 'h',
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible' as const,
+      },
+    },
   } as unknown as HandlerFact;
 }
 

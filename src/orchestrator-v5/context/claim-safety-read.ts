@@ -188,6 +188,74 @@ const ARRAY_ONLY_SCOPE: ClaimSafetyScenarioScope = {
 };
 
 /**
+ * ⭐ THE ONE FACT → ONE VERDICT NARROW. Read both claim-safety answers off a
+ * fact that has ALREADY been chosen, by whatever chose it.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS IS EXTRACTED, AND WHY A SECOND CALLER IS NOT A SECOND DERIVATION.
+ *
+ * This is the body of {@link readMayNameLeadingOptionVerdict}'s
+ * `selected !== null` branch, lifted verbatim. That function still calls it, so
+ * there is exactly ONE place in the estate that narrows a `HandlerFact` and
+ * reads the pair (permission, state) off its `result` — the property #730's
+ * "ONE typed object" note rests on.
+ *
+ * SELECTION IS NOT PART OF IT, and that separation is the whole point. The
+ * question "WHICH fact governs this turn?" is scenario-scoped and is answered
+ * once, by {@link readMayNameLeadingOptionVerdict} via
+ * `selectClaimBearingRunAnalysisFact`. The question "what did THIS fact's
+ * verdict say?" is fact-scoped, and a caller that has already selected its own
+ * facts for its own reason must not run the scenario selection a second time to
+ * ask it — that WOULD be the second derivation (CLAUDE.md trap #12), and a
+ * second selection ceremony in the run-comparison gate is precisely what #726
+ * nearly shipped.
+ *
+ * THE SECOND CALLER, and why it needs a fact-scoped read at all:
+ * `routing/run-comparison-gate.ts` composes prose about TWO runs, which the
+ * turn-level verdict cannot speak for — it describes the newest claim-bearing
+ * fact and nothing else, so a PREVIOUS run's withheld leader was being named
+ * under the CURRENT run's permission. The gate selects its own pair
+ * (`selectTwoNewestRunAnalysisFacts`, which it has always owned) and asks this
+ * function what each of those two facts said. It never re-asks the turn
+ * question.
+ *
+ * `provenance` carries the same meaning it always had — `scenario_fact` means
+ * "a run_analysis fact was selected and its verdict was read; the answer
+ * describes a real analysis" — which is true of a per-run read as well. No new
+ * state is added: #726 and #730 both bought their discriminators to separate
+ * answers that were previously the SAME wire byte, and "which selector picked
+ * this fact" is not a distinction any consumer branches on.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+export function readMayNameLeadingOptionVerdictForFact(
+  fact: HandlerFact,
+): MayNameLeadingOptionVerdict {
+  if (fact.fact_type !== 'run_analysis') {
+    // A selection we cannot interpret. This branch used to return `true` —
+    // "the honest answer for a fact that is not an analysis is the same as
+    // for no analysis at all" — which is exactly the reasoning #730's P0
+    // showed to be unsafe: something WAS selected, so "no analysis" is not
+    // what happened, and an uninterpretable claim-bearer must not be
+    // entitled. Unreachable from the scenario selector (it only returns
+    // run_analysis facts), and kept fail-closed so it cannot become reachable
+    // and open — including for the per-run caller, whose own selector
+    // (`isSuccessfulRunAnalysisFact`) carries the same narrowing today.
+    return {
+      may_name_leading_option: false,
+      constraint_verdict_state: null,
+      provenance: 'fail_closed_uninterpretable',
+    };
+  }
+  return {
+    // ONE fact, both answers, one narrow. Two `fact_type` checks would be two
+    // chances to narrow differently on a single fact.
+    may_name_leading_option: readMayNameLeadingOptionFromResult(fact.result),
+    constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
+    provenance: 'scenario_fact',
+  };
+}
+
+/**
  * ⭐ May a turn on THIS SCENARIO name a leading option, and on what evidence?
  *
  * ═══════════════════════════════════════════════════════════════════════════
@@ -271,28 +339,7 @@ export function readMayNameLeadingOptionVerdict(
   // `readConstraintVerdictStateForFacts` used to be. It is now a delegate.
   const selected = selectClaimBearingRunAnalysisFact(facts);
   if (selected !== null) {
-    const fact = selected.fact;
-    if (fact.fact_type !== 'run_analysis') {
-      // A selection we cannot interpret. This branch used to return `true` —
-      // "the honest answer for a fact that is not an analysis is the same as
-      // for no analysis at all" — which is exactly the reasoning the P0 above
-      // showed to be unsafe: something WAS selected, so "no analysis" is not
-      // what happened, and an uninterpretable claim-bearer must not be
-      // entitled. Unreachable today (the selector only returns run_analysis
-      // facts), and kept fail-closed so it cannot become reachable and open.
-      return {
-        may_name_leading_option: false,
-        constraint_verdict_state: null,
-        provenance: 'fail_closed_uninterpretable',
-      };
-    }
-    return {
-      // ONE fact, both answers, one narrow. Two `fact_type` checks would be two
-      // chances to narrow differently on a single fact.
-      may_name_leading_option: readMayNameLeadingOptionFromResult(fact.result),
-      constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
-      provenance: 'scenario_fact',
-    };
+    return readMayNameLeadingOptionVerdictForFact(selected.fact);
   }
 
   // BELT AND BRACES — and it is a FALLBACK, not the mechanism. It requires

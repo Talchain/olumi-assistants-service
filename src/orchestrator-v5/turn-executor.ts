@@ -5478,6 +5478,15 @@ export async function runTurnExecutor(
           // permission is READ here (hoisted to turn entry) and consumed inside
           // `composeComparison`, which suppresses the ordering and margin
           // sentences and keeps the robustness / driver-influence ones.
+          //
+          // ⚠ THIS IS THE TURN'S PERMISSION AND IT IS NOW THE OUTER CONJUNCT
+          // ONLY. It describes the scenario's newest CLAIM-BEARING fact (#730);
+          // a comparison names TWO runs, so passing it alone meant a PREVIOUS
+          // run's withheld leader was named under the CURRENT run's verdict.
+          // The gate refines it per compared run, reading each run's own
+          // verdict off the pair it already selects. Nothing moves here: the
+          // per-run reads can only narrow this value, never widen it, and this
+          // remains the only input carrying `fail_closed_truncated`.
           mayNameLeadingOption: mayNameLeadingOptionForRun,
           // Spine A backstop: option-controlled levers must not be reported as
           // gaining/losing influence in run-comparison prose (the comparator
