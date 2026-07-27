@@ -32,18 +32,41 @@ import {
   readMayNameLeadingOptionFromResult,
 } from '../../orchestrator/context/constraint-feasibility.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
-import { selectClaimBearingRunAnalysisFact } from './freshness.js';
+import { selectClaimBearingRunAnalysisFact, selectRunAnalysisFact } from './freshness.js';
 
 /**
  * May a turn grounded in THIS fact array name a leading option?
  *
- * Selection is CONTENT-based via {@link selectRunAnalysisFact} — the same
- * canonical selector the freshness derivation and compose's lifecycle
- * resolution use — so the permission and the prose it governs describe the same
- * analysis. The verdict itself is read by
- * {@link readMayNameLeadingOptionFromResult} (typed `result.constraint_verdict`
- * first, the interim `enrichment.__cee_claim_safety` stamp second); this
- * function never re-derives it from constraints or graph state.
+ * ⚠ THIS PARAGRAPH WAS FALSE FROM #730 UNTIL F1, AND THE FALSE VERSION IS WHY
+ * THE DEFECT SURVIVED REVIEW. It read: "Selection is CONTENT-based via
+ * `selectRunAnalysisFact` — the same canonical selector the freshness
+ * derivation and compose's lifecycle resolution use — so the permission and the
+ * prose it governs describe the same analysis." #730 changed the selector to
+ * {@link selectClaimBearingRunAnalysisFact} and left the sentence standing, so
+ * the file asserted the ONE property it had just stopped having (CLAUDE.md trap
+ * #14 — an honest label overwritten by a false one, here by omission).
+ *
+ * WHAT IS TRUE NOW. TWO selectors are consulted, because two different facts
+ * can govern one turn and the permission has to answer for BOTH:
+ *
+ *   - {@link selectClaimBearingRunAnalysisFact} — the ENTITLEMENT fact: the
+ *     newest fact that made a claim, whatever its `analysis_status`. #730's
+ *     fix; it stops a newer WITHHELD `partial` being invisible.
+ *   - {@link selectRunAnalysisFact} — the DISPLAYED fact: the newest
+ *     SUCCESSFUL analysis, i.e. the one `buildAnalysisFromPriorFacts` projects
+ *     into `contextPack.analysis` and thence into everything the model and the
+ *     deterministic composers read.
+ *
+ * The permission is their CONJUNCTION. So the invariant the old sentence
+ * claimed is now true by construction and stated as what it is: **no analysis
+ * whose own verdict withheld the leader claim can be named under another
+ * analysis's permission.** See {@link readMayNameLeadingOptionVerdict} for the
+ * derivation and for why this is not the second-derivation defect.
+ *
+ * The verdict itself is read by {@link readMayNameLeadingOptionFromResult}
+ * (typed `result.constraint_verdict` first, the interim
+ * `enrichment.__cee_claim_safety` stamp second); this function never re-derives
+ * it from constraints or graph state.
  *
  * TWO DIFFERENT DEFAULTS, deliberately:
  *
@@ -118,7 +141,22 @@ export type MayNameLeadingOptionProvenance =
    * problem on the `false` side. This state replaces a branch that used to
    * return `true` for an uninterpretable selection.
    */
-  | 'fail_closed_uninterpretable';
+  | 'fail_closed_uninterpretable'
+  /**
+   * The ENTITLEMENT fact permitted, but the analysis this turn can actually
+   * DISPLAY is a DIFFERENT, older fact whose own verdict WITHHELD. F1.
+   *
+   * Its own state for the same reason the two above have theirs. "The newest
+   * claim withheld" and "the newest claim permitted, but the analysis the user
+   * is being shown withheld" are different situations needing different fixes:
+   * the first is a constraint problem on the current run, the second means the
+   * newest run is non-displayable (`partial` / `degraded` / an unrecognised
+   * future PLoT status) and the product is projecting an older one. A triager
+   * reading `_diagnostic_trace.claim_safety` must be able to tell them apart,
+   * and folding this into `scenario_fact` would make them the same wire byte —
+   * which is exactly what #726 and #730 each bought a discriminator to stop.
+   */
+  | 'fail_closed_projected_analysis';
 
 export interface MayNameLeadingOptionVerdict {
   readonly may_name_leading_option: boolean;
@@ -332,14 +370,24 @@ export function readMayNameLeadingOptionVerdict(
   // this function answered `true` on the "no analysis exists" branch. See
   // `selectClaimBearingRunAnalysisFact` for the full derivation.
   //
-  // Everything this module answers is read off `selected` — the permission AND
-  // the state that explains it. There is deliberately no second selector call
-  // in this file: a sibling reader with its own selection is the second
-  // DERIVATION the header forbids, and it is what
-  // `readConstraintVerdictStateForFacts` used to be. It is now a delegate.
+  // ⚠ THE SENTENCE THAT USED TO SIT HERE IS NOW WRONG, AND IS REPLACED RATHER
+  // THAN QUIETLY DELETED. It said: "There is deliberately no second selector
+  // call in this file: a sibling reader with its own selection is the second
+  // DERIVATION the header forbids." The rule it states is right and still
+  // binding — for a sibling reader answering THE SAME QUESTION, which is what
+  // `readConstraintVerdictStateForFacts` used to be and is why it is now a
+  // delegate. It is NOT a rule against consulting a second fact when a second
+  // fact genuinely governs the turn: that is #730's own "two selectors
+  // answering two questions is DESIGN; two copies of one ordering rule is the
+  // mirror defect", and the two selectors below share one ordering core
+  // (`selectNewestRunAnalysisFact`) precisely so no rule is copied.
   const selected = selectClaimBearingRunAnalysisFact(facts);
   if (selected !== null) {
-    return readMayNameLeadingOptionVerdictForFact(selected.fact);
+    const entitlement = readMayNameLeadingOptionVerdictForFact(selected.fact);
+    // A withheld entitlement already withholds; nothing below can widen it, and
+    // the early return keeps the common path a single selection.
+    if (!entitlement.may_name_leading_option) return entitlement;
+    return narrowToProjectedAnalysis(facts, selected.fact, entitlement);
   }
 
   // BELT AND BRACES — and it is a FALLBACK, not the mechanism. It requires
@@ -373,6 +421,99 @@ export function readMayNameLeadingOptionVerdict(
     may_name_leading_option: true,
     constraint_verdict_state: null,
     provenance: 'no_analysis_exists',
+  };
+}
+
+/**
+ * ⭐ F1 — THE SECOND CONJUNCT: the analysis this turn can actually DISPLAY.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE DEFECT THIS CLOSES, and why #730's fix is preserved rather than reverted.
+ *
+ * #730 correctly stopped the ENTITLEMENT question being answered with a QUALITY
+ * filter. What it left behind is that the two questions are now answered by
+ * DIFFERENT FACTS, and only one of them is the fact the turn shows:
+ *
+ *   permission : `selectClaimBearingRunAnalysisFact` → newest fact, ANY status
+ *   content    : `selectRunAnalysisFact`             → newest SUCCESSFUL fact
+ *                (`analysis-fallback.ts:510` — `buildAnalysisFromPriorFacts`
+ *                 selects with it, and its output IS `contextPack.analysis`,
+ *                 `display_analysis`, and the input to every deterministic
+ *                 leader composer)
+ *
+ * Given A = newest SUCCESSFUL fact, WITHHELD, and B = a NEWER `partial` fact,
+ * PERMITTED, the permission read B and said `true` while every content channel
+ * carried A. The model-input chokepoint (`turn-executor.ts:2208`) keys on this
+ * boolean, so the pack shipped A's withheld leader UNPROJECTED — and the
+ * Layer-3 egress alarm was armed with `true`, so the leak did not even count.
+ *
+ * REACHABLE, not theoretical: `deriveConstraintVerdict` takes the PLoT
+ * response, the ratified constraints and the leading option id — NOT
+ * `analysis_status` (`tools/handlers/run-analysis.ts:837`). Verdict and status
+ * are orthogonal, and the handler accepts and persists a `partial` analysis.
+ *
+ * WHY THE CONJUNCTION IS THE RIGHT SHAPE, AND NOT A REVERT.
+ * Reverting #730's selector would restore the fail-open it closed (a withheld
+ * `partial` invisible to the permission). Both questions have to be answered,
+ * and the honest permission for a TURN is the AND of them: the turn may name a
+ * leader only if the claim it is entitled to make and the analysis it is able
+ * to show BOTH permit it. Neither conjunct can move an answer from `false` to
+ * `true`, so #726's one-directionality argument survives intact.
+ *
+ * PROVABLY A NO-OP OFF THE DIVERGENCE PATH. When the newest claim-bearing fact
+ * passes the quality filter — every scenario without a `partial` / `degraded` /
+ * unrecognised-status fact newer than its newest successful one — both
+ * selectors return the SAME fact, the reference check below is `true`, and the
+ * function returns the entitlement verdict unchanged, byte for byte.
+ *
+ * ⚠ THE WINDOW/SCENARIO ASYMMETRY, CHECKED RATHER THAN ASSUMED. This selects
+ * over `facts` = windowFacts ∪ {scenario-newest}, while
+ * `buildAnalysisFromPriorFacts` selects over the bare window. They could name
+ * different facts only if the union's extra member S were successful AND newer
+ * than every windowed successful fact — but by the one-directionality proof in
+ * {@link readMayNameLeadingOptionVerdict}, S outside the window implies the
+ * window holds NO `run_analysis` fact at all, so the projection is `null` and
+ * there is no displayed analysis to disagree about. Unreachable by
+ * construction, in the safe direction either way.
+ *
+ * ⚠ WHAT THIS DELIBERATELY DOES NOT DO: gate `buildAnalysisFromPriorFacts`
+ * itself. Blanking the winner there would also blank the RAW handler-facing
+ * `analysis` slot — chips, telemetry (`leading_option_present`), projection
+ * summaries and `chip-generator.ts`'s projection-buildability probe all read
+ * it, and the model never sees it. Gating the PERMISSION keeps one chokepoint
+ * honest; gating the projection would degrade unrelated surfaces to buy the
+ * same thing.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+function narrowToProjectedAnalysis(
+  facts: readonly HandlerFact[],
+  entitlementFact: HandlerFact,
+  entitlement: MayNameLeadingOptionVerdict,
+): MayNameLeadingOptionVerdict {
+  const projected = selectRunAnalysisFact(facts);
+  // No displayable analysis (only partials, or nothing at all) ⇒ no second
+  // conjunct, and #730's rule governs alone: the newest CLAIM-BEARING fact
+  // decides. This is the branch that keeps the fix from degenerating into
+  // "withhold always wins".
+  if (projected === null) return entitlement;
+  // Same fact ⇒ same verdict. The check is redundant arithmetically and kept
+  // for the guarantee it makes readable: this function can only ever move an
+  // answer on the DIVERGENCE path.
+  if (projected.fact === entitlementFact) return entitlement;
+
+  const displayed = readMayNameLeadingOptionVerdictForFact(projected.fact);
+  if (displayed.may_name_leading_option) return entitlement;
+
+  return {
+    may_name_leading_option: false,
+    // THE DISPLAYED FACT'S state, not the entitling fact's. The state is what
+    // the withheld-leader note explains the withhold WITH, and the entitling
+    // fact's state describes the verdict that did NOT cause it — reporting it
+    // here would be #730's own P2 ("withheld correctly and explained the wrong
+    // reason") rebuilt at a new address. Permission, state and disclosure copy
+    // still originate from ONE fact; F1 only changes WHICH fact that is.
+    constraint_verdict_state: displayed.constraint_verdict_state,
+    provenance: 'fail_closed_projected_analysis',
   };
 }
 

@@ -53,6 +53,8 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLAIM_SAFETY_READ = resolve(HERE, '../claim-safety-read.ts');
 const TURN_EXECUTOR = resolve(HERE, '../../turn-executor.ts');
+/** Where both selectors live, and where the ONE ordering core has to stay. */
+const FRESHNESS = resolve(HERE, '../freshness.ts');
 
 const base = {
   scenario_id: 's',
@@ -208,6 +210,7 @@ describe('the permission and the state come from ONE selection (B2)', () => {
 describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => {
   const claimSafetySource = readFileSync(CLAIM_SAFETY_READ, 'utf8');
   const turnExecutorSource = readFileSync(TURN_EXECUTOR, 'utf8');
+  const freshnessSource = readFileSync(FRESHNESS, 'utf8');
 
   /** Count real CALLS, not the mentions in prose. Derived, never listed. */
   const countCalls = (source: string, symbol: string): number =>
@@ -216,36 +219,114 @@ describe('STRUCTURAL: the duplicated selection cannot come back quietly', () => 
       return code.includes(`${symbol}(`);
     }).length;
 
-  it('the mechanism file performs EXACTLY ONE selection', () => {
-    // The number is the whole claim. Two was the state of this file before the
-    // collapse — a sibling reader with its own `selectRunAnalysisFact`, inside
-    // the module whose header forbids a second derivation.
-    // NOTE the symbol: `selectClaimBearingRunAnalysisFact`, the ENTITLEMENT
-    // selector introduced by the P0 fix. Counting `selectRunAnalysisFact` here
-    // would now be a pin on a symbol this file no longer calls — and would pass
-    // at zero, i.e. vacuously (CLAUDE.md trap #13).
+  /**
+   * EVERY `select…(` call in code, keyed by symbol. DERIVED — a new selector,
+   * a renamed one, or a second call to an existing one all change this map.
+   * Comment lines are excluded the same way {@link countCalls} excludes them,
+   * so the prose above a selection can name it without arming the pin.
+   */
+  const selectionCalls = (source: string): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const line of source.split('\n')) {
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;
+      for (const m of line.matchAll(/\b(select[A-Za-z0-9_]*)\s*\(/g)) {
+        out[m[1]!] = (out[m[1]!] ?? 0) + 1;
+      }
+    }
+    return out;
+  };
+
+  it('the mechanism file performs EXACTLY THE TWO NAMED SELECTIONS', () => {
+    // ⚠ CORRECTED BY F1 — AND THE VERSION THIS REPLACES HAD BECOME A FALSE
+    // LABEL ON A TRUE FILE. It asserted "the mechanism file performs EXACTLY
+    // ONE selection" and its failure message ended "do not call the selector
+    // again". Both were written when the file made one selection. F1 added a
+    // SECOND, deliberately — and the pin stayed GREEN through it, because it
+    // counted only `selectClaimBearingRunAnalysisFact` and F1's addition is
+    // `selectRunAnalysisFact`. So the estate carried a structural pin whose
+    // stated invariant the file no longer had, passing for a reason unrelated
+    // to what it claimed to measure. CLAUDE.md trap #14, in an instrument.
+    //
+    // ⭐ THE INVARIANT IS NOT "ONE SELECTION". It never really was — it is
+    // ONE DERIVATION PER QUESTION. Two questions genuinely govern one turn:
+    //
+    //   `selectClaimBearingRunAnalysisFact` — ENTITLEMENT: what is the newest
+    //       claim, and did its verdict withhold? (#730)
+    //   `selectRunAnalysisFact`             — DISPLAY: which analysis does this
+    //       turn actually project, and did THAT fact's verdict withhold? (F1)
+    //
+    // Two selectors answering two questions is DESIGN; a second selector
+    // answering the SAME question is the defect this file exists to catch, and
+    // it is what `readConstraintVerdictStateForFacts` was until #730 made it a
+    // delegate. The map below is exact, so a THIRD selection — or a second call
+    // to either of these two — fails loudly, which is the property the old
+    // count was reaching for and, as of F1, no longer had.
     expect(
-      countCalls(claimSafetySource, 'selectClaimBearingRunAnalysisFact'),
-      'claim-safety-read.ts must select the analysis fact ONCE. A second selection here is a ' +
-        'second DERIVATION of the same answer — the exact class this module exists to close, ' +
-        'and the class it was itself carrying until 2026-07-27. If you need another projection ' +
-        'of the verdict, add a MEMBER to MayNameLeadingOptionVerdict and read it off the one ' +
-        'selection; do not call the selector again.',
-    ).toBe(1);
+      selectionCalls(claimSafetySource),
+      'claim-safety-read.ts must perform EXACTLY these two selections, once each: ' +
+        '`selectClaimBearingRunAnalysisFact` (entitlement) and `selectRunAnalysisFact` ' +
+        '(the displayed analysis). A THIRD selection, or a second call to either, is a second ' +
+        'DERIVATION of an answer this module already has — the exact class this module exists ' +
+        'to close. If you need another projection of the verdict, add a MEMBER to ' +
+        'MayNameLeadingOptionVerdict and read it off a selection that already happened.',
+    ).toEqual({
+      selectClaimBearingRunAnalysisFact: 1,
+      selectRunAnalysisFact: 1,
+    });
   });
 
-  it('POSITIVE CONTROL: the one-selection count can FAIL', () => {
-    // Rule 2 — an instrument that returns the same answer for "one selection"
-    // and "could not look" is not an instrument. Re-introduce the removed
-    // sibling derivation and prove the count moves.
-    const reverted = claimSafetySource.replace(
-      'return readMayNameLeadingOptionVerdict(facts, ARRAY_ONLY_SCOPE)\n    .constraint_verdict_state;',
-      'const selected = selectClaimBearingRunAnalysisFact(facts);\n  if (selected === null) return null;\n  return null;',
-    );
-    expect(reverted, 'the anchor for the mutation no longer exists — re-derive it').not.toBe(
-      claimSafetySource,
-    );
-    expect(countCalls(reverted, 'selectClaimBearingRunAnalysisFact')).toBe(2);
+  it('POSITIVE CONTROL: the selection map can FAIL on a THIRD selection', () => {
+    // Rule 2 — an instrument that returns the same answer for "exactly two
+    // selections" and "could not look" is not an instrument. Plant the third.
+    const planted = `${claimSafetySource}\nconst extra = selectRunAnalysisFact(facts);`;
+    expect(selectionCalls(planted)).toEqual({
+      selectClaimBearingRunAnalysisFact: 1,
+      selectRunAnalysisFact: 2,
+    });
+    // …and the code-vs-comment discriminator really works, or the pin would
+    // forbid the file from documenting its own selections.
+    const commented = `${claimSafetySource}\n// const extra = selectRunAnalysisFact(facts);`;
+    expect(selectionCalls(commented)).toEqual(selectionCalls(claimSafetySource));
+  });
+
+  it('BOTH selections resolve through the SHARED ordering core', () => {
+    // The other half of "two selectors is design, not duplication", and the
+    // half a call-count cannot see. #730's argument for splitting them rests
+    // entirely on `selectNewestRunAnalysisFact` being the ONE newest-first
+    // rule — "so 'the entitlement fact and the freshness fact are ordered the
+    // same way' is true by construction". If either selector ever grew its own
+    // ordering, F1's conjunction would compare verdicts from facts chosen by
+    // two different rules and the identity fast-path could stop holding on
+    // inputs where the two orderings disagree.
+    //
+    // DERIVED from each function's own body, so a copy-pasted sort fails here
+    // rather than in a reviewer's head.
+    for (const name of ['selectRunAnalysisFact', 'selectClaimBearingRunAnalysisFact']) {
+      const start = freshnessSource.indexOf(`export function ${name}(`);
+      expect(start, `${name} is no longer an exported function in freshness.ts`).toBeGreaterThan(-1);
+      const end = freshnessSource.indexOf('\n}\n', start);
+      const body = freshnessSource.slice(start, end);
+      expect(
+        (body.match(/selectNewestRunAnalysisFact\s*\(/g) ?? []).length,
+        `${name} must delegate to the shared newest-first core exactly once`,
+      ).toBe(1);
+      expect(
+        body,
+        `${name} carries its own ordering. Two copies of one ordering rule is the mirror ` +
+          'defect (CLAUDE.md trap #12) — and it is the premise F1\'s conjunction rests on.',
+      ).not.toContain('.sort(');
+    }
+  });
+
+  it('POSITIVE CONTROL: the shared-core check can see a private ordering', () => {
+    // The absence assertion above must be able to see a presence. Plant a sort
+    // into one selector's body and prove the check moves.
+    const name = 'selectRunAnalysisFact';
+    const start = freshnessSource.indexOf(`export function ${name}(`);
+    const end = freshnessSource.indexOf('\n}\n', start);
+    const planted = `${freshnessSource.slice(start, end)}\n  candidates.sort(() => 0);`;
+    expect(planted).toContain('.sort(');
+    expect(freshnessSource.slice(start, end)).not.toContain('.sort(');
   });
 
   it('turn-executor NEVER re-reads the verdict state locally', () => {
