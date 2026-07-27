@@ -43,13 +43,15 @@
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * SCOPE, STATED. This control covers the DETERMINISTIC producers only —
- * `composeExplainResultsFallback` and `composeWhatWouldFlipFallback`. Sonnet's
+ * `composeExplainResultsFallback`, `composeWhatWouldFlipFallback`, and (since
+ * 2026-07-27) `composeComparison` in `routing/run-comparison-gate.ts`. Sonnet's
  * free prose is unbounded and cannot be enumerated; it remains covered by the
  * pattern list as a best-effort net, and the live walk is what measures the
  * residue there. What this file removes is the excuse for missing a string THE
  * REPO ITSELF WRITES.
  */
 import { describe, it, expect } from 'vitest';
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
   composeExplainResultsFallback,
@@ -60,6 +62,8 @@ import {
   textAssertsLeadingOption,
   textNamesLeadingOption,
 } from '../leading-option-egress-guard.js';
+import { tryRunComparisonGate } from '../../routing/run-comparison-gate.js';
+import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 
 /**
  * The branch space of `composeRobustnessVerdict`, which both fallbacks route
@@ -263,5 +267,311 @@ describe('PRODUCER CONTROL — the enforcement scanner sees the repo\'s own temp
           'and that link is estimated rather than measured.',
       ),
     ).toBe(false);
+  });
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE THIRD DETERMINISTIC PRODUCER — `composeComparison`, added 2026-07-27.
+ *
+ * WHY IT BELONGS HERE AND NOT IN A GATE-LOCAL TEST. The two fallbacks above are
+ * covered because they are templates THIS REPO WRITES, and the file's whole
+ * argument is that a vocabulary list cannot be hand-synced to the templates it
+ * is supposed to see. `composeComparison` is the same kind of object — pure,
+ * deterministic, in-repo, leader-naming, with zero LLM in the path — and it was
+ * outside every derivation. The `performs_best` hole is what that costs.
+ *
+ * THE HOLE THIS SECTION FOUND, stated so a reader does not have to re-derive it.
+ * `LEADER_CLAIM_PATTERNS`'s `comes_out_ahead` read
+ * `/\bcomes?\s+out\s+(?:ahead|on\s+top)\b/i` — come / comes, and NOT the past
+ * tense. `composeComparison`'s #731 mixed branch emits, verbatim:
+ *
+ *     "${prior_leading_label} came out ahead in the earlier run."
+ *
+ * That sentence matched **NOTHING** in the list. Its sibling, the both-permitted
+ * template, emits "${prior} came out ahead before, and ${current} now leads." —
+ * seen today ONLY because the trailing clause says "now leads". The leader claim
+ * about the PRIOR run was invisible in both, and in the mixed branch there is no
+ * neighbouring clause to catch it. Byte-for-byte the incidental-catch pattern
+ * this file already records for `performs best`, arriving through a producer
+ * that shipped the day before.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE ASSERTION IS PER-CLAUSE, NOT PER-OUTPUT, AND THAT IS THE WHOLE POINT.
+ *
+ * A whole-answer assertion passes here without the fix: every arm of
+ * `composeComparison` that names the prior leader ALSO carries a sentence with
+ * `leads` in it, or a withheld substitution that does not. Scanning the blob
+ * measures the blob. The property that actually matters is that the CLAUSE
+ * carrying the claim is visible on its own, because that is the granularity the
+ * enforcing consumers work at — `context/withheld-history-redaction.ts` redacts
+ * per sentence, and `compose/withheld-explanation-answer.ts` decides
+ * REPLACE-vs-APPEND on whether it can see a claim at all.
+ *
+ * THE RULE IS DERIVED FROM THE FIXTURE, NOT FROM A LIST OF SENTENCES: every
+ * independent clause containing an OPTION LABEL THIS TEST INJECTED must be seen
+ * by the scanner. No template is named, so a reworded or newly-added branch is
+ * covered on the commit that writes it.
+ *
+ * SCOPE LIMIT, STATED HONESTLY. The rule assumes that in a COMPARISON answer a
+ * clause naming an option is designating its rank. That is true of every branch
+ * `composeComparison` has, and it is true by the gate's own construction — its
+ * job is to state what moved between two runs. A future branch that names an
+ * option WITHOUT ranking it (say, "X was ruled out by the budget constraint")
+ * would fail here, and that failure is correct behaviour for this control: it
+ * is a new claim class in a leader-gated composer and it wants a deliberate
+ * decision, not a silent pass.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
+  /** The two option labels the fixture injects. Nothing else names an option. */
+  const OPTION_LABELS = ['Standardise on MacBook Pro', 'Standardise on Dell XPS'] as const;
+
+  function envelope(
+    options: ReadonlyArray<{ id: string; label: string; win: number }>,
+    band: string,
+  ): V2RunResponseEnvelope {
+    return {
+      analysis_status: 'completed',
+      results: options.map((o) => ({
+        option_id: o.id,
+        option_label: o.label,
+        win_probability: o.win,
+      })),
+      robustness_synthesis: { overall_assessment: band },
+    } as unknown as V2RunResponseEnvelope;
+  }
+
+  /**
+   * How a run's claim-safety verdict is recorded on the persisted fact — the
+   * axis #731 introduced. `unstamped` is NOT a synonym for `withheld`: it is
+   * the legacy shape (every run persisted before #710) and reaches `false`
+   * through the reader's fail-closed default.
+   */
+  type VerdictShape = 'permitted' | 'withheld' | 'unstamped';
+  const VERDICT_SHAPES = ['permitted', 'withheld', 'unstamped'] as const;
+
+  function runFact(
+    env: V2RunResponseEnvelope,
+    shape: VerdictShape,
+    computedAt: string,
+  ): HandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      noop: false,
+      result: {
+        enrichment: env,
+        computed_at: computedAt,
+        graph_hash_at_run: 'h',
+        ...(shape === 'unstamped'
+          ? {}
+          : {
+              constraint_verdict: {
+                may_name_leading_option: shape === 'permitted',
+                constraint_verdict_state:
+                  shape === 'permitted' ? 'evaluated_feasible' : 'evaluated_infeasible',
+              },
+            }),
+      },
+    } as unknown as HandlerFact;
+  }
+
+  /**
+   * The gate's branch space for LEADER-DESIGNATING prose, enumerated from the
+   * composer's own conditionals rather than guessed:
+   *   prior verdict   x current verdict     — the four permission arms (#731)
+   *   ordering        ∈ changed | unchanged — "has changed …" vs "still leads"
+   *   margin          ∈ widened | narrowed | unchanged — the three lead sentences
+   * `MARGIN_EPSILON_PP` is 0.5 in `coaching/compare-runs.ts`, so these gaps are
+   * chosen to land unambiguously either side of it.
+   */
+  const ORDERING = [
+    { name: 'changed', currentTop: 1 },
+    { name: 'unchanged', currentTop: 0 },
+  ] as const;
+
+  const MARGIN = [
+    { name: 'widened', top: 0.7, runner: 0.3 },
+    { name: 'narrowed', top: 0.55, runner: 0.45 },
+    { name: 'unchanged', top: 0.62, runner: 0.38 },
+  ] as const;
+
+  interface ComparisonSample {
+    readonly branch: string;
+    readonly text: string;
+  }
+
+  function everyComparisonOutput(): ComparisonSample[] {
+    const out: ComparisonSample[] = [];
+    // Prior run: MacBook Pro ahead by 24pp, band 'low'.
+    const priorEnv = envelope(
+      [
+        { id: 'a', label: OPTION_LABELS[0], win: 0.62 },
+        { id: 'b', label: OPTION_LABELS[1], win: 0.38 },
+      ],
+      'low',
+    );
+    for (const prior of VERDICT_SHAPES) {
+      for (const current of VERDICT_SHAPES) {
+        for (const order of ORDERING) {
+          for (const margin of MARGIN) {
+            const topLabel = OPTION_LABELS[order.currentTop];
+            const runnerLabel = OPTION_LABELS[order.currentTop === 0 ? 1 : 0];
+            const currentEnv = envelope(
+              [
+                { id: order.currentTop === 0 ? 'a' : 'b', label: topLabel, win: margin.top },
+                {
+                  id: order.currentTop === 0 ? 'b' : 'a',
+                  label: runnerLabel,
+                  win: margin.runner,
+                },
+              ],
+              'high',
+            );
+            const outcome = tryRunComparisonGate({
+              message: 'What changed?',
+              // Newest-first, per the loader convention the pair selector relies on.
+              priorFacts: [
+                runFact(currentEnv, current, '2026-06-07T00:00:00.000Z'),
+                runFact(priorEnv, prior, '2026-06-06T00:00:00.000Z'),
+              ],
+              freshness: 'fresh',
+              mayNameLeadingOption: true,
+            });
+            // THROW, not `expect`. This runs at COLLECT time, and a
+            // collect-time `expect` is the shape that makes a suite report a
+            // smaller run as green (CLAUDE.md trap 2b). An explicit Error kills
+            // the file loudly and names the branch that stopped comparing.
+            if (!outcome.matched || outcome.mode !== 'compared') {
+              throw new Error(
+                `fixture stopped producing a comparison at ${prior}/${current}/${order.name}/` +
+                  `margin-${margin.name} — every assertion in this file would be vacuous. ` +
+                  `matched=${outcome.matched}` +
+                  (outcome.matched ? ` mode=${outcome.mode}` : ` reason=${outcome.reason}`),
+              );
+            }
+            out.push({
+              branch: `${prior}/${current}/${order.name}/margin-${margin.name}`,
+              text: outcome.assistant_text,
+            });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Split prose into INDEPENDENT CLAUSES — sentences, then coordinated halves.
+   *
+   * The coordination split is not cosmetic: "${prior} came out ahead before,
+   * and ${current} now leads." is ONE sentence carrying TWO claims, and the
+   * second one saturating the scan is exactly how the first stayed invisible.
+   */
+  function independentClauses(text: string): string[] {
+    const out: string[] = [];
+    for (const sentence of text.match(/[^.!?]+[.!?]*/g) ?? [text]) {
+      for (const clause of sentence.split(/,\s+(?:and|but|while|whereas)\s+|;\s+/)) {
+        const trimmed = clause.trim();
+        if (trimmed.length > 0) out.push(trimmed);
+      }
+    }
+    return out;
+  }
+
+  const namesAnOption = (clause: string): boolean =>
+    OPTION_LABELS.some((label) => clause.includes(label));
+
+  const samples = everyComparisonOutput();
+
+  const optionNamingClauses = samples.flatMap((s) =>
+    independentClauses(s.text)
+      .filter(namesAnOption)
+      .map((clause) => ({ branch: s.branch, clause })),
+  );
+
+  it('drives the gate across the FULL permission x ordering x margin space', () => {
+    // Non-vacuity for the enumeration itself: an empty or collapsed sweep would
+    // make every assertion below pass by testing nothing.
+    expect(samples).toHaveLength(
+      VERDICT_SHAPES.length * VERDICT_SHAPES.length * ORDERING.length * MARGIN.length,
+    );
+    for (const s of samples) {
+      expect(s.text.length, `${s.branch} produced empty prose`).toBeGreaterThan(40);
+    }
+  });
+
+  it('the fixture actually produces leader-naming prose to measure', () => {
+    // Trap #13 — an absence assertion must first prove it can see a presence.
+    // If the gate stopped naming options at all, the per-clause assertion below
+    // would pass on an empty list. Shapes are counted with the labels blanked,
+    // so this counts DISTINCT TEMPLATES rather than fixture permutations.
+    const shapes = new Set(
+      optionNamingClauses.map(({ clause }) =>
+        OPTION_LABELS.reduce((acc, label) => acc.split(label).join('<OPTION>'), clause),
+      ),
+    );
+    expect(
+      shapes.size,
+      `distinct leader-clause shapes found:\n  ${[...shapes].join('\n  ')}`,
+    ).toBeGreaterThanOrEqual(4);
+  });
+
+  it('EVERY clause that names an option is SEEN by the enforcement scanner', () => {
+    const unseen = optionNamingClauses
+      .filter(({ clause }) => !textAssertsLeadingOption(clause))
+      .map(({ branch, clause }) => `composeComparison @ ${branch}\n      "${clause}"`);
+
+    expect(
+      unseen,
+      'A clause emitted by `composeComparison` (routing/run-comparison-gate.ts) ' +
+        'designates a leading option in prose the ENFORCEMENT scanner cannot see. ' +
+        'Add the phrasing to LEADER_CLAIM_PATTERNS ' +
+        '(compose/leading-option-egress-guard.ts) — do NOT relax this test. The ' +
+        'enforcing consumers decide REPLACE-vs-APPEND on whether they can see a ' +
+        'claim, so a clause they cannot see is a leader claim that ships beside ' +
+        'the disclosure denying it.',
+    ).toEqual([]);
+  });
+
+  it('EVERY clause that names an option is SEEN by the ALARM too', () => {
+    // The two readers are deliberately different (the enforcer carves out
+    // "leads to" / "team leads"), and BOTH consume this gate's output: the
+    // egress guard scans `assistant_text` with the alarm's wide reader, and
+    // `withheld-history-redaction.ts` reads the same prose back as prior-turn
+    // context on a later withheld turn. Asserting only one leaves the other
+    // free to drift.
+    const unseen = optionNamingClauses
+      .filter(({ clause }) => !textNamesLeadingOption(clause))
+      .map(({ branch, clause }) => `composeComparison @ ${branch}\n      "${clause}"`);
+
+    expect(unseen, 'A leader clause is invisible to the ALARM vocabulary.').toEqual([]);
+  });
+
+  it('MUTATION SENTINEL: the fully-withheld arms name NO option at all', () => {
+    // Proves the clause filter DISCRIMINATES rather than matching everything —
+    // and re-pins, from this file's angle, that the withheld substitutions do
+    // not leak a label. If this ever goes red the assertions above are
+    // measuring the wrong thing and their greens are worthless.
+    const withheldBranches = optionNamingClauses.filter(({ branch }) =>
+      /^(?:withheld|unstamped)\/(?:withheld|unstamped)\//.test(branch),
+    );
+    expect(
+      withheldBranches.map(({ branch, clause }) => `${branch}: "${clause}"`),
+      'a both-withheld arm named an option',
+    ).toEqual([]);
+  });
+
+  it('MUTATION SENTINEL: the leader-FREE sentences are NOT seen', () => {
+    // The other half of discrimination: the band shift and the follow-up ship
+    // on every arm and rank nothing. If the scanner saw them, "every clause is
+    // seen" would be true of a scanner that says yes to everything.
+    for (const clause of [
+      'The result is now stable, where before it was sensitive to your assumptions',
+      'If you want to test this further, ask what would change the result',
+    ]) {
+      expect(textAssertsLeadingOption(clause), `scanner fired on: "${clause}"`).toBe(false);
+      expect(textNamesLeadingOption(clause), `alarm fired on: "${clause}"`).toBe(false);
+    }
   });
 });
