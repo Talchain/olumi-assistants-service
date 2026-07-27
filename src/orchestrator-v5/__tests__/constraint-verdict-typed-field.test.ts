@@ -37,7 +37,7 @@ import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   CEE_CLAIM_SAFETY_ENRICHMENT_KEY,
   readConstraintVerdictStateFromResult,
-  readMayNameLeadingOption,
+  legacyReadMayName_DO_NOT_USE,
   readMayNameLeadingOptionFromResult,
 } from '../../orchestrator/context/constraint-feasibility.js';
 import {
@@ -208,7 +208,7 @@ describe('§1 PRODUCER + DRIFT — every newly-persisted run_analysis fact carri
     // …and the legacy reader therefore sees nothing on a modern fact. This is
     // the assertion that proves §2's fallback is load-bearing rather than
     // shadowing the typed read.
-    expect(readMayNameLeadingOption(enrichment)).toBe(false);
+    expect(legacyReadMayName_DO_NOT_USE(enrichment)).toBe(false);
     // The typed reader, on the same fact, says the truth.
     expect(readMayNameLeadingOptionFromResult(fact.result)).toBe(false);
   });
