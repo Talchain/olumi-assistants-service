@@ -32,7 +32,7 @@ import {
   readMayNameLeadingOptionFromResult,
 } from '../../orchestrator/context/constraint-feasibility.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
-import { selectRunAnalysisFact } from './freshness.js';
+import { selectClaimBearingRunAnalysisFact } from './freshness.js';
 
 /**
  * May a turn grounded in THIS fact array name a leading option?
@@ -106,11 +106,45 @@ export function readMayNameLeadingOptionForFacts(
 export type MayNameLeadingOptionProvenance =
   | 'scenario_fact'
   | 'no_analysis_exists'
-  | 'fail_closed_truncated';
+  | 'fail_closed_truncated'
+  /**
+   * A claim-bearing fact WAS selected and could not be interpreted as a
+   * run_analysis result. Withhold — and say which kind of withhold it is.
+   *
+   * Added rather than folded into an existing state, deliberately. #726 shipped
+   * this discriminator because a `true` from "permitted" and a `true` from
+   * "blind" were the same wire byte; overloading `no_analysis_exists` to also
+   * mean "a fact existed but I could not read it" would rebuild that exact
+   * problem on the `false` side. This state replaces a branch that used to
+   * return `true` for an uninterpretable selection.
+   */
+  | 'fail_closed_uninterpretable';
 
 export interface MayNameLeadingOptionVerdict {
   readonly may_name_leading_option: boolean;
   readonly provenance: MayNameLeadingOptionProvenance;
+  /**
+   * The verdict STATE read off THE SAME selected fact as the boolean above
+   * (F2), and the reason it lives on the verdict rather than behind its own
+   * reader.
+   *
+   * ⚠ IT USED TO HAVE ITS OWN SELECTION. `readConstraintVerdictStateForFacts`
+   * called the selector a second time, so this module — whose header says "two
+   * read points, never two DERIVATIONS" — contained two derivations of one
+   * answer. They agreed only because callers handed both the same array, and
+   * that stopped being true when the permission became scenario-scoped and the
+   * state did not: on a scenario whose analysis had aged out of the 20-turn
+   * window the permission described the scenario fact while the state that
+   * EXPLAINS the permission read `null`, and the disclosure degraded to
+   * cause-free copy. The P0 above makes this load-bearing rather than tidy:
+   * permission, constraint state and disclosure copy must all originate from
+   * the ONE selected fact, or the product withholds correctly and then explains
+   * the wrong reason.
+   *
+   * `null` means "not recorded" and is never invented — a STATE has no safe
+   * default the way the boolean's `false` does.
+   */
+  readonly constraint_verdict_state: ConstraintVerdictState | null;
 }
 
 /**
@@ -221,14 +255,42 @@ export function readMayNameLeadingOptionVerdict(
       ? windowFacts
       : [...windowFacts, scope.newestAnalysisFact];
 
-  const selected = selectRunAnalysisFact(facts);
+  // ⭐ THE ONE SELECTION, and it is the ENTITLEMENT selector — NOT the
+  // freshness one. `selectRunAnalysisFact` filters out `partial`, `degraded`
+  // and any status it does not recognise, which is right for "can I build a
+  // result view from this?" and a FAIL-OPEN for "did an analysis withhold the
+  // leader claim?": the handler accepts and persists a partial analysis and may
+  // name a leader from it, so a withheld partial fact was invisible here and
+  // this function answered `true` on the "no analysis exists" branch. See
+  // `selectClaimBearingRunAnalysisFact` for the full derivation.
+  //
+  // Everything this module answers is read off `selected` — the permission AND
+  // the state that explains it. There is deliberately no second selector call
+  // in this file: a sibling reader with its own selection is the second
+  // DERIVATION the header forbids, and it is what
+  // `readConstraintVerdictStateForFacts` used to be. It is now a delegate.
+  const selected = selectClaimBearingRunAnalysisFact(facts);
   if (selected !== null) {
     const fact = selected.fact;
+    if (fact.fact_type !== 'run_analysis') {
+      // A selection we cannot interpret. This branch used to return `true` —
+      // "the honest answer for a fact that is not an analysis is the same as
+      // for no analysis at all" — which is exactly the reasoning the P0 above
+      // showed to be unsafe: something WAS selected, so "no analysis" is not
+      // what happened, and an uninterpretable claim-bearer must not be
+      // entitled. Unreachable today (the selector only returns run_analysis
+      // facts), and kept fail-closed so it cannot become reachable and open.
+      return {
+        may_name_leading_option: false,
+        constraint_verdict_state: null,
+        provenance: 'fail_closed_uninterpretable',
+      };
+    }
     return {
-      may_name_leading_option:
-        fact.fact_type === 'run_analysis'
-          ? readMayNameLeadingOptionFromResult(fact.result)
-          : true,
+      // ONE fact, both answers, one narrow. Two `fact_type` checks would be two
+      // chances to narrow differently on a single fact.
+      may_name_leading_option: readMayNameLeadingOptionFromResult(fact.result),
+      constraint_verdict_state: readConstraintVerdictStateFromResult(fact.result),
       provenance: 'scenario_fact',
     };
   }
@@ -248,6 +310,10 @@ export function readMayNameLeadingOptionVerdict(
   if (!scope.readOk && scope.windowTruncated) {
     return {
       may_name_leading_option: false,
+      // No fact was selected, so there is no state to report. `null` is the
+      // honest "not recorded" — inventing a cause for a withhold whose whole
+      // justification is that we could not look would be a fabricated one.
+      constraint_verdict_state: null,
       provenance: 'fail_closed_truncated',
     };
   }
@@ -256,7 +322,11 @@ export function readMayNameLeadingOptionVerdict(
   // leak. This must NOT become `false` — a scenario with no analysis has
   // nothing to withhold, and withholding there would convert the fail-closed
   // default's cost from content into correctness.
-  return { may_name_leading_option: true, provenance: 'no_analysis_exists' };
+  return {
+    may_name_leading_option: true,
+    constraint_verdict_state: null,
+    provenance: 'no_analysis_exists',
+  };
 }
 
 /**
@@ -305,10 +375,6 @@ export function claimSafetyScopeFromContext(context: {
 export function readConstraintVerdictStateForFacts(
   facts: readonly HandlerFact[],
 ): ConstraintVerdictState | null {
-  const selected = selectRunAnalysisFact(facts);
-  if (selected === null) return null;
-  const fact = selected.fact;
-  return fact.fact_type === 'run_analysis'
-    ? readConstraintVerdictStateFromResult(fact.result)
-    : null;
+  return readMayNameLeadingOptionVerdict(facts, ARRAY_ONLY_SCOPE)
+    .constraint_verdict_state;
 }

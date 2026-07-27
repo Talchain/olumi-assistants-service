@@ -244,16 +244,16 @@ import {
 } from './context/freshness.js';
 // T1 claim safety — READ the verdict the run_analysis handler stamped on the
 // fact. This file never derives it (CLAUDE.md trap #12).
-import {
-  readConstraintVerdictStateFromResult,
-  readRatifiedConstraints,
-} from '../orchestrator/context/constraint-feasibility.js';
+import { readRatifiedConstraints } from '../orchestrator/context/constraint-feasibility.js';
 // ROADMAP 1.233 — the ONE fact-array claim-safety read, shared by the turn-entry
 // hoist and the post-dispatch refinement so two read points can never become two
 // derivations. See `context/claim-safety-read.ts`.
+// NOTE: neither state reader is imported any more. Both were used to
+// re-select the analysis fact locally and re-read the state off it, which is
+// how this file came to hold two of the four selections of one answer. The
+// state arrives on the verdict; a drift test pins their absence.
 import {
   claimSafetyScopeFromContext,
-  readConstraintVerdictStateForFacts,
   readMayNameLeadingOptionVerdict,
 } from './context/claim-safety-read.js';
 import type { MayNameLeadingOptionProvenance } from './context/claim-safety-read.js';
@@ -1231,7 +1231,17 @@ export async function runTurnExecutor(
   // is assembled strictly below this and strictly above the post-dispatch
   // re-read, so a second assignment would have no reader and would only invite
   // the two answers to describe different facts.
-  const constraintVerdictStateForRun = readConstraintVerdictStateForFacts(context.prior_facts);
+  // ⚠ 2026-07-27 (P2, folded into the P0 fix) — READ OFF THE VERDICT, NOT
+  // RE-SELECTED. This used to call
+  // `readConstraintVerdictStateForFacts(context.prior_facts)`, which ran its
+  // own selection over the bare 20-turn WINDOW while the permission one line
+  // above was already SCENARIO-scoped. After eviction the two described
+  // different analyses: the system withheld correctly and then explained a
+  // generic reason, because the state could not see the fact the permission was
+  // derived from. Permission, constraint state and disclosure copy now all
+  // originate from the one selected fact.
+  const constraintVerdictStateForRun =
+    mayNameLeadingOptionVerdictForRun.constraint_verdict_state;
   // ROADMAP 1.233 — which projection the withheld-explanation gate applied on
   // this turn, if it ran. Surfaced on the run result so route-v2 can stamp it
   // onto the `_diagnostic_trace.claim_safety` block, which is the ONLY way an
@@ -7836,8 +7846,16 @@ export async function runTurnExecutor(
         config.cee.optionIdentityFreshnessGuard
           ? extractGraphOptionIds(context.persistedGraph ?? graphStateForTurn ?? null)
           : undefined;
+      // The unified fact array, bound ONCE. This literal was retyped at four
+      // sites in this block and three comments each claimed the readers used
+      // "the SAME fact array" — true only by the literals matching, which is a
+      // hand-maintained mirror (CLAUDE.md trap #12).
+      const unifiedFactsForPostHandler = [
+        ...handlerFactsForCommit,
+        ...context.prior_facts,
+      ];
       freshness = deriveAnalysisFreshness(
-        [...handlerFactsForCommit, ...context.prior_facts],
+        unifiedFactsForPostHandler,
         hashForPostHandlerFreshness,
         currentGraphOptionIdsForPostHandler,
       );
@@ -7882,7 +7900,7 @@ export async function runTurnExecutor(
       // change the graph. Passing the same scope restores the superset property
       // that makes the unconditional assignment safe.
       mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(
-        [...handlerFactsForCommit, ...context.prior_facts],
+        unifiedFactsForPostHandler,
         claimSafetyScope,
       );
       mayNameLeadingOptionForRun = mayNameLeadingOptionVerdictForRun.may_name_leading_option;
@@ -8059,15 +8077,13 @@ export async function runTurnExecutor(
         // one analysis. Labels come from the persisted `goal_constraints`, the
         // sole record of what the user ratified (`readRatifiedConstraints`
         // accepts the persisted graph directly).
-        const selectedForDisclosure = selectRunAnalysisFact([
-          ...handlerFactsForCommit,
-          ...context.prior_facts,
-        ]);
-        const verdictState =
-          selectedForDisclosure !== null &&
-          selectedForDisclosure.fact.fact_type === 'run_analysis'
-            ? readConstraintVerdictStateFromResult(selectedForDisclosure.fact.result)
-            : null;
+        // ⚠ P2. These lines used to re-run the FRESHNESS selector over a
+        // rebuilt array literal ~180 lines after the post-dispatch read had
+        // already selected. Two defects in one: it was a second derivation, and
+        // it used the quality selector, so on a withheld PARTIAL analysis it
+        // explained a claim the permission had withheld with `null` — the
+        // cause-free tail. The state now rides the same verdict as the boolean.
+        const verdictState = mayNameLeadingOptionVerdictForRun.constraint_verdict_state;
         const projected = projectExplanationAnswerForWithheldClaim(
           confirmationText,
           verdictState,
@@ -8137,7 +8153,7 @@ export async function runTurnExecutor(
         ...(freshness !== null
           ? {
               lifecycle: {
-                priorFacts: [...handlerFactsForCommit, ...context.prior_facts],
+                priorFacts: unifiedFactsForPostHandler,
                 freshness,
                 requestId,
                 scenarioId: context.session_id,

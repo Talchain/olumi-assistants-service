@@ -124,6 +124,7 @@ import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-disp
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
+import type { MayNameLeadingOptionProvenance } from '../orchestrator-v5/context/claim-safety-read.js';
 import {
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
@@ -781,10 +782,10 @@ function sendFinalised200(
      * indistinguishability this field exists to remove. Threaded from the run
      * result, never re-derived here (CLAUDE.md trap #12).
      */
-    readonly mayNameLeadingOptionProvenance?:
-      | 'scenario_fact'
-      | 'no_analysis_exists'
-      | 'fail_closed_truncated';
+    // Derived from the source union, not re-listed — see the note in
+    // v5-diagnostic-trace.ts. Two hand-typed copies of this union existed and
+    // both went stale the moment a provenance state was added.
+    readonly mayNameLeadingOptionProvenance?: MayNameLeadingOptionProvenance;
     /**
      * ROADMAP 1.233 — which branch the Layer-2 withheld-explanation gate took,
      * when the dispatch family HAS that gate and it ran. Optional and absent
