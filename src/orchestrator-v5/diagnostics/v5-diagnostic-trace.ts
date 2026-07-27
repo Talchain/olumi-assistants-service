@@ -234,6 +234,39 @@ export interface V5ClaimSafety {
    */
   may_name_leading_option: boolean;
   /**
+   * WHERE the boolean above came from — the discriminator that makes it
+   * FALSIFIABLE.
+   *
+   * ⭐ WHY. Until 2026-07-27, a `true` meaning *"the scenario's newest analysis
+   * PERMITTED naming a leader"* and a `true` meaning *"no analysis was in the
+   * 20-turn window I was handed"* were **the same wire byte**. That is the
+   * reason the acceptance walk which uncovered the window-scope defect could
+   * not construct a valid control, and why it reached for a turn-shape
+   * hypothesis that its own `false` control refuted. A field that reads the
+   * same for "permitted" and for "blind" is not evidence.
+   *
+   *   - `scenario_fact`         — a `run_analysis` fact was selected and its
+   *                               verdict read. The value describes a real
+   *                               analysis, whichever way it went.
+   *   - `no_analysis_exists`    — no selectable analysis anywhere in the
+   *                               scenario. The honest `true`.
+   *   - `fail_closed_truncated` — the scenario-scoped read degraded AND the
+   *                               window was provably truncated, so "no
+   *                               analysis" was unproven and the turn withheld.
+   *
+   * ADDITIVE. `_diagnostic_trace` is stripped before the response schema
+   * validates and re-attached afterwards (route-v2), so a new key breaks no
+   * contract and older consumers drop it silently.
+   *
+   * `fail_closed_truncated` appearing at any volume is an ALARM, not noise: it
+   * means the scenario-scoped fact read is failing in production.
+   */
+  verdict_provenance:
+    | 'scenario_fact'
+    | 'no_analysis_exists'
+    | 'fail_closed_truncated'
+    | null;
+  /**
    * Which branch the Layer-2 withheld-explanation gate took, or `null` when it
    * did not run on this turn (non-explanation handler, permitted verdict, or a
    * dispatch family that has no such gate).

@@ -71,7 +71,10 @@ import {
 // T1 claim safety — THE shared fact-array read (ROADMAP 1.233). This file
 // neither derives the verdict nor re-implements the read (CLAUDE.md trap #12);
 // it calls the one function turn-executor's two read points call.
-import { readMayNameLeadingOptionForFacts } from '../context/claim-safety-read.js';
+import {
+  claimSafetyScopeFromContext,
+  readMayNameLeadingOptionVerdict,
+} from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -981,10 +984,21 @@ export async function dispatchChipClickRunAnalysis(
         // change, this exit keeps the old ones and reads as green. Calling it is
         // what makes the chip-click exit's permission the same permission by
         // construction.
-        mayNameLeadingOption: readMayNameLeadingOptionForFacts([
-          ...enrichedFacts,
-          ...context.prior_facts,
-        ]),
+        //
+        // 2026-07-27 (the scope fix) — and the SAME argument now forces the
+        // SCOPE to be shared too, not just the reader. `context.prior_facts` is
+        // a 20-turn window; the routed path's permission is derived from
+        // `[...prior_facts, the scenario's newest analysis fact]`. Passing the
+        // window alone here would make this exit's permission a different
+        // permission again — the exact divergence the paragraph above says
+        // calling the shared reader was meant to end, reintroduced one layer
+        // down. `enrichedFacts` usually carries this turn's fresh analysis and
+        // masks the difference; on a degraded analysis it does not, and that is
+        // precisely the turn you least want reading a stale-window `true`.
+        mayNameLeadingOption: readMayNameLeadingOptionVerdict(
+          [...enrichedFacts, ...context.prior_facts],
+          claimSafetyScopeFromContext(context),
+        ).may_name_leading_option,
       };
     } catch (err) {
       log.error(

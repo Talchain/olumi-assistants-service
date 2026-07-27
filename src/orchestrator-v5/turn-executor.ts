@@ -252,9 +252,11 @@ import {
 // hoist and the post-dispatch refinement so two read points can never become two
 // derivations. See `context/claim-safety-read.ts`.
 import {
+  claimSafetyScopeFromContext,
   readConstraintVerdictStateForFacts,
-  readMayNameLeadingOptionForFacts,
+  readMayNameLeadingOptionVerdict,
 } from './context/claim-safety-read.js';
+import type { MayNameLeadingOptionProvenance } from './context/claim-safety-read.js';
 // ROADMAP 1.231 — INPUT-side claim safety: strip the leader-designating fields
 // from what a withheld turn feeds the model (and the deterministic advice gate).
 import {
@@ -412,6 +414,22 @@ export interface TurnExecutorRunResult {
    * dispatch `ok` outcome already carry.
    */
   mayNameLeadingOption: boolean;
+  /**
+   * WHERE `mayNameLeadingOption` came from. Additive, diagnostic, REQUIRED —
+   * same doctrine as the field above: an optional here is a latent forgetting
+   * point, and this one exists precisely so that a value cannot be reported
+   * without its evidence.
+   *
+   * A `true` meaning "the scenario's newest analysis PERMITTED naming a leader"
+   * and a `true` meaning "no analysis was in the 20-turn array I was handed"
+   * were the SAME WIRE BYTE. That is not a cosmetic gap: it is why the
+   * acceptance walk that found this defect could not build a valid control, and
+   * why it reached for a turn-shape hypothesis that its own data refuted. With
+   * the scope fix in place the blind case is gone, but the discriminator stays
+   * — a guarantee you cannot observe is one you cannot prove has not decayed
+   * again.
+   */
+  mayNameLeadingOptionProvenance: MayNameLeadingOptionProvenance;
   /**
    * ROADMAP 1.233 — which branch the withheld-explanation claim gate took on
    * this turn, or ABSENT when the gate never ran (non-explanation handler, or
@@ -1165,7 +1183,43 @@ export async function runTurnExecutor(
   // does: assembly happens inside the routing block, far below this
   // declaration.
   // ═══════════════════════════════════════════════════════════════════════════
-  let mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts(context.prior_facts);
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ⚠ 2026-07-27 — THE SCOPE FIX. This line used to call the array-only reader
+  // over `context.prior_facts` alone — and that array is a 20-TURN WINDOW, not
+  // the scenario. (The old call is described rather than quoted here on
+  // purpose: the drift test below pins its ABSENCE from this file, and a
+  // comment quoting it would make the pin measure prose instead of code.) The
+  // channels
+  // this permission gates are not: the rolling summary reads `LIMIT 1000` and
+  // decision records read scenario-wide. So a `run_analysis` fact whose parent
+  // turn had aged past the window was never LOADED, the reader took its
+  // `selected === null ⇒ true` branch, and all four input gates were skipped on
+  // a scenario whose newest verdict WITHHELD.
+  //
+  // Confirmed live, not inferred: on scenario `f63ccb45-…` (31 turns) the
+  // analysis turn ranked 20 at 12:57:02 → `false`, and 21 at 12:58:26 after one
+  // more turn committed → `true`. Zero store change, no deploy, no telemetry.
+  // A STAMPED-withheld verdict decayed identically — stamping fixed "the fact is
+  // loaded but unstamped" and did nothing about "the fact is not loaded", so
+  // every protected scenario had a turn-count expiry nobody wrote down.
+  //
+  // The scope was wrong, NOT the branch — which is why the fix is here and in
+  // the loader, and emphatically not at `claim-safety-read.ts`'s `null ⇒ true`.
+  // That default is correct about the array it is handed; changing it would
+  // make the honest case dishonest and would still miss the decision-records
+  // channel, which is gated hundreds of lines above pack assembly.
+  //
+  // `claimSafetyScopeFromContext` carries ONLY store-derived values. It must
+  // never acquire a client channel: `options.analysisState` is client-supplied
+  // and already populates `display_analysis`, so the CONTENT side has one — and
+  // that is exactly the reason the PERMISSION side must not.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const claimSafetyScope = claimSafetyScopeFromContext(context);
+  let mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(
+    context.prior_facts,
+    claimSafetyScope,
+  );
+  let mayNameLeadingOptionForRun = mayNameLeadingOptionVerdictForRun.may_name_leading_option;
   // F2 — the STATE behind the permission, read off the SAME fact array by the
   // SAME content-based selector, at the SAME point. The ContextPack input gate
   // below needs it to choose between the ratified-condition note and the
@@ -7815,10 +7869,23 @@ export async function runTurnExecutor(
       // what keeps them from drifting. Recorded rather than quietly fixed
       // because a plausible-but-unreachable safety argument left in a comment is
       // how the next reader inherits a false premise.
-      mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts([
-        ...handlerFactsForCommit,
-        ...context.prior_facts,
-      ]);
+      //
+      // ⚠ 2026-07-27 — AND THE SUPERSET ARGUMENT ABOVE IS WHY THIS RE-READ MUST
+      // CARRY THE SCENARIO SCOPE TOO. Post-scope-fix, the ENTRY value is derived
+      // from `[...prior_facts, scenario-newest-fact]`. If this re-read stayed on
+      // `[...handlerFactsForCommit, ...prior_facts]`, that array would NO LONGER
+      // be a superset of the entry array — and on an execute turn that produced
+      // no selectable `run_analysis` fact (an edit, a degraded analysis), the
+      // unified selection would be null, this UNCONDITIONAL assignment would
+      // return the `no_analysis_exists` `true`, and it would OVERWRITE the entry
+      // `false`. The fix would be silently undone on exactly the turns that
+      // change the graph. Passing the same scope restores the superset property
+      // that makes the unconditional assignment safe.
+      mayNameLeadingOptionVerdictForRun = readMayNameLeadingOptionVerdict(
+        [...handlerFactsForCommit, ...context.prior_facts],
+        claimSafetyScope,
+      );
+      mayNameLeadingOptionForRun = mayNameLeadingOptionVerdictForRun.may_name_leading_option;
       emitFreshnessTelemetry(
         freshness,
         {
@@ -9870,6 +9937,11 @@ export async function runTurnExecutor(
       // default on every non-execute exit, which made the Layer-3 egress
       // alarm a licensed no-op there. See the declaration above.
       mayNameLeadingOption: mayNameLeadingOptionForRun,
+      // …and WHERE that boolean came from. Taken off the SAME verdict object the
+      // boolean above is taken off, so the value and its evidence cannot
+      // describe different reads — the identical single-derivation rule the
+      // permission itself follows.
+      mayNameLeadingOptionProvenance: mayNameLeadingOptionVerdictForRun.provenance,
       // ROADMAP 1.233 — the withheld-explanation gate's own verdict for this
       // turn, or null when it never ran. Route-v2 stamps it onto
       // `_diagnostic_trace.claim_safety` so an acceptance walk can read at the

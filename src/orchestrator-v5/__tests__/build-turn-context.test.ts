@@ -60,6 +60,11 @@ describe('buildTurnContext', () => {
       // the wire; it exists so the ContextPack stops reporting the read
       // window's size as the conversation's size.
       prior_turns_total: _ptt,
+      // The scenario's newest run_analysis fact + whether that read succeeded —
+      // CEE-internal, never on the wire. They exist so the T1 claim-safety
+      // permission describes the SCENARIO rather than the 20-turn read window.
+      newest_analysis_fact: _naf,
+      newest_analysis_fact_read_ok: _nafok,
       prior_facts: _pf,
       prior_facts_with_turn: _pfwt,
       scenarioBriefText: _sb,

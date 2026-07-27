@@ -231,6 +231,42 @@ export interface SessionStore {
     conversationTurnRowIds: readonly string[],
     handlerId?: V5ActionType,
   ): Promise<readonly HandlerFactWithTurn[]>;
+  /**
+   * The SCENARIO's newest non-noop `run_analysis` fact — past the read window.
+   *
+   * WHY THIS IS NOT A FLAVOUR OF {@link readFactsFor}. Every other fact read on
+   * this interface is keyed by `v5_conversation_turn_id`, i.e. by the turns
+   * {@link readRecent} returned, i.e. by a `LIMIT 20` WINDOW. The T1
+   * claim-safety permission was read off that window while the three channels
+   * it gates read the whole scenario (rolling summary `LIMIT 1000`; decision
+   * records scenario-wide). Past 20 turns the analysis fact was simply not
+   * loaded, the reader took its "no analysis ⇒ nothing to withhold" branch, and
+   * a withheld scenario shipped an ungated summary. Same defect shape as the
+   * window-vs-total lie {@link countTurns} exists to remove, one table over —
+   * and the same remedy: a separate read, scoped to the truth, every turn.
+   *
+   * Filtered to `handler_id = 'run_analysis'` and `noop = false`; ordered
+   * `created_at DESC`, `LIMIT 1`. Eligibility beyond that (the
+   * `analysis_status` success filter) is the SELECTOR's job, not the store's —
+   * the store must not acquire a second copy of "is this analysis usable".
+   *
+   * ⚠ MUST NOT be served from the session LRU. That cache is process-local,
+   * has no TTL, and is invalidated only on the instance that did the append,
+   * so a cached permission could be stale across instances in either
+   * direction — the same non-determinism that let the live flip happen twice
+   * over. This read goes to the database every turn, by design.
+   *
+   * Returns `null` when the scenario has no such fact. THROWS on read failure —
+   * no assume-good default, because "no analysis" and "I could not look" are
+   * exactly the two things this method exists to stop conflating. The caller
+   * degrades explicitly and arms the fail-closed guard.
+   *
+   * Optional on the interface so existing test mocks aren't forced to
+   * implement it (mirrors {@link countTurns} / {@link readFactsWithTurnFor});
+   * `buildTurnContext` treats absence as a degraded read. Production
+   * (`SupabaseSessionStore`) always implements it.
+   */
+  readNewestAnalysisFactFor?(scenarioId: string): Promise<HandlerFact | null>;
   invalidateScoped(scenarioId: string, scope: InvalidationScope): Promise<InvalidationResult>;
   invalidateAll(scenarioId: string): Promise<InvalidationResult>;
   /**

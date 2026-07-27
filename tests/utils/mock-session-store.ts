@@ -57,6 +57,13 @@ export function createMockSessionStore(
     countTurns: async () => 0,
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
+    // Consistent with the empty fact reads above: this scenario has no
+    // analysis. The read SUCCEEDS and reports none — which is the honest
+    // default and NOT the same as the read failing. A default that threw would
+    // arm the claim-safety fail-closed guard across the whole suite; a store
+    // that omitted the method would report "degraded" forever. Tests exercising
+    // the scenario-scoped claim-safety path override it.
+    readNewestAnalysisFactFor: async () => null,
     invalidateScoped: async (_scenarioId, scope) => ({
       scope,
       entries_invalidated: [],
