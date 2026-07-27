@@ -657,7 +657,13 @@ export function guardLeadingOptionClaimsAtEgress(
     'V5 egress: this turn withheld the leading-option claim, and then asserted it anyway in the fields listed ' +
       'in hit_paths. A user is being told "no option can be put forward yet" and shown which option leads, in ' +
       'one response. FIX THE PRODUCER named by hit_paths — gate it on the constraint verdict the run_analysis ' +
-      'handler already stamped on the fact (readMayNameLeadingOption in orchestrator/context/' +
+      // ⚠ A6, 2026-07-27: this instruction used to name `readMayNameLeadingOption` — the LEGACY
+      // enrichment-only reader, which returns `false` for every fact written since schemas 0.25.0.
+      // An engineer following the alarm's own remediation advice would have shipped silent
+      // universal withholding. The alarm was right and its instructions were wrong, which is the
+      // trap-#14 shape (an honest label overwritten by a false one) inside the module whose whole
+      // subject is that a mechanism's label must be true. Name the reader the code actually calls.
+      'handler already stamped on the fact (readMayNameLeadingOptionFromResult in orchestrator/context/' +
       'constraint-feasibility.ts). Do NOT widen this guard instead: it is the alarm, not the fix.',
   );
 

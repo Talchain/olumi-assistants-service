@@ -971,7 +971,12 @@ export async function dispatchChipClickRunAnalysis(
         // T1 claim safety — READ off the just-produced run_analysis fact, using
         // the SAME canonical selector the routed path uses. Never re-derived
         // (CLAUDE.md trap #12). No fact ⇒ `true` (this turn withheld nothing);
-        // a fact with no stamp ⇒ `readMayNameLeadingOption` fails CLOSED.
+        // a fact with no stamp ⇒ `readMayNameLeadingOptionFromResult` fails
+        // CLOSED. (A6, 2026-07-27: this line used to name
+        // `readMayNameLeadingOption`, the legacy enrichment-only reader, which
+        // is NOT on this call chain and which answers `false` unconditionally
+        // on post-0.25.0 facts. The behaviour described was right; the reader
+        // named for it was not.)
         //
         // 2026-07-27 — this used to be an INLINE IIFE that was line-for-line the
         // body of `readMayNameLeadingOptionForFacts`: same selector, same

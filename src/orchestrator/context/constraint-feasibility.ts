@@ -691,7 +691,10 @@ export function readMayNameLeadingOptionFromResult(result: unknown): boolean {
         // {@link typedVerdictIsPresent}.
         false;
   }
-  return readMayNameLeadingOption((result as Record<string, unknown>).enrichment);
+  // The ramp's second rung. This is the ONE legitimate call to the legacy
+  // enrichment-only reader in the codebase — it is reached only when the typed
+  // 0.25.0 field is ABSENT, which is exactly the interim-stamp population.
+  return legacyReadMayName_DO_NOT_USE((result as Record<string, unknown>).enrichment);
 }
 
 /** A non-null, non-array object — the only shape a typed verdict can take. */
@@ -790,15 +793,32 @@ function asVerdictState(value: unknown): ConstraintVerdictState | null {
 }
 
 /**
- * LEGACY reader — the interim `enrichment.__cee_claim_safety` stamp only.
+ * ⛔ DEPRECATED, AND DELIBERATELY UNAUTOCOMPLETABLE. Do not call this.
+ * Call {@link readMayNameLeadingOptionFromResult}.
  *
- * Kept exported because {@link readMayNameLeadingOptionFromResult} delegates to
- * it and the fallback deserves its own test. Do NOT call it directly from a
- * claim-safety surface: on a fact written from 0.25.0 onward it returns `false`
- * for every turn, permitted or not, because nothing writes that key any more.
- * Call the `FromResult` reader.
+ * LEGACY reader — the interim `enrichment.__cee_claim_safety` stamp ONLY. It is
+ * the second rung of the `FromResult` ladder, not a reader in its own right.
+ *
+ * ⚠ RENAMED 2026-07-27 (R8), AND THE NAME IS THE FIX. It used to be called
+ * `readMayNameLeadingOption` — one autocomplete keystroke away from
+ * `readMayNameLeadingOptionFromResult`, the reader every claim-safety surface
+ * is supposed to call, and IDENTICAL in signature-shape at the call site. The
+ * failure mode of picking the wrong one is not a crash and not a test failure:
+ * on any fact written from `@talchain/schemas@0.25.0` onward the verdict lives
+ * at `result.constraint_verdict`, this function cannot see it, and it returns
+ * `false` for EVERY turn — permitted or withheld alike. That is SILENT
+ * UNIVERSAL WITHHOLDING: the product stops making recommendations it is
+ * entitled to make, no alarm fires, and the symptom is a content regression
+ * nobody can attribute. `decision-review-enricher.ts` has already been bitten
+ * by exactly this read (see the `mayNameLeadingOption` parameter's docstring
+ * there) and was fixed by threading the verdict instead.
+ *
+ * It is not deleted because it has one real caller: the `FromResult` reader
+ * below delegates to it for the migration ramp, and the ramp's own fallback
+ * deserves its own test. It stays EXPORTED only for that test — production has
+ * no business importing it, and the name now says so.
  */
-export function readMayNameLeadingOption(enrichment: unknown): boolean {
+export function legacyReadMayName_DO_NOT_USE(enrichment: unknown): boolean {
   if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {
     return false;
   }

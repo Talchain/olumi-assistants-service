@@ -521,7 +521,9 @@ function buildInvokeInput(
    *
    * THREADED RATHER THAN RE-READ, and that is the fix this parameter exists
    * for. It used to be derived here as
-   * `readMayNameLeadingOption(enrichment)`, which worked only while the
+   * `readMayNameLeadingOption(enrichment)` — the legacy enrichment-only
+   * reader, renamed `legacyReadMayName_DO_NOT_USE` in 2026-07-27's R8 fix
+   * precisely because of this incident — which worked only while the
    * verdict rode INSIDE the enrichment record as the interim
    * `__cee_claim_safety` stamp. Schemas 0.25.0 moves it to
    * `result.constraint_verdict` — a sibling of `enrichment`, invisible from
