@@ -545,10 +545,27 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
       // It is deliberately NOT proof the prose was scrubbed: the guard is
       // observe-only by design (ROADMAP 1.227 owns the enforce flip).
       const alarms = events.filter((e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress);
+      // ⭐ EXACTLY ONE — tightened from `toBeGreaterThan(0)` by ROADMAP 1.272
+      // E1, and the tightening IS the multiplicity proof.
+      //
+      // The guard used to run inside `sanitiseOlumiResponseForEgress`, which
+      // `sendFinalised200` re-enters 2–8 times per response (one validate pass,
+      // one of {validated, fallback}, and up to six CONDITIONAL debug re-attach
+      // passes). The alarm fired on EVERY pass that found hits, so `hit_count`
+      // on the dashboard carried a multiplier that varied with which debug
+      // surfaces the environment had enabled — the guard's own comment told
+      // readers to divide by 4, and 4 was never the number.
+      //
+      // A loose `> 0` cannot see that regression, which is why it is being
+      // replaced rather than kept alongside: an assertion that passes for 1 and
+      // for 8 is not measuring the property this PR changed.
       expect(
         alarms.length,
-        'the withheld converse exit must arm the egress alarm with the REAL permission',
-      ).toBeGreaterThan(0);
+        'the withheld converse exit must arm the egress alarm with the REAL permission, and ' +
+          'exactly ONCE. More than one means the Layer-3 scan has been re-added to a re-entered ' +
+          'chokepoint (it belongs on the final `wireBody` in `sendFinalised200`, immediately ' +
+          'before `reply.send`); zero means the alarm is not armed at all.',
+      ).toBe(1);
       expect(alarms[0]!.data['hit_count']).toBeGreaterThan(0);
     });
 

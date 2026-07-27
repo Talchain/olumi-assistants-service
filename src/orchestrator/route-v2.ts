@@ -125,6 +125,10 @@ import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispat
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import type { MayNameLeadingOptionProvenance } from '../orchestrator-v5/context/claim-safety-read.js';
+// T1 claim safety, LAYER 3 — armed ONCE at the send point (1.272 E1). It used
+// to be called from inside `sanitiseOlumiResponseForEgress`, which this file
+// re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
+import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import {
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
@@ -1277,6 +1281,49 @@ function sendFinalised200(
       }
     }
   }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // T1 claim safety, LAYER 3 — THE SINGLE EGRESS SCAN. (ROADMAP 1.272 E1.)
+  //
+  // Placed here, and only here, for two reasons — one of which is correctness
+  // and was not the reason the move was proposed:
+  //
+  //   1. THIS IS THE ONLY POSITION THAT SCANS WHAT THE USER RECEIVES. The scan
+  //      used to live inside `sanitiseOlumiResponseForEgress`, but every call
+  //      to that function is WRAPPED in `finaliseV5Response(...)`, which then
+  //      deletes transport-banned enrichment members, rewrites enrichment prose
+  //      and overrides `graph_hash`. The alarm therefore reported on a
+  //      pre-finalise draft, never on the wire bytes. And the `_answer_shape`
+  //      and synthesised-shape re-attach passes can FAIL CLOSED and DISCARD the
+  //      object that was scanned last, so the final scan was not even
+  //      guaranteed to be of a live envelope. `wireBody` on this line is the
+  //      exact object handed to `reply.send`.
+  //   2. It runs ONCE. `sendFinalised200` re-enters the sanitiser 2–8 times per
+  //      response (1 validate pass + 1 of {validated, fallback} + up to 6
+  //      conditional re-attach passes), and the guard fired on every pass that
+  //      found hits — so `hit_count` on the dashboard carried an undeclared
+  //      multiplier that varied with which debug surfaces were enabled.
+  //
+  // ORDERING: the guard must sit after every pass that can edit user-facing
+  // prose, because `compose/terminology-rewrite.ts` MANUFACTURES the banned
+  // vocabulary ("recommendation" → "leading option"). Nothing edits prose
+  // between here and `reply.send`, so this satisfies that rule strictly better
+  // than the old position did.
+  //
+  // OBSERVE-ONLY (`enforce: false`): it reports and returns the response
+  // unchanged, and the return value is discarded. It cannot alter a single wire
+  // byte — which is why this move is byte-neutral by construction, not merely
+  // by test.
+  //
+  // `ctx.mayNameLeadingOption` is the SAME value that was previously handed to
+  // every sanitiser call on this path (it is passed to each of them from this
+  // ctx, unmodified), so the permission the alarm is armed with is unchanged.
+  // ═══════════════════════════════════════════════════════════════════════════
+  guardLeadingOptionClaimsAtEgress(wireBody, {
+    requestId,
+    exitPath,
+    mayNameLeadingOption: ctx.mayNameLeadingOption,
+    enforce: false,
+  });
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);
   return reply.code(200).send(wireBody);
 }

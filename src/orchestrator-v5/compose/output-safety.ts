@@ -58,7 +58,9 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { finalizeChips } from './chip-finalizer.js';
 import { guardLoopingChipsAtEgress } from './looping-chip-guard.js';
-import { guardLeadingOptionClaimsAtEgress } from './leading-option-egress-guard.js';
+// NOTE: `guardLeadingOptionClaimsAtEgress` is deliberately NOT imported here
+// any more — it runs once at the send point in `sendFinalised200`. See the
+// block where it used to be called, below.
 
 // ----------------------------------------------------------------------------
 // Per-string scrubber — moved to neutral location so V4 + CEE pipeline can
@@ -111,14 +113,27 @@ export interface EgressSanitiseOpts {
    * confirmation. The guard reports that (observe-only today) — see
    * `leading-option-egress-guard.ts`.
    *
-   * REQUIRED, same rationale as `exitPath` and `userMessage` above: an optional
-   * field is one a future caller silently forgets, and a claim-safety guard a
-   * caller can forget to arm is theatre. Turns with no analysis pass `true` —
-   * an explicit, honest "nothing was withheld on this turn"; omission is not an
-   * option the type checker allows.
+   * ⚠ VESTIGIAL AS OF 2026-07-27 (E1), AND SAID PLAINLY RATHER THAN DRESSED UP.
+   * This function no longer reads this field: the Layer-3 guard moved to a
+   * single pass in `sendFinalised200`, which arms it from
+   * `ctx.mayNameLeadingOption` — the same value, from the same source, one
+   * frame up. So this is currently a REQUIRED FIELD WITH NO READER.
    *
-   * The value is READ from the verdict the run_analysis handler stamped on the
-   * fact; it is never re-derived here (CLAUDE.md trap #12).
+   * It is retained, not removed, and the reason is scope rather than merit:
+   * dropping it is ~38 mechanical call-site edits across seven test files plus
+   * a rewrite of the `EgressSanitiseOpts declares mayNameLeadingOption as
+   * REQUIRED` pin in `route-egress-claim-safety-marking.drift.test.ts`, which
+   * is a claim-safety drift gate and deserves its own reviewed change rather
+   * than a ride-along in a performance PR.
+   *
+   * The paragraph this replaced argued the field must stay REQUIRED because "a
+   * claim-safety guard a caller can forget to arm is theatre". That argument is
+   * still TRUE — but it is now true of `sendFinalised200`'s ctx marking, not of
+   * this field, and the drift test that enforces it scans the
+   * `sendFinalised200` call sites, which is the half that was always
+   * load-bearing. Leaving the old sentence here would have been an honest label
+   * quietly turned false (CLAUDE.md trap #14) — the exact thing this PR's
+   * sibling is fixing two files over.
    */
   readonly mayNameLeadingOption: boolean;
 }
@@ -192,30 +207,32 @@ export function sanitiseOlumiResponseForEgress(
     ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
   };
 
-  // T1 claim safety, LAYER 3 — the loud egress guard.
+  // ═════════════════════════════════════════════════════════════════════════
+  // T1 claim safety, LAYER 3 — THE GUARD USED TO RUN HERE. It now runs ONCE,
+  // in `sendFinalised200`, on the final `wireBody` immediately before
+  // `reply.send`. Moved 2026-07-27 (ROADMAP 1.272 E1).
   //
-  // ORDERING IS LOAD-BEARING. This runs at the egress chokepoint, which is
-  // strictly AFTER `compose/terminology-rewrite.ts` (applied to every Phase-3
-  // prose field at `phase3-blocks.ts` → `validateProseAndSchemaOrDrop`). That
-  // rewrite turns "recommendation" into "leading option" and "the winner" into
-  // "the leading option" — OUR OWN SAFETY PASS MANUFACTURES THE BANNED
-  // LANGUAGE. A scan placed upstream of it would read clean prose and pass a
-  // response that ships "leading option" to the user.
+  // ORDERING IS LOAD-BEARING, and the move STRENGTHENS it rather than risking
+  // it. The rule is that the guard must sit after every pass that can edit
+  // user-facing prose — because `compose/terminology-rewrite.ts` turns
+  // "recommendation" into "leading option" and "the winner" into "the leading
+  // option", i.e. OUR OWN SAFETY PASS MANUFACTURES THE BANNED LANGUAGE, and a
+  // scan placed upstream of it reads clean prose and ships the leak.
   //
-  // If you reorder this pipeline: the guard must stay after every pass that can
-  // edit user-facing prose. Moving it earlier silently reopens the hole, and no
-  // test upstream of the rewrite can see it. See the guard module's docstring.
+  // ⚠ AND THIS POSITION WAS NOT ACTUALLY LAST. `sendFinalised200` wraps EVERY
+  // call to this function in `finaliseV5Response(...)`, which then deletes
+  // transport-banned enrichment members, rewrites enrichment prose leaves and
+  // overrides `graph_hash`. So the scan here never saw the bytes that shipped —
+  // it saw a pre-finalise draft of them. Worse, the last two re-attach passes
+  // (`_answer_shape`, and the synthesised shape) can FAIL CLOSED and discard
+  // the very object this guard just scanned. Scanning `wireBody` at the send
+  // point is the only position from which "the guard scanned what the user
+  // received" is true by construction.
   //
-  // OBSERVE-ONLY (`enforce: false`): it reports and returns the response
-  // unchanged. It never throws — a 500 is worse than the prose it is watching
-  // for. Sits below the sanitised envelope's construction so it scans the exact
-  // object that is about to be serialized.
-  guardLeadingOptionClaimsAtEgress(sanitised, {
-    requestId: opts.requestId,
-    exitPath: opts.exitPath,
-    mayNameLeadingOption: opts.mayNameLeadingOption,
-    enforce: false,
-  });
+  // Do NOT re-add a call here. This function is re-entered 2–8 times per
+  // response, so a scan here is 2–8 scans of near-identical bytes, and the
+  // alarm's own `hit_count` telemetry was multiplied by that factor.
+  // ═════════════════════════════════════════════════════════════════════════
 
   for (const m of allMatches) {
     log.warn(

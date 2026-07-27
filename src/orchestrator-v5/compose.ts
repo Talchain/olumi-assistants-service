@@ -40,6 +40,11 @@ import {
   mayNameLeadingOptionForFact,
   projectAnalysisSummaryForWithheldClaim,
   projectTransportEnrichmentForWithheldClaim,
+  // E2 — imported so the clone-skip is DERIVED from the projection's own frozen
+  // drop-set rather than from a second hand-listed copy of it (trap #12). If
+  // the projection learns to drop another blob whole, the skip follows for
+  // free; a local literal here would silently keep cloning it.
+  WITHHELD_DROPPED_ENRICHMENT_BLOBS,
 } from './compose/withheld-claim-projection.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
@@ -628,13 +633,49 @@ function stripInternalKeysDeep(value: unknown): unknown {
  * (tests/contract/cee-to-ui.contract.test.ts), so the test exercises the
  * REAL projection rather than a mirror of it.
  */
-export function toSafeTransportEnrichment(enrichment: unknown): Record<string, unknown> | undefined {
+export function toSafeTransportEnrichment(
+  enrichment: unknown,
+  /**
+   * Will this block be handed to `projectTransportEnrichmentForWithheldClaim`?
+   * If so, the blobs that projection drops WHOLE are never cloned (ROADMAP
+   * 1.272 E2) — building a 9,581 B / 86-node subtree and discarding it one line
+   * later is free work on every withheld analysis turn.
+   *
+   * ⚠ A BOOLEAN, NOT A KEY SET, AND THAT IS THE WHOLE SAFETY ARGUMENT. The
+   * first cut of this took `droppedWholeByCaller?: readonly string[]` with a
+   * docstring saying it "must only ever be passed blobs the projection drops
+   * unconditionally and whole". A mutation proved that docstring was the only
+   * thing enforcing it: widening the caller's array to include `robustness` — a
+   * blob the projection TRANSFORMS rather than drops, so skipping it silently
+   * deletes the tie facts a withheld turn is supposed to keep — passed every
+   * test. A contract a caller can violate is a contract nothing enforces
+   * (CLAUDE.md trap #12).
+   *
+   * With a boolean the set is DERIVED here from the projection's own frozen
+   * constant, so the wrong-set failure mode is not expressible. If the
+   * projection learns to drop another blob whole, this follows for free.
+   *
+   * `false` (the default) ⇒ clone everything, i.e. the pre-E2 behaviour exactly.
+   */
+  willProjectForWithheldClaim = false,
+): Record<string, unknown> | undefined {
   if (enrichment === null || enrichment === undefined || typeof enrichment !== 'object') {
     return undefined;
   }
   const src = enrichment as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const key of P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) {
+    // E2 — the drop-set is known BEFORE the clone, so the clone is free work.
+    // `decision_review` measured 9,581 B / 86 nodes and is dropped whole on
+    // every withheld analysis turn; it was deep-cloned first every time.
+    //
+    // Byte-neutral including at the empty boundary, and that is not luck worth
+    // relying on silently: both this function and
+    // `projectTransportEnrichmentForWithheldClaim` end with the SAME
+    // "nothing survived ⇒ undefined" rule, so an enrichment whose only
+    // keep-list member is a dropped blob yielded `undefined` before (build it,
+    // then drop it, then collapse) and yields `undefined` now (never build it).
+    if (willProjectForWithheldClaim && WITHHELD_DROPPED_ENRICHMENT_BLOBS.includes(key)) continue;
     // Shallow keep-list at the top level PLUS a deep strip of internal/debug
     // carriers inside each kept field, so the keep-list is not merely shallow.
     if (src[key] !== undefined) out[key] = stripInternalKeysDeep(src[key]);
@@ -671,7 +712,12 @@ function buildAnalysisResultBlock(
   // `decision_review` goes whole while `decision_brief` does not, and why the
   // honest variant is ABSENCE rather than synthesised copy.
   const mayNameLeadingOption = mayNameLeadingOptionForFact(fact);
-  const safeTransport = toSafeTransportEnrichment(enrichment);
+  // E2 (ROADMAP 1.272) — the permission is read BEFORE the clone and the
+  // drop-set is a frozen module constant, so on a withheld turn the blobs that
+  // `projectTransportEnrichmentForWithheldClaim` discards whole are never
+  // cloned in the first place. Pure work-avoidance: the projection below still
+  // runs and still owns the policy, and it would drop these keys anyway.
+  const safeTransport = toSafeTransportEnrichment(enrichment, !mayNameLeadingOption);
   const transportEnrichment = mayNameLeadingOption
     ? safeTransport
     : projectTransportEnrichmentForWithheldClaim(safeTransport);
