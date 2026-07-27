@@ -177,8 +177,59 @@ const R_DECISION_REVIEW =
   'M2 decision-review surface — projected via the SEPARATE decision_review prompt path (turn-executor enrichRunAnalysisWithDecisionReview), never the analysis→LLM ContextPack.';
 const R_CEE_PANEL =
   'CEE Results-panel field — LLM-derived content re-fed to the UI; feeding it back into the coach context would be circular.';
-const R_UI_ARTEFACT =
-  'UI-facing artefact (leader band / cards / facts) — keep-listed to the UI transport, not the coach analysis projection.';
+/**
+ * ⚠ SPLIT PER MEMBER 2026-07-27 (ROADMAP 1.276). A single shared rationale here
+ * said "keep-listed to the UI transport, not the coach analysis projection" and
+ * was applied to THREE members. It was true of exactly ONE of them.
+ *
+ * The skip list is a claim about WHY a field is not read by the analysis→LLM
+ * projection, and "it goes to the UI instead" is a materially different reason
+ * from "it goes nowhere". Sharing one string across members with different
+ * destinies is the hand-maintained-mirror shape (CLAUDE.md trap #12) wearing a
+ * rationale's clothes: the string stayed accurate for `decision_brief` and went
+ * quietly false for the other two, and nothing could fail, because a rationale
+ * is prose that no test compares against the keep-list.
+ *
+ * Membership derived at CEE `cf10c553` against the COMPLETE
+ * `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` (compose.ts:491-538, 12 entries, whole
+ * list reviewed — not a grep for the three names):
+ *   option_comparison, factor_sensitivity, results, robustness,
+ *   decision_review, option_comparison_status, conditional_probabilities,
+ *   edge_e_values, inference_warnings, confidence_tier, flip_thresholds,
+ *   decision_brief.
+ */
+const R_UI_ARTEFACT_TRANSPORTED =
+  'UI-facing artefact — genuinely keep-listed to the UI transport (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP, compose.ts), not the coach analysis projection.';
+/**
+ * `review_cards`: NOT on the UI transport keep-list — but it is not orphaned
+ * either, which is why it needs its own line rather than `fact_objects`'s. Its
+ * consumer is server-side: `coaching/post-analysis-wrapper.ts:336` reads
+ * `enrichment.review_cards` off the PERSISTED fact to mine post-analysis
+ * coaching chips (its skip reasons `no_review_cards` are named at :222/:260),
+ * and `compose/sanitise-enrichment.ts:598-622` scrubs its user-facing prose
+ * (`what`, `why`, `items[*].suggested_evidence`). So it reaches users as
+ * CHIPS, not as transported enrichment.
+ */
+const R_COACHING_CHIP_SOURCE =
+  'Read server-side off the persisted fact by the post-analysis coaching wrapper (coaching/post-analysis-wrapper.ts) to mine chips; NOT on the UI transport keep-list, and deliberately not fed back into the coach analysis projection that would then be reasoning about its own output.';
+/**
+ * `fact_objects`: neither projected NOR transported, and — on the manifest
+ * below — read by nothing.
+ *
+ * READER MANIFEST, scope = all of `src/` at `cf10c553` (CLAUDE.md trap #10: a
+ * "no consumer" claim needs the manifest, not an impression). The only
+ * non-test, non-comment occurrence is the optional TYPE FIELD declaration
+ * `fact_objects?: unknown[]` at `orchestrator/types.ts:398`. There is no
+ * property read of `.fact_objects` in production code; the two other mentions
+ * are comments (`compose.ts:617`, `types/guidance-item.ts:121`, the latter
+ * describing a verification that is not implemented against it).
+ *
+ * Stated as a fact about the CURRENT tree, not as a recommendation: a field
+ * with no reader is a candidate for removal, but removing a PLoT-produced key
+ * from the manifest is a producer-contract question and is not this PR's.
+ */
+const R_NO_CONSUMER =
+  'Not read by the analysis→LLM projection AND not on the UI transport keep-list — on a complete src/ reader manifest at cf10c553 it currently reaches no consumer at all (only an optional type-field declaration at orchestrator/types.ts:398). Skipped here because there is nothing to project, not because it goes somewhere else.';
 const R_INTERNAL =
   'Internal carrier / observability — stripped by compose.ts INTERNAL_ENRICHMENT_KEYS before UI transport; never coaching content.';
 const R_COACHING_SIGNAL =
@@ -244,9 +295,12 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['improvement_guidance', R_CEE_PANEL],
   ['rationale', R_CEE_PANEL],
   ['factor_enrichments', R_CEE_PANEL],
-  ['decision_brief', R_UI_ARTEFACT],
-  ['review_cards', R_UI_ARTEFACT],
-  ['fact_objects', R_UI_ARTEFACT],
+  // Three members that used to share ONE rationale claiming all three were
+  // "keep-listed to the UI transport". Only the first is. See the rationale
+  // constants above for the derivation and the reader manifest.
+  ['decision_brief', R_UI_ARTEFACT_TRANSPORTED],
+  ['review_cards', R_COACHING_CHIP_SOURCE],
+  ['fact_objects', R_NO_CONSUMER],
   ['_meta', R_INTERNAL],
   ['meta', R_INTERNAL],
   ['downstream_calls', R_INTERNAL],
