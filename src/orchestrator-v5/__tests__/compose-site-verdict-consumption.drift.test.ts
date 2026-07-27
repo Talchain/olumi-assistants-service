@@ -49,20 +49,37 @@
  *
  * NOW SCANNED, and the register is keyed by FILE so the scope is visible in the
  * data rather than asserted in a comment:
- *   - `src/orchestrator-v5/turn-executor.ts`  — 29 sites / 25 keys
- *   - `src/orchestrator/route-v2.ts`          —  2 sites /  2 keys  (NEW)
- *
- * STILL OUT OF SCOPE, with the count DERIVED so the next reader inherits a
- * number instead of a shrug: `src/orchestrator-v5/handlers/chip-click-dispatch.ts`
- * has **3** compose sites (two literal failure strings, plus `confirmationText`,
- * which forwards the run_analysis handler's own allowlisted headline and whose
- * stance needs a derivation of `isAllowedRunAnalysisAssistantText` that this
- * slice did not do). That is a KNOWN GAP, not a covered surface, and it is the
- * next widening.
+ *   - `src/orchestrator-v5/turn-executor.ts`              — 29 sites / 25 keys
+ *   - `src/orchestrator/route-v2.ts`                      —  2 sites /  2 keys
+ *   - `src/orchestrator-v5/handlers/chip-click-dispatch.ts` — 3 sites / 3 keys (NEW 2026-07-27)
  *
  * The four scanned function names are unchanged: `composeAnswer`,
  * `composeToolCallResponse`, `composeClarifyResponse`,
  * `composeDirectAnswerResponse`.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ AND THE SCOPE STATEMENT ITSELF IS NOW DERIVED — BECAUSE THE HAND-WRITTEN
+ * ONE WAS WRONG THE DAY IT WAS WRITTEN.
+ *
+ * The previous revision named `handlers/chip-click-dispatch.ts` as THE surface
+ * still out of scope, pinned its site count, and left the reader with "widen
+ * this one file and the ledger speaks for all of CEE". That was false. A walk
+ * of `src/` for the enumerator's OWN pattern finds FIVE non-test files with
+ * compose sites, not three — `compose/edit-clarify-response.ts` and
+ * `routing/post-analysis-label-intercept.ts` were named nowhere, by anything.
+ *
+ * So the hand-chosen domain was doing exactly what CLAUDE.md trap #12 says a
+ * hand-maintained mirror does, one level ABOVE the register: the register's own
+ * scope was a list a human had to remember to sync, and the drift read as green
+ * ("0 ungated", "1 file left"). Widening the scan by one file would have
+ * REPLACED that defect rather than removed it.
+ *
+ * {@link derivedComposeFileDomain} now walks `src/` and derives the complete
+ * file set from source on every run. `SCANNED_FILES` ∪ {@link
+ * UNSCANNED_COMPOSE_FILES} must equal it EXACTLY, so a new production file
+ * containing a compose call fails THIS test on the commit that adds it — it can
+ * no longer be invisible, whichever of the two lists it belongs in.
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * ⚠ AND IT IS DELIBERATELY NOT ALL-GREEN-MEANS-SAFE. Eight of the twenty-five
@@ -74,12 +91,16 @@
  * to-do, not a hedge).
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
+
+import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TURN_EXECUTOR = resolve(HERE, '../turn-executor.ts');
+/** `src/` — the root of the derived file domain below. */
+const SRC_ROOT = resolve(HERE, '../..');
 
 /**
  * Every file the enumerator scans, keyed by the label the register uses. Adding
@@ -90,14 +111,90 @@ const TURN_EXECUTOR = resolve(HERE, '../turn-executor.ts');
 const SCANNED_FILES: Readonly<Record<string, string>> = {
   'turn-executor.ts': TURN_EXECUTOR,
   'route-v2.ts': resolve(HERE, '../../orchestrator/route-v2.ts'),
+  'handlers/chip-click-dispatch.ts': resolve(HERE, '../handlers/chip-click-dispatch.ts'),
 };
 
-/** The module the scan does NOT cover yet, and the count it would add. */
-const KNOWN_UNSCANNED = {
-  file: resolve(HERE, '../handlers/chip-click-dispatch.ts'),
-  label: 'handlers/chip-click-dispatch.ts',
-  siteCount: 3,
-} as const;
+/**
+ * The production files that contain compose sites and are STILL NOT SCANNED.
+ *
+ * This list is NOT the scope statement — {@link derivedComposeFileDomain} is.
+ * This is the declared REMAINDER, and the domain test below proves the two
+ * lists together are exhaustive. A file may sit here only while someone has
+ * looked at it and written down what it costs; it may not sit here by having
+ * been forgotten, because a forgotten file is in neither list and fails.
+ */
+const UNSCANNED_COMPOSE_FILES: Readonly<
+  Record<string, { readonly siteCount: number; readonly keyable: boolean; readonly why: string }>
+> = {
+  'orchestrator-v5/routing/post-analysis-label-intercept.ts': {
+    siteCount: 1,
+    keyable: true,
+    why:
+      'ONE site: `assistant_text: composeExploreText(canonicalLabel)` (:331). Deterministic ' +
+      'exploration prompt built from ONE graph-node label — "It looks like you would like to ' +
+      'explore {label}. Would you like me to walk you through the analysis…" (:273-280). Reads ' +
+      'no analysis and makes no comparison, so it looks structural on inspection; it is left ' +
+      'UNREGISTERED rather than assumed, because this file exists to stop stances being ' +
+      'assigned by inspection-at-a-glance.',
+  },
+  'orchestrator-v5/compose/edit-clarify-response.ts': {
+    siteCount: 1,
+    keyable: false,
+    why:
+      'ONE site (:128) that the enumerator CANNOT KEY — it returns UNPARSEABLE. The site passes ' +
+      'the ES6 SHORTHAND property `assistant_text,` and the key regex requires `assistant_text:`. ' +
+      'That is an instrument limitation worth naming plainly: the enumerator is blind to ' +
+      'shorthand, so a scanned file adopting shorthand would key as UNPARSEABLE (caught — the ' +
+      '"never parses a compose site it cannot key" test) rather than be keyed wrongly. Widening ' +
+      'to this file therefore requires an enumerator change, which is a separate PR.',
+  },
+};
+
+/**
+ * The enumerator's own pattern, as the DOMAIN definition. Deliberately the same
+ * regex {@link enumerateComposeSites} uses: the set of files that matters is
+ * exactly the set the scan could find sites in, so the domain and the scan
+ * cannot disagree about what a "compose site" is.
+ *
+ * Built fresh per call — a `/g` regex carries `lastIndex` between `.test()`
+ * calls, and a stateful matcher inside a completeness check would skip files on
+ * alternate iterations. (Trap 13 in miniature: the instrument would report
+ * "clean" for "did not look".)
+ */
+function composeCallPattern(): RegExp {
+  return /compose(?:Answer|ToolCallResponse|ClarifyResponse|DirectAnswerResponse)\(\{/g;
+}
+
+/**
+ * DERIVED, from source, on every run: every non-test `.ts` file under `src/`
+ * containing at least one compose call, as a path relative to `src/`.
+ *
+ * This is the answer to "which files does the `ungated` ledger speak for?" that
+ * cannot go stale, and it replaces a hand-written scope note that was wrong on
+ * the day it was written (see the header). Test files are excluded by directory
+ * (`__tests__`) AND by suffix (`.test.ts` / `.spec.ts`) — they compose responses
+ * constantly and none of it reaches a user.
+ */
+function derivedComposeFileDomain(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
+        walk(full);
+        continue;
+      }
+      if (!entry.name.endsWith('.ts')) continue;
+      if (entry.name.endsWith('.test.ts') || entry.name.endsWith('.spec.ts')) continue;
+      if (composeCallPattern().test(readFileSync(full, 'utf8'))) {
+        out.push(relative(SRC_ROOT, full).split(sep).join('/'));
+      }
+    }
+  };
+  walk(SRC_ROOT);
+  return out.sort();
+}
 
 /**
  * How a compose site stands with respect to the persisted constraint verdict.
@@ -253,6 +350,71 @@ const ROUTE_V2_SITES: Readonly<Record<string, RegisteredSite>> = {
 };
 
 /**
+ * `src/orchestrator-v5/handlers/chip-click-dispatch.ts` — brought into scope
+ * 2026-07-27. THREE sites, and only the third needed real work.
+ *
+ * This module is the deterministic chip-click fast path: route-v2 detects a
+ * `chip_click` whose `action_type` is `run_analysis` and calls
+ * `dispatchDeterministicChipClick`, which invokes the registered `run_analysis`
+ * handler directly — no Sonnet routing, no ORIENT call, zero LLM calls on the
+ * compose path. So every byte of user-facing text here is deterministic code
+ * output, which is what makes a byte-level derivation possible at all.
+ */
+const CHIP_CLICK_DISPATCH_SITES: Readonly<Record<string, RegisteredSite>> = {
+  "'Could not run analysis. The analysis service is temporarily unavailab": {
+    stance: 'structural',
+    why:
+      'Literal (chip-click-dispatch.ts:533), zero interpolation. The registry-missing safety ' +
+      'net: fires when `resolveHandler(registry, "run_analysis")` returns nothing, i.e. before ' +
+      'any analysis has run. No analysis exists on this path, so there is no leader to name and ' +
+      'no expression in the string to carry one.',
+  },
+  "'Analysis could not complete.'": {
+    stance: 'structural',
+    why:
+      'Literal (chip-click-dispatch.ts:551), zero interpolation. The `failureResponse` skeleton ' +
+      'for the two typed-failure exits (HandlerInvocationFailedError / HandlerResultInvalidError), ' +
+      'where the handler never produced a usable outcome. Same reasoning: no result, no leader.',
+  },
+
+  // ── THE ONE THAT NEEDED A DERIVATION ────────────────────────────────────
+  confirmationText: {
+    stance: 'gated',
+    why:
+      "GATED — derived at the bytes, not assumed, because the honest stance was NOT obvious: the " +
+      'allowlist that admits this text is anchored on the literal phrase "currently leads", which ' +
+      'is the exact shape that leaked three times. The allowlist is NOT the gate. THE LIVE CHAIN ' +
+      '(trap #16 — traced producer→consumer, not grepped): chip-click-dispatch.ts:786 reads ' +
+      '`HANDLER_VALIDATION_REGISTRY.run_analysis.confirmation_template` = ' +
+      '`runAnalysisConfirmationTemplate` (validation-registry.ts:104), which forwards ' +
+      "`outcome.assistant_text` iff `isAllowedRunAnalysisAssistantText` accepts it and otherwise " +
+      'falls back to the locked literal; the forwarded value reaches `confirmation:` at :807. ' +
+      '`outcome` is the run_analysis handler’s single return (run-analysis.ts:1066, ' +
+      '`assistant_text: summary`; the handler has exactly one exit and `outcome` is never ' +
+      'reassigned between the call and the read). `summary` is ' +
+      '`${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}` (:1004). ' +
+      'THE GATE IS `headline`: `buildAnalysisResultHeadline` returns `text: null` — withholding ' +
+      'the whole "{X} currently leads…" grammar — for each of the three verdict states that ' +
+      'withhold the claim (analysis-result-headline.ts:460, :484, :507), and `template` is one of ' +
+      'the five RUN_ANALYSIS_ASSISTANT_TEMPLATES literals, none of which interpolates an option. ' +
+      'CRUCIALLY IT IS THE SAME VERDICT, NOT A SECOND DERIVATION: run-analysis.ts computes ONE ' +
+      '`constraintVerdict`, feeds its three withholding states into the headline input (:872-895) ' +
+      'AND persists it as `result.constraint_verdict` (:1046) — which is precisely what ' +
+      '`readMayNameLeadingOptionForFacts` reads back as `mayNameLeadingOption`. Output-side ' +
+      'consumption of the persisted verdict, at the same turn, from one derivation. ' +
+      '⚠ ONE RESIDUAL, STATED RATHER THAN SMOOTHED: the `evaluated_infeasible` conjunct is ' +
+      '`config.features.constraintInfeasibleGate && …` (run-analysis.ts:893-895) while the ' +
+      "persisted verdict's `MAY_NAME_LEADING_OPTION.evaluated_infeasible` is `false` " +
+      'UNCONDITIONALLY. The flag defaults to `true` (config/index.ts:728), so they agree as ' +
+      'shipped — but with `CEE_CONSTRAINT_INFEASIBLE_GATE=false` the headline would name a leader ' +
+      'the persisted verdict withholds, and Layer 3 is observe-only ' +
+      '(`guardLeadingOptionClaimsAtEgress` returns the response unchanged). The default is ' +
+      'PINNED below so flipping it turns this register red rather than silently voiding this ' +
+      'entry.',
+  },
+};
+
+/**
  * The register, KEYED BY FILE. The nesting is the scope statement: a reader of
  * the `ungated` ledger can see exactly which files it speaks for, instead of
  * inferring it from a comment that can go stale (which is what happened).
@@ -260,6 +422,7 @@ const ROUTE_V2_SITES: Readonly<Record<string, RegisteredSite>> = {
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
+  'handlers/chip-click-dispatch.ts': CHIP_CLICK_DISPATCH_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -364,22 +527,74 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     expect(routeV2Keys.sort()).toEqual(['EDIT_GRAPH_RECOVERY_TEXT', 'NO_LIVE_PROPOSAL_TEXT']);
   });
 
-  it('names the surface it still does NOT cover, with a derived count', () => {
-    // The scope hole this widening only PARTLY closed, pinned as a number rather
-    // than left in prose. If chip-click-dispatch grows or loses a compose site,
-    // this fails and the next reader is told the register's ledger just changed
-    // meaning — instead of the count quietly drifting inside a docstring, which
-    // is exactly how the turn-executor-only scope survived three walks.
-    const unscanned = enumerateComposeSites(readFileSync(KNOWN_UNSCANNED.file, 'utf8'));
-    expect(unscanned).not.toContain('UNPARSEABLE');
+  it('the scan really covers chip-click-dispatch.ts, and it really has sites', () => {
+    // Same anti-tautology pin as route-v2.ts above, for the 2026-07-27 widening.
+    // A file added to SCANNED_FILES that the enumerator finds nothing in widens
+    // the scope on paper and changes no measurement (trap 12b).
+    const chipKeys = enumerateComposeSites(sources['handlers/chip-click-dispatch.ts']!);
+    expect(chipKeys.length).toBeGreaterThan(0);
+    expect(chipKeys.sort()).toEqual([
+      "'Analysis could not complete.'",
+      "'Could not run analysis. The analysis service is temporarily unavailab",
+      'confirmationText',
+    ]);
+  });
+
+  it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
+    // ⭐ THE SCOPE-LEVEL TRAP-12 FIX. The previous revision hand-named ONE file
+    // as the remaining gap. A walk of src/ finds FIVE non-test files with
+    // compose sites — two of them (`compose/edit-clarify-response.ts`,
+    // `routing/post-analysis-label-intercept.ts`) were named nowhere at all. The
+    // register's `ungated: []` was therefore scoped by a list a human had to
+    // remember to sync, and the drift read as green.
+    //
+    // Now the domain is DERIVED and the two lists must exhaust it. A new
+    // production file with a compose site fails HERE, on the commit that adds
+    // it, whichever list it should have joined — which is the property trap 12
+    // demands: derive from the source of truth, and where the JUDGEMENT cannot
+    // be derived, make the MEMBERSHIP fail loud.
+    const declared = [
+      ...Object.values(SCANNED_FILES).map((p) => relative(SRC_ROOT, p).split(sep).join('/')),
+      ...Object.keys(UNSCANNED_COMPOSE_FILES),
+    ].sort();
     expect(
-      unscanned.length,
-      `${KNOWN_UNSCANNED.label} is a KNOWN-UNSCANNED surface. Its site count changed, ` +
-        "so the register's `ungated: []` ledger now speaks for a different share of " +
-        'CEE than it did. Either widen SCANNED_FILES and register the sites, or update ' +
-        'this number deliberately.',
-    ).toBe(KNOWN_UNSCANNED.siteCount);
-    expect(Object.keys(SCANNED_FILES)).not.toContain(KNOWN_UNSCANNED.label);
+      declared,
+      'A file under src/ contains a compose site and is in NEITHER SCANNED_FILES nor ' +
+        "UNSCANNED_COMPOSE_FILES (or one of those lists names a file that no longer has " +
+        'sites). The `ungated: []` ledger below speaks only for SCANNED_FILES, so an ' +
+        'undeclared compose file means that ledger silently covers less of CEE than the ' +
+        'last reader believed. Register it, or declare it unscanned WITH a reason.',
+    ).toEqual(derivedComposeFileDomain());
+  });
+
+  it('POSITIVE CONTROL: the derived domain SEES a compose file (it is not vacuously empty)', () => {
+    // Rule 2. A walk that silently found nothing — wrong root, wrong extension
+    // filter, a `/g` regex carrying `lastIndex` — would make the assertion above
+    // pass only when BOTH lists were also empty, and read as clean forever.
+    const domain = derivedComposeFileDomain();
+    expect(domain.length).toBeGreaterThanOrEqual(5);
+    expect(domain).toContain('orchestrator-v5/turn-executor.ts');
+    expect(domain).toContain('orchestrator-v5/handlers/chip-click-dispatch.ts');
+    // And it must EXCLUDE the definition site: compose.ts declares
+    // `composeToolCallResponse(input: …)` and calls none of the four, so a
+    // domain containing it would mean the pattern had drifted from the
+    // enumerator's and the two could disagree about what a site is.
+    expect(domain).not.toContain('orchestrator-v5/compose.ts');
+  });
+
+  it('the declared UNSCANNED remainder still has the sites it says it has', () => {
+    // The remainder is a to-do with a price on it, not a shrug. If either file
+    // gains or loses a site the number here is wrong, and the next reader would
+    // otherwise inherit a stale cost estimate for closing the gap.
+    for (const [rel, decl] of Object.entries(UNSCANNED_COMPOSE_FILES)) {
+      const keys = enumerateComposeSites(readFileSync(resolve(SRC_ROOT, rel), 'utf8'));
+      expect(keys.length, `${rel}: declared site count is stale`).toBe(decl.siteCount);
+      // `keyable: false` is a DECLARED instrument limitation, pinned in both
+      // directions so it can neither be quietly fixed nor quietly spread.
+      expect(keys.includes('UNPARSEABLE'), `${rel}: declared keyable=${decl.keyable}`).toBe(
+        !decl.keyable,
+      );
+    }
   });
 
   it('POSITIVE CONTROL: a duplicate-NAME site is caught (the set-comparison blind spot)', () => {
@@ -427,10 +642,17 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // would let it in silently — which is the whole defect class this file is
     // about.
     //
-    // ⚠ READ THE SCOPE WITH THE NUMBER. This `[]` now speaks for turn-executor.ts
-    // AND route-v2.ts — 31 sites / 27 keys — and NOT for
-    // handlers/chip-click-dispatch.ts (3 sites, pinned above). Before 2026-07-27
-    // it spoke for one file and said so nowhere.
+    // ⚠ READ THE SCOPE WITH THE NUMBER. This `[]` speaks for turn-executor.ts,
+    // route-v2.ts AND handlers/chip-click-dispatch.ts — 34 sites / 30 keys — and
+    // NOT for the two files in UNSCANNED_COMPOSE_FILES (1 site each). The
+    // difference from previous revisions is that the boundary is no longer a
+    // sentence anyone has to keep true: the derived-domain test above fails if
+    // this list of files stops being the whole story.
+    //
+    // NOTE the chip-click widening did NOT add an ungated site. That is a
+    // derivation (see `confirmationText`'s entry), not a convenience: had the
+    // headline gate turned out absent, the honest move was to add the key here
+    // and change this assertion deliberately — never to relabel the site.
     expect(ungated).toEqual([]);
   });
 
@@ -439,9 +661,10 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // as covering more than it measures. Both figures are DERIVED from source on
     // every run; only the expectation is written down.
     const sites = enumerateAllScannedSites(sources);
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(31);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(27);
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(34);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(30);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
+      'handlers/chip-click-dispatch.ts',
       'route-v2.ts',
       'turn-executor.ts',
     ]);
@@ -571,5 +794,149 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       'let mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts(context.prior_facts);',
     );
     expect(source).not.toContain('let mayNameLeadingOptionForRun = true;');
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // chip-click `confirmationText` — the derivation, pinned hop by hop.
+  //
+  // This site is registered `gated` on a FOUR-HOP chain across four files. A
+  // single `toContain` on the compose site would prove none of it, and the
+  // stance would rest on this file's prose — which is the failure mode the
+  // register's own header calls out (trap #14: the honest label overwritten by
+  // a false one). Each hop below is the line the gate actually turns on, so
+  // breaking ANY hop turns this red.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  const CHIP_CLICK = readFileSync(SCANNED_FILES['handlers/chip-click-dispatch.ts']!, 'utf8');
+  const VALIDATION_REGISTRY = readFileSync(resolve(HERE, '../routing/validation-registry.ts'), 'utf8');
+  const RUN_ANALYSIS = readFileSync(resolve(HERE, '../tools/handlers/run-analysis.ts'), 'utf8');
+  const HEADLINE = readFileSync(resolve(HERE, '../coaching/analysis-result-headline.ts'), 'utf8');
+
+  it('chip-click: the two failure sites really ARE literals (structural, non-vacuous)', () => {
+    for (const key of [
+      "'Could not run analysis. The analysis service is temporarily unavailab",
+      "'Analysis could not complete.'",
+    ]) {
+      expect(CHIP_CLICK_DISPATCH_SITES[key]!.stance).toBe('structural');
+    }
+    // The claim is "zero interpolation", so the evidence is the literal itself
+    // WITH its terminating quote+comma: a future edit turning either into a
+    // template literal cannot leave these fragments intact.
+    expect(CHIP_CLICK).toContain(
+      "confirmation: 'Could not run analysis. The analysis service is temporarily unavailable.',",
+    );
+    expect(CHIP_CLICK).toContain("confirmation: 'Analysis could not complete.',");
+  });
+
+  it('chip-click confirmationText: HOP 1-2 — the site reads the registry template', () => {
+    expect(CHIP_CLICK_DISPATCH_SITES['confirmationText']!.stance).toBe('gated');
+    // HOP 1: the compose site is fed by the registry declaration, not by raw
+    // handler prose. Both halves matter — the `typeof === 'function'` branch is
+    // what routes through the allowlist at all.
+    expect(CHIP_CLICK).toContain("decl?.confirmation_template === 'function'");
+    expect(CHIP_CLICK).toContain('confirmation: confirmationText,');
+    // HOP 2: run_analysis's declared template IS the allowlisting forwarder, and
+    // that forwarder gates on the allowlist rather than passing prose through.
+    expect(VALIDATION_REGISTRY).toContain('confirmation_template: runAnalysisConfirmationTemplate,');
+    expect(VALIDATION_REGISTRY).toContain('if (isAllowedRunAnalysisAssistantText(candidate)) {');
+    expect(VALIDATION_REGISTRY).toContain(
+      "const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';",
+    );
+  });
+
+  it('chip-click confirmationText: HOP 3 — the text is headline ?? locked template', () => {
+    // The load-bearing composition. If `summary` ever stops being
+    // "withheld-able headline, else a locked template", the `gated` stance is
+    // void — so the exact expression is pinned, not paraphrased.
+    expect(RUN_ANALYSIS).toContain('const headline = buildAnalysisResultHeadline(headlineInput);');
+    expect(RUN_ANALYSIS).toContain(
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}`;',
+    );
+    expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
+    // ONE verdict, TWO consumers — the property that makes this `gated` rather
+    // than "two derivations that happen to agree". The same object that gates
+    // the headline is the one persisted and read back as mayNameLeadingOption.
+    expect(RUN_ANALYSIS).toContain('constraint_verdict: projectClaimSafety(constraintVerdict),');
+  });
+
+  it('chip-click confirmationText: HOP 4 — EVERY withholding verdict state withholds the headline', () => {
+    // ⭐ THE DERIVATION, not a fragment grep. The set of states that withhold the
+    // claim is DERIVED from `MAY_NAME_LEADING_OPTION` — the same exhaustive
+    // `Record<ConstraintVerdictState, boolean>` the verdict itself reads — so a
+    // SIXTH state added with `false` and no matching headline branch fails here
+    // instead of shipping a leader the verdict withheld.
+    //
+    // The state -> headline-input mapping cannot be derived (the names are not
+    // mechanical: `evaluated_infeasible` -> `constraint_infeasible`), so it is a
+    // mirror — and per trap #12 a mirror that cannot be derived must FAIL LOUD
+    // on drift, which is what the key-set assertion immediately below does.
+    const WITHHOLD_STATE_TO_HEADLINE_INPUT: Readonly<Record<string, string>> = {
+      evaluated_infeasible: 'constraint_infeasible',
+      unevaluated: 'constraint_unevaluated',
+      identity_unresolved: 'constraint_identity_unresolved',
+    };
+    const derivedWithholdingStates = Object.entries(MAY_NAME_LEADING_OPTION)
+      .filter(([, mayName]) => !mayName)
+      .map(([state]) => state)
+      .sort();
+    expect(
+      Object.keys(WITHHOLD_STATE_TO_HEADLINE_INPUT).sort(),
+      'A ConstraintVerdictState changed its leading-option answer, or a new state was ' +
+        'added. The chip-click confirmationText stance is `gated` ONLY because every state ' +
+        'that withholds the claim also withholds the headline — re-derive that before ' +
+        'updating this map.',
+    ).toEqual(derivedWithholdingStates);
+
+    for (const [state, field] of Object.entries(WITHHOLD_STATE_TO_HEADLINE_INPUT)) {
+      // The headline builder returns `text: null` on this input...
+      expect(HEADLINE, `${state}: headline no longer withholds on ${field}`).toContain(
+        `if (input.${field} === true) {`,
+      );
+      // ...and the handler really wires THAT state to THAT input.
+      expect(RUN_ANALYSIS, `${state}: handler no longer feeds the verdict state to the headline`)
+        .toContain(`constraintVerdict.state === '${state}',`);
+    }
+
+    // ⚠ THE RESIDUAL, PINNED. `evaluated_infeasible` is the one hop whose
+    // withhold is flag-conditional, while the persisted verdict's answer for it
+    // is unconditional `false`. They agree only because the flag defaults ON.
+    // Flipping this default re-opens a divergence between the confirmation text
+    // and the verdict the same response carries — with Layer 3 observe-only —
+    // so it must not be possible to do it quietly.
+    expect(MAY_NAME_LEADING_OPTION.evaluated_infeasible).toBe(false);
+    expect(RUN_ANALYSIS).toContain('config.features.constraintInfeasibleGate &&');
+    expect(
+      readFileSync(resolve(HERE, '../../config/index.ts'), 'utf8'),
+      'CEE_CONSTRAINT_INFEASIBLE_GATE no longer defaults ON. The chip-click ' +
+        '`confirmationText` gate for the evaluated_infeasible state is conditional on this ' +
+        'flag; with it off, the headline names a leader the persisted verdict withholds and ' +
+        'the Layer-3 guard is observe-only. Re-derive the stance before changing this.',
+    ).toContain('constraintInfeasibleGate: booleanString.default(true),');
+  });
+
+  it('POSITIVE CONTROL: the chip-click hop evidence can FAIL', () => {
+    // Rule 2, for the four-hop chain. Each `toContain` above must discriminate;
+    // prove it on the two hops that carry the whole stance — the compose-site
+    // read and the headline withhold — by mutating each and re-checking.
+    const site = 'confirmation: confirmationText,';
+    expect(CHIP_CLICK).toContain(site);
+    expect(CHIP_CLICK.replace(site, 'confirmation: outcome.assistant_text,')).not.toContain(site);
+
+    const withhold = 'if (input.constraint_infeasible === true) {';
+    expect(HEADLINE).toContain(withhold);
+    // The pre-gate shape: the branch deleted entirely.
+    expect(HEADLINE.replace(withhold, 'if (false) {')).not.toContain(withhold);
+  });
+
+  it('chip-click reads the SHARED claim-safety reader, not a copy of it', () => {
+    // 2026-07-27. The chip-click exit used to inline an IIFE that was
+    // line-for-line `readMayNameLeadingOptionForFacts` — same selector, same
+    // `null ⇒ true`, same narrow, same input array. Identical behaviour, and
+    // therefore invisible: the shared reader's docstring promises "a future
+    // third caller gets the same answer BY CONSTRUCTION rather than by a
+    // reviewer noticing", and the third caller got it by copy. Pinned in both
+    // directions so the copy cannot come back.
+    expect(CHIP_CLICK).toContain('readMayNameLeadingOptionForFacts([');
+    expect(CHIP_CLICK).not.toContain('selectRunAnalysisFact([...enrichedFacts');
   });
 });
