@@ -265,7 +265,10 @@ import {
 // redact the ordering claims out of prior assistant messages on a withheld
 // turn, so a leaked answer cannot be read back to the model (and cannot
 // self-reinforce). Projection-side only; the stored turns are never mutated.
-import { projectConversationForWithheldClaim } from './context/withheld-history-redaction.js';
+import {
+  projectConversationForWithheldClaim,
+  projectConversationSummaryForWithheldClaim,
+} from './context/withheld-history-redaction.js';
 import {
   projectExplanationAnswerForWithheldClaim,
   type WithheldExplanationReason,
@@ -2103,6 +2106,40 @@ export async function runTurnExecutor(
       // one axis and not the other. See
       // `context/withheld-history-redaction.ts` for the reader (wider than the
       // egress alarm's, and why), the marker, and the module-load probes.
+      //
+      // ─────────────────────────────────────────────────────────────────────
+      // ⭐ 2026-07-27 — THE THIRD FIELD GATED AT THIS SAME CHOKEPOINT:
+      // `conversation_summary`, the rolling summary. The LAST model-input
+      // channel with PROVEN leader content, and the register above has listed it
+      // as an open residual since #724 ("`conversation_summary` (the rolling
+      // summary) — its own ROADMAP row").
+      //
+      // A live read on historic scenario `f63ccb45` shows its `RESOLVED` slot
+      // carrying, VERBATIM: "Current analysis shows Double Down on SMB leading
+      // 52% vs Enterprise 35%, but result is fragile and sensitive to sales win
+      // rate assumptions." — three sentences ABOVE that same summary's own "No
+      // ranking can be put forward…". The stored summary contradicts itself, and
+      // `inject.ts` renders the whole block into the routing prompt beside an
+      // instruction to treat it as the conversation's working notes.
+      //
+      // ⚠ AND THE SHARED ALARM IS BLIND TO IT: `textNamesLeadingOption` scores
+      // that sentence FALSE (`\bleads\b` is present-tense; this is the bare
+      // participle "leading 52%"). #724's WIDER reader catches it, which is
+      // exactly why this gate REUSES that module rather than the egress
+      // vocabulary — and why it reuses it rather than copying it (the estate's
+      // dominant defect is near-identical readers drifting apart).
+      //
+      // INJECT-SIDE, NOT WRITE-SIDE (A1's ruling). The whole arc gates
+      // PROJECTIONS and never mutates stored data: the persisted summary stays
+      // the audit trail of what the product actually recorded. Whether the
+      // SUMMARISER should record leader claims at all is a separate
+      // summariser-contract change with its own blast radius — and one that
+      // could not help the summaries already stored — assessed in the PR body
+      // as a follow-up rather than smuggled in here.
+      //
+      // The key is spread CONDITIONALLY so a pack with no stored summary keeps
+      // the key ABSENT (byte-identity with pre-S4 packs, which several tests and
+      // the pack schema's `.optional()` both depend on).
       // ═════════════════════════════════════════════════════════════════════
       const contextPack: ContextPack = mayNameLeadingOptionForRun
         ? assembledContextPack
@@ -2115,6 +2152,13 @@ export async function runTurnExecutor(
             conversation: projectConversationForWithheldClaim(
               assembledContextPack.conversation,
             ),
+            ...(assembledContextPack.conversation_summary === undefined
+              ? {}
+              : {
+                  conversation_summary: projectConversationSummaryForWithheldClaim(
+                    assembledContextPack.conversation_summary,
+                  ),
+                }),
           };
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {

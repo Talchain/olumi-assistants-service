@@ -1,5 +1,21 @@
 /**
- * T1 claim safety — the FOURTH channel: the model's own CONVERSATION HISTORY.
+ * T1 claim safety — the model's own CONVERSATION HISTORY, in BOTH the forms it
+ * reaches the prompt in:
+ *
+ *   FOURTH CHANNEL — `conversation.recent_turns[].assistant_message`, the prior
+ *     turns VERBATIM (#724). The measurement below is this one's.
+ *   FIFTH CHANNEL  — `conversation_summary.text`, the stored four-slot ROLLING
+ *     SUMMARY of the same conversation (2026-07-27). Same defect one layer up,
+ *     same reader, same marker; see the section headed THE FIFTH CHANNEL near
+ *     {@link projectConversationSummaryForWithheldClaim} for its own live
+ *     evidence and for why the block's structure survives redaction.
+ *
+ * ONE MODULE, TWO CONSUMERS, DELIBERATELY. The two channels carry the same kind
+ * of prose and were leaking the same kind of sentence; giving the summary its
+ * own near-identical reader is precisely how this estate's dominant defect
+ * (near-identical copies drifting apart) gets built. The wide-vocabulary reader,
+ * the splitter, the marker and its inertness probes are shared by CALL, not by
+ * copy.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * WHAT THIS CLOSES, MEASURED RATHER THAN SUPPOSED.
@@ -118,6 +134,11 @@ import type {
   ContextPackConversationTurn,
 } from './context-pack-assembler.js';
 import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
+import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
+import {
+  ROLLING_SUMMARY_SLOTS,
+  ROLLING_SUMMARY_SLOT_LABELS,
+} from '../rolling-summary/summary-types.js';
 
 /**
  * The neutral stand-in for one redacted history sentence.
@@ -300,6 +321,15 @@ function splitIntoRedactableUnits(text: string): string[] {
  * would otherwise become a wall of identical markers — noise that reads as a
  * malfunction and eats budget. One marker per contiguous redacted run.
  *
+ * ⚠ NEVER RETURNS EMPTY FOR A NON-EMPTY STRING INPUT, and a second consumer now
+ * DEPENDS on that. A redacted unit is REPLACED by the marker, never deleted —
+ * so a message that is wall-to-wall ordering claims redacts to the marker, not
+ * to `''`. The rolling-summary gate rests on this: an emptied slot would render
+ * as `(none)`, which the injector documents as "the summariser looked and found
+ * none" — an affirmative claim that no settled history exists, i.e. the exact
+ * lying-coverage class `retention.ts` was written to stop. Pinned at module load
+ * by {@link assertRedactionNeverEmpties}.
+ *
  * PURE. Never throws, never mutates.
  */
 export function redactLeaderClaimsFromHistoryMessage(message: string | null): string | null {
@@ -396,6 +426,122 @@ export function projectConversationForWithheldClaim(
   const changed = projected.some((turn, i) => turn !== conversation.recent_turns[i]);
   if (!changed) return conversation;
   return { ...conversation, recent_turns: projected };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE FIFTH CHANNEL — the ROLLING SUMMARY (`ContextPack.conversation_summary`).
+//
+// The same defect, one layer up. `scenarios.rolling_summary` is a haiku-written
+// digest of the conversation, and the summariser RECORDED the leader claim into
+// it. Live read on scenario `f63ccb45`, the `RESOLVED` slot, verbatim:
+//
+//   "Current analysis shows Double Down on SMB leading 52% vs Enterprise 35%,
+//    but result is fragile and sensitive to sales win rate assumptions."
+//
+// …three sentences above that same summary's own "No ranking can be put
+// forward…". The stored summary CONTRADICTS ITSELF, and `inject.ts` renders the
+// whole four-slot block into `conversation_summary.text`, which `buildUserMessage`
+// serialises into the routing prompt beside an instruction to treat it as the
+// conversation's working notes. Nothing on that path consulted the verdict.
+//
+// ⚠ MEASURED, NOT SUPPOSED, AND IT IS THE SAME MEASUREMENT THAT FORCED #724'S
+// READER: `textNamesLeadingOption` scores that sentence FALSE — `\bleads\b` is
+// present-tense and this is the bare participle "leading 52%", which
+// `leading_option` and `leading_in` both require a following word for. The
+// shared alarm is blind to the string sitting in the live summary; the wider
+// reader above catches it on `lead_any_inflection`. A gate built on the shared
+// vocabulary would have been theatre here too.
+//
+// ⭐ WHY THIS IS A PROJECTION AND NOT A SUMMARISER FIX (A1's ruling). The whole
+// arc gates PROJECTIONS and never mutates stored data — the persisted summary is
+// the audit trail of what the product actually recorded, and rewriting it is how
+// a leak becomes uninvestigable. Whether the summariser should record leader
+// claims AT ALL is a separate, larger question (it is a summariser-contract
+// change with its own blast radius, and it cannot help the summaries already
+// stored); it is assessed in the PR body as a follow-up, deliberately not
+// implemented here.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * The rendered slot-line prefixes, DERIVED from the injector's own label
+ * vocabulary rather than re-listed (CLAUDE.md trap #12).
+ *
+ * `inject.ts` renders exactly `${ROLLING_SUMMARY_SLOT_LABELS[slot]}: ${content}`,
+ * one line per slot, in `ROLLING_SUMMARY_SLOTS` order. Splitting the label off
+ * before redacting is what makes "never make the block unparseable" a
+ * DERIVATION: the label bytes are never handed to the reader, so no pattern can
+ * ever consume one, and the line count is invariant under projection.
+ */
+const SUMMARY_SLOT_LINE_PREFIXES: readonly string[] = Object.freeze(
+  ROLLING_SUMMARY_SLOTS.map((slot) => `${ROLLING_SUMMARY_SLOT_LABELS[slot]}: `),
+);
+
+/**
+ * Redact the ordering claims out of ONE rendered four-slot block.
+ *
+ * ⚠ THE FOUR-SLOT CONTRACT IS PRESERVED BY CONSTRUCTION, THREE WAYS:
+ *
+ *   1. LABELS ARE NEVER TOUCHED. Each line is split at its known prefix and
+ *      only the CONTENT is redacted, so `RESOLVED:` cannot be eaten by a
+ *      pattern that happened to match across it.
+ *   2. THE LINE COUNT IS INVARIANT. Redaction is per-line and lossless-joined,
+ *      so a four-line block stays a four-line block (five with the
+ *      `history_capped` disclosure).
+ *   3. NO SLOT CAN BECOME EMPTY. A redacted unit is REPLACED by the marker, so
+ *      even a slot whose every sentence is an ordering claim renders
+ *      `RESOLVED: [prior discussion …]` — never `RESOLVED: (none)`. That
+ *      distinction is load-bearing and is not cosmetic: `inject.ts` documents
+ *      the bare `(none)` on a non-floor summary as "the summariser looked and
+ *      found none", so emptying a slot would make this gate MINT the affirmative
+ *      false claim that no settled history exists — the lying-coverage class,
+ *      reintroduced by the fix for a different one. Pinned at module load.
+ *
+ * A line matching no known prefix (only the `history_capped` disclosure today)
+ * is redacted whole, as ordinary prose. That is the safe default: an
+ * unrecognised line is content, and content is what this gate exists to check.
+ *
+ * PURE. Byte-identical (same reference) when no line carried a claim.
+ */
+export function redactLeaderClaimsFromSummaryBlock(text: string): string {
+  if (typeof text !== 'string' || text.length === 0) return text;
+  let changed = false;
+  const lines = text.split('\n').map((line) => {
+    const prefix = SUMMARY_SLOT_LINE_PREFIXES.find((p) => line.startsWith(p));
+    const body = prefix === undefined ? line : line.slice(prefix.length);
+    // `?? body` is a type narrowing, not a fallback: the redactor returns null
+    // only for a null input, and `body` is always a string here.
+    const redacted = redactLeaderClaimsFromHistoryMessage(body) ?? body;
+    if (redacted !== body) changed = true;
+    return prefix === undefined ? redacted : `${prefix}${redacted}`;
+  });
+  return changed ? lines.join('\n') : text;
+}
+
+/**
+ * Project the `conversation_summary` section for a turn whose verdict WITHHOLDS.
+ *
+ * The caller owns the permission and this function assumes it — it does not
+ * re-derive the verdict, so the permission and the input it governs describe the
+ * same turn (CLAUDE.md trap #12).
+ *
+ * ONLY `text` IS TOUCHED. `current_to_turn_id`, `lag_turns` and `stale` are
+ * structural metadata carrying no ordering claim, and `note` is CEE'S OWN
+ * authored copy (the staleness / floor / memory-hole disclosures) — constants
+ * written by this repo, not model output, and redacting them would degrade the
+ * honesty disclosures this section exists to carry. The memory-hole refusal path
+ * already ships `text: ''`, which this leaves untouched.
+ *
+ * Returns the SAME OBJECT when nothing changed — byte-identity for a
+ * leader-free summary is a derivation, not a hope.
+ *
+ * PURE. Never throws, never mutates, never touches storage.
+ */
+export function projectConversationSummaryForWithheldClaim(
+  summary: ContextPackConversationSummary,
+): ContextPackConversationSummary {
+  const redacted = redactLeaderClaimsFromSummaryBlock(summary.text);
+  if (redacted === summary.text) return summary;
+  return { ...summary, text: redacted };
 }
 
 /**
@@ -551,6 +697,102 @@ function assertSupersetAndLosslessSplit(): void {
   }
 }
 
+/**
+ * BUILD-TIME PROBE 4 — REDACTION NEVER EMPTIES, and the FOUR-SLOT BLOCK STAYS
+ * STRUCTURALLY INTACT.
+ *
+ * ⭐ THE PROPERTY THE ROLLING-SUMMARY GATE RESTS ON, exercised rather than
+ * argued. Every sentence that actually leaked is redacted to a NON-EMPTY string
+ * containing the marker. A future "optimisation" that dropped a claim unit
+ * instead of replacing it would keep compiling, would keep every leak assertion
+ * green, and would silently start rendering `RESOLVED: (none)` on withheld turns
+ * — an affirmative claim that no settled history exists, minted by the gate.
+ *
+ * The block arm is a real four-slot render (the shape `inject.ts` produces) with
+ * a slot whose ENTIRE content is an ordering claim — the worst case — and it
+ * pins that the labels, the line count and the slot order all survive.
+ */
+function assertRedactionNeverEmpties(): void {
+  for (const sentence of LIVE_LEAK_CORPUS) {
+    const redacted = redactLeaderClaimsFromHistoryMessage(sentence);
+    if (redacted === null || redacted.length === 0) {
+      throw new Error(
+        'withheld-history-redaction: redaction EMPTIED a non-empty message — ' +
+          `${JSON.stringify(sentence.slice(0, 80))}. A redacted unit must be REPLACED by the ` +
+          'marker, never deleted: the rolling-summary gate would otherwise render an emptied ' +
+          'slot as "(none)", which the injector documents as an affirmative "found none".',
+      );
+    }
+    if (!redacted.includes(WITHHELD_HISTORY_REDACTION_MARKER)) {
+      throw new Error(
+        'withheld-history-redaction: a redacted message carries no marker — the redaction is ' +
+          'silent, and a hole in prior context invites the model to reconstruct it.',
+      );
+    }
+  }
+
+  // The worst case for the block: RESOLVED is nothing but an ordering claim.
+  const block = [
+    'DECISION FRAME: Whether to double down on SMB or move upmarket.',
+    'CONSTRAINTS & PREFERENCES: Keep the existing team. [t:f63ccb45]',
+    'RESOLVED: Double Down on SMB is leading. [t:f63ccb45]',
+    'OPEN: Is the sales win rate link verified?',
+  ].join('\n');
+  const projected = redactLeaderClaimsFromSummaryBlock(block);
+  const before = block.split('\n');
+  const after = projected.split('\n');
+  if (after.length !== before.length) {
+    throw new Error(
+      'withheld-history-redaction: projecting a four-slot block changed the LINE COUNT ' +
+        `(${before.length} → ${after.length}). The block would no longer render as four slots.`,
+    );
+  }
+  for (const [i, prefix] of SUMMARY_SLOT_LINE_PREFIXES.entries()) {
+    if (!after[i]!.startsWith(prefix)) {
+      throw new Error(
+        `withheld-history-redaction: slot line ${i} lost its label — expected the projected ` +
+          `block to still start line ${i} with ${JSON.stringify(prefix)}, got ` +
+          `${JSON.stringify(after[i]!.slice(0, 40))}. Redaction must never consume a slot label.`,
+      );
+    }
+  }
+  const resolved = after[ROLLING_SUMMARY_SLOTS.indexOf('RESOLVED')]!;
+  if (resolved.includes('leading')) {
+    throw new Error(
+      'withheld-history-redaction: the ordering claim survived the block projection. The gate ' +
+        'is inert against the content it exists to remove.',
+    );
+  }
+  if (resolved.includes('(none)')) {
+    throw new Error(
+      'withheld-history-redaction: a fully-redacted slot rendered as "(none)". The injector ' +
+        'documents the bare marker on a non-floor summary as "the summariser looked and found ' +
+        'none" — this gate would be MINTING that affirmative claim. It must render the marker.',
+    );
+  }
+  if (!resolved.includes(WITHHELD_HISTORY_REDACTION_MARKER)) {
+    throw new Error(
+      'withheld-history-redaction: a fully-redacted slot carries no marker — the absence is ' +
+        'silent, which is the one thing the four-slot block must never be.',
+    );
+  }
+  // Byte-identity for a claim-free block — the over-suppression arm, and the
+  // property that makes a permitted-vs-withheld comparison meaningful.
+  const clean = [
+    'DECISION FRAME: Whether to double down on SMB or move upmarket.',
+    'CONSTRAINTS & PREFERENCES: Keep the existing team. [t:f63ccb45]',
+    'RESOLVED: (none)',
+    'OPEN: Is the sales win rate link verified?',
+  ].join('\n');
+  if (redactLeaderClaimsFromSummaryBlock(clean) !== clean) {
+    throw new Error(
+      'withheld-history-redaction: a claim-free four-slot block was altered. Byte-identity on ' +
+        'claim-free content is the anti-over-suppression property.',
+    );
+  }
+}
+
 assertMarkerIsInert();
 assertReaderSeesTheLiveLeakAndSparesOrdinaryProse();
 assertSupersetAndLosslessSplit();
+assertRedactionNeverEmpties();

@@ -233,17 +233,35 @@ function derivedComposeFileDomain(): string[] {
  * build `b35d09de`, 2/5 samples — and CLOSED for the assistant side:
  * `context/withheld-history-redaction.ts` redacts the ordering claims out of
  * `conversation.recent_turns[].assistant_message` at the same pack chokepoint.
+ *
+ * ⚠ UPDATED AGAIN 2026-07-27, SAME DISCIPLINE — the entry below read
+ * *"`conversation_summary` (the rolling summary) — its own ROADMAP row"*, and
+ * that row has now been worked. A live read on scenario `f63ccb45` found its
+ * `RESOLVED` slot carrying "Current analysis shows Double Down on SMB leading
+ * 52% vs Enterprise 35%…" three sentences above the SAME summary's own "No
+ * ranking can be put forward…". It is gated at the same chokepoint by
+ * `projectConversationSummaryForWithheldClaim`, reusing this module's reader
+ * (the shared alarm scores that sentence FALSE — bare participle).
+ *
  * THE INPUT SET IS NOW WIDER, NOT COMPLETE. What `gated_by_input` still does
  * NOT cover, enumerated rather than implied:
  *   - `conversation.recent_turns[].user_message` — the USER'S own words, left
  *     verbatim by design (CEE asserting a claim ≠ the user restating one), and
  *     not the self-reinforcing half.
- *   - `conversation_summary` (the rolling summary) — its own ROADMAP row.
  *   - `brief`, `coaching_context`, `recent_changes`, `parsed_quantities`,
  *     `system_event`, `payload`, `display_graph` — never gated on this axis.
  *   - the V4 edit-graph dispatch (`handlers/edit-graph-dispatch.ts:1261`),
  *     which builds its OWN conversation slice for the edit LLM and has no
- *     verdict to consume — it loads no prior facts.
+ *     verdict to consume — it loads no prior facts. ASSESSED 2026-07-27 and
+ *     deliberately left: threading the verdict there needs a NEW prior-facts
+ *     read on a path that performs none, which is a derivation this arc's own
+ *     rule (one hoist, one selector) says not to add in passing. Sized in the
+ *     PR body for #725.
+ *   - the STORED summary itself: this gate is a PROJECTION, so
+ *     `scenarios.rolling_summary` still HOLDS the claim on disk and every
+ *     historic row stays as written. That is deliberate (the audit trail is what
+ *     makes a leak investigable) and it is why the write-side question is a
+ *     separate slice, not an oversight.
  */
 type VerdictStance = 'gated' | 'gated_by_input' | 'structural' | 'ungated';
 
@@ -813,6 +831,24 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
         'channel WALK-HISTORIC-PREP-2026-07-27.md §10 measured leaking 2/5 AFTER #721 and ' +
         '#723, and the one that self-reinforces.',
     ).toContain('conversation: projectConversationForWithheldClaim(');
+    // The THIRD gate at that chokepoint (2026-07-27): the rolling summary.
+    expect(
+      source,
+      'the rolling-summary input gate is gone from turn-executor.ts. The stored four-slot ' +
+        'summary would again reach the model verbatim on a withheld turn — scenario ' +
+        'f63ccb45 holds "…Double Down on SMB leading 52% vs Enterprise 35%…" in its RESOLVED ' +
+        'slot, three sentences above that same summary\'s own "No ranking can be put forward".',
+    ).toContain('conversation_summary: projectConversationSummaryForWithheldClaim(');
+  });
+
+  it('POSITIVE CONTROL: the rolling-summary gate evidence check can FAIL', () => {
+    // Rule 2, for the pin just added — prove the `toContain` discriminates
+    // rather than passing against any source it is handed.
+    const gate = 'conversation_summary: projectConversationSummaryForWithheldClaim(';
+    expect(source).toContain(gate);
+    expect(
+      source.replace(gate, 'conversation_summary: assembledContextPack.conversation_summary, // ('),
+    ).not.toContain(gate);
   });
 
   it('POSITIVE CONTROL: the conversation-gate evidence check can FAIL', () => {
