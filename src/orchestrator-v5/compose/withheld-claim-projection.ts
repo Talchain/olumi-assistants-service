@@ -149,13 +149,54 @@
  * silently decided — what is deliberately KEPT.
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * NOT IN SCOPE, stated rather than silently decided: `decision_brief.options[]`
- * keeps its `rank: 1|2|3`. Suppressing an ordering while the same block ships
- * `win_probabilities` and `option_comparison` (neither flagged by the walk, both
- * carrying the identical ordering) would be theatre, not a gate. The verdict
- * withholds NAMING a leading option as the answer; it does not withhold the
- * simulation's numbers, which the disclosure explicitly invites the user to act
- * on.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ 2026-07-27, LATER THE SAME DAY — THE PARAGRAPH THAT USED TO SIT HERE SAID
+ * `decision_brief.options[]` WAS OUT OF SCOPE. IT IS NOW IN SCOPE, AND LEAVING
+ * THE OLD TEXT STANDING WOULD BE CLAUDE.md TRAP #14 (an honest label overwritten
+ * by a stale one). It read, verbatim:
+ *
+ *   "NOT IN SCOPE, stated rather than silently decided: `decision_brief.options[]`
+ *    keeps its `rank: 1|2|3`. Suppressing an ordering while the same block ships
+ *    `win_probabilities` and `option_comparison` (neither flagged by the walk,
+ *    both carrying the identical ordering) would be theatre, not a gate."
+ *
+ * `WALK-2026-07-27-CONFIRM.md` §6 put that channel on an inventory for the first
+ * time and measured it live on **7 of 7** withheld analysis-bearing bodies, and
+ * the A1 ruling of 2026-07-27 drew the line the old paragraph was missing.
+ *
+ * THE LINE IS DESIGNATION vs DATA, and it cuts the old argument in half rather
+ * than reversing it:
+ *
+ *   KEPT — `win_probabilities`, `option_comparison`, and every
+ *     `options[].win_probability`. They are COMPUTED FACTS the user is entitled
+ *     to. The withheld verdict says "given your constraint I cannot put an
+ *     option forward"; it does NOT say "I cannot compute win probabilities".
+ *     This is the doctrine that made the UI RELABEL rather than gate its
+ *     probability readouts (#493/#494): gating would delete data; the CLAIM is
+ *     what gets withheld. The old paragraph was right about this half.
+ *   GATED — `rank`. `rank == 1` is not a measurement. It is an ORDINAL
+ *     DESIGNATION: a claim wearing a number, and the only thing in the whole
+ *     withheld envelope that singles out one option by position.
+ *   NEUTRALISED — the ORDER of `options[]`. The array ships sorted
+ *     win-probability-descending, so `options[0]` IS the leader with no `rank`
+ *     field needed. Position-as-designation is the same defect the ContextPack
+ *     gate already fixed for the MODEL (`context/withheld-leader-projection.ts`);
+ *     this closes it for the USER. On a withheld turn the array is re-ordered by
+ *     `option_id`, so its position is a pure function of identities the payload
+ *     already shows in full and carries no rank information.
+ *
+ * ⚠ AND ONE PREMISE OF THE OLD PARAGRAPH IS FALSE AT THE BYTES, which is why
+ * "it would be theatre" did not survive contact with the archive. It claimed
+ * `win_probabilities` and `option_comparison` both "carry the identical
+ * ordering". They do not. On all 7 withheld bodies of
+ * `raw-2026-07-27-confirm/`, `option_comparison` ships in GRAPH order
+ * (`opt_dell` 0.219, `opt_macbook` 0.181, `opt_status_quo` 0.600) and
+ * `win_probabilities` in the same graph key order — the leader is neither first
+ * in either, nor is either sorted. They carry the VALUES, from which an ordering
+ * is DERIVABLE by argmax; only `decision_brief.options[]` PRESENTS one. Deriving
+ * a ranking from published numbers is the user's own arithmetic; presenting a
+ * ranking is CEE's claim. That distinction is the whole of this change.
+ * ═══════════════════════════════════════════════════════════════════════════
  *
  * PURE. Never throws, never mutates its input, and returns a new record.
  */
@@ -248,14 +289,48 @@ export const WITHHELD_DROPPED_DECISION_BRIEF_MEMBERS: readonly string[] = Object
  *     unlabelled scalar under a key that designates nobody; suppressing it
  *     while `win_probabilities` and `option_comparison` ship the whole roster
  *     verbatim would be theatre, which is this estate's dominant defect class.
+ *
+ *     ⚠ 2026-07-27 — THE EQUALITY IS NOT A COINCIDENCE, IT IS AN IDENTITY, AND
+ *     IT IS A MISLABELLING DEFECT THAT DOES NOT BELONG TO CEE. Traced producer
+ *     → adapter → consumer at the bytes rather than assumed:
+ *       ISL `src/services/robustness_analyzer_v2.py@1716f9bb`
+ *         :4528  `recommendation_stability = option_wins[winner] / n_samples`
+ *         :4590  `confidence = _stability_confidence_figure(stability, n)`
+ *         :2739  `del n_samples; return recommendation_stability`  ← identity
+ *         :4602  `confidence_basis = "recommendation_stability_uncalibrated"`
+ *       PLoT `src/routes/v2/run.ts@dd144f77:2794` forwards it verbatim, while
+ *         `src/contracts/isl-to-ui.contract.ts:71` DROPS the honestly-named
+ *         twin `robustness.recommendation_stability` as "the leader's
+ *         win_probability relabelled, zero independent information".
+ *     So `confidence` is the leader's win probability under a name that implies
+ *     calibration, which ISL's own field description now denies. BOTH upstream
+ *     repos disclose it and PLoT's own comment calls the duplication "a
+ *     cross-repo contract question … not settled unilaterally by this lane".
+ *     CEE is a pure passthrough here — nothing in this repo READS
+ *     `robustness.confidence` (the compose readers take
+ *     `factor_sensitivity[].confidence`, a different field). It is therefore
+ *     not fixable at this seam and is raised for its own row rather than
+ *     smuggled into a claim-safety projection. Under the DESIGNATION vs DATA
+ *     ruling it stays: it is a probability VALUE, it names no option, and the
+ *     only way to reach the leader through it is to argmax the roster that
+ *     ships beside it anyway. The defect is the LABEL, not the value.
+ *     (Note it is not even a reliable identity: :4535 scales
+ *     `recommendation_stability` by a defaulted-root penalty, so on such a run
+ *     `confidence` and the leader's `win_probability` differ.)
  *   `robustness.fragile_edges[].alternative_winner_id` / `_label` — the
  *     COUNTERFACTUAL winner if that edge flips. Not the leader; the opposite of
  *     the leader. It is the substance of a fragility finding, it is exactly
  *     what a user needs on a turn where the recommendation is withheld, and PR
  *     #717 landed a fix to carry it through the flip path days before this. The
  *     `^` anchors on the key patterns exist to keep it.
- *   `decision_brief.options[]` and its `rank` — unchanged and still out of
- *     scope, for the reason the module docstring already gives.
+ *   `decision_brief.options[].win_probability` — KEPT, and the anti-
+ *     over-suppression pin in the route test asserts its PRESENCE explicitly.
+ *     Only the element's `rank` and the array's ORDER are designations; the
+ *     number is a computed fact. See {@link WITHHELD_DROPPED_OPTION_MEMBERS}.
+ *
+ * ⚠ `decision_brief.options[]` IS NO LONGER "out of scope" — that line was here
+ * until 2026-07-27 and the module docstring now carries the ruling that replaced
+ * it. Its `rank` is dropped and its order neutralised; its probabilities stay.
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * Exported for the drift test, which asserts each entry really is dropped by the
@@ -271,6 +346,68 @@ export const WITHHELD_DROPPED_NEAR_TIE_MEMBERS: readonly string[] = Object.freez
   'second_option_id',
   'tied_option_ids',
 ]);
+
+/**
+ * Key names that assert a POSITION IN A RANKING rather than measure anything.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY A PATTERN FAMILY AND NOT `['rank']`, AND WHY IT IS SEPARATE FROM
+ * {@link keyDesignatesLeadingOption}.
+ *
+ * A one-element list is the hand-maintained mirror CLAUDE.md trap #12 is about:
+ * green today, silent the day PLoT ships `position: 1` beside it. The family
+ * gives the property a list has not — an ordinal that has never been observed
+ * is covered the day it arrives — and the drift test asserts exactly that.
+ *
+ * SEPARATE from the leader-designating family for a reason that is load-bearing
+ * in both directions:
+ *   - `keyDesignatesLeadingOption` is SHARED with the Layer-3 egress alarm, and
+ *     the alarm's `scanKey` returns immediately on a non-string
+ *     (`leading-option-egress-guard.ts` — `typeof value !== 'string'`). `rank`
+ *     is a NUMBER. Adding it to that family would put a name in the alarm's
+ *     vocabulary that the alarm can never fire on — a detector in prose only,
+ *     which is precisely the guarantee-theatre class this file exists to close.
+ *   - the drift test's ANCHOR CONTROL asserts `keyDesignatesLeadingOption('rank')`
+ *     is `false`, because that family is also what the alarm reports on. That
+ *     control stays true, and this predicate is what carries the ordinal rule.
+ *
+ * `^`-ANCHORED, and the anchor is doing work: `blocks[].priority_rank` ranks
+ * CARDS, not options — 67 instances across the withheld arm of
+ * `raw-2026-07-27-confirm/`, not one of them singling out an option. An
+ * unanchored `/rank/` would eat the coaching-card ordering.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+const ORDINAL_DESIGNATING_KEY_PATTERNS: readonly RegExp[] = Object.freeze([
+  /^rank(?:ing|_index|_position)?$/,
+  /^order(?:ing|_index)?$/,
+  /^position$/,
+  /^ordinal$/,
+  /^placement$/,
+  /^standing$/,
+]);
+
+/**
+ * Does this key name assert a position in a ranking?
+ *
+ * Exported for the drift test, which pins both directions: every ordinal the
+ * live archive carried, ordinals never observed, and the anchor control that
+ * `priority_rank` / `win_probability` / `option_id` are NOT ordinals.
+ */
+export function keyDesignatesOrdinalPosition(key: string): boolean {
+  return ORDINAL_DESIGNATING_KEY_PATTERNS.some((re) => re.test(key));
+}
+
+/**
+ * The members of a `decision_brief.options[]` element dropped on a withheld
+ * turn, listed here for the drift test — the projection reads
+ * {@link keyDesignatesOrdinalPosition}, not this constant.
+ *
+ * Exactly one member is observed in the live archive. **`win_probability` is
+ * NOT here and must not be**: the ruling of 2026-07-27 keeps every per-option
+ * probability, and the route test asserts its PRESENCE on a withheld turn as
+ * the anti-over-suppression pin.
+ */
+export const WITHHELD_DROPPED_OPTION_MEMBERS: readonly string[] = Object.freeze(['rank']);
 
 /**
  * The `robustness` members recognised by NAME rather than by container, listed
@@ -294,8 +431,29 @@ export const WITHHELD_LEADER_DESIGNATING_KEYS_OBSERVED: readonly string[] = Obje
  * pattern-derived vocabulary the Layer-3 alarm scans with — so a key this drops
  * is a key that alarm reports, and neither can drift from the other.
  * `containerScopedMembers` carries the few members whose key name is innocent
- * and whose container makes the claim; it is small, enumerated, and the alarm is
- * its drift detector.
+ * and whose container makes the claim; it is small and enumerated.
+ *
+ * ⚠ 2026-07-27 — THE PRECEDING SENTENCE USED TO END "…and the alarm is its
+ * drift detector." THAT WAS FALSE AT THE BYTES, and a comment naming a detector
+ * that cannot fire is the guarantee-theatre class in prose — the thing this file
+ * exists to close, written into the file itself.
+ * `WALK-2026-07-27-CONFIRM.md` §12.4 item 4 refuted it: the alarm's `scanKey`
+ * (`leading-option-egress-guard.ts`) returns immediately unless
+ * `typeof value === 'string' && value.length > 0`, and
+ * `analysis_summary.win_probability` is a NUMBER while `near_tie.tied_option_ids`
+ * is an ARRAY — so neither can ever reach a pattern test. The third member,
+ * `near_tie.second_option_id`, IS a string but matches no pattern in
+ * `LEADER_DESIGNATING_KEY_PATTERNS` (the drift test's own anchor control asserts
+ * `keyDesignatesLeadingOption('second_option_id') === false`, deliberately, so
+ * the runner-up is not read as the leader).
+ *
+ * THE REAL DETECTOR IS CI, NAMED SO THE NEXT READER RELIES ON SOMETHING THAT
+ * EXISTS: `__tests__/withheld-structured-designation.drift.test.ts` —
+ * "the withheld projection honours every member it declares" — walks
+ * {@link WITHHELD_DROPPED_ANALYSIS_SUMMARY_MEMBERS} and
+ * {@link WITHHELD_DROPPED_NEAR_TIE_MEMBERS} and asserts each is absent from the
+ * projected output. A member added to either list without a matching drop fails
+ * THERE. The alarm remains the detector for the KEY-NAME family only.
  *
  * A non-object payload is dropped whole rather than trusted — the same decision
  * {@link projectDecisionBriefForWithheldClaim} already makes, for the same
@@ -314,6 +472,95 @@ function projectLeaderDesignatingMembers(
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * The claim-free sort key of one `decision_brief.options[]` element.
+ *
+ * IDENTITY ONLY. Every candidate here names WHICH option the element is about
+ * and nothing about where it placed — so an order derived from it is a pure
+ * function of identities the payload already ships in full, and therefore
+ * carries no rank information. `win_probability`, `rank`, `goal_fit` and every
+ * other measure are deliberately absent from the chain: sorting by any of them
+ * would replace one ordering claim with another.
+ *
+ * Returns `undefined` when the element offers no identity at all. The caller
+ * treats that as "not neutralisable" and drops the array — the same
+ * we-cannot-show-what-we-cannot-inspect decision the sibling `decision_brief`
+ * and `robustness` branches already make on an uninspectable payload.
+ */
+function claimFreeOptionSortKey(element: unknown): string | undefined {
+  if (element === null || typeof element !== 'object' || Array.isArray(element)) return undefined;
+  const record = element as Record<string, unknown>;
+  for (const key of ['option_id', 'id', 'label', 'option_label'] as const) {
+    const value = record[key];
+    if (typeof value === 'string' && value.length > 0) return `${key}:${value}`;
+  }
+  return undefined;
+}
+
+/**
+ * Project `decision_brief.options[]` for a withheld turn: drop the ORDINAL,
+ * neutralise the ORDER, keep every measured value.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT THIS CLOSES — `WALK-2026-07-27-CONFIRM.md` §6, live on 7/7 withheld
+ * analysis-bearing bodies at build `7508820`, invisible to every instrument
+ * that had ever been pointed at this wire:
+ *
+ *   `options[rank == 1]`  names the leader by label AND carries its probability
+ *   `options[0]`          the array is sorted win-probability-DESCENDING, so
+ *                         position alone is the same designation with no `rank`
+ *
+ * S1–S6 has no entry for the path; S7/S8 read KEY NAMES and `rank`, `label`,
+ * `win_probability` are all innocent names (matcher-v4's own anchor control
+ * requires them to stay innocent, or it would manufacture an over-suppression
+ * finding against the deliberately-kept set); every prose tier sees bare labels
+ * and numbers; and the FINAL walk's derived manifest normalised `options[0]` →
+ * `options[]`, saw all three options at that path, and classified it a symmetric
+ * roster — correct about the PATH, wrong about the OBJECT.
+ *
+ * TWO OF THE THREE THINGS IN AN ELEMENT SURVIVE. `option_id`, `label` and
+ * `win_probability` all ship. The ruling of 2026-07-27 is that the probabilities
+ * are DATA and gating them would delete what the user is entitled to; the route
+ * test asserts their presence on a withheld turn precisely so a later
+ * "tighten the gate" cannot quietly take them.
+ *
+ * WHY RE-ORDER RATHER THAN SHUFFLE OR REVERSE. A random order is not pure and
+ * not reproducible; a reversed order still carries the ranking (last is the
+ * leader). A canonical order keyed on identity is total, deterministic, and
+ * information-free — and it is the same answer the model-facing projection
+ * reached for the ContextPack.
+ *
+ * ⚠ THE ONE RESIDUAL, STATED RATHER THAN LEFT TO BE FOUND: `Array.prototype.sort`
+ * is stable, so two elements with the SAME sort key keep their input order and
+ * therefore their relative rank. That requires two elements claiming the same
+ * option identity — a malformed payload with no claim-free way to tell them
+ * apart. It has never been observed; it is written down here rather than
+ * discovered by the next walk.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+function projectOptionsForWithheldClaim(options: unknown): unknown[] | undefined {
+  if (!Array.isArray(options)) return undefined;
+  const keyed: Array<{ key: string; element: Record<string, unknown> }> = [];
+  for (const element of options) {
+    const key = claimFreeOptionSortKey(element);
+    // Not neutralisable ⇒ the whole array goes. Keeping an element we cannot
+    // re-order would leave the ordering claim standing on the survivors.
+    if (key === undefined) return undefined;
+    const projected: Record<string, unknown> = {};
+    for (const [member, value] of Object.entries(element as Record<string, unknown>)) {
+      if (keyDesignatesOrdinalPosition(member)) continue;
+      // The leader-designating family too: an `options[].leading_option_id`
+      // sibling arriving later is covered the day it ships, exactly as it is on
+      // the brief's own keys.
+      if (keyDesignatesLeadingOption(member)) continue;
+      projected[member] = value;
+    }
+    keyed.push({ key, element: projected });
+  }
+  keyed.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return keyed.map((entry) => entry.element);
 }
 
 /**
@@ -429,6 +676,13 @@ function projectDecisionBriefForWithheldClaim(brief: unknown): Record<string, un
         WITHHELD_DROPPED_ANALYSIS_SUMMARY_MEMBERS,
       );
       if (summary !== undefined) out[key] = summary;
+      continue;
+    }
+    // WALK-2026-07-27-CONFIRM.md §6. The ORDINAL and the ORDER go; every
+    // measured value stays. See `projectOptionsForWithheldClaim`.
+    if (key === 'options') {
+      const projected = projectOptionsForWithheldClaim(value);
+      if (projected !== undefined) out[key] = projected;
       continue;
     }
     out[key] = value;
