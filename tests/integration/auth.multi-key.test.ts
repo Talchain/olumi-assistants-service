@@ -31,16 +31,20 @@ const originalEnv = { ...process.env };
 //     server.ready()                                1-2 ms
 //
 // Inside beforeAll that transform was charged against vitest's 10,000 ms
-// DEFAULT hookTimeout — this repo configures no hookTimeout/testTimeout
-// anywhere — leaving a margin thin enough to breach whenever the file ran with
-// a cold transform cache on a loaded machine. The file then failed with
-// "Hook timed out in 10000ms" and SKIPPED all 9 tests, so the suite reported a
-// failure with zero assertions evaluated. It stayed green in CI only because a
-// full-suite run has already warmed the transform cache via another file, which
-// makes the pass depend on file ordering rather than on anything this file does.
+// DEFAULT hookTimeout, leaving a margin thin enough to breach whenever the file
+// ran with a cold transform cache on a loaded machine. (`hookTimeout` is set
+// nowhere in this repo; the only `testTimeout` lives in
+// tests/benchmarks/vitest.benchmark.config.ts, which both root configs exclude
+// via `tests/benchmarks/**` — so both runs use vitest's defaults.)
+//
+// The file then failed with "Hook timed out in 10000ms" and SKIPPED all 9
+// tests, so the suite reported a failure with zero assertions evaluated. It
+// stayed green in CI only because a full-suite run has already warmed the
+// transform cache via another file — which made the pass depend on file
+// ordering rather than on anything this file does.
 //
 // At module level the identical transform is charged to the collection phase,
-// which is not hook-budgeted. This is the pattern the other 57 server-booting
+// which is not hook-budgeted. This is the pattern the 62 other server-booting
 // test files already use via a static top-level import. The hook below now
 // measures 372 ms (build 371 ms + ready 1 ms) against the 10,000 ms budget —
 // a 27x margin, where before it was 1.4-2.4x. Deterministic control, machine-
