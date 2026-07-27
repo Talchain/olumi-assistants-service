@@ -254,7 +254,10 @@ import {
 import { readMayNameLeadingOptionForFacts } from './context/claim-safety-read.js';
 // ROADMAP 1.231 — INPUT-side claim safety: strip the leader-designating fields
 // from what a withheld turn feeds the model (and the deterministic advice gate).
-import { projectContextPackAnalysisForWithheldClaim } from './context/withheld-leader-projection.js';
+import {
+  projectContextPackAnalysisForWithheldClaim,
+  projectDisplayAnalysisForWithheldClaim,
+} from './context/withheld-leader-projection.js';
 import {
   projectExplanationAnswerForWithheldClaim,
   type WithheldExplanationReason,
@@ -1927,7 +1930,7 @@ export async function runTurnExecutor(
       ]);
       summaryLagForBudget = summaryInjection.lagTurns;
       olderFactsProjectionForBudget = olderRelevantFactsProjection ?? null;
-      const { contextPack, cqeSummary } = assembleContextPackWithSummary({
+      const { contextPack: assembledContextPack, cqeSummary } = assembleContextPackWithSummary({
         payload,
         priorTurns: context.prior_turns,
         // How many turns the conversation ACTUALLY has. `prior_turns` is a
@@ -1998,6 +2001,43 @@ export async function runTurnExecutor(
         // (undefined ⇒ pack key absent ⇒ byte-identity for record-less scenarios).
         olderRelevantFacts: olderRelevantFactsProjection?.text,
       });
+      // ═════════════════════════════════════════════════════════════════════
+      // ROADMAP 1.231 — THE INPUT GATE (A1's ruling: gate the input, not the
+      // output). One chokepoint, immediately after assembly and before ANY
+      // consumer, so no branch can obtain an ungated pack.
+      //
+      // WHAT IT GATES, and why here rather than at the assembler:
+      // `buildUserMessage` (routing/route-with-tool-use.ts:1185-1208) drops the
+      // raw `analysis` and re-keys `display_analysis` under that name before
+      // serialising, so `display_analysis` IS the model's view of the analysis.
+      // Nulling `leading_option` inside the assembler's `projectAnalysis`
+      // (:1533, the locus the ruling named) would leave the model's own copy of
+      // the leader and the whole ranked `options` table untouched — a gate that
+      // reads as a gate and stops nothing. The intent of the ruling is
+      // implemented in full; the address moves one hop. See
+      // `context/withheld-leader-projection.ts` for the field-by-field
+      // derivation and for what is deliberately KEPT.
+      //
+      // The RAW `analysis` slot is deliberately left intact here: it is
+      // handler-facing structured state (chips, telemetry, projection
+      // summaries, the `leading_option_present` observability field) and
+      // blanking it would degrade unrelated surfaces to buy nothing — the model
+      // never sees it. The deterministic composers that DO read it are gated at
+      // their own call sites, where the verdict is consumed explicitly (the
+      // post-analysis advice gate below, the run-comparison gate above, and
+      // `buildBoundedFallbackCopyAndChips`).
+      //
+      // PERMITTED TURNS ARE BYTE-IDENTICAL: `mayNameLeadingOptionForRun` is
+      // `true` and the pack is passed through by reference, unchanged.
+      // ═════════════════════════════════════════════════════════════════════
+      const contextPack: ContextPack = mayNameLeadingOptionForRun
+        ? assembledContextPack
+        : {
+            ...assembledContextPack,
+            display_analysis: projectDisplayAnalysisForWithheldClaim(
+              assembledContextPack.display_analysis,
+            ),
+          };
       cqeSummaryForLog = cqeSummary;
       emit(TelemetryEvents.CqeExtraction, {
         request_id: requestId,

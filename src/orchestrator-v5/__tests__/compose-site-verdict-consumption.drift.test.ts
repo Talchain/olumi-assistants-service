@@ -181,11 +181,11 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, RegisteredSite>> = {
   // ── GATED BY INPUT — LLM-authored prose; the verdict is applied to the
   //    model's view of the analysis instead (ROADMAP 1.231). ────────────────
   'coachGuarded.assistant_text': {
-    stance: 'ungated',
+    stance: 'gated_by_input',
     why: "ROADMAP 1.231 (A1's ruling: gate the input, not the output). Verbatim / sanitise-stripped LLM prose — there is no deterministic path to a leader here, so the leader can only arrive via what the model was GIVEN. Confirmed live-leaking by the POST-#713 walk (§7: 3/3 non-execute turns named the leader, one with a probability and no disclosure). Closed by stripping `leading_option` / `runner_up` / `margin` AND the ranked `options` table from the model-facing `display_analysis` on withheld turns. ⚠ THE ADDRESS MATTERS: the ruling named context-pack-assembler.ts:1533, but `buildUserMessage` (route-with-tool-use.ts:1185-1208) drops the raw `analysis` and re-keys `display_analysis` under that name, so gating :1533 alone would have left the model's actual view untouched. See context/withheld-leader-projection.ts.",
   },
   'converseGuarded.assistant_text': {
-    stance: 'ungated',
+    stance: 'gated_by_input',
     why: 'As coachGuarded above — the converse twin, same closure, same input gate.',
   },
 };
@@ -288,12 +288,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // NINTH ungated site fail CI the day someone adds one. A deleted test
     // would let it in silently — which is the whole defect class this file is
     // about.
-    // 1.233 closed six of the eight. The two remaining are the LLM-authored
-    // coach/converse pair, closed by the sibling input-gate commit (1.231).
-    expect(ungated).toEqual([
-      'coachGuarded.assistant_text',
-      'converseGuarded.assistant_text',
-    ]);
+    expect(ungated).toEqual([]);
   });
 
   it('the EXECUTE-path gate is registered GATED and really is projected in source', () => {
@@ -327,6 +322,22 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
         fragment,
       );
     }
+  });
+
+  it('every GATED_BY_INPUT site is backed by a real input gate at the assembly seam', () => {
+    const byInput = Object.entries(COMPOSE_SITE_REGISTER)
+      .filter(([, v]) => v.stance === 'gated_by_input')
+      .map(([k]) => k)
+      .sort();
+    expect(byInput).toEqual([
+      'coachGuarded.assistant_text',
+      'converseGuarded.assistant_text',
+    ]);
+    // Non-vacuity, same rationale as the gated check above. `gated_by_input`
+    // asserts something about the PACK, so the evidence is the projection call
+    // at the assembly seam — not the compose site, which by definition has no
+    // gate of its own.
+    expect(source).toContain('projectDisplayAnalysisForWithheldClaim(');
   });
 
   it('POSITIVE CONTROL: the per-site gate evidence check can FAIL', () => {

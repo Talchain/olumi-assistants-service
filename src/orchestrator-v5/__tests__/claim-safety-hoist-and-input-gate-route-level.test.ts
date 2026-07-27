@@ -56,6 +56,7 @@ import { randomUUID } from 'node:crypto';
 
 import { setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { WITHHELD_LEADER_INPUT_NOTE } from '../context/withheld-leader-projection.js';
 // The production alarm's OWN scanner, so this acceptance test and the alarm
 // cannot drift apart.
 import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
@@ -463,6 +464,45 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
       expect(alarms[0]!.data['hit_count']).toBeGreaterThan(0);
     });
 
+    // ── 1.231, THE INPUT GATE — what the model was GIVEN ───────────────────
+    it('the model-facing analysis carries NO leader: the explicit slots are gone', () => {
+      // Synchronous read of the pack captured by the awaited turn above is not
+      // possible across `it`s, so each assertion drives its own turn.
+      return postTurn(app, 'So where does this leave things?').then(() => {
+        const analysis = modelFacingAnalysis();
+        expect(analysis, 'the pack must still carry an analysis section').not.toBeNull();
+        expect(analysis!['leading_option']).toBeUndefined();
+        expect(analysis!['runner_up']).toBeUndefined();
+        expect(analysis!['margin']).toBeUndefined();
+      });
+    });
+
+    it('the model-facing analysis carries NO leader: the RANKED OPTIONS TABLE is gone', async () => {
+      // The load-bearing half. `options` is sorted by win probability and
+      // carries the probabilities, so `options[0]` IS the leader and the live
+      // leaking sentence ("X leads at 56% against Y at 26%") is reconstructible
+      // from this field alone. A gate that dropped the two named slots and left
+      // this table would read as a gate and stop nothing.
+      await postTurn(app, 'So where does this leave things?');
+      const analysis = modelFacingAnalysis()!;
+      expect(analysis['options']).toBeUndefined();
+
+      // Belt and braces on the SERIALISED pack: neither option label may
+      // appear anywhere in the model-facing analysis section, and neither win
+      // probability may either. This catches a future field that reintroduces
+      // the ranking under a new name — the drift a member list cannot see.
+      const serialised = JSON.stringify(analysis);
+      expect(serialised).not.toContain(LEADER_LABEL);
+      expect(serialised).not.toContain(RUNNER_LABEL);
+      expect(serialised).not.toContain('72%');
+      expect(serialised).not.toContain('28%');
+    });
+
+    it('the absence is NEVER SILENT — the pack says why the ranking is missing', async () => {
+      await postTurn(app, 'So where does this leave things?');
+      expect(modelFacingAnalysis()!['leading_option_note']).toBe(WITHHELD_LEADER_INPUT_NOTE);
+    });
+
     it('the RAW handler-facing analysis is UNTOUCHED (no collateral damage)', async () => {
       // The input gate is scoped to the model's view on purpose. The raw slot
       // drives chips, telemetry (`leading_option_present`) and projection
@@ -479,6 +519,22 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
   describe('PERMITTED (evaluated_feasible) — the over-suppression control', () => {
     beforeEach(() => {
       priorFacts = [priorRunAnalysisFact(true)];
+    });
+
+    it('POSITIVE CONTROL: the model-facing analysis keeps EVERY leader field', async () => {
+      // Over-suppression is weighted equally with the leak. This is the arm
+      // that fails if the gate ever becomes unconditional — and it is also the
+      // branch-reached proof for the withheld arm: only a fixture that really
+      // loaded the persisted fact can produce these values, so if the FK-parent
+      // row regressed, THIS goes red rather than the absence assertions going
+      // falsely green.
+      await postTurn(app, 'So where does this leave things?');
+      const analysis = modelFacingAnalysis()!;
+      expect(analysis['leading_option']?.label).toBe(LEADER_LABEL);
+      expect(analysis['runner_up']?.label).toBe(RUNNER_LABEL);
+      expect(Array.isArray(analysis['options'])).toBe(true);
+      expect((analysis['options'] as unknown[]).length).toBeGreaterThan(1);
+      expect(analysis['leading_option_note']).toBeUndefined();
     });
 
     it('POSITIVE CONTROL: the alarm stays SILENT on a permitted turn', async () => {
