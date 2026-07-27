@@ -52,6 +52,12 @@ import { formatPercentagePoints } from '../format/format-analysis-value.js';
 // probe on this file's withheld copy. Imported rather than re-implemented so the
 // probe and the alarm cannot drift (CLAUDE.md trap #12).
 import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
+// PER-RUN claim safety — #730's ONE fact → ONE verdict narrow, applied to each
+// of the two facts THIS gate already selected. Imported, never re-implemented,
+// and deliberately NOT the scenario selector: see
+// `readMayNameLeadingOptionVerdictForFact`'s docstring for why a second
+// selection ceremony here is the defect and this is not.
+import { readMayNameLeadingOptionVerdictForFact } from '../context/claim-safety-read.js';
 
 export type RunComparisonFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
 
@@ -106,6 +112,15 @@ export interface RunComparisonGuardInput {
    * permission would silently re-open the exact leak — an optional field would
    * make that omission compile. Callers that ran no analysis pass `true`, which
    * is the honest statement of "nothing was withheld".
+   *
+   * ⚠ IT IS THE TURN'S PERMISSION, NOT A RUN'S — and treating the two as one
+   * thing was a live leak. This boolean describes the scenario's NEWEST
+   * claim-bearing fact; a comparison names TWO runs. The gate therefore uses it
+   * as the OUTER conjunct only, and refines it per compared run — see
+   * {@link RunComparisonLeaderAuthority}. It remains load-bearing on its own:
+   * it is the only input that can see `fail_closed_truncated` (a degraded
+   * scenario-scoped read on a provably truncated window), which no per-fact
+   * read can detect.
    */
   readonly mayNameLeadingOption: boolean;
   /**
@@ -207,6 +222,88 @@ export const WITHHELD_NOTHING_ELSE_CHANGED_TEXT =
   + ' Nothing else about the two runs moved enough to report.';
 
 /**
+ * Copy for the MIXED case in which the PRIOR run's verdict withholds and the
+ * current run's permits — the Codex scenario, and the commonest shape of it.
+ *
+ * Written in the register of {@link WITHHELD_LEADER_COMPARISON_TEXT} on
+ * purpose, reusing its two load-bearing phrases verbatim ("put forward", "the
+ * order of the options"). Two authors of withheld copy in this file have now
+ * independently reached for leader vocabulary (see the probe below), so new
+ * copy here is composed from the sanctioned phrases rather than freshly worded.
+ *
+ * The tense is the only real change: `could` and "the earlier result", because
+ * the claim being declined is about a run that has already happened.
+ */
+export const WITHHELD_PRIOR_LEADER_COMPARISON_TEXT =
+  'No single option could be put forward on the earlier result, so I am not '
+  + 'showing how the order of the options has moved.';
+
+/**
+ * The mirror-image mixed case: the CURRENT run's verdict withholds while the
+ * prior run's permits.
+ *
+ * Reachable, but not by the same route as its sibling — see the reachability
+ * note on {@link RunComparisonLeaderAuthority}. Given an explicit shape anyway:
+ * a case enumerated and left to fall through to a neighbouring branch is how
+ * "the comparison degrades honestly" becomes "the comparison degrades however
+ * the last `else` happened to be written".
+ */
+export const WITHHELD_CURRENT_LEADER_COMPARISON_TEXT =
+  'No single option can be put forward on the latest result yet, so I am not '
+  + 'showing how the order of the options has moved.';
+
+/**
+ * ⭐ MAY THIS TURN NAME **THIS** RUN'S LEADING OPTION? One answer per compared
+ * run, because a comparison makes one claim per run.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE DEFECT THIS CLOSES. {@link composeComparison} received ONE permission and
+ * composed BOTH runs' leaders from it:
+ *
+ *     `The leading option has changed. ${prior_leading_label} came out ahead
+ *      before, and ${current_leading_label} now leads.`
+ *
+ * The caller supplies the TURN's permission, which #730 reads off the
+ * scenario's newest CLAIM-BEARING fact. That fact speaks for the current run
+ * and for nothing else. So on any scenario whose PRIOR run withheld its leader
+ * and whose CURRENT run permits, "What changed?" named the withheld one — the
+ * withhold had an expiry equal to one more analysis. (Cleanup-review F4 is the
+ * same defect seen from the other end: "composeComparison re-asserts the prior
+ * run's leader on a later permitted turn".)
+ *
+ * ⭐ ONE-DIRECTIONAL BY CONSTRUCTION. Each field is
+ * `turnPermission && thatRunsOwnVerdict`, so every value this type can hold is
+ * `≤` the single boolean it replaces. **No input moves `false → true`**: a turn
+ * that withheld everything still withholds everything, and the only reachable
+ * change is a leader that used to be named no longer being named. That is the
+ * same safety argument #726 made for the scenario scope, and it is why the
+ * permitted/permitted case is byte-identical rather than merely equivalent.
+ *
+ * REACHABILITY, stated per field rather than assumed symmetric — the two are
+ * NOT equally likely and pretending otherwise would misdescribe the fix:
+ *
+ *   - `prior === false, current === true` — COMMON, and it has two production
+ *     forms. (a) the prior run's verdict is stamped withheld; (b) the prior run
+ *     predates the verdict stamp entirely, so `readMayNameLeadingOptionFrom
+ *     Result` fail-closes on it. Form (b) makes every legacy run's leader
+ *     nameable from a later permitted turn, and it needs no unusual state at
+ *     all — just a scenario that has been running since before #710.
+ *   - `prior === true, current === false` — RARE, and it needs the turn
+ *     permission and the compared current run to come from DIFFERENT facts.
+ *     The turn permission is read off the newest claim-bearing fact of any
+ *     status; the comparison's current run is the newest SUCCESSFUL one. They
+ *     diverge only when a newer non-successful (e.g. `partial`) fact exists and
+ *     is stamped permitted, which is exactly the state #730 made visible.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+export interface RunComparisonLeaderAuthority {
+  /** May the PRIOR (older) run's leading option be named on this turn? */
+  readonly prior: boolean;
+  /** May the CURRENT (newer) run's leading option be named on this turn? */
+  readonly current: boolean;
+}
+
+/**
  * BUILD-TIME PROBE — withheld copy must not trip the alarm that measures the
  * residue it exists to remove.
  *
@@ -235,6 +332,15 @@ function assertWithheldCopyIsLeaderFree(): void {
   const probes: ReadonlyArray<readonly [string, string]> = [
     ['WITHHELD_LEADER_COMPARISON_TEXT', WITHHELD_LEADER_COMPARISON_TEXT],
     ['WITHHELD_NOTHING_ELSE_CHANGED_TEXT', WITHHELD_NOTHING_ELSE_CHANGED_TEXT],
+    // The two MIXED-case substitutions. They ship on turns that ALSO name the
+    // other run's leader, so the alarm is not armed on them today — but the
+    // hazard the probe exists for is authorial, not situational: both were
+    // written in the register of the sentence they replace, which is what makes
+    // an author reach for leader vocabulary. `run-comparison-gate.test.ts` pins
+    // that this list stays complete by reflecting over the module's exports,
+    // so a third constant cannot be added and left unprobed (CLAUDE.md #12).
+    ['WITHHELD_PRIOR_LEADER_COMPARISON_TEXT', WITHHELD_PRIOR_LEADER_COMPARISON_TEXT],
+    ['WITHHELD_CURRENT_LEADER_COMPARISON_TEXT', WITHHELD_CURRENT_LEADER_COMPARISON_TEXT],
     // The leader-free branches too: they ship on withheld turns as well, so a
     // copy edit to any of them carries the same hazard.
     ['STALE_TEXT', STALE_TEXT],
@@ -280,10 +386,10 @@ function bandPhrase(level: string): string | null {
 }
 
 /**
- * @param mayNameLeadingOption the persisted verdict's permission for this turn,
- *   READ by the caller and passed down — never re-derived here (CLAUDE.md trap
- *   #12). `false` suppresses the ordering and margin sentences and substitutes
- *   {@link WITHHELD_LEADER_COMPARISON_TEXT}.
+ * @param authority ONE permission PER COMPARED RUN — see
+ *   {@link RunComparisonLeaderAuthority}. Both fields are read by the caller
+ *   and by this gate's own per-run read; neither is re-derived from constraints
+ *   or graph state here (CLAUDE.md trap #12).
  *
  * ⚠ THE SUPPRESSION IS DELIBERATELY PARTIAL, and that is the anti-
  * over-suppression property. Only the two leader-designating groups go: which
@@ -292,25 +398,65 @@ function bandPhrase(level: string): string | null {
  * and about FACTORS, not about which option wins — they rank nothing, and they
  * are the substance of the user's actual question ("what changed?"). Dropping
  * the whole comparison would trade a leak for the failure the acceptance
- * criteria weight equally with it.
+ * criteria weight equally with it. That property is now preserved in all FOUR
+ * permission combinations, not just the two the single boolean could express.
+ *
+ * ⚠ THE MIXED CASES MUST NOT LEAK BY IMPLICATION, and this is the subtle part.
+ * Two sentences that name no forbidden option can still designate one between
+ * them:
+ *
+ *   - `"${current} still leads."` — "still" ASSERTS the prior run's leader was
+ *     the same option. It is a designation of the prior leader by identity, in
+ *     a sentence whose only proper noun is the current one. It is therefore
+ *     restricted to the both-permitted branch, not merely reworded.
+ *   - `"The leading option has changed."` + a named prior leader would let a
+ *     two-option model determine the current leader by elimination. So the
+ *     change claim is confined to both-permitted as well, and the mixed
+ *     branches make no cross-run claim at all.
+ *   - The MARGIN sentences describe a shift between the two runs' leads, so
+ *     they presuppose BOTH leaders and require BOTH permissions.
  */
-function composeComparison(delta: RunDelta, mayNameLeadingOption: boolean): string {
+function composeComparison(
+  delta: RunDelta,
+  authority: RunComparisonLeaderAuthority,
+): string {
   const parts: string[] = [];
+  const mayNamePrior = authority.prior;
+  const mayNameCurrent = authority.current;
+  // Both runs' verdicts permit: the only state in which a CROSS-RUN claim
+  // (whether the leader changed, and by how much the lead moved) is grounded.
+  const mayCompareLeaders = mayNamePrior && mayNameCurrent;
 
-  if (!mayNameLeadingOption) {
-    parts.push(WITHHELD_LEADER_COMPARISON_TEXT);
-  } else if (delta.leading_option_changed) {
-    parts.push(
-      `The leading option has changed. ${delta.prior_leading_label} came out ahead before, and ${delta.current_leading_label} now leads.`,
-    );
+  if (mayCompareLeaders) {
+    // Byte-identical to the pre-fix permitted arm.
+    if (delta.leading_option_changed) {
+      parts.push(
+        `The leading option has changed. ${delta.prior_leading_label} came out ahead before, and ${delta.current_leading_label} now leads.`,
+      );
+    } else {
+      parts.push(`${delta.current_leading_label} still leads.`);
+    }
+  } else if (mayNameCurrent) {
+    // MIXED — the prior run withheld. Name what this run's own verdict
+    // licenses, say plainly that the other half is unavailable, and make no
+    // statement that relates the two.
+    parts.push(`${delta.current_leading_label} leads on the latest result.`);
+    parts.push(WITHHELD_PRIOR_LEADER_COMPARISON_TEXT);
+  } else if (mayNamePrior) {
+    // MIXED, mirrored. "came out ahead in the earlier run" is scoped to that
+    // run by construction — no "before", which only means anything relative to
+    // a current leader we are declining to name.
+    parts.push(`${delta.prior_leading_label} came out ahead in the earlier run.`);
+    parts.push(WITHHELD_CURRENT_LEADER_COMPARISON_TEXT);
   } else {
-    parts.push(`${delta.current_leading_label} still leads.`);
+    parts.push(WITHHELD_LEADER_COMPARISON_TEXT);
   }
 
   // The margin sentences are suppressed with the leader: "its lead has widened"
-  // presupposes a lead, and the pronoun makes it a claim ABOUT the option we
-  // just declined to name.
-  if (!mayNameLeadingOption) {
+  // presupposes a lead, the pronoun makes it a claim ABOUT the option we just
+  // declined to name, and the SHIFT is a claim about both runs at once — so a
+  // single withheld side is enough to suppress it.
+  if (!mayCompareLeaders) {
     // no margin sentence
   } else if (delta.margin_direction === 'widened') {
     parts.push(
@@ -340,11 +486,16 @@ function composeComparison(delta: RunDelta, mayNameLeadingOption: boolean): stri
     );
   }
 
-  // Withheld turn on which nothing leader-free survived: the two runs differed
-  // only in ordering and margin. `parts` is exactly the substituted sentence, so
-  // say that outright rather than trailing an empty "here is what else moved"
-  // into the follow-up prompt.
-  if (!mayNameLeadingOption && parts.length === 1) {
+  // Fully-withheld turn on which nothing leader-free survived: the two runs
+  // differed only in ordering and margin. `parts` is exactly the substituted
+  // sentence, so say that outright rather than trailing an empty "here is what
+  // else moved" into the follow-up prompt.
+  //
+  // The condition stays scoped to the BOTH-withheld branch, unchanged. The
+  // mixed branches always emit two sentences, so they can never reach
+  // `length === 1` — and they need no equivalent: each already states what it
+  // could not show, which is the whole job this constant does.
+  if (!mayNamePrior && !mayNameCurrent && parts.length === 1) {
     parts[0] = WITHHELD_NOTHING_ELSE_CHANGED_TEXT;
   }
 
@@ -463,11 +614,44 @@ export function tryRunComparisonGate(
     };
   }
 
+  // ⭐ PER-RUN AUTHORISATION — the fix. Each compared run's leader is licensed
+  // by THAT run's own persisted verdict, conjoined with the turn's.
+  //
+  // THE FACTS ARE THE ONES ALREADY SELECTED. `pair` came from
+  // `selectTwoNewestRunAnalysisFacts` above — this gate's own long-standing
+  // selection, which is what `prior`/`current` were projected from a few lines
+  // up. Asking the SAME two facts what their verdicts said is a read, not a
+  // derivation: there is no second selector call here, and
+  // `readMayNameLeadingOptionVerdictForFact` is #730's one fact → one verdict
+  // narrow, shared with the scenario-scoped reader (see its docstring for why
+  // a second selection ceremony in THIS file is the defect and this is not).
+  //
+  // THE CONJUNCTION IS ONE-DIRECTIONAL. `input.mayNameLeadingOption` stays the
+  // outer gate — it is the only input that can see `fail_closed_truncated`,
+  // which no per-fact read can detect — and each per-run verdict can only
+  // narrow it further. Every value is `<=` the pre-fix boolean, so a turn that
+  // withheld still withholds and no leader becomes newly nameable.
+  const authority: RunComparisonLeaderAuthority = {
+    prior:
+      input.mayNameLeadingOption
+      && readMayNameLeadingOptionVerdictForFact(pair.prior).may_name_leading_option,
+    current:
+      input.mayNameLeadingOption
+      && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option,
+  };
+
   return {
     matched: true,
     mode: 'compared',
-    assistant_text: composeComparison(delta, input.mayNameLeadingOption),
+    assistant_text: composeComparison(delta, authority),
     suggested_actions: [],
+    // Deliberately NOT gated on `authority`. This field has exactly one
+    // consumer — the `v5.run_comparison_gate` telemetry event in
+    // `turn-executor.ts` — and never reaches the wire or any composer. It is
+    // the factual delta between two persisted runs, and nulling it would blind
+    // triage on precisely the turns where the withhold most needs observing.
+    // The disclosure question is settled in `composeComparison`, which is the
+    // only path to user-facing bytes.
     leading_option_changed: delta.leading_option_changed,
   };
 }
