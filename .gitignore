@@ -49,3 +49,6 @@ tools/graph-evaluator/results/*
 # V5 Phase 1b — local routing log accumulation (PoC fallback before
 # proper Supabase persistence)
 logs/
+
+# Lane scratch (never committed)
+LANE-PROGRESS-*.md
