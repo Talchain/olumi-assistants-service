@@ -306,15 +306,81 @@ export function selectDegradedRunAnalysisFact(
 export function selectRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
 ): SelectedRunAnalysisFact | null {
+  return selectNewestRunAnalysisFact(priorFacts, { requireSuccessfulStatus: true });
+}
+
+/**
+ * ⭐ THE ENTITLEMENT SELECTOR — newest CLAIM-BEARING `run_analysis` fact,
+ * chosen WITHOUT regard to analysis quality.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS SEPARATELY FROM {@link selectRunAnalysisFact}, AND WHY THAT
+ * IS NOT THE SECOND-DERIVATION DEFECT.
+ *
+ * The two selectors answer DIFFERENT QUESTIONS, and the P0 this closes was
+ * caused by one of them being used to answer the other:
+ *
+ *   - FRESHNESS asks "is this analysis good enough to build a result view
+ *     from?" — `partial` / `degraded` / an unrecognised future status all mean
+ *     NO, and excluding them is correct.
+ *   - ENTITLEMENT asks "did an analysis make a claim, and what did its verdict
+ *     say about naming a leader?" — and a `partial` analysis MAKES CLAIMS. The
+ *     run_analysis handler accepts it (permissive accept matrix, resilience
+ *     contract Part C), persists it, and may name a leading option from it.
+ *
+ * Composed, the quality filter silently deleted the entitlement question's
+ * input: a `partial` fact carrying `may_name_leading_option: false` was
+ * invisible, so `readMayNameLeadingOptionVerdict` took its `no analysis
+ * exists ⇒ true` branch — the branch whose entire justification is "no claim
+ * can be grounded, so nothing can leak", on an input where a claim HAD been
+ * grounded and explicitly withheld. The fail-closed default was never wrong;
+ * the SELECTOR made it unreachable.
+ *
+ * ⚠ AND THE FORWARD-COMPATIBILITY CLAUSE INVERTED. `selectRunAnalysisFact`
+ * excludes statuses it does not recognise so a new PLoT status can never be
+ * mistaken for success. Safe for freshness; the exact opposite here — the day
+ * PLoT ships a new status string, every fact carrying it becomes entitled to
+ * name a leader, with no CEE deploy and no alarm. A conservative rule in one
+ * question is a fail-open in the other.
+ *
+ * ONE ORDERING, TWO FILTERS. Both selectors share
+ * {@link selectNewestRunAnalysisFact} rather than each carrying a copy of the
+ * newest-first rule, so "the entitlement fact and the freshness fact are
+ * ordered the same way" is true by construction. That is the distinction worth
+ * holding onto: two selectors answering two questions is DESIGN; two copies of
+ * one ordering rule is the mirror defect (CLAUDE.md trap #12).
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+export function selectClaimBearingRunAnalysisFact(
+  priorFacts: readonly HandlerFact[],
+): SelectedRunAnalysisFact | null {
+  return selectNewestRunAnalysisFact(priorFacts, { requireSuccessfulStatus: false });
+}
+
+/**
+ * The shared newest-first pick. `requireSuccessfulStatus` is the ONLY
+ * difference between the freshness and entitlement selectors.
+ */
+function selectNewestRunAnalysisFact(
+  priorFacts: readonly HandlerFact[],
+  opts: { readonly requireSuccessfulStatus: boolean },
+): SelectedRunAnalysisFact | null {
   const candidates: RunAnalysisFactView[] = [];
   for (let i = 0; i < priorFacts.length; i += 1) {
     const view = viewRunAnalysisFact(priorFacts[i]!, i);
     if (!view) continue;
-    // Eligibility filter: status missing entirely (legacy fact) is
-    // accepted; otherwise the value must normalise to a canonical
+    // Eligibility filter (FRESHNESS ONLY): status missing entirely (legacy
+    // fact) is accepted; otherwise the value must normalise to a canonical
     // success. Everything else (partial / blocked / failed / degraded /
     // future PLoT statuses) is excluded.
-    if (view.status !== null && normaliseAnalysisStatus(view.status) === null) {
+    //
+    // Deliberately NOT applied to the entitlement question — see
+    // `selectClaimBearingRunAnalysisFact` for the P0 that earned this branch.
+    if (
+      opts.requireSuccessfulStatus &&
+      view.status !== null &&
+      normaliseAnalysisStatus(view.status) === null
+    ) {
       continue;
     }
     candidates.push(view);

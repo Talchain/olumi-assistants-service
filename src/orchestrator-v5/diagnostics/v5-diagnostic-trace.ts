@@ -47,6 +47,7 @@
  * threads it onto the BoundaryError wire envelope.
  */
 
+import type { MayNameLeadingOptionProvenance } from '../context/claim-safety-read.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import type {
   DiagnosticTrace,
@@ -261,11 +262,14 @@ export interface V5ClaimSafety {
    * `fail_closed_truncated` appearing at any volume is an ALARM, not noise: it
    * means the scenario-scoped fact read is failing in production.
    */
-  verdict_provenance:
-    | 'scenario_fact'
-    | 'no_analysis_exists'
-    | 'fail_closed_truncated'
-    | null;
+  // ⚠ DERIVED, NOT RE-LISTED (2026-07-27). This union used to be a hand-typed
+  // copy of `MayNameLeadingOptionProvenance`, and route-v2.ts carried a THIRD
+  // copy. Adding `fail_closed_uninterpretable` at the source would have left
+  // both copies silently narrower than the values that actually flow — the
+  // mirror defect (CLAUDE.md trap #12) applied to a type, where the compiler
+  // reports it as an error at the consumer rather than at the stale list.
+  // Importing the type makes a new provenance state propagate for free.
+  verdict_provenance: MayNameLeadingOptionProvenance | null;
   /**
    * Which branch the Layer-2 withheld-explanation gate took, or `null` when it
    * did not run on this turn (non-explanation handler, permitted verdict, or a
