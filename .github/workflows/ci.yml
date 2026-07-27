@@ -29,6 +29,20 @@ jobs:
         run: pnpm install --frozen-lockfile
         env:
           NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      - name: Assert pnpm overrides are readable by the installing pnpm
+        # ARMED LANDMINE GUARD. pnpm <10 reads dependency overrides from
+        # `package.json`; pnpm >=10 reads them from `pnpm-workspace.yaml` and
+        # ignores the package.json field with only a [WARN]. So bumping any
+        # INSTALL job to pnpm 11 while the overrides still live in package.json
+        # drops all 39 of them — including the security floors — with no error
+        # and nothing red. That is the failure mode this repo keeps getting
+        # bitten by: the break reads as green.
+        #
+        # This script derives BOTH halves (where the overrides are, and which
+        # pnpm each installing job pins) from the actual files, so it cannot go
+        # stale the way a checklist would. It fails in either direction, and is
+        # deliberately in the REQUIRED job so the transition blocks merge.
+        run: node scripts/ci/assert-pnpm-overrides-readable.mjs
       - name: Generate OpenAPI types
         run: pnpm openapi:generate
       - name: Lint
@@ -241,13 +255,23 @@ jobs:
           # Node 20 the pnpm binary itself crashes. Only this audit job moves to
           # 22 — the other jobs stay on Node 20.
           node-version: 22
-      # NOTE: deliberately NO `pnpm install` here. `pnpm audit` reads pnpm-lock.yaml
-      # directly (it does not need node_modules), so the install is unnecessary.
-      # Skipping it also dodges ERR_PNPM_LOCKFILE_CONFIG_MISMATCH: pnpm 11 no longer
-      # reads `pnpm.overrides` from package.json (moved to pnpm-workspace.yaml), so a
-      # `--frozen-lockfile` install would reject this lockfile's baked-in overrides.
-      # Migrating overrides is out of scope for this CI-hygiene fix and would affect
-      # the pnpm-9 jobs. Auditing from the committed lockfile needs no NPM_PACKAGES_TOKEN.
+      # NOTE: deliberately NO `pnpm install` here, and that is load-bearing, not
+      # just an optimisation. `pnpm audit` reads pnpm-lock.yaml directly (it does
+      # not need node_modules), so the install is unnecessary — and skipping it is
+      # what keeps this job's pnpm 11 compatible with overrides that still live in
+      # package.json. Both halves are MEASURED, not predicted (2026-07-27, this
+      # lockfile, pnpm 9.15.9 / pnpm 11.13.1):
+      #   - pnpm 11 + overrides in package.json  -> audit fine, but any
+      #     `--frozen-lockfile` install would drop all 39 overrides (pnpm 11 only
+      #     logs `[WARN] The "pnpm" field in package.json is no longer read`).
+      #   - overrides moved to pnpm-workspace.yaml -> pnpm 11 installs cleanly with
+      #     a byte-identical lockfile, but EVERY pnpm-9 install job then fails with
+      #     ERR_PNPM_LOCKFILE_CONFIG_MISMATCH (pnpm <10 cannot read that key).
+      # So the move is safe ONLY as part of moving the installing jobs to pnpm >=10
+      # (18 of them, all currently pinned to 9) — it cannot land on its own. Until
+      # then the `Assert pnpm overrides are readable by the installing pnpm` step in
+      # the unit-tests job blocks the half-migration in either direction.
+      # Auditing from the committed lockfile needs no NPM_PACKAGES_TOKEN.
       - name: Check for duplicate files (prevents drift from shadow copies)
         run: |
           # Fail if any duplicate-pattern files exist in tracked files
