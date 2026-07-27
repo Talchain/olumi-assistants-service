@@ -218,7 +218,7 @@ describe('honest distinct states carry no success claims and no forbidden phrase
   });
 
   it('stale what-changed: staleness framing + executable rerun chip, no success claim, no freshness claim', () => {
-    const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_CHANGED, freshness: 'stale' });
+    const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_CHANGED, freshness: 'stale', mayNameLeadingOption: true });
     expect(r.matched).toBe(true);
     if (!r.matched) return;
     expect(r.mode).toBe('stale');
@@ -233,7 +233,7 @@ describe('honest distinct states carry no success claims and no forbidden phrase
   });
 
   it('unknown freshness: unconfirmed framing — must NOT claim the model changed, must NOT claim freshness', () => {
-    const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_CHANGED, freshness: 'unknown' });
+    const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_CHANGED, freshness: 'unknown', mayNameLeadingOption: true });
     expect(r.matched).toBe(true);
     if (!r.matched) return;
     expect(r.mode).toBe('unconfirmed');
@@ -248,7 +248,7 @@ describe('honest distinct states carry no success claims and no forbidden phrase
   });
 
   it('fresh + identical runs: nothing-changed is said honestly and does not trip the egress denial-phrase guard', () => {
-    const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_IDENTICAL, freshness: 'fresh' });
+    const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_IDENTICAL, freshness: 'fresh', mayNameLeadingOption: true });
     expect(r.matched).toBe(true);
     if (!r.matched) return;
     // Grounded comparison: same leader, unchanged margin — honest wording.
@@ -264,7 +264,7 @@ describe('honest distinct states carry no success claims and no forbidden phrase
 
   it('freshness gate is fail-closed: no comparison prose is produced on stale/unknown, only rerun guidance', () => {
     for (const freshness of ['stale', 'unknown'] as const) {
-      const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_CHANGED, freshness });
+      const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_CHANGED, freshness, mayNameLeadingOption: true });
       expect(r.matched).toBe(true);
       if (!r.matched) continue;
       // The changed-leader story in TWO_RUNS_CHANGED must never surface

@@ -48,6 +48,10 @@ import {
   type RunDelta,
 } from '../coaching/compare-runs.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
+// T1 claim safety (ROADMAP 1.233) — the ALARM's reader, for the module-load
+// probe on this file's withheld copy. Imported rather than re-implemented so the
+// probe and the alarm cannot drift (CLAUDE.md trap #12).
+import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
 
 export type RunComparisonFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
 
@@ -89,6 +93,21 @@ export interface RunComparisonGuardInput {
   readonly message: string;
   readonly priorFacts: readonly HandlerFact[];
   readonly freshness: RunComparisonFreshness | null | undefined;
+  /**
+   * T1 claim safety (ROADMAP 1.233) — may this turn NAME a leading option?
+   *
+   * READ by the caller off the persisted `run_analysis` verdict and passed
+   * down; this gate never re-derives it (CLAUDE.md trap #12: two derivations
+   * over different inputs are how one response contradicts itself).
+   *
+   * REQUIRED, not optional-defaulting-to-true, and deliberately so: the same
+   * doctrine as `EgressSanitiseOpts.mayNameLeadingOption`. This gate composes
+   * leader prose in code with zero LLM calls, so a call site that forgot the
+   * permission would silently re-open the exact leak — an optional field would
+   * make that omission compile. Callers that ran no analysis pass `true`, which
+   * is the honest statement of "nothing was withheld".
+   */
+  readonly mayNameLeadingOption: boolean;
   /**
    * Spine A backstop: factor_ids an option intervenes on. Threaded into
    * `compareRuns` so an option-controlled lever is never reported as having
@@ -140,6 +159,106 @@ const INCOMPARABLE_TEXT =
   + 'Re-running the analysis is the most reliable way to see the current result.';
 
 /**
+ * T1 claim safety (ROADMAP 1.233) — the sentence that replaces the
+ * leading-option half of a comparison when the persisted verdict WITHHOLDS.
+ *
+ * `runComparisonOutcome.assistant_text` was registered `ungated` by #713's
+ * drift ledger, and this gate makes ZERO LLM calls: {@link composeComparison}
+ * builds "The leading option has changed. X came out ahead before, and Y now
+ * leads." and "Its lead has widened by about N percentage points." directly
+ * from the two runs' persisted enrichment. Input gating cannot reach a
+ * composer with no model in it — this site has to consume the verdict itself.
+ *
+ * Says only what `mayNameLeadingOption === false` means, without asserting a
+ * cause we may not have evidence for on this turn — the same discipline, and
+ * deliberately the same register, as
+ * `compose/withheld-explanation-answer.ts`'s
+ * WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL.
+ *
+ * ⚠ THE WORDING IS CONSTRAINED BY THE ALARM. The first version of this constant
+ * said "…which one is **out in front**…", and `out_in_front`
+ * (`/\bout\s+in\s+front\b/i`) is a live pattern in `LEADER_CLAIM_PATTERNS`. On a
+ * withheld comparison the guard is armed with `false` and scans `assistant_text`
+ * with the raw set, so that copy made EVERY withheld comparison turn emit an
+ * error-level `v5.invariant_violation` naming `out_in_front` — a standing red on
+ * the exact instrument this workstream exists to make trustworthy, and one that
+ * would have taught triage to dismiss `out_in_front` as "the gate's own copy"
+ * and so masked a genuine leak (CLAUDE.md trap #7).
+ *
+ * It is the SAME phrase the sibling input note's probe rejected during
+ * development. Two independent authors of withheld copy reached for it, which is
+ * why the guard below is now a module-load assertion rather than a review habit.
+ */
+export const WITHHELD_LEADER_COMPARISON_TEXT =
+  'No single option can be put forward on this result yet, so I am not showing '
+  + 'the order of the options or how that has moved.';
+
+/**
+ * Copy for a withheld comparison in which NOTHING leader-free survived — the
+ * two runs differed only in their ordering and margin.
+ *
+ * A separate constant rather than {@link WITHHELD_LEADER_COMPARISON_TEXT}
+ * alone: "here is what else moved" followed by nothing is a worse artefact
+ * than a sentence that admits the comparison is empty for this turn. TESTING-
+ * DISCIPLINE rule 6 — a stated limit beats a silent one.
+ */
+export const WITHHELD_NOTHING_ELSE_CHANGED_TEXT =
+  WITHHELD_LEADER_COMPARISON_TEXT
+  + ' Nothing else about the two runs moved enough to report.';
+
+/**
+ * BUILD-TIME PROBE — withheld copy must not trip the alarm that measures the
+ * residue it exists to remove.
+ *
+ * ⚠ THIS IS A CLASS, NOT AN INSTANCE, AND IT WAS EARNED TWICE IN ONE CHANGE.
+ * The sibling input note (`context/withheld-leader-projection.ts`) had its first
+ * draft rejected by the same kind of probe for saying "out in front"; this file
+ * then shipped review-clean with the identical phrase, because nothing was
+ * checking it. Substituted copy is written in the register of the thing it is
+ * replacing, so the author is reaching for leader vocabulary by construction —
+ * a review habit is the wrong control for that, and a module-load assertion is
+ * the right one.
+ *
+ * ⚠ `textNamesLeadingOption`, NOT `textAssertsLeadingOption`. This is
+ * RESPONSE-side copy, so the reader that matters is the one the ALARM uses —
+ * the wide net with no enforcement carve-outs, which is exactly what
+ * `findLeaderClaims` runs over `assistant_text` at egress. Probing with the
+ * narrower enforcement reader would let copy through that the alarm then flags
+ * on every withheld turn: the failure this probe exists to prevent, dressed as
+ * a passing check.
+ *
+ * Runs at module load and throws on drift, so a violation fails the process at
+ * startup and every test importing this gate — loudly, which is the point
+ * (CLAUDE.md trap #12: a mirror must fail loud, never assume-good).
+ */
+function assertWithheldCopyIsLeaderFree(): void {
+  const probes: ReadonlyArray<readonly [string, string]> = [
+    ['WITHHELD_LEADER_COMPARISON_TEXT', WITHHELD_LEADER_COMPARISON_TEXT],
+    ['WITHHELD_NOTHING_ELSE_CHANGED_TEXT', WITHHELD_NOTHING_ELSE_CHANGED_TEXT],
+    // The leader-free branches too: they ship on withheld turns as well, so a
+    // copy edit to any of them carries the same hazard.
+    ['STALE_TEXT', STALE_TEXT],
+    ['UNCONFIRMED_TEXT', UNCONFIRMED_TEXT],
+    ['INSUFFICIENT_RUNS_TEXT', INSUFFICIENT_RUNS_TEXT],
+    ['INCOMPARABLE_TEXT', INCOMPARABLE_TEXT],
+  ];
+  for (const [name, copy] of probes) {
+    if (textNamesLeadingOption(copy)) {
+      throw new Error(
+        `run-comparison-gate: ${name} trips the shared leader vocabulary ` +
+          '(compose/leading-option-egress-guard.ts LEADER_CLAIM_PATTERNS). On a ' +
+          'withheld comparison the egress alarm is armed with `false`, so this ' +
+          'copy would raise an error-level v5.invariant_violation on EVERY such ' +
+          'turn — a standing red that trains triage to ignore the one instrument ' +
+          'that can see a real leak. Reword the copy — do not narrow the pattern ' +
+          'set, which is shared with the alarm.',
+      );
+    }
+  }
+}
+assertWithheldCopyIsLeaderFree();
+
+/**
  * Plain-language robustness band phrasing. Re-derived locally rather than
  * imported from `coaching/robustness-honesty.ts` to keep this gate
  * decoupled; band-map consolidation is a tracked follow-up. Aligned with
@@ -160,10 +279,27 @@ function bandPhrase(level: string): string | null {
   }
 }
 
-function composeComparison(delta: RunDelta): string {
+/**
+ * @param mayNameLeadingOption the persisted verdict's permission for this turn,
+ *   READ by the caller and passed down — never re-derived here (CLAUDE.md trap
+ *   #12). `false` suppresses the ordering and margin sentences and substitutes
+ *   {@link WITHHELD_LEADER_COMPARISON_TEXT}.
+ *
+ * ⚠ THE SUPPRESSION IS DELIBERATELY PARTIAL, and that is the anti-
+ * over-suppression property. Only the two leader-designating groups go: which
+ * option is ahead, and by how much its LEAD moved. The robustness-band shift
+ * and the driver-influence mover are statements about the RESULT'S STABILITY
+ * and about FACTORS, not about which option wins — they rank nothing, and they
+ * are the substance of the user's actual question ("what changed?"). Dropping
+ * the whole comparison would trade a leak for the failure the acceptance
+ * criteria weight equally with it.
+ */
+function composeComparison(delta: RunDelta, mayNameLeadingOption: boolean): string {
   const parts: string[] = [];
 
-  if (delta.leading_option_changed) {
+  if (!mayNameLeadingOption) {
+    parts.push(WITHHELD_LEADER_COMPARISON_TEXT);
+  } else if (delta.leading_option_changed) {
     parts.push(
       `The leading option has changed. ${delta.prior_leading_label} came out ahead before, and ${delta.current_leading_label} now leads.`,
     );
@@ -171,7 +307,12 @@ function composeComparison(delta: RunDelta): string {
     parts.push(`${delta.current_leading_label} still leads.`);
   }
 
-  if (delta.margin_direction === 'widened') {
+  // The margin sentences are suppressed with the leader: "its lead has widened"
+  // presupposes a lead, and the pronoun makes it a claim ABOUT the option we
+  // just declined to name.
+  if (!mayNameLeadingOption) {
+    // no margin sentence
+  } else if (delta.margin_direction === 'widened') {
     parts.push(
       `Its lead has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`,
     );
@@ -197,6 +338,14 @@ function composeComparison(delta: RunDelta): string {
     parts.push(
       `${mover.factor_label} now has ${moreInfluential ? 'more' : 'less'} influence on the outcome than before.`,
     );
+  }
+
+  // Withheld turn on which nothing leader-free survived: the two runs differed
+  // only in ordering and margin. `parts` is exactly the substituted sentence, so
+  // say that outright rather than trailing an empty "here is what else moved"
+  // into the follow-up prompt.
+  if (!mayNameLeadingOption && parts.length === 1) {
+    parts[0] = WITHHELD_NOTHING_ELSE_CHANGED_TEXT;
   }
 
   parts.push('If you want to test this further, ask what would change the result.');
@@ -317,7 +466,7 @@ export function tryRunComparisonGate(
   return {
     matched: true,
     mode: 'compared',
-    assistant_text: composeComparison(delta),
+    assistant_text: composeComparison(delta, input.mayNameLeadingOption),
     suggested_actions: [],
     leading_option_changed: delta.leading_option_changed,
   };
