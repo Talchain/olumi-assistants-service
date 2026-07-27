@@ -14,6 +14,12 @@
  *        → "prompt vocabulary is DERIVED from the contract" RED
  *  - M3  change the bias handling from drop to re-label
  *        → "never re-labels an unrecognised bias" RED
+ *  - M4  restore the hand-typed `"type": "direct"` / `"weak"|"moderate"|"strong"`
+ *        causal-claims line in coaching-pass.ts
+ *        → the whole "causal_claims prompt vocabulary" describe RED
+ *        (2026-07-27: this vocabulary was NOT covered by M2 — the 24 Jul fix
+ *        derived the coaching enums and left causal_claims hand-typed, so the
+ *        prompt instructed a vocabulary that failed safeParse 100% of the time.)
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -26,11 +32,19 @@ vi.mock("../../../utils/telemetry.js", () => ({
   },
 }));
 
-import { BiasType, StrengthenItemActionType } from "@talchain/schemas";
+import {
+  BiasType,
+  StrengthenItemActionType,
+  CausalClaimSchema,
+  StrengthBand,
+} from "@talchain/schemas";
 import {
   enforceCoachingContract,
   CANONICAL_ACTION_TYPES,
   CANONICAL_BIAS_TYPES,
+  CANONICAL_STRENGTH_BANDS,
+  CANONICAL_CAUSAL_CLAIM_TYPES,
+  STRENGTH_BEARING_CLAIM_TYPE,
   GENERIC_ACTION_TYPE,
 } from "../coaching-contract-conformance.js";
 import { COACHING_SYSTEM } from "../../../cee/unified-pipeline/stages/coaching-pass.js";
@@ -119,6 +133,99 @@ describe("derive-don't-mirror pins", () => {
     for (const stale of ["add_factor", "add_edge", "clarify_goal", "quantify", "availability"]) {
       expect(COACHING_SYSTEM).not.toContain(stale);
     }
+  });
+});
+
+/**
+ * P0 (2026-07-27) — the causal_claims vocabulary the prompt INSTRUCTS must be a
+ * vocabulary the contract ACCEPTS.
+ *
+ * These assertions read the vocabulary back OUT of the rendered prompt and
+ * round-trip it through the real `CausalClaimSchema`. That is deliberately not
+ * a token-containment check: a containment check is a second mirror (it asserts
+ * the prompt holds tokens the TEST names), and the defect it missed for four
+ * days is precisely that the test's loop named the wrong enums. Parsing the
+ * prompt's own instructed shape and PARSING IT means any future hand-typing —
+ * of the type literal, of a band, of a whole new claim variant — fails here
+ * without anybody remembering to extend a list (CLAUDE.md trap 12).
+ */
+describe("causal_claims prompt vocabulary is DERIVED and round-trips (M4)", () => {
+  /** The single prompt line that declares the causal-claim shape. */
+  function claimLine(): string {
+    const lines = COACHING_SYSTEM.split("\n").filter((l) => l.includes('"stated_strength"'));
+    // Positive control on the extractor itself: if the prompt is restructured
+    // so this line vanishes or doubles, every assertion below would silently
+    // test nothing. Fail loud instead (CLAUDE.md trap 13).
+    expect(lines).toHaveLength(1);
+    return lines[0]!;
+  }
+
+  /** The claim `type` literal the prompt actually offers the model. */
+  function instructedClaimType(): string {
+    const m = /"type":\s*"([a-z_]+)"/.exec(claimLine());
+    expect(m).not.toBeNull();
+    return m![1]!;
+  }
+
+  /** The `stated_strength` band tokens the prompt actually offers the model. */
+  function instructedBands(): string[] {
+    const tail = claimLine().slice(claimLine().indexOf('"stated_strength"'));
+    const bands = [...tail.matchAll(/"([a-z_]+)"/g)]
+      .map((m) => m[1]!)
+      .filter((t) => t !== "stated_strength");
+    expect(bands.length).toBeGreaterThan(0);
+    return bands;
+  }
+
+  it("the derived constants ARE the contract, not a local copy", () => {
+    expect([...CANONICAL_STRENGTH_BANDS]).toEqual([...StrengthBand.options]);
+    expect([...CANONICAL_CAUSAL_CLAIM_TYPES]).toEqual([...CausalClaimSchema.optionsMap.keys()]);
+    expect(CANONICAL_CAUSAL_CLAIM_TYPES).toContain(STRENGTH_BEARING_CLAIM_TYPE);
+    // Non-vacuity: these lists are non-empty, so "everything is canonical" is
+    // not trivially true.
+    expect(CANONICAL_STRENGTH_BANDS.length).toBeGreaterThan(0);
+    expect(CANONICAL_CAUSAL_CLAIM_TYPES.length).toBeGreaterThan(0);
+  });
+
+  it("the instructed claim type is a contract discriminator", () => {
+    expect([...CausalClaimSchema.optionsMap.keys()]).toContain(instructedClaimType());
+  });
+
+  it("the instructed bands are EXACTLY the contract's StrengthBand", () => {
+    expect(instructedBands()).toEqual([...StrengthBand.options]);
+  });
+
+  it("THE PIN: every claim the prompt instructs actually parses (round-trip)", () => {
+    const type = instructedClaimType();
+    const bands = instructedBands();
+    for (const band of bands) {
+      const claim = { type, from: "fac_a", to: "out_b", stated_strength: band };
+      const result = CausalClaimSchema.safeParse(claim);
+      // Name the offending value in the failure message — this is the assertion
+      // that was 100% RED in production for four days.
+      expect(
+        result.success,
+        `prompt-instructed claim {type:"${type}", stated_strength:"${band}"} does not satisfy CausalClaimSchema`,
+      ).toBe(true);
+    }
+  });
+
+  it("positive control: the round-trip CAN fail (it is not vacuous)", () => {
+    // The exact hand-typed vocabulary this P0 removed. If this ever passes, the
+    // round-trip assertion above has stopped discriminating.
+    expect(
+      CausalClaimSchema.safeParse({
+        type: "direct",
+        from: "fac_a",
+        to: "out_b",
+        stated_strength: "weak",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("the retired 3-band / bare-'direct' vocabulary is GONE from the prompt", () => {
+    expect(COACHING_SYSTEM).not.toContain('"type": "direct"');
+    expect(instructedBands()).not.toContain("weak");
   });
 });
 
