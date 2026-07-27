@@ -144,7 +144,44 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * siblings here, add them when the control asks.
    */
   { code: 'performs_best', re: /\bperforms?\s+best\b/i },
-  { code: 'comes_out_ahead', re: /\bcomes?\s+out\s+(?:ahead|on\s+top)\b/i },
+  /**
+   * ⚠ THE PAST TENSE — added 2026-07-27, and it is the SECOND time this list
+   * missed a template the repo itself writes.
+   *
+   * This entry read `/\bcomes?\s+out\s+(?:ahead|on\s+top)\b/i`: come, comes,
+   * and NOT `came`. `routing/run-comparison-gate.ts`'s `composeComparison` — a
+   * pure, deterministic, zero-LLM composer — emits, verbatim, on the #731 mixed
+   * branch where the prior run's verdict permits and the current run's
+   * withholds:
+   *
+   *     "${prior_leading_label} came out ahead in the earlier run."
+   *
+   * That sentence matched NOTHING in this list. Its sibling, the both-permitted
+   * template, emits "${prior} came out ahead before, and ${current} now leads."
+   * and was seen ONLY INCIDENTALLY, through the trailing "now leads" clause —
+   * the leader claim about the PRIOR run was invisible in both, and the mixed
+   * branch has no neighbouring clause to save it.
+   *
+   * WHY IT MATTERS BEYOND THAT ONE COMPOSER. The vocabulary is SHARED with four
+   * consumers that read UNBOUNDED prose and act on what they see:
+   * `compose/withheld-explanation-answer.ts` (REPLACE-vs-APPEND on a handler's
+   * answer), `compose.ts`'s `evidence_gap` filter, `compose/withheld-claim-
+   * projection.ts`'s `analysis_summary` projection, and
+   * `context/withheld-leader-projection.ts`'s notes. A past-tense leader claim
+   * in model or enrichment prose was invisible to every one of them. (The fifth
+   * consumer, `context/withheld-history-redaction.ts`, already caught it through
+   * its own wider bare-`ahead` pattern — which is exactly the alarm-weaker-than-
+   * its-own-sibling divergence this module's docstring says must never happen.)
+   *
+   * ADDED BY, AND PINNED BY, THE DERIVED CONTROL — not by inspection.
+   * `__tests__/leader-vocabulary-producer-control.test.ts` now drives
+   * `composeComparison` across its full permission x ordering x margin space and
+   * asserts PER CLAUSE, so the incidental catch cannot mask a miss. Removing
+   * `came|` from the alternation turns that control red and names the template.
+   * `coming out ahead` is deliberately NOT added: no producer emits it and the
+   * control does not ask for it — when one does, the control is what will say so.
+   */
+  { code: 'comes_out_ahead', re: /\b(?:came|comes?)\s+out\s+(?:ahead|on\s+top)\b/i },
   { code: 'leading_in', re: /\bleading\s+in\b/i },
   { code: 'ahead_by', re: /\bahead\s+by\b/i },
   { code: 'out_in_front', re: /\bout\s+in\s+front\b/i },
