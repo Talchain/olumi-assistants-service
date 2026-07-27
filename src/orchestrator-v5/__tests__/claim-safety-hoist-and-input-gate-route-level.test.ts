@@ -69,6 +69,12 @@ import {
 // The substituted copy the wire gate (#721) ships, reused here so the pack-input
 // arm and the wire arm cannot assert different constants for one doctrine.
 import { WITHHELD_ANALYSIS_SUMMARY } from '../compose/withheld-claim-projection.js';
+// The conversation-history gate's own reader and marker, taken off the
+// production module so this acceptance arm and the gate cannot drift apart.
+import {
+  WITHHELD_HISTORY_REDACTION_MARKER,
+  historyAssertsLeaderClaim,
+} from '../context/withheld-history-redaction.js';
 
 const SCENARIO_ID = 'a1b2c3d4-1233-4123-8123-a1b2c3d41233';
 const LEADER_LABEL = 'Hire Marketing Manager';
@@ -1029,5 +1035,278 @@ describe('G-CEE-1 — the PERSISTED analysis summary in the MODEL INPUT (P6 deci
     expect(bytes).toContain(HISTORIC_LEADER_SUMMARY);
     expect(bytes).toContain('17 percentage points');
     expect(section).not.toContain(WITHHELD_ANALYSIS_SUMMARY);
+  });
+});
+
+/**
+ * The VERBATIM live leak, from `raw-2026-07-27-historic/phase-post-b35d09de-rep4/
+ * c5.historic.propose.reading.json` — build `b35d09de`, i.e. AFTER #721 and
+ * AFTER #723, on a turn whose own `may_name_leading_option` reads `false`.
+ *
+ * ⚠ ITS `assistant_text_leader_codes` IS `[]`. The production alarm scored ZERO
+ * hits on this sentence: `\bleads\b` is present-tense and this is "led". That
+ * measurement is the whole reason the redaction reader is a SEPARATE, WIDER one
+ * — a gate built on the shared vocabulary could not have caught the string that
+ * actually leaked. Pinned as an assertion below, not left as a comment.
+ *
+ * Labels are NOT remapped onto this file's graph, deliberately: these are the
+ * live bytes, and the reader is label-independent by design (it triggers on the
+ * ordering claim, never on an option roster — deriving the roster here would be
+ * a second derivation of "who is leading" beside the verdict).
+ */
+const HISTORY_LEAK_SENTENCE_LIVE =
+  'Double down on SMB previously led by 17 percentage points, flagged fragile on ' +
+  'this exact assumption from the first run.';
+
+/** The rep4 bytes exactly as captured ("17 points", not "17 percentage points"). */
+const HISTORY_LEAK_SENTENCE_REP4 = 'Double down on SMB previously led by 17 points.';
+
+/**
+ * ONE prior assistant answer, shaped like the c5 turns that poisoned that
+ * scenario: mostly legitimate coaching, with the ordering claim in one bullet.
+ *
+ * The surviving bullets are load-bearing. A gate that blanked the whole message
+ * would pass every absence assertion below and destroy the coach's memory of
+ * what the blocker is — the over-suppression failure this estate weights equally
+ * with the leak. "sales win rate" in particular is a FACTOR NAME on the leaking
+ * scenario, and it must survive a reader whose vocabulary includes `win`.
+ */
+const C5_SHAPED_ASSISTANT_MESSAGE =
+  "You have asked this several times now, and the model cannot answer until one specific thing changes.\n" +
+  '• The blocker is unchanged and narrow. The connection from sales win rate to revenue growth is still unverified against real pipeline numbers.\n' +
+  `• Your stored lean was recorded on the first run. ${HISTORY_LEAK_SENTENCE_LIVE}\n` +
+  `• ${HISTORY_LEAK_SENTENCE_REP4}\n` +
+  '• Something other than the model may be holding this up. If pulling pipeline data or triggering a rerun both feel undoable right now, that is the actual thing worth solving.';
+
+/** An answer that makes NO ordering claim — the anti-over-suppression fixture. */
+const LEADER_FREE_ASSISTANT_MESSAGE =
+  'The connection from sales win rate to revenue growth is still unverified against real pipeline numbers. ' +
+  'Two things would change that: real enterprise figures from your pipeline, or a rerun of the analysis as it stands.';
+
+/** A prior turn carrying conversation content, as `readRecent` returns it. */
+function priorContentTurn(
+  turnId: string,
+  userMessage: string,
+  assistantMessage: string,
+): Record<string, unknown> {
+  return {
+    id: `cccccccc-1233-4ccc-8ccc-${turnId.padStart(12, '0').slice(-12)}`,
+    scenario_id: SCENARIO_ID,
+    user_id: null,
+    turn_id: turnId,
+    turn_class: 'clarify',
+    handler_id: null,
+    request_hash: `sha256:${turnId}`,
+    response_emitted: true,
+    llm_calls_used: 1,
+    duration_ms: 210,
+    created_at: new Date(Date.now() - 30_000).toISOString(),
+    user_message: userMessage,
+    assistant_message: assistantMessage,
+  };
+}
+
+/**
+ * G-CEE-1 — THE FOURTH CHANNEL: the model's own CONVERSATION HISTORY.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT #721 AND #723 DID NOT CLOSE, MEASURED ON THE BUILD THAT SHIPPED BOTH.
+ *
+ * `WALK-HISTORIC-PREP-2026-07-27.md` §10, build `b35d09de`: on historic scenario
+ * `f63ccb45` the withheld turn's `assistant_text` named the withheld leader on
+ * **2 of 5** samples — down from 5/5 on `74936a65` (so #723's decision-records
+ * gate was real and material) but NOT zero. The residual channel is
+ * `ContextPack.conversation.recent_turns[].assistant_message`, which
+ * `buildUserMessage` serialises into the routing prompt through its `...rest`
+ * spread with nothing on the path consulting the verdict.
+ *
+ * ⚠ AND IT SELF-REINFORCES. A leaked answer is persisted as that turn's
+ * `assistant_message` and feeds the NEXT turn's window. Seven of the leaking
+ * messages in `f63ccb45`'s history were written by the walk's own probe turns
+ * (§10.4) — the instrument poisoned the scenario it was measuring. Gating the
+ * INPUT is what breaks the loop.
+ *
+ * ⚠ THESE ARE NOT ASSERTIONS ABOUT MODEL OUTPUT, and the control that forces
+ * that discipline is in the evidence: target `c6` carries EIGHT leader-naming
+ * stored messages and leaked 0/5. Presence in history is not sufficiency, so a
+ * leak rate is not pinnable in-repo. THE INPUT IS THE DEFECT; the model BYTES
+ * are what is measured here.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+describe('G-CEE-1 — prior-turn ASSISTANT PROSE in the MODEL INPUT (conversation history)', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => app.close());
+
+  beforeEach(() => {
+    events = [];
+    setTestSink(() => {});
+    routeWithToolUseMock.mockReset();
+    routeWithToolUseMock.mockResolvedValue(converseTextOnly('A conversational reply.'));
+    priorTurns = [
+      priorContentTurn('prior-turn-c5', 'Which one should we go with?', C5_SHAPED_ASSISTANT_MESSAGE),
+      PRIOR_RUN_ANALYSIS_TURN,
+    ];
+    // The c5 shape: a HISTORIC, UNSTAMPED fact ⇒ withheld by the fail-closed
+    // default, which is the class with no migration and therefore live.
+    priorFacts = [priorUnstampedRunAnalysisFact()];
+    // CHANNEL ISOLATION. #723's channel is switched OFF for this whole arm, so
+    // a hit here can only have come through `conversation`. Without it the two
+    // channels ship the same "17 percentage points" substring and neither arm
+    // would discriminate.
+    decisionRecordPage = { records: [], totalCount: 0 };
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.clearAllMocks();
+  });
+
+  /** The conversation section as it sits on the pack handed to the router. */
+  const conversationSection = (): Record<string, any> =>
+    packHandedToTheModel().conversation as Record<string, any>;
+
+  it('INSTRUMENT: the live leak sentence is INVISIBLE to the shared alarm vocabulary', () => {
+    // ⭐ THE MEASUREMENT THAT DICTATED THE DESIGN, asserted rather than asserted
+    // about. The archive scored `assistant_text_leader_codes: []` on this
+    // sentence; if that ever stops being true (someone widens
+    // LEADER_CLAIM_PATTERNS — good) this test goes red and the "separate wider
+    // reader" rationale must be re-derived rather than inherited.
+    expect(textNamesLeadingOption(HISTORY_LEAK_SENTENCE_LIVE)).toBe(false);
+    expect(textNamesLeadingOption(HISTORY_LEAK_SENTENCE_REP4)).toBe(false);
+    expect(findLeaderClaims({ assistant_text: HISTORY_LEAK_SENTENCE_REP4 } as never)).toEqual([]);
+    // …and the redaction reader DOES see it. A gate that cannot see the string
+    // that leaked is theatre (rule 2: prove the instrument sees a PRESENCE).
+    expect(historyAssertsLeaderClaim(HISTORY_LEAK_SENTENCE_LIVE)).toBe(true);
+    expect(historyAssertsLeaderClaim(HISTORY_LEAK_SENTENCE_REP4)).toBe(true);
+  });
+
+  it('NON-VACUITY: the channel really is OPEN and carrying this turn’s history', async () => {
+    // Rule 2. Every absence assertion below is worthless if the conversation
+    // section is empty — which it would be if the store mock, the window
+    // projection or the pack key stopped working.
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+    expect(conversationSection()['recent_turns'].length).toBeGreaterThan(0);
+    expect(bytes).toContain('"recent_turns"');
+    expect(bytes).toContain('Which one should we go with?');
+  });
+
+  it('BRANCH DISCRIMINATOR: this turn really is withheld', async () => {
+    // Rule 1: a fixture regression to a permitted verdict would make the leak
+    // arm pass for no reason at all.
+    await postTurn(app, 'So where does this leave things?');
+    expect(modelFacingAnalysis()!['leading_option']).toBeUndefined();
+    expect(modelFacingAnalysis()!['options']).toBeUndefined();
+  });
+
+  it('THE LEAK: the prior answer’s ordering claim must NOT reach the model bytes', async () => {
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+
+    // The exact live strings, and the fragments the walk scored on.
+    expect(bytes).not.toContain(HISTORY_LEAK_SENTENCE_LIVE);
+    expect(bytes).not.toContain(HISTORY_LEAK_SENTENCE_REP4);
+    expect(bytes).not.toContain('previously led');
+    expect(bytes).not.toContain('17 percentage points');
+    expect(bytes).not.toContain('17 points');
+
+    // And on the SECTION, so a future field that re-exposes the same prose
+    // elsewhere in the pack cannot make this pass by accident.
+    const section = JSON.stringify(conversationSection());
+    expect(section).not.toContain('previously led');
+    expect(historyAssertsLeaderClaim(section)).toBe(false);
+
+    // NEVER SILENT: the marker says what is absent and why.
+    expect(section).toContain(WITHHELD_HISTORY_REDACTION_MARKER);
+  });
+
+  it('ANTI-OVER-SUPPRESSION: the SURVIVING prose of the same message is untouched', async () => {
+    // A gate that blanked the whole assistant message would pass every absence
+    // assertion above and destroy the coach's memory of what the blocker is.
+    // The redaction is sentence-scoped, and this is what proves it.
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+    expect(bytes).toContain('The blocker is unchanged and narrow.');
+    expect(bytes).toContain('sales win rate to revenue growth is still unverified');
+    expect(bytes).toContain('Something other than the model may be holding this up.');
+    // The USER's own words are never redacted — see the module docstring for
+    // why that is a decision and not an oversight. Pinned so a later widening
+    // to `user_message` is a deliberate edit here.
+    expect(bytes).toContain('Which one should we go with?');
+  });
+
+  it('POSITIVE CONTROL: a withheld turn with LEADER-FREE history is BYTE-IDENTICAL', async () => {
+    // The over-suppression arm proper, and the one that fails if the gate ever
+    // becomes unconditional. Same verdict, same path, claim-free content.
+    expect(
+      historyAssertsLeaderClaim(LEADER_FREE_ASSISTANT_MESSAGE),
+      'the control message must itself be claim-free, or it is measuring the leak arm again',
+    ).toBe(false);
+    priorTurns = [
+      priorContentTurn('prior-turn-clean', 'What is blocking this?', LEADER_FREE_ASSISTANT_MESSAGE),
+      PRIOR_RUN_ANALYSIS_TURN,
+    ];
+
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+    const turn = conversationSection()['recent_turns'][0] as Record<string, any>;
+    expect(turn['assistant_message']).toBe(LEADER_FREE_ASSISTANT_MESSAGE);
+    expect(bytes).not.toContain(WITHHELD_HISTORY_REDACTION_MARKER);
+  });
+
+  it('POSITIVE CONTROL: on a PERMITTED verdict the history ships VERBATIM', async () => {
+    // Same history, same path, opposite verdict. Byte-identity with a world in
+    // which this gate does not exist — and the branch-reached proof for the
+    // withheld arms above, since only a fixture that really loaded the turn can
+    // produce these bytes.
+    priorFacts = [priorRunAnalysisFact(true)];
+
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+    const turn = conversationSection()['recent_turns'][0] as Record<string, any>;
+    expect(turn['assistant_message']).toBe(C5_SHAPED_ASSISTANT_MESSAGE);
+    expect(bytes).toContain(HISTORY_LEAK_SENTENCE_LIVE);
+    expect(bytes).toContain('17 percentage points');
+    expect(bytes).not.toContain(WITHHELD_HISTORY_REDACTION_MARKER);
+  });
+
+  it('the INJECTED MARKER does not trip the alarm this gate exists to quieten', async () => {
+    // The third positive control. An input gate that injected leader-vocabulary
+    // residue into every withheld prompt would show up only as an alarm rate
+    // nobody had a reason to look at — the trap
+    // `withheld-leader-projection.ts` records hitting with "out in front".
+    // Checked here on the REAL prompt bytes, not on the constant alone.
+    await postTurn(app, 'So where does this leave things?');
+    const bytes = modelBytes('So where does this leave things?');
+    expect(bytes).toContain(WITHHELD_HISTORY_REDACTION_MARKER);
+    expect(textNamesLeadingOption(WITHHELD_HISTORY_REDACTION_MARKER)).toBe(false);
+    expect(historyAssertsLeaderClaim(WITHHELD_HISTORY_REDACTION_MARKER)).toBe(false);
+    expect(findLeaderClaims({ assistant_text: WITHHELD_HISTORY_REDACTION_MARKER } as never)).toEqual(
+      [],
+    );
+  });
+
+  it('SELF-REINFORCEMENT: a SECOND leaked turn in the window is also removed', async () => {
+    // The loop, in miniature. Once a turn leaks, its answer is persisted and
+    // feeds the next turn's window — which is how seven probe turns compounded
+    // on `f63ccb45`. The gate must be per-turn over the WHOLE window, not a
+    // most-recent-turn special case.
+    priorTurns = [
+      priorContentTurn('prior-turn-c5b', 'And now?', `${HISTORY_LEAK_SENTENCE_REP4} Nothing else has changed.`),
+      priorContentTurn('prior-turn-c5', 'Which one should we go with?', C5_SHAPED_ASSISTANT_MESSAGE),
+      PRIOR_RUN_ANALYSIS_TURN,
+    ];
+
+    await postTurn(app, 'So where does this leave things?');
+    const section = JSON.stringify(conversationSection());
+    expect(section).not.toContain('previously led');
+    expect(section).not.toContain('17 points');
+    // The non-claiming half of the SECOND turn survives too.
+    expect(section).toContain('Nothing else has changed.');
   });
 });
