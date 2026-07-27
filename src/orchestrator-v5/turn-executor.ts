@@ -1935,6 +1935,28 @@ export async function runTurnExecutor(
                 store: getDecisionRecordStore(),
                 scenarioId: context.session_id,
                 charBudget: POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET,
+                // ROADMAP 1.231, second channel — THE INPUT GATE, applied to the
+                // P6 decision-records read.
+                //
+                // A stored record's `prediction.statement` is the run_analysis
+                // fact's `result.summary` VERBATIM (decision-records/capture.ts)
+                // and its `chosen_option_label` is that fact's LEADING OPTION
+                // under another name. Both are serialised into the routing
+                // prompt by `buildUserMessage`'s `...rest` — beside
+                // OLDER_RELEVANT_FACTS_INSTRUCTION, which tells the coach to
+                // treat the block as established fact. #721 gated that same
+                // summary on the WIRE and this channel was left open; a withheld
+                // turn on historic scenario `f63ccb45` then recited it 5/5 on
+                // build `74936a6`.
+                //
+                // Threaded from the SAME hoisted verdict the display-analysis
+                // gate below reads, so the two model-facing gates cannot
+                // describe different turns. Gated HERE rather than after pack
+                // assembly because the record is still STRUCTURED at this point:
+                // gating later would mean re-parsing assembled prose, and the
+                // budget telemetry would then account for text that never
+                // shipped.
+                mayNameLeadingOption: mayNameLeadingOptionForRun,
                 requestId,
               });
             } catch {
