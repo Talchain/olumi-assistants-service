@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
-import { tryRunComparisonGate } from '../run-comparison-gate.js';
+import {
+  tryRunComparisonGate,
+  WITHHELD_LEADER_COMPARISON_TEXT,
+  WITHHELD_NOTHING_ELSE_CHANGED_TEXT,
+} from '../run-comparison-gate.js';
+import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 
 // Self-contained fixtures (no shared integration mocks).
@@ -340,5 +345,54 @@ describe('tryRunComparisonGate — claim safety (ROADMAP 1.233)', () => {
         expect(withheld).toEqual(permitted);
       }
     }
+  });
+});
+
+/**
+ * F1 (Fable review of #716) — THE COPY THIS GATE SUBSTITUTES MUST NOT TRIP THE
+ * ALARM IT IS PROTECTED BY.
+ *
+ * The first version of `WITHHELD_LEADER_COMPARISON_TEXT` said "…which one is
+ * **out in front**…", and `out_in_front` is a live pattern in
+ * `LEADER_CLAIM_PATTERNS`. On a withheld comparison the egress guard is armed
+ * with `false` and scans `assistant_text` with the RAW pattern set, so that copy
+ * made every withheld comparison turn emit an error-level
+ * `v5.invariant_violation` — a standing red on the one instrument that can see a
+ * real leak, and one that would have trained triage to dismiss `out_in_front`
+ * hits as "the gate's own copy" (CLAUDE.md trap #7).
+ *
+ * The module-load probe in the gate is the hard guarantee. These are the
+ * readable regression pins, and the last one is the one that matters: it scans
+ * the WHOLE EMITTED `assistant_text`, not the constant in isolation, so it also
+ * covers the sentences the constant is concatenated with.
+ */
+describe('tryRunComparisonGate — withheld copy vs the ALARM vocabulary (F1)', () => {
+  it('the substituted constants are invisible to the production alarm', () => {
+    expect(findLeaderClaims({ assistant_text: WITHHELD_LEADER_COMPARISON_TEXT } as never)).toHaveLength(0);
+    expect(findLeaderClaims({ assistant_text: WITHHELD_NOTHING_ELSE_CHANGED_TEXT } as never)).toHaveLength(0);
+  });
+
+  it('the FULL emitted withheld answer is invisible to the production alarm', () => {
+    // Asserting on the constant alone would miss a hit formed across the join
+    // with the robustness / driver / follow-up sentences. This is the assertion
+    // that matches what the guard actually scans at egress.
+    const out = tryRunComparisonGate({
+      message: 'What changed?', priorFacts: TWO_RUNS, freshness: 'fresh', mayNameLeadingOption: false,
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(findLeaderClaims({ assistant_text: out.assistant_text } as never)).toHaveLength(0);
+  });
+
+  it('POSITIVE CONTROL: the alarm DOES see the permitted answer', () => {
+    // Rule 2 — without this, the three absence assertions above would pass
+    // identically against a broken scanner. The permitted arm composes "X still
+    // leads" / "the leading option has changed", which must be visible.
+    const out = tryRunComparisonGate({
+      message: 'What changed?', priorFacts: TWO_RUNS, freshness: 'fresh', mayNameLeadingOption: true,
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(findLeaderClaims({ assistant_text: out.assistant_text } as never).length).toBeGreaterThan(0);
   });
 });

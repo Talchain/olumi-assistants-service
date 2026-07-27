@@ -125,7 +125,7 @@ function textOnlyAdapter(text: string) {
   };
 }
 
-function buildFreshRunAnalysisFact(graphHashAtRun: string): HandlerFact {
+function buildFreshRunAnalysisFact(graphHashAtRun: string, mayNameLeadingOption = true): HandlerFact {
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
@@ -154,8 +154,10 @@ function buildFreshRunAnalysisFact(graphHashAtRun: string): HandlerFact {
       // leader-naming assertions below red is the mutation check on the 1.233
       // gates — proof they bite, delivered by the pre-existing suite.
       constraint_verdict: {
-        may_name_leading_option: true,
-        constraint_verdict_state: 'evaluated_feasible' as const,
+        may_name_leading_option: mayNameLeadingOption,
+        constraint_verdict_state: mayNameLeadingOption
+          ? ('evaluated_feasible' as const)
+          : ('unevaluated' as const),
       },
       win_probabilities: { 'A': 0.62, 'B': 0.38 },
       enrichment: {
@@ -623,6 +625,66 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
     expect(result.response.assistant_text).not.toContain("couldn't complete that turn");
 
     // Ops signal preserved: bounded fallback still fired, cause intact.
+    const bf = events.find((e) => e.event === 'v5.routing_bounded_fallback');
+    expect(bf).toBeDefined();
+    expect(bf!.data.routing_error_cause).toBe('schema_repair_failed');
+    expect(bf!.data.analysis_freshness).toBe('fresh');
+  });
+
+  /**
+   * F5(b) (Fable review of #716) — the WITHHELD arm of the same corridor.
+   *
+   * The test above is the PERMITTED arm and was the bounded fallback's only
+   * behavioural coverage. Everything else guarding this gate was a source-pin in
+   * the drift register plus the fixture-stamp property — both of which exercise
+   * only the permitted direction, so a revert of the gate's `mayNameLeadingOption
+   * &&` conjunct had no behavioural test that could see it.
+   *
+   * This is the exact live corridor ROADMAP 1.233 was written for: a routing
+   * DEGRADE (`schema_repair_failed`) on a forced analytical pill, which reaches
+   * an exit that — before the hoist — shipped the full deterministic leader
+   * answer with no gate, no disclosure, and a `true` permission that made the
+   * Layer-3 alarm a licensed no-op.
+   */
+  it('FORCED what_would_flip pill + schema_repair_failed + WITHHELD verdict → bounded copy, NO leader answer', async () => {
+    const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
+    const { findLeaderClaims } = await import('../compose/leading-option-egress-guard.js');
+    const expectedHash = computeAnalysisAffectingGraphHash(baseGraph)!;
+    // The ONLY difference from the arm above.
+    mockedPriorFacts = [buildFreshRunAnalysisFact(expectedHash, false)];
+
+    const adapterMock = vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockResolvedValueOnce(mkFailingToolUse({ intent_class: 'execute' }))
+      .mockResolvedValueOnce(mkFailingToolUse({ intent_class: 'clarify' }));
+    const adapter = { chatWithTools: adapterMock };
+
+    const flipPayload = {
+      ...ANALYSE_PAYLOAD,
+      source: 'chip_click' as const,
+      message: 'What would flip this result?',
+    };
+
+    const result = await runTurnExecutor(flipPayload, 'req-flip-fallback-withheld', {
+      routingAdapter: adapter,
+      graphState: baseGraph,
+      chipClickForcedIntent: 'what_would_flip',
+    });
+
+    const text = result.response.assistant_text;
+    // The deterministic leader answer the permitted arm asserts MUST be absent —
+    // both the phrase and the probability it carries.
+    expect(text).not.toContain('currently leads');
+    expect(text).not.toContain('62%');
+    // And nothing else in the response asserts a leader either: scanned with the
+    // production alarm's own reader, so this test and the alarm cannot drift.
+    expect(findLeaderClaims({ assistant_text: text } as never)).toHaveLength(0);
+    // It degrades to the bounded copy rather than fabricating a substitute
+    // leader sentence — the honest direction.
+    expect(text.length).toBeGreaterThan(0);
+
+    // Ops signal must be UNCHANGED by the gate: suppressing the answer must not
+    // also suppress the telemetry that says why the turn degraded.
     const bf = events.find((e) => e.event === 'v5.routing_bounded_fallback');
     expect(bf).toBeDefined();
     expect(bf!.data.routing_error_cause).toBe('schema_repair_failed');

@@ -535,6 +535,16 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
       expect(Array.isArray(analysis['options'])).toBe(true);
       expect((analysis['options'] as unknown[]).length).toBeGreaterThan(1);
       expect(analysis['leading_option_note']).toBeUndefined();
+
+      // F7 (Fable review) — THE PRESENCE TWIN for the withheld arm's
+      // serialised-pack absence checks. Those assert `'72%'` / `'28%'` never
+      // appear anywhere in the model-facing analysis; without this, a change
+      // that stopped emitting integer-percent strings entirely (or renamed the
+      // field) would make BOTH absence checks pass while proving nothing. The
+      // labels already had such a twin above; the probabilities did not.
+      const serialisedPermitted = JSON.stringify(analysis);
+      expect(serialisedPermitted).toContain('72%');
+      expect(serialisedPermitted).toContain('28%');
     });
 
     it('POSITIVE CONTROL: the alarm stays SILENT on a permitted turn', async () => {
@@ -596,6 +606,50 @@ describe('G-CEE-1 — the DETERMINISTIC advice gate consumes the verdict (ROADMA
     expect(body.assistant_text).toContain('72%');
   });
 
+  it('ANTI-OVER-SUPPRESSION: a NON-LEADER advice class still SERVES on a withheld verdict', async () => {
+    // F5(a) (Fable review of #716). The claim that input-gating this gate does
+    // not over-suppress previously rested on READING `CLASS_REQUIREMENTS` —
+    // i.e. on an argument, not on a test. This is the test.
+    //
+    // `readiness` declares `needs_leading_option: false`, so a null-leader
+    // projection must leave it completely unaffected. If the gate ever became
+    // unconditional — declining every class on a withheld turn rather than only
+    // the ones that need a leader — this goes red while every absence assertion
+    // in this file stays green. That asymmetry is the whole point: the leak and
+    // the over-suppression are weighted equally, and only one of them had
+    // coverage.
+    priorFacts = [priorRunAnalysisFact(false)];
+    events = [];
+    setTestSink((name, data) => {
+      events.push({ name, data });
+    });
+    const { status, body } = await postTurn(app, 'What evidence is missing?', 'frame');
+    expect(status).toBe(200);
+
+    // BRANCH-ONLY: the advice gate is a PRE-ROUTE, so serving without the
+    // router is something only this branch can produce.
+    expect(
+      routeWithToolUseMock,
+      'the readiness class needs no leading option, so a withheld verdict must not stop it serving',
+    ).not.toHaveBeenCalled();
+    expect(body.assistant_text.length).toBeGreaterThan(0);
+
+    // The gate's own telemetry states the two halves of the claim on one line:
+    // it MATCHED, and it did so with the leading option WITHHELD. That is the
+    // difference between "a class that needs no leader kept working" and "the
+    // turn happened to be answered by something else".
+    const gate = events.find((e) => e.name === 'v5.post_analysis_advice_gate');
+    expect(gate, 'the advice gate must have run').toBeDefined();
+    expect(gate!.data['matched']).toBe(true);
+    expect(gate!.data['advice_class']).toBe('evidence_gap');
+    expect(gate!.data['leading_option_withheld']).toBe(true);
+    expect(gate!.data['leading_option_present']).toBe(false);
+
+    // And it is still leader-free, scanned with the production alarm's reader —
+    // serving is not a licence to name a leader.
+    expect(findLeaderClaims(body as never)).toHaveLength(0);
+  });
+
   it('on a WITHHELD verdict the gate DECLINES: no leader, no probability, on the wire', async () => {
     // Same message, same graph, same fact — ONE member of the persisted
     // verdict differs. Both arms are driven here so the comparison is between
@@ -631,6 +685,18 @@ describe('G-CEE-1 — the DETERMINISTIC advice gate consumes the verdict (ROADMA
     // (rule 3: assert the bytes the consumer receives). The blocks and any
     // sidecar are covered by this, which the prose-only assertions are not.
     expect(withheld.body.assistant_text.length).toBeGreaterThan(0);
-    expect(JSON.stringify(withheld.body.blocks ?? [])).not.toContain(LEADER_LABEL);
+    // F7 (Fable review) — the previous assertion here was
+    // `JSON.stringify(withheld.body.blocks ?? []).not.toContain(LEADER_LABEL)`,
+    // and it was VACUOUS: `blocks` is `[]` on BOTH arms of this path, so it
+    // could never fail. Replaced with a scan of the WHOLE serialised envelope
+    // using the production alarm's own scanner — which carries its own positive
+    // control, because the permitted arm registers a hit and the withheld arm
+    // must register none. Measured: withheld 0, permitted 1 (`the_lead`).
+    expect(findLeaderClaims(withheld.body as never)).toHaveLength(0);
+    expect(
+      findLeaderClaims(permitted.body as never).length,
+      'positive control: the permitted arm must be VISIBLE to the same scanner, ' +
+        'or the absence assertion above is measuring nothing',
+    ).toBeGreaterThan(0);
   });
 });

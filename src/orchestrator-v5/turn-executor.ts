@@ -7677,15 +7677,22 @@ export async function runTurnExecutor(
       // exit never reaches this line and keeps the entry value — which is the
       // whole point of the hoist.
       //
-      // ⚠ UNCONDITIONAL ASSIGNMENT, deliberately changed. The previous shape
-      // was `if (selected !== null) { … }`, which on a null selection LEFT the
-      // prior value. Under the old `= true` default that was a no-op. Under the
-      // hoist it would be a REGRESSION IN THE OPPOSITE DIRECTION: a turn whose
-      // prior chain withheld, but whose unified array selects nothing, would
-      // keep `false` and over-suppress. `readMayNameLeadingOptionForFacts`
-      // answers the null case honestly (`true` — no analysis, nothing to leak),
-      // so the assignment is unconditional and the two callers share one
-      // meaning.
+      // UNCONDITIONAL ASSIGNMENT — a simplification, and deliberately NOT
+      // justified by a safety argument, because the obvious one does not hold.
+      //
+      // ⚠ CORRECTED AFTER REVIEW. An earlier version of this comment claimed the
+      // previous `if (selected !== null)` shape would, under the hoist, leave a
+      // withheld entry value stranded when the unified array selected nothing.
+      // That case is UNREACHABLE: the unified array is a SUPERSET of the entry
+      // array (`[...handlerFactsForCommit, ...context.prior_facts]`), so a null
+      // unified selection implies a null entry selection, which implies the
+      // entry value was already `true`. The two shapes are equivalent.
+      //
+      // The real reason to write it this way is that both read points then go
+      // through ONE function with ONE meaning, including the null case, which is
+      // what keeps them from drifting. Recorded rather than quietly fixed
+      // because a plausible-but-unreachable safety argument left in a comment is
+      // how the next reader inherits a false premise.
       mayNameLeadingOptionForRun = readMayNameLeadingOptionForFacts([
         ...handlerFactsForCommit,
         ...context.prior_facts,

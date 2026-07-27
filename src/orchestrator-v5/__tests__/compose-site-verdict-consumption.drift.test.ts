@@ -324,6 +324,58 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     }
   });
 
+  it('every STRUCTURAL-by-derivation site still IS structural in its own source', () => {
+    // F6 (Fable review of #716). Two sites were re-derived from `ungated` to
+    // `structural` in this train. They are correct TODAY, and nothing was
+    // stopping them drifting: if RECAP_TEXT grew an interpolation, or the
+    // state-query guard's `Pick` widened to the whole ContextPack, the register
+    // would keep asserting a safety property the code no longer had — the
+    // honest-label-overwritten-by-a-false-one failure (CLAUDE.md trap #14),
+    // which is exactly what these two entries were CORRECTING.
+    //
+    // Same shape as the gated-site evidence check: one required source fragment
+    // per claim, chosen so that removing the property makes THIS test red.
+    const STRUCTURAL_EVIDENCE: ReadonlyArray<readonly [string, string, string]> = [
+      [
+        'freshFollowupOutcome.assistant_text',
+        '../routing/fresh-analysis-followup-guard.ts',
+        // The matched branch returns the constant — no template literal, no
+        // interpolation. An interpolated variant would not contain this.
+        'assistant_text: RECAP_TEXT,',
+      ],
+      [
+        'stateQueryOutcome.assistant_text',
+        '../routing/state-query-guard.ts',
+        // The strongest form of the claim: the analysis is out of reach BY TYPE.
+        "readonly contextPack: Pick<ContextPack, 'recent_changes'>;",
+      ],
+    ];
+    for (const [site, rel, fragment] of STRUCTURAL_EVIDENCE) {
+      expect(COMPOSE_SITE_REGISTER[site]!.stance, `${site} must be registered structural`).toBe(
+        'structural',
+      );
+      const guardSource = readFileSync(resolve(HERE, rel), 'utf8');
+      expect(
+        guardSource,
+        `${site}: the register claims this site is structural, but the property ` +
+          'it rests on is no longer in the guard source',
+      ).toContain(fragment);
+    }
+  });
+
+  it('POSITIVE CONTROL: the structural evidence check can FAIL', () => {
+    // Rule 2 — prove the `toContain` above discriminates rather than passing on
+    // any file it is handed.
+    const guardSource = readFileSync(resolve(HERE, '../routing/fresh-analysis-followup-guard.ts'), 'utf8');
+    expect(guardSource).toContain('assistant_text: RECAP_TEXT,');
+    // The drift this pin exists to catch: RECAP_TEXT gaining an interpolation.
+    const drifted = guardSource.replace(
+      'assistant_text: RECAP_TEXT,',
+      'assistant_text: `${RECAP_TEXT} ${leadingLabel}`,',
+    );
+    expect(drifted).not.toContain('assistant_text: RECAP_TEXT,');
+  });
+
   it('every GATED_BY_INPUT site is backed by a real input gate at the assembly seam', () => {
     const byInput = Object.entries(COMPOSE_SITE_REGISTER)
       .filter(([, v]) => v.stance === 'gated_by_input')

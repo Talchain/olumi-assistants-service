@@ -48,6 +48,10 @@ import {
   type RunDelta,
 } from '../coaching/compare-runs.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
+// T1 claim safety (ROADMAP 1.233) — the ALARM's reader, for the module-load
+// probe on this file's withheld copy. Imported rather than re-implemented so the
+// probe and the alarm cannot drift (CLAUDE.md trap #12).
+import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
 
 export type RunComparisonFreshness = 'fresh' | 'stale' | 'unknown' | 'none';
 
@@ -170,10 +174,24 @@ const INCOMPARABLE_TEXT =
  * deliberately the same register, as
  * `compose/withheld-explanation-answer.ts`'s
  * WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL.
+ *
+ * ⚠ THE WORDING IS CONSTRAINED BY THE ALARM. The first version of this constant
+ * said "…which one is **out in front**…", and `out_in_front`
+ * (`/\bout\s+in\s+front\b/i`) is a live pattern in `LEADER_CLAIM_PATTERNS`. On a
+ * withheld comparison the guard is armed with `false` and scans `assistant_text`
+ * with the raw set, so that copy made EVERY withheld comparison turn emit an
+ * error-level `v5.invariant_violation` naming `out_in_front` — a standing red on
+ * the exact instrument this workstream exists to make trustworthy, and one that
+ * would have taught triage to dismiss `out_in_front` as "the gate's own copy"
+ * and so masked a genuine leak (CLAUDE.md trap #7).
+ *
+ * It is the SAME phrase the sibling input note's probe rejected during
+ * development. Two independent authors of withheld copy reached for it, which is
+ * why the guard below is now a module-load assertion rather than a review habit.
  */
-const WITHHELD_LEADER_COMPARISON_TEXT =
+export const WITHHELD_LEADER_COMPARISON_TEXT =
   'No single option can be put forward on this result yet, so I am not showing '
-  + 'which one is out in front or how that has moved.';
+  + 'the order of the options or how that has moved.';
 
 /**
  * Copy for a withheld comparison in which NOTHING leader-free survived — the
@@ -184,9 +202,61 @@ const WITHHELD_LEADER_COMPARISON_TEXT =
  * than a sentence that admits the comparison is empty for this turn. TESTING-
  * DISCIPLINE rule 6 — a stated limit beats a silent one.
  */
-const WITHHELD_NOTHING_ELSE_CHANGED_TEXT =
+export const WITHHELD_NOTHING_ELSE_CHANGED_TEXT =
   WITHHELD_LEADER_COMPARISON_TEXT
   + ' Nothing else about the two runs moved enough to report.';
+
+/**
+ * BUILD-TIME PROBE — withheld copy must not trip the alarm that measures the
+ * residue it exists to remove.
+ *
+ * ⚠ THIS IS A CLASS, NOT AN INSTANCE, AND IT WAS EARNED TWICE IN ONE CHANGE.
+ * The sibling input note (`context/withheld-leader-projection.ts`) had its first
+ * draft rejected by the same kind of probe for saying "out in front"; this file
+ * then shipped review-clean with the identical phrase, because nothing was
+ * checking it. Substituted copy is written in the register of the thing it is
+ * replacing, so the author is reaching for leader vocabulary by construction —
+ * a review habit is the wrong control for that, and a module-load assertion is
+ * the right one.
+ *
+ * ⚠ `textNamesLeadingOption`, NOT `textAssertsLeadingOption`. This is
+ * RESPONSE-side copy, so the reader that matters is the one the ALARM uses —
+ * the wide net with no enforcement carve-outs, which is exactly what
+ * `findLeaderClaims` runs over `assistant_text` at egress. Probing with the
+ * narrower enforcement reader would let copy through that the alarm then flags
+ * on every withheld turn: the failure this probe exists to prevent, dressed as
+ * a passing check.
+ *
+ * Runs at module load and throws on drift, so a violation fails the process at
+ * startup and every test importing this gate — loudly, which is the point
+ * (CLAUDE.md trap #12: a mirror must fail loud, never assume-good).
+ */
+function assertWithheldCopyIsLeaderFree(): void {
+  const probes: ReadonlyArray<readonly [string, string]> = [
+    ['WITHHELD_LEADER_COMPARISON_TEXT', WITHHELD_LEADER_COMPARISON_TEXT],
+    ['WITHHELD_NOTHING_ELSE_CHANGED_TEXT', WITHHELD_NOTHING_ELSE_CHANGED_TEXT],
+    // The leader-free branches too: they ship on withheld turns as well, so a
+    // copy edit to any of them carries the same hazard.
+    ['STALE_TEXT', STALE_TEXT],
+    ['UNCONFIRMED_TEXT', UNCONFIRMED_TEXT],
+    ['INSUFFICIENT_RUNS_TEXT', INSUFFICIENT_RUNS_TEXT],
+    ['INCOMPARABLE_TEXT', INCOMPARABLE_TEXT],
+  ];
+  for (const [name, copy] of probes) {
+    if (textNamesLeadingOption(copy)) {
+      throw new Error(
+        `run-comparison-gate: ${name} trips the shared leader vocabulary ` +
+          '(compose/leading-option-egress-guard.ts LEADER_CLAIM_PATTERNS). On a ' +
+          'withheld comparison the egress alarm is armed with `false`, so this ' +
+          'copy would raise an error-level v5.invariant_violation on EVERY such ' +
+          'turn — a standing red that trains triage to ignore the one instrument ' +
+          'that can see a real leak. Reword the copy — do not narrow the pattern ' +
+          'set, which is shared with the alarm.',
+      );
+    }
+  }
+}
+assertWithheldCopyIsLeaderFree();
 
 /**
  * Plain-language robustness band phrasing. Re-derived locally rather than

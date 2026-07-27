@@ -113,7 +113,7 @@
 
 import type { ContextPackAnalysis } from './context-pack-assembler.js';
 import type { DisplaySafeAnalysis } from '../format/format-analysis-for-context.js';
-import { textAssertsLeadingOption } from '../compose/leading-option-egress-guard.js';
+import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
 
 /**
  * The note stamped onto a withheld MODEL-facing projection in place of the
@@ -248,7 +248,15 @@ export function projectContextPackAnalysisForWithheldClaim(
  * (CLAUDE.md trap #12: a mirror must fail loud, never assume-good).
  */
 function assertInjectedNoteIsLeaderFree(): void {
-  if (textAssertsLeadingOption(WITHHELD_LEADER_INPUT_NOTE)) {
+  // `textNamesLeadingOption` (the ALARM's wide reader), not
+  // `textAssertsLeadingOption` (the ENFORCER's, which blanks documented
+  // false-positive spans first). ONE doctrine for all copy this lane authors:
+  // the narrower reader would pass copy the alarm still flags, and there is no
+  // reason to hold our own substituted copy to a laxer bar than the instrument
+  // that measures it. Raised from the enforcement reader after the sibling
+  // run-comparison gate shipped review-clean with `out in front` — a phrase
+  // BOTH readers catch, but the near-miss is the point.
+  if (textNamesLeadingOption(WITHHELD_LEADER_INPUT_NOTE)) {
     throw new Error(
       'withheld-leader-projection: WITHHELD_LEADER_INPUT_NOTE trips the shared ' +
         'leader vocabulary (compose/leading-option-egress-guard.ts ' +
