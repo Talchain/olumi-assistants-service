@@ -235,8 +235,29 @@ export type DispatchChipClickRunAnalysisResult =
        * layer-3 egress guard is armed on this path too — the coaching slot
        * defect (#709) reached the wire through a dispatch path that had been
        * overlooked, and the two paths must not drift again.
+       *
+       * ⚠ REQUIRED, NOT OPTIONAL — changed 2026-07-27 (WALK-2026-07-27-FINAL.md
+       * §11.6). While this was optional, route-v2's `ok` exit read
+       * `cc.mayNameLeadingOption ?? true` — the same `?? true` default the
+       * ROADMAP 1.233 hoist removed everywhere else, and the shape that made the
+       * Layer-3 alarm a licensed no-op on every exit that took it. Required is
+       * the same doctrine `tryRunComparisonGate` already applies: a new `ok`
+       * producer cannot re-open the leak by OMISSION, because omission no longer
+       * compiles.
+       *
+       * ⚠ AND THE WALK'S ACCOMPANYING CLAIM IS REFUTED, in the safe direction:
+       * that default was NOT "live-reachable for every non-`run_analysis` chip
+       * outcome". There are no non-`run_analysis` chip outcomes.
+       * `DETERMINISTIC_CHIP_ACTION_TYPES` has exactly one member (:160-162),
+       * `dispatchDeterministicChipClick` THROWS on anything else (:399-404), and
+       * route-v2 only calls it behind `isDeterministicChipClickActionType`. This
+       * union has ONE `outcome: 'ok'` producer and it always populated the
+       * field. The default was a LATENT re-arming point, like the sibling at
+       * route-v2.ts:4339 — not a live leak. Recorded because "live-reachable"
+       * and "reachable the day the whitelist grows" are different claims and
+       * only the second one was true.
        */
-      readonly mayNameLeadingOption?: boolean;
+      readonly mayNameLeadingOption: boolean;
     }
   | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined; readonly graph: GraphV3T | null }
   | {

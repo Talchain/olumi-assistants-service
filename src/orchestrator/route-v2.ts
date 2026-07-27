@@ -2123,9 +2123,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           analysisReady: cc.analysisReady,
           graph: cc.graph,
           // T1 claim safety — READ off the chip dispatch's own run_analysis fact
-          // stamp (see DispatchChipClickRunAnalysisResult). Defaults `true` for
-          // the non-run_analysis chip outcomes, which derive no verdict.
-          mayNameLeadingOption: cc.mayNameLeadingOption ?? true,
+          // stamp (see DispatchChipClickRunAnalysisResult).
+          //
+          // ⚠ THE `?? true` THAT USED TO BE HERE IS GONE (WALK-2026-07-27-FINAL
+          // §11.6). It was the last surviving instance of the default the
+          // ROADMAP 1.233 hoist removed everywhere else: an exit that could not
+          // read a verdict shipped `true` to the Layer-3 guard, which then had
+          // an explicit permission to ignore whatever the response said. The
+          // field is now REQUIRED on the `ok` outcome, so this exit carries the
+          // producer's real answer and a future `ok` producer that forgets to
+          // derive one fails to compile instead of failing open.
+          mayNameLeadingOption: cc.mayNameLeadingOption,
           ...(cc.freshness ? { freshness: cc.freshness } : {}),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: thread the chip
           // answer's declared kind, DEFAULTING to 'functional' when the dispatch

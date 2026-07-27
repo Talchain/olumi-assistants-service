@@ -250,6 +250,79 @@ export function textAssertsLeadingOption(value: string): boolean {
   return textNamesLeadingOption(neutralised);
 }
 
+/**
+ * KEY NAMES that designate a leading option — the STRUCTURED half of this
+ * vocabulary, and the half whose absence let a leak run for three walks.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY A SECOND READER AT ALL. Every reader above scans string VALUES for
+ * comparative English. That is the right instrument for prose and it is
+ * structurally blind to this:
+ *
+ *   `enrichment.robustness.recommended_option_label`
+ *       = "Defer and Keep Current Machines (Status Quo)"
+ *   `enrichment.decision_brief.analysis_summary.leading_option`
+ *       = "Standardise on Dell XPS"
+ *
+ * The value is a bare option label. It contains no superiority vocabulary, so
+ * `textNamesLeadingOption` correctly returns false on it. THE CLAIM IS CARRIED
+ * BY THE KEY, and no text matcher reads keys.
+ *
+ * Measured, not supposed: `WALK-2026-07-27-FINAL.md` §8 found these four paths
+ * on **10 of 10** withheld bodies that carried an analysis block, and present in
+ * BOTH prior archives — pre-existing, missed by every prior walk because the
+ * structured assertion set S1–S6 is a hand-kept list of five paths with no entry
+ * for `analysis_summary` or for `enrichment.robustness`, and because this guard
+ * did not scan `enrichment.robustness` at all.
+ *
+ * ⚠ PATTERNS, NOT A KEY LIST, AND THAT IS THE WHOLE POINT. A list of the four
+ * observed key names would be the same hand-maintained mirror that produced the
+ * miss (CLAUDE.md trap #12): the fifth key name — `preferred_option_label`, say,
+ * or a rename to `leader_label` — would read as green on the day it shipped.
+ * A key-name FAMILY covers designations that do not exist yet.
+ *
+ * ⚠ ANCHORED AT `^`, AND THAT IS LOAD-BEARING TOO. `fragile_edges[].
+ * alternative_winner_id` / `alternative_winner_label` are live on every body and
+ * are NOT leader designations — they name the COUNTERFACTUAL winner if that edge
+ * flips, which is the science content the withheld disclosure explicitly invites
+ * the user to act on, and which PR #717 landed a fix to carry through. An
+ * unanchored `/winner/` would suppress them. The anchor is what keeps this a
+ * leader detector rather than an option-label detector.
+ *
+ * Shared with the PRODUCER gate (`compose/withheld-claim-projection.ts`) for the
+ * same reason {@link textNamesLeadingOption} is: a producer gate with its own
+ * private copy drifts from the alarm, and the first symptom is a leak this
+ * module reports and the gate silently permits.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+const LEADER_DESIGNATING_KEY_PATTERNS: ReadonlyArray<{
+  readonly code: string;
+  readonly re: RegExp;
+}> = [
+  { code: 'key_leading_option', re: /^leading_option(?:_(?:id|label|name))?$/i },
+  { code: 'key_leader', re: /^leader_(?:option(?:_(?:id|label|name))?|id|label)$/i },
+  { code: 'key_recommended_option', re: /^recommend(?:ed|ation)_option(?:_(?:id|label|name))?$/i },
+  { code: 'key_top_option', re: /^top_option(?:_(?:id|label|name))?$/i },
+  {
+    code: 'key_winning_option',
+    re: /^(?:winning|winner|best|preferred|chosen)_option(?:_(?:id|label|name))?$/i,
+  },
+];
+
+/**
+ * Does this OBJECT KEY designate a leading option, on its own, regardless of
+ * what its value says?
+ *
+ * Exported so the withheld-turn producer projection drops exactly the keys this
+ * alarm reports — one vocabulary, two consumers, no mirror between them.
+ *
+ * Every pattern is non-global and anchored, so this is safe to call repeatedly.
+ */
+export function keyDesignatesLeadingOption(key: string): boolean {
+  if (typeof key !== 'string' || key.length === 0) return false;
+  return LEADER_DESIGNATING_KEY_PATTERNS.some(({ re }) => re.test(key));
+}
+
 /** One detected claim. `sample` is NEVER logged or emitted — triage only. */
 export interface LeaderClaimHit {
   /** Dotted path into the serialized envelope, e.g. `blocks[13].body`. */
@@ -280,6 +353,29 @@ function scanString(path: string, value: unknown, out: LeaderClaimHit[]): void {
     if (re.test(value)) {
       out.push({ path, code });
       return; // first match per string — the string is already condemned
+    }
+  }
+}
+
+/**
+ * Report one KEY whose NAME designates a leading option, when it actually
+ * carries an identity.
+ *
+ * POPULATION IS REQUIRED, and the reason is the whole point of the field it was
+ * written for: `blocks[i].leading_option_id` is a REQUIRED wire key that the
+ * withheld projection sets to `null` (compose.ts — `null` is the schema's own
+ * honest "no leader is being put forward"). A key-name reader that fired on the
+ * key's PRESENCE would report the correct, gated shape as a violation on every
+ * withheld turn, and an alarm that is loud when nothing is wrong is an alarm
+ * that gets muted. So: a non-empty string identity fires; `null`, `undefined`
+ * and `''` do not.
+ */
+function scanKey(path: string, key: string, value: unknown, out: LeaderClaimHit[]): void {
+  if (typeof value !== 'string' || value.length === 0) return;
+  for (const { code, re } of LEADER_DESIGNATING_KEY_PATTERNS) {
+    if (re.test(key)) {
+      out.push({ path, code });
+      return; // first match per key — the key is already condemned
     }
   }
 }
@@ -333,8 +429,27 @@ function asRecord(value: unknown): Record<string, unknown> | null {
  * DYNAMIC keys here (option ids, factor ids, edge ids), so no static list can
  * stay complete. This layer drops nothing (observe-only), so a broad scan costs
  * a false alarm at worst and cannot over-suppress.
+ *
+ * ⚠ `robustness` ADDED 2026-07-27, AND IT IS THE THIRD INSTANCE OF THE SAME
+ * DEFECT. `WALK-2026-07-27-FINAL.md` §8: `enrichment.robustness` was outside
+ * this scan surface ENTIRELY, and it ships `recommended_option_id`,
+ * `recommended_option_label` and `near_tie.top_option_id` — the leading option,
+ * by id and by label — on every withheld body carrying an analysis block. The
+ * blob is present on **65 of 65** enriched blocks across all five archived
+ * corpora, so this was never a rare shape; it was simply never looked at.
+ *
+ * Note WHY adding it to this list alone would NOT have been enough, and why
+ * {@link scanKey} exists: the values under `robustness` are bare labels and ids
+ * with no comparative vocabulary in them. The deep STRING walk added here finds
+ * nothing on today's shapes. It is the KEY reader that sees this leak, and it is
+ * wired into the same walk so a future prose member of `robustness` is covered
+ * by both.
  */
-const ENRICHMENT_CLAIM_BLOBS: readonly string[] = ['decision_review', 'decision_brief'];
+const ENRICHMENT_CLAIM_BLOBS: readonly string[] = [
+  'decision_review',
+  'decision_brief',
+  'robustness',
+];
 
 /**
  * Node budget for the deep walk, shared across the WHOLE response so total work
@@ -366,7 +481,14 @@ function scanDeep(
   }
   const record = asRecord(value);
   if (record === null) return;
-  for (const key of Object.keys(record)) scanDeep(`${path}.${key}`, record[key], out, budget);
+  for (const key of Object.keys(record)) {
+    // The KEY reader runs alongside the string walk, not instead of it: a member
+    // can leak through its name (`recommended_option_label`), through its prose
+    // (`headline`), or through both. Reported as separate hits with separate
+    // codes so the log line names which channel fired.
+    scanKey(`${path}.${key}`, key, record[key], out);
+    scanDeep(`${path}.${key}`, record[key], out, budget);
+  }
 }
 
 /**
@@ -405,7 +527,17 @@ export function findLeaderClaims(response: OlumiResponse): LeaderClaimHit[] {
       scanString(`blocks[${i}].${field}`, block[field], hits);
     }
 
-    // `blocks[i].enrichment.{decision_review,decision_brief}` — the
+    // The block's OWN keys, by name. `blocks[i].leading_option_id` is the field
+    // the whole gate turns on, and until now it sat outside every scan surface
+    // in this module — the key reader would have been scoped to enrichment
+    // blobs while the sharpest structured designation on the envelope was not
+    // covered by it. It is `null` on a correctly-gated withheld turn and so
+    // fires nothing; a regression that restores the id fires here.
+    for (const key of Object.keys(block)) {
+      scanKey(`blocks[${i}].${key}`, key, block[key], hits);
+    }
+
+    // `blocks[i].enrichment.{decision_review,decision_brief,robustness}` — the
     // analysis_result block's enrichment blobs. NOT wire-data-only:
     // `DecisionGuideAI/src/v5/applyV5State.ts` maps `decision_review` onto
     // `runMeta.ceeReviewV1`, and `decision_brief.headline_banded` has an
