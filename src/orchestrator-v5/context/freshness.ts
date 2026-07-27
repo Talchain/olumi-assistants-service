@@ -246,45 +246,39 @@ export function isSuccessfulRunAnalysisFact(fact: HandlerFact): boolean {
  * "degraded analysis" case (analysis ran but partial / blocked / failed)
  * so the explanation handlers can offer the right recovery copy.
  *
- * Sorted by computed_at desc, same convention as `selectRunAnalysisFact`.
+ * Sorted by computed_at desc, same convention as `selectRunAnalysisFact` —
+ * and now BY that convention rather than alongside it.
+ *
+ * ⚠ THIS FUNCTION USED TO CARRY A BYTE-IDENTICAL PRIVATE COPY of the
+ * computed_at-desc / nulls-last comparator, kept in step with the canonical one
+ * by nothing but the sentence above. That is the fourth copy of one ordering
+ * rule in this estate, in the same file as the docstring claiming there was
+ * one — the "two agreeing copies plus a comment asserting they agree" pattern
+ * that CLAUDE.md trap #12 is about, and it made the completeness claim on
+ * {@link selectClaimBearingRunAnalysisFact} false.
+ *
+ * It now takes the ENTITLEMENT ordering (`requireSuccessfulStatus: false` — the
+ * candidate set of all non-noop `run_analysis` facts, which is a superset of
+ * the degraded ones) and filters to the degraded subset AFTER the shared sort.
+ * Filtering a stably-sorted list preserves the relative order of what survives,
+ * so this is order-identical to collect-then-sort — the equivalence is a
+ * property of stable sort, not a coincidence to re-verify.
+ *
  * Returns null when no degraded fact exists.
  */
 export function selectDegradedRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
 ): { readonly fact: HandlerFact; readonly status: string } | null {
-  const candidates: Array<{
-    readonly fact: HandlerFact;
-    readonly status: string;
-    readonly computed_at: string | null;
-  }> = [];
-  for (const fact of priorFacts) {
-    if (!isRunAnalysisFact(fact)) continue;
-    if (fact.noop !== false) continue;
-    const status = readAnalysisStatus(fact.result.enrichment);
-    if (status === null) continue;
-    if (normaliseAnalysisStatus(status) !== null) continue;
-    candidates.push({
-      fact,
-      status,
-      computed_at:
-        typeof fact.result.computed_at === 'string'
-          ? fact.result.computed_at
-          : null,
-    });
+  for (const view of orderRunAnalysisFacts(priorFacts, {
+    requireSuccessfulStatus: false,
+  })) {
+    // "Degraded" = status PRESENT and not normalising to a canonical success.
+    // A missing status is the legacy-success case, not a degradation.
+    if (view.status === null) continue;
+    if (normaliseAnalysisStatus(view.status) !== null) continue;
+    return { fact: view.fact, status: view.status };
   }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => {
-    if (a.computed_at !== null && b.computed_at !== null) {
-      if (a.computed_at < b.computed_at) return 1;
-      if (a.computed_at > b.computed_at) return -1;
-      return 0;
-    }
-    if (a.computed_at !== null) return -1;
-    if (b.computed_at !== null) return 1;
-    return 0;
-  });
-  const top = candidates[0]!;
-  return { fact: top.fact, status: top.status };
+  return null;
 }
 
 /**
@@ -343,12 +337,37 @@ export function selectRunAnalysisFact(
  * name a leader, with no CEE deploy and no alarm. A conservative rule in one
  * question is a fail-open in the other.
  *
- * ONE ORDERING, TWO FILTERS. Both selectors share
- * {@link selectNewestRunAnalysisFact} rather than each carrying a copy of the
- * newest-first rule, so "the entitlement fact and the freshness fact are
- * ordered the same way" is true by construction. That is the distinction worth
- * holding onto: two selectors answering two questions is DESIGN; two copies of
- * one ordering rule is the mirror defect (CLAUDE.md trap #12).
+ * ONE ORDERING, TWO FILTERS — and it now covers the COMPARISON PAIR too.
+ * Every consumer that asks "which run_analysis fact is newest?" reaches the
+ * single {@link orderRunAnalysisFacts} core:
+ *
+ *   - {@link selectRunAnalysisFact}            (freshness: newest SUCCESSFUL)
+ *   - {@link selectClaimBearingRunAnalysisFact}(entitlement: newest CLAIM-BEARING)
+ *   - {@link orderSuccessfulRunAnalysisFactsNewestFirst}
+ *       → `coaching/compare-runs.ts:selectTwoNewestRunAnalysisFacts` (the
+ *         prior/current PAIR) and `deriveRerunReadiness`'s count;
+ *       → `signals/coaching-signals.ts:buildRerunDelta`, via
+ *         {@link selectRunAnalysisFact}.
+ *   - {@link selectDegradedRunAnalysisFact}   (the newest DEGRADED fact)
+ *
+ * The list is exhaustive as written: no other function in this estate orders
+ * `run_analysis` facts. It was not exhaustive when first written — see the
+ * warning below, and the one on `selectDegradedRunAnalysisFact`, which held a
+ * fourth copy of the comparator in THIS FILE while this paragraph claimed
+ * there was one.
+ *
+ * ⚠ THAT LAST ONE IS A CORRECTION, NOT A RESTATEMENT. Until #738 the pair
+ * selector took `filter(isSuccessfulRunAnalysisFact)[0]` and `[1]` — by ARRAY
+ * POSITION — so this paragraph's "true by construction" was FALSE of it: a
+ * legacy fact carrying no `computed_at` (still "successful") sitting at window
+ * position 0, or any `computed_at` skew, made the comparison's `current` a
+ * DIFFERENT fact from the one whose hash grounded `freshness === 'fresh'`, and
+ * with two skewed timestamps the prior/current roles — and every margin
+ * direction derived from them — inverted. The claim is true now because the
+ * pair IS this function, not because two copies were checked against each
+ * other: two selectors answering two questions is DESIGN; two copies of one
+ * ordering rule is the mirror defect (CLAUDE.md trap #12), and a docstring
+ * asserting they agree is the mirror's alibi.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 export function selectClaimBearingRunAnalysisFact(
@@ -358,34 +377,42 @@ export function selectClaimBearingRunAnalysisFact(
 }
 
 /**
- * The shared newest-first pick. `requireSuccessfulStatus` is the ONLY
- * difference between the freshness and entitlement selectors.
+ * ⭐ THE ONE ORDERING CORE. Every eligible `run_analysis` fact, newest-first.
+ * `requireSuccessfulStatus` is the ONLY difference between the freshness and
+ * entitlement selectors — the sort is shared, never copied.
+ *
+ * Exposed to consumers that need MORE than the head of the list (the
+ * prior/current comparison pair) through
+ * {@link orderSuccessfulRunAnalysisFactsNewestFirst}, so "the pair is ordered
+ * the same way as the freshness fact" is a property of one function rather
+ * than an agreement between two.
  */
-function selectNewestRunAnalysisFact(
+function orderRunAnalysisFacts(
   priorFacts: readonly HandlerFact[],
   opts: { readonly requireSuccessfulStatus: boolean },
-): SelectedRunAnalysisFact | null {
+): RunAnalysisFactView[] {
   const candidates: RunAnalysisFactView[] = [];
   for (let i = 0; i < priorFacts.length; i += 1) {
-    const view = viewRunAnalysisFact(priorFacts[i]!, i);
+    const fact = priorFacts[i]!;
+    const view = viewRunAnalysisFact(fact, i);
     if (!view) continue;
     // Eligibility filter (FRESHNESS ONLY): status missing entirely (legacy
     // fact) is accepted; otherwise the value must normalise to a canonical
     // success. Everything else (partial / blocked / failed / degraded /
     // future PLoT statuses) is excluded.
     //
+    // CALLS the exported predicate rather than re-testing the status inline:
+    // `isSuccessfulRunAnalysisFact` is the same rule the compose layer and the
+    // comparison-pair count use, and an inline copy here is exactly the mirror
+    // that let the pair selector drift (CLAUDE.md trap #12).
+    //
     // Deliberately NOT applied to the entitlement question — see
     // `selectClaimBearingRunAnalysisFact` for the P0 that earned this branch.
-    if (
-      opts.requireSuccessfulStatus &&
-      view.status !== null &&
-      normaliseAnalysisStatus(view.status) === null
-    ) {
+    if (opts.requireSuccessfulStatus && !isSuccessfulRunAnalysisFact(fact)) {
       continue;
     }
     candidates.push(view);
   }
-  if (candidates.length === 0) return null;
 
   // Stable sort by computed_at desc, putting facts without computed_at
   // last. JavaScript Array.sort is stable in V8, so insertion order is
@@ -403,7 +430,31 @@ function selectNewestRunAnalysisFact(
     if (b.computed_at !== null) return 1;
     return 0;
   });
-  return candidates[0]!;
+  return candidates;
+}
+
+/**
+ * The SUCCESSFUL run_analysis facts of this window, newest-first, under the
+ * SAME ordering {@link selectRunAnalysisFact} uses — of which it is the head.
+ *
+ * Exists for `coaching/compare-runs.ts`, which needs the two newest rather
+ * than the newest. Returning the ordered list (instead of exporting the
+ * comparator, or a "second-newest" selector) is what makes
+ * `pair.current === selectRunAnalysisFact(window)!.fact` hold by construction
+ * for any window: same filter, same sort, same array.
+ */
+export function orderSuccessfulRunAnalysisFactsNewestFirst(
+  priorFacts: readonly HandlerFact[],
+): readonly SelectedRunAnalysisFact[] {
+  return orderRunAnalysisFacts(priorFacts, { requireSuccessfulStatus: true });
+}
+
+/** The shared newest-first pick: the head of {@link orderRunAnalysisFacts}. */
+function selectNewestRunAnalysisFact(
+  priorFacts: readonly HandlerFact[],
+  opts: { readonly requireSuccessfulStatus: boolean },
+): SelectedRunAnalysisFact | null {
+  return orderRunAnalysisFacts(priorFacts, opts)[0] ?? null;
 }
 
 function assertExhaustive(value: never): never {

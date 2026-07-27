@@ -559,6 +559,72 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
 // ships via `decision_review`).
 
 /**
+ * VERDICT-CLASS TRANSPORT DEBT — THE REGISTERED REASONS TABLE.
+ *
+ * ⚠ THE DEFECT THIS EXISTS FOR. The keep-list above, and the fixed field set
+ * `buildAnalysisResultBlock` destructures out of `fact.result`, have NO notion
+ * of a verdict CLASS. A `*_verdict` field can be persisted server-side and
+ * silently never reach the wire — and has been, twice, in two independent
+ * families: `constraint_verdict` (persisted on `RunAnalysisResultSchema` since
+ * @talchain/schemas 0.25.0; the adoption manifest states it "never reaches the
+ * wire either way") and `goal_verdict` (ROADMAP 1.298 P0-1 — "the persisted
+ * `goal_verdict` NEVER REACHES THE UI"). Neither family had to remember the
+ * other; each independently forgot. That is CLAUDE.md trap 12 at the service
+ * boundary: a hand-listed allowlist a human must remember to extend, whose
+ * drift always reads as green.
+ *
+ * The UI consequence is not "a missing field": with no verdict on the wire the
+ * UI re-derives from a null sentinel and cannot distinguish WITHHELD from
+ * NO-ANALYSIS-EXISTS from DROPPED-BY-PIN-SKEW.
+ *
+ * WHAT THIS TABLE IS. Not a mirror of the verdict fields — the gate DERIVES
+ * those from the persisted fact schemas at runtime
+ * (`__tests__/verdict-class-transport-gate.test.ts`). This is the exemption
+ * register: a derived verdict-class field must be either TRANSPORTED or carry
+ * an entry HERE naming the rowed work that closes it. A third verdict family
+ * added with neither REDs that gate with a paste-ready message.
+ *
+ * RULES THE GATE ENFORCES (so this list cannot rot the way the keep-list did):
+ *   - SHRINK-ONLY in effect: an entry whose field IS transported REDs — when
+ *     the wire work lands, the entry must be DELETED, not left behind.
+ *   - Every entry carries a `rowed` reference (`ROADMAP <major>.<minor>`); an
+ *     entry cannot be added as a bare "known issue".
+ *   - Fields, unique and alphabetically sorted, for reviewable diffs.
+ *
+ * DO NOT use this table to make a new omission cheap. The correct close for
+ * both entries below is the 0.28 contract train (ROADMAP 1.306), which carries
+ * the UI-first ordering the wire change requires: the strict
+ * `AnalysisResultBlockSchema` hard-fails on an unknown nested field, so
+ * emitting before the UI re-vendors is an OUTAGE, not a no-op.
+ */
+export const UNTRANSPORTED_VERDICT_CLASS_REGISTERED_REASONS = [
+  {
+    field: 'constraint_verdict',
+    rowed: 'ROADMAP 1.306',
+    reason:
+      'Persisted on RunAnalysisResultSchema (@talchain/schemas 0.25.0) and read ' +
+      'server-side by the claim-safety derivation, but buildAnalysisResultBlock ' +
+      'destructures a fixed field set that omits it, so the UI re-derives the ' +
+      'withheld state from a null leading_option_id. Covers its LEGACY CARRIER ' +
+      'too — the interim `enrichment.__cee_claim_safety` stamp holds the same ' +
+      'two members and is likewise absent from the keep-list; exactly one of the ' +
+      'two is ever present on a fact, so they are one debt, not two. Closes on ' +
+      'the 0.28 train: declare it on the strict analysis_result block, re-vendor ' +
+      'the UI FIRST, then project it here.',
+  },
+  {
+    field: 'goal_verdict',
+    rowed: 'ROADMAP 1.306',
+    reason:
+      'Family-2 goal attainment. Designed to be persisted, never projected ' +
+      '(ROADMAP 1.298 P0-1). Not yet declared at this schemas pin, so the gate ' +
+      'reports it PENDING rather than active — the entry is forward-declared so ' +
+      'the field cannot land dark. Closes on the same 0.28 train, on the amended ' +
+      'discriminated shape (measure_scope x constraint_origin x sampling_basis).',
+  },
+] as const;
+
+/**
  * Internal/debug carrier KEYS that must never ship inside a kept field, at any
  * depth (Codex review — the keep-list was a shallow top-level pick, so a leak
  * carrier nested inside a kept field would survive the copy). These are

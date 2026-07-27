@@ -45,6 +45,7 @@ import {
   compareRuns,
   projectRunFact,
   selectTwoNewestRunAnalysisFacts,
+  type LeaderIdentityBasis,
   type RunDelta,
 } from '../coaching/compare-runs.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
@@ -89,6 +90,14 @@ export type RunComparisonGuardResult =
       readonly suggested_actions: readonly RunComparisonSuggestedAction[];
       /** Null unless a comparison was actually produced. */
       readonly leading_option_changed: boolean | null;
+      /**
+       * The EVIDENCE behind `leading_option_changed`, forwarded so the
+       * `v5.run_comparison_gate` drift ledger can tell an indeterminate-false
+       * from a verified-same-leader-false. Without it the two are one byte in
+       * telemetry — on exactly the legacy-window turns where the forced-false
+       * most needs observing. Null unless a comparison was produced.
+       */
+      readonly leader_identity_basis: LeaderIdentityBasis | null;
     }
   | {
       readonly matched: false;
@@ -253,6 +262,37 @@ export const WITHHELD_CURRENT_LEADER_COMPARISON_TEXT =
   + 'showing how the order of the options has moved.';
 
 /**
+ * ⭐ NOT A WITHHOLD — an UNMATCHED IDENTITY. Both runs' verdicts permit; we
+ * simply cannot prove the two runs' leading options are the same option.
+ *
+ * WHY THIS IS A SEPARATE CONSTANT rather than a reuse of
+ * {@link WITHHELD_PRIOR_LEADER_COMPARISON_TEXT}. That sentence states a REASON
+ * — "no single option could be put forward on the earlier result" — which is a
+ * claim about a constraint verdict. Here the earlier verdict said no such
+ * thing; the earlier run simply carried no option ids. Reusing it would ship a
+ * true-sounding sentence with a false cause, which is CLAUDE.md trap #14 in the
+ * user-facing register: the label that gets remembered is the one that was
+ * wrong.
+ *
+ * ⚠ WHY IT IS NEEDED AT ALL — the amendment this constant exists for.
+ * `compareRuns` correctly refuses to assert a leader change when identity is
+ * indeterminate, but a bare `leading_option_changed === false` reaching this
+ * composer rendered "X still leads." — an AFFIRMATIVE continuity claim. On a
+ * legacy id-less run whose leader GENUINELY changed, the mechanism therefore
+ * replaced a correct "the leader changed" with a confident, false "nothing
+ * changed": the fix landing one hop short of the user, and a worse artefact
+ * than the defect it was fixing, because "still leads" is the shape a user
+ * stops reading at.
+ *
+ * Composed from the sanctioned leader-free phrase ("the order of the options")
+ * per this file's standing rule, and probed at module load like every other
+ * substituted constant here.
+ */
+export const UNMATCHED_LEADER_IDENTITY_TEXT =
+  'I cannot line up the earlier result with this one closely enough to say '
+  + 'whether the order of the options has moved.';
+
+/**
  * ⭐ MAY THIS TURN NAME **THIS** RUN'S LEADING OPTION? One answer per compared
  * run, because a comparison makes one claim per run.
  *
@@ -353,6 +393,7 @@ function assertWithheldCopyIsLeaderFree(): void {
     // The leader-free branches too: they ship on withheld turns as well, so a
     // copy edit to any of them carries the same hazard.
     ['STALE_TEXT', STALE_TEXT],
+    ['UNMATCHED_LEADER_IDENTITY_TEXT', UNMATCHED_LEADER_IDENTITY_TEXT],
     ['UNCONFIRMED_TEXT', UNCONFIRMED_TEXT],
     ['INSUFFICIENT_RUNS_TEXT', INSUFFICIENT_RUNS_TEXT],
     ['INCOMPARABLE_TEXT', INCOMPARABLE_TEXT],
@@ -436,7 +477,20 @@ function composeComparison(
   // (whether the leader changed, and by how much the lead moved) is grounded.
   const mayCompareLeaders = mayNamePrior && mayNameCurrent;
 
-  if (mayCompareLeaders) {
+  // ⭐ PERMISSION IS NOT THE ONLY PRECONDITION FOR A CROSS-RUN CLAIM — the two
+  // runs' leaders must also be KNOWN TO BE THE SAME OPTION OR NOT.
+  //
+  // `leading_option_changed` is a single boolean over a THREE-valued question:
+  // changed / unchanged / cannot tell. `compareRuns` collapses the third case
+  // to `false` (the safe direction there), and a composer that branches only
+  // on the boolean silently promotes "cannot tell" to "unchanged" — then says
+  // so out loud. On a legacy id-less run whose leader really did change, that
+  // is a confident false negative in the one sentence the user reads. The
+  // basis is therefore consulted HERE, next to the words.
+  const leaderIdentityKnown = delta.leader_identity_basis === 'option_id';
+  const mayCompareLeaderIdentity = mayCompareLeaders && leaderIdentityKnown;
+
+  if (mayCompareLeaderIdentity) {
     // Byte-identical to the pre-fix permitted arm.
     if (delta.leading_option_changed) {
       parts.push(
@@ -445,6 +499,14 @@ function composeComparison(
     } else {
       parts.push(`${delta.current_leading_label} still leads.`);
     }
+  } else if (mayCompareLeaders) {
+    // PERMITTED BUT UNMATCHABLE. Both verdicts allow naming, so this run's
+    // leader is said plainly — the same first sentence as the mixed branch
+    // below, because the user-visible situation is the same: one run's leader
+    // is nameable and no relation between the runs is. What differs is the
+    // REASON, which is why the second sentence is its own constant.
+    parts.push(`${delta.current_leading_label} leads on the latest result.`);
+    parts.push(UNMATCHED_LEADER_IDENTITY_TEXT);
   } else if (mayNameCurrent) {
     // MIXED — the prior run withheld. Name what this run's own verdict
     // licenses, say plainly that the other half is unavailable, and make no
@@ -465,7 +527,15 @@ function composeComparison(
   // presupposes a lead, the pronoun makes it a claim ABOUT the option we just
   // declined to name, and the SHIFT is a claim about both runs at once — so a
   // single withheld side is enough to suppress it.
-  if (!mayCompareLeaders) {
+  //
+  // ⚠ AND AN UNMATCHED IDENTITY SUPPRESSES THEM TOO, for a different reason
+  // that lands in the same place. `margin_pp` is the winner's lead over the
+  // runner-up WITHIN each run; the SHIFT between them is only a statement
+  // about "its lead" if the two runs' winners are the same option. When we
+  // cannot show that, "its lead has widened by about 20 percentage points"
+  // silently attributes one option's lead to another — and the pronoun makes
+  // it a continuity claim in the very branch that just declined to make one.
+  if (!mayCompareLeaderIdentity) {
     // no margin sentence
   } else if (delta.margin_direction === 'widened') {
     parts.push(
@@ -556,6 +626,7 @@ export function tryRunComparisonGate(
         assistant_text: STALE_TEXT,
         suggested_actions: [RERUN_ACTION],
         leading_option_changed: null,
+        leader_identity_basis: null,
       };
     case 'unknown':
       // Currency cannot be confirmed (legacy fact missing its run-time hash, an
@@ -568,6 +639,7 @@ export function tryRunComparisonGate(
         assistant_text: UNCONFIRMED_TEXT,
         suggested_actions: [RERUN_ACTION],
         leading_option_changed: null,
+        leader_identity_basis: null,
       };
     case 'fresh':
       break; // confirmed current → the only verdict that may ground a comparison
@@ -583,6 +655,7 @@ export function tryRunComparisonGate(
         assistant_text: UNCONFIRMED_TEXT,
         suggested_actions: [RERUN_ACTION],
         leading_option_changed: null,
+        leader_identity_basis: null,
       };
     }
   }
@@ -597,6 +670,7 @@ export function tryRunComparisonGate(
       assistant_text: INSUFFICIENT_RUNS_TEXT,
       suggested_actions: [],
       leading_option_changed: null,
+      leader_identity_basis: null,
     };
   }
 
@@ -609,6 +683,7 @@ export function tryRunComparisonGate(
       assistant_text: INCOMPARABLE_TEXT,
       suggested_actions: [],
       leading_option_changed: null,
+      leader_identity_basis: null,
     };
   }
 
@@ -620,6 +695,7 @@ export function tryRunComparisonGate(
       assistant_text: INCOMPARABLE_TEXT,
       suggested_actions: [],
       leading_option_changed: null,
+      leader_identity_basis: null,
     };
   }
 
@@ -662,5 +738,6 @@ export function tryRunComparisonGate(
     // The disclosure question is settled in `composeComparison`, which is the
     // only path to user-facing bytes.
     leading_option_changed: delta.leading_option_changed,
+    leader_identity_basis: delta.leader_identity_basis,
   };
 }

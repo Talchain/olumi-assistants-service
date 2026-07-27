@@ -10,6 +10,7 @@ import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
   enforceInvariants,
+  selectDegradedRunAnalysisFact,
 } from '../freshness.js';
 import type { FreshnessDerivation } from '../freshness.js';
 import { setTestSink } from '../../../utils/telemetry.js';
@@ -246,6 +247,52 @@ describe('deriveAnalysisFreshness — unknown', () => {
     const r = deriveAnalysisFreshness(facts, 'h1');
     expect(r.freshness).toBe('unknown');
     expect(r.computed_at).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The DEGRADED selector rides the ONE shared ordering.
+//
+// It used to carry a byte-identical private copy of the computed_at-desc /
+// nulls-last comparator, held in step with the canonical one by a comment —
+// the fourth copy of one rule, in the file whose docstring claimed there was
+// one. These tests are the drift guard on that: they fail if the comparator is
+// ever re-privatised AND diverges, which a comment cannot do.
+// ---------------------------------------------------------------------------
+describe('selectDegradedRunAnalysisFact — ordering is the shared one', () => {
+  const degraded = (computed_at: string | null, status: string) =>
+    mkRunAnalysisFact({
+      status,
+      ...(computed_at === null ? {} : { computed_at }),
+      graph_hash_at_run: 'h',
+    });
+
+  it('picks the newest degraded fact by computed_at, not by array position', () => {
+    const older = degraded('2026-04-01T00:00:00.000Z', 'partial');
+    const newer = degraded('2026-04-30T00:00:00.000Z', 'blocked');
+    // Insertion order says `older`; computed_at says `newer`.
+    const r = selectDegradedRunAnalysisFact([older, newer]);
+    expect(r).not.toBeNull();
+    expect(r!.fact).toBe(newer);
+    expect(r!.status).toBe('blocked');
+  });
+
+  it('puts a degraded fact with NO computed_at last, like the canonical sort', () => {
+    const untimestamped = degraded(null, 'partial');
+    const timestamped = degraded('2026-04-30T00:00:00.000Z', 'blocked');
+    const r = selectDegradedRunAnalysisFact([untimestamped, timestamped]);
+    expect(r!.fact).toBe(timestamped);
+  });
+
+  it('CONTROL: successful and legacy-no-status facts are still not "degraded"', () => {
+    // Non-vacuity for the filter half — the ordering change must not have
+    // widened what counts as degraded.
+    const ok = mkRunAnalysisFact({ status: 'computed', computed_at: '2026-05-01T00:00:00.000Z' });
+    const legacy = mkRunAnalysisFact({ computed_at: '2026-05-02T00:00:00.000Z' });
+    expect(selectDegradedRunAnalysisFact([ok, legacy])).toBeNull();
+    // …and a real degraded fact among them IS found.
+    const bad = degraded('2026-04-01T00:00:00.000Z', 'failed');
+    expect(selectDegradedRunAnalysisFact([ok, bad, legacy])!.fact).toBe(bad);
   });
 });
 

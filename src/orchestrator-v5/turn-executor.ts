@@ -5528,6 +5528,14 @@ export async function runTurnExecutor(
           leading_option_changed: runComparisonOutcome.matched
             ? runComparisonOutcome.leading_option_changed
             : null,
+          // The EVIDENCE behind the boolean above. Without it an
+          // `indeterminate` false (legacy run, identity unprovable) and a
+          // verified same-leader false are one byte in the ledger — and the
+          // first is the one worth watching, because it is the state in which
+          // the gate deliberately declines to answer the user's question.
+          leader_identity_basis: runComparisonOutcome.matched
+            ? runComparisonOutcome.leader_identity_basis
+            : null,
           freshness: freshness?.freshness ?? null,
         });
         if (runComparisonOutcome.matched) {

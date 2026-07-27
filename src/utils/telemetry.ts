@@ -1525,8 +1525,12 @@ export const TelemetryEvents = {
 
   // V5 P0.2 — run-comparison gate. Fires on a result-sense "what
   // changed?" turn. Payload: structural enums + booleans only (gate
-  // mode, matched, unmatched_reason, leading_option_changed) — no
-  // option/factor labels, no copy.
+  // mode, matched, unmatched_reason, leading_option_changed,
+  // leader_identity_basis) — no option/factor labels, no copy.
+  // `leader_identity_basis` is the closed enum 'option_id' |
+  // 'indeterminate' | null: it distinguishes a comparison that PROVED the
+  // leader unchanged from one that could not tell (a legacy run carrying no
+  // option ids), which the boolean alone collapses into one value.
   V5RunComparisonGate: "v5.run_comparison_gate",
 
   // V5 P0.2 — flip-threshold proposal emitted on a what_would_flip turn.
