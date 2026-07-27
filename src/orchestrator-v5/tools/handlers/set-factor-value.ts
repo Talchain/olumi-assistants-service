@@ -106,6 +106,21 @@ export const STALENESS_NARRATIVE =
  * dead documentation that risked silent double-normalisation) fail
  * validation loudly.
  */
+/**
+ * Graph node kinds this handler will set a value on. Exported as the SINGLE
+ * source of truth for `set_factor_value`'s target-kind capability: the
+ * execute-time gate below reads it, and
+ * `routing/__tests__/registry-handler-kind-drift.test.ts` projects it through
+ * `toEntityKind` and asserts the routing registry's `accepted_entity_kinds`
+ * matches exactly. Without that derivation the registry is a hand-maintained
+ * mirror of this list, and a mirror drifts silently in the direction that
+ * reads as green — refusing requests this handler would have served.
+ */
+export const SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS: readonly string[] = ['factor'];
+const SET_FACTOR_VALUE_ALLOWED_TARGET_KIND_SET: ReadonlySet<string> = new Set(
+  SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS,
+);
+
 // W2E-2: `.finite()` on every number — factor values are contract-silent on
 // range (no bound invented) but NaN/±Infinity must never enter the graph.
 // A failure here rides the existing proposal-validation rejection mechanism.
@@ -237,7 +252,7 @@ export function createSetFactorValueHandler(): HandlerFn {
         },
       );
     }
-    if (targetNode.kind !== 'factor') {
+    if (!SET_FACTOR_VALUE_ALLOWED_TARGET_KIND_SET.has(targetNode.kind)) {
       throw new D1HandlerError(
         'ENTITY_KIND_MISMATCH',
         `Cannot set value on a ${targetNode.kind} — set_factor_value only accepts factors.`,
@@ -246,6 +261,7 @@ export function createSetFactorValueHandler(): HandlerFn {
             handler_id: 'set_factor_value',
             target_id: targetId,
             actual_kind: targetNode.kind,
+            accepted_kinds: [...SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS],
           },
           userGuidance: SET_FACTOR_VALUE_USER_GUIDANCE,
         },

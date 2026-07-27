@@ -6608,6 +6608,28 @@ export async function runTurnExecutor(
         validationRegistry,
       );
 
+      // Entity-kind repair telemetry. The validator adopts the graph's kind
+      // when the routing model mislabels an entity it resolved correctly
+      // (see validator.ts). That turns a user-visible refusal into a silent
+      // success, so it MUST be observable: a rising repair rate is a
+      // routing-prompt signal, and without this line the fix would hide the
+      // very behaviour that motivated it. Enum-valued kinds + system ids
+      // only — no labels, matching the safe_details privacy contract.
+      if (validationResult.valid && validationResult.kind_repair) {
+        log.info(
+          {
+            event: 'v5.entity_kind_repaired',
+            request_id: requestId,
+            v5_journey_id: v5JourneyId,
+            handler_id: validationResult.kind_repair.handler_id,
+            entity_id: validationResult.kind_repair.entity_id,
+            proposed_kind: validationResult.kind_repair.proposed_kind,
+            resolved_kind: validationResult.kind_repair.resolved_kind,
+          },
+          'V5 TurnExecutor repaired proposal entity kind from graph',
+        );
+      }
+
       // V5 edit_graph P0 containment (task_99f83f0d) — option-intervention
       // misroute guard. A request that implies editing an OPTION's
       // intervention ("revise the Outsource option's Annual Support Cost
