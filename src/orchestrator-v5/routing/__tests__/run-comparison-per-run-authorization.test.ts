@@ -317,7 +317,7 @@ describe('run-comparison: mixed-case copy vs the production alarm', () => {
     ).toHaveLength(0);
   });
 
-  it('DERIVED: every exported WITHHELD_* constant is covered by the module-load probe', () => {
+  it('DERIVED: every exported *_TEXT constant is covered by the module-load probe', () => {
     // CLAUDE.md trap #12 — the probe's list is hand-maintained, so this is the
     // fail-loud drift guard on it. Derived from the module's own exports rather
     // than from a second copy of the list: a third withheld constant added
@@ -328,12 +328,20 @@ describe('run-comparison: mixed-case copy vs the production alarm', () => {
     // The probe itself runs at module load and throws, so it cannot be called
     // directly; this asserts the equivalent property over the same inputs using
     // the same reader the probe uses.
+    //
+    // ⚠ BROADENED from `WITHHELD_*` to every exported `*_TEXT` constant. The
+    // prefix was not the property that mattered — being SUBSTITUTED COPY IN
+    // THIS FILE was. `UNMATCHED_LEADER_IDENTITY_TEXT` is not a withhold (both
+    // verdicts permit; the two runs' identities merely cannot be lined up), so
+    // under the old filter it would have been exactly the constant this
+    // reflection exists to catch and the only one it could not see: a
+    // completeness guard whose scope was an accident of naming.
     const withheldConstants = Object.entries(gateModule).filter(
       (entry): entry is [string, string] =>
-        entry[0].startsWith('WITHHELD_') && typeof entry[1] === 'string',
+        entry[0].endsWith('_TEXT') && typeof entry[1] === 'string',
     );
     // Non-vacuity: the reflection must actually find them.
-    expect(withheldConstants.length).toBeGreaterThanOrEqual(4);
+    expect(withheldConstants.length).toBeGreaterThanOrEqual(5);
     for (const [name, copy] of withheldConstants) {
       expect(
         findLeaderClaims({ assistant_text: copy } as never),
