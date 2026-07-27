@@ -36,6 +36,7 @@ import type { PLoTClient } from '../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   CEE_CLAIM_SAFETY_ENRICHMENT_KEY,
+  readConstraintVerdictStateFromResult,
   readMayNameLeadingOption,
   readMayNameLeadingOptionFromResult,
 } from '../../orchestrator/context/constraint-feasibility.js';
@@ -286,5 +287,76 @@ describe('§2 CONSUMER — the reader ladder: typed first, interim second, close
         `malformed verdict ${JSON.stringify(junk)} fell through to the interim`,
       ).toBe(false);
     }
+  });
+
+  /**
+   * F5 — THE HALF OF THAT INVARIANT THE JUNK LIST NEVER COVERED.
+   *
+   * The test above states the rule ("reading past it to an older key would let
+   * the bug pick the more permissive of two answers") and then exercises only
+   * three OBJECT shapes. The typed branch is entered on
+   * `typed !== null && typeof typed === 'object' && !Array.isArray(typed)`, so a
+   * `constraint_verdict` that is present but a BOOLEAN, a STRING, an ARRAY, a
+   * NUMBER or `null` skips the branch entirely and falls through to the interim
+   * key — which can answer `true`. The invariant was written down and then
+   * enforced over a strict subset of the values that violate it.
+   *
+   * `constraint_verdict` is `z.optional(z.object(...))` on the contract, so
+   * ABSENT is `undefined` and nothing else. Every other present value is a
+   * producer bug, and a producer bug must not be able to buy the permissive
+   * answer.
+   */
+  it('F5: a NON-OBJECT typed field is fail-closed, not a fall-through to the interim', () => {
+    const nonObjectJunk: readonly unknown[] = [true, 'feasible', [], 0, null];
+    for (const junk of nonObjectJunk) {
+      expect(
+        readMayNameLeadingOptionFromResult({
+          constraint_verdict: junk,
+          enrichment: INTERIM_PERMIT,
+        }),
+        `constraint_verdict: ${JSON.stringify(junk)} fell through to a permissive interim`,
+      ).toBe(false);
+    }
+  });
+
+  it('F5 POSITIVE CONTROL: an ABSENT typed field still reaches the interim', () => {
+    // Rule 2, and the anti-over-correction half: `undefined` is the ONLY honest
+    // "no typed verdict recorded", and the migration ramp depends on it. A fix
+    // that fail-closed on absence too would silently reclassify every
+    // #710-to-0.25.0 fact as withheld.
+    expect(readMayNameLeadingOptionFromResult({ enrichment: INTERIM_PERMIT })).toBe(true);
+    expect(
+      readMayNameLeadingOptionFromResult({
+        constraint_verdict: undefined,
+        enrichment: INTERIM_PERMIT,
+      }),
+    ).toBe(true);
+  });
+
+  it('F5: readConstraintVerdictStateFromResult carries the SAME asymmetry, and must not', () => {
+    // The two readers walk one ladder by design ("the boolean and the state can
+    // never be read from different stamps on one fact"). A junk typed field that
+    // fail-closes the boolean while the STATE is read from the interim would
+    // break exactly that property — the note would describe a verdict the
+    // permission does not.
+    const interimState = {
+      [CEE_CLAIM_SAFETY_ENRICHMENT_KEY]: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible',
+      },
+    };
+    for (const junk of [true, 'feasible', [], 0, null]) {
+      expect(
+        readConstraintVerdictStateFromResult({
+          constraint_verdict: junk,
+          enrichment: interimState,
+        }),
+        `constraint_verdict: ${JSON.stringify(junk)} read its STATE from the interim`,
+      ).toBeNull();
+    }
+    // POSITIVE CONTROL: absent ⇒ the interim state is still read.
+    expect(readConstraintVerdictStateFromResult({ enrichment: interimState })).toBe(
+      'evaluated_feasible',
+    );
   });
 });

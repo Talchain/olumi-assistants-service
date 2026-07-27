@@ -56,7 +56,10 @@ import { randomUUID } from 'node:crypto';
 
 import { setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
-import { WITHHELD_LEADER_INPUT_NOTE } from '../context/withheld-leader-projection.js';
+import {
+  WITHHELD_LEADER_INPUT_NOTE,
+  WITHHELD_LEADER_INPUT_NOTE_NO_CAUSE,
+} from '../context/withheld-leader-projection.js';
 // The production alarm's OWN scanner, so this acceptance test and the alarm
 // cannot drift apart.
 import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
@@ -186,6 +189,24 @@ function priorRunAnalysisFact(mayName: boolean): Record<string, unknown> {
       win_probabilities: { opt_hire: 0.72, opt_hold: 0.28 },
     },
   };
+}
+
+/**
+ * The SAME fact as a PRE-#710 row: no `constraint_verdict`, no
+ * `enrichment.__cee_claim_safety`. There is no data migration (A1 ruling), so
+ * this shape is live in the store and it is the largest class the fail-closed
+ * default fires on — and the one class no acceptance walk has ever induced,
+ * because every walk runs a fresh analysis and gets a stamped fact.
+ *
+ * Built by SUBTRACTION from the withheld fixture so the two differ in exactly
+ * one field: the fail-closed default is what makes this turn withheld, and the
+ * absent state is what the note has to cope with.
+ */
+function priorUnstampedRunAnalysisFact(): Record<string, unknown> {
+  const fact = priorRunAnalysisFact(false);
+  const result = fact.result as Record<string, unknown>;
+  delete result.constraint_verdict;
+  return fact;
 }
 
 /**
@@ -513,6 +534,57 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
       const raw = packHandedToTheModel()['analysis'] as Record<string, any> | null;
       expect(raw, 'the raw analysis slot must survive').not.toBeNull();
       expect(raw!['leading_option']?.label).toBe(LEADER_LABEL);
+    });
+  });
+
+  /**
+   * F2 — THE WIRED PROOF that the note's cause is no longer fabricated.
+   *
+   * The unit tests in `context/__tests__/withheld-leader-projection.test.ts`
+   * prove the SELECTOR picks the right note; only this proves the STATE reaches
+   * it from the persisted fact, through the hoist and the pack assembly seam
+   * (TESTING-DISCIPLINE rule 3 — a unit test of a projection cannot tell you the
+   * projection is wired with the right input).
+   */
+  describe('WITHHELD by the FAIL-CLOSED DEFAULT (pre-#710, unstamped) — F2', () => {
+    beforeEach(() => {
+      priorFacts = [priorUnstampedRunAnalysisFact()];
+    });
+
+    it('BRANCH DISCRIMINATOR: the turn really is withheld, by the default and not by a stamp', async () => {
+      // Rule 1. The whole point of this arm is that NOTHING was recorded, so
+      // the withholding must be shown to come from the fail-closed read — if
+      // the fixture regressed to a stamped fact, this arm would silently become
+      // a duplicate of the one above.
+      await postTurn(app, 'So where does this leave things?');
+      const analysis = modelFacingAnalysis()!;
+      expect(analysis['leading_option'], 'the input gate must still have fired').toBeUndefined();
+      expect(analysis['options']).toBeUndefined();
+    });
+
+    it('the note carries NO fabricated cause when no verdict was ever recorded', async () => {
+      // The defect: the note said "a condition the user ratified could not be
+      // checked against this result" on EVERY unstamped fact, including
+      // scenarios where the user ratified nothing at all — whose verdict, had
+      // one been derived, would have been `not_applicable` (permitted). The
+      // model was handed a false factual premise about the user's own scenario
+      // and coached to explain the withheld ranking with it.
+      const note = await postTurn(app, 'So where does this leave things?').then(
+        () => modelFacingAnalysis()!['leading_option_note'],
+      );
+      expect(note).toBe(WITHHELD_LEADER_INPUT_NOTE_NO_CAUSE);
+      expect(note).not.toBe(WITHHELD_LEADER_INPUT_NOTE);
+      expect(note as string).not.toContain('ratified');
+    });
+
+    it('ANTI-OVER-CORRECTION: it is still NEVER SILENT', async () => {
+      // Removing the cause must not remove the note. A ranking that vanishes
+      // with no explanation invites the model either to invent one or to claim
+      // no options exist — the failure the never-silent rule exists for.
+      await postTurn(app, 'So where does this leave things?');
+      const note = modelFacingAnalysis()!['leading_option_note'] as string;
+      expect(note).toContain('Do not name or imply any option as the answer');
+      expect(note).toContain('do not infer one from the drivers below');
     });
   });
 

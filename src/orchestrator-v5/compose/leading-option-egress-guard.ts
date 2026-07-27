@@ -388,11 +388,33 @@ function scanKey(path: string, key: string, value: unknown, out: LeaderClaimHit[
  * evidence quartet but skips `signal`), not the prose guard. It is a 140-char
  * user-visible line; an unscanned user-visible line is exactly the shape of
  * this whole defect class.
+ *
+ * ⚠ `summary` ADDED 2026-07-27 (F1), AND IT IS THE FIELD THE WHOLE DOCTRINE
+ * SAYS THE DISCLOSURE RIDES ON. `blocks[].summary` is the `analysis_result`
+ * block's REQUIRED headline string. `compose.ts`'s `buildAnalysisResultBlock`
+ * shipped it VERBATIM on every branch — the withheld projection nulls
+ * `leading_option_id`, projects the enrichment and drops the leader-presuming
+ * Phase-3 blocks, and never touched `summary`.
+ *
+ * It was outside BOTH readers: absent from this list, and its key name matches
+ * nothing in {@link LEADER_DESIGNATING_KEY_PATTERNS}, so {@link scanKey} could
+ * not see it either. On a PRE-#708 fact — no `constraint_verdict`, no
+ * `__cee_claim_safety`, so the reader fails CLOSED — the FRESH prior-fact
+ * lifecycle branch rebuilds the block and ships
+ * "…currently leads by 18 percentage points" beside an assistant_text saying no
+ * option can be put forward. Byte-for-byte the G-CEE-1 contradiction, and the
+ * residue meter reported ZERO hits on it, so the telemetry sizing this class
+ * under-counted exactly the class the fail-closed default manufactures.
+ *
+ * Why no walk saw it: the walks induce FRESH scenarios, whose facts are stamped
+ * and therefore PERMITTED. Only a historic fact takes this path, and there is no
+ * migration.
  */
 const BLOCK_PROSE_FIELDS: readonly string[] = [
   'title',
   'body',
   'signal',
+  'summary',
   'action_label',
   'factor_label',
   'evidence_gap',
@@ -452,10 +474,17 @@ const ENRICHMENT_CLAIM_BLOBS: readonly string[] = [
 ];
 
 /**
- * Node budget for the deep walk, shared across the WHOLE response so total work
- * is bounded even on a pathological envelope (this chokepoint is re-entered up
- * to 4× per response). The live blobs measure ~1–2k nodes, so this is ~25×
- * headroom.
+ * Node budget for the deep walk, shared across every enrichment blob on ONE
+ * `findLeaderClaims` CALL, so total work is bounded even on a pathological
+ * envelope. The live blobs measure ~1–2k nodes, so this is ~25× headroom.
+ *
+ * ⚠ PER-CALL, NOT PER-RESPONSE — corrected 2026-07-27 (F9). This comment used
+ * to say "shared across the WHOLE response". It is not: `findLeaderClaims`
+ * allocates a FRESH `{ remaining }` on every invocation, and `sendFinalised200`
+ * re-enters this chokepoint up to 4× per response, so a response gets up to 4×
+ * this budget in total. Nothing depends on the stronger reading today, but a
+ * future reader sizing the bound — or explaining a `scan_budget_exhausted`
+ * count — would have been reasoning from a false statement about the mechanism.
  *
  * Exhaustion is reported as a HIT, never as a silent truncation: a scanner that
  * quietly stops looking is the broken-alarm class this module exists to avoid.

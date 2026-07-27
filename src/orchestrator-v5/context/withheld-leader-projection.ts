@@ -113,17 +113,16 @@
 
 import type { ContextPackAnalysis } from './context-pack-assembler.js';
 import type { DisplaySafeAnalysis } from '../format/format-analysis-for-context.js';
+import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
+import { MAY_NAME_LEADING_OPTION } from '../../orchestrator/context/constraint-feasibility.js';
 import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
 
 /**
- * The note stamped onto a withheld MODEL-facing projection in place of the
- * dropped ranking. Addressed to the coach, in the receive-vs-author register
- * the other prompt-facing notes use.
+ * The instruction half of both notes below, held in one constant so the two
+ * voices cannot drift apart on the part that actually does the work.
  *
- * No option label, no probability, no verdict jargon. It says what is absent,
- * why, and what the model may do instead — the third clause matters, because a
- * bare "this was removed" invites the model to reach for the numbers it can
- * still see in `top_drivers`.
+ * The third clause matters: a bare "this was removed" invites the model to
+ * reach for the numbers it can still see in `top_drivers`.
  *
  * ⚠ THE WORDING IS CONSTRAINED BY THE ALARM, and the constraint bit during
  * development rather than in review: the first draft said "do not state or
@@ -135,12 +134,91 @@ import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.j
  * Recording that here because the next person to improve this copy will reach
  * for the same natural phrase.
  */
+const WITHHELD_LEADER_INPUT_INSTRUCTION =
+  'Do not name or imply any option as the answer, and do not infer one from the ' +
+  'drivers below. Discuss what the model shows about the drivers, the fragility ' +
+  'of the result, and what evidence would firm it up.';
+
+/**
+ * The note stamped onto a withheld MODEL-facing projection when the persisted
+ * verdict state says a ratified condition is genuinely behind the withholding.
+ * Addressed to the coach, in the receive-vs-author register the other
+ * prompt-facing notes use. No option label, no probability, no verdict jargon.
+ *
+ * ⚠ CONDITIONAL SINCE 2026-07-27 (F2). This note was UNCONDITIONAL, and that
+ * made it assert a FABRICATED CAUSE on the largest class of turns that reach it.
+ * See {@link withheldLeaderInputNoteForState}.
+ */
 export const WITHHELD_LEADER_INPUT_NOTE =
   'Option ranking is not available for this turn: a condition the user ratified ' +
   'could not be checked against this result, so no option can be put forward and ' +
-  'none is shown here. Do not name or imply any option as the answer, and do not ' +
-  'infer one from the drivers below. Discuss what the model shows about the ' +
-  'drivers, the fragility of the result, and what evidence would firm it up.';
+  `none is shown here. ${WITHHELD_LEADER_INPUT_INSTRUCTION}`;
+
+/**
+ * The note stamped when the verdict STATE could not be read back — i.e. the
+ * withholding is the fail-closed default, and NOTHING is known about why.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * F2 — WHY THE UNCONDITIONAL NOTE WAS A CORRECTNESS DEFECT, NOT A CONTENT COST.
+ *
+ * `readMayNameLeadingOptionFromResult` fails closed on any fact carrying
+ * neither `result.constraint_verdict` nor `enrichment.__cee_claim_safety` —
+ * every fact persisted before #710, and there is no migration. That default is
+ * correct, and the cost of it was ratified as CONTENT: "a rebuilt view of a
+ * historic analysis drops its leader-presuming cards".
+ *
+ * The unconditional note converted that cost into CORRECTNESS. It told the
+ * model, as fact, that "a condition the user ratified could not be checked
+ * against this result" — on EVERY unstamped fact, INCLUDING scenarios where the
+ * user ratified no constraint at all. Had a verdict been derived for one of
+ * those it would have been `not_applicable`: permitted, nothing withheld,
+ * nothing unchecked. The model was handed a false factual premise about the
+ * user's own scenario and coached to explain the withheld ranking with it.
+ *
+ * Withholding a ranking we cannot stand behind is the doctrine. Inventing a
+ * reason for the withholding is the inverse of it — and it is the same failure
+ * mode as the leak itself: a confident sentence the evidence does not support.
+ *
+ * NOT SILENT, still. It says what is absent and what the model may do instead;
+ * it simply declines to say WHY, because on this branch we do not know.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+export const WITHHELD_LEADER_INPUT_NOTE_NO_CAUSE =
+  'The option ranking is not shown for this turn, and no option can be put ' +
+  `forward from it. ${WITHHELD_LEADER_INPUT_INSTRUCTION}`;
+
+/**
+ * Select the note for a withheld turn from the PERSISTED verdict state.
+ *
+ * `null` — the state could not be read back (a pre-#710 fact, or a junk stamp;
+ * see `readConstraintVerdictStateFromResult` for why a state has no safe
+ * default) ⇒ the CAUSE-FREE note.
+ *
+ * The two PERMITTED states (`not_applicable`, `evaluated_feasible`) cannot
+ * reach a withheld projection — the caller owns the permission and does not
+ * re-derive it. They are mapped to the cause-free note anyway rather than left
+ * to fall into the ratified-condition voice, because if a future caller ever
+ * did reach here with one, the honest answer is "no cause is known", never a
+ * manufactured one. Derived from {@link MAY_NAME_LEADING_OPTION}'s own answer
+ * rather than by listing the three withholding states, so a sixth state added
+ * to the contract cannot silently inherit the cause-bearing note.
+ *
+ * ⚠ ONE RESIDUAL, STATED RATHER THAN LEFT TO BE FOUND. On
+ * `evaluated_infeasible` the condition WAS checked and the leader failed it, so
+ * "could not be checked against this result" is imprecise for that state — a
+ * third voice, not this lane's call. It is reported to the orchestrator rather
+ * than fixed here: it is a copy decision about what the coach is told, and the
+ * sibling `constraint-gap-disclosure.ts` already shows what a per-state voice
+ * costs to get right.
+ */
+export function withheldLeaderInputNoteForState(
+  state: ConstraintVerdictState | null,
+): string {
+  if (state === null) return WITHHELD_LEADER_INPUT_NOTE_NO_CAUSE;
+  return MAY_NAME_LEADING_OPTION[state]
+    ? WITHHELD_LEADER_INPUT_NOTE_NO_CAUSE
+    : WITHHELD_LEADER_INPUT_NOTE;
+}
 
 /**
  * Members of the MODEL-facing `DisplaySafeAnalysis` that designate a leading
@@ -181,6 +259,7 @@ export const WITHHELD_DROPPED_PACK_ANALYSIS_MEMBERS: readonly string[] =
  */
 export function projectDisplayAnalysisForWithheldClaim(
   display: DisplaySafeAnalysis | null,
+  state: ConstraintVerdictState | null,
 ): DisplaySafeAnalysis | null {
   if (display === null) return null;
   const {
@@ -198,7 +277,13 @@ export function projectDisplayAnalysisForWithheldClaim(
   // the source carried no ranking to begin with. A withheld turn says so
   // whether or not the producer happened to populate the fields — otherwise
   // the note's presence would leak which shape the producer sent.
-  return { ...rest, leading_option_note: WITHHELD_LEADER_INPUT_NOTE };
+  //
+  // F2: WHICH note is chosen by the PERSISTED verdict state, threaded by the
+  // caller from the SAME fact the permission came from. `state` is REQUIRED,
+  // not optional-with-a-default: an optional cause is one a future caller
+  // silently forgets to supply, and the forgotten value would be the fabricated
+  // one — the same doctrine `EgressSanitiseOpts.mayNameLeadingOption` applies.
+  return { ...rest, leading_option_note: withheldLeaderInputNoteForState(state) };
 }
 
 /**
@@ -256,14 +341,28 @@ function assertInjectedNoteIsLeaderFree(): void {
   // that measures it. Raised from the enforcement reader after the sibling
   // run-comparison gate shipped review-clean with `out in front` — a phrase
   // BOTH readers catch, but the near-miss is the point.
-  if (textNamesLeadingOption(WITHHELD_LEADER_INPUT_NOTE)) {
-    throw new Error(
-      'withheld-leader-projection: WITHHELD_LEADER_INPUT_NOTE trips the shared ' +
-        'leader vocabulary (compose/leading-option-egress-guard.ts ' +
-        'LEADER_CLAIM_PATTERNS). The input gate would inject the exact residue ' +
-        'the output alarm measures, on every withheld turn. Reword the note — ' +
-        'do not narrow the pattern set, which is shared with the alarm.',
-    );
+  //
+  // ⚠ BOTH VOICES, and DERIVED from the selector rather than hand-listed: a
+  // probe over one constant would have gone silently partial the moment F2
+  // added the second, which is the mirror trap this file already carries one
+  // instance of (CLAUDE.md trap #12). Driving `withheldLeaderInputNoteForState`
+  // over `null` PLUS every declared state also proves the selector is total.
+  const voices: ReadonlyArray<readonly [string, string]> = [
+    ['null (state unreadable)', withheldLeaderInputNoteForState(null)],
+    ...(Object.keys(MAY_NAME_LEADING_OPTION) as ConstraintVerdictState[]).map(
+      (state): readonly [string, string] => [state, withheldLeaderInputNoteForState(state)],
+    ),
+  ];
+  for (const [name, note] of voices) {
+    if (textNamesLeadingOption(note)) {
+      throw new Error(
+        `withheld-leader-projection: the note for ${name} trips the shared ` +
+          'leader vocabulary (compose/leading-option-egress-guard.ts ' +
+          'LEADER_CLAIM_PATTERNS). The input gate would inject the exact residue ' +
+          'the output alarm measures, on every withheld turn. Reword the note — ' +
+          'do not narrow the pattern set, which is shared with the alarm.',
+      );
+    }
   }
 }
 assertInjectedNoteIsLeaderFree();

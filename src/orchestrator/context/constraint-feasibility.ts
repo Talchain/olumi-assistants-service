@@ -655,7 +655,9 @@ export function projectClaimSafety(verdict: ConstraintVerdict): PersistedClaimSa
  * TYPED FIRST, INTERIM SECOND, FAIL CLOSED THIRD:
  *
  *   1. `result.constraint_verdict` — the 0.25.0 contract field, written by
- *      every fact from this release onward.
+ *      every fact from this release onward. PRESENT-but-malformed stops here
+ *      and answers `false`; it does NOT fall through (see
+ *      {@link typedVerdictIsPresent} for why `undefined` is the only absence).
  *   2. `result.enrichment.__cee_claim_safety` — the interim stamp, present on
  *      every fact persisted between #710 and this release. Kept as a FALLBACK
  *      because there is no data migration (A1 ruling); see
@@ -682,10 +684,52 @@ export function projectClaimSafety(verdict: ConstraintVerdict): PersistedClaimSa
 export function readMayNameLeadingOptionFromResult(result: unknown): boolean {
   if (result === null || typeof result !== 'object' || Array.isArray(result)) return false;
   const typed = (result as Record<string, unknown>).constraint_verdict;
-  if (typed !== null && typeof typed === 'object' && !Array.isArray(typed)) {
-    return (typed as Record<string, unknown>).may_name_leading_option === true;
+  if (typedVerdictIsPresent(typed)) {
+    return isPlainObject(typed)
+      ? (typed as Record<string, unknown>).may_name_leading_option === true
+      : // PRESENT but not an object ⇒ fail closed, never fall through. See
+        // {@link typedVerdictIsPresent}.
+        false;
   }
   return readMayNameLeadingOption((result as Record<string, unknown>).enrichment);
+}
+
+/** A non-null, non-array object — the only shape a typed verdict can take. */
+function isPlainObject(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Is `result.constraint_verdict` PRESENT, whatever shape it arrived in? (F5)
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE INVARIANT THIS RESTORES, WHICH WAS STATED AND THEN ENFORCED OVER A STRICT
+ * SUBSET OF ITS OWN SCOPE.
+ *
+ * `constraint-verdict-typed-field.test.ts` already declares the rule: "a typed
+ * field that is present but junk is a producer bug; reading past it to an older
+ * key would let the bug pick the more permissive of two answers." Both readers
+ * entered the typed branch on `!== null && typeof === 'object' && !isArray`, so
+ * exactly three OBJECT junk shapes were covered. A `constraint_verdict` that is
+ * `true`, `'feasible'`, `[]`, `0` or `null` skipped the branch ENTIRELY and fell
+ * through to `enrichment.__cee_claim_safety` — which can answer `true`. The
+ * invariant was written down and then routed around by every non-object value.
+ *
+ * `ABSENT` IS `undefined` AND NOTHING ELSE, and that is derived, not chosen:
+ * the contract declares `constraint_verdict: z.optional(z.object(...))`
+ * (`@talchain/schemas@0.25.0` handler-results), so it is either absent or a
+ * strict object. `null` is not a legal value, which is why `null` is treated
+ * here as PRESENT-and-malformed rather than as absence. That is also the only
+ * safe reading: a stray `null` from a future writer or a DB default must not be
+ * able to buy the permissive answer.
+ *
+ * The ONE thing this must not break is the migration ramp: `undefined` still
+ * reaches the interim stamp, or every fact persisted between #710 and 0.25.0
+ * would be silently reclassified as withheld.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+function typedVerdictIsPresent(value: unknown): boolean {
+  return value !== undefined;
 }
 
 /**
@@ -718,8 +762,15 @@ export function readConstraintVerdictStateFromResult(
   if (result === null || typeof result !== 'object' || Array.isArray(result)) return null;
   const record = result as Record<string, unknown>;
   const typed = record.constraint_verdict;
-  if (typed !== null && typeof typed === 'object' && !Array.isArray(typed)) {
-    return asVerdictState((typed as Record<string, unknown>).constraint_verdict_state);
+  // F5 — the SAME present-but-malformed rule as the boolean reader, and it must
+  // be the same or the two readers walk different ladders on one fact. A junk
+  // typed field that fail-closes the permission while the STATE is read from the
+  // interim would break the property this reader's docstring rests on: "the
+  // boolean and the state can never be read from different stamps on one fact".
+  if (typedVerdictIsPresent(typed)) {
+    return isPlainObject(typed)
+      ? asVerdictState((typed as Record<string, unknown>).constraint_verdict_state)
+      : null;
   }
   const enrichment = record.enrichment;
   if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {

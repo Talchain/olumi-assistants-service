@@ -204,7 +204,11 @@
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
-import { keyDesignatesLeadingOption } from './leading-option-egress-guard.js';
+import {
+  keyDesignatesLeadingOption,
+  textAssertsLeadingOption,
+  textNamesLeadingOption,
+} from './leading-option-egress-guard.js';
 
 /**
  * Enrichment blobs dropped WHOLE from the wire on a withheld turn: prose
@@ -578,6 +582,117 @@ function projectOptionsForWithheldClaim(options: unknown): unknown[] | undefined
 export function mayNameLeadingOptionForFact(fact: RunAnalysisHandlerFact): boolean {
   return readMayNameLeadingOptionFromResult(fact.result);
 }
+
+/**
+ * The `analysis_result` block's summary on a withheld turn whose PERSISTED
+ * summary names a leader.
+ *
+ * States the one thing that is unambiguously true — an analysis exists and was
+ * read — and then the withholding, in the register
+ * `WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL` already uses. No cause: this
+ * substitution fires on facts whose verdict is, by construction, unreadable, so
+ * a cause here would be exactly the fabrication F2 removes from the input note.
+ *
+ * "put forward", never "recommended" — the shared leader vocabulary bans the
+ * whole `recommend*` family, and the build-time probe below fails the module if
+ * this copy ever trips it.
+ */
+export const WITHHELD_ANALYSIS_SUMMARY =
+  'This analysis has been run. No single option can be put forward on its result yet.';
+
+/**
+ * Project one `analysis_result` block summary for a turn whose verdict
+ * WITHHOLDS the leading-option claim.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * F1 — THE FIELD THE WITHHELD PROJECTION NEVER TOUCHED, AND THE ONE HISTORIC
+ * SHAPE THAT MAKES IT BITE.
+ *
+ * `buildAnalysisResultBlock` (compose.ts) nulls `leading_option_id`, projects
+ * the enrichment through {@link projectTransportEnrichmentForWithheldClaim} and
+ * hands the Phase-3 rebuild a permission that drops every leader-presuming
+ * block. `summary` shipped VERBATIM on both branches.
+ *
+ * On a fact this codebase writes today that is harmless: a withheld turn's
+ * summary is composed by the gated headline builder and names no leader. The
+ * failing input is a fact persisted BEFORE #708's headline gate — no
+ * `constraint_verdict`, no `__cee_claim_safety`, so the reader FAILS CLOSED to
+ * `false` — carrying a pre-gate summary of the form "The MacBook Pro currently
+ * leads by 18 percentage points". There is no data migration (A1 ruling), so
+ * those facts are live. Reopen the scenario, click explain, get freshness
+ * `fresh`, and compose's prior-fact lifecycle branch rebuilds the block from
+ * that fact: the wire then carries gated blocks, `leading_option_id: null`, a
+ * projected enrichment, and that sentence — beside an assistant_text saying no
+ * option can be put forward.
+ *
+ * The gate's own fail-closed default MANUFACTURES the contradiction the whole
+ * arc exists to close, through the one field the residue meter could not see.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * SUBSTITUTION IS CONDITIONAL, AND THAT IS THE ANTI-OVER-SUPPRESSION PROPERTY.
+ * A summary that names no leader is kept BYTE-IDENTICAL. Withholding is scoped
+ * to the CLAIM, not to the field: on the very turn a recommendation is withheld,
+ * an honest summary is content the user is entitled to, and blanking every one
+ * of them would be the failure this estate weights equally with the leak.
+ *
+ * `textAssertsLeadingOption` (the ENFORCER's reader), not
+ * `textNamesLeadingOption` (the ALARM's): this function REPLACES user-facing
+ * content when it fires, so it takes the reader that blanks the documented
+ * false-positive spans first — the same choice
+ * `compose/withheld-explanation-answer.ts` makes, for the same reason. A
+ * summary reading "higher capacity leads to faster delivery" must survive.
+ *
+ * PURE. Never throws, never mutates.
+ */
+export function projectAnalysisSummaryForWithheldClaim(summary: string): string {
+  if (typeof summary !== 'string' || summary.length === 0) return summary;
+  return textAssertsLeadingOption(summary) ? WITHHELD_ANALYSIS_SUMMARY : summary;
+}
+
+/**
+ * BUILD-TIME PROBE — the substituted summary must not itself trip the alarm
+ * that measures the residue this projection exists to remove.
+ *
+ * Identical mechanism and rationale to
+ * `compose/withheld-explanation-answer.ts`'s `assertSubstitutedCopyIsLeaderFree`
+ * and `context/withheld-leader-projection.ts`'s `assertInjectedNoteIsLeaderFree`
+ * — and now strictly necessary, because F1 puts `summary` INSIDE
+ * `BLOCK_PROSE_FIELDS`. Copy that trips the vocabulary would fire the guard on
+ * every withheld turn carrying a historic fact, and the only symptom would be an
+ * alarm rate nobody had a reason to look at.
+ *
+ * `textNamesLeadingOption` (the ALARM's wider reader), not the enforcement one:
+ * one doctrine for all copy this workstream authors — there is no reason to hold
+ * our own substituted copy to a laxer bar than the instrument that measures it.
+ *
+ * Runs at module load and throws on drift; this module is imported by the
+ * compose seam, so a violation fails the process at startup and every test that
+ * touches the seam (CLAUDE.md trap #12: a mirror must fail loud).
+ */
+function assertWithheldAnalysisSummaryIsLeaderFree(): void {
+  if (textNamesLeadingOption(WITHHELD_ANALYSIS_SUMMARY)) {
+    throw new Error(
+      'withheld-claim-projection: WITHHELD_ANALYSIS_SUMMARY trips the shared leader ' +
+        'vocabulary (compose/leading-option-egress-guard.ts LEADER_CLAIM_PATTERNS). The ' +
+        'withheld block summary would inject the exact residue the output alarm measures, ' +
+        'on every withheld turn built from a historic fact. Reword the copy — do not narrow ' +
+        'the pattern set, which is shared with the alarm.',
+    );
+  }
+  // NON-VACUITY, at module load: prove the projection can actually SEE a leader
+  // claim. A substitution that never fires is the same theatre as an absence
+  // assertion that cannot see a presence (CLAUDE.md trap 13).
+  if (
+    projectAnalysisSummaryForWithheldClaim('The MacBook Pro currently leads by 18 points.') !==
+    WITHHELD_ANALYSIS_SUMMARY
+  ) {
+    throw new Error(
+      'withheld-claim-projection: projectAnalysisSummaryForWithheldClaim did not substitute ' +
+        'the live pre-#708 leader-naming summary class. The gate is inert.',
+    );
+  }
+}
+assertWithheldAnalysisSummaryIsLeaderFree();
 
 /**
  * Project the ALREADY safe-transport-projected enrichment for a turn whose
