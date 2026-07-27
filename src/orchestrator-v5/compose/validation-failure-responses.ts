@@ -159,21 +159,88 @@ function composeEntityResolutionAmbiguous(error: ValidationError): BranchResult 
   };
 }
 
-function composeEntityKindMismatch(error: ValidationError): BranchResult {
+function composeEntityKindMismatch(error: ValidationError, ctx: ComposeContext): BranchResult {
   const details = error.details ?? {};
   const entityLabel = safeLabel({
-    label: readString(details.proposed_label),
+    label: readString(details.resolved_label) ?? readString(details.proposed_label),
     kind: undefined,
   });
+
+  // `resolved_kind` is present only when the graph resolved the id and the
+  // entity's REAL kind is one the handler does not accept. That is now the
+  // only way a genuine kind mismatch survives the validator's repair — the
+  // model mislabelling a valid target is corrected, not refused. So when we
+  // do refuse, we know exactly what the thing is and what we can act on, and
+  // the copy must say both.
+  const resolvedKind = pickKind(details.resolved_kind);
+  const acceptedKinds = readEntityKinds(details.accepted_kinds);
+
+  // Chips from the kinds the handler CAN act on — the same affordance the
+  // entity_not_found_with_siblings branch gives. A dead-end refusal that
+  // names no next step is what this branch used to be.
+  const graph = ctx.graph;
+  const chips: SuggestedAction[] = [];
+  if (graph) {
+    for (const kind of acceptedKinds) {
+      for (const entity of graph.listEntitiesByKind(kind)) {
+        if (chips.length >= ENTITY_SIBLING_CAP) break;
+        const label = safeLabel({ label: entity.label, kind });
+        chips.push({
+          id: chipId('entity', `km-${chips.length}`),
+          label,
+          message: `I meant ${label}.`,
+        });
+      }
+      if (chips.length >= ENTITY_SIBLING_CAP) break;
+    }
+  }
+
+  // What the handler CAN act on is conveyed by the chips — real labels from
+  // the graph — not by naming our taxonomy. The product-voice contract
+  // (pinned in validation-failure-responses.test.ts) forbids the words
+  // node / edge / goal / constraint / kind in user text, and rightly so:
+  // they are our words, not the user's. Concrete labels are also simply more
+  // useful than an abstract category, and they are clickable.
+  if (chips.length > 0) {
+    const found = resolvedKind
+      ? `I found ${entityLabel}, but I can't make that change to it.`
+      : `I wasn't sure what you meant by ${entityLabel}.`;
+    return {
+      body: {
+        assistant_text: `${found} Did you mean one of these?`,
+        suggested_actions: chips,
+      },
+      template_id: resolvedKind ? 'kind_mismatch_resolved_with_siblings' : 'kind_mismatch_with_siblings',
+      chip_type: 'entity_suggestion',
+    };
+  }
+
+  // No graph to draw chips from (graph-absent turn, or the handler accepts
+  // only kinds this graph has none of). Still drop the old tail — "Try asking
+  // about a specific option" was actively misleading when the target was an
+  // outcome node, which live evidence shows is the common case.
+  const found = resolvedKind
+    ? `I found ${entityLabel}, but I can't make that change to it.`
+    : `I wasn't sure what you meant by ${entityLabel}.`;
   return {
     body: {
-      assistant_text:
-        `I wasn't sure what you meant by ${entityLabel}. Try asking about a specific option, or describe what you'd like to change.`,
-      suggested_actions: [fallbackPrompt('Try describing what you want to change')],
+      assistant_text: `${found} Tell me what you'd like to change.`,
+      suggested_actions: [fallbackPrompt('Tell me what you want to change')],
     },
-    template_id: 'kind_mismatch',
+    template_id: resolvedKind ? 'kind_mismatch_resolved' : 'kind_mismatch',
     chip_type: 'text_prompt',
   };
+}
+
+/** Validate a `details.accepted_kinds` array into typed EntityKinds. */
+function readEntityKinds(value: unknown): EntityKind[] {
+  if (!Array.isArray(value)) return [];
+  const out: EntityKind[] = [];
+  for (const raw of value) {
+    const kind = pickKind(raw);
+    if (kind && !out.includes(kind)) out.push(kind);
+  }
+  return out;
 }
 
 function composeEntityNotFound(error: ValidationError, ctx: ComposeContext): BranchResult {
@@ -636,7 +703,7 @@ function composeValueUnitUnresolved(error: ValidationError): BranchResult {
 export const VALIDATION_COMPOSERS: Readonly<Record<ValidationErrorCode, BranchComposerFn>> = {
   HANDLER_NOT_FOUND: composeHandlerNotFound,
   ENTITY_RESOLUTION_AMBIGUOUS: (e) => composeEntityResolutionAmbiguous(e),
-  ENTITY_KIND_MISMATCH: (e) => composeEntityKindMismatch(e),
+  ENTITY_KIND_MISMATCH: (e, ctx) => composeEntityKindMismatch(e, ctx),
   ENTITY_NOT_FOUND: composeEntityNotFound,
   ENTITY_RESOLUTION_SUSPICIOUS: (e) => composeEntityResolutionSuspicious(e),
   PRECONDITION_UNMET: (e) => composePreconditionUnmet(e),

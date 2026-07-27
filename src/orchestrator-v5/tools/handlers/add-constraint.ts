@@ -108,7 +108,12 @@ const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
  * the constrained-node kind. `add_constraint` itself does not call
  * PLoT — see file header.
  */
-const ALLOWED_TARGET_KINDS: readonly string[] = [
+// Exported as the SINGLE source of truth for this handler's target-kind
+// capability. `routing/__tests__/registry-handler-kind-drift.test.ts` projects
+// it through `toEntityKind` and asserts the routing registry's
+// `accepted_entity_kinds` matches exactly, so the registry can no longer
+// drift into refusing a target this handler would have accepted.
+export const ALLOWED_TARGET_KINDS: readonly string[] = [
   'factor',
   'outcome',
   'goal',

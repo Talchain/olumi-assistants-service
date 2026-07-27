@@ -109,11 +109,25 @@ describe('composeValidationFailure — ENTITY_RESOLUTION_AMBIGUOUS', () => {
 });
 
 describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
-  const KIND_MISMATCH_PATTERN =
-    /^I wasn't sure what you meant by .+\. Try asking about a specific option, or describe what you'd like to change\.$/;
+  // AMENDED 2026-07-27 (entity-kind repair). The old copy ended "Try asking
+  // about a specific option, or describe what you'd like to change." — which
+  // was actively misleading, because live evidence shows the overwhelmingly
+  // common target of this refusal is an OUTCOME node, not an option. It also
+  // named no next step the user could act on.
+  //
+  // Two shapes now, distinguished by whether the graph resolved the entity:
+  //   resolved  → we know what it is, so say we found it
+  //   otherwise → we genuinely don't, so say that
+  // Neither names our taxonomy; the no-jargon assertions below are unchanged
+  // and still enforced. When a graph is available the branch offers real
+  // entity chips instead (covered separately).
+  const KIND_MISMATCH_UNRESOLVED =
+    /^I wasn't sure what you meant by .+\. Tell me what you'd like to change\.$/;
+  const KIND_MISMATCH_RESOLVED =
+    /^I found .+, but I can't make that change to it\. Tell me what you'd like to change\.$/;
   const INTERNAL_KIND_LABELS = ['node', 'edge', 'goal', 'constraint'] as const;
 
-  it('uses proposed_label when present and uses the fixed template', () => {
+  it('uses proposed_label when present and no longer suggests an inapplicable option', () => {
     const { response, template_id } = composeFor({
       code: 'ENTITY_KIND_MISMATCH',
       message: 'kind mismatch',
@@ -125,8 +139,10 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
       },
     });
     expect(template_id).toBe('kind_mismatch');
-    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_UNRESOLVED);
     expect(response.assistant_text).toContain('Churn Risk');
+    // The dead end this branch used to be.
+    expect(response.assistant_text).not.toMatch(/specific option/i);
     expect(response.suggested_actions.length).toBe(1);
     assertStyle(response.assistant_text);
   });
@@ -140,10 +156,11 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
         proposed_kind: 'option',
         resolved_kind: 'node',
         proposed_label: 'Churn Risk',
+        resolved_label: 'Churn Risk',
       },
     });
-    expect(template_id).toBe('kind_mismatch');
-    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+    expect(template_id).toBe('kind_mismatch_resolved');
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_RESOLVED);
     expect(response.assistant_text).toContain('Churn Risk');
     expect(response.assistant_text).not.toContain('fac_churn');
     for (const label of INTERNAL_KIND_LABELS) {
@@ -165,8 +182,10 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
             proposed_label: 'Some Entity',
           },
         });
-        expect(template_id).toBe('kind_mismatch');
-        expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+        expect(template_id).toBe(resolved ? 'kind_mismatch_resolved' : 'kind_mismatch');
+        expect(response.assistant_text).toMatch(
+          resolved ? KIND_MISMATCH_RESOLVED : KIND_MISMATCH_UNRESOLVED,
+        );
         for (const label of INTERNAL_KIND_LABELS) {
           expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
         }
@@ -186,8 +205,49 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
       },
     });
     expect(template_id).toBe('kind_mismatch');
-    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_UNRESOLVED);
     expect(response.suggested_actions.length).toBe(1);
+    assertStyle(response.assistant_text);
+  });
+
+  it('offers real entity chips from the accepted kinds when a graph is available', () => {
+    // The affordance the old branch lacked entirely. `run_analysis` accepts
+    // 'option', so the refusal names the options the user could have meant
+    // instead of leaving them to guess.
+    const graph = graphWith([
+      { id: 'opt_a', label: 'Standardise on Dell XPS', kind: 'option' },
+      { id: 'opt_b', label: 'Standardise on MacBook Pro', kind: 'option' },
+      { id: 'fac_x', label: 'Hardware Unit Cost', kind: 'node' },
+    ]);
+    const { response, template_id, chip_type } = composeFor(
+      {
+        code: 'ENTITY_KIND_MISMATCH',
+        message: 'mismatch',
+        details: {
+          handler_id: 'run_analysis',
+          entity_id: 'fac_x',
+          proposed_kind: 'option',
+          resolved_kind: 'node',
+          accepted_kinds: ['option'],
+          resolved_label: 'Hardware Unit Cost',
+        },
+      },
+      { handlerRegistry: REGISTRY, graph },
+    );
+    expect(template_id).toBe('kind_mismatch_resolved_with_siblings');
+    expect(chip_type).toBe('entity_suggestion');
+    expect(response.suggested_actions.map((a) => a.label)).toEqual([
+      'Standardise on Dell XPS',
+      'Standardise on MacBook Pro',
+    ]);
+    expect(response.assistant_text).toContain('Hardware Unit Cost');
+    for (const label of INTERNAL_KIND_LABELS) {
+      expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
+    }
+    // Chips must never leak ids either.
+    for (const action of response.suggested_actions) {
+      expect(`${action.label} ${action.message}`).not.toMatch(/\b(opt_a|opt_b|fac_x)\b/);
+    }
     assertStyle(response.assistant_text);
   });
 });

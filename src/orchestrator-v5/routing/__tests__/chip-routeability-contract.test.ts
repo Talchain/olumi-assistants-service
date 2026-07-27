@@ -196,34 +196,63 @@ describe('chip routeability — genuine ambiguity still fails safely (authority 
       if (!result.valid) expect(result.error.code).toBe('ENTITY_NOT_FOUND');
     });
 
-    it(`${handlerId}: kind 'node' aimed at a REAL option id still fails ENTITY_KIND_MISMATCH (graph cross-check authority)`, () => {
+    // AMENDED 2026-07-27 (entity-kind repair). These two cases previously
+    // asserted that a 'node'-labelled proposal aimed at a REAL option/goal id
+    // was REFUSED, under the heading "graph cross-check authority". The graph
+    // is still the authority — but authority now means its answer is ADOPTED,
+    // not that a disagreement is fatal. Both explain handlers accept 'option'
+    // and 'goal', so the correct outcome for a correctly-identified target is
+    // to serve it with the kind the graph reports.
+    //
+    // The property the original tests were protecting — "neither can be
+    // silently RETARGETED by a 'node' proposal" — is untouched and is asserted
+    // directly below: the id never changes, and the handler is told what the
+    // entity actually is. The refusal case that genuinely matters (a resolved
+    // kind the handler cannot serve) is covered by `what_would_flip` in
+    // entity-kind-repair.test.ts and by the constraint/edge cases below.
+    it(`${handlerId}: kind 'node' aimed at a REAL option id is repaired to 'option', never retargeted`, () => {
       const result = validateToolCall(
         mkProposal(handlerId, { id: 'opt_a', kind: 'node' }),
         LOOKUP,
         HANDLER_VALIDATION_REGISTRY,
       );
-      expect(result.valid).toBe(false);
-      if (!result.valid) {
-        expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
-        expect(result.error.details?.proposed_kind).toBe('node');
-        expect(result.error.details?.resolved_kind).toBe('option');
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.proposal.entity.id).toBe('opt_a');
+        expect(result.proposal.entity.kind).toBe('option');
+        expect(result.kind_repair?.proposed_kind).toBe('node');
+        expect(result.kind_repair?.resolved_kind).toBe('option');
       }
     });
 
-    it(`${handlerId}: kind 'node' aimed at a REAL goal id still fails ENTITY_KIND_MISMATCH (other half of the cross-check)`, () => {
-      // Same authority as the option case above, on the goal branch — both
-      // 'goal' and 'option' resolve to their own kind in the lookup, so neither
-      // can be silently retargeted by a 'node' proposal.
+    it(`${handlerId}: kind 'node' aimed at a REAL goal id is repaired to 'goal', never retargeted`, () => {
       const result = validateToolCall(
         mkProposal(handlerId, { id: 'goal_1', kind: 'node' }),
         LOOKUP,
         HANDLER_VALIDATION_REGISTRY,
       );
-      expect(result.valid).toBe(false);
-      if (!result.valid) {
-        expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
-        expect(result.error.details?.proposed_kind).toBe('node');
-        expect(result.error.details?.resolved_kind).toBe('goal');
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.proposal.entity.id).toBe('goal_1');
+        expect(result.proposal.entity.kind).toBe('goal');
+        expect(result.kind_repair?.proposed_kind).toBe('node');
+        expect(result.kind_repair?.resolved_kind).toBe('goal');
+      }
+    });
+
+    it(`${handlerId}: what_would_flip still REFUSES a resolved 'node' — repair does not widen a narrower handler`, () => {
+      // The control for the two amendments above: what_would_flip accepts only
+      // ['goal','option'], so a factor id is refused no matter how it is
+      // labelled. If repair had widened the admit-set rather than merely
+      // relabelling, this would now pass.
+      for (const proposed of ['node', 'goal', 'option'] as const) {
+        const result = validateToolCall(
+          mkProposal('what_would_flip', { id: 'fac_churn', kind: proposed }),
+          LOOKUP,
+          HANDLER_VALIDATION_REGISTRY,
+        );
+        expect(result.valid).toBe(false);
+        if (!result.valid) expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
       }
     });
 

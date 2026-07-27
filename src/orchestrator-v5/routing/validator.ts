@@ -185,8 +185,28 @@ export interface ValidationError {
   readonly details?: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * Record of an entity-kind repair (see `validateToolCall`). Present on a
+ * successful result ONLY when the routing model's `entity.kind` disagreed
+ * with the graph's own kind for that id and the graph's kind was adopted.
+ * Observability-only: the caller logs it. Absent on the common path where
+ * the model labelled the entity correctly.
+ */
+export interface EntityKindRepair {
+  readonly handler_id: string;
+  readonly entity_id: string;
+  /** What the model claimed. */
+  readonly proposed_kind: EntityKind;
+  /** What the graph says — the kind actually used for validation. */
+  readonly resolved_kind: EntityKind;
+}
+
 export type ValidationResult =
-  | { readonly valid: true; readonly proposal: ProposalAction }
+  | {
+      readonly valid: true;
+      readonly proposal: ProposalAction;
+      readonly kind_repair?: EntityKindRepair;
+    }
   | { readonly valid: false; readonly error: ValidationError };
 
 // -----------------------------------------------------------------------
@@ -280,16 +300,97 @@ export function validateToolCall(
     };
   }
 
-  if (!decl.accepted_entity_kinds.includes(proposal.entity.kind)) {
+  // ----- entity-kind repair: the GRAPH is the authority on kind -----
+  //
+  // The routing model emits both an entity `id` and an entity `kind`. The id
+  // is a lookup into the graph we handed it. The kind is the model's own
+  // LABEL for that entity — a guess about our taxonomy, not a claim the user
+  // made. Trusting the guess over our own graph throws away correct requests.
+  //
+  // Live evidence (cee-staging, 2026-07-26/27 — 20 consecutive
+  // ENTITY_KIND_MISMATCH refusals on "add a hard constraint on <outcome>"):
+  //   * 12× proposed_kind 'constraint'  → refused by the registry check below
+  //     (the user's own word "constraint" primes the label);
+  //   * 8× proposed_kind 'goal' with resolved_kind 'node' on the REAL id
+  //     `out_tco_efficiency` → refused by the graph cross-check.
+  // In every one of the 20 the id resolved to the node the user meant, and
+  // `add_constraint` accepts that node's real kind. Nothing was wrong with
+  // the request except the model's label for it.
+  //
+  // So: when the id resolves, adopt the graph's kind and carry on.
+  //
+  // BLAST RADIUS — this does not widen what can execute. Today a proposal
+  // reaches a handler iff
+  //     proposed ∈ accepted   AND   proposed === resolved
+  // (the registry check plus the graph cross-check that used to live at the
+  // bottom of this function), which entails `resolved ∈ accepted`. After
+  // this change it reaches a handler iff
+  //     resolved ∈ accepted
+  // Both conditions are stated over the GRAPH-RESOLVED kind, so the set of
+  // (handler, real graph kind) pairs that can execute is IDENTICAL; the old
+  // admit-set is a strict subset of the new one, and the difference is
+  // exactly "the model mislabelled an entity it had already identified
+  // correctly". The id — the only thing that selects a target — is never
+  // altered. Handlers still run their own graph-kind check against their
+  // finer taxonomy (e.g. add-constraint.ts ALLOWED_TARGET_KINDS).
+  //
+  // This SUBSUMES the former graph-resolved cross-check, which existed to
+  // stop a hallucinated kind reaching a handler pointed at the wrong node
+  // class. Adopting ground truth is strictly stronger than rejecting on a
+  // disagreement with it: a proposal whose resolved kind the handler does
+  // not accept is still refused here, by the check immediately below.
+  //
+  // NOT repaired, both keeping exactly today's behaviour:
+  //   * 'edge' proposals — edges have no stable id and are excluded from
+  //     graph resolution entirely, so there is nothing to resolve against;
+  //   * graph-absent turns — no graph, no ground truth, model's claim stands.
+  // An id that does NOT resolve is also not repaired: the model's kind is
+  // left alone so this check still fires first, preserving today's error
+  // precedence (kind before not-found) for unresolvable entities.
+  const resolvedEntity =
+    graph && proposal.entity.kind !== 'edge'
+      ? graph.findEntityById(proposal.entity.id)
+      : null;
+
+  const kindRepair: EntityKindRepair | null =
+    resolvedEntity && resolvedEntity.kind !== proposal.entity.kind
+      ? {
+          handler_id: decl.handler_id,
+          entity_id: proposal.entity.id,
+          proposed_kind: proposal.entity.kind,
+          resolved_kind: resolvedEntity.kind,
+        }
+      : null;
+
+  // Every check from here on runs against the repaired proposal, so the
+  // graph's kind is what the parameter prechecks, the Dice check, the
+  // preconditions and the handler all see. Carrying the model's stale label
+  // any further would silently skip kind-gated checks (notably the
+  // `set_factor_value` value precheck, gated on kind === 'node').
+  const effectiveProposal: ProposalAction = kindRepair
+    ? { ...proposal, entity: { ...proposal.entity, kind: kindRepair.resolved_kind } }
+    : proposal;
+
+  const effectiveKind = effectiveProposal.entity.kind;
+
+  if (!decl.accepted_entity_kinds.includes(effectiveKind)) {
     return {
       valid: false,
       error: {
         code: 'ENTITY_KIND_MISMATCH',
-        message: `Handler "${decl.handler_id}" does not accept entity kind "${proposal.entity.kind}"`,
+        message:
+          `Handler "${decl.handler_id}" does not accept entity kind "${effectiveKind}"` +
+          (kindRepair
+            ? ` (graph-resolved for id "${proposal.entity.id}"; model proposed "${kindRepair.proposed_kind}")`
+            : ''),
         details: {
           handler_id: decl.handler_id,
           proposed_kind: proposal.entity.kind,
           accepted_kinds: [...decl.accepted_entity_kinds],
+          // Present only when the graph disagreed with the model. Lets the
+          // composer say what was actually found instead of guessing.
+          ...(kindRepair ? { resolved_kind: kindRepair.resolved_kind } : {}),
+          ...(resolvedEntity?.label ? { resolved_label: resolvedEntity.label } : {}),
           ...(proposal.entity.label ? { proposed_label: proposal.entity.label } : {}),
         },
       },
@@ -337,10 +438,16 @@ export function validateToolCall(
   // V5 D1: edges are keyed by composite `from→to` and have no stable id
   // in the GraphLookup adapter. The handler does its own (from, to)
   // resolution at execute-time and surfaces ENTITY_NOT_FOUND through
-  // the typed handler error path. Skip the structural existence + kind
-  // cross-check + Dice check for edge entities.
-  if (graph && proposal.entity.kind !== 'edge') {
-    const existing = graph.findEntityById(proposal.entity.id);
+  // the typed handler error path. Skip the structural existence +
+  // Dice check for edge entities.
+  //
+  // The kind cross-check that used to live here is gone — it is subsumed by
+  // the repair above, which adopts `existing.kind` rather than rejecting a
+  // disagreement with it. `existing` is the same lookup, hoisted so the
+  // repair could run before the registry check; it is reused (not re-run)
+  // so this stays a single graph read.
+  if (graph && effectiveProposal.entity.kind !== 'edge') {
+    const existing = resolvedEntity;
     if (!existing) {
       return {
         valid: false,
@@ -356,32 +463,22 @@ export function validateToolCall(
       };
     }
 
-    // Phase 1.5 P0-1: cross-check proposal.entity.kind against the graph's
-    // actual kind for this id. The earlier accepted_entity_kinds check only
-    // trusts the LLM's claim about the entity. Without this check, an LLM
-    // that hallucinates kind='option' on a factor id would pass validation
-    // and reach the handler targeting the wrong node class.
-    if (existing.kind !== proposal.entity.kind) {
-      return {
-        valid: false,
-        error: {
-          code: 'ENTITY_KIND_MISMATCH',
-          message:
-            `Proposed kind "${proposal.entity.kind}" does not match graph-resolved kind ` +
-            `"${existing.kind}" for id "${proposal.entity.id}"`,
-          details: {
-            entity_id: proposal.entity.id,
-            proposed_kind: proposal.entity.kind,
-            resolved_kind: existing.kind,
-            ...(proposal.entity.label ? { proposed_label: proposal.entity.label } : {}),
-            ...(existing.label ? { resolved_label: existing.label } : {}),
-          },
-        },
-      };
-    }
-
-    if (proposal.entity.resolution_method === 'label_match') {
-      const suspicion = detectSuspiciousLabelMatch(proposal.entity, graph);
+    // Phase 1.5 P0-1's cross-check (`existing.kind !== proposal.entity.kind`
+    // → ENTITY_KIND_MISMATCH) stood here. It is INTENTIONALLY REMOVED, not
+    // lost: the repair above adopts `existing.kind` as the validated kind, so
+    // this comparison is true-by-construction and the hazard it guarded — a
+    // hallucinated kind reaching a handler aimed at the wrong node class — is
+    // now handled by the registry check running against the graph's kind
+    // instead of the model's. Leaving the old branch in place would have been
+    // a condition that can no longer fire.
+    //
+    // The Dice check runs on the REPAIRED entity, so it lists candidates from
+    // the bucket the entity actually lives in. On a mislabelled proposal it
+    // previously listed the wrong bucket, failed to find the chosen id and
+    // returned null — i.e. this guard silently did nothing on exactly the
+    // proposals most likely to be confused. It now discriminates.
+    if (effectiveProposal.entity.resolution_method === 'label_match') {
+      const suspicion = detectSuspiciousLabelMatch(effectiveProposal.entity, graph);
       if (suspicion) return { valid: false, error: suspicion };
     }
   }
@@ -409,11 +506,20 @@ export function validateToolCall(
   //       both `graph` and `findFactorObservedState` are available.
   //       Test mocks that don't expose observed_state still
   //       benefit from (a); they just skip the cap/unit checks.
-  if (proposal.handler_id === 'set_factor_value' && proposal.entity.kind === 'node') {
-    const structuralResult = preexecuteSetFactorValueStructural(proposal);
+  //
+  // Gated on the REPAIRED kind. A proposal the model mislabelled (say
+  // kind 'goal' on a factor id) is now admitted by the registry check, so
+  // gating this precheck on the model's stale label would let a malformed
+  // value skip it and reach the handler — the repair must not open a hole
+  // in a kind-gated check.
+  if (
+    effectiveProposal.handler_id === 'set_factor_value' &&
+    effectiveProposal.entity.kind === 'node'
+  ) {
+    const structuralResult = preexecuteSetFactorValueStructural(effectiveProposal);
     if (structuralResult) return { valid: false, error: structuralResult };
     if (graph && typeof graph.findFactorObservedState === 'function') {
-      const precheckResult = preexecuteSetFactorValue(proposal, graph);
+      const precheckResult = preexecuteSetFactorValue(effectiveProposal, graph);
       if (precheckResult) return { valid: false, error: precheckResult };
     }
   }
@@ -422,7 +528,11 @@ export function validateToolCall(
   // run when graph is available. Handlers whose preconditions don't need
   // graph are still safe (the function ignores the unused arg).
   if (graph && decl.preconditions) {
-    const pre = decl.preconditions({ graph, entity: proposal.entity, parameters: proposal.parameters });
+    const pre = decl.preconditions({
+      graph,
+      entity: effectiveProposal.entity,
+      parameters: effectiveProposal.parameters,
+    });
     if (!pre.ok) {
       return {
         valid: false,
@@ -438,7 +548,13 @@ export function validateToolCall(
     }
   }
 
-  return { valid: true, proposal };
+  // Hand the handler the REPAIRED proposal — the graph's kind, not the
+  // model's guess. `kind_repair` is present only when a repair happened; the
+  // caller logs it so a rise in repairs is visible as a routing-prompt
+  // signal rather than disappearing into a silent success.
+  return kindRepair
+    ? { valid: true, proposal: effectiveProposal, kind_repair: kindRepair }
+    : { valid: true, proposal: effectiveProposal };
 }
 
 function detectSuspiciousLabelMatch(
