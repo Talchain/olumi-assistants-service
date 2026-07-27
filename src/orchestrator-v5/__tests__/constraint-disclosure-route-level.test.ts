@@ -252,12 +252,76 @@ const LEADER_ROBUSTNESS = {
   ],
 };
 
+/**
+ * A THIRD option, opt-in, whose only job is to make the ORDER of
+ * `decision_brief.options[]` measurable.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ WITHOUT IT THE 2026-07-27 ORDERING ASSERTION IS VACUOUS — CLAUDE.md TRAP 13
+ * IN ITS PUREST FORM, AND IT WOULD HAVE SHIPPED GREEN.
+ *
+ * The fix re-orders `options[]` by `option_id` on a withheld turn, so position
+ * stops tracking rank. On this file's two-option graph `opt_hire` (0.72) sorts
+ * BEFORE `opt_hold` (0.28), so identity order and probability order are the
+ * SAME sequence — "the withheld array is not probability-descending" would have
+ * been false-by-construction, i.e. it could never have gone red, on either the
+ * fixed or the unfixed code.
+ *
+ * `opt_contract` sorts FIRST by id and LAST by probability, which is the exact
+ * structural property the live archive has and this graph did not:
+ * `raw-2026-07-27-confirm/caseINF.run.response.json` ranks
+ * `opt_status_quo` (0.6001) first and its id sorts LAST of the three.
+ *
+ *   probability-descending  →  opt_hire 0.72 · opt_hold 0.28 · opt_contract 0.10
+ *   canonical by option_id  →  opt_contract 0.10 · opt_hire 0.72 · opt_hold 0.28
+ *
+ * OPT-IN, so no test written before 2026-07-27 changes what it measures: the
+ * two existing options keep their ids, labels and probabilities exactly, and
+ * `opt_hire` remains the leader at 0.72.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+const THIRD_OPTION = { id: 'opt_contract', label: 'Contract a Freelancer', win: 0.1 } as const;
+
+/**
+ * `decision_brief.options[]` in the LIVE shape: probability-DESCENDING, with an
+ * explicit `rank`.
+ *
+ * Transcribed member-for-member from `caseINF.run.response.json`
+ * (`acceptance-evidence/g-cee-1-constraint-verdict/raw-2026-07-27-confirm/`,
+ * build `7508820`), relabelled onto this file's graph —
+ *
+ *   {"option_id": "opt_status_quo", "label": "Defer and Keep Current Machines
+ *     (Status Quo)", "win_probability": 0.6000833333333333, "rank": 1}
+ *   {"option_id": "opt_dell",    …, "win_probability": 0.21858333333333332, "rank": 2}
+ *   {"option_id": "opt_macbook", …, "win_probability": 0.18133333333333332, "rank": 3}
+ *
+ * — where `WALK-2026-07-27-CONFIRM.md` §6 measured `options[rank == 1]` and
+ * `options[0]` designating the leader on 7 of 7 withheld analysis-bearing
+ * bodies.
+ */
+const RANKED_OPTIONS = [
+  { option_id: 'opt_hire', label: 'Hire Marketing Manager', win_probability: 0.72, rank: 1 },
+  { option_id: 'opt_hold', label: 'Hold', win_probability: 0.28, rank: 2 },
+  {
+    option_id: THIRD_OPTION.id,
+    label: THIRD_OPTION.label,
+    win_probability: THIRD_OPTION.win,
+    rank: 3,
+  },
+];
+
 function plotEnvelope(opts: {
   constraintKey?: string;
   /** Attach the leader-asserting decision_review (see above). */
   withDecisionReview?: boolean;
   /** Attach the leader-asserting decision_brief (see above). */
   withDecisionBrief?: boolean;
+  /**
+   * Add {@link THIRD_OPTION} to `option_comparison` and give `decision_brief`
+   * the matching three-element {@link RANKED_OPTIONS}. See THIRD_OPTION for why
+   * the ordering assertions need it and why it is opt-in.
+   */
+  withThirdOption?: boolean;
   /**
    * Attach the leader-designating `robustness` blob (see above).
    *
@@ -306,12 +370,39 @@ function plotEnvelope(opts: {
     // route-level file reaches the LIVE-FAILING blocks without needing the
     // enricher's LLM call or its default-off await flag.
     ...(opts.withDecisionReview ? { decision_review: LEADER_DECISION_REVIEW } : {}),
-    ...(opts.withDecisionBrief ? { decision_brief: LEADER_DECISION_BRIEF } : {}),
+    ...(opts.withDecisionBrief
+      ? {
+          decision_brief: opts.withThirdOption
+            ? { ...LEADER_DECISION_BRIEF, options: RANKED_OPTIONS }
+            : LEADER_DECISION_BRIEF,
+        }
+      : {}),
     ...(opts.withRobustness ? { robustness: LEADER_ROBUSTNESS } : {}),
     ...(opts.warningCodes && opts.warningCodes.length > 0
       ? { inference_warnings: opts.warningCodes.map((code) => ({ code })) }
       : {}),
+    // ⚠ THE THIRD OPTION GOES FIRST, AND THAT IS FIDELITY, NOT TIDINESS.
+    // `option_comparison` ships in GRAPH order on the live wire, NOT in
+    // probability order: on all 7 withheld bodies of
+    // `raw-2026-07-27-confirm/` it reads 0.219 · 0.181 · 0.600 — unsorted,
+    // with the leader LAST — and `win_probabilities` carries the same key
+    // order. Only `decision_brief.options[]` presents an ordering, and that
+    // asymmetry is the whole of the 2026-07-27 ruling. Appending the third
+    // option instead would have made this roster probability-descending AND
+    // leader-first, i.e. a positional designation the live producer does not
+    // emit, and the derived sweep below correctly reported it as one.
+    // The two-option default is BYTE-UNCHANGED, so no prior test moves.
     option_comparison: [
+      ...(opts.withThirdOption
+        ? [
+            option(
+              THIRD_OPTION.id,
+              THIRD_OPTION.label,
+              THIRD_OPTION.win,
+              opts.constraintProb ?? 0.85,
+            ),
+          ]
+        : []),
       option('opt_hire', 'Hire Marketing Manager', 0.72, opts.constraintProb ?? 0.91),
       option('opt_hold', 'Hold', 0.28, opts.constraintProb ?? 0.88),
     ],
@@ -680,23 +771,26 @@ const LEADING_OPTION_LANGUAGE: readonly RegExp[] = [
   /the result is unchanged/i,
 ];
 
-/** The three states in which the verdict forbids naming a leading option. */
+/**
+ * The three states in which the verdict forbids naming a leading option.
+ *
+ * `opts` is the SAME argument `envelope()` passes, exposed so a later describe
+ * can add a flag (`withThirdOption`) without re-deriving which options select
+ * which verdict. `envelope()` is defined in terms of it, so the two cannot
+ * drift — a second literal copy of these arguments is exactly the
+ * hand-maintained mirror CLAUDE.md trap #12 is about.
+ */
 const WITHHOLDING_STATES = [
   {
     state: 'unevaluated',
-    envelope: () =>
-      plotEnvelope({ constraintsStatus: 'unavailable', warningCodes: ['CONSTRAINT_OUT_OF_DOMAIN'] }),
+    opts: { constraintsStatus: 'unavailable', warningCodes: ['CONSTRAINT_OUT_OF_DOMAIN'] },
   },
-  {
-    state: 'identity_unresolved',
-    envelope: () => plotEnvelope({ constraintKey: 'out_total_cost_<=' }),
-  },
+  { state: 'identity_unresolved', opts: { constraintKey: 'out_total_cost_<=' } },
   {
     state: 'evaluated_infeasible',
-    envelope: () =>
-      plotEnvelope({ constraintKey: 'constraint_out_total_cost_max', constraintProb: 0 }),
+    opts: { constraintKey: 'constraint_out_total_cost_max', constraintProb: 0 },
   },
-] as const;
+].map((entry) => ({ ...entry, envelope: () => plotEnvelope(entry.opts) }));
 
 describe('withhold paths: the coaching tail must not presume a leading option', () => {
   let app: FastifyInstance;
@@ -1401,6 +1495,367 @@ describe('withhold paths: the STRUCTURED leader residue must not reach the wire'
         expect(
           findLeaderClaims(JSON.parse(turn.raw)).map((h) => `${h.path} (${h.code})`),
           'a leading-option claim survived to the wire on a withheld turn',
+        ).toEqual([]);
+      });
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// S9 — ORDINAL AND POSITIONAL DESIGNATION. WALK-2026-07-27-CONFIRM.md §6.
+//
+// THE FINDING, live on 7 of 7 withheld analysis-bearing bodies at build
+// `7508820` and invisible to every instrument ever pointed at this wire:
+//
+//   `decision_brief.options[rank == 1]`  names the leader by LABEL and carries
+//                                        its win probability
+//   `decision_brief.options[0]`          the array ships sorted
+//                                        win-probability-DESCENDING, so
+//                                        position IS the designation with no
+//                                        `rank` field needed
+//
+// Why nothing saw it: S1–S6 is a hand-kept list of five paths with no entry
+// for this one; S7/S8 (`matcher-v4.py`) read KEY NAMES and `rank`, `label`,
+// `win_probability` are innocent names — matcher-v4's own anchor control
+// REQUIRES them to stay innocent, or it would manufacture an over-suppression
+// finding against the deliberately-kept set; every prose tier sees bare labels
+// and bare numbers; and the FINAL walk's derived manifest normalised
+// `options[0]` → `options[]`, found all three options at that path, and
+// classified it a symmetric roster — correct about the PATH, wrong about the
+// OBJECT.
+//
+// THE RULING (A1, 2026-07-27) IS **DESIGNATION vs DATA**, and these tests pin
+// BOTH sides of it, because a gate that only pins the suppression half is one
+// "tighten it" away from deleting the user's analysis:
+//
+//   KEEP     every per-option `win_probability`, `win_probabilities`,
+//            `option_comparison`. Computed facts the user is entitled to. The
+//            verdict withholds a CLAIM, not the simulation's numbers — the same
+//            doctrine that made the UI RELABEL rather than gate its probability
+//            readouts (#493/#494). **The presence assertions below are
+//            load-bearing, not decoration.**
+//   GATE     `rank`. Not a measurement — an ordinal designation, a claim
+//            wearing a number.
+//   NEUTRALISE  the ORDER, by re-sorting on `option_id` so position is a pure
+//            function of identities the payload already ships in full.
+//
+// The two sweeps below (`ordinalDesignations` / `positionalDesignations`) are
+// the in-repo successor to `channel-sweep.py`: DERIVED over the whole
+// serialised envelope rather than aimed at a known path, so the day a new
+// producer ships a ranked array this file goes red instead of a fifth walk
+// finding it. Their non-vacuity control is the `evaluated_feasible` arm, where
+// both fire on exactly the path the walk measured.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Ordinal key names, DELIBERATELY wider than the production predicate. */
+const ORDINAL_VOCAB = [
+  'rank',
+  'ranking',
+  'rank_index',
+  'rank_position',
+  'order',
+  'ordering',
+  'order_index',
+  'position',
+  'ordinal',
+  'placement',
+  'standing',
+  'sequence',
+  'seq',
+  'slot',
+];
+/** Keys whose STRING value says "this object is about that option". */
+const IDENTITY_KEYS = ['option_id', 'id', 'option_label', 'label', 'name', 'key'];
+
+function everyNode(
+  node: unknown,
+  path: string,
+  onObject: (path: string, obj: Record<string, unknown>) => void,
+  onArray: (path: string, arr: unknown[]) => void,
+): void {
+  if (Array.isArray(node)) {
+    onArray(path, node);
+    node.forEach((child, i) => everyNode(child, `${path}[${i}]`, onObject, onArray));
+    return;
+  }
+  if (node !== null && typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+    onObject(path, obj);
+    for (const [k, v] of Object.entries(obj)) everyNode(v, path ? `${path}.${k}` : k, onObject, onArray);
+  }
+}
+
+/**
+ * The leader, and every option identity, derived from
+ * `option_comparison[].win_probability` — VALUE-derived, never read off a field
+ * that claims to name a leader, which would be circular.
+ */
+function optionRoster(raw: string): {
+  leader: Set<string>;
+  others: Set<string>;
+  leaderWin: number;
+} {
+  const comparison = analysisBlockOf(raw).enrichment.option_comparison as Array<
+    Record<string, any>
+  >;
+  const scored = [...comparison].sort((a, b) => b.win_probability - a.win_probability);
+  const names = (o: Record<string, any>) =>
+    new Set<string>([o.option_id, o.id, o.option_label, o.label].filter(Boolean));
+  const others = new Set<string>();
+  for (const o of scored.slice(1)) for (const n of names(o)) others.add(n);
+  return { leader: names(scored[0]!), others, leaderWin: scored[0]!.win_probability };
+}
+
+function singlesOutLeader(obj: Record<string, unknown>, roster: ReturnType<typeof optionRoster>) {
+  const values = IDENTITY_KEYS.map((k) => obj[k]).filter(
+    (v): v is string => typeof v === 'string' && v.length > 0,
+  );
+  return values.some((v) => roster.leader.has(v)) && !values.some((v) => roster.others.has(v));
+}
+
+/** Every object anywhere carrying an ordinal key AND singling out the leader. */
+function ordinalDesignations(raw: string): string[] {
+  const roster = optionRoster(raw);
+  const hits: string[] = [];
+  everyNode(
+    JSON.parse(raw),
+    '',
+    (path, obj) => {
+      for (const key of ORDINAL_VOCAB) {
+        if (!(key in obj)) continue;
+        if (singlesOutLeader(obj, roster)) hits.push(`${path}.${key}=${JSON.stringify(obj[key])}`);
+      }
+    },
+    () => {},
+  );
+  return hits.sort();
+}
+
+/**
+ * Every array anywhere whose POSITION carries the ranking.
+ *
+ * ⚠ THE CRITERION IS SHARPER THAN "LEADER FIRST", AND THE FIRST DRAFT OF THIS
+ * FILE PROVED WHY. A roster in graph order puts the leader at `[0]` whenever
+ * the user happened to create that option first — position determined by a
+ * claim-free key is a COINCIDENCE, not information, and asserting `[]` on
+ * "leader first" would fail on `analysis_ready.options` for a user who typed
+ * their options in a lucky order. Two shapes DO carry the ranking:
+ *
+ *   MONOTONE  the array is sorted by a numeric member common to every element,
+ *             and the element at the sorted extreme singles out the leader.
+ *             That is `decision_brief.options[]` exactly: sorted
+ *             win-probability-descending with the leader at `[0]`.
+ *   SINGLETON the array is bare option identities and the leader is the ONLY
+ *             option in it — `near_tie.tied_option_ids: ['opt_hire']`, which
+ *             fired on 4 bodies of `raw-2026-07-27-final/` before #718 closed
+ *             it. Nothing coincidental about naming one option and no other.
+ */
+function positionalDesignations(raw: string): string[] {
+  const roster = optionRoster(raw);
+  const hits: string[] = [];
+  everyNode(
+    JSON.parse(raw),
+    '',
+    () => {},
+    (path, arr) => {
+      if (arr.length === 0) return;
+      if (arr.every((e) => e !== null && typeof e === 'object' && !Array.isArray(e))) {
+        const records = arr as Array<Record<string, unknown>>;
+        const common = Object.keys(records[0]!).filter((k) =>
+          records.every((r) => typeof r[k] === 'number'),
+        );
+        for (const key of common) {
+          const values = records.map((r) => r[key] as number);
+          if (new Set(values).size < 2) continue; // a constant column orders nothing
+          const desc = values.every((v, i) => i === 0 || values[i - 1]! >= v);
+          const asc = values.every((v, i) => i === 0 || values[i - 1]! <= v);
+          if (!desc && !asc) continue;
+          const extreme = desc ? records[0]! : records[records.length - 1]!;
+          if (singlesOutLeader(extreme, roster)) hits.push(`${path} sorted-by:${key}`);
+        }
+        return;
+      }
+      const strings = arr.filter((e): e is string => typeof e === 'string');
+      if (strings.length !== arr.length) return;
+      if (strings.some((s) => roster.leader.has(s)) && !strings.some((s) => roster.others.has(s))) {
+        hits.push(`${path} singleton-leader`);
+      }
+    },
+  );
+  // Sorted so the manifest assertions do not depend on producer key order.
+  return [...new Set(hits)].sort();
+}
+
+/** `decision_brief.options[]` off the wire. */
+function briefOptionsOf(raw: string): Array<Record<string, any>> {
+  return analysisBlockOf(raw).enrichment.decision_brief.options as Array<Record<string, any>>;
+}
+const isDescending = (xs: number[]) => xs.every((x, i) => i === 0 || xs[i - 1]! >= x);
+
+describe('withhold paths: ORDINAL and POSITIONAL designation must not reach the wire', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => app.close());
+  beforeEach(() => {
+    setTestSink(() => {});
+    routeWithToolUseMock.mockReset();
+    routeWithToolUseMock.mockResolvedValue(routedRunAnalysis());
+    plotResponse = plotEnvelope({});
+    priorTurns = [];
+    priorFacts = [];
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.clearAllMocks();
+  });
+
+  describe('POSITIVE CONTROLS — evaluated_feasible keeps the ordinal AND the ordering', () => {
+    const feasible = () =>
+      plotEnvelope({
+        constraintKey: 'constraint_out_total_cost_max',
+        withDecisionBrief: true,
+        withRobustness: true,
+        withThirdOption: true,
+      });
+
+    it('the ranked options ride the wire in full on a permitted run', async () => {
+      // Without this, every absence below would pass on a turn that shipped no
+      // `options` array at all — the over-suppressing "fix" that ships green
+      // while costing the user the comparison.
+      plotResponse = feasible();
+      const options = briefOptionsOf((await runAnalysisTurn(app)).raw);
+
+      expect(options.map((o) => o.rank)).toEqual([1, 2, 3]);
+      expect(options.map((o) => o.option_id)).toEqual(['opt_hire', 'opt_hold', 'opt_contract']);
+      expect(options.map((o) => o.win_probability)).toEqual([0.72, 0.28, 0.1]);
+      expect(isDescending(options.map((o) => o.win_probability))).toBe(true);
+    });
+
+    it('BOTH SWEEPS SEE IT, AND SEE NOTHING ELSE — a COMPLETE manifest', async () => {
+      // TESTING-DISCIPLINE rule 1 / CLAUDE.md trap 13: an absence assertion must
+      // first prove it can see a PRESENCE. These two sweeps are derived over the
+      // whole envelope, so "they found nothing on a withheld turn" is worth
+      // exactly as much as this control and no more.
+      //
+      // EXACT EQUALITY, not `toContain`, so this is a MANIFEST rather than a
+      // spot check: on a permitted turn `decision_brief.options[]` is the ONLY
+      // ordinal and the ONLY rank-carrying position in the entire envelope,
+      // which is what makes "zero on the withheld arm" a measurement. A second
+      // ranked producer appearing anywhere fails HERE, in the direction of
+      // discovery, before it can fail silently on the withheld side.
+      plotResponse = feasible();
+      const raw = (await runAnalysisTurn(app)).raw;
+
+      expect(ordinalDesignations(raw)).toEqual([
+        'blocks[0].enrichment.decision_brief.options[0].rank=1',
+      ]);
+      // TWO entries, and the second is the sweep earning its keep:
+      // `near_tie.tied_option_ids: ['opt_hire']` is the singleton shape that
+      // fired on 4 bodies of `raw-2026-07-27-final/` and that #718 closed on
+      // withheld turns. It is CORRECT here — this is the permitted arm — and
+      // its presence proves the singleton branch is live rather than dead code
+      // that would never have caught a regression.
+      expect(positionalDesignations(raw)).toEqual([
+        'blocks[0].enrichment.decision_brief.options sorted-by:win_probability',
+        'blocks[0].enrichment.robustness.near_tie.tied_option_ids singleton-leader',
+      ]);
+    });
+  });
+
+  for (const { state, opts } of WITHHOLDING_STATES) {
+    describe(`${state}`, () => {
+      // The state's own verdict-selecting arguments, plus the third option.
+      // Nothing about which constraint is scored, or how, is restated here.
+      const withRanked = () => ({
+        ...plotEnvelope({ ...opts, withThirdOption: true, withDecisionBrief: true }),
+        robustness: LEADER_ROBUSTNESS,
+      });
+
+      it('(g) the ORDINAL is gone — no `rank` survives on the serialised bytes', async () => {
+        plotResponse = withRanked();
+        const turn = await runAnalysisTurn(app);
+        for (const option of briefOptionsOf(turn.raw)) {
+          expect(option.rank, 'an options[] element still carries its rank').toBeUndefined();
+        }
+        // …and off the SERIALISED bytes, not merely off one parsed path. The
+        // `"` in the needle is what keeps `priority_rank` / `importance_rank`
+        // out of it — those rank CARDS and FACTORS and are untouched.
+        expect(turn.raw).not.toContain('"rank":');
+      });
+
+      it('(g) the ORDER is neutralised — position no longer tracks probability', async () => {
+        // `options[0]` WAS the leader with no rank field needed. It is now the
+        // canonical-by-identity first element, which on this graph is the
+        // LOWEST-probability option — see THIRD_OPTION for why a two-option
+        // fixture could not have measured this.
+        plotResponse = withRanked();
+        const options = briefOptionsOf((await runAnalysisTurn(app)).raw);
+
+        expect(options.map((o) => o.option_id)).toEqual(['opt_contract', 'opt_hire', 'opt_hold']);
+        expect(isDescending(options.map((o) => o.win_probability))).toBe(false);
+        const top = Math.max(...options.map((o) => o.win_probability));
+        expect(options[0]!.win_probability, 'options[0] is still the leader').not.toBe(top);
+      });
+
+      it('(g) ⚠ ANTI-OVER-SUPPRESSION: every PROBABILITY is still there', async () => {
+        // THE LOAD-BEARING HALF OF THE RULING. Gating these would delete a
+        // computed fact the user is entitled to; the verdict withholds the
+        // CLAIM, not the numbers. Every other assertion in this describe would
+        // still be green if the whole array had been dropped, and this is what
+        // stops that being called a fix.
+        plotResponse = withRanked();
+        const turn = await runAnalysisTurn(app);
+        const options = briefOptionsOf(turn.raw);
+
+        expect(options).toHaveLength(3);
+        expect([...options.map((o) => o.win_probability)].sort()).toEqual([0.1, 0.28, 0.72]);
+        expect(options.map((o) => o.label).sort()).toEqual([
+          'Contract a Freelancer',
+          'Hire Marketing Manager',
+          'Hold',
+        ]);
+        for (const option of options) {
+          expect(typeof option.win_probability, `${option.option_id} lost its probability`).toBe(
+            'number',
+          );
+          expect(typeof option.option_id).toBe('string');
+        }
+        // The whole roster is on the wire beside it, unprojected.
+        expect(analysisBlockOf(turn.raw).win_probabilities['Hire Marketing Manager']).toBe(0.72);
+        expect(analysisBlockOf(turn.raw).enrichment.option_comparison).toHaveLength(3);
+        // …and the deliberately-kept scalar the walk flagged (§6 channel 4).
+        // Traced to ISL `robustness_analyzer_v2.py:2739` / PLoT
+        // `routes/v2/run.ts:2794`: it is the leader's win probability under a
+        // name that implies calibration. A LABEL defect owned by the ISL→PLoT
+        // contract, not a designation — it names no option.
+        expect(analysisBlockOf(turn.raw).enrichment.robustness.confidence).toBe(0.72);
+      });
+
+      it('(g) THE DERIVED SWEEP: no ordinal designation anywhere in the envelope', async () => {
+        // Not "the path I know about is clean" — every object at every depth,
+        // against a vocabulary wider than the production predicate's.
+        plotResponse = withRanked();
+        const turn = await runAnalysisTurn(app);
+        expect(
+          ordinalDesignations(turn.raw),
+          'an ordinal designation survived to the wire on a withheld turn',
+        ).toEqual([]);
+      });
+
+      it('(g) THE DERIVED SWEEP: no leader-first array anywhere in the envelope', async () => {
+        // Every array at every depth, objects and bare strings alike — the two
+        // shapes `channel-sweep.py` could not reach (it collected only
+        // all-dict arrays and required a `win_probability` on every element).
+        plotResponse = withRanked();
+        const turn = await runAnalysisTurn(app);
+        expect(
+          positionalDesignations(turn.raw),
+          'a leader-first array survived to the wire on a withheld turn',
         ).toEqual([]);
       });
     });

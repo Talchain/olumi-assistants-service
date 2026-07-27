@@ -33,7 +33,9 @@ import { keyDesignatesLeadingOption } from '../leading-option-egress-guard.js';
 import {
   WITHHELD_DROPPED_ANALYSIS_SUMMARY_MEMBERS,
   WITHHELD_DROPPED_NEAR_TIE_MEMBERS,
+  WITHHELD_DROPPED_OPTION_MEMBERS,
   WITHHELD_LEADER_DESIGNATING_KEYS_OBSERVED,
+  keyDesignatesOrdinalPosition,
   projectTransportEnrichmentForWithheldClaim,
 } from '../withheld-claim-projection.js';
 
@@ -53,9 +55,22 @@ function archivedLeakingEnrichment(): Record<string, unknown> {
         goal_fit: 0,
         robustness_band: 'fragile',
       },
+      /**
+       * THREE options, probability-DESCENDING, each with an explicit `rank` —
+       * the live shape (`WALK-2026-07-27-CONFIRM.md` §6, 7/7 withheld bodies).
+       *
+       * ⚠ THE THIRD IS NOT PADDING. The fix re-orders by `option_id`, and on
+       * `opt_hire` (0.72) / `opt_hold` (0.28) alone the identity order and the
+       * probability order are the SAME sequence — so "the withheld array is not
+       * probability-descending" could never have gone red, on fixed or unfixed
+       * code (CLAUDE.md trap 13). `opt_contract` sorts FIRST by id and LAST by
+       * probability, which is the structural property the archive has
+       * (`opt_status_quo` leads at 0.6001 and its id sorts last of the three).
+       */
       options: [
         { option_id: 'opt_hire', label: 'Hire Marketing Manager', win_probability: 0.72, rank: 1 },
         { option_id: 'opt_hold', label: 'Hold', win_probability: 0.28, rank: 2 },
+        { option_id: 'opt_contract', label: 'Contract a Freelancer', win_probability: 0.1, rank: 3 },
       ],
       top_drivers: [{ factor_label: 'Hiring pipeline health', sensitivity: 0.23 }],
       robustness: 'fragile',
@@ -155,6 +170,89 @@ describe('the leader-designating KEY vocabulary is shared, derived, and anchored
   });
 });
 
+describe('the ORDINAL vocabulary is a family, is separate, and is anchored', () => {
+  // ═════════════════════════════════════════════════════════════════════════
+  // WALK-2026-07-27-CONFIRM.md §6. `decision_brief.options[rank == 1]` named
+  // the leader on 7 of 7 withheld analysis-bearing bodies at build `7508820`.
+  //
+  // WHY A SECOND FAMILY RATHER THAN FOUR CHARACTERS ADDED TO THE FIRST — and
+  // this is the load-bearing design point, not a style choice:
+  //   · `keyDesignatesLeadingOption` is SHARED with the Layer-3 egress alarm,
+  //     whose `scanKey` returns immediately on a non-string. `rank` is a
+  //     NUMBER, so a name added there could never fire — a detector in prose
+  //     only, which is the exact defect this slice also corrects in a comment
+  //     three files away.
+  //   · the ANCHOR CONTROL above asserts `keyDesignatesLeadingOption('rank')`
+  //     is false ON PURPOSE. Both statements have to stay true at once, and
+  //     that is only possible with two readers.
+  // ═════════════════════════════════════════════════════════════════════════
+
+  it('recognises the ordinal the live archive actually shipped', () => {
+    // Provenance: `blocks[].enrichment.decision_brief.options[].rank`, 21
+    // instances across the 7 withheld analysis-bearing bodies of
+    // `raw-2026-07-27-confirm/`, `rank == 1` singling out the leader on every
+    // one.
+    for (const member of WITHHELD_DROPPED_OPTION_MEMBERS) {
+      expect(keyDesignatesOrdinalPosition(member), `${member} must be recognised`).toBe(true);
+    }
+    expect(keyDesignatesOrdinalPosition('rank')).toBe(true);
+  });
+
+  it('recognises ordinals that have NEVER been observed — the property a list has not', () => {
+    // A one-element list would be green today and silent the day PLoT ships
+    // `position: 1` beside `rank` — which is precisely how `analysis_summary`
+    // reached this file, and how S1–S6 read clean over three corpora carrying
+    // the leak (CLAUDE.md trap #12).
+    for (const unseen of [
+      'ranking',
+      'rank_index',
+      'rank_position',
+      'order',
+      'ordering',
+      'order_index',
+      'position',
+      'ordinal',
+      'placement',
+      'standing',
+    ]) {
+      expect(keyDesignatesOrdinalPosition(unseen), `${unseen} must be recognised`).toBe(true);
+    }
+  });
+
+  it('ANCHOR CONTROL: does not read card / factor ordering as an option ranking', () => {
+    // The over-suppression direction, and why every pattern is `^`-anchored.
+    // `priority_rank` orders COACHING CARDS — 67 instances across the withheld
+    // arm of `raw-2026-07-27-confirm/`, not one singling out an option — and
+    // `importance_rank` orders FACTORS. An unanchored `/rank/` would eat both.
+    for (const innocent of [
+      'priority_rank',
+      'importance_rank',
+      'win_probability',
+      'option_id',
+      'option_label',
+      'label',
+      'confidence',
+      'goal_fit',
+      'robustness_band',
+      'switch_probability',
+      'alternative_winner_id',
+    ]) {
+      expect(keyDesignatesOrdinalPosition(innocent), `${innocent} must NOT be flagged`).toBe(false);
+    }
+  });
+
+  it('the two families stay DISJOINT on the names each one anchors', () => {
+    // If `rank` ever entered the leader family, the alarm would list a key it
+    // can never fire on; if an id/label key entered the ordinal family, the
+    // projection would drop the option's identity and leave a probability
+    // belonging to nobody. Both directions pinned.
+    expect(keyDesignatesLeadingOption('rank')).toBe(false);
+    expect(keyDesignatesOrdinalPosition('leading_option')).toBe(false);
+    expect(keyDesignatesOrdinalPosition('recommended_option_id')).toBe(false);
+    expect(keyDesignatesOrdinalPosition('top_option_id')).toBe(false);
+  });
+});
+
 describe('the withheld projection honours every member it declares', () => {
   const projected = () =>
     projectTransportEnrichmentForWithheldClaim(archivedLeakingEnrichment()) as Record<string, any>;
@@ -191,13 +289,73 @@ describe('the withheld projection honours every member it declares', () => {
     const out = projected();
     expect(out.decision_brief.analysis_summary.goal_fit).toBe(0);
     expect(out.decision_brief.analysis_summary.robustness_band).toBe('fragile');
-    expect(out.decision_brief.options).toHaveLength(2);
+    expect(out.decision_brief.options).toHaveLength(3);
     expect(out.decision_brief.top_drivers).toBeDefined();
     expect(out.robustness.near_tie.is_tie).toBe(false);
     expect(out.robustness.near_tie.gap).toBe(0.44);
     expect(out.robustness.confidence).toBe(0.72);
     expect(out.robustness.fragile_edges[0].alternative_winner_label).toBe('Hold');
     expect(out.option_comparison).toHaveLength(2);
+  });
+
+  it('drops the ORDINAL and neutralises the ORDER of options[]', () => {
+    // WALK-2026-07-27-CONFIRM.md §6, both halves of the channel.
+    const out = projected();
+    for (const option of out.decision_brief.options as Array<Record<string, unknown>>) {
+      for (const member of WITHHELD_DROPPED_OPTION_MEMBERS) {
+        expect(option[member], `options[].${member} is declared dropped and is present`).toBeUndefined();
+      }
+    }
+    // Position is now a pure function of `option_id`, so it carries no rank
+    // information. The third fixture option is what makes this measurable —
+    // see the fixture note.
+    expect((out.decision_brief.options as Array<Record<string, unknown>>).map((o) => o.option_id)).toEqual([
+      'opt_contract',
+      'opt_hire',
+      'opt_hold',
+    ]);
+    const wins = (out.decision_brief.options as Array<Record<string, number>>).map(
+      (o) => o.win_probability!,
+    );
+    expect(wins.every((w, i) => i === 0 || wins[i - 1]! >= w), 'still probability-descending').toBe(
+      false,
+    );
+  });
+
+  it('⚠ ANTI-OVER-SUPPRESSION: every option keeps its identity and its probability', () => {
+    // THE LOAD-BEARING HALF OF THE 2026-07-27 RULING. The probabilities are
+    // computed facts the withheld verdict does not withhold; the test above
+    // would be green if the whole array had been dropped, and this is what
+    // stops that being called a fix.
+    const options = projected().decision_brief.options as Array<Record<string, unknown>>;
+    expect(options).toHaveLength(3);
+    expect([...options.map((o) => o.win_probability as number)].sort()).toEqual([0.1, 0.28, 0.72]);
+    for (const option of options) {
+      expect(typeof option.win_probability).toBe('number');
+      expect(typeof option.option_id).toBe('string');
+      expect(typeof option.label).toBe('string');
+    }
+  });
+
+  it('an options[] it cannot re-order is dropped, never shipped in rank order', () => {
+    // We cannot neutralise what we cannot identify, and keeping the survivors
+    // would leave the ordering claim standing on them. Same
+    // we-cannot-show-what-we-cannot-inspect decision the `decision_brief` and
+    // `robustness` branches already make.
+    const noIdentity = projectTransportEnrichmentForWithheldClaim({
+      decision_brief: {
+        brief_id: 'fixture',
+        options: [{ win_probability: 0.72, rank: 1 }, { win_probability: 0.28, rank: 2 }],
+        top_drivers: [],
+      },
+    }) as Record<string, any>;
+    expect('options' in noIdentity.decision_brief).toBe(false);
+    expect(noIdentity.decision_brief.brief_id).toBe('fixture');
+
+    const notAnArray = projectTransportEnrichmentForWithheldClaim({
+      decision_brief: { brief_id: 'fixture', options: 'three' },
+    }) as Record<string, any>;
+    expect('options' in notAnArray.decision_brief).toBe(false);
   });
 
   it('PURE: the caller’s enrichment is not mutated', () => {
@@ -212,6 +370,14 @@ describe('the withheld projection honours every member it declares', () => {
       ((source.decision_brief as Record<string, any>).analysis_summary as Record<string, unknown>)
         .leading_option,
     ).toBe('Hire Marketing Manager');
+    // The options projection builds NEW elements and sorts a NEW array — the
+    // persisted fact keeps its rank and its order. A mutating sort here would
+    // corrupt what CEE knows, not merely what it says.
+    const options = (source.decision_brief as Record<string, any>).options as Array<
+      Record<string, unknown>
+    >;
+    expect(options.map((o) => o.option_id)).toEqual(['opt_hire', 'opt_hold', 'opt_contract']);
+    expect(options[0]!.rank).toBe(1);
   });
 
   it('omits a container rather than shipping an empty one', () => {
