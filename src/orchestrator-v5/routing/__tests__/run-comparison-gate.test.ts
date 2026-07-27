@@ -5,6 +5,7 @@ import {
   tryRunComparisonGate,
   WITHHELD_LEADER_COMPARISON_TEXT,
   WITHHELD_NOTHING_ELSE_CHANGED_TEXT,
+  UNMATCHED_LEADER_IDENTITY_TEXT,
 } from '../run-comparison-gate.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
@@ -502,6 +503,80 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     if (!out.matched) return;
     expect(out.mode).toBe('compared');
     expect(out.leading_option_changed).toBe(false);
+    expect(out.leader_identity_basis).toBe('indeterminate');
     expect(out.assistant_text).not.toContain('leading option has changed');
+    // ⚠ ASSERT WHAT IS SAID, not only what is not. An absence-only assertion
+    // leaves the arm's actual content unpinned — and the arm it reaches emits
+    // an AFFIRMATIVE continuity claim unless it is told not to.
+    expect(out.assistant_text).not.toContain('still leads');
+    expect(out.assistant_text).toContain(UNMATCHED_LEADER_IDENTITY_TEXT);
+  });
+
+  // ⭐ A1 — THE ONE THAT MATTERS. Indeterminate identity is "we cannot tell",
+  // NOT "we checked and it is the same option". Here the leader GENUINELY
+  // changed (Offshore → Onshore) but the earlier run is id-less, so the
+  // comparator must decline — and the composer must not translate that
+  // declining into a confident "nothing changed".
+  it('A1 RED: a legacy prior + an identified current with DIFFERENT leaders makes no continuity claim', () => {
+    const before = runFact(labelOnlyEnvelope([
+      { label: 'Offshore', win: 0.62 },
+      { label: 'Onshore', win: 0.38 },
+    ]));
+    const after = runFact(envelope([
+      { id: 'b', label: 'Onshore', win: 0.70 },
+      { id: 'a', label: 'Offshore', win: 0.30 },
+    ]));
+    const out = ask([after, before]);
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.mode).toBe('compared');
+    expect(out.leader_identity_basis).toBe('indeterminate');
+    // No cross-run leader claim, in EITHER direction.
+    expect(out.assistant_text).not.toContain('still leads');
+    expect(out.assistant_text).not.toContain('leading option has changed');
+    expect(out.assistant_text).not.toContain('came out ahead');
+    // The no-relational-claim form: name this run's leader, say plainly that
+    // the two cannot be lined up.
+    expect(out.assistant_text).toContain('Onshore leads on the latest result.');
+    expect(out.assistant_text).toContain(UNMATCHED_LEADER_IDENTITY_TEXT);
+  });
+
+  it('A1 RED: the MARGIN sentences are suppressed when identity is indeterminate', () => {
+    // "Its lead has widened/narrowed" and "the size of its lead is essentially
+    // unchanged" compare the leads of two possibly-DIFFERENT options.
+    const before = runFact(labelOnlyEnvelope([
+      { label: 'Offshore', win: 0.62 },
+      { label: 'Onshore', win: 0.38 },
+    ]));
+    const after = runFact(envelope([
+      { id: 'b', label: 'Onshore', win: 0.90 },
+      { id: 'a', label: 'Offshore', win: 0.10 },
+    ]));
+    const out = ask([after, before]);
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.assistant_text).not.toContain('lead has widened');
+    expect(out.assistant_text).not.toContain('lead has narrowed');
+    expect(out.assistant_text).not.toContain('size of its lead');
+  });
+
+  it('POSITIVE CONTROL: with ids on BOTH runs the margin sentence is still emitted', () => {
+    // Without this, the suppression assertions above would pass identically
+    // against a composer that never emits a margin sentence at all.
+    const out = ask(TWO_RUNS);
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.leader_identity_basis).toBe('option_id');
+    expect(out.assistant_text).toContain('narrowed');
+  });
+
+  it('A5: the basis reaches the gate result, so telemetry can tell the two falses apart', () => {
+    const identified = ask(TWO_RUNS);
+    expect(identified.matched && identified.leader_identity_basis).toBe('option_id');
+    // Non-comparing modes carry null, like `leading_option_changed`.
+    const stale = tryRunComparisonGate({
+      message: 'What changed?', priorFacts: TWO_RUNS, freshness: 'stale', mayNameLeadingOption: true,
+    });
+    expect(stale.matched && stale.leader_identity_basis).toBeNull();
   });
 });

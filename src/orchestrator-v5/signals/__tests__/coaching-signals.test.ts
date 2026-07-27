@@ -357,6 +357,64 @@ describe('detectCoachingSignal', () => {
       expect(detection?.coaching_text).toContain('Offshore (EU) still leads');
     });
 
+    // ⭐ A1 — the rerun composer has the same affirmative-continuity arms as
+    // the gate ("The result is unchanged: X still leads.", "…its lead has
+    // widened/narrowed"). On an id-less prior run they assert a continuity we
+    // did not verify — here, one that is actually false.
+    it('A1 RED: an id-less prior run with a DIFFERENT leader gets no continuity claim', () => {
+      const labelOnlyEnv = {
+        analysis_status: 'completed',
+        results: [
+          { option_label: 'Offshore', win_probability: 0.62, factor_sensitivity: [] },
+          { option_label: 'Onshore', win_probability: 0.38, factor_sensitivity: [] },
+        ],
+      } as Record<string, unknown>;
+      const currentEnv = runEnvelope({
+        options: [
+          { id: 'b', label: 'Onshore', win: 0.70 },
+          { id: 'a', label: 'Offshore', win: 0.30 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(labelOnlyEnv)],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      const text = detection!.coaching_text;
+      // Neither direction, and no margin movement about two different leaders.
+      expect(text).not.toContain('still leads');
+      expect(text).not.toContain('The result is unchanged');
+      expect(text).not.toContain('led before');
+      expect(text).not.toContain('widened');
+      expect(text).not.toContain('narrowed');
+      // What IS said: this run's leader, and the honest limit.
+      expect(text).toContain('Onshore leads after this re-run');
+      expect(text).toContain('cannot line up');
+      // Copy safety, same as the sibling arms.
+      expect(text).not.toContain('—');
+      expect(text).not.toMatch(/0\.\d/);
+    });
+
+    it('POSITIVE CONTROL: with ids on both runs the continuity copy still fires', () => {
+      // Without this, the absence assertions above would pass against a
+      // composer that never makes a continuity claim at all.
+      const env = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        outcome: runAnalysisOutcomeWithEnvelope(env),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(env)],
+      });
+      expect(detection?.coaching_text).toContain('Offshore still leads');
+    });
+
     it('fires with a NULL contextPack (chip-click path assembles no pack)', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',

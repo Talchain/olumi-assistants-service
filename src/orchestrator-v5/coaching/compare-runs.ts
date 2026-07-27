@@ -187,17 +187,52 @@ export interface RunProjection {
  * different notions by design (see option-result-source.ts "STRATEGY SPLIT").
  * Taking identity from one and the displayed label from the other would let a
  * run report "unchanged" while showing two different labels.
+ *
+ * ⚠ THE CONFIRMATION IS ANCHORED TO THE CROWNED ENTRY, NOT EXISTENTIAL. An
+ * "any entry in this source carries that id" test is defeated by a SIBLING
+ * option whose own `option_id` collides with the id-less leader's
+ * label-fallback:
+ *
+ *     [{ option_label: 'Offshore', win: 0.62 },                    ← crowned, NO id
+ *      { option_id: 'Offshore', option_label: 'Onshore', win: 0.38 }]
+ *
+ * The sibling would vouch for an identity the leader never had, and the
+ * comparison would then report a leader change under basis `option_id` — the
+ * false claim this whole change exists to remove, wearing the badge that says
+ * it was verified.
+ *
+ * So the entry must match the projection on all THREE fields `compactAnalysis`
+ * carries through, which is what makes "this is the record we crowned"
+ * decidable from the outside. The three conditions restate compact's own
+ * passthrough rules, and each is load-bearing (there is a control test per
+ * field):
+ *   - `option_id` — passed through verbatim when present;
+ *   - `option_label` — passed through when present, else compact substitutes
+ *     the id (so an absent raw label means projected label === projected id);
+ *   - `win_probability` — passed through when numeric, else coerced to 0.
+ *     Separates a sibling that collides on BOTH id and label.
  */
 function readLeaderOptionId(
   enrichment: Record<string, unknown>,
   summary: AnalysisResponseSummary,
 ): string | null {
-  const winnerId = summary.winner.option_id;
-  if (winnerId.length === 0) return null;
+  const winner = summary.winner;
+  if (winner.option_id.length === 0) return null;
   for (const entry of winnerOptionResultSource(enrichment)) {
-    if (typeof entry.option_id === 'string' && entry.option_id === winnerId) {
-      return winnerId;
+    if (typeof entry.option_id !== 'string' || entry.option_id !== winner.option_id) {
+      continue;
     }
+    const labelMatches =
+      typeof entry.option_label === 'string'
+        ? entry.option_label === winner.option_label
+        : winner.option_label === winner.option_id;
+    if (!labelMatches) continue;
+    const winMatches =
+      typeof entry.win_probability === 'number'
+        ? entry.win_probability === winner.win_probability
+        : winner.win_probability === 0;
+    if (!winMatches) continue;
+    return winner.option_id;
   }
   return null;
 }

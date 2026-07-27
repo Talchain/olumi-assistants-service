@@ -246,45 +246,39 @@ export function isSuccessfulRunAnalysisFact(fact: HandlerFact): boolean {
  * "degraded analysis" case (analysis ran but partial / blocked / failed)
  * so the explanation handlers can offer the right recovery copy.
  *
- * Sorted by computed_at desc, same convention as `selectRunAnalysisFact`.
+ * Sorted by computed_at desc, same convention as `selectRunAnalysisFact` —
+ * and now BY that convention rather than alongside it.
+ *
+ * ⚠ THIS FUNCTION USED TO CARRY A BYTE-IDENTICAL PRIVATE COPY of the
+ * computed_at-desc / nulls-last comparator, kept in step with the canonical one
+ * by nothing but the sentence above. That is the fourth copy of one ordering
+ * rule in this estate, in the same file as the docstring claiming there was
+ * one — the "two agreeing copies plus a comment asserting they agree" pattern
+ * that CLAUDE.md trap #12 is about, and it made the completeness claim on
+ * {@link selectClaimBearingRunAnalysisFact} false.
+ *
+ * It now takes the ENTITLEMENT ordering (`requireSuccessfulStatus: false` — the
+ * candidate set of all non-noop `run_analysis` facts, which is a superset of
+ * the degraded ones) and filters to the degraded subset AFTER the shared sort.
+ * Filtering a stably-sorted list preserves the relative order of what survives,
+ * so this is order-identical to collect-then-sort — the equivalence is a
+ * property of stable sort, not a coincidence to re-verify.
+ *
  * Returns null when no degraded fact exists.
  */
 export function selectDegradedRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
 ): { readonly fact: HandlerFact; readonly status: string } | null {
-  const candidates: Array<{
-    readonly fact: HandlerFact;
-    readonly status: string;
-    readonly computed_at: string | null;
-  }> = [];
-  for (const fact of priorFacts) {
-    if (!isRunAnalysisFact(fact)) continue;
-    if (fact.noop !== false) continue;
-    const status = readAnalysisStatus(fact.result.enrichment);
-    if (status === null) continue;
-    if (normaliseAnalysisStatus(status) !== null) continue;
-    candidates.push({
-      fact,
-      status,
-      computed_at:
-        typeof fact.result.computed_at === 'string'
-          ? fact.result.computed_at
-          : null,
-    });
+  for (const view of orderRunAnalysisFacts(priorFacts, {
+    requireSuccessfulStatus: false,
+  })) {
+    // "Degraded" = status PRESENT and not normalising to a canonical success.
+    // A missing status is the legacy-success case, not a degradation.
+    if (view.status === null) continue;
+    if (normaliseAnalysisStatus(view.status) !== null) continue;
+    return { fact: view.fact, status: view.status };
   }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => {
-    if (a.computed_at !== null && b.computed_at !== null) {
-      if (a.computed_at < b.computed_at) return 1;
-      if (a.computed_at > b.computed_at) return -1;
-      return 0;
-    }
-    if (a.computed_at !== null) return -1;
-    if (b.computed_at !== null) return 1;
-    return 0;
-  });
-  const top = candidates[0]!;
-  return { fact: top.fact, status: top.status };
+  return null;
 }
 
 /**
@@ -351,9 +345,18 @@ export function selectRunAnalysisFact(
  *   - {@link selectClaimBearingRunAnalysisFact}(entitlement: newest CLAIM-BEARING)
  *   - {@link orderSuccessfulRunAnalysisFactsNewestFirst}
  *       → `coaching/compare-runs.ts:selectTwoNewestRunAnalysisFacts` (the
- *         prior/current PAIR) and `deriveRerunReadiness`'s count.
+ *         prior/current PAIR) and `deriveRerunReadiness`'s count;
+ *       → `signals/coaching-signals.ts:buildRerunDelta`, via
+ *         {@link selectRunAnalysisFact}.
+ *   - {@link selectDegradedRunAnalysisFact}   (the newest DEGRADED fact)
  *
- * ⚠ THAT LAST ONE IS A CORRECTION, NOT A RESTATEMENT. Until #736 the pair
+ * The list is exhaustive as written: no other function in this estate orders
+ * `run_analysis` facts. It was not exhaustive when first written — see the
+ * warning below, and the one on `selectDegradedRunAnalysisFact`, which held a
+ * fourth copy of the comparator in THIS FILE while this paragraph claimed
+ * there was one.
+ *
+ * ⚠ THAT LAST ONE IS A CORRECTION, NOT A RESTATEMENT. Until #738 the pair
  * selector took `filter(isSuccessfulRunAnalysisFact)[0]` and `[1]` — by ARRAY
  * POSITION — so this paragraph's "true by construction" was FALSE of it: a
  * legacy fact carrying no `computed_at` (still "successful") sitting at window

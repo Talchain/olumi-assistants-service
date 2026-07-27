@@ -139,6 +139,22 @@ function composeRerunText(delta: RunDelta | null): string {
     // rerun without claiming a comparison we could not make.
     return 'This was a re-run. It replaces the earlier result as the current analysis.';
   }
+  // ⭐ THE SAME AMENDMENT AS `composeComparison`, and it belongs here for the
+  // same reason: every arm below asserts CONTINUITY between the two runs —
+  // "still leads", "The result is unchanged", "its lead has widened" — and
+  // `leading_option_changed === false` does not mean the leader is the same
+  // option. It also carries the "we could not tell" case, which `compareRuns`
+  // folds into `false` deliberately. Branching on the bare boolean would turn
+  // an honest abstention into a confident "nothing changed" on precisely the
+  // legacy runs where it can be false. Say this run's leader, state the limit,
+  // and make no claim relating the two (margin included: the lead being
+  // compared may belong to a different option).
+  if (delta.leader_identity_basis !== 'option_id') {
+    return (
+      `${delta.current_leading_label} leads after this re-run. I cannot line up `
+      + 'the earlier result with this one, so I have not compared the two.'
+    );
+  }
   if (delta.leading_option_changed) {
     return (
       `This re-run changed the outcome: ${delta.prior_leading_label} led before, `
@@ -290,7 +306,7 @@ function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
  * Prior selection calls `selectRunAnalysisFact` — the canonical newest-first
  * selector the freshness verdict itself is derived from. It used to be
  * `priorFacts.find(isSuccessfulRunAnalysisFact)`: the right PREDICATE but a
- * private ORDERING (first by array position), which is the same drift #736
+ * private ORDERING (first by array position), which is the same drift #738
  * fixed in `selectTwoNewestRunAnalysisFacts` — a legacy fact with no
  * `computed_at`, or any timestamp skew, made this acknowledgment diff against
  * a different "previous run" than the rest of the turn was reasoning about.

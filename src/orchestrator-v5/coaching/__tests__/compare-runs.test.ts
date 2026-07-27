@@ -346,6 +346,47 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
     expect(delta.leading_option_changed).toBe(false);
   });
 
+  // ⚠ The confirmation must be anchored to the CROWNED entry. An EXISTENTIAL
+  // check ("some entry in this source carries that id") is defeated by a
+  // SIBLING option whose own id collides with the id-less leader's
+  // label-fallback — which re-manufactures exactly the false "your leader
+  // changed" F3 exists to remove, now wearing basis `option_id`.
+  it('A3: an id-less leader is NOT confirmed by a SIBLING option carrying that id', () => {
+    const priorEnv = {
+      analysis_status: 'completed',
+      results: [
+        { option_label: 'Offshore', win_probability: 0.62 }, // leader, NO id
+        { option_id: 'Offshore', option_label: 'Onshore', win_probability: 0.38 },
+      ],
+    } as unknown as V2RunResponseEnvelope;
+    const prior = projectEnv(priorEnv);
+    expect(prior.summary.winner.option_label).toBe('Offshore');
+    // compactAnalysis' label fallback makes the projected winner id collide
+    // with the SIBLING's genuine id.
+    expect(prior.summary.winner.option_id).toBe('Offshore');
+    expect(prior.leader_option_id).toBeNull();
+
+    const current = projectEnv(envelope({ options: [
+      { id: 'b', label: 'Onshore', win: 0.62 }, { id: 'a', label: 'Offshore', win: 0.38 }] }));
+    const delta = compareRuns(prior, current);
+    expect(delta.leader_identity_basis).toBe('indeterminate');
+    expect(delta.leading_option_changed).toBe(false);
+  });
+
+  it('A3: nor by a sibling that ALSO shares the leader’s label (win_probability separates them)', () => {
+    // Hardest form: the sibling matches the crowned entry on both id and
+    // label, so only the third field of the anchor can reject it.
+    const priorEnv = {
+      analysis_status: 'completed',
+      results: [
+        { option_label: 'Offshore', win_probability: 0.62 }, // leader, NO id
+        { option_id: 'Offshore', option_label: 'Offshore', win_probability: 0.38 },
+      ],
+    } as unknown as V2RunResponseEnvelope;
+    const prior = projectEnv(priorEnv);
+    expect(prior.leader_option_id).toBeNull();
+  });
+
   it('an id that HAPPENS to equal the label is still a real identity', () => {
     // The structural-coincidence trap: `option_id === option_label` is not
     // evidence of a missing id. Reading the RAW record rather than inferring
