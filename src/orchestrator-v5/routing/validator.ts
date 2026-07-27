@@ -185,12 +185,25 @@ export interface ValidationError {
   readonly details?: Readonly<Record<string, unknown>>;
 }
 
+/** Which proposal-entity attributes the graph overrode. */
+export type RepairedEntityAttribute = 'kind' | 'label';
+
 /**
  * Record of an entity-kind repair (see `validateToolCall`). Present on a
  * successful result ONLY when the routing model's `entity.kind` disagreed
  * with the graph's own kind for that id and the graph's kind was adopted.
  * Observability-only: the caller logs it. Absent on the common path where
  * the model labelled the entity correctly.
+ *
+ * ⚠ THE NAME IS THE POPULATION. This record is produced for KIND repairs
+ * only, so `v5.entity_kind_repaired` keeps the exact population it had when
+ * the staging diagnosis was read off it. A LABEL-only repair also happens
+ * (see `effectiveProposal` below) and deliberately produces NO record: the
+ * label is prose-only, adopting the graph's is strictly more truthful, and
+ * there is no routing-prompt question a label-only signal would answer.
+ * `repaired_attributes` exists so the kind-repair population still discloses
+ * when the model got BOTH wrong — a doubly-confused proposal is a stronger
+ * prompt signal than a kind slip alone, and that was previously invisible.
  */
 export interface EntityKindRepair {
   readonly handler_id: string;
@@ -199,6 +212,14 @@ export interface EntityKindRepair {
   readonly proposed_kind: EntityKind;
   /** What the graph says — the kind actually used for validation. */
   readonly resolved_kind: EntityKind;
+  /**
+   * Attribute names the graph overrode on this proposal, in a stable order.
+   * Always contains 'kind' (see the population note above); contains 'label'
+   * as well when the model's label also disagreed with the graph's. Attribute
+   * NAMES only — never the label values, which are user-authored content and
+   * must not enter the log line (safe_details privacy contract).
+   */
+  readonly repaired_attributes: readonly RepairedEntityAttribute[];
 }
 
 export type ValidationResult =
@@ -352,13 +373,38 @@ export function validateToolCall(
       ? graph.findEntityById(proposal.entity.id)
       : null;
 
+  const kindNeedsRepair = resolvedEntity !== null && resolvedEntity.kind !== proposal.entity.kind;
+
+  // ----- the LABEL is graph-owned too -----
+  //
+  // The same argument that makes the graph authoritative on `kind` makes it
+  // authoritative on `label`: the model emits a label as its own NAME for the
+  // entity it resolved, not as a claim the user made, and we are holding the
+  // real one. Left un-adopted the model's invention reaches user prose — the
+  // turn-executor stamps `factor_label` onto its VALUE_UNIT_UNRESOLVED and
+  // OPTION_INTERVENTION_MISROUTE errors straight from the proposal entity, and
+  // those render through `safeLabel()` into "the {label} factor". We would be
+  // repeating a name that appears nowhere in the user's model back to them as
+  // if it were theirs.
+  //
+  // Adopted ONLY when the graph actually knows a label. `label: null` on a
+  // graph entry is missing data, not ground truth, and blanking a usable
+  // model label in its favour would degrade the same prose (safeLabel would
+  // fall back to "that item").
+  const labelNeedsRepair =
+    resolvedEntity !== null &&
+    typeof resolvedEntity.label === 'string' &&
+    resolvedEntity.label.length > 0 &&
+    resolvedEntity.label !== proposal.entity.label;
+
   const kindRepair: EntityKindRepair | null =
-    resolvedEntity && resolvedEntity.kind !== proposal.entity.kind
+    resolvedEntity && kindNeedsRepair
       ? {
           handler_id: decl.handler_id,
           entity_id: proposal.entity.id,
           proposed_kind: proposal.entity.kind,
           resolved_kind: resolvedEntity.kind,
+          repaired_attributes: labelNeedsRepair ? (['kind', 'label'] as const) : (['kind'] as const),
         }
       : null;
 
@@ -367,9 +413,17 @@ export function validateToolCall(
   // preconditions and the handler all see. Carrying the model's stale label
   // any further would silently skip kind-gated checks (notably the
   // `set_factor_value` value precheck, gated on kind === 'node').
-  const effectiveProposal: ProposalAction = kindRepair
-    ? { ...proposal, entity: { ...proposal.entity, kind: kindRepair.resolved_kind } }
-    : proposal;
+  const effectiveProposal: ProposalAction =
+    resolvedEntity && (kindNeedsRepair || labelNeedsRepair)
+      ? {
+          ...proposal,
+          entity: {
+            ...proposal.entity,
+            ...(kindNeedsRepair ? { kind: resolvedEntity.kind } : {}),
+            ...(labelNeedsRepair ? { label: resolvedEntity.label as string } : {}),
+          },
+        }
+      : proposal;
 
   const effectiveKind = effectiveProposal.entity.kind;
 
@@ -472,13 +526,30 @@ export function validateToolCall(
     // instead of the model's. Leaving the old branch in place would have been
     // a condition that can no longer fire.
     //
-    // The Dice check runs on the REPAIRED entity, so it lists candidates from
+    // The Dice check runs on the REPAIRED KIND, so it lists candidates from
     // the bucket the entity actually lives in. On a mislabelled proposal it
     // previously listed the wrong bucket, failed to find the chosen id and
     // returned null — i.e. this guard silently did nothing on exactly the
     // proposals most likely to be confused. It now discriminates.
+    //
+    // ⚠ BUT IT MUST SEE THE MODEL'S LABEL, NOT THE REPAIRED ONE. The check
+    // scores `bigramDice(entity.label, graphLabelOf(entity.id))` and fires
+    // when some OTHER graph entry scores materially higher. The model's label
+    // is the entire input under judgement: it is the evidence that the
+    // `label_match` resolution picked the right id. Hand it the adopted graph
+    // label and that score is 1.0 by construction, `bestOther - 1 >= 0.15`
+    // can never hold, and ENTITY_RESOLUTION_SUSPICIOUS becomes unreachable —
+    // a guard deleted by a change that reads like an improvement. Pinned by
+    // `resolved-label-adoption.test.ts` ("STILL flags a suspicious label
+    // match after the graph label is adopted").
     if (effectiveProposal.entity.resolution_method === 'label_match') {
-      const suspicion = detectSuspiciousLabelMatch(effectiveProposal.entity, graph);
+      // Repaired kind (right candidate bucket) + the MODEL's own label (the
+      // evidence under judgement). Never `effectiveProposal.entity` wholesale.
+      const diceEntity: ProposalEntity = {
+        ...proposal.entity,
+        kind: effectiveProposal.entity.kind,
+      };
+      const suspicion = detectSuspiciousLabelMatch(diceEntity, graph);
       if (suspicion) return { valid: false, error: suspicion };
     }
   }
@@ -548,10 +619,21 @@ export function validateToolCall(
     }
   }
 
-  // Hand the handler the REPAIRED proposal — the graph's kind, not the
-  // model's guess. `kind_repair` is present only when a repair happened; the
-  // caller logs it so a rise in repairs is visible as a routing-prompt
-  // signal rather than disappearing into a silent success.
+  // Return the REPAIRED proposal — the graph's kind and label, not the
+  // model's guesses. `kind_repair` is present only when a KIND repair
+  // happened; the caller logs it so a rise in repairs is visible as a
+  // routing-prompt signal rather than disappearing into a silent success.
+  //
+  // CALLER CONTRACT (this comment used to say "hand the HANDLER the repaired
+  // proposal", which was not what either caller did — the handler received
+  // the unrepaired object and the discrepancy sat here as an untrue claim):
+  //   • turn-executor.ts — REBINDS its `action` to this proposal immediately
+  //     after a valid verdict, so the handler, and the two validation errors
+  //     the executor itself raises afterwards (VALUE_UNIT_UNRESOLVED,
+  //     OPTION_INTERVENTION_MISROUTE), all see the repaired entity.
+  //   • compound-value-update-chain.ts — uses the result as a VERDICT ONLY.
+  //     It approves the caller's own `CompoundUpdatePart`, never a proposal,
+  //     so there is nothing there for a repaired proposal to flow into.
   return kindRepair
     ? { valid: true, proposal: effectiveProposal, kind_repair: kindRepair }
     : { valid: true, proposal: effectiveProposal };
