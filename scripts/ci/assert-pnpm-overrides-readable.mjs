@@ -28,12 +28,26 @@
  * Run: node scripts/ci/assert-pnpm-overrides-readable.mjs
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { parse } from 'yaml';
 
-const WORKFLOW_DIR = '.github/workflows';
+// Resolve everything from THIS FILE's location, never from the caller's cwd.
+// A checker that silently reads the wrong package.json — or reads nothing and
+// reports success — is the failure mode it exists to catch.
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const WORKFLOW_DIR = join(REPO_ROOT, '.github', 'workflows');
+const PACKAGE_JSON = join(REPO_ROOT, 'package.json');
+const WORKSPACE_YAML = join(REPO_ROOT, 'pnpm-workspace.yaml');
+
+for (const required of [PACKAGE_JSON, WORKSPACE_YAML, WORKFLOW_DIR]) {
+  if (!existsSync(required)) {
+    console.error(`::error::Expected ${required} to exist — is this the repo root?`);
+    process.exit(1);
+  }
+}
 
 /** pnpm majors >= this read overrides from pnpm-workspace.yaml, not package.json. */
 const WORKSPACE_SETTINGS_MAJOR = 10;
@@ -46,8 +60,8 @@ const errors = [];
 // ---------------------------------------------------------------------------
 // 1. Derive WHERE the overrides live.
 // ---------------------------------------------------------------------------
-const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-const workspace = parse(readFileSync('pnpm-workspace.yaml', 'utf8')) ?? {};
+const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf8'));
+const workspace = parse(readFileSync(WORKSPACE_YAML, 'utf8')) ?? {};
 
 const pkgOverrides = pkg?.pnpm?.overrides ?? null;
 const wsOverrides = workspace?.overrides ?? null;
