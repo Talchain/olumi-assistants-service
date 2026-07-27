@@ -67,11 +67,11 @@ import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
-  selectRunAnalysisFact,
 } from '../context/freshness.js';
-// T1 claim safety — READ the verdict the run_analysis handler stamped on the
-// fact. This file never derives it (CLAUDE.md trap #12).
-import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
+// T1 claim safety — THE shared fact-array read (ROADMAP 1.233). This file
+// neither derives the verdict nor re-implements the read (CLAUDE.md trap #12);
+// it calls the one function turn-executor's two read points call.
+import { readMayNameLeadingOptionForFacts } from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
@@ -969,13 +969,22 @@ export async function dispatchChipClickRunAnalysis(
         // the SAME canonical selector the routed path uses. Never re-derived
         // (CLAUDE.md trap #12). No fact ⇒ `true` (this turn withheld nothing);
         // a fact with no stamp ⇒ `readMayNameLeadingOption` fails CLOSED.
-        mayNameLeadingOption: ((): boolean => {
-          const selected = selectRunAnalysisFact([...enrichedFacts, ...context.prior_facts]);
-          if (selected === null) return true;
-          return selected.fact.fact_type === 'run_analysis'
-            ? readMayNameLeadingOptionFromResult(selected.fact.result)
-            : true;
-        })(),
+        //
+        // 2026-07-27 — this used to be an INLINE IIFE that was line-for-line the
+        // body of `readMayNameLeadingOptionForFacts`: same selector, same
+        // `null ⇒ true`, same `fact_type` narrow, same result reader, same input
+        // array. Identical behaviour, and that is the point — the shared reader's
+        // own docstring promises "a future third caller gets the same answer by
+        // construction rather than by a reviewer noticing", and this WAS that
+        // third caller, obtaining the right answer by copy instead. A copy is a
+        // hand-maintained mirror (trap #12): the day the shared reader's defaults
+        // change, this exit keeps the old ones and reads as green. Calling it is
+        // what makes the chip-click exit's permission the same permission by
+        // construction.
+        mayNameLeadingOption: readMayNameLeadingOptionForFacts([
+          ...enrichedFacts,
+          ...context.prior_facts,
+        ]),
       };
     } catch (err) {
       log.error(

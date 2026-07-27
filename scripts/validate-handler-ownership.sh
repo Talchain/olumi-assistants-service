@@ -171,30 +171,57 @@ if [ -z "$ENRICHMENT_OK" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6b. The CEE-owned claim-safety stamp is the ONLY post-validation edit
+# 6b. The claim-safety verdict is written INSIDE the validated fact — and
+#     nothing is bolted onto enrichment after validation.
 #
-# T1 claim safety (2026-07-26) added ONE CEE-owned key to the fact's
-# enrichment: `__cee_claim_safety`, the run_analysis handler's record of the
-# constraint verdict ("may a leading option be named"). It is applied AFTER
-# `RunAnalysisHandlerFactSchema.safeParse`, so §6 above still sees — and still
-# enforces — the untouched byte-for-byte pass-through.
+# ⚠ REWRITTEN 2026-07-27 BECAUSE THIS CHECK HAD GONE VACUOUS IN UNDER 24 HOURS.
 #
-# The correct home is a first-class `constraint_verdict` field on
-# `RunAnalysisResultSchema`, which is `.strict()` in the vendored
-# `@talchain/schemas`; adding it needs a package release blocked behind
-# V5-CI-01. Same wall, and the same `__`-channel workaround, as
-# `HandlerOutcome.__validation_beat`.
+# #710 (2026-07-26) carried the constraint verdict as a post-validation stamp on
+# `result.enrichment.__cee_claim_safety`, applied by a helper
+# `stampClaimSafetyOnEnrichment`, and pinned "applied exactly once" by counting
+# references to that helper. #712 — the SAME NIGHT — moved the verdict to the
+# first-class `result.constraint_verdict` field (schemas 0.25.0) and DELETED the
+# helper. The count check was left behind: with zero references `STAMP_COUNT`
+# was 0, `0 -gt 2` is false, and the guard PASSED BY POLICING A SYMBOL THAT NO
+# LONGER EXISTS. Trap 13 (an absence assertion that never proved it could see a
+# presence) and trap 14 (the comment still said the typed field was "blocked
+# behind V5-CI-01" — unblocked by #712) in one block, inside a gate wired into
+# validate-prepush.sh.
 #
-# This guard pins the exception to exactly that ONE key, so a future
-# post-validation edit to enrichment — a second CEE key, or an un-namespaced
-# one — fails HERE rather than quietly eroding the pass-through invariant into
-# "the handler may add whatever it likes after validation".
-STAMP_HELPER='stampClaimSafetyOnEnrichment'
-STAMP_COUNT=$(grep -c "$STAMP_HELPER(" "$HANDLER_FILE" || true)
-# 1 import + 1 call site.
-if [ "$STAMP_COUNT" -gt 2 ]; then
-  fail "result.enrichment is stamped more than once (found $STAMP_COUNT ${STAMP_HELPER} references)" \
-    'The claim-safety stamp is applied EXACTLY ONCE, at the single deriveConstraintVerdict call.'
+# It is replaced rather than deleted: the underlying invariant — the verdict is
+# CEE-owned, written ONCE, and never smuggled into the PLoT pass-through — is
+# still real, it just has a new mechanism. Every check below FAILS ON ZERO, so
+# "the thing I police no longer exists" is now RED, not green.
+
+# (i) NON-VACUITY + exactly-once: the verdict is a first-class field on the
+#     fact, written inside the single safeParse. Zero occurrences fails.
+VERDICT_WRITE='constraint_verdict: projectClaimSafety(constraintVerdict),'
+VERDICT_COUNT=$(grep -cF "$VERDICT_WRITE" "$HANDLER_FILE" || true)
+if [ "$VERDICT_COUNT" -ne 1 ]; then
+  fail "the claim-safety verdict is not written exactly once (found $VERDICT_COUNT)" \
+    "Expected exactly one '$VERDICT_WRITE' in $HANDLER_FILE.
+0 means the mechanism this check polices has MOVED — do not leave this guard
+counting a symbol that no longer exists (that is the defect this block replaced).
+Re-derive where the verdict is written and re-point the check.
+>1 means two derivations can disagree inside one response (CLAUDE.md trap #12)."
+fi
+
+# (ii) The post-validation enrichment bolt must not come back. Matched on the
+#      COMMENT-STRIPPED view: run-analysis.ts legitimately DISCUSSES the old
+#      `__cee_claim_safety` channel in prose (and the read-side ramp in
+#      constraint-feasibility.ts still honours facts persisted under it), so a
+#      raw grep here would fail on a docstring.
+ENRICHMENT_STAMP_WRITES=$(
+  node "$STRIPPER" --scan "__cee_claim_safety" "$HANDLER_FILE" 2>/dev/null \
+  || true
+)
+if [ -n "$ENRICHMENT_STAMP_WRITES" ]; then
+  fail 'run_analysis handler writes the claim-safety stamp onto enrichment' \
+    "$ENRICHMENT_STAMP_WRITES
+The verdict is a first-class \`result.constraint_verdict\` field since schemas
+0.25.0 and is validated by the handler's single safeParse. Writing it onto
+\`enrichment\` re-opens the post-validation edit that §6 exists to forbid, and
+splits the verdict across two homes that can disagree."
 fi
 
 UNNAMESPACED_ENRICHMENT_WRITES=$(
@@ -205,8 +232,9 @@ if [ -n "$UNNAMESPACED_ENRICHMENT_WRITES" ]; then
   fail 'run_analysis handler spreads into result.enrichment inline' \
     "$UNNAMESPACED_ENRICHMENT_WRITES
 Enrichment must stay the verbatim PLoT pass-through at schema-validation time.
-The ONLY permitted addition is the post-validation ${STAMP_HELPER} stamp, which
-namespaces its key as CEE-owned (\`__cee_\`). See CEE_CLAIM_SAFETY_ENRICHMENT_KEY."
+CEE-owned fields (graph_hash_at_run, computed_at, constraint_verdict) are
+declared members of RunAnalysisResultSchema — put new ones there, never in
+enrichment."
 fi
 
 # ---------------------------------------------------------------------------
