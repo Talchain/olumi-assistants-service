@@ -474,7 +474,37 @@ const rule_P6: PatternRule = {
 };
 
 // ---- P6b directional_absolute ----------------------------------------------
-
+//
+// PERCENTAGE OWNERSHIP — read before touching the trailing `(?!\s*%)`.
+//
+// The lookahead was evidently written to keep percentages out of P6b and
+// leave them to P6, per CQE Design v1.1 §4.2's "Must NOT contain % (P6
+// territory)" guard. IT DOES NOT DO THAT, because it sits AFTER the optional
+// `(${UNIT})` group and UNIT itself includes `%`. When UNIT consumes the `%`
+// the lookahead is evaluated past it, is trivially satisfied, and P6b matches
+// the percentage anyway. (It is not entirely inert — it still rejects a
+// doubled "5%%" — so it is left in place rather than deleted on a
+// coverage-only argument.)
+//
+// P6b therefore DOES own a real slice of percentage territory, and the fix is
+// to normalise rather than to decline, because P6 cannot take that slice:
+// P6_REGEX requires a mandatory `\s+by\s+`, whereas P6b's `by` is optional.
+// So "grew 5%" / "raise it 5%" / "grow revenue 5%" are outside P6 by
+// construction, and P9's guard (see rule_P9) explicitly refuses any `N%`
+// preceded by a direction verb. Making the lookahead work as intended would
+// hand those strings to the compromise backstop, which returns the right
+// NUMBER but drops `operator` and `direction` and downgrades `source` to
+// 'compromise' — the exact "lower-fidelity substitute re-claims the span"
+// failure that extract-quantities.ts §5 exists to prevent. Measured both
+// ways; see PR for the table.
+//
+// CONVENTION (uniform across every rule that emits `unit: 'percentage'`):
+// the VALUE is always stored as a FRACTION and `unit` is metadata. The
+// consumer depends on this — `mapCqeQuantityToProposalValue` in
+// routing/deterministic-value-update.ts multiplies by 100 to recover user
+// units ("CQE pre-divides by 100"). `percentage_points` is the deliberate
+// exception and stays a raw count; the same consumer passes it through
+// unscaled.
 const P6B_REGEX = new RegExp(
   `\\b(${DIRECTION_UP_VERB}|${DIRECTION_DOWN_VERB})(?:\\s+[a-z][a-z\\s-]{0,30}?)?\\s+(?:by\\s+)?(?:(?:${APPROX})\\s+)?(?:(${CURRENCY_SYMBOL}))?(${NUM})\\s*(${SUFFIX})?(?:\\s*(${UNIT}))?(?!\\s*%)`,
   'gi',
@@ -495,7 +525,14 @@ const rule_P6b: PatternRule = {
       if (direction === 'set') return null;
       let unit = normaliseUnit(rawUnit);
       if (currSym) unit = normaliseCurrencyUnit(currSym);
-      const value = applySuffix(num, suffix);
+      let value = applySuffix(num, suffix);
+      // Fraction convention, as every sibling that can emit `percentage`
+      // does (P1, P2, P3, P6, P7, P7c, P9, P11, P12). P6b was the only
+      // rule emitting `unit: 'percentage'` with an un-normalised value —
+      // a silent 100x that survived into `parsed_quantities` and was
+      // deterministically appliable to the user's graph. NOT applied to
+      // `percentage_points`, which is a raw count by design.
+      if (unit === 'percentage') value = value / 100;
       const isCut = direction === 'down';
       const verbLower = verb.toLowerCase();
       const isAddVerb = /^add/i.test(verbLower);

@@ -7,14 +7,29 @@
  * unmasked and got re-claimed by a LOWER-FIDELITY substitute, which emitted
  * a DIFFERENT NUMBER with full confidence and normal `source`. Measured:
  *
- *   "increase by about 10%"  0.1        -> 10          (100x)   P6  -> P6b
+ *   "reduce to 5%"           set        -> decrement   (op flip) P12 -> P6b
+ *   "from £50k to £70k"      [50k..70k] -> 50k, 70k    (collapse) P11 -> P8
  *   "USD 1.2bn"              1200000000 -> 1.2         (1e-9x)  P8  -> compromise
  *
- * Note the two substitution paths differ: the first is a lower-priority CQE
- * RULE taking the span (source stays 'cqe'), the second is the compromise
- * backstop. Neither is visible to a guard keyed on quantity COUNT or on
- * `source` — for THESE TWO cases the count is unchanged and the first never
- * leaves 'cqe'.
+ * Note the substitution paths differ: the first two are lower-priority CQE
+ * RULES taking the span (source stays 'cqe'), the third is the compromise
+ * backstop. Neither kind is reliably visible to a guard keyed on quantity
+ * COUNT or on `source`: the operator-flip case changes neither (nor even the
+ * value), and the collapse case never leaves 'cqe'.
+ *
+ * ⚠ HISTORY — the first row used to read
+ *     "increase by about 10%"  0.1 -> 10  (100x)  P6 -> P6b
+ * and that row was retired (ROADMAP 1.235), NOT because the degradation
+ * class went away but because the 100x was never a property of degradation
+ * at all. It was a defect in P6b, which assigned `unit: 'percentage'` and
+ * never applied the `/100` every sibling applies — so P6b returned 5 for
+ * "5%" on the HEALTHY path too, with every rule running and
+ * `degraded === false`. This file framing it as degraded-only is what let it
+ * survive: the number looked like evidence FOR the degradation pin, so
+ * nobody asked whether P6b was simply wrong. Fixed at source; pinned on the
+ * healthy path in extract-quantities.p6b-percentage.test.ts. The arm was
+ * re-pointed at a substitution that still corrupts, never relaxed to match
+ * the new value.
  *
  * The class is wider than the two cases pinned here. Adversarial review
  * found 6-9 rules affected across at least four corruption modes, and they
@@ -148,22 +163,65 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
       // budget can trip and confound the comparison.
       const { restore } = withFrozenClock();
       try {
-        const pct = __runExtractionForTesting('increase by about 10%', {
-          forceTimeoutPatterns: new Set(['P6']),
-        });
-        expect(pct.results.map((r) => r.value)).toEqual([10]); // 100x wrong
-        expect(pct.results[0]!.source).toBe('cqe'); // NOT compromise — a rule did this
-        // Count UNCHANGED *in this mode* — which is why an arity guard is
-        // blind here. (Other modes DO change it; see the file header.)
-        expect(pct.results).toHaveLength(1);
-        expect(pct.summary.degraded).toBe(true); // ...but provenance sees it
-
         const bn = __runExtractionForTesting('USD 1.2bn', {
           forceTimeoutPatterns: new Set(['P8']),
         });
         expect(bn.results.map((r) => r.value)).toEqual([1.2]); // 1e-9x wrong
         expect(bn.results[0]!.source).toBe('compromise');
         expect(bn.summary.degraded).toBe(true);
+
+        // RANGE COLLAPSE, and note `source` never leaves 'cqe' — one range
+        // quantity becomes two point quantities, both claimed by a
+        // lower-priority RULE. A `source` guard is blind to this.
+        const range = __runExtractionForTesting('from £50k to £70k', {
+          forceTimeoutPatterns: new Set(['P11']),
+        });
+        expect(range.results.map((r) => r.value)).toEqual([50_000, 70_000]);
+        expect(range.results.map((r) => r.source)).toEqual(['cqe', 'cqe']);
+        expect(range.summary.degraded).toBe(true);
+      } finally {
+        restore();
+      }
+    });
+
+    it('OPERATOR FLIP: count, value and source ALL unchanged — only provenance sees it', () => {
+      // ---------------------------------------------------------------
+      // This arm replaces the "increase by about 10%" P6 -> P6b arm, which
+      // used to assert `[10]` — a 100x substitute. That number was NOT a
+      // property of degradation; it was a defect IN P6b, which assigned
+      // `unit: 'percentage'` and never divided by 100. P6b was wrong on the
+      // HEALTHY path too, with every rule running (ROADMAP 1.235, pinned in
+      // extract-quantities.p6b-percentage.test.ts). Fixing it at source
+      // makes P6b a faithful substitute for P6 on that string — measured
+      // byte-identical — so keeping the arm and merely relaxing `[10]` to
+      // `[0.1]` would have left a control that asserts the substitute
+      // agrees with the original, i.e. a control that can no longer fail
+      // for the reason it exists. It is re-pointed rather than relaxed.
+      //
+      // The replacement is strictly STRONGER than the arm it replaces. It
+      // keeps every property that made the old arm worth having — count
+      // unchanged, `source` still 'cqe' — and adds one: the VALUE is
+      // byte-identical too, so a magnitude heuristic is blind as well.
+      // Only `summary.degraded` distinguishes it.
+      // ---------------------------------------------------------------
+      const { restore } = withFrozenClock();
+      try {
+        const undisturbed = runExtraction('reduce to 5%');
+        expect(undisturbed.results.map((r) => r.operator)).toEqual(['set']);
+        expect(undisturbed.summary.degraded).toBe(false);
+
+        const flipped = __runExtractionForTesting('reduce to 5%', {
+          forceTimeoutPatterns: new Set(['P12']),
+        });
+        // Same count, same value, same source, same unit...
+        expect(flipped.results).toHaveLength(undisturbed.results.length);
+        expect(flipped.results.map((r) => r.value)).toEqual([0.05]);
+        expect(flipped.results.map((r) => r.source)).toEqual(['cqe']);
+        expect(flipped.results.map((r) => r.unit)).toEqual(['percentage']);
+        // ...but "set it to 5%" has silently become "reduce it BY 5%".
+        expect(flipped.results.map((r) => r.operator)).toEqual(['decrement']);
+        // The one signal that catches it.
+        expect(flipped.summary.degraded).toBe(true);
       } finally {
         restore();
       }
