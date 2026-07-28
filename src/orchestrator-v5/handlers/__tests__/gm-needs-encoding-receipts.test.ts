@@ -91,7 +91,11 @@ describe('HOLD side — buildNeedsEncodingAddNotice', () => {
     expect(notice).not.toBeNull();
     expect(notice).toContain("'Acquire Small German Competitor'");
     expect(notice).toContain('no effect values yet');
-    expect(notice).toContain('blocked');
+    // ROADMAP 2.117: the disclosure must state the ACTUAL outcome. It used to
+    // assert 'blocked'; since #747 the option is scaffolded and scored, so
+    // asserting a block here would re-pin the untruth this fix removed.
+    expect(notice).toContain('provisional placeholder values');
+    expect(notice).not.toMatch(/\bblock/i);
   });
 
   it('stays silent when the add requests interventions (copy byte-identical)', () => {
@@ -160,7 +164,10 @@ describe('APPLY side — receipt + chips', () => {
     const receipt = buildGmHeldAppliedReceipt(["add 'Acquire Small German Competitor' and 4 more changes"], labels);
     expect(receipt).toContain('Confirmed:');
     expect(receipt).toContain("'Acquire Small German Competitor' does not have effect values yet");
-    expect(receipt).toContain('the analysis cannot run until they are set');
+    // ROADMAP 2.117 — was 'the analysis cannot run until they are set'; #747
+    // scaffolds the option instead, so the receipt states inclusion.
+    expect(receipt).toContain('provisional placeholder values');
+    expect(receipt).not.toMatch(/cannot run/i);
 
     const chips = buildGmHeldAppliedChips(NEEDS_ENCODING);
     expect(chips).toEqual([buildConfigureOptionChip('Acquire Small German Competitor')]);
