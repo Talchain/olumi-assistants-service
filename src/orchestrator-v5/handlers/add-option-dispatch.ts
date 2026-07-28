@@ -184,8 +184,8 @@ export function dispatchAddOptionTransaction(
   // the referee gate's held copy does not carry. The UNCONFIGURED case is
   // DELIBERATELY not re-disclosed here (C4): the gate's held copy already emits
   // the 2.11 needs-encoding notice for a factor-linkless option add
-  // ("...has no effect values yet, so Olumi will include it using provisional
-  // placeholder values..." — 2.117), so appending
+  // ("...has no effect values yet. Tell me what it changes and I'll write in
+  // the real numbers." — prediction-free per 2.117 round 2), so appending
   // `buildUnconfiguredOptionsNotice` too would state it TWICE. The
   // gate's structural heads-up fires exactly when there are no factor links,
   // which is precisely `configured === false` here (one factor edge per value),
