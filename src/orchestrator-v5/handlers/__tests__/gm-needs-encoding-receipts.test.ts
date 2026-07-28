@@ -91,11 +91,14 @@ describe('HOLD side — buildNeedsEncodingAddNotice', () => {
     expect(notice).not.toBeNull();
     expect(notice).toContain("'Acquire Small German Competitor'");
     expect(notice).toContain('no effect values yet');
-    // ROADMAP 2.117: the disclosure must state the ACTUAL outcome. It used to
-    // assert 'blocked'; since #747 the option is scaffolded and scored, so
-    // asserting a block here would re-pin the untruth this fix removed.
-    expect(notice).toContain('provisional placeholder values');
+    // ROADMAP 2.117 round 2: the disclosure states the FACT and the remedy,
+    // and forecasts the outcome in NEITHER direction. It asserted 'blocked'
+    // (false post-#747), then 'will include … placeholder values' (#748,
+    // falsified by IDENTICAL_OPTIONS_DEDUPED on the next live capture).
+    // Pinning either would re-pin an untruth.
+    expect(notice).toContain("I'll write in the real numbers");
     expect(notice).not.toMatch(/\bblock/i);
+    expect(notice).not.toMatch(/will include/i);
   });
 
   it('stays silent when the add requests interventions (copy byte-identical)', () => {
@@ -164,10 +167,13 @@ describe('APPLY side — receipt + chips', () => {
     const receipt = buildGmHeldAppliedReceipt(["add 'Acquire Small German Competitor' and 4 more changes"], labels);
     expect(receipt).toContain('Confirmed:');
     expect(receipt).toContain("'Acquire Small German Competitor' does not have effect values yet");
-    // ROADMAP 2.117 — was 'the analysis cannot run until they are set'; #747
-    // scaffolds the option instead, so the receipt states inclusion.
-    expect(receipt).toContain('provisional placeholder values');
+    // ROADMAP 2.117 round 2 — was 'the analysis cannot run until they are
+    // set', then #748's 'will include … placeholder values'. Both were
+    // outcome predictions and both were falsified live. The receipt now
+    // states the fact and the remedy only.
+    expect(receipt).toContain("I'll write in the real numbers");
     expect(receipt).not.toMatch(/cannot run/i);
+    expect(receipt).not.toMatch(/will include/i);
 
     const chips = buildGmHeldAppliedChips(NEEDS_ENCODING);
     expect(chips).toEqual([buildConfigureOptionChip('Acquire Small German Competitor')]);

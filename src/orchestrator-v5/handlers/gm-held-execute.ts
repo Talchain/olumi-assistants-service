@@ -124,23 +124,29 @@ export function buildGmHeldAppliedReceipt(
  * edit lane without the LLM router — pinned by
  * configure-option-copy-detector-contract.test.ts.
  *
- * ⚠ ROADMAP 2.117 — this notice used to say "the analysis cannot run until
- * they are set". Since #747 that is FALSE: `run_analysis` scaffolds these
- * options with provisional placeholder values and completes with them
- * scored (live-proven 28 Jul, JOURNEY-PROOF step 3 captured the old, now
- * untrue sentence). The disclosure and the deterministic remedy stay; the
- * block prediction is replaced by what actually happens.
+ * ⚠⚠ ROADMAP 2.117 — PREDICTION-FREE BY DESIGN. This notice states the fact
+ * and names the deterministic remedy. It must NOT forecast what the analysis
+ * will do with the option, in EITHER direction. Two generations were
+ * falsified live, in opposite directions:
  *
- * Soundness of the placeholder promise on this path: labels come from
- * `deriveUnconfiguredOptionLabels` (status !== 'ready'), which carries no
- * intent filter of its own — but the P0-A configure-or-don't-persist gate
- * (`orchestrator/tools/edit-graph.ts`) rejects an ADD that requests an
- * intervention it cannot encode NUMERICALLY, so a newly-added persisted
- * option is either numeric (`ready`, never named here) or value-free and
- * therefore scaffoldable. Note also that option STATUS is not a proxy for
- * scaffoldability — an edge-less option is stamped `needs_user_mapping` yet
- * IS scaffolded via the sibling comparison basis — so this copy must not be
- * split on status.
+ *   gen 1  "…so the analysis cannot run until they are set."  → FALSE
+ *          post-#747 (JOURNEY-PROOF step 3 captured it): the option is
+ *          scaffolded and the run proceeds.
+ *   gen 2  "…so Olumi will include it using provisional placeholder values."
+ *          (#748) → FALSE on the next live re-capture: the value-free option
+ *          collapsed onto the baseline and the engine removed it,
+ *          `IDENTICAL_OPTIONS_DEDUPED`. It was never scored.
+ *
+ * The outcome is draft-dependent, and dedup fires DOWNSTREAM of the scaffold
+ * — so even `will_scaffold_options: true` does not license an inclusion
+ * promise. Disclosing what actually happened is the analysis result's job.
+ *
+ * Two further facts, kept because they cost real time to establish and would
+ * otherwise be re-derived: labels here come from `deriveUnconfiguredOptionLabels`
+ * (status !== 'ready') with no intent filter, and option STATUS is not a proxy
+ * for scaffoldability — an edge-less option is stamped `needs_user_mapping`
+ * yet IS scaffolded via the sibling comparison basis. So this copy must not be
+ * split on status either.
  */
 export function buildUnconfiguredOptionsNotice(
   unconfiguredOptionLabels: readonly string[],
@@ -153,9 +159,7 @@ export function buildUnconfiguredOptionsNotice(
       ? first
       : `${first} and ${labels.length - 1} more option${labels.length - 1 === 1 ? '' : 's'}`;
   return (
-    `Note: ${named} ${labels.length === 1 ? 'does' : 'do'} not have effect values yet, ` +
-    `so Olumi will include ${labels.length === 1 ? 'it' : 'them'} using provisional ` +
-    `placeholder values. ` +
+    `Note: ${named} ${labels.length === 1 ? 'does' : 'do'} not have effect values yet. ` +
     `Say 'configure the ${labels[0]} option' and tell me what ` +
     `${labels.length === 1 ? 'it' : 'each one'} changes, and I'll write in the real numbers.`
   );

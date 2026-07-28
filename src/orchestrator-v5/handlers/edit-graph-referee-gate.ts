@@ -379,24 +379,31 @@ export function buildGmProtectedHeldAssistantText(
  * A2→A4) was that the user learned it only two turns later, from a recovery
  * chip that used to loop.
  *
- * ⚠ ROADMAP 2.117 — WHAT it says changed, because the OUTCOME changed. This
- * copy used to predict that "the analysis will stay blocked after this is
- * applied until you set them", which was true while PLoT preflight
- * 422-blocked the whole analysis on `options_not_configured`. Since #747 it
- * is FALSE for exactly the options this notice names: `run_analysis`
- * SCAFFOLDS them with provisional placeholder values, the run gate stays
- * enabled, and the option is scored (live-proven 28 Jul —
- * THREE-SURFACE-PROOF §P3). It also contradicted the results panel, which
- * discloses that placeholder reliance honestly. The disclosure stays; the
- * false prediction is replaced by what actually happens.
+ * ⚠⚠ ROADMAP 2.117 — THIS COPY IS PREDICTION-FREE BY DESIGN. It states a
+ * fact that is true at proposal time and names the remedy. It must NOT
+ * forecast what the analysis will do with the option, in EITHER direction.
+ * That rule was learned twice, the hard way:
  *
- * The placeholder promise is SOUND for what this builder names, not a new
- * over-claim: the scaffolder declines an option that carries user
- * intervention INTENT, and the label filter below skips exactly those via
- * `optionIdsAddedWithInterventionIntent` — the same classifier
- * `scaffold-unconfigured-options.ts` consults. (Its remaining conditions —
- * a projectable neutral target and ≥1 configured sibling — are not modelled
- * here; see the 2.117 evidence note.)
+ *   gen 1  "…so the analysis will stay blocked after this is applied until
+ *           you set them."  → FALSE post-#747: the option is scaffolded, the
+ *           gate stays enabled, the analysis runs.
+ *   gen 2  "…so Olumi will include it using provisional placeholder values."
+ *           (#748) → FALSE on the next live re-capture: the value-free option
+ *           scaffolds onto the baseline, collides with "Defer Replacement
+ *           (Status Quo)", and the engine REMOVES it —
+ *           `IDENTICAL_OPTIONS_DEDUPED`. It was never scored.
+ *
+ * gen 2 replaced a false NEGATIVE prediction with a false POSITIVE one. The
+ * outcome is DRAFT-DEPENDENT and at least three independent mechanisms can
+ * suppress inclusion — no projectable neutral target, no configured sibling,
+ * and post-scaffold dedup against the baseline (the third fires AFTER the
+ * scaffold, so `will_scaffold_options: true` does not imply the option
+ * survives to be scored). None of them is knowable here.
+ *
+ * Whether the option ended up scored on placeholders or deduped away is the
+ * ANALYSIS RESULT's disclosure, not the consent ask's. Pinned by
+ * `needs-encoding-copy-prediction-free.test.ts`, whose detector is symmetric
+ * and carries BOTH historical sentences as positive controls.
  *
  * Detection derives from `optionIdsAddedWithInterventionIntent` — the SAME
  * intent classifier the edit pipeline's configure-or-don't-persist gate
@@ -437,9 +444,7 @@ export function buildNeedsEncodingAddNotice(
       ? first
       : `${first} and ${labels.length - 1} more option${labels.length - 1 === 1 ? '' : 's'}`;
   return (
-    `Heads up: ${named} ${labels.length === 1 ? 'has' : 'have'} no effect values yet, ` +
-    `so Olumi will include ${labels.length === 1 ? 'it' : 'them'} using provisional ` +
-    'placeholder values. ' +
+    `Heads up: ${named} ${labels.length === 1 ? 'has' : 'have'} no effect values yet. ` +
     `Tell me what ${labels.length === 1 ? 'it' : 'each one'} changes and I'll write in ` +
     'the real numbers.'
   );
