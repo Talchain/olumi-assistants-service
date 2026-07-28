@@ -128,6 +128,8 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
     HERE,
     '../routing/post-analysis-label-intercept.ts',
   ),
+  // ROADMAP 1.346 — the value-carrying inspector edit's compose site.
+  'system-events/factor-value-edit.ts': resolve(HERE, '../system-events/factor-value-edit.ts'),
 };
 
 /**
@@ -558,12 +560,45 @@ const POST_ANALYSIS_LABEL_INTERCEPT_SITES: Readonly<Record<string, RegisteredSit
   },
 };
 
+/**
+ * `src/orchestrator-v5/system-events/factor-value-edit.ts` — brought into scope
+ * 2026-07-28 (ROADMAP 1.346), on the commit that created the file. The derived
+ * domain test caught it on its first run, which is the mechanism working.
+ */
+const FACTOR_VALUE_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
+  'outcome.assistant_text': {
+    stance: 'structural',
+    why:
+      'ONE site. The value is the `set_factor_value` handler\'s own receipt, passed straight ' +
+      'through as `confirmation`. That text is assembled DETERMINISTICALLY in ' +
+      'tools/handlers/set-factor-value.ts from `formatFactorChange` / `formatFactorValueSet` / ' +
+      '`formatFactorValueUnchanged` over the target factor\'s label and its before/after ' +
+      'user-unit values, plus at most two module constants (STALENESS_NARRATIVE and the ' +
+      'cap-change scale note). The handler declares `llm_calls_used: 0` and makes no LLM call, ' +
+      'so no model-authored prose can reach this key. ' +
+      'IT CANNOT ASSERT A LEADER. The only graph label it interpolates is the label of the ' +
+      'ONE factor the user edited — named by id from the wire event, never selected by rank — ' +
+      'and `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS` is `[\'factor\']`, so the interpolated ' +
+      'label can never be an OPTION\'s. The sentence carries no comparison, no ordering, no ' +
+      'probability and no margin. That is a stronger derivation than the add-risk echo already ' +
+      'registered structural, which interpolates two labels without a kind restriction. ' +
+      'The route threads `mayNameLeadingOption: true` on the system_event exit, and on this ' +
+      'path that is honest for the same reason: the dispatch runs no analysis, so it withheld ' +
+      'no verdict. ' +
+      'SCOPE NOTE so a later reader does not think it was missed: the REFUSAL branches of this ' +
+      'file do not reach this key — they compose via `composeRecoverableValidationResponse` / ' +
+      '`composeRecoverableHandlerResponse`, whose own copy lives in ' +
+      'compose/validation-failure-responses.ts and is keyed where that file is scanned.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
   'handlers/chip-click-dispatch.ts': CHIP_CLICK_DISPATCH_SITES,
   'compose/edit-clarify-response.ts': EDIT_CLARIFY_SITES,
   'routing/post-analysis-label-intercept.ts': POST_ANALYSIS_LABEL_INTERCEPT_SITES,
+  'system-events/factor-value-edit.ts': FACTOR_VALUE_EDIT_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -790,7 +825,7 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // used `assistant_text:` and was therefore always keyable — it was
     // unregistered for a different reason (nobody had derived its stance), and
     // conflating the two exclusions is what this count prevents.
-    expect(compared, 'the re-key comparison compared nothing').toBe(35);
+    expect(compared, 'the re-key comparison compared nothing').toBe(36);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -931,13 +966,14 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // as covering more than it measures. Both figures are DERIVED from source on
     // every run; only the expectation is written down.
     const sites = enumerateAllScannedSites(sources);
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(36);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(32);
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(37);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(33);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/edit-clarify-response.ts',
       'handlers/chip-click-dispatch.ts',
       'route-v2.ts',
       'routing/post-analysis-label-intercept.ts',
+      'system-events/factor-value-edit.ts',
       'turn-executor.ts',
     ]);
   });

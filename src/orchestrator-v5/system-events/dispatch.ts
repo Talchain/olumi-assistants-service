@@ -31,9 +31,17 @@ import type {
   SystemEventKindLiteral,
 } from '@talchain/schemas/boundary';
 
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
+import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
+import { loadPersistedGraphStrict } from '../build-turn-context.js';
+import { getSessionStore } from '../session/index.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
+import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
+import { applyFactorValueEdit } from './factor-value-edit.js';
 
 export type SystemEventCommitSkipReason = 'client_only_event';
 
@@ -51,27 +59,53 @@ export interface DispatchSystemEventResult {
    *     the event).
    *
    *   patch_accepted / direct_graph_edit
-   *     Graph-MUTATING. The current dispatch produces only a silent
-   *     acknowledgement and has no post-mutation graph snapshot in scope,
-   *     so analysisReady stays undefined here too. The UI is responsible
-   *     for invalidating `ceeAnalysisReady` locally on these events
-   *     (per `invalidateAnalysisReady()` in DecisionGuideAI canvas store).
-   *     If a future change exposes the post-mutation graph at this layer,
-   *     populate this field from `computeStructuralReadiness` so the wire
-   *     refreshes readiness atomically with the mutation acknowledgement.
+   *     Graph-MUTATING in the client, but this dispatch produces only a
+   *     silent acknowledgement and has no post-mutation graph snapshot in
+   *     scope, so analysisReady stays undefined here too. The UI is
+   *     responsible for invalidating `ceeAnalysisReady` locally on these
+   *     events (per `invalidateAnalysisReady()` in DecisionGuideAI canvas
+   *     store).
+   *
+   *   factor_value_edit
+   *     Graph-mutating ON THE SERVER, and the one kind that populates this
+   *     field. It carries the VALUE, so the dispatch can run the real
+   *     `set_factor_value` mutation, commit the graph, and re-derive
+   *     readiness from the COMMITTED bytes via `computeStructuralReadiness`
+   *     — which is exactly the "future change" the paragraph above
+   *     anticipated. Readiness is derived post-commit, never pre-, so it can
+   *     never describe a graph that failed to land.
    *
    * Type is `AnalysisReadyPayload | undefined` (not literal `undefined`)
    * so future implementations can populate it without a type-shape change.
    */
   readonly analysisReady?: AnalysisReadyPayload;
   /**
-   * Graph for the central egress sanitiser. Always `null` here as a
-   * deliberate documented choice: system-event acknowledgement responses
-   * have empty `assistant_text` and no blocks, so the sanitiser is a no-op
-   * regardless. If a future change exposes a post-mutation graph at this
-   * layer (see `analysisReady` jsdoc above), populate it here too.
+   * Graph for the central egress sanitiser.
+   *
+   * `null` for the acknowledgement kinds — their `assistant_text` is empty
+   * and they carry no blocks, so the sanitiser has nothing to scrub.
+   *
+   * NON-NULL FOR `factor_value_edit`. That kind ships real prose ("Updated
+   * Marketing budget from £40,000 to £50,000.") through
+   * `sanitiseOlumiResponseForEgress`, whose entity-id leak scrub resolves ids
+   * to labels AGAINST THIS GRAPH. Passing `null` does not SKIP the scrub — it
+   * runs graph-free, and a graph-free scrub cannot tell an ambiguous
+   * single-segment id (`goal_revenue`) from an English compound
+   * (`goal_setting`), so it leaves those intact.
+   *
+   * ⚠ HONEST SCOPE OF THE EVIDENCE. That paragraph is REASONED FROM THE SCRUB'S
+   * SOURCE, NOT PINNED BY A TEST HERE. A mutation check confirmed it: forcing
+   * this field back to `null` leaves all 13 tests in
+   * `route-v2-factor-value-edit.test.ts` GREEN. The reason is that the wire
+   * `graph_hash` is now stamped explicitly from the commit's own persisted hash
+   * (see `dispatchFactorValueEdit`), so the sanitiser no longer needs this
+   * graph to derive it — which removed the coverage this field used to get for
+   * free. The remaining justification is the id scrub, and this suite's
+   * fixtures have clean labels, so they cannot discriminate it. Treat the
+   * non-null as CORRECT-BUT-UNPINNED: if you are adding a leak-shaped fixture,
+   * that is the test this field is missing.
    */
-  readonly graph: null;
+  readonly graph: GraphV3T | null;
 }
 
 export interface DispatchSystemEventParams {
@@ -134,6 +168,16 @@ export async function dispatchSystemEvent(
     };
   }
 
+  // ── the one VALUE-CARRYING kind ──────────────────────────────────────────
+  // Everything above and below this block is unchanged for every other kind:
+  // a value-less event still gets the byte-identical silent acknowledgement it
+  // got before. That is the reader-first compatibility guarantee — a CEE on
+  // this version behaves exactly as before for every client that has not yet
+  // learned to send `factor_value_edit`.
+  if (payload.event.kind === 'factor_value_edit') {
+    return await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
+  }
+
   try {
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
@@ -169,5 +213,226 @@ export async function dispatchSystemEvent(
       'V5 system event commit failed',
     );
     return { response, commitPerformed: false, graph: null };
+  }
+}
+
+/**
+ * `factor_value_edit` — run the real mutation, commit it, and stamp readiness.
+ *
+ * The shape mirrors the turn-executor's own write chokepoint, and the ORDER is
+ * the part that matters:
+ *
+ *   1. load the persisted graph STRICTLY (throws on a degraded read — never
+ *      guess at a base, because guessing is how you clobber a server model);
+ *   2. run the existing validator + handler (no mutation code lives here);
+ *   3. commit the merged graph with a CAS expected-base;
+ *   4. ONLY THEN derive readiness, from the graph that actually landed.
+ *
+ * Step 4 after step 3 is deliberate: deriving readiness pre-commit once shipped
+ * a post-mutation hash paired with pre-mutation interventions.
+ */
+async function dispatchFactorValueEdit(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'factor_value_edit' }>,
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  try {
+    persistedGraph = await loadPersistedGraphStrict(payload.scenario_id);
+  } catch (err) {
+    // Fail CLOSED. A degraded read gives no trusted merge base, so writing
+    // anything risks clobbering a model we cannot see. Surface it as a failed
+    // commit; the route maps that to a typed 500 rather than a false success.
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 factor_value_edit — persisted-graph read failed; refusing the write (fail closed)',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  const priorFacts = await readPriorFactsQuietly(payload.scenario_id, requestId);
+
+  const result = await applyFactorValueEdit({
+    payload,
+    event,
+    requestId,
+    persistedGraph,
+    priorFacts,
+  });
+
+  // ── the refusal path ─────────────────────────────────────────────────────
+  // An above-cap value, an unknown target, an inconsistent scale: all land
+  // here. The turn IS committed (the transcript should record that the user
+  // tried and was refused) but NO graph is written, so `scenarios.graph` is
+  // untouched and `graph_hash` does not move. Never a silent clamp, never a 500.
+  if (result.kind === 'refused') {
+    try {
+      await commitDirectAnswer(result.response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        coaching_state: null,
+      });
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          refusal_reason: result.reason,
+          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+        },
+        'V5 factor_value_edit — refusal commit failed',
+      );
+      return { response: result.response, commitPerformed: false, graph: null };
+    }
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        refusal_reason: result.reason,
+      },
+      'V5 factor_value_edit refused — committed honestly, no graph written',
+    );
+    return { response: result.response, commitPerformed: true, graph: null };
+  }
+
+  // ── the mutation path ────────────────────────────────────────────────────
+  let persistedAnalysisGraphHash: string | null = null;
+  try {
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const commitResult = await commitDirectAnswer(result.response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      // A handler ran and produced facts. Claiming `direct_answer` with a
+      // populated `handler_facts` would misreport the turn to every consumer
+      // that keys off turn_class.
+      turn_class: 'handler',
+      handler_id: 'set_factor_value',
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      // THE LINE THE WHOLE CHANGE IS ABOUT. `commitDirectAnswer` writes
+      // scenarios.graph atomically with the turn row when — and only when —
+      // this key is present, and RECOMPUTES the authoritative graph_hash from
+      // the persisted bytes. Omitting it is precisely the old behaviour whose
+      // symptom was a hash that never moved.
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      ...(cas.expectedGraphIdentityHash !== null
+        ? { expectedGraphIdentityHash: cas.expectedGraphIdentityHash }
+        : {}),
+      ...(cas.expectedGraphAnalysisHash !== null
+        ? { expectedGraphAnalysisHash: cas.expectedGraphAnalysisHash }
+        : {}),
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        target_id: event.target_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 factor_value_edit — mutation commit failed',
+    );
+    // commitPerformed:false with no recognised skip reason ⇒ the route returns
+    // a typed 500. Correct: nothing landed, and saying otherwise would tell the
+    // UI to show a change that does not exist.
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      target_id: event.target_id,
+    },
+    'V5 factor_value_edit committed — graph written, hash recomputed',
+  );
+
+  // ⚠ ADVERTISE THE PERSISTED HASH, NOT ONE WE COMPUTED OURSELVES.
+  //
+  // `commitDirectAnswer` runs `projectGraphForPersistence` on the way to the
+  // store (it repairs the graph, normalises option-intervention contracts and
+  // reconciles top-level options), so the bytes that land are NOT the bytes we
+  // handed it. Letting the egress sanitiser hash OUR copy advertises a hash the
+  // next turn will never read back — the UI would compare its
+  // `computed_against_hash` against a value that never existed and conclude
+  // "stale" (or "fresh") on a fiction. That is the same class of defect as the
+  // frozen hash this change exists to fix, so it is not a nicety.
+  //
+  // `persistedAnalysisGraphHash` is documented as "the only hash a caller may
+  // advertise for this turn" (commit.ts:347-352). The sanitiser's
+  // `response.graph_hash ?? compute(opts.graph)` precedence exists for exactly
+  // this "authoritative upstream setter" case, so setting it here wins.
+  //
+  // Caught by `route-v2-factor-value-edit.test.ts` — the wire hash and the hash
+  // of the graph the store received disagreed until this was threaded.
+  const response: OlumiResponse =
+    persistedAnalysisGraphHash !== null
+      ? { ...result.response, graph_hash: persistedAnalysisGraphHash }
+      : result.response;
+
+  return {
+    response,
+    commitPerformed: true,
+    // Post-commit, from the graph that landed.
+    analysisReady: computeStructuralReadiness(result.graph),
+    // Still the full graph: the egress id-leak scrub resolves ids to labels
+    // against it, independently of the hash above.
+    graph: result.graph,
+  };
+}
+
+/**
+ * Prior facts drive one thing here: whether `set_factor_value` appends its
+ * staleness narrative ("This makes the last analysis stale."). A failed read
+ * must not fail the edit — the worst case is a receipt missing one sentence, so
+ * this degrades to `[]` and says so in the log rather than throwing.
+ */
+async function readPriorFactsQuietly(
+  scenarioId: string,
+  requestId: string,
+): Promise<readonly HandlerFact[]> {
+  try {
+    const store = getSessionStore();
+    const recent = await store.readRecent(scenarioId);
+    const rowIds = recent
+      .map((t: { readonly id?: unknown }) => t.id)
+      .filter((id): id is string => typeof id === 'string');
+    if (rowIds.length === 0) return [];
+    return await store.readFactsFor(rowIds);
+  } catch (err) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 factor_value_edit — prior-fact read failed; proceeding without the staleness narrative',
+    );
+    return [];
   }
 }
