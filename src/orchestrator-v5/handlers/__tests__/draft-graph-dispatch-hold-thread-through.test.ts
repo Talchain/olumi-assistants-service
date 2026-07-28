@@ -168,6 +168,11 @@ beforeEach(() => {
     // §3.2: the analysis hash of the bytes actually written. This echo mock
     // persists nothing, so `null` is the honest value.
     persistedAnalysisGraphHash: null,
+    // Same reasoning, same honest value: the bytes actually written. Added when
+    // `CommitResult` gained `persistedGraph` so a caller can derive from the
+    // COMMITTED graph rather than its own pre-projection copy. An echo mock
+    // writes nothing, so there are no committed bytes to hand back.
+    persistedGraph: null,
     pendingLifecycle: {
       priorCount: 0,
       consumedCount: 0,
