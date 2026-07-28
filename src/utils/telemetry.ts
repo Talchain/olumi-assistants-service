@@ -1773,6 +1773,7 @@ export const TelemetryEvents = {
   //   - selected_action_type: 'explain_results' | 'what_would_flip' | null
   V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
 
+
   // V5 P0 stabilisation — bounded routing-failure fallback.
   //
   // Fires when the routing call returns a "model output failed" error

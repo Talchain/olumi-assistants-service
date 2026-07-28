@@ -275,7 +275,7 @@ describe('turn-executor — bounded-recovery copy honours the freshness VERDICT,
 
     expect(findPreHandlerFreshnessEvent()?.data.freshness).toBe('fresh');
     expect(result.response.assistant_text).toBe(
-      "I couldn't complete that turn cleanly, but your current analysis is still available.",
+      "I couldn't complete that turn cleanly, but your current analysis is still available."
     );
     const actionTypes = result.response.suggested_actions.map((a: { action_type?: string }) => a.action_type);
     expect(actionTypes).toContain('explain_results');

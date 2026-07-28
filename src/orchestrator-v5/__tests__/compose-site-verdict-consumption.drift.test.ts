@@ -966,6 +966,16 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // as covering more than it measures. Both figures are DERIVED from source on
     // every run; only the expectation is written down.
     const sites = enumerateAllScannedSites(sources);
+    //
+    // ⚠ 2026-07-28 (ROADMAP 2.104) — these went 37 -> 38 -> 37 WITHIN ONE PR,
+    // and the round trip is worth recording. A withheld-why guard added a
+    // compose site; three adversarial rounds then showed its question
+    // recogniser could not be made precise (a restrictive-modifier generator
+    // over-captured 35/35 of its own TRUE POSITIVES), so the guard was deleted
+    // and the reason moved to a finaliser hook that APPENDS to whatever the
+    // turn already said. A finaliser hook mutates `response.assistant_text`
+    // directly and is not a compose site at all — which is why the count
+    // returns to its pre-PR value even though the behaviour is strictly wider.
     expect(sites.length, 'total compose SITES across every scanned file').toBe(37);
     expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(33);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([

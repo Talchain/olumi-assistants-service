@@ -104,10 +104,11 @@
  */
 
 import { textAssertsLeadingOption } from './leading-option-egress-guard.js';
-import { buildConstraintDisclosureFromState } from '../coaching/constraint-gap-disclosure.js';
-import type {
-  ConstraintVerdictState,
-  RatifiedConstraint,
+import { composeWithheldReasonTail } from './withheld-reason-tail.js';
+import {
+  MAY_NAME_LEADING_OPTION,
+  type ConstraintVerdictState,
+  type RatifiedConstraint,
 } from '../../orchestrator/context/constraint-feasibility.js';
 
 /**
@@ -166,19 +167,64 @@ export interface WithheldExplanationProjection {
  * @param state       the persisted verdict state, or `null` when unreadable.
  * @param constraints the ratified constraints, read from the same persisted
  *                    `goal_constraints` the original derivation read.
+ * @param conditionsAreCurrent whether those constraints describe the SAME graph
+ *                    the verdict was derived against — i.e. the analysis is
+ *                    `fresh`. See {@link WithheldExplanationProjection} and the
+ *                    note below for why this is required rather than defaulted.
  */
 export function projectExplanationAnswerForWithheldClaim(
   answerText: string,
   state: ConstraintVerdictState | null,
   constraints: readonly RatifiedConstraint[],
+  conditionsAreCurrent: boolean,
 ): WithheldExplanationProjection {
   const original = typeof answerText === 'string' ? answerText : '';
 
-  // The disclosure, in the SAME copy the first run emitted. Empty for a state
-  // with nothing to disclose, and for a state we could not read back.
-  const disclosure =
-    state === null ? '' : buildConstraintDisclosureFromState(state, constraints);
-  const tail = disclosure.length > 0 ? disclosure : WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL;
+  // ⚠ ROADMAP 2.104 — THIS USED TO BE `buildConstraintDisclosureFromState`
+  // DIRECTLY, AND THAT IS WHY THE APPEND BRANCH BELOW COULD NOT FIRE FOR TWO OF
+  // THE THREE WITHHOLDING STATES.
+  //
+  // That builder returns `''` for `evaluated_infeasible` (deliberately — it
+  // says its copy "lives in the coach's compact-summary note", which is not
+  // available on a narrating turn and which names the winning option), and this
+  // function was handed `null` for an unreadable state. In both cases
+  // `disclosure.length > 0` was false, so the APPEND branch was skipped and the
+  // turn carried no reason at all. Only the REPLACE branch spoke, and only when
+  // the answer happened to trip the leader vocabulary.
+  //
+  // `composeWithheldReasonTail` is total over the withholding states: it
+  // DELEGATES the two voices this estate already got right, and supplies the
+  // two that had none. Same leading-space fragment contract, so nothing about
+  // how it is consumed changes.
+  // ⚠ FRESHNESS SPLITS THE TWO BRANCHES, AND CONFLATING THEM WOULD BREAK ONE OF
+  // THEM WHICHEVER WAY YOU CHOSE. Found by a route-level test on this change:
+  // this gate had NO freshness predicate, so on a STALE run it named a condition
+  // read from the CURRENT graph against a verdict derived from the PREVIOUS one.
+  // `goal_constraints` are inside the analysis-affecting hash, so any constraint
+  // edit produces exactly that state — including the edit this copy's own repair
+  // step asks for. Pre-existing, and it would have been WIDENED here rather than
+  // introduced, because the tail is now total over the withholding states.
+  //
+  //   REPLACE is a SAFETY branch and is NEVER freshness-gated. It fires when the
+  //   answer asserts a leader on a withheld turn; suppressing it on a stale run
+  //   would re-open the very leak this module exists to close. Stale simply
+  //   costs it the named condition — it degrades to the cause-free tail, which
+  //   is true on every withheld turn regardless of graph state.
+  //
+  //   APPEND is an INFORMATIVE branch. Its whole value is naming the condition,
+  //   and on a stale run that name may be wrong, so it stands down entirely.
+  //
+  // `conditionsAreCurrent` is REQUIRED, not optional-with-a-default: an optional
+  // one is the one a future caller silently forgets, and the forgotten value
+  // would be the unsafe one — the same doctrine
+  // `EgressSanitiseOpts.mayNameLeadingOption` applies.
+  const reason = conditionsAreCurrent ? composeWithheldReasonTail(state, constraints) : null;
+  // `null` for the two PERMITTING states (a correct caller cannot reach them —
+  // it owns the permission) and for a stale run. Falling back to the cause-free
+  // tail rather than inventing one is the same fail-closed posture as the rest
+  // of this module.
+  const tail = reason?.text ?? WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL;
+  const disclosure = reason?.text ?? '';
 
   // LEADER CLAIM ⇒ replace wholesale. A leader-naming answer cannot be
   // repaired by appending to it: the contradiction the walk photographed
@@ -223,19 +269,30 @@ function assertSubstitutedCopyIsLeaderFree(): void {
   const probes: ReadonlyArray<readonly [string, string]> = [
     ['WITHHELD_EXPLANATION_OPENING', WITHHELD_EXPLANATION_OPENING],
     ['WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL', WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL],
-    // Both speakable voices, at the shapes the builder can actually emit:
-    // count-only and label-naming, singular and plural.
-    ...(['unevaluated', 'identity_unresolved'] as const).flatMap(
-      (voice): ReadonlyArray<readonly [string, string]> => [
-        [`disclosure:${voice}:count-only`, buildConstraintDisclosureFromState(voice, [
-          { constraint_id: 'c1', label: null },
-          { constraint_id: 'c2', label: null },
-        ])],
-        [`disclosure:${voice}:labelled`, buildConstraintDisclosureFromState(voice, [
-          { constraint_id: 'c1', label: 'Three-Year Total Cost of Ownership' },
-        ])],
-      ],
-    ),
+    // ⚠ DERIVED FROM THE STATE ENUM, not the two voices this probe used to
+    // hand-list. It listed `unevaluated` and `identity_unresolved` because they
+    // were the only states with copy; the tail is now total over the
+    // withholding states, and a hand-list would have left the two NEW voices
+    // (`evaluated_infeasible`, `reason_unrecorded`) unprobed — the same mirror
+    // drift this file's sibling probes were written against.
+    ...([null, ...(Object.keys(MAY_NAME_LEADING_OPTION) as ConstraintVerdictState[])] as const)
+      .flatMap((state): ReadonlyArray<readonly [string, string]> =>
+        (
+          [
+            ['none', [] as readonly RatifiedConstraint[]],
+            ['labelled', [{ constraint_id: 'c1', label: 'Three-Year Total Cost of Ownership' }]],
+            ['count-only', [
+              { constraint_id: 'c1', label: null },
+              { constraint_id: 'c2', label: null },
+            ]],
+          ] as const
+        ).flatMap(([shape, constraints]) => {
+          const tail = composeWithheldReasonTail(state, constraints);
+          return tail === null
+            ? []
+            : [[`tail:${state ?? 'null'}:${shape}`, tail.text] as const];
+        }),
+      ),
   ];
   for (const [name, copy] of probes) {
     if (textAssertsLeadingOption(copy)) {

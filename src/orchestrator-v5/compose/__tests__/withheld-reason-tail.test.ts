@@ -1,0 +1,366 @@
+/**
+ * ROADMAP 2.104 — the withheld-why composer.
+ *
+ * THE THREE PROPERTIES THIS FILE EXISTS FOR, in the order they matter:
+ *
+ *   1. IT SAYS SOMETHING. Every withholding state produces an answer that names
+ *      the reason, not a deflection. Asserted per state, on the shipped bytes.
+ *   2. IT SAYS ONLY WHAT IS RECORDED. The persisted verdict carries no failing
+ *      constraint id and no violation kind, so the copy must not name one —
+ *      pinned by the multi-condition case, which is exactly where a well-meaning
+ *      edit would reach for the list.
+ *   3. IT IS NOT AN ORACLE. The answer's shape varies with the verdict state and
+ *      the ratified condition count and with NOTHING about any option, so it
+ *      cannot be probed for a hidden position (the #743 lesson, applied here
+ *      before it could become a defect).
+ */
+import { describe, it, expect } from 'vitest';
+
+import { composeWithheldReasonTail } from '../withheld-reason-tail.js';
+import { projectExplanationAnswerForWithheldClaim } from '../withheld-explanation-answer.js';
+import {
+  textNamesLeadingOption,
+  findLeaderClaims,
+} from '../leading-option-egress-guard.js';
+import {
+  buildConstraintDisclosure,
+  buildConstraintDisclosureFromState,
+} from '../../coaching/constraint-gap-disclosure.js';
+import {
+  MAY_NAME_LEADING_OPTION,
+  type ConstraintVerdictState,
+  type RatifiedConstraint,
+} from '../../../orchestrator/context/constraint-feasibility.js';
+
+const ONE: readonly RatifiedConstraint[] = [
+  { constraint_id: 'c_cost', label: 'Three-Year Total Cost of Ownership' },
+];
+const TWO: readonly RatifiedConstraint[] = [
+  ...ONE,
+  { constraint_id: 'c_time', label: 'Delivery within two quarters' },
+];
+const UNLABELLED: readonly RatifiedConstraint[] = [{ constraint_id: 'c_cost', label: null }];
+
+/** The three withholding states, DERIVED from the contract rather than listed. */
+const WITHHOLDING_STATES = (
+  Object.keys(MAY_NAME_LEADING_OPTION) as ConstraintVerdictState[]
+).filter((s) => !MAY_NAME_LEADING_OPTION[s]);
+
+const PERMITTING_STATES = (
+  Object.keys(MAY_NAME_LEADING_OPTION) as ConstraintVerdictState[]
+).filter((s) => MAY_NAME_LEADING_OPTION[s]);
+
+describe('composeWithheldReasonTail — it answers, for every state that withholds', () => {
+  it('EVERY voice is a leading-space fragment — the contract the append seam relies on', () => {
+    // Load-bearing twice over: the seam concatenates without a separator, and
+    // the idempotence check compares `includes(tail.trim())`. A voice that
+    // forgot the space would run into the previous sentence AND could still
+    // satisfy the idempotence check, so the duplicate would be invisible.
+    for (const state of [null, ...WITHHOLDING_STATES] as const) {
+      for (const constraints of [[], ONE, TWO, UNLABELLED]) {
+        const tail = composeWithheldReasonTail(state, constraints);
+        if (tail === null) continue;
+        expect(tail.text.startsWith(' '), `${state ?? 'null'}/${constraints.length}`).toBe(true);
+        expect(tail.text.trim().length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('covers every withholding state the contract declares, with no gaps', () => {
+    // DERIVED, not hand-listed: a sixth withholding state added to the contract
+    // arrives here as an unanswered case rather than as silence in production.
+    expect(WITHHOLDING_STATES.length).toBeGreaterThan(0);
+    for (const state of WITHHOLDING_STATES) {
+      const answer = composeWithheldReasonTail(state, ONE);
+      expect(answer, state).not.toBeNull();
+      expect(answer!.text.length, state).toBeGreaterThan(80);
+    }
+  });
+
+  it('evaluated_infeasible — names the sole condition and states that the result does not stand up to it', () => {
+    const answer = composeWithheldReasonTail('evaluated_infeasible', ONE);
+    expect(answer).not.toBeNull();
+    expect(answer!.kind).toBe('constraint_infeasible');
+    expect(answer!.named_constraint).toBe(true);
+    expect(answer!.text).toContain('“Three-Year Total Cost of Ownership”');
+    expect(answer!.text).toContain('was checked on this run');
+    expect(answer!.text.startsWith(' '), 'tails must be leading-space fragments').toBe(true);
+    expect(answer!.text).toContain('does not stand up against it');
+    // The repair step, which is what makes the answer actionable rather than
+    // merely honest.
+    expect(answer!.text).toContain('run the analysis again');
+  });
+
+  it('evaluated_infeasible with TWO conditions — names NEITHER, and says so', () => {
+    // ⚠ THE PROPERTY MOST LIKELY TO BE "TIDIED UP" INTO A DEFECT. Which
+    // condition the result fell short on is NOT persisted
+    // (`PersistedClaimSafety` stores the state and the permission, nothing
+    // else). Listing both would assert that each failed.
+    const answer = composeWithheldReasonTail('evaluated_infeasible', TWO);
+    expect(answer).not.toBeNull();
+    expect(answer!.named_constraint).toBe(false);
+    expect(answer!.text).not.toContain('Three-Year Total Cost of Ownership');
+    expect(answer!.text).not.toContain('Delivery within two quarters');
+    expect(answer!.text).toContain('All 2 conditions you set were checked');
+    expect(answer!.text).toContain('Which one that is has not been recorded');
+  });
+
+  it('evaluated_infeasible never claims that NO option satisfies the condition', () => {
+    // The brief's premise, refuted at the code:
+    // `deriveWinnerConstraintInfeasibility` evaluates ONLY the winner, so a
+    // sentence about "no option" would be a claim about options the analysis
+    // never gated on.
+    for (const constraints of [[], ONE, TWO, UNLABELLED]) {
+      const text = composeWithheldReasonTail('evaluated_infeasible', constraints)!.text;
+      expect(text.toLowerCase(), JSON.stringify(constraints)).not.toContain('no option satisf');
+      expect(text.toLowerCase(), JSON.stringify(constraints)).not.toContain('none of the options');
+      expect(text.toLowerCase(), JSON.stringify(constraints)).not.toContain('no option meets');
+    }
+  });
+
+  it('evaluated_infeasible never asserts the satisfaction claim only hard_violation licenses', () => {
+    // `kind` (hard_violation vs joint_tension) is not persisted either, and the
+    // two carry DIFFERENT contracts — "does not satisfy" vs "in tension with".
+    // Indistinguishable here, so the weaker claim is the only honest one.
+    for (const constraints of [[], ONE, TWO]) {
+      const text = composeWithheldReasonTail('evaluated_infeasible', constraints)!.text;
+      expect(text.toLowerCase()).not.toContain('does not satisfy');
+      expect(text.toLowerCase()).not.toContain('violates');
+      expect(text.toLowerCase()).not.toContain('breaches');
+    }
+  });
+
+  it('evaluated_infeasible with NO ratified conditions invents none', () => {
+    // Reachable: `deriveConstraintVerdict` returns this state on
+    // `ratified.length === 0` when the producer's own scoring condemns the
+    // result. Copy that said "the condition you set" would be a fabricated
+    // premise about the user's own scenario.
+    const answer = composeWithheldReasonTail('evaluated_infeasible', []);
+    expect(answer!.named_constraint).toBe(false);
+    expect(answer!.text).toContain('the limits in your model');
+    expect(answer!.text).not.toContain('the condition you set was checked');
+  });
+
+  it('unevaluated / identity_unresolved REUSE the disclosure copy rather than restating it', () => {
+    // ⚠ NOT A STYLE POINT. Those two voices were got wrong twice before they
+    // were got right ("pairing the wrong sentence with the state is the mistake
+    // both earlier revisions of this fix made"). A second near-copy would drift
+    // the first time either was reworded. This asserts the shipped bytes CONTAIN
+    // the sibling module's own output, so a reword there moves this answer too.
+    for (const state of ['unevaluated', 'identity_unresolved'] as const) {
+      for (const constraints of [ONE, TWO]) {
+        const disclosure = buildConstraintDisclosureFromState(state, constraints);
+        expect(disclosure.length, `${state} fixture must produce a disclosure`).toBeGreaterThan(0);
+        const answer = composeWithheldReasonTail(state, constraints);
+        // VERBATIM, not merely containing: wrapping the sibling's fragment
+        // would be a second account of one fact.
+        expect(answer!.text, state).toBe(disclosure);
+      }
+    }
+  });
+
+  it('unevaluated says "not checked"; identity_unresolved says "could not be matched" — never each other', () => {
+    // The exact conflation `constraint-gap-disclosure.ts` exists to prevent,
+    // asserted at this module's own output so a future refactor cannot
+    // reintroduce it here.
+    const unevaluated = composeWithheldReasonTail('unevaluated', ONE)!.text;
+    const unresolved = composeWithheldReasonTail('identity_unresolved', ONE)!.text;
+    expect(unevaluated).toContain('was not checked');
+    expect(unresolved).not.toContain('was not checked');
+    expect(unresolved).toContain('could not be matched');
+    expect(unevaluated).not.toContain('could not be matched');
+  });
+
+  it('a state whose conditions cannot be read back still answers, without naming one', () => {
+    // Reachable when a condition is deleted after the run: the state persists,
+    // the labels do not. The disclosure builder returns '' for an empty list,
+    // which would otherwise leave the opening sentence answering nothing.
+    for (const state of ['unevaluated', 'identity_unresolved'] as const) {
+      expect(buildConstraintDisclosureFromState(state, [])).toBe('');
+      const answer = composeWithheldReasonTail(state, []);
+      expect(answer, state).not.toBeNull();
+      expect(answer!.named_constraint, state).toBe(false);
+      expect(answer!.text.length, state).toBeGreaterThan(80);
+      expect(answer!.text, state).toContain('run the analysis again');
+    }
+  });
+
+  it('an unreadable state says so, and does NOT reach for the ratified-condition voice', () => {
+    // The F2 correctness lesson from `withheld-leader-projection.ts`: an
+    // unconditional cause is a FABRICATED cause on every fact that carries none.
+    const answer = composeWithheldReasonTail(null, TWO);
+    expect(answer!.kind).toBe('reason_unrecorded');
+    expect(answer!.text).toContain('the reason is not recorded on it');
+    expect(answer!.text).not.toContain('condition you set');
+    expect(answer!.text).not.toContain('Three-Year Total Cost of Ownership');
+  });
+
+  it('declines the two PERMITTING states rather than explaining a withholding that did not happen', () => {
+    for (const state of PERMITTING_STATES) {
+      for (const constraints of [[], ONE, TWO]) {
+        expect(composeWithheldReasonTail(state, constraints), state).toBeNull();
+      }
+    }
+  });
+
+  it('never throws on degenerate input', () => {
+    expect(() =>
+      composeWithheldReasonTail('unevaluated', null as unknown as RatifiedConstraint[]),
+    ).not.toThrow();
+    expect(() => composeWithheldReasonTail(null, [])).not.toThrow();
+    // A label that is really an id degrades to the count shape rather than
+    // leaking the id (`sanitiseLabel` refuses it).
+    const idish = composeWithheldReasonTail('evaluated_infeasible', [
+      { constraint_id: 'c_cost', label: 'c_cost' },
+    ]);
+    expect(idish!.named_constraint).toBe(false);
+    expect(idish!.text).not.toContain('c_cost');
+  });
+
+  it('a label past the length bound degrades to the count shape, never a truncation', () => {
+    const long = 'x'.repeat(61);
+    const answer = composeWithheldReasonTail('evaluated_infeasible', [
+      { constraint_id: 'c_cost', label: long },
+    ]);
+    expect(answer!.named_constraint).toBe(false);
+    expect(answer!.text).not.toContain(long);
+    expect(answer!.text).not.toContain('x'.repeat(40));
+  });
+});
+
+describe('the run_analysis path stands the finaliser hook down BY IDENTITY, not by exclusion', () => {
+  it('the tail is BYTE-IDENTICAL to what run_analysis itself appends, for both shared states', () => {
+    // ⚠ THIS TEST IS WHY THE `run_analysis` EXCLUSION COULD BE DELETED.
+    //
+    // The finaliser hook runs on every exit including the run_analysis receipt,
+    // and stands down when its bytes are already present. That only works if
+    // the two producers emit THE SAME BYTES — which they do, because both
+    // delegate to `buildConstraintDisclosureFromState`. Asserting it here makes
+    // the identity a checked property rather than an assumption: reword either
+    // producer independently and this reds, instead of a duplicate disclosure
+    // appearing on a live run_analysis turn.
+    for (const state of ['unevaluated', 'identity_unresolved'] as const) {
+      for (const constraints of [ONE, TWO, UNLABELLED]) {
+        const fromRunAnalysis = buildConstraintDisclosure({
+          state,
+          mayNameLeadingOption: false,
+          codes: [],
+          constraints,
+          leaderInfeasibility: null,
+        });
+        const fromTail = composeWithheldReasonTail(state, constraints);
+        expect(fromTail!.text, `${state}/${constraints.length}`).toBe(fromRunAnalysis);
+      }
+    }
+  });
+
+  it('and on evaluated_infeasible run_analysis says NOTHING — which is why the hook must run there', () => {
+    // The builder returns '' for this state by design. An exclusion for the
+    // run_analysis exit would therefore have created a silent hole in the exact
+    // state ROADMAP 2.104 was raised for.
+    expect(
+      buildConstraintDisclosure({
+        state: 'evaluated_infeasible',
+        mayNameLeadingOption: false,
+        codes: [],
+        constraints: ONE,
+        leaderInfeasibility: null,
+      }),
+    ).toBe('');
+    expect(composeWithheldReasonTail('evaluated_infeasible', ONE)!.text.length).toBeGreaterThan(80);
+  });
+});
+
+describe('claim safety — no leader, and no oracle', () => {
+  it('no voice trips the shared leader vocabulary, on any branch', () => {
+    // The same assertion the module-load probe makes, run here too so a
+    // regression names the branch instead of only failing the import.
+    for (const state of [null, ...WITHHOLDING_STATES] as const) {
+      for (const constraints of [[], ONE, TWO, UNLABELLED]) {
+        const answer = composeWithheldReasonTail(state, constraints);
+        if (answer === null) continue;
+        // Through the ALARM'S OWN envelope walker, on the field this answer
+        // actually ships in, rather than a string-level shortcut — so the check
+        // is the one production runs.
+        const hits = findLeaderClaims({ assistant_text: answer.text } as never);
+        expect(hits, `${state ?? 'null'} / ${constraints.length}`).toEqual([]);
+        expect(textNamesLeadingOption(answer.text)).toBe(false);
+      }
+    }
+  });
+
+  it('the module-load probe is not vacuous — it can SEE a leader claim', () => {
+    // Trap 13: an absence assertion that has never seen a presence proves
+    // nothing. This drives the probe's own reader over a sentence of the shape
+    // the copy must never take.
+    expect(textNamesLeadingOption('Hire Marketing Manager comes out ahead on this analysis.')).toBe(
+      true,
+    );
+    expect(
+      findLeaderClaims({ assistant_text: 'The leading option is Hold.' } as never).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('THE ORACLE PROPERTY — the answer varies with the scenario, never with an option', () => {
+    // #743's lesson, applied before it became a defect. Copy whose SHAPE
+    // differed for the option that happens to be hidden would let a user read
+    // the withheld position off the difference. This answer is composed from
+    // the verdict state and the ratified condition list ALONE — there is no
+    // option input to vary — so identical scenario inputs give identical bytes
+    // no matter what the analysis found.
+    for (const state of WITHHOLDING_STATES) {
+      for (const constraints of [[], ONE, TWO]) {
+        const a = composeWithheldReasonTail(state, constraints);
+        const b = composeWithheldReasonTail(state, constraints.map((c) => ({ ...c })));
+        expect(b!.text, `${state}/${constraints.length}`).toBe(a!.text);
+      }
+    }
+  });
+
+  it('never names an option, a probability, or a percentage', () => {
+    for (const state of [null, ...WITHHOLDING_STATES] as const) {
+      for (const constraints of [[], ONE, TWO]) {
+        const answer = composeWithheldReasonTail(state, constraints);
+        if (answer === null) continue;
+        expect(answer.text, `${state ?? 'null'}`).not.toMatch(/\d+(?:\.\d+)?\s*%/);
+        expect(answer.text).not.toMatch(/\b0\.\d+\b/);
+      }
+    }
+  });
+});
+
+describe('the FRESHNESS SPLIT — the two branches must not be gated together', () => {
+  it('APPEND stands down on a stale run: the label could be about a different graph', () => {
+    // `goal_constraints` are inside the analysis-affecting hash, so a constraint
+    // edit alone makes the run stale — which is exactly what the repair step in
+    // every one of these voices asks the user to do. The verdict then comes from
+    // the OLD fact while the labels come from the CURRENT graph.
+    const clean = 'The model is driven mainly by Capacity, and the spread is wide.';
+    const fresh = projectExplanationAnswerForWithheldClaim(clean, 'unevaluated', ONE, true);
+    expect(fresh.reason).toBe('disclosure_appended');
+    expect(fresh.text).toContain('“Three-Year Total Cost of Ownership”');
+
+    const stale = projectExplanationAnswerForWithheldClaim(clean, 'unevaluated', ONE, false);
+    expect(stale.reason).toBe('unchanged');
+    expect(stale.text).toBe(clean);
+  });
+
+  it('REPLACE still fires on a stale run — it is a SAFETY branch, not an informative one', () => {
+    // ⚠ THE ASYMMETRY IS THE POINT. Gating both branches on freshness would
+    // suppress the leader-claim replacement on stale runs and re-open the leak
+    // this module exists to close. Stale costs REPLACE only the named condition.
+    const leaderClaim = 'Hire Marketing Manager comes out ahead, leading in 72% of simulations.';
+    const stale = projectExplanationAnswerForWithheldClaim(leaderClaim, 'unevaluated', ONE, false);
+    expect(stale.reason).toBe('leader_claim_replaced');
+    expect(stale.text).not.toContain('comes out ahead');
+    // Cause-free: it must NOT name a condition it cannot vouch for on this graph.
+    expect(stale.text).not.toContain('“Three-Year Total Cost of Ownership”');
+    expect(stale.text).toContain('No single option can be put forward on this result yet');
+
+    // POSITIVE CONTROL — the same input on a FRESH run does name it, so the
+    // absence above is the freshness gate and not a broken fixture.
+    const fresh = projectExplanationAnswerForWithheldClaim(leaderClaim, 'unevaluated', ONE, true);
+    expect(fresh.reason).toBe('leader_claim_replaced');
+    expect(fresh.text).toContain('“Three-Year Total Cost of Ownership”');
+  });
+});

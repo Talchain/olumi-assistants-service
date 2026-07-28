@@ -1253,6 +1253,19 @@ export async function runTurnExecutor(
   // (§4.3, "UNVERIFIED — not a pass"). `null` = the gate did not run or made
   // no change.
   let withheldExplanationReasonForRun: WithheldExplanationReason | null = null;
+  // ROADMAP 2.104 (F2) — may the withheld-reason copy NAME the user's ratified
+  // conditions on this turn? Only when the analysis is `fresh`: the verdict is
+  // read off the persisted fact while the labels are read off the CURRENT graph,
+  // and `goal_constraints` sit inside the analysis-affecting hash, so a stale
+  // run is precisely the state where those two describe different graphs.
+  //
+  // ⚠ ONE EXPRESSION, TWO CONSUMERS — the per-handler compose gate and the
+  // finaliser hook. Two copies of this predicate would be the hand-maintained
+  // mirror (CLAUDE.md trap #12), and the drift would read as green on exactly
+  // the turns where the label is wrong. Closed-union comparison, so `stale` /
+  // `unknown` / `none` / no-readiness all fail closed.
+  const withheldConditionsAreCurrent = (): boolean =>
+    contextReadiness !== null && contextReadiness.latest_analysis_freshness === 'fresh';
   // V5 Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): the
   // canonical verdict assembled pre-dispatch for the flag-gated coaching prompt
   // pack. Reused in the coaching compose branches for the deterministic
@@ -8204,6 +8217,7 @@ export async function runTurnExecutor(
           confirmationText,
           verdictState,
           readRatifiedConstraints(context.persistedGraph ?? graphStateForTurn ?? null),
+          withheldConditionsAreCurrent(),
         );
         // ROADMAP 1.233 — record the outcome WHETHER OR NOT it changed the
         // text. `null` (the initial value) means the gate never ran; a
