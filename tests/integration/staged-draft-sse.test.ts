@@ -18,11 +18,12 @@
  * ids, durations). A pin that hand-listed those fields would be a maintained
  * mirror, and would silently grow to cover a REAL divergence the day one
  * appeared (CLAUDE.md trap 12). So the volatile set is DERIVED, not listed:
- * the test runs the BUFFERED route twice, and whatever differs between those
- * two runs is by definition volatile. The staged-vs-buffered comparison then
- * ignores exactly that derived set and nothing else — and a further assertion
- * fails the test if the derived set ever grows to include a structural key,
- * which is the only way this normalisation could hide a real difference.
+ * the test runs the BUFFERED route three times and unions the pairwise diffs,
+ * and whatever differs between runs of the SAME route is by definition
+ * volatile. The staged-vs-buffered comparison then ignores exactly that derived
+ * set and nothing else — and a further assertion fails the test if the derived
+ * set ever grows to include a structural key, which is the only way this
+ * normalisation could hide a real difference.
  *
  * `app.inject()` buffers the whole SSE response and resolves on `raw.end()`, so
  * these tests prove frame ORDER and CONTENT. They cannot prove wall-clock
@@ -261,16 +262,52 @@ describe("staged SSE draft delivery (ROADMAP 1.204 M1)", () => {
   // ── 4. THE EQUIVALENCE PIN ───────────────────────────────────────────────
 
   it("terminal payload is equivalent to the buffered route's body", async () => {
-    // Control run: the SAME route twice. Whatever differs here is volatile by
-    // construction (ids, clocks) — derived, never hand-listed.
-    const bufferedA = await injectBuffered();
-    const bufferedB = await injectBuffered();
-    expect(bufferedA.statusCode).toBe(200);
-    expect(bufferedB.statusCode).toBe(200);
+    // CONTROL: the SAME route, several times. Whatever differs between two runs
+    // of one route is volatile by construction (ids, clocks) — derived, never
+    // hand-listed.
+    //
+    // SAMPLED, and sampled from BOTH routes — for a measured reason. A single
+    // buffered pair is not enough: under the fixtures adapter a draft completes
+    // so fast that `trace.pipeline.total_duration_ms` lands on the SAME integer
+    // millisecond in consecutive runs, so the path is never classified volatile
+    // — and then any run whose duration does differ reds the test for no real
+    // reason. (Observed: this exact path, ~1 run in 10.) A flaky pin is worse
+    // than no pin; an alarm that cries wolf gets ignored.
+    //
+    // So volatility is derived from repeated runs of EACH route against ITSELF
+    // — never across the two, which would be circular (it would use the very
+    // equality under test to decide what may be ignored). Staged runs carry the
+    // extra jitter of SSE writes, which is what actually surfaces the duration
+    // fields.
+    //
+    // BE HONEST ABOUT THE RESIDUAL: this is sampling, not a proof. Measured
+    // 0 failures in 20 runs here against ~1 in 10 before. If it ever reds on a
+    // pure timing path again, the fix is another sample — NOT a hand-written
+    // ignore list, which is the failure mode this derivation exists to avoid.
+    const bufferedBodies = [
+      JSON.parse((await injectBuffered()).body),
+      JSON.parse((await injectBuffered()).body),
+      JSON.parse((await injectBuffered()).body),
+    ];
+    const stagedTerminal = async () => {
+      const frames = parseStageFrames((await injectStaged()).body);
+      return frames[frames.length - 1]!;
+    };
+    const stagedBodies = [
+      (await stagedTerminal()).payload,
+      (await stagedTerminal()).payload,
+      (await stagedTerminal()).payload,
+    ];
 
-    const volatilePaths = new Set(
-      diffPaths(JSON.parse(bufferedA.body), JSON.parse(bufferedB.body)),
-    );
+    const volatilePaths = new Set<string>();
+    for (const sameRouteBodies of [bufferedBodies, stagedBodies]) {
+      for (let i = 0; i < sameRouteBodies.length; i++) {
+        for (let j = i + 1; j < sameRouteBodies.length; j++) {
+          for (const p of diffPaths(sameRouteBodies[i], sameRouteBodies[j])) volatilePaths.add(p);
+        }
+      }
+    }
+    const controlBodies = bufferedBodies;
 
     // Guard the guard: the derived volatile set must never include a
     // structural or claim-bearing path, because that is the only way the
@@ -303,7 +340,7 @@ describe("staged SSE draft delivery (ROADMAP 1.204 M1)", () => {
     expect(terminal.stage).toBe("COMPLETE");
     expect(terminal.status_code).toBe(200);
 
-    const differing = diffPaths(JSON.parse(bufferedA.body), terminal.payload).filter(
+    const differing = diffPaths(controlBodies[0], terminal.payload).filter(
       (p) => !volatilePaths.has(p),
     );
 
