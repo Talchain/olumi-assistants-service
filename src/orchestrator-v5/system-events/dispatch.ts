@@ -31,12 +31,9 @@ import type {
   SystemEventKindLiteral,
 } from '@talchain/schemas/boundary';
 
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
-
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
-import { loadPersistedGraphStrict } from '../build-turn-context.js';
-import { getSessionStore } from '../session/index.js';
+import { loadPersistedGraphStrict, loadPriorFactsQuietly } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
@@ -260,7 +257,7 @@ async function dispatchFactorValueEdit(
     };
   }
 
-  const priorFacts = await readPriorFactsQuietly(payload.scenario_id, requestId);
+  const priorFacts = await loadPriorFactsQuietly(payload.scenario_id, requestId);
 
   const result = await applyFactorValueEdit({
     payload,
@@ -404,35 +401,4 @@ async function dispatchFactorValueEdit(
     // against it, independently of the hash above.
     graph: result.graph,
   };
-}
-
-/**
- * Prior facts drive one thing here: whether `set_factor_value` appends its
- * staleness narrative ("This makes the last analysis stale."). A failed read
- * must not fail the edit — the worst case is a receipt missing one sentence, so
- * this degrades to `[]` and says so in the log rather than throwing.
- */
-async function readPriorFactsQuietly(
-  scenarioId: string,
-  requestId: string,
-): Promise<readonly HandlerFact[]> {
-  try {
-    const store = getSessionStore();
-    const recent = await store.readRecent(scenarioId);
-    const rowIds = recent
-      .map((t: { readonly id?: unknown }) => t.id)
-      .filter((id): id is string => typeof id === 'string');
-    if (rowIds.length === 0) return [];
-    return await store.readFactsFor(rowIds);
-  } catch (err) {
-    log.warn(
-      {
-        request_id: requestId,
-        scenario_id: scenarioId,
-        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-      },
-      'V5 factor_value_edit — prior-fact read failed; proceeding without the staleness narrative',
-    );
-    return [];
-  }
 }

@@ -347,6 +347,17 @@ export async function applyFactorValueEdit(
       prior_facts: priorFacts,
       scenarioBriefText: null,
       persistedGraph,
+      // BOUNDED, and the bound is checkable. `set_factor_value` reads exactly two
+      // fields off the context — `prior_facts` (staleness narrative) and
+      // `persistedGraph` (fallback graph) — and both are populated honestly above.
+      // `EnrichedTurnContext` is produced only by `buildTurnContext`, which is typed
+      // `MessageTurnPayload`; a system event has no `message`, so the alternatives
+      // are this cast or FABRICATING user text to feed the builder. The structural
+      // fix is widening `HandlerInvocation.payload` to the payload union (only two
+      // handlers read it: add-constraint.ts:346 `.message`, run-analysis.ts:253
+      // `.scenario_id`) — a change to every handler's contract, so it rides its own
+      // train rather than this one.
+      // forbidden-exempt: bounded shim — the handler reads only prior_facts + persistedGraph, both populated honestly; widening HandlerInvocation.payload to the payload union is the structural fix and rides its own train
     } as unknown as HandlerInvocation['context'],
     payload: {
       kind: 'message',
@@ -354,6 +365,13 @@ export async function applyFactorValueEdit(
       turn_id: payload.turn_id,
       stage: payload.stage,
       message: '',
+      // Same bound as the context cast above. `set_factor_value` never reads
+      // `invocation.payload` at all (verified: the only handler readers are
+      // add-constraint.ts:346 and run-analysis.ts:253, neither of them this one), so
+      // this shape is inert for this call. `message: ''` deliberately does NOT
+      // fabricate user prose — the user typed a number into an inspector, not a
+      // sentence, and inventing one would put words in their mouth in the transcript.
+      // forbidden-exempt: inert shim — set_factor_value never reads invocation.payload; message stays empty rather than fabricating user prose for the transcript
     } as unknown as HandlerInvocation['payload'],
     requestId,
     signal: new AbortController().signal,
