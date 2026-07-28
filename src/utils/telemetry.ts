@@ -1789,7 +1789,7 @@ export const TelemetryEvents = {
   //   - scenario_id: string
   //   - matched: boolean
   //   - unmatched_reason: 'not_a_why_question' | 'permitted' | 'no_analysis_fact'
-  //     | 'mutation_signal' | 'permitting_state' | null
+  //     | 'mutation_signal' | 'not_fresh' | 'permitting_state' | null
   //   - answer_kind: 'constraint_infeasible' | 'constraint_unevaluated'
   //     | 'constraint_unresolved' | 'reason_unrecorded' | null
   //   - constraint_verdict_state: the persisted state, or 'unreadable'

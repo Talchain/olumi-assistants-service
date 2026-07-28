@@ -117,6 +117,31 @@ const READY_GRAPH = {
 const READY_GRAPH_HASH = computeAnalysisAffectingGraphHash(READY_GRAPH as never)!;
 
 /**
+ * The graph AS IT WAS when the withheld analysis ran, before the user took this
+ * guard's own advice and re-stated the limit.
+ *
+ * ⚠ THE CONSTRAINT IS THE ONLY DIFFERENCE, and that is the whole point:
+ * `goal_constraints` sit inside the analysis-affecting hash
+ * (`context/graph-hash.ts` — `goal_constraints: Array.isArray(...) ? ... : []`),
+ * so editing one is by itself enough to make the prior run STALE. The stale-arm
+ * fixture is therefore not contrived; it is the ordinary consequence of
+ * following the repair step every voice in this answer offers.
+ */
+const PRE_EDIT_GRAPH = {
+  ...READY_GRAPH,
+  goal_constraints: [
+    { ...RATIFIED_CONSTRAINT, threshold: 4000, label: 'Total Cost (first draft)' },
+  ],
+};
+
+/**
+ * DERIVED with the production hash function, never a hand-written sentinel: a
+ * literal "stale" string would prove the guard declines on a value the product
+ * cannot produce, which is a different and much weaker claim.
+ */
+const PRE_EDIT_GRAPH_HASH = computeAnalysisAffectingGraphHash(PRE_EDIT_GRAPH as never)!;
+
+/**
  * The deflection, verbatim from `routing/fresh-analysis-followup-guard.ts`.
  *
  * Copied rather than imported ON PURPOSE, and this is the one place in the
@@ -153,10 +178,14 @@ const PRIOR_RUN_ANALYSIS_TURN = {
   created_at: new Date(Date.now() - 60_000).toISOString(),
 };
 
-function priorRunAnalysisFact(verdict: {
-  may_name_leading_option: boolean;
-  constraint_verdict_state: string;
-}): Record<string, unknown> {
+function priorRunAnalysisFact(
+  verdict: {
+    may_name_leading_option: boolean;
+    constraint_verdict_state: string;
+  },
+  /** The graph the run was against. Defaults to the current one ⇒ `fresh`. */
+  graphHashAtRun: string = READY_GRAPH_HASH,
+): Record<string, unknown> {
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
@@ -165,7 +194,7 @@ function priorRunAnalysisFact(verdict: {
       scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_hire',
       summary: 'Prior analysis result',
-      graph_hash_at_run: READY_GRAPH_HASH,
+      graph_hash_at_run: graphHashAtRun,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
       constraint_verdict: verdict,
       enrichment: {
@@ -491,6 +520,65 @@ describe('route-level: "Why is there no option?" on a WITHHELD run', () => {
       // this question, and stealing it would be a regression dressed as a fix.
       const turn = await askTurn(app, 'What drove this result?');
       expect(turn.assistantText).not.toContain('No single option is being put forward');
+    });
+
+    it('F1 — the adversarial attack phrasings reach the ROUTER, not this composer', async () => {
+      // ⚠ THE OVER-CAPTURE ARM, on a WITHHELD run — the only place it can do
+      // harm. Every phrasing below matched the first revision of the recogniser,
+      // and on this fixture each would have been answered "No single option is
+      // being put forward on this result, and here is why…" — a canned
+      // non-sequitur to a question about a node, a UI limit, or the world.
+      //
+      // Asserting at the wire rather than at the recogniser is deliberate: the
+      // unit test proves the pattern does not match, and this proves the TURN
+      // still reaches the surface that can actually answer it.
+      for (const attack of [
+        'Why is there an option to do nothing?',
+        'Why is there an option called Hold in my model?',
+        'Why is there a clear winner?',
+        'Why is there a choice between these two?',
+        'Why is there a preference for hiring?',
+        'Why do people not choose subscriptions?',
+        "Why can't I pick more than one option?",
+        "Why shouldn't I pick option A?",
+      ]) {
+        routeWithToolUseMock.mockClear();
+        const turn = await askTurn(app, attack);
+        expect(turn.assistantText, attack).not.toContain('No single option is being put forward');
+        expect(routeWithToolUseMock, attack).toHaveBeenCalled();
+      }
+    });
+
+    it('F2 — a constraint edited AFTER the withheld run makes it stale, and the guard stands down', async () => {
+      // ⚠ THE FRESHNESS ARM. Without the gate this turn receives "The condition
+      // you set was checked on this run: “Three-Year Total Cost of Ownership”"
+      // — naming the CURRENT label for a verdict derived against the PREVIOUS
+      // one. The label is read from the live graph; the verdict is read from the
+      // old fact; nothing persisted reconciles them.
+      //
+      // The window is not exotic. `goal_constraints` are inside the
+      // analysis-affecting hash, so this is what happens the moment a user
+      // follows the repair step THIS ANSWER gives them.
+      priorFacts = [
+        priorRunAnalysisFact(
+          {
+            may_name_leading_option: false,
+            constraint_verdict_state: 'evaluated_infeasible',
+          },
+          PRE_EDIT_GRAPH_HASH,
+        ),
+      ];
+      // Non-vacuity: the two hashes must genuinely differ, or this fixture is
+      // silently the fresh one and the assertion below passes for no reason.
+      expect(PRE_EDIT_GRAPH_HASH).not.toBe(READY_GRAPH_HASH);
+
+      const turn = await askTurn(app, THE_QUESTION);
+      expect(turn.assistantText).not.toContain('No single option is being put forward');
+      expect(turn.assistantText).not.toContain('was checked on this run');
+      // Stale falls back to the behaviour it has today — it does not become a
+      // new silence.
+      expect(turn.status).toBe(200);
+      expect(turn.assistantText.length).toBeGreaterThan(0);
     });
 
     it('⚠ RESIDUAL, RECORDED RATHER THAN LEFT TO BE FOUND: the OTHER deflection is still live', async () => {

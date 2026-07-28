@@ -36,10 +36,31 @@
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * DELIBERATELY NARROW. Every pattern is anchored on BOTH halves of the question:
- * an interrogative (`why` / `what is stopping`) AND a NEGATED outcome noun (no
- * option, no recommendation, nothing put forward). A recogniser keyed on the
- * noun alone would swallow "which option should I pick?"; one keyed on `why`
- * alone would swallow every `what_drove` phrasing the advice gate already owns.
+ * an interrogative (`why` / `what is stopping`) AND a NEGATION that reaches the
+ * outcome — either on the noun phrase ("no option", "not a recommendation") or
+ * on a verb whose subject is THE PRODUCT ("why can't YOU recommend one"). A
+ * recogniser keyed on the noun alone would swallow "which option should I
+ * pick?"; one keyed on `why` alone would swallow every `what_drove` phrasing
+ * the advice gate already owns.
+ *
+ * ⚠ THAT SENTENCE WAS ONCE A CLAIM THE REGEXES DID NOT IMPLEMENT, AND AN
+ * ADVERSARIAL REVIEW PROVED IT EXECUTABLY. The first revision said every pattern
+ * required "an interrogative AND a NEGATED outcome noun" while pattern 1 allowed
+ * a non-negated verb beside an `a`/`an` article (a free cross-product), and the
+ * negated-ability pattern allowed a BARE negation with any subject. Eight
+ * phrasings matched that are not this question at all — "Why is there a clear
+ * winner?", "Why can't I pick more than one option?", "Why do people not choose
+ * subscriptions?" among them — and each would have received the canned withheld
+ * answer as a non-sequitur. None of them was in the negative set, so nothing was
+ * red.
+ *
+ * TWO DURABLE LESSONS, recorded because both are cheap to repeat:
+ *   - A PROSE CLAIM ABOUT A REGEX IS NOT A CONSTRAINT ON IT. Where a pattern
+ *     must require two things at once, write two patterns — each internally
+ *     consistent — rather than one pattern and a comment asserting the coupling.
+ *   - A NEGATIVE SET BUILT BY ITS OWN AUTHOR TESTS THE SHAPES THE AUTHOR WAS
+ *     ALREADY THINKING ABOUT. Every attack phrasing above is now in it, and the
+ *     boundary is a test rather than a paragraph.
  *
  * The cost of narrowness is stated rather than hidden: a phrasing outside this
  * set still reaches the pre-existing routing, which is exactly where it goes
@@ -76,14 +97,42 @@ const OUTCOME_NOUN =
 const OUTCOME_QUALIFIER = '(?:single\\s+|clear\\s+|leading\\s+|preferred\\s+|recommended\\s+|best\\s+|obvious\\s+)?';
 
 /**
- * Contracted and uncontracted negations, in one place. Written out rather than
- * assembled from a verb list because "can't"/"won't"/"cannot" do not decompose
- * the same way — a `verb + n't` assembly silently misses "won't" (the verb is
- * "wo") and "cannot" (no apostrophe), and a recogniser that misses the
- * contraction misses the way people actually type.
+ * Contracted negations, written out rather than assembled from a verb list:
+ * "can't"/"won't"/"cannot" do not decompose the same way — a `verb + n't`
+ * assembly silently misses "won't" (the verb is "wo") and "cannot" (no
+ * apostrophe), and a recogniser that misses the contraction misses the way
+ * people actually type.
+ *
+ * ⚠ BARE `not` / `never` / `no` ARE NOT IN THIS SET, and their absence is the
+ * F1 fix. See {@link SYSTEM_SUBJECT}.
  */
-const NEGATION =
-  "(?:can['’]?t|cannot|won['’]?t|couldn['’]?t|wouldn['’]?t|shouldn['’]?t|didn['’]?t|doesn['’]?t|don['’]?t|haven['’]?t|hasn['’]?t|isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|not|never|no)";
+const CONTRACTED_NEGATION =
+  "(?:can['’]?t|cannot|won['’]?t|couldn['’]?t|wouldn['’]?t|shouldn['’]?t|didn['’]?t|doesn['’]?t|don['’]?t|haven['’]?t|hasn['’]?t|isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t)";
+
+/**
+ * WHO is being said not to put an option forward. THE PRODUCT — never the user,
+ * never a third party, never the world.
+ *
+ * ⚠ ADDED BY ADVERSARIAL REVIEW (F1), AND THE SUBJECT IS THE WHOLE DEFENCE.
+ * The negated-ability pattern used to allow any 30 characters between "why" and
+ * a bare negation, which made these three domain / capability / advice
+ * questions match — each then received the canned withheld answer as a
+ * non-sequitur:
+ *
+ *   "Why do people not choose subscriptions?"   a question about the WORLD
+ *   "Why can't I pick more than one option?"    a question about the UI
+ *   "Why shouldn't I pick option A?"            a request for ADVICE
+ *
+ * "why can't YOU recommend one" and "why can't I pick one" are different
+ * questions with different answers, and only the first is about a withholding.
+ * The subject is what tells them apart, so it is required rather than skipped
+ * over.
+ */
+const SYSTEM_SUBJECT =
+  '(?:you|it|this|the\\s+(?:analysis|model|system|tool|engine|result|app)|olumi)';
+
+/** Auxiliaries that can carry an uncontracted "not" after the subject. */
+const AUXILIARY = '(?:can|could|will|would|do|does|did|have|has|had|is|are|was|were)';
 
 /** Verbs for the act of putting an option forward. */
 const PUT_FORWARD_VERB =
@@ -91,17 +140,46 @@ const PUT_FORWARD_VERB =
 
 const WITHHELD_WHY_PATTERNS: readonly RegExp[] = [
   // "Why is there no option?" — the ROADMAP row's own phrasing, and the shape
-  // the live journey used. Also: "Why are there no recommendations?",
-  // "Why isn't there a leading option?", "Why was there no winner?".
+  // the live journey used. Also "Why are there no recommendations?" and
+  // "Why was there no winner?".
   //
-  // The negation is optional on the verb because it can live on EITHER side:
-  // "why IS there NO option" and "why ISN'T there AN option" are the same
-  // question, and requiring it in one place misses half of them. At least one
-  // of the two positions must carry it — enforced by the trailing group, which
-  // demands `no`/`any` when the verb was not negated.
+  // ⚠ SPLIT FROM ITS SIBLING BELOW BY ADVERSARIAL REVIEW (F1), AND THE SPLIT IS
+  // THE FIX. One pattern used to carry both a NEGATION-OPTIONAL verb and an
+  // `a`/`an` article branch, under a comment claiming the trailing group
+  // "demands no/any when the verb was not negated". It demanded nothing of the
+  // sort: the two were a free cross-product, so a NON-negated verb plus an
+  // article matched — and these all received the canned withheld answer:
+  //
+  //   "Why is there an option to do nothing?"        a question about a NODE
+  //   "Why is there an option called Hold?"          a question about a NODE
+  //   "Why is there a clear winner?"                 the OPPOSITE question
+  //   "Why is there a choice between these two?"     a framing question
+  //   "Why is there a preference for hiring?"        a question about WEIGHTS
+  //
+  // Two patterns, each internally consistent, is the only way to state the
+  // requirement the docstring makes. A prose claim about a regex is not a
+  // constraint on it — the reviewer's probe proved that executably, and the
+  // negative set now carries every one of those phrasings.
+  //
+  // 1a — NEGATED VERB. The article is then free, because the negation is
+  // already carried: "Why isn't there a leading option?", "Why wasn't there an
+  // option?", "Why isn't there any recommendation?".
   new RegExp(
-    `\\bwhy\\s+(?:is|are|was|were)(?:\\s*n['’]?t|\\s+not)?\\s+there\\s+` +
-      `(?:(?:no|not\\s+a|not\\s+any|any)\\s+|(?:a|an)\\s+(?=${OUTCOME_QUALIFIER}${OUTCOME_NOUN}))` +
+    `\\bwhy\\s+(?:is|are|was|were)(?:\\s*n['’]?t|\\s+not)\\s+there\\s+` +
+      `(?:(?:a|an|any)\\s+)?${OUTCOME_QUALIFIER}${OUTCOME_NOUN}\\b`,
+    'i',
+  ),
+
+  // 1b — NON-NEGATED VERB, so the NEGATION MUST RIDE THE NOUN PHRASE.
+  // "Why is there no option?", "Why are there no recommendations?",
+  // "Why was there not a recommendation?".
+  //
+  // Bare `any` is deliberately NOT an alternative here: "why is there any
+  // option..." is a question about why an option EXISTS, which is the inverse
+  // of this one. It survives only on the negated branch above, where the
+  // negation makes the reading unambiguous.
+  new RegExp(
+    `\\bwhy\\s+(?:is|are|was|were)\\s+there\\s+(?:no|not\\s+a|not\\s+an|not\\s+any)\\s+` +
       `${OUTCOME_QUALIFIER}${OUTCOME_NOUN}\\b`,
     'i',
   ),
@@ -111,6 +189,15 @@ const WITHHELD_WHY_PATTERNS: readonly RegExp[] = [
   /\bwhy\s+(?:is|are|was|were)\s+(?:no|none|nothing|not\s+one)\b[^.?!\n]{0,50}\b(?:put\s+forward|recommended|shown|suggested|chosen|picked|named|given|offered)\b/i,
 
   // "Why no option?" · "Why no recommendation?" · "Why not a winner?"
+  //
+  // ⚠ STATED BOUNDARY (adversarial review, minor note). "why no clear winner
+  // LAST TIME?" matches here, and the answer is composed from the LATEST run's
+  // verdict — so a question about an earlier run is answered about the current
+  // one. Accepted rather than fixed: this recogniser has no run-selection
+  // vocabulary and neither does the composer, the persisted verdict is
+  // per-fact with only the latest selected, and a half-built temporal read
+  // would be worse than a stated boundary. Recorded so the next reader does
+  // not mistake it for an oversight.
   new RegExp(
     `\\bwhy\\s+(?:no|not)\\s+(?:a\\s+|an\\s+|any\\s+)?${OUTCOME_QUALIFIER}${OUTCOME_NOUN}\\b`,
     'i',
@@ -123,16 +210,27 @@ const WITHHELD_WHY_PATTERNS: readonly RegExp[] = [
     'i',
   ),
 
-  // The NEGATED-ABILITY family, in one entry rather than one per auxiliary:
-  //   "Why can't you recommend one?"      "Why won't it pick an option?"
-  //   "Why did you not pick an option?"   "Why haven't you recommended anything?"
-  //   "Why can't the analysis put an option forward?"
+  // The NEGATED-ABILITY family — THE PRODUCT is what cannot put one forward.
   //
-  // Requires BOTH a negation and a put-an-option-forward verb, which is what
-  // keeps it off "Why didn't the result change?" and every `what_drove`
-  // phrasing the advice gate already owns.
+  // Two orders, because English puts the subject on either side of the
+  // negation, and both are the same question:
+  //   contracted:   "Why can't YOU recommend one?"  "Why won't IT pick one?"
+  //                 "Why haven't YOU recommended anything?"
+  //                 "Why can't THE ANALYSIS put an option forward?"
+  //   uncontracted: "Why can YOU not suggest one?"  "Why did YOU not pick one?"
+  //
+  // ⚠ THE SUBJECT IS REQUIRED (F1). This entry used to allow any 30 characters
+  // between "why" and a BARE negation, so "why do PEOPLE not choose…",
+  // "why can't I pick…" and "why shouldn't I pick…" all matched — three
+  // questions that are not about a withholding at all. Requiring
+  // `SYSTEM_SUBJECT` adjacent to the negation is what separates "why can't YOU
+  // recommend one" from "why can't I pick one"; the verb alone never could.
   new RegExp(
-    `\\bwhy\\s+[^.?!\\n]{0,30}\\b${NEGATION}\\b[^.?!\\n]{0,40}\\b${PUT_FORWARD_VERB}`,
+    `\\bwhy\\s+${CONTRACTED_NEGATION}\\s+${SYSTEM_SUBJECT}\\b[^.?!\\n]{0,30}\\b${PUT_FORWARD_VERB}`,
+    'i',
+  ),
+  new RegExp(
+    `\\bwhy\\s+${AUXILIARY}\\s+${SYSTEM_SUBJECT}\\s+(?:not|never)\\b[^.?!\\n]{0,30}\\b${PUT_FORWARD_VERB}`,
     'i',
   ),
 

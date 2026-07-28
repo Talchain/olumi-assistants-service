@@ -42,6 +42,10 @@ const WITHHELD_WHY_QUESTIONS: readonly string[] = [
   'Why is there no preferred option?',
   'Why are there no recommendations?',
   "Why isn't there a leading option?",
+  "Why isn't there an option?",
+  "Why isn't there any recommendation?",
+  "Why wasn't there a winner?",
+  'Why is there not a recommendation?',
   'Why was there no recommendation?',
   'Why no option?',
   'Why no recommendation?',
@@ -91,6 +95,32 @@ const OWNED_BY_SOMETHING_ELSE: readonly string[] = [
   'Why is there no data on cost?',
   'Why is there a delay?',
   'No option is fine, thanks',
+
+  // ⚠ ADVERSARIAL-REVIEW ATTACK SET (F1). Every one of these MATCHED the first
+  // revision and would have received the canned withheld answer as a
+  // non-sequitur. None was in the negative set above, which is the point: a
+  // negative set written by the pattern's own author tests the shapes its
+  // author was already thinking about.
+  //
+  // Group 1 — a NON-negated verb beside an article. These ask why something
+  // EXISTS; two of them presuppose the opposite of a withholding.
+  'Why is there an option to do nothing?',
+  'Why is there an option called Hold in my model?',
+  'Why is there a clear winner?',
+  'Why is there a choice between these two?',
+  'Why is there a preference for hiring?',
+  // Group 2 — a negation whose subject is NOT the product. About the world,
+  // about the UI, and a request for advice.
+  'Why do people not choose subscriptions?',
+  "Why can't I pick more than one option?",
+  "Why shouldn't I pick option A?",
+  // Sibling shapes derived from the same two holes, so the fix is pinned wider
+  // than the exact strings the review happened to try.
+  'Why is there an answer already?',
+  'Why are there options at all?',
+  "Why can't we pick both?",
+  'Why did the team not choose that supplier?',
+  "Why don't customers pick the cheaper option?",
 ];
 
 describe('ROADMAP 2.104 — the gap this recogniser exists for, re-measured', () => {

@@ -5844,11 +5844,38 @@ export async function runTurnExecutor(
         // concrete edit must reach the edit-graph dispatch path even when it is
         // wrapped in a question about the result.
         const whyMutation = hasMutationSignal(payload.message);
+        // ⚠ FRESHNESS IS A CORRECTNESS PREDICATE HERE, NOT HOUSE STYLE (F2,
+        // adversarial review). This guard had none, and it was the ONE
+        // deterministic surface in this block without one — the advice gate and
+        // the catch-net both decline on `!== 'fresh'`, and the stale-rerun guard
+        // cannot cover the gap because it needs `classifyAnalyticalIntent`,
+        // which returns null for every phrasing this guard recognises. The
+        // stale path was therefore provably open.
+        //
+        // THE HARM IS SPECIFIC, AND THIS GUARD'S OWN ADVICE STEERS USERS INTO
+        // IT. `goal_constraints` are inside the analysis-affecting hash
+        // (context/graph-hash.ts), so ANY constraint edit makes the run stale.
+        // The verdict then comes from the OLD fact while the labels come from
+        // the CURRENT graph, and the copy asserts "The condition you set was
+        // checked on this run: X" — false for a condition added, renamed or
+        // relaxed since — and "All N conditions you set were checked", where N
+        // is counted NOW and was never recorded. Every voice tells the user to
+        // re-state the limit and run again, which is exactly the edit that
+        // opens the window.
+        //
+        // GATE RATHER THAN CAVEAT, and the choice is forced by the evidence
+        // rather than preferred: a caveat can hedge WHEN the check happened, but
+        // the label set would still be the current one while the verdict is the
+        // old one, so the sentence would stay hedged AND wrong about WHICH
+        // condition. Nothing persisted can reconcile them. Stale therefore falls
+        // through to the behaviour it has today.
+        const whyFreshnessOk = contextReadiness.latest_analysis_freshness === 'fresh';
         const whyAnswer =
           isWhyQuestion &&
           !whyMutation &&
           !mayNameLeadingOptionForRun &&
-          contextReadiness.has_run_analysis_fact
+          contextReadiness.has_run_analysis_fact &&
+          whyFreshnessOk
             ? composeWithheldWhyAnswer(
                 constraintVerdictStateForRun,
                 readRatifiedConstraints(
@@ -5868,10 +5895,12 @@ export async function runTurnExecutor(
               ? 'permitted'
               : !contextReadiness.has_run_analysis_fact
                 ? 'no_analysis_fact'
-                : // Reached the composer and it declined: a permitting state on
-                  // a withholding permission. Not expected, and recorded rather
-                  // than smoothed over.
-                  'permitting_state';
+                : !whyFreshnessOk
+                  ? 'not_fresh'
+                  : // Reached the composer and it declined: a permitting state
+                    // on a withholding permission. Not expected, and recorded
+                    // rather than smoothed over.
+                    'permitting_state';
         emit(TelemetryEvents.V5WithheldWhyGuard, {
           request_id: requestId,
           scenario_id: context.session_id,
