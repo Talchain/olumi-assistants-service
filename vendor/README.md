@@ -9,12 +9,19 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ### `talchain-schemas-0.29.0.tgz`
 
-> **⚠ PRE-PUBLISH TARBALL — built from `Talchain/olumi-schemas` branch
-> `lane/factor-value-edit-event` at `ef58d93a`, NOT from GitHub Packages.** That
-> branch is PR #28, which is HELD for orchestrator review. `npm run build && npm
-> pack` on that tip produced these bytes. **The orchestrator must RE-VENDOR
-> against the published `0.29.0` at merge time** — this pin is a build artefact of
-> an unmerged branch and its bytes are not the released ones until it is.
+> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.29.0`, pulled from
+> GitHub Packages via `npm pack @talchain/schemas@0.29.0`.** olumi-schemas PR #28
+> merged as `80c52743`, tagged `v0.29.0`, and the Publish Package run
+> (`30329034746`) completed `success` with `Publish to GitHub Packages` green.
+>
+> These are NOT the bytes an earlier revision of this file described. The PR
+> initially vendored a local `npm pack` of the unmerged branch
+> (sha256 `2e866b89…`, 254,301 bytes); npm repacks on publish, so the released
+> tarball is 254,609 bytes with a different hash. **Re-vendored from the registry
+> after the merge, exactly as the pre-publish note required.** Content verified at
+> the bytes rather than assumed: the published `dist/boundary/turn-payload.d.ts`
+> carries `field?: "value"` (the literal, not the permissive string the PR started
+> with), so the release contains the reviewed amendment.
 
 0.25.0 → 0.29.0 is a FOUR-RELEASE jump (0.26.0, 0.27.0, 0.28.0 landed 26–27 Jul
 while CEE stayed on 0.25.0 — parent CLAUDE.md hazard 1, measured not assumed).
@@ -45,27 +52,29 @@ producer/consumer obligations. Recorded here so the next reader knows the delta 
 read rather than ignored.
 
 ⚠ **SEQUENCING — THIS IS THE READER, AND IT MUST DEPLOY BEFORE THE WRITER.**
+Step 1 (publish 0.29.0) is DONE; this pin is step 2.
 Every member of `SystemEventSchema` is `.strict()` and the union discriminates on
 `kind`, so a consumer below 0.29.0 that receives `factor_value_edit` fails the
 discriminator and rejects THE WHOLE TURN. Pins measured 2026-07-28 at each repo's
 `staging` tip: UI **0.22.0**, CEE **0.25.0** (this PR), PLoT 0.22.0 (never sees
-turns). Order: publish 0.29.0 → this PR merges and DEPLOYS → only then the UI
-emitter ships. Shipping the writer first 400s every inspector edit.
+turns). Order: ~~publish 0.29.0~~ (done, `80c52743`) → this PR merges and DEPLOYS →
+only then the UI emitter ships. Shipping the writer first 400s every inspector edit.
 
 **Checksum verification:** `vendor/talchain-schemas-0.29.0.tgz.sha256` holds the
 canonical sha256 hash
-(`08d3a6dcec7b74ba6160451f17f782e68889dea5822e169e788988381d41ce33`). The pre-push
+(`9104048a1ebe282866bee88b014a2542c80619b5ed93f1567b45ba4a33e76143`). The pre-push
 hook (`scripts/validate-tarball-sha.sh`) verifies the tarball bytes against this
-manifest on every push. ⚠ This hash is for the PRE-PUBLISH build described above,
-replacing the prior published `0.25.0` hash `5d7f5679…708c4a`. **It will change
-when the orchestrator re-vendors from the registry** — the published tarball is
-repacked by npm and is not guaranteed byte-identical to a local `npm pack`.
+manifest on every push — re-run and green against these bytes. ✔ This hash is for
+the PUBLISHED `@talchain/schemas@0.29.0` (`npm pack` from GitHub Packages),
+replacing the prior published `0.25.0` hash `5d7f5679…708c4a`.
 
 **Rollback path:** revert the whole PR. Git history restores
 `vendor/talchain-schemas-0.25.0.tgz`, its `.sha256`, the `package.json` `file:`
 reference and this README. Re-run `pnpm install` after the revert. **NOTE:** the
 vendor commit cannot be reverted alone — `src/orchestrator-v5/system-events/`
-references the new event type and would not typecheck against 0.25.0.
+references the new event type and would not typecheck against 0.25.0. Reverting
+here does NOT unpublish 0.29.0; the release stands, and a later re-adoption is a
+fresh vendor commit, not a revert of a revert.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
