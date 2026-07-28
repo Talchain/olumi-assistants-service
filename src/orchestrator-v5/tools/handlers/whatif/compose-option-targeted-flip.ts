@@ -74,6 +74,13 @@ export type OptionTargetedFlipRefusalReason =
   /** Flip rows exist but isolate no tipping point, so there is no verdict. */
   | 'indeterminate';
 
+/** Why the answer declines to place the target at all. */
+export type PositionUnstatedReason =
+  /** This turn's verdict withholds the leading option, so position is unsayable. */
+  | 'withheld'
+  /** The run recorded no unambiguous leader id, so we do not know. */
+  | 'leader_unknown';
+
 export type OptionTargetedFlipAnswer =
   | {
       readonly kind: 'addressed';
@@ -83,14 +90,51 @@ export type OptionTargetedFlipAnswer =
       readonly factor_labels: readonly string[];
     }
   | {
+      /**
+       * The target IS the option currently leading. Only ever produced when the
+       * turn's verdict PERMITS naming a leading option — this string asserts
+       * one, deliberately and truthfully.
+       */
+      readonly kind: 'already_leading';
+      readonly text: string;
+      readonly target: TargetOption;
+    }
+  | {
       readonly kind: 'refused';
       readonly text: string;
       readonly target: TargetOption;
       readonly reason: OptionTargetedFlipRefusalReason;
+    }
+  | {
+      /**
+       * We may not, or cannot, say where the target stands — so we say neither
+       * that it trails nor that it leads.
+       */
+      readonly kind: 'position_unstated';
+      readonly text: string;
+      readonly target: TargetOption;
+      readonly reason: PositionUnstatedReason;
     };
 
 /** How many levers the prose names. Matches the generic composer's cap. */
 const NAMED_FACTOR_CAP = 2;
+
+/**
+ * Everything the answer needs to be both addressed AND honest about position.
+ *
+ * `leadingOptionId` and `mayNameLeadingOption` are threaded from the turn's own
+ * derivations, never re-derived here (CLAUDE.md trap #12): the permission is the
+ * turn-executor's hoisted `mayNameLeadingOptionForRun`, and the leader id comes
+ * off the SAME `run_analysis` fact the flip rows did.
+ */
+export interface OptionTargetedFlipInput {
+  readonly target: TargetOption;
+  readonly flipSummary: FlipSummary | null | undefined;
+  /** IDENTITY of the option currently leading; `null` ⇒ unknown, NOT "none". */
+  readonly leadingOptionId: string | null | undefined;
+  /** This turn's verdict. Absent/false ⇒ treated as WITHHOLDING (fail closed). */
+  readonly mayNameLeadingOption?: boolean;
+}
 
 /**
  * The honest next step, shared by all three refusals. Suggests a direction to
@@ -150,15 +194,84 @@ function composeAddressedText(
   const moves = named.map(describeFactorMove);
   const condition = moves.length === 1 ? moves[0]! : `either ${moves[0]!}, or ${moves[1]!}`;
 
-  // "the only" is a completeness claim, so it is made ONLY when the matched set
-  // really is a single row. With more matches than we name, the prose says what
-  // it can see and claims no exhaustiveness.
+  // COMPLETENESS IS CLAIMED ONLY WHEN IT HOLDS. "the only" / "Those are" assert
+  // that the named set is the whole set; the naming cap can truncate it, and an
+  // exhaustiveness claim about a truncated set is false. So the quantifier is
+  // derived from whether anything was dropped, never fixed by branch.
+  const complete = matchedCount === named.length;
   const closing =
     matchedCount === 1
       ? `That is the only single-factor change the analysis found that would put this result in favour of ${target.label}, so it is the clearest one to test.`
-      : `Those are the single-factor changes the analysis found that would put this result in favour of ${target.label}, so they are the clearest ones to test.`;
+      : `${complete ? 'Those are' : 'Those include'} the single-factor changes the analysis found that would put this result in favour of ${target.label}, so they are the clearest ones to test.`;
 
   return `${target.label} would lead instead if ${condition}. ${closing}`;
+}
+
+/**
+ * The one string that DOES name a leading option, and may only be emitted when
+ * the turn's verdict permits it.
+ *
+ * Without this branch, "what would make {the current leader} win?" fell through
+ * to `no_flip_to_target` — because a flip row's `alternative_winner_id` is BY
+ * CONSTRUCTION never the option already leading, so no row can ever name it.
+ * The refusal was vacuously true and pragmatically false: it told the user that
+ * nothing would put the result in favour of the option that had already won.
+ */
+function composeAlreadyLeadingText(target: TargetOption): string {
+  return (
+    `${target.label} is already the leading option on this analysis, so no single-factor change is ` +
+    'needed to put it there. Would you like to see what could change that instead?'
+  );
+}
+
+/**
+ * Position-neutral copy: names the target, places it nowhere.
+ *
+ * ⚠ WHY THIS FIRES FOR EVERY UNMATCHED TARGET ON A WITHHELD RUN, not only when
+ * the target happens to be the hidden leader. If the copy differed in that one
+ * case, THE COPY ITSELF WOULD BE AN ORACLE: a user could name each option in
+ * turn and read the leader off which one produced the different answer. The
+ * whole point of the withheld verdict is that the leader is not derivable, so
+ * every unmatched target must receive the SAME words. The branch is ambiguous
+ * between "the target is the leader" and "nothing tested flips to the target",
+ * and that ambiguity is the security property, not a vagueness to tidy up.
+ *
+ * The factor picture is likewise the GENERIC flip set, never the set filtered to
+ * the target — a target-filtered picture is empty exactly when the target leads,
+ * which would reintroduce the same oracle through the back door.
+ */
+function composePositionUnstatedText(
+  target: TargetOption,
+  reason: PositionUnstatedReason,
+  flipSummary: FlipSummary,
+): string {
+  const opening =
+    reason === 'withheld'
+      ? // "put forward", never "recommend" / "lead" — the estate's existing
+        // leader-free phrasing for exactly this state.
+        `This analysis could not put a single option forward, so I cannot say where ${target.label} stands on it.`
+      : `I cannot tell from what this run recorded where ${target.label} stands, so I would rather not guess.`;
+
+  return `${opening} ${composeGenericFactorPicture(flipSummary)}`;
+}
+
+/** The position-neutral factor picture. Says which factors move, never who wins. */
+function composeGenericFactorPicture(flipSummary: FlipSummary): string {
+  if (flipSummary.overall_status === 'no_practical_flip') {
+    return 'Within the tested ranges, the analysis found no single-factor tipping point at all.';
+  }
+  if (flipSummary.overall_status === 'insufficient_data') {
+    return 'The analysis did not isolate a single-factor tipping point on this run.';
+  }
+  const named = flipSummary.entries
+    .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value))
+    .slice(0, NAMED_FACTOR_CAP);
+  if (named.length === 0) {
+    return 'The analysis did not isolate a single-factor tipping point on this run.';
+  }
+  const labels = named.map((e) => e.factor_label);
+  const list = labels.length === 1 ? labels[0]! : `${labels[0]!} and ${labels[1]!}`;
+  return `What it can say is which factors move the result at all: ${list} reached a tipping point within the tested ranges, so those are the clearest ones to test.`;
 }
 
 /**
@@ -173,11 +286,94 @@ function composeAddressedText(
  * Pure. Never throws.
  */
 export function composeOptionTargetedFlipAnswer(
-  target: TargetOption,
-  flipSummary: FlipSummary | null | undefined,
+  input: OptionTargetedFlipInput,
 ): OptionTargetedFlipAnswer | null {
+  const { target, flipSummary, leadingOptionId } = input;
+  // FAIL CLOSED on an unstated permission: a caller that did not populate it is
+  // a caller whose verdict we cannot read, and "unknown" must never license copy
+  // that presupposes where the target stands.
+  const mayNameLeadingOption = input.mayNameLeadingOption === true;
+
   if (flipSummary == null || flipSummary.overall_status === 'none') return null;
 
+  // ── 1. Does any TESTED row make the target lead? ─────────────────────────
+  // Only 'concrete' can produce one. A row with no finite flip_value carries no
+  // tipping point to describe, so it is not evidence for an addressed answer.
+  const matched =
+    flipSummary.overall_status === 'concrete'
+      ? flipSummary.entries.filter((e) => {
+          if (typeof e.flip_value !== 'number' || !Number.isFinite(e.flip_value)) return false;
+          const winner = resolveAlternativeWinner(e);
+          return winner !== null && winner.id === target.id;
+        })
+      : [];
+
+  // ── 2. POSITION IS CHECKED BEFORE THE ROWS, because "has already won"
+  //       outranks "would win if". A flip row's `alternative_winner_id` is by
+  //       construction never the option already leading, so the two can only
+  //       both be true on inconsistent data — and there `leading_option_id`,
+  //       which records who actually won, is the authority. Answering "X would
+  //       lead instead if …" about an X that already leads would be a new wrong
+  //       answer in place of the old one.
+  const leaderKnown =
+    typeof leadingOptionId === 'string' && leadingOptionId.length > 0;
+
+  if (leaderKnown && leadingOptionId === target.id) {
+    // On a withheld run we hold the id but may not act on it in prose — so this
+    // falls through to the SAME position-neutral copy every other unmatched
+    // target gets. That identity of copy is the anti-oracle property.
+    return mayNameLeadingOption
+      ? { kind: 'already_leading', text: composeAlreadyLeadingText(target), target }
+      : {
+          kind: 'position_unstated',
+          text: composePositionUnstatedText(target, 'withheld', flipSummary),
+          target,
+          reason: 'withheld',
+        };
+  }
+
+  if (matched.length > 0) {
+    // Naming the COUNTERFACTUAL winner is explicitly licensed on withheld runs
+    // (the egress guard's key patterns are `^`-anchored precisely to preserve
+    // `alternative_winner_*`), and a row naming the target proves the target is
+    // not the current leader — so this branch is safe under either verdict.
+    const named = matched.slice(0, NAMED_FACTOR_CAP);
+    return {
+      kind: 'addressed',
+      text: composeAddressedText(target, named, matched.length),
+      target,
+      factor_labels: named.map((e) => e.factor_label),
+    };
+  }
+
+  // ── 3. Nothing tested flips to the target, and the target is not the known
+  //       leader. Say so only when we are entitled to place it at all.
+  if (!mayNameLeadingOption) {
+    // We may not say where anything stands, so we say nothing about it — for
+    // EVERY unmatched target, so the copy cannot be read as an oracle for the
+    // withheld leader. See composePositionUnstatedText.
+    return {
+      kind: 'position_unstated',
+      text: composePositionUnstatedText(target, 'withheld', flipSummary),
+      target,
+      reason: 'withheld',
+    };
+  }
+
+  if (!leaderKnown) {
+    // Permitted to name a leader, but the run recorded none we can trust (a tie,
+    // or a missing field). We cannot rule out that the target IS the leader, so
+    // we decline to place it rather than guess.
+    return {
+      kind: 'position_unstated',
+      text: composePositionUnstatedText(target, 'leader_unknown', flipSummary),
+      target,
+      reason: 'leader_unknown',
+    };
+  }
+
+  // ── 4. The target is a real, named, non-leading option that nothing tested
+  //       flips to. NOW the refusal is both true and honest.
   if (flipSummary.overall_status === 'no_practical_flip') {
     return {
       kind: 'refused',
@@ -186,7 +382,6 @@ export function composeOptionTargetedFlipAnswer(
       reason: 'no_practical_flip',
     };
   }
-
   if (flipSummary.overall_status === 'insufficient_data') {
     return {
       kind: 'refused',
@@ -195,31 +390,11 @@ export function composeOptionTargetedFlipAnswer(
       reason: 'indeterminate',
     };
   }
-
-  // 'concrete' — real tipping points exist. Select the rows that name THIS
-  // target, by IDENTITY. A row with no finite flip_value carries no tipping
-  // point to describe, so it is not evidence for an addressed answer.
-  const matched = flipSummary.entries.filter((e) => {
-    if (typeof e.flip_value !== 'number' || !Number.isFinite(e.flip_value)) return false;
-    const winner = resolveAlternativeWinner(e);
-    return winner !== null && winner.id === target.id;
-  });
-
-  if (matched.length === 0) {
-    return {
-      kind: 'refused',
-      text: composeRefusalText(target, 'no_flip_to_target'),
-      target,
-      reason: 'no_flip_to_target',
-    };
-  }
-
-  const named = matched.slice(0, NAMED_FACTOR_CAP);
   return {
-    kind: 'addressed',
-    text: composeAddressedText(target, named, matched.length),
+    kind: 'refused',
+    text: composeRefusalText(target, 'no_flip_to_target'),
     target,
-    factor_labels: named.map((e) => e.factor_label),
+    reason: 'no_flip_to_target',
   };
 }
 
@@ -265,6 +440,22 @@ function assertTargetedCopyIsLeaderFree(): void {
     probes.push([`addressed:one:${direction}`, composeAddressedText(target, one, 1)]);
     probes.push([`addressed:one-of-many:${direction}`, composeAddressedText(target, one, 3)]);
     probes.push([`addressed:two:${direction}`, composeAddressedText(target, two, 2)]);
+    probes.push([`addressed:two-of-many:${direction}`, composeAddressedText(target, two, 5)]);
+  }
+  // The position-unstated family is what a WITHHELD run actually ships, so it is
+  // the branch this probe most needs to cover.
+  for (const status of ['concrete', 'no_practical_flip', 'insufficient_data'] as const) {
+    const summary: FlipSummary = {
+      overall_status: status,
+      margin_supports_flip: true,
+      entries: [entry('increase'), entry('decrease')],
+    };
+    for (const reason of ['withheld', 'leader_unknown'] as const) {
+      probes.push([
+        `position_unstated:${reason}:${status}`,
+        composePositionUnstatedText(target, reason, summary),
+      ]);
+    }
   }
 
   for (const [name, copy] of probes) {
@@ -277,6 +468,24 @@ function assertTargetedCopyIsLeaderFree(): void {
           'not narrow the pattern set, which is shared with the alarm.',
       );
     }
+  }
+
+  // ── THE INVERSE PROBE, and it is a safety property rather than a style one.
+  //
+  // `already_leading` is the one string here that DOES assert a leading option.
+  // That is correct: it is only reachable when the turn's verdict permits it. If
+  // it were ever emitted on a withheld run, the withheld gate is the backstop
+  // that replaces it — but only if the gate can SEE it. A reword that made this
+  // sentence invisible to the vocabulary ("X is out in front already") would
+  // remove the backstop silently, which is the `performs best` hole exactly.
+  const leaderCopy = composeAlreadyLeadingText(target);
+  if (!textAssertsLeadingOption(leaderCopy)) {
+    throw new Error(
+      'compose-option-targeted-flip: the already_leading copy no longer trips the shared ' +
+        'leader vocabulary. That copy names a leading option by design and is licensed only ' +
+        'by a PERMITTING verdict; the withheld gate is its backstop, and a string the gate ' +
+        'cannot see has no backstop. Keep the claim explicit — do not make it invisible.',
+    );
   }
 }
 assertTargetedCopyIsLeaderFree();

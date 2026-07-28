@@ -150,9 +150,19 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     // The composer returns null when there is no flip evidence at all
     // (`flipSummary` absent or 'none'), because then there is nothing to address
     // the question WITH — and the pre-existing behaviour is preserved verbatim.
+    // Position honesty: a flip row's `alternative_winner_id` is BY CONSTRUCTION
+    // never the option already leading, so without the leader identity the
+    // composer would answer "nothing would put this in favour of X" about the
+    // option that has already won. The permission and the leader id are threaded
+    // from the turn's own derivations, never re-derived here.
     const targeted =
       invocation.flipTargetOption != null
-        ? composeOptionTargetedFlipAnswer(invocation.flipTargetOption, invocation.flipSummary)
+        ? composeOptionTargetedFlipAnswer({
+            target: invocation.flipTargetOption,
+            flipSummary: invocation.flipSummary,
+            leadingOptionId: invocation.analysisLeadingOptionId ?? null,
+            mayNameLeadingOption: invocation.mayNameLeadingOption,
+          })
         : null;
 
     const rawText =
@@ -177,14 +187,29 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     // exact intervention it asked about. When the client is null (the latent
     // state on staging today) it short-circuits immediately, so `rawText` is
     // returned unchanged and the base flip behaviour is byte-preserved.
-    const lens = await runCounterfactualLens({
-      client: counterfactualClient,
-      graphForTurn: invocation.graphForTurn,
-      flipSummary: invocation.flipSummary,
-      rawRobustness: invocation.rawRobustness,
-      requestId: invocation.requestId,
-      signal: invocation.signal,
-    });
+    //
+    // ⚠ NOT APPENDED AFTER A NEGATIVE TARGETED ANSWER. `selectCounterfactualProbe`
+    // picks its probe from the GENERIC flip set, so right after "nothing tested
+    // would put this in favour of X" (or after declining to place X at all) the
+    // card can propose a factor whose tipping point favours a DIFFERENT option —
+    // read, reasonably, as "try this to make X win". The card is claim-safe in
+    // isolation and contradictory in that adjacency, so the adjacency is what is
+    // removed. `addressed` and `already_leading` keep it: there the suggestion
+    // and the answer point the same way. (Latent on staging today — the client is
+    // null — but the interplay is structural, not a live-only concern. A
+    // target-aware probe selector would let this branch keep the card.)
+    const targetedIsNegative =
+      targeted !== null && (targeted.kind === 'refused' || targeted.kind === 'position_unstated');
+    const lens = targetedIsNegative
+      ? null
+      : await runCounterfactualLens({
+          client: counterfactualClient,
+          graphForTurn: invocation.graphForTurn,
+          flipSummary: invocation.flipSummary,
+          rawRobustness: invocation.rawRobustness,
+          requestId: invocation.requestId,
+          signal: invocation.signal,
+        });
     const assistantText = lens ? `${rawText} ${lens.card}` : rawText;
 
     const fact: WhatWouldFlipHandlerFact = {

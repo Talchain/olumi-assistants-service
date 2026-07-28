@@ -71,6 +71,9 @@ function makeInvocation(over: {
   flipSummary?: FlipSummary | null;
   sonnetValid?: boolean;
   message?: string;
+  /** Defaults to a PERMITTING verdict with a leader that is neither target. */
+  mayNameLeadingOption?: boolean;
+  leadingOptionId?: string | null;
 }): HandlerInvocation {
   const priorFacts: readonly HandlerFact[] = [ANALYSIS_FACT];
   const message = over.message ?? 'What would make Engage Offshore Partner win?';
@@ -112,6 +115,9 @@ function makeInvocation(over: {
     analysisProjection: PROJECTION,
     flipSummary: over.flipSummary === undefined ? FLIPS_TO_HIRE : over.flipSummary,
     flipTargetOption: over.flipTargetOption ?? null,
+    mayNameLeadingOption: over.mayNameLeadingOption ?? true,
+    analysisLeadingOptionId:
+      over.leadingOptionId === undefined ? 'opt_status_quo' : over.leadingOptionId,
   } as unknown as HandlerInvocation;
 }
 
@@ -157,6 +163,65 @@ describe('what_would_flip — the answer addresses the option the user named', (
     expect(fact.result.answer_source).toBe('deterministic_fallback');
     expect(fact.result.fallback_reason).not.toBeNull();
     expect(out.assistant_text).toContain('Engage Offshore Partner');
+  });
+});
+
+describe('F1 at the HANDLER — the target may be the option that already won', () => {
+  it('VISIBLE run, user names the CURRENT LEADER ⇒ told so, not refused', async () => {
+    const out = await handler(
+      makeInvocation({
+        flipTargetOption: HIRE,
+        // No row can ever name the leader as alternative winner, so without the
+        // leader check this turn refused about the option that had already won.
+        flipSummary: { ...FLIPS_TO_HIRE, entries: [] as FlipSummary['entries'] },
+        leadingOptionId: HIRE.id,
+        mayNameLeadingOption: true,
+        sonnetValid: true,
+      }),
+    );
+    expect(out.assistant_text).toContain('is already the leading option');
+    expect(out.assistant_text).not.toContain('in favour of');
+    expect(out.assistant_text).not.toContain('Testing two or more factors together');
+  });
+
+  it('WITHHELD run, user names the HIDDEN LEADER ⇒ places it nowhere (the 1/N case)', async () => {
+    const out = await handler(
+      makeInvocation({
+        flipTargetOption: HIRE,
+        flipSummary: { ...FLIPS_TO_HIRE, entries: [] as FlipSummary['entries'] },
+        leadingOptionId: HIRE.id,
+        mayNameLeadingOption: false,
+        sonnetValid: true,
+      }),
+    );
+    // Neither asserts it trails …
+    expect(out.assistant_text).not.toContain('in favour of');
+    // … nor confirms it leads.
+    expect(out.assistant_text).not.toContain('is already the leading option');
+    expect(out.assistant_text).toContain(
+      'cannot say where Hire Two Senior Engineers Locally stands',
+    );
+  });
+
+  it('WITHHELD run: naming the hidden leader is INDISTINGUISHABLE from naming a no-flip option', async () => {
+    const emptyRows = { ...FLIPS_TO_HIRE, entries: [] as FlipSummary['entries'] };
+    const asLeader = await handler(
+      makeInvocation({
+        flipTargetOption: HIRE,
+        flipSummary: emptyRows,
+        leadingOptionId: HIRE.id,
+        mayNameLeadingOption: false,
+      }),
+    );
+    const asNonLeader = await handler(
+      makeInvocation({
+        flipTargetOption: HIRE,
+        flipSummary: emptyRows,
+        leadingOptionId: 'opt_status_quo',
+        mayNameLeadingOption: false,
+      }),
+    );
+    expect(asLeader.assistant_text).toBe(asNonLeader.assistant_text);
   });
 });
 

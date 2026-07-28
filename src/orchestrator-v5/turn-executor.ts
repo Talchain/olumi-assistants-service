@@ -305,6 +305,7 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { pickLatestFlipSummary } from './coaching/pick-flip-summary.js';
+import { pickLatestLeadingOptionId } from './coaching/pick-leading-option-id.js';
 import {
   composeExplainResultsFallback,
   composeWhatWouldFlipFallback,
@@ -7259,6 +7260,15 @@ export async function runTurnExecutor(
             : undefined,
           flipSummary: routedFlipSummaryFiltered,
           flipTargetOption,
+          // Same fact as `flipSummary` (shared `selectRunAnalysisFact`), under
+          // the same same-source guard, so "is the target the current leader?"
+          // is decided against the run the flip rows describe.
+          analysisLeadingOptionId:
+            isExplanationHandler && analysisStateSource !== 'request'
+              ? pickLatestLeadingOptionId(context.prior_facts)
+              : null,
+          // The turn's hoisted permission — one derivation, many read points.
+          mayNameLeadingOption: mayNameLeadingOptionForRun,
         });
         if (timingsEnabled) {
           turnTimings.handler_execute_ms = Date.now() - handlerStartedAt;

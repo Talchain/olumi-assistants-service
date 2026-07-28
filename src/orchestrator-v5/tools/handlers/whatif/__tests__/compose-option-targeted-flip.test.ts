@@ -17,7 +17,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  composeOptionTargetedFlipAnswer,
+  composeOptionTargetedFlipAnswer as composeRaw,
   type OptionTargetedFlipAnswer,
 } from '../compose-option-targeted-flip.js';
 import type { TargetOption } from '../resolve-target-option.js';
@@ -26,6 +26,26 @@ import { textAssertsLeadingOption } from '../../../../compose/leading-option-egr
 
 const OFFSHORE: TargetOption = { id: 'opt_offshore', label: 'Engage Offshore Partner' };
 const HIRE: TargetOption = { id: 'opt_hire_local', label: 'Hire Two Senior Engineers Locally' };
+/** The current leader on the pinned scenario — neither OFFSHORE nor HIRE. */
+const LEADER_ID = 'opt_status_quo';
+
+/**
+ * Default harness: a PERMITTING verdict with a known leader that is NOT the
+ * target. Every case that is not specifically about position uses this, so the
+ * position logic is exercised only where it is the subject.
+ */
+function composeOptionTargetedFlipAnswer(
+  target: TargetOption,
+  flipSummary: FlipSummary | null | undefined,
+  over: { leadingOptionId?: string | null; mayNameLeadingOption?: boolean } = {},
+): OptionTargetedFlipAnswer | null {
+  return composeRaw({
+    target,
+    flipSummary,
+    leadingOptionId: over.leadingOptionId === undefined ? LEADER_ID : over.leadingOptionId,
+    mayNameLeadingOption: over.mayNameLeadingOption ?? true,
+  });
+}
 
 function entry(over: Partial<FlipEntry> = {}): FlipEntry {
   return {
@@ -250,9 +270,152 @@ describe('"only" is a completeness claim and is made only when it is true', () =
     );
     const a = composeOptionTargetedFlipAnswer(HIRE, three);
     expect(a!.text).not.toContain('the only');
-    expect(a!.text).toContain('Those are the single-factor changes');
+    // Completeness is NOT claimed over a truncated set.
+    expect(a!.text).not.toContain('Those are');
+    expect(a!.text).toContain('Those include the single-factor changes');
     // Capped at two named levers, like the generic composer.
     expect(a!.text).not.toContain('Offshore Engagement');
+  });
+});
+
+describe('F1 — the target may BE the option that has already won', () => {
+  /**
+   * A flip row's `alternative_winner_id` is by construction never the current
+   * leader, so without a leader check "what would make {the leader} win?"
+   * deterministically produced "none of the changes would put this in favour of
+   * X" — vacuously true, and pragmatically asserting that the winning option
+   * trails.
+   */
+  it('VISIBLE run, target IS the leader ⇒ says so, never a refusal', () => {
+    const a = composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE, {
+      leadingOptionId: HIRE.id,
+      mayNameLeadingOption: true,
+    });
+    expect(a!.kind).toBe('already_leading');
+    expect(a!.text).toContain('Hire Two Senior Engineers Locally is already the leading option');
+    expect(a!.text).not.toContain('none of the single-factor changes');
+    expect(a!.text).not.toContain('in favour of');
+  });
+
+  it('VISIBLE run, target is the leader, and NOTHING flips at all ⇒ still says so', () => {
+    const a = composeOptionTargetedFlipAnswer(
+      HIRE,
+      summary([entry({ flip_value: null, alternative_winner_id: null })], 'no_practical_flip'),
+      { leadingOptionId: HIRE.id, mayNameLeadingOption: true },
+    );
+    expect(a!.kind).toBe('already_leading');
+  });
+
+  /**
+   * THE 1/N CASE. On a withheld run the user cannot know the leader, so a
+   * fraction of targeted questions name it. Pre-amendment they received a
+   * leader-free refusal that survived the withheld gate BY DESIGN and induced a
+   * false belief about the hidden leader — worse than HEAD, where those turns
+   * were replaced wholesale with neutral copy.
+   */
+  it('WITHHELD run, target IS the hidden leader ⇒ places it nowhere', () => {
+    const a = composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE, {
+      leadingOptionId: HIRE.id,
+      mayNameLeadingOption: false,
+    });
+    expect(a!.kind).toBe('position_unstated');
+    // Does not assert it trails …
+    expect(a!.text).not.toContain('in favour of');
+    expect(a!.text).not.toContain('none of the single-factor changes');
+    // … and does not confirm it leads.
+    expect(a!.text).not.toMatch(/already the leading option|leads/i);
+    expect(a!.text).toContain('cannot say where Hire Two Senior Engineers Locally stands');
+  });
+
+  /**
+   * ⚠ THE ORACLE PROPERTY. If withheld copy differed when the target happens to
+   * be the leader, a user could name each option in turn and read the leader off
+   * whichever produced the odd answer. Every unmatched target must get the SAME
+   * words.
+   */
+  it('WITHHELD run: leader and non-leader targets are INDISTINGUISHABLE', () => {
+    const noFlipSummary = summary(
+      [entry({ flip_value: null, alternative_winner_id: null })],
+      'no_practical_flip',
+    );
+    const asLeader = composeOptionTargetedFlipAnswer(HIRE, noFlipSummary, {
+      leadingOptionId: HIRE.id,
+      mayNameLeadingOption: false,
+    });
+    const asNonLeader = composeOptionTargetedFlipAnswer(HIRE, noFlipSummary, {
+      leadingOptionId: 'opt_status_quo',
+      mayNameLeadingOption: false,
+    });
+    expect(asLeader!.kind).toBe(asNonLeader!.kind);
+    expect(asLeader!.text).toBe(asNonLeader!.text);
+  });
+
+  it('WITHHELD run: the factor picture is the GENERIC set, so it cannot leak either', () => {
+    // A target-FILTERED picture is empty exactly when the target leads, which
+    // would reintroduce the oracle through the back door.
+    const a = composeOptionTargetedFlipAnswer(OFFSHORE, FLIPS_TO_HIRE, {
+      leadingOptionId: 'opt_status_quo',
+      mayNameLeadingOption: false,
+    });
+    expect(a!.kind).toBe('position_unstated');
+    expect(a!.text).toContain('Engineering Capacity');
+    // Names factors, never who would win.
+    expect(a!.text).not.toContain('Hire Two Senior Engineers Locally');
+  });
+
+  it('an ADDRESSED answer still ships on a withheld run — that claim is licensed', () => {
+    // A row naming the target proves the target is not the leader, and naming
+    // the COUNTERFACTUAL winner is what the `^`-anchored key patterns preserve.
+    const a = composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE, {
+      leadingOptionId: 'opt_status_quo',
+      mayNameLeadingOption: false,
+    });
+    expect(a!.kind).toBe('addressed');
+  });
+
+  it('FAIL CLOSED: an unstated permission is treated as withholding', () => {
+    const a = composeRaw({
+      target: OFFSHORE,
+      flipSummary: FLIPS_TO_HIRE,
+      leadingOptionId: 'opt_status_quo',
+      // mayNameLeadingOption deliberately omitted
+    });
+    expect(a!.kind).toBe('position_unstated');
+  });
+
+  it('permitted but leader UNKNOWN ⇒ declines to place the target, does not guess', () => {
+    for (const leadingOptionId of [null, undefined, '']) {
+      // composeRaw directly: the harness substitutes a default for `undefined`.
+      const a = composeRaw({
+        target: OFFSHORE,
+        flipSummary: FLIPS_TO_HIRE,
+        leadingOptionId,
+        mayNameLeadingOption: true,
+      });
+      expect(a!.kind).toBe('position_unstated');
+      expect((a as Extract<OptionTargetedFlipAnswer, { kind: 'position_unstated' }>).reason).toBe(
+        'leader_unknown',
+      );
+      expect(a!.text).not.toContain('could not put a single option forward');
+      expect(a!.text).toContain('cannot tell from what this run recorded');
+    }
+  });
+
+  it('a non-leading target on a permitted run still gets the honest refusal', () => {
+    const a = composeOptionTargetedFlipAnswer(OFFSHORE, FLIPS_TO_HIRE, {
+      leadingOptionId: 'opt_status_quo',
+      mayNameLeadingOption: true,
+    });
+    expect(a!.kind).toBe('refused');
+    expect(a!.text).toContain('in favour of Engage Offshore Partner');
+  });
+});
+
+describe('F2 — completeness is claimed only when the named set IS the whole set', () => {
+  it('exactly two matches, both named ⇒ "Those are" (a true completeness claim)', () => {
+    const a = composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE);
+    expect(a!.kind).toBe('addressed');
+    expect(a!.text).toContain('Those are the single-factor changes');
   });
 });
 
@@ -267,19 +430,34 @@ describe('"only" is a completeness claim and is made only when it is true', () =
  * before the user ever saw the option they asked about.
  */
 describe('WITHHELD RUNS — targeted prose survives its own egress', () => {
+  const WITHHELD = { mayNameLeadingOption: false, leadingOptionId: 'opt_status_quo' };
+  /**
+   * Every branch that can SHIP ON A WITHHELD RUN. `already_leading` is
+   * deliberately excluded — it is unreachable without a permitting verdict, and
+   * it asserts a leader by design (its inverse control is the last test here).
+   */
   const ALL_BRANCHES: OptionTargetedFlipAnswer[] = [
-    composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE)!,
-    composeOptionTargetedFlipAnswer(HIRE, summary([entry()], 'concrete'))!,
-    composeOptionTargetedFlipAnswer(HIRE, summary([entry({ direction: 'decrease' })], 'concrete'))!,
-    composeOptionTargetedFlipAnswer(HIRE, summary([entry({ direction: null })], 'concrete'))!,
+    composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE, WITHHELD)!,
+    composeOptionTargetedFlipAnswer(HIRE, summary([entry()], 'concrete'), WITHHELD)!,
+    composeOptionTargetedFlipAnswer(HIRE, summary([entry({ direction: 'decrease' })], 'concrete'), WITHHELD)!,
+    composeOptionTargetedFlipAnswer(HIRE, summary([entry({ direction: null })], 'concrete'), WITHHELD)!,
+    // position_unstated, all three flip statuses, both reasons
+    composeOptionTargetedFlipAnswer(OFFSHORE, FLIPS_TO_HIRE, WITHHELD)!,
+    composeOptionTargetedFlipAnswer(OFFSHORE, summary([entry()], 'no_practical_flip'), WITHHELD)!,
+    composeOptionTargetedFlipAnswer(OFFSHORE, summary([entry()], 'insufficient_data'), WITHHELD)!,
+    composeOptionTargetedFlipAnswer(OFFSHORE, FLIPS_TO_HIRE, { leadingOptionId: null, mayNameLeadingOption: true })!,
+    // the permitted refusals — they ship on VISIBLE runs, but must stay clean
     composeOptionTargetedFlipAnswer(OFFSHORE, FLIPS_TO_HIRE)!,
     composeOptionTargetedFlipAnswer(OFFSHORE, summary([entry()], 'no_practical_flip'))!,
     composeOptionTargetedFlipAnswer(OFFSHORE, summary([entry()], 'insufficient_data'))!,
   ];
 
-  it('non-vacuity: every branch produced real prose', () => {
-    expect(ALL_BRANCHES).toHaveLength(7);
+  it('non-vacuity: every branch produced real prose, and all four kinds are covered', () => {
+    expect(ALL_BRANCHES).toHaveLength(11);
     for (const a of ALL_BRANCHES) expect(a.text.length).toBeGreaterThan(60);
+    expect(new Set(ALL_BRANCHES.map((a) => a.kind))).toEqual(
+      new Set(['addressed', 'position_unstated', 'refused']),
+    );
   });
 
   it('NO targeted answer asserts a leading option — so none is replaced wholesale', () => {
@@ -296,13 +474,24 @@ describe('WITHHELD RUNS — targeted prose survives its own egress', () => {
   });
 
   it('no targeted answer names or implies the CURRENT leader', () => {
-    // The current leader on the pinned scenario is 'Maintain Current Team
-    // (Status Quo)'. The composers never receive it and never read it — they
-    // take no projection at all — so this is structural, not incidental.
+    // The composers receive the leader's ID but never a leader LABEL, and no
+    // branch that can ship on a withheld run prints anything about position.
     for (const a of ALL_BRANCHES) {
       expect(a.text).not.toContain('Maintain Current Team');
+      expect(a.text).not.toContain('opt_status_quo');
       expect(a.text).not.toMatch(/currently leads|beats|ahead of/i);
     }
+  });
+
+  it('INVERSE CONTROL — already_leading DOES assert a leader, so the gate can see it', () => {
+    // It is licensed only by a permitting verdict; the withheld gate is its
+    // backstop, and a claim the gate cannot see has no backstop.
+    const a = composeOptionTargetedFlipAnswer(HIRE, FLIPS_TO_HIRE, {
+      leadingOptionId: HIRE.id,
+      mayNameLeadingOption: true,
+    });
+    expect(a!.kind).toBe('already_leading');
+    expect(textAssertsLeadingOption(a!.text)).toBe(true);
   });
 
   it('POSITIVE CONTROL — the vocabulary CAN see a leader claim about this target', () => {

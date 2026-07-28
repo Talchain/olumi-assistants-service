@@ -286,6 +286,31 @@ export interface HandlerInvocation {
   readonly flipTargetOption?:
     | import('./handlers/whatif/resolve-target-option.js').TargetOption
     | null;
+  /**
+   * IDENTITY of the option currently leading, read off the SAME `run_analysis`
+   * fact `flipSummary` came from (`pickLatestLeadingOptionId`). `null` means
+   * UNKNOWN (no successful fact, or a tie left the field empty) — never "there
+   * is no leader".
+   *
+   * Needed because a flip row's `alternative_winner_id` is by construction never
+   * the option already leading: without this, "what would make {the leader}
+   * win?" selects no rows and the answer says nothing would put the result in
+   * favour of the option that has already won.
+   *
+   * IDENTITY, not label: `analysisProjection.leading_option` carries only a
+   * label, and two options can share one.
+   */
+  readonly analysisLeadingOptionId?: string | null;
+  /**
+   * This turn's OWN answer to "may a leading option be named" — the
+   * turn-executor's hoisted `mayNameLeadingOptionForRun`, threaded rather than
+   * re-derived (CLAUDE.md trap #12), so the permission and the prose it governs
+   * describe the same analysis.
+   *
+   * Absent ⇒ the consumer treats it as WITHHOLDING. A state we cannot read must
+   * not license copy that presupposes where an option stands.
+   */
+  readonly mayNameLeadingOption?: boolean;
 }
 
 /**
