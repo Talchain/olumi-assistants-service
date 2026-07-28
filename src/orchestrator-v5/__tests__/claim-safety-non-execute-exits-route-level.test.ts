@@ -737,8 +737,15 @@ describe('T1 claim safety — no route exit may stamp a LITERAL permission', () 
     // The mutation this pin exists to catch, executed against the scanner
     // itself rather than trusted. A regex that matched nothing would pass the
     // assertion below on ANY file.
-    const withRegrowth = `${sourceWithoutComments()}\nconst x = { mayNameLeadingOption: true };`;
-    expect(withRegrowth.match(/mayNameLeadingOption:\s*(true|false)\b/g) ?? []).toHaveLength(1);
+    //
+    // Asserted as a DELTA, not an absolute count: an absolute `toHaveLength(1)`
+    // silently assumes the file currently has zero, so under a real regrowth
+    // this instrument would fail too and report the scanner as broken when the
+    // scanner is the only thing working. The delta isolates "can it see one
+    // more?" from "how many are there?", which is the next test's job.
+    const base = sourceWithoutComments();
+    const count = (s: string) => (s.match(/mayNameLeadingOption:\s*(true|false)\b/g) ?? []).length;
+    expect(count(`${base}\nconst x = { mayNameLeadingOption: true };`) - count(base)).toBe(1);
   });
 
   it('every exit INHERITS: zero hardcoded true/false permissions remain', () => {
