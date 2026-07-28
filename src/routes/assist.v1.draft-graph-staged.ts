@@ -35,7 +35,8 @@
  *   DRAFTING        status:"in_progress"  — stream opened, pipeline starting
  *   PROGRESS        status:"in_progress"  — node labels from the live token
  *                                            stream; `labels[]`, `phase`
- *   GRAPH_READY     status:"in_progress"  — validated graph, ~33 s; `graph`
+ *   GRAPH_READY     status:"in_progress"  — validated graph, ~33 s; `graph`,
+ *                                            `schema_version`
  *   COACHING_READY  status:"in_progress"  — coaching settled, ~53 s; `coaching_status`
  *   COMPLETE        status:"complete"     — terminal; `payload` is BYTE-EQUIVALENT
  *                                            to the buffered route's body
@@ -45,6 +46,24 @@
  * stage, callers cannot set it), and the terminal frame surfaces
  * `salvaged_from_truncation` so a salvaged draft presents as partial — the
  * register's standing doctrine.
+ *
+ * ── CLIENT RULE: WHEN TO DISCARD GRAPH_READY (required) ─────────────────────
+ * GRAPH_READY is provisional. The pipeline can still fail or degrade AFTER it is
+ * emitted (soft-gate degradations in Stage 5/6, or an outright throw), and
+ * `salvaged_from_truncation` is only known at the end. A client MUST therefore:
+ *
+ *   DISCARD the GRAPH_READY graph, and render the terminal payload instead, if
+ *   the COMPLETE frame carries `status_code >= 400` OR
+ *   `salvaged_from_truncation === true`.
+ *
+ * Otherwise, for up to ~20 s a salvaged partial draft is indistinguishable on
+ * screen from a whole one. `status:"in_progress"` is what makes that period
+ * honest; this rule is what makes it correct.
+ *
+ * IDENTITY, NOT VALUES. GRAPH_READY's node `id`/`label`/`kind` are byte-equal to
+ * the terminal frame's, so reconciliation by id is safe (pinned by test).
+ * Numeric values may be refined between the two frames by the post-transform
+ * graph-integrity pass — the terminal frame is always the authority.
  *
  * ── CLAIM-SAFETY ────────────────────────────────────────────────────────────
  * Pre-terminal frames carry NO leader/designation/recommendation content, and
@@ -88,7 +107,7 @@ import { evaluatePreflightDecision } from "../cee/validation/preflight-decision.
 import type { PreflightRejectPayload, NeedsClarificationPayload, PreflightDecision } from "../cee/validation/preflight-decision.js";
 import { formatBriefHeader } from "../cee/signals/brief-header.js";
 import { detectCurrency, buildCurrencyInstruction } from "../cee/signals/currency-signal.js";
-import { parseSchemaVersion, transformResponseToV2 } from "../cee/transforms/index.js";
+import { parseSchemaVersion } from "../cee/transforms/index.js";
 
 const EVENT_STREAM = "text/event-stream";
 const SSE_HEADERS = {
@@ -118,6 +137,42 @@ function statusForStage(stage: StagedFrameClass): "in_progress" | "complete" {
   return stage === "COMPLETE" ? "complete" : "in_progress";
 }
 
+/**
+ * Lift `salvaged_from_truncation` out of the response body for the terminal
+ * frame, so a client can tell a salvaged (partial) draft from a whole one
+ * without reaching into the payload.
+ *
+ * ⚠ THE PATH IS THE WHOLE POINT, AND THE FIRST VERSION OF IT WAS WRONG.
+ * The projection lands at `trace.pipeline.llm_metadata` (written by
+ * unified-pipeline/stages/package.ts into the pipeline trace) — NOT at the body
+ * root. Reading `body.llm_metadata` silently resolved to `undefined` on every
+ * response, so the field was never emitted and the partial-draft doctrine this
+ * implements was decoration. Verified against a captured body: the root key is
+ * absent and `trace.pipeline.llm_metadata` is present.
+ *
+ * Returns `undefined` when genuinely unknown (e.g. an error body that never
+ * reached Package). The client rule keys on `=== true`, so unknown is safe.
+ *
+ * Exported for the unit pin: absence assertions about a field nobody can see
+ * are vacuous, so the test proves this reads a PRESENT value too (trap 13).
+ */
+export function readSalvagedFromTruncation(body: unknown): boolean | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const trace = (body as Record<string, unknown>).trace as Record<string, unknown> | undefined;
+  const candidates = [
+    (trace?.pipeline as Record<string, unknown> | undefined)?.llm_metadata,
+    trace?.llm_metadata,
+    (body as Record<string, unknown>).llm_metadata,
+  ];
+  for (const meta of candidates) {
+    if (meta && typeof meta === "object") {
+      const v = (meta as Record<string, unknown>).salvaged_from_truncation;
+      if (typeof v === "boolean") return v;
+    }
+  }
+  return undefined;
+}
+
 export default async function route(app: FastifyInstance) {
   const FEATURE_VERSION = "staged-1.0.0";
 
@@ -131,11 +186,14 @@ export default async function route(app: FastifyInstance) {
     const schemaVersion = parseSchemaVersion((req.query as Record<string, unknown>)?.schema);
 
     // ── Frame writer ────────────────────────────────────────────────────────
-    // Fire-and-forget by design. Backpressure is handled by DROPPING the frame
-    // rather than awaiting a drain: a pre-terminal frame is a progressive
-    // nicety, and stalling the pipeline on a slow socket would reintroduce the
-    // very latency this route removes. The terminal frame is the one that must
-    // land, and it lands on the same socket after the pipeline has finished.
+    // Fire-and-forget by design: we never AWAIT a drain, because stalling the
+    // pipeline on a slow socket would reintroduce the very latency this route
+    // exists to remove.
+    //
+    // Precisely what happens under backpressure: `reply.raw.write` returning
+    // `false` means the kernel buffer is full, and Node QUEUES the frame in
+    // memory — frames are not dropped. We only stop writing once the socket is
+    // destroyed, which is the client having genuinely gone away.
     let seq = 0;
     let socketWritable = true;
 
@@ -159,11 +217,19 @@ export default async function route(app: FastifyInstance) {
       }
     };
 
-    // Rate limiting: shared draft-tier bucket, same feature family as the
-    // pre-existing stream route so a client cannot use the staged sibling to
-    // sidestep the draft budget.
+    // Rate limiting. `enforceRateBuckets` keys its bucket map by the `feature`
+    // STRING (cee/config/limits.ts), so a distinct feature name would mint a
+    // SEPARATE bucket and hand a client a whole extra allowance of the most
+    // expensive operation in the service. This deliberately reuses the
+    // pre-existing stream route's feature key so the two SSE draft routes SHARE
+    // one bucket — sharing achieved additively, without touching that route.
+    //
+    // Precise about what this does and does not buy: the buffered
+    // /assist/v1/draft-graph route has its own bucket and always did. That is
+    // pre-existing behaviour and is not changed here; this route adds no new
+    // streaming allowance.
     const { allowed, retryAfterSeconds } = enforceRateBuckets({
-      feature: "draft_graph_staged",
+      feature: "draft_graph_stream",
       envVarName: "CEE_STREAM_RATE_LIMIT_RPM",
       keyId: keyId ?? undefined,
       ip: req.ip,
@@ -381,7 +447,11 @@ export default async function route(app: FastifyInstance) {
     (input as any).currencyInstruction = buildCurrencyInstruction(currencySignal);
 
     // ── Open the stream ────────────────────────────────────────────────────
-    reply.raw.setHeader("X-CEE-API-Version", schemaVersion === "v2" ? "v2" : "v1");
+    // Report the ACTUAL negotiated version. The pre-existing stream route
+    // reports "v1" for anything that is not "v2", which mislabels a v3 payload
+    // — v3 is the default when `?schema` is absent. That route's header is left
+    // alone (byte-identical sibling), but new code should not inherit the bug.
+    reply.raw.setHeader("X-CEE-API-Version", schemaVersion);
     reply.raw.setHeader("X-CEE-Feature-Version", FEATURE_VERSION);
     reply.raw.setHeader("X-CEE-Request-ID", requestId);
     reply.raw.writeHead(200, SSE_HEADERS);
@@ -427,6 +497,7 @@ export default async function route(app: FastifyInstance) {
               graphReadyAtMs = event.elapsed_ms;
               writeStage("GRAPH_READY", {
                 graph: event.graph,
+                schema_version: event.schema_version,
                 elapsed_ms: event.elapsed_ms,
               });
               break;
@@ -449,22 +520,28 @@ export default async function route(app: FastifyInstance) {
         });
       }
 
-      // Schema transform — identical branch to the 2-frame stream route, so the
-      // terminal payload matches that route's COMPLETE payload as well.
-      let responseBody: unknown = body;
-      if (schemaVersion === "v2" && statusCode === 200 && body && typeof body === "object" && "graph" in body) {
-        responseBody = transformResponseToV2(body as any);
-      }
+      // ⚠ NO SCHEMA TRANSFORM HERE — DELIBERATELY, AND THIS IS A DEPARTURE FROM
+      // THE 2-FRAME STREAM ROUTE. That route re-runs `transformResponseToV2` on
+      // the pipeline's body when `?schema=v2` (assist.v1.draft-graph-stream.ts
+      // :430-435), but Stage 6 (Boundary) has ALREADY produced the V2 body
+      // (unified-pipeline/stages/boundary.ts:344-345). The second pass reads
+      // `node.kind` on nodes that now carry `type`, so `mapKindToType(undefined)`
+      // falls to its default and EVERY NODE COMES OUT TYPED "factor" — measured:
+      // dec_1/fac_1/goal_1/opt_1/opt_2/out_1 all "factor" on that path.
+      //
+      // Not fixed in the stream route from this lane (it stays byte-identical),
+      // but not inherited either. Reported separately. Emitting the pipeline
+      // body verbatim also makes this route's terminal payload exactly what the
+      // BUFFERED route returns — which is the equivalence property this lane
+      // pins, now true for every schema version rather than just the default.
+      const responseBody: unknown = body;
 
       // ── TERMINAL FRAME ─────────────────────────────────────────────────────
       // `payload` is the buffered route's body verbatim. `salvaged_from_truncation`
       // is lifted onto the frame so a client can tell a salvaged (partial) draft
       // from a whole one WITHOUT reaching into the payload — the register's
       // doctrine that partial content must present as partial.
-      const salvaged =
-        body && typeof body === "object"
-          ? ((body as Record<string, unknown>).llm_metadata as Record<string, unknown> | undefined)?.salvaged_from_truncation
-          : undefined;
+      const salvaged = readSalvagedFromTruncation(body);
 
       writeStage("COMPLETE", {
         status_code: statusCode,

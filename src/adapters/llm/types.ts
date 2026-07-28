@@ -455,7 +455,7 @@ export interface CallOpts {
    * awaited: a progress consumer can neither delay nor fail a draft. Throws
    * are swallowed by the caller.
    */
-  onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges"; elapsedMs: number }) => void;
+  onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges" }) => void;
 }
 
 /**

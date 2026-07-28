@@ -93,8 +93,16 @@ export interface PipelineProgressEvent {
  */
 export interface PipelineGraphReadyEvent {
   kind: "GRAPH_READY";
-  /** The repaired + validated GraphV1 (nodes/edges). */
+  /**
+   * The repaired + validated graph, ALREADY PROJECTED into the negotiated
+   * schema vocabulary (`schema_version` below) so its node ids and labels are
+   * byte-equal to the terminal frame's. Emitting the raw V1 graph here would
+   * hand the client one set of ids at ~33 s and a different set at ~53 s —
+   * see staged-graph-projection.ts.
+   */
   graph: unknown;
+  /** The vocabulary `graph` is expressed in — the negotiated schema version. */
+  schema_version: "v1" | "v2" | "v3";
   elapsed_ms: number;
 }
 

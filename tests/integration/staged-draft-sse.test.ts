@@ -37,6 +37,17 @@ import type { FastifyInstance } from "fastify";
 
 vi.stubEnv("LLM_PROVIDER", "fixtures");
 
+// This suite makes many draft calls, and the staged route deliberately SHARES
+// the pre-existing stream route's rate-limit bucket (so the sibling cannot hand
+// a client a second streaming allowance). Raise the draft tier for the suite —
+// rate limiting is not what these tests are about.
+//
+// Worth recording: the sharing was demonstrated empirically rather than merely
+// asserted. Before this override the suite started returning 429 the moment the
+// staged route began consuming the same bucket — which is direct evidence the
+// two routes really do share one allowance, not two.
+vi.stubEnv("CEE_RATE_BUCKET_DRAFT_RPM", "10000");
+
 // Clone the fixture graph on every access — the pipeline mutates it, and
 // without this a second run in the same process sees an already-repaired graph
 // and does less repair work. That is a HARNESS artefact; left unguarded it
@@ -203,6 +214,63 @@ describe("staged SSE draft delivery (ROADMAP 1.204 M1)", () => {
     expect(Array.isArray(graph?.nodes)).toBe(true);
     expect(Array.isArray(graph?.edges)).toBe(true);
     expect(graph.nodes!.length).toBeGreaterThan(0);
+  });
+
+  // ── 1b. NODE IDENTITY IS STABLE ACROSS FRAMES ────────────────────────────
+  //
+  // The defect this pins would have voided the whole lane silently.
+  // `parseSchemaVersion` DEFAULTS to "v3", and the V3 boundary transform
+  // rewrites node ids (`normalizeToId`, including collision suffixing) and
+  // labels (`cleanNodeLabel`). An untransformed GRAPH_READY therefore hands the
+  // client one set of ids at ~33 s and a DIFFERENT set at ~53 s: reconciliation
+  // by id fails, the canvas duplicates or orphans nodes, and the early graph is
+  // thrown away — destroying the exact latency win this route delivers.
+  //
+  // Note the shape of the original blind spot: the first version of this file
+  // read `graphFrame.graph.nodes` in one test and asserted `toHaveProperty(
+  // "nodes")` on the terminal body in another, and so never compared the two.
+  // Testing each frame in isolation cannot catch a cross-frame contract.
+  describe.each([
+    { name: "default (v3 — the ordinary path, no ?schema)", url: "/assist/v1/draft-graph/staged", expected: "v3" },
+    { name: "explicit ?schema=v2", url: "/assist/v1/draft-graph/staged?schema=v2", expected: "v2" },
+  ])("node identity is byte-equal between GRAPH_READY and COMPLETE — $name", ({ url, expected }) => {
+    it("matches ids, labels and kinds", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url,
+        payload: PAYLOAD,
+        headers: { accept: "text/event-stream" },
+      });
+      expect(res.statusCode).toBe(200);
+
+      const frames = parseStageFrames(res.body);
+      const graphFrame = frames.find((f) => f.stage === "GRAPH_READY")!;
+      const terminal = frames[frames.length - 1]!;
+      expect(terminal.stage).toBe("COMPLETE");
+
+      // The frame must declare which vocabulary it speaks, and it must be the
+      // one actually negotiated.
+      expect(graphFrame.schema_version).toBe(expected);
+
+      const early = (graphFrame.graph as { nodes: Record<string, unknown>[] }).nodes;
+      const payload = terminal.payload as Record<string, unknown>;
+
+      // v3 flattens nodes to the payload root; v1/v2 keep them under `graph`.
+      const finalNodes = (Array.isArray(payload.nodes)
+        ? payload.nodes
+        : (payload.graph as { nodes: unknown[] } | undefined)?.nodes) as Record<string, unknown>[];
+
+      expect(Array.isArray(early)).toBe(true);
+      expect(Array.isArray(finalNodes)).toBe(true);
+      expect(early.length).toBeGreaterThan(0);
+
+      // IDENTITY — ids in order, byte-equal.
+      expect(early.map((n) => n.id)).toEqual(finalNodes.map((n) => n.id));
+      // LABELS — byte-equal.
+      expect(early.map((n) => n.label)).toEqual(finalNodes.map((n) => n.label));
+      // KIND/TYPE — whichever the negotiated vocabulary uses.
+      expect(early.map((n) => n.kind ?? n.type)).toEqual(finalNodes.map((n) => n.kind ?? n.type));
+    });
   });
 
   // ── 2. PARTIAL CONTENT NEVER PRESENTS AS COMPLETE ────────────────────────

@@ -38,6 +38,7 @@ import { runStagePackage } from "./stages/package.js";
 import { runStageBoundary } from "./stages/boundary.js";
 import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
 import { runValidationPipeline } from "../validation-pipeline/index.js";
+import { projectGraphForStagedFrame } from "./staged-graph-projection.js";
 
 /**
  * Stamp coaching_status 'complete' at a terminal exit UNLESS the coaching pass
@@ -936,10 +937,18 @@ export async function runUnifiedPipeline(
     // Claim-safety: `ctx.coaching` and `ctx.causalClaims` are still undefined at
     // this line, so this frame cannot carry a leader designation, a
     // recommendation, or any analysis claim. Structure only, by construction.
+    //
+    // ⚠ The graph is projected into the NEGOTIATED SCHEMA VOCABULARY before it
+    // goes on the wire. Emitting the raw V1 `ctx.graph` here would be a silent
+    // lane-killer: `parseSchemaVersion` defaults to "v3", and the V3 transform
+    // REWRITES node ids and labels — so the client would key the ~33 s graph by
+    // one set of ids and the ~53 s terminal frame by another, and reconciliation
+    // would fail. See staged-graph-projection.ts for the full argument.
     if (ctx.opts.onStage) {
       emitStageEvent(ctx, {
         kind: "GRAPH_READY",
-        graph: ctx.graph,
+        graph: projectGraphForStagedFrame(ctx.graph, ctx.opts.schemaVersion, ctx.requestId),
+        schema_version: ctx.opts.schemaVersion,
         elapsed_ms: Date.now() - ctx.start,
       });
     }

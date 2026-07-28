@@ -677,7 +677,7 @@ export async function draftGraphWithAnthropic(
     maxTokensCeiling?: number;
     /** ROADMAP 1.204 M1 — see CallOpts.onDraftProgress. Optional; absent ⇒ the
      *  streaming loop is byte-identical to before (no scanner constructed). */
-    onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges"; elapsedMs: number }) => void;
+    onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges" }) => void;
   }
 ): Promise<DraftGraphResult> {
   const collector = opts?.collector;
@@ -1217,7 +1217,6 @@ export async function draftGraphWithAnthropic(
                   opts?.onDraftProgress?.({
                     labels: batch,
                     phase: edgesReached ? "edges" : "nodes",
-                    elapsedMs: nowMs - attemptStart,
                   });
                 } catch {
                   // Progress is best-effort; a throwing consumer is ignored.
@@ -1234,7 +1233,6 @@ export async function draftGraphWithAnthropic(
             opts?.onDraftProgress?.({
               labels: pendingProgressLabels,
               phase: edgesReached ? "edges" : "nodes",
-              elapsedMs: Date.now() - attemptStart,
             });
           } catch {
             // Best-effort, as above.
