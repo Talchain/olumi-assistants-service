@@ -63,12 +63,30 @@ describe("F4 buildReadinessRawPersistedGraph — intent reconstruction from anal
     expect(optB.data.interventions).toHaveProperty("fac_price");
   });
 
-  it("needs_encoding with no raw_interventions still yields intent (contract: implies raw values)", () => {
+  // ⚠ F4 #2 (Paul, 28 Jul) — this test previously asserted the OPPOSITE:
+  // "needs_encoding with no raw_interventions still yields intent (contract:
+  // implies raw values)". That contract claim is FALSE at the producer —
+  // `reconcile-top-level-options.ts` stamps `needs_encoding` on ANY option with
+  // no NUMERIC value, including an option added by chat with no values at all —
+  // so the synthetic key fabricated intent for a genuinely empty option,
+  // suppressed the scaffold, and blocked a run that `run_analysis` performs.
+  // Intent is now read from VALUES ONLY.
+  it("needs_encoding with NO values at all yields NO intent (the status alone never manufactures it)", () => {
     const raw = buildReadinessRawPersistedGraph(makeGraph(), [
       { id: "opt_b", status: "needs_encoding", interventions: {} },
     ]) as { nodes: Array<Record<string, any>> };
     const optB = raw.nodes.find((n) => n.id === "opt_b")!;
-    expect(Object.keys(optB.data.interventions).length).toBeGreaterThan(0);
+    // Unchanged node → the shared predicate sees no intent → scaffold-eligible.
+    expect(optB.data).toBeUndefined();
+  });
+
+  it("needs_encoding with an explicitly EMPTY raw_interventions also yields NO intent", () => {
+    const raw = buildReadinessRawPersistedGraph(makeGraph(), [
+      { id: "opt_a", status: "ready", interventions: { fac_price: 0.9 } },
+      { id: "opt_b", status: "needs_encoding", interventions: {}, raw_interventions: {} },
+    ]) as { nodes: Array<Record<string, any>> };
+    const optB = raw.nodes.find((n) => n.id === "opt_b")!;
+    expect(optB.data).toBeUndefined();
   });
 
   it("a genuinely-empty option (no interventions, no raw, needs_user_mapping) gets NO synthetic intent", () => {
@@ -108,6 +126,25 @@ describe("F4 parity — reconstructed intent suppresses the scaffold exactly as 
     });
     expect(outcome.scaffolded.map((s) => s.option_id)).not.toContain("opt_b");
     expect(outcome.scaffolded.length).toBe(0);
+  });
+
+  // ⚠ F4 #2: the `needs_user_mapping` arm below is a status the CHAT-ADD
+  // producer never emits — `reconcile-top-level-options.ts` stamps
+  // `needs_encoding`. Keeping it alone made this "true-scaffold case preserved"
+  // control vacuous for the state Paul actually hit, so the `needs_encoding`
+  // arm is added beside it and is the one that reproduces his journey.
+  it("genuinely-empty opt_b (needs_encoding — the chat-add producer's status) → run predicate DOES scaffold it", () => {
+    const rawPersistedGraph = buildReadinessRawPersistedGraph(makeGraph(), [
+      { id: "opt_a", status: "ready", interventions: { fac_price: 0.9 } },
+      { id: "opt_b", status: "needs_encoding", interventions: {} },
+    ]);
+    const outcome = scaffoldUnconfiguredOptions({
+      options,
+      graph: makeGraph(),
+      rawPersistedGraph,
+      scaleNetEnabled: true,
+    });
+    expect(outcome.scaffolded.map((s) => s.option_id)).toEqual(["opt_b"]);
   });
 
   it("genuinely-empty opt_b → run predicate DOES scaffold it (true-scaffold case preserved)", () => {

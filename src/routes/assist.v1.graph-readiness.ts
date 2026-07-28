@@ -85,8 +85,9 @@ type GraphReadinessInputT = z.infer<typeof GraphReadinessInput>;
  * `data.interventions` so the ONE existing predicate — no second, driftable
  * copy — sees the same intent the run path sees. Semantics are identical to
  * `collectInterventionIntentOptionIds`: an option has intent iff it carries any
- * intervention entry (here: any `interventions` key, any `raw_interventions`
- * key, or the `needs_encoding` status that by contract implies raw values).
+ * intervention entry (here: any `interventions` key or any `raw_interventions`
+ * key). Intent is read from VALUES ONLY — a bare `status` never manufactures it
+ * (F4 #2; see the note on the intent-key loop below).
  *
  * Pure: returns a shallow-cloned graph; the request graph is never mutated. The
  * neutral-value / edge reads still use the untouched request `graph`.
@@ -109,18 +110,52 @@ export function buildReadinessRawPersistedGraph(
     return graph;
   }
 
-  // Per-option intent keys from analysis_ready. `needs_encoding` implies raw
-  // (non-numeric) values by contract, so a synthetic key guarantees intent even
-  // if a caller omitted raw_interventions.
+  // Per-option intent keys from analysis_ready — read ONLY from the VALUES the
+  // option actually carries on the wire (`interventions` / `raw_interventions`),
+  // never inferred from `status` alone.
+  //
+  // ⚠ F4 #2 (Paul, 28 Jul) — why a status must never manufacture intent here.
+  // This block used to add a synthetic `__needs_encoding_intent__` key whenever
+  // an option was `needs_encoding` with NO values at all, on the premise that
+  // "`needs_encoding` implies raw (non-numeric) values by contract". That premise
+  // is FALSE AT THE PRODUCER: `reconcile-top-level-options.ts` stamps
+  // `needs_encoding` on ANY option lacking a NUMERIC value — including an option
+  // added by chat that has no values whatsoever. The status is overloaded there;
+  // only the CONSUMER-side doc comment (`schemas/analysis-ready.ts`) carries the
+  // narrow "raw values awaiting encoding" meaning. CEE's own payload validator
+  // agrees the fabricated case is not a real wire state: an option that is
+  // `needs_encoding` with no `raw_interventions` is reported as
+  // `OPTION_NEEDS_ENCODING_WITHOUT_RAW` (`cee/transforms/analysis-ready.ts`).
+  //
+  // The cost of the fiction was a FALSE NEGATIVE that blocked the product:
+  // intent is never scaffolded over (`scaffold-unconfigured-options.ts`), so the
+  // fabricated key suppressed the scaffold → `will_scaffold_options: false` →
+  // the pre-run panel refused a run that `run_analysis` performs successfully
+  // (it reads the REAL persisted graph, which carries no such key). F4 was
+  // re-created inside the code written to close F4.
+  //
+  // ⚠ The trade this makes on #612's over-report, stated honestly (adversarial
+  // review, 28 Jul): the live V5 wire producer (`computeStructuralReadiness`)
+  // carries NO `raw_interventions` field and silently DROPS non-numeric
+  // `interventions` values, so a persisted option configured with only raw/
+  // categorical values arrives here WIRE-INDISTINGUISHABLE from a truly-empty
+  // one. No consumer-side rule can serve both states. This fix chooses the
+  // common, reproduced, terminal case (chat-added empty option → run falsely
+  // refused, Paul 28 Jul). The residual: for a raw-configured option whose
+  // values the producer dropped, readiness may over-advertise a scaffold the
+  // run path will not perform — an over-advertisement that resolves into the
+  // coached configure path, softer than the terminal refusal it replaces. It
+  // stands until the P1 status split (`needs_encoding` vs `unconfigured`)
+  // makes the states distinguishable — rowed, with the reviewer's parity
+  // fixture as its RED-first pin (PHASE0-EVIDENCE-2026-07-28/
+  // adv-review-cee-747.md). Pinned here by the "F4 over-report" + "F4 #2"
+  // route tests, which move in opposite directions on the same predicate.
   const intentKeysByOptionId = new Map<string, Record<string, number>>();
   for (const opt of options) {
     if (typeof opt?.id !== "string" || opt.id.length === 0) continue;
     const keys: Record<string, number> = {};
     for (const k of Object.keys(opt.interventions ?? {})) keys[k] = 1;
     for (const k of Object.keys(opt.raw_interventions ?? {})) keys[k] = 1;
-    if (opt.status === "needs_encoding" && Object.keys(keys).length === 0) {
-      keys.__needs_encoding_intent__ = 1;
-    }
     if (Object.keys(keys).length > 0) intentKeysByOptionId.set(opt.id, keys);
   }
   if (intentKeysByOptionId.size === 0) return graph;

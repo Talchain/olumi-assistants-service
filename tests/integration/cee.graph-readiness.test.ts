@@ -18,7 +18,7 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    vi.stubEnv("ASSIST_API_KEYS", "readiness-key-1,readiness-key-2,readiness-key-rate,readiness-key-alt,readiness-key-min,readiness-key-f4,readiness-key-f4b,readiness-key-f4c,readiness-key-f4d");
+    vi.stubEnv("ASSIST_API_KEYS", "readiness-key-1,readiness-key-2,readiness-key-rate,readiness-key-alt,readiness-key-min,readiness-key-f4,readiness-key-f4b,readiness-key-f4c,readiness-key-f4d,readiness-key-f4e,readiness-key-f4f");
     vi.stubEnv("CEE_GRAPH_READINESS_RATE_LIMIT_RPM", "3");
 
     cleanBaseUrl();
@@ -40,6 +40,8 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
   const headersF4b = { "X-Olumi-Assist-Key": "readiness-key-f4b" } as const;
   const headersF4c = { "X-Olumi-Assist-Key": "readiness-key-f4c" } as const;
   const headersF4d = { "X-Olumi-Assist-Key": "readiness-key-f4d" } as const;
+  const headersF4e = { "X-Olumi-Assist-Key": "readiness-key-f4e" } as const;
+  const headersF4f = { "X-Olumi-Assist-Key": "readiness-key-f4f" } as const;
 
   function makeGraph() {
     return {
@@ -480,6 +482,113 @@ describe("POST /assist/v1/graph-readiness (CEE v1)", () => {
     const body = res.json();
     expect(body.scaffold_plan.will_scaffold_options).toBe(false);
     expect(body.can_run_analysis).toBe(false);
+  });
+
+  // --- F4 #2 — the UNDER-report the synthetic intent key created (Paul, 28 Jul)
+  //
+  // The defect this pins, end to end on the route:
+  //   1. A user adds an option by chat. It is created with NO effect values.
+  //   2. `reconcile-top-level-options.ts` stamps it `status: "needs_encoding"`
+  //      — that producer stamps `needs_encoding` on ANY option lacking a numeric
+  //      value, INCLUDING one with no values at all. It is NOT the narrow
+  //      documented meaning ("raw values awaiting numeric encoding",
+  //      `schemas/analysis-ready.ts`), and CEE's OWN payload validator flags this
+  //      exact wire state as an inconsistency
+  //      (`OPTION_NEEDS_ENCODING_WITHOUT_RAW`, `transforms/analysis-ready.ts`).
+  //   3. `buildReadinessRawPersistedGraph` used to READ that status as if it
+  //      carried the narrow meaning and FABRICATE an intervention-intent key for
+  //      it, even with `interventions: {}` and NO `raw_interventions`.
+  //   4. Intent is never scaffolded over (`scaffold-unconfigured-options.ts`), so
+  //      the fabricated intent suppressed the scaffold →
+  //      `will_scaffold_options: false` → the UI's OR-term collapsed → the run
+  //      was refused.
+  //
+  // It is a FALSE NEGATIVE: `run_analysis` reads the REAL persisted graph, which
+  // carries no such key, so it scaffolds the option and the analysis succeeds.
+  // F4 was re-created inside the code written to close F4.
+  //
+  // Live one-variable control (deployed CEE d6a765d, 28 Jul): flipping ONLY
+  // `opt_b.status` "needs_encoding" → "ready", `interventions` still `{}`,
+  // flipped `will_scaffold_options` false → true. The status was the sole
+  // discriminating variable.
+  //
+  // This is the exact wire shape captured live from the app's own request.
+  // RED before the fix: will_scaffold_options === false.
+  it("F4 #2 RED-first: needs_encoding with NO values at all (interventions {} and no raw_interventions) → will_scaffold_options=true (the run path DOES scaffold it)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4e,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_encoding",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            // opt_b: added by chat, never configured. NOTHING was set — no
+            // numeric intervention, no raw value. There is no user intent here
+            // to protect; the run path scaffolds it and succeeds.
+            {
+              id: "opt_b",
+              label: "Partner with a specialist consultancy",
+              status: "needs_encoding",
+              interventions: {},
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan).toBeDefined();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
+    expect(body.scaffold_plan.option_count).toBe(1);
+    // can_run_analysis stays HONEST and unchanged (#612's invariant): the option
+    // genuinely is not "ready". The panel's runnability comes from the OR with
+    // scaffold_plan, never from readiness lying.
+    expect(body.can_run_analysis).toBe(false);
+    // The structured fields the UI must compose its blocked/runnable copy from
+    // stay truthful and specific — never "add a decision, a goal and at least
+    // two options" when five options are present.
+    expect(body.options_total).toBe(2);
+    expect(body.options_ready).toBe(1);
+    expect(body.issues).toContain('Option "opt_b" has no interventions');
+  });
+
+  // Control (the near neighbour that must NOT change): the same empty option
+  // with an EXPLICIT empty raw_interventions map. Same absence of intent, same
+  // answer — the fix must not depend on whether the caller omitted the field or
+  // sent it empty.
+  it("F4 #2 control: needs_encoding with an explicitly EMPTY raw_interventions → will_scaffold_options=true", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/assist/v1/graph-readiness",
+      headers: headersF4f,
+      payload: {
+        graph: makeMixedV3Graph(),
+        analysis_ready: {
+          goal_node_id: "goal",
+          status: "needs_encoding",
+          options: [
+            { id: "opt_a", label: "Premium", status: "ready", interventions: { fac_price: 0.9 } },
+            {
+              id: "opt_b",
+              label: "Partner with a specialist consultancy",
+              status: "needs_encoding",
+              interventions: {},
+              raw_interventions: {},
+            },
+          ],
+        },
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.scaffold_plan.will_scaffold_options).toBe(true);
+    expect(body.scaffold_plan.option_count).toBe(1);
   });
 
   // --- F4 #1b — the observed_state under-report residual (A2-coordinated) -----
