@@ -266,6 +266,51 @@ export interface HandlerInvocation {
    * explicit "no flip evidence available" form.
    */
   readonly flipSummary?: import('../compose/flip-proposal.js').FlipSummary | null;
+  /**
+   * M1 (finish-line criterion 7) — the ONE option the user named in this turn's
+   * message, resolved to a graph option IDENTITY, or null when they named none
+   * (or named more than one, which is a comparison rather than a target).
+   *
+   * Resolved in the turn-executor rather than here because that is where the
+   * user text and the CANONICAL graph authority meet — the same
+   * `context.persistedGraph ?? options.graphState` the flip evidence is already
+   * filtered against, so the target and the rows it is matched into describe one
+   * graph. It is the same seam `structureProjection` uses to read a user-named
+   * FACTOR (`buildStructureProjectionSummary(..., { messageText })`).
+   *
+   * Read by `what_would_flip` to answer about THAT option — matching on
+   * `alternative_winner_id`, never on a label — with a typed refusal when no
+   * tested flip row makes it lead. Absent/null ⇒ the pre-existing generic
+   * answer, byte-identical.
+   */
+  readonly flipTargetOption?:
+    | import('./handlers/whatif/resolve-target-option.js').TargetOption
+    | null;
+  /**
+   * IDENTITY of the option currently leading, read off the SAME `run_analysis`
+   * fact `flipSummary` came from (`pickLatestLeadingOptionId`). `null` means
+   * UNKNOWN (no successful fact, or a tie left the field empty) — never "there
+   * is no leader".
+   *
+   * Needed because a flip row's `alternative_winner_id` is by construction never
+   * the option already leading: without this, "what would make {the leader}
+   * win?" selects no rows and the answer says nothing would put the result in
+   * favour of the option that has already won.
+   *
+   * IDENTITY, not label: `analysisProjection.leading_option` carries only a
+   * label, and two options can share one.
+   */
+  readonly analysisLeadingOptionId?: string | null;
+  /**
+   * This turn's OWN answer to "may a leading option be named" — the
+   * turn-executor's hoisted `mayNameLeadingOptionForRun`, threaded rather than
+   * re-derived (CLAUDE.md trap #12), so the permission and the prose it governs
+   * describe the same analysis.
+   *
+   * Absent ⇒ the consumer treats it as WITHHOLDING. A state we cannot read must
+   * not license copy that presupposes where an option stands.
+   */
+  readonly mayNameLeadingOption?: boolean;
 }
 
 /**

@@ -305,6 +305,7 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
 import { pickLatestFlipSummary } from './coaching/pick-flip-summary.js';
+import { pickLatestLeadingOptionId } from './coaching/pick-leading-option-id.js';
 import {
   composeExplainResultsFallback,
   composeWhatWouldFlipFallback,
@@ -340,6 +341,7 @@ import {
   buildAnalysisProjectionSummary,
   buildStructureProjectionSummary,
 } from './context/projection-summaries.js';
+import { resolveTargetOptionFromMessage } from './tools/handlers/whatif/resolve-target-option.js';
 import {
   containsMutationLanguage,
   classifyStructuralClaim,
@@ -7192,6 +7194,32 @@ export async function runTurnExecutor(
             )
           : routedFlipSummary;
 
+      // M1 (finish-line criterion 7) — which option did the user NAME?
+      //
+      // Read here, beside the flip evidence, because this is where the user's
+      // words and the CANONICAL graph meet. The graph authority is deliberately
+      // the SAME `context.persistedGraph ?? options.graphState` expression the
+      // flip filter above uses (raw, never the GraphV3-parsed graph, which
+      // strips the top-level `options[]` this read depends on): the target and
+      // the flip rows it will be matched into must describe ONE graph, or a
+      // stale request graph could resolve an option the analysis never saw.
+      //
+      // Scoped to `what_would_flip` — it is the only handler that consumes it,
+      // and the read is otherwise pure cost. The chip-click path never reaches
+      // here and carries a constant message, so it resolves nothing and keeps
+      // its existing answer, which is correct: a chip names no option.
+      const flipTargetOptionResolution =
+        proposedHandlerId === 'what_would_flip'
+          ? resolveTargetOptionFromMessage(
+              payload.message,
+              context.persistedGraph ?? options.graphState,
+            )
+          : null;
+      const flipTargetOption =
+        flipTargetOptionResolution?.kind === 'resolved'
+          ? flipTargetOptionResolution.option
+          : null;
+
       try {
         const registry = options.handlerRegistry ?? getDefaultRegistry();
         const handlerFn = resolveHandler(registry, proposedHandlerId);
@@ -7231,6 +7259,16 @@ export async function runTurnExecutor(
             ? pickLatestRawRobustness(context.prior_facts)
             : undefined,
           flipSummary: routedFlipSummaryFiltered,
+          flipTargetOption,
+          // Same fact as `flipSummary` (shared `selectRunAnalysisFact`), under
+          // the same same-source guard, so "is the target the current leader?"
+          // is decided against the run the flip rows describe.
+          analysisLeadingOptionId:
+            isExplanationHandler && analysisStateSource !== 'request'
+              ? pickLatestLeadingOptionId(context.prior_facts)
+              : null,
+          // The turn's hoisted permission — one derivation, many read points.
+          mayNameLeadingOption: mayNameLeadingOptionForRun,
         });
         if (timingsEnabled) {
           turnTimings.handler_execute_ms = Date.now() - handlerStartedAt;

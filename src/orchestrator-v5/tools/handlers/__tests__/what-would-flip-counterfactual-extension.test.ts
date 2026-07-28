@@ -172,3 +172,69 @@ describe('what_would_flip — counterfactual extension', () => {
     }
   });
 });
+
+/**
+ * F4 — the card's ADJACENCY to a negative targeted answer.
+ *
+ * `selectCounterfactualProbe` picks its probe from the GENERIC flip set, with no
+ * knowledge of the option the user named. Appended straight after "nothing
+ * tested would put this in favour of X", it can therefore propose a factor whose
+ * tipping point favours a DIFFERENT option — read, reasonably, as "try this to
+ * make X win". The card is claim-safe in isolation; it is the adjacency that
+ * misleads, so the adjacency is what is removed.
+ *
+ * Latent on staging today (the client is null), which is exactly why it is
+ * pinned here rather than left to a live walk to find.
+ */
+describe('what_would_flip — the card is not appended to a NEGATIVE targeted answer', () => {
+  const TARGET = { id: 'opt_offshore', label: 'Engage Offshore Partner' };
+
+  function targetedInvocation(over: {
+    flipSummary?: FlipSummary;
+    mayNameLeadingOption?: boolean;
+  }): HandlerInvocation {
+    return {
+      ...makeInvocation(true),
+      ...(over.flipSummary ? { flipSummary: over.flipSummary } : {}),
+      flipTargetOption: TARGET,
+      analysisLeadingOptionId: 'opt_1',
+      mayNameLeadingOption: over.mayNameLeadingOption ?? true,
+    } as unknown as HandlerInvocation;
+  }
+
+  it('a targeted REFUSAL suppresses the card', async () => {
+    // CONCRETE_FLIP carries no alternative_winner_id, so nothing flips to TARGET.
+    const handler = createWhatWouldFlipHandler({ counterfactualClient: fakeClient(okResult()) });
+    const outcome = await handler(targetedInvocation({}));
+    expect(outcome.assistant_text).not.toContain('One further what-if worth exploring');
+    expect(outcome.assistant_text).toContain('in favour of Engage Offshore Partner');
+  });
+
+  it('a POSITION-UNSTATED answer suppresses it too', async () => {
+    const handler = createWhatWouldFlipHandler({ counterfactualClient: fakeClient(okResult()) });
+    const outcome = await handler(targetedInvocation({ mayNameLeadingOption: false }));
+    expect(outcome.assistant_text).not.toContain('One further what-if worth exploring');
+  });
+
+  it('POSITIVE CONTROL — an ADDRESSED targeted answer still gets the card', async () => {
+    // Suppression must be scoped to the contradictory adjacency, not to every
+    // targeted turn: here the suggestion and the answer point the same way.
+    const flipsToTarget: FlipSummary = {
+      overall_status: 'concrete',
+      margin_supports_flip: true,
+      entries: [
+        {
+          factor_id: 'factor_capacity',
+          factor_label: 'Engineering capacity',
+          flip_value: 18,
+          alternative_winner_id: 'opt_offshore',
+          alternative_winner_label: 'Engage Offshore Partner',
+        },
+      ],
+    };
+    const handler = createWhatWouldFlipHandler({ counterfactualClient: fakeClient(okResult()) });
+    const outcome = await handler(targetedInvocation({ flipSummary: flipsToTarget }));
+    expect(outcome.assistant_text).toContain('Engage Offshore Partner would lead instead');
+    expect(outcome.assistant_text).toContain('One further what-if worth exploring');
+  });
+});
