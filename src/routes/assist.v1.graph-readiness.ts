@@ -134,12 +134,22 @@ export function buildReadinessRawPersistedGraph(
   // (it reads the REAL persisted graph, which carries no such key). F4 was
   // re-created inside the code written to close F4.
   //
-  // The over-report #612 closed is UNAFFECTED, because a genuinely
-  // configured-but-non-numeric option carries its value on the wire: the
-  // categorical sits in `raw_interventions` (or a non-numeric entry sits in
-  // `interventions`), and both loops below still register it as intent. Pinned
-  // by the "F4 over-report" + "F4 #2" route tests, which move in opposite
-  // directions on the same predicate.
+  // ⚠ The trade this makes on #612's over-report, stated honestly (adversarial
+  // review, 28 Jul): the live V5 wire producer (`computeStructuralReadiness`)
+  // carries NO `raw_interventions` field and silently DROPS non-numeric
+  // `interventions` values, so a persisted option configured with only raw/
+  // categorical values arrives here WIRE-INDISTINGUISHABLE from a truly-empty
+  // one. No consumer-side rule can serve both states. This fix chooses the
+  // common, reproduced, terminal case (chat-added empty option → run falsely
+  // refused, Paul 28 Jul). The residual: for a raw-configured option whose
+  // values the producer dropped, readiness may over-advertise a scaffold the
+  // run path will not perform — an over-advertisement that resolves into the
+  // coached configure path, softer than the terminal refusal it replaces. It
+  // stands until the P1 status split (`needs_encoding` vs `unconfigured`)
+  // makes the states distinguishable — rowed, with the reviewer's parity
+  // fixture as its RED-first pin (PHASE0-EVIDENCE-2026-07-28/
+  // adv-review-cee-747.md). Pinned here by the "F4 over-report" + "F4 #2"
+  // route tests, which move in opposite directions on the same predicate.
   const intentKeysByOptionId = new Map<string, Record<string, number>>();
   for (const opt of options) {
     if (typeof opt?.id !== "string" || opt.id.length === 0) continue;
