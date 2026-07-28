@@ -451,6 +451,43 @@
                   "properties": {
                     "kind": {
                       "type": "string",
+                      "const": "factor_value_edit"
+                    },
+                    "target_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "value": {
+                      "type": "number",
+                      "description": "The edited value on the MODEL scale (for a capped factor, raw_value / cap). Required: an edit with no value is a `direct_graph_edit` notification, not this event. The server RE-DERIVES the persisted model value from `raw_value` and its own stored cap and never persists this number verbatim — it is the client's statement of intent, cross-checked against `raw_value`, not a trusted input."
+                    },
+                    "raw_value": {
+                      "type": "number",
+                      "description": "The USER-UNIT magnitude as typed (e.g. 30000 for £30,000). ABSENCE IS DISTINCT from any value: it means the client did not state a user-unit magnitude, and the server must derive one from `value` and its own stored cap. It does NOT mean zero. Send this whenever the user typed a magnitude — it is the honest record of the input, and the server prefers it over `value`."
+                    },
+                    "unit": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Unit symbol for `raw_value` (e.g. \"£\", \"%\"). ABSENCE IS DISTINCT from any value: a unit-less number is treated as an AMBIGUOUS bare number against a capped factor and may be refused, whereas a stated unit is validated against the factor's own unit. Absence never means \"no unit\" — it means \"the client did not say\"."
+                    },
+                    "field": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Which `observed_state` field was edited. ABSENCE IS THE SAME as \"value\" — the only field this event has ever carried — so a client that omits it is treated as editing the value. Present-and-not-\"value\" is REFUSED rather than coerced, so a future field (e.g. \"baseline\") cannot be silently applied as a value edit."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "target_id",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
                       "const": "chip_click"
                     },
                     "chip_id": {
