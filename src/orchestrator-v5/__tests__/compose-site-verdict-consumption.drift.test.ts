@@ -354,6 +354,25 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   // ── GATED — sites that compose leader text from STRUCTURED data in code,
   //    and therefore consume the verdict themselves. Input gating cannot help
   //    these: there is no model to withhold the leader from. ─────────────────
+  'whyAnswer.text': {
+    stance: 'gated',
+    why:
+      'ROADMAP 2.104 — the withheld-why guard, added on the commit this entry arrives with. ' +
+      'GATED in the strongest sense available at this layer: the verdict is not merely ' +
+      'consulted, it is the ONLY thing the copy is composed from. The guard fires solely on ' +
+      "`!mayNameLeadingOptionForRun` (the turn-entry verdict's boolean, threaded — never " +
+      're-derived), and `composeWithheldWhyAnswer` selects its voice over ' +
+      "`mayNameLeadingOptionVerdictForRun.constraint_verdict_state` — the SAME member the " +
+      'ContextPack input gate and the explanation-answer gate read off the SAME fact. ' +
+      'It carries a THIRD, independent defence that no other entry in this register has: a ' +
+      'module-load probe in compose/withheld-why-answer.ts drives every voice over every ' +
+      'branch and THROWS at import if any output trips the shared leader vocabulary, so the ' +
+      'copy cannot regress into a leader claim without failing the process. ' +
+      'The two labels it can interpolate come from the persisted `goal_constraints` via ' +
+      '`readRatifiedConstraints` — CONDITION labels, never option labels — and only when ' +
+      'exactly one condition was ratified, so the interpolation cannot express a ranking. ' +
+      'No probability, no margin, no ordering, no option name.',
+  },
   recoveryText: {
     stance: 'gated',
     count: 3,
@@ -825,7 +844,13 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // used `assistant_text:` and was therefore always keyable — it was
     // unregistered for a different reason (nobody had derived its stance), and
     // conflating the two exclusions is what this count prevents.
-    expect(compared, 'the re-key comparison compared nothing').toBe(36);
+    //
+    // 36 -> 37 on 2026-07-28 (ROADMAP 2.104): the withheld-why guard's site
+    // writes `assistant_text: whyAnswer.text`, so the OLD regex keys it too and
+    // it joins the comparison set. It is NOT the shorthand exclusion — that
+    // remains the single unkeyable site, and this counter is what keeps the two
+    // exclusions from being conflated.
+    expect(compared, 'the re-key comparison compared nothing').toBe(37);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -966,8 +991,14 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // as covering more than it measures. Both figures are DERIVED from source on
     // every run; only the expectation is written down.
     const sites = enumerateAllScannedSites(sources);
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(37);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(33);
+    //
+    // 37 -> 38 and 33 -> 34 on 2026-07-28 (ROADMAP 2.104): ONE new site,
+    // `turn-executor.ts::whyAnswer.text`, the withheld-why guard. Bumped
+    // deliberately and with the delta stated, which is the only honest way to
+    // move an anti-vacuity counter — a silent bump is the mirror drift this
+    // whole file exists to make loud.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(38);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(34);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/edit-clarify-response.ts',
       'handlers/chip-click-dispatch.ts',
