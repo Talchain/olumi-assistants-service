@@ -1,5 +1,5 @@
 /**
- * ROADMAP 2.104 — the ANSWER half: say WHY no option is being put forward.
+ * ROADMAP 2.104 — the withheld REASON, as an appendable tail.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * THE DIFFERENTIATOR IS ONLY CREDIBLE IF THE PRODUCT CAN SAY WHY IT WITHHELD.
@@ -9,6 +9,41 @@
  * reason existed server-side the whole time — the persisted
  * `constraint_verdict_state` and the ratified conditions it is about — and the
  * turn deflected to a surface that does not contain it either.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ THERE WAS A RECOGNISER HERE. IT WAS DELETED, AND THE REASON MUST OUTLIVE IT
+ * — DO NOT REBUILD ONE.
+ *
+ * The first three revisions paired this copy with a regex recogniser for the
+ * question "why is there no option?", and short-circuited the turn when it
+ * matched. Three adversarial rounds found three INDEPENDENT over-capture axes,
+ * and the third is not an axis but a ceiling:
+ *
+ *   G1 — closure under negation, applied to five known false positives:
+ *        10/10 still over-captured.
+ *   G2 — append a restrictive modifier ("… to do nothing", "… in my model",
+ *        "… called Hold"), applied to the five TRUE POSITIVES:
+ *        35/35 over-captured.
+ *
+ * G2 is the finding that ended the approach. "No X is being put forward" and
+ * "no X exists in my graph" HAVE THE SAME SURFACE FORM. "Why is there no
+ * option?" and "Why is there no option to do nothing?" differ by four words and
+ * are different questions — one about a withheld recommendation, one about a
+ * missing node. The distinguishing information is not in the sentence at all;
+ * it is in what the user is looking at. No pattern over the message text can
+ * recover it, so no recogniser can be made precise, so precision must not be
+ * load-bearing.
+ *
+ * And G1 would never have found G2: the mechanical rule proposed to close the
+ * class was itself specific to the axis its author had imagined — the same
+ * defect one level up.
+ *
+ * WHAT REPLACED IT IS STRICTLY STRONGER. This tail is appended to EVERY
+ * withheld turn that displays the analysis, whatever was asked. There are no
+ * false positives and no false negatives, because THE TAIL IS TRUE ON EVERY
+ * WITHHELD TURN — it does not depend on the question, so it cannot be wrong
+ * about the question. The ~11s saved by the old short-circuit is knowingly
+ * forfeited: correctness over latency.
  *
  * FOUR FIRST-CLASS OUTCOMES, NOT ONE OUTCOME AND AN ERROR PATH — the shape
  * `compose-option-targeted-flip.ts` (#743) established:
@@ -125,14 +160,21 @@ import type {
  * cardinality, and it maps one-to-one onto the persisted verdict states that
  * withhold, plus the unreadable case.
  */
-export type WithheldWhyAnswerKind =
+export type WithheldReasonKind =
   | 'constraint_infeasible'
   | 'constraint_unevaluated'
   | 'constraint_unresolved'
   | 'reason_unrecorded';
 
-export interface WithheldWhyAnswer {
-  readonly kind: WithheldWhyAnswerKind;
+export interface WithheldReasonTail {
+  readonly kind: WithheldReasonKind;
+  /**
+   * A LEADING-SPACE-PREFIXED FRAGMENT, so it concatenates onto an existing
+   * answer exactly as `buildConstraintDisclosureFromState`'s output does. That
+   * shared contract is what lets the two be used interchangeably at the append
+   * seam, and what makes the idempotence check (`includes(tail.trim())`) work
+   * for both without knowing which produced the bytes.
+   */
   readonly text: string;
   /**
    * How many ratified conditions the answer was composed over. Structural only
@@ -154,14 +196,13 @@ export interface WithheldWhyAnswer {
 const WHY_LABEL_MAX_CHARS = 60;
 
 /**
- * The one sentence every voice opens with. Held in one constant so the four
- * cannot drift apart on the part that answers the question asked.
- *
- * "put forward", never "recommend*" — `LEADER_CLAIM_PATTERNS` bans the whole
- * `recommend` family, blunt to negation by design, and this estate's existing
- * leader-free phrasing for this exact state is "no option can be put forward".
+ * Shared closing clause. Held in one constant so the voices cannot drift apart
+ * on the part that states the CONSEQUENCE, and deliberately the SAME words the
+ * sibling disclosure ends on (`constraint-gap-disclosure.ts`
+ * `consequenceSentence`): "put forward", never "recommend*", which
+ * `LEADER_CLAIM_PATTERNS` bans outright and blunt to negation by design.
  */
-const OPENING = 'No single option is being put forward on this result, and here is why.';
+const NO_OPTION_YET = 'so no option can be put forward yet';
 
 function quoted(label: string): string {
   return `“${label}”`;
@@ -208,32 +249,29 @@ function composeInfeasibleText(
   constraints: readonly RatifiedConstraint[],
   label: string | null,
 ): string {
-  const repair =
-    ' Relax that limit, or bring in an option that can meet it, and run the analysis again.';
-
   if (constraints.length === 0) {
     return (
-      `${OPENING} This result was checked against the limits in your model, and the ` +
-      'option it would otherwise have put forward does not stand up against one of them. ' +
+      ` This result was checked against the limits in your model, and the option it would ` +
+      `otherwise have put forward does not stand up against one of them, ${NO_OPTION_YET}. ` +
       'Set out the condition you want met, and run the analysis again.'
     );
   }
 
   if (label !== null) {
     return (
-      `${OPENING} The condition you set was checked on this run: ${quoted(label)}. The ` +
-      'option this result would otherwise have put forward does not stand up against it.' +
-      repair
+      ` The condition you set was checked on this run: ${quoted(label)}. The option this ` +
+      `result would otherwise have put forward does not stand up against it, ${NO_OPTION_YET}. ` +
+      'Relax that limit, or bring in an option that can meet it, and run the analysis again.'
     );
   }
 
   const plural = constraints.length === 1 ? 'condition' : 'conditions';
   const count = constraints.length === 1 ? 'The' : `All ${constraints.length}`;
   return (
-    `${OPENING} ${count} ${plural} you set were checked on this run, and the option this ` +
-    'result would otherwise have put forward does not stand up against one of them. Which ' +
-    'one that is has not been recorded on this result.' +
-    ' Relax the limits, or bring in an option that can meet them, and run the analysis again.'
+    ` ${count} ${plural} you set were checked on this run, and the option this result would ` +
+    `otherwise have put forward does not stand up against one of them, ${NO_OPTION_YET}. ` +
+    'Which one that is has not been recorded on this result. Relax the limits, or bring in ' +
+    'an option that can meet them, and run the analysis again.'
   );
 }
 
@@ -254,15 +292,15 @@ function composeUnlabelledStateText(
 ): string {
   if (state === 'unevaluated') {
     return (
-      `${OPENING} A condition you set could not be evaluated against this model on this ` +
-      'run, so no option can be put forward from it. Re-state that limit against a measure ' +
-      'recorded in the same units as the limit, then run the analysis again.'
+      ` A condition you set could not be evaluated against this model on this run, ` +
+      `${NO_OPTION_YET}. Re-state that limit against a measure recorded in the same units ` +
+      'as the limit, then run the analysis again.'
     );
   }
   return (
-    `${OPENING} The analysis engine returned condition results that could not be matched ` +
-    'to the conditions you set, so it cannot be confirmed whether they were checked. ' +
-    'Re-state the conditions and run the analysis again.'
+    ' The analysis engine returned condition results that could not be matched to the ' +
+    `conditions you set, so it cannot be confirmed whether they were checked, and ` +
+    `${NO_OPTION_YET}. Re-state the conditions and run the analysis again.`
   );
 }
 
@@ -277,8 +315,9 @@ function composeUnlabelledStateText(
  * none — the exact correctness defect F2 fixed in `withheld-leader-projection.ts`.
  */
 const REASON_UNRECORDED_TEXT =
-  `${OPENING} The reason is not recorded on this result, so I will not guess at one. ` +
-  'Run the analysis again and it will be recorded, and I can tell you then.';
+  ` No single option can be put forward on this result yet, and the reason is not ` +
+  'recorded on it, so I will not guess at one. Run the analysis again and it will be ' +
+  'recorded, and I can tell you then.';
 
 /**
  * Compose the honest answer to "why is there no option?".
@@ -298,10 +337,10 @@ const REASON_UNRECORDED_TEXT =
  *                    `goal_constraints` the original derivation read
  *                    (`readRatifiedConstraints`).
  */
-export function composeWithheldWhyAnswer(
+export function composeWithheldReasonTail(
   state: ConstraintVerdictState | null,
   constraints: readonly RatifiedConstraint[],
-): WithheldWhyAnswer | null {
+): WithheldReasonTail | null {
   const ratified = Array.isArray(constraints) ? constraints : [];
 
   if (state === null) {
@@ -343,11 +382,13 @@ export function composeWithheldWhyAnswer(
           named_constraint: false,
         };
       }
-      // `disclosure` is a leading-space-prefixed fragment by contract, so it
-      // concatenates onto the opening exactly as it appends to a run summary.
+      // Shipped VERBATIM. The sibling's fragment is already a leading-space
+      // tail with its own consequence clause and repair step, so wrapping it
+      // would be a second account of one fact — and re-stating it would be the
+      // near-copy drift that module's docstring exists to prevent.
       return {
         kind,
-        text: `${OPENING}${disclosure}`,
+        text: disclosure,
         ratified_constraint_count: ratified.length,
         // The builder quotes labels only when they survive its own egress
         // probe; `includes('“')` reads the shipped bytes rather than
@@ -380,7 +421,7 @@ export function composeWithheldWhyAnswer(
  * arrives here as a compile error and, failing that, as an unprobed voice this
  * loop would not silently skip.
  */
-function assertWhyCopyIsLeaderFree(): void {
+function assertTailCopyIsLeaderFree(): void {
   const one: readonly RatifiedConstraint[] = [
     { constraint_id: 'c1', label: 'Three-Year Total Cost of Ownership' },
   ];
@@ -406,7 +447,7 @@ function assertWhyCopyIsLeaderFree(): void {
       ['one-unlabelled', unlabelled],
       ['many', many],
     ] as const) {
-      const answer = composeWithheldWhyAnswer(state, constraints);
+      const answer = composeWithheldReasonTail(state, constraints);
       if (answer === null) continue;
       probes.push([`${state ?? 'null'}:${shape}`, answer.text]);
     }
@@ -414,13 +455,25 @@ function assertWhyCopyIsLeaderFree(): void {
   // Both unlabelled-state voices are reachable only through a read-back with no
   // constraints, which the loop above covers — but probe them directly too, so
   // deleting that branch's only caller cannot silently un-probe the copy.
+  // Every tail must be a LEADING-SPACE fragment — the contract the append seam
+  // and the idempotence check both rely on. Checked here rather than in a test
+  // so a voice that forgot it fails at import, where it cannot be missed.
+  for (const [name, copy] of probes) {
+    if (!copy.startsWith(' ')) {
+      throw new Error(
+        `withheld-reason-tail: voice ${name} is not a leading-space fragment. The append ` +
+          'seam concatenates it directly onto an existing answer, so a missing leading ' +
+          'space runs it into the previous sentence.',
+      );
+    }
+  }
   probes.push(['unlabelled:unevaluated', composeUnlabelledStateText('unevaluated')]);
   probes.push(['unlabelled:identity_unresolved', composeUnlabelledStateText('identity_unresolved')]);
 
   for (const [name, copy] of probes) {
     if (textNamesLeadingOption(copy)) {
       throw new Error(
-        `withheld-why-answer: copy ${name} trips the shared leader vocabulary ` +
+        `withheld-reason-tail: copy ${name} trips the shared leader vocabulary ` +
           '(compose/leading-option-egress-guard.ts LEADER_CLAIM_PATTERNS). This answer ' +
           'ships only on turns whose verdict WITHHOLDS, where ' +
           'projectExplanationAnswerForWithheldClaim would replace it wholesale and the ' +
@@ -430,4 +483,4 @@ function assertWhyCopyIsLeaderFree(): void {
     }
   }
 }
-assertWhyCopyIsLeaderFree();
+assertTailCopyIsLeaderFree();

@@ -488,14 +488,26 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       ];
     });
 
-    it('withholds the leader, and says so without inventing a condition diagnosis', async () => {
+    it('withholds the leader, and now NAMES the condition without inventing a diagnosis', async () => {
+      // ⚠ UPDATED BY ROADMAP 2.104, AND THE OLD EXPECTATION WAS PINNING THE GAP.
+      //
+      // This used to assert the CAUSE-FREE tail ("No single option can be put
+      // forward on this result yet"), because `buildConstraintDisclosureFromState`
+      // returns '' for this state by design — its copy "lives in the coach's
+      // compact-summary note", which is not available on a narrating turn and
+      // which names the winning option. So the append branch could not fire and
+      // the user learned nothing about why.
+      //
+      // `composeWithheldReasonTail` supplies that missing voice. THE ORIGINAL
+      // REQUIREMENT IS UNCHANGED AND STILL ASSERTED BELOW: it must not claim the
+      // condition went unchecked, which would be false here — this state means
+      // the condition WAS checked and the result did not stand up to it.
       const turn = await rerunTurn(app);
       expect(turn.assistantText).not.toContain('comes out ahead');
-      // `buildConstraintDisclosureFromState` returns '' for this state by
-      // design (its copy lives in the coach's compact-summary note), so the
-      // honest tail is the no-disclosure one — and it must NOT claim the
-      // condition went unchecked, which would be false here.
-      expect(turn.assistantText).toContain('No single option can be put forward on this result yet');
+      expect(turn.assistantText).toContain('was checked on this run');
+      expect(turn.assistantText).toContain('“Three-Year Total Cost of Ownership”');
+      expect(turn.assistantText).toContain('so no option can be put forward yet');
+      // The requirement this test was written for, unchanged.
       expect(turn.assistantText).not.toContain('was not checked');
     });
   });
