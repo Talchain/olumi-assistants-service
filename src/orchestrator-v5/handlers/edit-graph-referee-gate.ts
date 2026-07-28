@@ -374,11 +374,29 @@ export function buildGmProtectedHeldAssistantText(
 /**
  * ROADMAP 2.11 / P1-3 — needs-encoding disclosure ON THE HOLD. An
  * `add_node` option op whose payload requests NO interventions will, once
- * confirmed, persist an option with no effect values — and PLoT preflight
- * then 422-blocks the WHOLE analysis (`options_not_configured`). The
- * live-proven failure (2.11 diagnosis, scenario A A2→A4) is that the user
- * learns this only two turns later, from a recovery chip that used to loop.
- * The consent ask must say it AT ADD TIME.
+ * confirmed, persist an option with no effect values. The consent ask must
+ * say so AT ADD TIME — the live-proven 2.11 failure (diagnosis scenario A,
+ * A2→A4) was that the user learned it only two turns later, from a recovery
+ * chip that used to loop.
+ *
+ * ⚠ ROADMAP 2.117 — WHAT it says changed, because the OUTCOME changed. This
+ * copy used to predict that "the analysis will stay blocked after this is
+ * applied until you set them", which was true while PLoT preflight
+ * 422-blocked the whole analysis on `options_not_configured`. Since #747 it
+ * is FALSE for exactly the options this notice names: `run_analysis`
+ * SCAFFOLDS them with provisional placeholder values, the run gate stays
+ * enabled, and the option is scored (live-proven 28 Jul —
+ * THREE-SURFACE-PROOF §P3). It also contradicted the results panel, which
+ * discloses that placeholder reliance honestly. The disclosure stays; the
+ * false prediction is replaced by what actually happens.
+ *
+ * The placeholder promise is SOUND for what this builder names, not a new
+ * over-claim: the scaffolder declines an option that carries user
+ * intervention INTENT, and the label filter below skips exactly those via
+ * `optionIdsAddedWithInterventionIntent` — the same classifier
+ * `scaffold-unconfigured-options.ts` consults. (Its remaining conditions —
+ * a projectable neutral target and ≥1 configured sibling — are not modelled
+ * here; see the 2.117 evidence note.)
  *
  * Detection derives from `optionIdsAddedWithInterventionIntent` — the SAME
  * intent classifier the edit pipeline's configure-or-don't-persist gate
@@ -420,8 +438,10 @@ export function buildNeedsEncodingAddNotice(
       : `${first} and ${labels.length - 1} more option${labels.length - 1 === 1 ? '' : 's'}`;
   return (
     `Heads up: ${named} ${labels.length === 1 ? 'has' : 'have'} no effect values yet, ` +
-    'so the analysis will stay blocked after this is applied until you set them. ' +
-    `You can tell me what ${labels.length === 1 ? 'it' : 'each one'} changes once it is added.`
+    `so Olumi will include ${labels.length === 1 ? 'it' : 'them'} using provisional ` +
+    'placeholder values. ' +
+    `Tell me what ${labels.length === 1 ? 'it' : 'each one'} changes and I'll write in ` +
+    'the real numbers.'
   );
 }
 

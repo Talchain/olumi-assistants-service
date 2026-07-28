@@ -117,12 +117,30 @@ export function buildGmHeldAppliedReceipt(
 }
 
 /**
- * Honest notice for options that block analysis. Null when every option is
- * configured (copy byte-identical to the pre-2.11 receipt). The advised
- * phrasing MUST carry the deterministic configure-option gate's own
+ * Honest notice for options that still lack effect values. Null when every
+ * option is configured (copy byte-identical to the pre-2.11 receipt). The
+ * advised phrasing MUST carry the deterministic configure-option gate's own
  * vocabulary ("configure … option") so a user who echoes it routes to the
  * edit lane without the LLM router — pinned by
  * configure-option-copy-detector-contract.test.ts.
+ *
+ * ⚠ ROADMAP 2.117 — this notice used to say "the analysis cannot run until
+ * they are set". Since #747 that is FALSE: `run_analysis` scaffolds these
+ * options with provisional placeholder values and completes with them
+ * scored (live-proven 28 Jul, JOURNEY-PROOF step 3 captured the old, now
+ * untrue sentence). The disclosure and the deterministic remedy stay; the
+ * block prediction is replaced by what actually happens.
+ *
+ * Soundness of the placeholder promise on this path: labels come from
+ * `deriveUnconfiguredOptionLabels` (status !== 'ready'), which carries no
+ * intent filter of its own — but the P0-A configure-or-don't-persist gate
+ * (`orchestrator/tools/edit-graph.ts`) rejects an ADD that requests an
+ * intervention it cannot encode NUMERICALLY, so a newly-added persisted
+ * option is either numeric (`ready`, never named here) or value-free and
+ * therefore scaffoldable. Note also that option STATUS is not a proxy for
+ * scaffoldability — an edge-less option is stamped `needs_user_mapping` yet
+ * IS scaffolded via the sibling comparison basis — so this copy must not be
+ * split on status.
  */
 export function buildUnconfiguredOptionsNotice(
   unconfiguredOptionLabels: readonly string[],
@@ -136,9 +154,10 @@ export function buildUnconfiguredOptionsNotice(
       : `${first} and ${labels.length - 1} more option${labels.length - 1 === 1 ? '' : 's'}`;
   return (
     `Note: ${named} ${labels.length === 1 ? 'does' : 'do'} not have effect values yet, ` +
-    `so the analysis cannot run until they are set. ` +
+    `so Olumi will include ${labels.length === 1 ? 'it' : 'them'} using provisional ` +
+    `placeholder values. ` +
     `Say 'configure the ${labels[0]} option' and tell me what ` +
-    `${labels.length === 1 ? 'it' : 'each one'} changes, and I'll write it in.`
+    `${labels.length === 1 ? 'it' : 'each one'} changes, and I'll write in the real numbers.`
   );
 }
 
