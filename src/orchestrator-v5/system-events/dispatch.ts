@@ -31,7 +31,7 @@ import type {
   SystemEventKindLiteral,
 } from '@talchain/schemas/boundary';
 
-import type { GraphV3T } from '../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
 import { loadPersistedGraphStrict, loadPriorFactsQuietly } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
@@ -90,17 +90,17 @@ export interface DispatchSystemEventResult {
    * single-segment id (`goal_revenue`) from an English compound
    * (`goal_setting`), so it leaves those intact.
    *
-   * ⚠ HONEST SCOPE OF THE EVIDENCE. That paragraph is REASONED FROM THE SCRUB'S
-   * SOURCE, NOT PINNED BY A TEST HERE. A mutation check confirmed it: forcing
-   * this field back to `null` leaves all 13 tests in
-   * `route-v2-factor-value-edit.test.ts` GREEN. The reason is that the wire
-   * `graph_hash` is now stamped explicitly from the commit's own persisted hash
-   * (see `dispatchFactorValueEdit`), so the sanitiser no longer needs this
-   * graph to derive it — which removed the coverage this field used to get for
-   * free. The remaining justification is the id scrub, and this suite's
-   * fixtures have clean labels, so they cannot discriminate it. Treat the
-   * non-null as CORRECT-BUT-UNPINNED: if you are adding a leak-shaped fixture,
-   * that is the test this field is missing.
+   * ⚠ THIS IS NOW PINNED, AND FOR A WHILE IT WAS NOT. Stamping the wire
+   * `graph_hash` explicitly from the commit's own persisted hash (see
+   * `dispatchFactorValueEdit`) removed the coverage this field used to get for
+   * free — a mutation check then showed `graph: null` leaving the whole suite
+   * green. The gap was disclosed rather than papered over, and is now closed by
+   * a fixture that discriminates the scrub itself:
+   * `route-v2-factor-value-edit.test.ts` → "resolves a leak-shaped label via the
+   * graph". It uses a SINGLE-SEGMENT suffix under an ambiguous prefix
+   * (`goal_revenue`, not `fac_*`/`opt_*`), which `isLikelyEntityId` leaves
+   * untouched without a graph and rewrites to the node's label with one. Set
+   * this field to `null` and that test REDs.
    */
   readonly graph: GraphV3T | null;
 }
@@ -110,20 +110,61 @@ export interface DispatchSystemEventParams {
   readonly requestId: string;
 }
 
-// Events that produce no server state change. Skipping commit for these
-// matches V4's deterministic handler behaviour — undo/redo are realised in
-// the client's graph history, not in Supabase turn state. Typed against
-// `SystemEventKindLiteral` so adding a new kind to the schema without
-// updating this list is a compile-time error (not a silent runtime miss).
+/**
+ * How each system-event kind is handled. TOTAL BY CONSTRUCTION.
+ *
+ * ⚠ THIS REPLACES A CLAIM THAT WAS FALSE FOR AS LONG AS IT EXISTED. The list
+ * below used to be a `ReadonlySet<SystemEventKindLiteral>` carrying the comment
+ * "adding a new kind to the schema without updating this list is a compile-time
+ * error (not a silent runtime miss)". **A `Set` of a union type is not exhaustive
+ * — a Set with three members satisfies `ReadonlySet<X>` no matter how many
+ * members `X` has.** Nothing went red. That is precisely how `factor_value_edit`
+ * would have arrived: silently, falling through to the generic acknowledgement,
+ * which is the P0 this change exists to fix — one kind later.
+ *
+ * A `Record` keyed by the union IS exhaustive: TypeScript requires every member.
+ * So re-vendoring a schemas release that adds a kind now fails `pnpm typecheck`
+ * until someone states what the new kind does. That is the loud signal the old
+ * comment promised and did not deliver.
+ *
+ * Belt and braces, because a compile-time guard can be defeated by a cast or by
+ * a consumer on a stale pin: `system-event-kind-exhaustiveness.test.ts` DERIVES
+ * the kind set from `SystemEventKind.options` — the schema's own vocabulary —
+ * and asserts set-equality with this map's keys. Derived, not mirrored.
+ */
+export type SystemEventHandling =
+  /** No server state change at all — no commit, `client_only_event` skip reason. */
+  | 'client_only'
+  /** Silent acknowledgement, committed as a turn row. No graph write. */
+  | 'ack_and_commit'
+  /** Runs a real mutation and writes `scenarios.graph`. */
+  | 'mutating';
+
+export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, SystemEventHandling>> = {
+  patch_accepted: 'ack_and_commit',
+  patch_dismissed: 'ack_and_commit',
+  direct_graph_edit: 'ack_and_commit',
+  factor_value_edit: 'mutating',
+  chip_click: 'ack_and_commit',
+  undo: 'client_only',
+  redo: 'client_only',
+  selection_change: 'client_only',
+  feedback: 'ack_and_commit',
+};
+
+// DERIVED from the map above — not a second list to keep in step. undo/redo are
+// realised in the client's graph history, not in Supabase turn state.
 //
 // selection_change is client-only ACKED as a holding position — R5 will
 // likely route it into ephemeral turn context (never a committed turn);
 // revisit the dispatch branch, not this guard, when R5 lands.
-const CLIENT_ONLY_EVENT_KINDS: ReadonlySet<SystemEventKindLiteral> = new Set<SystemEventKindLiteral>([
-  'undo',
-  'redo',
-  'selection_change',
-]);
+const CLIENT_ONLY_EVENT_KINDS: ReadonlySet<SystemEventKindLiteral> = new Set<SystemEventKindLiteral>(
+  (Object.keys(SYSTEM_EVENT_HANDLING) as SystemEventKindLiteral[]).filter(
+    (k) => SYSTEM_EVENT_HANDLING[k] === 'client_only',
+  ),
+);
+
+
 
 function buildAcknowledgementResponse(
   payload: SystemEventTurnPayload,
@@ -171,7 +212,10 @@ export async function dispatchSystemEvent(
   // got before. That is the reader-first compatibility guarantee — a CEE on
   // this version behaves exactly as before for every client that has not yet
   // learned to send `factor_value_edit`.
-  if (payload.event.kind === 'factor_value_edit') {
+  if (
+    SYSTEM_EVENT_HANDLING[payload.event.kind] === 'mutating' &&
+    payload.event.kind === 'factor_value_edit'
+  ) {
     return await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
   }
 
@@ -283,6 +327,15 @@ async function dispatchFactorValueEdit(
         llm_calls_used: 0,
         duration_ms: Date.now() - startedAt,
         handler_facts: [],
+        // The consented "extend the scale" chip's backing pending. Supplied
+        // EXPLICITLY (not left to commit.ts's chip-derivation default) because
+        // this pending carries structured `{value, unit, cap}` that no chip can
+        // encode — deriving it from the chip set would lose the cap, which is the
+        // whole point of the consent. Omitted entirely when empty so the normal
+        // derivation still runs for every other refusal.
+        ...(result.pendingActions.length > 0
+          ? { pending_actions: result.pendingActions }
+          : {}),
         coaching_state: null,
       });
     } catch (err) {
@@ -304,6 +357,7 @@ async function dispatchFactorValueEdit(
         event_kind: event.kind,
         scenario_id: payload.scenario_id,
         refusal_reason: result.reason,
+        rescale_pendings_persisted: result.pendingActions.length,
       },
       'V5 factor_value_edit refused — committed honestly, no graph written',
     );
@@ -312,6 +366,7 @@ async function dispatchFactorValueEdit(
 
   // ── the mutation path ────────────────────────────────────────────────────
   let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
   try {
     const cas = computeExpectedGraphCasHashes(result.baseGraph);
     const commitResult = await commitDirectAnswer(result.response, {
@@ -342,6 +397,7 @@ async function dispatchFactorValueEdit(
       coaching_state: null,
     });
     persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
   } catch (err) {
     log.error(
       {
@@ -392,13 +448,25 @@ async function dispatchFactorValueEdit(
       ? { ...result.response, graph_hash: persistedAnalysisGraphHash }
       : result.response;
 
+  // Readiness from the bytes that LANDED, not from our pre-projection copy.
+  //
+  // This is not pedantry. `computeStructuralReadiness` reads each option node's
+  // merged `interventions`, and `projectGraphForPersistence` runs
+  // `normaliseOptionInterventionContract` over exactly that field on the way to
+  // the store. Deriving readiness from the un-projected graph can therefore
+  // publish a readiness verdict for a graph that was never stored — the same
+  // "advertised state != persisted state" class as the hash defect above.
+  // Falls back to the merged graph only if the projected bytes fail to re-parse,
+  // which would itself mean the store holds something we cannot model.
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const graphForReadiness = committedParse.success ? committedParse.data : result.graph;
+
   return {
     response,
     commitPerformed: true,
-    // Post-commit, from the graph that landed.
-    analysisReady: computeStructuralReadiness(result.graph),
+    analysisReady: computeStructuralReadiness(graphForReadiness),
     // Still the full graph: the egress id-leak scrub resolves ids to labels
     // against it, independently of the hash above.
-    graph: result.graph,
+    graph: graphForReadiness,
   };
 }

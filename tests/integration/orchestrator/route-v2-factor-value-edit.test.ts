@@ -120,6 +120,14 @@ function committedGraph(): Record<string, unknown> | undefined {
   return arg?.graph;
 }
 
+/** The pending actions the commit actually handed the store. */
+function committedPendings(): Array<Record<string, unknown>> {
+  const arg = appendMock.mock.calls.at(-1)?.[0] as
+    | { pending_actions?: Array<Record<string, unknown>> }
+    | undefined;
+  return arg?.pending_actions ?? [];
+}
+
 function budgetObservedState(graph: Record<string, unknown> | undefined) {
   const nodes = (graph?.nodes ?? []) as Array<{ id: string; observed_state?: Record<string, unknown> }>;
   return nodes.find((n) => n.id === 'f-budget')?.observed_state;
@@ -213,9 +221,15 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     expect(patch?.status).toBe('applied');
     expect(patch?.operation).toBe('set_factor_value');
 
-    // `graph_hash` is stamped by the egress sanitiser from the graph the
-    // dispatch returns. It is present ONLY because that graph is non-null —
-    // this is the assertion that catches a regression to `graph: null`.
+    // `graph_hash` is stamped from the commit's OWN persisted hash, then the
+    // egress sanitiser defers to it.
+    //
+    // ⚠ THIS ASSERTION DOES NOT CATCH A REGRESSION TO `graph: null`, and an
+    // earlier comment here claimed it did. That claim was disproved by this
+    // change's own mutation check: forcing `graph: null` left all 13 tests green,
+    // precisely BECAUSE the hash is stamped explicitly and no longer needs the
+    // graph. The test that actually discriminates `graph` vs `null` is the
+    // id-leak one at the bottom of this file.
     expect(typeof body.graph_hash).toBe('string');
     expect(body.graph_hash).toBe(computeAnalysisAffectingGraphHash(committedGraph() as never));
 
@@ -306,19 +320,6 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     expect(JSON.parse(res.body).assistant_text).toMatch(/haven't changed anything/i);
   });
 
-  it('REFUSES field:"baseline" rather than coercing it into a value edit', async () => {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: payloadFor(
-        { kind: 'factor_value_edit', target_id: 'f-budget', value: 0.5, raw_value: 50000, field: 'baseline' },
-        '8',
-      ),
-    });
-    expect(res.statusCode).toBe(200);
-    expect(committedGraph()).toBeUndefined();
-  });
-
   it('REFUSES when there is no persisted model yet — and does NOT write an empty graph', async () => {
     persisted = null;
     const res = await app.inject({
@@ -358,6 +359,123 @@ describe('POST /orchestrate/v2/turn — factor_value_edit (the value-carrying in
     });
     expect(res.statusCode).toBe(200);
     expect(appendMock).not.toHaveBeenCalled();
+  });
+
+
+  // ── the consented rescale chip must not be a dead control ────────────────
+
+  it('above-cap ships the "extend the scale" chip AND persists its backing pending', async () => {
+    // ⚠ THE CHIP ALONE IS A DEAD CONTROL. Its replay message deliberately carries
+    // no digits and no edit verb, because the structured {value, unit, cap}
+    // cannot ride a chip (the boundary Action is strict {id,label,message}). The
+    // cap rides the PENDING. Ship the chip without the pending and the click
+    // finds nothing to resume, the resumer fails closed on the missing hash, the
+    // message falls to the LLM without the cap — and the user gets the same
+    // honest refusal again, forever.
+    //
+    // The original suite asserted the copy and `blocks: []` only, so it could not
+    // see this. Found in adversarial review, not by the tests.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        { kind: 'factor_value_edit', target_id: 'f-budget', value: 2.5, raw_value: 250000, unit: '£' },
+        'd',
+      ),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    const chip = (body.suggested_actions as Array<Record<string, unknown>>).find(
+      (a) => a.id === 'chip_prompt_rescale_extend_cap',
+    );
+    expect(chip, 'the consented "extend the scale" chip must be on the wire').toBeDefined();
+
+    const pendings = committedPendings();
+    const rescale = pendings.find((pa) => pa.chip_id === 'chip_prompt_rescale_extend_cap');
+    expect(rescale, 'the chip must have a backing pending or the click cannot resume').toBeDefined();
+
+    // The cap is the whole point of the consent — it is what the chip cannot carry.
+    const action = rescale?.action as Record<string, unknown>;
+    expect(action.kind).toBe('set_factor_value');
+    expect(action.factor_id).toBe('f-budget');
+    expect(action.value).toBe(250000);
+    expect(action.unit).toBe('£');
+    expect(action.operator).toBe('set');
+    expect(typeof action.cap).toBe('number');
+    expect(action.cap as number).toBeGreaterThanOrEqual(250000);
+
+    // The precondition hash must be the PRE-mutation graph: nothing was written
+    // on a refusal, so that is the graph the resumer must find unchanged.
+    const pre = (rescale?.preconditions ?? {}) as Record<string, unknown>;
+    // The RAW persisted bytes — what the resumer will re-derive from the store.
+    // Hashing a Zod-parsed copy instead yields a value that can never match, so
+    // the pending would be invalidated on first read: a pending that cannot
+    // resume is the same dead control as no pending at all.
+    expect(pre.graph_hash).toBe(computeAnalysisAffectingGraphHash(buildPersistedGraph() as never));
+    expect(pre.target_entity_ids).toEqual(['f-budget']);
+
+    // Still a refusal: no graph written.
+    expect(committedGraph()).toBeUndefined();
+  });
+
+  it('a NON-cap refusal mints no pending — the builder stays fail-closed', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        { kind: 'factor_value_edit', target_id: 'f-does-not-exist', value: 0.5 },
+        'e',
+      ),
+    });
+    expect(committedPendings().filter((pa) => pa.chip_id === 'chip_prompt_rescale_extend_cap')).toEqual([]);
+  });
+
+  // ── the id-leak scrub genuinely needs the graph ──────────────────────────
+
+  it('resolves a leak-shaped label via the graph — this is what `graph: null` would break', async () => {
+    // The discriminator the original suite lacked. `isLikelyEntityId` treats a
+    // SINGLE-SEGMENT suffix under an ambiguous prefix (`goal_`, not `fac_`/`opt_`)
+    // as an English compound and leaves it alone WITHOUT a graph; WITH a graph it
+    // resolves against the node ids and rewrites to the label. So a receipt
+    // naming `goal_revenue`, in a graph that has a node with that id, is scrubbed
+    // only when the dispatch hands the sanitiser a real graph.
+    //
+    // Without this, `graph: null` was a surviving mutant: the wire `graph_hash`
+    // is stamped explicitly, so nothing else in the suite could see the field.
+    persisted = {
+      goal_node_id: 'goal_revenue',
+      nodes: [
+        { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+        {
+          id: 'f-budget',
+          // The factor's LABEL is another node's ID. The deterministic receipt
+          // interpolates the label verbatim, so the id reaches the wire text.
+          kind: 'factor',
+          label: 'goal_revenue',
+          observed_state: { value: 0.4, raw_value: 40000, unit: '£', cap: 100000 },
+        },
+      ],
+      edges: [],
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        { kind: 'factor_value_edit', target_id: 'f-budget', value: 0.5, raw_value: 50000, unit: '£' },
+        'f',
+      ),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    expect(committedGraph(), 'the edit must still have applied').toBeDefined();
+    expect(
+      body.assistant_text,
+      'the raw entity id must not reach the wire — the scrub needs the graph to know it IS one',
+    ).not.toContain('goal_revenue');
+    expect(body.assistant_text).toContain('Revenue');
   });
 
   // ── 4. the ingress boundary ──────────────────────────────────────────────

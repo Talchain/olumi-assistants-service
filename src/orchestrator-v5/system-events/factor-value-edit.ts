@@ -37,6 +37,7 @@ import { log } from '../../utils/telemetry.js';
 import { composeToolCallResponse } from '../compose.js';
 import { composeRecoverableHandlerResponse } from '../compose/recoverable-handler-response.js';
 import { composeRecoverableValidationResponse } from '../compose/recoverable-validation-response.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { buildGraphLookup } from '../routing/graph-lookup-adapter.js';
 import type { GraphLookup } from '../routing/validator.js';
 import type { ProposalAction } from '../routing/types.js';
@@ -45,6 +46,8 @@ import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { buildRescaleCapPendingActions } from '../session/rescale-cap-pending.js';
+import type { PendingAction } from '../session/pending-action.js';
 
 /**
  * The ONLY `observed_state` field this event may edit today. `field` is optional
@@ -99,6 +102,21 @@ export type FactorValueEditResult =
       readonly kind: 'refused';
       readonly response: OlumiResponse;
       readonly reason: string;
+      /**
+       * Pending actions the REFUSAL itself must persist.
+       *
+       * ⚠ A CHIP WITHOUT ITS PENDING IS A DEAD CONTROL, and that is not a
+       * cosmetic gap. The above-cap refusal ships a consented "extend the scale"
+       * chip whose replay message deliberately carries NO digits and NO edit verb
+       * — the structured `{value, unit, cap}` cannot ride a chip (the boundary
+       * `Action` is strict `{id,label,message,action_type?}`), so it rides the
+       * pending-action channel instead. Persist the chip without the pending and
+       * the click finds nothing to resume, the resumer fails closed on the
+       * missing hash, and the message falls through to the LLM WITHOUT the cap —
+       * so the user clicks "extend the scale" and gets the same refusal again,
+       * forever. Empty on every other refusal.
+       */
+      readonly pendingActions: readonly PendingAction[];
     };
 
 export interface ApplyFactorValueEditParams {
@@ -119,6 +137,7 @@ function refuse(
   return {
     kind: 'refused',
     reason,
+    pendingActions: [],
     response: {
       response_version: 2,
       assistant_text: assistantText,
@@ -134,6 +153,7 @@ function refuseFromValidationError(
   payload: SystemEventTurnPayload,
   error: ValidationError,
   lookup: GraphLookup | undefined,
+  persistedGraph: unknown,
 ): FactorValueEditResult {
   // The SAME per-code composer the NL lane uses. This is what carries the
   // cap-rejection copy and the consented "extend the scale" chip — we do not
@@ -143,7 +163,37 @@ function refuseFromValidationError(
     { ...(lookup !== undefined ? { graph: lookup } : {}), handlerRegistry: HANDLER_VALIDATION_REGISTRY },
     payload.stage,
   );
-  return { kind: 'refused', reason: error.code, response: composed.response };
+
+  // The consented "extend the scale" chip needs its backing pending, or it is a
+  // dead control (see `pendingActions` above). Same builder, same fail-closed
+  // rules, as the NL lane's identical recovery at turn-executor.ts:7022 — the
+  // only other production caller. It returns [] unless the chip is genuinely on
+  // this response AND the validator threaded the complete detail set AND a live
+  // graph hash exists, so a non-cap refusal costs nothing.
+  //
+  // The hash is the PRE-mutation PERSISTED graph's — computed on the raw stored
+  // bytes, NOT on our Zod-parsed copy. `PendingAction.preconditions.graph_hash`
+  // is contractually "the persisted graph's analysis-affecting hash", and the
+  // resumer re-derives it from the store on the next turn. Hashing the parsed
+  // copy instead produces a value that never matches, so the pending would be
+  // invalidated the moment it was read — a pending that can never resume, which
+  // is the dead control this whole amendment removes, one layer down.
+  // (Caught by the test asserting the exact precondition hash.)
+  const pendingActions = buildRescaleCapPendingActions({
+    error,
+    response: composed.response,
+    scenarioId: payload.scenario_id,
+    currentGraphHash: computeAnalysisAffectingGraphHash(
+      persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+    ),
+  });
+
+  return {
+    kind: 'refused',
+    reason: error.code,
+    response: composed.response,
+    pendingActions,
+  };
 }
 
 /**
@@ -318,7 +368,7 @@ export async function applyFactorValueEdit(
       },
       'factor_value_edit — validator refused; no graph written',
     );
-    return refuseFromValidationError(payload, validation.error, lookup);
+    return refuseFromValidationError(payload, validation.error, lookup, persistedGraph);
   }
 
   // ── the EXISTING handler ─────────────────────────────────────────────────
@@ -406,7 +456,17 @@ export async function applyFactorValueEdit(
         },
         payload.stage,
       );
-      return { kind: 'refused', reason: err.cause_kind, response: composed.response };
+      // The handler's own re-run of the predicate is a BACKSTOP, not the primary
+      // cap path — the validator above catches value_exceeds_cap first and is
+      // where the rescale pending is built. Reaching here with a cap rejection
+      // would mean the validator stopped catching it; no pending is minted,
+      // because the composer on this path emits no rescale chip to back.
+      return {
+        kind: 'refused',
+        reason: err.cause_kind,
+        response: composed.response,
+        pendingActions: [],
+      };
     }
     throw err;
   }
