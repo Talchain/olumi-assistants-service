@@ -520,6 +520,108 @@ paths:
               schema:
                 type: string
 
+  /assist/v1/draft-graph/staged:
+    post:
+      summary: Draft decision graph with STAGED SSE delivery (CEE v1)
+      description: |
+        Staged Server-Sent Events delivery of a draft (ROADMAP 1.204 M1).
+
+        Sibling of `/assist/v1/draft-graph` (buffered) and
+        `/assist/v1/draft-graph/stream` (2-frame SSE). Both of those are
+        unchanged; this route is additive and clients opt in by calling it.
+
+        A cold draft takes ~53 s as a single buffered response, but the graph is
+        finished and **validated at ~33 s** — the remaining ~20 s is a coaching
+        pass. This endpoint emits each stage as it completes instead of one blob
+        at the end.
+
+        **Frame classes** (every frame is `event: stage`, with `stage`, `seq`
+        monotonic from 0, and `status`):
+        - `DRAFTING` (`in_progress`) — stream opened
+        - `PROGRESS` (`in_progress`) — `labels[]`, `phase`: node labels from the
+          live token stream (Anthropic draft path only)
+        - `GRAPH_READY` (`in_progress`) — `graph`, `schema_version`: the
+          validated graph, ~33 s
+        - `COACHING_READY` (`in_progress`) — `coaching_status`, ~53 s
+        - `COMPLETE` (`complete`) — `status_code`, `payload`, and
+          `salvaged_from_truncation` when known. `payload` is equivalent to the
+          buffered route's body for the same input.
+
+        **Node identity is stable across frames.** `GRAPH_READY`'s node
+        `id`/`label`/`kind` are byte-equal to the terminal payload's for the
+        negotiated `schema_version`, so a client can reconcile by id. Numeric
+        values may be refined between the two frames; the terminal frame is the
+        authority.
+
+        **Client rule — when to discard `GRAPH_READY`:** discard the early graph
+        and render the terminal payload instead if the `COMPLETE` frame carries
+        `status_code >= 400` **or** `salvaged_from_truncation: true`. Pre-terminal
+        frames are always `status: "in_progress"`; only the terminal frame may
+        claim completeness.
+
+        **Claim-safety:** pre-terminal frames carry structure and labels only —
+        no coaching, causal claims, recommendations, or leader designations.
+
+        **Rate limiting:** shares the bucket of `/assist/v1/draft-graph/stream`
+        (draft tier, `CEE_STREAM_RATE_LIMIT_RPM`), so the staged sibling grants
+        no additional streaming allowance.
+
+        **Resume/snapshot is NOT supported** on this route (M3, out of scope). If
+        the connection drops the draft simply ends; nothing half-written persists.
+      tags:
+        - Draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CEEDraftGraphRequestV1'
+      responses:
+        '200':
+          description: Staged SSE stream of draft generation events
+          headers:
+            X-CEE-API-Version:
+              description: |
+                The schema version actually negotiated for this request (`v3` is
+                the default when `?schema` is absent).
+              schema:
+                type: string
+                enum: ["v1", "v2", "v3"]
+            X-CEE-Feature-Version:
+              description: Version of the CEE staged-draft feature.
+              schema:
+                type: string
+            X-CEE-Request-ID:
+              description: Unique request identifier for CEE tracing.
+              schema:
+                type: string
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  Server-Sent Events stream. Each event has format:
+                  ```
+                  event: stage
+                  data: {"stage":"GRAPH_READY","seq":2,"status":"in_progress",...}
+                  ```
+                  The terminal frame is:
+                  ```
+                  event: stage
+                  data: {"stage":"COMPLETE","seq":N,"status":"complete","status_code":200,"payload":<CEEDraftGraphResponseV1>}
+                  ```
+        '429':
+          description: CEE rate limit exceeded (SSE format)
+          headers:
+            Retry-After:
+              description: Seconds until the client may retry this request.
+              schema:
+                type: integer
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
   /assist/v1/decision-review/example:
     get:
       summary: Example Decision Review payload (CEE v1, internal)

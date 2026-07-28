@@ -327,6 +327,10 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   // before strength detection runs, so only one of the two directives is ever
   // appended to a given attempt.
   let leanDraftRetried = false;
+  // ROADMAP 1.204 M1 — labels already surfaced to the staged PROGRESS frames.
+  // Declared OUTSIDE the attempt loop on purpose: the adapter's scanner is
+  // per-attempt, so without this a retry replays the whole draft's labels.
+  const emittedProgressLabels = new Set<string>();
 
   while (attempt < 2) {
     attempt += 1;
@@ -425,6 +429,51 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           bypassCache: ctx.opts.refreshPrompts,
           forceDefault: ctx.opts.forceDefault,
           signal: ctx.opts.signal,
+          // ROADMAP 1.204 M1 — bridge the adapter's mid-draft label stream onto
+          // the pipeline's staged-emission seam. Added ONLY when a stage
+          // consumer is wired, so the un-wired path (buffered route, 2-frame
+          // stream route, V5 draft_graph tool) passes the identical opts object
+          // it passed before and the adapter's scanner is never constructed.
+          //
+          // Two properties this bridge owns, both learned in review:
+          //
+          //  1. IT SWALLOWS. `emitStageEvent` in the pipeline guarantees a
+          //     throwing consumer cannot fail a draft, but this call reaches
+          //     `onStage` DIRECTLY and so bypasses that guard. Today the only
+          //     producer is the adapter, which already wraps the call in a bare
+          //     catch — but relying on a caller two layers away to hold the
+          //     guarantee is exactly how it gets lost when a second producer is
+          //     added. The try/catch here makes the property local.
+          //
+          //  2. IT DEDUPES ACROSS ATTEMPTS. The adapter builds a fresh scanner
+          //     per ATTEMPT, so a lean-retry or runaway retry re-streams the
+          //     whole draft and would re-emit every label the client already
+          //     has. Labels are an append-only skeleton on the canvas, so a
+          //     replay would duplicate nodes. Dedupe at the bridge, which is
+          //     the one place that sees every attempt of a single draft.
+          ...(ctx.opts.onStage
+            ? {
+                onDraftProgress: (progress: { labels: string[]; phase: "nodes" | "edges" }) => {
+                  try {
+                    const fresh = progress.labels.filter((l) => !emittedProgressLabels.has(l));
+                    if (fresh.length === 0) return;
+                    for (const l of fresh) emittedProgressLabels.add(l);
+                    ctx.opts.onStage?.({
+                      kind: "PROGRESS",
+                      labels: fresh,
+                      phase: progress.phase,
+                      // Pipeline-relative, matching GRAPH_READY / COACHING_READY.
+                      // The adapter's own attempt-relative clock is deliberately
+                      // not forwarded: two different origins on one timeline is
+                      // a trap for the consumer.
+                      elapsed_ms: Date.now() - ctx.start,
+                    });
+                  } catch {
+                    // A progress consumer must never be able to fail a draft.
+                  }
+                },
+              }
+            : {}),
         },
       );
 

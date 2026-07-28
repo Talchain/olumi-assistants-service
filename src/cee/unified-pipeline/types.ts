@@ -35,7 +35,95 @@ export interface UnifiedPipelineOpts {
   forceDefault?: boolean;
   signal?: AbortSignal;
   requestStartMs?: number;
+  /**
+   * ROADMAP 1.204 M1 — the staged-emission seam (the never-built D-M Option C
+   * `onStage`, now with a consumer: the staged SSE sibling route).
+   *
+   * ABSENT (every pre-existing caller: the buffered /assist/v1/draft-graph
+   * route, the 2-frame /assist/v1/draft-graph/stream route, and the V5
+   * orchestrator's draft_graph tool) ⇒ the pipeline runs BYTE-IDENTICALLY to
+   * before. Every emission site is guarded on this field being set, so the
+   * OFF path pays one `undefined` check per stage boundary and nothing else.
+   *
+   * PRESENT ⇒ the pipeline calls it at stage boundaries that ALREADY EXIST.
+   * It is a PURE OBSERVER: no stage is added, removed, or reordered, and the
+   * emitter can neither change the response body nor fail the draft. That is
+   * what makes the staged route's terminal frame byte-equivalent to the
+   * buffered route's body BY CONSTRUCTION rather than by assertion.
+   *
+   * DELIBERATELY SYNCHRONOUS AND `void`-RETURNING. The pipeline never awaits
+   * the consumer, so a slow or dead SSE socket can never stall or fail an
+   * in-flight draft — the transport degrades to a plain buffered completion
+   * (M3 snapshot/resume is out of scope). Throws are swallowed at the call
+   * site (see `emitStageEvent` in ./index.ts).
+   */
+  onStage?: PipelineStageEmitter;
 }
+
+// ---------------------------------------------------------------------------
+// Staged emission seam (ROADMAP 1.204 M1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mid-flight progress, derived from the draft adapter's ALREADY-EXISTING token
+ * accumulator (`acc` in adapters/llm/anthropic.ts) — the same character stream
+ * the runaway detector and `time_to_edges_ms` are computed from. Carries node
+ * LABELS ONLY: no strengths, no rationales, no coaching, no claims.
+ */
+export interface PipelineProgressEvent {
+  kind: "PROGRESS";
+  /** Node labels seen in the partial draft so far, in stream order. */
+  labels: string[];
+  /** Which region of the draft the accumulator has reached. */
+  phase: "nodes" | "edges";
+  elapsed_ms: number;
+}
+
+/**
+ * The validated graph, emitted the moment Stage 4 (Repair) + the validation
+ * pipeline complete and BEFORE the ~20 s coaching pass — i.e. at the point the
+ * live probe measured as ~33 s of a ~53 s draft.
+ *
+ * Structure only. At this point in `runUnifiedPipeline`, `ctx.coaching` and
+ * `ctx.causalClaims` are still `undefined` (the coaching pass has not run), so
+ * this frame cannot carry a leader designation, a recommendation, or any
+ * analysis claim — not by filtering, but because the claim-bearing fields do
+ * not yet exist. See the claim-safety pin in
+ * tests/integration/staged-draft-sse.test.ts.
+ */
+export interface PipelineGraphReadyEvent {
+  kind: "GRAPH_READY";
+  /**
+   * The repaired + validated graph, ALREADY PROJECTED into the negotiated
+   * schema vocabulary (`schema_version` below) so its node ids and labels are
+   * byte-equal to the terminal frame's. Emitting the raw V1 graph here would
+   * hand the client one set of ids at ~33 s and a different set at ~53 s —
+   * see staged-graph-projection.ts.
+   */
+  graph: unknown;
+  /** The vocabulary `graph` is expressed in — the negotiated schema version. */
+  schema_version: "v1" | "v2" | "v3";
+  elapsed_ms: number;
+}
+
+/**
+ * The coaching pass has settled (completed, degraded, or budget-skipped).
+ * Carries only its STATUS — the coaching prose itself rides the terminal
+ * COMPLETE frame, which is the byte-identical buffered body, so coaching
+ * reaches the client through exactly one path and one shape.
+ */
+export interface PipelineCoachingReadyEvent {
+  kind: "COACHING_READY";
+  coaching_status: CoachingStatus;
+  elapsed_ms: number;
+}
+
+export type PipelineStageEvent =
+  | PipelineProgressEvent
+  | PipelineGraphReadyEvent
+  | PipelineCoachingReadyEvent;
+
+export type PipelineStageEmitter = (event: PipelineStageEvent) => void;
 
 // ---------------------------------------------------------------------------
 // Pipeline Result

@@ -17,7 +17,7 @@
  */
 
 import type { FastifyRequest } from "fastify";
-import type { StageContext, StageSnapshot, PlanAnnotationCheckpoint, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras, PipelineOutcome } from "./types.js";
+import type { StageContext, StageSnapshot, PlanAnnotationCheckpoint, UnifiedPipelineOpts, UnifiedPipelineResult, DraftInputWithCeeExtras, PipelineOutcome, PipelineStageEvent } from "./types.js";
 import { getRequestId, generateRequestId } from "../../utils/request-id.js";
 import { computeResponseHash } from "../../utils/response-hash.js";
 import { config } from "../../config/index.js";
@@ -38,6 +38,7 @@ import { runStagePackage } from "./stages/package.js";
 import { runStageBoundary } from "./stages/boundary.js";
 import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
 import { runValidationPipeline } from "../validation-pipeline/index.js";
+import { projectGraphForStagedFrame } from "./staged-graph-projection.js";
 
 /**
  * Stamp coaching_status 'complete' at a terminal exit UNLESS the coaching pass
@@ -573,6 +574,36 @@ function attachDraftGraphTimings(
 }
 
 /**
+ * Fire the staged-emission seam (ROADMAP 1.204 M1).
+ *
+ * THREE PROPERTIES MAKE THE STAGED ROUTE'S OUTPUT BYTE-EQUIVALENT TO THE
+ * BUFFERED ROUTE'S BY CONSTRUCTION, and each is enforced here rather than
+ * asserted downstream:
+ *
+ *  1. **No-op when unwired.** Every pre-existing caller omits `onStage`, so the
+ *     pipeline they run is the one that ran before this seam existed.
+ *  2. **Pure observer.** The emitter returns `void`; nothing it does can reach
+ *     `ctx`, the response body, or the stage order.
+ *  3. **Cannot fail or stall the draft.** Throws are swallowed (a dead SSE
+ *     socket must degrade to a plain buffered completion, never a corrupt half
+ *     state), and the call is synchronous and un-awaited so a slow consumer
+ *     cannot add latency to the very wall this work exists to shorten.
+ */
+function emitStageEvent(ctx: StageContext, event: PipelineStageEvent): void {
+  const emitter = ctx.opts.onStage;
+  if (!emitter) return;
+  try {
+    emitter(event);
+  } catch (err) {
+    // Deliberately swallowed — see property 3 above.
+    log.debug(
+      { err, request_id: ctx.requestId, stage_event: event.kind },
+      "staged-emission consumer threw; draft continues unaffected",
+    );
+  }
+}
+
+/**
  * Helper: if earlyReturn is set, attach pipeline outcome and return it.
  * Avoids TS control-flow narrowing issues with repeated earlyReturn checks.
  */
@@ -887,6 +918,41 @@ export async function runUnifiedPipeline(
     await validationPromise;
     timings.validation_pipeline_ms = stageElapsed(tValidation);
 
+    // ── GRAPH_READY (ROADMAP 1.204 M1) ────────────────────────────────────
+    // The graph is repaired and validated HERE, and the ~20 s coaching pass has
+    // not started — this is the point the 28 Jul live probe measured at ~33 s of
+    // a ~53 s draft. Emitting here is what turns one silent blob into staged
+    // delivery, and it needs NO reordering: the split the design asked for
+    // already exists in the current stage order.
+    //
+    // ⚠ The design's Q3 CEE-1 also said "reorder coaching after package+
+    // boundary". That is REFUTED and deliberately NOT done: Stage 5 (Package)
+    // is a CONSUMER of the coaching pass's output (package.ts reads
+    // ctx.coaching / ctx.causalClaims — enforceCoachingContract,
+    // validateCausalClaims, narrowCoachingForResponse), as coaching-pass.ts's
+    // own header states. Reordering would make Package emit canonical-empty
+    // coaching, changing the BUFFERED route's response bytes — breaking both
+    // "the buffered route stays byte-identical" and the equivalence pin.
+    //
+    // Claim-safety: `ctx.coaching` and `ctx.causalClaims` are still undefined at
+    // this line, so this frame cannot carry a leader designation, a
+    // recommendation, or any analysis claim. Structure only, by construction.
+    //
+    // ⚠ The graph is projected into the NEGOTIATED SCHEMA VOCABULARY before it
+    // goes on the wire. Emitting the raw V1 `ctx.graph` here would be a silent
+    // lane-killer: `parseSchemaVersion` defaults to "v3", and the V3 transform
+    // REWRITES node ids and labels — so the client would key the ~33 s graph by
+    // one set of ids and the ~53 s terminal frame by another, and reconciliation
+    // would fail. See staged-graph-projection.ts for the full argument.
+    if (ctx.opts.onStage) {
+      emitStageEvent(ctx, {
+        kind: "GRAPH_READY",
+        graph: projectGraphForStagedFrame(ctx.graph, ctx.opts.schemaVersion, ctx.requestId),
+        schema_version: ctx.opts.schemaVersion,
+        elapsed_ms: Date.now() - ctx.start,
+      });
+    }
+
     // Stage 4.5: Post-draft coaching pass (v12, lean-draft contract 1.197).
     // The lean draft call emits STRUCTURE ONLY; coaching + causal_claims are
     // re-produced here from the FINAL (repaired) structure in a bounded,
@@ -896,6 +962,22 @@ export async function runUnifiedPipeline(
     const tCoaching = stageStart();
     await runStageCoachingPass(ctx);
     timings.coaching_pass_ms = stageElapsed(tCoaching);
+
+    // ── COACHING_READY (ROADMAP 1.204 M1) ─────────────────────────────────
+    // The ~19.8 s coaching tax has settled — the ~53 s point. Carries the
+    // STATUS only; the coaching prose itself rides the terminal COMPLETE frame
+    // (the byte-identical buffered body), so coaching reaches the client
+    // through exactly one path and one shape. `coaching_status` is not final
+    // until Stage 5/6 stamp it, so this reports the pass's own outcome —
+    // 'complete' here means the PASS settled, and the terminal frame remains
+    // the authority on the finished draft.
+    if (ctx.opts.onStage) {
+      emitStageEvent(ctx, {
+        kind: "COACHING_READY",
+        coaching_status: ctx.pipelineOutcome.coaching_status,
+        elapsed_ms: Date.now() - ctx.start,
+      });
+    }
 
     // Stage 5: Package — Quality + warnings + caps + trace
     // Soft gate: both the verification pipeline inside Package and the

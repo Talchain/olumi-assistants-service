@@ -17,6 +17,7 @@ import evidencePackRoute from "./routes/assist.evidence-pack.js";
 import shareRoute from "./routes/assist.share.js";
 import ceeDraftRouteV1 from "./routes/assist.v1.draft-graph.js";
 import ceeDraftStreamRouteV1 from "./routes/assist.v1.draft-graph-stream.js";
+import ceeDraftStagedRouteV1 from "./routes/assist.v1.draft-graph-staged.js";
 import ceeOptionsRouteV1 from "./routes/assist.v1.options.js";
 import ceeBiasCheckRouteV1 from "./routes/assist.v1.bias-check.js";
 import ceeExplainGraphRouteV1 from "./routes/assist.v1.explain-graph.js";
@@ -1134,6 +1135,10 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
 
   await ceeDraftRouteV1(app);
   await ceeDraftStreamRouteV1(app);
+  // ROADMAP 1.204 M1 — staged SSE draft delivery. Registered UNCONDITIONALLY
+  // and unflagged (no dark launches): the buffered and 2-frame routes above are
+  // unchanged, and the UI opts in by calling this one.
+  await ceeDraftStagedRouteV1(app);
   await ceeOptionsRouteV1(app);
   await ceeBiasCheckRouteV1(app);
   await ceeExplainGraphRouteV1(app);

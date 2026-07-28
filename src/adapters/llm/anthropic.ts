@@ -39,6 +39,7 @@ import {
   DRAFT_RUNAWAY_RETRY_TEMPERATURE,
   type DraftRunawayTrigger,
 } from "./draft-budget.js";
+import { createDraftLabelScanner, DRAFT_PROGRESS_MIN_INTERVAL_MS } from "./draft-progress.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { formatEdgeId, type CorrectionCollector } from '../../cee/corrections.js';
 import { extractJsonFromResponse, closeTruncatedJson, type JsonExtractionOptions, type JsonExtractionResult } from '../../utils/json-extractor.js';
@@ -667,7 +668,17 @@ function isStructuredOutputsRejection(err: unknown): boolean {
 
 export async function draftGraphWithAnthropic(
   args: DraftArgs,
-  opts?: { collector?: CorrectionCollector; refreshPrompts?: boolean; forceDefault?: boolean; signal?: AbortSignal; timeoutMs?: number; maxTokensCeiling?: number }
+  opts?: {
+    collector?: CorrectionCollector;
+    refreshPrompts?: boolean;
+    forceDefault?: boolean;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    maxTokensCeiling?: number;
+    /** ROADMAP 1.204 M1 — see CallOpts.onDraftProgress. Optional; absent ⇒ the
+     *  streaming loop is byte-identical to before (no scanner constructed). */
+    onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges" }) => void;
+  }
 ): Promise<DraftGraphResult> {
   const collector = opts?.collector;
 
@@ -1005,6 +1016,14 @@ export async function draftGraphWithAnthropic(
       // failures, and why it is the only signal that can cover `label` and
       // `uncertainty_drivers[]`, which the grammar can never bound.
       const stringRunScanner = createJsonStringRunScanner();
+      // ROADMAP 1.204 M1 — mid-draft progress. Constructed ONLY when a consumer
+      // is wired, so the un-wired path (every caller but the staged SSE route)
+      // allocates nothing and scans nothing. Fed the same deltas as `acc` and
+      // the runaway scanner, but read STRICTLY AFTER every detector branch
+      // below, so it can never change what the detector sees or when it fires.
+      const labelScanner = opts?.onDraftProgress ? createDraftLabelScanner() : null;
+      let lastProgressEmitAt = 0;
+      let pendingProgressLabels: string[] = [];
       // True only when an IN-LOOP gate broke the stream mid-flight (a definite
       // runaway: the per-string-value ceiling or the total-char gate).
       // Distinguishes that from a TIMER firing between the last delta and
@@ -1177,6 +1196,46 @@ export async function draftGraphWithAnthropic(
             if (!edgesReached) {
               edgesProbeOffset = Math.max(edgesProbeOffset, acc.length - EDGES_PROBE_OVERLAP);
             }
+            // ── Mid-draft progress (ROADMAP 1.204 M1) ────────────────────
+            // LAST in the delta block, and after every `break`, on purpose: by
+            // construction this cannot alter which branch the detector takes or
+            // when it aborts. Throttled so a fast stream cannot flood the SSE
+            // socket with frames, and fully swallowed — a progress consumer must
+            // never be able to fail a draft.
+            if (labelScanner) {
+              const fresh = labelScanner.push(event.delta.text);
+              if (fresh.length > 0) pendingProgressLabels.push(...fresh);
+              const nowMs = Date.now();
+              if (
+                pendingProgressLabels.length > 0 &&
+                nowMs - lastProgressEmitAt >= DRAFT_PROGRESS_MIN_INTERVAL_MS
+              ) {
+                const batch = pendingProgressLabels;
+                pendingProgressLabels = [];
+                lastProgressEmitAt = nowMs;
+                try {
+                  opts?.onDraftProgress?.({
+                    labels: batch,
+                    phase: edgesReached ? "edges" : "nodes",
+                  });
+                } catch {
+                  // Progress is best-effort; a throwing consumer is ignored.
+                }
+              }
+            }
+          }
+        }
+        // Flush any labels the throttle held back, so the last nodes of a draft
+        // are not silently dropped just because they completed inside the final
+        // throttle window.
+        if (labelScanner && pendingProgressLabels.length > 0) {
+          try {
+            opts?.onDraftProgress?.({
+              labels: pendingProgressLabels,
+              phase: edgesReached ? "edges" : "nodes",
+            });
+          } catch {
+            // Best-effort, as above.
           }
         }
         clearDetectTimers();

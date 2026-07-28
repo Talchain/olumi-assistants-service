@@ -442,6 +442,20 @@ export interface CallOpts {
   maxTokensCeiling?: number;
   collector?: CorrectionCollector; // Graph corrections tracking
   observabilityCollector?: ObservabilityCollector; // LLM call observability tracking
+  /**
+   * ROADMAP 1.204 M1 — mid-draft progress from the streaming accumulator.
+   *
+   * ABSENT ⇒ the streaming loop is byte-identical to before (one `undefined`
+   * check per attempt; the scanner is never constructed and never fed).
+   * PRESENT ⇒ called with node labels as they COMPLETE in the partial stream,
+   * so the canvas can show real structure ~10-16 s into a ~53 s draft.
+   *
+   * Anthropic draft path only — other adapters ignore it, exactly as they
+   * ignore `maxTokensCeiling`. Synchronous, `void`-returning, and never
+   * awaited: a progress consumer can neither delay nor fail a draft. Throws
+   * are swallowed by the caller.
+   */
+  onDraftProgress?: (progress: { labels: string[]; phase: "nodes" | "edges" }) => void;
 }
 
 /**
