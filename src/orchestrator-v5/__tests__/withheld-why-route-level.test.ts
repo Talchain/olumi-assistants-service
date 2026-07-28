@@ -422,6 +422,37 @@ describe('route-level: "Why is there no option?" on a WITHHELD run', () => {
       expect(turn.assistantText).not.toContain('No single option is being put forward');
     });
 
+    it('PERMITTED but state UNREADABLE — the wiring-site permission gate is what stops this', async () => {
+      // ⚠ THIS TEST EXISTS BECAUSE A MUTANT DID NOT BITE, AND THAT IS RECORDED
+      // RATHER THAN QUIETLY FIXED.
+      //
+      // Deleting `!mayNameLeadingOptionForRun` from the guard's wiring left all
+      // 77 tests green. The composer's own decline on the two permitting states
+      // was masking it — so the control that was supposed to prove the wiring-
+      // site gate was actually proving the composer's switch, and the gate
+      // itself had no coverage at all.
+      //
+      // The discriminating fixture is PERMITTED + UNREADABLE STATE, which the
+      // two readers make reachable on one fact by design: a typed verdict whose
+      // `constraint_verdict_state` is not a contract member reads as `true` on
+      // the permission (`may_name_leading_option === true`) and `null` on the
+      // state (`asVerdictState` rejects unknown strings against the enum's own
+      // key set, so a sixth state added upstream lands here). The composer
+      // answers `reason_unrecorded` for a null state — correctly, for a WITHHELD
+      // turn — so without the wiring-site gate a PERMITTING run would be told no
+      // option is being put forward.
+      priorFacts = [
+        priorRunAnalysisFact({
+          may_name_leading_option: true,
+          constraint_verdict_state: 'a_sixth_state_this_release_does_not_know',
+        }),
+      ];
+      const turn = await askTurn(app, THE_QUESTION);
+      expect(routeWithToolUseMock).toHaveBeenCalled();
+      expect(turn.assistantText).not.toContain('No single option is being put forward');
+      expect(turn.assistantText).not.toContain('The reason is not recorded on this result');
+    });
+
     it('and a permitting run never receives a withheld explanation for any why-phrasing', async () => {
       for (const phrasing of [
         'Why is there no recommendation?',
