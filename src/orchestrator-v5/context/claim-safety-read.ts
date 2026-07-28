@@ -156,7 +156,38 @@ export type MayNameLeadingOptionProvenance =
    * and folding this into `scenario_fact` would make them the same wire byte —
    * which is exactly what #726 and #730 each bought a discriminator to stop.
    */
-  | 'fail_closed_projected_analysis';
+  | 'fail_closed_projected_analysis'
+  /**
+   * NO TURN CONTEXT WAS AVAILABLE TO DERIVE FROM — so nothing was read, and
+   * the permission is withheld because its premise is UNPROVEN.
+   *
+   * ROADMAP 1.233 finish-line criterion 2 / 1.349 P1-2. Two situations reach
+   * it, and both are "we could not look", never "we looked and found nothing":
+   *
+   *   - the turn-context read THREW (store failure / degraded Supabase), or
+   *   - the exit is on a turn shape that has no message-turn context to build
+   *     from at all. Derived, not assumed: {@link buildTurnContext} is typed
+   *     `MessageTurnPayload` and reads `payload.message`, so the
+   *     `kind: 'system_event'` family — which has no `message` field, which is
+   *     why route-v2 dispatches it before the TurnExecutor — cannot produce
+   *     one. That family is the ENTIRE set.
+   *
+   * ⚠ IT GETS ITS OWN STATE RATHER THAN REUSING `fail_closed_truncated`, for
+   * the reason every other discriminator in this union exists: that state
+   * makes a POSITIVE claim ("the window is provably shorter than the
+   * scenario"), which is a claim we have not earned here and could not
+   * support. Folding the two together would make "I read the store and proved
+   * truncation" and "I never reached the store" the same wire byte — the exact
+   * indistinguishability #726 and #730 each bought a discriminator to remove,
+   * and the one this whole provenance field exists for.
+   *
+   * ⚠ AND IT IS NOT `no_analysis_exists`. That is the HONEST `true` — nothing
+   * can be grounded, so nothing can leak. Here the opposite is true: an
+   * analysis may very well exist and may very well have withheld; we simply
+   * could not see it. Answering `true` on an unread scenario is precisely the
+   * fail-open this workstream exists to close.
+   */
+  | 'fail_closed_no_turn_context';
 
 export interface MayNameLeadingOptionVerdict {
   readonly may_name_leading_option: boolean;

@@ -8,10 +8,19 @@
  * cheapest way to make that error go away is to pass a hardcoded `true`,
  * silently disarming the guard for that whole family.
  *
- * So this guard asserts the marking exists AT EVERY EXIT, from SOURCE, and the
- * companion assertion below records which exits pass a LITERAL `true` — the
- * shape a future reader must be able to audit at a glance rather than discover
- * by reading nineteen call sites.
+ * So this guard asserts the marking exists AT EVERY EXIT, from SOURCE.
+ *
+ * ⚠ AND THE COMPANION ASSERTION HAS BEEN INVERTED (ROADMAP 1.233 finish-line
+ * criterion 2, 2026-07-28). It used to RECORD which exits pass a literal
+ * `true`, "the shape a future reader must be able to audit at a glance rather
+ * than discover by reading nineteen call sites" — a guard that catalogued the
+ * defect instead of rejecting it. Sixteen exits sat in that catalogue, each
+ * asserting "this path runs no analysis, so it withheld no claim", and that
+ * premise is false: the permission belongs to the fact the response DISPLAYS,
+ * not to the work the turn performed. It now asserts NO exit may pass a
+ * literal at all — `false` included, since a blanket `false` over-suppresses
+ * just as silently. The audit-at-a-glance property survives: the answer is
+ * "none", derived, rather than a list to keep in sync.
  *
  * DERIVE-NOT-MIRROR (CLAUDE.md trap #12): this test does NOT hand-list the exit
  * paths. It ENUMERATES every `sendFinalised200(...)` CALL in route-v2.ts from
@@ -45,10 +54,30 @@ const TURN_EXECUTOR = resolve(HERE, '../turn-executor.ts');
 interface SendCall {
   readonly offset: number;
   readonly argSpan: string;
-  /** ctx declares `mayNameLeadingOption` in any form. */
+  /**
+   * ctx STATES the permission — either by naming the field explicitly, or by
+   * inheriting it from the turn-entry resolver.
+   *
+   * ⚠ THE SECOND FORM IS NEW (ROADMAP 1.233 finish-line criterion 2). Sixteen
+   * exits used to name the field and pass a literal `true`; they now spread
+   * `...(await claimSafety.forExit())`, which supplies the boolean AND its
+   * provenance together. Widening the detector here is NOT a weakening — the
+   * companion assertion below went from "record which exits pass a literal" to
+   * "NO exit may pass a literal", which is strictly stronger than what this
+   * file enforced before.
+   */
   readonly marked: boolean;
-  /** ctx passes the LITERAL `true` (an explicit "this path withheld nothing"). */
-  readonly literalTrue: boolean;
+  /**
+   * ctx passes a LITERAL permission.
+   *
+   * Used to be `true`-only, on the doctrine "pass the literal `true` ONLY if
+   * the path provably runs no analysis". That doctrine was the defect: the
+   * permission belongs to the fact the response DISPLAYS, not to whether this
+   * turn ran an analysis, and an edit turn displays the prior analysis. Both
+   * literals are now failures — `false` included, because a blanket `false`
+   * would over-suppress legitimate prose just as silently.
+   */
+  readonly literalPermission: boolean;
 }
 
 function enumerateSendCalls(source: string): SendCall[] {
@@ -73,8 +102,9 @@ function enumerateSendCalls(source: string): SendCall[] {
     calls.push({
       offset: matchStart,
       argSpan,
-      marked: /mayNameLeadingOption/.test(argSpan),
-      literalTrue: /mayNameLeadingOption:\s*true\b/.test(argSpan),
+      marked:
+        /mayNameLeadingOption/.test(argSpan) || /claimSafety\.forExit\(\)/.test(argSpan),
+      literalPermission: /mayNameLeadingOption:\s*(true|false)\b/.test(argSpan),
     });
   }
   return calls;
@@ -94,21 +124,47 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
     const unmarked = calls.filter((c) => !c.marked);
     expect(
       unmarked.map((c) => `sendFinalised200@${c.offset}`),
-      'route-v2 has a sendFinalised200 call whose ctx omits mayNameLeadingOption, so the ' +
-        'layer-3 leading-option egress guard is DISARMED for that dispatch family. Thread the ' +
-        "dispatch result's own value if the path can run an analysis — as a REQUIRED field, " +
-        'not a `?? true` fallback, which is the shape that disarmed the chip exit until ' +
-        '2026-07-27. Pass the literal `true` ONLY if the path provably runs no analysis.',
+      'route-v2 has a sendFinalised200 call whose ctx omits the claim-safety permission, so ' +
+        'the layer-3 leading-option egress guard is DISARMED for that dispatch family. Thread ' +
+        "the dispatch result's own value if the path derives one (as a REQUIRED field, not a " +
+        '`?? true` fallback — the shape that disarmed the chip exit until 2026-07-27), ' +
+        'otherwise inherit the turn-entry read with `...(await claimSafety.forExit())`.',
     ).toEqual([]);
   });
 
-  it('the two analysis-running exits thread a real value, never a literal true', () => {
-    // The routed executor and the run_analysis chip click are the ONLY exits
-    // that can derive a constraint verdict, so they are the only ones where a
-    // hardcoded `true` would be a lie rather than a fact. Asserted by the
-    // threaded expression appearing in the span — a future refactor that
-    // replaces `run.mayNameLeadingOption` with `true` fails HERE.
-    const threaded = calls.filter((c) => c.marked && !c.literalTrue);
+  it('NO exit may pass a LITERAL permission — every one reads or inherits', () => {
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⭐ ROADMAP 1.233 finish-line criterion 2. This assertion REPLACES a
+    // weaker one, and the replacement is the point of the change.
+    //
+    // It used to say: "Pass the literal `true` ONLY if the path provably runs
+    // no analysis" — and it recorded, rather than rejected, the sixteen exits
+    // that did. That doctrine was itself the defect. The permission belongs to
+    // the fact the response DISPLAYS, not to the work this turn performed, and
+    // an edit turn is handed the prior analysis as context; so "this path runs
+    // no analysis" never licensed `true`. Live-confirmed 28 Jul: a withheld
+    // analysis, then an edit turn that came back `true`.
+    //
+    // `false` is rejected too. A blanket `false` would pass every withheld
+    // test in the estate and silently over-suppress legitimate leader prose —
+    // a worse defect, and one this file would not otherwise see.
+    // ═══════════════════════════════════════════════════════════════════════
+    expect(
+      calls.filter((c) => c.literalPermission).map((c) => `sendFinalised200@${c.offset}`),
+      'an exit hardcoded its claim-safety permission. Inherit the turn-entry read instead — ' +
+        '`...(await claimSafety.forExit())` — which supplies the boolean AND its provenance ' +
+        'from the same canonical derivation the execute path uses.',
+    ).toEqual([]);
+  });
+
+  it('the two analysis-running exits thread a real value, never a literal', () => {
+    // The routed executor and the run_analysis chip click are the two exits
+    // that carry their OWN post-dispatch verdict (#737 re-reads after this
+    // turn's facts commit — a different question from the entry read, and one
+    // the resolver deliberately does not answer). Asserted by the threaded
+    // expression appearing in the span — a future refactor that replaces
+    // `run.mayNameLeadingOption` with `true` fails HERE.
+    const threaded = calls.filter((c) => /mayNameLeadingOption:/.test(c.argSpan));
     const exprs = threaded.map((c) => {
       const m = /mayNameLeadingOption:\s*([^\n,]+)/.exec(c.argSpan);
       return (m?.[1] ?? '').trim();
@@ -262,7 +318,16 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
     const ok = enumerateSendCalls(fixtureMarked);
     expect(ok).toHaveLength(1);
     expect(ok[0]!.marked).toBe(true);
-    expect(ok[0]!.literalTrue).toBe(true);
+    expect(ok[0]!.literalPermission).toBe(true);
+
+    // A literal `false` must ALSO be seen as a literal — otherwise the
+    // "no literal permissions" assertion would be blind to the blanket-false
+    // over-suppression mutant, which is the more dangerous of the two.
+    const fixtureLiteralFalse = fixtureMarked.replace(
+      'mayNameLeadingOption: true,',
+      'mayNameLeadingOption: false,',
+    );
+    expect(enumerateSendCalls(fixtureLiteralFalse)[0]!.literalPermission).toBe(true);
 
     const fixtureThreaded = `
       return sendFinalised200(reply, requestId, 'made_up_family', someResponse, {
@@ -273,6 +338,22 @@ describe('T1 layer 3 — route-v2 claim-safety marking drift guard', () => {
     `;
     const thr = enumerateSendCalls(fixtureThreaded);
     expect(thr[0]!.marked).toBe(true);
-    expect(thr[0]!.literalTrue, 'a threaded value must NOT read as a literal true').toBe(false);
+    expect(thr[0]!.literalPermission, 'a threaded value must NOT read as a literal').toBe(false);
+
+    // THE INHERITED FORM — the shape sixteen exits now use. It must read as
+    // MARKED (the permission IS stated) and NOT as a literal. Without this
+    // arm the detector could silently stop recognising the resolver and the
+    // "every call declares it" assertion would go red for the wrong reason.
+    const fixtureInherited = `
+      return sendFinalised200(reply, requestId, 'made_up_family', someResponse, {
+        graph: null,
+        ...(await claimSafety.forExit()),
+        userMessage: ingress.message,
+      });
+    `;
+    const inh = enumerateSendCalls(fixtureInherited);
+    expect(inh).toHaveLength(1);
+    expect(inh[0]!.marked, 'the inherited form STATES the permission').toBe(true);
+    expect(inh[0]!.literalPermission).toBe(false);
   });
 });
