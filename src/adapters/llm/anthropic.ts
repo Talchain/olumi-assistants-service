@@ -1230,11 +1230,9 @@ export async function draftGraphWithAnthropic(
         // are not silently dropped just because they completed inside the final
         // throttle window.
         if (labelScanner && pendingProgressLabels.length > 0) {
-          const batch = pendingProgressLabels;
-          pendingProgressLabels = [];
           try {
             opts?.onDraftProgress?.({
-              labels: batch,
+              labels: pendingProgressLabels,
               phase: edgesReached ? "edges" : "nodes",
               elapsedMs: Date.now() - attemptStart,
             });
