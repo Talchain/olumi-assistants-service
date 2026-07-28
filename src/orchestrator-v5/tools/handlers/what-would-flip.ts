@@ -60,6 +60,7 @@ import {
 import { composeWhatWouldFlipFallback } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
 import { runCounterfactualLens } from './whatif/run-counterfactual-lens.js';
+import { composeOptionTargetedFlipAnswer } from './whatif/compose-option-targeted-flip.js';
 import type { CounterfactualClient } from '../../../adapters/isl/counterfactual-client.js';
 
 /**
@@ -129,13 +130,41 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     // back to projected-band copy).
     const explanation = invocation.explanation;
     const sonnetValid = !!(explanation && explanation.answer_text_valid);
-    const rawText = sonnetValid
-      ? explanation!.answer_text
-      : composeWhatWouldFlipFallback(
-          invocation.analysisProjection,
-          invocation.rawRobustness ?? null,
-          invocation.flipSummary ?? null,
-        );
+
+    // M1 (finish-line criterion 7) — OPTION-TARGETED ANSWER.
+    //
+    // When the user named ONE option ("what would make Engage Offshore Partner
+    // win?"), the answer must be about THAT option. The deterministic composer
+    // below owns those turns, matching flip rows on `alternative_winner_id`, and
+    // returns a typed refusal when no tested row makes the named option lead.
+    //
+    // WHY IT OUTRANKS SONNET'S ANSWER TOO, not only the generic fallback. This
+    // is the exact question shape whose honest answer is often "nothing in the
+    // tested set does that", and free prose asked that question invents a
+    // threshold — a fabricated tipping point wearing this estate's trust
+    // dressing. The refusal is the safety-bearing half of the feature, so it
+    // cannot be a branch that only fires when Sonnet has already failed. Turns
+    // where the user named no single option are untouched: `flipTargetOption` is
+    // null and Sonnet keeps the answer exactly as before.
+    //
+    // The composer returns null when there is no flip evidence at all
+    // (`flipSummary` absent or 'none'), because then there is nothing to address
+    // the question WITH — and the pre-existing behaviour is preserved verbatim.
+    const targeted =
+      invocation.flipTargetOption != null
+        ? composeOptionTargetedFlipAnswer(invocation.flipTargetOption, invocation.flipSummary)
+        : null;
+
+    const rawText =
+      targeted !== null
+        ? targeted.text
+        : sonnetValid
+          ? explanation!.answer_text
+          : composeWhatWouldFlipFallback(
+              invocation.analysisProjection,
+              invocation.rawRobustness ?? null,
+              invocation.flipSummary ?? null,
+            );
 
     // V5 state-trust: CEE no longer prefixes assistant_text with the
     // staleness caveat. See explain-results.ts for the rationale; same
@@ -165,7 +194,16 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
       result: {
         precondition_unmet: false,
         option_count: optionCount,
-        answer_source: sonnetValid ? 'sonnet' : 'deterministic_fallback',
+        // A targeted answer is DETERMINISTIC whichever path it displaced, so it
+        // reports as such. (`ExplainAnswerSourceSchema` is a strict three-value
+        // enum in `@talchain/schemas`; a dedicated `option_targeted` source
+        // would be a cross-repo contract change, and `deterministic_fallback` is
+        // already the true statement about who composed this string.)
+        answer_source:
+          targeted !== null || !sonnetValid ? 'deterministic_fallback' : 'sonnet',
+        // Unchanged: a fallback REASON only exists when Sonnet's text failed
+        // validation. A targeted answer that displaced a VALID Sonnet answer has
+        // no failure to report, and must not invent one.
         fallback_reason: sonnetValid
           ? null
           : mapFallbackReason(explanation?.answer_validation_error),

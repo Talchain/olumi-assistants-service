@@ -266,6 +266,26 @@ export interface HandlerInvocation {
    * explicit "no flip evidence available" form.
    */
   readonly flipSummary?: import('../compose/flip-proposal.js').FlipSummary | null;
+  /**
+   * M1 (finish-line criterion 7) — the ONE option the user named in this turn's
+   * message, resolved to a graph option IDENTITY, or null when they named none
+   * (or named more than one, which is a comparison rather than a target).
+   *
+   * Resolved in the turn-executor rather than here because that is where the
+   * user text and the CANONICAL graph authority meet — the same
+   * `context.persistedGraph ?? options.graphState` the flip evidence is already
+   * filtered against, so the target and the rows it is matched into describe one
+   * graph. It is the same seam `structureProjection` uses to read a user-named
+   * FACTOR (`buildStructureProjectionSummary(..., { messageText })`).
+   *
+   * Read by `what_would_flip` to answer about THAT option — matching on
+   * `alternative_winner_id`, never on a label — with a typed refusal when no
+   * tested flip row makes it lead. Absent/null ⇒ the pre-existing generic
+   * answer, byte-identical.
+   */
+  readonly flipTargetOption?:
+    | import('./handlers/whatif/resolve-target-option.js').TargetOption
+    | null;
 }
 
 /**
