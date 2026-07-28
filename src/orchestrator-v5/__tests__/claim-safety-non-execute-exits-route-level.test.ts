@@ -180,12 +180,19 @@ const ANALYSIS_TURN = {
 let factsByTurnRowId: Record<string, Array<Record<string, unknown>>> = {};
 /** `null` ⇒ the scenario has no persisted graph (drives the recovery exit). */
 let persistedGraph: unknown = READY_GRAPH;
+/** Make the windowed turn read throw, to exercise the DEGRADED path. */
+let turnReadFails = false;
+/** Make EVERY claim-safety-relevant read throw — a fully degraded store. */
+let allReadsFail = false;
 
 function makeStore(): Record<string, unknown> {
   return {
     append: async () => ({ id: `row-${randomUUID()}` }),
-    readRecent: async (_id: string, limit: number = 20) => [ANALYSIS_TURN].slice(0, limit),
-    countTurns: async () => 1,
+    readRecent: async (_id: string, limit: number = 20) => {
+      if (turnReadFails) throw new Error('simulated session store failure');
+      return [ANALYSIS_TURN].slice(0, limit);
+    },
+    countTurns: async () => { if (allReadsFail) throw new Error("degraded"); return 1; },
     readFactsFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.flatMap((id) => factsByTurnRowId[id] ?? []),
     readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
@@ -198,6 +205,7 @@ function makeStore(): Record<string, unknown> {
       ),
     // SCENARIO-SCOPED: newest non-noop run_analysis fact across ALL turns.
     readNewestAnalysisFactFor: async () => {
+      if (allReadsFail) throw new Error("degraded");
       const all = Object.values(factsByTurnRowId).flat();
       return all.find((f) => f.fact_type === 'run_analysis' && f.noop === false) ?? null;
     },
@@ -364,6 +372,8 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     routeWithToolUseMock.mockReset();
     routeWithToolUseMock.mockResolvedValue(converseTextOnly('Noted.'));
     persistedGraph = READY_GRAPH;
+    turnReadFails = false;
+    allReadsFail = false;
     factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [withheldRunAnalysisFact()] };
   });
   afterEach(() => {
@@ -484,6 +494,87 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
       const { body } = await postTurn(app, MESSAGE, { withGraphState: false });
       expect(permissionOnTheWire(body)).toBe(true);
+    });
+  });
+
+  describe('FAIL-CLOSED — the two situations where nothing can be read', () => {
+    // "Fail closed" is a claim about a branch, and an unexercised branch is a
+    // claim nobody has checked. Both arms below would have passed silently as
+    // `true` under the pre-fix literal, and a fail-OPEN rewrite of the resolver
+    // would pass every other test in this file.
+
+    it('a degraded WINDOW read still withholds — the scenario read carries it', async () => {
+      // ⚠ MY OWN PREMISE WAS WRONG HERE AND THE TEST CORRECTED IT, so it is
+      // recorded as what it measures rather than what I expected.
+      // `buildTurnContext` does NOT propagate read failures: every fetch is
+      // individually guarded and degrades to an empty/null value. So a thrown
+      // window read does not reach the resolver's catch at all — it produces a
+      // context whose `prior_facts` are empty but whose SCENARIO-scoped read
+      // still supplied the withheld fact. The permission is therefore still
+      // `false`, and honestly provenanced `scenario_fact`, because a real fact
+      // really was read. That is the union in `readMayNameLeadingOptionVerdict`
+      // doing its job, and it is worth pinning: this is the common degraded
+      // shape and it is SAFE.
+      turnReadFails = true;
+      const { status, body } = await postTurn(app, 'Make the model better');
+      expect(status).toBe(200);
+      expect(permissionOnTheWire(body)).toBe(false);
+      expect(provenanceOnTheWire(body)).toBe('scenario_fact');
+    });
+
+    it('KNOWN GAP, PINNED: a FULLY degraded store still fails OPEN', async () => {
+      // ⚠ THIS IS A RECORDED DEFECT, NOT A BLESSING — and it is pinned rather
+      // than quietly left undiscovered, so it fails loud in BOTH directions:
+      // closing it turns this test red and forces a deliberate edit here.
+      //
+      // With the window read, the COUNT read and the scenario read all failing,
+      // `readMayNameLeadingOptionVerdict` cannot arm its fail-closed guard —
+      // that guard requires `windowTruncated`, which requires a
+      // `prior_turns_total` that a degraded `countTurns` cannot supply — so it
+      // reaches the "honest true" branch on a scenario that DOES have a
+      // withheld analysis.
+      //
+      // NOT INTRODUCED BY THE HOIST, and not fixable at this seam. It lives in
+      // the canonical derivation, and the EXECUTE path has the identical
+      // exposure because it calls the same function with the same scope.
+      // Patching it here would fork the derivation — the exact
+      // second-derivation defect (CLAUDE.md trap #12) the resolver exists to
+      // avoid. It needs its own change, in `claim-safety-read.ts`, with the
+      // over-suppression controls that a shared-path change requires.
+      // BOTH flags: the gap needs the WINDOW read to fail as well. With only
+      // the count and scenario reads down, the window still carries the
+      // withheld fact and the permission is correctly `false` — which is why
+      // the arm above is a separate, passing case rather than the same one.
+      turnReadFails = true;
+      allReadsFail = true;
+      const { body } = await postTurn(app, 'Make the model better');
+      expect(
+        permissionOnTheWire(body),
+        'if this is now `false`, the residual fail-open has been CLOSED — good. Update this pin ' +
+          'and the note in turn-claim-safety.ts rather than deleting the test.',
+      ).toBe(true);
+      expect(provenanceOnTheWire(body)).toBe('no_analysis_exists');
+    });
+
+    it('a SYSTEM EVENT withholds — the one family that cannot build a turn context', async () => {
+      // DERIVED, not assumed: `buildTurnContext` is typed `MessageTurnPayload`
+      // and reads `payload.message`, which the system_event union member does
+      // not have. `undo` is client-only, so it returns 200 without committing.
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'system_event',
+          turn_id: randomUUID(),
+          scenario_id: SCENARIO_ID,
+          stage: 'analyse',
+          event: { kind: 'undo' },
+        },
+      });
+      const body = JSON.parse(res.body) as Record<string, any>;
+      expect(res.statusCode).toBe(200);
+      expect(permissionOnTheWire(body)).toBe(false);
+      expect(provenanceOnTheWire(body)).toBe('fail_closed_no_turn_context');
     });
   });
 
