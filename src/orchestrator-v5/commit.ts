@@ -355,6 +355,24 @@ export interface CommitResult {
    * hash) or when the graph was empty/unhashable.
    */
   readonly persistedAnalysisGraphHash: string | null;
+  /**
+   * The graph bytes ACTUALLY WRITTEN to `scenarios.graph` — the output of
+   * `projectGraphForPersistence`, not the caller's input.
+   *
+   * Exposed because `persistedAnalysisGraphHash` alone is not enough for a
+   * caller that must DERIVE something else from the committed state. The persist
+   * passes mutate `intercept`, node `interventions` and top-level `options[]`,
+   * and at least one downstream derivation reads exactly those:
+   * `computeStructuralReadiness` reads option nodes' merged interventions. A
+   * caller deriving readiness from its own pre-projection copy can therefore
+   * publish a readiness verdict describing a graph that was never stored —
+   * the same "advertised state != persisted state" class the hash field above
+   * exists to prevent, one field over.
+   *
+   * `null` when this commit wrote no graph. Do NOT treat it as a general
+   * read-back: it is this commit's own input after projection, not a re-read.
+   */
+  readonly persistedGraph: unknown | null;
 }
 
 /**
@@ -1257,6 +1275,7 @@ export async function commitDirectAnswer(
   const graphPersisted = writesGraph;
   return {
     persistedAnalysisGraphHash,
+    persistedGraph: writesGraph ? graphForStore : null,
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume

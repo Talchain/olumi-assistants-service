@@ -1407,6 +1407,50 @@ export async function loadPersistedGraph(
  * integration points: session/, commit.ts, build-turn-context.ts.
  * The pre-push `state-write-invariant` check enforces that boundary.
  */
+/**
+ * Prior handler facts for a scenario, best-effort.
+ *
+ * Added for the `factor_value_edit` system-event dispatch (ROADMAP 1.346), which
+ * needs `prior_facts` to decide whether `set_factor_value` appends its staleness
+ * narrative ("This makes the last analysis stale."). It lives HERE, beside the
+ * other persisted-read helpers, because the state-write invariant
+ * (`scripts/ci/check-state-write-invariant.sh`) allows `SessionStore` imports in
+ * exactly three places — `session/`, `commit.ts` and this file — and a dispatch
+ * module reaching for the store directly is precisely what that gate exists to
+ * stop. Keeping the read on this side of the chokepoint is the point.
+ *
+ * BEST-EFFORT ON PURPOSE, and the failure mode is bounded: the worst case of a
+ * failed read is a receipt missing one sentence, so this degrades to `[]` and
+ * logs rather than throwing. It must never be used where a fact read is
+ * load-bearing for a decision — for that, read through a path that fails closed.
+ */
+export async function loadPriorFactsQuietly(
+  scenarioId: string,
+  requestId: string,
+  sessionStore?: SessionStore,
+): Promise<readonly HandlerFact[]> {
+  try {
+    const store = sessionStore ?? getSessionStore();
+    const recent = await store.readRecent(scenarioId);
+    const rowIds = recent
+      .map((t) => t.id)
+      .filter((id): id is string => typeof id === 'string');
+    if (rowIds.length === 0) return [];
+    return await store.readFactsFor(rowIds);
+  } catch (err) {
+    log.warn(
+      {
+        event: 'v5.prior_facts.read_failed',
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'Prior-fact read failed; proceeding without prior facts',
+    );
+    return [];
+  }
+}
+
 export async function loadPersistedGraphStrict(
   scenarioId: string,
   sessionStore?: SessionStore,
