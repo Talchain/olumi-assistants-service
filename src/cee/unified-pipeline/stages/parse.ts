@@ -425,6 +425,23 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           bypassCache: ctx.opts.refreshPrompts,
           forceDefault: ctx.opts.forceDefault,
           signal: ctx.opts.signal,
+          // ROADMAP 1.204 M1 — bridge the adapter's mid-draft label stream onto
+          // the pipeline's staged-emission seam. Added ONLY when a stage
+          // consumer is wired, so the un-wired path (buffered route, 2-frame
+          // stream route, V5 draft_graph tool) passes the identical opts object
+          // it passed before and the adapter's scanner is never constructed.
+          ...(ctx.opts.onStage
+            ? {
+                onDraftProgress: (progress: { labels: string[]; phase: "nodes" | "edges"; elapsedMs: number }) => {
+                  ctx.opts.onStage?.({
+                    kind: "PROGRESS",
+                    labels: progress.labels,
+                    phase: progress.phase,
+                    elapsed_ms: Date.now() - ctx.start,
+                  });
+                },
+              }
+            : {}),
         },
       );
 
