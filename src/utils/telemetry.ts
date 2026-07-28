@@ -1773,6 +1773,30 @@ export const TelemetryEvents = {
   //   - selected_action_type: 'explain_results' | 'what_would_flip' | null
   V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
 
+  // ROADMAP 2.104 — the withheld-why guard. Fires once per turn, on the
+  // question shape "why is there no option?", BEFORE the post-analysis advice
+  // gate, and only when this turn's verdict WITHHOLDS the leading-option claim.
+  //
+  // Why this event exists rather than a field on the advice-gate event: without
+  // it, the only observable of an honest withheld explanation is
+  // indistinguishable from the deflection it replaced — both leave the advice
+  // gate `data_unavailable_for_class` and both commit as `direct_answer`. That
+  // is the same unfalsifiability `V5WithheldExplanationAnswerProjected` was
+  // added to close for the APPEND branch.
+  //
+  // Payload (structural only — no labels, no user prose, no message text):
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - matched: boolean
+  //   - unmatched_reason: 'not_a_why_question' | 'permitted' | 'no_analysis_fact'
+  //     | 'mutation_signal' | 'permitting_state' | null
+  //   - answer_kind: 'constraint_infeasible' | 'constraint_unevaluated'
+  //     | 'constraint_unresolved' | 'reason_unrecorded' | null
+  //   - constraint_verdict_state: the persisted state, or 'unreadable'
+  //   - ratified_constraint_count: number
+  //   - named_constraint: boolean — whether the answer quoted a condition label
+  V5WithheldWhyGuard: "v5.withheld_why_guard",
+
   // V5 P0 stabilisation — bounded routing-failure fallback.
   //
   // Fires when the routing call returns a "model output failed" error

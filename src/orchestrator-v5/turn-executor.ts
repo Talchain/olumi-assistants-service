@@ -137,6 +137,13 @@ import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
+// ROADMAP 2.104 — the withheld-why guard's two halves. `hasMutationSignal` is
+// the SHARED negative gate every sibling guard applies (routing/analytical-
+// intent.ts owns it); importing the shared one rather than re-testing the
+// patterns keeps mutation precedence identical across all of them.
+import { isWithheldWhyQuestion } from './routing/withheld-why-question.js';
+import { hasMutationSignal } from './routing/analytical-intent.js';
+import { composeWithheldWhyAnswer } from './compose/withheld-why-answer.js';
 import {
   collectOptionGuardLabels,
   impliesOptionInterventionEdit,
@@ -5774,6 +5781,151 @@ export async function runTurnExecutor(
                 err: serialiseError(error),
               },
               'V5 TurnExecutor commit failure on stale-rerun guard',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // ROADMAP 2.104 — the WITHHELD-WHY guard. "Why is there no option?"
+      //
+      // THE DEFECT, live 28 Jul: on a withheld run the user asked why no option
+      // had been put forward and the turn answered "open the latest recap"
+      // (`RECAP_TEXT`, routing/fresh-analysis-followup-guard.ts) — a deflection
+      // to a surface that does not contain the reason either. The reason existed
+      // server-side throughout: the persisted `constraint_verdict_state` and the
+      // conditions it is about.
+      //
+      // WHY IT SITS HERE — ABOVE the advice gate, not below it. Two measured
+      // reasons, and neither is a preference:
+      //
+      //   1. Below the advice gate is where the deflection IS. The gate's input
+      //      is `projectContextPackAnalysisForWithheldClaim(...)` (see the next
+      //      block), whose nulled `leading_option` makes every one of the seven
+      //      `needs_leading_option` classes decline `data_unavailable_for_class`
+      //      on exactly the turns this guard exists for. Control then reaches
+      //      the class-blind catch-net, which recaps. Sitting below would mean
+      //      racing the deflection for the same turn.
+      //   2. The advice gate cannot answer this question at all. Its `readiness`
+      //      and `evidence_gap` classes are the two that survive a withheld
+      //      projection, and both are about a graph that is not ready to RUN —
+      //      a different claim from a run that completed and withheld.
+      //
+      // BYTE-IDENTICAL ON A PERMITTING RUN, BY CONSTRUCTION. The guard is gated
+      // on `!mayNameLeadingOptionForRun` before it looks at the message, so a
+      // run whose verdict permits reaches the advice gate on exactly the path it
+      // reaches today. Position cannot change that; the permission does.
+      //
+      // PERMISSION AND STATE ARE THREADED, NEVER RE-DERIVED — the turn-entry
+      // verdict hoisted above (`mayNameLeadingOptionVerdictForRun`), the same
+      // object the ContextPack input gate and the explanation-answer gate read.
+      // Labels come from the persisted `goal_constraints` via the same
+      // `readRatifiedConstraints` call shape the explanation gate uses. One
+      // fact, one permission, one explanation (CLAUDE.md trap #12).
+      //
+      // A FORCED PILL is skipped for the same reason its siblings skip it: a
+      // pill's copy must reach the coach with conversation sight.
+      // ══════════════════════════════════════════════════════════════════
+      if (
+        routingResult === undefined &&
+        contextReadiness !== null &&
+        options.chipClickForcedIntent === undefined
+      ) {
+        const isWhyQuestion = isWithheldWhyQuestion(payload.message);
+        // Mutation precedence, the same rule every sibling guard applies: a
+        // concrete edit must reach the edit-graph dispatch path even when it is
+        // wrapped in a question about the result.
+        const whyMutation = hasMutationSignal(payload.message);
+        const whyAnswer =
+          isWhyQuestion &&
+          !whyMutation &&
+          !mayNameLeadingOptionForRun &&
+          contextReadiness.has_run_analysis_fact
+            ? composeWithheldWhyAnswer(
+                constraintVerdictStateForRun,
+                readRatifiedConstraints(
+                  context.persistedGraph ?? graphStateForTurn ?? null,
+                ),
+              )
+            : null;
+        // The unmatched reason is DERIVED from the same predicates the branch
+        // above evaluated, in their own precedence order — never restated as a
+        // parallel condition list that could disagree with the branch it
+        // describes.
+        const whyUnmatchedReason = !isWhyQuestion
+          ? 'not_a_why_question'
+          : whyMutation
+            ? 'mutation_signal'
+            : mayNameLeadingOptionForRun
+              ? 'permitted'
+              : !contextReadiness.has_run_analysis_fact
+                ? 'no_analysis_fact'
+                : // Reached the composer and it declined: a permitting state on
+                  // a withholding permission. Not expected, and recorded rather
+                  // than smoothed over.
+                  'permitting_state';
+        emit(TelemetryEvents.V5WithheldWhyGuard, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          matched: whyAnswer !== null,
+          unmatched_reason: whyAnswer === null ? whyUnmatchedReason : null,
+          answer_kind: whyAnswer?.kind ?? null,
+          constraint_verdict_state: constraintVerdictStateForRun ?? 'unreadable',
+          ratified_constraint_count: whyAnswer?.ratified_constraint_count ?? 0,
+          named_constraint: whyAnswer?.named_constraint ?? false,
+        });
+        if (whyAnswer !== null) {
+          // NO CHIPS. The catch-net this replaces offered "Explain the result",
+          // which on a withheld run re-enters the same fall-through and recaps
+          // again. The answer names its own repair step (re-state the condition,
+          // run again) in every voice, so an affordance that led somewhere else
+          // would be the #743 F4 shape: a follow-on probe drawn from a set that
+          // does not answer the question just asked.
+          const whyResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: whyAnswer.text,
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = whyResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(whyResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'withheld_why_guard',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on withheld-why guard',
             );
             failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
             response = buildFailureResponse(
