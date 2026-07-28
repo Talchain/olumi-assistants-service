@@ -125,6 +125,8 @@ import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispat
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
 import type { MayNameLeadingOptionProvenance } from '../orchestrator-v5/context/claim-safety-read.js';
+import { createTurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-claim-safety.js';
+import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-claim-safety.js';
 // T1 claim safety, LAYER 3 — armed ONCE at the send point (1.272 E1). It used
 // to be called from inside `sanitiseOlumiResponseForEgress`, which this file
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
@@ -769,22 +771,38 @@ function sendFinalised200(
      * (observe-only) — see `orchestrator-v5/compose/leading-option-egress-guard.ts`.
      *
      * REQUIRED, same rationale as `userMessage` above: every dispatch path must
-     * state the permission, so no path can disarm the guard by omission. Paths
-     * that ran no analysis pass `true` — the honest "nothing was withheld on
-     * this turn". The value is READ from the verdict the run_analysis handler
-     * stamped on the fact (`run.mayNameLeadingOption`), never re-derived here
-     * (CLAUDE.md trap #12).
+     * state the permission, so no path can disarm the guard by omission.
+     *
+     * ⚠ THE SENTENCE THAT USED TO SIT HERE IS NOW FALSE AND IS REPLACED RATHER
+     * THAN QUIETLY DELETED (CLAUDE.md trap #14). It read: "Paths that ran no
+     * analysis pass `true` — the honest 'nothing was withheld on this turn'."
+     * That is the exact premise ROADMAP 1.233's finish-line criterion 2
+     * refuted: the permission belongs to the fact the response DISPLAYS, not
+     * to the work this turn performed, and an edit turn displays the prior
+     * analysis. Seventeen exits shipped that `true` and thereby handed the
+     * Layer-3 guard an explicit licence not to look.
+     *
+     * EVERY exit now READS it — never a literal:
+     *   - `turn_executor` from `run.mayNameLeadingOption` (the verdict the
+     *     run_analysis handler stamped, re-read post-dispatch by #737),
+     *   - `chip_click` from `cc.mayNameLeadingOption`,
+     *   - every other exit from the turn-entry resolver
+     *     (`context/turn-claim-safety.ts`), which calls the SAME canonical
+     *     `readMayNameLeadingOptionVerdict`.
+     * Never re-derived here (CLAUDE.md trap #12).
      */
     readonly mayNameLeadingOption: boolean;
     /**
-     * WHERE the permission above came from, when the exit READ it from a fact
-     * rather than hardcoding it (2026-07-27).
+     * WHERE the permission above came from (2026-07-27).
      *
-     * Optional and absent on the hardcoded-`true` exits by design: those turns
-     * consulted no analysis, so `null` at the wire is the honest statement.
-     * Stamping a provenance they did not earn would rebuild the exact
-     * indistinguishability this field exists to remove. Threaded from the run
-     * result, never re-derived here (CLAUDE.md trap #12).
+     * ⚠ ALSO CORRECTED. It used to read: "Optional and absent on the
+     * hardcoded-`true` exits by design: those turns consulted no analysis, so
+     * `null` at the wire is the honest statement." There are no hardcoded
+     * exits left, so that rationale describes nothing — and while it stood it
+     * made a `null` provenance look principled at exactly the exits whose
+     * permission was fabricated. Optional only so the two 500-adjacent
+     * fallback shapes keep compiling; every 200 exit now carries a real one.
+     * Threaded from the read, never re-derived here (CLAUDE.md trap #12).
      */
     // Derived from the source union, not re-listed — see the note in
     // v5-diagnostic-trace.ts. Two hand-typed copies of this union existed and
@@ -1036,12 +1054,17 @@ function sendFinalised200(
       claim_safety: {
         may_name_leading_option: ctx.mayNameLeadingOption,
         // The provenance discriminator (2026-07-27). Same single-derivation
-        // rule as the boolean beside it: threaded from the run result, never
-        // re-inferred here — the trace must not be able to disagree with the
-        // read it reports on. `null` on the exits that hand the route a
-        // hardcoded permission rather than a read one (fallback envelopes,
-        // pre-dispatch declines), which is itself the honest answer: those
-        // turns did not consult a fact.
+        // rule as the boolean beside it: threaded from the exit's own read,
+        // never re-inferred here — the trace must not be able to disagree with
+        // the read it reports on.
+        //
+        // ⚠ THE `null` RATIONALE THAT USED TO SIT HERE IS GONE WITH THE THING
+        // IT DESCRIBED. It said `null` was honest "on the exits that hand the
+        // route a hardcoded permission rather than a read one … those turns
+        // did not consult a fact". Every 200 exit now consults one, so a
+        // `null` here no longer means "nothing to report" — it means an exit
+        // reached this stamp without a provenance, which is a defect worth
+        // seeing rather than a state worth explaining away.
         verdict_provenance: ctx.mayNameLeadingOptionProvenance ?? null,
         withheld_projection_reason: ctx.withheldExplanationReason ?? null,
       },
@@ -1628,14 +1651,17 @@ type EditGraphRecoveryReason =
   | 'persisted_graph_invalid'
   | 'session_store_failed';
 
-function sendEditGraphRecovery(
+async function sendEditGraphRecovery(
   reply: import('fastify').FastifyReply<{ Reply: V5RouteReply }>,
   requestId: string,
   scenarioId: string,
   stage: import('@talchain/schemas/boundary').StageType,
   reason: EditGraphRecoveryReason,
   userMessage: string | null,
-): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
+  claimSafety: TurnClaimSafetyResolver,
+  turnId: string,
+  routeStartedAt: number,
+): Promise<import('fastify').FastifyReply<{ Reply: V5RouteReply }>> {
   emit(TelemetryEvents.V5EditGraphGraphStateUnavailable, {
     request_id: requestId,
     scenario_id: scenarioId,
@@ -1645,10 +1671,25 @@ function sendEditGraphRecovery(
     answerKind: 'functional',
     assistant_text: EDIT_GRAPH_RECOVERY_TEXT,
     stage,
-  // T1 claim safety: an edit_graph recovery runs no analysis, so it withheld no
-  // leading-option claim. `true` is the honest statement of that, not a
-  // fail-open — the withhold only exists where a verdict was derived.
-  }), { graph: null, answerKind: 'functional', userMessage, mayNameLeadingOption: true });
+  }), {
+    graph: null,
+    answerKind: 'functional',
+    userMessage,
+    // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+    // the permission belongs to the fact this response DISPLAYS, not to
+    // whether this turn ran an analysis. See turn-claim-safety.ts.
+    ...(await claimSafety.forExit()),
+    // ⚠ THE TRACE INPUTS ARE NEW, AND THEY ARE NOT COSMETIC. Without them the
+    // minimal-trace builder never runs, so this exit shipped NO
+    // `_diagnostic_trace` at all — which meant its claim-safety permission was
+    // UNOBSERVABLE at the wire and no acceptance walk could falsify it. An
+    // exit whose guarantee cannot be measured is the guarantee-theatre shape
+    // this workstream exists to remove, so the stamp and its instrument land
+    // together. Flag-gated exactly like every other family's.
+    requestStartedAt: routeStartedAt,
+    scenarioId,
+    turnId,
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -2031,6 +2072,36 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     }
     const { requestId, ingress, extensions } = pre.context;
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⭐ T1 CLAIM SAFETY — THE TURN-ENTRY READ (ROADMAP 1.233 finish-line
+    // criterion 2 / 1.349 P1-2). Constructed HERE, before the first dispatch
+    // branch, so EVERY exit below can inherit ONE answer.
+    //
+    // Until this landed, seventeen exits handed the finaliser a hardcoded
+    // permission of `true` on the premise that "this path runs no
+    // analysis, so it withheld no claim". That premise is false: the
+    // permission belongs to the fact the response DISPLAYS, not to the work
+    // this turn performed — and an edit turn is handed the prior analysis as
+    // context. Live-confirmed 28 Jul (a withheld analysis, then an edit turn
+    // that came back `true`). Because the Layer-3 guard short-circuits on
+    // `true`, that literal was an explicit licence for the alarm not to look.
+    //
+    // LAZY: the resolver reads nothing until an exit asks. The `turn_executor`
+    // path never asks (it carries its own post-dispatch verdict via
+    // `run.mayNameLeadingOption`), so the hot path is unchanged.
+    //
+    // `null` for system events, and that is DERIVED rather than chosen:
+    // `buildTurnContext` is typed `MessageTurnPayload` and reads
+    // `payload.message`, which the `system_event` union member does not have —
+    // which is itself why this file dispatches that family before the
+    // TurnExecutor. The resolver answers `false` /
+    // `fail_closed_no_turn_context` there: we could not look, so we withhold.
+    // ═══════════════════════════════════════════════════════════════════════
+    const claimSafety: TurnClaimSafetyResolver = createTurnClaimSafetyResolver(
+      ingress.kind === 'message' ? ingress : null,
+      requestId,
+    );
+
     // v0.7.0 schema: ingress is a discriminated union on `kind`. System events
     // (patch_accepted / patch_dismissed / direct_graph_edit / chip_click /
     // undo / redo) are Layer 0 deterministic operations — no LLM routing, no
@@ -2073,10 +2144,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       return sendFinalised200(reply, requestId, 'system_event', sysResult.response, {
         analysisReady: sysResult.analysisReady,
         graph: sysResult.graph,
-        // T1 claim safety: this path runs no analysis, so it withheld no
-        // leading-option claim. `true` is the honest statement of that, not a
-        // fail-open — the withhold only exists where a verdict was derived.
-        mayNameLeadingOption: true,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: system-event copy is
         // functional (receipts/notices) and must ship plain (omission now shapes).
         answerKind: 'functional',
@@ -2139,10 +2210,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         if (cc.outcome === 'handler_recovered') {
           return sendFinalised200(reply, requestId, 'chip_click', cc.response, {
             graph: cc.graph,
-            // T1 claim safety: this path runs no analysis, so it withheld no
-            // leading-option claim. `true` is the honest statement of that, not a
-            // fail-open — the withhold only exists where a verdict was derived.
-            mayNameLeadingOption: true,
+            // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+            // the permission belongs to the fact this response DISPLAYS, not to
+            // whether this turn ran an analysis. See turn-claim-safety.ts.
+            ...(await claimSafety.forExit()),
             // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: chip-click recovery
             // copy is functional and must ship plain (omission would now SHAPE).
             answerKind: 'functional',
@@ -2196,11 +2267,22 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // stamp (see DispatchChipClickRunAnalysisResult).
           //
           // ⚠ THE `?? true` THAT USED TO BE HERE IS GONE (WALK-2026-07-27-FINAL
-          // §11.6). It was the last surviving instance of the default the
-          // ROADMAP 1.233 hoist removed everywhere else: an exit that could not
-          // read a verdict shipped `true` to the Layer-3 guard, which then had
+          // §11.6). It was an instance of the default an exit falls into when
+          // it cannot read a verdict: it shipped `true` to the Layer-3 guard,
+          // which then had
           // an explicit permission to ignore whatever the response said. The
-          // field is now REQUIRED on the `ok` outcome, so this exit carries the
+          // ⚠ AND THE SENTENCE THAT CALLED THIS "the LAST surviving instance"
+          // WAS FALSE WHEN IT WAS WRITTEN — corrected here rather than
+          // deleted, because it is this file's own instance of CLAUDE.md trap
+          // #12. It claimed the ROADMAP 1.233 hoist "removed [the default]
+          // everywhere else"; the hoist had in fact only ever covered the
+          // turn_executor path, and SEVENTEEN other exits still hardcoded
+          // `true` at that moment. A good-faith status line about a sibling's
+          // work became the reason nobody re-checked the siblings. It is true
+          // NOW, and it is true because the exits DERIVE rather than because
+          // this comment says so.
+          //
+          // The field is REQUIRED on the `ok` outcome, so this exit carries the
           // producer's real answer and a future `ok` producer that forgets to
           // derive one fails to compile instead of failing open.
           mayNameLeadingOption: cc.mayNameLeadingOption,
@@ -2357,10 +2439,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // egress label sanitiser has nothing to resolve.
       return sendFinalised200(reply, requestId, 'readiness_intake', readiness.response, {
         graph: null,
-        // T1 claim safety: this path runs no analysis, so it withheld no
-        // leading-option claim. `true` is the honest statement of that, not a
-        // fail-open — the withhold only exists where a verdict was derived.
-        mayNameLeadingOption: true,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: readiness-intake copy is
         // functional (receipt / question) and must ship plain.
         answerKind: 'functional',
@@ -2513,10 +2595,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             });
             return sendFinalised200(reply, requestId, 'add_option_transaction', addOptionWire, {
               graph: null,
-              // T1 claim safety: this path runs no analysis, so it withheld no
-              // leading-option claim. `true` is the honest statement of that, not a
-              // fail-open — the withhold only exists where a verdict was derived.
-              mayNameLeadingOption: true,
+              // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+              // the permission belongs to the fact this response DISPLAYS, not to
+              // whether this turn ran an analysis. See turn-claim-safety.ts.
+              ...(await claimSafety.forExit()),
               // ROADMAP 1.132 (F1) — held-proposal copy is functional
               // (a receipt/question) and must ship plain.
               answerKind: 'functional',
@@ -2981,10 +3063,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       } as import('@talchain/schemas/boundary').OlumiResponse;
       return sendFinalised200(reply, requestId, 'explicit_generate_no_brief', declineResponse, {
         graph: null,
-        // T1 claim safety: this path runs no analysis, so it withheld no
-        // leading-option claim. `true` is the honest statement of that, not a
-        // fail-open — the withhold only exists where a verdict was derived.
-        mayNameLeadingOption: true,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: decline copy is
         // functional and must ship plain.
         answerKind: 'functional',
@@ -3113,10 +3195,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         wireResponse,
         {
           graph: null,
-          // T1 claim safety: this path runs no analysis, so it withheld no
-          // leading-option claim. `true` is the honest statement of that, not a
-          // fail-open — the withhold only exists where a verdict was derived.
-          mayNameLeadingOption: true,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: this decline/offer
           // copy is functional and must ship plain.
           answerKind: 'functional',
@@ -3212,10 +3294,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       if (cv2 !== null && cv2.kind === 'respond') {
         return sendFinalised200(reply, requestId, 'clarify_v2', cv2.response, {
           graph: null,
-          // T1 claim safety: this path runs no analysis, so it withheld no
-          // leading-option claim. `true` is the honest statement of that, not a
-          // fail-open — the withhold only exists where a verdict was derived.
-          mayNameLeadingOption: true,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a clarify QUESTION is
           // functional and must ship plain, never behind progressive disclosure.
           answerKind: 'functional',
@@ -3281,10 +3363,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'draft_graph', dg.response, {
           analysisReady: dg.analysisReady,
           graph: dg.graph,
-          // T1 claim safety: this path runs no analysis, so it withheld no
-          // leading-option claim. `true` is the honest statement of that, not a
-          // fail-open — the withhold only exists where a verdict was derived.
-          mayNameLeadingOption: true,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a draft-graph turn's
           // artifact is the GRAPH (draft_graph block), not the intro prose. Mark
           // functional AND rely on the draft_graph block-primary egress guard.
@@ -3675,10 +3757,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         });
         return sendFinalised200(reply, requestId, 'edit_graph', noProposalResponse, {
           graph: null,
-          // T1 claim safety: this path runs no analysis, so it withheld no
-          // leading-option claim. `true` is the honest statement of that, not a
-          // fail-open — the withhold only exists where a verdict was derived.
-          mayNameLeadingOption: true,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
           // functional and must ship plain.
           answerKind: 'functional',
@@ -3713,10 +3795,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
-        // T1 claim safety: this path runs no analysis, so it withheld no
-        // leading-option claim. `true` is the honest statement of that, not a
-        // fail-open — the withhold only exists where a verdict was derived.
-        mayNameLeadingOption: true,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
         // copy is functional and must ship plain.
         answerKind: 'functional',
@@ -3767,10 +3849,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       );
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
-        // T1 claim safety: this path runs no analysis, so it withheld no
-        // leading-option claim. `true` is the honest statement of that, not a
-        // fail-open — the withhold only exists where a verdict was derived.
-        mayNameLeadingOption: true,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
         // copy is functional and must ship plain.
         answerKind: 'functional',
@@ -3797,10 +3879,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       });
       return sendFinalised200(reply, requestId, 'edit_graph', response, {
         graph: null,
-        // T1 claim safety: this path runs no analysis, so it withheld no
-        // leading-option claim. `true` is the honest statement of that, not a
-        // fail-open — the withhold only exists where a verdict was derived.
-        mayNameLeadingOption: true,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
         // copy is functional and must ship plain.
         answerKind: 'functional',
@@ -3885,10 +3967,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph graphState reload failed — returning typed recovery',
           );
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed', ingress.message);
+          return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
         }
         if (persisted == null) {
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message);
+          return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
         }
         // Validate the reloaded graph through the same ingress schema the
         // request body would have gone through. A persisted-but-invalid
@@ -3904,7 +3986,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             },
             'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
           );
-          return sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message);
+          return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
         }
         resolvedGraphState = parsed.data;
         emit(TelemetryEvents.V5EditGraphGraphStateReloaded, {
@@ -3953,10 +4035,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         return sendFinalised200(reply, requestId, 'edit_graph', eg.response, {
           analysisReady: eg.analysisReady,
           graph: eg.graph,
-          // T1 claim safety: this path runs no analysis, so it withheld no
-          // leading-option claim. `true` is the honest statement of that, not a
-          // fail-open — the withhold only exists where a verdict was derived.
-          mayNameLeadingOption: true,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph receipt is
           // functional (add-option / edit confirmation) and must ship plain.
           answerKind: 'functional',
@@ -4048,10 +4130,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         composeProcessMetaIntakeResponse(),
         {
           graph: null,
-          // T1 claim safety: this path runs no analysis, so it withheld no
-          // leading-option claim. `true` is the honest statement of that, not a
-          // fail-open — the withhold only exists where a verdict was derived.
-          mayNameLeadingOption: true,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
           // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: process-meta intake
           // copy is functional and must ship plain.
           answerKind: 'functional',
@@ -4241,10 +4323,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           });
           return sendFinalised200(reply, requestId, 'frame_no_brief_guard', commitResult.response, {
             graph: null,
-            // T1 claim safety: this path runs no analysis, so it withheld no
-            // leading-option claim. `true` is the honest statement of that, not a
-            // fail-open — the withhold only exists where a verdict was derived.
-            mayNameLeadingOption: true,
+            // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+            // the permission belongs to the fact this response DISPLAYS, not to
+            // whether this turn ran an analysis. See turn-claim-safety.ts.
+            ...(await claimSafety.forExit()),
             // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: guard/commit copy is
             // functional and must ship plain.
             answerKind: 'functional',
@@ -4275,10 +4357,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       }
       return sendFinalised200(reply, requestId, 'frame_no_brief_guard', guardResponse, {
         graph: null,
-        // T1 claim safety: this path runs no analysis, so it withheld no
-        // leading-option claim. `true` is the honest statement of that, not a
-        // fail-open — the withhold only exists where a verdict was derived.
-        mayNameLeadingOption: true,
+        // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+        // the permission belongs to the fact this response DISPLAYS, not to
+        // whether this turn ran an analysis. See turn-claim-safety.ts.
+        ...(await claimSafety.forExit()),
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: guard decline copy is
         // functional and must ship plain.
         answerKind: 'functional',
