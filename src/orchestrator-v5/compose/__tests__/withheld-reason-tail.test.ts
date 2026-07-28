@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { composeWithheldReasonTail } from '../withheld-reason-tail.js';
+import { projectExplanationAnswerForWithheldClaim } from '../withheld-explanation-answer.js';
 import {
   textNamesLeadingOption,
   findLeaderClaims,
@@ -325,5 +326,41 @@ describe('claim safety — no leader, and no oracle', () => {
         expect(answer.text).not.toMatch(/\b0\.\d+\b/);
       }
     }
+  });
+});
+
+describe('the FRESHNESS SPLIT — the two branches must not be gated together', () => {
+  it('APPEND stands down on a stale run: the label could be about a different graph', () => {
+    // `goal_constraints` are inside the analysis-affecting hash, so a constraint
+    // edit alone makes the run stale — which is exactly what the repair step in
+    // every one of these voices asks the user to do. The verdict then comes from
+    // the OLD fact while the labels come from the CURRENT graph.
+    const clean = 'The model is driven mainly by Capacity, and the spread is wide.';
+    const fresh = projectExplanationAnswerForWithheldClaim(clean, 'unevaluated', ONE, true);
+    expect(fresh.reason).toBe('disclosure_appended');
+    expect(fresh.text).toContain('“Three-Year Total Cost of Ownership”');
+
+    const stale = projectExplanationAnswerForWithheldClaim(clean, 'unevaluated', ONE, false);
+    expect(stale.reason).toBe('unchanged');
+    expect(stale.text).toBe(clean);
+  });
+
+  it('REPLACE still fires on a stale run — it is a SAFETY branch, not an informative one', () => {
+    // ⚠ THE ASYMMETRY IS THE POINT. Gating both branches on freshness would
+    // suppress the leader-claim replacement on stale runs and re-open the leak
+    // this module exists to close. Stale costs REPLACE only the named condition.
+    const leaderClaim = 'Hire Marketing Manager comes out ahead, leading in 72% of simulations.';
+    const stale = projectExplanationAnswerForWithheldClaim(leaderClaim, 'unevaluated', ONE, false);
+    expect(stale.reason).toBe('leader_claim_replaced');
+    expect(stale.text).not.toContain('comes out ahead');
+    // Cause-free: it must NOT name a condition it cannot vouch for on this graph.
+    expect(stale.text).not.toContain('“Three-Year Total Cost of Ownership”');
+    expect(stale.text).toContain('No single option can be put forward on this result yet');
+
+    // POSITIVE CONTROL — the same input on a FRESH run does name it, so the
+    // absence above is the freshness gate and not a broken fixture.
+    const fresh = projectExplanationAnswerForWithheldClaim(leaderClaim, 'unevaluated', ONE, true);
+    expect(fresh.reason).toBe('leader_claim_replaced');
+    expect(fresh.text).toContain('“Three-Year Total Cost of Ownership”');
   });
 });

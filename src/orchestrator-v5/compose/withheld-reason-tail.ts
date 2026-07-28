@@ -38,28 +38,43 @@
  * class was itself specific to the axis its author had imagined — the same
  * defect one level up.
  *
- * WHAT REPLACED IT IS STRICTLY STRONGER. This tail is appended to EVERY
- * withheld turn that displays the analysis, whatever was asked. There are no
- * false positives and no false negatives, because THE TAIL IS TRUE ON EVERY
- * WITHHELD TURN — it does not depend on the question, so it cannot be wrong
- * about the question. The ~11s saved by the old short-circuit is knowingly
- * forfeited: correctness over latency.
+ * ⚠ WHAT REPLACED IT — AND THE SCOPE THIS PR ACTUALLY SHIPS, STATED EXACTLY.
  *
- * FOUR FIRST-CLASS OUTCOMES, NOT ONE OUTCOME AND AN ERROR PATH — the shape
- * `compose-option-targeted-flip.ts` (#743) established:
+ * SHIPPED HERE: this tail is total over the withholding states, and the
+ * per-handler gate (`projectExplanationAnswerForWithheldClaim`) consumes it. That
+ * closes the defect 2.104 was raised for on the EXPLANATION path:
+ * `buildConstraintDisclosureFromState` returns '' for `evaluated_infeasible` by
+ * design and gave nothing for an unreadable state, so `disclosure.length > 0`
+ * was false, the APPEND branch could not fire, and those turns carried NO REASON
+ * AT ALL. Only REPLACE spoke, and only when the answer happened to trip the
+ * leader vocabulary.
  *
- *   constraint_infeasible  the conditions WERE checked and the result does not
- *                          stand up against one of them.
- *   constraint_unevaluated a condition was applied and never scored.
- *   constraint_unresolved  the engine's condition results could not be matched
- *                          to the user's conditions.
- *   reason_unrecorded      the verdict state could not be read back. We say we
- *                          do not know, and we do NOT guess a cause.
+ * ⚠ NOT SHIPPED, AND ROWED RATHER THAN HALF-BUILT: making every OTHER exit carry
+ * the reason. A finaliser hook was built for that and then withdrawn, because an
+ * adversarial review showed it was wrong in BOTH directions and neither could be
+ * fixed cleanly in the same pass:
  *
- * The fourth is load-bearing, and it is the same lesson `withheld-leader-
- * projection.ts` F2 was corrected for: an unconditional cause is a FABRICATED
- * cause on every fact that carries none. Inventing a reason for a withholding
- * is the inverse of the doctrine that produced the withholding.
+ *   OVER-REACH — the finaliser is where all 40 `buildFailureResponse` sites and
+ *   every clarify exit land, and the hook's content predicate was "an analysis
+ *   exists and is fresh", not "this turn displays it". A CAS failure or a
+ *   clarifying question would have shipped "…so no option can be put forward
+ *   yet. Relax that limit…". This lane OBSERVED that and re-baselined a
+ *   bounded-recovery test to accept it — normalising the defect instead of
+ *   reading it. That re-baseline is reverted.
+ *
+ *   UNDER-REACH — "a finaliser hook cannot miss an emit path" was FALSE at the
+ *   bytes. `handlers/chip-click-dispatch.ts` composes and returns its own
+ *   response and never enters the turn executor, and
+ *   `DETERMINISTIC_CHIP_ACTION_TYPES` contains `run_analysis` — so the UI's
+ *   PRIMARY Run-analysis affordance was exactly the path with no tail, on
+ *   `evaluated_infeasible`, which is 2.104's own state.
+ *   `system-events/factor-value-edit.ts` is a second bypass.
+ *
+ * The correct shape for that work is the precedent the estate already set for
+ * the sibling guard — duplicate it into `chip-click-dispatch.ts` (which already
+ * computes `mayNameLeadingOption`) — plus a "this turn DISPLAYS the analysis"
+ * predicate and post-handler readiness. That is its own change with its own
+ * controls, and it is rowed, not smuggled in here.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * ⚠ THE BRIEF'S PREMISE FOR `evaluated_infeasible` IS WRONG, AND THE COPY IS

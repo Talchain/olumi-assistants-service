@@ -274,20 +274,9 @@ describe('turn-executor — bounded-recovery copy honours the freshness VERDICT,
     );
 
     expect(findPreHandlerFreshnessEvent()?.data.freshness).toBe('fresh');
-    // ⚠ ROADMAP 2.104 — the withheld-reason tail now rides EVERY exit that
-    // displays the analysis, and this recovery copy explicitly does ("your
-    // current analysis is still available"). The fixture's fact is unstamped, so
-    // the honest voice is `reason_unrecorded`.
-    //
-    // Asserted as a PREFIX plus an explicit tail check rather than re-baselined
-    // as one opaque string: the recovery copy is what THIS file is about, and it
-    // must stay byte-identical up to the appended reason. A whole-string
-    // re-baseline would have silently absorbed a change to the recovery copy
-    // itself.
-    expect(result.response.assistant_text.startsWith(
+    expect(result.response.assistant_text).toBe(
       "I couldn't complete that turn cleanly, but your current analysis is still available."
-    )).toBe(true);
-    expect(result.response.assistant_text).toContain('the reason is not recorded on it');
+    );
     const actionTypes = result.response.suggested_actions.map((a: { action_type?: string }) => a.action_type);
     expect(actionTypes).toContain('explain_results');
     expect(actionTypes).toContain('run_analysis');

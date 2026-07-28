@@ -1773,22 +1773,6 @@ export const TelemetryEvents = {
   //   - selected_action_type: 'explain_results' | 'what_would_flip' | null
   V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
 
-  // ROADMAP 2.104 — the withheld REASON disclosure, applied at the finaliser to
-  // every withheld turn that displays the analysis (the `run_analysis` receipt
-  // excepted — it owns its own). Replaces `v5.withheld_why_guard`, which was
-  // deleted along with the question recogniser it measured.
-  //
-  // Payload (structural only — no labels, no user prose, no message text):
-  //   - request_id / scenario_id / dispatch_path
-  //   - turn_class / handler_id — WHICH exit received the tail. This is the
-  //     coverage measurement the widening exists for: a surface that never
-  //     appears here is a surface the reason is not reaching.
-  //   - reason_kind: 'constraint_infeasible' | 'constraint_unevaluated'
-  //     | 'constraint_unresolved' | 'reason_unrecorded'
-  //   - constraint_verdict_state: the persisted state, or 'unreadable'
-  //   - ratified_constraint_count: number
-  //   - named_constraint: boolean
-  V5WithheldReasonDisclosed: "v5.withheld_reason_disclosed",
 
   // V5 P0 stabilisation — bounded routing-failure fallback.
   //

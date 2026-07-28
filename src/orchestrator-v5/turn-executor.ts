@@ -137,7 +137,6 @@ import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
 import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
-import { composeWithheldReasonTail } from './compose/withheld-reason-tail.js';
 import {
   collectOptionGuardLabels,
   impliesOptionInterventionEdit,
@@ -9766,117 +9765,6 @@ export async function runTurnExecutor(
    * Idempotent: a second call on the rewritten response is a no-op
    * because the neutral fallback contains no forbidden phrase.
    */
-  /**
-   * ⭐ ROADMAP 2.104 — every withheld turn that DISPLAYS the analysis carries the
-   * reason it withheld.
-   *
-   * ═══════════════════════════════════════════════════════════════════════════
-   * WHY THE SCOPE IS "EVERY EXIT" AND NOT A RECOGNISED QUESTION.
-   *
-   * The first three revisions of 2.104 recognised the question ("why is there
-   * no option?") with a regex and short-circuited the turn. Three adversarial
-   * rounds found three independent over-capture axes, the last of which is a
-   * ceiling rather than a hole: applying a restrictive-modifier generator to
-   * the five TRUE POSITIVES over-captured 35/35, because "no X is being put
-   * forward" and "no X exists in my graph" have the SAME SURFACE FORM. The
-   * discriminating information is not in the message.
-   *
-   * THIS IS STRICTLY STRONGER THAN ANY RECOGNISER COULD BE. The tail does not
-   * depend on what was asked, so it cannot be wrong about what was asked: no
-   * false positives, no false negatives. `compose/withheld-reason-tail.ts`
-   * carries the full record so no future lane rebuilds the recogniser.
-   *
-   * ⚠ THE ~11s SHORT-CIRCUIT SAVING IS KNOWINGLY FORFEITED. The deleted guard
-   * answered with zero LLM calls. These turns now pay the routing call and
-   * receive the reason appended to a real answer. Correctness over latency,
-   * recorded here so it is not rediscovered later as a performance regression
-   * and "fixed" by restoring the short-circuit.
-   *
-   * ═══════════════════════════════════════════════════════════════════════════
-   * THE THREE PREDICATES, each a correctness condition rather than a taste:
-   *
-   *   1. `!mayNameLeadingOptionForRun` — the turn WITHHELD. Threaded from the
-   *      turn-entry verdict, never re-derived (CLAUDE.md trap #12).
-   *   2. `has_run_analysis_fact` — an analysis EXISTS to be displayed. Without
-   *      it there is no withholding to explain and the tail would assert one.
-   *   3. `latest_analysis_freshness === 'fresh'` — the F2 predicate, moved here
-   *      unchanged from the deleted guard because the exposure moved with it.
-   *      `goal_constraints` sit inside the analysis-affecting hash, so ANY
-   *      constraint edit makes the run stale; the verdict would then come from
-   *      the OLD fact while the labels come from the CURRENT graph, and the
-   *      tail would name a condition the verdict is not about. Closed-union
-   *      comparison, so `stale` / `unknown` / `none` / absent all fail closed.
-   *
-   * ⚠ NO EXIT IS EXCLUDED — AND AN EXCLUSION FOR `run_analysis` WAS REMOVED
-   * BECAUSE ITS MUTANT DID NOT BITE, WHICH IS RECORDED RATHER THAN SMOOTHED.
-   *
-   * The first cut skipped the turn that JUST RAN the analysis, reasoning that
-   * `run_analysis` appends its own disclosure and a second would be two accounts
-   * of one fact (the #707 convention). Deleting that line left every test green,
-   * so it was examined instead of re-tested — and it was wrong twice over:
-   *
-   *   - It was UNNECESSARY. On `unevaluated` / `identity_unresolved` the
-   *     run_analysis producer appends `buildConstraintDisclosure(verdict)`,
-   *     which is BYTE-IDENTICAL to this tail (both delegate to
-   *     `buildConstraintDisclosureFromState`; pinned by a derived test in
-   *     `withheld-reason-tail.test.ts`). Idempotence already stands this hook
-   *     down there — no exclusion required, and that path IS covered (removing
-   *     the idempotence check reds the duplicate control).
-   *   - It was HARMFUL. On `evaluated_infeasible` that builder returns '' by
-   *     design, so the run_analysis confirmation carries NO reason at all. The
-   *     exclusion therefore created a silent hole in the exact state 2.104 was
-   *     raised for, on the very turn the user just asked for.
-   *
-   * An unnecessary guard whose mutant cannot bite is machinery nobody can
-   * verify. It is gone; the verified mechanism (idempotence) carries the load.
-   *
-   * IDEMPOTENT, and that is what makes the widening safe next to the
-   * pre-existing per-handler gate at the tool-call compose site. That gate still
-   * runs (it feeds `blocks[].summary` and the `_answer_shape` sidecar by
-   * construction, which a finaliser cannot); this one then sees its own bytes
-   * already present and does nothing. Both call the SAME composer, so "its own
-   * bytes" is exact rather than approximate.
-   */
-  function enforceWithheldReasonDisclosure(
-    dispatchPath: 'turn_executor_finalise',
-  ): void {
-    if (!response) return;
-    if (mayNameLeadingOptionForRun) return;
-    if (contextReadiness === null) return;
-    if (!contextReadiness.has_run_analysis_fact) return;
-    if (!withheldConditionsAreCurrent()) return;
-    const assistantText = response.assistant_text;
-    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
-
-    const tail = composeWithheldReasonTail(
-      mayNameLeadingOptionVerdictForRun.constraint_verdict_state,
-      readRatifiedConstraints(context.persistedGraph ?? graphStateForTurn ?? null),
-    );
-    // `null` only for the two PERMITTING states, unreachable under the
-    // permission check above. Nothing to say ⇒ say nothing.
-    if (tail === null) return;
-    // IDEMPOTENCE. `trim()` because the tail is a leading-space fragment and the
-    // upstream gate concatenates it without one when it opens a replacement.
-    if (assistantText.includes(tail.text.trim())) return;
-
-    emit(TelemetryEvents.V5WithheldReasonDisclosed, {
-      request_id: requestId,
-      scenario_id: context.session_id,
-      dispatch_path: dispatchPath,
-      turn_class: resolvedTurnClass ?? null,
-      handler_id: proposedHandlerIdForOutcome ?? null,
-      reason_kind: tail.kind,
-      constraint_verdict_state:
-        mayNameLeadingOptionVerdictForRun.constraint_verdict_state ?? 'unreadable',
-      ratified_constraint_count: tail.ratified_constraint_count,
-      named_constraint: tail.named_constraint,
-    });
-    response = {
-      ...response,
-      assistant_text: `${assistantText}${tail.text}`,
-    };
-  }
-
   function enforceEgressForbiddenPhraseGuard(
     dispatchPath: 'turn_executor_finalise',
   ): void {
@@ -9985,11 +9873,6 @@ export async function runTurnExecutor(
     // claim with no committed mutation. Commit-anchored, precision-first, not
     // flag-gated. See `enforceStructuralSuccessClaimGuard`.
     enforceStructuralSuccessClaimGuard('turn_executor_finalise');
-    // ⭐ ROADMAP 2.104 — THE WITHHELD REASON, ON EVERY TURN THAT DISPLAYS THE
-    // ANALYSIS. Placed HERE, beside its two siblings, for the reason their own
-    // comments give: "an upstream hook would miss new emit paths added later;
-    // a finaliser hook cannot."
-    enforceWithheldReasonDisclosure('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     // Fix 4 (observability): finalise turn timings only when V5_TIMING_DEBUG
     // is enabled. Default-OFF production paths skip the telemetry emit and
