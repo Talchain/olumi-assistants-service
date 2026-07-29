@@ -723,19 +723,35 @@ describe("POST /orchestrate/v2/turn/stream — the streamed V5 turn", () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe("auth surface", () => {
-    it("the streamed route is NOT in the public-route allowlist", async () => {
-      // Read the allowlist's own behaviour rather than restating it: the module
-      // exposes no predicate, so this asserts the property that matters — the
-      // streamed path is not a prefix-match of any public route.
+    it("the SERVICE route is authenticated and the BROWSER route is public — derived, not mirrored", async () => {
+      // F7 (review): this test used to restate `auth.ts`'s `publicRoutes` array
+      // and admit it in its own comment. That is a trap-12 mirror — it would keep
+      // asserting the old answer after the real list moved. The predicate is now
+      // exported, so this DERIVES each route's posture from the code that decides
+      // it.
+      const { isPublicRoute } = await import("../../src/plugins/auth.js");
       const { STREAMED_TURN_ROUTE, STREAMED_TURN_INTERNAL_TARGET } = await import(
         "../../src/routes/orchestrate.v2.turn-stream.js"
       );
-      const PUBLIC = ["/healthz", "/health", "/", "/v1/status", "/admin", "/proxy/v5/turn"];
-      const isPublic = (p: string) =>
-        PUBLIC.some((r) => p === r || (r !== "/" && p.startsWith(r + "/")));
-      // The streamed route must be exactly as (non-)public as the turn it wraps.
-      expect(isPublic(STREAMED_TURN_ROUTE)).toBe(isPublic(STREAMED_TURN_INTERNAL_TARGET));
-      expect(isPublic(STREAMED_TURN_ROUTE)).toBe(false);
+      const { PROXY_STREAMED_TURN_ROUTE } = await import(
+        "../../src/routes/proxy-v5-turn-stream.js"
+      );
+
+      // The service sibling must be exactly as (non-)public as the turn it wraps.
+      expect(isPublicRoute(STREAMED_TURN_ROUTE, "POST")).toBe(
+        isPublicRoute(STREAMED_TURN_INTERNAL_TARGET, "POST"),
+      );
+      expect(isPublicRoute(STREAMED_TURN_ROUTE, "POST")).toBe(false);
+
+      // The browser sibling must be exactly as public as the proxy it wraps —
+      // by prefix INHERITANCE, without a new allowlist entry.
+      expect(isPublicRoute(PROXY_STREAMED_TURN_ROUTE, "POST")).toBe(
+        isPublicRoute("/proxy/v5/turn", "POST"),
+      );
+      expect(isPublicRoute(PROXY_STREAMED_TURN_ROUTE, "POST")).toBe(true);
+
+      // Positive control: the predicate discriminates at all.
+      expect(isPublicRoute("/assist/v1/draft-graph", "POST")).toBe(false);
     });
 
     it("forwards auth headers verbatim to the internal turn and strips hop-by-hop headers", async () => {
@@ -750,7 +766,7 @@ describe("POST /orchestrate/v2/turn/stream — the streamed V5 turn", () => {
         "content-length": "123",
         connection: "keep-alive",
         host: "cee-staging.onrender.com",
-      } as never);
+      } as never, "req-id-under-test");
 
       // The inner request must authenticate as the outer one did.
       expect(forwarded["x-olumi-assist-key"]).toBe("test-key");
@@ -762,6 +778,12 @@ describe("POST /orchestrate/v2/turn/stream — the streamed V5 turn", () => {
       expect(forwarded).not.toHaveProperty("content-length");
       expect(forwarded).not.toHaveProperty("connection");
       expect(forwarded).not.toHaveProperty("host");
+
+      // F3 (review): the inner turn must be attributable to the stream that ran
+      // it. Without this, a client that sends no x-request-id gets UUID-A on the
+      // stream and a different UUID-B in the turn's logs, and the two cannot be
+      // joined. /proxy/v5/turn sets it for exactly this reason.
+      expect(forwarded["x-request-id"]).toBe("req-id-under-test");
     });
   });
 });

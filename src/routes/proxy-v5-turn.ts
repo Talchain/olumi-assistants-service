@@ -45,7 +45,8 @@ import {
 const INTERNAL_TARGET = "/orchestrate/v2/turn";
 
 /** Headers forwarded from the browser request to the internal CEE call. */
-const ALLOWED_REQUEST_HEADERS = [
+/** EXPORTED for the streamed sibling — one forwarding policy, not two. */
+export const ALLOWED_REQUEST_HEADERS = [
   "content-type",
   "accept",
   "x-correlation-id",
@@ -78,7 +79,13 @@ const SAFE_RESPONSE_HEADERS = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseAllowedOrigins(): Set<string> {
+/**
+ * EXPORTED (ROADMAP 2.122, CEE lane 2) so the streamed sibling
+ * `/proxy/v5/turn/stream` shares ONE origin policy with this route instead of
+ * mirroring it. A second copy of the browser allowlist is trap 12 with a
+ * security blast radius.
+ */
+export function parseAllowedOrigins(): Set<string> {
   const raw = config.proxy.browserProxyAllowedOrigins;
   if (!raw) return new Set();
   return new Set(
@@ -89,7 +96,8 @@ function parseAllowedOrigins(): Set<string> {
   );
 }
 
-function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
+/** EXPORTED for the streamed sibling — see parseAllowedOrigins. */
+export function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
   // Exact-match only. Netlify preview patterns are NOT matched by regex here
   // because the global @fastify/cors plugin (which handles OPTIONS preflight)
   // only knows about ALLOWED_ORIGINS — it has no regex support. A preview
@@ -100,7 +108,15 @@ function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
   return allowedOrigins.has(origin);
 }
 
-function buildCorsHeaders(origin: string): Record<string, string> {
+/**
+ * EXPORTED for the streamed sibling.
+ *
+ * ⚠ The streamed sibling NEEDS these explicitly, and that is not a style choice:
+ * an SSE route writes `reply.raw.writeHead` directly, which bypasses the Reply
+ * API that `@fastify/cors` stages its headers through. See
+ * `streamed-turn-sse.ts` `buildStagedSseHeaders`.
+ */
+export function buildCorsHeaders(origin: string): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -130,6 +146,24 @@ function pickSafeResponseHeaders(
 // Route registration
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve the service key the proxy injects into its internal call.
+ *
+ * Prefers the single-key config, falls back to the first entry in the multi-key
+ * array — mirroring how `auth.ts` builds its valid-key set from both
+ * `ASSIST_API_KEY` and `ASSIST_API_KEYS`. EXPORTED so the streamed sibling
+ * injects the SAME key by the SAME rule; two resolutions could disagree and the
+ * symptom would be a 401 buried inside a terminal SSE frame.
+ */
+export function resolveProxyAssistKey(): string | undefined {
+  return (
+    config.auth.assistApiKey ??
+    (config.auth.assistApiKeys && config.auth.assistApiKeys.length > 0
+      ? config.auth.assistApiKeys[0]
+      : undefined)
+  );
+}
+
 export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   if (!config.proxy.browserProxyEnabled) {
     log.info({}, "[proxy-v5] BROWSER_PROXY_ENABLED is false — route not registered");
@@ -142,11 +176,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   // Resolve the service key: prefer the single-key config, fall back to the
   // first entry in the multi-key array. This mirrors how auth.ts builds its
   // valid-key set from both ASSIST_API_KEY and ASSIST_API_KEYS.
-  const assistKey =
-    config.auth.assistApiKey ??
-    (config.auth.assistApiKeys && config.auth.assistApiKeys.length > 0
-      ? config.auth.assistApiKeys[0]
-      : undefined);
+  const assistKey = resolveProxyAssistKey();
 
   if (!assistKey) {
     log.warn(

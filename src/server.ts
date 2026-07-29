@@ -77,6 +77,7 @@ import { adminRoutingLogRoutes } from "./routes/admin.v1.routing-log.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
 import { adminModelRoutes } from "./routes/admin.models.js";
 import { proxyV5TurnRoute } from "./routes/proxy-v5-turn.js";
+import proxyV5TurnStreamRoute from "./routes/proxy-v5-turn-stream.js";
 import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
@@ -1259,6 +1260,21 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     }
   }
   await proxyV5TurnRoute(app);
+
+    // ROADMAP 2.122 / 1.204 M1 (CEE lane 2) — the STREAMED browser surface.
+    //
+    // Registered inside the same BROWSER_PROXY_ENABLED block as its buffered
+    // sibling and immediately after it: a deployment with no browser proxy has
+    // no browser surface to stream over, and it forwards to /orchestrate/v2/turn
+    // (registered above) via app.inject(), so that target must already exist.
+    //
+    // This is the route the UI can actually reach. The service sibling
+    // (/orchestrate/v2/turn/stream, registered above) requires an assist key or
+    // HMAC, which a browser cannot hold — any VITE_* value is public by
+    // construction. Public in the auth-plugin sense by INHERITANCE, not by a new
+    // exemption: isPublicRoute() matches by prefix, so the existing
+    // "/proxy/v5/turn" entry already covers "/proxy/v5/turn/stream".
+    await proxyV5TurnStreamRoute(app);
 
   // Public prompt routes (cache warming and status)
   // Registered unconditionally - routes handle health checks internally
