@@ -99,6 +99,8 @@ let faithful: RetentionRunResult;
 let budgetOldest: RetentionRunResult;
 let budgetNewest: RetentionRunResult;
 let erasing: RetentionRunResult;
+/** The assembled report string, so the extracted artefact itself is assertable. */
+let reportText = '';
 
 const at = (r: RetentionRunResult, turn: number): RetentionMeasurement => {
   const m = r.measurements.find((x) => x.at_turn === turn);
@@ -193,6 +195,7 @@ beforeAll(async () => {
       ];
     }),
   ].join('\n');
+  reportText = report;
   process.stdout.write(`\n${report}\n`);
   const out = process.env.MEMORY_RETENTION_REPORT_PATH;
   if (out !== undefined && out.length > 0) writeFileSync(out, report, 'utf8');
@@ -292,6 +295,24 @@ describe('MEM-FLOOR 5 — pack integrity and non-vacuity', () => {
         'rejected as over_cap, the prior summary is kept, and ARM A measures a frozen summary ' +
         'rather than retention. Shorten the fixture.',
     ).toBeLessThan(SUMMARY_HARD_CAP_CHARS);
+  });
+
+  it('the EXTRACTED report carries the stand-in caveat beside the numbers', () => {
+    // A1, pinned on the ASSEMBLED artefact rather than only on the renderer.
+    // Without this, dropping renderModelProvenanceHeader() from the report array
+    // while leaving the function intact would restore exactly the reviewed defect:
+    // 175 lines printing "retained 10/10" with no indication that no live model
+    // was called, in a file designed to be extracted and read on its own.
+    expect(reportText).toContain('MEMORY-RETENTION EVAL REPORT');
+    expect(reportText).toContain('retained 10/10');
+    expect(reportText, 'the numbers are present but the caveat is not').toContain(
+      'NO live model was called',
+    );
+    expect(reportText).toContain('is NOT measured by this report');
+    expect(reportText).toContain('declared gap 1');
+    // R3: both sizes travel with the table, so the uncapped-injection point is a
+    // number in the artefact rather than a claim in a document.
+    expect(reportText).toMatch(/stored \d+ chars · injected \d+ chars/);
   });
 
   it('provenance stamps are DISTINGUISHABLE — the R3 channel carries information', () => {
