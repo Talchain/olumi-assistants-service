@@ -345,11 +345,14 @@ describe('feature health: the verdicts are DERIVED, and drift fails loud', () =>
    * genuinely DELETED, cross-checked against the mechanically-derived record of
    * `f957d6d8`. A typo is not in that record, so a typo REDs here.
    *
-   * Why a record file and not `git` directly: no CI job in this repo sets
-   * `fetch-depth: 0` (`actions/checkout@v4` defaults to 1), so the deletion
-   * commit is not in CI's shallow clone. A git probe would either RED in CI or
-   * need a skip-escape — and a control that skips is a control that tests
-   * nothing (trap 13).
+   * Why a record file and not `git` directly: the workflow that RUNS this suite
+   * — `ci.yml`'s required `Lint, TypeCheck, Unit Tests` job — checks out with a
+   * bare `actions/checkout@v4` (`ci.yml:19`), which defaults to `fetch-depth: 1`,
+   * so the deletion commit is not in this suite's shallow clone. A git probe
+   * would either RED in CI or need a skip-escape — and a control that skips is a
+   * control that tests nothing (trap 13). (Scoped deliberately: one job in the
+   * repo, `openapi-validation.yml:30`, DOES set `fetch-depth: 0` — it just does
+   * not run this suite, so it cannot supply the history here.)
    */
   it('every ABSENT producer specifier names a path that was really deleted', () => {
     const deleted = deletedByF957d6d8();

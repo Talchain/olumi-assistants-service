@@ -20,10 +20,14 @@
 # in either one fails.
 #
 # CI NOTE — why the test reads this instead of asking git directly:
-# `actions/checkout@v4` defaults to fetch-depth 1 and no CI job here sets
-# fetch-depth: 0, so the deletion commit is NOT in CI's shallow clone. A
-# git-history probe would either RED in CI or need a skip-escape, and a control
-# that skips is a control that tests nothing (trap 13).
+# The workflow that RUNS `__tests__/feature-health.test.ts` — `ci.yml`'s required
+# `Lint, TypeCheck, Unit Tests` job — checks out with a bare
+# `actions/checkout@v4` (`ci.yml:19`), which defaults to fetch-depth 1, so the
+# deletion commit is NOT in this suite's shallow clone. A git-history probe would
+# either RED in CI or need a skip-escape, and a control that skips is a control
+# that tests nothing (trap 13). Scoped deliberately: one job in the repo,
+# `openapi-validation.yml:30`, DOES set fetch-depth: 0 — it just does not run
+# this suite, so it cannot supply the history here.
 #
 # REGENERATE (requires full history; must produce this file byte-for-byte):
 #   git show --diff-filter=D --name-only --pretty=format: f957d6d8 \
