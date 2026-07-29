@@ -67,8 +67,23 @@ vi.mock("../../src/utils/fixtures.js", async (importOriginal) => {
   };
 });
 
+/**
+ * The graph validator, with a deliberate delay.
+ *
+ * The delay exists for ONE test — the real-socket incremental-delivery pin. Under
+ * fixtures the whole turn completes in well under a millisecond, so Node coalesces
+ * every SSE write into a single TCP chunk and a genuinely streaming route becomes
+ * indistinguishable from a buffered one. That is a property of the harness's
+ * speed, not of the route. Making the turn take a measurable amount of time
+ * restores the distinction, so the pin measures the route instead of the clock.
+ * Every other test in this file is indifferent to it.
+ */
+const VALIDATE_DELAY_MS = 60;
 vi.mock("../../src/services/validateClient.js", () => ({
-  validateGraph: vi.fn().mockResolvedValue({ ok: true, violations: [], normalized: undefined }),
+  validateGraph: vi.fn(async () => {
+    await new Promise((r) => setTimeout(r, VALIDATE_DELAY_MS));
+    return { ok: true, violations: [], normalized: undefined };
+  }),
 }));
 
 /**
@@ -619,7 +634,86 @@ describe("POST /orchestrate/v2/turn/stream — the streamed V5 turn", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // 6. AUTH SURFACE
+  // 6. INCREMENTAL DELIVERY — over a REAL SOCKET
+  //
+  // This is the one property `app.inject()` cannot prove, and it is the whole
+  // point of the lane: `inject()` buffers the SSE response and resolves at
+  // `raw.end()`, so every test above would pass identically against a route that
+  // computed all five frames and wrote them in one burst at the end. That route
+  // would deliver exactly zero latency benefit.
+  //
+  // So this listens on a real port and reads the response body as a stream,
+  // recording the wall-clock arrival of each frame.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("incremental delivery (real socket)", () => {
+    it("the first frame reaches the client BEFORE the turn completes", async () => {
+      const server = await build();
+      await server.listen({ port: 0, host: "127.0.0.1" });
+      try {
+        const { port } = server.server.address() as { port: number };
+        const t0 = Date.now();
+        const res = await fetch(`http://127.0.0.1:${port}${STREAM_URL}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "text/event-stream" },
+          body: JSON.stringify(draftTurnPayload(nextScenarioId(), nextTurnId())),
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+        // Record each SOCKET CHUNK as well as each frame. The chunk boundary is
+        // the evidence: wall-clock deltas are useless here because the fixtures
+        // pipeline finishes inside one millisecond, but a BUFFERED implementation
+        // necessarily delivers every frame in the same chunk, and a streaming one
+        // cannot (the terminal frame is written after an awaited turn).
+        const chunks: string[] = [];
+        const arrivals: Array<{ stage: string; at: number }> = [];
+        const reader = res.body!.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = dec.decode(value, { stream: true });
+          chunks.push(text);
+          buf += text;
+          let i: number;
+          while ((i = buf.indexOf("\n\n")) !== -1) {
+            const block = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            if (!block.includes("event: stage")) continue;
+            const line = block.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            arrivals.push({
+              stage: (JSON.parse(line.slice(6)) as StageFrame).stage,
+              at: performance.now() - t0,
+            });
+          }
+        }
+
+        expect(arrivals.length).toBeGreaterThanOrEqual(2);
+        expect(arrivals[0].stage).toBe("DRAFTING");
+        expect(arrivals[arrivals.length - 1].stage).toBe("COMPLETE");
+
+        // THE ASSERTION THAT MATTERS. The opening frame was flushed to the socket
+        // in its own chunk, before the turn had finished — so a client can render
+        // on it. Collapse this route to a buffered one and every frame arrives in
+        // chunk 0, which is precisely what this forbids.
+        expect(chunks.length, "the whole stream arrived as ONE chunk — delivery is buffered, not staged").toBeGreaterThan(1);
+        expect(chunks[0]).toContain("DRAFTING");
+        expect(
+          chunks[0],
+          "the terminal frame shared the first chunk with DRAFTING — nothing was delivered early",
+        ).not.toContain("COMPLETE");
+      } finally {
+        await server.close();
+      }
+    }, 90_000);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 7. AUTH SURFACE
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe("auth surface", () => {
