@@ -251,40 +251,48 @@ export interface MayNameLeadingOptionVerdict {
  * value that reached here anyway (e.g. across a schema boundary).
  * ═══════════════════════════════════════════════════════════════════════════
  */
+/**
+ * The classification itself — a typed TOTAL map over the union, which is the
+ * house pattern for exactly this (`signals/coaching-signals.ts`: "Typed Record
+ * over the derived CoachingSignalId union … adding an id without a bank entry
+ * fails to compile").
+ *
+ * ⚠ THIS IS WHY IT IS A `Record` AND NOT A CONDITION: a SEVENTH provenance value
+ * does not type-check until it is classified here. A boolean expression over a
+ * few remembered names cannot do that, and the names nobody remembers are
+ * exactly the ones that break (see the exclusion-list note above).
+ */
+const PROVENANCE_PROVES_ANALYSIS_EXISTS: Record<MayNameLeadingOptionProvenance, boolean> = {
+  // A run_analysis fact WAS selected and its verdict was read. The union's own
+  // docstring puts it plainly: "The answer describes a real analysis."
+  scenario_fact: true,
+  // F1: the entitling fact permitted, but the analysis this turn can DISPLAY is a
+  // different, older `run_analysis` fact whose own verdict withheld.
+  // `projected.fact` IS that real analysis, so existence is proven by it.
+  fail_closed_projected_analysis: true,
+
+  // Provably NO analysis. (Unreachable behind a withheld permission — this branch
+  // is the honest `true` — but classified rather than assumed.)
+  no_analysis_exists: false,
+  // No fact selected; the scenario read did not succeed and the window is provably
+  // shorter than the scenario. Existence is UNPROVEN, which is the entire reason
+  // this branch withholds.
+  fail_closed_truncated: false,
+  // A fact WAS selected but is not a `run_analysis` result, so no ANALYSIS is
+  // established by it.
+  fail_closed_uninterpretable: false,
+  // We never reached the store. "An analysis may very well exist … we simply could
+  // not see it" — the definition of unproven.
+  fail_closed_no_turn_context: false,
+};
+
 export function provenanceProvesAnalysisExists(
   provenance: MayNameLeadingOptionProvenance,
 ): boolean {
-  switch (provenance) {
-    // A run_analysis fact WAS selected and its verdict was read. The docstring
-    // above this union puts it plainly: "The answer describes a real analysis."
-    case 'scenario_fact':
-    // F1: the entitling fact permitted, but the analysis this turn can DISPLAY
-    // is a different, older `run_analysis` fact whose own verdict withheld.
-    // `projected.fact` is that real analysis — existence is proven by it.
-    case 'fail_closed_projected_analysis':
-      return true;
-
-    // Provably NO analysis. (Unreachable behind a withheld permission — this
-    // branch is the honest `true` — but classified rather than assumed.)
-    case 'no_analysis_exists':
-    // No fact selected; the store read did not succeed and the window is
-    // provably shorter than the scenario. Existence is UNPROVEN, which is the
-    // entire reason this branch withholds.
-    case 'fail_closed_truncated':
-    // A fact WAS selected but is not a `run_analysis` result, so no ANALYSIS is
-    // established by it.
-    case 'fail_closed_uninterpretable':
-    // We never reached the store. "An analysis may very well exist … we simply
-    // could not see it" — the definition of unproven.
-    case 'fail_closed_no_turn_context':
-      return false;
-
-    default: {
-      const _exhaustive: never = provenance;
-      void _exhaustive;
-      return false;
-    }
-  }
+  // `?? false` is the RUNTIME safe direction for a value that arrives from
+  // outside the type system (a persisted or wire-carried string). The compile-time
+  // guarantee is the `Record` above; this is the belt.
+  return PROVENANCE_PROVES_ANALYSIS_EXISTS[provenance] ?? false;
 }
 
 /**
