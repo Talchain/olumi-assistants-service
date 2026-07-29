@@ -196,5 +196,97 @@
       ],
       "note": "The explicit ready-to-draft escape: a go-ahead always proceeds with the working brief."
     }
+  ],
+  "no_reask_cases_description": "ROADMAP 2.103 micro eval set — 'the intake must not ask for a fact the brief already supplied'. Each case pairs a decision brief with `supplied`: the completeness dimensions a reader can extract from that brief's own words (the golden label). The deterministic assertion (FLOOR 6 in __tests__/clarify-v2-floors.harness-test.ts) walks the WHOLE pre-draft flow — round 1 plus every resume round the stop rule allows — and fails if any emitted question's dimension is in `supplied`. `expect` is derived-not-declared in spirit but stated for readability: 'silent' = every dimension is supplied, so the flow must proceed with zero questions; 'ask_only_unsupplied' = the flow must still ask (>=1 question) but only about dimensions the brief does NOT supply. Every case is asserted draft-shaped (isDraftShapedText), so a fixture can never pass by being unreachable on the live route. PROVENANCE: reask-01 is the live-journey defect recorded twice independently (HANDOVER 18 Jul: 'a brief explicitly enumerating THREE named priced options still triggers \"What alternatives are you weighing this against?\"'; ROADMAP 2.103, Codex live journey 28 Jul: 'alternatives explicitly supplied -> asked for alternatives; outcome+timeframe supplied -> asked again; two redundant clarify turns before any draft'). noreask-06 is the reproduction brief the 2.103 dispatch specified as MUST-NOT-re-ask. ask-07 is the false-positive control: a genuinely sparse brief MUST still ask.",
+  "no_reask_cases": [
+    {
+      "id": "reask-01-enumerated-priced-options",
+      "brief": "We must decide how to replace our ageing billing platform. We have three options: Vendor A at £180,000, Vendor B at £240,000, and an in-house build at £200,000. The goal is to cut support costs, and the replacement has to be live within this year.",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "LIVE-JOURNEY CASE (HANDOVER 18 Jul + ROADMAP 2.103). Three named, priced alternatives enumerated as a labelled list with no joining 'or'/'versus'. RED at the 2.103 baseline: the options battery required a joining word, so the intake asked 'What alternatives are you weighing this against?' over a brief that had just enumerated three of them."
+    },
+    {
+      "id": "reask-02-stated-deadline-in-six-months",
+      "brief": "We need to decide how to replace our ageing billing system. Budget is £200,000 and it must be live in six months. I am weighing building it in-house against buying a vendor platform.",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "The 2.103 reproduction brief with its horizon phrased 'in six months' instead of 'within six months'. RED at the baseline: the timeframe battery credited only the literal 'within ...' opener and the digit-anchored duration arm, so a word-form horizon behind any other preposition scored MISSING. Single-variable control against noreask-06, which differs by exactly one word."
+    },
+    {
+      "id": "reask-03-deadline-by-month-name",
+      "brief": "Should we renew the vendor contract or move to a competitor by March? The goal is to cut costs and roughly £80,000 is at stake.",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "A bare calendar-month deadline. RED at the baseline: 'by the end of March' matched the existing 'by (the )?end of' arm but the bare 'by March' did not, so the intake asked for a horizon the brief had stated."
+    },
+    {
+      "id": "reask-04-stated-window-word-form",
+      "brief": "The goal is to reduce churn. We have a six month window and £50,000 to spend. Should we rebuild onboarding in-house or buy a vendor tool?",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "A stated window in word form. RED at the baseline: the duration arm was digit-anchored on purpose (to exclude compound adjectives like 'four-day week'), which also excluded an explicit word-form window noun."
+    },
+    {
+      "id": "reask-05-success-stated-as-would-be",
+      "brief": "Success would be fewer than five failed invoices a week. Should we rebuild billing in-house or buy a vendor platform for around £200,000 this year?",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "The outcome half of the 2.103 report. RED at the baseline: the goal battery credited 'success looks like / means / is defined / is measured' but not the equally common 'success would be ...', so the intake asked 'What outcome would make this decision a success?' immediately after the user defined success."
+    },
+    {
+      "id": "noreask-06-billing-brief-as-briefed",
+      "brief": "We need to decide how to replace our ageing billing system. Budget is £200,000 and it must be live within six months. I am weighing building it in-house against buying a vendor platform.",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "GREEN at the 2.103 baseline and must stay green: the exact brief the 2.103 dispatch named as MUST-NOT-trigger-re-asking. Present as a regression guard, not as evidence of the defect."
+    },
+    {
+      "id": "ask-07-sparse-control-false-positive-guard",
+      "brief": "Help me decide what to do about our billing system.",
+      "supplied": [],
+      "expect": "ask_only_unsupplied",
+      "note": "FALSE-POSITIVE CONTROL. A genuinely sparse brief supplies nothing, so the intake MUST still ask. If a detector widening ever silences this case, the fix has traded the redundant-question defect for the never-asks baseline the whole capability was built to end."
+    },
+    {
+      "id": "mid-08-options-and-scale-only",
+      "brief": "Should we buy the £180,000 vendor platform or rebuild billing in-house for £200,000?",
+      "supplied": [
+        "options",
+        "quantities"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "MIDDLE CASE. Alternatives and scale are supplied; outcome and horizon genuinely are not. The intake must ask about goal and/or timeframe and must never ask about options or quantities. GREEN at the baseline; it guards the fix against over-widening in the other direction."
+    }
   ]
 }

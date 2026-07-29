@@ -14,11 +14,15 @@
  * no quantities / ambiguous scope"):
  *   - `goal`       — an explicit outcome/purpose marker ("the goal is…",
  *                    "in order to…", "to increase…").
- *   - `options`    — evidence of ≥2 alternatives ("X or Y", "versus",
- *                    "alternative", "instead of").
+ *   - `options`    — evidence of ≥2 alternatives, either JOINED ("X or Y",
+ *                    "versus", "alternative", "instead of") or ENUMERATED
+ *                    ("three options: A, B and C", a short-list, repeated
+ *                    "Option A … Option B" labels).
  *   - `quantities` — any magnitude signal (digits, currency, number words).
- *   - `timeframe`  — a horizon marker ("this year", "by Q3", "within…", or
- *                    a bare stated duration/runway like "14 months").
+ *   - `timeframe`  — a horizon marker ("this year", "by Q3", "by March",
+ *                    "within…"/"in six months"/"over the next two years",
+ *                    a bare stated duration/runway like "14 months", or a
+ *                    stated window like "a six month window").
  *
  * RELATIONSHIP TO `src/cee/signals/brief-signals.ts` (deliberate seam, not
  * an accidental twin): `computeBriefSignals` answers a DIFFERENT question —
@@ -113,9 +117,44 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     /\bwhat\s+matters\s+most\b/i,
     /\b(?:my|our)\s+(?:main\s+|top\s+|number one\s+|overriding\s+)?priority\s+(?:is|here is)\b/i,
     /\b(?:optimis|optimiz)(?:e|es|ed|ing)\s+for\b/i,
+    // SUCCESS-DEFINITION constructions the launch battery's `success …` arm
+    // missed. It credited "success looks like / means / is defined / is
+    // measured" but not the equally common future-conditional phrasing
+    // ("Success would be fewer than five failed invoices a week"), so a user
+    // who had just defined success was asked "What outcome would make this
+    // decision a success?" — the outcome half of ROADMAP 2.103. Anchored on
+    // the modal so a bare "success is important" cannot fire.
+    /\bsuccess\s+(?:would|will|should)\s+be\b/i,
   ],
   options: [
     /\b(?:versus|vs\.?|alternative(?:s|ly)?|either|instead of|rather than|compared? (?:to|with)|(?:choice|choos(?:e|ing)|decid(?:e|ing)) between|option[s]? (?:are|would be|include))\b/i,
+    // ENUMERATED alternatives — the ROADMAP 2.103 / HANDOVER 18 Jul defect.
+    // EVERY arm the launch battery shipped requires a JOINING WORD (or /
+    // versus / either / instead of / weighing … against), so a brief that
+    // LISTS its alternatives instead of joining them matched nothing:
+    // "We have three options: Vendor A at £180,000, Vendor B at £240,000,
+    // and an in-house build at £200,000" scored options-MISSING, and the
+    // intake asked "What alternatives are you weighing this against?" over a
+    // brief that had just enumerated three of them. Reproduced independently
+    // twice on live journeys (HANDOVER 18 Jul; ROADMAP 2.103, 28 Jul).
+    //
+    // PRECISION over recall is preserved by requiring the option-family
+    // NOUN: a bare comma list ("we sell in France, Spain and Italy") is not
+    // evidence of alternatives and still scores MISSING. `alternatives` is
+    // already covered by the bare-word arm above; it is listed here only so
+    // the enumeration shapes read as one rule.
+    /\b(?:options|alternatives|choices|candidates|contenders)\s*(?:are|were|would be|include|:|—|–)\s*\S/i,
+    // A COUNTED option set — "three options", "two candidates", "4 routes".
+    // The count itself is the evidence that ≥2 alternatives exist. Restricted
+    // to choice-set nouns; deliberately excludes generic entity nouns
+    // ("three vendors", "two teams") which carry no decision framing.
+    /\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:options|alternatives|choices|candidates|contenders|routes|paths|proposals|bids|quotes)\b/i,
+    // A short-list is a set of alternatives by definition.
+    /\bshort[- ]?list(?:s|ed)?\b/i,
+    // Repeated explicit option LABELS ("Option A … Option B", "Option 1 …
+    // Option 2"). Requires TWO occurrences within a bounded span, so a
+    // single "Option A looks fine" cannot satisfy the dimension alone.
+    /\boption\s+(?:[a-e]|one|two|three|1|2|3)\b[\s\S]{0,400}?\boption\s+(?:[a-e]|one|two|three|1|2|3)\b/i,
     // "weighing X against Y" — the weigh-verb construction names two
     // alternatives without an "or" (round-2 calibration, direction A).
     // Bounded gap so an unrelated "against" clauses away does not fire.
@@ -156,6 +195,34 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     // silently reproduces the never-asks baseline). The number-word durations
     // stay reachable only through the "within …" arm above, deliberately.
     /(?<!\d)\d{1,4}[\s-]*(?:week|month|quarter|year)s?\b/i,
+    // ROADMAP 2.103 — a WORD-FORM horizon behind any preposition other than
+    // the literal "within". The arm above is digit-anchored and the arm above
+    // THAT hard-codes the opener "within", so "it must be live in six months"
+    // scored timeframe-MISSING and the intake asked for a horizon the brief
+    // had just stated. This is the THIRD correction of this same class in
+    // this battery (the "14 months runway" and "profit in 2 years" fixes
+    // above are the first two) — the recurring error is assuming the ONE
+    // phrasing the fixture author happened to write.
+    //
+    // The FORWARD anchor is what keeps precision: the number-word must follow
+    // the preposition immediately, so a backward-looking "in the last three
+    // years" / "over the past two quarters" cannot fire (its "the" blocks the
+    // match), and the deliberate exclusion of bare compound adjectives
+    // ("four-day week", "two-year plan") is untouched — they carry no
+    // preposition.
+    /\b(?:in|over|across|within)\s+(?:a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)\s+(?:week|month|quarter|year)s?\b/i,
+    // The explicitly forward-looking form, which may carry a determiner:
+    // "over the next two years", "for the next three quarters".
+    /\b(?:in|over|across|within|for|during)\s+the\s+(?:next|coming)\s+(?:a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen|few)\s+(?:week|month|quarter|year)s?\b/i,
+    // A word-form duration attached to an explicit HORIZON NOUN — "a six
+    // month window", "an eighteen month runway". The noun is what makes this
+    // a decision horizon rather than a compound adjective, so the digit
+    // anchor is not needed and the "two-year plan" exclusion still holds
+    // (no horizon noun follows it).
+    /\b(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|eighteen)[\s-](?:week|month|quarter|year)[\s-](?:window|horizon|runway|deadline|timeline|period|programme|program)\b/i,
+    // A bare calendar-month deadline. "by the end of March" already matched
+    // the `by (?:the )?end of` arm at the top; the bare "by March" did not.
+    /\bby\s+(?:next\s+|early\s+|mid[- ]|late\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/i,
   ],
 };
 
