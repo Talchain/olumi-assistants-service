@@ -16,7 +16,7 @@
  * from a hand-typed model string.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { getAdapterWithResolution, resetAdapterCache, TASK_TO_CONFIG_KEY, ROUTER_ENV_ONLY_TASKS } from "../../src/adapters/llm/router.js";
 import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
