@@ -64,6 +64,18 @@ export type CeeTask =
   | "repair_graph"
   | "critique_graph"
   | "decision_review"
+  // Pass 2 of the two-pass validation pipeline — the INDEPENDENT REVIEWER that
+  // re-estimates every causal edge's parameters without seeing Pass 1's values
+  // (src/cee/validation-pipeline/). Added as a first-class task by ROADMAP 2.146:
+  // it was previously declared env-only in ROUTER_ENV_ONLY_TASKS, which meant an
+  // unset CEE_MODEL_VALIDATION fell through to the GLOBAL LLM_MODEL — i.e. the
+  // reviewer's identity became an accident, and if it resolved to the drafting
+  // family the "independent adversarial review" claim quietly weakened to
+  // "same-model blind re-estimate". Note this is the ONE routed name that needs a
+  // default: the router also maps the alias 'validate' → the same config key, but
+  // `getAdapter('validate')` has zero callers (scope: rg over src/), so that alias
+  // stays declared env-only rather than being given a default it can never use.
+  | "validate_graph"
   // V6 dual-draft M2 graph review. Model must be EXPLICITLY set via
   // CEE_MODEL_M2_REVIEW at activation (the dual-draft model-resolution gate
   // stays inert otherwise); this union entry exists so startup/admin model
@@ -138,6 +150,21 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   suggest_options: "gpt-5.2",  // Alias for options task
   critique_graph: "gpt-5.2",
   decision_review: "gpt-4.1-2025-04-14",  // registered pin of live CEE_MODEL_DECISION_REVIEW=gpt-4.1
+  // Validation Pass 2 — CROSS-PROVIDER ON PURPOSE (ROADMAP 2.146). Pass 1 (the
+  // drafter) is `draft_graph` above = claude-sonnet-4-6 (anthropic); this is
+  // o4-mini (openai, registered at config/models.ts:216 — provider openai, tier
+  // quality, enabled). Independence is the ONLY reason this task exists, so the
+  // default must not be able to collide with the drafting family. Reconciles with
+  // the intended model named in the pipeline's own header comments and in
+  // router.ts's env-only note. Overridable by CEE_MODEL_VALIDATION exactly like
+  // every other row here (router precedence step 3 > step 4).
+  //
+  // ⚠ Provider-mismatch caveat above applies IN OUR FAVOUR here: staging runs
+  // LLM_PROVIDER unset/openai, and this default is an openai model, so the
+  // router's task_default branch APPLIES it rather than skipping it. (An
+  // anthropic reviewer default would have been silently skipped on staging and
+  // fallen through to the global model — the exact failure this row closes.)
+  validate_graph: "o4-mini",
   // V6 dual-draft M2 review — display default only (D3 recommendation).
   // NEVER governs a live call: the dual-draft gate requires the explicit
   // CEE_MODEL_M2_REVIEW env override to match the resolved model.
