@@ -232,7 +232,40 @@ const ANALYSIS_TURN = {
 
 let factsByTurnRowId: Record<string, Array<Record<string, unknown>>> = {};
 
+/**
+ * DEGRADED-READ MODE — drives `provenance: 'fail_closed_truncated'`.
+ *
+ * Two conditions, both from the store: `readOk === false` and
+ * `windowTruncated === true`. `build-turn-context.ts:1037` returns
+ * `{fact: null, readOk: false}` when the store has NO `readNewestAnalysisFactFor`
+ * method at all ("absence of the method is the same as a failed read"), and
+ * `windowTruncated` is `prior_turns_total > prior_turns.length` — so a high
+ * `countTurns` against a one-turn window. With ZERO facts in the window as well,
+ * nothing is selected, and `readMayNameLeadingOptionVerdict` takes its
+ * `!readOk && windowTruncated` branch: withhold, with NO analysis proven to exist.
+ */
+let degradedAnalysisRead = false;
+
 function makeStore(): Record<string, unknown> {
+  if (degradedAnalysisRead) {
+    return {
+      append: async () => ({ id: `row-${randomUUID()}` }),
+      readRecent: async () => [ANALYSIS_TURN],
+      // Provably truncated: the scenario has far more turns than the window.
+      countTurns: async () => 25,
+      readFactsFor: async () => [],
+      readFactsWithTurnFor: async () => [],
+      // ⚠ `readNewestAnalysisFactFor` DELIBERATELY ABSENT — that is what makes
+      // `readOk` false without needing to throw.
+      loadGraph: async () => READY_GRAPH,
+      loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
+      ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
+      readMostRecentPendingActions: async () => [],
+      storeDraftGraph: async () => undefined,
+      invalidateScoped: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+      invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
+    };
+  }
   return {
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async (_id: string, limit: number = 20) => [ANALYSIS_TURN].slice(0, limit),
@@ -368,6 +401,11 @@ function permissionOnTheWire(body: Record<string, any>): unknown {
   return body._diagnostic_trace?.claim_safety?.may_name_leading_option;
 }
 
+/** WHICH branch produced the permission — the existence gate turns on this. */
+function provenanceOnTheWire(body: Record<string, any>): unknown {
+  return body._diagnostic_trace?.claim_safety?.verdict_provenance;
+}
+
 let priorTraceFlag: string | undefined;
 let events: Array<{ name: string; data: Record<string, any> }> = [];
 
@@ -406,6 +444,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       events.push({ name, data: data as Record<string, any> });
     });
     routeWithToolUseMock.mockReset();
+    degradedAnalysisRead = false;
     factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [withheldRunAnalysisFact()] };
   });
   afterEach(() => {
@@ -805,6 +844,40 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       // it". This assertion is what stops the gate being "simplified" back into
       // that shape.
       expect(provenanceProvesAnalysisExists('fail_closed_no_turn_context')).toBe(false);
+    });
+
+    it('⭐ WIRING: on a DEGRADED READ the guard drops the opening end-to-end', async () => {
+      // ⚠ THIS ARM EXISTS BECAUSE A MUTANT SURVIVED. Hardcoding
+      // `analysisExistenceProven = true` inside the guard left all 32 tests green:
+      // every other route-level fixture has a `scenario_fact` provenance, where
+      // existence genuinely IS proven, so the guard's USE of the predicate was
+      // unpinned even though the predicate itself was well covered. Same class as
+      // the `in_flow_gate_eligible` finding — the derivation was tested, the
+      // wiring was not.
+      degradedAnalysisRead = true;
+      routeWithToolUseMock.mockResolvedValue(converseTextOnly(LEAK_TEXT));
+      const { status, body } = await postTurn(app, NEUTRAL_MESSAGE);
+      expect(status).toBe(200);
+
+      // INSTRUMENT: the fixture really produced the degraded, existence-unproven
+      // verdict — otherwise this arm silently re-tests the scenario_fact path.
+      expect(
+        permissionOnTheWire(body),
+        'the degraded read must WITHHOLD, or the guard never runs',
+      ).toBe(false);
+      expect(
+        provenanceOnTheWire(body),
+        'and it must be the fail-closed-truncated branch specifically — the one where NO fact was selected',
+      ).toBe('fail_closed_truncated');
+
+      const finalText = String(body.assistant_text ?? '');
+      expect(textAssertsLeadingOption(finalText), 'the leader claim is still suppressed').toBe(false);
+      expect(
+        finalText,
+        'and NO existence claim ships: on this provenance the store could not tell us an analysis exists',
+      ).not.toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
+      expect(finalText).not.toContain(WITHHELD_EXPLANATION_OPENING);
+      expect(eventsNamed(CHOKEPOINT_EVENT)).toHaveLength(1);
     });
 
     it('the two openings are mutually exclusive by construction', () => {
