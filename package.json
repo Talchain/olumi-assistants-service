@@ -48,6 +48,7 @@
     "cee:demo": "tsx scripts/cee-demo-cli.ts",
     "cee:review": "tsx scripts/cee-review-cli.ts",
     "cee:prompt-lint": "tsx scripts/cee-prompt-lint.ts",
+    "prompts:archive-retired": "tsx scripts/archive-retired-prompts.ts",
     "cee:diagnostics": "tsx scripts/cee-diagnostics.ts",
     "config:validate": "tsx scripts/validate-config.ts",
     "config:validate:strict": "tsx scripts/validate-config.ts --strict",

@@ -55,7 +55,9 @@ export interface LLMExtractionResult {
 // Prompt Templates
 // ============================================================================
 
-const FACTOR_EXTRACTION_SYSTEM_PROMPT = `You are a quantitative analyst specializing in extracting numerical factors from business documents.
+// EXPORTED (content unchanged) so the prompt estate can report its hash —
+// see CODE_CONSTANT_PROMPTS in src/prompts/estate.ts.
+export const FACTOR_EXTRACTION_SYSTEM_PROMPT = `You are a quantitative analyst specializing in extracting numerical factors from business documents.
 
 Your task is to identify and extract all quantitative values from the provided brief that could be used in financial modeling or decision analysis.
 

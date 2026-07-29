@@ -445,7 +445,10 @@ const RAW_LLM_PREVIEW_MAX_CHARS = 500;
 // Compliance reminder appended to the user message for initial draft generation only.
 // Reinforces critical structural rules at the point of generation (not in the system prompt).
 // Controlled by CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED (default: true).
-const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
+// EXPORTED (content unchanged) so the estate drift check can assert this copy
+// stays byte-identical to the Anthropic adapter's — see
+// tests/unit/prompt-estate-drift.test.ts.
+export const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - Output valid JSON only (no comments, no text outside the JSON object)
 - Every outcome and risk needs an inbound path from a controllable factor
 - Every option needs a complete path to goal: option → controllable → outcome/risk → goal

@@ -12,9 +12,13 @@
  *   | CeeTaskIdSchema                  | src/prompts/schema.ts             | SSOT               |
  *   | PROMPT_TASKS                     | src/constants/prompt-tasks.ts     | DERIVED (guarded)  |
  *   | PROMPT_TASK_LABELS               | src/constants/prompt-tasks.ts     | DERIVED (guarded)  |
- *   | OPERATION_TO_TASK_ID             | src/adapters/llm/prompt-loader.ts | typed Record<string, CeeTaskId> — invalid values are a COMPILE error |
+ *   | OPERATION_TO_TASK_ID             | src/prompts/operations.ts         | typed Record<string, CeeTaskId> — invalid values are a COMPILE error. MOVED here from adapters/llm/prompt-loader.ts so the estate can derive from it without an import cycle |
  *   | registerDefaultPrompt(...) calls | src/prompts/defaults.ts           | typed CeeTaskId — invalid ids are a COMPILE error; COVERAGE guarded below |
- *   | TRACKED_KEYS                     | src/prompts/tracked.ts            | `satisfies readonly CeeTaskId[]` — deliberate subset, COMPILE-guarded |
+ *   | LIVE/REPORTED_PMS_TASKS          | src/prompts/estate.ts             | DERIVED from OPERATION_TASK_IDS minus two exception lists — guarded in prompt-estate-drift.test.ts |
+ *   | GATED / RETIRED_PMS_TASKS        | src/prompts/estate.ts             | hand-declared, but every drift mode REDs — see prompt-estate-drift.test.ts |
+ *   | TRACKED_KEYS (= CRITICAL_PMS_TASKS) | src/prompts/tracked.ts → estate.ts | `satisfies readonly LivePmsTask[]` — deliberate subset, COMPILE-guarded |
+ *   | STATUS_KEYS (= REPORTED_PMS_TASKS)  | src/prompts/tracked.ts → estate.ts | DERIVED — the reporting surface |
+ *   | DEFAULT_PROMPT_VERSIONS          | src/prompts/estate.ts             | one map; was DEFAULT_VERSIONS + FALLBACK_VERSIONS, two mirrors of one fact |
  *   | CeeTask / TASK_MODEL_DEFAULTS    | src/config/model-routing.ts       | separate vocabulary — guarded below |
  *
  * History: this suite previously existed but its entire sync block was
@@ -165,8 +169,9 @@ describe('prompt task registry', () => {
 
   describe('TRACKED_KEYS is a deliberate subset', () => {
     it('contains only real prompt tasks', () => {
-      // Compile-time guarded by `satisfies readonly CeeTaskId[]`; asserted at
-      // runtime too so a future `as` cast cannot slip past.
+      // Compile-time guarded by `satisfies readonly LivePmsTask[]` in
+      // src/prompts/estate.ts; asserted at runtime too so a future `as` cast
+      // cannot slip past.
       for (const key of TRACKED_KEYS) {
         expect(
           (PROMPT_TASKS as readonly string[]).includes(key),
