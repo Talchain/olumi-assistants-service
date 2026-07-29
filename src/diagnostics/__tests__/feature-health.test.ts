@@ -270,12 +270,42 @@ describe('feature health: live subsystems still report healthy', () => {
  * the file exists. Independent of the runtime probe (`fs` vs `import()`), so
  * the two mechanisms have to agree.
  */
-function producerFileExists(specifier: string): boolean {
+function specifierToRepoPath(specifier: string): string {
   const featureHealthModule = new URL('../feature-health.ts', import.meta.url);
-  const asJs = fileURLToPath(new URL(specifier, featureHealthModule));
+  return fileURLToPath(new URL(specifier, featureHealthModule));
+}
+
+function producerFileExists(specifier: string): boolean {
+  const asJs = specifierToRepoPath(specifier);
   const asTs = asJs.replace(/\.js$/, '.ts'); // dev/test tree is .ts, dist is .js
   return fs.existsSync(asJs) || fs.existsSync(asTs);
 }
+
+const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+
+/**
+ * The set of `src/` files deleted by `f957d6d8` — read from the record that was
+ * generated mechanically from that commit (see the file's own header for the
+ * regenerate command and for why recording an IMMUTABLE commit's file list is
+ * not a trap-12 mirror).
+ */
+function deletedByF957d6d8(): Set<string> {
+  const recordPath = fileURLToPath(new URL('./deleted-src-f957d6d8.txt', import.meta.url));
+  return new Set(
+    fs
+      .readFileSync(recordPath, 'utf8')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#')),
+  );
+}
+
+const moduleBackedDeclarations = () =>
+  FEATURE_DECLARATIONS.filter((d) => d.evidence.kind === 'producer_module').map((d) => ({
+    name: d.name,
+    specifier: d.evidence.kind === 'producer_module' ? d.evidence.specifier : '',
+    producesExport: d.evidence.kind === 'producer_module' ? d.evidence.producesExport : '',
+  }));
 
 describe('feature health: the verdicts are DERIVED, and drift fails loud', () => {
   it('every producer_module verdict agrees with an independent filesystem check', async () => {
@@ -284,25 +314,108 @@ describe('feature health: the verdicts are DERIVED, and drift fails loud', () =>
     const report = await checkFeatureHealth();
     const byName = new Map(report.checks.map((c) => [c.name, c]));
 
-    const moduleBacked = FEATURE_DECLARATIONS.filter(
-      (d) => d.evidence.kind === 'producer_module',
-    );
+    const moduleBacked = moduleBackedDeclarations();
     // Guard the guard: if this list empties, the assertion below is vacuous.
     expect(moduleBacked.length).toBeGreaterThanOrEqual(5);
 
     for (const declaration of moduleBacked) {
-      const specifier =
-        declaration.evidence.kind === 'producer_module' ? declaration.evidence.specifier : '';
-      const onDisk = producerFileExists(specifier);
+      const onDisk = producerFileExists(declaration.specifier);
       const reported = check(byName, declaration.name);
       expect(
         reported.healthy,
         `${declaration.name}: report says healthy=${reported.healthy} but ` +
-          `${specifier} ${onDisk ? 'EXISTS' : 'does NOT exist'} on disk. ` +
-          `Either the specifier is wrong (so the probe fails for the wrong reason) ` +
-          `or the module came back and the health verdict must be re-derived.`,
+          `${declaration.specifier} ${onDisk ? 'EXISTS' : 'does NOT exist'} on disk. ` +
+          `A present-but-unhealthy module means it failed to LOAD or lost its ` +
+          `producing export; an absent-but-healthy one should be impossible.`,
       ).toBe(onDisk);
     }
+  });
+
+  /**
+   * AMENDMENT 1 (adversarial review of PR #756). The agreement check above
+   * CANNOT catch a typo'd or stale specifier: a path that never existed is
+   * "absent" to both `import()` and `fs`, so they agree and the check passes
+   * with the right verdict for the wrong reason. The reviewer proved it —
+   * `…/extract.js` → `…/extractTYPO.js` left the suite 17/17 green — and the
+   * consequence is worse than untidy: a restored producer at the REAL path
+   * would report unhealthy forever, silently killing the self-healing property
+   * that is the whole point of `producer_module` evidence.
+   *
+   * So every specifier that names an absent path must name a path that was
+   * genuinely DELETED, cross-checked against the mechanically-derived record of
+   * `f957d6d8`. A typo is not in that record, so a typo REDs here.
+   *
+   * Why a record file and not `git` directly: no CI job in this repo sets
+   * `fetch-depth: 0` (`actions/checkout@v4` defaults to 1), so the deletion
+   * commit is not in CI's shallow clone. A git probe would either RED in CI or
+   * need a skip-escape — and a control that skips is a control that tests
+   * nothing (trap 13).
+   */
+  it('every ABSENT producer specifier names a path that was really deleted', () => {
+    const deleted = deletedByF957d6d8();
+
+    // Guard the guard twice: the record must have loaded, and it must be able
+    // to answer NO — otherwise "is it in the record?" proves nothing.
+    expect(deleted.size).toBeGreaterThan(100);
+    expect(deleted.has('src/orchestrator/brief-intelligence/extractTYPO.ts')).toBe(false);
+
+    const moduleBacked = moduleBackedDeclarations();
+    expect(moduleBacked.length).toBeGreaterThanOrEqual(5);
+
+    let absentCount = 0;
+    for (const declaration of moduleBacked) {
+      if (producerFileExists(declaration.specifier)) continue; // live producer
+      absentCount += 1;
+      const repoRelativeTs = path
+        .relative(REPO_ROOT, specifierToRepoPath(declaration.specifier))
+        .replace(/\.js$/, '.ts');
+      expect(
+        deleted.has(repoRelativeTs),
+        `${declaration.name}: specifier "${declaration.specifier}" resolves to ` +
+          `${repoRelativeTs}, which is absent from the tree AND absent from the ` +
+          `f957d6d8 deletion record — so it is a TYPO or a stale rename, not a ` +
+          `deleted producer. Left alone, this feature reports unhealthy forever ` +
+          `even after its real producer is restored.`,
+      ).toBe(true);
+    }
+    // The loop must have asserted at least once, or this test is vacuous.
+    // Deliberately >= 1 rather than >= 5: restoring one producer is legitimate
+    // and must not RED here (the RED-first tests and the partition control are
+    // what force a restoration to be re-derived). Zero means every producer is
+    // back and this pin has nothing left to check — revisit it then.
+    expect(
+      absentCount,
+      'no producer_module specifier is absent any more — every dead producer ' +
+        'has been restored, so this pin now checks nothing and should be revisited',
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  /**
+   * AMENDMENT 2 (same review). `import()` alone proved RESOLUTION, not
+   * production: gutting `grounding/index.ts` to `export {}` left the module
+   * resolvable and the report `healthy: true`, 17/17 green. The probe now
+   * requires the named producing export to be callable. This pins the live
+   * declaration's export name against the real module, so a rename in
+   * `grounding/index.ts` REDs here rather than going quietly false-green.
+   */
+  it('a live producer must actually EXPORT its declared producing symbol', async () => {
+    const live = [];
+    for (const declaration of moduleBackedDeclarations()) {
+      if (!producerFileExists(declaration.specifier)) continue;
+      live.push(declaration);
+      const mod = (await import(
+        specifierToRepoPath(declaration.specifier).replace(/\.js$/, '.ts')
+      )) as Record<string, unknown>;
+      expect(
+        typeof mod[declaration.producesExport],
+        `${declaration.name}: declared producing export ` +
+          `"${declaration.producesExport}" is not a callable in ` +
+          `${declaration.specifier}. Either the export was renamed (update the ` +
+          `declaration) or the module lost its producing surface.`,
+      ).toBe('function');
+    }
+    // Guard the guard: with no live module-backed declaration this proves nothing.
+    expect(live.length).toBeGreaterThanOrEqual(1);
   });
 
   /**
@@ -315,6 +428,16 @@ describe('feature health: the verdicts are DERIVED, and drift fails loud', () =>
    * `feature-health.ts`, whose evidence text quotes it. Any THIRD file
    * mentioning it REDs here. Read through Node's `fs` rather than `grep`,
    * which is blind to this repo's NUL-sentinel source files (trap 17).
+   *
+   * KNOWN HOLE, named rather than papered over (adversarial review of PR #756):
+   * this is a string match, so a caller could evade it by going through an
+   * alias re-exported from INSIDE the producer file — which is on the exclusion
+   * list — e.g. `export const track = trackEntityStates` there, then importing
+   * `track` elsewhere. Contrived enough to be worth a comment and not a code
+   * change: wiring entity memory up that way, rather than calling the function
+   * by name, would be a deliberate act. If it ever happens, the `no_producer`
+   * verdict below goes stale silently, which is the one failure mode this test
+   * exists to prevent.
    */
   it('entity_memory stays no_producer only while trackEntityStates has no caller', () => {
     const srcRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -370,7 +493,7 @@ describe('feature health: the verdicts are DERIVED, and drift fails loud', () =>
       if (c.enabled && !c.healthy) {
         expect(c.reason, `${c.name} is unhealthy with no stated cause`).toBeTruthy();
         expect(c.reason).toMatch(
-          /^(producer_module_unresolvable|runtime_state_absent|dependency_unsatisfied|no_producer):/,
+          /^(producer_module_unresolvable|producer_export_missing|runtime_state_absent|dependency_unsatisfied|no_producer):/,
         );
       }
     }

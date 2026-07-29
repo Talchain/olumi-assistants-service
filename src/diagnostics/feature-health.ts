@@ -26,10 +26,24 @@
  *
  *   - `runtime_state`   — an accessor proves the subsystem is loaded/active.
  *   - `producer_module` — the module that produces the feature's output must
- *     RESOLVE. Probed by dynamic `import()` at report time, so the verdict is
- *     derived from the tree, not from a list somebody has to remember to
- *     update: delete the module and this goes red on its own; re-add it and it
- *     goes green on its own.
+ *     resolve AND still export the producing symbol. Probed by dynamic
+ *     `import()` at report time, so the verdict is derived from the tree, not
+ *     from a list somebody has to remember to update: delete the module and
+ *     this goes red on its own; restore it and it goes green on its own.
+ *
+ *     ⚠ IT PROVES RESOLUTION + EXPORT PRESENCE, NOT PRODUCTION. It cannot know
+ *     whether the export is *called* on a live path (that is what `no_producer`
+ *     below is for), and it cannot know whether the export still does anything
+ *     useful. The export check exists because resolution alone was demonstrably
+ *     too weak: an adversarial review of PR #756 replaced `grounding/index.ts`
+ *     with `export {}` — module resolves, entire producing surface gone — and
+ *     the report stayed `healthy: true` (17/17 tests green). A resolution-only
+ *     probe was adequate then ONLY because the single live specifier happened to
+ *     be boot-critical (Node ESM named-import linking would have failed the boot
+ *     before anyone read the report) — an unwritten precondition that the next
+ *     lazily-imported or optional feature would have violated silently.
+ *     **So: when adding a `producer_module` check, name the export a consumer
+ *     actually imports — never a file that merely exists.**
  *   - `dependency`      — a configured external dependency.
  *   - `no_producer`     — statically verified dead: the producing symbol still
  *     exists but has no production caller, so a module probe would report a
@@ -56,10 +70,14 @@ export type FeatureEvidence =
   /** A runtime accessor proves the subsystem is loaded/active. */
   | { kind: 'runtime_state'; describes: string; observe: () => boolean }
   /**
-   * The module producing the feature's output must resolve.
+   * The module producing the feature's output must resolve AND export the
+   * named producing symbol as a function.
+   *
    * `specifier` is relative to THIS module and is probed with `import()`.
+   * `producesExport` must be a symbol a real consumer imports — see the
+   * resolution-vs-production warning in the module docstring.
    */
-  | { kind: 'producer_module'; specifier: string }
+  | { kind: 'producer_module'; specifier: string; producesExport: string }
   /** A configured external dependency the feature cannot run without. */
   | { kind: 'dependency'; describes: string; satisfied: () => boolean }
   /**
@@ -97,9 +115,31 @@ interface FeatureDeclaration {
 // ============================================================================
 
 /**
- * Exported for the derivation test, which independently re-derives every
- * `producer_module` specifier against the filesystem so a typo'd or stale
- * specifier fails loud instead of passing as "unresolvable".
+ * Exported for the derivation test in `__tests__/feature-health.test.ts`.
+ *
+ * WHAT THAT TEST CAN SEE:
+ *  - Whether each `producer_module` verdict agrees with an independent
+ *    `fs.existsSync` of the same specifier (so a module that is present but
+ *    fails to LOAD is caught — the two mechanisms disagree).
+ *  - Whether every specifier naming an ABSENT path is a path that genuinely
+ *    was deleted, cross-checked against the mechanically-derived deletion
+ *    record `__tests__/deleted-src-f957d6d8.txt`. **This is what makes a typo'd
+ *    or stale specifier fail loud.** Without it, a typo passes: a path that
+ *    never existed is "absent" to both mechanisms, so they agree and the check
+ *    reports the right verdict for the wrong reason — and a restored producer
+ *    would then report unhealthy forever. (Exactly this was demonstrated
+ *    against PR #756 by adversarial review: typo'd specifier, 17/17 green.)
+ *  - Whether a live specifier's named export is present and callable.
+ *
+ * WHAT IT CANNOT SEE:
+ *  - Whether `producesExport` is the RIGHT name for an absent producer. While
+ *    the module is gone there is nothing in the working tree to check it
+ *    against; the names below were read out of the deleted files themselves at
+ *    `f957d6d8^` and are cited per declaration. A wrong one is latent — it
+ *    would surface as a `producer_export_missing` verdict on the day the
+ *    producer is restored, not as a false green today.
+ *  - Whether a resolvable, exported producer is actually CALLED on a live path.
+ *    That is the `no_producer` kind's job, and it is pinned separately.
  */
 export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
   {
@@ -110,6 +150,8 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
     evidence: {
       kind: 'producer_module',
       specifier: '../orchestrator/brief-intelligence/extract.js',
+      // `extract.ts:440` at f957d6d8^ — the module's only producing function.
+      producesExport: 'extractBriefIntelligence',
     },
   },
   {
@@ -134,6 +176,9 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
     evidence: {
       kind: 'producer_module',
       specifier: '../orchestrator/dsk-coaching/index.js',
+      // `index.ts:1` at f957d6d8^ — the barrel's first re-export, and the
+      // function that assembled the `dsk_coaching` envelope payload.
+      producesExport: 'assembleDskCoachingItems',
     },
   },
   {
@@ -168,6 +213,10 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
     evidence: {
       kind: 'producer_module',
       specifier: '../grounding/index.js',
+      // `index.ts:40`, and one of the three symbols the live consumer imports
+      // (`grounding/process-attachments.ts:11-15`) — a real consumed producer,
+      // not a file that merely exists.
+      producesExport: 'extractTextFromPdf',
     },
   },
   {
@@ -179,6 +228,8 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
     evidence: {
       kind: 'producer_module',
       specifier: '../orchestrator/prompt-zones/zone2-blocks.js',
+      // `zone2-blocks.ts:490` at f957d6d8^ — resolved the active Zone 2 blocks.
+      producesExport: 'getActiveBlocks',
     },
   },
   {
@@ -191,6 +242,8 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
     evidence: {
       kind: 'producer_module',
       specifier: '../orchestrator/pipeline/pipeline.js',
+      // `pipeline.ts:55` at f957d6d8^ — the five-phase pipeline's entry point.
+      producesExport: 'executePipeline',
     },
   },
   {
@@ -203,6 +256,9 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
     evidence: {
       kind: 'producer_module',
       specifier: '../orchestrator/intent-gate.js',
+      // `intent-gate.ts:723` at f957d6d8^ — the brief-detection heuristic
+      // itself. Zero hits repo-wide at this tip.
+      producesExport: 'looksLikeDecisionBrief',
     },
   },
 ] as const;
@@ -212,23 +268,43 @@ export const FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
 // ============================================================================
 
 /**
- * Does the named module resolve and load from HERE?
+ * Does the named module resolve and load from HERE, and does it still export
+ * the producing symbol as a callable?
  *
  * Deliberately a real `import()`, not a filesystem stat: it proves the module
  * loads (its own imports resolve too), and it resolves the specifier the same
  * way production code would. Every live specifier below is already in the
- * server's static import graph, so this adds no load-order side effects.
+ * server's static import graph, so this adds no load-order side effects — see
+ * the module docstring for why that precondition matters and must hold for any
+ * future declaration.
+ *
+ * The export check is the difference between "a file is here" and "the producer
+ * is here". Resolution alone let a module gutted to `export {}` report healthy.
  */
 async function probeProducerModule(
   specifier: string,
-): Promise<{ ok: boolean; detail?: string }> {
+  producesExport: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  let mod: Record<string, unknown>;
   try {
-    await import(specifier);
-    return { ok: true };
+    mod = (await import(specifier)) as Record<string, unknown>;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { ok: false, detail: message.split('\n')[0] };
+    return {
+      ok: false,
+      reason: `producer_module_unresolvable: ${specifier} (${message.split('\n')[0]})`,
+    };
   }
+  if (typeof mod[producesExport] !== 'function') {
+    return {
+      ok: false,
+      reason:
+        `producer_export_missing: ${specifier} resolves but does not export ` +
+        `a callable \`${producesExport}\` (got ${typeof mod[producesExport]}) — ` +
+        `the module is present, the producer is not`,
+    };
+  }
+  return { ok: true };
 }
 
 async function evaluate(
@@ -239,17 +315,8 @@ async function evaluate(
       return evidence.observe()
         ? { ok: true }
         : { ok: false, reason: `runtime_state_absent: ${evidence.describes}` };
-    case 'producer_module': {
-      const probe = await probeProducerModule(evidence.specifier);
-      return probe.ok
-        ? { ok: true }
-        : {
-            ok: false,
-            reason:
-              `producer_module_unresolvable: ${evidence.specifier}` +
-              (probe.detail ? ` (${probe.detail})` : ''),
-          };
-    }
+    case 'producer_module':
+      return probeProducerModule(evidence.specifier, evidence.producesExport);
     case 'dependency':
       return evidence.satisfied()
         ? { ok: true }

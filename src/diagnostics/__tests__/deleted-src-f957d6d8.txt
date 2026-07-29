@@ -1,0 +1,156 @@
+# Files deleted from src/ by commit f957d6d8 — "chore(cee): delete dead V1
+# orchestrator belt (~96.5k LOC)" (#615, 2026-07-22).
+#
+# WHY THIS FILE EXISTS
+# src/diagnostics/feature-health.ts points five `producer_module` health checks
+# at producer modules that this commit deleted. A specifier naming an absent
+# path is UNFALSIFIABLE on its own: a typo'd or stale path is "absent" too, so
+# the check would report the feature unhealthy FOREVER — even after the real
+# producer came back — and no test would notice. (Found by adversarial review of
+# PR #756: typo'd specifier -> 17/17 green.)
+#
+# This record closes that hole. Every absent specifier must appear here, so a
+# typo REDs in `__tests__/feature-health.test.ts`.
+#
+# WHY IT IS NOT A HAND-MAINTAINED MIRROR (CLAUDE.md trap 12)
+# A mirror rots because it tracks a MOVING reality. This records the file list
+# of ONE IMMUTABLE COMMIT — f957d6d8's deletion set cannot change, so this file
+# cannot go stale. It is also not hand-transcribed: generated mechanically, so
+# a hand-written specifier is checked against a machine-derived list and a typo
+# in either one fails.
+#
+# CI NOTE — why the test reads this instead of asking git directly:
+# `actions/checkout@v4` defaults to fetch-depth 1 and no CI job here sets
+# fetch-depth: 0, so the deletion commit is NOT in CI's shallow clone. A
+# git-history probe would either RED in CI or need a skip-escape, and a control
+# that skips is a control that tests nothing (trap 13).
+#
+# REGENERATE (requires full history; must produce this file byte-for-byte):
+#   git show --diff-filter=D --name-only --pretty=format: f957d6d8 \
+#     | rg '^src/.*\.ts$' | sort -u
+src/middleware/rate-limit.ts
+src/orchestrator-v5/coaching/__tests__/draft-coaching-call-sites.test.ts
+src/orchestrator-v5/context/__tests__/trust-spine-constraint-coach-egress.test.ts
+src/orchestrator-v5/routing/__tests__/robustness-verdict-routing.matrix.test.ts
+src/orchestrator/analysis-inputs/assemble.ts
+src/orchestrator/analysis-state.ts
+src/orchestrator/brief-intelligence/extract.ts
+src/orchestrator/brief-intelligence/format.ts
+src/orchestrator/brief-intelligence/primary-gap.ts
+src/orchestrator/context-fabric/index.ts
+src/orchestrator/context-fabric/profiles.ts
+src/orchestrator/context-fabric/renderer.ts
+src/orchestrator/context-fabric/token-estimator.ts
+src/orchestrator/context-fabric/types.ts
+src/orchestrator/context/context-hash.ts
+src/orchestrator/context/entity-matcher.ts
+src/orchestrator/context/event-log-summary.ts
+src/orchestrator/deterministic/action-failure.ts
+src/orchestrator/deterministic/action-tool-mapping.ts
+src/orchestrator/deterministic/actions/add-constraint.ts
+src/orchestrator/deterministic/actions/add-factor.ts
+src/orchestrator/deterministic/actions/add-option.ts
+src/orchestrator/deterministic/actions/adjust-edge-strength.ts
+src/orchestrator/deterministic/actions/challenge-assumption.ts
+src/orchestrator/deterministic/actions/compare-options.ts
+src/orchestrator/deterministic/actions/draft-graph.ts
+src/orchestrator/deterministic/actions/edit-graph.ts
+src/orchestrator/deterministic/actions/explain-result.ts
+src/orchestrator/deterministic/actions/generate-artefact.ts
+src/orchestrator/deterministic/actions/registry.ts
+src/orchestrator/deterministic/actions/remove-factor.ts
+src/orchestrator/deterministic/actions/run-analysis.ts
+src/orchestrator/deterministic/actions/run-premortem.ts
+src/orchestrator/deterministic/actions/set-factor-value.ts
+src/orchestrator/deterministic/actions/set-goal-target.ts
+src/orchestrator/deterministic/actions/what-would-flip.ts
+src/orchestrator/deterministic/analysis-cache.ts
+src/orchestrator/deterministic/chip-builder-v4.ts
+src/orchestrator/deterministic/chip-engine.ts
+src/orchestrator/deterministic/confirmation-flow.ts
+src/orchestrator/deterministic/entity-resolver.ts
+src/orchestrator/deterministic/history-filter-v4.ts
+src/orchestrator/deterministic/history-sanitiser.ts
+src/orchestrator/deterministic/intent-gates.ts
+src/orchestrator/deterministic/llm-prompt.ts
+src/orchestrator/deterministic/mutation-health.ts
+src/orchestrator/deterministic/pipeline-v4.ts
+src/orchestrator/deterministic/prompt-audit.ts
+src/orchestrator/deterministic/prompt-builder-v2.ts
+src/orchestrator/deterministic/response-normaliser.ts
+src/orchestrator/deterministic/sanitise-output.ts
+src/orchestrator/deterministic/stream-handler-v4.ts
+src/orchestrator/deterministic/system-event-handler.ts
+src/orchestrator/deterministic/tool-builder.ts
+src/orchestrator/deterministic/turn-context.ts
+src/orchestrator/deterministic/universal-honesty-gate.ts
+src/orchestrator/dsk-coaching/assemble-coaching-items.ts
+src/orchestrator/dsk-coaching/bias-alerts.ts
+src/orchestrator/dsk-coaching/index.ts
+src/orchestrator/dsk-coaching/technique-recommendations.ts
+src/orchestrator/guidance/post-analysis.ts
+src/orchestrator/guidance/post-draft.ts
+src/orchestrator/idempotency.ts
+src/orchestrator/intent-gate.ts
+src/orchestrator/lookup/analysis-lookup.ts
+src/orchestrator/moe-spike/call-specialist.ts
+src/orchestrator/moe-spike/compare.ts
+src/orchestrator/moe-spike/persist.ts
+src/orchestrator/moe-spike/prompt.ts
+src/orchestrator/moe-spike/schemas.ts
+src/orchestrator/parallel-generate.ts
+src/orchestrator/pipeline/llm-client.ts
+src/orchestrator/pipeline/phase1-enrichment/archetype-detector.ts
+src/orchestrator/pipeline/phase1-enrichment/conversational-state.ts
+src/orchestrator/pipeline/phase1-enrichment/dsk-loader.ts
+src/orchestrator/pipeline/phase1-enrichment/index.ts
+src/orchestrator/pipeline/phase1-enrichment/progress-tracker.ts
+src/orchestrator/pipeline/phase1-enrichment/stage-inference.ts
+src/orchestrator/pipeline/phase1-enrichment/stuck-detector.ts
+src/orchestrator/pipeline/phase1-enrichment/user-profile-loader.ts
+src/orchestrator/pipeline/phase2-specialists/index.ts
+src/orchestrator/pipeline/phase3-llm/index.ts
+src/orchestrator/pipeline/phase3-llm/prompt-assembler.ts
+src/orchestrator/pipeline/phase3-llm/response-parser.ts
+src/orchestrator/pipeline/phase4-tools/index.ts
+src/orchestrator/pipeline/phase5-validation/claims-ledger.ts
+src/orchestrator/pipeline/phase5-validation/envelope-assembler.ts
+src/orchestrator/pipeline/phase5-validation/index.ts
+src/orchestrator/pipeline/phase5-validation/observation-writer.ts
+src/orchestrator/pipeline/phase5-validation/progress-classifier.ts
+src/orchestrator/pipeline/phase5-validation/science-validator.ts
+src/orchestrator/pipeline/phase5-validation/stage-transition.ts
+src/orchestrator/pipeline/pipeline-stream.ts
+src/orchestrator/pipeline/pipeline.ts
+src/orchestrator/pipeline/route-v2.ts
+src/orchestrator/pipeline/stream-events.ts
+src/orchestrator/pipeline/streaming-xml-stripper.ts
+src/orchestrator/prompt-assembly.ts
+src/orchestrator/prompt-zones/assemble.ts
+src/orchestrator/prompt-zones/profiles.ts
+src/orchestrator/prompt-zones/validate.ts
+src/orchestrator/prompt-zones/zone2-blocks.ts
+src/orchestrator/request-normalization.ts
+src/orchestrator/route-schemas.ts
+src/orchestrator/route-stream.ts
+src/orchestrator/route.ts
+src/orchestrator/system-event-router.ts
+src/orchestrator/tools/analysis-blocks.ts
+src/orchestrator/tools/dispatch.ts
+src/orchestrator/tools/explain-results.ts
+src/orchestrator/tools/gap-detection.ts
+src/orchestrator/tools/generate-brief.ts
+src/orchestrator/tools/likert-scale.ts
+src/orchestrator/tools/registry.ts
+src/orchestrator/tools/research-client.ts
+src/orchestrator/tools/research-topic.ts
+src/orchestrator/tools/run-analysis.ts
+src/orchestrator/tools/run-exercise.ts
+src/orchestrator/tools/stage-policy.ts
+src/orchestrator/tools/undo-patch.ts
+src/orchestrator/turn-contract.ts
+src/orchestrator/turn-handler.ts
+src/orchestrator/utils/flatten-interventions.ts
+src/routes/assist.v1.edit-graph.ts
+src/schemas/analysis-inputs-summary.ts
+src/schemas/brief-intelligence.ts
