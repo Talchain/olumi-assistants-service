@@ -65,6 +65,7 @@ import {
   assertWitnessesAreDiscriminating,
   evaluateFloors,
   makeCompressorArm,
+  lostFactIds,
   makePlantedArm,
   normaliseForDetection,
   renderModelProvenanceHeader,
@@ -168,8 +169,13 @@ beforeAll(async () => {
       budgetNewest,
     ),
     '',
-    ...['ARM A (faithful)', 'ARM B1 (oldest-first)'].flatMap((label, idx) => {
-      const passes = (idx === 0 ? faithful.arm_passes : budgetOldest.arm_passes) ?? [];
+    // Explicit [label, run] pairs: the previous form paired them POSITIONALLY via
+    // flatMap+idx, so reordering the labels would have mislabelled the data.
+    ...([
+      ['ARM A (faithful)', faithful],
+      ['ARM B1 (oldest-first)', budgetOldest],
+    ] as const).flatMap(([label, run]) => {
+      const passes = run.arm_passes ?? [];
       return [
         `#### per-pass accounting — ${label}`,
         '',
@@ -604,6 +610,8 @@ describe('MEASUREMENT — ARM B: what budget pressure costs, and what notices', 
       'the budget arm dropped nothing — either the fixture shrank below the target ' +
         '(see MEM-FLOOR 5) or the drop rule stopped firing',
     ).toBeGreaterThan(0);
+    // ...and the drop reached the MEASUREMENT, not just the arm's own bookkeeping.
+    expect(lostFactIds(budgetOldest, MEASURE_TURNS[0]!).length).toBeGreaterThan(0);
   });
 
   it('a budget drop is SILENT: nothing rejects, counts, or discloses it', () => {
@@ -626,23 +634,15 @@ describe('MEASUREMENT — ARM B: what budget pressure costs, and what notices', 
     // WHEN THE ESTATE GAINS A DROP DISCLOSURE, this expectation flips and this
     // block becomes a floor. It is written as the measurement it is today, not
     // as an approval of the behaviour.
-    const lost = at(budgetOldest, MEASURE_TURNS[0]!).facts.filter(
-      (f) => f.stated_at_turn !== null && !f.retained_in_summary,
-    );
     expect(
-      lost.length,
+      lostFactIds(budgetOldest, MEASURE_TURNS[0]!).length,
       'the whole point: facts were lost and the system said nothing',
     ).toBeGreaterThan(0);
   });
 
   it('WHICH fact a user loses is decided by the drop ORDER, which nothing constrains', () => {
-    const lostIn = (r: RetentionRunResult): string[] =>
-      at(r, MEASURE_TURNS[0]!)
-        .facts.filter((f) => f.stated_at_turn !== null && !f.retained_in_summary)
-        .map((f) => f.id)
-        .sort();
-    const oldest = lostIn(budgetOldest);
-    const newest = lostIn(budgetNewest);
+    const oldest = lostFactIds(budgetOldest, MEASURE_TURNS[0]!);
+    const newest = lostFactIds(budgetNewest, MEASURE_TURNS[0]!);
     expect(oldest.length).toBeGreaterThan(0);
     expect(newest.length).toBeGreaterThan(0);
     expect(
@@ -658,13 +658,10 @@ describe('MEASUREMENT — ARM B: what budget pressure costs, and what notices', 
     // the regen re-derives the same over-budget input and drops again.
     const regenTurn = MEASURE_TURNS.find((t) => t % SUMMARY_REGEN_INTERVAL === 0)!;
     const incrementalTurn = MEASURE_TURNS.find((t) => t % SUMMARY_REGEN_INTERVAL !== 0)!;
-    const lostAt = (turn: number): string[] =>
-      at(budgetOldest, turn)
-        .facts.filter((f) => f.stated_at_turn !== null && !f.retained_in_summary)
-        .map((f) => f.id)
-        .sort();
     expect(at(budgetOldest, regenTurn).stored_generator).toBe('regen');
-    expect(lostAt(regenTurn).length).toBeGreaterThan(0);
-    expect(lostAt(regenTurn)).toEqual(lostAt(incrementalTurn));
+    expect(lostFactIds(budgetOldest, regenTurn).length).toBeGreaterThan(0);
+    expect(lostFactIds(budgetOldest, regenTurn)).toEqual(
+      lostFactIds(budgetOldest, incrementalTurn),
+    );
   });
 });

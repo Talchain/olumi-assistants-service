@@ -63,14 +63,7 @@ import {
   ROLLING_SUMMARY_SLOT_LABELS,
   ROLLING_SUMMARY_SLOTS,
 } from '../../../src/orchestrator-v5/rolling-summary/summary-types.js';
-import type {
-  RollingSummary,
-  RollingSummarySlot,
-} from '../../../src/orchestrator-v5/rolling-summary/summary-types.js';
-import type {
-  RollingSummaryStorePort,
-  UpsertRollingSummaryOutcome,
-} from '../../../src/orchestrator-v5/rolling-summary/store-adapter.js';
+import type { RollingSummarySlot } from '../../../src/orchestrator-v5/rolling-summary/summary-types.js';
 import type { SummariserModel } from '../../../src/orchestrator-v5/rolling-summary/summariser.js';
 import { assembleContextPackWithSummary } from '../../../src/orchestrator-v5/context/context-pack-assembler.js';
 import type { AssembleContextPackInput } from '../../../src/orchestrator-v5/context/context-pack-assembler.js';
@@ -78,6 +71,17 @@ import { CONTEXT_PACK_RECENT_TURNS_CAP } from '../../../src/orchestrator-v5/cont
 import { buildUserMessage } from '../../../src/orchestrator-v5/routing/route-with-tool-use.js';
 import type { SessionTurnWithContent } from '../../../src/orchestrator-v5/session/conversation-content.js';
 import { setTestSink } from '../../../src/utils/telemetry.js';
+// Shared test-support, imported NOT copied — the same direction the src-side
+// suites already take (`src/**/__tests__/*.test.ts` → `tests/fixtures|utils`).
+// `makeSessionTurnRow` owns the COMPLETE row shape: the vendored
+// `SessionTurnSchema` is `.strict()`-parsed on the read path and a hand-rolled
+// partial row is silently DROPPED, which here would mean the retention table
+// measured a shorter conversation than the fixture describes.
+// `MonotonicRollingSummaryStoreFake` owns the COMPOSITE (created_at, turn_id,
+// version) write guard; this file previously compared `created_at` alone, a
+// strictly weaker ordering than the unit suites pin.
+import { makeSessionTurnRow } from '../../../tests/utils/mock-session-store.js';
+import { MonotonicRollingSummaryStoreFake } from '../../../tests/utils/rolling-summary-store-fake.js';
 
 // ---------------------------------------------------------------------------
 // Fixture shape
@@ -182,9 +186,25 @@ export function normaliseForDetection(raw: string): string {
  *    fixture, in both directions, at load time.
  */
 export function witnessPresent(haystack: string, witness: readonly string[]): boolean {
-  if (witness.length === 0) return false;
-  const h = normaliseForDetection(haystack);
-  return witness.every((w) => h.includes(normaliseForDetection(w)));
+  return witnessPresentIn(normaliseForDetection(haystack), witness.map(normaliseForDetection));
+}
+
+/**
+ * The comparison itself, over ALREADY-NORMALISED inputs.
+ *
+ * Exists because `witnessPresent` re-normalised the same haystack once per fact:
+ * 3 haystacks x 11 facts x 5 measured runs is ~880 normalisations where ~51
+ * distinct ones suffice, and each walks the string four times for thousands-
+ * separators alone. Callers that measure many facts against the same text
+ * normalise once and call this; `witnessPresent` stays as the one-shot wrapper so
+ * its unit pins keep testing the same predicate both paths use.
+ */
+export function witnessPresentIn(
+  normalisedHaystack: string,
+  normalisedWitness: readonly string[],
+): boolean {
+  if (normalisedWitness.length === 0) return false;
+  return normalisedWitness.every((w) => normalisedHaystack.includes(w));
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +344,27 @@ export function splitStatements(blob: string): { statements: string[]; stamp: st
 export const DURABILITY_MARKER_RE =
   /\b(?:must|cannot|can not|no more than|no earlier than|no later than|at least|cap|ceiling|budget|deadline|prefer|prefers|preferred|correction|non-negotiable|only if|never|do not want)\b/i;
 
+/**
+ * Render the four-slot contract `parseSummaryOutput` enforces.
+ *
+ * ONE definition for every summariser this module builds. It was duplicated
+ * between the compressor arms and `makePlantedArm`, which is the shape of bug
+ * that matters most here: drift would make the CONTROL arm exercise a layout the
+ * measured arm never emits, so a control could pass against a shape the real run
+ * could not produce. Slot ORDER and LABELS are derived from the production
+ * constants, not restated.
+ */
+export function renderSlots(slots: {
+  readonly FRAME: string;
+  readonly CONSTRAINTS: string;
+  readonly RESOLVED?: string;
+  readonly OPEN?: string;
+}): string {
+  return ROLLING_SUMMARY_SLOTS.map(
+    (slot) => `${ROLLING_SUMMARY_SLOT_LABELS[slot]}: ${slots[slot] ?? '(none)'}`,
+  ).join('\n');
+}
+
 export interface CompressorOptions {
   /**
    * Character budget the arm respects by DROPPING statements, mirroring the
@@ -458,12 +499,7 @@ export function makeCompressorArm(opts: CompressorOptions): CompressorArm {
         return parts.length > 0 ? parts.join(' ') : '(none)';
       };
       const render = (keptCarried: readonly string[], keptFresh: readonly string[]): string =>
-        [
-          `${ROLLING_SUMMARY_SLOT_LABELS.FRAME}: ${frame}`,
-          `${ROLLING_SUMMARY_SLOT_LABELS.CONSTRAINTS}: ${renderConstraints(keptCarried, keptFresh)}`,
-          `${ROLLING_SUMMARY_SLOT_LABELS.RESOLVED}: (none)`,
-          `${ROLLING_SUMMARY_SLOT_LABELS.OPEN}: (none)`,
-        ].join('\n');
+        renderSlots({ FRAME: frame, CONSTRAINTS: renderConstraints(keptCarried, keptFresh) });
 
       const keptCarried = [...carried];
       const keptFresh = [...fresh];
@@ -519,12 +555,7 @@ export function makePlantedArm(slots: {
   readonly OPEN?: string;
   readonly verbatimFromFixture: boolean;
 }): RetentionSummariser {
-  const text = [
-    `${ROLLING_SUMMARY_SLOT_LABELS.FRAME}: ${slots.FRAME}`,
-    `${ROLLING_SUMMARY_SLOT_LABELS.CONSTRAINTS}: ${slots.CONSTRAINTS}`,
-    `${ROLLING_SUMMARY_SLOT_LABELS.RESOLVED}: ${slots.RESOLVED ?? '(none)'}`,
-    `${ROLLING_SUMMARY_SLOT_LABELS.OPEN}: ${slots.OPEN ?? '(none)'}`,
-  ].join('\n');
+  const text = renderSlots(slots);
   return {
     verbatimByConstruction: slots.verbatimFromFixture,
     summarise: async () => ({ text }),
@@ -538,26 +569,8 @@ export function makePlantedArm(slots: {
 const SCENARIO = 'aaaaaaaa-1111-4000-8000-000000000000';
 const USER_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
-/** Monotonic in-memory store: the real port, the real write ordering. */
-class InMemoryMonotonicStore implements RollingSummaryStorePort {
-  stored: RollingSummary | null = null;
-  loadCalls = 0;
-  async loadSummary(): Promise<RollingSummary | null> {
-    this.loadCalls += 1;
-    return this.stored;
-  }
-  async upsertSummary(_id: string, s: RollingSummary): Promise<UpsertRollingSummaryOutcome> {
-    const priorWatermark = this.stored?.updated_turn_created_at ?? '';
-    if (priorWatermark !== '' && s.updated_turn_created_at < priorWatermark) {
-      return { applied: false, regressed: true, current_watermark: priorWatermark };
-    }
-    this.stored = s;
-    return { applied: true, regressed: false, current_watermark: s.updated_turn_created_at };
-  }
-}
-
 function buildTurn(n: number, user: string, assistant: string): SessionTurnWithContent {
-  return {
+  return makeSessionTurnRow({
     id: `row-${n}`,
     scenario_id: SCENARIO,
     user_id: USER_ID,
@@ -567,16 +580,18 @@ function buildTurn(n: number, user: string, assistant: string): SessionTurnWithC
     // provenance channel carried zero information — a stamp regression was
     // undetectable here. Pinned by MEM-FLOOR 5's stamp-distinctness assertion.
     turn_id: `${String(n).padStart(8, '0')}-1111-4000-8000-${String(n).padStart(12, '0')}`,
+    // Both halves of the SessionTurn biconditional
+    // (`turn_class === 'handler'` ⇔ `handler_id !== null`) are overridden
+    // together — the shared helper's docstring makes that the caller's job, and
+    // its defaults describe a `handler` turn, which these conversational turns
+    // are not.
     turn_class: 'direct_answer',
     handler_id: null,
     request_hash: `sha256:memret-turn-${n}`,
-    response_emitted: true,
-    llm_calls_used: 1,
-    duration_ms: 100,
     created_at: new Date(Date.UTC(2026, 6, 30, 9, n, 0)).toISOString(),
     user_message: user,
     assistant_message: assistant,
-  };
+  });
 }
 
 export interface FactReading {
@@ -660,7 +675,7 @@ export async function runRetentionEval(args: {
   const lastTurn = Math.max(...measureAt);
 
   const all = kase.turns.map((t) => buildTurn(t.n, t.user, t.assistant));
-  const store = new InMemoryMonotonicStore();
+  const store = new MonotonicRollingSummaryStoreFake();
 
   const events: SummaryUpdatedEvent[] = [];
   let telemetryObserved = false;
@@ -679,9 +694,16 @@ export async function runRetentionEval(args: {
     });
     telemetryObserved = true;
   } catch {
-    // setTestSink refuses outside a test env, by design.
-    telemetryObserved = false;
+    // setTestSink refuses outside a test env, by design. `telemetryObserved`
+    // stays at its initial false, which is what `telemetry_observed` reports —
+    // re-assigning it here only looked like handling.
   }
+
+  // eff-8: normalise each fact's witness ONCE for the whole run rather than
+  // once per fact per haystack per measurement.
+  const normalisedWitness = new Map<string, readonly string[]>(
+    kase.facts.map((f) => [f.id, f.witness.map(normaliseForDetection)] as const),
+  );
 
   const measurements: RetentionMeasurement[] = [];
   try {
@@ -701,7 +723,9 @@ export async function runRetentionEval(args: {
       });
 
       if (!measureAt.includes(n)) continue;
-      measurements.push(await measureInjectedContext(kase, newestFirst, store, windowDepth, n));
+      measurements.push(
+        await measureInjectedContext(kase, normalisedWitness, newestFirst, store, windowDepth, n),
+      );
     }
   } finally {
     if (telemetryObserved) setTestSink(null);
@@ -727,8 +751,9 @@ export async function runRetentionEval(args: {
 
 async function measureInjectedContext(
   kase: RetentionCase,
+  normalisedWitness: ReadonlyMap<string, readonly string[]>,
   newestFirst: readonly SessionTurnWithContent[],
-  store: InMemoryMonotonicStore,
+  store: MonotonicRollingSummaryStoreFake,
   windowDepth: number,
   atTurn: number,
 ): Promise<RetentionMeasurement> {
@@ -759,6 +784,10 @@ async function measureInjectedContext(
 
   const sectionText = outcome.section?.text ?? '';
   const windowJson = JSON.stringify(contextPack.conversation);
+  // eff-8: three haystacks, normalised once, reused across every fact.
+  const nSection = normaliseForDetection(sectionText);
+  const nWindow = normaliseForDetection(windowJson);
+  const nPrompt = normaliseForDetection(prompt);
   const stored = store.stored;
 
   const durableEntries: Record<string, number> = {};
@@ -785,15 +814,18 @@ async function measureInjectedContext(
     history_capped: stored?.history_capped === true,
     durable_entries_per_slot: durableEntries,
     statements_per_slot: statements,
-    facts: kase.facts.map((f) => ({
-      id: f.id,
-      kind: f.kind,
-      stated_at_turn: f.stated_at_turn,
-      floor: f.floor,
-      retained_in_summary: witnessPresent(sectionText, f.witness),
-      present_in_verbatim_window: witnessPresent(windowJson, f.witness),
-      present_in_prompt: witnessPresent(prompt, f.witness),
-    })),
+    facts: kase.facts.map((f) => {
+      const w = normalisedWitness.get(f.id) ?? f.witness.map(normaliseForDetection);
+      return {
+        id: f.id,
+        kind: f.kind,
+        stated_at_turn: f.stated_at_turn,
+        floor: f.floor,
+        retained_in_summary: witnessPresentIn(nSection, w),
+        present_in_verbatim_window: witnessPresentIn(nWindow, w),
+        present_in_prompt: witnessPresentIn(nPrompt, w),
+      };
+    }),
   };
 }
 
@@ -910,23 +942,31 @@ export function evaluateFloors(
  */
 export function assertWitnessesAreDiscriminating(kase: RetentionCase): void {
   const problems: string[] = [];
+  // eff-8: the 2N turn strings are compared against every fact, so normalise them
+  // (and each witness) once instead of 2N x facts times.
+  const turns = kase.turns.map((t) => ({
+    n: t.n,
+    user: normaliseForDetection(t.user),
+    assistant: normaliseForDetection(t.assistant),
+  }));
   for (const f of kase.facts) {
+    const w = f.witness.map(normaliseForDetection);
     if (f.stated_at_turn === null) {
-      const anywhere = kase.turns.some(
-        (t) => witnessPresent(t.user, f.witness) || witnessPresent(t.assistant, f.witness),
+      const anywhere = turns.some(
+        (t) => witnessPresentIn(t.user, w) || witnessPresentIn(t.assistant, w),
       );
       if (anywhere) {
         problems.push(`${f.id}: never-stated control IS present somewhere in the conversation`);
       }
       continue;
     }
-    const own = kase.turns.find((t) => t.n === f.stated_at_turn);
-    if (!own || !witnessPresent(own.user, f.witness)) {
+    const own = turns.find((t) => t.n === f.stated_at_turn);
+    if (!own || !witnessPresentIn(own.user, w)) {
       problems.push(`${f.id}: witness is NOT present in its own stating turn ${f.stated_at_turn}`);
     }
-    for (const t of kase.turns) {
+    for (const t of turns) {
       if (t.n === f.stated_at_turn) continue;
-      if (witnessPresent(t.user, f.witness) || witnessPresent(t.assistant, f.witness)) {
+      if (witnessPresentIn(t.user, w) || witnessPresentIn(t.assistant, w)) {
         problems.push(`${f.id}: witness also matches turn ${t.n} — not discriminating`);
       }
     }
@@ -960,6 +1000,30 @@ export function assertStatementsAreSingleSentences(kase: RetentionCase): void {
 }
 
 /** Render the per-fact retention table for the evidence file / CI log. */
+/**
+ * The ids of MEASURABLE facts (i.e. excluding the never-stated control) that the
+ * injected summary no longer witnesses at `turn`, sorted.
+ *
+ * ONE definition. This filter had been written three times under three names
+ * (`lost` / `lostIn` / `lostAt`) across the ARM B assertions, and one of those
+ * three is the NON-VACUITY guard — the one that proves the budget arm actually
+ * dropped something. A divergence between them would not have gone red; it would
+ * have made the measurement quietly wrong, which is the worse failure.
+ */
+export function lostFactIds(run: RetentionRunResult, turn: number): string[] {
+  const m = run.measurements.find((x) => x.at_turn === turn);
+  if (!m) {
+    throw new Error(
+      `memory-retention eval: no measurement at turn ${turn} for case ${run.case_id} ` +
+        `(measured: ${run.measurements.map((x) => x.at_turn).join(', ') || 'none'})`,
+    );
+  }
+  return m.facts
+    .filter((f) => f.stated_at_turn !== null && !f.retained_in_summary)
+    .map((f) => f.id)
+    .sort();
+}
+
 /**
  * The stand-in caveat, DERIVED from the run (A1).
  *
