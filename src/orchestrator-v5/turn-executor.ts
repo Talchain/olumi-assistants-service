@@ -259,6 +259,11 @@ import {
 import {
   claimSafetyScopeFromContext,
   readMayNameLeadingOptionVerdict,
+  // Whether the verdict's provenance PROVES an analysis exists. Three of the six
+  // branches withhold BECAUSE they could not establish that, so the withheld copy
+  // may not say "your most recent analysis" on them. Imported, never re-decided
+  // here — the predicate lives beside the union it classifies (trap #12).
+  provenanceProvesAnalysisExists,
 } from './context/claim-safety-read.js';
 import type { MayNameLeadingOptionProvenance } from './context/claim-safety-read.js';
 // ROADMAP 1.231 — INPUT-side claim safety: strip the leader-designating fields
@@ -8229,6 +8234,11 @@ export async function runTurnExecutor(
           verdictState,
           readRatifiedConstraints(context.persistedGraph ?? graphStateForTurn ?? null),
           withheldConditionsAreCurrent(),
+          // Same single predicate the finaliser hook uses, off the SAME verdict.
+          // This gate has the same population exposure the chokepoint had: a
+          // degraded read withholds with no fact selected, and the substituted
+          // copy must not then claim an analysis exists.
+          provenanceProvesAnalysisExists(mayNameLeadingOptionVerdictForRun.provenance),
         );
         // ROADMAP 1.233 — record the outcome WHETHER OR NOT it changed the
         // text. `null` (the initial value) means the gate never ran; a
@@ -10008,18 +10018,30 @@ export async function runTurnExecutor(
     //                                   handler-outcome channel, not the fact
     //                                   chain), so the two can disagree.
     //   the three explanation handlers → the in-flow gate at `:8210`.
-    //   ⛔ `edit_graph` / `draft_graph` / `set_factor_value` / `add_constraint` /
-    //      `adjust_edge_strength` receipts → NO leader-claim enforcement at all.
-    //      Only the observe-only Layer-3 alarm at `route-v2.ts` scans them, and
-    //      observe-only changes not one byte.
+    //   ⛔ `set_factor_value` / `add_constraint` / `adjust_edge_strength`
+    //      receipts → NO leader-claim enforcement at all. Only the observe-only
+    //      Layer-3 alarm at `route-v2.ts` scans them, and observe-only changes
+    //      not one byte.
     //
-    // That gap is real, it is NOT closed by this PR, and it is not closable from
-    // here: those receipts are producer-gated territory and this finaliser must
-    // not overrule a producer (the paragraph above is what happens when it
-    // does). It is rowed programme-side as route-level claim-safety work,
-    // together with the `sendFinalised200` exits that never reach this function
-    // at all. A reader who needs "is a leader claim reachable on an edit
-    // receipt?" should go there, not infer safety from this guard's existence.
+    // ⚠ THAT GAP SET IS **THREE**, DERIVED — and an earlier revision of this
+    // comment said FIVE by adding `edit_graph` / `draft_graph`. Corrected at the
+    // bytes: `tools/registry.ts:496-504` registers exactly SEVEN handlers
+    // (`run_analysis`, the three explanation ids, and the three above); neither
+    // `edit_graph` nor `draft_graph` is among them, so neither can produce a
+    // receipt through this executor's handler-invocation path. Their receipts
+    // come from the route-level mechanism and belong to ROADMAP 2.149, not here.
+    // Over-stating a gap is the safe direction for a reader and the WRONG
+    // direction for sizing the work that closes it — 7 = 1 + 3 + 3, and the
+    // arithmetic is the check.
+    //
+    // The three-handler gap is real, is NOT closed by this PR, and is not
+    // closable from here: those receipts are producer-gated territory and this
+    // finaliser must not overrule a producer (the paragraph above is what
+    // happens when it does). Rowed programme-side (2.149) as route-level
+    // claim-safety work, together with the `sendFinalised200` exits that never
+    // reach this function at all. A reader who needs "is a leader claim
+    // reachable on a mutation receipt?" should go there, not infer safety from
+    // this guard's existence.
     // ═══════════════════════════════════════════════════════════════════════
     if (proposedHandlerIdForOutcome !== null) return;
     const assistantText = response.assistant_text;
@@ -10035,12 +10057,19 @@ export async function runTurnExecutor(
     let verdictState: ConstraintVerdictState | null = null;
     let ratifiedConstraints: readonly RatifiedConstraint[] = [];
     let conditionsAreCurrent = false;
+    // Both default FALSE, and both defaults are the SAFE direction for a
+    // different reason: unproven currency costs the named condition, unproven
+    // existence costs the whole opening. Neither costs the suppression.
+    let analysisExistenceProven = false;
     try {
       verdictState = mayNameLeadingOptionVerdictForRun.constraint_verdict_state;
       ratifiedConstraints = readRatifiedConstraints(
         context.persistedGraph ?? graphStateForTurn ?? null,
       );
       conditionsAreCurrent = withheldConditionsAreCurrent();
+      analysisExistenceProven = provenanceProvesAnalysisExists(
+        mayNameLeadingOptionVerdictForRun.provenance,
+      );
     } catch (err) {
       log.error(
         {
@@ -10057,6 +10086,9 @@ export async function runTurnExecutor(
       verdictState = null;
       ratifiedConstraints = [];
       conditionsAreCurrent = false;
+      // A guard that could not read its inputs must not claim an analysis
+      // exists any more than it may claim one is current.
+      analysisExistenceProven = false;
     }
 
     const projected = projectExplanationAnswerForWithheldClaim(
@@ -10064,6 +10096,7 @@ export async function runTurnExecutor(
       verdictState,
       ratifiedConstraints,
       conditionsAreCurrent,
+      analysisExistenceProven,
     );
     // Structurally unreachable given the `textAssertsLeadingOption` check above
     // (the projection branches on the SAME predicate), but asserted rather than

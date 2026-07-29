@@ -150,23 +150,41 @@ export const WITHHELD_EXPLANATION_OPENING =
  * false`): stale, `unknown`, `none`, no readiness derived yet, or the caller's
  * own input read failed closed.
  *
- * Asserts NOTHING about whether the analysis is up to date. It says only that
- * the answer reflects the most recent analysis — which is warranted on the whole
- * population by construction, not by assumption: a withheld verdict IMPLIES a
- * `run_analysis` fact exists in the chain (with no fact the permission reads
- * `true`, so this code is unreachable), and the verdict is read off the newest
- * non-noop such fact.
+ * Asserts NOTHING about whether the analysis is up to date. It DOES assert that
+ * an analysis EXISTS ("your most recent analysis"), so it is gated on
+ * `analysisExistenceProven` — see below.
  *
- * Pairs with `WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL`, which is the only tail
- * reachable when `conditionsAreCurrent` is false — so the complete text on this
- * branch is "This reflects your most recent analysis. No single option can be
- * put forward on this result yet." Both halves are true on every exit that can
- * reach them.
+ * ⚠⚠ THE WARRANT THIS DOCSTRING ORIGINALLY CLAIMED WAS FALSE, AND THAT IS THE
+ * SECOND POPULATION DEFECT IN THIS COPY — corrected 2026-07-29 (re-review).
+ * It read: *"warranted on the whole population by construction … a withheld
+ * verdict IMPLIES a `run_analysis` fact exists in the chain (with no fact the
+ * permission reads `true`, so this code is unreachable)"*.
  *
- * Probed at module load twice: leader-free (like every other substituted
- * fragment here) AND currency-free, with a positive control that the
- * currency-asserting sibling above still trips the same probe — an absence
- * check whose instrument cannot see a presence proves nothing (trap #13).
+ * That implication does not hold. `context/claim-safety-read.ts` withholds on
+ * THREE branches that cannot establish what exists — `fail_closed_truncated`
+ * returns `false` with **no fact selected at all** (its own comment: *"a
+ * scenario that genuinely never ran an analysis but has >20 turns withholds
+ * while the store is degraded"*), and `fail_closed_no_turn_context` says *"an
+ * analysis may very well exist … we simply could not see it."* `readOk === false`
+ * is a live path: `build-turn-context.ts` catches `SessionReadError` from
+ * `readNewestAnalysisFactFor`. On those populations this sentence asserts the
+ * existence of something that may not exist.
+ *
+ * SO IT IS NOW GATED. `analysisExistenceProven` is derived by the ONE predicate
+ * that owns the union — `provenanceProvesAnalysisExists` in `claim-safety-read.ts`
+ * — never re-decided here or at a caller. When it is false BOTH openings are
+ * dropped and the tail ships alone, which asserts nothing about existence beyond
+ * what `mayNameLeadingOption === false` already means.
+ *
+ * THE LESSON, recorded because this copy has now cost two rounds: a sentence is
+ * safe only on the population where EVERY clause in it is true, and "the
+ * permission is false" is a much weaker premise than it reads like. Enumerate
+ * the populations; do not reason from the one you had in mind.
+ *
+ * Probed at module load three ways: leader-free (like every other substituted
+ * fragment here), currency-free, AND existence-asserting — each with a positive
+ * control, because an absence check whose instrument cannot see a presence
+ * proves nothing (trap #13).
  */
 export const WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN =
   'This reflects your most recent analysis.';
@@ -216,12 +234,20 @@ export interface WithheldExplanationProjection {
  *                    the verdict was derived against — i.e. the analysis is
  *                    `fresh`. See {@link WithheldExplanationProjection} and the
  *                    note below for why this is required rather than defaulted.
+ * @param analysisExistenceProven whether the verdict's provenance PROVES a
+ *                    `run_analysis` analysis exists. Derive it with
+ *                    `provenanceProvesAnalysisExists` (claim-safety-read.ts) —
+ *                    never by re-deciding the union here or at a call site.
+ *                    REQUIRED, not optional-with-a-default, for the reason the
+ *                    parameter above is: the forgotten value would be the unsafe
+ *                    one. `false` drops BOTH openings and ships the tail alone.
  */
 export function projectExplanationAnswerForWithheldClaim(
   answerText: string,
   state: ConstraintVerdictState | null,
   constraints: readonly RatifiedConstraint[],
   conditionsAreCurrent: boolean,
+  analysisExistenceProven: boolean,
 ): WithheldExplanationProjection {
   const original = typeof answerText === 'string' ? answerText : '';
 
@@ -278,16 +304,33 @@ export function projectExplanationAnswerForWithheldClaim(
   // read off the CURRENT graph, and the opening asserts the analysis is CURRENT.
   // Splitting them was the defect — the tail stood down honestly while the opening
   // kept asserting.
-  const opening = conditionsAreCurrent
-    ? WITHHELD_EXPLANATION_OPENING
-    : WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN;
+  // TWO GATES, TWO DIFFERENT CLAIMS — and neither sentence may outrun its warrant.
+  //
+  //   existence  → whether ANY opening may be used at all. Both openings refer to
+  //                "your latest / your most recent analysis", so both assert an
+  //                analysis EXISTS. Three provenance branches withhold precisely
+  //                because they could not establish that (see the constant's
+  //                docstring). Unproven ⇒ no opening; the tail ships alone.
+  //   currency   → WHICH opening. Only the first asserts the analysis is still
+  //                current, and that is true only on a verified-fresh turn.
+  //
+  // Ordered existence-first because it is the stronger precondition: a sentence
+  // about the currency of a thing that may not exist is not repairable by
+  // rewording the currency half.
+  const opening = !analysisExistenceProven
+    ? ''
+    : conditionsAreCurrent
+      ? WITHHELD_EXPLANATION_OPENING
+      : WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN;
 
   // LEADER CLAIM ⇒ replace wholesale. A leader-naming answer cannot be
   // repaired by appending to it: the contradiction the walk photographed
   // (`case1g`) was exactly a leader claim followed by the disclosure.
   if (textAssertsLeadingOption(original)) {
     return {
-      text: `${opening}${tail}`,
+      // `tail` is a LEADING-SPACE fragment by contract, so tail-alone is
+      // trimmed rather than shipped with a stray leading space.
+      text: opening ? `${opening}${tail}` : tail.trim(),
       changed: true,
       reason: 'leader_claim_replaced',
     };
@@ -420,3 +463,56 @@ function assertCurrencyIsClaimedOnlyWhenVerified(): void {
   }
 }
 assertCurrencyIsClaimedOnlyWhenVerified();
+
+/**
+ * Spans that assert an ANALYSIS EXISTS — a possessive reference to the user's
+ * analysis.
+ */
+const EXISTENCE_ASSERTION_PATTERN =
+  /\byour\s+(?:latest|most\s+recent)\s+analysis\b/i;
+
+/**
+ * BUILD-TIME PROBE #3 — the EXISTENCE one, added 2026-07-29 by re-review.
+ *
+ * Both openings refer to the user's analysis, so both make an existence claim,
+ * so both must stay behind `analysisExistenceProven`. That is a property of the
+ * COPY, and this probe keeps the copy and the gate in agreement: reword an
+ * opening to drop the possessive and the first arm fires, telling the author the
+ * gate's premise changed rather than letting the two drift apart.
+ *
+ * ⚠ BOTH DIRECTIONS, like its sibling above. The negative control is the
+ * cause-free tail — the fragment that ships ALONE when existence is unproven, so
+ * it is exactly the string that must NOT carry an existence claim. Without it, a
+ * pattern broken into matching nothing would let this probe "pass" while proving
+ * nothing (trap #13).
+ */
+function assertBothOpeningsAssertExistence(): void {
+  for (const [name, copy] of [
+    ['WITHHELD_EXPLANATION_OPENING', WITHHELD_EXPLANATION_OPENING],
+    [
+      'WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN',
+      WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN,
+    ],
+  ] as const) {
+    if (!EXISTENCE_ASSERTION_PATTERN.test(copy)) {
+      throw new Error(
+        `withheld-explanation-answer: ${name} no longer asserts that an analysis exists. ` +
+          'Both openings are gated on `analysisExistenceProven` BECAUSE they make that claim. If ' +
+          'this copy genuinely stopped making it, the gate can be relaxed for it — but that is a ' +
+          'deliberate decision to record here, not a silent drift. Do not weaken ' +
+          'EXISTENCE_ASSERTION_PATTERN to satisfy this.',
+      );
+    }
+  }
+  // NEGATIVE CONTROL — the pattern must not match the fragment that ships alone
+  // when existence is unproven, or the arms above pass by matching everything.
+  if (EXISTENCE_ASSERTION_PATTERN.test(WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL)) {
+    throw new Error(
+      'withheld-explanation-answer: the NEGATIVE CONTROL failed — EXISTENCE_ASSERTION_PATTERN ' +
+        'matches the cause-free tail, which is the fragment that ships ALONE when existence is ' +
+        'unproven. Either the tail acquired a possessive analysis reference (then it needs the ' +
+        'same gate) or the pattern is over-broad (then narrow it).',
+    );
+  }
+}
+assertBothOpeningsAssertExistence();

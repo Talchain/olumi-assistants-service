@@ -336,11 +336,11 @@ describe('the FRESHNESS SPLIT — the two branches must not be gated together', 
     // every one of these voices asks the user to do. The verdict then comes from
     // the OLD fact while the labels come from the CURRENT graph.
     const clean = 'The model is driven mainly by Capacity, and the spread is wide.';
-    const fresh = projectExplanationAnswerForWithheldClaim(clean, 'unevaluated', ONE, true);
+    const fresh = projectExplanationAnswerForWithheldClaim(clean, 'unevaluated', ONE, true, true);
     expect(fresh.reason).toBe('disclosure_appended');
     expect(fresh.text).toContain('“Three-Year Total Cost of Ownership”');
 
-    const stale = projectExplanationAnswerForWithheldClaim(clean, 'unevaluated', ONE, false);
+    const stale = projectExplanationAnswerForWithheldClaim(clean, 'unevaluated', ONE, false, true);
     expect(stale.reason).toBe('unchanged');
     expect(stale.text).toBe(clean);
   });
@@ -350,7 +350,7 @@ describe('the FRESHNESS SPLIT — the two branches must not be gated together', 
     // suppress the leader-claim replacement on stale runs and re-open the leak
     // this module exists to close. Stale costs REPLACE only the named condition.
     const leaderClaim = 'Hire Marketing Manager comes out ahead, leading in 72% of simulations.';
-    const stale = projectExplanationAnswerForWithheldClaim(leaderClaim, 'unevaluated', ONE, false);
+    const stale = projectExplanationAnswerForWithheldClaim(leaderClaim, 'unevaluated', ONE, false, true);
     expect(stale.reason).toBe('leader_claim_replaced');
     expect(stale.text).not.toContain('comes out ahead');
     // Cause-free: it must NOT name a condition it cannot vouch for on this graph.
@@ -359,7 +359,7 @@ describe('the FRESHNESS SPLIT — the two branches must not be gated together', 
 
     // POSITIVE CONTROL — the same input on a FRESH run does name it, so the
     // absence above is the freshness gate and not a broken fixture.
-    const fresh = projectExplanationAnswerForWithheldClaim(leaderClaim, 'unevaluated', ONE, true);
+    const fresh = projectExplanationAnswerForWithheldClaim(leaderClaim, 'unevaluated', ONE, true, true);
     expect(fresh.reason).toBe('leader_claim_replaced');
     expect(fresh.text).toContain('“Three-Year Total Cost of Ownership”');
   });

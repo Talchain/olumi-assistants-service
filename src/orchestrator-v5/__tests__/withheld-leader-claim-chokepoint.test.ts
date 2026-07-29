@@ -671,7 +671,8 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
 
       // conditionsAreCurrent === FALSE — the population the guard's own
       // try/catch forces, and where "still current" would be a fabrication.
-      const unverified = projectExplanationAnswerForWithheldClaim(LEAK_TEXT, null, [], false);
+      // Existence PROVEN here, so the currency question is the one under test.
+      const unverified = projectExplanationAnswerForWithheldClaim(LEAK_TEXT, null, [], false, true);
       expect(unverified.reason, 'must still take the REPLACE branch — safety is never freshness-gated').toBe(
         'leader_claim_replaced',
       );
@@ -688,7 +689,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       // ⭐ THE OTHER DIRECTION. Without this, deleting the currency-asserting
       // copy outright would satisfy the arm above — a different defect
       // (under-informing every withheld turn) dressed up as a fix.
-      const verified = projectExplanationAnswerForWithheldClaim(LEAK_TEXT, null, [], true);
+      const verified = projectExplanationAnswerForWithheldClaim(LEAK_TEXT, null, [], true, true);
       expect(verified.reason).toBe('leader_claim_replaced');
       expect(
         verified.text,
@@ -717,6 +718,93 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       ).toContain(WITHHELD_EXPLANATION_OPENING);
       expect(finalText).not.toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
       expect(textAssertsLeadingOption(finalText)).toBe(false);
+    });
+
+    // ══ ⭐ EXISTENCE — the SECOND population defect in this copy ═════════════
+    //
+    // Re-review falsified the warrant the currency fix was built on. The
+    // docstring claimed "a withheld verdict IMPLIES a run_analysis fact exists".
+    // It does not: `claim-safety-read.ts` withholds on THREE branches that could
+    // not establish what exists —
+    //   · `fail_closed_truncated`         no fact selected at all, degraded read;
+    //   · `fail_closed_no_turn_context`   never reached the store;
+    //   · `fail_closed_uninterpretable`   a fact, but not an analysis.
+    // On those, "This reflects your most recent analysis" asserts the existence
+    // of something that may not exist.
+    //
+    // Pinned at the function seam, deliberately — same reasoning as the
+    // interception pins above. End-to-end reachability of the degraded-read shape
+    // is uncertain (`v5.no_analysis_guard` may intercept some of it), and a
+    // route-level arm that cannot reach the branch would be theatre. The property
+    // does not depend on reachability: on a branch whose provenance means "I
+    // could not look", the copy must not assert what it could not look at.
+    // ═════════════════════════════════════════════════════════════════════════
+    it('⭐ RED-FIRST (unit, both directions): existence is asserted only when PROVEN', async () => {
+      const { projectExplanationAnswerForWithheldClaim } = await import(
+        '../compose/withheld-explanation-answer.js'
+      );
+
+      // EXISTENCE UNPROVEN — the degraded-read shape. Neither opening may ship;
+      // the tail goes alone.
+      const unproven = projectExplanationAnswerForWithheldClaim(LEAK_TEXT, null, [], false, false);
+      expect(
+        unproven.reason,
+        'the leader claim must STILL be replaced — safety is gated on neither currency nor existence',
+      ).toBe('leader_claim_replaced');
+      expect(
+        unproven.text,
+        'no existence claim may ship on a provenance that means "I could not look"',
+      ).not.toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
+      expect(unproven.text).not.toContain(WITHHELD_EXPLANATION_OPENING);
+      expect(
+        unproven.text,
+        'it ships the cause-free tail ALONE, trimmed — the tail is a leading-space fragment',
+      ).toBe(WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL.trim());
+      expect(textAssertsLeadingOption(unproven.text)).toBe(false);
+
+      // ⭐ POSITIVE CONTROL — a PROVEN-existence population keeps the sentence.
+      // Without this, dropping the opening unconditionally would satisfy the arm
+      // above while silently under-informing every withheld turn.
+      const proven = projectExplanationAnswerForWithheldClaim(LEAK_TEXT, null, [], false, true);
+      expect(proven.reason).toBe('leader_claim_replaced');
+      expect(
+        proven.text,
+        'where an analysis provably exists the context sentence is TRUE and must survive',
+      ).toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
+      expect(proven.text).not.toBe(unproven.text);
+    });
+
+    it('the existence predicate classifies the WHOLE provenance union, and both values occur', async () => {
+      // Derived from the union, not a hand-listed echo of the implementation: a
+      // seventh provenance value fails to compile in
+      // `provenanceProvesAnalysisExists` (its `never` default arm), and this arm
+      // pins that the classification is not degenerate in either direction — an
+      // all-true or all-false predicate would make the gate pointless or the copy
+      // unreachable, and both would pass a one-sided test.
+      const { provenanceProvesAnalysisExists } = await import('../context/claim-safety-read.js');
+      const proven = ['scenario_fact', 'fail_closed_projected_analysis'] as const;
+      const unproven = [
+        'no_analysis_exists',
+        'fail_closed_truncated',
+        'fail_closed_uninterpretable',
+        'fail_closed_no_turn_context',
+      ] as const;
+      for (const p of proven) {
+        expect(provenanceProvesAnalysisExists(p), `${p} selects a real run_analysis fact`).toBe(true);
+      }
+      for (const p of unproven) {
+        expect(
+          provenanceProvesAnalysisExists(p),
+          `${p} cannot establish that an analysis exists`,
+        ).toBe(false);
+      }
+      // ⚠ THE EXCLUSION-LIST TRAP, pinned. The form first proposed for this gate
+      // was `p !== 'fail_closed_truncated' && p !== 'fail_closed_uninterpretable'`,
+      // which would wrongly permit `fail_closed_no_turn_context` — whose own
+      // docstring says an analysis "may very well exist … we simply could not see
+      // it". This assertion is what stops the gate being "simplified" back into
+      // that shape.
+      expect(provenanceProvesAnalysisExists('fail_closed_no_turn_context')).toBe(false);
     });
 
     it('the two openings are mutually exclusive by construction', () => {
