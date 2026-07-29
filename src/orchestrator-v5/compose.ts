@@ -540,6 +540,38 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   // (pinned by the cee-to-ui contract test with the persisted staging
   // capture as its own positive control).
   'decision_brief',
+  // V7-C slice 1b (@talchain/schemas 0.30.0): the VOI family. ISL emits all
+  // four at the top level of ISLResponseV2 and PLoT forwards them VERBATIM
+  // (`ISL_TOPLEVEL_ENRICHMENT_KEYS`, run-contract-keys.ts:34-38, spread at
+  // run.ts:3533, all derived at PLoT staging 3d13e0ac) — and this list was
+  // where they died, one hop before the browser. A probe at ISL, at PLoT, or
+  // at CEE's own persisted fact finds them present at every hop it looks at,
+  // which is how a prior review concluded "the envelope reaches the UI" about
+  // keys no consumer could read at any pin.
+  //
+  // The family travels together: `correlation_model` is the DISCRIMINATOR for
+  // an absent `p_win_sensitivity` (ISL suppresses that attribution entirely
+  // under active correlation and names it in
+  // `correlation_model.suppressed_attributions`), so transporting the
+  // suppressed field without its suppression disclosure would ship two states
+  // in one byte by construction.
+  //
+  // Leak-safety, derived not assumed: no field of any of these shapes names an
+  // OPTION — rows carry a factor id and numbers only — so nothing here is
+  // leading-option-adjacent, `INTERNAL_ENRICHMENT_KEYS` has zero collisions
+  // with any row field, and `TIER3_TRANSPORT_BANNED_FIELDS` is `m1_coaching`
+  // only. That is why the withheld-claim projection correctly passes them
+  // through a withheld turn unchanged, and why that is PINNED by a test
+  // rather than guarded by new machinery.
+  //
+  // Transport is claim-inert; the claim cage is the READER. Only
+  // `factor_evppi` has a licensed surface (a ranking with a below-resolution
+  // band, NO magnitudes — `units: 'outcome'` is why), and that surface is a
+  // separate UI train. Design: V7C-EVPPI-RANKING-DESIGN-2026-07-30.
+  'factor_evppi',
+  'decision_evpi',
+  'p_win_sensitivity',
+  'correlation_model',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
