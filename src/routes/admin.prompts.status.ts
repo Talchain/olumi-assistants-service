@@ -106,11 +106,21 @@ export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<voi
    * Read-only admin auth, same as /status. Deliberately a separate route so
    * /status keeps its exact `{ keys: [...] }` shape for existing consumers.
    */
-  app.get('/admin/prompts/inventory', async (request, reply) => {
-    if (!verifyAdminKey(request, reply, 'read')) return;
-    const inventory = await buildPromptEstateInventory();
-    return reply.code(200).send(inventory);
-  });
+  app.get(
+    '/admin/prompts/inventory',
+    {
+      // Tighter than the plugin-wide limiter above: this is the only route in
+      // the file that reads the prompt STORE (`store.list()` for the archive
+      // -drift measurement), so it is the only one whose cost scales with the
+      // estate rather than with in-memory state.
+      config: { rateLimit: { max: 20, timeWindow: 15 * 60 * 1000 } },
+    },
+    async (request, reply) => {
+      if (!verifyAdminKey(request, reply, 'read')) return;
+      const inventory = await buildPromptEstateInventory();
+      return reply.code(200).send(inventory);
+    },
+  );
 
   app.post('/admin/prompts/reload', async (request, reply) => {
     if (!verifyAdminKey(request, reply, 'write')) return;
