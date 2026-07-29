@@ -816,6 +816,29 @@ export const TelemetryEvents = {
   // vocabulary; `handler_id` is a registry key; the lengths are finite
   // integers. The answer PROSE and the user's decision content never appear.
   V5WithheldExplanationAnswerProjected: "v5.explanation.withheld_answer_projected",
+  // V5WithheldLeaderClaimNeutralisedAtFinalise — THE CHOKEPOINT BACKSTOP.
+  //
+  // Counterpart to V5WithheldExplanationAnswerProjected above: that event is
+  // the IN-FLOW explanation gate, which only runs on an explanation-handler
+  // dispatch. This one is the finaliser-level guard that every one of
+  // `runTurnExecutor`'s 39 exits passes through, so it is the only observable
+  // for a leader claim leaking on an exit the in-flow gate cannot see — the
+  // POST-#713 walk's 3/3 non-execute shape. Emitted ONLY on the REPLACE branch
+  // (the text actually asserted a leader on a withheld turn); a permitted turn
+  // and a clean withheld turn emit nothing at all, so a non-zero rate here is
+  // real suppressed leakage, not guard traffic.
+  //
+  // `in_flow_gate_eligible` is the load-bearing tag: `false` means the exit
+  // could not have been covered upstream, which is the population this guard
+  // exists for. Without it the dashboard cannot tell a backstop catching real
+  // leaks from one duplicating a gate that already fired.
+  //
+  // Privacy contract (R-004): bounded enums, a registry key, finite integers.
+  // The matched prose is the user's own decision content and never appears.
+  // Payload: { request_id, scenario_id, handler_id, constraint_verdict_state,
+  // original_length, projected_length, in_flow_gate_eligible, dispatch_path }.
+  V5WithheldLeaderClaimNeutralisedAtFinalise:
+    "v5.claim_safety.withheld_leader_claim_neutralised_at_finalise",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
   // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
   V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
