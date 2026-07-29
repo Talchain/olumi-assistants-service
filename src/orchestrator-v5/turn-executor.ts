@@ -9938,6 +9938,59 @@ export async function runTurnExecutor(
     // reason) as `guardLeadingOptionClaimsAtEgress`'s
     // `if (opts.mayNameLeadingOption) return response;`.
     if (mayNameLeadingOptionForRun) return;
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⚠ THE SCOPE, AND THE MEASURED REASON FOR IT — do not widen without
+    // re-running `turn-executor-compound-edit-disclosure.test.ts`.
+    //
+    // A dispatched handler's answer is a RECEIPT, and this estate has already
+    // ruled on receipts. The in-flow explanation gate states the ruling in its
+    // own comment: it is "scoped to EXPLANATION handlers" because "a
+    // mutation/run receipt is deterministic template copy that is already gated
+    // at its own producer, and running this over it would risk replacing an
+    // honest receipt."
+    //
+    // The first cut of this guard ignored that ruling and the existing suite
+    // caught the exact harm it predicts, within one run. On a `run_analysis`
+    // turn the composed receipt carried:
+    //
+    //   "Your first analysis is ready. Take a moment to explore the leading
+    //    option and the factors shaping it before acting on the result."
+    //
+    // — `signals/coaching-signals.ts` FIRST_ANALYSIS_COMPLETE. That sentence
+    // trips `leading_option` in the shared vocabulary and DESIGNATES NOTHING:
+    // no option named, no probability, no ranking. The unscoped guard replaced
+    // the whole receipt with withheld copy, destroying both the analysis
+    // confirmation AND the honest compound-edit disclosure ("haven't applied
+    // the other change yet ('Sales Budget')") sitting in the same string. That
+    // is a strictly worse outcome than the phrase it removed, and it is the
+    // over-suppression failure this estate treats as a defect, not a safe
+    // default.
+    //
+    // ⚠ AND THE DIVERGENCE UNDERNEATH IT IS WORTH KNOWING. That copy is ALREADY
+    // producer-gated — `coaching-signals.ts` returns `null` for it when
+    // `leadingOptionClaimWithheld(outcome)` is true. Its appearance means the
+    // PRODUCER read the claim as permitted (via the handler outcome's
+    // `__leading_option_claim_withheld` channel) while the FACT-CHAIN verdict
+    // read here fail-closed to `false` on an unstamped fact. Two authorities,
+    // one question. The fail-closed default is right for a PERMISSION and
+    // dangerous as a licence to DELETE a whole answer — which is precisely why
+    // the finaliser must not overrule a producer that has already consulted its
+    // own gate.
+    //
+    // SO: this guard owns the exits where NO producer-side verdict gate exists
+    // — the turns that dispatched no execute-intent handler at all. That is the
+    // walk's actual leaking population (3/3 NON-EXECUTE turns), and it is
+    // derived from a single assignment site (`proposedHandlerIdForOutcome`, set
+    // only on the execute-intent path), not from a hand-listed allowlist of
+    // exits that would drift (trap #12).
+    //
+    // WHAT THIS DELIBERATELY DOES NOT COVER, stated so nobody over-reads it:
+    // execute-intent receipts. Those keep the three enforcements they already
+    // have — the producer's own gate, the in-flow explanation gate, and STEP
+    // 6.6 — plus the observe-only Layer-3 alarm at the wire, which still scans
+    // them and is the instrument that would show a receipt leaking.
+    // ═══════════════════════════════════════════════════════════════════════
+    if (proposedHandlerIdForOutcome !== null) return;
     const assistantText = response.assistant_text;
     if (typeof assistantText !== 'string' || assistantText.length === 0) return;
     // THE SHARED ENFORCER PREDICATE. Checked HERE as well as inside the
@@ -9990,7 +10043,6 @@ export async function runTurnExecutor(
     emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise, {
       request_id: requestId,
       scenario_id: context.session_id,
-      handler_id: proposedHandlerIdForOutcome ?? null,
       constraint_verdict_state: verdictState ?? 'unreadable',
       // Lengths only. This is the claim-safety boundary and the prose is the
       // user's own decision content — never the matched text.
