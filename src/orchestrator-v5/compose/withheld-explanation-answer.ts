@@ -112,19 +112,64 @@ import {
 } from '../../orchestrator/context/constraint-feasibility.js';
 
 /**
- * The opening line for a withheld explanation answer.
+ * The opening line for a withheld explanation answer **on a turn whose analysis
+ * is verified CURRENT** (`conditionsAreCurrent === true`).
  *
  * States the one thing that is unambiguously true on a no-op rerun — the
  * analysis the user asked to re-run is the analysis they already have — and
  * nothing else. Every comparative word is absent BY CONSTRUCTION, and the
  * build-time probe below fails the module if that ever stops being true.
  *
+ * ⚠ IT ASSERTS CURRENCY, SO IT IS NOW FRESHNESS-GATED — corrected 2026-07-29.
+ * This constant used to be returned UNCONDITIONALLY by the REPLACE branch while
+ * only the *tail* consumed `conditionsAreCurrent`. On any turn where that
+ * predicate is `false` — stale, unknown, no analysis-readiness derived yet, or
+ * the caller's own read failing closed — the sentence "your latest analysis is
+ * still current" was **affirmatively false**, and the guard was swapping a
+ * leader-claim leak for a freshness fabrication: one honesty defect for
+ * another. Found by adversarial review of the chokepoint work (#755), which
+ * also widened this constant's population from three explanation handlers on a
+ * rerun to every non-execute exit — turns where there was no rerun at all and
+ * the original justification above does not transfer.
+ *
+ * Use {@link WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN} whenever currency
+ * is not verified. The rule this encodes: **copy may state a fact only on the
+ * population where that fact is true** — and a degradation path that could not
+ * read its inputs must not make a factual claim about them.
+ *
  * Deliberately NOT a per-branch variant ("no-op" vs "explanation"): the gate
  * cannot tell those apart from the answer text, and a sentence that guessed
- * would be wrong on the turns it guessed about.
+ * would be wrong on the turns it guessed about. The freshness split is a
+ * different thing — it is driven by a derived predicate, not a guess.
  */
 export const WITHHELD_EXPLANATION_OPENING =
   'Your latest analysis is still current, so this is what it already shows.';
+
+/**
+ * The opening line when currency is **NOT verified** (`conditionsAreCurrent ===
+ * false`): stale, `unknown`, `none`, no readiness derived yet, or the caller's
+ * own input read failed closed.
+ *
+ * Asserts NOTHING about whether the analysis is up to date. It says only that
+ * the answer reflects the most recent analysis — which is warranted on the whole
+ * population by construction, not by assumption: a withheld verdict IMPLIES a
+ * `run_analysis` fact exists in the chain (with no fact the permission reads
+ * `true`, so this code is unreachable), and the verdict is read off the newest
+ * non-noop such fact.
+ *
+ * Pairs with `WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL`, which is the only tail
+ * reachable when `conditionsAreCurrent` is false — so the complete text on this
+ * branch is "This reflects your most recent analysis. No single option can be
+ * put forward on this result yet." Both halves are true on every exit that can
+ * reach them.
+ *
+ * Probed at module load twice: leader-free (like every other substituted
+ * fragment here) AND currency-free, with a positive control that the
+ * currency-asserting sibling above still trips the same probe — an absence
+ * check whose instrument cannot see a presence proves nothing (trap #13).
+ */
+export const WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN =
+  'This reflects your most recent analysis.';
 
 /**
  * Tail used when the verdict withholds but has NOTHING to disclose — today
@@ -226,12 +271,23 @@ export function projectExplanationAnswerForWithheldClaim(
   const tail = reason?.text ?? WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL;
   const disclosure = reason?.text ?? '';
 
+  // ⚠ THE OPENING IS FRESHNESS-GATED TOO — and it was not, which was a
+  // fabrication (see WITHHELD_EXPLANATION_OPENING's docstring). `conditionsAreCurrent`
+  // now governs BOTH halves of the substituted sentence, because both halves make
+  // claims that are only true when it holds: the tail names a ratified condition
+  // read off the CURRENT graph, and the opening asserts the analysis is CURRENT.
+  // Splitting them was the defect — the tail stood down honestly while the opening
+  // kept asserting.
+  const opening = conditionsAreCurrent
+    ? WITHHELD_EXPLANATION_OPENING
+    : WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN;
+
   // LEADER CLAIM ⇒ replace wholesale. A leader-naming answer cannot be
   // repaired by appending to it: the contradiction the walk photographed
   // (`case1g`) was exactly a leader claim followed by the disclosure.
   if (textAssertsLeadingOption(original)) {
     return {
-      text: `${WITHHELD_EXPLANATION_OPENING}${tail}`,
+      text: `${opening}${tail}`,
       changed: true,
       reason: 'leader_claim_replaced',
     };
@@ -268,6 +324,10 @@ export function projectExplanationAnswerForWithheldClaim(
 function assertSubstitutedCopyIsLeaderFree(): void {
   const probes: ReadonlyArray<readonly [string, string]> = [
     ['WITHHELD_EXPLANATION_OPENING', WITHHELD_EXPLANATION_OPENING],
+    [
+      'WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN',
+      WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN,
+    ],
     ['WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL', WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL],
     // ⚠ DERIVED FROM THE STATE ENUM, not the two voices this probe used to
     // hand-list. It listed `unevaluated` and `identity_unresolved` because they
@@ -307,3 +367,56 @@ function assertSubstitutedCopyIsLeaderFree(): void {
   }
 }
 assertSubstitutedCopyIsLeaderFree();
+
+/**
+ * Spans that ASSERT the analysis is up to date.
+ *
+ * Small and anchored to what this module's own copy actually says — not a
+ * speculative vocabulary. It exists to hold ONE invariant: currency is claimed
+ * only on the population where currency was verified.
+ */
+const CURRENCY_ASSERTION_PATTERN =
+  /\b(?:still\s+current|already\s+shows|already\s+reflects|up\s+to\s+date|unchanged\s+since)\b/i;
+
+/**
+ * BUILD-TIME PROBE #2 — the PREDICTION-FREE one, added 2026-07-29 with the
+ * freshness gate on the opening.
+ *
+ * The defect it exists to prevent is not hypothetical: the REPLACE branch used
+ * to emit "Your latest analysis is still current" on turns where the caller had
+ * just told it currency could NOT be established — including this module's own
+ * caller forcing `conditionsAreCurrent = false` on a failed input read. A
+ * fabrication in the mouth of the guard whose job is honesty.
+ *
+ * ⚠ IT CARRIES ITS OWN POSITIVE CONTROL, and that is the load-bearing half.
+ * An absence assertion whose instrument cannot see a presence passes by testing
+ * nothing (trap #13, and trap 12b: a control that can only pass is not a
+ * control). So the probe asserts BOTH directions:
+ *
+ *   - the currency-UNKNOWN opening must NOT match the pattern; and
+ *   - the currency-ASSERTING opening MUST match it.
+ *
+ * Reword the first to sneak a currency claim in and the first arm throws.
+ * Weaken the pattern to make the first arm vacuous and the second arm throws.
+ */
+function assertCurrencyIsClaimedOnlyWhenVerified(): void {
+  if (CURRENCY_ASSERTION_PATTERN.test(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN)) {
+    throw new Error(
+      'withheld-explanation-answer: WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN asserts that ' +
+        'the analysis is up to date. That copy is emitted precisely when currency could NOT be ' +
+        'established (stale / unknown / none / no readiness / a failed input read), so the ' +
+        'sentence would be false on its entire population. Reword the copy — do not narrow ' +
+        'CURRENCY_ASSERTION_PATTERN, which is what keeps this invariant readable.',
+    );
+  }
+  if (!CURRENCY_ASSERTION_PATTERN.test(WITHHELD_EXPLANATION_OPENING)) {
+    throw new Error(
+      'withheld-explanation-answer: the POSITIVE CONTROL failed — WITHHELD_EXPLANATION_OPENING ' +
+        'no longer trips CURRENCY_ASSERTION_PATTERN, so the absence check above is now vacuous ' +
+        'and would pass on copy that fabricates currency. Either the opening was reworded (then ' +
+        'update the pattern to match what it now claims) or the pattern was weakened (then ' +
+        'restore it). Do not delete this arm.',
+    );
+  }
+}
+assertCurrencyIsClaimedOnlyWhenVerified();

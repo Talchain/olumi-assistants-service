@@ -581,7 +581,6 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
           'chokepoint guard must act on it exactly once. ZERO means the permission arrived as the ' +
           'pre-hoist `true` default (the licensed no-op) or the chokepoint guard is gone.',
       ).toBe(1);
-      expect(neutralised[0]!.data['in_flow_gate_eligible']).toBe(false);
 
       // ⭐ AND THE PROPERTY THE OLD CAVEAT SAID WAS UNPROVABLE IN-REPO: the
       // converse OUTPUT is leader-free on a withheld turn. Scored with the

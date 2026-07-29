@@ -9984,11 +9984,42 @@ export async function runTurnExecutor(
     // only on the execute-intent path), not from a hand-listed allowlist of
     // exits that would drift (trap #12).
     //
-    // WHAT THIS DELIBERATELY DOES NOT COVER, stated so nobody over-reads it:
-    // execute-intent receipts. Those keep the three enforcements they already
-    // have — the producer's own gate, the in-flow explanation gate, and STEP
-    // 6.6 — plus the observe-only Layer-3 alarm at the wire, which still scans
-    // them and is the instrument that would show a receipt leaking.
+    // ⚠ WHAT THIS DOES NOT COVER — CORRECTED 2026-07-29, because the sentence
+    // that used to sit here was FALSE and false in the reassuring direction.
+    //
+    // It claimed execute-intent receipts "keep the three enforcements they
+    // already have — the producer's own gate, the in-flow explanation gate, and
+    // STEP 6.6". Checked at the bytes, that is not the coverage:
+    //
+    //   - STEP 6.6 (`:8904`) is the structural-success-claim honesty gate. It
+    //     enforces a DIFFERENT claim class — a false first-person MUTATION
+    //     success claim — and says nothing about leader claims. Counting it here
+    //     was counting an unrelated guard as protection.
+    //   - the producer gate is ONE call, `leadingOptionClaimWithheld` at
+    //     `signals/coaching-signals.ts:233`, inside `if (input.proposedHandlerId
+    //     === 'run_analysis')`. It covers ONE signal of ONE handler.
+    //   - the in-flow explanation gate covers `EXPLANATION_HANDLER_IDS` only:
+    //     `explain_from_structure`, `explain_results`, `what_would_flip`.
+    //
+    // THE TRUE COVERAGE, and the gap named rather than papered over:
+    //   `run_analysis`                → producer gate (the FIRST_ANALYSIS_COMPLETE
+    //                                   signal) — and note it reads a DIFFERENT
+    //                                   authority than this guard does (the
+    //                                   handler-outcome channel, not the fact
+    //                                   chain), so the two can disagree.
+    //   the three explanation handlers → the in-flow gate at `:8210`.
+    //   ⛔ `edit_graph` / `draft_graph` / `set_factor_value` / `add_constraint` /
+    //      `adjust_edge_strength` receipts → NO leader-claim enforcement at all.
+    //      Only the observe-only Layer-3 alarm at `route-v2.ts` scans them, and
+    //      observe-only changes not one byte.
+    //
+    // That gap is real, it is NOT closed by this PR, and it is not closable from
+    // here: those receipts are producer-gated territory and this finaliser must
+    // not overrule a producer (the paragraph above is what happens when it
+    // does). It is rowed programme-side as route-level claim-safety work,
+    // together with the `sendFinalised200` exits that never reach this function
+    // at all. A reader who needs "is a leader claim reachable on an edit
+    // receipt?" should go there, not infer safety from this guard's existence.
     // ═══════════════════════════════════════════════════════════════════════
     if (proposedHandlerIdForOutcome !== null) return;
     const assistantText = response.assistant_text;
@@ -10048,11 +10079,22 @@ export async function runTurnExecutor(
       // user's own decision content — never the matched text.
       original_length: assistantText.length,
       projected_length: projected.text.length,
-      // TRUE when the in-flow explanation gate could not have covered this exit.
-      // The whole point of the guard is the turns where this is `true`; a
-      // dashboard that cannot separate them cannot tell a backstop that is
-      // catching real leaks from one that is duplicating a gate upstream.
-      in_flow_gate_eligible: withheldExplanationReasonForRun !== null,
+      // ⚠ NO `in_flow_gate_eligible`, AND NO `handler_id` — both were STRUCTURAL
+      // CONSTANTS here, which is worse than uninformative: a dashboard field that
+      // cannot vary reads as a measured population when it is a tautology.
+      //
+      // `in_flow_gate_eligible` was `withheldExplanationReasonForRun !== null`.
+      // That variable's ONLY assignment site is inside the execute block, which
+      // the scope check above (`proposedHandlerIdForOutcome !== null → return`)
+      // excludes by construction — so it was always `null` at this emit and the
+      // tag was always `false`. Removed on the same reasoning that removed
+      // `handler_id`, applied consistently. (Caught by adversarial review of
+      // #755, whose mutant hardcoded the field to `false` and left the whole
+      // suite green — the tell that nothing was measuring it.)
+      //
+      // Every event this guard emits is, by the scope, an exit the in-flow gate
+      // could not have covered. That is a property of the guard, so it belongs
+      // in this comment and in the event NAME, not in a per-event boolean.
       dispatch_path: dispatchPath,
     });
     response = {

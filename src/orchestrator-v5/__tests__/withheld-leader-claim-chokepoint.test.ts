@@ -59,6 +59,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { textAssertsLeadingOption } from '../compose/leading-option-egress-guard.js';
 import {
   WITHHELD_EXPLANATION_OPENING,
+  WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN,
   WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL,
 } from '../compose/withheld-explanation-answer.js';
 import { EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT } from '../compose/forbidden-user-facing-phrases.js';
@@ -177,6 +178,32 @@ function permittedRunAnalysisFact(): Record<string, unknown> {
     may_name_leading_option: true,
     constraint_verdict_state: 'evaluated_feasible',
   };
+  return fact;
+}
+
+/**
+ * STAMPED WITHHELD with **UNVERIFIABLE currency** — the population on which the
+ * substituted copy must not assert that the analysis is up to date.
+ *
+ * ⚠ WHY `unknown` AND NOT `stale`, recorded because the obvious fixture does not
+ * work and quietly passes. Setting a MISMATCHED `graph_hash_at_run` yields
+ * freshness `stale`, and `stale` is exactly what the **stale-rerun pre-route**
+ * matches on — so that turn never reaches the converse compose at all. It ships
+ * the pre-route's own honest copy ("These results may be out of date because the
+ * model has changed…"), the chokepoint never runs, and an
+ * `expect(...).not.toContain(currency copy)` arm passes VACUOUSLY. Measured, not
+ * assumed: that is precisely what the first cut of this arm did.
+ *
+ * Omitting `graph_hash_at_run` entirely takes the `legacy_fact_missing_hash`
+ * branch instead → freshness `unknown`. Non-fresh, so
+ * `withheldConditionsAreCurrent()` is FALSE (its own comment: "`stale` /
+ * `unknown` / `none` / no-readiness all fail closed"), but NOT `stale`, so the
+ * stale-rerun pre-route stands down and the turn reaches the converse exit with
+ * the model's prose intact.
+ */
+function currencyUnverifiableWithheldRunAnalysisFact(): Record<string, unknown> {
+  const fact = withheldRunAnalysisFact();
+  delete (fact.result as Record<string, unknown>).graph_hash_at_run;
   return fact;
 }
 
@@ -491,11 +518,13 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
         await postTurn(app, NEUTRAL_MESSAGE);
         const fired = eventsNamed(CHOKEPOINT_EVENT);
         expect(fired, 'the guard must be observable, or a live walk is the only instrument again').toHaveLength(1);
-        expect(
-          fired[0]?.data.in_flow_gate_eligible,
-          'this exit is exactly the population the backstop exists for',
-        ).toBe(false);
         expect(fired[0]?.data.dispatch_path).toBe('turn_executor_finalise');
+        // No `in_flow_gate_eligible` / `handler_id` assertion: both were removed
+        // from the payload as structural constants under this guard's scope. A
+        // field that cannot vary is not evidence, and asserting one is how a
+        // tautology gets mistaken for coverage — see the payload comment in
+        // `enforceWithheldLeaderClaimGuard`.
+        expect(Object.keys(fired[0]?.data ?? {})).not.toContain('in_flow_gate_eligible');
         // Privacy contract (R-004): lengths and bounded enums only.
         expect(Object.values(fired[0]?.data ?? {}).join(' ')).not.toContain(LEADER_LABEL);
       });
@@ -558,4 +587,144 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       });
     });
   }
+
+  // ══ ⭐ THE SUBSTITUTED COPY MUST NOT FABRICATE ═══════════════════════════
+  //
+  // Adversarial review of #755's first revision found the guard trading one
+  // honesty defect for another: the REPLACE branch emitted "Your latest analysis
+  // is still current, so this is what it already shows" UNCONDITIONALLY, while
+  // only the tail consumed `conditionsAreCurrent`. On a stale / unknown / no-
+  // readiness turn — and on this guard's OWN try/catch degradation path, which
+  // forces the predicate false — that sentence is affirmatively FALSE.
+  //
+  // #755 is what made it severe: it widened the constant's population from three
+  // explanation handlers on a rerun (where "the analysis you asked to re-run is
+  // the one you already have" is warranted) to every non-execute exit, including
+  // value-update and state-query turns where there was no rerun at all.
+  //
+  // The property under test is therefore: **currency is asserted only where
+  // currency was verified.** Both directions are pinned — an absence check with
+  // no positive control would pass on a guard that never asserts currency
+  // anywhere, which would be a different bug, not a fix.
+  // ═════════════════════════════════════════════════════════════════════════
+  describe('the substituted copy — currency is claimed only where it is verified', () => {
+    // ⚠ WHERE THIS PROPERTY IS TESTED, AND WHY IT IS NOT AT THE ROUTE HERE.
+    //
+    // I tried twice to build a route-level NON-EXECUTE turn with
+    // `conditionsAreCurrent === false`, and both fixtures were intercepted
+    // upstream by a deterministic pre-route that emits its OWN honest copy, so
+    // the chokepoint never ran and the arm passed vacuously:
+    //
+    //   - mismatched `graph_hash_at_run` → freshness `stale` → the STALE-RERUN
+    //     pre-route serves "These results may be out of date because the model
+    //     has changed since the last analysis…";
+    //   - omitted `graph_hash_at_run` → freshness `unknown` → an unknown-freshness
+    //     pre-route serves "The last analysis may be out of date because I can't
+    //     confirm it still matches the current model…".
+    //
+    // That is a real and welcome finding, and it NARROWS the review's
+    // reachability estimate: on the non-execute exits, the two obvious
+    // non-fresh states are already answered honestly before compose. What it
+    // does NOT do is make the fabrication unreachable — `conditionsAreCurrent`
+    // is also forced `false` by this guard's OWN try/catch on a failed input
+    // read (`enforceWithheldLeaderClaimGuard`), and the in-flow gate reaches the
+    // same branch on its own population.
+    //
+    // So the property is pinned where the defect actually lives — on the pure
+    // function, both directions — plus the two module-load probes in
+    // `withheld-explanation-answer.ts`. Asserting it through a route that cannot
+    // reach the branch would be theatre.
+    it('WHY NOT AT THE ROUTE: a non-fresh withheld turn is answered honestly UPSTREAM of the chokepoint', async () => {
+      // This pins the finding above as a MECHANISM rather than leaving it as
+      // prose. On a `unknown`-freshness withheld turn the deterministic
+      // pre-route answers first, so:
+      //   - no fabricated currency claim reaches the user (the pre-route's own
+      //     copy is honest about the uncertainty), and
+      //   - the chokepoint never runs, which is why the route-level RED arm
+      //     could not be built here.
+      // If a future change removes or narrows that pre-route, this test goes red
+      // and tells the next reader that the route-level population just opened
+      // up — instead of leaving them to rediscover it.
+      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [currencyUnverifiableWithheldRunAnalysisFact()] };
+      routeWithToolUseMock.mockResolvedValue(converseTextOnly(LEAK_TEXT));
+      const { body } = await postTurn(app, NEUTRAL_MESSAGE);
+
+      expect(body.analysis_ready?.freshness, 'the fixture must genuinely not be fresh').not.toBe('fresh');
+      expect(permissionOnTheWire(body), 'and must still WITHHOLD').toBe(false);
+      const finalText = String(body.assistant_text ?? '');
+      // Derived from the production constant, not a copy of the pre-route's prose.
+      expect(
+        finalText,
+        'no currency assertion may reach the user on a turn whose currency is unverifiable',
+      ).not.toContain(WITHHELD_EXPLANATION_OPENING);
+      expect(textAssertsLeadingOption(finalText), 'and no leader claim either').toBe(false);
+      expect(
+        eventsNamed(CHOKEPOINT_EVENT),
+        'the chokepoint did NOT run — the upstream pre-route already answered, which is the whole reason the unit arms below exist',
+      ).toHaveLength(0);
+    });
+
+    it('⭐ RED-FIRST (unit, both directions): currency is asserted only when verified', async () => {
+      const { projectExplanationAnswerForWithheldClaim } = await import(
+        '../compose/withheld-explanation-answer.js'
+      );
+
+      // conditionsAreCurrent === FALSE — the population the guard's own
+      // try/catch forces, and where "still current" would be a fabrication.
+      const unverified = projectExplanationAnswerForWithheldClaim(LEAK_TEXT, null, [], false);
+      expect(unverified.reason, 'must still take the REPLACE branch — safety is never freshness-gated').toBe(
+        'leader_claim_replaced',
+      );
+      expect(
+        unverified.text,
+        'the guard must not tell the user the analysis is still current on a turn where currency could not be established',
+      ).not.toContain(WITHHELD_EXPLANATION_OPENING);
+      expect(
+        unverified.text,
+        'it must use the currency-neutral opening instead — replaced, not merely blanked',
+      ).toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
+      expect(textAssertsLeadingOption(unverified.text)).toBe(false);
+
+      // ⭐ THE OTHER DIRECTION. Without this, deleting the currency-asserting
+      // copy outright would satisfy the arm above — a different defect
+      // (under-informing every withheld turn) dressed up as a fix.
+      const verified = projectExplanationAnswerForWithheldClaim(LEAK_TEXT, null, [], true);
+      expect(verified.reason).toBe('leader_claim_replaced');
+      expect(
+        verified.text,
+        'on a verified-current turn the currency assertion is TRUE and must survive — the fix is a gate, not a deletion',
+      ).toContain(WITHHELD_EXPLANATION_OPENING);
+      expect(verified.text).not.toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
+      expect(textAssertsLeadingOption(verified.text)).toBe(false);
+
+      // And the two openings genuinely differ, or both arms above could hold
+      // for the wrong reason.
+      expect(unverified.text).not.toBe(verified.text);
+    });
+
+    it('END-TO-END: on a VERIFIED-CURRENT turn the currency sentence reaches the wire', async () => {
+      // The route-level half of the property — the direction that IS reachable
+      // through a non-execute exit. Confirms the unit arms above are describing
+      // the same code path a real turn takes, not a function nobody calls.
+      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [withheldRunAnalysisFact()] };
+      routeWithToolUseMock.mockResolvedValue(converseTextOnly(LEAK_TEXT));
+      const { body } = await postTurn(app, NEUTRAL_MESSAGE);
+      expect(body.analysis_ready?.freshness, 'the control needs a genuinely fresh fixture').toBe('fresh');
+      const finalText = String(body.assistant_text ?? '');
+      expect(
+        finalText,
+        'on a verified-current turn the currency assertion is TRUE and must survive — the fix is a gate, not a deletion',
+      ).toContain(WITHHELD_EXPLANATION_OPENING);
+      expect(finalText).not.toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
+      expect(textAssertsLeadingOption(finalText)).toBe(false);
+    });
+
+    it('the two openings are mutually exclusive by construction', () => {
+      // Cheap structural pin: neither constant may be a substring of the other,
+      // or the two `toContain` / `not.toContain` pairs above could both hold for
+      // the wrong reason.
+      expect(WITHHELD_EXPLANATION_OPENING).not.toContain(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN);
+      expect(WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN).not.toContain(WITHHELD_EXPLANATION_OPENING);
+    });
+  });
 });

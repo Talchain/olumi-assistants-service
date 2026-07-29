@@ -836,20 +836,23 @@ export const TelemetryEvents = {
   // and a clean withheld turn emit nothing at all, so a non-zero rate here is
   // real suppressed leakage, not guard traffic.
   //
-  // `in_flow_gate_eligible` is the load-bearing tag: `false` means the exit
-  // could not have been covered upstream, which is the population this guard
-  // exists for. Without it the dashboard cannot tell a backstop catching real
-  // leaks from one duplicating a gate that already fired.
+  // EVERY event from this guard is, BY ITS SCOPE, an exit the in-flow
+  // explanation gate could not have covered — the guard returns early on any
+  // turn that dispatched an execute-intent handler. So that fact needs no
+  // per-event tag; it is a property of the event's existence.
   //
-  // There is deliberately NO `handler_id`: the guard is scoped to turns that
-  // dispatched no execute-intent handler (execute receipts keep their own
-  // producer gate — see `enforceWithheldLeaderClaimGuard`), so the field would
-  // be null on every event and would read as a covered population that is not.
+  // ⚠ There is deliberately NO `in_flow_gate_eligible` and NO `handler_id`.
+  // Both were tried and both were STRUCTURAL CONSTANTS under this scope, which
+  // is worse than uninformative — a field that cannot vary reads on a dashboard
+  // as a measured population when it is a tautology. An earlier revision shipped
+  // `in_flow_gate_eligible` and adversarial review showed a mutant hardcoding it
+  // to `false` left the whole suite green. Do not re-add either without a test
+  // proving BOTH values occur.
   //
   // Privacy contract (R-004): bounded enums and finite integers only.
   // The matched prose is the user's own decision content and never appears.
   // Payload: { request_id, scenario_id, constraint_verdict_state,
-  // original_length, projected_length, in_flow_gate_eligible, dispatch_path }.
+  // original_length, projected_length, dispatch_path }.
   V5WithheldLeaderClaimNeutralisedAtFinalise:
     "v5.egress.leading_option_claim_neutralised_at_finalise",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
