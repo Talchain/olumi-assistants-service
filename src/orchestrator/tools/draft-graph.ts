@@ -11,6 +11,7 @@
 import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
+import { currentStageEmitter } from "../../cee/unified-pipeline/stage-stream-context.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts, PipelineOutcome } from "../../cee/unified-pipeline/types.js";
 import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry, DraftCoachingStrengthenItem, DraftCoachingWideningLog } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
@@ -173,6 +174,29 @@ export async function handleDraftGraph(
     currencyInstruction: buildCurrencyInstruction(currencySignal),
   };
 
+  // ROADMAP 2.122 / 1.204 M1 (CEE lane 2) — the staged-emission seam, wired for
+  // the TURN path.
+  //
+  // Lane 1 (#745) built `onStage` and gave it exactly one caller: the staged
+  // ASSIST route, which calls `runUnifiedPipeline` directly. The product's cold
+  // draft does NOT go that way — it is a V5 turn, and it arrives here. This is
+  // the line that lets a streamed turn observe the same stage boundaries the
+  // staged assist route already observes. It GENERALISES lane 1's emitter; it
+  // does not duplicate the pipeline.
+  //
+  // ABSENT BY DEFAULT, AND THAT IS THE WHOLE SAFETY ARGUMENT. `currentStageEmitter()`
+  // reads an async-context store that only `/orchestrate/v2/turn/stream` ever
+  // sets. Every other caller of this tool — the buffered `/orchestrate/v2/turn`,
+  // every test, every internal draft — runs outside that context and gets
+  // `undefined`, so the key is not spread and `opts` is the object it was
+  // before. The buffered turn is untouched by construction rather than by flag.
+  //
+  // The emitter is a PURE OBSERVER (see unified-pipeline/index.ts
+  // `emitStageEvent`): synchronous, un-awaited, throw-swallowing, unable to
+  // reach `ctx` or the response body. So a streamed draft and a buffered draft
+  // execute the same pipeline and commit the same graph.
+  const stageEmitter = currentStageEmitter();
+
   const opts: UnifiedPipelineOpts = {
     schemaVersion: 'v3',
     signal: draftOpts?.signal,
@@ -181,6 +205,7 @@ export async function handleDraftGraph(
     // request start, not LLM start. Omitted (not defaulted) when absent —
     // parse.ts owns the documented LLM-start fallback for legacy callers.
     ...(draftOpts?.requestStartMs !== undefined ? { requestStartMs: draftOpts.requestStartMs } : {}),
+    ...(stageEmitter ? { onStage: stageEmitter } : {}),
   };
 
   log.info({ brief_length: brief.length, turn_id: turnId }, "draft_graph: starting unified pipeline");
