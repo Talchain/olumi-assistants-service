@@ -26,6 +26,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
 import {
   probeStatusPrompts,
@@ -71,6 +72,28 @@ async function buildKeyRows(
 }
 
 export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<void> {
+  // Rate limiting, matching the sibling admin plugins (admin.prompts.ts,
+  // admin.v1.turn-debug.ts, admin.v1.routing-log.ts, admin.v1.draft-failures.ts):
+  // 100 requests / 15 min per admin-key+IP.
+  //
+  // This plugin previously had NONE — the global limiter in server.ts covered
+  // it, but nothing scoped these authorization-performing routes the way every
+  // other admin plugin is scoped. CodeQL's js/missing-rate-limiting flagged the
+  // gap when /admin/prompts/inventory was added; the honest fix is to close it
+  // for the whole plugin rather than for the one new route.
+  await app.register(rateLimit, {
+    max: 100,
+    timeWindow: 15 * 60 * 1000,
+    keyGenerator: (request) => {
+      const adminKey = (request.headers['x-admin-key'] as string) ?? '';
+      return `prompt_status:${adminKey.slice(0, 8)}:${request.ip}`;
+    },
+    errorResponseBuilder: () => ({
+      error: 'rate_limit_exceeded',
+      message: 'Too many requests. Please try again later.',
+    }),
+  });
+
   app.get('/admin/prompts/status', async (request, reply) => {
     if (!verifyAdminKey(request, reply, 'read')) return;
     const keys = await buildKeyRows('status');
