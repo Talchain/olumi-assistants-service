@@ -366,7 +366,31 @@ export interface CompressorPass {
   readonly emitted_chars: number;
 }
 
-export interface CompressorArm extends SummariserModel {
+/**
+ * A summariser this module constructed, carrying the ONE fact the floors depend
+ * on (adversarial review of #757, A2).
+ *
+ * `verbatimByConstruction: true` ⇒ the summary reproduces the USER'S OWN WORDS,
+ * so the lexical detector cannot mistake a paraphrase for a loss and
+ * `evaluateFloors` is sound. `false` ⇒ built here but planting text that is not
+ * the fixture's words. **ABSENT ⇒ an external model** (the live haiku
+ * summariser, or anything else a caller supplies) — and then the floors are
+ * UNSOUND, because a faithful paraphrase scores as a loss.
+ *
+ * Measured by the reviewer, which is why this is a field and not a paragraph: a
+ * planted summary preserving all ten facts IN MEANING but none in the user's
+ * words scored **1/10 retained with 2 MEM-FLOOR-1 violations** — a summariser
+ * that lost nothing, reported as losing the decision goal and the user's
+ * correction. The prose disclosure existed in three places and would not have
+ * stopped a lane filing that as a product defect (trap 10: a measurement
+ * artefact inherited and escalated). So the API refuses instead.
+ */
+export interface RetentionSummariser extends SummariserModel {
+  readonly verbatimByConstruction?: boolean;
+}
+
+export interface CompressorArm extends RetentionSummariser {
+  readonly verbatimByConstruction: true;
   readonly passes: readonly CompressorPass[];
 }
 
@@ -385,6 +409,10 @@ export function makeCompressorArm(opts: CompressorOptions): CompressorArm {
   const passes: CompressorPass[] = [];
 
   return {
+    // By CONSTRUCTION: every statement this arm emits is a user utterance copied
+    // verbatim out of the input (see the mint loop below), so no paraphrase can
+    // arise and the lexical detector cannot mistake one for a loss.
+    verbatimByConstruction: true,
     passes,
     async summarise(userMessage: string) {
       const parsed = parseSummariserInput(userMessage);
@@ -477,20 +505,30 @@ export function makeCompressorArm(opts: CompressorOptions): CompressorArm {
  * DETECTOR and the FLOOR LOGIC (does a planted fact get found? does a missing
  * one RED?) and exactly wrong for any claim about the pipeline. Never use it to
  * produce a retention number.
+ *
+ * `verbatimFromFixture` is REQUIRED, not defaulted (A2): the caller must state
+ * whether the planted text carries the fixture's witness tokens in the user's
+ * own words. `false` makes the run detector-unsound and `evaluateFloors` then
+ * refuses. A default would be inherited silently by the next author, which is
+ * the whole failure mode.
  */
 export function makePlantedArm(slots: {
   readonly FRAME: string;
   readonly CONSTRAINTS: string;
   readonly RESOLVED?: string;
   readonly OPEN?: string;
-}): SummariserModel {
+  readonly verbatimFromFixture: boolean;
+}): RetentionSummariser {
   const text = [
     `${ROLLING_SUMMARY_SLOT_LABELS.FRAME}: ${slots.FRAME}`,
     `${ROLLING_SUMMARY_SLOT_LABELS.CONSTRAINTS}: ${slots.CONSTRAINTS}`,
     `${ROLLING_SUMMARY_SLOT_LABELS.RESOLVED}: ${slots.RESOLVED ?? '(none)'}`,
     `${ROLLING_SUMMARY_SLOT_LABELS.OPEN}: ${slots.OPEN ?? '(none)'}`,
   ].join('\n');
-  return { summarise: async () => ({ text }) };
+  return {
+    verbatimByConstruction: slots.verbatimFromFixture,
+    summarise: async () => ({ text }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -523,7 +561,12 @@ function buildTurn(n: number, user: string, assistant: string): SessionTurnWithC
     id: `row-${n}`,
     scenario_id: SCENARIO,
     user_id: USER_ID,
-    turn_id: `tttttttt-1111-4000-8000-${String(n).padStart(12, '0')}`,
+    // The FIRST EIGHT CHARS must differ per turn (adversarial review R2). The
+    // injector's provenance stamp is `id.slice(0, 8)` (inject.ts `stampFor`), so
+    // an all-`tttttttt` id set rendered nine IDENTICAL refs and the R3
+    // provenance channel carried zero information — a stamp regression was
+    // undetectable here. Pinned by MEM-FLOOR 5's stamp-distinctness assertion.
+    turn_id: `${String(n).padStart(8, '0')}-1111-4000-8000-${String(n).padStart(12, '0')}`,
     turn_class: 'direct_answer',
     handler_id: null,
     request_hash: `sha256:memret-turn-${n}`,
@@ -581,6 +624,21 @@ export interface RetentionMeasurement {
 export interface RetentionRunResult {
   readonly case_id: string;
   readonly window_depth: number;
+  /**
+   * DERIVED from the summariser that was actually used, never passed in.
+   * `'deterministic-stand-in'` ⇒ built by this module; NO live model was called.
+   * `'external-unverified'` ⇒ supplied by the caller (e.g. the live haiku
+   * summariser). Rendered into the report header so an extracted artefact cannot
+   * be mistaken for a live-model measurement (A1).
+   */
+  readonly model_kind: 'deterministic-stand-in' | 'external-unverified';
+  /**
+   * DERIVED (A2). TRUE only when the summariser carries the user's words
+   * VERBATIM. When FALSE, `evaluateFloors` REFUSES by default: a lexical
+   * detector reads a faithful paraphrase as a loss, so the floors would report
+   * defects that are artefacts of the detector.
+   */
+  readonly detector_sound_for_floors: boolean;
   readonly measurements: readonly RetentionMeasurement[];
   /** Every `v5.summary.updated` the run emitted, in order. */
   readonly summary_events: readonly SummaryUpdatedEvent[];
@@ -651,9 +709,15 @@ export async function runRetentionEval(args: {
 
   const armPasses =
     'passes' in model ? ((model as CompressorArm).passes as readonly CompressorPass[]) : null;
+  // A1 + A2, both DERIVED from the model actually used. An ABSENT marker means an
+  // external model, so the default for anything this module did not build is
+  // "unverified, floors unsound" — fail-closed, not assume-good (trap 12).
+  const marker = (model as RetentionSummariser).verbatimByConstruction;
   return {
     case_id: kase.id,
     window_depth: windowDepth,
+    model_kind: marker === undefined ? 'external-unverified' : 'deterministic-stand-in',
+    detector_sound_for_floors: marker === true,
     measurements,
     summary_events: events,
     telemetry_observed: telemetryObserved,
@@ -741,7 +805,20 @@ export interface FloorViolation {
   readonly floor: 'MEM-FLOOR-1' | 'MEM-FLOOR-2';
   readonly fact_id: string;
   readonly detail: string;
+  /** Present ONLY under `onUnsound: 'tag'` — the violation may be an artefact of
+   *  the lexical detector rather than a real loss. Never absent-and-untrue. */
+  readonly detector_unsound?: true;
 }
+
+/** Message used by both the refusal and the tag, so the two paths cannot drift. */
+export const DETECTOR_UNSOUND_FOR_FLOORS =
+  'the summariser for this run does not carry the user\'s words verbatim ' +
+  '(detector_sound_for_floors=false), so the LEXICAL detector reads a faithful ' +
+  'paraphrase as a LOSS. A run measured by the reviewer: a summary preserving all ' +
+  'ten facts IN MEANING scored 1/10 with 2 MEM-FLOOR-1 violations, having lost ' +
+  'nothing. READ THE TABLE, NOT THE FLOORS — the retained column is a lower bound. ' +
+  'Pass { onUnsound: \'tag\' } if you want the violations anyway, labelled as ' +
+  'possible detector artefacts.';
 
 /**
  * Evaluate the two floors that RED the build. Everything else the eval produces
@@ -756,11 +833,33 @@ export interface FloorViolation {
  * MEM-FLOOR 2 — a SUPERSEDED value survives while the CORRECTION that replaced
  *   it does not. That is not forgetting; the system is then holding, and will
  *   act on, a number the user explicitly withdrew.
+ *
+ * ⚠ REFUSES on a detector-unsound run (A2). The floors are only meaningful when
+ * the summariser carries the user's words verbatim; against a paraphrasing model
+ * they report the detector's limits as product defects. `run` is taken (not just
+ * the measurement) precisely so that soundness cannot be forgotten at a call
+ * site — the guard is not something a caller has to remember to ask for.
  */
 export function evaluateFloors(
   kase: RetentionCase,
+  run: RetentionRunResult,
   m: RetentionMeasurement,
+  opts: { readonly onUnsound: 'refuse' | 'tag' } = { onUnsound: 'refuse' },
 ): FloorViolation[] {
+  if (!run.measurements.includes(m)) {
+    throw new Error(
+      'memory-retention eval: evaluateFloors was given a measurement that does not belong to ' +
+        `the run passed alongside it (run ${run.case_id}, measurement at turn ${m.at_turn}). ` +
+        'Pairing a measurement with the wrong run would evaluate one arm under another arm\'s ' +
+        'soundness verdict.',
+    );
+  }
+  if (!run.detector_sound_for_floors && opts.onUnsound === 'refuse') {
+    throw new Error(`memory-retention eval: REFUSING to evaluate the floors — ${DETECTOR_UNSOUND_FOR_FLOORS}`);
+  }
+  const unsoundTag: { detector_unsound?: true } = run.detector_sound_for_floors
+    ? {}
+    : { detector_unsound: true };
   const violations: FloorViolation[] = [];
   const byId = new Map(m.facts.map((f) => [f.id, f] as const));
 
@@ -774,6 +873,7 @@ export function evaluateFloors(
           `turn ${m.at_turn}: "${reading.id}" (${reading.kind}, stated at turn ` +
           `${reading.stated_at_turn}) is ABSENT from the injected conversation summary. ` +
           `Injected block was:\n${m.section_text}`,
+        ...unsoundTag,
       });
     }
   }
@@ -791,6 +891,7 @@ export function evaluateFloors(
           `turn ${m.at_turn}: the SUPERSEDED value "${spec.supersedes}" survived in memory ` +
           `while the correction "${spec.id}" that replaced it did not. The system now holds a ` +
           `value the user explicitly withdrew. Injected block was:\n${m.section_text}`,
+        ...unsoundTag,
       });
     }
   }
@@ -859,6 +960,38 @@ export function assertStatementsAreSingleSentences(kase: RetentionCase): void {
 }
 
 /** Render the per-fact retention table for the evidence file / CI log. */
+/**
+ * The stand-in caveat, DERIVED from the run (A1).
+ *
+ * The report is designed to be extracted (`MEMORY_RETENTION_REPORT_PATH`), and an
+ * extracted artefact reading `retained 10/10` under the title "MEMORY-RETENTION
+ * EVAL REPORT" is exactly how a later lane closes rec 8 off a stand-in's numbers.
+ * The caveat therefore travels WITH the numbers, not only in the files that
+ * reader will never open.
+ */
+export function renderModelProvenanceHeader(result: RetentionRunResult): string {
+  if (result.model_kind === 'deterministic-stand-in') {
+    return (
+      '**MODEL: deterministic stand-in**, supplied through the sanctioned ' +
+      '`SummariserModel` port — **NO live model was called and the real (haiku) ' +
+      "summariser's retention is NOT measured by this report.** These numbers are " +
+      'about the PIPELINE and about the system\'s response to a drop. For the live ' +
+      'table see declared gap 1: `runRetentionEval({ kase, model: new ' +
+      'AnthropicSummariserModel(), measureAtTurns: [19, 20] })` — which needs an ' +
+      'API key, costs money, and is a TABLE, never a gate.' +
+      (result.detector_sound_for_floors
+        ? ''
+        : ' ⚠ `detector_sound_for_floors=false` on this run — the floors are not applicable.')
+    );
+  }
+  return (
+    '**⚠ MODEL: EXTERNAL / UNVERIFIED** — supplied by the caller, not built by this ' +
+    `module. \`detector_sound_for_floors=${result.detector_sound_for_floors}\`. The ` +
+    'detector is LEXICAL, so a faithful paraphrase reads as a LOSS: the retained ' +
+    'column is a **LOWER BOUND** and the FLOORS DO NOT APPLY. Read the table only.'
+  );
+}
+
 export function renderRetentionTable(label: string, result: RetentionRunResult): string {
   const lines: string[] = [`#### ${label} — case \`${result.case_id}\``];
   for (const m of result.measurements) {
@@ -867,7 +1000,11 @@ export function renderRetentionTable(label: string, result: RetentionRunResult):
     lines.push(
       '',
       `**turn ${m.at_turn}** · generator=\`${m.stored_generator}\` v${m.stored_version} · ` +
-        `stored ${m.stored_chars} chars · stale=\`${m.stale}\` · lag=${m.lag_turns} · ` +
+        // R3: the STORED text is what the 1,600 cap governs; the INJECTED block is
+        // re-rendered from slots WITH provenance stamps and is uncapped, so the two
+        // numbers differ and only one of them is bounded. Report both.
+        `stored ${m.stored_chars} chars · injected ${m.section_text.length} chars · ` +
+        `stale=\`${m.stale}\` · lag=${m.lag_turns} · ` +
         `summarised=${m.summarised_turns} · history_capped=\`${m.history_capped}\` · ` +
         `durable entries/slot=${JSON.stringify(m.durable_entries_per_slot)} · ` +
         `statements/slot=${JSON.stringify(m.statements_per_slot)} · ` +

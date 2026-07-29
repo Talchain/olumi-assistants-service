@@ -67,10 +67,12 @@ import {
   makeCompressorArm,
   makePlantedArm,
   normaliseForDetection,
+  renderModelProvenanceHeader,
   renderRetentionTable,
   runRetentionEval,
   splitStatements,
   witnessPresent,
+  DETECTOR_UNSOUND_FOR_FLOORS,
   type RetentionCase,
   type RetentionMeasurement,
   type RetentionRunResult,
@@ -142,6 +144,14 @@ beforeAll(async () => {
   // console output), and to a file when a path is supplied.
   const report = [
     '===== MEMORY-RETENTION EVAL REPORT =====',
+    '',
+    // A1 (adversarial review of #757): the caveat rides WITH the numbers. This
+    // artefact is extracted to a file, and a bare "retained 10/10" under this
+    // title is how the next lane closes rec 8 off a stand-in's output. Derived
+    // from the run, so substituting a live model rewrites it automatically —
+    // never a hand-maintained sentence that could go stale (trap 12).
+    renderModelProvenanceHeader(faithful),
+    '',
     `case: ${kase.id} · verbatim window: ${CONTEXT_PACK_RECENT_TURNS_CAP} turns · ` +
       `regen interval: ${SUMMARY_REGEN_INTERVAL} · target ${SUMMARY_TARGET_MAX_CHARS} / ` +
       `hard cap ${SUMMARY_HARD_CAP_CHARS} chars`,
@@ -278,6 +288,31 @@ describe('MEM-FLOOR 5 — pack integrity and non-vacuity', () => {
     ).toBeLessThan(SUMMARY_HARD_CAP_CHARS);
   });
 
+  it('provenance stamps are DISTINGUISHABLE — the R3 channel carries information', () => {
+    // Adversarial review R2: `stampFor` renders `turn_id.slice(0, 8)`, so a
+    // fixture whose ids share a prefix rendered NINE IDENTICAL refs and a
+    // stamp-provenance regression was undetectable here. Derived from the
+    // injected block, not from the fixture, so it pins the rendering too.
+    const stamps = at(faithful, MEASURE_TURNS[0]!).section_text.match(/t:[0-9a-z]{8}/g) ?? [];
+    expect(stamps.length, 'the injected block carries no provenance stamps at all').toBeGreaterThan(1);
+    expect(
+      new Set(stamps).size,
+      `all ${stamps.length} stamps are identical (${stamps[0]}) — the provenance channel is ` +
+        'degenerate and a stamp regression could not be seen',
+    ).toBeGreaterThan(1);
+  });
+
+  it('the INJECTED block is larger than the stored text, and only the stored one is capped', () => {
+    // Adversarial review R3, and the concrete form of sharpening 2: the 1,600
+    // hard cap governs the STORED text; the injected block is re-rendered from
+    // slots WITH provenance stamps and is uncapped. Reported, and pinned.
+    for (const turn of MEASURE_TURNS) {
+      const m = at(faithful, turn);
+      expect(m.section_text.length).toBeGreaterThan(m.stored_chars);
+      expect(m.stored_chars).toBeLessThan(SUMMARY_HARD_CAP_CHARS);
+    }
+  });
+
   it('the durable shape holds at most ONE entry per slot — so no count can see a drop', () => {
     // Derived, not asserted from the design doc: assemble.ts stores a
     // single-element entries array, so "nine constraints" exists only in prose.
@@ -316,6 +351,8 @@ describe('MEM-FLOOR 3 — detector controls (both directions, or the table is th
       model: makePlantedArm({
         FRAME: kase.turns[0]!.user,
         CONSTRAINTS: plantedText,
+        // Literally the fixture's own user turns, concatenated.
+        verbatimFromFixture: true,
       }),
       measureAtTurns: [MEASURE_TURNS[0]!],
     });
@@ -327,7 +364,7 @@ describe('MEM-FLOOR 3 — detector controls (both directions, or the table is th
     // NEGATIVE, same run: the never-stated control must still be MISSED.
     const control = m.facts.find((f) => f.stated_at_turn === null)!;
     expect(control.retained_in_summary, 'never-stated fact must be MISSED').toBe(false);
-    expect(evaluateFloors(kase, m)).toEqual([]);
+    expect(evaluateFloors(kase, run, m)).toEqual([]);
   });
 
   it('NEGATIVE: removing the floor facts from a planted summary makes MEM-FLOOR 1 FIRE', async () => {
@@ -337,11 +374,14 @@ describe('MEM-FLOOR 3 — detector controls (both directions, or the table is th
         FRAME: 'Choosing between three candidate sites.',
         CONSTRAINTS:
           'The total fit-out budget must not go above £180,000. I would prefer a shorter lease.',
+        // Every WITNESS token present here is the user's own wording, so the
+        // floors are sound: the two that fire, fire because the fact is absent.
+        verbatimFromFixture: true,
       }),
       measureAtTurns: [MEASURE_TURNS[0]!],
     });
     const m = at(run, MEASURE_TURNS[0]!);
-    const violations = evaluateFloors(kase, m);
+    const violations = evaluateFloors(kase, run, m);
     expect(violations.map((v) => v.fact_id).sort()).toEqual(
       kase.facts
         .filter((f) => f.floor)
@@ -362,14 +402,97 @@ describe('MEM-FLOOR 3 — detector controls (both directions, or the table is th
       model: makePlantedArm({
         FRAME: kase.turns[0]!.user,
         CONSTRAINTS: kase.turns.find((t) => t.n === superseded.stated_at_turn)!.user,
+        verbatimFromFixture: true,
       }),
       measureAtTurns: [MEASURE_TURNS[0]!],
     });
     const m = at(run, MEASURE_TURNS[0]!);
-    const violations = evaluateFloors(kase, m);
+    const violations = evaluateFloors(kase, run, m);
     expect(violations.some((v) => v.floor === 'MEM-FLOOR-2')).toBe(true);
     const two = violations.find((v) => v.floor === 'MEM-FLOOR-2')!;
     expect(two.detail).toContain('the user explicitly withdrew');
+  });
+
+  it('MEM-FLOOR 6 — the floors REFUSE to run against a paraphrasing summariser', async () => {
+    // A2 (adversarial review of #757). The reviewer planted a summary preserving
+    // ALL TEN facts in MEANING but none in the user's words and got 1/10 retained
+    // with 2 MEM-FLOOR-1 violations — a summariser that lost NOTHING, reported as
+    // losing the decision goal and the user's correction. Evidence gap 1 hands
+    // over a copy-paste command to substitute the live model, so that is a real
+    // path to a false defect report (trap 10: a measurement artefact inherited and
+    // escalated). The prose disclosure existed in three places and would not have
+    // stopped it. Reproduced here, and the API now refuses.
+    const paraphrase = await runRetentionEval({
+      kase,
+      model: makePlantedArm({
+        FRAME: 'Picking a site for the new northern depot to recommend upstairs.',
+        CONSTRAINTS:
+          'Spend is capped at one hundred and eighty thousand pounds for the refit. ' +
+          'Nothing can begin before early spring. Bramhall Park is the favourite for its rail link. ' +
+          'Staffing is forty bodies, revised up from the earlier twenty-five. ' +
+          'A briefer tenancy is wanted even at a higher rate. ' +
+          'Legal will not sign until the ecological assessment clears. ' +
+          'The Yorkshire site keeps running for half a year. The candidate list is closed.',
+        verbatimFromFixture: false,
+      }),
+      measureAtTurns: [MEASURE_TURNS[0]!],
+    });
+    const m = at(paraphrase, MEASURE_TURNS[0]!);
+
+    // The artefact is real and is reproduced, not hidden.
+    expect(paraphrase.model_kind).toBe('deterministic-stand-in');
+    expect(paraphrase.detector_sound_for_floors).toBe(false);
+    const scored = m.facts.filter((f) => f.stated_at_turn !== null && f.retained_in_summary);
+    expect(
+      scored.length,
+      'a semantically-complete summary must still score LOW — that is the detector limit ' +
+        'this guard exists for; if this ever reads 10/10 the detector became semantic and ' +
+        'the refusal can be reconsidered',
+    ).toBeLessThan(kase.facts.filter((f) => f.stated_at_turn !== null).length);
+
+    // DIRECTION 1 — refuse by default.
+    expect(() => evaluateFloors(kase, paraphrase, m)).toThrow(/REFUSING to evaluate the floors/);
+    expect(() => evaluateFloors(kase, paraphrase, m)).toThrow(/READ THE TABLE, NOT THE FLOORS/);
+
+    // DIRECTION 2 — opt in, and every violation is LABELLED as a possible artefact.
+    const tagged = evaluateFloors(kase, paraphrase, m, { onUnsound: 'tag' });
+    expect(tagged.length, 'the reviewer measured 2 violations here').toBeGreaterThan(0);
+    expect(tagged.every((v) => v.detector_unsound === true)).toBe(true);
+
+    // The report header says so too, so an extracted artefact cannot mislead.
+    expect(renderModelProvenanceHeader(paraphrase)).toContain('detector_sound_for_floors=false');
+    expect(DETECTOR_UNSOUND_FOR_FLOORS).toContain('lower bound');
+  });
+
+  it('MEM-FLOOR 6 — a run whose model this module did not build is EXTERNAL and unsound', async () => {
+    // The live-model path: an ABSENT marker must not read as "sound". Fail-closed
+    // for anything the module did not construct (trap 12 — never assume-good).
+    const external = await runRetentionEval({
+      kase,
+      model: { summarise: async () => ({ text: at(faithful, MEASURE_TURNS[0]!).section_text }) },
+      measureAtTurns: [MEASURE_TURNS[0]!],
+    });
+    expect(external.model_kind).toBe('external-unverified');
+    expect(external.detector_sound_for_floors).toBe(false);
+    expect(() =>
+      evaluateFloors(kase, external, at(external, MEASURE_TURNS[0]!)),
+    ).toThrow(/REFUSING/);
+    expect(renderModelProvenanceHeader(external)).toContain('EXTERNAL / UNVERIFIED');
+    // POSITIVE CONTROL for the marker's discrimination: the verbatim arms ARE sound
+    // and their header carries no external warning — so `false` above is a verdict
+    // about the model, not a constant.
+    expect(faithful.detector_sound_for_floors).toBe(true);
+    expect(faithful.model_kind).toBe('deterministic-stand-in');
+    expect(renderModelProvenanceHeader(faithful)).not.toContain('EXTERNAL');
+    expect(renderModelProvenanceHeader(faithful)).toContain('NO live model was called');
+  });
+
+  it('evaluateFloors refuses a measurement paired with the wrong run', () => {
+    // The guard is only honest if the (run, measurement) pair is coherent —
+    // otherwise a caller could launder an unsound arm through a sound run's verdict.
+    expect(() => evaluateFloors(kase, budgetOldest, at(faithful, MEASURE_TURNS[0]!))).toThrow(
+      /does not belong to the run/,
+    );
   });
 
   it('statement recovery splits a stored blob back into its statements', () => {
@@ -422,7 +545,7 @@ describe('MEM-FLOOR 1 + 2 — ARM A (faithful): the pipeline must not lose what 
     'turn %i: the decision goal and the user correction survive into the injected summary',
     (turn) => {
       const m = at(faithful, turn);
-      const violations = evaluateFloors(kase, m);
+      const violations = evaluateFloors(kase, faithful, m);
       expect(violations.map((v) => `${v.floor} ${v.fact_id}`), violations.map((v) => v.detail).join('\n\n')).toEqual([]);
     },
   );
@@ -458,7 +581,7 @@ describe('MEM-FLOOR 1 — ARM C (erasure): the floor bites on the carry-forward 
 
   it('every seeded fact — including both floor facts — survives the erasure', () => {
     const m = at(erasing, MEASURE_TURNS[0]!);
-    expect(evaluateFloors(kase, m).map((v) => v.detail)).toEqual([]);
+    expect(evaluateFloors(kase, erasing, m).map((v) => v.detail)).toEqual([]);
     for (const f of m.facts) {
       if (f.stated_at_turn === null) continue;
       expect(f.retained_in_summary, `${f.id} lost to the erasure`).toBe(true);
