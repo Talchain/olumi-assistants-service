@@ -245,10 +245,12 @@ export interface MayNameLeadingOptionVerdict {
  * trap #12) in its most expensive direction. This form fails CLOSED: an
  * unclassified value returns `false`, costing a sentence, never a truth.
  *
- * ⚠ AND IT FAILS AT COMPILE TIME, not at runtime. The `never` assignment in the
- * default arm means a seventh provenance value does not type-check until it is
- * classified. The `return false` beneath it is the runtime safe direction for a
- * value that reached here anyway (e.g. across a schema boundary).
+ * ⚠ AND IT FAILS AT COMPILE TIME, not at runtime. The classification is a typed
+ * TOTAL `Record<MayNameLeadingOptionProvenance, boolean>`, so a seventh
+ * provenance value does not type-check until an entry is added for it — the
+ * exhaustiveness comes from the Record's key type, not from a `default` arm.
+ * The `?? false` on the lookup is the runtime safe direction for a value that
+ * reached here anyway (e.g. across a schema boundary).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 /**
