@@ -1,8 +1,19 @@
 /**
- * Admin Prompts Status + Reload Routes
+ * Admin Prompts Status + Inventory + Reload Routes
  *
- * GET  /admin/prompts/status — per-key resolution detail for the five
- *      PMS-tracked prompts. Read-only admin auth.
+ * GET  /admin/prompts/status — per-key resolution detail for the DERIVED
+ *      reported prompt set (every live PMS prompt plus the gated-but-wired
+ *      ones). Read-only admin auth.
+ *
+ *      This set used to be a HAND-LISTED five keys (`TRACKED_KEYS`), which
+ *      duly went stale: `repair_edit_graph` is PMS-registered and
+ *      live-callable and was invisible here. It is now derived — see
+ *      `src/prompts/estate.ts`. Health GATING still uses the critical five;
+ *      only REPORTING widened.
+ *
+ * GET  /admin/prompts/inventory — the one derivable answer to "how many
+ *      prompts, which, what hash", covering BOTH halves of the estate (PMS
+ *      rows and code constants) and reporting its own archive drift.
  *
  * POST /admin/prompts/reload — clears all cache layers (store, adapter,
  *      routing snapshot), re-warms the store cache, returns post-reload
@@ -17,10 +28,11 @@
 import type { FastifyInstance } from 'fastify';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
 import {
-  probeTrackedPrompts,
+  probeStatusPrompts,
   resetPromptsReadyCache,
   type PromptKeyStatus,
 } from '../prompts/readiness.js';
+import { buildPromptEstateInventory } from '../prompts/inventory.js';
 import {
   ensureRoutingPromptSnapshot,
   refreshRoutingPromptSnapshot,
@@ -41,7 +53,7 @@ type PromptKeyStatusWithExtras = PromptKeyStatus & RoutingExtras;
 async function buildKeyRows(
   trigger: 'status' | 'reload',
 ): Promise<PromptKeyStatusWithExtras[]> {
-  const statuses = await probeTrackedPrompts(trigger);
+  const statuses = await probeStatusPrompts(trigger);
   let sent_hash: string | undefined;
   try {
     // Pass the route trigger through to the snapshot accessor so the
@@ -63,6 +75,18 @@ export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<voi
     if (!verifyAdminKey(request, reply, 'read')) return;
     const keys = await buildKeyRows('status');
     return reply.code(200).send({ keys });
+  });
+
+  /**
+   * GET /admin/prompts/inventory — the whole estate in one derivable answer.
+   *
+   * Read-only admin auth, same as /status. Deliberately a separate route so
+   * /status keeps its exact `{ keys: [...] }` shape for existing consumers.
+   */
+  app.get('/admin/prompts/inventory', async (request, reply) => {
+    if (!verifyAdminKey(request, reply, 'read')) return;
+    const inventory = await buildPromptEstateInventory();
+    return reply.code(200).send(inventory);
   });
 
   app.post('/admin/prompts/reload', async (request, reply) => {

@@ -21,6 +21,7 @@ import {
   ensureRoutingPromptSnapshot,
 } from '../../src/orchestrator-v5/routing/prompt-loader.js';
 import { __resetPromptsReadyCacheForTests } from '../../src/prompts/readiness.js';
+import { STATUS_KEYS } from '../../src/prompts/tracked.js';
 
 beforeAll(() => {
   registerAllDefaultPrompts();
@@ -77,7 +78,11 @@ describe('POST /admin/prompts/reload', () => {
     };
     expect(body.reload_ok).toBe(true);
     expect(body.snapshot_error).toBeNull();
-    expect(body.keys).toHaveLength(5);
+    // DERIVED, not a literal. This used to assert `5` — a third copy of the
+    // hand-listed tracked-key set, which meant widening the reported estate
+    // read as a regression instead of as the fix. The route's job is to report
+    // exactly the derived reporting set, so that is what is asserted.
+    expect(body.keys.map((r) => r.key).sort()).toEqual([...STATUS_KEYS].sort());
     for (const row of body.keys) {
       expect(['pms', 'default']).toContain(row.source);
       expect(row.version).toBeTruthy();

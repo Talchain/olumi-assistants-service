@@ -320,7 +320,11 @@ Respond ONLY with valid JSON matching this structure.`;
 // Compliance reminder appended to the user message for initial draft generation only.
 // Reinforces critical structural rules at the point of generation (not in the system prompt).
 // Controlled by CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED (default: true).
-const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
+// EXPORTED (content unchanged) so the prompt estate can report its hash —
+// see CODE_CONSTANT_PROMPTS in src/prompts/estate.ts. The OpenAI adapter
+// carries a byte-identical copy; tests/unit/prompt-estate-drift.test.ts
+// fails loud if the two ever diverge.
+export const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - Output valid JSON only (no comments, no text outside the JSON object)
 - Every outcome and risk needs an inbound path from a controllable factor
 - Every option needs a complete path to goal: option → controllable → outcome/risk → goal
