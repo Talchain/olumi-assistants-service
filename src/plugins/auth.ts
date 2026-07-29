@@ -41,8 +41,19 @@ function getValidApiKeys(): Set<string> {
 
 /**
  * Check if route is public (no auth required)
+ *
+ * EXPORTED (ROADMAP 2.122, CEE lane 2) so tests can DERIVE a route's auth
+ * posture instead of restating the allowlist. The streamed-turn suite previously
+ * hand-copied `publicRoutes` into itself and said so in its own comment — a
+ * trap-12 mirror that would keep asserting the old answer after this list moved.
+ * Exporting the predicate is the derive-don't-mirror fix; behaviour unchanged.
+ *
+ * Note the prefix rule below (`path.startsWith(route + "/")`): it is why
+ * `/proxy/v5/turn/stream` inherits `/proxy/v5/turn`'s public posture without a
+ * new entry, and why `/orchestrate/v2/turn/stream` inherits nothing and stays
+ * authenticated.
  */
-function isPublicRoute(path: string, method?: string): boolean {
+export function isPublicRoute(path: string, method?: string): boolean {
   const publicRoutes = [
     "/healthz",
     "/health",

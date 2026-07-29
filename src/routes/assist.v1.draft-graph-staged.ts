@@ -132,8 +132,15 @@ export type StagedFrameClass = (typeof STAGED_FRAME_CLASSES)[number];
  * mechanism behind "partial content presents as in-progress, never complete":
  * there is no code path that can stamp `"complete"` on a pre-terminal frame,
  * so the doctrine is enforced by construction rather than by review.
+ *
+ * EXPORTED (ROADMAP 2.122, CEE lane 2) so the streamed TURN route derives its
+ * `status` from THIS function rather than re-implementing the rule. Two routes
+ * each carrying their own copy of "which stage counts as complete" is the
+ * hand-maintained mirror of CLAUDE.md trap 12 — and the failure would be
+ * silent, because a mirror that drifts still returns a valid-looking string.
+ * Adding the keyword changes no behaviour on this route.
  */
-function statusForStage(stage: StagedFrameClass): "in_progress" | "complete" {
+export function statusForStage(stage: StagedFrameClass): "in_progress" | "complete" {
   return stage === "COMPLETE" ? "complete" : "in_progress";
 }
 

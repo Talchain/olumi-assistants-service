@@ -65,6 +65,7 @@ import { getTurnExecutorBudgets, getHandlerBudgetMs } from "./orchestrator-v5/bu
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { ceeOrchestratorRouteV2 } from "./orchestrator/route-v2.js";
+import ceeStreamedTurnRouteV2 from "./routes/orchestrate.v2.turn-stream.js";
 import { adminPromptRoutes } from "./routes/admin.prompts.js";
 import { adminPromptStatusRoutes } from "./routes/admin.prompts.status.js";
 import { publicPromptRoutes } from "./routes/v1.prompts.js";
@@ -76,6 +77,7 @@ import { adminRoutingLogRoutes } from "./routes/admin.v1.routing-log.js";
 import { adminTestRoutes } from "./routes/admin.testing.js";
 import { adminModelRoutes } from "./routes/admin.models.js";
 import { proxyV5TurnRoute } from "./routes/proxy-v5-turn.js";
+import proxyV5TurnStreamRoute from "./routes/proxy-v5-turn-stream.js";
 import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
 import { getActiveExperiments, warmPromptCacheFromStore, getPromptLoaderCacheDiagnostics, isCacheWarmingComplete, isCacheWarmingHealthy, getCacheWarmingState, logStartupHealthCheck } from "./adapters/llm/prompt-loader.js";
@@ -1178,6 +1180,22 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeOrchestratorRouteV2(app);
   app.log.info({}, 'V5 orchestrator registered (POST /orchestrate/v2/turn)');
 
+  // ROADMAP 2.122 / 1.204 M1 (CEE lane 2) — the STREAMED sibling of the turn.
+  // Registered UNCONDITIONALLY and unflagged (no dark launches); the UI opts in
+  // by calling it, and rollback is a revert.
+  //
+  // MUST be registered AFTER ceeOrchestratorRouteV2 — the same ordering
+  // constraint /proxy/v5/turn carries below, and for the same reason: this route
+  // forwards to /orchestrate/v2/turn via app.inject(), so that route has to
+  // exist as an internal target.
+  //
+  // Auth: NOT listed in auth.ts isPublicRoute(), so the global onRequest hook
+  // authenticates it exactly as it authenticates /orchestrate/v2/turn. No new
+  // auth surface — deliberately, and unlike /proxy/v5/turn, which is public and
+  // does its own origin validation.
+  await ceeStreamedTurnRouteV2(app);
+  app.log.info({}, 'V5 streamed turn registered (POST /orchestrate/v2/turn/stream)');
+
   // Browser proxy for V5 turns — bypasses Netlify Edge timeout.
   // Registered after V5 orchestrator so /orchestrate/v2/turn exists as the internal target.
   // Route handles its own origin validation; auth bypass is in auth.ts isPublicRoute().
@@ -1242,6 +1260,21 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
     }
   }
   await proxyV5TurnRoute(app);
+
+    // ROADMAP 2.122 / 1.204 M1 (CEE lane 2) — the STREAMED browser surface.
+    //
+    // Registered inside the same BROWSER_PROXY_ENABLED block as its buffered
+    // sibling and immediately after it: a deployment with no browser proxy has
+    // no browser surface to stream over, and it forwards to /orchestrate/v2/turn
+    // (registered above) via app.inject(), so that target must already exist.
+    //
+    // This is the route the UI can actually reach. The service sibling
+    // (/orchestrate/v2/turn/stream, registered above) requires an assist key or
+    // HMAC, which a browser cannot hold — any VITE_* value is public by
+    // construction. Public in the auth-plugin sense by INHERITANCE, not by a new
+    // exemption: isPublicRoute() matches by prefix, so the existing
+    // "/proxy/v5/turn" entry already covers "/proxy/v5/turn/stream".
+    await proxyV5TurnStreamRoute(app);
 
   // Public prompt routes (cache warming and status)
   // Registered unconditionally - routes handle health checks internally
