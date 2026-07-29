@@ -360,8 +360,12 @@ export async function build() {
   const dskHash = getDskVersionHash();
   log.info({ dsk_version_hash: dskHash }, dskHash ? `DSK loaded: ${dskHash}` : 'DSK not loaded: flag OFF or bundle missing');
 
-  // Feature health check — log which enabled features have satisfied dependencies
-  logFeatureHealth();
+  // Feature health check — log which enabled features have OBSERVED evidence
+  // that they can do something (a resolvable producer module, a loaded bundle,
+  // a configured dependency), not merely a flag that is on. Awaited because
+  // producer-module evidence is probed by dynamic import; it runs after
+  // loadDskBundle() above so the DSK verdict sees the real bundle state.
+  await logFeatureHealth();
 
   // Startup health summary — single structured log line for deployment diagnostics
   // eslint-disable-next-line no-restricted-syntax -- ISSUE-9020 diagnostic-trace tristate (explicitly-set vs default-unset); pending config-side is-set predicate
