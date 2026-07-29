@@ -652,7 +652,13 @@ describe("POST /orchestrate/v2/turn/stream — the streamed V5 turn", () => {
       await server.listen({ port: 0, host: "127.0.0.1" });
       try {
         const { port } = server.server.address() as { port: number };
-        const t0 = Date.now();
+        // ONE clock. `performance.now()` and `Date.now()` have different
+        // origins, so mixing them here produced arrival offsets in the
+        // billions — harmless to the assertions below (they read `chunks`,
+        // not `at`) but the kind of nonsense number that gets copied into a
+        // report and believed. Deltas between `at` values are the meaningful
+        // quantity and they are now on a single base.
+        const t0 = performance.now();
         const res = await fetch(`http://127.0.0.1:${port}${STREAM_URL}`, {
           method: "POST",
           headers: { "content-type": "application/json", accept: "text/event-stream" },
