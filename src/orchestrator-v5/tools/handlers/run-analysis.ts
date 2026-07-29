@@ -938,9 +938,23 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         outcome: 'omitted_from_comparison',
       });
     }
+    // 2.120(c), 2026-07-29 — the omission sentence now carries the ENGINE'S
+    // reason where the engine gave one. Previously it said the option was left
+    // out "because it has no values set", while the payload's own reason was
+    // `IDENTICAL_OPTIONS_DEDUPED` (identical interventions to another option).
+    // The proxy reason is causally related but points the user at the wrong
+    // repair, and it is outright wrong for an option whose values ARE set to
+    // the same numbers as another's — dedup is a fingerprint match, not an
+    // emptiness test. The resolver reads the warning crossed with the returned
+    // comparison; no warning ⇒ null ⇒ the previous sentence ships unchanged.
+    const dedupKeptLabelFor = buildDedupKeptLabelResolver(
+      response,
+      resultRecords,
+      analysedOptionIds,
+    );
     const scaffoldDisclosure =
       scaffoldOutcome.scaffolded.length > 0
-        ? buildScaffoldDisclosureForPartition(scaffoldPresence)
+        ? buildScaffoldDisclosureForPartition(scaffoldPresence, dedupKeptLabelFor)
         : '';
     // T1 disclosure. The VERDICT is passed whole: which sentence is honest
     // depends on which state the producer evidence selected, and that pairing
@@ -1339,6 +1353,87 @@ export function readAnalysedOptionIds(
     if (typeof id === 'string' && id.length > 0) ids.add(id);
   }
   return ids;
+}
+
+/**
+ * ROADMAP 2.120(c) — resolve, for each option the engine REMOVED as a
+ * duplicate, the label of the option it was indistinguishable from.
+ *
+ * Why this exists: the omission disclosure used to give "because it has no
+ * values set" as the reason an option was left out. That is not the engine's
+ * reason — the engine's reason is `IDENTICAL_OPTIONS_DEDUPED`, a fingerprint
+ * match on the interventions, which fires whether or not values were set. The
+ * accurate sentence has to NAME the option that was kept, and that name is only
+ * derivable here, where the warning and the returned comparison are both in
+ * hand. See `coaching/scaffold-disclosure.ts` for the copy.
+ *
+ * PROVENANCE OF THE FIELD, verified at the bytes on PLoT `3d13e0a`:
+ * `validation/preflight-v2.ts:433-441` composes the warning with
+ * `affected_option_ids`, `routes/v2/run.ts:6268` aggregates it into
+ * `critiques`, and `:3496` publishes it through `addUserMessages`, which
+ * SPREADS each critique (`critique-humaniser.ts:499-502`) — so no field is
+ * dropped on the way to us. (The CEE→UI turn payload does strip it; that is a
+ * different hop and the reason a wire capture cannot answer this question.)
+ *
+ * ⚠ WHICH ID IS THE KEPT ONE IS **DERIVED, NOT POSITIONAL**. PLoT happens to
+ * emit `[keptOption.id, droppedOption.id]` today, but encoding that order here
+ * would be a hand-maintained mirror of another repo's array literal — trap-12,
+ * silent and green when it drifts. Instead: the KEPT option is the one PRESENT
+ * in the returned comparison and the REMOVED ones are those ABSENT from it,
+ * read off the same `analysedOptionIds` the omission partition uses. So
+ * "which option do we name?" and "which option did we say was left out?"
+ * cannot answer differently, and a PLoT order flip changes nothing here.
+ *
+ * Trap-13 built in: a warning is only honoured when EXACTLY ONE of its affected
+ * ids is present in the comparison AND at least one is absent. Anything else
+ * (no comparison read at all, both present, both absent, no resolvable label)
+ * resolves to null, and the caller falls back to the pre-existing sentence — we
+ * never name an option we did not see in the results.
+ */
+export function buildDedupKeptLabelResolver(
+  response: V2RunResponseEnvelope,
+  resultRecords: ReadonlyArray<Record<string, unknown>>,
+  analysedOptionIds: ReadonlySet<string>,
+): (omittedOptionId: string) => string | null {
+  const rawCritiques = (response as Record<string, unknown>).critiques;
+  if (!Array.isArray(rawCritiques) || analysedOptionIds.size === 0) return () => null;
+
+  const labelById = new Map<string, string>();
+  for (const record of resultRecords) {
+    const id = record.option_id;
+    if (typeof id !== 'string' || id.length === 0) continue;
+    const label =
+      typeof record.option_label === 'string' && record.option_label.length > 0
+        ? record.option_label
+        : typeof record.label === 'string' && record.label.length > 0
+          ? record.label
+          : null;
+    if (label !== null) labelById.set(id, label);
+  }
+
+  const keptLabelByRemovedId = new Map<string, string>();
+  for (const critique of rawCritiques) {
+    if (!isRecord(critique)) continue;
+    if (critique.code !== 'IDENTICAL_OPTIONS_DEDUPED') continue;
+    const affected = critique.affected_option_ids;
+    if (!Array.isArray(affected)) continue;
+    const ids = affected.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const present = ids.filter((id) => analysedOptionIds.has(id));
+    const absent = ids.filter((id) => !analysedOptionIds.has(id));
+    if (present.length !== 1 || absent.length === 0) continue;
+    const keptLabel = labelById.get(present[0]!);
+    if (keptLabel === undefined) continue;
+    for (const removedId of absent) {
+      // First warning wins: a second warning naming the same removed option is
+      // a shape we have never observed, and picking arbitrarily between two
+      // kept labels would be a claim neither warning supports on its own.
+      if (!keptLabelByRemovedId.has(removedId)) keptLabelByRemovedId.set(removedId, keptLabel);
+    }
+  }
+
+  if (keptLabelByRemovedId.size === 0) return () => null;
+  return (omittedOptionId: string): string | null =>
+    keptLabelByRemovedId.get(omittedOptionId) ?? null;
 }
 
 /**

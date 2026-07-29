@@ -222,6 +222,97 @@ function omittedPluralSuffix(count: number): string {
   );
 }
 
+// ── DEDUP form (ROADMAP 2.120(c), 2026-07-29) ───────────────────────────
+// The sentences above name a REASON — "because it has no values set" — that is
+// not the engine's. The engine's reason, when it removes the arm, is
+// `IDENTICAL_OPTIONS_DEDUPED`: the option's interventions fingerprint
+// identically to another option's, so it is not a distinct arm to score.
+//
+// The two are causally related (no values ⇒ the factors sit at their current
+// position ⇒ that is what the status-quo option encodes ⇒ identical), which is
+// why the proxy reason read as defensible for as long as it did. It is still
+// the WRONG reason, and the difference is load-bearing for the user:
+//
+//   - dedup is a FINGERPRINT MATCH, not an emptiness test. An option whose
+//     values ARE set — to the same numbers as another option — is removed too,
+//     and would be shown a sentence asserting it has no values set.
+//   - the repair the proxy reason implies ("set any values") is not the repair
+//     that works. The repair is "make it DIFFERENT from the option it collapsed
+//     onto" — which the user cannot act on until we NAME that option.
+//
+// Measured on deployed staging 2026-07-28 22:22Z (CEE `f2e00b6`, evidence
+// `PHASE0-EVIDENCE-2026-07-28/fix-2117-cee-copy.md` LIVE RE-CAPTURE post-#748):
+// the panel said "One of your options was left out of this comparison because
+// it has no values set" while the same payload carried
+//
+//   IDENTICAL_OPTIONS_DEDUPED — "Option 'Partner with Specialist Consultancy to
+//   Extend Current System' has identical interventions to 'Defer Replacement
+//   (Status Quo)' and was removed. Analysis proceeds with deduplicated options."
+//
+// DERIVED, NEVER PREDICTED (trap-12). Nothing here models PLoT's dedup rule.
+// The kept option arrives as a resolved LABEL from the caller, which reads it
+// off the engine's own warning crossed with the returned comparison (see
+// `run-analysis.ts::buildDedupKeptLabelResolver`). No warning ⇒ no resolver hit
+// ⇒ the sentences above still ship, unchanged, byte for byte. A future engine
+// filter that removes an arm for a DIFFERENT reason therefore keeps the generic
+// copy honest instead of inheriting a dedup explanation that does not apply.
+function dedupOmittedLabelledSuffix(removed: string, kept: string): string {
+  return (
+    ` '${removed}' was left out of this comparison because it is currently ` +
+    `indistinguishable from '${kept}' — its result is that option's result. ` +
+    `To score it separately, say '${buildConfigureOptionChipMessage(removed)}'`
+  );
+}
+
+function dedupOmittedGenericSingleSuffix(kept: string): string {
+  return (
+    ` One of your options was left out of this comparison because it is currently ` +
+    `indistinguishable from '${kept}' — its result is that option's result. ` +
+    `To score it separately, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
+  );
+}
+
+function dedupOmittedPluralSuffix(count: number): string {
+  return (
+    ` ${count} of your options were left out of this comparison because each is currently ` +
+    `indistinguishable from an option already in it — each shares that option's result. ` +
+    `To score them separately, say '${CONFIGURE_OPTION_GENERIC_CHIP.message}'`
+  );
+}
+
+/**
+ * Resolve the label of the option a given omitted option was found
+ * INDISTINGUISHABLE FROM, or null when the engine gave no such reason for it.
+ *
+ * The contract is deliberately narrow: the caller owns reading the engine's
+ * `IDENTICAL_OPTIONS_DEDUPED` warning and deciding which id was kept, because
+ * the caller is the only place holding both the warning and the returned
+ * comparison. This module never sees a critique.
+ */
+export type DedupKeptLabelResolver = (omittedOptionId: string) => string | null;
+
+/**
+ * The kept label, safe to name in the GENERIC dedup sentence — or null, which
+ * forces the whole accurate branch to stand down. Fail-safe direction: if the
+ * option cannot be named, we do not make a claim that turns on naming it.
+ */
+function safeDedupKeptLabel(kept: string | null | undefined): string | null {
+  return safeLabelForSuffix(kept, dedupOmittedGenericSingleSuffix);
+}
+
+/**
+ * The removed label, safe to name ALONGSIDE an already-safe kept label. Probed
+ * against the FULL two-slot sentence (not the label in isolation), so a pair
+ * that only fails together degrades to the generic-removed form — which was
+ * already probed with this same kept label.
+ */
+function safeDedupRemovedLabel(
+  removed: string | null | undefined,
+  safeKept: string,
+): string | null {
+  return safeLabelForSuffix(removed, (label) => dedupOmittedLabelledSuffix(label, safeKept));
+}
+
 /**
  * Split the scaffold records by whether the option ACTUALLY reached the
  * analysis result.
@@ -294,8 +385,34 @@ export function buildScaffoldDisclosureSuffix(
  */
 export function buildScaffoldOmittedSuffix(
   omitted: readonly ScaffoldedOptionRecord[],
+  keptLabelFor?: DedupKeptLabelResolver,
 ): string {
   if (omitted.length === 0) return '';
+
+  // 2.120(c) — the ACCURATE branch, claimed only when the engine's own reason
+  // covers EVERY option the sentence speaks for. A sentence about "2 of your
+  // options" asserts the reason for both; if the evidence covers one, it is not
+  // evidence for that sentence (trap-10/13: claim only what the manifest
+  // covers). A partial or absent match keeps the pre-existing copy, which makes
+  // the weaker claim and is therefore the fail-safe direction.
+  const safeKeptLabels =
+    keptLabelFor === undefined
+      ? []
+      : omitted.map((record) => safeDedupKeptLabel(keptLabelFor(record.option_id)));
+  const everyOmittedWasDeduped =
+    safeKeptLabels.length === omitted.length && safeKeptLabels.every((l) => l !== null);
+
+  if (everyOmittedWasDeduped) {
+    if (omitted.length === 1) {
+      const kept = safeKeptLabels[0]!;
+      const removed = safeDedupRemovedLabel(omitted[0].label, kept);
+      return removed !== null
+        ? dedupOmittedLabelledSuffix(removed, kept)
+        : dedupOmittedGenericSingleSuffix(kept);
+    }
+    return dedupOmittedPluralSuffix(Math.min(omitted.length, 99));
+  }
+
   if (omitted.length === 1) {
     const label = safeOmittedOptionLabel(omitted[0].label);
     return label !== null ? omittedLabelledSuffix(label) : omittedGenericSingleSuffix();
@@ -312,10 +429,11 @@ export function buildScaffoldOmittedSuffix(
  */
 export function buildScaffoldDisclosureForPartition(
   partition: ScaffoldPresencePartition,
+  keptLabelFor?: DedupKeptLabelResolver,
 ): string {
   return (
     buildScaffoldDisclosureSuffix(partition.analysed) +
-    buildScaffoldOmittedSuffix(partition.omitted)
+    buildScaffoldOmittedSuffix(partition.omitted, keptLabelFor)
   );
 }
 
@@ -419,6 +537,42 @@ export const SCAFFOLD_OMITTED_RE_SRC =
   `To include (?:it|them), say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'`;
 
 /**
+ * Grammar source for the 2.120(c) DEDUP omission suffix — the branch that
+ * carries the ENGINE's reason instead of the "no values set" proxy. Two
+ * shapes, matching the two builders:
+ *   - singular: a named-or-generic removed option, ALWAYS naming the kept one
+ *     (the accurate branch exists only when the kept option is nameable);
+ *   - plural:   `\d{1,2} of your options`, naming neither.
+ * Same pinned `Help me configure …` exemplar as every other disclosure shape,
+ * so the routing promise breaks the grammar loudly if the copy is edited.
+ *
+ * Note the kept-label slot is `[^'\n]` bounded, so it cannot run past its
+ * closing quote into the literal `option's` apostrophe that follows.
+ */
+export const SCAFFOLD_DEDUP_OMITTED_RE_SRC =
+  '(?:' +
+  // singular
+  ` (?:'[^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS}}' was|One of your options was) ` +
+  'left out of this comparison because it is currently indistinguishable from ' +
+  `'[^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS}}' — its result is that option's result\\. ` +
+  `To score it separately, say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'` +
+  '|' +
+  // plural
+  ' \\d{1,2} of your options were left out of this comparison because each is currently ' +
+  "indistinguishable from an option already in it — each shares that option's result\\. " +
+  `To score them separately, say 'Help me configure [^'\\n]{1,${SCAFFOLD_LABEL_MAX_CHARS + 1}}\\.'` +
+  ')';
+
+/**
+ * EITHER omission reason. Derived union (never a hand-listed set of shapes):
+ * every consumer of {@link SCAFFOLD_ANY_DISCLOSURE_RE_SRC} accepts a new
+ * omission reason the moment it is added here, so a copy branch cannot ship
+ * while the egress silently swallows the summary carrying it.
+ */
+export const SCAFFOLD_OMITTED_ANY_RE_SRC =
+  `(?:${SCAFFOLD_OMITTED_RE_SRC}|${SCAFFOLD_DEDUP_OMITTED_RE_SRC})`;
+
+/**
  * The union every consumer compiles — the registry egress allowlist tail,
  * the validation-registry salvage, and this module's own build-time
  * survival probe. Ordered `placeholder [omitted] | omitted` to match
@@ -427,7 +581,7 @@ export const SCAFFOLD_OMITTED_RE_SRC =
  * in every consumer's pattern.
  */
 export const SCAFFOLD_ANY_DISCLOSURE_RE_SRC =
-  `(?:${SCAFFOLD_DISCLOSURE_RE_SRC}(?:${SCAFFOLD_OMITTED_RE_SRC})?|${SCAFFOLD_OMITTED_RE_SRC})`;
+  `(?:${SCAFFOLD_DISCLOSURE_RE_SRC}(?:${SCAFFOLD_OMITTED_ANY_RE_SRC})?|${SCAFFOLD_OMITTED_ANY_RE_SRC})`;
 
 /**
  * Egress budget the allowlist length cap is extended by — computed from the
@@ -447,4 +601,14 @@ export const SCAFFOLD_DISCLOSURE_MAX_CHARS =
     omittedLabelledSuffix('x'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
     omittedGenericSingleSuffix().length,
     omittedPluralSuffix(99).length,
+    // 2.120(c): the dedup shapes are LONGER (two label slots, extra clause).
+    // Computed from the builders, never hand-estimated — an over-budget
+    // disclosure is silently replaced by the locked template, i.e. the user
+    // sees a scaffolded/removed option with no disclosure at all.
+    dedupOmittedLabelledSuffix(
+      'x'.repeat(SCAFFOLD_LABEL_MAX_CHARS),
+      'y'.repeat(SCAFFOLD_LABEL_MAX_CHARS),
+    ).length,
+    dedupOmittedGenericSingleSuffix('y'.repeat(SCAFFOLD_LABEL_MAX_CHARS)).length,
+    dedupOmittedPluralSuffix(99).length,
   );
