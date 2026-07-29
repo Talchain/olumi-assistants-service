@@ -22,7 +22,7 @@ import {
   resolvePublicVersion,
   type PublicSource,
 } from './tracked.js';
-import { dispositionOf, gateOf, type PromptDisposition } from './estate.js';
+import { dispositionOf, gateActiveOf, gateOf, type PromptDisposition } from './estate.js';
 import { log } from '../utils/telemetry.js';
 import { getRoutingLiveStatus } from './routing-live-status.js';
 import type { CeeTaskId } from './schema.js';
@@ -62,8 +62,15 @@ export interface PromptKeyStatus {
    * `src/prompts/estate.ts`.
    */
   disposition?: PromptDisposition;
-  /** Env var gating this prompt's call site, when `disposition === 'gated'`. */
+  /** Env var gating this prompt's call site, when the prompt carries a gate. */
   gate?: string;
+  /**
+   * Whether that gate is ACTIVE right now — MEASURED from config at request
+   * time, not recorded. Its absence is what let a deployment with the flag ON
+   * keep reporting the prompt as `gated` forever, with nothing failing loud.
+   * When true, `disposition` is `live`.
+   */
+  gate_active?: boolean;
   /** True when this key GATES health (`prompts_ready` / `all_pms`). */
   critical?: boolean;
 }
@@ -85,9 +92,10 @@ async function probePromptKeys(
 ): Promise<PromptKeyStatus[]> {
   const results = await Promise.all(
     keys.map(async (key): Promise<PromptKeyStatus> => {
+      const gate = gateOf(key);
       const meta = {
         disposition: dispositionOf(key),
-        ...(gateOf(key) ? { gate: gateOf(key) } : {}),
+        ...(gate ? { gate, gate_active: gateActiveOf(key) } : {}),
         critical: (TRACKED_KEYS as readonly string[]).includes(key),
       };
       // The `routing` key reports from the LIVE served snapshot

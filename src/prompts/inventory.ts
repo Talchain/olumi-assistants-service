@@ -24,7 +24,9 @@ import {
   CODE_CONSTANT_PROMPTS,
   CRITICAL_PMS_TASKS,
   GATED_PMS_TASKS,
-  LIVE_PMS_TASKS,
+  activeGateTasks,
+  deriveLiveEstate,
+  isCodeConstantLiveNow,
   type RetirementRecord,
 } from './estate.js';
 import { probeStatusPrompts, type PromptKeyStatus } from './readiness.js';
@@ -41,7 +43,13 @@ export interface CodeConstantPromptStatus {
   source: 'code_constant';
   source_file: string;
   call_site: string;
+  /** `live` (subject to `gate_active`) or `fallback`. */
+  disposition: 'live' | 'fallback';
   gate?: string;
+  /** MEASURED from config at request time, like the PMS half. */
+  gate_active?: boolean;
+  /** True iff this constant reaches a model on a normal path RIGHT NOW. */
+  live_now: boolean;
   note: string;
   content_hash: string | null;
   content_chars: number | null;
@@ -62,13 +70,21 @@ export interface RetiredRowStatus {
 export interface PromptEstateInventory {
   /**
    * The headline. `live_llm_call_prompts` is the honest answer to "how many
-   * prompts do we have" — artefacts that shape a live LLM call today.
+   * prompts shape a live LLM call" — and it is computed from the MEASURED gate
+   * state on this process, so a deployment with a gate flipped ON reports the
+   * larger number rather than a comfortable constant.
    */
   totals: {
     live_llm_call_prompts: number;
     pms_live: number;
-    code_constants: number;
-    pms_gated: number;
+    /** Code constants live RIGHT NOW (gate-aware). */
+    code_constants_live: number;
+    /** Every declared code-constant entry, live or not. */
+    code_constants_declared: number;
+    /** Gated prompts whose gate is currently OFF (PMS + code halves). */
+    gated_inactive: number;
+    /** Gated prompts whose gate is currently ON — already counted as live. */
+    gated_active: number;
     pms_retired: number;
     pms_critical: number;
     /** Non-archived rows in the store, or null if the store was unreadable. */
@@ -76,6 +92,16 @@ export interface PromptEstateInventory {
     /** Every row in the store regardless of status, or null. */
     pms_rows_total: number | null;
   };
+  /**
+   * The scope of the guarantee, carried IN the payload so it travels with any
+   * number quoted from it. The PMS half is derived; the code half is declared.
+   */
+  derivation: {
+    pms_half: string;
+    code_constant_half: string;
+  };
+  /** Env vars measured this request, and what they read. */
+  gates: Array<{ owner: string; env: string; active: boolean }>;
   pms: PromptKeyStatus[];
   code_constants: CodeConstantPromptStatus[];
   retired: RetiredRowStatus[];
@@ -90,7 +116,7 @@ export interface PromptEstateInventory {
   generated_at: string;
 }
 
-/** Hash the four code-constant prompts by loading them for real. */
+/** Hash every declared code-constant prompt by loading it for real. */
 export async function buildCodeConstantInventory(): Promise<CodeConstantPromptStatus[]> {
   return Promise.all(
     CODE_CONSTANT_PROMPTS.map(async (p): Promise<CodeConstantPromptStatus> => {
@@ -99,7 +125,9 @@ export async function buildCodeConstantInventory(): Promise<CodeConstantPromptSt
         source: 'code_constant' as const,
         source_file: p.sourceFile,
         call_site: p.callSite,
-        ...(p.gate ? { gate: p.gate } : {}),
+        disposition: p.disposition,
+        ...(p.gate ? { gate: p.gate.env, gate_active: p.gate.isActive() } : {}),
+        live_now: isCodeConstantLiveNow(p),
         note: p.note,
       };
       try {
@@ -179,17 +207,46 @@ export async function buildPromptEstateInventory(): Promise<PromptEstateInventor
     ? [...storeStatuses.values()].filter((r) => r.status !== 'archived').length
     : null;
 
+  // MEASURED, at request time. `deriveLiveEstate()` re-runs the same pure
+  // derivation with the gates that are actually inactive on this process, so a
+  // flipped gate moves its task from `gated` into `live` here and in the
+  // totals — the single fact the endpoint used to record rather than measure.
+  const live = deriveLiveEstate();
+  const pmsGatesActive = activeGateTasks();
+  const codeLiveNow = CODE_CONSTANT_PROMPTS.filter(isCodeConstantLiveNow);
+  const codeGates = CODE_CONSTANT_PROMPTS.filter((p) => p.gate);
+  const codeGatesActive = codeGates.filter((p) => p.gate!.isActive());
+
   return {
     totals: {
-      live_llm_call_prompts: LIVE_PMS_TASKS.length + CODE_CONSTANT_PROMPTS.length,
-      pms_live: LIVE_PMS_TASKS.length,
-      code_constants: CODE_CONSTANT_PROMPTS.length,
-      pms_gated: Object.keys(GATED_PMS_TASKS).length,
+      live_llm_call_prompts: live.live.length + codeLiveNow.length,
+      pms_live: live.live.length,
+      code_constants_live: codeLiveNow.length,
+      code_constants_declared: CODE_CONSTANT_PROMPTS.length,
+      gated_inactive:
+        Object.keys(GATED_PMS_TASKS).length -
+        pmsGatesActive.length +
+        (codeGates.length - codeGatesActive.length),
+      gated_active: pmsGatesActive.length + codeGatesActive.length,
       pms_retired: retired.length,
       pms_critical: CRITICAL_PMS_TASKS.length,
       pms_rows_active: activeRows,
       pms_rows_total: storeStatuses ? storeStatuses.size : null,
     },
+    derivation: {
+      pms_half:
+        'DERIVED. A prompt cannot be resolved through the loader without a row in OPERATION_TO_TASK_ID, so it cannot hide from this list.',
+      code_constant_half:
+        'DECLARED REGISTRY, drift-checked by hash and liveness but NOT complete-by-construction. No static scan can see an inline messages.create({system}) call. Completeness is reviewed, not derived.',
+    },
+    gates: [
+      ...Object.entries(GATED_PMS_TASKS).map(([owner, g]) => ({
+        owner,
+        env: g.env,
+        active: g.isActive(),
+      })),
+      ...codeGates.map((p) => ({ owner: p.id, env: p.gate!.env, active: p.gate!.isActive() })),
+    ],
     pms,
     code_constants: codeConstants,
     retired,

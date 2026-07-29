@@ -29,9 +29,23 @@
  *      this goes RED — the half of the estate PMS cannot see stays visible.
  *   5. THE NAMED DEFECT STAYS FIXED. `repair_edit_graph` — PMS-registered,
  *      live-callable, historically invisible — is pinned into the reported set.
+ *   6. GATE STATE IS MEASURED, NOT RECORDED. The adversarial review's
+ *      constructed case is run verbatim below: with BOTH gate flags ON, the
+ *      estate must report the gated prompts as LIVE. It previously passed
+ *      33/33 green while reporting them as `gated` forever. Each gate's reader
+ *      is bound to the env var it NAMES (stub the name → the reader must flip),
+ *      and each gate's default is asserted by MEASUREMENT so a code-level
+ *      default flip is loud.
  *
- * Mutation-checked: see PHASE0-EVIDENCE-2026-07-28/harness-hygiene.md for the
- * seven mutants that were proven to bite.
+ * WHAT THIS SUITE CANNOT CATCH, stated so nobody assumes otherwise: a
+ * deployment-level env flip on Render. CI has no view of it. That is why
+ * `gate_active` is REPORTED at runtime rather than asserted here — the test
+ * guards the mechanism, the endpoint reports the state.
+ *
+ * The assertion count is deliberately not written down here; it drifted once
+ * already (a "25" that was 26). Run the file.
+ *
+ * Mutation-checked: see PHASE0-EVIDENCE-2026-07-28/harness-hygiene.md.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -46,12 +60,13 @@ import {
   DEFAULT_PROMPT_VERSIONS,
   ESTATE_INPUTS,
   GATED_PMS_TASKS,
-  LIVE_PMS_TASKS,
+  LIVE_PMS_TASKS_AT_DEFAULT_GATES,
   PMS_TASK_ALIAS,
   REPORTED_PMS_TASKS,
   RESOLVABLE_PMS_TASKS,
   RETIRED_PMS_ROWS,
   RETIRED_PMS_TASKS,
+  allGateDeclarations,
   deriveEstate,
   dispositionOf,
 } from '../../src/prompts/estate.js';
@@ -156,7 +171,7 @@ describe('prompt estate — the reported set is DERIVED', () => {
   it('the exported sets equal the derivation of the real inputs', () => {
     const derived = deriveEstate(ESTATE_INPUTS);
     expect([...RESOLVABLE_PMS_TASKS]).toEqual([...derived.resolvable]);
-    expect([...LIVE_PMS_TASKS]).toEqual([...derived.live]);
+    expect([...LIVE_PMS_TASKS_AT_DEFAULT_GATES]).toEqual([...derived.live]);
     expect([...REPORTED_PMS_TASKS]).toEqual([...derived.reported]);
     expect([...STATUS_KEYS]).toEqual([...derived.reported]);
   });
@@ -181,7 +196,7 @@ describe('prompt estate — the named defect stays fixed', () => {
     // The concrete bug: /admin/prompts/status tracked a hand-listed five keys
     // and repair_edit_graph — resolved by orchestrator/tools/edit-graph.ts on
     // the attempt-≥2 retry — was not one of them.
-    expect(LIVE_PMS_TASKS as readonly string[]).toContain('repair_edit_graph');
+    expect(LIVE_PMS_TASKS_AT_DEFAULT_GATES as readonly string[]).toContain('repair_edit_graph');
     expect(STATUS_KEYS as readonly string[]).toContain('repair_edit_graph');
     expect(dispositionOf('repair_edit_graph')).toBe('live');
   });
@@ -238,12 +253,15 @@ describe('prompt estate — the exception lists cannot go stale', () => {
   });
 
   it('every gate names an env var the config actually reads', () => {
-    // Kills the "flag renamed, gate description now a lie" mirror.
+    // Kills the "flag renamed, gate description now a lie" mirror at the source
+    // level. NOTE THE LIMIT: this is a SUBSTRING check, so an env var named
+    // only in a comment would pass it. The behavioural binding test below is
+    // the one that actually proves the reader tracks the name.
     const configSrc = readFileSync(join(SRC_ROOT, 'config/index.ts'), 'utf8');
-    for (const [task, envVar] of Object.entries(GATED_PMS_TASKS)) {
+    for (const { owner, gate } of allGateDeclarations()) {
       expect(
-        configSrc.includes(envVar),
-        `gate '${envVar}' declared for '${task}' does not appear in src/config/index.ts`,
+        configSrc.includes(gate.env),
+        `gate '${gate.env}' declared for '${owner}' does not appear in src/config/index.ts`,
       ).toBe(true);
     }
   });
@@ -289,7 +307,7 @@ describe('prompt estate — the exception lists cannot go stale', () => {
 describe('prompt estate — criticality is a guarded subset of live', () => {
   it('every critical key is live', () => {
     for (const key of CRITICAL_PMS_TASKS) {
-      expect(LIVE_PMS_TASKS as readonly string[]).toContain(key);
+      expect(LIVE_PMS_TASKS_AT_DEFAULT_GATES as readonly string[]).toContain(key);
     }
   });
 
@@ -348,6 +366,47 @@ describe('prompt estate — the code-constant half is visible and real', () => {
     const ids = CODE_CONSTANT_PROMPTS.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
+
+  it('every artefact the adversarial review found undeclared is now declared', () => {
+    // Regression pin on the exact R2 finding. These seven were named in this
+    // PR's own source inventory and silently dropped by the first registry —
+    // five of them GATED, so one flag flip served four unmonitored prompts.
+    const declared = new Set(CODE_CONSTANT_PROMPTS.map((p) => p.id));
+    for (const id of [
+      'FACTOR_EXTRACTION_SYSTEM_PROMPT',
+      'DECOMPOSE_R1_HEADLINE_PROMPT',
+      'DECOMPOSE_R2_DRIVER_PROMPT',
+      'DECOMPOSE_R3_FRAGILITY_PROMPT',
+      'DECOMPOSE_R4_CALIBRATION_PROMPT',
+      'DRAFT_LEAN_RETRY_DIRECTIVE',
+      'STRENGTH_DEFAULT_RETRY_NUDGE',
+      '_DRAFT_SYSTEM_PROMPT',
+    ]) {
+      expect(declared.has(id), `code-constant prompt '${id}' is not declared in the estate`).toBe(
+        true,
+      );
+    }
+  });
+
+  it('every gated code constant declares a measurable gate', () => {
+    // The estate's gated-PMS principle — "a gate flip can never silently serve
+    // an unmonitored prompt" — must hold on this half too, which is exactly
+    // what it did not do before the review.
+    for (const p of CODE_CONSTANT_PROMPTS) {
+      if (!p.gate) continue;
+      expect(p.gate.env).toMatch(/^[A-Z][A-Z0-9_]*$/);
+      expect(typeof p.gate.isActive()).toBe('boolean');
+      expect(typeof p.gate.defaultsTo).toBe('boolean');
+    }
+  });
+
+  it('states the scope of its own guarantee rather than overclaiming', () => {
+    // The claim "it can no longer hide a prompt" was FALSE for this half and is
+    // now scoped in the source. Pin the scoping so it cannot quietly widen back.
+    const estateSrc = readFileSync(join(SRC_ROOT, 'prompts/estate.ts'), 'utf8');
+    expect(estateSrc).toMatch(/DECLARED REGISTRY/);
+    expect(estateSrc).toMatch(/reviewed, never derived|reviewed, not derived/);
+  });
 });
 
 describe('prompt estate — the operation map keeps its contract', () => {
@@ -373,7 +432,7 @@ describe('prompt estate — the operation map keeps its contract', () => {
     const gated = RESOLVABLE_PMS_TASKS.filter((t) => dispositionOf(t) === 'gated').length;
     const retired = RESOLVABLE_PMS_TASKS.filter((t) => dispositionOf(t) === 'retired').length;
     expect(live + gated + retired).toBe(RESOLVABLE_PMS_TASKS.length);
-    expect(live).toBe(LIVE_PMS_TASKS.length);
+    expect(live).toBe(LIVE_PMS_TASKS_AT_DEFAULT_GATES.length);
   });
 
   it('reports an unknown id as undefined rather than guessing', () => {

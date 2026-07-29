@@ -17,12 +17,12 @@
  *
  * ## The fix: derive, and make forgetting fail toward visibility
  *
- * `LIVE_PMS_TASKS` is DERIVED:
+ * The live set is DERIVED:
  *
  *     resolvable universe   = OPERATION_TASK_IDS ∪ alias logical keys
  *                             (minus alias TARGETS — a logical key and its
  *                             target are one artefact, reported once)
- *     LIVE_PMS_TASKS        = resolvable universe \ GATED \ RETIRED
+ *     live                  = resolvable universe \ GATED \ RETIRED
  *
  * A prompt cannot be wired up at all without a row in `OPERATION_TO_TASK_ID`
  * (`src/prompts/operations.ts`) — `getSystemPrompt()` throws
@@ -32,12 +32,36 @@
  * with nobody remembering anything.** Forgetting now over-reports, never
  * under-reports.
  *
- * The two exception lists (`GATED_PMS_TASKS`, `RETIRED_PMS_TASKS`) are the
- * only hand-declared facts left, and `tests/unit/prompt-estate-drift.test.ts`
- * fails loud on every way they can drift: an entry for a task that no longer
- * exists, a task in both lists, a gate naming an env var the config schema
- * does not define, a call site for a task the estate has never heard of, a
- * declared code-constant prompt whose export has gone.
+ * ## ⚠ EXACTLY HOW FAR THAT GUARANTEE REACHES
+ *
+ * It covers **PMS-resolved prompts only**. The code-constant half
+ * (`CODE_CONSTANT_PROMPTS`) is a DECLARED registry, drift-checked but not
+ * complete-by-construction — see the long note on `CodeConstantPrompt`. Quote
+ * the two halves separately or not at all; `/admin/prompts/inventory` carries
+ * a `derivation` block saying so, so the caveat travels with the number.
+ *
+ * ## GATE STATE IS MEASURED, NOT RECORDED
+ *
+ * `GATED_PMS_TASKS` was originally a task → env-var-NAME map, and the drift
+ * check only asserted the name existed in config. The adversarial review of
+ * PR #753 ran the constructed case: with both gate flags ON, the whole suite
+ * passed 33/33 GREEN while the inventory kept reporting `pms_live: 6` and
+ * `validate_graph` as `gated` — silently false forever, no RED anywhere. The
+ * mirror had not died; it had moved into the subtraction terms.
+ *
+ * Every gate now carries a `GateDeclaration` with an `isActive()` reader, and
+ * `deriveLiveEstate()` re-runs the SAME pure derivation with the gates that
+ * are genuinely inactive on this process. A flipped gate moves its prompt into
+ * `live` on `/status`, on `/inventory`, and in the totals.
+ *
+ * `tests/unit/prompt-estate-drift.test.ts` fails loud on every way the
+ * remaining hand-declared facts can drift: an entry for a task that no longer
+ * exists, a task in both lists, a gate whose reader does not track the env var
+ * it names, a gate whose default silently flips, a call site for a task the
+ * estate has never heard of, a declared code-constant prompt whose export has
+ * gone. What it CANNOT catch is a deployment-level env flip (CI cannot see
+ * Render's environment) — which is precisely why `gate_active` is reported at
+ * runtime rather than asserted at build time.
  *
  * ## Two axes, deliberately kept apart
  *
@@ -52,6 +76,7 @@
 
 import type { CeeTaskId } from './schema.js';
 import { OPERATION_TASK_IDS, type OperationTask } from './operations.js';
+import { config } from '../config/index.js';
 
 // ============================================================================
 // Alias
@@ -96,23 +121,64 @@ export function pmsResolveTaskId(key: CeeTaskId): CeeTaskId {
 // ============================================================================
 
 /**
- * Tasks whose call site EXISTS and is wired, but sits behind a named,
- * off-by-default gate. They are REPORTED (so a gate flip can never silently
- * serve an unmonitored prompt) but are not `pms_required` — their PMS rows
- * are deliberately NOT archived, because archiving would change the bytes a
- * gate flip would serve.
+ * A named gate on a prompt's call site.
  *
- * Value = the env var that gates the call site. The drift check asserts each
- * one is a real key in the config env schema, so a rename cannot rot this
- * into a lie.
+ * ## Why this is not just a string
+ *
+ * The first version of this registry stored only the env var NAME, and the
+ * drift check only asserted that the name appeared in the config schema. That
+ * left the gate's actual STATE unmeasured, and the adversarial review's
+ * constructed case passed 33/33 GREEN: with both flags flipped ON, the
+ * inventory still reported `pms_live: 6` and `validate_graph` as `gated` —
+ * silently false, forever, with nothing failing loud. The mirror had not died;
+ * it had moved into the subtraction terms.
+ *
+ * So a gate now carries a READER. `isActive()` reads the live config at call
+ * time, which is what turns the estate's gate handling from RECORDED into
+ * MEASURED — the same promise `/admin/prompts/inventory` makes about every
+ * other number it reports.
+ *
+ * `defaultsTo` is the value the config schema is expected to yield with the
+ * env var unset. It exists so the drift check can assert it BY MEASUREMENT
+ * (unset the env, read `isActive()`) rather than by matching source text — and
+ * so that flipping a code-level default is loud rather than silent. CI cannot
+ * see a deployment's Render env, so this is the only gate drift a test can
+ * catch; the runtime `gate_active` field covers the rest.
+ */
+export interface GateDeclaration {
+  /** Env var that gates the call site. */
+  readonly env: string;
+  /** Reads the CURRENT value from config. Measured at call time, never cached. */
+  readonly isActive: () => boolean;
+  /** Value expected when the env var is unset. Asserted by measurement in CI. */
+  readonly defaultsTo: boolean;
+}
+
+/**
+ * Tasks whose call site EXISTS and is wired, but sits behind a named,
+ * off-by-default gate. They are always REPORTED (so a gate flip can never
+ * silently serve an unmonitored prompt) but are not `pms_required` — their PMS
+ * rows are deliberately NOT archived, because archiving would change the bytes
+ * a gate flip would serve.
+ *
+ * When a gate is ACTIVE the task is `live`, not `gated`, and the request-time
+ * totals say so — see `deriveLiveEstate()`.
  */
 export const GATED_PMS_TASKS = {
   /** `src/cee/validation-pipeline/validate-graph.ts:52` */
-  validate_graph: 'CEE_VALIDATION_PIPELINE_ENABLED',
+  validate_graph: {
+    env: 'CEE_VALIDATION_PIPELINE_ENABLED',
+    isActive: () => config.cee.validationPipelineEnabled === true,
+    defaultsTo: false,
+  },
   /** `src/cee/dual-draft/m2-review.ts:108` — registered default is a
    *  fail-closed sentinel (`src/cee/dual-draft/prompt-sentinel.ts`). */
-  m2_graph_review: 'CEE_V6_DUAL_DRAFT_ENABLED',
-} as const satisfies Partial<Record<OperationTask, string>>;
+  m2_graph_review: {
+    env: 'CEE_V6_DUAL_DRAFT_ENABLED',
+    isActive: () => config.features.v6DualDraftEnabled === true,
+    defaultsTo: false,
+  },
+} as const satisfies Partial<Record<OperationTask, GateDeclaration>>;
 
 export type GatedPmsTask = keyof typeof GATED_PMS_TASKS;
 
@@ -291,37 +357,111 @@ export function deriveEstate(inputs: EstateInputs): DerivedEstate {
   });
 }
 
-const GATED_SET = new Set<string>(Object.keys(GATED_PMS_TASKS));
 const RETIRED_SET = new Set<string>(Object.keys(RETIRED_PMS_TASKS));
 
-/** The real estate, derived from the real inputs. */
+const ALL_GATE_ENVS: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(Object.entries(GATED_PMS_TASKS).map(([task, g]) => [task, g.env])),
+);
+
+/**
+ * The estate inputs AT DEFAULT GATE STATE — every gate assumed inactive.
+ *
+ * This is the COMPILE-TIME anchor: it is what gives `LivePmsTask` its literal
+ * union, which is what lets `CRITICAL_PMS_TASKS` be compile-checked as a
+ * subset. It is NOT the runtime truth. For that, call `deriveLiveEstate()`.
+ */
 export const ESTATE_INPUTS: EstateInputs = Object.freeze({
   operationTaskIds: OPERATION_TASK_IDS,
   aliases: PMS_TASK_ALIAS,
-  gated: GATED_PMS_TASKS,
+  gated: ALL_GATE_ENVS,
   retired: Object.keys(RETIRED_PMS_TASKS),
 });
 
-const DERIVED = deriveEstate(ESTATE_INPUTS);
+const DERIVED_AT_DEFAULT_GATES = deriveEstate(ESTATE_INPUTS);
 
-export const RESOLVABLE_PMS_TASKS = DERIVED.resolvable as readonly ResolvablePmsTask[];
-export const LIVE_PMS_TASKS = DERIVED.live as readonly LivePmsTask[];
-/** DERIVED: live + gated — everything `/admin/prompts/status` reports. */
-export const REPORTED_PMS_TASKS = DERIVED.reported as readonly ResolvablePmsTask[];
+export const RESOLVABLE_PMS_TASKS =
+  DERIVED_AT_DEFAULT_GATES.resolvable as readonly ResolvablePmsTask[];
+
+/**
+ * PMS prompts on a live path WHEN EVERY GATE IS INACTIVE.
+ *
+ * ⚠ NOT the runtime live set — the name says `AT_DEFAULT_GATES` because a
+ * deployment with `CEE_VALIDATION_PIPELINE_ENABLED=true` is serving one more
+ * than this. Use `deriveLiveEstate().live` for anything a human will read as
+ * "how many prompts are live". This constant exists to anchor the
+ * `LivePmsTask` type and the compile-time `CRITICAL_PMS_TASKS` subset check.
+ */
+export const LIVE_PMS_TASKS_AT_DEFAULT_GATES =
+  DERIVED_AT_DEFAULT_GATES.live as readonly LivePmsTask[];
+
+/**
+ * DERIVED: live + gated — everything `/admin/prompts/status` reports.
+ *
+ * Gate state does NOT affect this set: a gated prompt is reported whether its
+ * gate is on or off. That is the invariant that makes "a gate flip can never
+ * serve an unmonitored prompt" true.
+ */
+export const REPORTED_PMS_TASKS =
+  DERIVED_AT_DEFAULT_GATES.reported as readonly ResolvablePmsTask[];
+
+// ---------------------------------------------------------------------------
+// Measured gate state — the runtime truth
+// ---------------------------------------------------------------------------
+
+/** Task ids whose gate is ACTIVE right now (measured from config). */
+export function activeGateTasks(): string[] {
+  return Object.entries(GATED_PMS_TASKS)
+    .filter(([, g]) => g.isActive())
+    .map(([task]) => task);
+}
+
+/**
+ * The estate as it actually is on THIS process, right now.
+ *
+ * A gate that is ON removes its task from the `gated` subtraction term, so the
+ * task lands in `live` — which is the whole point: `deriveEstate()` was already
+ * a pure function taking `gated` as an input, and this feeds it the truth
+ * instead of the assumption.
+ */
+export function deriveLiveEstate(): DerivedEstate {
+  const active = new Set(activeGateTasks());
+  const stillGated = Object.fromEntries(
+    Object.entries(ALL_GATE_ENVS).filter(([task]) => !active.has(task)),
+  );
+  return deriveEstate({ ...ESTATE_INPUTS, gated: stillGated });
+}
 
 export type PromptDisposition = 'live' | 'gated' | 'retired';
 
-/** Disposition of any task id. Unknown ids are `undefined`, never guessed. */
+/**
+ * Disposition of any task id, MEASURED — a gated task whose gate is currently
+ * active reports `live`, not `gated`. Unknown ids are `undefined`, never
+ * guessed.
+ *
+ * Reads config. That is deliberate: the previous version answered from a
+ * static set and was therefore capable of reporting `gated` about a prompt
+ * that was serving on every draft turn.
+ */
 export function dispositionOf(taskId: string): PromptDisposition | undefined {
   if (RETIRED_SET.has(taskId)) return 'retired';
-  if (GATED_SET.has(taskId)) return 'gated';
+  const gate = (GATED_PMS_TASKS as Record<string, GateDeclaration | undefined>)[taskId];
+  if (gate) return gate.isActive() ? 'live' : 'gated';
   if ((RESOLVABLE_PMS_TASKS as readonly string[]).includes(taskId)) return 'live';
   return undefined;
 }
 
-/** The env gate for a gated task, or undefined if the task is not gated. */
+/** The env gate NAME for a gated task, or undefined if the task is not gated. */
 export function gateOf(taskId: string): string | undefined {
-  return (GATED_PMS_TASKS as Record<string, string | undefined>)[taskId];
+  return (GATED_PMS_TASKS as Record<string, GateDeclaration | undefined>)[taskId]?.env;
+}
+
+/**
+ * Whether a gated task's gate is ACTIVE right now, or undefined when the task
+ * carries no gate. This is the field whose absence let the constructed drift
+ * case pass green.
+ */
+export function gateActiveOf(taskId: string): boolean | undefined {
+  return (GATED_PMS_TASKS as Record<string, GateDeclaration | undefined>)[taskId]?.isActive();
 }
 
 // ============================================================================
@@ -333,7 +473,7 @@ export function gateOf(taskId: string): string | undefined {
  * and `critical_prompts_pms` (= `getCriticalPromptCoverage().all_pms`, the
  * "safe to arm fail-closed?" signal).
  *
- * A DELIBERATE, JUSTIFIED SUBSET of `LIVE_PMS_TASKS` — every one of these has
+ * A DELIBERATE, JUSTIFIED SUBSET of the live set — every one of these has
  * an operator-managed PMS row that MUST be what is served. `repair_edit_graph`
  * is live and is now REPORTED, but is not critical: it is a retry-only prompt
  * whose PMS content is currently byte-identical to its bundled default, so
@@ -349,6 +489,9 @@ export const CRITICAL_PMS_TASKS = [
   'decision_review',
   'repair_graph',
 ] as const satisfies readonly LivePmsTask[];
+// ^ `LivePmsTask` is the AT-DEFAULT-GATES union, which is the strictest of the
+//   two: a gate flip can only ADD to the live set, never remove from it, so a
+//   critical key that compiles here is live under every gate configuration.
 
 export type CriticalPmsTask = (typeof CRITICAL_PMS_TASKS)[number];
 
@@ -383,9 +526,27 @@ export const DEFAULT_PROMPT_VERSIONS = {
 // ============================================================================
 
 /**
- * A prompt that shapes a live LLM call but lives as a TypeScript constant, not
- * a PMS row. Declared here so "how many prompts, which, what hash" has ONE
- * answer covering both halves of the estate.
+ * A prompt that shapes an LLM call but lives as a TypeScript constant, not a
+ * PMS row.
+ *
+ * ## ⚠ THE SCOPE OF THE GUARANTEE — read this before quoting a number
+ *
+ * The PMS half of the estate is DERIVED: a prompt cannot be resolved through
+ * the loader without a row in `OPERATION_TO_TASK_ID`, so it cannot hide.
+ * **This half is not.** It is a DECLARED REGISTRY. Each entry is drift-checked
+ * (it must load, from a file that exists, and its hash is measured not
+ * recorded), but the registry's COMPLETENESS is reviewed, never derived: no
+ * static scan can see an inline `client.messages.create({ system: "…" })`, and
+ * pretending a grep sweep settles it would be the same guarantee-theatre this
+ * file exists to remove.
+ *
+ * The adversarial review of PR #753 proved the cost of getting that wrong: the
+ * first version declared FOUR entries and claimed "it can no longer hide a
+ * prompt". Seven artefacts were missing — five of them GATED, so a single flag
+ * flip would have served four unmonitored decompose prompts. They are declared
+ * below. Adding a code-constant prompt without adding it here is still
+ * possible; the honest claim is scoped accordingly, and deriving this half is
+ * a rowed follow-up.
  *
  * `load()` is a dynamic import ON PURPOSE: `coaching-pass.ts` and
  * `anthropic.ts` are heavy modules that transitively import the prompt loader.
@@ -400,20 +561,37 @@ export interface CodeConstantPrompt {
   readonly sourceFile: string;
   /** Where it is sent to a model. */
   readonly callSite: string;
-  /** Env var that can switch it off, if any. */
-  readonly gate?: string;
+  /**
+   * `live`     — reaches a model on a normal path (subject to `gate`).
+   * `fallback` — reached only when a primary source fails.
+   */
+  readonly disposition: 'live' | 'fallback';
+  /**
+   * Gate on the call site, if any. Same measured `GateDeclaration` the PMS half
+   * uses — so a flag flip reclassifies a code constant exactly as it does a PMS
+   * prompt, and `defaultsTo` is asserted by measurement in CI.
+   */
+  readonly gate?: GateDeclaration;
   /** Why it is not in PMS (yet). */
   readonly note: string;
   /** Resolve the live content. Dynamic import — see above. */
   readonly load: () => Promise<string>;
 }
 
+const DECOMPOSE_GATE: GateDeclaration = {
+  env: 'CEE_DECISION_REVIEW_DECOMPOSE',
+  isActive: () => config.cee.decisionReviewDecompose === true,
+  defaultsTo: false,
+};
+
 export const CODE_CONSTANT_PROMPTS: readonly CodeConstantPrompt[] = Object.freeze([
+  // --- live, ungated ---
   {
     id: 'COACHING_SYSTEM',
     sourceFile: 'src/cee/unified-pipeline/stages/coaching-pass.ts',
     callSite: 'coaching-pass.ts:379 — the coaching pass on every draft turn',
-    note: 'PMS migration rowed; content is gated by the copy-quality lexicon and has its own COACHING_PROMPT_HASH telemetry.',
+    disposition: 'live',
+    note: 'PMS migration rowed; output is gated by the copy-quality lexicon and it has its own COACHING_PROMPT_HASH telemetry.',
     load: async () =>
       (await import('../cee/unified-pipeline/stages/coaching-pass.js')).COACHING_SYSTEM,
   },
@@ -421,6 +599,7 @@ export const CODE_CONSTANT_PROMPTS: readonly CodeConstantPrompt[] = Object.freez
     id: 'SUMMARISER_SYSTEM_PROMPT',
     sourceFile: 'src/orchestrator-v5/rolling-summary/summariser.ts',
     callSite: 'summariser.ts:84 — rolling summary at every commit seam (fire-and-forget)',
+    disposition: 'live',
     note: 'PMS migration rowed.',
     load: async () =>
       (await import('../orchestrator-v5/rolling-summary/summariser.js')).SUMMARISER_SYSTEM_PROMPT,
@@ -429,6 +608,7 @@ export const CODE_CONSTANT_PROMPTS: readonly CodeConstantPrompt[] = Object.freez
     id: 'ENRICH_FACTORS_PROMPT',
     sourceFile: 'src/prompts/enrich-factors.ts',
     callSite: 'services/review/enrichFactors.ts:429 — POST /assist/v1/review enrichment',
+    disposition: 'live',
     note:
       'A PMS row `enrich_factors` exists but has ZERO readers and its content has drifted from this constant. The row is retired (see RETIRED_PMS_ROWS); this constant is what is served.',
     load: async () => (await import('./enrich-factors.js')).ENRICH_FACTORS_PROMPT,
@@ -436,10 +616,120 @@ export const CODE_CONSTANT_PROMPTS: readonly CodeConstantPrompt[] = Object.freez
   {
     id: 'DRAFT_COMPLIANCE_REMINDER',
     sourceFile: 'src/adapters/llm/anthropic.ts',
-    callSite: 'anthropic.ts:425 / openai.ts:568 — appended to the draft user message',
-    gate: 'CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED',
+    callSite: 'anthropic.ts:429 / openai.ts:571 — appended to the draft user message',
+    disposition: 'live',
+    gate: {
+      env: 'CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED',
+      isActive: () => config.cee.draftComplianceReminderEnabled === true,
+      // NOTE the direction: this gate defaults ON. `defaultsTo` is asserted by
+      // measurement, so a gate that defaults true is stated as true rather than
+      // quietly assumed to match the off-by-default ones.
+      defaultsTo: true,
+    },
     note:
       'Duplicated byte-for-byte in the OpenAI adapter; the drift check asserts the two copies stay identical.',
     load: async () => (await import('../adapters/llm/anthropic.js')).DRAFT_COMPLIANCE_REMINDER,
   },
+  // --- live, retry-only fragments. Declared for the same reason the compliance
+  // --- reminder is: they are appended to a real draft call. The boundary
+  // --- between "prompt" and "fragment" was previously drawn silently, which is
+  // --- how two live artefacts stayed invisible.
+  {
+    id: 'DRAFT_LEAN_RETRY_DIRECTIVE',
+    sourceFile: 'src/cee/constants.ts',
+    callSite: 'draft retry attempts (lean-draft contract)',
+    disposition: 'live',
+    note: 'Fires only on a draft retry, so it does not reach a model on every turn — but it does reach one on a normal path.',
+    load: async () => (await import('../cee/constants.js')).DRAFT_LEAN_RETRY_DIRECTIVE,
+  },
+  {
+    id: 'STRENGTH_DEFAULT_RETRY_NUDGE',
+    sourceFile: 'src/cee/constants.ts',
+    callSite: 'draft retry attempts (edge-strength defaults)',
+    disposition: 'live',
+    note: 'Fires only on a draft retry. Same class as DRAFT_LEAN_RETRY_DIRECTIVE.',
+    load: async () => (await import('../cee/constants.js')).STRENGTH_DEFAULT_RETRY_NUDGE,
+  },
+  // --- gated: a single flag flip serves each of these, and until the review
+  // --- caught it the inventory had never heard of any of them.
+  {
+    id: 'FACTOR_EXTRACTION_SYSTEM_PROMPT',
+    sourceFile: 'src/cee/factor-extraction/llm-extractor.ts',
+    callSite: 'llm-extractor.ts:154 — LLM-first factor/constraint extraction',
+    disposition: 'live',
+    gate: {
+      env: 'CEE_LLM_FIRST_EXTRACTION_ENABLED',
+      isActive: () => config.cee.llmFirstExtractionEnabled === true,
+      defaultsTo: false,
+    },
+    note: 'Regex extraction runs while the gate is off.',
+    load: async () =>
+      (await import('../cee/factor-extraction/llm-extractor.js')).FACTOR_EXTRACTION_SYSTEM_PROMPT,
+  },
+  {
+    id: 'DECOMPOSE_R1_HEADLINE_PROMPT',
+    sourceFile: 'src/cee/decision-review/decompose-prompts.ts',
+    callSite: 'decompose.ts 4x-parallel haiku fan-out — R1 headline verdict',
+    disposition: 'live',
+    gate: DECOMPOSE_GATE,
+    note: 'ONE flag serves all four decompose prompts; the byte-identical monolith path runs while it is off.',
+    load: async () =>
+      (await import('../cee/decision-review/decompose-prompts.js')).DECOMPOSE_R1_HEADLINE_PROMPT,
+  },
+  {
+    id: 'DECOMPOSE_R2_DRIVER_PROMPT',
+    sourceFile: 'src/cee/decision-review/decompose-prompts.ts',
+    callSite: 'decompose.ts 4x-parallel haiku fan-out — R2 evidence gaps',
+    disposition: 'live',
+    gate: DECOMPOSE_GATE,
+    note: 'See DECOMPOSE_R1_HEADLINE_PROMPT.',
+    load: async () =>
+      (await import('../cee/decision-review/decompose-prompts.js')).DECOMPOSE_R2_DRIVER_PROMPT,
+  },
+  {
+    id: 'DECOMPOSE_R3_FRAGILITY_PROMPT',
+    sourceFile: 'src/cee/decision-review/decompose-prompts.ts',
+    callSite: 'decompose.ts 4x-parallel haiku fan-out — R3 stability / flips',
+    disposition: 'live',
+    gate: DECOMPOSE_GATE,
+    note: 'See DECOMPOSE_R1_HEADLINE_PROMPT.',
+    load: async () =>
+      (await import('../cee/decision-review/decompose-prompts.js')).DECOMPOSE_R3_FRAGILITY_PROMPT,
+  },
+  {
+    id: 'DECOMPOSE_R4_CALIBRATION_PROMPT',
+    sourceFile: 'src/cee/decision-review/decompose-prompts.ts',
+    callSite: 'decompose.ts 4x-parallel haiku fan-out — R4 calibration layer',
+    disposition: 'live',
+    gate: DECOMPOSE_GATE,
+    note: 'See DECOMPOSE_R1_HEADLINE_PROMPT.',
+    load: async () =>
+      (await import('../cee/decision-review/decompose-prompts.js')).DECOMPOSE_R4_CALIBRATION_PROMPT,
+  },
+  // --- fallback only ---
+  {
+    id: '_DRAFT_SYSTEM_PROMPT',
+    sourceFile: 'src/adapters/llm/anthropic.ts',
+    callSite: 'last-resort draft system prompt — served only when PMS AND the registered default both fail',
+    disposition: 'fallback',
+    note: 'Not counted as live: reaching it means two prior sources already failed.',
+    load: async () => (await import('../adapters/llm/anthropic.js'))._DRAFT_SYSTEM_PROMPT,
+  },
 ]);
+
+/** A code constant is LIVE now iff its disposition is `live` and its gate (if
+ *  any) is currently ACTIVE. Measured, like the PMS half. */
+export function isCodeConstantLiveNow(p: CodeConstantPrompt): boolean {
+  return p.disposition === 'live' && (p.gate ? p.gate.isActive() : true);
+}
+
+/** Every gate declared anywhere in the estate, PMS half and code half. */
+export function allGateDeclarations(): Array<{ owner: string; gate: GateDeclaration }> {
+  return [
+    ...Object.entries(GATED_PMS_TASKS).map(([owner, gate]) => ({ owner, gate })),
+    ...CODE_CONSTANT_PROMPTS.filter((p) => p.gate).map((p) => ({
+      owner: p.id,
+      gate: p.gate as GateDeclaration,
+    })),
+  ];
+}

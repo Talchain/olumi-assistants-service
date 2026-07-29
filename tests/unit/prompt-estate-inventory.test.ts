@@ -16,9 +16,10 @@ import { describe, it, expect } from 'vitest';
 import { buildPromptEstateInventory } from '../../src/prompts/inventory.js';
 import {
   CODE_CONSTANT_PROMPTS,
-  LIVE_PMS_TASKS,
+  LIVE_PMS_TASKS_AT_DEFAULT_GATES,
   RETIRED_PMS_ROWS,
   RETIRED_PMS_TASKS,
+  isCodeConstantLiveNow,
 } from '../../src/prompts/estate.js';
 import { registerAllDefaultPrompts } from '../../src/prompts/defaults.js';
 
@@ -28,10 +29,18 @@ describe('prompt estate inventory', () => {
   it('reports a headline that is the sum of its halves', async () => {
     const inv = await buildPromptEstateInventory();
     expect(inv.totals.live_llm_call_prompts).toBe(
-      inv.totals.pms_live + inv.totals.code_constants,
+      inv.totals.pms_live + inv.totals.code_constants_live,
     );
-    expect(inv.totals.pms_live).toBe(LIVE_PMS_TASKS.length);
-    expect(inv.totals.code_constants).toBe(CODE_CONSTANT_PROMPTS.length);
+    // At default gate state only. `prompt-estate-gates.test.ts` covers the
+    // flipped case, where both of these must GROW.
+    expect(inv.totals.pms_live).toBe(LIVE_PMS_TASKS_AT_DEFAULT_GATES.length);
+    expect(inv.totals.code_constants_declared).toBe(CODE_CONSTANT_PROMPTS.length);
+    expect(inv.totals.code_constants_live).toBe(
+      CODE_CONSTANT_PROMPTS.filter(isCodeConstantLiveNow).length,
+    );
+    // The declared registry is strictly larger than the live count — gated and
+    // fallback entries are declared precisely so they cannot hide.
+    expect(inv.totals.code_constants_declared).toBeGreaterThan(inv.totals.code_constants_live);
   });
 
   it('includes repair_edit_graph — the prompt the old hand-list omitted', async () => {
@@ -57,6 +66,8 @@ describe('prompt estate inventory', () => {
       expect(c.content_hash).toMatch(/^[0-9a-f]{16}$/);
       expect(c.content_chars).toBeGreaterThan(0);
       expect(c.source_file).toMatch(/^src\//);
+      expect(['live', 'fallback']).toContain(c.disposition);
+      if (c.gate) expect(typeof c.gate_active).toBe('boolean');
     }
   });
 

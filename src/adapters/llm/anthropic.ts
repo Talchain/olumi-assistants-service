@@ -242,7 +242,10 @@ function buildSystemBlocks(text: string, opts?: { operation?: string }): Anthrop
   ];
 }
 
-const _DRAFT_SYSTEM_PROMPT = `You are an expert at drafting small decision graphs from plain-English briefs.
+// EXPORTED (content unchanged) so the prompt estate can report its hash —
+// see CODE_CONSTANT_PROMPTS in src/prompts/estate.ts. Still a last-resort
+// fallback: reached only when PMS and the registered default both fail.
+export const _DRAFT_SYSTEM_PROMPT = `You are an expert at drafting small decision graphs from plain-English briefs.
 
 ## Your Task
 Draft a small decision graph with:

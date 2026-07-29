@@ -121,6 +121,37 @@ describe('POST /admin/prompts/reload', () => {
     await app.close();
   });
 
+  it('a rate-limited request returns 429, not 500', async () => {
+    // The adversarial review of #753 proved empirically that every admin
+    // errorResponseBuilder in this repo omits `statusCode`, so @fastify/rate-limit
+    // (which reads it off the error object, index.js:31-35) fell through to 500.
+    // The new 20/15-min cap on /admin/prompts/inventory makes that
+    // misdiagnosis-fuel likely to actually fire, so the builder in THIS plugin
+    // now sets it. The repo-wide sweep of the sibling builders is rowed.
+    const app = Fastify();
+    await adminPromptStatusRoutes(app);
+
+    let limited: { statusCode: number; body: string } | null = null;
+    for (let i = 0; i < 40; i++) {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/admin/prompts/inventory',
+        headers: { 'x-admin-key': 'test-admin-key' },
+      });
+      if (res.statusCode !== 200) {
+        limited = { statusCode: res.statusCode, body: res.body };
+        break;
+      }
+    }
+
+    // Positive control: assert the cap actually FIRED before asserting its
+    // status code, or the assertion below passes by never being reached.
+    expect(limited, 'the 20/15-min cap never fired — the assertion below would be vacuous').not.toBeNull();
+    expect(limited!.statusCode, `got ${limited!.statusCode}: ${limited!.body}`).toBe(429);
+    expect(JSON.parse(limited!.body).error).toBe('rate_limit_exceeded');
+    await app.close();
+  });
+
   it('roundtrip: store mutation is visible to the next getSystemPrompt() after reload', async () => {
     // The full chain is getSystemPrompt → adapter cache → loadPrompt →
     // getPromptStore().getCompiled(). The loader binds `getPromptStore`

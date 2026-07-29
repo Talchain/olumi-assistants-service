@@ -89,6 +89,12 @@ export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<voi
       return `prompt_status:${adminKey.slice(0, 8)}:${request.ip}`;
     },
     errorResponseBuilder: () => ({
+      // statusCode is LOAD-BEARING. @fastify/rate-limit reads it off the error
+      // object to set the response status; the sibling admin plugins all omit
+      // it, so their limit hits return 500 instead of 429 — proven empirically
+      // in the #753 adversarial review. Fixed here; the repo-wide sweep of the
+      // other builders is rowed.
+      statusCode: 429,
       error: 'rate_limit_exceeded',
       message: 'Too many requests. Please try again later.',
     }),
