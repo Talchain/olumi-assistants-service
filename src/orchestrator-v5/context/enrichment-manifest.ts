@@ -16,10 +16,8 @@
  *   1. {@link ENRICHMENT_PRODUCER_MANIFEST} — every TOP-LEVEL field the
  *      PERSISTED run_analysis enrichment can carry. This is a MULTI-WRITER
  *      record, not a pure PLoT passthrough: the run-analysis handler stores
- *      the PLoT `/v2/run` body verbatim (the 68 `RunResponseV3` keys — 64
- *      derived at PLoT `51abbc80` plus the 4 ISL top-level VOI passthrough
- *      keys added at PLoT `a07b0ae`/`5dae8df` and manifested here in V7-C
- *      slice 1b), then
+ *      the PLoT `/v2/run` body verbatim (every top-level `RunResponseV3`
+ *      key — the count is deliberately NOT written here, see below), then
  *      CEE enrichers WRITE 4 more keys onto the same record (decision_review +
  *      3 coaching-signal markers) before the analysis→LLM projection reads it,
  *      and one legacy V1-tolerance key (`results`) rounds out the boundary
@@ -61,16 +59,34 @@ import { log } from '../../utils/telemetry.js';
 /**
  * Every TOP-LEVEL key the persisted run_analysis `enrichment` can carry.
  *
- * Sections: (a) the 68 PLoT `/v2/run` `RunResponseV3` keys — citations are
- * `engine-v3.ts` line numbers, the first 64 at plot-lite-service tip
- * `51abbc80` and the 4 ISL top-level VOI keys at tip `3d13e0ac`, grouped by
- * the interface's own section headers; (b) 4 CEE-injected keys written onto
- * the same record after PLoT returns; (c) 1 legacy V1 inbound-tolerance key.
+ * Sections: (a) the PLoT `/v2/run` `RunResponseV3` keys — citations are
+ * `engine-v3.ts` line numbers, grouped by the interface's own section headers;
+ * (b) 4 CEE-injected keys written onto the same record after PLoT returns;
+ * (c) 1 legacy V1 inbound-tolerance key.
  *
- * ⚠ THE SECTION-(a) COUNT IS A HAND-MAINTAINED MIRROR OF A PRODUCER IN
- * ANOTHER REPO, and it has already drifted once by four keys for five days
- * (see the VOI block below). Re-derive it against PLoT's `RunResponseV3` at
- * the tip you are on; do not trust this number, including this one.
+ * ⚠ SECTION (a) IS A HAND-MAINTAINED MIRROR OF A PRODUCER IN ANOTHER REPO, and
+ * it has now drifted TWICE — by four keys for five days (the VOI block below),
+ * and then again in the very change that fixed that: the refresh wrote "the 68
+ * RunResponseV3 keys ... at tip 3d13e0ac" when that tip had 69, because
+ * `driver_order` landed in the same window and was not looked for. A count was
+ * written, dated to a tip, and was false AT that tip.
+ *
+ * SO THERE IS NO COUNT HERE ANY MORE. A number in a comment is the cheapest
+ * possible lie and the one nobody re-checks. The derivation is one command, and
+ * the honest artefact is the command — as a RUNNABLE SCRIPT, not as pasted
+ * text, because a command you have to un-escape by hand is a command nobody
+ * runs (this one first went in as a comment and its regex closed the block
+ * comment it lived in, which rather made the point):
+ *
+ *   node scripts/derive-plot-response-keys.mjs <path-to-plot-lite-service>
+ *
+ * It prints PLoT's tip, the key count, a paste-ready literal, and the diff
+ * against this manifest in BOTH directions, exiting non-zero on any gap.
+ *
+ * {@link PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS} is that command's output pinned at
+ * one dated tip, and the conformance test diffs it against this manifest in BOTH
+ * directions — so a key this manifest LOSES, or one it lists that PLoT no longer
+ * emits, now fails a test instead of waiting for a human to notice telemetry.
  */
 export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>([
   // Envelope identity / status spine (:890-939)
@@ -170,6 +186,31 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   'decision_evpi', // :1091
   'factor_evppi', // :1093
   'p_win_sensitivity', // :1095
+  // ── PLoT canonical driver ordering (:1120) ────────────────────────────────
+  // ⚠ THE FIFTH KEY OF THE SAME WINDOW, AND IT WAS MISSED BY THE REFRESH THAT
+  // FIXED THE OTHER FOUR. `driver_order` landed at PLoT in #287 (`36b3309`) +
+  // #288 (`05529e4`), merged 2026-07-28 — the same `51abbc80 → 3d13e0ac`
+  // window as the VOI keys, read in the same session. Caught by adversarial
+  // review, which fed the tripwire a body shaped like the REAL RunResponseV3
+  // and watched it fire `unknown_keys: ["driver_order"]`.
+  //
+  // The lesson is sharper than the fix. The refresh did not just miss a key —
+  // it wrote a COUNT ("the 68 RunResponseV3 keys ... at tip 3d13e0ac") that was
+  // false at its own citation, in the file whose entire job is to be believed,
+  // directly beneath a freshly-added warning that said not to trust the number.
+  // A grep for the four keys you already know about will always confirm the
+  // four keys you already know about: the only honest refresh is to DERIVE the
+  // producer's whole key set and diff it. That is now a test, not a habit.
+  //
+  // It is emitted on essentially every real analysis body: `buildDriverOrder`
+  // returns undefined ONLY when `factors === undefined` (plot
+  // src/lib/driver-order.ts), and run.ts:3554 spreads it top-level.
+  // NOT on the CEE→UI transport keep-list: it has no `@talchain/schemas`
+  // contract and no withheld ruling, and CEE has zero readers of it (complete
+  // `src/` + `tests/` grep at this commit: no occurrences). Manifested so the
+  // tripwire stops false-positiving; transporting it is S1d's decision, and it
+  // needs a schemas train first.
+  'driver_order', // :1120
   // ── CEE post-run additions to the SAME persisted enrichment record ────────
   // The run-analysis handler stores the PLoT body verbatim as
   // `result.enrichment` (run-analysis.ts:870), then CEE enrichers WRITE more
@@ -285,6 +326,21 @@ const R_INTERNAL =
  * So this is a skip with a stated boundary, not a gap: adding a deriver here
  * is a doctrine decision (and a Paul ruling), not a wiring task.
  */
+/**
+ * `driver_order` (PLoT #287/#288): the same `R_NO_CONSUMER` shape as
+ * `fact_objects`, but do not read it as the same VERDICT. `fact_objects` has no
+ * consumer because nothing wants it; `driver_order` has no consumer because CEE
+ * has not got to it yet — PLoT built it deliberately as the ONE canonical driver
+ * ordering, and S1d owns deciding what CEE does with it.
+ *
+ * READER MANIFEST, scope = all of `src/` AND `tests/` at this commit: **zero
+ * occurrences of the string `driver_order`**, of any kind — not a read, not a
+ * type field, not a comment. That is the complete scope searched and the precise
+ * claim: not "no consumer in the projection", but "the identifier does not
+ * appear in this repo".
+ */
+const R_NO_CONSUMER_YET_S1D =
+  'PLoT canonical driver ordering (#287/#288, landed 2026-07-28). Manifested so the runtime tripwire stops false-positiving on essentially every analysis body; NOT projected, and deliberately NOT on the UI transport keep-list — it has no @talchain/schemas contract and no withheld-claim ruling, and CEE currently has ZERO references to it anywhere in src/ or tests/. Its consumption (project, transport, or retire) is S1d\'s decision and needs a schemas train first. Skipped because there is no reader yet, not because it goes somewhere else.';
 const R_VOI_NOT_COACH_NARRATED =
   'Value-of-information family — transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) for a deterministic ranking surface with NO magnitudes, and deliberately withheld from the analysis→LLM projection: the values are outcome-unit / percentage-point magnitudes, and narrating them in prose is the "worth X" / "by N pp" claim class the no-EVPI-display doctrine forbids. Adding a deriver is a doctrine ruling, not a wiring gap.';
 const R_COACHING_SIGNAL =
@@ -371,6 +427,58 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['decision_evpi', R_VOI_NOT_COACH_NARRATED],
   ['factor_evppi', R_VOI_NOT_COACH_NARRATED],
   ['p_win_sensitivity', R_VOI_NOT_COACH_NARRATED],
+  // The fifth key of the same PLoT window — see its manifest entry.
+  ['driver_order', R_NO_CONSUMER_YET_S1D],
+]);
+
+/**
+ * PLoT's `RunResponseV3` top-level key set, PINNED at one dated tip.
+ *
+ * WHAT THIS IS, PRECISELY. It is the output of the derivation command in this
+ * module's header, run once, at **plot-lite-service `3d13e0ac`** (2026-07-29).
+ * It exists because the manifest↔PLoT seam had NO BOLT — the conformance gate
+ * only ever checked manifest↔skip INTERNAL consistency, which is exactly how a
+ * four-key gap survived five days and a fifth key survived the refresh that was
+ * written to close it. CI was green through all of it.
+ *
+ * WHAT IT CATCHES: a key this manifest LOSES, and a key this manifest LISTS
+ * that PLoT no longer emits. Both directions, as a test, at this tip.
+ *
+ * WHAT IT CANNOT CATCH, and this is the honest half: **a key PLoT adds AFTER
+ * this tip.** A pinned snapshot cannot see the future, so this does not replace
+ * the runtime tripwire — it bounds the problem instead. Before, an unmanifested
+ * producer key was an UNBOUNDED unknown discoverable only by someone reading
+ * telemetry. Now it is a DATED one: this constant carries the tip it was taken
+ * at, and refreshing it is one command whose output is diffable in review.
+ *
+ * A pinned snapshot IS still a hand-maintained mirror (trap 12) — the estate's
+ * dominant defect class, not exempt here. The mitigation is that it FAILS LOUD
+ * on any drift it can see, names its own tip, and ships the command to refresh
+ * it. Do not "fix" a red here by editing this list to match the manifest: that
+ * inverts the direction of truth. Re-run the command against PLoT, then decide
+ * what the manifest should say.
+ */
+export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP = '3d13e0ac' as const;
+export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS: ReadonlySet<string> = new Set<string>([
+  '_meta', 'analysis_status', 'approximate', 'auto_noise_applied',
+  'auto_noise_provenance', 'ceeTrace', 'cee_status', 'conditional_probabilities',
+  'conditional_winners', 'confidence_tier', 'constraint_diagnostics',
+  'constraint_results', 'constraints_status', 'correlation_model', 'critiques',
+  'decision_brief', 'decision_evpi', 'decision_quality', 'dominant_factor',
+  'downstream_calls', 'driver_order', 'drivers_status', 'edge_e_values',
+  'edge_sensitivity', 'endpoint_version', 'fact_objects', 'factor_enrichments',
+  'factor_evppi', 'factor_sensitivity', 'factor_stability', 'flip_thresholds',
+  'flip_thresholds_margin_coverage', 'flip_thresholds_margin_status',
+  'flip_thresholds_status', 'flip_thresholds_status_reason', 'identifiability',
+  'improvement_guidance', 'inference_warnings', 'insights',
+  'isl_analysis_status', 'isl_status_reason', 'm1_coaching', 'm1_review',
+  'meta', 'option_comparison', 'option_comparison_status', 'p_win_sensitivity',
+  'path_decomposition', 'preflight_version', 'processing_time_ms', 'rationale',
+  'request_id', 'request_schema_version', 'response_hash', 'review_cards',
+  'review_failure_codes', 'review_meta', 'review_skip_reason', 'review_status',
+  'review_warnings', 'robustness', 'robustness_status', 'robustness_synthesis',
+  'sensitivity_reference_option_id', 'stability_thresholds', 'status_reason',
+  'threshold_analysis', 'thresholds_meta', 'thresholds_status',
 ]);
 
 /**

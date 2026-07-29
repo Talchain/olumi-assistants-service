@@ -18,6 +18,8 @@ import {
   ENRICHMENT_PRODUCER_MANIFEST,
   ENRICHMENT_ANALYSIS_LLM_SKIP,
   ENRICHMENT_DEFENSIVE_NON_EMITTED_READS,
+  PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS,
+  PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP,
   MAX_LOGGED_ENRICHMENT_KEY_LENGTH,
   sanitiseEnrichmentKeyName,
   findUnknownEnrichmentKeys,
@@ -144,6 +146,125 @@ describe('enrichment producer manifest — conformance (context-audit #1 row #2)
     expect(sorted(broken)).not.toEqual(sorted(ENRICHMENT_PRODUCER_MANIFEST));
     const unclassified = [...ENRICHMENT_PRODUCER_MANIFEST].filter((k) => !broken.has(k));
     expect(unclassified).toContain('flip_thresholds');
+  });
+});
+
+// ============================================================================
+// THE MANIFEST↔PLoT SEAM — the bolt that did not exist.
+//
+// WHY IT IS BEING ADDED NOW, stated plainly because the reason is the value.
+// Every gate above checks manifest↔skip INTERNAL consistency: they prove the
+// manifest is self-consistent, and they are all green while the manifest is
+// missing a producer field entirely. That is not hypothetical — it is the
+// measured history of this file, twice:
+//
+//   1. Four VOI keys landed at PLoT on 23-24 Jul and went unmanifested for five
+//      days. The runtime tripwire fired on every analysis body, correctly, and
+//      nobody read it. CI: green throughout.
+//   2. The change that fixed those four MISSED A FIFTH from the same window
+//      (`driver_order`, PLoT #287/#288) and wrote a false key COUNT dated to the
+//      very tip that refutes it. Caught by adversarial review, not by CI, which
+//      was green throughout that too.
+//
+// Both failures have one shape: the seam between this manifest and its producer
+// in another repo was checked by a HUMAN REMEMBERING, and the only instrument
+// pointed at it reported to a log nobody was reading. A grep for the keys you
+// already know about will always confirm the keys you already know about.
+//
+// SCOPE, precisely (claim-type matters): this compares the manifest against a
+// snapshot of PLoT's RunResponseV3 PINNED AT ONE DATED TIP. It catches a key the
+// manifest LOSES and a key the manifest LISTS that PLoT no longer emits. It
+// CANNOT catch a key PLoT adds after that tip — a pinned snapshot cannot see the
+// future, and the runtime tripwire remains the backstop for that. What this
+// changes is that an unmanifested producer key is no longer an UNBOUNDED unknown
+// discoverable only via telemetry; it is bounded by a tip written down in the
+// repo, refreshable with one command, and diffable in review.
+// ============================================================================
+describe('manifest ↔ PLoT RunResponseV3 (the seam that had no bolt)', () => {
+  /** The manifest minus the keys CEE itself writes and the legacy V1 tolerance key. */
+  const CEE_INJECTED = new Set([
+    'decision_review',
+    'coaching_signal_id',
+    'coaching_signal_turn_id',
+    'coaching_signal_produced_at',
+    '_diagnostics',
+  ]);
+  const LEGACY_V1_ONLY = new Set(['results']);
+  const manifestPlotSection = [...ENRICHMENT_PRODUCER_MANIFEST].filter(
+    (k) => !CEE_INJECTED.has(k) && !LEGACY_V1_ONLY.has(k),
+  );
+
+  it('manifests EVERY key PLoT emits at the pinned tip (the five-day-silence direction)', () => {
+    const missing = [...PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS].filter(
+      (k) => !ENRICHMENT_PRODUCER_MANIFEST.has(k),
+    );
+    expect(
+      missing,
+      `Unmanifested PLoT producer key(s) at ${PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP}. ` +
+        'Each will fire v5.enrichment.unknown_producer_key on every analysis body ' +
+        'carrying it. Add it to ENRICHMENT_PRODUCER_MANIFEST with its engine-v3.ts ' +
+        'citation, then EITHER wire a deriver OR add an ENRICHMENT_ANALYSIS_LLM_SKIP ' +
+        'row with a reason. Do NOT add it to the transport keep-list without a ' +
+        'schemas contract and a withheld-claim ruling.',
+    ).toEqual([]);
+  });
+
+  it('lists no PLoT key that the pinned tip does not emit (the stale-key direction)', () => {
+    const phantom = manifestPlotSection.filter(
+      (k) => !PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS.has(k),
+    );
+    expect(
+      phantom,
+      'Manifest lists PLoT key(s) absent from RunResponseV3 at ' +
+        `${PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP}. Either PLoT removed them (drop the rows) ` +
+        'or the pinned snapshot is stale (re-run the derivation command in the ' +
+        'enrichment-manifest.ts header against PLoT — never edit the snapshot to ' +
+        'match the manifest, that inverts the direction of truth).',
+    ).toEqual([]);
+  });
+
+  it('POSITIVE CONTROL — the seam check SEES an unmanifested producer key', () => {
+    // Trap 13. Without this, both assertions above pass just as happily against
+    // a snapshot that had accidentally been emptied. Replays the exact defect
+    // adversarial review found: driver_order present at PLoT, absent from CEE.
+    const manifestWithoutDriverOrder = new Set(ENRICHMENT_PRODUCER_MANIFEST);
+    manifestWithoutDriverOrder.delete('driver_order');
+    const missing = [...PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS].filter(
+      (k) => !manifestWithoutDriverOrder.has(k),
+    );
+    expect(missing).toEqual(['driver_order']);
+  });
+
+  it('a body shaped like the REAL RunResponseV3 fires ZERO unknown-key telemetry', () => {
+    // The reviewer's probe, promoted to a permanent test. This is the assertion
+    // that would have been RED at the PR head: it feeds the REAL tripwire (not a
+    // reimplementation) an enrichment carrying every key PLoT actually emits.
+    const body: Record<string, unknown> = {};
+    for (const key of PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS) body[key] = null;
+
+    const calls: Array<{ payload: Record<string, unknown>; message: string }> = [];
+    const logger: EnrichmentTripwireLogger = {
+      warn: (payload, message) => calls.push({ payload, message }),
+    };
+    emitUnknownEnrichmentKeyTelemetry(body, logger);
+
+    expect(findUnknownEnrichmentKeys(body)).toEqual([]);
+    expect(calls, 'a real PLoT body must be silent on the tripwire').toEqual([]);
+  });
+
+  it('POSITIVE CONTROL — the same probe DOES fire on a genuinely new producer key', () => {
+    // Proves the silence above is a measurement, not a broken probe.
+    const body: Record<string, unknown> = { plot_field_landed_after_the_pin: null };
+    for (const key of PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS) body[key] = null;
+
+    const calls: Array<{ payload: Record<string, unknown>; message: string }> = [];
+    const logger: EnrichmentTripwireLogger = {
+      warn: (payload, message) => calls.push({ payload, message }),
+    };
+    emitUnknownEnrichmentKeyTelemetry(body, logger);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].payload.unknown_keys).toEqual(['plot_field_landed_after_the_pin']);
   });
 });
 

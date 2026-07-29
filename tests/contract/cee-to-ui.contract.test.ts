@@ -460,3 +460,136 @@ describe("CEE→UI: the VOI family on a WITHHELD-claim turn (V7-C slice 1b)", ()
     expect(WITHHELD_DROPPED_ENRICHMENT_BLOBS).toContain("decision_review");
   });
 });
+
+// ============================================================================
+// EXHAUSTIVENESS: every transport key has an EXPLICIT withheld ruling.
+//
+// THE GAP THIS CLOSES (adversarial review of #754, non-blocking recommendation).
+// `projectTransportEnrichmentForWithheldClaim` is default pass-through: it names
+// what it drops and what it projects, and everything else falls through. So a
+// key added to `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` in a future train starts
+// crossing the withheld-claim boundary the moment it is keep-listed, with
+// nothing forcing anyone to decide whether it should — it inherits pass-through
+// silently, from a different file, in a different PR.
+//
+// That is the same defect class this very PR was written to fix, pointed the
+// other way. A key silently DROPPED at a boundary cost the estate four releases
+// of a dark UI surface. A key silently KEPT at a CLAIM boundary is the same
+// failure with worse consequences, because the thing that leaks is a claim we
+// decided not to make.
+//
+// WHY THIS IS NOT JUST A SECOND MIRROR: the rulings are not compared against
+// the projection's source. They are compared against its OBSERVED BEHAVIOUR —
+// the real function is run over a probe and each key's fate is derived from the
+// output. A ruling that stops matching what the code does goes red.
+// ============================================================================
+/**
+ * The declared withheld ruling for every transport keep-list key.
+ *
+ * ⚠ WHY THIS LIVES IN THE TEST AND NOT BESIDE THE PROJECTION. It was written
+ * first in `compose/withheld-claim-projection.ts`, and
+ * `tests/contract/tier3-leak-guard.static.guard.test.ts` immediately went RED:
+ * the registry names `flip_thresholds`, `edge_e_values` and `inference_warnings`
+ * as literals, and that guard's static scan cannot tell a REGISTRY of key names
+ * from a CONSUMPTION of the fields — by design, because a producer file that
+ * mentions a Tier-3 key is exactly what it exists to catch.
+ *
+ * The available fixes were: allow-list the projection file, or move the table.
+ * Allow-listing was the wrong one. The guard's own message routes a new entry
+ * through Brief 4 §9 claim-safety review, and buying a cosmetic table an
+ * exemption from a claim-safety control — self-granted, for a file that does no
+ * Tier-3 consumption at all — weakens the control for everyone who reads the
+ * allow-list afterwards as "these files were reviewed".
+ *
+ * Nothing is lost by moving it. This table is ENFORCEMENT, not behaviour: no
+ * production code imports it, the projection's semantics are unchanged, and the
+ * gate is identical — a key added to the keep-list without a ruling REDs here.
+ */
+type WithheldRuling = "pass_through" | "projected" | "dropped";
+const WITHHELD_RULING_BY_TRANSPORT_KEY: ReadonlyMap<string, WithheldRuling> =
+  new Map<string, WithheldRuling>([
+    // Science that measures options WITHOUT ranking them. The 2026-07-27
+    // anti-over-suppression ruling deliberately KEEPS per-option
+    // win_probability on a withheld turn; these ride that ruling.
+    ["option_comparison", "pass_through"],
+    ["option_comparison_status", "pass_through"],
+    ["conditional_probabilities", "pass_through"],
+    ["factor_sensitivity", "pass_through"],
+    ["edge_e_values", "pass_through"],
+    ["inference_warnings", "pass_through"],
+    ["confidence_tier", "pass_through"],
+    ["flip_thresholds", "pass_through"],
+    ["results", "pass_through"],
+    // Leader-designating members removed, the rest kept.
+    ["decision_brief", "projected"],
+    ["robustness", "projected"],
+    // Withheld whole.
+    ["decision_review", "dropped"],
+    // V7-C slice 1b — the VOI family. `pass_through` is a RULING, derived: no
+    // field of any of these shapes names an option (factor ids and numbers
+    // only), so the leading-option egress guard has nothing to catch. And the
+    // claim being withheld is "which option leads"; "which uncertainty is worth
+    // resolving next" is a different claim, and withholding it on a turn where
+    // we cannot name a leader would suppress the most useful thing still true.
+    ["factor_evppi", "pass_through"],
+    ["decision_evpi", "pass_through"],
+    ["p_win_sensitivity", "pass_through"],
+    ["correlation_model", "pass_through"],
+  ]);
+
+describe("CEE→UI: every transport key has an explicit withheld ruling", () => {
+  /**
+   * A probe carrying every keep-list key with a value that can distinguish all
+   * three fates. `decision_brief` and `robustness` deliberately carry BOTH a
+   * leader-designating member (removed) and an innocent one (kept), so they
+   * come back changed-but-present rather than dropped.
+   */
+  const probe: Record<string, unknown> = {};
+  for (const key of P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) {
+    probe[key] = { probe_marker: key };
+  }
+  probe.decision_brief = { headline: "X currently leads", brief_id: "keep-me" };
+  probe.robustness = { leading_option_id: "opt_a", fragile_edges: [] };
+
+  const projectedProbe = projectTransportEnrichmentForWithheldClaim(probe) ?? {};
+
+  /** Derive each key's fate from what the REAL projection did to it. */
+  const observed = new Map<string, WithheldRuling>();
+  for (const key of P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) {
+    if (!(key in projectedProbe)) observed.set(key, "dropped");
+    else if (JSON.stringify(projectedProbe[key]) === JSON.stringify(probe[key])) {
+      observed.set(key, "pass_through");
+    } else observed.set(key, "projected");
+  }
+
+  it("the ruling registry covers the keep-list EXACTLY (a new key must be ruled on)", () => {
+    expect([...WITHHELD_RULING_BY_TRANSPORT_KEY.keys()].sort()).toEqual(
+      [...P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP].sort(),
+    );
+  });
+
+  it("every declared ruling matches OBSERVED behaviour of the real projection", () => {
+    const mismatches: string[] = [];
+    for (const [key, declared] of WITHHELD_RULING_BY_TRANSPORT_KEY) {
+      const actual = observed.get(key);
+      if (actual !== declared) mismatches.push(`${key}: declared ${declared}, observed ${actual}`);
+    }
+    expect(
+      mismatches,
+      "A withheld ruling no longer describes what the projection does. Fix the " +
+        "CODE if the behaviour is wrong, or the RULING if the behaviour is right " +
+        "— but never by copying one into the other without deciding which is.",
+    ).toEqual([]);
+  });
+
+  it("POSITIVE CONTROL — the probe exercises all three verdicts", () => {
+    // Without this, the check above passes just as happily in a world where the
+    // projection became a no-op and every key read `pass_through` (trap 13).
+    expect(new Set(observed.values())).toEqual(
+      new Set(["pass_through", "projected", "dropped"]),
+    );
+    expect(observed.get("decision_review")).toBe("dropped");
+    expect(observed.get("decision_brief")).toBe("projected");
+    expect(observed.get("factor_evppi")).toBe("pass_through");
+  });
+});
