@@ -45,11 +45,7 @@ import { createHash } from 'node:crypto';
 import { registerAllDefaultPrompts } from '../src/prompts/defaults.js';
 import { getDefaultPrompts } from '../src/prompts/loader.js';
 import { OPERATION_TASK_IDS } from '../src/prompts/operations.js';
-import {
-  RETIRED_PMS_ROWS,
-  RETIRED_PMS_TASKS,
-  type RetirementRecord,
-} from '../src/prompts/estate.js';
+import { ALL_RETIREMENTS, type RetirementEntry } from '../src/prompts/estate.js';
 
 interface PromptVersionRow {
   version: number;
@@ -88,15 +84,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<{ status: numbe
 }
 
 /** Every retirement the estate declares, keyed by PMS row id. */
-function declaredRetirements(): Map<string, RetirementRecord & { taskId: string }> {
-  const out = new Map<string, RetirementRecord & { taskId: string }>();
-  for (const [taskId, rec] of Object.entries(RETIRED_PMS_TASKS)) {
-    out.set(`${taskId}_default`, { ...rec, taskId });
-  }
-  for (const [promptId, rec] of Object.entries(RETIRED_PMS_ROWS)) {
-    out.set(promptId, rec);
-  }
-  return out;
+function declaredRetirements(): Map<string, RetirementEntry> {
+  return new Map(ALL_RETIREMENTS.map((r) => [r.promptId, r]));
 }
 
 async function main(): Promise<void> {

@@ -31,7 +31,7 @@
  *      live-callable, historically invisible — is pinned into the reported set.
  *
  * Mutation-checked: see PHASE0-EVIDENCE-2026-07-28/harness-hygiene.md for the
- * five mutants that were proven to bite.
+ * seven mutants that were proven to bite.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -40,6 +40,7 @@ import { join, resolve } from 'node:path';
 import { CeeTaskIdSchema } from '../../src/prompts/schema.js';
 import { OPERATION_TASK_IDS, OPERATION_TO_TASK_ID } from '../../src/prompts/operations.js';
 import {
+  ALL_RETIREMENTS,
   CODE_CONSTANT_PROMPTS,
   CRITICAL_PMS_TASKS,
   DEFAULT_PROMPT_VERSIONS,
@@ -247,6 +248,11 @@ describe('prompt estate — the exception lists cannot go stale', () => {
     }
   });
 
+  it('every retirement has a unique PMS row id', () => {
+    const ids = ALL_RETIREMENTS.map((r) => r.promptId);
+    expect(new Set(ids).size, 'two retirements claim the same PMS row').toBe(ids.length);
+  });
+
   it('row-level retirements are for tasks no operation can reach', () => {
     // That is what makes them row-level rather than task-level: enrich_factors
     // has no operation (a code constant serves the live path), and
@@ -262,8 +268,10 @@ describe('prompt estate — the exception lists cannot go stale', () => {
   });
 
   it('every retirement states a reason, and every blocked one states why', () => {
-    const all = [...Object.values(RETIRED_PMS_TASKS), ...Object.values(RETIRED_PMS_ROWS)];
-    for (const rec of all) {
+    expect(ALL_RETIREMENTS).toHaveLength(
+      Object.keys(RETIRED_PMS_TASKS).length + Object.keys(RETIRED_PMS_ROWS).length,
+    );
+    for (const rec of ALL_RETIREMENTS) {
       expect(rec.reason.length).toBeGreaterThan(20);
       if (rec.archive === 'blocked') {
         expect(

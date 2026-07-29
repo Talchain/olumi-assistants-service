@@ -202,6 +202,36 @@ export const RETIRED_PMS_ROWS: Readonly<Record<string, RetirementRecord & { read
 // The derivation
 // ============================================================================
 
+/**
+ * Every declared retirement, task-level and row-level, as ONE typed list.
+ *
+ * Three consumers (the inventory endpoint, the archive script, the drift
+ * check) each needed to merge `RETIRED_PMS_TASKS` with `RETIRED_PMS_ROWS`.
+ * Three copies of a merge is three chances to merge it differently, so the
+ * merge lives here once.
+ *
+ * The explicit `RetirementRecord` element type matters: the `as const
+ * satisfies` above narrows each entry to its own literal shape, so the raw
+ * union does not carry `blockedReason` on the members that omit it. Widening
+ * here keeps the optional field reachable without an `as` cast at three
+ * different call sites.
+ */
+export interface RetirementEntry extends RetirementRecord {
+  /** PMS row id. */
+  readonly promptId: string;
+  /** The task the row belongs to (may not be a valid CeeTaskId — see orphans). */
+  readonly taskId: string;
+}
+
+export const ALL_RETIREMENTS: readonly RetirementEntry[] = Object.freeze([
+  ...Object.entries(RETIRED_PMS_TASKS).map(
+    ([taskId, rec]): RetirementEntry => ({ ...rec, taskId, promptId: `${taskId}_default` }),
+  ),
+  ...Object.entries(RETIRED_PMS_ROWS).map(
+    ([promptId, rec]): RetirementEntry => ({ ...rec, promptId }),
+  ),
+]);
+
 /** Every task the code can resolve, reported once (alias targets folded in). */
 export type ResolvablePmsTask = Exclude<OperationTask, AliasTargetTask> | AliasLogicalKey;
 

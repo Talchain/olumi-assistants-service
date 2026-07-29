@@ -20,12 +20,11 @@
 
 import { createHash } from 'node:crypto';
 import {
+  ALL_RETIREMENTS,
   CODE_CONSTANT_PROMPTS,
   CRITICAL_PMS_TASKS,
   GATED_PMS_TASKS,
   LIVE_PMS_TASKS,
-  RETIRED_PMS_ROWS,
-  RETIRED_PMS_TASKS,
   type RetirementRecord,
 } from './estate.js';
 import { probeStatusPrompts, type PromptKeyStatus } from './readiness.js';
@@ -152,31 +151,28 @@ export async function buildPromptEstateInventory(): Promise<PromptEstateInventor
   const retired: RetiredRowStatus[] = [];
   const archiveDrift: string[] = [];
 
-  const record = (taskId: string, promptId: string, rec: RetirementRecord): void => {
-    const storeStatus = storeStatuses ? (storeStatuses.get(promptId)?.status ?? 'absent') : null;
+  for (const rec of ALL_RETIREMENTS) {
+    const storeStatus = storeStatuses
+      ? (storeStatuses.get(rec.promptId)?.status ?? 'absent')
+      : null;
     retired.push({
-      task_id: taskId,
-      ...(promptId !== `${taskId}_default` ? { prompt_id: promptId } : {}),
+      task_id: rec.taskId,
+      ...(rec.promptId !== `${rec.taskId}_default` ? { prompt_id: rec.promptId } : {}),
       reason: rec.reason,
       archive: rec.archive,
       ...(rec.blockedReason ? { blocked_reason: rec.blockedReason } : {}),
       store_status: storeStatus,
     });
+    // Drift is only observable when the store was actually read. A null status
+    // means "did not look", which must never be reported as "not archived".
     if (
       rec.archive === 'archived' &&
       storeStatus !== null &&
       storeStatus !== 'archived' &&
       storeStatus !== 'absent'
     ) {
-      archiveDrift.push(promptId);
+      archiveDrift.push(rec.promptId);
     }
-  };
-
-  for (const [taskId, rec] of Object.entries(RETIRED_PMS_TASKS)) {
-    record(taskId, `${taskId}_default`, rec);
-  }
-  for (const [promptId, rec] of Object.entries(RETIRED_PMS_ROWS)) {
-    record(rec.taskId, promptId, rec);
   }
 
   const activeRows = storeStatuses
