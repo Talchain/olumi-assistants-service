@@ -22,7 +22,7 @@
  * rather than of how busy the machine is. A CPU-starved runner cannot flip it.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ── Stage mocks (same shape as the sibling unified-pipeline unit tests) ──────
 vi.mock("../../src/cee/unified-pipeline/stages/parse.js", () => ({
@@ -165,6 +165,15 @@ async function yieldTurns(n: number): Promise<void> {
   }
 }
 
+/**
+ * Real sleep. Used ONLY by the timing-attribution suite at the bottom, which is
+ * about wall-clock attribution and therefore cannot use `setImmediate` turns.
+ * Every assertion there is either EXACT (`=== 0`) or a RATIO between two numbers
+ * measured in the SAME run, so a slow or starved runner scales both and cannot
+ * flip a verdict — see that suite's header.
+ */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 interface RunResult {
   order: string[];
   frames: PipelineStageEvent[];
@@ -175,6 +184,10 @@ interface RunResult {
 async function runPipeline(opts: {
   /** How the mocked Pass 2 behaves. */
   pass2: "slow" | "instant";
+  /** Real ms the mocked Pass 2 should burn (timing-attribution suite only). */
+  pass2SleepMs?: number;
+  /** Real ms the coaching pass should burn (timing-attribution suite only). */
+  coachingSleepMs?: number;
 }): Promise<RunResult> {
   const order: string[] = [];
   const frames: PipelineStageEvent[] = [];
@@ -202,7 +215,15 @@ async function runPipeline(opts: {
     ctx.finalResponse = { ok: true };
   });
 
+  if (opts.coachingSleepMs !== undefined) {
+    const ms = opts.coachingSleepMs;
+    (runStageCoachingPass as any).mockImplementationOnce(async () => {
+      await sleep(ms);
+    });
+  }
+
   (runValidationPipeline as any).mockImplementation(async (ctx: any) => {
+    if (opts.pass2SleepMs !== undefined) await sleep(opts.pass2SleepMs);
     if (opts.pass2 === "slow") {
       // Three event-loop turns: strictly after every microtask the pipeline
       // drains between the fire site and the coaching pass, so this settles
@@ -345,5 +366,97 @@ describe("ROADMAP 2.146 — Pass-2 await overlaps the coaching pass", () => {
     // and what the terminal frame is built from.
     expect(packageCtx.graph[VALIDATION_GRAPH_SUMMARY_KEY]).toBeDefined();
     expect(packageCtx.graph.edges[0][VALIDATION_EDGE_METADATA_KEY]).toEqual(fakeMetadata);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TIMING ATTRIBUTION — `validation_pipeline_ms` measures PASS 2, not the await
+//
+// Review A1 on PR #758. The first version of this lane left `tValidation` at the
+// fire site, OUTSIDE the flag check, and read `stageElapsed` at the (now much
+// later) await. That made the flag-OFF path report the coaching pass's entire
+// duration as validation time — measured ratio 1.00 against a forced 150 ms
+// coaching pass, i.e. ~19,800 ms in production for a pipeline that never ran.
+//
+// Why it is more than telemetry: this PR exists to make the flip measurable by an
+// A/B probe whose A arm IS the flag off. With both arms reporting sweep + coaching,
+// the Pass-2 cost cancels to ~0 and the Phase-1 gate loses the one number it is
+// judged on. Exactly the standard the drain comment applies to `validation_status`
+// — a field whose value depends on where someone chose to await is worse than a
+// missing one, because it reads as a measurement.
+//
+// ── LOAD-INDEPENDENCE ───────────────────────────────────────────────────────
+// This suite uses real sleeps (wall-clock attribution cannot be tested with
+// event-loop turns). Every assertion is therefore either EXACT (`=== 0`) or a
+// RATIO between two numbers measured in the SAME run under the SAME conditions,
+// so a starved runner scales both and cannot flip a verdict. No absolute
+// millisecond thresholds. #525's own lesson: a positive control that depends on
+// the machine being fast is a race, not a pin.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The stage timings the pipeline attaches to the response body. */
+function timingsOf(result: any): Record<string, number> {
+  const t = result?.body?._timings?.draft_graph;
+  expect(t, "no _timings.draft_graph on the body — is timingDebugEnabled set?").toBeDefined();
+  return t as Record<string, number>;
+}
+
+describe("ROADMAP 2.146 — validation_pipeline_ms attribution (review A1)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConfig.cee.validationPipelineEnabled = true;
+    // The timings object is only attached to the body when timing capture is on.
+    mockConfig.cee.timingDebugEnabled = true;
+  });
+
+  afterEach(() => {
+    mockConfig.cee.timingDebugEnabled = false;
+  });
+
+  it("flag OFF reports EXACTLY 0, however long the coaching pass takes", async () => {
+    mockConfig.cee.validationPipelineEnabled = false;
+
+    const { result } = await runPipeline({ pass2: "instant", coachingSleepMs: 150 });
+    const t = timingsOf(result);
+
+    // THE PIN, and it is exact rather than bounded — no clock arithmetic to flake.
+    expect(t.validation_pipeline_ms).toBe(0);
+    expect(runValidationPipeline).not.toHaveBeenCalled();
+
+    // POSITIVE CONTROL (trap 13): the coaching pass really did burn time, so the 0
+    // above is an attribution result and not "nothing happened in this run at all".
+    // Before the fix this same run reported validation_pipeline_ms ≈ 150.
+    expect(t.coaching_pass_ms).toBeGreaterThan(0);
+  });
+
+  it("flag ON with an INSTANT Pass 2 does not bill it for the coaching pass", async () => {
+    const { result } = await runPipeline({ pass2: "instant", coachingSleepMs: 300 });
+    const t = timingsOf(result);
+
+    expect(runValidationPipeline).toHaveBeenCalledTimes(1);
+    // RATIO, not an absolute bound: both numbers come from the same run. Pass 2
+    // was instant, so its own window must be a small fraction of the coaching
+    // pass's. Before the fix the two were EQUAL (the old code measured the same
+    // window twice), so `< half` is the assertion that separates them.
+    expect(t.coaching_pass_ms).toBeGreaterThan(0);
+    expect(t.validation_pipeline_ms).toBeLessThan(t.coaching_pass_ms / 2);
+  });
+
+  it("flag ON with a SLOW Pass 2 reports Pass 2's own cost", async () => {
+    // The presence half, and the control that keeps the test above honest: without
+    // it, a fix that hard-coded 0 everywhere would pass both arms so far.
+    const { result } = await runPipeline({
+      pass2: "instant",
+      pass2SleepMs: 250,
+      coachingSleepMs: 0,
+    });
+    const t = timingsOf(result);
+
+    expect(runValidationPipeline).toHaveBeenCalledTimes(1);
+    // A `setTimeout(250)` can only over-run, never under-run, so this is a
+    // one-sided bound and cannot flake. Allow 5 ms for clock granularity.
+    expect(t.validation_pipeline_ms).toBeGreaterThanOrEqual(245);
+    // And it is Pass 2 being measured, not the coaching pass, which was instant.
+    expect(t.validation_pipeline_ms).toBeGreaterThan(t.coaching_pass_ms);
   });
 });
