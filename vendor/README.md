@@ -7,74 +7,59 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.29.0.tgz`
+### `talchain-schemas-0.30.0.tgz`
 
-> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.29.0`, pulled from
-> GitHub Packages via `npm pack @talchain/schemas@0.29.0`.** olumi-schemas PR #28
-> merged as `80c52743`, tagged `v0.29.0`, and the Publish Package run
-> (`30329034746`) completed `success` with `Publish to GitHub Packages` green.
->
-> These are NOT the bytes an earlier revision of this file described. The PR
-> initially vendored a local `npm pack` of the unmerged branch
-> (sha256 `2e866b89…`, 254,301 bytes); npm repacks on publish, so the released
-> tarball is 254,609 bytes with a different hash. **Re-vendored from the registry
-> after the merge, exactly as the pre-publish note required.** Content verified at
-> the bytes rather than assumed: the published `dist/boundary/turn-payload.d.ts`
-> carries `field?: "value"` (the literal, not the permissive string the PR started
-> with), so the release contains the reviewed amendment.
+> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.30.0`, pulled from
+> GitHub Packages via `npm pack @talchain/schemas@0.30.0`.** olumi-schemas PR #29
+> merged as `f5815a34`, tagged `v0.30.0`, and the Publish Package run
+> (`30445606038`) completed `success` with `Publish to GitHub Packages` green.
+> **Vendored from the registry, never from a local `npm pack` of the branch** —
+> npm repacks on publish, so a branch pack has different bytes and a different
+> hash — the 0.29.0 vendor commit learned that the hard way (it first shipped a
+> 254,301-byte branch pack, sha `2e866b89…`, against a 254,609-byte release, and
+> had to re-vendor; see this file at the previous commit).
+> Content verified at the bytes rather than assumed: the published
+> `dist/boundary/enrichment.js` carries all four VOI keys on
+> `CEE_UI_ENRICHMENT_KEEP_LIST`.
 
-0.25.0 → 0.29.0 is a FOUR-RELEASE jump (0.26.0, 0.27.0, 0.28.0 landed 26–27 Jul
-while CEE stayed on 0.25.0 — parent CLAUDE.md hazard 1, measured not assumed).
-**The jump was isolated with a control before any code was written:** vendoring
-UNMODIFIED `0.28.0` into this repo and running `pnpm typecheck` gave 0 errors,
-identical to the 0.25.0 baseline. So the inherited skew is typecheck-clean on its
-own, and any error after the 0.29.0 bump is attributable to the new member rather
-than to three releases of drift. (Measured again at 0.29.0: still 0 errors.)
+0.29.0 → 0.30.0 is a single-release step (no skew inherited: CEE was current).
 
 **What CEE adopts here — exactly one thing:**
 
-- **`factor_value_edit` on `SystemEventSchema` (0.29.0)** — the VALUE-CARRYING
-  inspector edit. `{ target_id, value, raw_value?, unit?, field? }`, `.strict()`
-  like every sibling of that union. `target_id` is ID-ADDRESSED; `value` is the
-  MODEL scale and `raw_value` the USER-UNIT magnitude, borrowing the vocabulary of
-  this repo's own `d1-shared/normalise-factor-value.ts` rather than inventing
-  parallel names. CEE consumes it in
-  `src/orchestrator-v5/system-events/factor-value-edit.ts`.
-- The union widening also widens `SystemEventKindLiteral`. **Nothing broke:**
-  `pnpm typecheck` is 0 errors with no code change, which establishes that no
-  exhaustive `switch` over `event.kind` exists in the build scope — so a new kind
-  would have fallen silently through to the generic acknowledgement path rather
-  than failing loudly. That is why the dispatch branch is explicit.
+- **The VOI family on `CEE_UI_ENRICHMENT_KEEP_LIST` (0.30.0)** — `factor_evppi`,
+  `decision_evpi`, `p_win_sensitivity`, `correlation_model`. CEE mirrors the same
+  four onto `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` (`src/orchestrator-v5/compose.ts`)
+  in this PR; the cross-repo drift bolt (`tests/contract/cee-to-ui.contract.test.ts`)
+  is DERIVED from the vendored constant, so it REDs on the re-vendor alone and
+  goes green only once compose.ts matches — that is the RED-first entry point.
+- The new exported `EnrichmentFactorEvppiEntrySchema` is typed but **not read by
+  CEE**: this repo transports the rows, it does not interpret them. The reader is
+  the UI (V7-C slice 1c), and the claim cage lives there.
 
-**Everything else in 0.26.0–0.28.0 is UNADOPTED, and that is deliberate**, not
-skipped: nothing in this PR imports it, and each of those surfaces carries its own
-producer/consumer obligations. Recorded here so the next reader knows the delta was
-read rather than ignored.
+**Everything else in 0.30.0 is UNADOPTED**, which is the whole release — 0.30.0
+is a keep-list + one entry schema, nothing more.
 
-⚠ **SEQUENCING — THIS IS THE READER, AND IT MUST DEPLOY BEFORE THE WRITER.**
-Step 1 (publish 0.29.0) is DONE; this pin is step 2.
-Every member of `SystemEventSchema` is `.strict()` and the union discriminates on
-`kind`, so a consumer below 0.29.0 that receives `factor_value_edit` fails the
-discriminator and rejects THE WHOLE TURN. Pins measured 2026-07-28 at each repo's
-`staging` tip: UI **0.22.0**, CEE **0.25.0** (this PR), PLoT 0.22.0 (never sees
-turns). Order: ~~publish 0.29.0~~ (done, `80c52743`) → this PR merges and DEPLOYS →
-only then the UI emitter ships. Shipping the writer first 400s every inspector edit.
+⚠ **SEQUENCING — THERE ISN'T ANY, AND THAT IS DERIVED, NOT ASSUMED.** Unlike the
+0.29.0 `factor_value_edit` train (a `.strict()` union member, where a
+below-pin consumer rejects the WHOLE turn), this change adds only ENRICHMENT
+keys. `AnalysisResultBlockSchema.enrichment` is `z.record(z.string(),
+z.unknown())` and the typed envelope is `.passthrough()` throughout, so an
+additive enrichment key parses at every pinned validator including the UI's
+current one. There is no outage window, no forced landing order, and no flag:
+CEE and the UI can land in either order, and rollback is a revert.
 
-**Checksum verification:** `vendor/talchain-schemas-0.29.0.tgz.sha256` holds the
+**Checksum verification:** `vendor/talchain-schemas-0.30.0.tgz.sha256` holds the
 canonical sha256 hash
-(`9104048a1ebe282866bee88b014a2542c80619b5ed93f1567b45ba4a33e76143`). The pre-push
-hook (`scripts/validate-tarball-sha.sh`) verifies the tarball bytes against this
-manifest on every push — re-run and green against these bytes. ✔ This hash is for
-the PUBLISHED `@talchain/schemas@0.29.0` (`npm pack` from GitHub Packages),
-replacing the prior published `0.25.0` hash `5d7f5679…708c4a`.
+(`cd3746369b26da20e079c8d8ec323294edcc46a32df6830b657aed2cd465a0cc`, 265,222
+bytes). The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
+tarball bytes against this manifest on every push.
 
 **Rollback path:** revert the whole PR. Git history restores
-`vendor/talchain-schemas-0.25.0.tgz`, its `.sha256`, the `package.json` `file:`
-reference and this README. Re-run `pnpm install` after the revert. **NOTE:** the
-vendor commit cannot be reverted alone — `src/orchestrator-v5/system-events/`
-references the new event type and would not typecheck against 0.25.0. Reverting
-here does NOT unpublish 0.29.0; the release stands, and a later re-adoption is a
-fresh vendor commit, not a revert of a revert.
+`vendor/talchain-schemas-0.29.0.tgz`, its `.sha256`, the `package.json` `file:`
+reference and this README. Re-run `pnpm install` after the revert. Unlike the
+0.29.0 vendor commit, this one **could** be reverted alone — no CEE source
+imports anything new from 0.30.0; the compose.ts keep-list entries are plain
+string literals. Reverting here does NOT unpublish 0.30.0; the release stands.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
@@ -87,7 +72,8 @@ draft-goal-constraints wave, 0.19.0 at the wave-2 producer fields,
 `what_changed` action-type wave, 0.22.0 at the Intent/chip.id +
 graph-identity-handshake + batched direct_graph_edit wave, 0.23.0 at
 the `graph_state` ingress / wave-2 graph write-identity boundary,
-0.25.0 at the typed `constraint_verdict` wave) are removed on each
+0.25.0 at the typed `constraint_verdict` wave, 0.29.0 at the
+value-carrying `factor_value_edit` inspector event) are removed on each
 bump — only the currently-pinned version lives in `vendor/`.
 
 **How to update:**

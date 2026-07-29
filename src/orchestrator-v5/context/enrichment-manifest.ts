@@ -16,7 +16,10 @@
  *   1. {@link ENRICHMENT_PRODUCER_MANIFEST} — every TOP-LEVEL field the
  *      PERSISTED run_analysis enrichment can carry. This is a MULTI-WRITER
  *      record, not a pure PLoT passthrough: the run-analysis handler stores
- *      the PLoT `/v2/run` body verbatim (the 64 `RunResponseV3` keys), then
+ *      the PLoT `/v2/run` body verbatim (the 68 `RunResponseV3` keys — 64
+ *      derived at PLoT `51abbc80` plus the 4 ISL top-level VOI passthrough
+ *      keys added at PLoT `a07b0ae`/`5dae8df` and manifested here in V7-C
+ *      slice 1b), then
  *      CEE enrichers WRITE 4 more keys onto the same record (decision_review +
  *      3 coaching-signal markers) before the analysis→LLM projection reads it,
  *      and one legacy V1-tolerance key (`results`) rounds out the boundary
@@ -58,10 +61,16 @@ import { log } from '../../utils/telemetry.js';
 /**
  * Every TOP-LEVEL key the persisted run_analysis `enrichment` can carry.
  *
- * Sections: (a) the 64 PLoT `/v2/run` `RunResponseV3` keys — citations are
- * `engine-v3.ts` line numbers at plot-lite-service tip `51abbc80`, grouped by
+ * Sections: (a) the 68 PLoT `/v2/run` `RunResponseV3` keys — citations are
+ * `engine-v3.ts` line numbers, the first 64 at plot-lite-service tip
+ * `51abbc80` and the 4 ISL top-level VOI keys at tip `3d13e0ac`, grouped by
  * the interface's own section headers; (b) 4 CEE-injected keys written onto
  * the same record after PLoT returns; (c) 1 legacy V1 inbound-tolerance key.
+ *
+ * ⚠ THE SECTION-(a) COUNT IS A HAND-MAINTAINED MIRROR OF A PRODUCER IN
+ * ANOTHER REPO, and it has already drifted once by four keys for five days
+ * (see the VOI block below). Re-derive it against PLoT's `RunResponseV3` at
+ * the tip you are on; do not trust this number, including this one.
  */
 export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>([
   // Envelope identity / status spine (:890-939)
@@ -140,6 +149,27 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   '_meta', // :1432
   'downstream_calls', // :1438
   'meta', // :1441
+  // ── ISL top-level VOI passthrough (:1089-1095) ────────────────────────────
+  // ⚠ THE MANIFEST WAS STALE HERE, AND ITS OWN TRIPWIRE WAS THE THING SAYING
+  // SO. The 64 keys above were derived at PLoT staging `51abbc80`
+  // (2026-07-22). These four landed at PLoT the NEXT DAY (#258, `a07b0ae`,
+  // 2026-07-23; refined by #259, `5dae8df`, 2026-07-24) — verified with
+  // `git merge-base --is-ancestor`, not assumed from dates. So since 23 Jul
+  // every persisted run_analysis enrichment carrying them has been firing
+  // `v5.enrichment.unknown_producer_key`, exactly as designed, and nobody
+  // read it. The instrument worked; the loop back to a human did not. Worth
+  // more than this fix: a fail-loud mirror still needs someone downstream of
+  // the noise.
+  //
+  // PLoT forwards them VERBATIM from the ISL envelope
+  // (`ISL_TOPLEVEL_ENRICHMENT_KEYS`, src/routes/v2/run-contract-keys.ts:34-38;
+  // `islEnrichmentPassthrough` spread at src/routes/v2/run.ts:3533), guard is
+  // `!== undefined` so an explicit null/0 passes. Citations below are
+  // `engine-v3.ts` lines at PLoT staging tip `3d13e0ac`, read directly.
+  'correlation_model', // :1089
+  'decision_evpi', // :1091
+  'factor_evppi', // :1093
+  'p_win_sensitivity', // :1095
   // ── CEE post-run additions to the SAME persisted enrichment record ────────
   // The run-analysis handler stores the PLoT body verbatim as
   // `result.enrichment` (run-analysis.ts:870), then CEE enrichers WRITE more
@@ -197,6 +227,13 @@ const R_CEE_PANEL =
  *   decision_review, option_comparison_status, conditional_probabilities,
  *   edge_e_values, inference_warnings, confidence_tier, flip_thresholds,
  *   decision_brief.
+ *
+ * That 12 is a DATED derivation, not the current count: the keep-list is 16 as
+ * of V7-C slice 1b. The four VOI keys are also transported, but they do NOT
+ * take this rationale — they carry {@link R_VOI_NOT_COACH_NARRATED}, because
+ * "transported to the UI" and "deliberately withheld from the coach on a claim
+ * boundary" are different reasons, and collapsing them is the exact mistake
+ * this comment block exists to record.
  */
 const R_UI_ARTEFACT_TRANSPORTED =
   'UI-facing artefact — genuinely keep-listed to the UI transport (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP, compose.ts), not the coach analysis projection.';
@@ -232,6 +269,24 @@ const R_NO_CONSUMER =
   'Not read by the analysis→LLM projection AND not on the UI transport keep-list — on a complete src/ reader manifest at cf10c553 it currently reaches no consumer at all (only an optional type-field declaration at orchestrator/types.ts:398). Skipped here because there is nothing to project, not because it goes somewhere else.';
 const R_INTERNAL =
   'Internal carrier / observability — stripped by compose.ts INTERNAL_ENRICHMENT_KEYS before UI transport; never coaching content.';
+/**
+ * The VOI family (V7-C slice 1b). Deliberately NOT projected into the coach
+ * context, and the reason is not "it goes to the UI instead" — it is a claim
+ * boundary.
+ *
+ * `factor_evppi` and `decision_evpi` are in OUTCOME units (`units: 'outcome'`)
+ * and `p_win_sensitivity` is in percentage points. The coach narrates in prose,
+ * and prose has no unit discipline: handing an LLM a ranked list of
+ * outcome-unit magnitudes is handing it the material for exactly the "worth X"
+ * and "by N pp" sentences the estate's no-EVPI-display doctrine exists to stop.
+ * The licensed surface for this data is a DETERMINISTIC composer rendering a
+ * RANKING with no magnitudes, and it lives in the UI.
+ *
+ * So this is a skip with a stated boundary, not a gap: adding a deriver here
+ * is a doctrine decision (and a Paul ruling), not a wiring task.
+ */
+const R_VOI_NOT_COACH_NARRATED =
+  'Value-of-information family — transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) for a deterministic ranking surface with NO magnitudes, and deliberately withheld from the analysis→LLM projection: the values are outcome-unit / percentage-point magnitudes, and narrating them in prose is the "worth X" / "by N pp" claim class the no-EVPI-display doctrine forbids. Adding a deriver is a doctrine ruling, not a wiring gap.';
 const R_COACHING_SIGNAL =
   'CEE-injected coaching-signal marker for the next turn coaching-cache reader (coaching-signal-application.ts) — routing metadata, not analysis content.';
 const R_LEGACY_COMPACT =
@@ -311,6 +366,11 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['coaching_signal_produced_at', R_COACHING_SIGNAL],
   ['_diagnostics', R_INTERNAL],
   ['results', R_LEGACY_COMPACT],
+  // V7-C slice 1b — transported to the UI, never narrated by the coach.
+  ['correlation_model', R_VOI_NOT_COACH_NARRATED],
+  ['decision_evpi', R_VOI_NOT_COACH_NARRATED],
+  ['factor_evppi', R_VOI_NOT_COACH_NARRATED],
+  ['p_win_sensitivity', R_VOI_NOT_COACH_NARRATED],
 ]);
 
 /**

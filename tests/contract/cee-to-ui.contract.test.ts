@@ -43,6 +43,10 @@ import {
   P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP,
   toSafeTransportEnrichment,
 } from "../../src/orchestrator-v5/compose.js";
+import {
+  WITHHELD_DROPPED_ENRICHMENT_BLOBS,
+  projectTransportEnrichmentForWithheldClaim,
+} from "../../src/orchestrator-v5/compose/withheld-claim-projection.js";
 import { ENRICHMENT_PRODUCER_MANIFEST } from "../../src/orchestrator-v5/context/enrichment-manifest.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -204,7 +208,255 @@ describe("CEE→UI: keep-list membership pins", () => {
     expect(CEE_UI_ENRICHMENT_KEEP_LIST).toContain("decision_brief");
   });
 
-  it("keep-list is exactly the CEE compose.ts P0B list (12 keys)", () => {
-    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(12);
+  it("keep-list is exactly the CEE compose.ts P0B list (16 keys)", () => {
+    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(16);
+  });
+});
+
+// ============================================================================
+// V7-C slice 1b — the VOI family transports (@talchain/schemas 0.30.0).
+//
+// THE DEFECT. ISL emits `factor_evppi`, `decision_evpi`, `p_win_sensitivity`
+// and `correlation_model` at the top level of ISLResponseV2; PLoT forwards all
+// four VERBATIM (ISL_TOPLEVEL_ENRICHMENT_KEYS, run-contract-keys.ts:34-38,
+// spread at run.ts:3533 @ PLoT staging 3d13e0ac); the run-analysis handler
+// persists the PLoT body byte-for-byte. And `toSafeTransportEnrichment` then
+// stripped all four — ONE HOP before the browser. The chain was whole
+// everywhere except its last link, which is exactly why a producer-side probe
+// at any earlier hop reported success.
+//
+// RED-FIRST ENTRY POINT: the drift bolt above is DERIVED from the vendored
+// `CEE_UI_ENRICHMENT_KEEP_LIST`, so re-vendoring 0.30.0 turns it RED before a
+// line of compose.ts changes. That is the intended order and it is why the
+// bolt compares against the schemas constant rather than a local literal.
+//
+// SCOPE, STATED HONESTLY: the checked-in staging capture predates the VOI
+// family and carries none of these keys (asserted below as this block's own
+// negative control). The overlay is SYNTHESISED from ISL's typed row shape.
+// These are PROJECTION pins over the real compose.ts functions — they prove
+// what CEE does to bytes it is handed, NOT that ISL put those bytes on the
+// wire. The live-wire claim needs a staging probe and is not made here.
+// ============================================================================
+
+/** Synthesised from ISL `FactorEvppiEntryV2` @ staging 1716f9bb — NOT a capture. */
+const VOI_ENRICHMENT = {
+  factor_evppi: [
+    {
+      factor_id: "fac_market_receptivity",
+      evppi: 0.34,
+      evppi_raw: 0.341982,
+      units: "outcome",
+      method: "regression_evppi_v1",
+      noise_floor: 0.02,
+      status: "resolved",
+      correlation_active: false,
+    },
+    {
+      // clamped_high: the per-factor <= total-EVPI cap fired. Audit only —
+      // order is unaffected and no magnitude is displayed, so this row must
+      // transport exactly like any other.
+      factor_id: "fac_competitor_response",
+      evppi: 0.91,
+      evppi_raw: 1.4,
+      units: "outcome",
+      method: "regression_evppi_v1",
+      clamped_high: true,
+      noise_floor: 0.02,
+      status: "resolved",
+    },
+    {
+      factor_id: "fac_hiring_pace",
+      evppi: 0,
+      evppi_raw: -0.0004,
+      units: "outcome",
+      method: "regression_evppi_v1",
+      clamped_low: true,
+      noise_floor: 0.02,
+      status: "below_resolution",
+    },
+  ],
+  decision_evpi: 0.91,
+  p_win_sensitivity: [{ factor_id: "fac_market_receptivity", delta_pp: 4.2 }],
+  correlation_model: { suppressed_attributions: ["p_win_sensitivity"] },
+} as const;
+
+const VOI_KEYS = [
+  "factor_evppi",
+  "decision_evpi",
+  "p_win_sensitivity",
+  "correlation_model",
+] as const;
+
+/**
+ * The persisted fact shape: the real capture PLUS the VOI family, an internal
+ * intruder, and a `decision_review`.
+ *
+ * `decision_review` is added deliberately: it is CEE-INJECTED after PLoT
+ * returns (turn-executor / decision-review-enricher), so the PLoT-side staging
+ * capture does not carry it — and without it the withheld block's positive
+ * control asserts nothing, because the key it watches being dropped was never
+ * there. That is not hypothetical; it is how this fixture was first written,
+ * and the control caught itself.
+ */
+const persistedWithVoi = {
+  ...persisted,
+  ...VOI_ENRICHMENT,
+  decision_review: {
+    // `produced_at` is REQUIRED by EnrichmentDecisionReviewSchema — a bare
+    // `{summary}` fails the parse pin two tests down, which is the envelope
+    // catching a malformed KNOWN key exactly as designed.
+    produced_at: "2026-07-29T00:00:00.000Z",
+    summary: "FIXTURE synthetic decision review.",
+  },
+  _meta: { seed: 42, graph_hash: "deadbeef" },
+} as Record<string, unknown>;
+const transportedWithVoi = toSafeTransportEnrichment(persistedWithVoi);
+if (!transportedWithVoi) {
+  throw new Error("toSafeTransportEnrichment returned undefined for the VOI fixture");
+}
+
+describe("CEE→UI: the VOI family transports (V7-C slice 1b)", () => {
+  it("NEGATIVE CONTROL — the staging capture itself carries none of the four", () => {
+    // Provenance, asserted rather than claimed in a comment: if a future
+    // re-capture DOES carry them, this goes red and the synthesised overlay
+    // above should be replaced by the real bytes.
+    for (const key of VOI_KEYS) {
+      expect(persisted, `${key} unexpectedly present on the capture`).not.toHaveProperty(key);
+    }
+  });
+
+  it("the real projection ships all four VERBATIM", () => {
+    for (const key of VOI_KEYS) {
+      expect(transportedWithVoi, `${key} must transport`).toHaveProperty(key);
+    }
+    expect(transportedWithVoi.factor_evppi).toEqual(VOI_ENRICHMENT.factor_evppi);
+    expect(transportedWithVoi.decision_evpi).toBe(0.91);
+    expect(transportedWithVoi.p_win_sensitivity).toEqual(VOI_ENRICHMENT.p_win_sensitivity);
+    expect(transportedWithVoi.correlation_model).toEqual(VOI_ENRICHMENT.correlation_model);
+  });
+
+  it("preserves PRODUCER RANK ORDER — the ordering is the contract", () => {
+    // ISL sorts by `evppi` DESCENDING and the surface renders in wire order.
+    // Transport must not reorder, and a consumer must not re-sort: a layer
+    // that "fixes" the order is a layer that can invert it.
+    const rows = transportedWithVoi.factor_evppi as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.factor_id)).toEqual([
+      "fac_market_receptivity",
+      "fac_competitor_response",
+      "fac_hiring_pace",
+    ]);
+  });
+
+  it("preserves the below-resolution row's clamped 0 AND its status (absent != zero)", () => {
+    // The pair is what stops a consumer reading 0 as "measured worthless".
+    // A transport that dropped `status` would leave a bare 0 that ranks.
+    const rows = transportedWithVoi.factor_evppi as Array<Record<string, unknown>>;
+    const below = rows[2];
+    expect(below.evppi).toBe(0);
+    expect(below.status).toBe("below_resolution");
+    expect(below.clamped_low).toBe(true);
+    // …and the clamped_high row is untouched: audit flag, not a display gate.
+    expect(rows[1].clamped_high).toBe(true);
+    expect(rows[1].evppi).toBe(0.91);
+  });
+
+  it("still strips the internal intruder (the strip did not stop discriminating)", () => {
+    // Positive control for the leak pin on THIS fixture: the source really
+    // carries `_meta`, so the not-shipped assertion is not vacuous.
+    expect(persistedWithVoi).toHaveProperty("_meta");
+    expect(transportedWithVoi).not.toHaveProperty("_meta");
+    expect(transportedWithVoi).not.toHaveProperty("m1_coaching");
+  });
+
+  it("the transported VOI family parses against AnalysisEnrichmentSchema", () => {
+    const result = AnalysisEnrichmentSchema.safeParse(transportedWithVoi);
+    if (!result.success) throw new Error(result.error.message);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ── The withheld-turn ruling, pinned ────────────────────────────────────────
+//
+// THE RULING, DERIVED AT THE BYTES RATHER THAN ASSUMED: the VOI family SURVIVES
+// a withheld-claim turn, unchanged, and that is correct — not an oversight to
+// be closed.
+//
+// `projectTransportEnrichmentForWithheldClaim` drops
+// WITHHELD_DROPPED_ENRICHMENT_BLOBS (= ['decision_review']) whole, projects
+// `decision_brief` and `robustness` member-wise, and passes every other key
+// through verbatim. The question is therefore whether these four keys are
+// claim-adjacent, and they are not: NO FIELD OF ANY VOI SHAPE NAMES AN OPTION.
+// A `factor_evppi` row carries a factor id and numbers; `correlation_model`
+// carries field names; `p_win_sensitivity` carries factor-keyed deltas. The
+// leading-option egress guard has nothing to catch, so the right move is to PIN
+// the pass-through, not to add a suppression path — a second owner of the
+// withholding rule is how this estate ends up with two `generateGraphHash`
+// twins (compose/withheld-claim-projection.ts says so in its own comments).
+//
+// The claim being withheld is "which option leads". "Which uncertainty is worth
+// resolving next" is a different claim, and withholding it would be its own
+// dishonesty: on a turn where we cannot name a leader, what to go and learn is
+// the most useful thing we can still say.
+describe("CEE→UI: the VOI family on a WITHHELD-claim turn (V7-C slice 1b)", () => {
+  const withheld = projectTransportEnrichmentForWithheldClaim(transportedWithVoi);
+  if (!withheld) {
+    throw new Error("withheld projection returned undefined for the VOI fixture");
+  }
+
+  it("POSITIVE CONTROL — the withheld projection actually ran", () => {
+    // Without this, every assertion below passes just as happily against a
+    // projection that no-opped (trap 13). `decision_review` is on the capture
+    // and on the transport keep-list, and the withheld projection drops it
+    // whole — so its absence is proof the funnel executed.
+    expect(transportedWithVoi).toHaveProperty("decision_review");
+    expect(withheld).not.toHaveProperty("decision_review");
+  });
+
+  it("passes all four VOI keys through UNCHANGED", () => {
+    for (const key of VOI_KEYS) {
+      expect(withheld, `${key} must survive a withheld turn`).toHaveProperty(key);
+      expect(withheld[key]).toEqual(transportedWithVoi[key]);
+    }
+  });
+
+  it("no VOI shape names an OPTION — the licence for passing them through", () => {
+    // Walked over the real values, not read off the types. This is the
+    // derivation the ruling rests on, so it is executed, not asserted in prose.
+    const OPTION_KEY = /(^|_)option(_|$)|option_id|leading_option/i;
+    const violations: string[] = [];
+    const walk = (value: unknown, path: string): void => {
+      if (Array.isArray(value)) {
+        value.forEach((v, i) => walk(v, `${path}[${i}]`));
+      } else if (value !== null && typeof value === "object") {
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          if (OPTION_KEY.test(k)) violations.push(`${path}.${k}`);
+          walk(v, `${path}.${k}`);
+        }
+      }
+    };
+    for (const key of VOI_KEYS) walk(withheld[key], `$.${key}`);
+    expect(violations).toEqual([]);
+
+    // POSITIVE CONTROL — the walker can see an option key when one exists.
+    const control: string[] = [];
+    const walkControl = (value: unknown, path: string): void => {
+      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+          if (OPTION_KEY.test(k)) control.push(`${path}.${k}`);
+          walkControl(v, `${path}.${k}`);
+        }
+      }
+    };
+    walkControl({ leading_option_id: "opt_a" }, "$");
+    expect(control).toEqual(["$.leading_option_id"]);
+  });
+
+  it("the VOI keys are NOT on the withheld drop list, and decision_review still is", () => {
+    // Pins the ruling against the constant itself, so a future lane that adds
+    // a VOI key to the drop list has to change this test and read the reason.
+    for (const key of VOI_KEYS) {
+      expect(WITHHELD_DROPPED_ENRICHMENT_BLOBS).not.toContain(key);
+    }
+    expect(WITHHELD_DROPPED_ENRICHMENT_BLOBS).toContain("decision_review");
   });
 });
