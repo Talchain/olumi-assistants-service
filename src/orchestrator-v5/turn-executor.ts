@@ -244,7 +244,11 @@ import {
 } from './context/freshness.js';
 // T1 claim safety — READ the verdict the run_analysis handler stamped on the
 // fact. This file never derives it (CLAUDE.md trap #12).
-import { readRatifiedConstraints } from '../orchestrator/context/constraint-feasibility.js';
+import {
+  readRatifiedConstraints,
+  type ConstraintVerdictState,
+  type RatifiedConstraint,
+} from '../orchestrator/context/constraint-feasibility.js';
 // ROADMAP 1.233 — the ONE fact-array claim-safety read, shared by the turn-entry
 // hoist and the post-dispatch refinement so two read points can never become two
 // derivations. See `context/claim-safety-read.ts`.
@@ -255,6 +259,11 @@ import { readRatifiedConstraints } from '../orchestrator/context/constraint-feas
 import {
   claimSafetyScopeFromContext,
   readMayNameLeadingOptionVerdict,
+  // Whether the verdict's provenance PROVES an analysis exists. Three of the six
+  // branches withhold BECAUSE they could not establish that, so the withheld copy
+  // may not say "your most recent analysis" on them. Imported, never re-decided
+  // here — the predicate lives beside the union it classifies (trap #12).
+  provenanceProvesAnalysisExists,
 } from './context/claim-safety-read.js';
 import type { MayNameLeadingOptionProvenance } from './context/claim-safety-read.js';
 // ROADMAP 1.231 — INPUT-side claim safety: strip the leader-designating fields
@@ -275,6 +284,13 @@ import {
   projectExplanationAnswerForWithheldClaim,
   type WithheldExplanationReason,
 } from './compose/withheld-explanation-answer.js';
+// ROADMAP — CLAIM SAFETY AT THE CHOKEPOINT. The ENFORCER's reader, imported
+// (never re-implemented): `textAssertsLeadingOption` is the same predicate the
+// in-flow gate's `projectExplanationAnswerForWithheldClaim` branches on, and
+// the same one `withheld-claim-projection.ts` / `withheld-explanation-answer.ts`
+// use. Two same-named predicates is how this estate got burned before
+// (CLAUDE.md trap #12) — this is a call, not a copy.
+import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
 import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
@@ -8218,6 +8234,11 @@ export async function runTurnExecutor(
           verdictState,
           readRatifiedConstraints(context.persistedGraph ?? graphStateForTurn ?? null),
           withheldConditionsAreCurrent(),
+          // Same single predicate the finaliser hook uses, off the SAME verdict.
+          // This gate has the same population exposure the chokepoint had: a
+          // degraded read withholds with no fact selected, and the substituted
+          // copy must not then claim an analysis exists.
+          provenanceProvesAnalysisExists(mayNameLeadingOptionVerdictForRun.provenance),
         );
         // ROADMAP 1.233 — record the outcome WHETHER OR NOT it changed the
         // text. `null` (the initial value) means the gate never ran; a
@@ -9846,6 +9867,280 @@ export async function runTurnExecutor(
     functionalAnswerText = V5_STRUCTURAL_DECLINE_TEXT;
   }
 
+  /**
+   * ⭐ CLAIM SAFETY AT THE CHOKEPOINT — the THIRD finaliser-level guard.
+   *
+   * ═══════════════════════════════════════════════════════════════════════════
+   * WHY THIS EXISTS, AND WHY HERE. The T1 leader-claim ENFORCER lives at ONE
+   * point in this function: the explanation-answer claim gate, guarded by
+   * `isExplanationHandler && !mayNameLeadingOptionForRun`, immediately before
+   * compose. That placement is correct for what it covers and structurally
+   * blind to everything else:
+   *
+   *   - **positionally**: 27 of this function's 39 `return finalizeRun()` exits
+   *     are upstream of it and never reach it at all — every deterministic
+   *     pre-route (short-confirm, label/ordinal, dismissal, clarify-resume,
+   *     typed chip, value update, state query, run comparison, post-analysis
+   *     advice), every early validation exit, the routing-degrade corridor;
+   *   - **conditionally**: of the 12 exits downstream of it, only those that
+   *     dispatched an EXPLANATION handler satisfy its guard — converse,
+   *     coach, clarify, the bounded/recovery fallbacks and the commit-failure
+   *     tail all compose text and return without it.
+   *
+   * That is the same geometry as the pre-1.233 permission defect one layer up,
+   * and it is not theoretical: the POST-#713 live walk captured 3/3 NON-EXECUTE
+   * turns on a withheld scenario naming the leading option, one of them with a
+   * probability and no disclosure at all — turns that by construction never
+   * touched the explanation gate. 65 test files did not see it; a live walk did.
+   *
+   * The answer is the one this file already uses TWICE: `finalizeRun` is the
+   * single internal choke point every one of the 39 exits passes through, and
+   * it already backstops the forbidden-phrase and structural-success guards
+   * there for exactly this reason. This is the third. "The gate is armed on
+   * every exit" stops being a comment and becomes a property of the call graph.
+   *
+   * ═══════════════════════════════════════════════════════════════════════════
+   * ONE PREDICATE, IMPORTED — NOT A TWIN (CLAUDE.md trap #12). The trigger is
+   * `textAssertsLeadingOption`, the ENFORCER's reader from
+   * `compose/leading-option-egress-guard.ts` — the SAME function
+   * `projectExplanationAnswerForWithheldClaim` branches on, and the same one
+   * the compose-side projections use. The substitution is
+   * `projectExplanationAnswerForWithheldClaim` itself, the SAME function the
+   * in-flow gate calls, handed the SAME four inputs from the SAME single
+   * selected fact (`mayNameLeadingOptionVerdictForRun`), the SAME persisted
+   * constraint read, and the SAME `withheldConditionsAreCurrent()` closure —
+   * whose own declaration comment already names "the finaliser hook" as its
+   * second consumer. This is that consumer.
+   *
+   * PRECISION-FIRST, REPLACE-ONLY — mirrors `enforceStructuralSuccessClaimGuard`.
+   * The guard fires ONLY on the projection's REPLACE branch, i.e. only when the
+   * text actually asserts a leader on a turn whose verdict withholds. It never
+   * takes the APPEND branch: bolting a disclosure onto every clarify / converse
+   * / coach exit is a behaviour widening, not a safety backstop, and the in-flow
+   * gate keeps owning APPEND on the explanation path. Over-suppression is a
+   * failure here, not a safe default.
+   *
+   * BYTE-IDENTICAL ON A PERMITTED TURN. `mayNameLeadingOptionForRun === true`
+   * returns before anything is read. So does a withheld turn whose text carries
+   * no leader claim. Both are pinned by positive controls.
+   *
+   * IDEMPOTENT. `withheld-explanation-answer.ts` proves its substituted copy
+   * leader-free at module load (`assertSubstitutedCopyIsLeaderFree`), so a
+   * second pass finds nothing to replace.
+   *
+   * NEVER THROWS — the finalise-path invariant. A 500 is strictly worse than
+   * the prose being suppressed, so the constraint/freshness reads are wrapped
+   * and DEGRADE TOWARDS SAFETY: on a read failure the guard still substitutes,
+   * using the cause-free tail (`state = null`, no constraints, not current).
+   * It never falls back to shipping the leader claim.
+   *
+   * THE IN-FLOW GATE STAYS. Defence in depth: it runs pre-compose, so its
+   * projection flows into `blocks[].summary` and the `_answer_shape` sidecar by
+   * construction, and it owns APPEND. This guard is the backstop for the exits
+   * it cannot see — deliberately not a replacement for it.
+   * ═══════════════════════════════════════════════════════════════════════════
+   */
+  function enforceWithheldLeaderClaimGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    // PERMITTED ⇒ no-op, byte-identical. Same short-circuit shape (and same
+    // reason) as `guardLeadingOptionClaimsAtEgress`'s
+    // `if (opts.mayNameLeadingOption) return response;`.
+    if (mayNameLeadingOptionForRun) return;
+    // ═══════════════════════════════════════════════════════════════════════
+    // ⚠ THE SCOPE, AND THE MEASURED REASON FOR IT — do not widen without
+    // re-running `turn-executor-compound-edit-disclosure.test.ts`.
+    //
+    // A dispatched handler's answer is a RECEIPT, and this estate has already
+    // ruled on receipts. The in-flow explanation gate states the ruling in its
+    // own comment: it is "scoped to EXPLANATION handlers" because "a
+    // mutation/run receipt is deterministic template copy that is already gated
+    // at its own producer, and running this over it would risk replacing an
+    // honest receipt."
+    //
+    // The first cut of this guard ignored that ruling and the existing suite
+    // caught the exact harm it predicts, within one run. On a `run_analysis`
+    // turn the composed receipt carried:
+    //
+    //   "Your first analysis is ready. Take a moment to explore the leading
+    //    option and the factors shaping it before acting on the result."
+    //
+    // — `signals/coaching-signals.ts` FIRST_ANALYSIS_COMPLETE. That sentence
+    // trips `leading_option` in the shared vocabulary and DESIGNATES NOTHING:
+    // no option named, no probability, no ranking. The unscoped guard replaced
+    // the whole receipt with withheld copy, destroying both the analysis
+    // confirmation AND the honest compound-edit disclosure ("haven't applied
+    // the other change yet ('Sales Budget')") sitting in the same string. That
+    // is a strictly worse outcome than the phrase it removed, and it is the
+    // over-suppression failure this estate treats as a defect, not a safe
+    // default.
+    //
+    // ⚠ AND THE DIVERGENCE UNDERNEATH IT IS WORTH KNOWING. That copy is ALREADY
+    // producer-gated — `coaching-signals.ts` returns `null` for it when
+    // `leadingOptionClaimWithheld(outcome)` is true. Its appearance means the
+    // PRODUCER read the claim as permitted (via the handler outcome's
+    // `__leading_option_claim_withheld` channel) while the FACT-CHAIN verdict
+    // read here fail-closed to `false` on an unstamped fact. Two authorities,
+    // one question. The fail-closed default is right for a PERMISSION and
+    // dangerous as a licence to DELETE a whole answer — which is precisely why
+    // the finaliser must not overrule a producer that has already consulted its
+    // own gate.
+    //
+    // SO: this guard owns the exits where NO producer-side verdict gate exists
+    // — the turns that dispatched no execute-intent handler at all. That is the
+    // walk's actual leaking population (3/3 NON-EXECUTE turns), and it is
+    // derived from a single assignment site (`proposedHandlerIdForOutcome`, set
+    // only on the execute-intent path), not from a hand-listed allowlist of
+    // exits that would drift (trap #12).
+    //
+    // ⚠ WHAT THIS DOES NOT COVER — CORRECTED 2026-07-29, because the sentence
+    // that used to sit here was FALSE and false in the reassuring direction.
+    //
+    // It claimed execute-intent receipts "keep the three enforcements they
+    // already have — the producer's own gate, the in-flow explanation gate, and
+    // STEP 6.6". Checked at the bytes, that is not the coverage:
+    //
+    //   - STEP 6.6 (`:8904`) is the structural-success-claim honesty gate. It
+    //     enforces a DIFFERENT claim class — a false first-person MUTATION
+    //     success claim — and says nothing about leader claims. Counting it here
+    //     was counting an unrelated guard as protection.
+    //   - the producer gate is ONE call, `leadingOptionClaimWithheld` at
+    //     `signals/coaching-signals.ts:233`, inside `if (input.proposedHandlerId
+    //     === 'run_analysis')`. It covers ONE signal of ONE handler.
+    //   - the in-flow explanation gate covers `EXPLANATION_HANDLER_IDS` only:
+    //     `explain_from_structure`, `explain_results`, `what_would_flip`.
+    //
+    // THE TRUE COVERAGE, and the gap named rather than papered over:
+    //   `run_analysis`                → producer gate (the FIRST_ANALYSIS_COMPLETE
+    //                                   signal) — and note it reads a DIFFERENT
+    //                                   authority than this guard does (the
+    //                                   handler-outcome channel, not the fact
+    //                                   chain), so the two can disagree.
+    //   the three explanation handlers → the in-flow gate at `:8210`.
+    //   ⛔ `set_factor_value` / `add_constraint` / `adjust_edge_strength`
+    //      receipts → NO leader-claim enforcement at all. Only the observe-only
+    //      Layer-3 alarm at `route-v2.ts` scans them, and observe-only changes
+    //      not one byte.
+    //
+    // ⚠ THAT GAP SET IS **THREE**, DERIVED — and an earlier revision of this
+    // comment said FIVE by adding `edit_graph` / `draft_graph`. Corrected at the
+    // bytes: `tools/registry.ts:496-504` registers exactly SEVEN handlers
+    // (`run_analysis`, the three explanation ids, and the three above); neither
+    // `edit_graph` nor `draft_graph` is among them, so neither can produce a
+    // receipt through this executor's handler-invocation path. Their receipts
+    // come from the route-level mechanism and belong to ROADMAP 2.149, not here.
+    // Over-stating a gap is the safe direction for a reader and the WRONG
+    // direction for sizing the work that closes it — 7 = 1 + 3 + 3, and the
+    // arithmetic is the check.
+    //
+    // The three-handler gap is real, is NOT closed by this PR, and is not
+    // closable from here: those receipts are producer-gated territory and this
+    // finaliser must not overrule a producer (the paragraph above is what
+    // happens when it does). Rowed programme-side (2.149) as route-level
+    // claim-safety work, together with the `sendFinalised200` exits that never
+    // reach this function at all. A reader who needs "is a leader claim
+    // reachable on a mutation receipt?" should go there, not infer safety from
+    // this guard's existence.
+    // ═══════════════════════════════════════════════════════════════════════
+    if (proposedHandlerIdForOutcome !== null) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    // THE SHARED ENFORCER PREDICATE. Checked HERE as well as inside the
+    // projection so this guard can never reach the projection's APPEND branch —
+    // the REPLACE branch is the only one it is licensed to take.
+    if (!textAssertsLeadingOption(assistantText)) return;
+
+    // DEGRADE TOWARDS SAFETY, never towards the claim. These three reads are
+    // the only fallible work in the guard; if any of them throws, the
+    // substitution still happens with the cause-free tail.
+    let verdictState: ConstraintVerdictState | null = null;
+    let ratifiedConstraints: readonly RatifiedConstraint[] = [];
+    let conditionsAreCurrent = false;
+    // Both default FALSE, and both defaults are the SAFE direction for a
+    // different reason: unproven currency costs the named condition, unproven
+    // existence costs the whole opening. Neither costs the suppression.
+    let analysisExistenceProven = false;
+    try {
+      verdictState = mayNameLeadingOptionVerdictForRun.constraint_verdict_state;
+      ratifiedConstraints = readRatifiedConstraints(
+        context.persistedGraph ?? graphStateForTurn ?? null,
+      );
+      conditionsAreCurrent = withheldConditionsAreCurrent();
+      analysisExistenceProven = provenanceProvesAnalysisExists(
+        mayNameLeadingOptionVerdictForRun.provenance,
+      );
+    } catch (err) {
+      log.error(
+        {
+          event: 'v5.invariant_violation',
+          invariant: 'withheld_leader_claim_chokepoint_inputs_unreadable',
+          request_id: requestId,
+          scenario_id: context.session_id,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'V5 finalise: the withheld-leader chokepoint guard could not read its disclosure inputs. ' +
+          'It is substituting the cause-free copy anyway — the leader claim is still suppressed. ' +
+          'Fix the reader; do not make this guard throw.',
+      );
+      verdictState = null;
+      ratifiedConstraints = [];
+      conditionsAreCurrent = false;
+      // A guard that could not read its inputs must not claim an analysis
+      // exists any more than it may claim one is current.
+      analysisExistenceProven = false;
+    }
+
+    const projected = projectExplanationAnswerForWithheldClaim(
+      assistantText,
+      verdictState,
+      ratifiedConstraints,
+      conditionsAreCurrent,
+      analysisExistenceProven,
+    );
+    // Structurally unreachable given the `textAssertsLeadingOption` check above
+    // (the projection branches on the SAME predicate), but asserted rather than
+    // assumed: if the two ever diverge, this guard stands down instead of
+    // silently taking a branch it was never licensed to take.
+    if (!projected.changed || projected.reason !== 'leader_claim_replaced') return;
+
+    emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      constraint_verdict_state: verdictState ?? 'unreadable',
+      // Lengths only. This is the claim-safety boundary and the prose is the
+      // user's own decision content — never the matched text.
+      original_length: assistantText.length,
+      projected_length: projected.text.length,
+      // ⚠ NO `in_flow_gate_eligible`, AND NO `handler_id` — both were STRUCTURAL
+      // CONSTANTS here, which is worse than uninformative: a dashboard field that
+      // cannot vary reads as a measured population when it is a tautology.
+      //
+      // `in_flow_gate_eligible` was `withheldExplanationReasonForRun !== null`.
+      // That variable's ONLY assignment site is inside the execute block, which
+      // the scope check above (`proposedHandlerIdForOutcome !== null → return`)
+      // excludes by construction — so it was always `null` at this emit and the
+      // tag was always `false`. Removed on the same reasoning that removed
+      // `handler_id`, applied consistently. (Caught by adversarial review of
+      // #755, whose mutant hardcoded the field to `false` and left the whole
+      // suite green — the tell that nothing was measuring it.)
+      //
+      // Every event this guard emits is, by the scope, an exit the in-flow gate
+      // could not have covered. That is a property of the guard, so it belongs
+      // in this comment and in the event NAME, not in a per-event boolean.
+      dispatch_path: dispatchPath,
+    });
+    response = {
+      ...response,
+      assistant_text: projected.text,
+    };
+    // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: same reasoning as the
+    // structural-success swap directly above. The substitution replaces the
+    // answer with short withheld copy; mark it functional so the egress does
+    // not reshape a decline behind progressive disclosure.
+    functionalAnswerText = projected.text;
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // V5 finaliser contract: surface `analysisReadyForTurn` on the run
     // result so route-v2.ts can stamp it via `finaliseV5Response`. The
@@ -9865,6 +10160,16 @@ export async function runTurnExecutor(
     // guard. An upstream hook would miss new emit paths added later;
     // a finaliser hook cannot. See FORBIDDEN_USER_FACING_PHRASES for
     // the contradiction list this enforces.
+    // ⭐ CLAIM SAFETY AT THE CHOKEPOINT — the THIRD guard, and deliberately the
+    // FIRST to run. It performs a WHOLE-TEXT substitution, so running it ahead
+    // of the other two means its replacement copy is itself subject to the
+    // forbidden-phrase and structural-success guards below rather than
+    // bypassing them. (`withheld-leader-claim-chokepoint.test.ts` pins the
+    // converse: that the other two guards' own substitution constants are
+    // leader-free, so this ordering cannot silently rot.) See
+    // `enforceWithheldLeaderClaimGuard` for why a finaliser hook and not
+    // another in-flow gate.
+    enforceWithheldLeaderClaimGuard('turn_executor_finalise');
     enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
     // AI Harness capability 1 — always-on false-success neutralisation. Runs
     // alongside the forbidden-phrase guard so EVERY emit path (incl. the

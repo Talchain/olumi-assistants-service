@@ -27,22 +27,34 @@
  * plainly, because collapsing them is how a partial fix reads as a whole one:
  *
  *   1. THE HOIST is a claim about a MECHANISM, and it is fully provable here:
- *      the alarm now RECEIVES `false` on a non-execute exit, so it FIRES. The
- *      assertion is the telemetry event, i.e. the mechanism executing — not a
- *      restatement of the code.
+ *      the finaliser now RECEIVES `false` on a non-execute exit, so the
+ *      claim-safety machinery FIRES. The assertion is the telemetry event, i.e.
+ *      the mechanism executing — not a restatement of the code.
  *   2. THE INPUT GATE is a claim about what the MODEL WAS GIVEN. In this file
  *      the model is a mock, so it cannot be a claim about what the model then
  *      wrote. The assertion is therefore on the ContextPack the router
  *      received — which is the whole content of "gate the input, not the
  *      output" — and NOT on the prose coming back.
  *
- * ⚠ SO THIS FILE CANNOT PROVE the coach/converse OUTPUT is leader-free on a
- * withheld turn. Nothing in-repo can: that is a property of a real model given
- * a gated pack. It is delegated, explicitly, to the next live walk — read the
- * BODIES on case-5-style turns, and now also read
- * `_diagnostic_trace.claim_safety`, which this train adds precisely so the walk
- * no longer has to infer the mechanism from prose. TESTING-DISCIPLINE rule 6: a
- * stated limit is a to-do, not a hedge.
+ * ⚠⚠ THE CAVEAT THAT USED TO SIT HERE IS NOW FALSE, AND IS WITHDRAWN RATHER
+ * THAN LEFT TO ROT (2026-07-29). It read:
+ *
+ *     "SO THIS FILE CANNOT PROVE the coach/converse OUTPUT is leader-free on a
+ *      withheld turn. Nothing in-repo can … delegated, explicitly, to the next
+ *      live walk."
+ *
+ * That was true while the ONLY output-side mechanism on a non-execute exit was
+ * the observe-only Layer-3 alarm. It stopped being true when claim safety was
+ * enforced at the `finalizeRun` chokepoint: on a non-execute exit the leader
+ * claim is now REPLACED before the response leaves the executor, so the
+ * converse output being leader-free is an in-repo, byte-level property. It is
+ * asserted directly below, and exhaustively across converse / coach / clarify
+ * in `withheld-leader-claim-chokepoint.test.ts`.
+ *
+ * Leaving the old sentence in place would have been the trap-14 shape — a
+ * label that was honest when written and false when read. The live walk is
+ * still the authority on what a REAL model writes into a gated pack; it is no
+ * longer the only authority on whether that prose can reach the user.
  *
  * ASSERTIONS ARE ON THE SERIALISED HTTP BYTES, or on the ARGUMENT the next
  * consumer actually received (rule 3). Nothing here asserts on a value a
@@ -529,44 +541,79 @@ describe('G-CEE-1 — claim safety on NON-EXECUTE exits (ROADMAP 1.233 + 1.231)'
     });
 
     // ── 1.233, THE HOIST — the mechanism, not the claim ────────────────────
-    it('the Layer-3 alarm RECEIVES false on a converse exit, and therefore FIRES', async () => {
-      const { status } = await postTurn(app, 'So where does this leave things?');
+    it('the finaliser RECEIVES false on a converse exit, and the claim-safety machinery FIRES', async () => {
+      const { status, body } = await postTurn(app, 'So where does this leave things?');
       expect(status).toBe(200);
 
-      // THE PIN. `guardLeadingOptionClaimsAtEgress` returns its input
-      // unchanged and emits NOTHING whenever the permission is `true`
-      // (`if (opts.mayNameLeadingOption) return response;`). Before the hoist
-      // this exit shipped the hardcoded `true`, so this event count was ZERO
-      // on exactly this fixture — which is what "a coach-turn leak produces
-      // ZERO telemetry" meant, and why the walk could not use the alarm log
-      // on non-execute turns at all.
+      // ═════════════════════════════════════════════════════════════════════
+      // ⚠ THIS ASSERTION MOVED INSTRUMENT ON 2026-07-29, AND THE REASON IS THE
+      // POINT — it is NOT a weakening, and the old instrument is not "flaky".
       //
-      // The event firing is proof the alarm was ARMED WITH THE REAL VERDICT.
-      // It is deliberately NOT proof the prose was scrubbed: the guard is
-      // observe-only by design (ROADMAP 1.227 owns the enforce flip).
-      const alarms = events.filter((e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress);
-      // ⭐ EXACTLY ONE — tightened from `toBeGreaterThan(0)` by ROADMAP 1.272
-      // E1, and the tightening IS the multiplicity proof.
+      // It used to assert the observe-only Layer-3 alarm FIRED here, as a proxy
+      // for "the finaliser was armed with the REAL verdict rather than the
+      // pre-hoist hardcoded `true`". That proxy worked only while nothing
+      // ENFORCED the claim before the wire. Claim safety is now enforced at the
+      // `finalizeRun` chokepoint, so on this exit the leader claim is replaced
+      // inside the executor and the alarm — which scans the final `wireBody` —
+      // correctly finds nothing left to report. Zero alarms here is now the
+      // CORRECT reading, and keeping the old assertion would have meant either
+      // a permanent red or, far worse, deleting the enforcement to keep a
+      // telemetry count alive.
       //
-      // The guard used to run inside `sanitiseOlumiResponseForEgress`, which
-      // `sendFinalised200` re-enters 2–8 times per response (one validate pass,
-      // one of {validated, fallback}, and up to six CONDITIONAL debug re-attach
-      // passes). The alarm fired on EVERY pass that found hits, so `hit_count`
-      // on the dashboard carried a multiplier that varied with which debug
-      // surfaces the environment had enabled — the guard's own comment told
-      // readers to divide by 4, and 4 was never the number.
+      // The property is preserved and STRENGTHENED, because the replacement
+      // instrument fails on exactly the same defect. The chokepoint guard's
+      // first statement is `if (mayNameLeadingOptionForRun) return;` — so if
+      // the hoist ever regressed to the `= true` default, this event count goes
+      // to ZERO, which is precisely what the original assertion detected.
       //
-      // A loose `> 0` cannot see that regression, which is why it is being
-      // replaced rather than kept alongside: an assertion that passes for 1 and
-      // for 8 is not measuring the property this PR changed.
+      // The Layer-3 alarm's own multiplicity pin (exactly ONE event per
+      // response, ROADMAP 1.272 E1) is NOT orphaned by this move: it lives on
+      // the ROUTE-level edit exit, which the executor chokepoint does not touch
+      // — `claim-safety-non-execute-exits-route-level.test.ts`, "the Layer-3
+      // alarm ... and therefore FIRES".
+      // ═════════════════════════════════════════════════════════════════════
+      const neutralised = events.filter(
+        (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise,
+      );
       expect(
-        alarms.length,
-        'the withheld converse exit must arm the egress alarm with the REAL permission, and ' +
-          'exactly ONCE. More than one means the Layer-3 scan has been re-added to a re-entered ' +
-          'chokepoint (it belongs on the final `wireBody` in `sendFinalised200`, immediately ' +
-          'before `reply.send`); zero means the alarm is not armed at all.',
+        neutralised.length,
+        'the withheld converse exit must reach the finaliser with the REAL permission, and the ' +
+          'chokepoint guard must act on it exactly once. ZERO means the permission arrived as the ' +
+          'pre-hoist `true` default (the licensed no-op) or the chokepoint guard is gone.',
       ).toBe(1);
-      expect(alarms[0]!.data['hit_count']).toBeGreaterThan(0);
+
+      // ⭐ AND THE PROPERTY THE OLD CAVEAT SAID WAS UNPROVABLE IN-REPO: the
+      // converse OUTPUT is leader-free on a withheld turn. Scored with the
+      // production scanner on the serialised bytes, not a local regex.
+      expect(
+        findLeaderClaims({ assistant_text: body['assistant_text'] } as never),
+        'the converse answer must carry no leader claim once the chokepoint has run',
+      ).toHaveLength(0);
+      // (No `_diagnostic_trace` assertion here: this file does not enable
+      // CEE_DIAGNOSTIC_TRACE_ENABLED, and the chokepoint event above already
+      // proves the permission reached the finaliser as `false` — its guard
+      // returns before emitting anything when the permission is `true`. The
+      // wire-diagnostic reading of the same property is covered in
+      // `claim-safety-non-execute-exits-route-level.test.ts`, which does set
+      // the flag.)
+
+      // AND THE ALARM IS NOW SILENT ON THIS EXIT — asserted, not ignored,
+      // because "the alarm stopped firing" is exactly the shape that should
+      // make a reader suspicious, and an unasserted silence is how a broken
+      // alarm gets normalised (trap 7b).
+      //
+      // Its silence here is CAUSED, and the cause is pinned two assertions up:
+      // `findLeaderClaims` on the wire bytes is empty, so the observe-only
+      // scan has nothing to report. If a future change stops the chokepoint
+      // substituting, `findLeaderClaims` goes non-empty and this expectation
+      // flips too — the two are read off the SAME scanner, so they cannot
+      // drift into agreeing for different reasons.
+      const alarms = events.filter((e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress);
+      expect(
+        alarms,
+        'the alarm must be silent BECAUSE the claim was enforced away upstream, not because it ' +
+          'is unarmed — the leader-free assertion above is what distinguishes those two.',
+      ).toHaveLength(0);
     });
 
     // ── 1.231, THE INPUT GATE — what the model was GIVEN ───────────────────

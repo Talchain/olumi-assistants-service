@@ -816,6 +816,45 @@ export const TelemetryEvents = {
   // vocabulary; `handler_id` is a registry key; the lengths are finite
   // integers. The answer PROSE and the user's decision content never appear.
   V5WithheldExplanationAnswerProjected: "v5.explanation.withheld_answer_projected",
+  // V5WithheldLeaderClaimNeutralisedAtFinalise — THE CHOKEPOINT BACKSTOP.
+  //
+  // Named into `v5.egress.*` deliberately, alongside its two closest relatives:
+  // `v5.egress.forbidden_phrase_detected` (the sibling finaliser guard) and
+  // `v5.egress.leading_option_claim_withheld_violated` (the observe-only Layer-3
+  // ALARM on the SAME subject). Same namespace, opposite posture — the alarm
+  // reports and changes nothing, this one is emitted only when the claim was
+  // actually replaced. Reading the two counters together is how you tell
+  // "enforcement is working" from "enforcement is not reached".
+  //
+  // Counterpart to V5WithheldExplanationAnswerProjected above: that event is
+  // the IN-FLOW explanation gate, which only runs on an explanation-handler
+  // dispatch. This one is the finaliser-level guard that every one of
+  // `runTurnExecutor`'s 39 exits passes through, so it is the only observable
+  // for a leader claim leaking on an exit the in-flow gate cannot see — the
+  // POST-#713 walk's 3/3 non-execute shape. Emitted ONLY on the REPLACE branch
+  // (the text actually asserted a leader on a withheld turn); a permitted turn
+  // and a clean withheld turn emit nothing at all, so a non-zero rate here is
+  // real suppressed leakage, not guard traffic.
+  //
+  // EVERY event from this guard is, BY ITS SCOPE, an exit the in-flow
+  // explanation gate could not have covered — the guard returns early on any
+  // turn that dispatched an execute-intent handler. So that fact needs no
+  // per-event tag; it is a property of the event's existence.
+  //
+  // ⚠ There is deliberately NO `in_flow_gate_eligible` and NO `handler_id`.
+  // Both were tried and both were STRUCTURAL CONSTANTS under this scope, which
+  // is worse than uninformative — a field that cannot vary reads on a dashboard
+  // as a measured population when it is a tautology. An earlier revision shipped
+  // `in_flow_gate_eligible` and adversarial review showed a mutant hardcoding it
+  // to `false` left the whole suite green. Do not re-add either without a test
+  // proving BOTH values occur.
+  //
+  // Privacy contract (R-004): bounded enums and finite integers only.
+  // The matched prose is the user's own decision content and never appears.
+  // Payload: { request_id, scenario_id, constraint_verdict_state,
+  // original_length, projected_length, dispatch_path }.
+  V5WithheldLeaderClaimNeutralisedAtFinalise:
+    "v5.egress.leading_option_claim_neutralised_at_finalise",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
   // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
   V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",

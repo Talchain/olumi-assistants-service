@@ -217,6 +217,85 @@ export interface MayNameLeadingOptionVerdict {
 }
 
 /**
+ * Does this provenance PROVE that a `run_analysis` analysis exists?
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS, AND WHY IT LIVES HERE RATHER THAN AT ITS CALLER.
+ *
+ * `may_name_leading_option === false` does **NOT** imply an analysis exists.
+ * Three of the six branches below withhold precisely BECAUSE they could not
+ * establish what exists — `fail_closed_truncated` returns `false` with **no
+ * fact selected at all**, and its own comment says so: *"a scenario that
+ * genuinely never ran an analysis but has >20 turns withholds while the store
+ * is degraded."*
+ *
+ * Copy that says "your most recent analysis" is therefore making an EXISTENCE
+ * claim the permission alone cannot warrant. `compose/withheld-explanation-answer.ts`
+ * shipped exactly that assumption ("a withheld verdict IMPLIES a run_analysis
+ * fact exists") and it was false. This predicate is the fix, and it lives beside
+ * the union it classifies so that ADDING a provenance value forces the author to
+ * classify it here — rather than in a caller that will not be re-read.
+ *
+ * ⚠ AN ALLOWLIST, NOT AN EXCLUSION LIST — and the direction is load-bearing.
+ * The obvious form (`p !== 'fail_closed_truncated' && p !== 'fail_closed_uninterpretable'`)
+ * was proposed and is WRONG ON TODAY'S UNION: it silently permits
+ * `fail_closed_no_turn_context`, whose own docstring says *"an analysis may very
+ * well exist … we simply could not see it."* An exclusion list fails OPEN on
+ * every value nobody remembered — the hand-maintained-mirror defect (CLAUDE.md
+ * trap #12) in its most expensive direction. This form fails CLOSED: an
+ * unclassified value returns `false`, costing a sentence, never a truth.
+ *
+ * ⚠ AND IT FAILS AT COMPILE TIME, not at runtime. The `never` assignment in the
+ * default arm means a seventh provenance value does not type-check until it is
+ * classified. The `return false` beneath it is the runtime safe direction for a
+ * value that reached here anyway (e.g. across a schema boundary).
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+/**
+ * The classification itself — a typed TOTAL map over the union, which is the
+ * house pattern for exactly this (`signals/coaching-signals.ts`: "Typed Record
+ * over the derived CoachingSignalId union … adding an id without a bank entry
+ * fails to compile").
+ *
+ * ⚠ THIS IS WHY IT IS A `Record` AND NOT A CONDITION: a SEVENTH provenance value
+ * does not type-check until it is classified here. A boolean expression over a
+ * few remembered names cannot do that, and the names nobody remembers are
+ * exactly the ones that break (see the exclusion-list note above).
+ */
+const PROVENANCE_PROVES_ANALYSIS_EXISTS: Record<MayNameLeadingOptionProvenance, boolean> = {
+  // A run_analysis fact WAS selected and its verdict was read. The union's own
+  // docstring puts it plainly: "The answer describes a real analysis."
+  scenario_fact: true,
+  // F1: the entitling fact permitted, but the analysis this turn can DISPLAY is a
+  // different, older `run_analysis` fact whose own verdict withheld.
+  // `projected.fact` IS that real analysis, so existence is proven by it.
+  fail_closed_projected_analysis: true,
+
+  // Provably NO analysis. (Unreachable behind a withheld permission — this branch
+  // is the honest `true` — but classified rather than assumed.)
+  no_analysis_exists: false,
+  // No fact selected; the scenario read did not succeed and the window is provably
+  // shorter than the scenario. Existence is UNPROVEN, which is the entire reason
+  // this branch withholds.
+  fail_closed_truncated: false,
+  // A fact WAS selected but is not a `run_analysis` result, so no ANALYSIS is
+  // established by it.
+  fail_closed_uninterpretable: false,
+  // We never reached the store. "An analysis may very well exist … we simply could
+  // not see it" — the definition of unproven.
+  fail_closed_no_turn_context: false,
+};
+
+export function provenanceProvesAnalysisExists(
+  provenance: MayNameLeadingOptionProvenance,
+): boolean {
+  // `?? false` is the RUNTIME safe direction for a value that arrives from
+  // outside the type system (a persisted or wire-carried string). The compile-time
+  // guarantee is the `Record` above; this is the belt.
+  return PROVENANCE_PROVES_ANALYSIS_EXISTS[provenance] ?? false;
+}
+
+/**
  * The SCENARIO-scoped inputs to the permission. All store-derived.
  *
  * ⚠ NOTHING HERE MAY EVER BECOME CLIENT-SUPPLIED. The *content* side already
