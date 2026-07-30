@@ -32,7 +32,11 @@
 import type { FastifyReply, FastifyRequest, HookHandlerDoneFunction } from 'fastify';
 
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
-import { runWithTurnFence, type TurnFenceHandle } from '../orchestrator-v5/session/turn-fence.js';
+import {
+  runWithTurnFence,
+  unclaimedTurnFenceHandle,
+  type TurnFenceHandle,
+} from '../orchestrator-v5/session/turn-fence.js';
 import { log } from '../utils/telemetry.js';
 
 /**
@@ -58,11 +62,11 @@ export function readIngressTurnIdentity(
  * Claim the fence for this turn, then continue the request INSIDE the fence
  * context.
  *
- * Never fails the request. A claim that cannot be made leaves the turn unfenced
- * and is logged at ERROR by the store; the protection that matters still
- * happens at the write, where an unclaimed graph write is refused (turn-fence.ts
- * arrival 11). Refusing the turn here instead would convert a fence outage into
- * a total outage — including for the many turns that write no graph at all.
+ * Never fails the request. A claim that cannot be made binds an UNCLAIMED handle
+ * and is logged at ERROR; the protection then happens at the write, where an
+ * unclaimed graph write is REFUSED (turn-fence.ts arrival 11). Refusing the turn
+ * here instead would convert a fence outage into a total outage — including for
+ * the many turns that write no graph at all.
  */
 export function turnFencePreHandler(
   request: FastifyRequest,
@@ -75,23 +79,30 @@ export function turnFencePreHandler(
     return;
   }
 
-  const claim = async (): Promise<TurnFenceHandle | null> => {
-    const store = getSessionStore();
-    // Optional on the SessionStore interface (mirrors `countTurns`), so a test
-    // double without it degrades to unfenced rather than throwing a TypeError
-    // into the request lifecycle.
-    if (typeof store.claimTurnFence !== 'function') return null;
-    return await store.claimTurnFence(identity.scenarioId, identity.turnId);
-  };
+  // ⚠ TWO DIFFERENT ABSENCES, AND CONFLATING THEM WAS THE #759 REVIEW'S SEVERE
+  //   FINDING. `null` here used to mean both "this store cannot claim" and "the
+  //   claim failed", and both bound NO handle — so a failed claim reached the
+  //   commit as `no_ingress_fence` and the write was ALLOWED. The fail-closed
+  //   branch could never fire, while four doc sites promised it would.
+  //
+  //   · store has no `claimTurnFence`  → the store is a DOUBLE. There is nothing
+  //     to fail closed about; bind no handle (the commit's `no_ingress_fence`
+  //     branch, unchanged). Production always implements it, pinned from the
+  //     class by `turn-fence-guards.test.ts`.
+  //   · claim returned nothing, or THREW → the turn DID come through the fenced
+  //     ingress and we could not order it. Bind an UNCLAIMED handle so the
+  //     graph write is refused at the commit.
+  const store = getSessionStore();
+  if (typeof store.claimTurnFence !== 'function') {
+    done();
+    return;
+  }
+  const claimer = store.claimTurnFence.bind(store);
 
-  claim()
-    .then((handle) => {
-      if (handle === null) {
-        done();
-        return;
-      }
+  claimer(identity.scenarioId, identity.turnId)
+    .then((handle: TurnFenceHandle | null) => {
       // `done()` is called INSIDE the context — see the header warning.
-      runWithTurnFence(handle, done);
+      runWithTurnFence(handle ?? unclaimedTurnFenceHandle(identity.scenarioId, identity.turnId), done);
     })
     .catch((err: unknown) => {
       log.error(
@@ -101,8 +112,8 @@ export function turnFencePreHandler(
           turn_id: identity.turnId,
           err: err instanceof Error ? err.message : String(err),
         },
-        'V5 turn fence — the ingress claim threw; this turn runs UNFENCED and any graph write it makes will be refused at the commit',
+        'V5 turn fence — the ingress claim THREW; this turn is UNCLAIMED and any graph write it makes will be REFUSED at the commit',
       );
-      done();
+      runWithTurnFence(unclaimedTurnFenceHandle(identity.scenarioId, identity.turnId), done);
     });
 }

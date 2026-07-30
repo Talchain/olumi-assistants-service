@@ -73,12 +73,51 @@ database BEFORE this code deploys. Non-graph turns keep working either way, and
 the failure is loud and immediate rather than a service silently running
 unfenced.
 
+> ⚠ **This section was false when written, and the #759 adversarial review is why
+> it is true now.** A missing migration presents as `PGRST202` on the ingress
+> *claim*. A failed claim used to bind **no** fence handle, so the commit took its
+> "this commit never came through the fenced ingress" branch — which **allows** the
+> write. A wrong deploy order therefore ran **silently unfenced**, the exact
+> opposite of the paragraph above, and the `unclaimed` verdict that was supposed to
+> catch it was unreachable because the only producer of a handle was a *successful*
+> claim. The proven consequence was not merely "no fence" but an active clobber
+> with no timing inversion needed: turn B's claim blips → B commits unfenced → turn
+> A (generation 1) reads `max_generation = 1` → verdict `current` → **A overwrites
+> B**. A failed claim now binds `generation: null` and graph writes refuse.
+
+## What a fence refusal looks like on the wire
+
+A refusal is a typed 409-class conflict, never a 500. `TurnFenceRejectedError` has
+its own branch in the executor's commit catch (ahead of the generic
+`STATE_COMMIT_FAILED` fallback) and maps to `GRAPH_WRITE_CONFLICT` →
+`GRAPH_DIVERGED` → HTTP 409, carrying:
+
+| field | value |
+|---|---|
+| `fence_verdict` | `stopped` · `superseded` · `unclaimed` · `unavailable` |
+| `recovery_action` | `start_new_draft` (stopped) · `refresh_and_reconfirm` (superseded) · `retry_later` (unclaimed/unavailable) |
+
+Until the #759 review nothing caught that error, so every refusal flattened to
+`INTERNAL_ERROR` → **HTTP 500**: "you stopped this turn" arriving as a server
+error, unactionable for the UI and permanent alert noise. Honest residual: 409 is
+a compromise for the two INFRASTRUCTURE verdicts (`unclaimed`, `unavailable`) —
+a 503-class code would be more accurate but needs a contract change, and they stay
+distinguishable via `fence_verdict`.
+
 ## Residuals (rowed, not hidden)
 
 * The evaluate→append window above. Closing it needs the check inside
   `append_turn_atomic` itself.
 * `v5_turn_fence` grows one row per turn and nothing prunes it; retention is a
-  separate decision.
+  separate decision. **Two ways a trim job would break the fence**, spelled out in
+  the migration next to the table: deleting an in-flight turn's row refuses that
+  turn's write (a lost draft), and deleting a scenario's NEWEST row lowers
+  `max_generation` so an older in-flight turn reads `current` and can clobber — the
+  second silently reintroduces the very defect the table prevents.
+* **No retry on a fence read.** One transient blip costs a whole draft. A retry
+  would widen the evaluate→append window the fence's honesty depends on, so it is
+  priced and rowed rather than built; if added it belongs inside the RPC.
+* A dedicated 503-class wire code for the infrastructure verdicts.
 * A commit reached by any route other than `POST /orchestrate/v2/turn` would be
   unfenced. No such route exists today (every `commitDirectAnswer` call site is
   downstream of that handler), and the store emits

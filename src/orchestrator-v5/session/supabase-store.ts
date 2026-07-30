@@ -57,6 +57,7 @@ import {
   evaluateTurnFence,
   markTurnStopped,
   TurnFenceRejectedError,
+  type TurnFenceEvaluation,
   type TurnFenceHandle,
   type TurnFenceVerdict,
   type TurnStopOutcome,
@@ -305,7 +306,7 @@ export class SupabaseSessionStore implements SessionStore {
           turn_id: turnId,
           err: result.error,
         },
-        'V5 turn fence — CLAIM FAILED; this turn runs UNFENCED and any graph write it makes will be refused at the commit',
+        'V5 turn fence — CLAIM FAILED; this turn is UNCLAIMED and any graph write it makes will be REFUSED at the commit (fail closed)',
       );
       return null;
     }
@@ -340,6 +341,13 @@ export class SupabaseSessionStore implements SessionStore {
    * be comfortable with — and `turn-fence-route-registration.test.ts` pins that
    * the ingress does bind the handle, so the claim rests on a test rather than
    * on this sentence.
+   *
+   * ⚠ A FAILED CLAIM IS NOT THAT GAP, AND TREATING IT AS ONE WAS THE #759
+   *   REVIEW'S SEVERE FINDING. A turn whose claim failed now arrives with a
+   *   handle whose `generation` is `null` and is REFUSED below. Before that fix
+   *   it arrived with no handle, fell through this gap, and was allowed — which
+   *   let a claim blip on turn B end with turn A CLOBBERING it, no timing
+   *   inversion required.
    */
   private async enforceTurnFence(write: SessionTurnWrite): Promise<void> {
     if (write.graph == null) return;
@@ -373,6 +381,42 @@ export class SupabaseSessionStore implements SessionStore {
       );
       this.emitFenceEvaluated(write, 'unfenced', null, null, 'scenario_mismatch');
       return;
+    }
+
+    // The ingress claim did not land, so this turn has NO position in the
+    // scenario's order. Refuse WITHOUT the RPC: there is nothing to ask — we
+    // already know we cannot prove the write is current, and asking would only
+    // add a round trip to a decision that is already made.
+    //
+    // ⚠ THIS IS THE BRANCH THE #759 REVIEW PROVED UNREACHABLE. It was written,
+    //   documented and tested-in-the-classifier, but no handle with a failed
+    //   claim ever reached it, because a failed claim bound no handle at all and
+    //   landed in `no_ingress_fence` above — which ALLOWS the write. See
+    //   `TurnFenceHandle.generation`.
+    if (handle.generation === null) {
+      const evaluation: TurnFenceEvaluation = {
+        verdict: 'unclaimed',
+        generation: null,
+        maxGeneration: null,
+      };
+      this.emitFenceEvaluated(write, 'unclaimed', null, null, 'claim_did_not_land');
+      log.warn(
+        {
+          event: 'v5.turn_fence.graph_write_refused',
+          scenario_id: write.scenario_id,
+          turn_id: handle.turnId,
+          turn_class: write.turn_class,
+          verdict: 'unclaimed',
+          reason: 'claim_did_not_land',
+        },
+        'V5 turn fence — REFUSING this graph write: the ingress claim did not land, so this turn has no position in the scenario order and cannot be proven current. Nothing was written.',
+      );
+      throw new TurnFenceRejectedError(
+        `V5 turn fence refused a graph write for scenario ${write.scenario_id} ` +
+          `turn ${handle.turnId} — the ingress claim did not land (fence unavailable). ` +
+          'Fail closed: an unorderable write is not stored.',
+        evaluation,
+      );
     }
 
     const evaluation = await evaluateTurnFence(this.client, handle);

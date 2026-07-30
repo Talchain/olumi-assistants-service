@@ -71,6 +71,19 @@
  *     current, and the whole point is not to clobber. This mirrors
  *     `commit.ts`'s terminal-invariant refusal, NOT the CAS observe hook's
  *     never-fail-a-write posture: that hook is observation, this is integrity.
+ *     Covers BOTH halves of "unavailable": the pre-commit EVALUATE failing, and
+ *     the ingress CLAIM failing (`generation: null` → verdict `unclaimed`). The
+ *     second half did not work until the #759 review proved it could not — see
+ *     `TurnFenceHandle.generation`.
+ * 12. A COMMIT THAT NEVER PASSED THROUGH THE FENCED INGRESS → no handle at all,
+ *     and it PROCEEDS (logged at ERROR + emitted as `no_ingress_fence`). This is
+ *     deliberately NOT the same state as a failed claim: no handle means the
+ *     commit reached the store by some route other than
+ *     `POST /orchestrate/v2/turn` (a test double, or a future route), so there is
+ *     nothing to fail closed ABOUT; a failed claim means the turn DID come
+ *     through the ingress and we know we could not order it. Different
+ *     epistemic states, different answers. No such route exists today
+ *     (`turn-fence-route-registration.test.ts` pins the ingress).
  *
  * ── HOW THE TURN IDENTITY REACHES THE COMMIT ────────────────────────────────
  * Via AsyncLocalStorage, and that is a derivation, not a preference. The commit
@@ -111,7 +124,40 @@ export const TURN_FENCE_RPC = {
 export interface TurnFenceHandle {
   readonly scenarioId: string;
   readonly turnId: string;
-  readonly generation: number;
+  /**
+   * This turn's position in the scenario's start order — or `null` when the
+   * ingress claim DID NOT LAND (RPC error, throw, or a store that returned
+   * nothing).
+   *
+   * ⚠ `null` IS THE FAIL-CLOSED SIGNAL, AND IT EXISTS BECAUSE THE FIRST VERSION
+   *   OF THIS MODULE COULD NOT FAIL CLOSED AT ALL. Adversarial review of PR #759
+   *   proved it: the preHandler called `done()` with NO handle when the claim
+   *   failed, so the commit chokepoint hit its `no_ingress_fence` branch and
+   *   ALLOWED the write. The `unclaimed` verdict existed in the classifier, in
+   *   the enforcement and in the DB function, and was UNREACHABLE — the only
+   *   producer of a handle was a SUCCESSFUL claim. Four doc sites and the
+   *   migration header promised the opposite ("a claim failure costs the user a
+   *   failed graph write, never a silently unfenced one"), which made it worse
+   *   than a bug: a guarantee the code contradicted.
+   *
+   *   The proven blast radius was not "no fence" but an ACTIVE CLOBBER with no
+   *   timing inversion needed: B's claim blips → B commits unfenced → A (gen 1)
+   *   reads `max_generation = 1` → verdict `current` → A overwrites B. With a
+   *   healthy claim A is correctly refused as `superseded`.
+   */
+  readonly generation: number | null;
+}
+
+/**
+ * The handle bound when the ingress claim did not land. Separate constructor so
+ * every producer of an unclaimed handle is greppable, and so the shape cannot
+ * drift between the preHandler and the tests that pin it.
+ */
+export function unclaimedTurnFenceHandle(
+  scenarioId: string,
+  turnId: string,
+): TurnFenceHandle {
+  return { scenarioId, turnId, generation: null };
 }
 
 /**
@@ -199,12 +245,13 @@ function errMessage(e: unknown): string {
 /**
  * Claim this turn's place in the scenario's start order.
  *
- * Returns `null` when the claim could not be made — the caller proceeds
- * UNFENCED and says so in its log. That is deliberate and narrow: refusing the
- * turn outright would convert a fence outage into a total outage, and the
- * refusal that actually protects the data still happens at the commit (arrival
- * 11 — an unclaimed graph write is refused there). A claim failure therefore
- * costs the user a failed graph write, never a silently unfenced one.
+ * Returns `null` when the claim could not be made. The caller does NOT then
+ * proceed unfenced: it binds an `unclaimedTurnFenceHandle`, so the turn runs to
+ * completion and its GRAPH WRITE is refused at the commit (arrival 11). The turn
+ * itself is not failed at ingress, because refusing there would convert a fence
+ * outage into a total outage — including for the many turns that write no graph
+ * at all. So a claim failure costs the user a failed graph write, and (since the
+ * #759 review) that sentence is enforced rather than merely written down.
  */
 export async function claimTurnFence(
   client: Pick<SupabaseClient, 'rpc'>,
@@ -310,6 +357,19 @@ export function classifyTurnFence(payload: unknown): TurnFenceEvaluation {
   }
   return { verdict: 'current', generation, maxGeneration };
 }
+
+/**
+ * ⚠ NO RETRY ON A FENCE READ, AND THAT IS A PRICED TRADE (raised by the #759
+ *   review as a non-blocking note). One transient blip on the claim or the
+ *   evaluate costs the user a whole draft — the graph write is refused and ~50 s
+ *   of work is discarded. A retry would recover most of those, but a retry around
+ *   an integrity check is its own hazard: it widens the evaluate→append window
+ *   the fence's honesty depends on (arrival 10), and a retry that succeeds on the
+ *   second attempt has read the fence at a LATER moment than the caller believes.
+ *   So: no retry now, deliberately, priced at one lost draft per blip, and rowed
+ *   rather than built. If it is ever added, it belongs INSIDE the RPC, not around
+ *   it.
+ */
 
 /** Record an explicit user Stop. Throws only if the RPC itself fails. */
 export async function markTurnStopped(

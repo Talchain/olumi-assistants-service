@@ -4630,6 +4630,11 @@ function extractGraphConflictRecovery(
   const out: Record<string, unknown> = {};
   if (typeof d.recovery_action === 'string') out.recovery_action = d.recovery_action;
   if (typeof d.conflict_category === 'string') out.conflict_category = d.conflict_category;
+  // V5 turn fence (A2, #759 review) — the machine-readable verdict rides the same
+  // 409 envelope so the UI can tell "you stopped this" from "a later turn owns
+  // the scenario" from "the fence was unreadable". Without it the three collapse
+  // into one opaque conflict.
+  if (typeof d.fence_verdict === 'string') out.fence_verdict = d.fence_verdict;
   if ('expected_base_graph_hash' in d) {
     out.expected_base_graph_hash = d.expected_base_graph_hash;
   }

@@ -37,8 +37,9 @@ const claimTurnFence = vi.fn(async (scenarioId: string, turnId: string) => ({
   generation: 42,
 }));
 
+let storeHasClaim = true;
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
-  getSessionStore: () => ({ claimTurnFence }),
+  getSessionStore: () => (storeHasClaim ? { claimTurnFence } : {}),
 }));
 
 let app: FastifyInstance;
@@ -106,26 +107,62 @@ describe('the fence preHandler binds a handle the handler can still read', () =>
     expect((res.json() as { after: unknown }).after).toBeNull();
   });
 
-  it('a claim that resolves null or throws leaves the turn unfenced WITHOUT failing it', async () => {
+  it('a claim that resolves null binds an UNCLAIMED handle, not NO handle (#759 A1)', async () => {
+    // THE severe finding. This test previously asserted `after` was NULL — i.e.
+    // it PINNED the defect: no handle meant the commit chokepoint's
+    // `no_ingress_fence` branch, which ALLOWS the write, so the fail-closed
+    // branch could never fire while four doc sites promised it would.
     claimTurnFence.mockResolvedValueOnce(null as never);
-    const nullRes = await app.inject({
+    const res = await app.inject({
       method: 'POST',
       url: '/fenced',
       payload: { scenario_id: SCENARIO, turn_id: TURN },
     });
-    expect(nullRes.statusCode).toBe(200);
-    expect((nullRes.json() as { after: unknown }).after).toBeNull();
+    // Still a 200: a fence outage must not become a turn outage.
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      after: { scenarioId: string; turnId: string; generation: number | null } | null;
+    };
+    // But the handle IS bound, and its null generation is what makes the commit
+    // refuse a graph write.
+    expect(body.after).toEqual({ scenarioId: SCENARIO, turnId: TURN, generation: null });
+  });
 
+  it('a claim that THROWS binds an unclaimed handle too', async () => {
     claimTurnFence.mockRejectedValueOnce(new Error('supabase down'));
-    const throwRes = await app.inject({
+    const res = await app.inject({
       method: 'POST',
       url: '/fenced',
       payload: { scenario_id: SCENARIO, turn_id: TURN },
     });
-    // A fence outage must not become a turn outage — the graph write is
-    // refused later, at the commit, which is where the data is.
-    expect(throwRes.statusCode).toBe(200);
-    expect((throwRes.json() as { after: unknown }).after).toBeNull();
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { after: { generation: number | null } | null };
+    expect(body.after?.generation).toBeNull();
+  });
+
+  it('a store that CANNOT claim binds no handle at all — a different absence', async () => {
+    // Deliberately NOT the same as a failed claim. No `claimTurnFence` means the
+    // store is a double, so the commit never came through a fence we own and
+    // there is nothing to fail closed about. Conflating the two was the bug.
+    const bare = Fastify();
+    bare.post('/fenced', { preHandler: turnFencePreHandler }, async () => ({
+      after: currentTurnFence() ?? null,
+    }));
+    await bare.ready();
+    storeHasClaim = false;
+    try {
+      const res = await bare.inject({
+        method: 'POST',
+        url: '/fenced',
+        payload: { scenario_id: SCENARIO, turn_id: TURN },
+      });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as { after: unknown }).after).toBeNull();
+      expect(claimTurnFence).not.toHaveBeenCalled();
+    } finally {
+      storeHasClaim = true;
+      await bare.close();
+    }
   });
 });
 

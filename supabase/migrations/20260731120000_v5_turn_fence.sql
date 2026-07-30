@@ -15,6 +15,16 @@
 --     Non-graph turns (answers, analysis, receipts) are never fenced and
 --     keep working either way.
 --
+--     ⚠️⚠️  THAT PROMISE WAS FALSE WHEN FIRST WRITTEN, AND THE FIX IS WHAT
+--     MAKES IT TRUE. The #759 adversarial review proved that a missing
+--     migration presented as PGRST202 on the ingress CLAIM, which bound no
+--     fence handle, so the commit took its "never came through the fenced
+--     ingress" branch and ALLOWED the write. A wrong deploy order therefore
+--     ran SILENTLY UNFENCED — the exact opposite of this paragraph. A failed
+--     claim now binds an unclaimed handle and graph writes refuse. Anyone
+--     re-reading this header for reassurance should note that it needed a
+--     reviewer to make it honest.
+--
 -- Target: Staging Supabase
 -- Date authored: 2026-07-31
 -- Date executed: (pending)
@@ -82,7 +92,18 @@ CREATE INDEX IF NOT EXISTS v5_turn_fence_scenario_generation_idx
   ON public.v5_turn_fence (scenario_id, generation DESC);
 
 COMMENT ON TABLE public.v5_turn_fence IS
-  'V5 turn fence (Codex P0, 2026-07-31): one row per turn START. Holds the per-scenario start order (generation) and the explicit-Stop tombstone (stopped_at). Read immediately before every graph-bearing commit by v5_evaluate_turn_fence. Rows are never deleted by the application; retention is a separate, rowed decision.';
+  'V5 turn fence (Codex P0, 2026-07-31): one row per turn START. Holds the per-scenario start order (generation) and the explicit-Stop tombstone (stopped_at). Read immediately before every graph-bearing commit by v5_evaluate_turn_fence. Rows are never deleted by the application; retention is a separate, rowed decision. RETENTION HAZARD: any future trim MUST NOT delete a row for an IN-FLIGHT turn, and must not delete the NEWEST row of a scenario — a turn whose row is gone evaluates as unclaimed and its graph write is refused, and trimming the newest row lowers max_generation so an older in-flight turn reads as current and can clobber. Trim by created_at with a margin well above the turn budget, and never trim rows whose turn has no v5_conversation_turns row yet.';
+
+-- ⚠️  RETENTION, SPELLED OUT NEXT TO THE TABLE IT ENDANGERS (raised as a
+--     non-blocking note by the #759 review). The two ways a well-meaning
+--     cleanup job breaks the fence:
+--       1. deleting an IN-FLIGHT turn's row  → that turn evaluates `unclaimed`
+--          and its graph write is refused (a lost draft, fail-closed but real);
+--       2. deleting a scenario's NEWEST row  → max_generation drops, so an
+--          older in-flight turn reads `current` and can CLOBBER a newer graph.
+--     (2) is the dangerous one: it silently reintroduces the defect this table
+--     exists to prevent. No trim job exists today, and this comment is here so
+--     the first one written cannot claim it was not warned.
 
 -- ────────────────────────────────────────────────────────────────────
 -- CLAIM — called once per turn, at ingress (/orchestrate/v2/turn).

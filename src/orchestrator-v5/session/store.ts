@@ -204,10 +204,16 @@ export interface SessionStore {
    * immediately before any graph-bearing commit. See `turn-fence.ts` for the
    * defect this closes and the full arrival enumeration.
    *
-   * Resolves to `null` when the claim could not be made — the turn then runs
-   * UNFENCED and its graph write is refused at the commit (fail closed there,
-   * not here: refusing at ingress would turn a fence outage into a total
-   * outage, including for turns that write no graph at all).
+   * Resolves to `null` when the claim could not be made. The ingress then binds
+   * an UNCLAIMED handle (`generation: null`) and the turn's graph write is
+   * REFUSED at the commit — fail closed there, not here, because refusing at
+   * ingress would turn a fence outage into a total outage including for turns
+   * that write no graph at all.
+   *
+   * ⚠ Until the #759 adversarial review this doc said the turn "runs UNFENCED
+   *   and its graph write is refused", which is a contradiction, and the code
+   *   implemented the first half: a failed claim bound no handle, the commit hit
+   *   `no_ingress_fence`, and the write was ALLOWED.
    *
    * Optional on the interface for the same reason as {@link countTurns} —
    * existing test mocks are not forced to implement it. Production

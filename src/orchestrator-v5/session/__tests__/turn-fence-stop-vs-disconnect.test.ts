@@ -34,6 +34,7 @@ import { StateCommitFailedError, type SessionTurnWrite } from '../store.js';
 import {
   runWithTurnFence,
   TurnFenceRejectedError,
+  unclaimedTurnFenceHandle,
   type TurnFenceHandle,
 } from '../turn-fence.js';
 import { setTestSink } from '../../../utils/telemetry.js';
@@ -299,6 +300,83 @@ describe('V5 turn fence — INCIDENTAL DISCONNECT KEEPS finish-atomically', () =
     // assertion: a stop for another turn never tombstones this one.
     expect((refusal as TurnFenceRejectedError).verdict).toBe('superseded');
     expect(backend.rows.find((r) => r.turnId === TURN_A)?.stoppedAt).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+describe('V5 turn fence — A FAILED CLAIM FAILS CLOSED (#759 review, finding A1)', () => {
+  it('reproduces the CLOBBER the unreachable branch allowed, and refuses it', async () => {
+    // The review's proof, as a permanent pin. Before the fix a failed claim bound
+    // NO handle, so the commit hit `no_ingress_fence` and was ALLOWED — and the
+    // consequence was not merely "unfenced" but an active clobber needing no
+    // timing inversion:
+    //
+    //   B's claim blips  → B commits UNFENCED (graph = B)
+    //   A (generation 1) → max_generation is 1, because B never claimed
+    //                    → verdict `current` → A OVERWRITES B
+    //
+    // With a healthy claim A is refused as `superseded` (the control below).
+    const backend = makeFenceBackedClient();
+    const store = makeStore(backend.client);
+
+    // A claims normally. B's claim fails, exactly as a missing migration
+    // (PGRST202) or a DB blip would present.
+    const handleA = await store.claimTurnFence(SCENARIO, TURN_A);
+    expect(handleA?.generation).toBe(1);
+    const handleB = unclaimedTurnFenceHandle(SCENARIO, TURN_B);
+
+    // B tries to commit its graph.
+    const bRefusal = await runWithTurnFence(handleB, async () =>
+      await store.append(write(TURN_B, GRAPH_B)).then(
+        () => null,
+        (e: unknown) => e,
+      ),
+    );
+    expect(bRefusal).toBeInstanceOf(TurnFenceRejectedError);
+    expect((bRefusal as TurnFenceRejectedError).verdict).toBe('unclaimed');
+    // Nothing landed, so there is no B graph for A to clobber.
+    expect(backend.storedGraph()).toBeNull();
+
+    // No RPC was asked: an unorderable write needs no round trip to be refused.
+    expect(backend.calls.filter((c) => c.fn === 'v5_evaluate_turn_fence')).toHaveLength(0);
+    expect(backend.calls.filter((c) => c.fn.startsWith('append_turn_atomic'))).toHaveLength(0);
+  });
+
+  it('CONTROL — with a healthy claim for B, A is refused as superseded (not unclaimed)', async () => {
+    // The control the review used, kept so the test above cannot pass by the
+    // fence refusing everything (trap 13). Same two turns, same order; the ONLY
+    // difference is that B's claim lands.
+    const backend = makeFenceBackedClient();
+    const store = makeStore(backend.client);
+    const handleA = await store.claimTurnFence(SCENARIO, TURN_A);
+    const handleB = await store.claimTurnFence(SCENARIO, TURN_B);
+
+    await runWithTurnFence(handleB as TurnFenceHandle, async () => {
+      await store.append(write(TURN_B, GRAPH_B));
+    });
+    expect(backend.storedGraph()).toEqual(GRAPH_B);
+
+    const aRefusal = await runWithTurnFence(handleA as TurnFenceHandle, async () =>
+      await store.append(write(TURN_A, GRAPH_A)).then(
+        () => null,
+        (e: unknown) => e,
+      ),
+    );
+    expect((aRefusal as TurnFenceRejectedError).verdict).toBe('superseded');
+    expect(backend.storedGraph()).toEqual(GRAPH_B);
+  });
+
+  it('a NON-GRAPH write from an unclaimed turn still commits', async () => {
+    // Fail-closed is scoped to graph writes here too. A fence outage must not
+    // stop answers, analysis receipts or graph-free system events.
+    const backend = makeFenceBackedClient();
+    const store = makeStore(backend.client);
+    const result = await runWithTurnFence(
+      unclaimedTurnFenceHandle(SCENARIO, TURN_A),
+      async () => await store.append(write(TURN_A)),
+    );
+    expect(result.id).toBe(`row-${TURN_A}`);
   });
 });
 
