@@ -437,6 +437,9 @@ export async function tryClarifyV2Turn(
         decision.questions,
         decision.phase,
         decision.postStop,
+        // 30 Jul live-probe fix: the ack derives from the fold-vs-replace
+        // branch — the replace arm must never claim a fold.
+        decision.incorporation,
       );
       const finalResponse = await commitClarifyTurn(
         response,
