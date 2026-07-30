@@ -316,7 +316,7 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
       ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
       // ROADMAP 2.159 — the STORED model value / raw_value, un-inverted, so the
-      // predicate can derive whether this factor's scale is the unit interval.
+      // predicate can tell a scale REDECLARATION from a first-time declaration.
       // Distinct from `factorExistingRaw` (the de-normalised delta LHS).
       ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
       ...(before.raw_value !== undefined
@@ -347,9 +347,9 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
-      // ROADMAP 2.159 — same two fields as `preEvaluation` above. The
-      // normalised-range guard is a VALUE-level guard, so it must also bound
-      // the POST-operator computed value (an `increase` that overshoots 1).
+      // ROADMAP 2.159 — same two fields as `preEvaluation` above, so the
+      // execute-time re-check enforces the same redeclaration gates rather
+      // than a weaker rule set (the AC.1 parity invariant).
       ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
       ...(before.raw_value !== undefined
         ? { factorObservedRawValue: before.raw_value }

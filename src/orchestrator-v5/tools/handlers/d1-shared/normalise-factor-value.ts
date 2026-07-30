@@ -46,9 +46,10 @@ export interface NormaliseInput {
   readonly factorUnit?: string;
   /**
    * ROADMAP 2.159 — the factor's stored `observed_state.value` /
-   * `observed_state.raw_value`, threaded so the shared predicate can derive
-   * whether this factor's model scale is the unit interval and bound the
-   * POST-operator value accordingly. Absent ⇒ `unbounded` ⇒ today's behaviour.
+   * `observed_state.raw_value`, threaded so the shared predicate can tell a
+   * scale REDECLARATION (a proposal-supplied unit/cap on a factor that already
+   * has a recorded state) from a first-time declaration. Absent ⇒ both gates
+   * inert ⇒ today's behaviour.
    */
   readonly factorObservedValue?: number;
   readonly factorObservedRawValue?: number;

@@ -1,41 +1,32 @@
 /**
- * ROADMAP 2.159 — normalised factor bounds, END-TO-END on the route.
+ * ROADMAP 2.159 (re-scoped) — SILENT SCALE REDECLARATION, END-TO-END.
  *
- * THE DEFECT (Codex P1, live-proven 31 Jul): editing a NORMALISED `[0,1]`
- * factor to `1.5` was ACCEPTED and PERSISTED end-to-end. CEE's range guard
- * runs only when a `cap` exists (`evaluate-factor-value-proposal.ts` §6), and
- * `normaliseFactorValue` writes `value = raw_value = 1.5` verbatim when the
- * cap is absent — so "uncapped" was silently conflated with "unbounded" for
- * factors whose declared model scale IS the unit interval (binary/one-hot
- * indicators, ordinal 0-1 encodings, inferred `0.5` baselines, qualitative
- * Low/Medium/High = 0.2/0.5/0.8 — see `prompts/defaults-v187.ts`
- * EXTRACTION_RULES + SCALE_DISCIPLINE). The persisted `1.5` then feeds every
- * downstream delta as if it were a proportion.
+ * THE DEFECT THIS CLOSES (measured at the bytes, 31 Jul, against PR #766's own
+ * head): the handler persists `after.unit = parsed.unit ?? before.unit`, so a
+ * proposal carrying a unit permanently changes what a previously-unitless
+ * factor MEASURES — in an ordinary 200, with no consent step. The measured
+ * consequence is a two-turn launder:
  *
- * These tests replay that exact event against the route:
- *   - `1.5` on `{ value: 0.65 }`  → REFUSED, no write, honest copy that states
- *                                   the bound AND the received value.
- *   - `-0.2` on the same factor   → REFUSED (the bound is two-sided).
- *   - `0.65` on the same factor   → STILL LANDS (the control; the fix must not
- *                                   break the in-range edit).
- *   - the capped `£` factor       → untouched by this change.
+ *   turn 1  { value: 0.9, unit: '%' }  → accepted; `unit: '%'` PERSISTED
+ *   turn 2  { value: 1.5 }             → the factor now reads as unit-bearing
  *
- * Reuses `route-v2-factor-value-edit.test.ts`'s harness shape deliberately:
- * this is the same wire event, the same store mock, the same route.
+ * ⚠ WHAT THIS FILE DOES NOT CLAIM. It does not bound a normalised `[0,1]`
+ * factor. PR #766's first attempt did, by classifying a factor as normalised
+ * when its stored value happened to sit in `[0,1]`; adversarial review refuted
+ * that heuristic at the bytes in both directions — a small COUNT factor at 0 or
+ * 1 (a class `prompts/defaults-v187.ts:301` explicitly sanctions as raw) was
+ * refused a legitimate 1→3 edit with factually FALSE copy, and any count that
+ * passed through `[0,1]` became permanently un-raisable. Bounding a normalised
+ * factor needs a DECLARED scale on the contract — rowed as 2.193. The
+ * `ACCEPTS 1.5` test below pins the fail-open so nobody reads this file as
+ * having closed it.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
-// ── the persisted model ────────────────────────────────────────────────────
-// `f-adoption` is the NORMALISED factor: no cap, no unit, model value 0.65.
-// That is exactly the state the estate's own integrity pass calls a
-// "qualitative 0-1 factor" (`cee/transforms/graph-data-integrity.ts`
-// `shouldSkipScaleCheck`) and clamps interventions against ("factor values
-// are normalised", same file).
-//
-// `f-budget` is the CAPPED control — £, cap 100000 — whose existing guards
-// this change must leave byte-identical.
+// `f-adoption` — no cap, no unit. `f-hires` — the small-count class, the one
+// the refuted heuristic broke. `f-budget` — the capped control, untouched.
 function buildPersistedGraph() {
   return {
     goal_node_id: 'g-revenue',
@@ -46,6 +37,12 @@ function buildPersistedGraph() {
         kind: 'factor',
         label: 'Adoption rate',
         observed_state: { value: 0.65 },
+      },
+      {
+        id: 'f-hires',
+        kind: 'factor',
+        label: 'New hires',
+        observed_state: { value: 1, raw_value: 1 },
       },
       {
         id: 'f-budget',
@@ -137,11 +134,9 @@ function payloadFor(event: Record<string, unknown>, suffix: string) {
   };
 }
 
-/** The graph the commit actually handed the store, or undefined if none. */
 function committedGraph(): Record<string, unknown> | undefined {
   const call = appendMock.mock.calls.at(-1);
-  const arg = call?.[0] as { graph?: Record<string, unknown> } | undefined;
-  return arg?.graph;
+  return (call?.[0] as { graph?: Record<string, unknown> } | undefined)?.graph;
 }
 
 function observedStateOf(
@@ -152,7 +147,7 @@ function observedStateOf(
   return nodes.find((n) => n.id === id)?.observed_state;
 }
 
-describe('POST /orchestrate/v2/turn — normalised factor bounds (ROADMAP 2.159)', () => {
+describe('POST /orchestrate/v2/turn — scale redeclaration (ROADMAP 2.159)', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -171,15 +166,14 @@ describe('POST /orchestrate/v2/turn — normalised factor bounds (ROADMAP 2.159)
     persisted = buildPersistedGraph();
   });
 
-  // ── THE LIVE EVENT ───────────────────────────────────────────────────────
+  // ── THE LAUNDERING SEQUENCE ──────────────────────────────────────────────
 
-  it('REFUSES 1.5 on a normalised [0,1] factor — no write, no clamp, no 500', async () => {
+  it('REFUSES turn 1 of the launder — a unit onto a previously-unitless factor', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: payloadFor(
-        // The exact live event: a normalised factor edited to 1.5.
-        { kind: 'factor_value_edit', target_id: 'f-adoption', value: 1.5 },
+        { kind: 'factor_value_edit', target_id: 'f-adoption', value: 0.9, unit: '%' },
         '0',
       ),
     });
@@ -187,46 +181,53 @@ describe('POST /orchestrate/v2/turn — normalised factor bounds (ROADMAP 2.159)
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
 
-    // The turn is still committed (the transcript records the refusal) but NO
-    // graph is written — this is the assertion that was false before the fix.
+    // The turn is committed (the transcript records the refusal) but NO graph
+    // is written — this is the assertion that was false before the fix.
     expect(appendMock).toHaveBeenCalledTimes(1);
     expect(committedGraph()).toBeUndefined();
 
-    // NOT SILENTLY CLAMPED, and the copy is honest.
     expect(body.assistant_text).toMatch(/haven't changed anything/i);
     expect(body.blocks).toEqual([]);
-    // Prediction-free copy: state the BOUND and the RECEIVED VALUE, nothing
-    // about what the analysis would have done.
-    expect(body.assistant_text).toContain('1.5');
-    expect(body.assistant_text).toMatch(/0 to 1/);
+    expect(body.assistant_text).toContain('recorded without a unit');
+    // Prediction-free AND free of computed arithmetic (an earlier draft
+    // rendered "the value given was 1.2999999999999998").
+    expect(body.assistant_text).not.toMatch(/\d{6}/);
   });
+
+  it('THE FULL TWO-TURN LAUNDER cannot complete — the unit never lands, so turn 2 has nothing to exploit', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        { kind: 'factor_value_edit', target_id: 'f-adoption', value: 0.9, unit: '%' },
+        '1',
+      ),
+    });
+    // Nothing was written, so the persisted graph is unchanged: still unitless.
+    expect(committedGraph()).toBeUndefined();
+    expect(observedStateOf(persisted as Record<string, unknown>, 'f-adoption')?.unit).toBeUndefined();
+  });
+
+  // ── THE REFUSAL SHAPE, pinned for the UI half ────────────────────────────
 
   it('THE REFUSAL SHAPE ON THE WIRE — pinned for the UI half', async () => {
     // ⚠ THIS TEST EXISTS FOR ANOTHER REPO. The UI's #524 reject-revert keys off
-    // a CEE refusal, and the UI-feedback half of ROADMAP 2.159 builds min/max
-    // hints against exactly this payload. Pin it here so a CEE-side change to
-    // the refusal shape shows up as a RED in CEE rather than as a silent
-    // regression in the UI.
-    //
-    // ⚠ AND NOTE WHAT IS ABSENT: there is NO structured bound on the wire — no
-    // min, no max, no rejection code. The bound exists only inside the prose.
-    // Carrying it structurally needs a declared contract field (see the CEE-half
-    // section of PHASE0-EVIDENCE-2026-07-28/fix-factor-bounds.md).
+    // a CEE refusal. Pin the payload here so a CEE-side change shows up as a
+    // RED in CEE rather than as a silent regression in the UI.
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
       payload: payloadFor(
-        { kind: 'factor_value_edit', target_id: 'f-adoption', value: 1.5 },
-        '8',
+        { kind: 'factor_value_edit', target_id: 'f-adoption', value: 0.9, unit: '%' },
+        '2',
       ),
     });
-    const body = JSON.parse(res.body);
 
-    expect(body).toEqual({
+    expect(JSON.parse(res.body)).toEqual({
       response_version: 2,
       assistant_text:
-        "This factor is on a 0 to 1 scale, and the value given was 1.5. " +
-        "I haven't changed anything. Tell me what you'd like instead and I'll apply it.",
+        'This factor is recorded without a unit, so applying a value in % would change ' +
+        "what it measures. I haven't changed anything. Tell me what you'd like instead and I'll apply it.",
       blocks: [],
       suggested_actions: [
         {
@@ -240,60 +241,45 @@ describe('POST /orchestrate/v2/turn — normalised factor bounds (ROADMAP 2.159)
     });
   });
 
-  it('REFUSES a negative value on a normalised [0,1] factor — the bound is two-sided', async () => {
+  // ── THE FAIL-OPEN, pinned honestly ───────────────────────────────────────
+
+  it('⚠ ACCEPTS 1.5 on the uncapped unitless factor — NOT closed here; that is 2.193', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: payloadFor(
-        { kind: 'factor_value_edit', target_id: 'f-adoption', value: -0.2 },
-        '1',
-      ),
+      payload: payloadFor({ kind: 'factor_value_edit', target_id: 'f-adoption', value: 1.5 }, '3'),
     });
-
     expect(res.statusCode).toBe(200);
-    expect(committedGraph()).toBeUndefined();
-    expect(JSON.parse(res.body).assistant_text).toMatch(/haven't changed anything/i);
+    expect(observedStateOf(committedGraph(), 'f-adoption')?.value).toBe(1.5);
   });
 
-  // ── THE CONTROL ──────────────────────────────────────────────────────────
-
-  it('STILL LANDS an in-range 0.65 edit on the same normalised factor', async () => {
+  it('ACCEPTS the legitimate small-COUNT edit 1 -> 3 that the refuted heuristic broke', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: payloadFor(
-        { kind: 'factor_value_edit', target_id: 'f-adoption', value: 0.8 },
-        '2',
-      ),
+      payload: payloadFor({ kind: 'factor_value_edit', target_id: 'f-hires', value: 3 }, '4'),
     });
-
     expect(res.statusCode).toBe(200);
-    const graph = committedGraph();
-    expect(graph).toBeDefined();
-    const obs = observedStateOf(graph, 'f-adoption');
-    expect(obs?.value).toBeCloseTo(0.8, 10);
-    // Uncapped stores raw and model identically (normalise-factor-value.ts).
-    expect(obs?.raw_value).toBeCloseTo(0.8, 10);
-    // No cap is invented by the guard — the bound is derived, never persisted.
-    expect(obs?.cap).toBeUndefined();
+    expect(observedStateOf(committedGraph(), 'f-hires')?.value).toBe(3);
   });
 
-  it('accepts the boundary values 0 and 1 exactly', async () => {
-    // Turn ids are UUIDs — the base is 35 chars, so each suffix is ONE char.
-    for (const [value, suffix] of [[0, '6'], [1, '7']] as const) {
-      appendMock.mockClear();
-      persisted = buildPersistedGraph();
-      const res = await app.inject({
-        method: 'POST',
-        url: '/orchestrate/v2/turn',
-        payload: payloadFor(
-          { kind: 'factor_value_edit', target_id: 'f-adoption', value },
-          suffix,
-        ),
-      });
-      expect(res.statusCode).toBe(200);
-      expect(observedStateOf(committedGraph(), 'f-adoption')?.value).toBeCloseTo(value, 10);
-    }
+  it('ACCEPTS a count edit in BOTH directions — no one-way trapdoor', async () => {
+    // 3 -> 1 then 1 -> 4. Under the refuted heuristic the second was refused
+    // forever, because passing through [0,1] reclassified the factor.
+    persisted = buildPersistedGraph();
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor({ kind: 'factor_value_edit', target_id: 'f-hires', value: 1 }, '5'),
+    });
+    persisted = committedGraph();
+    appendMock.mockClear();
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor({ kind: 'factor_value_edit', target_id: 'f-hires', value: 4 }, '6'),
+    });
+    expect(observedStateOf(committedGraph(), 'f-hires')?.value).toBe(4);
   });
 
   // ── NON-REGRESSION: the capped lane is untouched ─────────────────────────
@@ -304,7 +290,7 @@ describe('POST /orchestrate/v2/turn — normalised factor bounds (ROADMAP 2.159)
       url: '/orchestrate/v2/turn',
       payload: payloadFor(
         { kind: 'factor_value_edit', target_id: 'f-budget', value: 0.5, raw_value: 50000, unit: '£' },
-        '4',
+        '7',
       ),
     });
     expect(res.statusCode).toBe(200);
@@ -320,7 +306,7 @@ describe('POST /orchestrate/v2/turn — normalised factor bounds (ROADMAP 2.159)
       url: '/orchestrate/v2/turn',
       payload: payloadFor(
         { kind: 'factor_value_edit', target_id: 'f-budget', value: 2.5, raw_value: 250000, unit: '£' },
-        '5',
+        '8',
       ),
     });
     expect(res.statusCode).toBe(200);
