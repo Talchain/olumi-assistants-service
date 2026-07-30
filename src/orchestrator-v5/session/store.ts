@@ -231,6 +231,17 @@ export interface SessionStore {
    */
   markTurnStopped?(scenarioId: string, turnId: string): Promise<TurnStopOutcome>;
   /**
+   * 2.174 fix a (Stop-route hardening) — does a `scenarios` row exist for
+   * this id? Read by `recordExplicitTurnStop` BEFORE the tombstone upsert so
+   * a Stop for an unknown scenario is refused without creating a fence row
+   * (the public route is reachable with any UUID; rows are never deleted, so
+   * unchecked upserts grew the table without bound). MAY throw on a failed
+   * read — the caller fails OPEN (records the Stop anyway): a DB blip must
+   * not cost a legitimate user their Stop. Optional for the same reason as
+   * {@link claimTurnFence}.
+   */
+  scenarioExists?(scenarioId: string): Promise<boolean>;
+  /**
    * V5 TURN FENCE / ROADMAP 2.171 — is the scenario in the POST-EXPLICIT-STOP
    * state? True iff the NEWEST `v5_turn_fence` row for the scenario, excluding
    * `excludeTurnId` (the turn asking), carries a Stop tombstone. Any later

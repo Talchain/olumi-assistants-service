@@ -27,7 +27,7 @@ START, migration `20260731120000_v5_turn_fence.sql`):
 | Fact | Column | Written by |
 |---|---|---|
 | "the user explicitly stopped THIS turn" | `stopped_at` | `POST /proxy/v5/turn/stop` → `v5_mark_turn_stopped` |
-| "a LATER turn has claimed this scenario" | `generation` (`bigserial`) | the ingress preHandler → `v5_claim_turn_fence` |
+| "a LATER turn has claimed this scenario" | `generation` (`bigserial`) | post-admission claim (`admitCurrentTurnFence`, after `runPreFlight` passes — 2.174 fix b; the preHandler only binds the slot) → `v5_claim_turn_fence` |
 
 Both are read in one round trip (`v5_evaluate_turn_fence`) immediately before a
 graph-bearing commit, inside `SupabaseSessionStore.append()` — the single
@@ -39,9 +39,14 @@ claimed on that scenario (`superseded`) — or whose fence cannot be read at all
 (`unavailable` / `unclaimed`, fail closed). Nothing else. Non-graph commits are
 never fenced: a superseded turn ROW is harmless history.
 
-**What it is not:** a lock. The evaluation and the append are separate round
-trips, so a Stop landing inside that ~10-40 ms window is not seen. Stated in
-`turn-fence.ts` arrival 10, and never described as atomic anywhere.
+**Atomicity (2.174 fix c):** a claimed turn's graph write now runs through
+`append_turn_atomic_v4`, which performs the fence check INSIDE the append
+transaction under `FOR UPDATE` on the turn's own fence row — a concurrent Stop
+either commits first (the append refuses) or waits (and then
+`already_committed` reads true). The pre-v4 sentence stands for the FALLBACK
+path only (v4 not migrated, feature-detected via PGRST202): there the
+evaluation and the append are separate round trips and a Stop landing inside
+that ~10-40 ms window is not seen — stated in `turn-fence.ts` arrival 10.
 
 **Incidental disconnect is unchanged.** A tab close or network drop sends no stop
 request, so there is no tombstone and the turn commits exactly as before — the
@@ -106,8 +111,12 @@ distinguishable via `fence_verdict`.
 
 ## Residuals (rowed, not hidden)
 
-* The evaluate→append window above. Closing it needs the check inside
-  `append_turn_atomic` itself.
+* ~~The evaluate→append window above. Closing it needs the check inside
+  `append_turn_atomic` itself.~~ **Built (2.174 fix c):** `append_turn_atomic_v4`
+  (migration 20260731130000, rehearsed; execution orchestrator-sequenced —
+  runbook at `Docs/v5/runbooks/turn-fence-atomic-append-migration.md`). Until
+  the migration executes, the feature-detect fallback keeps the window as the
+  documented residual.
 * `v5_turn_fence` grows one row per turn and nothing prunes it; retention is a
   separate decision. **Two ways a trim job would break the fence**, spelled out in
   the migration next to the table: deleting an in-flight turn's row refuses that

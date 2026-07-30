@@ -165,6 +165,14 @@ export function resolveProxyAssistKey(): string | undefined {
   );
 }
 
+/**
+ * 2.174 fix a — the public Stop rung's per-IP budget, pinned by
+ * turn-stop-hardening.test.ts. Constants (not env) per the no-env-var-gates
+ * doctrine; the window matches the global limiter's.
+ */
+export const TURN_STOP_RATE_LIMIT_MAX = 30;
+export const TURN_STOP_RATE_LIMIT_WINDOW = "1 minute";
+
 export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   if (!config.proxy.browserProxyEnabled) {
     log.info({}, "[proxy-v5] BROWSER_PROXY_ENABLED is false — route not registered");
@@ -519,7 +527,21 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   // on a scenario is already a caller who can APPEND turns to it, which is
   // strictly more power.
   // ══════════════════════════════════════════════════════════════════════════
-  app.post("/proxy/v5/turn/stop", async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post("/proxy/v5/turn/stop", {
+    // 2.174 fix a — the PUBLIC rung is rate-limited per IP with the repo's
+    // own limiter (@fastify/rate-limit, registered `global: true` in
+    // server.ts; this route config overrides its max for exactly this
+    // route). 30/min is generous for a human — a Stop is a click on a
+    // running draft — and 4× tighter than the global 120 rpm an abuser
+    // otherwise gets for tombstone spray. The /orchestrate sibling stays on
+    // the global limit: it is service-key gated at ingress.
+    config: {
+      rateLimit: {
+        max: TURN_STOP_RATE_LIMIT_MAX,
+        timeWindow: TURN_STOP_RATE_LIMIT_WINDOW,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     const requestId =
       (request.headers["x-request-id"] as string) ?? crypto.randomUUID();
 
