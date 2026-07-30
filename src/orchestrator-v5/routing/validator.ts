@@ -46,6 +46,7 @@ import { z } from 'zod';
 
 import { describeSchema } from '../compose/helpers.js';
 import {
+  canonicaliseUnit,
   evaluateFactorValueProposal,
   resolveExistingRawValue,
   suggestExtendedCap,
@@ -828,9 +829,10 @@ function preexecuteSetFactorValue(
     ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
     ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
     // ROADMAP 2.159 — the STORED model value / raw_value, un-inverted, so the
-    // predicate derives the factor's scale identically here and at the handler
-    // (the AC.1 parity invariant: both gates run the same predicate on the
-    // same inputs, so they cannot disagree).
+    // predicate distinguishes a scale REDECLARATION from a first-time
+    // declaration identically here and at the handler (the AC.1 parity
+    // invariant: both gates run the same predicate on the same inputs, so they
+    // cannot disagree). Magnitude is never inspected.
     ...(obs?.value !== undefined ? { factorObservedValue: obs.value } : {}),
     ...(obs?.raw_value !== undefined ? { factorObservedRawValue: obs.raw_value } : {}),
     inputHasUnit: parsed.inputHasUnit,
@@ -902,13 +904,17 @@ function parseValueParameter(raw: unknown): ParsedValueParameter | null {
   if (raw && typeof raw === 'object') {
     const obj = raw as { value?: unknown; unit?: unknown; cap?: unknown };
     if (typeof obj.value !== 'number') return null;
-    const unit = typeof obj.unit === 'string' ? obj.unit : undefined;
+    // An empty / whitespace-only unit is NOT a unit. Canonicalised here so the
+    // validator and the handler's `parseProposalValue` agree exactly (AC.1
+    // parity) and so `''` can never reach the write path. See
+    // `canonicaliseUnit`.
+    const unit = canonicaliseUnit(typeof obj.unit === 'string' ? obj.unit : undefined);
     const cap = typeof obj.cap === 'number' ? obj.cap : undefined;
     return {
       numeric: obj.value,
       ...(unit !== undefined ? { unit } : {}),
       ...(cap !== undefined ? { cap } : {}),
-      inputHasUnit: unit !== undefined && unit.length > 0,
+      inputHasUnit: unit !== undefined,
     };
   }
   return null;

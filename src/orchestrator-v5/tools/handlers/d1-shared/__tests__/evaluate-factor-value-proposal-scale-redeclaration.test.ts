@@ -20,6 +20,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  canonicaliseUnit,
   evaluateFactorValueProposal,
   evaluatePostOperatorFactorValue,
   type ProposalRejectionReason,
@@ -223,5 +224,89 @@ describe('the execute-time backstop applies the SAME gates', () => {
     expect(
       normaliseFactorValue({ rawInput: 0.8, factorObservedValue: 0.65, inputHasUnit: false }),
     ).toEqual({ raw_value: 0.8, value: 0.8 });
+  });
+});
+
+describe('an empty / whitespace-only unit is NOT a unit (canonicaliseUnit)', () => {
+  it('canonicalises the empty, whitespace-only and padded forms', () => {
+    expect(canonicaliseUnit(undefined)).toBeUndefined();
+    expect(canonicaliseUnit('')).toBeUndefined();
+    expect(canonicaliseUnit('   ')).toBeUndefined();
+    expect(canonicaliseUnit('\t\n')).toBeUndefined();
+    expect(canonicaliseUnit(' £ ')).toBe('£');
+    expect(canonicaliseUnit('%')).toBe('%');
+  });
+
+  it('a `unit: ""` proposal is treated as a BARE number, not a redeclaration', () => {
+    // Chosen semantics: `''` is no unit at all, so there is nothing to
+    // redeclare and nothing to refuse. The alternative (treat any defined unit
+    // as a declaration) would refuse this and render "applying a value in  …".
+    const r = evaluateFactorValueProposal({
+      rawInput: 5,
+      operator: 'set',
+      unit: '',
+      factorObservedValue: 0.7,
+      factorObservedRawValue: 0.7,
+      inputHasUnit: false,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('a whitespace-only unit is likewise not a redeclaration', () => {
+    expect(
+      evaluateFactorValueProposal({
+        rawInput: 5,
+        operator: 'set',
+        unit: '   ',
+        factorObservedValue: 0.7,
+        inputHasUnit: false,
+      }).ok,
+    ).toBe(true);
+  });
+
+  it('RETIRES THE MALFORMED COPY — a factor already storing `unit: ""` reads as unitless', () => {
+    // Before: `bare_ratio_on_unit_factor` fired and rendered
+    // "0.5 looks like a proportion, not a value in . Tell me the amount in ."
+    const r = evaluateFactorValueProposal({
+      rawInput: 0.5,
+      operator: 'set',
+      factorUnit: '',
+      factorObservedValue: 0.7,
+      factorObservedRawValue: 0.7,
+      inputHasUnit: false,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('RESTORES GUARD 2c for a factor already storing `unit: ""`', () => {
+    // Before: 2c was permanently inert (factorUnit === ''), so a real unit
+    // landed as `unit_mismatch` instead — falsifying 2c's own claim.
+    const r = evaluateFactorValueProposal({
+      rawInput: 9,
+      operator: 'set',
+      unit: '£',
+      factorUnit: '',
+      factorObservedValue: 0.7,
+      factorObservedRawValue: 0.7,
+      inputHasUnit: true,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe<ProposalRejectionReason>('unit_redeclares_scale');
+  });
+
+  it('NO refusal copy anywhere in this predicate can render an empty unit', () => {
+    // Sweep the unit-interpolating rejection paths with a `''` on either side.
+    const cases: Array<Parameters<typeof evaluateFactorValueProposal>[0]> = [
+      { rawInput: 0.5, operator: 'set', factorUnit: '', factorObservedValue: 0.7, inputHasUnit: false },
+      { rawInput: 250000, operator: 'set', unit: '', factorCap: 100, factorObservedValue: 0.4, inputHasUnit: false },
+      { rawInput: 0.3, operator: 'set', unit: '   ', factorUnit: '  ', factorObservedValue: 0.7, inputHasUnit: false },
+    ];
+    for (const input of cases) {
+      const r = evaluateFactorValueProposal(input);
+      if (!r.ok) {
+        expect(r.specific_issue).not.toMatch(/in \./);
+        expect(r.specific_issue).not.toMatch(/ {2}/);
+      }
+    }
   });
 });

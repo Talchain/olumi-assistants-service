@@ -39,6 +39,7 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
   applyFactorValueOperator,
+  canonicaliseUnit,
   evaluateFactorValueProposal,
   resolveExistingRawValue,
 } from './d1-shared/evaluate-factor-value-proposal.js';
@@ -158,11 +159,17 @@ function parseProposalValue(raw: unknown): ParsedValue {
   }
   if (raw && typeof raw === 'object') {
     const obj = raw as { value: number; unit?: string; cap?: number };
+    // An empty / whitespace-only unit is NOT a unit — canonicalise it away here
+    // so it can never be PERSISTED by `after.unit = parsed.unit ?? before.unit`.
+    // `inputHasUnit` already treated `''` as no-unit; carrying `''` in `unit`
+    // while saying "no unit" in `inputHasUnit` is the disagreement that let a
+    // `unit: ''` write through. See `canonicaliseUnit`.
+    const unit = canonicaliseUnit(obj.unit);
     return {
       numeric: obj.value,
-      ...(obj.unit !== undefined ? { unit: obj.unit } : {}),
+      ...(unit !== undefined ? { unit } : {}),
       ...(obj.cap !== undefined ? { cap: obj.cap } : {}),
-      inputHasUnit: typeof obj.unit === 'string' && obj.unit.length > 0,
+      inputHasUnit: unit !== undefined,
     };
   }
   throw new D1HandlerError(

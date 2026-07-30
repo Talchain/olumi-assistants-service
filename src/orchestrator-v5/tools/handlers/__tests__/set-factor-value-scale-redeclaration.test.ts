@@ -134,3 +134,36 @@ describe('set_factor_value handler — everything legitimate still lands', () =>
     expect(observed.raw_value).toBe(250000);
   });
 });
+
+describe('set_factor_value handler — an empty unit is never PERSISTED', () => {
+  it('{ value: 5, unit: "" } on a unitless factor writes NO unit key', async () => {
+    // Before: persisted { value: 5, unit: '', raw_value: 5 } — after which
+    // guard 2c was permanently inert for that factor and every later bare
+    // sub-1 edit rendered "not a value in . Tell me the amount in .".
+    const observed = observedAfter(await invoke(proposalFor({ value: 5, unit: '' }, 'set')), 'f-quality');
+    expect(observed.value).toBe(5);
+    expect(observed.raw_value).toBe(5);
+    expect('unit' in observed).toBe(false);
+  });
+
+  it('a whitespace-only unit likewise writes NO unit key', async () => {
+    const observed = observedAfter(await invoke(proposalFor({ value: 5, unit: '  ' }, 'set')), 'f-quality');
+    expect('unit' in observed).toBe(false);
+  });
+
+  it('a padded REAL unit is trimmed, not dropped — and still refused as a redeclaration', async () => {
+    const err = await captureFailure(proposalFor({ value: 5, unit: ' £ ' }, 'set'));
+    const details = err.details as Record<string, unknown>;
+    expect(details.rejection_reason).toBe('unit_redeclares_scale');
+  });
+
+  it('a padded unit matching the factor is trimmed and LANDS (no false redeclaration)', async () => {
+    // f-uncapped is { value: 12, raw_value: 12, unit: 'people' }.
+    const observed = observedAfter(
+      await invoke(proposalFor({ value: 20, unit: ' people ' }, 'set', 'f-uncapped')),
+      'f-uncapped',
+    );
+    expect(observed.value).toBe(20);
+    expect(observed.unit).toBe('people');
+  });
+});

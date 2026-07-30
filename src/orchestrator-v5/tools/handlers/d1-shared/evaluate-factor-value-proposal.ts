@@ -45,6 +45,42 @@ import { formatValueWithUnit } from './format-confirmation.js';
 export type FactorValueOperator = 'set' | 'increase' | 'decrease' | 'multiply';
 
 /**
+ * AN EMPTY OR WHITESPACE-ONLY UNIT IS NOT A UNIT. Canonicalise it to
+ * `undefined` so exactly one representation of "this has no unit" exists.
+ *
+ * ⚠ THE DEFECT THIS CLOSES (found in review of the 2.159 salvage, proven at the
+ * bytes). Both parse sites already computed `inputHasUnit` as
+ * `unit.length > 0` — i.e. they ALREADY treated `''` as "no unit" — while
+ * carrying `''` through in the `unit` field itself. Two fields, two answers,
+ * from the same input. The consequences of that disagreement:
+ *
+ *   • `{ value: 5, unit: '' }` on a unitless factor passed guard 2c (whose
+ *     exemption was `unit.length > 0`) and the handler then PERSISTED
+ *     `unit: ''` via `after.unit = parsed.unit ?? before.unit`;
+ *   • from then on `factorUnit === ''`, so 2c was permanently inert for that
+ *     factor — falsifying the guard's own claim ("a unit it did not have");
+ *   • and every later bare sub-1 edit hit `bare_ratio_on_unit_factor`, whose
+ *     copy interpolates the unit: "0.5 looks like a proportion, not a value
+ *     in . Tell me the amount in ." — malformed text shown to a user.
+ *
+ * Canonicalising is preferred over widening 2c to "any defined unit is a
+ * declaration": that alternative would REFUSE `{ unit: '' }` and render
+ * "applying a value in  would change what it measures" — creating a second
+ * malformed-copy path inside the guard meant to remove one. It also leaves the
+ * `inputHasUnit` disagreement in place.
+ *
+ * Applied at BOTH ends, deliberately: at the two parse sites so `''` is never
+ * WRITTEN, and at this predicate's entry so a factor already carrying `''`
+ * (reachable before any of this work) READS as unitless — which is what
+ * retires the malformed-copy path rather than merely stopping new instances.
+ */
+export function canonicaliseUnit(unit: string | undefined): string | undefined {
+  if (unit === undefined) return undefined;
+  const trimmed = unit.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
  * Granular rejection reasons. Bound to the telemetry enum — additions
  * here require a plan amendment (see "Locked telemetry enums" in the
  * workstream plan). Reasons are ordered roughly by check sequence:
@@ -285,10 +321,10 @@ function evaluateFactorValueProposalImpl(
   const {
     rawInput,
     operator: rawOperator,
-    unit,
+    unit: rawUnit,
     proposalCap,
     factorCap,
-    factorUnit,
+    factorUnit: rawFactorUnit,
     factorExistingRaw,
     factorObservedValue,
     factorObservedRawValue,
@@ -296,6 +332,14 @@ function evaluateFactorValueProposalImpl(
   } = input;
 
   const operator: FactorValueOperator = rawOperator ?? 'set';
+
+  // An empty / whitespace-only unit is NOT a unit — see `canonicaliseUnit`.
+  // Applied to the FACTOR's unit as well as the proposal's, so a factor already
+  // carrying `''` reads as unitless here: that is what retires the malformed
+  // `bare_ratio_on_unit_factor` copy ("not a value in .") and restores guard
+  // 2c for such a factor, rather than only preventing new `''` writes.
+  const unit = canonicaliseUnit(rawUnit);
+  const factorUnit = canonicaliseUnit(rawFactorUnit);
 
   // 1. Structural: rawInput must be finite. Matches the
   //    "Value must be a finite number." guard at normalise-factor-value.ts:62.
@@ -388,12 +432,7 @@ function evaluateFactorValueProposalImpl(
   // 2c. unit_redeclares_scale. The proposal states a unit; the factor has
   //     none. `unit_mismatch` (2b) cannot see this case — it requires BOTH
   //     sides to carry a unit.
-  if (
-    factorHasRecordedValue &&
-    unit !== undefined &&
-    unit.length > 0 &&
-    factorUnit === undefined
-  ) {
+  if (factorHasRecordedValue && unit !== undefined && factorUnit === undefined) {
     return {
       ok: false,
       reason: 'unit_redeclares_scale',
