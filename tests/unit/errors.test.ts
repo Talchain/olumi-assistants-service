@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import {
   buildErrorV1,
@@ -198,6 +198,35 @@ describe("error utilities", () => {
       expect(error1.message).toBe("Internal server error");
       expect(error2.code).toBe("INTERNAL");
       expect(error2.message).toBe("Internal server error");
+    });
+  });
+
+  // ROADMAP 2.181 — a thrown non-Error must stay INTERNAL/500 (never lenient:
+  // honouring `statusCode` off a thrown plain object would let an accidentally
+  // thrown upstream response dictate CEE's status), but it must be LOUD. For
+  // months every rate-limit refusal landed in that branch logging only
+  // `error_type: "object"`, indistinguishable from a real internal error.
+  describe("non-Error throws are answered INTERNAL and logged as a distinct alarm", () => {
+    it("emits event=non_error_thrown with the value's shape, and still returns INTERNAL", async () => {
+      const telemetry = await import("../../src/utils/telemetry.js");
+      const spy = vi.spyOn(telemetry.log, "error").mockImplementation(() => undefined as never);
+
+      try {
+        const result = toErrorV1({ statusCode: 429, code: "RATE_LIMITED", oops: true });
+
+        expect(result.code).toBe("INTERNAL");
+        expect(getStatusCodeForErrorCode(result.code)).toBe(500);
+
+        const payloads = spy.mock.calls
+          .map((c) => c[0])
+          .filter((p): p is Record<string, unknown> => !!p && typeof p === "object");
+        const alarm = payloads.find((p) => p.event === "non_error_thrown");
+        expect(alarm, "no non_error_thrown alarm was logged").toBeDefined();
+        expect(alarm!.error_tag).toBe("[object Object]");
+        expect(alarm!.error_keys).toEqual(["statusCode", "code", "oops"]);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

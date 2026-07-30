@@ -17,12 +17,8 @@ export async function adminLLMOutputRoutes(app: FastifyInstance): Promise<void> 
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `llm_output:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    // ROADMAP 2.181 — @fastify/rate-limit THROWS whatever this builder RETURNS
-    // (index.js:333). A plain object is not an Error, so on the real server
-    // (which installs a custom setErrorHandler) the refusal was answered
-    // 500 INTERNAL instead of 429. `statusCode` on a plain object is only read
-    // by Fastify's DEFAULT handler, which is why the bare-Fastify unit tests
-    // never saw it. Return a real Error.
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
     errorResponseBuilder: (_req, context) =>
       new RateLimitedError(
         retryAfterSecondsFromRateLimitContext(context),

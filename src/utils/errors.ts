@@ -44,6 +44,14 @@ export interface ErrorV1 {
  * A real `Error` satisfies both worlds: `toErrorV1` classifies it as
  * `RATE_LIMITED` via `statusCode`/`retryAfter` (→ 429 + `retry_after_seconds`),
  * and Fastify's default handler reads `statusCode` off it directly.
+ *
+ * ⚠ This hardcodes **429** and therefore discards the plugin's own
+ * `context.statusCode`, which is **403** when a `ban` threshold fires
+ * (`index.js:327-330`). That is safe only because `ban` is configured on none of
+ * the registration sites (`rg -a "ban\s*:" src/` → nothing). If anyone ever
+ * enables `ban`, this class must take the status from `context.statusCode`
+ * instead — a banned caller would otherwise be told 429 "come back later" when
+ * the service means 403.
  */
 export class RateLimitedError extends Error {
   /** Read by Fastify's default error handler AND by `toErrorV1`. */
@@ -260,10 +268,34 @@ export function toErrorV1(error: unknown, requestOrOptions?: FastifyRequest | To
     return result;
   }
 
-  // Unknown error type - log and return minimal info
+  // Unknown error type — a non-Error was THROWN. Keep answering INTERNAL/500:
+  // that is the correct answer for a programming error, and honouring a
+  // `statusCode`/`code` off a thrown plain object would let any accidentally
+  // thrown upstream response dictate CEE's status and error envelope (this repo
+  // is full of PLoT/LLM shapes carrying `statusCode`). Deliberately NOT lenient.
+  //
+  // But make it LOUD (ROADMAP 2.181). For months every rate-limit refusal landed
+  // here — nine builders returned plain objects and @fastify/rate-limit throws
+  // the builder's return value — and the only trace was `error_type: "object"`,
+  // indistinguishable from any other internal error. That is why a global 500
+  // on every limiter refusal survived until a /healthz probe on staging found
+  // it. A distinct, greppable event with the shape of the thrown value is the
+  // alarm that would have surfaced it in a day: `throw <plain object>` is always
+  // a bug, so this line should never appear in a healthy service.
   log.error(
-    { error_type: typeof error, request_id: requestId, stage },
-    'Internal server error occurred (unknown error type)'
+    {
+      event: 'non_error_thrown',
+      error_type: typeof error,
+      error_tag: Object.prototype.toString.call(error),
+      // Key NAMES only — never values, which may carry user or secret data.
+      error_keys:
+        error && typeof error === 'object'
+          ? Object.keys(error as Record<string, unknown>).slice(0, 20)
+          : [],
+      request_id: requestId,
+      stage,
+    },
+    'Non-Error value was thrown — answering INTERNAL/500. This is always a bug: throw an Error.'
   );
   const result = buildErrorV1('INTERNAL', 'Internal server error', undefined, requestId);
   if (stage) result.stage = stage;

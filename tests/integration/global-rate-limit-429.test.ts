@@ -69,6 +69,24 @@ describe("global rate limit — typed 429 RATE_LIMITED (ROADMAP 2.181)", () => {
     vi.unstubAllEnvs();
   });
 
+  // Folded in from the deleted `tests/integration/rate-limit.test.ts`, which
+  // asserted these against a bare `Fastify()` app carrying a COPY of the old
+  // broken builder — a mirror of production that passed while production
+  // returned 500. Same assertions, now against the real app. Runs before the
+  // limiter is exhausted (vitest runs `it`s in declaration order).
+  it("emits x-ratelimit-* on allowed requests and decrements remaining", async () => {
+    const first = await app.inject({ method: "GET", url: "/healthz" });
+    expect(first.statusCode).toBe(200);
+    expect(first.headers["x-ratelimit-limit"]).toBe(String(GLOBAL_MAX));
+    expect(first.headers["x-ratelimit-remaining"]).toBeDefined();
+    expect(first.headers["x-ratelimit-reset"]).toBeDefined();
+
+    const second = await app.inject({ method: "GET", url: "/healthz" });
+    expect(Number(second.headers["x-ratelimit-remaining"])).toBeLessThan(
+      Number(first.headers["x-ratelimit-remaining"]),
+    );
+  });
+
   it("refuses the over-limit request with 429 + error.v1 RATE_LIMITED + retry_after_seconds", async () => {
     let refused: Awaited<ReturnType<FastifyInstance["inject"]>> | null = null;
 
@@ -104,11 +122,18 @@ describe("global rate limit — typed 429 RATE_LIMITED (ROADMAP 2.181)", () => {
     expect(body.request_id).toBeTruthy();
     expect(typeof body.details?.retry_after_seconds).toBe("number");
     expect(body.details.retry_after_seconds).toBeGreaterThan(0);
-    // The window is 1 minute, so a correct remaining-TTL derivation can never
-    // exceed 60s. The old `context.after` arithmetic could not produce this at
-    // all (`after` is a human-readable STRING, so the guard never matched and
-    // the value was pinned to the 60 fallback).
+    // ⚠ WEAK BOUND, deliberately labelled as such. The window here is 1 minute,
+    // so 60 is both the correct remaining-TTL derivation AND the old hardcoded
+    // fallback — this assertion cannot tell them apart, and a mutant that pins
+    // the helper to 60 sails through it. The discriminating pins are the 15-min
+    // admin rung in `rate-limit-rungs-real-server.test.ts` (expects ~900) and
+    // the unit tests on the helper itself. This bound only rules out a
+    // ms-vs-seconds (1000×) error.
     expect(body.details.retry_after_seconds).toBeLessThanOrEqual(60);
+    // It must also agree exactly with the header the plugin staged itself.
+    expect(Number(refused!.headers["retry-after"])).toBe(
+      body.details.retry_after_seconds,
+    );
 
     // Retry-After header must be present and parseable for a backing-off client.
     expect(Number(refused!.headers["retry-after"])).toBeGreaterThan(0);

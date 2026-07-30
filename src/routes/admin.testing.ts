@@ -890,9 +890,8 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `admin_test:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value
-    // (index.js:333); a plain object reaches the app's custom setErrorHandler as
-    // an unknown error type and is answered 500 INTERNAL. Return a real Error.
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
     errorResponseBuilder: (_request, context) =>
       new RateLimitedError(
         retryAfterSecondsFromRateLimitContext(context),

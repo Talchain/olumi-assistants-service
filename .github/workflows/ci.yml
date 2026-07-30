@@ -43,6 +43,24 @@ jobs:
         # stale the way a checklist would. It fails in either direction, and is
         # deliberately in the REQUIRED job so the transition blocks merge.
         run: node scripts/ci/assert-pnpm-overrides-readable.mjs
+      - name: Assert every rate-limit errorResponseBuilder returns an Error
+        # DERIVED GUARD (ROADMAP 2.181). @fastify/rate-limit THROWS whatever the
+        # builder RETURNS (index.js:333). A builder that returns a plain object
+        # gets that object thrown; this app's custom setErrorHandler receives a
+        # non-Error and answers 500 INTERNAL while the limiter's own headers
+        # still say 429. All nine builders shipped that way and survived months
+        # of green CI — the break reads as green, again.
+        #
+        # Neither existing gate can catch it: the plugin types the return as
+        # `object`, so a raw builder typechecks clean (proven), and lint reddens
+        # on a REVERT only incidentally (unused import) and on a brand-new tenth
+        # builder not at all.
+        #
+        # The script DERIVES its sites from the source tree — no hand-list to go
+        # stale — and hard-fails if it is blinded (zero files / zero plugin
+        # references / zero registrations / zero builders), so it can never pass
+        # by finding nothing. Deliberately in the REQUIRED job.
+        run: node scripts/ci/assert-rate-limit-builders-return-error.mjs
       - name: Generate OpenAPI types
         run: pnpm openapi:generate
       - name: Lint

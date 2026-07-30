@@ -48,12 +48,8 @@ export default async function route(app: FastifyInstance) {
       // Rate limit by IP for public share routes
       return `share:${request.ip}`;
     },
-    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value
-    // (index.js:333). Returning the error.v1 body as a plain object made the
-    // real server answer 500 INTERNAL, not 429: the app's custom
-    // setErrorHandler saw a non-Error and fell through to its unknown-type
-    // branch. Returning a real Error lets that same handler emit the identical
-    // error.v1 RATE_LIMITED body with a request_id, at 429.
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
     errorResponseBuilder: (_, context) =>
       new RateLimitedError(
         retryAfterSecondsFromRateLimitContext(context),
