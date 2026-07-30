@@ -205,6 +205,58 @@ export const CLARIFY_V2_QUESTION_REPLY_PATTERN =
   /^\s*(?:what|why|how|who|whom|whose|when|where|which|can|could|do|does|did|is|are|was|were|will|would|should|shall|whether)\b[\s\S]*\?\s*$/i;
 
 /**
+ * ROADMAP 2.171 (Paul-ratified) — the post-explicit-Stop choice.
+ *
+ * When a user STOPS a draft and types a NEW brief on the same scenario, the
+ * live clarify round claims it as an answer and FOLDS it into the ORIGINAL
+ * working brief — correct fence semantics, but the plain ack ("Thanks — I
+ * have folded that in") reads as "my stop didn't take" (stop-fence
+ * acceptance probe, arm 1). The ratified fix KEEPS the fold and makes it
+ * explicit with an escape: the reply in exactly this state disclosures the
+ * original topic and offers "fold this in, or start over?".
+ *
+ * "Start over" routes to the EXISTING new-draft path, no new machinery: the
+ * resume re-runs `decideClarifyV2Round1` over the message the disclosure was
+ * issued for (persisted as `startOverBrief`, armed for exactly one round —
+ * a later ordinary fold rebuilds the state without it, because by then
+ * "start over" has no unambiguous referent).
+ *
+ * The chip's canned message must stay inside the typed pattern — pinned in
+ * clarify-v2.post-stop.test.ts the same way A10 pins the proceed constant.
+ */
+export const CLARIFY_V2_START_OVER_CHIP_ID = 'cv2_start_over';
+export const CLARIFY_V2_START_OVER_MESSAGE = 'Start over with my new brief.';
+export const CLARIFY_V2_START_OVER_PATTERN =
+  /^\s*(?:start\s+(?:over|again|fresh|afresh)(?:\s+with\s+(?:my|the)\s+new\s+(?:brief|decision|topic))?|start\s+a\s+new\s+decision|new\s+decision)\s*[.!]?\s*$/i;
+
+/**
+ * 2.171 — consent to the fold, offered as the FIRST arm of the post-Stop
+ * choice. The words must never be folded into the working brief as if they
+ * were decision content, and they are not consent to draft immediately —
+ * so they take the bare-ack calibration (one direct yes/no re-offer, after
+ * which an ack proceeds). Recognised only while the post-Stop choice is
+ * armed (`startOverBrief` present); in any other round these words fold as
+ * an ordinary answer, unchanged.
+ */
+export const CLARIFY_V2_FOLD_IN_PATTERN =
+  /^\s*(?:yes[,\s]+)?(?:please\s+)?fold\s+(?:it|this|that)\s+in\s*[,.!]?\s*(?:please|thanks|thank\s+you)?\s*[.!]?\s*$/i;
+
+/**
+ * 2.171 — render the original decision as a short quotable topic for the
+ * disclosure copy: first sentence, flattened whitespace, word-boundary cut.
+ */
+export const CLARIFY_V2_TOPIC_MAX_LENGTH = 90;
+export function renderDecisionTopic(brief: string): string {
+  const flattened = brief.trim().replace(/\s+/g, ' ');
+  const firstSentence = /^[^.?!]*[.?!]/.exec(flattened)?.[0] ?? flattened;
+  const base = firstSentence.trim();
+  if (base.length <= CLARIFY_V2_TOPIC_MAX_LENGTH) return base;
+  const cut = base.slice(0, CLARIFY_V2_TOPIC_MAX_LENGTH);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+/**
  * Review fix A2 (1.152) — the REPLACEMENT bar. Wholesale brief
  * replacement is the one destructive move in this flow (it discards the
  * working brief, answers and all), so it demands a genuinely STANDALONE
@@ -251,6 +303,13 @@ export interface ClarifyV2RoundState {
    * before 1.152 parse as not-reoffered.
    */
   readonly reoffered?: boolean;
+  /**
+   * 2.171: the NEW brief the post-Stop disclosure was issued for, verbatim
+   * (trimmed, draft-max capped). Present exactly while the "fold this in, or
+   * start over?" choice is live; "start over" re-runs round 1 over THIS.
+   * A later ordinary fold rebuilds the state without it (one-round arming).
+   */
+  readonly startOverBrief?: string;
 }
 
 export type ClarifyV2ProceedReason =
@@ -280,6 +339,14 @@ export type ClarifyV2Decision =
       /** The state to persist for the next turn's resume. */
       readonly state: ClarifyV2RoundState;
       readonly phase: 'initial' | 'follow_up';
+      /**
+       * 2.171: present when this ask must carry the post-explicit-Stop
+       * disclosure — the fold happened right after a user Stop, so the copy
+       * names the ORIGINAL decision (the pre-fold working brief) and offers
+       * the fold-in / start-over choice. Never present on the replace arm:
+       * a standalone restatement really did switch the frame.
+       */
+      readonly postStop?: { readonly originalBrief: string };
     }
   | {
       /**
@@ -416,6 +483,14 @@ export interface DecideClarifyV2ResumeInput {
    * message typed alongside the Generate click) rather than discarded.
    */
   readonly explicitGenerateBrief: string | null;
+  /**
+   * 2.171: true when the scenario is in the post-explicit-Stop state (the
+   * newest PRIOR fence row carries a Stop tombstone — read server-side by the
+   * dispatch). Optional with a false default: an omitted argument fails
+   * toward the ordinary copy, the same fail-safe direction as
+   * `explicitGenerateBrief`'s `?? null`.
+   */
+  readonly postExplicitStop?: boolean;
 }
 
 /**
@@ -457,6 +532,25 @@ export function decideClarifyV2Resume(
       brief: mergeExplicitGenerateBrief(state.brief, assembledGenerateBrief),
       reason: 'explicit_generate',
     };
+  }
+  // ── 2.171: the post-Stop choice, while armed ─────────────────────────────
+  // "Start over" routes to the EXISTING new-draft path: round 1 over the new
+  // brief the disclosure was issued for. The old frame (and its asked
+  // history) is discarded WITH the user's explicit consent — that is the
+  // point of the choice. Checked before every other cue so the decline set
+  // ("stop", "cancel") can never claim it.
+  if (state.startOverBrief !== undefined && CLARIFY_V2_START_OVER_PATTERN.test(message)) {
+    return decideClarifyV2Round1(state.startOverBrief);
+  }
+  // "Fold this in" consents to the fold (already incorporated) without
+  // consenting to draft — bare-ack calibration, and the literal words must
+  // never pollute the working brief. `{...state}` preserves the armed
+  // choice, so "start over" still works after an intervening "fold it in".
+  if (state.startOverBrief !== undefined && CLARIFY_V2_FOLD_IN_PATTERN.test(message)) {
+    if (state.reoffered === true) {
+      return { kind: 'proceed', brief: state.brief, reason: 'user_proceed' };
+    }
+    return { kind: 'reoffer', state: { ...state, reoffered: true }, cue: 'bare_ack' };
   }
   // Review fix A10: the exact-constant check was dead code — the pattern's
   // 'go ahead…' alternation matches CLARIFY_V2_PROCEED_MESSAGE exactly
@@ -543,6 +637,13 @@ export function decideClarifyV2Resume(
     askable,
     CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
   );
+  // 2.171: a FOLD (never a replacement — there the frame really switched)
+  // right after an explicit Stop must disclose and arm the choice. The armed
+  // brief is the user's message verbatim under the draft cap: what "start
+  // over" would draft from.
+  const newBrief = message.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+  const disclosePostStop =
+    input.postExplicitStop === true && !replaces && newBrief.length > 0;
   return {
     kind: 'ask',
     questions,
@@ -550,8 +651,10 @@ export function decideClarifyV2Resume(
       brief: workingBrief,
       asked: [...state.asked, ...questions.map((q) => q.dimension)],
       round: state.round + 1,
+      ...(disclosePostStop ? { startOverBrief: newBrief } : {}),
     },
     phase: 'follow_up',
+    ...(disclosePostStop ? { postStop: { originalBrief: state.brief } } : {}),
   };
 }
 
@@ -577,16 +680,24 @@ export function decideClarifyV2Resume(
 export function composeClarifyV2Response(
   questions: readonly ClarifyQuestion[],
   phase: 'initial' | 'follow_up',
+  postStop?: { readonly originalBrief: string },
 ): OlumiResponse {
   const singular = questions.length === 1;
+  // 2.171: in the post-explicit-Stop state the plain fold ack is the exact
+  // copy the acceptance probe caught reading as "my stop didn't take" — the
+  // lead instead disclosures the ORIGINAL decision and offers the choice
+  // (ratified wording). Ordinary rounds keep the pre-2.171 leads verbatim.
   const lead =
-    phase === 'initial'
-      ? singular
-        ? 'Before I draft the model, one quick question will make it sharper.'
-        : 'Before I draft the model, a few quick questions will make it sharper.'
-      : singular
-        ? 'Thanks — I have folded that in. One more thing would sharpen the draft.'
-        : 'Thanks — I have folded that in. A couple more things would sharpen the draft.';
+    postStop !== undefined
+      ? `Still working on your original decision — “${renderDecisionTopic(postStop.originalBrief)}”. ` +
+        'Want me to fold this in, or start over?'
+      : phase === 'initial'
+        ? singular
+          ? 'Before I draft the model, one quick question will make it sharper.'
+          : 'Before I draft the model, a few quick questions will make it sharper.'
+        : singular
+          ? 'Thanks — I have folded that in. One more thing would sharpen the draft.'
+          : 'Thanks — I have folded that in. A couple more things would sharpen the draft.';
   const numbered = questions
     .map((q, i) => `${i + 1}. ${q.text} (${q.impact})`)
     .join(' ');
@@ -600,6 +711,15 @@ export function composeClarifyV2Response(
     label: 'Use sensible defaults',
     message: CLARIFY_V2_PROCEED_MESSAGE,
   };
+  // 2.171: the choice is tappable. The start-over chip takes one candidate
+  // slot (never the escape hatch's), and its canned message is inside
+  // CLARIFY_V2_START_OVER_PATTERN so a tap routes exactly like the typed
+  // phrase (pinned).
+  const startOverChip: SuggestedAction = {
+    id: CLARIFY_V2_START_OVER_CHIP_ID,
+    label: 'Start over',
+    message: CLARIFY_V2_START_OVER_MESSAGE,
+  };
 
   return {
     response_version: 2,
@@ -610,7 +730,13 @@ export function composeClarifyV2Response(
       // of one or more preserves it, so the escape hatch stops depending
       // on the consumer's cap being exactly the number we assumed.
       proceedChip,
-      ...selectCandidateChips(questions, CLARIFY_V2_CANDIDATE_CHIP_BUDGET),
+      ...(postStop !== undefined ? [startOverChip] : []),
+      ...selectCandidateChips(
+        questions,
+        postStop !== undefined
+          ? CLARIFY_V2_CANDIDATE_CHIP_BUDGET - 1
+          : CLARIFY_V2_CANDIDATE_CHIP_BUDGET,
+      ),
     ]),
     insights: [],
     stage_indicator: 'frame',

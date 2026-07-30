@@ -34,7 +34,9 @@
  * 200.
  */
 
+import { readIngressTurnIdentity } from "../orchestrator/turn-fence-prehandler.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { errMessage } from "../orchestrator-v5/session/turn-fence.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 
 export interface TurnStopReply {
@@ -59,13 +61,12 @@ export async function recordExplicitTurnStop(
   body: unknown,
   requestId: string,
 ): Promise<TurnStopReply> {
-  const fields =
-    body !== null && typeof body === "object"
-      ? (body as { scenario_id?: unknown; turn_id?: unknown })
-      : {};
-  const scenarioId = typeof fields.scenario_id === "string" ? fields.scenario_id : "";
-  const turnId = typeof fields.turn_id === "string" ? fields.turn_id : "";
-  if (scenarioId.length === 0 || turnId.length === 0) {
+  // R-12/R-8: the SAME parse as the ingress claim (`readIngressTurnIdentity`)
+  // — the tombstone this records and the claim the turn made key one
+  // `v5_turn_fence` row, so the two identities must be read by ONE function
+  // or they can drift apart silently (a Stop the fence can never match).
+  const identity = readIngressTurnIdentity(body);
+  if (identity === null) {
     return {
       status: 400,
       body: {
@@ -79,6 +80,7 @@ export async function recordExplicitTurnStop(
     };
   }
 
+  const { scenarioId, turnId } = identity;
   try {
     const store = getSessionStore();
     if (typeof store.markTurnStopped !== "function") {
@@ -124,7 +126,7 @@ export async function recordExplicitTurnStop(
         request_id: requestId,
         scenario_id: scenarioId,
         turn_id: turnId,
-        err: err instanceof Error ? err.message : String(err),
+        err: errMessage(err),
       },
       "V5 turn fence — could not record the explicit user Stop",
     );

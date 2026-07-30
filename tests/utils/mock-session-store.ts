@@ -71,6 +71,9 @@ export function createMockSessionStore(
       claimed: true,
       alreadyCommitted: false,
     }),
+    // ROADMAP 2.171: benign default = NOT post-Stop, so every suite keeps the
+    // ordinary coach copy unless it seeds the tombstone deliberately.
+    wasLatestScenarioTurnStopped: async () => false,
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     // Consistent with the empty fact reads above: this scenario has no

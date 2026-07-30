@@ -935,7 +935,9 @@ export async function runUnifiedPipeline(
       // truthful duration is zero; `stageElapsed` of anything here would be a
       // small nonzero number that invites exactly the misreading A1 caught.
       timings.validation_pipeline_ms = 0;
-      validationPromise = Promise.resolve();
+      // No `validationPromise` write here (S2-10): the hoisted initialiser is
+      // already the resolved promise, and nothing between it and this branch
+      // reassigns — a re-set would read as if something needed undoing.
     }
 
     // Stage 4b: Threshold Sweep — deterministic goal threshold hygiene

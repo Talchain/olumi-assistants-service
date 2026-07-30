@@ -230,6 +230,12 @@ export type PendingActionAction =
        * persisted before 1.152 parse as not-reoffered — never refused.
        */
       readonly reoffered?: boolean;
+      /**
+       * 2.171: the post-Stop new brief the disclosure was issued for —
+       * "start over" re-runs round 1 over this. OPTIONAL so rows persisted
+       * before 2.171 (and every ordinary round) parse unchanged.
+       */
+      readonly start_over_brief?: string;
     }
   | {
       /**
@@ -630,6 +636,16 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     // 1.152 (A1/A4): optional re-offer marker; anything but a boolean (or
     // absence) is a corrupted row and refused like the other fields.
     if (a.reoffered !== undefined && typeof a.reoffered !== 'boolean') return null;
+    // 2.171: optional post-Stop start-over brief — same bounds as the working
+    // brief (non-empty, draft max 5000) or the row is corrupted and refused.
+    if (
+      a.start_over_brief !== undefined &&
+      (typeof a.start_over_brief !== 'string' ||
+        a.start_over_brief.trim().length === 0 ||
+        a.start_over_brief.length > 5000)
+    ) {
+      return null;
+    }
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.

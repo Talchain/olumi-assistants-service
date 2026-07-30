@@ -95,6 +95,10 @@ import type {
   V5DiagnosticTrace,
 } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
 import { buildMinimalV5DiagnosticTrace } from '../orchestrator-v5/diagnostics/v5-diagnostic-trace.js';
+import {
+  GRAPH_CONFLICT_RECOVERY_KEYS,
+  GRAPH_CONFLICT_RECOVERY_COPY_MODE,
+} from '../orchestrator-v5/graph-conflict-recovery-keys.js';
 // ROADMAP 1.233 — the Layer-2 gate's own reason type. Imported so the
 // `claim_safety.withheld_projection_reason` stamp below is checked against the
 // REAL union at compile time: the diagnostics module declares that member as a
@@ -4607,11 +4611,19 @@ function extractRetryableFlag(response: unknown): boolean {
 }
 
 /**
- * F4 — pull the graph-CAS-conflict recovery metadata (recovery_action,
- * conflict_category, expected_base_graph_hash) out of the failure response's
- * error-block details so it can be forwarded onto the 409 BoundaryError
- * envelope (A2's UI refresh/reconfirm leg reads it). Returns undefined on any
- * shape drift — the 409 status alone still carries the recoverable signal.
+ * F4 — pull the graph-conflict recovery metadata out of the failure
+ * response's error-block details so it can be forwarded onto the 409
+ * BoundaryError envelope (A2's UI refresh/reconfirm leg reads it). Returns
+ * undefined on any shape drift — the 409 status alone still carries the
+ * recoverable signal.
+ *
+ * A-2: DERIVED from `GRAPH_CONFLICT_RECOVERY_KEYS`, the same manifest the
+ * producers are compile-bound to (`satisfies GraphConflictFailureDetails` in
+ * turn-executor.ts). The old hand allowlist here FAILED SILENT — a key added
+ * at a producer never reached the wire (`fence_verdict` had to be hand-added
+ * when the fence landed). Now a new key is either in the manifest (and flows
+ * end-to-end) or a compile error at the producer; there is no silent third
+ * state. Per-key copy semantics live beside the manifest.
  */
 function extractGraphConflictRecovery(
   response: unknown,
@@ -4628,15 +4640,12 @@ function extractGraphConflictRecovery(
   if (!details || typeof details !== 'object') return undefined;
   const d = details as Record<string, unknown>;
   const out: Record<string, unknown> = {};
-  if (typeof d.recovery_action === 'string') out.recovery_action = d.recovery_action;
-  if (typeof d.conflict_category === 'string') out.conflict_category = d.conflict_category;
-  // V5 turn fence (A2, #759 review) — the machine-readable verdict rides the same
-  // 409 envelope so the UI can tell "you stopped this" from "a later turn owns
-  // the scenario" from "the fence was unreadable". Without it the three collapse
-  // into one opaque conflict.
-  if (typeof d.fence_verdict === 'string') out.fence_verdict = d.fence_verdict;
-  if ('expected_base_graph_hash' in d) {
-    out.expected_base_graph_hash = d.expected_base_graph_hash;
+  for (const key of GRAPH_CONFLICT_RECOVERY_KEYS) {
+    if (GRAPH_CONFLICT_RECOVERY_COPY_MODE[key] === 'string') {
+      if (typeof d[key] === 'string') out[key] = d[key];
+    } else if (key in d) {
+      out[key] = d[key];
+    }
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

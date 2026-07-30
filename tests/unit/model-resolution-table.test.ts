@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { getDefaultModelForTask } from "../../src/config/model-routing.js";
+import { getDefaultModelForTask, TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
 import { getModelProvider, isModelEnabled, isKnownModel } from "../../src/config/models.js";
 
 /** site → source → expected model id (captured pre-refactor). */
@@ -36,7 +36,32 @@ const RESOLUTION_TABLE: ReadonlyArray<{
   { site: "C15 suggest_options", source: "TASK_MODEL_DEFAULTS.suggest_options", expected: "gpt-5.2" },
   // ── DARK but registry-covered (governed by the drift guard) ─────────────
   { site: "C10 m2_graph_review (dark)", source: "TASK_MODEL_DEFAULTS.m2_graph_review", expected: "claude-opus-4-8" },
+  // ── R-7 COVERAGE ROWS (30 Jul) — drift alarms, not pre-refactor captures ─
+  // The completeness gate below made the table's blindness LOUD: every
+  // TASK_MODEL_DEFAULTS key must be pinned here or explicitly excused, so a
+  // key added to the defaults without a row REDs (validate_graph went LIVE
+  // with ROADMAP 2.146 and this table never saw it — the exact hole).
+  // Values pinned at the checked-in default at the time the gate was added.
+  { site: "validation Pass 2 (LIVE, 2.146 — the row R-7 found missing)", source: "TASK_MODEL_DEFAULTS.validate_graph", expected: "o4-mini" },
+  { site: "assist clarification", source: "TASK_MODEL_DEFAULTS.clarification", expected: "gpt-4.1-2025-04-14" },
+  { site: "assist preflight", source: "TASK_MODEL_DEFAULTS.preflight", expected: "gpt-4.1-2025-04-14" },
+  { site: "assist explainer", source: "TASK_MODEL_DEFAULTS.explainer", expected: "gpt-4.1-2025-04-14" },
+  { site: "assist evidence_helper", source: "TASK_MODEL_DEFAULTS.evidence_helper", expected: "gpt-4.1-2025-04-14" },
+  { site: "assist sensitivity_coach", source: "TASK_MODEL_DEFAULTS.sensitivity_coach", expected: "gpt-4.1-2025-04-14" },
+  { site: "bias_check", source: "TASK_MODEL_DEFAULTS.bias_check", expected: "claude-sonnet-4-20250514" },
+  { site: "options (alias base of C15 suggest_options)", source: "TASK_MODEL_DEFAULTS.options", expected: "gpt-5.2" },
 ];
+
+/**
+ * R-7: keys DELIBERATELY not pinned, each with its reason stated where the
+ * completeness gate reads it. An entry here is a decision, not an omission.
+ */
+const EXPLICITLY_UNPINNED_TASKS: Record<string, string> = {
+  routing:
+    "display-only default (admin UI parity); the v5 routing call site controls " +
+    "its own model selection and never reads this value — model-routing.ts's " +
+    "own comment on the row",
+};
 
 describe("model resolution table — zero behaviour change (checked-in defaults)", () => {
   for (const row of RESOLUTION_TABLE) {
@@ -49,6 +74,32 @@ describe("model resolution table — zero behaviour change (checked-in defaults)
   it("every default model in the table is a KNOWN registry id (post-opus-4-8 registration)", () => {
     for (const row of RESOLUTION_TABLE) {
       expect(isKnownModel(row.expected), `${row.expected} (${row.site}) must be registered`).toBe(true);
+    }
+  });
+
+  it("R-7: DERIVE-OR-RED — every TASK_MODEL_DEFAULTS key is pinned by a row or explicitly excused, in both directions", () => {
+    const pinned = new Set(
+      RESOLUTION_TABLE.map((r) => r.source.replace("TASK_MODEL_DEFAULTS.", "")),
+    );
+    const excused = new Set(Object.keys(EXPLICITLY_UNPINNED_TASKS));
+    // Forward: a key added to the defaults without a row (or a reasoned
+    // excuse) REDs here — the validate_graph hole cannot recur.
+    for (const task of Object.keys(TASK_MODEL_DEFAULTS)) {
+      expect(
+        pinned.has(task) || excused.has(task),
+        `TASK_MODEL_DEFAULTS.${task} has no RESOLUTION_TABLE row and no entry in ` +
+          `EXPLICITLY_UNPINNED_TASKS — pin its default or state why not.`,
+      ).toBe(true);
+      // An excused key must not ALSO be pinned: a stale excuse over a live row
+      // is exactly the mirror-drift this gate exists to refuse.
+      expect(pinned.has(task) && excused.has(task), `${task}: both pinned AND excused`).toBe(false);
+    }
+    // Reverse: no ghost rows or ghost excuses for keys that no longer exist.
+    for (const task of [...pinned, ...excused]) {
+      expect(
+      Object.hasOwn(TASK_MODEL_DEFAULTS, task),
+        `"${task}" is pinned/excused but is not a TASK_MODEL_DEFAULTS key`,
+      ).toBe(true);
     }
   });
 

@@ -182,7 +182,12 @@ export interface TurnFenceEvaluation {
   readonly verdict: TurnFenceVerdict;
   readonly generation: number | null;
   readonly maxGeneration: number | null;
-  /** Present only for `unavailable` — the reason we could not read the fence. */
+  /**
+   * Present when the verdict was reached WITHOUT a usable fence read: every
+   * `unavailable`, plus the RPC-free `unclaimed` the enforcement site
+   * constructs when the ingress claim did not land (R-11 — that refusal flows
+   * through the same tail as the others, so it carries its reason here).
+   */
   readonly unavailableReason?: string;
 }
 
@@ -235,11 +240,33 @@ export function currentTurnFence(): TurnFenceHandle | undefined {
   return fenceStorage.getStore();
 }
 
-function errMessage(e: unknown): string {
+/**
+ * Total error-to-string, shared across the fence's modules (R-13). Exported
+ * because the preHandler and the stop route were each re-implementing the
+ * `err instanceof Error ? err.message : String(err)` half of this inline —
+ * two copies of one rendering is the drift shape, and the inline form is
+ * WEAKER (it stringifies a message-bearing non-Error as `[object Object]`).
+ */
+export function errMessage(e: unknown): string {
   if (e === null || e === undefined) return 'unknown';
   if (typeof e === 'string') return e;
   const m = (e as { message?: unknown }).message;
   return typeof m === 'string' ? m : String(e);
+}
+
+/**
+ * The `unavailable` evaluation, built in ONE place (R-13). Four sites used to
+ * assemble this literal by hand; the reason string is the only honest
+ * variation (plus `generation` for the one site that HAS read a generation
+ * before discovering the payload is unusable).
+ */
+function unavailable(reason: string, generation: number | null = null): TurnFenceEvaluation {
+  return {
+    verdict: 'unavailable',
+    generation,
+    maxGeneration: null,
+    unavailableReason: reason,
+  };
 }
 
 /**
@@ -292,21 +319,11 @@ export async function evaluateTurnFence(
       p_turn_id: handle.turnId,
     });
     if (error) {
-      return {
-        verdict: 'unavailable',
-        generation: null,
-        maxGeneration: null,
-        unavailableReason: `rpc_error: ${errMessage(error)}`,
-      };
+      return unavailable(`rpc_error: ${errMessage(error)}`);
     }
     payload = data;
   } catch (err) {
-    return {
-      verdict: 'unavailable',
-      generation: null,
-      maxGeneration: null,
-      unavailableReason: `rpc_threw: ${errMessage(err)}`,
-    };
+    return unavailable(`rpc_threw: ${errMessage(err)}`);
   }
   return classifyTurnFence(payload);
 }
@@ -319,12 +336,7 @@ export async function evaluateTurnFence(
  */
 export function classifyTurnFence(payload: unknown): TurnFenceEvaluation {
   if (payload === null || typeof payload !== 'object') {
-    return {
-      verdict: 'unavailable',
-      generation: null,
-      maxGeneration: null,
-      unavailableReason: 'malformed_payload',
-    };
+    return unavailable('malformed_payload');
   }
   const row = payload as {
     claimed?: unknown;
@@ -345,12 +357,7 @@ export function classifyTurnFence(payload: unknown): TurnFenceEvaluation {
     // The turn is claimed, so its own row is in the table and MAX cannot be
     // null. A null here means we misread the payload, not that the fence is
     // clear — never resolve that to `current`.
-    return {
-      verdict: 'unavailable',
-      generation,
-      maxGeneration,
-      unavailableReason: 'claimed_without_max_generation',
-    };
+    return unavailable('claimed_without_max_generation', generation);
   }
   if (generation < maxGeneration) {
     return { verdict: 'superseded', generation, maxGeneration };

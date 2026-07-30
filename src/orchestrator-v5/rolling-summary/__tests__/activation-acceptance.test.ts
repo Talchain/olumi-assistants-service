@@ -42,9 +42,9 @@ import {
 } from '../capture.js';
 import type { ConversationHistoryReader } from '../capture.js';
 import { buildConversationSummarySection, loadConversationSummaryForInjection } from '../inject.js';
-import type { RollingSummaryStorePort, UpsertRollingSummaryOutcome } from '../store-adapter.js';
+import type { RollingSummaryStorePort } from '../store-adapter.js';
 import type { SummariserModel } from '../summariser.js';
-import type { RollingSummary } from '../summary-types.js';
+import { MonotonicRollingSummaryStoreFake } from '../../../../tests/utils/rolling-summary-store-fake.js';
 
 const SCENARIO = 'aaaaaaaa-0000-4000-8000-000000000000';
 
@@ -85,19 +85,15 @@ function historyNewestFirst(n: number): SessionTurnWithContent[] {
   return turns.reverse();
 }
 
-/** In-memory monotonic singleton store (write path exercised for real). */
-class InMemoryStore implements RollingSummaryStorePort {
-  stored: RollingSummary | null = null;
-  loadCalls = 0;
-  async loadSummary(): Promise<RollingSummary | null> {
-    this.loadCalls += 1;
-    return this.stored;
-  }
-  async upsertSummary(_id: string, s: RollingSummary): Promise<UpsertRollingSummaryOutcome> {
-    this.stored = s;
-    return { applied: true, regressed: false, current_watermark: s.updated_turn_created_at };
-  }
-}
+/**
+ * R-2: the store is the SHARED monotonic fake
+ * (tests/utils/rolling-summary-store-fake.ts). This suite used to carry its
+ * own `InMemoryStore` twin whose comment claimed "monotonic" while its upsert
+ * applied UNCONDITIONALLY — a regressing write the unit tests forbid would
+ * have been silently accepted here and read as green. One definition, all
+ * consumers; the guard's bite in THIS suite is pinned by the positive control
+ * at the bottom of the file.
+ */
 
 /**
  * A summariser that DERIVES its four slots from the input it is given —
@@ -187,7 +183,7 @@ beforeEach(() => {
 
 describe('S4 activation — the 5-turn cliff is closed by the rolling summary', () => {
   it('beyond-window conversation: turn-1 fact falls off the verbatim window but arrives via the summary, disclosed', async () => {
-    const store = new InMemoryStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     // cap+3 turns → exactly 3 fall off the window whatever the cap (derive-don't-mirror).
     const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
 
@@ -224,7 +220,7 @@ describe('S4 activation — the 5-turn cliff is closed by the rolling summary', 
   });
 
   it('the summary is byte-bounded and passes the budget seam untouched (precedence: never trimmed)', async () => {
-    const store = new InMemoryStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
     await maintain(history, store, derivingModel());
 
@@ -250,7 +246,7 @@ describe('S4 activation — the 5-turn cliff is closed by the rolling summary', 
 
 describe('S4 activation — positive control (≤ window: byte-identical, no store read)', () => {
   it('4-turn conversation: no section, no summarised marker, no store read, prompt carries the fact verbatim', async () => {
-    const store = new InMemoryStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     const history = historyNewestFirst(4);
     await maintain(history, store, derivingModel());
     expect(store.stored).not.toBeNull(); // the maintain half DOES run below the window
@@ -282,7 +278,7 @@ describe('S4 activation — positive control (≤ window: byte-identical, no sto
     // carries NO `summarised` key at all — `summarised: 0` is reserved for
     // a PRESENT block that earned no coverage (floor / withheld); stamping
     // 0 here would falsely imply a block was injected.
-    const store = new InMemoryStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP);
     await maintain(history, store, derivingModel());
     expect(store.stored).not.toBeNull();
@@ -303,7 +299,7 @@ describe('S4 activation — positive control (≤ window: byte-identical, no sto
   });
 
   it('byte-identity: a ≤window assembly equals an assembly with no summary machinery threaded at all', async () => {
-    const store = new InMemoryStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     const history = historyNewestFirst(4);
     await maintain(history, store, derivingModel());
 
@@ -323,7 +319,7 @@ describe('S4 activation — positive control (≤ window: byte-identical, no sto
 
 describe('S4 activation — summarised marker never overclaims', () => {
   it('floor summary (model failed at bootstrap): section discloses itself, summarised is 0', async () => {
-    const store = new InMemoryStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     const history = historyNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
     const failing: SummariserModel = {
       summarise: vi.fn(async () => {
@@ -342,5 +338,38 @@ describe('S4 activation — summarised marker never overclaims', () => {
     expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
     expect(pack.conversation.window?.available).toBe(CONTEXT_PACK_RECENT_TURNS_CAP + 3);
     expect(pack.conversation.window?.summarised).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-2 positive control — the shared fake's guard BITES in this suite
+// ---------------------------------------------------------------------------
+
+describe('R-2 — the monotonic guard is live in this suite (not a comment)', () => {
+  it('a regressing maintain (older watermark) is REFUSED; the newer summary stands', async () => {
+    const store = new MonotonicRollingSummaryStoreFake();
+    const model = derivingModel();
+
+    // Advance the watermark to turn 8…
+    await maintain(historyNewestFirst(8), store, model);
+    expect(store.stored).not.toBeNull();
+    const newerWatermark = store.stored!.updated_turn_created_at;
+
+    // …then replay a maintain whose newest turn is OLDER (turn 6). The old
+    // local `InMemoryStore` twin applied this unconditionally — the exact
+    // regressing write the unit tests forbid. The shared fake refuses it.
+    resetRollingSummarySingleFlightForTests();
+    await maintain(historyNewestFirst(6), store, model);
+    expect(store.stored!.updated_turn_created_at).toBe(newerWatermark);
+
+    // Direct non-vacuity check on the same store instance: the refusal is
+    // reported, not silent.
+    const regressed = await store.upsertSummary(SCENARIO, {
+      ...store.stored!,
+      updated_turn_created_at: new Date(Date.UTC(2026, 6, 19, 10, 1, 0)).toISOString(),
+      updated_turn_id: 'tttttttt-0000-4000-8000-000000000001',
+    });
+    expect(regressed.applied).toBe(false);
+    expect(regressed.regressed).toBe(true);
   });
 });
