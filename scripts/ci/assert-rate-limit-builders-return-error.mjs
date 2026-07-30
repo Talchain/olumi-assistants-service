@@ -41,6 +41,35 @@
  * It therefore fails if it finds zero TypeScript files, zero importers of
  * `@fastify/rate-limit`, zero `register(rateLimit, …)` sites, or zero builders.
  *
+ * FAIL-OPEN CLOSURE (round-2 review). The blinding checks above only fire when
+ * NOTHING is found, so they cannot see a single evasive site hiding behind nine
+ * healthy ones. Two idiomatic TypeScript forms are invisible to the AST walk,
+ * which recognises only `errorResponseBuilder: <value>`:
+ *   - shorthand property   `{ errorResponseBuilder }`
+ *   - computed key         `{ [BUILDER]: … }`
+ * Rather than enumerate evasions — a hand-maintained mirror, the very defect
+ * class this guard exists for — the check DERIVES the contradiction: any file
+ * that registers the plugin AND contains the literal text `errorResponseBuilder`
+ * must yield at least one recognised builder, or it is reported UNVERIFIABLE.
+ * Requiring both conditions is what correctly excludes `src/utils/errors.ts`,
+ * which discusses the option in comments but registers nothing.
+ *
+ * ⚠ KNOWN LIMIT, stated rather than implied (round-2 review, E3). The return
+ * check is SYNTACTIC and NAME-BASED: it accepts `new <Something>Error(...)` by
+ * matching the constructor's name against /Error$/. A class that is *named*
+ * like an error but does NOT extend `Error` —
+ *
+ *     class RateLimitError { statusCode = 429 }   // NOT an Error
+ *     … errorResponseBuilder: () => new RateLimitError()
+ *
+ * — passes this guard and reproduces the original defect exactly, because
+ * `toErrorV1`'s `instanceof Error` test is what actually decides. Closing that
+ * needs real type resolution (`ts.Program` + a TypeChecker), which is a heavier,
+ * slower gate than this class of bug warrants; the agreed direction is a
+ * stricter CHEAP guard, not a heavier one. If you are writing a new builder:
+ * the thing you return must genuinely `extends Error`. `RateLimitedError` in
+ * `src/utils/errors.ts` does, and is what every site should use.
+ *
  * Run: node scripts/ci/assert-rate-limit-builders-return-error.mjs
  */
 
@@ -134,6 +163,8 @@ export function scanRateLimitErrorBuilders(srcRoot = DEFAULT_SRC) {
   const pluginFiles = [];
   const registrationSites = [];
   const builderSites = [];
+  /** Per-file facts, for the fail-OPEN closure below. */
+  const fileFacts = [];
 
   for (const file of files) {
     // Read as utf8: several CEE sources carry deliberate NUL sentinels, which
@@ -209,7 +240,35 @@ export function scanRateLimitErrorBuilders(srcRoot = DEFAULT_SRC) {
       ts.forEachChild(node, visit);
     };
     visit(sf);
+
+    fileFacts.push({
+      file: rel,
+      hasRegistration: registrationSites.some((r) => r.file === rel),
+      // Literal text, NOT the parsed property — that is the whole point: a form
+      // the AST walk does not recognise still leaves this string behind.
+      mentionsBuilderText: text.includes(BUILDER_PROP),
+      recognisedBuilderCount: builderSites.filter((b) => b.file === rel).length,
+    });
   }
+
+  // FAIL-OPEN CLOSURE (round-2 review, E1/E2). The AST walk only recognises
+  // `errorResponseBuilder: <value>` (`ts.isPropertyAssignment`). Two idiomatic
+  // TypeScript forms slip past it silently:
+  //   E1  shorthand      `{ errorResponseBuilder }`      (ShorthandPropertyAssignment)
+  //   E2  computed key   `{ [KEY]: … }`                  (ComputedPropertyName)
+  // Neither can be caught by the blinding controls, because those only fire when
+  // NOTHING is found — and nine good sites keep the totals healthy while an
+  // evasive tenth goes unchecked. So instead of enumerating evasions (a
+  // hand-maintained mirror of its own), derive the contradiction: a file that
+  // REGISTERS the plugin and CONTAINS the option name, yet yields zero
+  // recognised builders, is a file this guard cannot vouch for. Fail loud.
+  //
+  // Requiring BOTH conditions is what keeps `src/utils/errors.ts` out of it:
+  // that file discusses `errorResponseBuilder` at length in comments but
+  // registers nothing.
+  const unverifiableFiles = fileFacts.filter(
+    (f) => f.hasRegistration && f.mentionsBuilderText && f.recognisedBuilderCount === 0,
+  );
 
   return {
     srcRoot,
@@ -217,6 +276,8 @@ export function scanRateLimitErrorBuilders(srcRoot = DEFAULT_SRC) {
     pluginFiles: [...new Set(pluginFiles)].sort(),
     registrationSites,
     builderSites,
+    fileFacts,
+    unverifiableFiles,
     violations: builderSites.filter((s) => !s.ok),
   };
 }
@@ -248,6 +309,17 @@ export function checkRateLimitErrorBuilders(srcRoot = DEFAULT_SRC) {
     errors.push(
       `SCANNER BLINDED: no \`${BUILDER_PROP}\` found under ${scan.srcRoot}. ` +
         `If the plugin renamed this option, this guard is no longer guarding anything.`,
+    );
+  }
+
+  // --- Fail-OPEN closure: a file this guard cannot vouch for (E1/E2). ---
+  for (const f of scan.unverifiableFiles) {
+    errors.push(
+      `${f.file} — UNVERIFIABLE: this file registers @fastify/rate-limit AND contains the text ` +
+        `"${BUILDER_PROP}", but no builder in a form this guard can check. Shorthand ` +
+        `(\`{ ${BUILDER_PROP} }\`) and computed keys (\`{ [KEY]: … }\`) are NOT checkable — ` +
+        `write it as a literal \`${BUILDER_PROP}: (req, context) => new RateLimitedError(…)\`. ` +
+        `Silently trusting this file is how the original defect shipped.`,
     );
   }
 

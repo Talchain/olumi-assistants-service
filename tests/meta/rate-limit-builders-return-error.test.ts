@@ -37,11 +37,19 @@ interface BuilderSite {
   ok: boolean;
   reason: string;
 }
+interface FileFacts {
+  file: string;
+  hasRegistration: boolean;
+  mentionsBuilderText: boolean;
+  recognisedBuilderCount: number;
+}
 interface Scan {
   tsFileCount: number;
   pluginFiles: string[];
   registrationSites: Array<{ file: string; line: number }>;
   builderSites: BuilderSite[];
+  fileFacts: FileFacts[];
+  unverifiableFiles: FileFacts[];
   violations: BuilderSite[];
 }
 interface Guard {
@@ -76,6 +84,46 @@ describe("derived guard: rate-limit errorResponseBuilder must return an Error", 
     // …and it is the raw builder that is flagged, not the conforming one.
     expect(joined).toMatch(/raw-builder\.ts/);
     expect(joined).not.toMatch(/conforming-builder\.ts/);
+  });
+
+  // FAIL-OPEN CONTROLS (round-2 review, E1/E2). The AST walk recognises only
+  // `errorResponseBuilder: <value>`. A shorthand property or a computed key is
+  // idiomatic TypeScript and slips past it — and the blinding controls below
+  // CANNOT catch that, because they only fire when nothing at all is found. Each
+  // fixture directory therefore also contains a CONFORMING builder, so the
+  // totals look healthy and only the per-file contradiction can catch it. That
+  // is the real-world shape: nine good sites and one evasive tenth.
+  it.each([
+    ["shorthand `{ errorResponseBuilder }`", "rate-limit-guard-shorthand", "shorthand-builder.ts"],
+    ["computed key `{ [KEY]: … }`", "rate-limit-guard-computed", "computed-builder.ts"],
+  ])("REDs on an unverifiable builder form: %s", (_label, dir, offender) => {
+    const { scan, errors } = guard.checkRateLimitErrorBuilders(join(FIXTURES, dir));
+
+    // Non-vacuity of the control itself: a healthy site IS present, so this
+    // cannot be passing via a blinding error.
+    expect(scan.builderSites.length).toBeGreaterThan(0);
+
+    expect(errors.length).toBeGreaterThan(0);
+    const joined = errors.join("\n");
+    expect(joined).toMatch(/UNVERIFIABLE/);
+    expect(joined).toContain(offender);
+    expect(joined).not.toMatch(/SCANNER BLINDED/);
+    expect(joined).not.toMatch(/conforming-builder\.ts/);
+  });
+
+  it("does not flag a file that only DISCUSSES the option (src/utils/errors.ts)", () => {
+    // The closure keys on `registers the plugin` AND `mentions the option`.
+    // `src/utils/errors.ts` documents `errorResponseBuilder` at length but
+    // registers nothing — it must stay out of the unverifiable set, or the
+    // guard becomes a false-positive generator that people learn to ignore.
+    const scan = guard.scanRateLimitErrorBuilders();
+    const errorsTs = scan.fileFacts.find((f) => f.file === "src/utils/errors.ts");
+
+    expect(errorsTs, "src/utils/errors.ts was not scanned at all").toBeDefined();
+    expect(errorsTs!.mentionsBuilderText).toBe(true);
+    expect(errorsTs!.hasRegistration).toBe(false);
+    expect(scan.unverifiableFiles.map((f) => f.file)).not.toContain("src/utils/errors.ts");
+    expect(scan.unverifiableFiles).toEqual([]);
   });
 
   // The scanner must HARD-FAIL when blinded, never pass by finding nothing.
