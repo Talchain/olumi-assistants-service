@@ -9,6 +9,29 @@
  */
 
 // ============================================================================
+// Wire keys — the ONLY two keys this pipeline writes onto the graph
+// ============================================================================
+
+/**
+ * The per-edge key {@link ValidationMetadata} is attached under
+ * (`edge.validation`), and the graph-level key {@link GraphValidationSummary}
+ * is attached under (`graph.validation_summary`).
+ *
+ * These exist as constants because a SECOND module needs to name the same two
+ * keys: the staged GRAPH_READY projection strips them so that frame's
+ * "structure only" claim holds BY CONSTRUCTION rather than by winning a race
+ * against the Pass-2 call (see unified-pipeline/staged-graph-projection.ts).
+ * A hand-copied string literal in that module would be a mirror of this one
+ * (CLAUDE.md trap 12) and would drift silently on a rename; importing the
+ * constant means a rename fails to compile instead.
+ *
+ * The writes in ./index.ts use these same constants, so this module is the
+ * single source rather than a third copy.
+ */
+export const VALIDATION_EDGE_METADATA_KEY = 'validation' as const;
+export const VALIDATION_GRAPH_SUMMARY_KEY = 'validation_summary' as const;
+
+// ============================================================================
 // Enumerated string-literal types
 // ============================================================================
 

@@ -664,6 +664,17 @@ export async function runUnifiedPipeline(
     return attachDraftGraphTimings(body, timings, ctx.requestId);
   };
 
+  // ── Validation pipeline (Pass 2) handle — HOISTED DELIBERATELY (2.146) ─────
+  // Declared out here, not at its fire site inside the try, for exactly one
+  // reason: after 2.146 the await sits AFTER the coaching pass, so there is a
+  // ~20 s window in which an unexpected throw from a stage could unwind to the
+  // outer catch with the promise still in flight and still holding a pending
+  // write to `ctx.pipelineOutcome.validation_status`. Hoisting lets the outer
+  // catch drain it before the error body is finalised — see the catch block.
+  // `Promise.resolve()` is the correct initial value: the flag-off path and every
+  // pre-fire failure then await nothing.
+  let validationPromise: Promise<void> = Promise.resolve();
+
   try {
     // Stage 1: Parse — LLM draft + adapter normalisation
     const t1 = stageStart();
@@ -858,11 +869,35 @@ export async function runUnifiedPipeline(
     ctx.stageSnapshots.stage_4_repair = captureStageSnapshot(ctx);
 
     // Validation pipeline (Pass 2) — fired immediately after Repair, runs
-    // concurrently with Stage 4b. Uses catch() so Stage 4b is never blocked
-    // by validation errors. Awaited before Stage 5 so metadata is ready.
-    const tValidation = stageStart();
-    let validationPromise: Promise<void>;
+    // concurrently with Stage 4b. Uses catch() so nothing downstream is ever
+    // blocked by validation errors.
+    //
+    // ⚠ AWAITED AFTER THE COACHING PASS, NOT HERE (ROADMAP 2.146). See the await
+    // site below for the full argument; the short version is that Pass 2 costs
+    // 10–25 s (30 s cap) and the coaching pass costs ~19.8 s, and the metadata's
+    // only consumer is Stage 5 (Package) — so overlapping the two hides almost
+    // all of Pass 2 behind latency the draft was already paying.
+    //
+    // ⚠ THE TIMER IS SCOPED TO THE FLAG-ON ARM, AND THAT IS A FIX, NOT A TIDY-UP
+    // (review A1 on #758). It used to start HERE, outside the branch, with
+    // `stageElapsed` read at the await site — which was harmless while the await
+    // sat 10 lines below and became a lie the moment the await moved behind the
+    // coaching pass: the window then spanned Stage 4b + GRAPH_READY + the whole
+    // ~19.8 s coaching pass, so a FLAG-OFF turn reported ~19,800 ms of
+    // "validation" for a pipeline that never ran (measured ratio 1.00 against a
+    // forced 150 ms coaching pass). That is worse than a missing number, because
+    // it reads as a measurement — and it is the number the A/B probe's Phase-1
+    // gate is judged on, so both arms would have reported sweep+coaching and the
+    // Pass-2 cost would have cancelled to ~0 by construction.
+    //
+    // Now: the flag-ON arm owns its own timer and records at SETTLEMENT, so the
+    // field means what its name claims — how long Pass 2 itself took, wherever the
+    // await happens to sit. The flag-OFF arm reports an explicit 0. Declaring
+    // `tValidation` inside the branch is what makes the old bug structurally
+    // impossible to reintroduce: move the await again and the compiler, not a
+    // reviewer, catches it.
     if (config.cee.validationPipelineEnabled) {
+      const tValidation = stageStart();
       validationPromise = runValidationPipeline(ctx).then(() => {
         ctx.pipelineOutcome.validation_status = 'passed';
       }).catch((err: unknown) => {
@@ -883,12 +918,23 @@ export async function runUnifiedPipeline(
           error: err instanceof Error ? err.message : String(err),
           degraded: true,
         });
+      }).finally(() => {
+        // Recorded at SETTLEMENT, not at the await — so the number is Pass 2's own
+        // wall time (concurrent with Stage 4b) and is independent of where the
+        // await sits. `.finally` rather than a copy in both handlers: two
+        // `stageElapsed` calls would be a mirror of each other, and the one that
+        // drifts is always the error arm nobody exercises.
+        timings.validation_pipeline_ms = stageElapsed(tValidation);
       });
     } else {
       log.debug(
         { event: "cee.validation_pipeline.skipped", request_id: ctx.requestId },
         "cee.validation_pipeline.skipped",
       );
+      // EXPLICIT 0, not an unmeasured window. The pipeline did not run, so the
+      // truthful duration is zero; `stageElapsed` of anything here would be a
+      // small nonzero number that invites exactly the misreading A1 caught.
+      timings.validation_pipeline_ms = 0;
       validationPromise = Promise.resolve();
     }
 
@@ -913,17 +959,19 @@ export async function runUnifiedPipeline(
     timings.threshold_sweep_ms = stageElapsed(t4b);
     ctx.stageSnapshots.stage_4b_threshold_sweep = captureStageSnapshot(ctx);
 
-    // Await Pass 2 before Stage 5 (Package) so validation metadata is present
-    // on edges when the response is assembled.
-    await validationPromise;
-    timings.validation_pipeline_ms = stageElapsed(tValidation);
-
     // ── GRAPH_READY (ROADMAP 1.204 M1) ────────────────────────────────────
-    // The graph is repaired and validated HERE, and the ~20 s coaching pass has
-    // not started — this is the point the 28 Jul live probe measured at ~33 s of
-    // a ~53 s draft. Emitting here is what turns one silent blob into staged
-    // delivery, and it needs NO reordering: the split the design asked for
-    // already exists in the current stage order.
+    // The graph is repaired HERE, and the ~20 s coaching pass has not started —
+    // this is the point the 28 Jul live probe measured at ~33 s of a ~53 s draft.
+    // Emitting here is what turns one silent blob into staged delivery, and it
+    // needs NO reordering: the split the design asked for already exists in the
+    // current stage order.
+    //
+    // ⚠ "and validated" was DROPPED from the line above by ROADMAP 2.146. Pass 2
+    // is no longer awaited before this frame — it is awaited after the coaching
+    // pass, so its 10–25 s hides behind the coaching tax instead of landing on
+    // graph_ready. The frame's MEANING is unchanged (repaired structure, values
+    // still settle at the terminal frame); what changed is that it no longer
+    // waits for an enrichment nothing in the frame carries.
     //
     // ⚠ The design's Q3 CEE-1 also said "reorder coaching after package+
     // boundary". That is REFUTED and deliberately NOT done: Stage 5 (Package)
@@ -937,6 +985,13 @@ export async function runUnifiedPipeline(
     // Claim-safety: `ctx.coaching` and `ctx.causalClaims` are still undefined at
     // this line, so this frame cannot carry a leader designation, a
     // recommendation, or any analysis claim. Structure only, by construction.
+    //
+    // ⚠ 2.146 — the SECOND half of "structure only" is now enforced rather than
+    // timed. With Pass 2 no longer awaited above, the validation pipeline can
+    // attach per-edge Pass-2 REASONING PROSE to `ctx.graph` at any moment while
+    // this line runs (it mutates edges in place). `projectGraphForStagedFrame`
+    // therefore STRIPS the validation pipeline's two keys unconditionally — see
+    // staged-graph-projection.ts. Racing for a claim is not holding a claim.
     //
     // ⚠ The graph is projected into the NEGOTIATED SCHEMA VOCABULARY before it
     // goes on the wire. Emitting the raw V1 `ctx.graph` here would be a silent
@@ -978,6 +1033,54 @@ export async function runUnifiedPipeline(
         elapsed_ms: Date.now() - ctx.start,
       });
     }
+
+    // ── AWAIT PASS 2 (ROADMAP 2.146) ──────────────────────────────────────
+    // THE LATENCY CONDITION OF THE CONTESTED-EDGE FLIP, and this is its whole
+    // implementation. Pass 2 was fired ~20 s ago, immediately after Repair; it
+    // has been running THROUGHOUT the coaching pass. Awaiting it here rather than
+    // before GRAPH_READY is what makes the flip affordable:
+    //
+    //   before: graph_ready = repair + PASS2(10–25 s) ; total = +PASS2
+    //   after:  graph_ready = repair                  ; total = +max(0, PASS2 − COACHING)
+    //
+    // With COACHING ~19.8 s measured (n=40) and PASS2 capped at
+    // CEE_VALIDATION_TIMEOUT_MS (30 s default), the typical case adds ~0 to BOTH
+    // numbers and the worst case adds ~10 s to the total only. Nothing before
+    // this line consumes validation metadata: Stage 5 (Package) is its only
+    // reader (`ctx.validationSummary` → trace; `edge.validation` rides the graph),
+    // and the coaching pass cannot see it — `projectStructuralGraph`
+    // (coaching-pass.ts) whitelists node {id,kind,label} and edge {from,to}, so
+    // the coaching prompt's bytes are invariant to whether Pass 2 has landed.
+    // That whitelist is the reason this overlap is safe rather than merely quick.
+    //
+    // ⚠ WRITERS, not just readers (review R3) — because the drain argument below is
+    // an argument about write ORDERING, and a reader-only manifest is its weaker
+    // half. `ctx.validationSummary` has THREE writers, in this order:
+    // `stages/repair/connectivity.ts:107` and `:124` (Stage 4, before the fire),
+    // then `validation-pipeline/index.ts:239` (Pass 2, which OVERWRITES them).
+    // Package reads at `stages/package.ts:802`, still downstream of this await, so
+    // the ordering is deterministic and 2.146 does not change it — but the fact
+    // that Pass 2 clobbers a Stage-4 write is the reason the await must stay
+    // BEFORE Package rather than merely "somewhere after coaching".
+    //
+    // ⚠ WHAT THIS AWAIT CAN DO, STATED WITH ITS PRECONDITION (review A2). The
+    // promise carries its own `.catch()` at the fire site, so it cannot reject for
+    // any reason Pass 2 itself produces — PRECONDITION: that the `.catch()`
+    // handler does not itself throw. It cannot today
+    // (`ctx.pipelineOutcome.warnings` is initialised `[]` at :131, so the `push`
+    // is safe), which makes this path unreachable rather than merely unlikely. The
+    // earlier wording here said "cannot throw" flat, which was an absolute claim
+    // resting on a fact two files away — the kind of sentence that stays in the
+    // record after the fact stops being true. If the handler ever does throw, this
+    // await rejects into the outer catch and is handled there as a degradation
+    // (and the drain at that site is now rejection-proof — see it for why that
+    // matters more than this).
+    //
+    // The timing is NOT recorded here any more: it is recorded at the promise's
+    // own settlement, in the `.finally` at the fire site. That is what makes
+    // `validation_pipeline_ms` mean Pass 2's duration rather than "whatever
+    // elapsed before someone chose to await" — review A1.
+    await validationPromise;
 
     // Stage 5: Package — Quality + warnings + caps + trace
     // Soft gate: both the verification pipeline inside Package and the
@@ -1072,6 +1175,32 @@ export async function runUnifiedPipeline(
   } catch (error) {
     // Pre-sweep failures (Stage 1-3) or unexpected errors still map to error responses.
     // Post-sweep failures are caught by the stage-level try/catch above.
+    //
+    // ⚠ 2.146 — DRAIN PASS 2 BEFORE BUILDING THE ERROR BODY. After the await
+    // moved behind the coaching pass there is a ~20 s window in which a throw can
+    // reach here with the validation promise still in flight, still holding a
+    // pending write to `ctx.pipelineOutcome.validation_status`.
+    //
+    // Precisely what goes wrong without this, stated no stronger than it is:
+    // `attachPipelineOutcome` assigns the outcome BY REFERENCE, so a late write
+    // is not *lost* — it is NONDETERMINISTIC. Whether the wire carries
+    // `validation_status: 'passed' | 'failed_degraded'` or `null` then depends on
+    // whether the promise settles before or after the framework serialises the
+    // body. A field whose value depends on that is worse than a missing one,
+    // because it reads as a measurement. Draining makes it deterministic.
+    //
+    // Free on the flag-off path (`Promise.resolve()`).
+    //
+    // ⚠ `.catch(() => {})` IS LOAD-BEARING, NOT BELT-AND-BRACES (review A2). If we
+    // reached here BECAUSE the await at the main site rejected — which needs the
+    // fire site's own `.catch()` handler to have thrown — then awaiting the same
+    // already-rejected promise a second time would reject INSIDE this catch block
+    // and propagate out of `runUnifiedPipeline` as an unhandled rejection. A
+    // handled degradation would become a crash, on the one escape path the
+    // relocation created. Swallowing here is correct: the error that brought us
+    // into this catch is the one being reported, and a second copy of it must not
+    // replace the response with a stack trace.
+    await validationPromise.catch(() => {});
     const result = mapPipelineError(error, ctx);
     attachPipelineOutcome(result.body, ctx.pipelineOutcome);
     finalise(result.body);

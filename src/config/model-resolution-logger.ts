@@ -52,6 +52,12 @@ const TASK_TO_LEGACY_MODEL_KEY: Partial<Record<CeeTask, keyof typeof config.cee.
   orchestrator: 'orchestrator',
   edit_graph: 'edit_graph',
   m2_graph_review: 'm2_review', // V6 dual-draft M2 review (CEE_MODEL_M2_REVIEW)
+  // Validation Pass 2 (CEE_MODEL_VALIDATION). Listed for the LOUD FALLBACK below,
+  // not for cosmetics: with the pipeline live (ROADMAP 2.146) a dropped or
+  // never-set CEE_MODEL_VALIDATION means the independent reviewer is running on
+  // the checked-in default, and that must be VISIBLE in startup logs rather than
+  // inferred. Mirrors TASK_TO_CONFIG_KEY's 'validate_graph' → 'validation' row.
+  validate_graph: 'validation',
 };
 
 function resolveTaskModel(task: CeeTask): { model: string; source: ModelSource } {
