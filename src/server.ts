@@ -62,6 +62,7 @@ import { getRecentCeeErrors } from "./cee/logging.js";
 import { resolveCeeRateLimit } from "./cee/config/limits.js";
 import { HTTP_CLIENT_TIMEOUT_MS, ROUTE_TIMEOUT_MS, UPSTREAM_RETRY_DELAY_MS, DRAFT_REQUEST_BUDGET_MS, LLM_POST_PROCESSING_HEADROOM_MS, DRAFT_LLM_TIMEOUT_MS, getResolvedTimeouts, validateTimeoutRelationships, getAffordableDraftTokens, validateDraftTokenAffordability } from "./config/timeouts.js";
 import { getTurnExecutorBudgets, getHandlerBudgetMs } from "./orchestrator-v5/budgets.js";
+import { resolveDecisionReviewHardBudgetMs } from "./orchestrator-v5/coaching/decision-review-enricher.js";
 import { getISLConfig } from "./adapters/isl/config.js";
 import { getIslCircuitBreakerStatusForDiagnostics } from "./cee/bias/causal-enrichment.js";
 import { ceeOrchestratorRouteV2 } from "./orchestrator/route-v2.js";
@@ -341,6 +342,11 @@ export async function build() {
     handlerBudgetMs: getHandlerBudgetMs(),
     turnBudgetMs: getTurnExecutorBudgets().turn_ms,
     browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+    // ROADMAP 2.180-B: the budget ACTUALLY ARMED on this instance, resolved
+    // against the live decompose posture — not the raw constant.
+    decisionReviewHardBudgetMs: resolveDecisionReviewHardBudgetMs(
+      config.cee.decisionReviewDecompose,
+    ),
   });
   for (const warning of timeoutWarnings) {
     log.warn({ event: 'config.timeout_relationship' }, warning);

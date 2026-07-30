@@ -109,19 +109,123 @@ export const EXPLAIN_DIFF_TIMEOUT_MS = clampTimeout(
 );
 
 /**
- * Decision-review auto-fire LLM call timeout (default: 22s, clamped 5s-5m).
+ * Decision-review auto-fire LLM call timeout (default: 30s, clamped 5s-5m).
  * V5 Group 1 Task B: the decision_review call fires synchronously after a
  * successful run_analysis with this hard timeout. On timeout the turn still
  * succeeds with thin content (decision_review enrichment absent).
  *
- * ROADMAP 2.73 Fix B: default raised 15s -> 22s. The 15-Jul Paul-session
- * RCA (RC5) observed the call aborting at 15,002ms — a coin flip against
- * observed gpt-4.1 latencies of ~9.7-11.6s. Staging already runs 22s via
- * an env override; raising the CODE default means environments without
- * the override (e.g. prod) do not silently re-inherit the coin flip.
+ * History: 15s -> 22s (ROADMAP 2.73 Fix B, after the 15-Jul RCA observed the
+ * call aborting at 15,002ms) -> 30s (ROADMAP 2.180-B, below).
+ *
+ * ── ROADMAP 2.180-B: 22,000 -> 30,000. Not a guess and not a doubling. ──────
+ *
+ * THE DEFECT. The 22 s wall sat INSIDE the call's own working latency
+ * distribution, so it did not trim a pathological tail — it cut healthy calls
+ * in half. Measured from CEE Render logs 27-30 Jul, n=128 completions
+ * (PHASE0-EVIDENCE-2026-07-28/reset-suppression-probe-2180-raw/
+ * decision-review-durations-27to30jul.txt): min 4,825 / p50 7,178 / p95 15,766 /
+ * max 19,802 ms, against failures at 22,003 and 22,007 ms. Persisted storage
+ * over 14 days: 12 of 363 run_analysis facts shipped no review (3.3% pooled,
+ * 24% on the worst day), and every one of the 6 attributable cases was this
+ * timeout.
+ *
+ * ⚠ THE SAMPLE IS RIGHT-CENSORED AT THE VALUE BEING REVIEWED. The 22 s wall
+ * truncates the very distribution used to size its replacement: "max success
+ * 19,802" is the maximum BELOW the censoring point, and the two failures are
+ * observations of unknown true duration >= 22,000. Sizing this constant as
+ * "observed max + margin" would re-fit the budget to a sample the old budget
+ * shaped. So the floor below is built on the SPREAD, not on the max.
+ *
+ * ── FLOOR: what the task needs ──────────────────────────────────────────────
+ * The two live captures (probe4-A / probe4-B) show the WORK is near-constant —
+ * 9,807 in / 972 out tokens in 7,992 ms, and 9,601 in / 901 out tokens in
+ * 10,169 ms. Capture B produced 7% FEWER output tokens and took 27% LONGER
+ * (88.6 vs 121.6 output tok/s). What varies is provider throughput, not the
+ * amount of work. Across n=128 the observed spread is 19,802 / 4,825 = 4.10x,
+ * and censoring makes 4.10x a LOWER bound on the true spread.
+ *
+ * A budget must therefore cover the TYPICAL call slowed by at least the
+ * slowdown factor we have already directly observed:
+ *   p50 7,178 ms x 4.104 = 29,459 ms.
+ * (Deliberately p50 x spread, not min x spread: sizing off the luckiest call
+ * is what produces a budget that only the lucky clear.)
+ *
+ * ── CEILING: what the turn can afford ───────────────────────────────────────
+ * The binding outer bound is the V5 turn abort, `budgets.turn_ms` =
+ * min(TURN_BUDGET_MS 180 s, browserProxyTimeoutMs 125 s - TURN_RESPONSE_HEADROOM_MS
+ * 10 s) = 115,000 ms (orchestrator-v5/budgets.ts). Both legs that reach the
+ * enricher arm a timer at that same value (turn-executor.ts:1102,
+ * chip-click-dispatch.ts:546-547) and the await is strictly serial on both.
+ *
+ * ⚠ THE NOMINAL LADDER IS ALREADY OVER-SUBSCRIBED, AND THAT IS NOT THIS
+ * CHANGE'S DOING. On the TurnExecutor leg the two inner budgets that must both
+ * complete before the enricher are routing (ORCHESTRATOR_TIMEOUT_MS 30,000) and
+ * the handler (getHandlerBudgetMs() 85,000) — and 30,000 + 85,000 = 115,000 is
+ * turn_ms EXACTLY. So at nominal worst case NO decision_review budget of any
+ * size is affordable, and that was equally true at the old 22,000. Rung 2 of
+ * `validateTimeoutRelationships` only checks handler < turn, so it certifies
+ * headroom that routing then consumes in full. Recorded as a separate
+ * pre-existing finding; a ceiling derived from the nominal ladder alone would
+ * be 0 and therefore useless.
+ *
+ * The ceiling below is therefore derived by charging the one term that can
+ * legitimately run long AND still yield a review at its full structural cap,
+ * and the rest at measurement:
+ *
+ *  - PLOT_RUN_TIMEOUT_MS (75,000). decision_review only exists on a turn whose
+ *    run_analysis SUCCEEDED, and a successful PLoT /v2/run cannot exceed it.
+ *    Charged in full: PLoT cost scales with graph size (measured 2.12 s at
+ *    8 nodes → 12.54 s at 26 — see the PLOT_RUN_TIMEOUT_MS note above).
+ *  - PROMPT_STORE_FETCH_TIMEOUT_MS (5,000). `invoke.ts` fetches the
+ *    decision_review system prompt INSIDE the enricher's try but passes it
+ *    neither the signal nor the timeout, so on a cold prompt cache the await
+ *    costs up to hardBudget + 5,000. The hard timer does not bound it.
+ *  - Routing (30,000 nominal) charged at measurement, not at cap: it is a small
+ *    classification call, the whole non-review turn work measured 5,109 and
+ *    10,847 ms INCLUDING PLoT and routing, and the chip-click leg — the leg both
+ *    live captures took, and the one the Run-analysis chip uses — makes NO
+ *    routing call at all (chip-click-dispatch.ts, "Chip-click bypasses the
+ *    routing layer").
+ *
+ *   resolveDecisionReviewHardBudgetMs(decomposeOff) + PROMPT_STORE_FETCH_TIMEOUT_MS
+ *       <= turn_ms - PLOT_RUN_TIMEOUT_MS
+ *   30,000 + 5,000 = 35,000  <=  115,000 - 75,000 = 40,000     ✔ 5,000 ms clear
+ *
+ * => the admissible interval is [29,459 , 35,000]. 30,000 is the round value
+ * inside it, above the floor and holding 5,000 ms of ceiling margin; 22,000 was
+ * BELOW the floor. Pinned both ways in
+ * src/orchestrator-v5/coaching/__tests__/decision-review-budget-2180b.test.ts,
+ * with the ceiling DERIVED from `getTurnExecutorBudgets()` and the constants
+ * rather than restating 115,000 or 40,000.
+ *
+ * ⚠ THE DECOMPOSE FLAG BREACHES THIS CEILING, AND NOW SAYS SO. With
+ * CEE_DECISION_REVIEW_DECOMPOSE on, the armed budget is
+ * DECISION_REVIEW_TIMEOUT_MS + DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS = 38,000, and
+ * 38,000 + 5,000 = 43,000 > 40,000. That flag is one env write away, so the
+ * breach must not be silent: `validateTimeoutRelationships` gained a rung that
+ * evaluates the budget ACTUALLY IN FORCE against this inequality and warns at
+ * BOOT (the M2_REVIEW_TIMEOUT_MS rung is the precedent). Enabling decompose is
+ * a re-budget, not a flag flip.
+ *
+ * ⚠ WHAT THIS CEILING DOES **NOT** CLAIM. It is not a proof that a turn can
+ * never exceed turn_ms — see the over-subscription note above. On such a turn
+ * the OUTER signal aborts first, the enricher rethrows (it does not degrade),
+ * and the executor returns a typed TURN_BUDGET_EXCEEDED. That path is unchanged
+ * here. The ceiling's job is narrower and is stated exactly: never grant the
+ * review more time than the turn can still be holding after its slowest LEGAL
+ * SUCCESSFUL analysis plus a cold prompt fetch.
+ *
+ * ⚠ AND 30,000 MAY STILL NOT BE ENOUGH — that is a property of the problem, not
+ * a defect in this number. The true tail is unobservable while the budget
+ * censors it. This is why 2.180-B also makes the loss LOUD
+ * (`v5.decision_review_degraded` now fires on the internal timeout, carrying
+ * elapsed_ms and budget_ms — decision-review-enricher.ts): the residual loss
+ * rate at 30 s becomes measurable instead of inferred. If loss persists, the
+ * next lever is NOT more static budget — the ceiling above leaves only 2,000 ms
+ * — it is the decomposed (parallel) path or a deadline-aware budget.
  */
 export const DECISION_REVIEW_TIMEOUT_MS = clampTimeout(
-  parseTimeoutEnv("DECISION_REVIEW_TIMEOUT_MS", 22_000),
+  parseTimeoutEnv("DECISION_REVIEW_TIMEOUT_MS", 30_000),
 );
 
 /**
@@ -1070,6 +1174,19 @@ export interface BudgetLadderInputs {
   turnBudgetMs: number;
   /** Browser-proxy deadline — `config.proxy.browserProxyTimeoutMs`. */
   browserProxyTimeoutMs: number;
+  /**
+   * ROADMAP 2.180-B. The decision_review hard-abort budget ACTUALLY IN FORCE —
+   * `resolveDecisionReviewHardBudgetMs(config.cee.decisionReviewDecompose)`,
+   * NOT the raw `DECISION_REVIEW_TIMEOUT_MS`. The two differ by
+   * DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS whenever CEE_DECISION_REVIEW_DECOMPOSE is
+   * on, which is one env write away, and a rung that checked the raw constant
+   * would certify a budget the service is not actually running.
+   *
+   * Injected for the same reason as the two above: `timeouts.ts` is kept
+   * import-light and cannot reach the enricher (which imports it) or
+   * `config.cee.*` without a cycle.
+   */
+  decisionReviewHardBudgetMs: number;
 }
 
 /**
@@ -1185,6 +1302,48 @@ export function validateTimeoutRelationships(ladder: BudgetLadderInputs): string
       `LLM_BUDGET_HANDLER_MS (${ladder.handlerBudgetMs}ms) >= resolved V5 turn budget (${ladder.turnBudgetMs}ms) — ` +
       `the per-handler inner budget is not nested inside the outer turn budget, so the turn's wall-clock abort ` +
       `will fire before a handler can return its own typed error`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // ROADMAP 2.180-B — the decision_review budget vs the turn ceiling.
+  //
+  // WHY THIS RUNG EXISTS. Before it, NOTHING checked the decision_review budget
+  // against the turn it has to fit inside — not this function, not CI, not a
+  // test. The budget could be raised by env to any value up to `clampTimeout`'s
+  // 300,000 ms and the only symptom would be turns dying at the outer abort with
+  // a generic TURN_BUDGET_EXCEEDED, with nothing anywhere naming the cause. The
+  // M2_REVIEW_TIMEOUT_MS rung above is the precedent and the same shape.
+  //
+  // WHAT IT ASSERTS. The budget actually armed, plus the prompt fetch the hard
+  // timer does NOT bound (`invoke.ts` calls `getSystemPrompt('decision_review')`
+  // inside the enricher's try but hands it neither the signal nor the timeout,
+  // so a cold cache adds up to PROMPT_STORE_FETCH_TIMEOUT_MS), must still fit in
+  // what the turn is holding after its slowest LEGAL SUCCESSFUL analysis — a
+  // successful PLoT /v2/run cannot exceed PLOT_RUN_TIMEOUT_MS.
+  //
+  // It is DERIVED, not mirrored: raising PLOT_RUN_TIMEOUT_MS or lowering
+  // BROWSER_PROXY_TIMEOUT_MS by env tightens it automatically, which is the
+  // point of asserting at boot rather than at repo defaults (both ends are
+  // env-overridable — see the header of this block).
+  //
+  // ⚠ IT IS A CEILING, NOT A SUFFICIENCY PROOF. The nominal inner budgets
+  // (ORCHESTRATOR_TIMEOUT_MS 30,000 routing + handler 85,000) already sum to
+  // turn_ms exactly, so no decision_review budget is affordable at nominal worst
+  // case — a pre-existing over-subscription this rung deliberately does not
+  // restate, because a rung that always fires is a broken alarm.
+  const decisionReviewCeilingMs = ladder.turnBudgetMs - PLOT_RUN_TIMEOUT_MS;
+  const decisionReviewChargeMs =
+    ladder.decisionReviewHardBudgetMs + PROMPT_STORE_FETCH_TIMEOUT_MS;
+  if (decisionReviewChargeMs > decisionReviewCeilingMs) {
+    warnings.push(
+      `decision_review hard budget (${ladder.decisionReviewHardBudgetMs}ms) + PROMPT_STORE_FETCH_TIMEOUT_MS ` +
+      `(${PROMPT_STORE_FETCH_TIMEOUT_MS}ms) = ${decisionReviewChargeMs}ms > resolved V5 turn budget ` +
+      `(${ladder.turnBudgetMs}ms) - PLOT_RUN_TIMEOUT_MS (${PLOT_RUN_TIMEOUT_MS}ms) = ${decisionReviewCeilingMs}ms — ` +
+      `after a full-length successful PLoT analysis the turn cannot hold a full-length decision_review, so the ` +
+      `outer turn abort will fire mid-review and the turn fails with TURN_BUDGET_EXCEEDED instead of degrading ` +
+      `to thin content. Lower DECISION_REVIEW_TIMEOUT_MS, or note that CEE_DECISION_REVIEW_DECOMPOSE adds ` +
+      `its fallback floor on top of it`,
     );
   }
 

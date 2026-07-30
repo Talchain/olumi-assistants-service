@@ -59,12 +59,19 @@ describe("Request budget configuration", () => {
   it("validateTimeoutRelationships checks budget vs route timeout", async () => {
     const { validateTimeoutRelationships } = await import("../../src/config/timeouts.js");
     const { getHandlerBudgetMs, getTurnExecutorBudgets } = await import("../../src/orchestrator-v5/budgets.js");
+    const { resolveDecisionReviewHardBudgetMs } = await import(
+      "../../src/orchestrator-v5/coaching/decision-review-enricher.js",
+    );
     const { config } = await import("../../src/config/index.js");
     // Just verify the function runs without throwing and returns an array
     const warnings = validateTimeoutRelationships({
       handlerBudgetMs: getHandlerBudgetMs(),
       turnBudgetMs: getTurnExecutorBudgets().turn_ms,
       browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+      // ROADMAP 2.180-B — resolved through the single-source function, not a literal.
+      decisionReviewHardBudgetMs: resolveDecisionReviewHardBudgetMs(
+        config.cee.decisionReviewDecompose,
+      ),
     });
     expect(Array.isArray(warnings)).toBe(true);
     // All items should be strings
@@ -88,6 +95,9 @@ describe("Request budget configuration", () => {
     expect(DRAFT_LLM_TIMEOUT_MS).toBe(DRAFT_REQUEST_BUDGET_MS - LLM_POST_PROCESSING_HEADROOM_MS);
 
     const { getHandlerBudgetMs, getTurnExecutorBudgets } = await import("../../src/orchestrator-v5/budgets.js");
+    const { resolveDecisionReviewHardBudgetMs } = await import(
+      "../../src/orchestrator-v5/coaching/decision-review-enricher.js",
+    );
     const { config } = await import("../../src/config/index.js");
 
     // No warnings about budget exceeding route timeout
@@ -95,6 +105,10 @@ describe("Request budget configuration", () => {
       handlerBudgetMs: getHandlerBudgetMs(),
       turnBudgetMs: getTurnExecutorBudgets().turn_ms,
       browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+      // ROADMAP 2.180-B — resolved through the single-source function, not a literal.
+      decisionReviewHardBudgetMs: resolveDecisionReviewHardBudgetMs(
+        config.cee.decisionReviewDecompose,
+      ),
     });
     const budgetVsRouteWarning = warnings.find(w => w.includes("DRAFT_REQUEST_BUDGET_MS") && w.includes("ROUTE_TIMEOUT_MS"));
     expect(budgetVsRouteWarning).toBeUndefined();
@@ -173,11 +187,17 @@ describe("Draft retry budget coherence", () => {
     const prev = process.env.MIN_DRAFT_RETRY_BUDGET_MS;
     process.env.MIN_DRAFT_RETRY_BUDGET_MS = "200000"; // ≥ DRAFT_LLM_TIMEOUT_MS (105s)
     try {
-      const { validateTimeoutRelationships } = await import("../../src/config/timeouts.js");
+      const { validateTimeoutRelationships, DECISION_REVIEW_TIMEOUT_MS } = await import(
+        "../../src/config/timeouts.js",
+      );
       const warnings = validateTimeoutRelationships({
         handlerBudgetMs: 85_000,
         turnBudgetMs: 115_000,
         browserProxyTimeoutMs: 125_000,
+        // ROADMAP 2.180-B — additive ladder input. These draft-lane rungs are
+        // indifferent to it; the value is the resolved code default so the
+        // fixture stays a healthy ladder rather than tripping an unrelated rung.
+        decisionReviewHardBudgetMs: DECISION_REVIEW_TIMEOUT_MS,
       });
       expect(warnings.some((w) => w.includes("MIN_DRAFT_RETRY_BUDGET_MS"))).toBe(true);
     } finally {
@@ -207,8 +227,12 @@ describe("Draft retry budget coherence", () => {
 describe("Draft request budget is nested under the browser-proxy deadline", () => {
   it("is SILENT at repo defaults — the wire-composition margin is exactly met", async () => {
     vi.resetModules();
-    const { validateTimeoutRelationships, DRAFT_REQUEST_BUDGET_MS, DRAFT_REQUEST_RESPONSE_HEADROOM_MS } =
-      await import("../../src/config/timeouts.js");
+    const {
+      validateTimeoutRelationships,
+      DRAFT_REQUEST_BUDGET_MS,
+      DRAFT_REQUEST_RESPONSE_HEADROOM_MS,
+      DECISION_REVIEW_TIMEOUT_MS,
+    } = await import("../../src/config/timeouts.js");
     // Sanity: no leaked env override — otherwise the "silent" claim is vacuous.
     expect(DRAFT_REQUEST_BUDGET_MS).toBe(120_000);
     // The default proxy deadline sits exactly one margin above the budget.
@@ -217,6 +241,7 @@ describe("Draft request budget is nested under the browser-proxy deadline", () =
       handlerBudgetMs: 85_000,
       turnBudgetMs: 115_000,
       browserProxyTimeoutMs: 125_000, // repo default
+      decisionReviewHardBudgetMs: DECISION_REVIEW_TIMEOUT_MS, // ROADMAP 2.180-B
     });
     const draftProxyWarning = warnings.find(
       (w) => w.includes("DRAFT_REQUEST_BUDGET_MS") && w.includes("BROWSER_PROXY_TIMEOUT_MS"),
@@ -229,11 +254,17 @@ describe("Draft request budget is nested under the browser-proxy deadline", () =
     const prev = process.env.DRAFT_REQUEST_BUDGET_MS;
     process.env.DRAFT_REQUEST_BUDGET_MS = "130000"; // climbs past the 125s proxy deadline
     try {
-      const { validateTimeoutRelationships } = await import("../../src/config/timeouts.js");
+      const { validateTimeoutRelationships, DECISION_REVIEW_TIMEOUT_MS } = await import(
+        "../../src/config/timeouts.js",
+      );
       const warnings = validateTimeoutRelationships({
         handlerBudgetMs: 85_000,
         turnBudgetMs: 115_000,
         browserProxyTimeoutMs: 125_000,
+        // ROADMAP 2.180-B — additive ladder input. These draft-lane rungs are
+        // indifferent to it; the value is the resolved code default so the
+        // fixture stays a healthy ladder rather than tripping an unrelated rung.
+        decisionReviewHardBudgetMs: DECISION_REVIEW_TIMEOUT_MS,
       });
       expect(
         warnings.some(
