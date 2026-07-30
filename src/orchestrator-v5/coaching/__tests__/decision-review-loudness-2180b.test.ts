@@ -32,10 +32,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import * as invokeMod from '../../../cee/decision-review/invoke.js';
+import * as decomposeMod from '../../../cee/decision-review/decompose.js';
+import { DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS } from '../../../cee/decision-review/decompose.js';
+import { config, _resetConfigCache } from '../../../config/index.js';
 import type { ModelResolution } from '../../../adapters/llm/router.js';
 import { DECISION_REVIEW_TIMEOUT_MS } from '../../../config/timeouts.js';
 import { setTestSink } from '../../../utils/telemetry.js';
-import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
+import {
+  enrichRunAnalysisWithDecisionReview,
+  resolveDecisionReviewHardBudgetMs,
+} from '../decision-review-enricher.js';
 
 /** The budget in force before 2.180-B. The fixture below must beat it. */
 const OLD_BUDGET_MS = 22_000;
@@ -314,5 +320,99 @@ describe('2.180-B — the loss is LOUD', () => {
     // new one: this lane ADDED an alarm, it did not replace the record.
     expect(events.filter((e) => e.event === 'v5.decision_review.failed')).toHaveLength(1);
     expect(degraded()).toHaveLength(1);
+  });
+});
+
+/**
+ * Review amendments A2 + A3 — two pins the first pass claimed but did not have.
+ *
+ * The original suite proved the emit set COLLECTIVELY (the M-b mutant removed
+ * all four call sites at once) while the code comment claimed a PER-SITE
+ * manifest. Deleting only the `contract_violation` site survived the entire
+ * decision-review suite. Likewise `budget_ms` was documented as "the budget
+ * ACTUALLY ARMED" but every assertion ran decompose-OFF, where that value and
+ * `DECISION_REVIEW_TIMEOUT_MS` are equal — so a mutation back to the raw
+ * constant passed everything.
+ *
+ * Both are claims the code makes about itself; both now have a pin that fails
+ * when the claim stops being true.
+ */
+describe('2.180-B A2 — the contract-violation drop is pinned PER SITE', () => {
+  it('a SAFETY-enforced drop FIRES v5.decision_review_degraded with reason contract_violation', async () => {
+    // `missing_review_card` is an enforced (non-count-cap) rule, so
+    // `checkDecisionReviewContract` returns mustDrop — the review parsed
+    // cleanly and is then deliberately dropped. That is a review invoked,
+    // paid for, and not shipped: the same user-visible loss as a timeout.
+    vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
+      ...okResult(),
+      output: { ...okOutput(), narrative_summary: '   ' },
+    } as never);
+
+    const facts: readonly HandlerFact[] = [runAnalysisFact()];
+    const out = await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: facts,
+      requestId: 'req-2180b',
+      scenarioId: 'scen-a',
+      signal: new AbortController().signal,
+      brief: BRIEF,
+    });
+
+    // The drop really happened (otherwise this pin would be testing nothing).
+    expect(out).toBe(facts);
+    const enrichment = (out[0] as HandlerFact & {
+      result: { enrichment: Record<string, unknown> };
+    }).result.enrichment;
+    expect('decision_review' in enrichment).toBe(false);
+
+    const ev = degraded();
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.data.reason).toBe('contract_violation');
+    expect(ev[0]!.data.timed_out).toBe(false);
+    expect(ev[0]!.data.budget_ms).toBe(DECISION_REVIEW_TIMEOUT_MS);
+    expect(typeof ev[0]!.data.elapsed_ms).toBe('number');
+
+    // The pre-existing contract-violation event still fires alongside it —
+    // the degraded alarm is additive, not a replacement.
+    const cv = events.filter((e) => e.event === 'v5.decision_review.contract_violation');
+    expect(cv.length).toBeGreaterThanOrEqual(1);
+    expect(cv[0]!.data.dropped).toBe(true);
+  });
+});
+
+describe('2.180-B A3 — budget_ms is the budget ARMED, not the raw constant', () => {
+  afterEach(() => {
+    delete process.env.CEE_DECISION_REVIEW_DECOMPOSE;
+    _resetConfigCache();
+  });
+
+  it('reports the DECOMPOSED hard budget when the decompose flag is on', async () => {
+    process.env.CEE_DECISION_REVIEW_DECOMPOSE = 'true';
+    _resetConfigCache();
+    // Precondition: the two values must actually DIFFER, or this pin is the
+    // vacuous one it exists to replace.
+    expect(config.cee.decisionReviewDecompose).toBe(true);
+    const armed = resolveDecisionReviewHardBudgetMs(true);
+    expect(armed).not.toBe(DECISION_REVIEW_TIMEOUT_MS);
+    expect(armed).toBe(DECISION_REVIEW_TIMEOUT_MS + DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS);
+
+    vi.spyOn(decomposeMod, 'invokeDecomposedDecisionReview').mockRejectedValue(
+      new Error('decomposed fan-out failed'),
+    );
+
+    await enrichRunAnalysisWithDecisionReview({
+      handlerFacts: [runAnalysisFact()],
+      requestId: 'req-2180b',
+      scenarioId: 'scen-a',
+      signal: new AbortController().signal,
+      brief: BRIEF,
+    });
+
+    const ev = degraded();
+    expect(ev).toHaveLength(1);
+    // THE PIN: the armed budget, not DECISION_REVIEW_TIMEOUT_MS. An operator
+    // comparing elapsed_ms against the raw constant on a decomposed run would
+    // mis-read a legitimate run as a near-miss.
+    expect(ev[0]!.data.budget_ms).toBe(armed);
+    expect(ev[0]!.data.budget_ms).not.toBe(DECISION_REVIEW_TIMEOUT_MS);
   });
 });

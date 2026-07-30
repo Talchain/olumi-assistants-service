@@ -41,11 +41,13 @@
  *   no timers. Nothing here can flake under a starved CI worker.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   DECISION_REVIEW_TIMEOUT_MS,
   PLOT_RUN_TIMEOUT_MS,
+  PLOT_RUN_BRIEF_TIMEOUT_MS,
+  PLOT_RUN_WORST_TIMEOUT_MS,
   PROMPT_STORE_FETCH_TIMEOUT_MS,
   validateTimeoutRelationships,
 } from '../../../config/timeouts.js';
@@ -151,7 +153,7 @@ describe('2.180-B CEILING — the budget must fit what the turn can still hold',
    * successful PLoT /v2/run cannot exceed PLOT_RUN_TIMEOUT_MS. What remains of
    * the turn after that is all the review can ever be granted.
    */
-  const ceilingMs = () => getTurnExecutorBudgets().turn_ms - PLOT_RUN_TIMEOUT_MS;
+  const ceilingMs = () => getTurnExecutorBudgets().turn_ms - PLOT_RUN_WORST_TIMEOUT_MS;
 
   /**
    * What the review actually costs the turn: the armed hard budget PLUS the
@@ -175,10 +177,24 @@ describe('2.180-B CEILING — the budget must fit what the turn can still hold',
   it('the ceiling is DERIVED from the live ladder, not restated', () => {
     // If this ever stops matching, the ladder moved and the pins above moved
     // with it — which is the property being asserted.
-    expect(ceilingMs()).toBe(getTurnExecutorBudgets().turn_ms - PLOT_RUN_TIMEOUT_MS);
+    expect(ceilingMs()).toBe(getTurnExecutorBudgets().turn_ms - PLOT_RUN_WORST_TIMEOUT_MS);
     expect(getTurnExecutorBudgets().turn_ms).toBeLessThan(
       config.proxy.browserProxyTimeoutMs,
     );
+  });
+
+  it('charges the MAX of the PLoT pair, not the base constant (review amendment A1)', () => {
+    // `plot-client.ts:429` selects PLOT_RUN_BRIEF_TIMEOUT_MS for brief-bearing
+    // payloads and PLOT_RUN_TIMEOUT_MS otherwise. The two are EQUAL at repo
+    // defaults, which is what made charging the base alone look correct — and
+    // what would have made a raise of BRIEF silently invalidate the ceiling.
+    expect(PLOT_RUN_WORST_TIMEOUT_MS).toBe(
+      Math.max(PLOT_RUN_TIMEOUT_MS, PLOT_RUN_BRIEF_TIMEOUT_MS),
+    );
+    expect(PLOT_RUN_WORST_TIMEOUT_MS).toBeGreaterThanOrEqual(PLOT_RUN_BRIEF_TIMEOUT_MS);
+    // The invariants suite permits BRIEF >= base, so BRIEF is the branch that
+    // can legally grow. A ceiling blind to it is a ceiling with an expiry date.
+    expect(PLOT_RUN_BRIEF_TIMEOUT_MS).toBeGreaterThanOrEqual(PLOT_RUN_TIMEOUT_MS);
   });
 
   it('the admissible interval is NON-EMPTY and the chosen value sits inside it', () => {
@@ -204,10 +220,14 @@ describe('2.180-B CEILING — the budget must fit what the turn can still hold',
   });
 });
 
-describe('2.180-B BOOT RUNG — the ceiling is enforced against the DEPLOYED env, not repo defaults', () => {
+describe('2.180-B BOOT RUNG — the ceiling is CHECKED against the DEPLOYED env, not repo defaults', () => {
   // Both ends of this relationship are env-overridable, which is why the rung
   // lives at boot and not only here. These are its CI-side positive controls:
   // without them the rung is an assertion nobody has ever watched fire.
+  //
+  // ⚠ THE RUNG WARNS, IT DOES NOT ENFORCE (review amendment A5a). `server.ts`
+  // pushes these strings through a `log.warn` loop; no boot exits non-zero. It
+  // makes a misconfiguration LOUD in the deploy log. THESE pins are what go RED.
   const healthyLadder = () => ({
     handlerBudgetMs: getHandlerBudgetMs(),
     turnBudgetMs: getTurnExecutorBudgets().turn_ms,
@@ -259,5 +279,59 @@ describe('2.180-B BOOT RUNG — the ceiling is enforced against the DEPLOYED env
       turnBudgetMs: PLOT_RUN_TIMEOUT_MS + DECISION_REVIEW_TIMEOUT_MS,
     });
     expect(warnings).toHaveLength(1);
+  });
+});
+
+/**
+ * Review amendment A1 — the positive control that the ORIGINAL ceiling lacked.
+ *
+ * `PLOT_RUN_BRIEF_TIMEOUT_MS` is import-time-resolved, so this block mutates
+ * the env and RE-IMPORTS (the same shape `cee.request-budget.test.ts` uses for
+ * MIN_DRAFT_RETRY_BUDGET_MS). It is the only way to prove the ceiling actually
+ * tracks the brief-bearing branch rather than merely agreeing with it at repo
+ * defaults, where the two constants are equal.
+ *
+ * Without this, the A1 defect was invisible: every assertion passed while the
+ * ceiling subtracted a constant the path may not even select.
+ */
+describe('2.180-B A1 — a legal raise of the BRIEF-bearing PLoT timeout tightens the ceiling', () => {
+  const RAISE_MS = 15_000;
+
+  it('FIRES the rung when PLOT_RUN_BRIEF_TIMEOUT_MS is raised above the base constant', async () => {
+    vi.resetModules();
+    const prev = process.env.PLOT_RUN_BRIEF_TIMEOUT_MS;
+    // Legal per the invariants suite (BRIEF >= base) and legal per clampTimeout.
+    process.env.PLOT_RUN_BRIEF_TIMEOUT_MS = String(75_000 + RAISE_MS);
+    try {
+      const t = await import('../../../config/timeouts.js');
+      const b = await import('../../budgets.js');
+      const e = await import('../decision-review-enricher.js');
+      const c = await import('../../../config/index.js');
+
+      // The raise is real and the worst-case constant tracked it.
+      expect(t.PLOT_RUN_BRIEF_TIMEOUT_MS).toBe(90_000);
+      expect(t.PLOT_RUN_WORST_TIMEOUT_MS).toBe(90_000);
+      expect(t.PLOT_RUN_WORST_TIMEOUT_MS).toBeGreaterThan(t.PLOT_RUN_TIMEOUT_MS);
+
+      // ...so the ceiling fell from 40,000 to 25,000 and the 30,000 budget no
+      // longer fits. This is the breach that used to pass silently.
+      const warnings = t
+        .validateTimeoutRelationships({
+          handlerBudgetMs: b.getHandlerBudgetMs(),
+          turnBudgetMs: b.getTurnExecutorBudgets().turn_ms,
+          browserProxyTimeoutMs: c.config.proxy.browserProxyTimeoutMs,
+          decisionReviewHardBudgetMs: e.resolveDecisionReviewHardBudgetMs(
+            c.config.cee.decisionReviewDecompose,
+          ),
+        })
+        .filter((w) => w.includes('decision_review hard budget'));
+
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('PLOT_RUN_BRIEF_TIMEOUT_MS');
+    } finally {
+      if (prev === undefined) delete process.env.PLOT_RUN_BRIEF_TIMEOUT_MS;
+      else process.env.PLOT_RUN_BRIEF_TIMEOUT_MS = prev;
+      vi.resetModules();
+    }
   });
 });

@@ -150,6 +150,28 @@ export const EXPLAIN_DIFF_TIMEOUT_MS = clampTimeout(
  * (Deliberately p50 x spread, not min x spread: sizing off the luckiest call
  * is what produces a budget that only the lucky clear.)
  *
+ * `p50 = 7,178` is the 64th of 128 sorted completions; the 65th is 7,188 (the
+ * probe's prose quotes that one). The true median is their mean, 7,183. The
+ * frozen constant uses 7,178, the lower and therefore more conservative of the
+ * two — it produces a SMALLER floor, so it cannot flatter the chosen value.
+ *
+ * ⚠ TWO HONEST LIMITS ON THIS FLOOR (review amendment A5b). Stating them
+ * because an earlier draft of this comment claimed the floor was "built on the
+ * SPREAD, not the max", which oversells it:
+ *   (a) It is NOT independent of the censored max. `p50 x (max/min)` contains
+ *       `max` algebraically. Using it as a RATIO numerator is less sensitive
+ *       than using it as an absolute level — but "not the max" was rhetoric,
+ *       not algebra.
+ *   (b) It is sensitive to a SINGLE observation. Drop just the fastest call
+ *       (4,825; next is 5,201) and the floor falls 29,459 -> 27,330, a 2,129 ms
+ *       swing off one data point.
+ * The chosen 30,000 SURVIVES both: it clears 29,459 AND the drop-fastest 27,330,
+ * and it independently clears the two floor conditions that use no ratio at all
+ * — max-completed + the p95->max gap (23,838) and the censoring point (22,000).
+ * The estimator is soft; the conclusion is not. And the concession below —
+ * that 30,000 may still be insufficient because the true tail is unobservable —
+ * is the honest cover for all of this, which is why it is not buried.
+ *
  * ── CEILING: what the turn can afford ───────────────────────────────────────
  * The binding outer bound is the V5 turn abort, `budgets.turn_ms` =
  * min(TURN_BUDGET_MS 180 s, browserProxyTimeoutMs 125 s - TURN_RESPONSE_HEADROOM_MS
@@ -172,10 +194,15 @@ export const EXPLAIN_DIFF_TIMEOUT_MS = clampTimeout(
  * legitimately run long AND still yield a review at its full structural cap,
  * and the rest at measurement:
  *
- *  - PLOT_RUN_TIMEOUT_MS (75,000). decision_review only exists on a turn whose
- *    run_analysis SUCCEEDED, and a successful PLoT /v2/run cannot exceed it.
- *    Charged in full: PLoT cost scales with graph size (measured 2.12 s at
- *    8 nodes → 12.54 s at 26 — see the PLOT_RUN_TIMEOUT_MS note above).
+ *  - PLOT_RUN_WORST_TIMEOUT_MS (75,000) = max(PLOT_RUN_TIMEOUT_MS,
+ *    PLOT_RUN_BRIEF_TIMEOUT_MS). decision_review only exists on a turn whose
+ *    run_analysis SUCCEEDED, and a successful PLoT /v2/run cannot exceed
+ *    whichever of the pair `plot-client.ts:429` selected. Charged in full and
+ *    at the MAX (review amendment A1): the selector depends on the dark
+ *    `CEE_SEND_BRIEF_TO_PLOT` flag, and the two constants are independently
+ *    env-raisable, so charging the base alone would be sound only by
+ *    coincidence of today's equal defaults. PLoT cost scales with graph size
+ *    (measured 2.12 s at 8 nodes → 12.54 s at 26 — see the note above).
  *  - PROMPT_STORE_FETCH_TIMEOUT_MS (5,000). `invoke.ts` fetches the
  *    decision_review system prompt INSIDE the enricher's try but passes it
  *    neither the signal nor the timeout, so on a cold prompt cache the await
@@ -187,8 +214,8 @@ export const EXPLAIN_DIFF_TIMEOUT_MS = clampTimeout(
  *    routing call at all (chip-click-dispatch.ts, "Chip-click bypasses the
  *    routing layer").
  *
- *   resolveDecisionReviewHardBudgetMs(decomposeOff) + PROMPT_STORE_FETCH_TIMEOUT_MS
- *       <= turn_ms - PLOT_RUN_TIMEOUT_MS
+   resolveDecisionReviewHardBudgetMs(decomposeOff) + PROMPT_STORE_FETCH_TIMEOUT_MS
+ *       <= turn_ms - PLOT_RUN_WORST_TIMEOUT_MS
  *   30,000 + 5,000 = 35,000  <=  115,000 - 75,000 = 40,000     ✔ 5,000 ms clear
  *
  * => the admissible interval is [29,459 , 35,000]. 30,000 is the round value
@@ -203,9 +230,10 @@ export const EXPLAIN_DIFF_TIMEOUT_MS = clampTimeout(
  * DECISION_REVIEW_TIMEOUT_MS + DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS = 38,000, and
  * 38,000 + 5,000 = 43,000 > 40,000. That flag is one env write away, so the
  * breach must not be silent: `validateTimeoutRelationships` gained a rung that
- * evaluates the budget ACTUALLY IN FORCE against this inequality and warns at
- * BOOT (the M2_REVIEW_TIMEOUT_MS rung is the precedent). Enabling decompose is
- * a re-budget, not a flag flip.
+ * evaluates the budget ACTUALLY IN FORCE against this inequality and WARNS at
+ * BOOT (the M2_REVIEW_TIMEOUT_MS rung is the precedent). The rung warns — it
+ * does not fail the boot (`server.ts` runs a `log.warn` loop); the CI pins are
+ * what go RED. Enabling decompose is a re-budget, not a flag flip.
  *
  * ⚠ WHAT THIS CEILING DOES **NOT** CLAIM. It is not a proof that a turn can
  * never exceed turn_ms — see the over-subscription note above. On such a turn
@@ -221,7 +249,7 @@ export const EXPLAIN_DIFF_TIMEOUT_MS = clampTimeout(
  * (`v5.decision_review_degraded` now fires on the internal timeout, carrying
  * elapsed_ms and budget_ms — decision-review-enricher.ts): the residual loss
  * rate at 30 s becomes measurable instead of inferred. If loss persists, the
- * next lever is NOT more static budget — the ceiling above leaves only 2,000 ms
+ * next lever is NOT more static budget — the ceiling above leaves only 5,000 ms
  * — it is the decomposed (parallel) path or a deadline-aware budget.
  */
 export const DECISION_REVIEW_TIMEOUT_MS = clampTimeout(
@@ -349,6 +377,36 @@ export const PLOT_RUN_TIMEOUT_MS = clampTimeout(
  */
 export const PLOT_RUN_BRIEF_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("PLOT_RUN_BRIEF_TIMEOUT_MS", 75_000),
+);
+
+/**
+ * The longest a SINGLE successful PLoT `/v2/run` attempt can take, whichever
+ * branch `plot-client.ts:429` selects.
+ *
+ * ROADMAP 2.180-B (review amendment A1). `plot-client.ts:429` reads
+ *   `const timeoutMs = briefBearing ? PLOT_RUN_BRIEF_TIMEOUT_MS : PLOT_RUN_TIMEOUT_MS;`
+ * so the run_analysis path can be bounded by EITHER constant. Anything deriving
+ * a downstream budget from "what PLoT can spend" must therefore charge the
+ * worst of the pair, not one of them.
+ *
+ * WHY `max` AND NOT "the constant the path actually selects". The selector is
+ * `isBriefBearingRunPayload` — true iff the outbound payload carries a non-empty
+ * `brief` — and the run_analysis handler attaches that key only behind
+ * `config.cee.sendBriefToPlot` (`CEE_SEND_BRIEF_TO_PLOT`, default FALSE,
+ * `run-analysis.ts:423`). So which constant binds is a function of a dark flag
+ * that is one env write away. A ceiling derived from the selected branch would
+ * be correct today and silently wrong the day that flag flips. `max` is sound
+ * under BOTH branches and needs no flag to be proven.
+ *
+ * The two are EQUAL at repo defaults (75,000 each), which is exactly what makes
+ * this dangerous rather than obvious: the defect is invisible until an operator
+ * raises one of them, and `timeouts.invariants.test.ts` explicitly PERMITS
+ * `PLOT_RUN_BRIEF_TIMEOUT_MS >= PLOT_RUN_TIMEOUT_MS`. A legal env change would
+ * otherwise invalidate the decision_review ceiling with every check green.
+ */
+export const PLOT_RUN_WORST_TIMEOUT_MS = Math.max(
+  PLOT_RUN_TIMEOUT_MS,
+  PLOT_RUN_BRIEF_TIMEOUT_MS,
 );
 
 /** PLoT /v1/validate-patch call timeout (default: 5s, clamped 5s–5m) */
@@ -1320,26 +1378,42 @@ export function validateTimeoutRelationships(ladder: BudgetLadderInputs): string
   // inside the enricher's try but hands it neither the signal nor the timeout,
   // so a cold cache adds up to PROMPT_STORE_FETCH_TIMEOUT_MS), must still fit in
   // what the turn is holding after its slowest LEGAL SUCCESSFUL analysis — a
-  // successful PLoT /v2/run cannot exceed PLOT_RUN_TIMEOUT_MS.
+  // successful PLoT /v2/run cannot exceed PLOT_RUN_WORST_TIMEOUT_MS.
   //
-  // It is DERIVED, not mirrored: raising PLOT_RUN_TIMEOUT_MS or lowering
-  // BROWSER_PROXY_TIMEOUT_MS by env tightens it automatically, which is the
-  // point of asserting at boot rather than at repo defaults (both ends are
+  // ⚠ IT IS THE MAX OF THE PAIR, NOT THE BASE CONSTANT (review amendment A1).
+  // `plot-client.ts:429` selects PLOT_RUN_BRIEF_TIMEOUT_MS for brief-bearing
+  // payloads and PLOT_RUN_TIMEOUT_MS otherwise, and which one binds depends on
+  // the dark `CEE_SEND_BRIEF_TO_PLOT` flag. Subtracting only the base constant
+  // was sound at repo defaults (the two are equal) and would have gone silently
+  // wrong the moment an operator raised BRIEF — which the invariants suite
+  // explicitly permits. See PLOT_RUN_WORST_TIMEOUT_MS.
+  //
+  // It is DERIVED, not mirrored: raising EITHER PLoT constant, or lowering
+  // BROWSER_PROXY_TIMEOUT_MS, tightens it automatically — which is the point of
+  // asserting at boot rather than at repo defaults (both ends are
   // env-overridable — see the header of this block).
+  //
+  // ⚠ IT WARNS, IT DOES NOT FAIL THE BOOT (review amendment A5a). `server.ts`
+  // collects these strings and emits them through a `log.warn` loop; nothing
+  // exits non-zero. This rung makes a misconfiguration LOUD in the deploy log;
+  // the CI pins in decision-review-budget-2180b.test.ts are what go RED.
+  // Hard-failing a boot on a budget relationship is a separate, riskier
+  // decision and is deliberately not taken here.
   //
   // ⚠ IT IS A CEILING, NOT A SUFFICIENCY PROOF. The nominal inner budgets
   // (ORCHESTRATOR_TIMEOUT_MS 30,000 routing + handler 85,000) already sum to
   // turn_ms exactly, so no decision_review budget is affordable at nominal worst
   // case — a pre-existing over-subscription this rung deliberately does not
   // restate, because a rung that always fires is a broken alarm.
-  const decisionReviewCeilingMs = ladder.turnBudgetMs - PLOT_RUN_TIMEOUT_MS;
+  const decisionReviewCeilingMs = ladder.turnBudgetMs - PLOT_RUN_WORST_TIMEOUT_MS;
   const decisionReviewChargeMs =
     ladder.decisionReviewHardBudgetMs + PROMPT_STORE_FETCH_TIMEOUT_MS;
   if (decisionReviewChargeMs > decisionReviewCeilingMs) {
     warnings.push(
       `decision_review hard budget (${ladder.decisionReviewHardBudgetMs}ms) + PROMPT_STORE_FETCH_TIMEOUT_MS ` +
       `(${PROMPT_STORE_FETCH_TIMEOUT_MS}ms) = ${decisionReviewChargeMs}ms > resolved V5 turn budget ` +
-      `(${ladder.turnBudgetMs}ms) - PLOT_RUN_TIMEOUT_MS (${PLOT_RUN_TIMEOUT_MS}ms) = ${decisionReviewCeilingMs}ms — ` +
+      `(${ladder.turnBudgetMs}ms) - max(PLOT_RUN_TIMEOUT_MS ${PLOT_RUN_TIMEOUT_MS}ms, ` +
+      `PLOT_RUN_BRIEF_TIMEOUT_MS ${PLOT_RUN_BRIEF_TIMEOUT_MS}ms) = ${decisionReviewCeilingMs}ms — ` +
       `after a full-length successful PLoT analysis the turn cannot hold a full-length decision_review, so the ` +
       `outer turn abort will fire mid-review and the turn fails with TURN_BUDGET_EXCEEDED instead of degrading ` +
       `to thin content. Lower DECISION_REVIEW_TIMEOUT_MS, or note that CEE_DECISION_REVIEW_DECOMPOSE adds ` +
