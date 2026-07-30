@@ -37,7 +37,7 @@ import {
   buildSignInRequiredError,
   extractJwtCandidate,
 } from "../orchestrator/user-identity.js";
-import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { recordExplicitTurnStop } from "./turn-stop.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -504,11 +504,14 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   //   an incidental disconnect is ONE thing: whether a tombstone exists. A
   //   disconnect sends nothing, has no tombstone, and still commits.
   //
-  // ⚠ NO `/orchestrate/v2/turn/stop` SIBLING, DELIBERATELY. Only a browser can
-  //   press Stop, and the browser cannot hold a service key (any VITE_* value
-  //   is public by construction). A service-key twin would be an unreachable
-  //   second copy of this handler — trap 12 with an auth surface attached. Add
-  //   it when a service caller actually needs it.
+  // ⚠ THE /orchestrate SIBLING IS NOT OPTIONAL — I first shipped this without
+  //   one, on the argument that only a browser can press Stop. That argument was
+  //   WRONG, and the derivation is what corrected it: the UI derives its stop URL
+  //   as `<buffered endpoint>/stop`, and the buffered endpoint resolves to the
+  //   Netlify edge rung (`/bff/orchestrate/v2/turn`) on any deployment that does
+  //   not bake VITE_V5_ENDPOINT. Without the sibling, that rung 404s and the UI
+  //   can never confirm a Stop on it. Both exist; ONE handler
+  //   (`recordExplicitTurnStop`) serves them.
   //
   // Auth posture is INHERITED from POST /proxy/v5/turn above, unchanged: origin
   // allowlist, no caller identity, guest scenarios addressable by anyone
@@ -520,6 +523,8 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     const requestId =
       (request.headers["x-request-id"] as string) ?? crypto.randomUUID();
 
+    // Ingress concerns ONLY — origin allowlist + CORS. Everything else is
+    // `recordExplicitTurnStop`, shared with the /orchestrate sibling.
     const origin = request.headers.origin;
     if (!origin || !isOriginAllowed(origin as string, allowedOrigins)) {
       log.warn({ origin, requestId }, "[proxy-v5] stop rejected: origin not allowed");
@@ -532,91 +537,11 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
         },
       });
     }
-    const cors = buildCorsHeaders(origin as string);
-    for (const [k, v] of Object.entries(cors)) reply.header(k, v);
-
-    const body: unknown = request.body;
-    const identity =
-      body !== null && typeof body === "object"
-        ? (body as { scenario_id?: unknown; turn_id?: unknown })
-        : {};
-    const scenarioId = typeof identity.scenario_id === "string" ? identity.scenario_id : "";
-    const turnId = typeof identity.turn_id === "string" ? identity.turn_id : "";
-    if (scenarioId.length === 0 || turnId.length === 0) {
-      return reply.code(400).send({
-        error: {
-          code: "PROXY_STOP_INVALID_BODY",
-          message: "scenario_id and turn_id are both required.",
-          source: "proxy",
-          request_id: requestId,
-        },
-      });
+    for (const [k, v] of Object.entries(buildCorsHeaders(origin as string))) {
+      reply.header(k, v);
     }
 
-    try {
-      const store = getSessionStore();
-      if (typeof store.markTurnStopped !== "function") {
-        // The production store always implements it (pinned by
-        // turn-fence-guards.test.ts). Reaching here means the store is a
-        // double, so say so rather than reporting a Stop we never recorded.
-        throw new Error("session store does not implement markTurnStopped");
-      }
-      const outcome = await store.markTurnStopped(scenarioId, turnId);
-      emit(TelemetryEvents.V5TurnStopRequested, {
-        request_id: requestId,
-        scenario_id: scenarioId,
-        turn_id: turnId,
-        claimed: outcome.claimed,
-        already_committed: outcome.alreadyCommitted,
-      });
-      log.info(
-        {
-          event: "v5.turn_fence.stop_requested",
-          request_id: requestId,
-          scenario_id: scenarioId,
-          turn_id: turnId,
-          claimed: outcome.claimed,
-          already_committed: outcome.alreadyCommitted,
-        },
-        "V5 turn fence — explicit user Stop recorded",
-      );
-      // The response describes WHAT WAS RECORDED, in the past tense, and
-      // nothing else. `already_committed` is derived from
-      // v5_conversation_turns, so it is a fact about a row that exists — not a
-      // prediction about whether the fence will hold. The UI's terminal notice
-      // is conditioned on exactly these two booleans; see
-      // Docs/v5/turn-fence.md for the three copy states and why none of them
-      // promises an outcome.
-      return reply.code(200).send({
-        stopped: outcome.stopped,
-        claimed: outcome.claimed,
-        already_committed: outcome.alreadyCommitted,
-        scenario_id: scenarioId,
-        turn_id: turnId,
-        request_id: requestId,
-      });
-    } catch (err) {
-      log.error(
-        {
-          event: "v5.turn_fence.stop_failed",
-          request_id: requestId,
-          scenario_id: scenarioId,
-          turn_id: turnId,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        "V5 turn fence — could not record the explicit user Stop",
-      );
-      // 502, not 200-with-a-flag: a Stop we failed to record must not read as a
-      // Stop that was recorded. The UI shows its "could not confirm" copy on
-      // exactly this branch.
-      return reply.code(502).send({
-        error: {
-          code: "PROXY_STOP_NOT_RECORDED",
-          message: "The stop request could not be recorded.",
-          source: "proxy",
-          request_id: requestId,
-        },
-      });
-    }
+    const result = await recordExplicitTurnStop(request.body, requestId);
+    return reply.code(result.status).send(result.body);
   });
 }

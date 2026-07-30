@@ -114,7 +114,7 @@ describe("POST /proxy/v5/turn/stop", () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.json()).toMatchObject({
-      error: { code: "PROXY_STOP_NOT_RECORDED", source: "proxy" },
+      error: { code: "TURN_STOP_NOT_RECORDED", source: "cee" },
     });
     await app.close();
   });
@@ -132,7 +132,7 @@ describe("POST /proxy/v5/turn/stop", () => {
     for (const payload of [{}, { scenario_id: SCENARIO }, { turn_id: TURN }, { scenario_id: "", turn_id: TURN }]) {
       const res = await post(app, payload);
       expect(res.statusCode).toBe(400);
-      expect(res.json()).toMatchObject({ error: { code: "PROXY_STOP_INVALID_BODY" } });
+      expect(res.json()).toMatchObject({ error: { code: "TURN_STOP_INVALID_BODY" } });
     }
     expect(markTurnStopped).not.toHaveBeenCalled();
     await app.close();
@@ -143,6 +143,19 @@ describe("POST /proxy/v5/turn/stop", () => {
     const res = await post(app, { scenario_id: SCENARIO, turn_id: TURN }, DISALLOWED_ORIGIN);
     expect(res.statusCode).toBe(403);
     expect(markTurnStopped).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it("uses the SHARED handler — the same function the /orchestrate sibling calls", async () => {
+    // The two ingresses exist because the UI's endpoint ladder can resolve to
+    // either rung; a second copy of the handler would be trap 12 with a
+    // persistence-integrity blast radius, and the drift would be silent (a
+    // divergent copy still answers 200). Pinned by the shared error codes: they
+    // are the handler's, not the proxy's.
+    markTurnStopped.mockRejectedValue(new Error("boom"));
+    const app = await buildApp();
+    const res = await post(app, { scenario_id: SCENARIO, turn_id: TURN });
+    expect(res.json()).toMatchObject({ error: { source: "cee" } });
     await app.close();
   });
 

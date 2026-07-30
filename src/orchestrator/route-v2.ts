@@ -148,6 +148,7 @@ import {
 } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
 import { turnFencePreHandler } from './turn-fence-prehandler.js';
+import { recordExplicitTurnStop } from '../routes/turn-stop.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
@@ -2049,6 +2050,28 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
   // hook function — global registration is simpler than route-scoped
   // and the cost (one URL comparison per non-V5 send) is negligible.
   app.addHook('preSerialization', v5FinaliserPreSerializationHook);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // POST /orchestrate/v2/turn/stop — the service-key ingress for the explicit
+  // user Stop. Auth is the file's global hook, exactly as for the buffered turn.
+  //
+  // Reached by the UI's Netlify edge rung: the UI derives its stop URL as
+  // `<buffered endpoint>/stop`, and when VITE_V5_ENDPOINT is not baked the
+  // buffered endpoint is `/bff/orchestrate/v2/turn`, which the edge function
+  // rewrites onto this route with the service key injected. The browser-facing
+  // twin is `/proxy/v5/turn/stop`. They differ ONLY in ingress; the handler is
+  // `recordExplicitTurnStop`, once — see src/routes/turn-stop.ts.
+  //
+  // NOT fenced by turnFencePreHandler: a stop request is not a turn and must
+  // never claim a generation of its own.
+  // ══════════════════════════════════════════════════════════════════════════
+  app.post('/orchestrate/v2/turn/stop', async (req, reply) => {
+    const requestId =
+      (typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : null) ??
+      randomUUID();
+    const result = await recordExplicitTurnStop(req.body, requestId);
+    return reply.code(result.status).send(result.body as never);
+  });
 
   // V5 TURN FENCE (Codex P0) — claim this turn's place in the scenario's start
   // order BEFORE any dispatch, and run the whole request inside the fence

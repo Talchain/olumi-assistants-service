@@ -48,6 +48,19 @@ describe('POST /orchestrate/v2/turn carries the turn-fence preHandler', () => {
     expect(turnRoute, 'the turn route must be registered').toBeDefined();
     expect(hooksFor(turnRoute)).toContain(turnFencePreHandler);
 
+    // The service-key stop sibling exists. It is NOT optional: the UI derives
+    // its stop URL as `<buffered endpoint>/stop`, and on any deployment that
+    // does not bake VITE_V5_ENDPOINT the buffered endpoint is the Netlify edge
+    // rung (`/bff/orchestrate/v2/turn`), which the edge function rewrites onto
+    // this route. Without it that rung 404s and the UI can never confirm a Stop.
+    const stopRoute = routes.find(
+      (r) => r.url === '/orchestrate/v2/turn/stop' && r.method === 'POST',
+    );
+    expect(stopRoute, 'the /orchestrate stop sibling must be registered').toBeDefined();
+    // And it must NOT be fenced — a stop request is not a turn and must never
+    // claim a generation of its own (which would supersede the turn it stops).
+    expect(hooksFor(stopRoute)).not.toContain(turnFencePreHandler);
+
     await app.close();
   });
 });
