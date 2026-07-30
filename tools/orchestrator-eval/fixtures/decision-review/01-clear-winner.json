@@ -1,0 +1,541 @@
+{
+  "id": "01-clear-winner",
+  "description": "Ready / clear_winner run with a wide margin, a single fragile connection, and a populated flip threshold. The confident-tone baseline: the served tone table forbids no phrasing at this row, so this fixture is where the LEXICON and NUMBER dimensions carry the load.",
+  "provenance": {
+    "origin": "graph-evaluator-revival",
+    "source": "tools/graph-evaluator/fixtures/decision-review/01-clear-winner.json (committed 11078d28, 2026-03-06)",
+    "note": "Revived and refreshed to the current input shape: graph edges now carry ids (the March graphs had none, so the runtime entity-grounding corpus was node-only), flip_threshold_data added (post-v11, invoke.ts:123), and the March fixture's hand-written margin of 0.15 dropped — it disagreed with its own winner/runner_up (0.72 - 0.28 = 0.44). Margin is now computed the way invoke.ts computes it."
+  },
+  "input": {
+    "brief": "Should we expand into the European market? We have four hundred pro customers and want to reach eight hundred.",
+    "brief_hash": "f1a2b3c4d5e60718",
+    "graph": {
+      "nodes": [
+        {
+          "id": "dec_expansion",
+          "kind": "decision",
+          "label": "European Market Expansion"
+        },
+        {
+          "id": "opt_expand",
+          "kind": "option",
+          "label": "Enter European Market"
+        },
+        {
+          "id": "opt_wait",
+          "kind": "option",
+          "label": "Delay to Next Year"
+        },
+        {
+          "id": "fac_europe_entry",
+          "kind": "factor",
+          "label": "Europe Market Entry"
+        },
+        {
+          "id": "fac_competition",
+          "kind": "factor",
+          "label": "Competitive Intensity"
+        },
+        {
+          "id": "fac_pricing",
+          "kind": "factor",
+          "label": "Pricing Power"
+        },
+        {
+          "id": "out_revenue",
+          "kind": "outcome",
+          "label": "Revenue Growth"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_expand_entry",
+          "from": "opt_expand",
+          "to": "fac_europe_entry",
+          "effect_direction": "positive"
+        },
+        {
+          "id": "edge_entry_revenue",
+          "from": "fac_europe_entry",
+          "to": "out_revenue",
+          "effect_direction": "positive"
+        },
+        {
+          "id": "edge_competition_revenue",
+          "from": "fac_competition",
+          "to": "out_revenue",
+          "effect_direction": "negative"
+        },
+        {
+          "id": "edge_pricing_revenue",
+          "from": "fac_pricing",
+          "to": "out_revenue",
+          "effect_direction": "positive"
+        }
+      ]
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_expand",
+          "option_label": "Enter European Market",
+          "win_probability": 0.72,
+          "outcome": {
+            "mean": 0.68,
+            "p10": 0.42,
+            "p90": 0.89
+          }
+        },
+        {
+          "option_id": "opt_wait",
+          "option_label": "Delay to Next Year",
+          "win_probability": 0.28,
+          "outcome": {
+            "mean": 0.41,
+            "p10": 0.18,
+            "p90": 0.63
+          }
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "factor_id": "fac_europe_entry",
+          "factor_label": "Europe Market Entry",
+          "elasticity": 0.72,
+          "confidence": 0.88
+        },
+        {
+          "factor_id": "fac_competition",
+          "factor_label": "Competitive Intensity",
+          "elasticity": -0.35,
+          "confidence": 0.7
+        },
+        {
+          "factor_id": "fac_pricing",
+          "factor_label": "Pricing Power",
+          "elasticity": 0.22,
+          "confidence": 0.81
+        }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "edge_competition_revenue",
+          "from_label": "Competitive Intensity",
+          "to_label": "Revenue Growth",
+          "switch_probability": 0.08
+        }
+      ],
+      "robustness": {
+        "level": "high",
+        "recommendation_stability": 0.91,
+        "overall_confidence": 0.85
+      }
+    },
+    "deterministic_coaching": {
+      "headline_type": "clear_winner",
+      "readiness": "ready",
+      "evidence_gaps": [
+        {
+          "factor_id": "fac_competition",
+          "factor_label": "Competitive Intensity",
+          "voi": 0.05,
+          "confidence": 0.7
+        }
+      ],
+      "model_critiques": []
+    },
+    "winner": {
+      "id": "opt_expand",
+      "label": "Enter European Market",
+      "win_probability": 0.72,
+      "outcome_mean": 0.68
+    },
+    "runner_up": {
+      "id": "opt_wait",
+      "label": "Delay to Next Year",
+      "win_probability": 0.28,
+      "outcome_mean": 0.41
+    },
+    "flip_threshold_data": [
+      {
+        "factor_id": "fac_competition",
+        "factor_label": "Competitive Intensity",
+        "current_value": 0.35,
+        "flip_value": 0.62
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Grounded, plain-language, coherent. Should PASS every dimension.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Enter European Market comes out ahead by about 44 percentage points over Delay to Next Year. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
+        "story_headlines": {
+          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_wait": "Protects near term spend but gives up the growth window"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering is stable across the simulated range, holding in about 91% of runs.",
+          "primary_risk": "Competitive intensity could compress revenue growth if rivals respond quickly.",
+          "stability_factors": [
+            "Europe market entry moves the outcome most and is well supported."
+          ],
+          "fragility_factors": [
+            "Competitive intensity carries the widest spread of the connections examined."
+          ]
+        },
+        "readiness_rationale": "The comparison is stable, so the main open question is how quickly competitive intensity shifts.",
+        "evidence_enhancements": {
+          "fac_competition": {
+            "why": "Competitive intensity is the least well supported input shaping revenue growth.",
+            "expected_gain": "Narrows the spread on the main fragility."
+          }
+        },
+        "scenario_contexts": {
+          "edge_competition_revenue": {
+            "context": "If competitive intensity rises sharply, the growth path narrows and the two options converge."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_label": "Competitive Intensity",
+            "current": "about 35%",
+            "flip_at": "about 62%",
+            "note": "Beyond that level the ordering would change."
+          }
+        ],
+        "bias_findings": [
+          {
+            "type": "anchoring",
+            "description": "The stated customer target may be anchoring how the options are compared.",
+            "affected_elements": [
+              "fac_europe_entry"
+            ],
+            "linked_critique_code": "ANCHORING"
+          }
+        ],
+        "key_assumptions": [
+          "Europe market entry continues to move the outcome as strongly as modelled.",
+          "Competitive response stays within the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would have to be true about competitive intensity for the ordering to change?",
+            "technique": "pre mortem"
+          }
+        ],
+        "pre_mortem": {
+          "scenario": "Twelve months on, competitive intensity rose faster than modelled and revenue growth stalled.",
+          "leading_indicator": "Rivals matching the entry offer within the first quarter."
+        }
+      }
+    },
+    {
+      "label": "banned_lexicon",
+      "note": "Uses \"winner\", \"wins\" and \"the best choice\" — three terms the served prompt bans outright.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Enter European Market is the clear winner and wins by about 44 percentage points, so it is the best choice here. Competitive intensity is the main fragility.",
+        "story_headlines": {
+          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_wait": "Protects near term spend but gives up the growth window"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering is stable across the simulated range, holding in about 91% of runs.",
+          "primary_risk": "Competitive intensity could compress revenue growth if rivals respond quickly.",
+          "stability_factors": [
+            "Europe market entry moves the outcome most and is well supported."
+          ],
+          "fragility_factors": [
+            "Competitive intensity carries the widest spread of the connections examined."
+          ]
+        },
+        "readiness_rationale": "The comparison is stable, so the main open question is how quickly competitive intensity shifts.",
+        "evidence_enhancements": {
+          "fac_competition": {
+            "why": "Competitive intensity is the least well supported input shaping revenue growth.",
+            "expected_gain": "Narrows the spread on the main fragility."
+          }
+        },
+        "scenario_contexts": {
+          "edge_competition_revenue": {
+            "context": "If competitive intensity rises sharply, the growth path narrows and the two options converge."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_label": "Competitive Intensity",
+            "current": "about 35%",
+            "flip_at": "about 62%",
+            "note": "Beyond that level the ordering would change."
+          }
+        ],
+        "bias_findings": [
+          {
+            "type": "anchoring",
+            "description": "The stated customer target may be anchoring how the options are compared.",
+            "affected_elements": [
+              "fac_europe_entry"
+            ],
+            "linked_critique_code": "ANCHORING"
+          }
+        ],
+        "key_assumptions": [
+          "Europe market entry continues to move the outcome as strongly as modelled.",
+          "Competitive response stays within the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would have to be true about competitive intensity for the ordering to change?",
+            "technique": "pre mortem"
+          }
+        ],
+        "pre_mortem": {
+          "scenario": "Twelve months on, competitive intensity rose faster than modelled and revenue growth stalled.",
+          "leading_indicator": "Rivals matching the entry offer within the first quarter."
+        }
+      }
+    },
+    {
+      "label": "raw_decimal",
+      "note": "Narrates 0.72 / 0.28 as bare decimals where the prompt requires \"72%\".",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Enter European Market comes out ahead with a probability of 0.72 against 0.28 for Delay to Next Year. Competitive intensity is the main fragility.",
+        "story_headlines": {
+          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_wait": "Protects near term spend but gives up the growth window"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering is stable across the simulated range, holding in about 91% of runs.",
+          "primary_risk": "Competitive intensity could compress revenue growth if rivals respond quickly.",
+          "stability_factors": [
+            "Europe market entry moves the outcome most and is well supported."
+          ],
+          "fragility_factors": [
+            "Competitive intensity carries the widest spread of the connections examined."
+          ]
+        },
+        "readiness_rationale": "The comparison is stable, so the main open question is how quickly competitive intensity shifts.",
+        "evidence_enhancements": {
+          "fac_competition": {
+            "why": "Competitive intensity is the least well supported input shaping revenue growth.",
+            "expected_gain": "Narrows the spread on the main fragility."
+          }
+        },
+        "scenario_contexts": {
+          "edge_competition_revenue": {
+            "context": "If competitive intensity rises sharply, the growth path narrows and the two options converge."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_label": "Competitive Intensity",
+            "current": "about 35%",
+            "flip_at": "about 62%",
+            "note": "Beyond that level the ordering would change."
+          }
+        ],
+        "bias_findings": [
+          {
+            "type": "anchoring",
+            "description": "The stated customer target may be anchoring how the options are compared.",
+            "affected_elements": [
+              "fac_europe_entry"
+            ],
+            "linked_critique_code": "ANCHORING"
+          }
+        ],
+        "key_assumptions": [
+          "Europe market entry continues to move the outcome as strongly as modelled.",
+          "Competitive response stays within the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would have to be true about competitive intensity for the ordering to change?",
+            "technique": "pre mortem"
+          }
+        ],
+        "pre_mortem": {
+          "scenario": "Twelve months on, competitive intensity rose faster than modelled and revenue growth stalled.",
+          "leading_indicator": "Rivals matching the entry offer within the first quarter."
+        }
+      }
+    },
+    {
+      "label": "fabricated_number",
+      "note": "99.4% is within no input value's ±10% band — the runtime grounding rule must catch it.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Enter European Market comes out ahead by about 44 percentage points over Delay to Next Year. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
+        "story_headlines": {
+          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_wait": "Protects near term spend but gives up the growth window"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering is stable across the simulated range, holding in about 91% of runs.",
+          "primary_risk": "Competitive intensity could compress revenue growth if rivals respond quickly.",
+          "stability_factors": [
+            "Europe market entry moves the outcome most and is well supported."
+          ],
+          "fragility_factors": [
+            "Competitive intensity carries the widest spread of the connections examined."
+          ]
+        },
+        "readiness_rationale": "The comparison is stable, so the main open question is how quickly competitive intensity shifts, which the model puts at about 5% per quarter.",
+        "evidence_enhancements": {
+          "fac_competition": {
+            "why": "Competitive intensity is the least well supported input shaping revenue growth.",
+            "expected_gain": "Narrows the spread on the main fragility."
+          }
+        },
+        "scenario_contexts": {
+          "edge_competition_revenue": {
+            "context": "If competitive intensity rises sharply, the growth path narrows and the two options converge."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_label": "Competitive Intensity",
+            "current": "about 35%",
+            "flip_at": "about 62%",
+            "note": "Beyond that level the ordering would change."
+          }
+        ],
+        "bias_findings": [
+          {
+            "type": "anchoring",
+            "description": "The stated customer target may be anchoring how the options are compared.",
+            "affected_elements": [
+              "fac_europe_entry"
+            ],
+            "linked_critique_code": "ANCHORING"
+          }
+        ],
+        "key_assumptions": [
+          "Europe market entry continues to move the outcome as strongly as modelled.",
+          "Competitive response stays within the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would have to be true about competitive intensity for the ordering to change?",
+            "technique": "pre mortem"
+          }
+        ],
+        "pre_mortem": {
+          "scenario": "Twelve months on, competitive intensity rose faster than modelled and revenue growth stalled.",
+          "leading_indicator": "Rivals matching the entry offer within the first quarter."
+        }
+      }
+    },
+    {
+      "label": "empty_narrative",
+      "note": "Whitespace-only narrative_summary: composes NO review_card, so an analysed turn ships no review.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "   ",
+        "story_headlines": {
+          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_wait": "Protects near term spend but gives up the growth window"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering is stable across the simulated range, holding in about 91% of runs.",
+          "primary_risk": "Competitive intensity could compress revenue growth if rivals respond quickly.",
+          "stability_factors": [
+            "Europe market entry moves the outcome most and is well supported."
+          ],
+          "fragility_factors": [
+            "Competitive intensity carries the widest spread of the connections examined."
+          ]
+        },
+        "readiness_rationale": "The comparison is stable, so the main open question is how quickly competitive intensity shifts.",
+        "evidence_enhancements": {
+          "fac_competition": {
+            "why": "Competitive intensity is the least well supported input shaping revenue growth.",
+            "expected_gain": "Narrows the spread on the main fragility."
+          }
+        },
+        "scenario_contexts": {
+          "edge_competition_revenue": {
+            "context": "If competitive intensity rises sharply, the growth path narrows and the two options converge."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_label": "Competitive Intensity",
+            "current": "about 35%",
+            "flip_at": "about 62%",
+            "note": "Beyond that level the ordering would change."
+          }
+        ],
+        "bias_findings": [
+          {
+            "type": "anchoring",
+            "description": "The stated customer target may be anchoring how the options are compared.",
+            "affected_elements": [
+              "fac_europe_entry"
+            ],
+            "linked_critique_code": "ANCHORING"
+          }
+        ],
+        "key_assumptions": [
+          "Europe market entry continues to move the outcome as strongly as modelled.",
+          "Competitive response stays within the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would have to be true about competitive intensity for the ordering to change?",
+            "technique": "pre mortem"
+          }
+        ],
+        "pre_mortem": {
+          "scenario": "Twelve months on, competitive intensity rose faster than modelled and revenue growth stalled.",
+          "leading_indicator": "Rivals matching the entry offer within the first quarter."
+        }
+      }
+    },
+    {
+      "label": "degenerate_empty",
+      "note": "The ANTI-VACUITY control: structurally valid keys, zero prose. Every absence dimension passes on it; the floor must still fail it.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "",
+        "story_headlines": {},
+        "robustness_explanation": {},
+        "readiness_rationale": "",
+        "evidence_enhancements": {},
+        "bias_findings": [],
+        "key_assumptions": [],
+        "decision_quality_prompts": []
+      }
+    }
+  ],
+  "expected": {
+    "good": true,
+    "banned_lexicon": false,
+    "raw_decimal": false,
+    "fabricated_number": false,
+    "empty_narrative": false,
+    "degenerate_empty": false
+  },
+  "expectedFailedDimensions": {
+    "banned_lexicon": [
+      "no_banned_lexicon"
+    ],
+    "raw_decimal": [
+      "no_raw_probability_decimals"
+    ],
+    "fabricated_number": [
+      "numbers_grounded"
+    ],
+    "empty_narrative": [
+      "review_card_coverage"
+    ],
+    "degenerate_empty": [
+      "substance_present",
+      "review_card_coverage"
+    ]
+  }
+}

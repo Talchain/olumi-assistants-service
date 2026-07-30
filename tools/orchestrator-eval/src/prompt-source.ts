@@ -6,9 +6,12 @@
  *
  *   <path>          a file on disk containing the FULL candidate prompt text
  *                   (e.g. a v42.x working copy). Read eagerly — no network.
- *   pms:<version>   a PMS version of the `routing` task (the orchestrator
- *                   prompt), resolved through the repo's own prompt store
- *                   (src/prompts/store.ts getCompiled('routing', {}, {version})).
+ *   pms:<version>   a PMS version of the RUN'S TASK (`--task`, default
+ *                   `routing`), resolved through the repo's own prompt store
+ *                   (src/prompts/store.ts getCompiled(task, {}, {version})).
+ *                   The task key is the same string the runtime passes to
+ *                   `getSystemPrompt(...)`, so a pms: ref resolves the prompt
+ *                   the runtime actually serves for that task.
  *                   LIVE-MODE ONLY: resolution needs the store backend
  *                   (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY or
  *                   PROMPTS_POSTGRES_URL), i.e. a network call — the offline
@@ -24,6 +27,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { DEFAULT_EVAL_TASK, type EvalTaskKey } from './tasks.js';
 
 export type PromptSourceKind = 'file' | 'pms' | 'mock';
 
@@ -77,15 +81,22 @@ export function parsePromptSpec(value: string): CandidatePromptSpec {
  * Resolve a pms: ref to prompt text through the repo's own prompt store.
  * LIVE-MODE ONLY (caller enforces). Dynamic import keeps the store — and its
  * config/telemetry import chain — out of the offline default path entirely.
+ *
+ * `task` defaults to `routing` so every pre-existing call site is unchanged.
+ * It is the SAME key the runtime resolves prompts under, so `pms:14` on task
+ * `decision_review` is the prompt staging actually serves for a review.
  */
-export async function resolvePmsPromptText(version: number): Promise<string> {
+export async function resolvePmsPromptText(
+  version: number,
+  task: EvalTaskKey = DEFAULT_EVAL_TASK,
+): Promise<string> {
   const { getPromptStore } = await import('../../../src/prompts/store.js');
   const store = getPromptStore();
   await store.initialize();
-  const compiled = await store.getCompiled('routing', {}, { version });
+  const compiled = await store.getCompiled(task, {}, { version });
   if (!compiled) {
     throw new Error(
-      `PMS has no 'routing' prompt at version ${version} (store returned null). ` +
+      `PMS has no '${task}' prompt at version ${version} (store returned null). ` +
         'Check the version number against /admin/prompts on the target environment.',
     );
   }

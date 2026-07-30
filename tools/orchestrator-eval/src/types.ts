@@ -62,16 +62,43 @@ export interface OrchestratorEvalFixture {
   readonly expected: Readonly<Record<string, boolean>>;
 }
 
+/**
+ * Where a dimension's rule comes from.
+ *   - `production-guard`     re-exported runtime code; eval and runtime cannot drift.
+ *   - `served-prompt-derived` PARSED out of the served prompt text at run time,
+ *                            so the rule tracks a prompt bump instead of
+ *                            mirroring one moment of it (see
+ *                            decision-review/served-contract.ts).
+ *   - `eval-assertion`       this pack's own worked logic, with its reasoning
+ *                            written down at the definition site.
+ */
+export type DimensionSource = 'production-guard' | 'served-prompt-derived' | 'eval-assertion';
+
 /** One scored dimension of a candidate. */
 export interface DimensionResult {
   /** Dimension name (stable key for reporting). */
   readonly name: string;
   /** Whether this dimension passed. */
   readonly pass: boolean;
-  /** Where the check comes from — a PRODUCTION guard, or this pack's own logic. */
-  readonly source: 'production-guard' | 'eval-assertion';
+  /** Where the check comes from. */
+  readonly source: DimensionSource;
   /** Human-readable evidence, e.g. the offending phrase or "clean". */
   readonly detail: string;
+  /**
+   * ANTI-VACUITY INSTRUMENT — how many units this dimension actually examined
+   * (prose strings scanned, keys compared, numbers checked).
+   *
+   * Every absence check ("no banned term", "no fabricated callback") passes
+   * trivially when there is nothing to look at, so a green absence dimension is
+   * only meaningful alongside proof that it SAW something. Trap 13 in miniature:
+   * a leak test that captured 0 bytes passed every "no raw value present"
+   * assertion by testing nothing. Recording the corpus size makes that visible
+   * in the report AND assertable in a test (`decision-review-anti-vacuity.test.ts`
+   * requires `scanned > 0` for every absence dimension on every good candidate).
+   *
+   * Optional because presence dimensions (`substance_present`) have no corpus.
+   */
+  readonly scanned?: number;
 }
 
 /** The deterministic score for one candidate. */

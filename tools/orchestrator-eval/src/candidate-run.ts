@@ -37,6 +37,9 @@ import { assembleAnalysis } from './assemble.js';
 import { scoreCandidate } from './scorer.js';
 import { enforceTurnCap, resolveLiveGate, type LiveGateInput, type LiveGateResult } from './live-gate.js';
 import { resolvePmsPromptText, type CandidatePromptSpec } from './prompt-source.js';
+import type { EvalTaskKey } from './tasks.js';
+import type { EvalTaskAdapter, ExtractionMode, ScoredOutput } from './task-adapter.js';
+import { loadFixtures } from './run.js';
 import type { DimensionResult, OrchestratorEvalFixture, ScoreResult } from './types.js';
 
 /** The v30.3 JSON-forcing suffix (mirrors tools/graph-evaluator adapters/orchestrator.ts). */
@@ -53,11 +56,14 @@ export interface CandidateModelResult {
   readonly error: string | null;
 }
 
-/** How the scored prose was obtained from the raw model output. */
-export type ExtractionMode =
-  | 'json_text' // v30.3 envelope parsed; `text` field scored (the contract path)
-  | 'raw_unparsed' // JSON parse failed; RAW output scored and flagged
-  | 'model_error'; // the model call itself failed; nothing scored
+/**
+ * How the scored surface was obtained from the raw model output.
+ *
+ * Re-exported from `task-adapter.ts` (where it now lives, because it is a
+ * task-agnostic pipeline concept) so every pre-existing importer of
+ * `candidate-run.js` keeps working unchanged.
+ */
+export type { ExtractionMode } from './task-adapter.js';
 
 export interface CandidateFixtureResult {
   readonly fixtureId: string;
@@ -91,6 +97,8 @@ export interface CandidateReport {
 }
 
 export interface CandidateEvalReport {
+  /** Which prompt task this run evaluated (`routing` unless --task said otherwise). */
+  readonly task: EvalTaskKey;
   readonly live: boolean;
   readonly gateReason: string;
   /** Model id used for live production; null in offline/mock mode. */
@@ -220,23 +228,77 @@ export function applyExtractionContract(score: ScoreResult, extraction: Extracti
   return { ...score, dimensions, pass: dimensions.every((d) => d.pass) };
 }
 
+/**
+ * The `routing` task adapter — the chassis's original, now-explicit behaviour.
+ *
+ * Every method here is the exact code the pipeline used to call inline, moved
+ * behind the adapter seam with NO change of behaviour: the request builder is
+ * `buildCandidateRequest`, the envelope is the v30.3 one, extraction is
+ * `extractAssistantText`, and scoring is `scoreCandidate` + the extraction
+ * contract. `pnpm eval:orchestrator:test` is the proof that the move is inert.
+ */
+export const ROUTING_ADAPTER: EvalTaskAdapter<OrchestratorEvalFixture> = {
+  task: 'routing',
+  fixtureId: (fixture) => fixture.id,
+  loadFixtures: (dir) => loadFixtures(dir),
+  buildRequest: (fixture, promptText) => buildCandidateRequest(fixture, promptText),
+  mockRaw: (fixture, mockLabel) => {
+    const recorded = fixture.candidates.find((c) => c.label === mockLabel);
+    return recorded ? mockEnvelope(recorded.text) : null;
+  },
+  scoreRaw: (fixture, raw, candidateLabel): ScoredOutput => {
+    const { text, extraction } = extractAssistantText(raw);
+    const score = applyExtractionContract(
+      scoreCandidate(fixture.analysis, {
+        label: candidateLabel,
+        note: 'SEAM-1 candidate',
+        source: 'live',
+        text,
+      }),
+      extraction,
+    );
+    return { extraction, score };
+  },
+};
+
+/**
+ * Resolve the adapter for a run, defaulting to `routing`.
+ *
+ * The generic parameter `F` defaults to `OrchestratorEvalFixture`, so the ONLY
+ * instantiation that can reach the `??` right-hand side is the defaulted one —
+ * `F` is then exactly `OrchestratorEvalFixture` and `ROUTING_ADAPTER` is
+ * already the right type. TypeScript cannot express "this branch is only
+ * reachable at the default instantiation", hence the localised assertion,
+ * confined to this one function rather than smeared through the pipeline.
+ *
+ * A caller supplying a NON-default `F` must supply its adapter — the pipeline
+ * has no way to invent one, and silently falling back to routing would score a
+ * decision_review fixture with the routing prose dimensions and report a
+ * number. That is exactly the kind of quiet mis-scoring this pack exists to
+ * catch, so it is pinned by a named test rather than left to review.
+ */
+function resolveAdapter<F>(adapter: EvalTaskAdapter<F> | undefined): EvalTaskAdapter<F> {
+  return adapter ?? (ROUTING_ADAPTER as EvalTaskAdapter<F>);
+}
+
 /** Produce the raw response for one (candidate, fixture) pair. */
-async function produceRawResponse(
+async function produceRawResponse<F>(
   spec: CandidatePromptSpec,
   promptText: string | null,
-  fixture: OrchestratorEvalFixture,
+  fixture: F,
+  adapter: EvalTaskAdapter<F>,
   model: CandidateModel | null,
 ): Promise<CandidateModelResult> {
   if (spec.kind === 'mock') {
-    const recorded = fixture.candidates.find((c) => c.label === spec.mockLabel);
-    if (!recorded) {
+    const raw = adapter.mockRaw(fixture, spec.mockLabel ?? '');
+    if (raw === null) {
       return {
         ok: false,
         text: null,
-        error: `fixture ${fixture.id} has no recorded candidate labelled "${spec.mockLabel}"`,
+        error: `fixture ${adapter.fixtureId(fixture)} has no recorded candidate labelled "${spec.mockLabel}"`,
       };
     }
-    return { ok: true, text: mockEnvelope(recorded.text), error: null };
+    return { ok: true, text: raw, error: null };
   }
 
   // file / pms — live production required.
@@ -249,7 +311,7 @@ async function produceRawResponse(
         'this should have been refused before any turn was planned',
     };
   }
-  const { system, user } = buildCandidateRequest(fixture, promptText);
+  const { system, user } = adapter.buildRequest(fixture, promptText);
   return model(system, user);
 }
 
@@ -284,9 +346,14 @@ async function mapWithConcurrency<T, R>(
   return out;
 }
 
-export interface RunCandidateEvalOptions {
+export interface RunCandidateEvalOptions<F = OrchestratorEvalFixture> {
   readonly specs: readonly CandidatePromptSpec[];
-  readonly fixtures: readonly OrchestratorEvalFixture[];
+  readonly fixtures: readonly F[];
+  /**
+   * Task adapter — the ONLY task-specific part of the pipeline. Defaults to
+   * `ROUTING_ADAPTER`, so every pre-existing call site is unchanged.
+   */
+  readonly adapter?: EvalTaskAdapter<F>;
   /** Gate inputs — usually { env: process.env, argv: process.argv }. */
   readonly gateInput: LiveGateInput;
   /** Optional --max-turns; may only LOWER the hard cap. */
@@ -309,8 +376,11 @@ export interface RunCandidateEvalOptions {
  *   4. resolve pms refs / construct the live model (live mode only);
  *   5. produce -> extract -> score -> rank.
  */
-export async function runCandidateEval(options: RunCandidateEvalOptions): Promise<CandidateEvalReport> {
+export async function runCandidateEval<F = OrchestratorEvalFixture>(
+  options: RunCandidateEvalOptions<F>,
+): Promise<CandidateEvalReport> {
   const { specs, fixtures } = options;
+  const adapter = resolveAdapter(options.adapter);
   if (specs.length === 0) throw new Error('no --prompt candidates given');
   if (fixtures.length === 0) throw new Error('no fixtures to evaluate against');
   const labels = new Set(specs.map((s) => s.label));
@@ -348,7 +418,8 @@ export async function runCandidateEval(options: RunCandidateEvalOptions): Promis
     model = await factory(options.modelId);
     for (const spec of liveSpecs) {
       if (spec.kind === 'pms' && spec.pmsVersion !== null) {
-        promptTexts.set(spec.label, await resolvePmsPromptText(spec.pmsVersion));
+        // Resolve against THIS RUN'S task, not a hard-wired 'routing'.
+        promptTexts.set(spec.label, await resolvePmsPromptText(spec.pmsVersion, adapter.task));
       }
     }
   }
@@ -365,27 +436,24 @@ export async function runCandidateEval(options: RunCandidateEvalOptions): Promis
       FIXTURE_CONCURRENCY,
       async (fixture): Promise<CandidateFixtureResult> => {
         turnsUsed += 1;
-        const raw = await produceRawResponse(spec, promptTexts.get(spec.label) ?? null, fixture, model);
+        const raw = await produceRawResponse(
+          spec,
+          promptTexts.get(spec.label) ?? null,
+          fixture,
+          adapter,
+          model,
+        );
         if (!raw.ok || raw.text === null) {
           return {
-            fixtureId: fixture.id,
+            fixtureId: adapter.fixtureId(fixture),
             extraction: 'model_error',
             score: null,
             pass: false,
             error: raw.error ?? 'model returned no text',
           };
         }
-        const { text, extraction } = extractAssistantText(raw.text);
-        const score = applyExtractionContract(
-          scoreCandidate(fixture.analysis, {
-            label: spec.label,
-            note: `SEAM-1 ${spec.kind} candidate (${spec.ref})`,
-            source: spec.kind === 'mock' ? 'recorded' : 'live',
-            text,
-          }),
-          extraction,
-        );
-        return { fixtureId: fixture.id, extraction, score, pass: score.pass, error: null };
+        const { extraction, score } = adapter.scoreRaw(fixture, raw.text, spec.label);
+        return { fixtureId: adapter.fixtureId(fixture), extraction, score, pass: score.pass, error: null };
       },
     );
     const passCount = results.filter((r) => r.pass).length;
@@ -431,6 +499,7 @@ export async function runCandidateEval(options: RunCandidateEvalOptions): Promis
     .map((c) => c.label);
 
   return {
+    task: adapter.task,
     live: gate.live,
     gateReason: gate.reason,
     model: gate.live && liveSpecs.length > 0 ? (options.modelId ?? null) : null,

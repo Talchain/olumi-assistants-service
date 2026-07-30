@@ -1,0 +1,520 @@
+{
+  "id": "03-needs-evidence",
+  "description": "needs_evidence run with low overall confidence and two evidence gaps. Exercises the served TONE table at caution rank 2 (\"ready to proceed\", \"confident\", \"clear\" forbidden), the runtime entity-grounding rule, and the tight bias_findings cap.",
+  "provenance": {
+    "origin": "graph-evaluator-revival",
+    "source": "tools/graph-evaluator/fixtures/decision-review/03-needs-evidence.json (committed 11078d28, 2026-03-06)",
+    "note": "Revived; edge ids added and a second bias finding carrying brief_evidence added so the semantic-bias shape is present. Deliberately has NO flip_threshold_data: the pack must contain at least one fixture where that post-v11 section is absent, or it would never exercise the assembler's \"Not available\" branch."
+  },
+  "input": {
+    "brief": "Should we rebuild the billing service in house or extend the current vendor contract?",
+    "brief_hash": "0918273645abcdef",
+    "graph": {
+      "nodes": [
+        {
+          "id": "dec_billing",
+          "kind": "decision",
+          "label": "Billing Platform Direction"
+        },
+        {
+          "id": "opt_rebuild",
+          "kind": "option",
+          "label": "Rebuild In House"
+        },
+        {
+          "id": "opt_extend",
+          "kind": "option",
+          "label": "Extend Vendor Contract"
+        },
+        {
+          "id": "fac_eng_capacity",
+          "kind": "factor",
+          "label": "Engineering Capacity"
+        },
+        {
+          "id": "fac_vendor_price",
+          "kind": "factor",
+          "label": "Vendor Price Path"
+        },
+        {
+          "id": "out_tco",
+          "kind": "outcome",
+          "label": "Total Cost of Ownership"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_capacity_tco",
+          "from": "fac_eng_capacity",
+          "to": "out_tco",
+          "effect_direction": "negative"
+        },
+        {
+          "id": "edge_price_tco",
+          "from": "fac_vendor_price",
+          "to": "out_tco",
+          "effect_direction": "positive"
+        }
+      ]
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_rebuild",
+          "option_label": "Rebuild In House",
+          "win_probability": 0.58,
+          "outcome": {
+            "mean": 0.55,
+            "p10": 0.21,
+            "p90": 0.86
+          }
+        },
+        {
+          "option_id": "opt_extend",
+          "option_label": "Extend Vendor Contract",
+          "win_probability": 0.42,
+          "outcome": {
+            "mean": 0.46,
+            "p10": 0.33,
+            "p90": 0.6
+          }
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "factor_id": "fac_eng_capacity",
+          "factor_label": "Engineering Capacity",
+          "elasticity": 0.61,
+          "confidence": 0.29
+        },
+        {
+          "factor_id": "fac_vendor_price",
+          "factor_label": "Vendor Price Path",
+          "elasticity": 0.33,
+          "confidence": 0.55
+        }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "edge_capacity_tco",
+          "from_label": "Engineering Capacity",
+          "to_label": "Total Cost of Ownership",
+          "switch_probability": 0.37
+        }
+      ],
+      "robustness": {
+        "level": "low",
+        "recommendation_stability": 0.61,
+        "overall_confidence": 0.27
+      }
+    },
+    "deterministic_coaching": {
+      "headline_type": "needs_evidence",
+      "readiness": "needs_evidence",
+      "evidence_gaps": [
+        {
+          "factor_id": "fac_eng_capacity",
+          "factor_label": "Engineering Capacity",
+          "voi": 0.31,
+          "confidence": 0.29
+        },
+        {
+          "factor_id": "fac_vendor_price",
+          "factor_label": "Vendor Price Path",
+          "voi": 0.18,
+          "confidence": 0.55
+        }
+      ],
+      "model_critiques": [
+        {
+          "type": "unsupported_link",
+          "severity": "medium",
+          "message": "Engineering capacity is asserted rather than evidenced."
+        }
+      ]
+    },
+    "winner": {
+      "id": "opt_rebuild",
+      "label": "Rebuild In House",
+      "win_probability": 0.58,
+      "outcome_mean": 0.55
+    },
+    "runner_up": {
+      "id": "opt_extend",
+      "label": "Extend Vendor Contract",
+      "win_probability": 0.42,
+      "outcome_mean": 0.46
+    }
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Cautious, evidence-first, both bias findings grounded. Should PASS.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Rebuild In House is ahead of Extend Vendor Contract by about 16 percentage points, based on current estimates. Engineering capacity is the weakest support in the picture.",
+        "story_headlines": {
+          "opt_rebuild": "Ahead on cost, resting on an engineering capacity claim",
+          "opt_extend": "Steadier cost path with a narrower spread"
+        },
+        "robustness_explanation": {
+          "summary": "Confidence in the inputs is low, so the ordering should be treated as provisional.",
+          "primary_risk": "Engineering capacity may be overstated, which would raise the cost of rebuilding.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Engineering capacity has the weakest support of any input in the picture."
+          ]
+        },
+        "readiness_rationale": "Engineering capacity carries the least support and the most weight, so evidence on it should come before a commitment.",
+        "evidence_enhancements": {
+          "fac_eng_capacity": {
+            "why": "Engineering capacity moves the outcome most and is supported least.",
+            "expected_gain": "Would firm up the input the comparison rests on."
+          },
+          "fac_vendor_price": {
+            "why": "The vendor price path is only partly supported.",
+            "expected_gain": "Would narrow the cost spread on the alternative."
+          }
+        },
+        "scenario_contexts": {
+          "edge_capacity_tco": {
+            "context": "If engineering capacity turns out lower than assumed, the cost of rebuilding rises and the ordering reverses."
+          }
+        },
+        "bias_findings": [
+          {
+            "type": "overconfidence",
+            "description": "Engineering capacity is asserted rather than evidenced, which tends to flatter an in house build.",
+            "affected_elements": [
+              "fac_eng_capacity"
+            ],
+            "linked_critique_code": "UNSUPPORTED_LINK"
+          },
+          {
+            "type": "status_quo",
+            "description": "Extending the existing contract is the familiar path, which can make it look safer than it is.",
+            "affected_elements": [
+              "opt_extend"
+            ],
+            "brief_evidence": "extend the current vendor contract"
+          }
+        ],
+        "key_assumptions": [
+          "Engineering capacity is available for the whole rebuild period.",
+          "The vendor price path stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would you need to see about engineering capacity to commit to a rebuild?",
+            "technique": "value of information"
+          },
+          {
+            "prompt": "If the familiar path were unavailable, would the rebuild still be attractive?",
+            "technique": "status quo test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ungrounded_bias_element",
+      "note": "affected_elements names an id that is not in the graph.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Rebuild In House is ahead of Extend Vendor Contract by about 16 percentage points, based on current estimates. Engineering capacity is the weakest support in the picture.",
+        "story_headlines": {
+          "opt_rebuild": "Ahead on cost, resting on an engineering capacity claim",
+          "opt_extend": "Steadier cost path with a narrower spread"
+        },
+        "robustness_explanation": {
+          "summary": "Confidence in the inputs is low, so the ordering should be treated as provisional.",
+          "primary_risk": "Engineering capacity may be overstated, which would raise the cost of rebuilding.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Engineering capacity has the weakest support of any input in the picture."
+          ]
+        },
+        "readiness_rationale": "Engineering capacity carries the least support and the most weight, so evidence on it should come before a commitment.",
+        "evidence_enhancements": {
+          "fac_eng_capacity": {
+            "why": "Engineering capacity moves the outcome most and is supported least.",
+            "expected_gain": "Would firm up the input the comparison rests on."
+          },
+          "fac_vendor_price": {
+            "why": "The vendor price path is only partly supported.",
+            "expected_gain": "Would narrow the cost spread on the alternative."
+          }
+        },
+        "scenario_contexts": {
+          "edge_capacity_tco": {
+            "context": "If engineering capacity turns out lower than assumed, the cost of rebuilding rises and the ordering reverses."
+          }
+        },
+        "bias_findings": [
+          {
+            "type": "overconfidence",
+            "description": "Engineering capacity is asserted rather than evidenced, which tends to flatter an in house build.",
+            "affected_elements": [
+              "fac_hiring_pipeline"
+            ],
+            "linked_critique_code": "UNSUPPORTED_LINK"
+          },
+          {
+            "type": "status_quo",
+            "description": "Extending the existing contract is the familiar path, which can make it look safer than it is.",
+            "affected_elements": [
+              "opt_extend"
+            ],
+            "brief_evidence": "extend the current vendor contract"
+          }
+        ],
+        "key_assumptions": [
+          "Engineering capacity is available for the whole rebuild period.",
+          "The vendor price path stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would you need to see about engineering capacity to commit to a rebuild?",
+            "technique": "value of information"
+          },
+          {
+            "prompt": "If the familiar path were unavailable, would the rebuild still be attractive?",
+            "technique": "status quo test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "cap_breach",
+      "note": "Three bias_findings against the tight prompt bound of two.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Rebuild In House is ahead of Extend Vendor Contract by about 16 percentage points, based on current estimates. Engineering capacity is the weakest support in the picture.",
+        "story_headlines": {
+          "opt_rebuild": "Ahead on cost, resting on an engineering capacity claim",
+          "opt_extend": "Steadier cost path with a narrower spread"
+        },
+        "robustness_explanation": {
+          "summary": "Confidence in the inputs is low, so the ordering should be treated as provisional.",
+          "primary_risk": "Engineering capacity may be overstated, which would raise the cost of rebuilding.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Engineering capacity has the weakest support of any input in the picture."
+          ]
+        },
+        "readiness_rationale": "Engineering capacity carries the least support and the most weight, so evidence on it should come before a commitment.",
+        "evidence_enhancements": {
+          "fac_eng_capacity": {
+            "why": "Engineering capacity moves the outcome most and is supported least.",
+            "expected_gain": "Would firm up the input the comparison rests on."
+          },
+          "fac_vendor_price": {
+            "why": "The vendor price path is only partly supported.",
+            "expected_gain": "Would narrow the cost spread on the alternative."
+          }
+        },
+        "scenario_contexts": {
+          "edge_capacity_tco": {
+            "context": "If engineering capacity turns out lower than assumed, the cost of rebuilding rises and the ordering reverses."
+          }
+        },
+        "bias_findings": [
+          {
+            "type": "overconfidence",
+            "description": "Engineering capacity is asserted rather than evidenced, which tends to flatter an in house build.",
+            "affected_elements": [
+              "fac_eng_capacity"
+            ],
+            "linked_critique_code": "UNSUPPORTED_LINK"
+          },
+          {
+            "type": "status_quo",
+            "description": "Extending the existing contract is the familiar path, which can make it look safer than it is.",
+            "affected_elements": [
+              "opt_extend"
+            ],
+            "brief_evidence": "extend the current vendor contract"
+          },
+          {
+            "type": "availability",
+            "description": "Recent vendor incidents are easy to recall and can dominate the comparison.",
+            "affected_elements": [
+              "fac_vendor_price"
+            ],
+            "brief_evidence": "extend the current vendor contract"
+          }
+        ],
+        "key_assumptions": [
+          "Engineering capacity is available for the whole rebuild period.",
+          "The vendor price path stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would you need to see about engineering capacity to commit to a rebuild?",
+            "technique": "value of information"
+          },
+          {
+            "prompt": "If the familiar path were unavailable, would the rebuild still be attractive?",
+            "technique": "status quo test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "tone_breach",
+      "note": "\"ready to proceed\" is forbidden at this run's tone row.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Rebuild In House is ahead of Extend Vendor Contract by about 16 percentage points, based on current estimates. Engineering capacity is the weakest support in the picture.",
+        "story_headlines": {
+          "opt_rebuild": "Ahead on cost, resting on an engineering capacity claim",
+          "opt_extend": "Steadier cost path with a narrower spread"
+        },
+        "robustness_explanation": {
+          "summary": "Confidence in the inputs is low, so the ordering should be treated as provisional.",
+          "primary_risk": "Engineering capacity may be overstated, which would raise the cost of rebuilding.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Engineering capacity has the weakest support of any input in the picture."
+          ]
+        },
+        "readiness_rationale": "Engineering capacity looks confident enough that the team is ready to proceed with the rebuild now.",
+        "evidence_enhancements": {
+          "fac_eng_capacity": {
+            "why": "Engineering capacity moves the outcome most and is supported least.",
+            "expected_gain": "Would firm up the input the comparison rests on."
+          },
+          "fac_vendor_price": {
+            "why": "The vendor price path is only partly supported.",
+            "expected_gain": "Would narrow the cost spread on the alternative."
+          }
+        },
+        "scenario_contexts": {
+          "edge_capacity_tco": {
+            "context": "If engineering capacity turns out lower than assumed, the cost of rebuilding rises and the ordering reverses."
+          }
+        },
+        "bias_findings": [
+          {
+            "type": "overconfidence",
+            "description": "Engineering capacity is asserted rather than evidenced, which tends to flatter an in house build.",
+            "affected_elements": [
+              "fac_eng_capacity"
+            ],
+            "linked_critique_code": "UNSUPPORTED_LINK"
+          },
+          {
+            "type": "status_quo",
+            "description": "Extending the existing contract is the familiar path, which can make it look safer than it is.",
+            "affected_elements": [
+              "opt_extend"
+            ],
+            "brief_evidence": "extend the current vendor contract"
+          }
+        ],
+        "key_assumptions": [
+          "Engineering capacity is available for the whole rebuild period.",
+          "The vendor price path stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would you need to see about engineering capacity to commit to a rebuild?",
+            "technique": "value of information"
+          },
+          {
+            "prompt": "If the familiar path were unavailable, would the rebuild still be attractive?",
+            "technique": "status quo test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "entity_id_in_prose",
+      "note": "Puts a raw factor id inside narrative prose.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Rebuild In House is ahead of Extend Vendor Contract by about 16 percentage points. The fac_eng_capacity input is the weakest support in the picture.",
+        "story_headlines": {
+          "opt_rebuild": "Ahead on cost, resting on an engineering capacity claim",
+          "opt_extend": "Steadier cost path with a narrower spread"
+        },
+        "robustness_explanation": {
+          "summary": "Confidence in the inputs is low, so the ordering should be treated as provisional.",
+          "primary_risk": "Engineering capacity may be overstated, which would raise the cost of rebuilding.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Engineering capacity has the weakest support of any input in the picture."
+          ]
+        },
+        "readiness_rationale": "Engineering capacity carries the least support and the most weight, so evidence on it should come before a commitment.",
+        "evidence_enhancements": {
+          "fac_eng_capacity": {
+            "why": "Engineering capacity moves the outcome most and is supported least.",
+            "expected_gain": "Would firm up the input the comparison rests on."
+          },
+          "fac_vendor_price": {
+            "why": "The vendor price path is only partly supported.",
+            "expected_gain": "Would narrow the cost spread on the alternative."
+          }
+        },
+        "scenario_contexts": {
+          "edge_capacity_tco": {
+            "context": "If engineering capacity turns out lower than assumed, the cost of rebuilding rises and the ordering reverses."
+          }
+        },
+        "bias_findings": [
+          {
+            "type": "overconfidence",
+            "description": "Engineering capacity is asserted rather than evidenced, which tends to flatter an in house build.",
+            "affected_elements": [
+              "fac_eng_capacity"
+            ],
+            "linked_critique_code": "UNSUPPORTED_LINK"
+          },
+          {
+            "type": "status_quo",
+            "description": "Extending the existing contract is the familiar path, which can make it look safer than it is.",
+            "affected_elements": [
+              "opt_extend"
+            ],
+            "brief_evidence": "extend the current vendor contract"
+          }
+        ],
+        "key_assumptions": [
+          "Engineering capacity is available for the whole rebuild period.",
+          "The vendor price path stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would you need to see about engineering capacity to commit to a rebuild?",
+            "technique": "value of information"
+          },
+          {
+            "prompt": "If the familiar path were unavailable, would the rebuild still be attractive?",
+            "technique": "status quo test"
+          }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "good": true,
+    "ungrounded_bias_element": false,
+    "cap_breach": false,
+    "tone_breach": false,
+    "entity_id_in_prose": false
+  },
+  "expectedFailedDimensions": {
+    "ungrounded_bias_element": [
+      "entity_references_grounded"
+    ],
+    "cap_breach": [
+      "contract_caps_respected"
+    ],
+    "tone_breach": [
+      "tone_alignment"
+    ],
+    "entity_id_in_prose": [
+      "no_entity_ids_in_prose"
+    ]
+  }
+}

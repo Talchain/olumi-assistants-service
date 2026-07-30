@@ -1,0 +1,297 @@
+{
+  "id": "06-duplicate-headlines",
+  "description": "Four-option run — the shape that produced ROADMAP 1.121, where the enricher emitted four review_cards ALL titled \"A load-bearing assumption\", colliding on dedupe and giving the canvas nothing to focus. story_headlines is the source field for those titles, so the defect is measurable here.",
+  "provenance": {
+    "origin": "defect-reproduction",
+    "source": "ROADMAP.md:532 (row 1.121)",
+    "note": "The only fixture with more than two options, so it is also the only one where headline collision is POSSIBLE — the distinctness dimension reports \"collision impossible\" everywhere else and says so rather than claiming a pass it did not earn."
+  },
+  "input": {
+    "brief": "Which of our four growth bets should get next quarter budget?",
+    "brief_hash": "2468ace013579bdf",
+    "graph": {
+      "nodes": [
+        {
+          "id": "dec_budget",
+          "kind": "decision",
+          "label": "Growth Budget Allocation"
+        },
+        {
+          "id": "opt_paid",
+          "kind": "option",
+          "label": "Paid Acquisition"
+        },
+        {
+          "id": "opt_partner",
+          "kind": "option",
+          "label": "Partner Channel"
+        },
+        {
+          "id": "opt_selfserve",
+          "kind": "option",
+          "label": "Self Serve Funnel"
+        },
+        {
+          "id": "opt_outbound",
+          "kind": "option",
+          "label": "Outbound Sales"
+        },
+        {
+          "id": "fac_cac",
+          "kind": "factor",
+          "label": "Customer Acquisition Cost"
+        },
+        {
+          "id": "out_growth",
+          "kind": "outcome",
+          "label": "New Revenue"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_cac_growth",
+          "from": "fac_cac",
+          "to": "out_growth",
+          "effect_direction": "negative"
+        }
+      ]
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_selfserve",
+          "option_label": "Self Serve Funnel",
+          "win_probability": 0.41,
+          "outcome": {
+            "mean": 0.52,
+            "p10": 0.31,
+            "p90": 0.72
+          }
+        },
+        {
+          "option_id": "opt_paid",
+          "option_label": "Paid Acquisition",
+          "win_probability": 0.27,
+          "outcome": {
+            "mean": 0.45,
+            "p10": 0.24,
+            "p90": 0.68
+          }
+        },
+        {
+          "option_id": "opt_partner",
+          "option_label": "Partner Channel",
+          "win_probability": 0.19,
+          "outcome": {
+            "mean": 0.4,
+            "p10": 0.2,
+            "p90": 0.61
+          }
+        },
+        {
+          "option_id": "opt_outbound",
+          "option_label": "Outbound Sales",
+          "win_probability": 0.13,
+          "outcome": {
+            "mean": 0.36,
+            "p10": 0.17,
+            "p90": 0.55
+          }
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "factor_id": "fac_cac",
+          "factor_label": "Customer Acquisition Cost",
+          "elasticity": -0.66,
+          "confidence": 0.74
+        }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "edge_cac_growth",
+          "from_label": "Customer Acquisition Cost",
+          "to_label": "New Revenue",
+          "switch_probability": 0.33
+        }
+      ],
+      "robustness": {
+        "level": "medium",
+        "recommendation_stability": 0.64,
+        "overall_confidence": 0.6
+      }
+    },
+    "deterministic_coaching": {
+      "headline_type": "moderate_winner",
+      "readiness": "ready",
+      "evidence_gaps": [
+        {
+          "factor_id": "fac_cac",
+          "factor_label": "Customer Acquisition Cost",
+          "voi": 0.19,
+          "confidence": 0.74
+        }
+      ],
+      "model_critiques": []
+    },
+    "winner": {
+      "id": "opt_selfserve",
+      "label": "Self Serve Funnel",
+      "win_probability": 0.41,
+      "outcome_mean": 0.52
+    },
+    "runner_up": {
+      "id": "opt_paid",
+      "label": "Paid Acquisition",
+      "win_probability": 0.27,
+      "outcome_mean": 0.45
+    }
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Four distinct, option-specific headlines. Should PASS.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Self Serve Funnel comes out ahead by about 14 percentage points over Paid Acquisition. Customer acquisition cost is the input that moves all four bets.",
+        "story_headlines": {
+          "opt_selfserve": "Ahead because acquisition cost bites it least",
+          "opt_paid": "Close behind, most exposed to acquisition cost",
+          "opt_partner": "Middling return with a narrow spread",
+          "opt_outbound": "Trails on every measure examined"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 64% of runs, with acquisition cost driving most of the movement.",
+          "primary_risk": "Customer acquisition cost could rise and compress every bet at once.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Customer acquisition cost reverses the ordering in about 33% of runs."
+          ]
+        },
+        "readiness_rationale": "The ordering is usable, but customer acquisition cost moves all four bets together, so it should be watched.",
+        "evidence_enhancements": {
+          "fac_cac": {
+            "why": "Customer acquisition cost is the single input shaping every bet.",
+            "expected_gain": "Would firm up all four at once."
+          }
+        },
+        "scenario_contexts": {
+          "edge_cac_growth": {
+            "context": "If customer acquisition cost rises, new revenue falls across every bet and the ordering tightens."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "Customer acquisition cost stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would have to happen to customer acquisition cost for the ordering to change?",
+            "technique": "assumption test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "duplicate_headlines",
+      "note": "All four headlines identical — the 1.121 dedupe-collision defect at its source field.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Self Serve Funnel comes out ahead by about 14 percentage points over Paid Acquisition. Customer acquisition cost is the input that moves all four bets.",
+        "story_headlines": {
+          "opt_selfserve": "A load bearing assumption",
+          "opt_paid": "A load bearing assumption",
+          "opt_partner": "A load bearing assumption",
+          "opt_outbound": "A load bearing assumption"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 64% of runs, with acquisition cost driving most of the movement.",
+          "primary_risk": "Customer acquisition cost could rise and compress every bet at once.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Customer acquisition cost reverses the ordering in about 33% of runs."
+          ]
+        },
+        "readiness_rationale": "The ordering is usable, but customer acquisition cost moves all four bets together, so it should be watched.",
+        "evidence_enhancements": {
+          "fac_cac": {
+            "why": "Customer acquisition cost is the single input shaping every bet.",
+            "expected_gain": "Would firm up all four at once."
+          }
+        },
+        "scenario_contexts": {
+          "edge_cac_growth": {
+            "context": "If customer acquisition cost rises, new revenue falls across every bet and the ordering tightens."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "Customer acquisition cost stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would have to happen to customer acquisition cost for the ordering to change?",
+            "technique": "assumption test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "incoherent_risk",
+      "note": "primary_risk names a risk no other section mentions, breaking the prompt COHERENCE rule.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Self Serve Funnel comes out ahead by about 14 percentage points over Paid Acquisition. Customer acquisition cost is the input that moves all four bets.",
+        "story_headlines": {
+          "opt_selfserve": "Ahead because acquisition cost bites it least",
+          "opt_paid": "Close behind, most exposed to acquisition cost",
+          "opt_partner": "Middling return with a narrow spread",
+          "opt_outbound": "Trails on every measure examined"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 64% of runs, with acquisition cost driving most of the movement.",
+          "primary_risk": "Partner contract renegotiation could stall midway through the period.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Customer acquisition cost reverses the ordering in about 33% of runs."
+          ]
+        },
+        "readiness_rationale": "The ordering is usable, but customer acquisition cost moves all four bets together, so it should be watched.",
+        "evidence_enhancements": {
+          "fac_cac": {
+            "why": "Customer acquisition cost is the single input shaping every bet.",
+            "expected_gain": "Would firm up all four at once."
+          }
+        },
+        "scenario_contexts": {
+          "edge_cac_growth": {
+            "context": "If customer acquisition cost rises, new revenue falls across every bet and the ordering tightens."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "Customer acquisition cost stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would have to happen to customer acquisition cost for the ordering to change?",
+            "technique": "assumption test"
+          }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "good": true,
+    "duplicate_headlines": false,
+    "incoherent_risk": false
+  },
+  "expectedFailedDimensions": {
+    "duplicate_headlines": [
+      "story_headlines_distinct"
+    ],
+    "incoherent_risk": [
+      "primary_risk_coherent"
+    ]
+  }
+}
