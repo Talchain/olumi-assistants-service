@@ -231,6 +231,22 @@ export interface SessionStore {
    */
   markTurnStopped?(scenarioId: string, turnId: string): Promise<TurnStopOutcome>;
   /**
+   * V5 TURN FENCE / ROADMAP 2.171 — is the scenario in the POST-EXPLICIT-STOP
+   * state? True iff the NEWEST `v5_turn_fence` row for the scenario, excluding
+   * `excludeTurnId` (the turn asking), carries a Stop tombstone. Any later
+   * ordinary turn claims a newer generation, so the state clears itself — no
+   * flag to reset, no second copy of the fact (trap 12: derived from the fence
+   * table that already owns it).
+   *
+   * Read by the clarify-v2 resume to disclose "still working on the original
+   * decision" when a NEW brief arrives right after an explicit Stop (the
+   * 2.171 tester confound). Best-effort by contract: implementations MUST
+   * resolve `false` on any read failure rather than throw — the only consumer
+   * is coach copy, and a copy nicety must never fail or delay-fail a turn.
+   * Optional for the same reason as {@link claimTurnFence}.
+   */
+  wasLatestScenarioTurnStopped?(scenarioId: string, excludeTurnId: string): Promise<boolean>;
+  /**
    * Load handler facts for a set of prior conversation turns.
    *
    * **Important:** `conversationTurnRowIds` must be the `v5_conversation_turns.id`

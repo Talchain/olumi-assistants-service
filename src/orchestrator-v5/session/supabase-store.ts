@@ -54,6 +54,7 @@ import {
 import {
   claimTurnFence,
   currentTurnFence,
+  errMessage,
   evaluateTurnFence,
   markTurnStopped,
   TurnFenceRejectedError,
@@ -319,6 +320,55 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
+   * V5 TURN FENCE / ROADMAP 2.171 — post-explicit-Stop state read.
+   *
+   * One indexed select on the fence table this store already owns (the
+   * scenario+generation index built for the evaluate RPC serves it): the
+   * newest fence row EXCLUDING the asking turn, tombstoned or not. Direct
+   * table read rather than a new RPC — `v5_turn_fence` is service_role-only
+   * with RLS on (migration 20260731120000) and this client IS the service
+   * role; the RPCs exist for write-path atomicity, which a single read does
+   * not need.
+   *
+   * Best-effort per the interface contract: any error resolves `false` (the
+   * ordinary coach copy) with a WARN — copy must never fail a turn.
+   */
+  async wasLatestScenarioTurnStopped(scenarioId: string, excludeTurnId: string): Promise<boolean> {
+    try {
+      const { data, error } = await this.client
+        .from('v5_turn_fence')
+        .select('stopped_at')
+        .eq('scenario_id', scenarioId)
+        .neq('turn_id', excludeTurnId)
+        .order('generation', { ascending: false })
+        .limit(1);
+      if (error) {
+        log.warn(
+          {
+            event: 'v5.turn_fence.post_stop_read_failed',
+            scenario_id: scenarioId,
+            err: errMessage(error),
+          },
+          'V5 turn fence — post-Stop state read failed; treating as not-post-Stop (ordinary copy)',
+        );
+        return false;
+      }
+      const row = Array.isArray(data) ? (data[0] as { stopped_at?: unknown } | undefined) : undefined;
+      return row != null && row.stopped_at != null;
+    } catch (err) {
+      log.warn(
+        {
+          event: 'v5.turn_fence.post_stop_read_failed',
+          scenario_id: scenarioId,
+          err: errMessage(err),
+        },
+        'V5 turn fence — post-Stop state read threw; treating as not-post-Stop (ordinary copy)',
+      );
+      return false;
+    }
+  }
+
+  /**
    * V5 TURN FENCE — refuse a graph write that the user stopped, or that a later
    * turn has superseded.
    *
@@ -393,33 +443,23 @@ export class SupabaseSessionStore implements SessionStore {
     //   claim ever reached it, because a failed claim bound no handle at all and
     //   landed in `no_ingress_fence` above — which ALLOWS the write. See
     //   `TurnFenceHandle.generation`.
-    if (handle.generation === null) {
-      const evaluation: TurnFenceEvaluation = {
-        verdict: 'unclaimed',
-        generation: null,
-        maxGeneration: null,
-      };
-      this.emitFenceEvaluated(write, 'unclaimed', null, null, 'claim_did_not_land');
-      log.warn(
-        {
-          event: 'v5.turn_fence.graph_write_refused',
-          scenario_id: write.scenario_id,
-          turn_id: handle.turnId,
-          turn_class: write.turn_class,
-          verdict: 'unclaimed',
-          reason: 'claim_did_not_land',
-        },
-        'V5 turn fence — REFUSING this graph write: the ingress claim did not land, so this turn has no position in the scenario order and cannot be proven current. Nothing was written.',
-      );
-      throw new TurnFenceRejectedError(
-        `V5 turn fence refused a graph write for scenario ${write.scenario_id} ` +
-          `turn ${handle.turnId} — the ingress claim did not land (fence unavailable). ` +
-          'Fail closed: an unorderable write is not stored.',
-        evaluation,
-      );
-    }
+    //
+    // R-11 (sweep-2 fence rider): this branch CONSTRUCTS its evaluation and
+    // falls through to the ONE refusal tail below. It used to carry its own
+    // emit + log + throw, and the two refusal paths had already drifted (the
+    // early copy logged `reason` but not the generations; the tail logged the
+    // generations but no reason). Two refusal paths must never log
+    // differently, so now there is one.
+    const evaluation: TurnFenceEvaluation =
+      handle.generation === null
+        ? {
+            verdict: 'unclaimed',
+            generation: null,
+            maxGeneration: null,
+            unavailableReason: 'claim_did_not_land',
+          }
+        : await evaluateTurnFence(this.client, handle);
 
-    const evaluation = await evaluateTurnFence(this.client, handle);
     this.emitFenceEvaluated(
       write,
       evaluation.verdict,
@@ -447,6 +487,7 @@ export class SupabaseSessionStore implements SessionStore {
         verdict: evaluation.verdict,
         generation: evaluation.generation,
         max_generation: evaluation.maxGeneration,
+        reason: evaluation.unavailableReason ?? null,
       },
       `V5 turn fence — REFUSING this graph write: ${detail}. Nothing was written; the turn row rolled back with it.`,
     );
@@ -470,7 +511,9 @@ export class SupabaseSessionStore implements SessionStore {
     reason?: string,
   ): void {
     try {
-      emit(TelemetryEvents.V5TurnFenceEvaluated, {
+      // R-13: ONE payload, two emits. The two literals had to be kept
+      // key-identical by hand; now they cannot diverge.
+      const payload = {
         scenario_id: write.scenario_id,
         turn_id: write.turn_id,
         turn_class: write.turn_class,
@@ -478,17 +521,10 @@ export class SupabaseSessionStore implements SessionStore {
         generation,
         max_generation: maxGeneration,
         reason: reason ?? null,
-      });
+      };
+      emit(TelemetryEvents.V5TurnFenceEvaluated, payload);
       if (verdict !== 'current' && verdict !== 'unfenced') {
-        emit(TelemetryEvents.V5TurnFenceGraphWriteRefused, {
-          scenario_id: write.scenario_id,
-          turn_id: write.turn_id,
-          turn_class: write.turn_class,
-          verdict,
-          generation,
-          max_generation: maxGeneration,
-          reason: reason ?? null,
-        });
+        emit(TelemetryEvents.V5TurnFenceGraphWriteRefused, payload);
       }
     } catch {
       // Never let telemetry decide whether a write is fenced.

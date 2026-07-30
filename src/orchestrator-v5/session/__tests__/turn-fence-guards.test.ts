@@ -89,6 +89,10 @@ describe('the PRODUCTION store implements the optional fence methods', () => {
     const proto = SupabaseSessionStore.prototype as unknown as Record<string, unknown>;
     expect(typeof proto.claimTurnFence).toBe('function');
     expect(typeof proto.markTurnStopped).toBe('function');
+    // ROADMAP 2.171: the post-Stop disclosure read. Optional on the interface
+    // (doubles fail toward the ordinary copy), but production MUST implement
+    // it — removing it would silently retire a Paul-ratified behaviour.
+    expect(typeof proto.wasLatestScenarioTurnStopped).toBe('function');
   });
 });
 

@@ -19,17 +19,15 @@
 # a hand-written specifier is checked against a machine-derived list and a typo
 # in either one fails.
 #
-# CI NOTE — why the test reads this instead of asking git directly:
-# The workflow that RUNS `__tests__/feature-health.test.ts` — `ci.yml`'s required
-# `Lint, TypeCheck, Unit Tests` job — checks out with a bare
-# `actions/checkout@v4` (`ci.yml:19`), which defaults to fetch-depth 1, so the
-# deletion commit is NOT in this suite's shallow clone. A git-history probe would
-# either RED in CI or need a skip-escape, and a control that skips is a control
-# that tests nothing (trap 13). Scoped deliberately: one job in the repo,
-# `openapi-validation.yml:30`, DOES set fetch-depth: 0 — it just does not run
-# this suite, so it cannot supply the history here.
+# CI NOTE — why the test reads this file instead of asking git directly:
+# ONE canonical copy of that rationale (CI fetch-depth, trap 13) lives on the
+# reader — the docstring above 'every ABSENT producer specifier names a path
+# that was really deleted' in `__tests__/feature-health.test.ts`. It used to be
+# duplicated here verbatim; S2-14 killed the hand-sync.
 #
-# REGENERATE (requires full history; must produce this file byte-for-byte):
+# REGENERATE the FILE LIST below (requires full history). The command
+# reproduces every non-comment line byte-for-byte; this comment header is
+# authored, not generated — do not expect the command to emit it:
 #   git show --diff-filter=D --name-only --pretty=format: f957d6d8 \
 #     | rg '^src/.*\.ts$' | sort -u
 src/middleware/rate-limit.ts

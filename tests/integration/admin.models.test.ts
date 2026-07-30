@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
 import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
 
 // NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
@@ -41,7 +41,8 @@ beforeAll(async () => {
   const { build } = await import("../../src/server.js");
   app = await build();
   await app.ready();
-});
+  // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   await app.close();
@@ -311,7 +312,7 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     const { build } = await import("../../src/server.js");
     appAnthropicProvider = await build();
     await appAnthropicProvider.ready();
-  });
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await appAnthropicProvider.close();
@@ -398,7 +399,7 @@ describe("Read-only key deployment (ADMIN_API_KEY_READ only)", () => {
     const { build } = await import("../../src/server.js");
     appReadOnly = await build();
     await appReadOnly.ready();
-  });
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await appReadOnly.close();

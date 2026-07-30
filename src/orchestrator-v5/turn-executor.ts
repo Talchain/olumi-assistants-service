@@ -60,6 +60,7 @@ import {
   type CanonicalGraphReadState,
 } from './build-turn-context.js';
 import { TurnFenceRejectedError } from './session/turn-fence.js';
+import type { GraphConflictFailureDetails } from './graph-conflict-recovery-keys.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -9624,6 +9625,11 @@ export async function runTurnExecutor(
         response = buildFailureResponse(
           'GRAPH_WRITE_CONFLICT',
           context.stage,
+          // A-2: `satisfies` binds this literal to the shared recovery-key
+          // manifest — a new key that is not in GRAPH_CONFLICT_RECOVERY_KEYS
+          // is a compile error HERE, and a key that is in it is forwarded to
+          // the 409 envelope automatically by the derived extractor
+          // (route-v2.ts). The old shape dropped unknown keys silently.
           {
             phase: 'commit',
             fence_verdict: error.verdict,
@@ -9634,7 +9640,7 @@ export async function runTurnExecutor(
                 : error.verdict === 'superseded'
                   ? 'refresh_and_reconfirm'
                   : 'retry_later',
-          },
+          } satisfies GraphConflictFailureDetails,
           recoveryCtx(),
         );
         return finalizeRun();
@@ -9653,6 +9659,7 @@ export async function runTurnExecutor(
         response = buildFailureResponse(
           'GRAPH_WRITE_CONFLICT',
           context.stage,
+          // A-2: manifest-bound like the fence branch above.
           {
             phase: 'commit',
             // Additive recovery contract (tolerant-parser passthrough) — A2's
@@ -9660,7 +9667,7 @@ export async function runTurnExecutor(
             recovery_action: 'refresh_and_reconfirm',
             conflict_category: error.conflict_category,
             expected_base_graph_hash: error.expected_base_graph_hash ?? null,
-          },
+          } satisfies GraphConflictFailureDetails,
           recoveryCtx(),
         );
         return finalizeRun();

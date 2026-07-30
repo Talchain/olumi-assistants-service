@@ -80,6 +80,14 @@ interface ClarifyV2HarnessState {
   persistedStateReadError: Error | null;
   /** When set, `append` THROWS it (commit-failure injection, A8 probe). */
   commitError: Error | null;
+  /**
+   * ROADMAP 2.171: what `wasLatestScenarioTurnStopped` reports — true seeds
+   * the post-explicit-Stop state (the newest prior fence row on the scenario
+   * is tombstoned). Default false = ordinary conversation.
+   */
+  latestScenarioTurnStopped: boolean;
+  /** When set, `wasLatestScenarioTurnStopped` THROWS it (best-effort probe). */
+  postStopReadError: Error | null;
   /** Every successful `append` write, in call order. */
   appends: CapturedTurnWrite[];
   /** Every telemetry emit while the harness sink is installed. */
@@ -93,6 +101,8 @@ export const clarifyV2Harness: ClarifyV2HarnessState = {
   persistedBriefText: null,
   persistedStateReadError: null,
   commitError: null,
+  latestScenarioTurnStopped: false,
+  postStopReadError: null,
   appends: [],
   events: [],
 };
@@ -125,6 +135,12 @@ export function buildHarnessSessionStore(): SessionStore {
       clarifyV2Harness.appends.push(write as unknown as CapturedTurnWrite);
       return { id: 'harness-row-id' };
     },
+    wasLatestScenarioTurnStopped: async () => {
+      if (clarifyV2Harness.postStopReadError !== null) {
+        throw clarifyV2Harness.postStopReadError;
+      }
+      return clarifyV2Harness.latestScenarioTurnStopped;
+    },
   });
 }
 
@@ -140,6 +156,8 @@ export async function resetClarifyV2Harness(): Promise<void> {
   clarifyV2Harness.persistedBriefText = null;
   clarifyV2Harness.persistedStateReadError = null;
   clarifyV2Harness.commitError = null;
+  clarifyV2Harness.latestScenarioTurnStopped = false;
+  clarifyV2Harness.postStopReadError = null;
   clarifyV2Harness.appends = [];
   clarifyV2Harness.events = [];
   const telemetry = await import('../../src/utils/telemetry.js');
@@ -206,9 +224,13 @@ export function seedClarifyPending(
   brief: string,
   asked: readonly string[],
   round: number,
-  opts: { readonly reoffered?: boolean } & Partial<PendingAction> = {},
+  opts: {
+    readonly reoffered?: boolean;
+    /** 2.171: arm the post-Stop fold/start-over choice on the seeded round. */
+    readonly startOverBrief?: string;
+  } & Partial<PendingAction> = {},
 ): PendingAction {
-  const { reoffered, ...overrides } = opts;
+  const { reoffered, startOverBrief, ...overrides } = opts;
   const now = Date.now();
   return {
     id: 'cv2_prior-turn',
@@ -220,6 +242,7 @@ export function seedClarifyPending(
       asked_dimensions: asked,
       round,
       ...(reoffered === true ? { reoffered: true } : {}),
+      ...(startOverBrief !== undefined ? { start_over_brief: startOverBrief } : {}),
     },
     preconditions: {},
     expires_at_turn_count: 2,

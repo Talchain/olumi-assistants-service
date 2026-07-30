@@ -39,6 +39,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { isDraftShapedText } from '../../schemas/assist.js';
+import { getSessionStore } from '../session/index.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import {
   loadMostRecentPendingActionsStrict,
@@ -120,6 +121,10 @@ function roundStateFromPending(pa: PendingAction): ClarifyV2RoundState | null {
     round: action.round,
     // 1.152 (A1/A4): absent on pre-1.152 rows → not reoffered.
     ...(action.reoffered === true ? { reoffered: true } : {}),
+    // 2.171: rehydrate the armed post-Stop choice, when present.
+    ...(typeof action.start_over_brief === 'string'
+      ? { startOverBrief: action.start_over_brief }
+      : {}),
   };
 }
 
@@ -140,6 +145,10 @@ function buildClarifyPending(
       asked_dimensions: state.asked,
       round: state.round,
       ...(state.reoffered === true ? { reoffered: true } : {}),
+      // 2.171: persist the armed post-Stop choice, when present.
+      ...(state.startOverBrief !== undefined
+        ? { start_over_brief: state.startOverBrief }
+        : {}),
     },
     preconditions: {},
     expires_at_turn_count: CLARIFY_V2_TURN_TTL,
@@ -254,6 +263,8 @@ function emitDecisionTelemetry(
       phase: decision.phase,
       question_count: decision.questions.length,
       dimensions: decision.questions.map((q) => q.dimension),
+      // 2.171: additive — lets the live probe see the disclosure fire.
+      post_stop_disclosed: decision.postStop !== undefined,
     });
   } else if (decision.kind === 'proceed') {
     emit(TelemetryEvents.V5ClarifyV2Proceeded, {
@@ -332,11 +343,39 @@ export async function tryClarifyV2Turn(
         return null;
       }
 
+      // ── 2.171: post-explicit-Stop detection ──────────────────────────────
+      // The #759 stop tombstone is the server-visible signal. Best-effort at
+      // BOTH layers (the store resolves false on its own failures; this guard
+      // covers a double that throws): any failure means "not post-Stop" and
+      // the ordinary copy — a disclosure nicety must never fail or slow-fail
+      // a turn. One indexed read, and only on a genuine clarify resume.
+      let postExplicitStop = false;
+      try {
+        const store = getSessionStore();
+        if (typeof store.wasLatestScenarioTurnStopped === 'function') {
+          postExplicitStop =
+            (await store.wasLatestScenarioTurnStopped(
+              payload.scenario_id,
+              payload.turn_id,
+            )) === true;
+        }
+      } catch (err) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: payload.scenario_id,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          'clarify_v2 — post-Stop state read failed; using the ordinary copy',
+        );
+      }
+
       const decision = decideClarifyV2Resume({
         state,
         message: payload.message,
         messageIsDraftShaped: isDraftShapedText(payload.message),
         explicitGenerateBrief: params.explicitGenerateBrief,
+        postExplicitStop,
       });
       if (decision.kind === 'proceed') {
         emitDecisionTelemetry(decision, payload, requestId, true);
@@ -394,7 +433,11 @@ export async function tryClarifyV2Turn(
         emitDecisionTelemetry(decision, payload, requestId, true);
         return { kind: 'respond', response: finalResponse };
       }
-      const response = composeClarifyV2Response(decision.questions, decision.phase);
+      const response = composeClarifyV2Response(
+        decision.questions,
+        decision.phase,
+        decision.postStop,
+      );
       const finalResponse = await commitClarifyTurn(
         response,
         payload,

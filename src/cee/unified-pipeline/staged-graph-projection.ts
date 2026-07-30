@@ -110,6 +110,13 @@ function stripValidationMetadata(graph: unknown): unknown {
  * Total by contract: a projection failure must never fail a draft, so any throw
  * degrades to the untransformed graph and is logged. A GRAPH_READY frame that
  * is merely less useful is strictly better than a dead draft.
+ *
+ * THE STRIP WRAPS THE WHOLE PROJECTION, STRUCTURALLY (S2-9). Every branch of
+ * `projectByVersion` — v3, v2, v1, and the degraded catch path — flows through
+ * ONE `stripValidationMetadata` call, so no schema version, timing, or
+ * projection failure can become the route by which Pass-2 prose reaches a
+ * frame documented structure-only. The old shape said this four times, once
+ * per call site, and a fifth branch could have forgotten to say it at all.
  */
 export function projectGraphForStagedFrame(
   graph: GraphV1 | undefined,
@@ -117,22 +124,31 @@ export function projectGraphForStagedFrame(
   requestId?: string,
 ): unknown {
   if (!graph) return graph;
+  return stripValidationMetadata(projectByVersion(graph, schemaVersion, requestId));
+}
+
+/** The version dispatch, strip-free by construction — see the caller's wrap. */
+function projectByVersion(
+  graph: GraphV1,
+  schemaVersion: StagedSchemaVersion,
+  requestId?: string,
+): unknown {
   try {
     if (schemaVersion === "v3") {
-      return stripValidationMetadata(transformGraphToV3(graph as never).graph);
+      return transformGraphToV3(graph as never).graph;
     }
     if (schemaVersion === "v2") {
-      return stripValidationMetadata(transformGraphToV2(graph as never));
+      return transformGraphToV2(graph as never);
     }
-    // v1 is the identity case — the boundary emits the V1 graph unchanged.
-    return stripValidationMetadata(graph);
+    // v1 needs no vocabulary transform — the boundary emits the V1 graph's
+    // ids and labels unchanged. NOT full identity: the caller's unconditional
+    // strip still removes the two validation wire keys.
+    return graph;
   } catch (err) {
     log.warn(
       { err, request_id: requestId, schema_version: schemaVersion },
       "staged GRAPH_READY projection failed — emitting the untransformed graph",
     );
-    // Still strip on the degraded path: a projection failure must not become the
-    // one route by which Pass-2 prose reaches a frame documented structure-only.
-    return stripValidationMetadata(graph);
+    return graph;
   }
 }

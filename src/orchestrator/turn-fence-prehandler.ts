@@ -33,6 +33,7 @@ import type { FastifyReply, FastifyRequest, HookHandlerDoneFunction } from 'fast
 
 import { getSessionStore } from '../orchestrator-v5/session/index.js';
 import {
+  errMessage,
   runWithTurnFence,
   unclaimedTurnFenceHandle,
   type TurnFenceHandle,
@@ -47,6 +48,13 @@ import { log } from '../utils/telemetry.js';
  * body without a usable `(scenario_id, turn_id)` pair is not claimed — B1 is
  * about to reject the request anyway, and the graph-write refusal at the commit
  * covers the impossible case where it does not.
+ *
+ * ⚠ THE ONE BODY PARSE FOR BOTH FENCE INGRESSES (R-12/R-8). The turn CLAIM
+ *   (this hook) and the Stop TOMBSTONE (`routes/turn-stop.ts`) key the SAME
+ *   `v5_turn_fence` row, so the identities they parse MUST agree — two
+ *   implementations of this parse would be the drift shape: a body one accepts
+ *   and the other rejects strands a tombstone the claim can never match. Any
+ *   future ingress that names a fence row parses its identity HERE.
  */
 export function readIngressTurnIdentity(
   body: unknown,
@@ -110,7 +118,7 @@ export function turnFencePreHandler(
           event: 'v5.turn_fence.claim_threw',
           scenario_id: identity.scenarioId,
           turn_id: identity.turnId,
-          err: err instanceof Error ? err.message : String(err),
+          err: errMessage(err),
         },
         'V5 turn fence — the ingress claim THREW; this turn is UNCLAIMED and any graph write it makes will be REFUSED at the commit',
       );

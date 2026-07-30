@@ -108,14 +108,27 @@ describe('the refusal is a typed conflict, not an internal error', () => {
     expect(branch).toContain("'retry_later'"); // unclaimed / unavailable
   });
 
-  it('route-v2 forwards fence_verdict onto the 409 envelope', () => {
+  it('route-v2 forwards fence_verdict onto the 409 envelope (via the A-2 derived manifest)', () => {
+    // Without this the three verdicts collapse into one opaque conflict at the
+    // boundary and the UI cannot tell "you stopped this" from "someone else owns
+    // the scenario now".
+    //
+    // A-2 changed the MECHANISM this pin must watch: the extractor no longer
+    // hand-copies `fence_verdict` — it derives its copy loop from
+    // `GRAPH_CONFLICT_RECOVERY_KEYS`. So the pin is now two halves:
+    // the extractor derives from the manifest, AND the manifest carries the
+    // key. (The RUNTIME guarantee — a real 409 carrying fence_verdict — is
+    // `tests/integration/orchestrate-v2-fail-closed.test.ts`, as the file
+    // header says; this stays defence in depth.)
     const routeV2 = readFileSync(
       fileURLToPath(new URL('../../orchestrator/route-v2.ts', import.meta.url)),
       'utf8',
     );
-    // Without this the three verdicts collapse into one opaque conflict at the
-    // boundary and the UI cannot tell "you stopped this" from "someone else owns
-    // the scenario now".
-    expect(routeV2).toContain('out.fence_verdict = d.fence_verdict');
+    expect(routeV2).toContain('for (const key of GRAPH_CONFLICT_RECOVERY_KEYS)');
+    const manifest = readFileSync(
+      fileURLToPath(new URL('../graph-conflict-recovery-keys.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(manifest).toContain("'fence_verdict'");
   });
 });

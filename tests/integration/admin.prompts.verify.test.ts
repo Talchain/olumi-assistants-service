@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { createHash } from "node:crypto";
-import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
 
 // NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
 // store treats it as a literal file name in cwd. Suites that share the
@@ -44,7 +44,8 @@ beforeAll(async () => {
   const { build } = await import("../../src/server.js");
   app = await build();
   await app.ready();
-});
+  // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   await app.close();
