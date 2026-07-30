@@ -333,9 +333,48 @@ export const REPAIR_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("CEE_REPAIR_TIMEOUT_MS", 60_000),
 );
 
-/** Validation pipeline (Pass 2 / o4-mini) call timeout (default: 30s, clamped 5s–5m) */
+/**
+ * Validation pipeline (Pass 2 / o4-mini) call timeout (default: 60s, clamped 5s–5m).
+ *
+ * 30_000 -> 60_000 (2026-07-31, ROADMAP 2.146). NOT a doubling — both ends were
+ * derived, and the interval they leave is narrow.
+ *
+ * ── FLOOR: what the task needs ──────────────────────────────────────────────
+ * Measured through the deployed service (PHASE0-EVIDENCE-2026-07-28/
+ * contested-edge-probe.md): a 16-causal-edge graph completed Pass 2 in
+ * **27,961 ms** — 93.2% of the old 30 s budget, ~2.0 s of margin, N=1, on a
+ * model whose registry `averageLatencyMs` is 75,000 (config/models.ts). Fitting
+ * cost(E) = FIXED + PER_EDGE·E with FIXED := 0 maximises the slope, so
+ * 27,961 / 16 = 1,747.6 ms per causal edge is an UPPER bound. Real drafts carry
+ * 10–30 causal edges (contested-edge-slice.md C3; 33–35 total edges live,
+ * cee2-live-latency.md), so covering the top of that range needs **52,427 ms**.
+ * 30 s covered 17 edges — under the observed range, not merely tight.
+ *
+ * ── CEILING: what the turn can afford ───────────────────────────────────────
+ * Pass 2 is fired after Repair and awaited after the coaching pass (#758), so
+ * it costs TOTAL draft time only `max(0, pass2 − overlap)`. Live staged-frame
+ * timings, 3 runs, per-chunk (cee2-live-latency.md): GRAPH_READY 35.8 s,
+ * COACHING_READY 59.2 s, COMPLETE 60.9 s median; worst run COMPLETE 63,957 ms.
+ * The overlap window is at least COACHING_READY − GRAPH_READY = 23,344 ms; we
+ * credit only the design's 19,800 ms, which OVER-states the added latency — the
+ * safe direction here.
+ *
+ * The binding outer bound is the V5 turn abort, `budgets.turn_ms` =
+ * min(TURN_BUDGET_MS 180 s, browserProxyTimeoutMs 125 s − TURN_RESPONSE_HEADROOM_MS
+ * 10 s) = **115,000 ms** (orchestrator-v5/budgets.ts). Note it is NOT
+ * `DRAFT_GRAPH_TURN_BUDGET_MS`: that constant has no runtime consumer — only
+ * this file's ladder warning and a self-referential unit test.
+ *
+ *   worst draft, flag on = 63,957 + (T − 19,800) <= 115,000  =>  T <= 74,800 ms
+ *
+ * At 60,000 the worst-case draft lands at 104,157 ms, 10,843 ms clear. At
+ * 75,000 it lands at 119,157 ms and BLOWS the turn budget — which is why this
+ * is 60 s and not "30 s doubled twice". Pinned both ways in
+ * tests/unit/cee.validation-pipeline/pass2-budget.test.ts, with the ceiling
+ * DERIVED from `getTurnExecutorBudgets()` rather than restating 115,000.
+ */
 export const VALIDATION_PIPELINE_TIMEOUT_MS = clampTimeout(
-  parseTimeoutEnv("CEE_VALIDATION_TIMEOUT_MS", 30_000),
+  parseTimeoutEnv("CEE_VALIDATION_TIMEOUT_MS", 60_000),
 );
 
 // ---------------------------------------------------------------------------
