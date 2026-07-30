@@ -10,7 +10,7 @@ import type { FastifyInstance } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 import { Graph } from "../schemas/graph.js";
-import { buildErrorV1 } from "../utils/errors.js";
+import { buildErrorV1, RateLimitedError, retryAfterSecondsFromRateLimitContext } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { TelemetryEvents, emit } from "../utils/telemetry.js";
 import {
@@ -48,14 +48,17 @@ export default async function route(app: FastifyInstance) {
       // Rate limit by IP for public share routes
       return `share:${request.ip}`;
     },
-    errorResponseBuilder: (_, context) => ({
-      schema: "error.v1",
-      code: "RATE_LIMITED",
-      message: "Too many requests. Please try again later.",
-      details: {
-        retry_after_seconds: Math.ceil(context.ttl / 1000),
-      },
-    }),
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value
+    // (index.js:333). Returning the error.v1 body as a plain object made the
+    // real server answer 500 INTERNAL, not 429: the app's custom
+    // setErrorHandler saw a non-Error and fell through to its unknown-type
+    // branch. Returning a real Error lets that same handler emit the identical
+    // error.v1 RATE_LIMITED body with a request_id, at 429.
+    errorResponseBuilder: (_, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        "Too many requests. Please try again later.",
+      ),
   });
 
   /**

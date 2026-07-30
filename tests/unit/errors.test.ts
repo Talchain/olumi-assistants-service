@@ -5,6 +5,8 @@ import {
   zodErrorToErrorV1,
   toErrorV1,
   getStatusCodeForErrorCode,
+  RateLimitedError,
+  retryAfterSecondsFromRateLimitContext,
   type ErrorCode,
 } from "../../src/utils/errors.js";
 
@@ -103,6 +105,36 @@ describe("error utilities", () => {
       expect(error.message).toBe("Too many requests");
     });
 
+    // ROADMAP 2.181 — the value every errorResponseBuilder must RETURN, because
+    // @fastify/rate-limit THROWS it (index.js:333). A plain object reached the
+    // central error handler as an unknown type and became 500 INTERNAL.
+    it("classifies a RateLimitedError as RATE_LIMITED with its retry hint", () => {
+      const error = toErrorV1(new RateLimitedError(17));
+
+      expect(error.code).toBe("RATE_LIMITED");
+      expect(error.message).toBe("Too many requests");
+      expect(error.details?.retry_after_seconds).toBe(17);
+      expect(getStatusCodeForErrorCode(error.code)).toBe(429);
+    });
+
+    // The negative control for the above: the exact PRE-FIX return value —
+    // a plain object carrying `statusCode: 429` and the full error.v1 body —
+    // is NOT recognised, which is the defect this pair pins.
+    it("does NOT classify the pre-fix plain object as RATE_LIMITED", () => {
+      const preFix = {
+        statusCode: 429,
+        schema: "error.v1",
+        code: "RATE_LIMITED",
+        message: "Too many requests",
+        details: { retry_after_seconds: 60 },
+      };
+
+      const error = toErrorV1(preFix);
+
+      expect(error.code).toBe("INTERNAL");
+      expect(getStatusCodeForErrorCode(error.code)).toBe(500);
+    });
+
     it("should detect body limit errors", () => {
       const bodyLimitError = new Error("Body limit exceeded");
       (bodyLimitError as any).code = "FST_ERR_CTP_BODY_TOO_LARGE";
@@ -166,6 +198,26 @@ describe("error utilities", () => {
       expect(error1.message).toBe("Internal server error");
       expect(error2.code).toBe("INTERNAL");
       expect(error2.message).toBe("Internal server error");
+    });
+  });
+
+  describe("retryAfterSecondsFromRateLimitContext", () => {
+    it("derives seconds from the ms TTL remaining in the window", () => {
+      expect(retryAfterSecondsFromRateLimitContext({ ttl: 17_400 })).toBe(18);
+      expect(retryAfterSecondsFromRateLimitContext({ ttl: 1 })).toBe(1);
+    });
+
+    it("falls back when ttl is absent or not a usable number", () => {
+      expect(retryAfterSecondsFromRateLimitContext({})).toBe(60);
+      expect(retryAfterSecondsFromRateLimitContext({ ttl: 0 })).toBe(60);
+      expect(retryAfterSecondsFromRateLimitContext({ ttl: Number.NaN })).toBe(60);
+      // `context.after` is a HUMAN-READABLE STRING ("1 minute"), never a
+      // number — the pre-fix code guarded on `typeof after === 'number'`, so it
+      // never matched and every refusal reported a hardcoded 60s. Passing only
+      // `after` must still fall back, and must not throw.
+      expect(
+        retryAfterSecondsFromRateLimitContext({ after: "1 minute" } as { ttl?: unknown }),
+      ).toBe(60);
     });
   });
 

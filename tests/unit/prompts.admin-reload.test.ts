@@ -128,6 +128,20 @@ describe('POST /admin/prompts/reload', () => {
     // The new 20/15-min cap on /admin/prompts/inventory makes that
     // misdiagnosis-fuel likely to actually fire, so the builder in THIS plugin
     // now sets it. The repo-wide sweep of the sibling builders is rowed.
+    //
+    // ⚠ ROADMAP 2.181 — that diagnosis was INCOMPLETE, and this test could not
+    // see the remainder. `statusCode` on a plain object is read only by
+    // Fastify's DEFAULT error handler — which is what this bare `Fastify()`
+    // harness uses. The REAL server installs a custom `setErrorHandler` that
+    // derives the status from the error.v1 code, and it received the plain
+    // object as an *unknown error type*: this route still answered 500 live.
+    // The builder now returns a real `RateLimitedError` (@fastify/rate-limit
+    // THROWS the builder's return value, index.js:333), which is correct under
+    // BOTH handlers. The body asserted below is therefore Fastify's default
+    // serialisation of that Error — a harness artefact; on the real server the
+    // central handler turns the same Error into `error.v1`/`RATE_LIMITED`,
+    // which is asserted end-to-end in
+    // tests/integration/global-rate-limit-429.test.ts.
     const app = Fastify();
     await adminPromptStatusRoutes(app);
 
@@ -148,7 +162,9 @@ describe('POST /admin/prompts/reload', () => {
     // status code, or the assertion below passes by never being reached.
     expect(limited, 'the 20/15-min cap never fired — the assertion below would be vacuous').not.toBeNull();
     expect(limited!.statusCode, `got ${limited!.statusCode}: ${limited!.body}`).toBe(429);
-    expect(JSON.parse(limited!.body).error).toBe('rate_limit_exceeded');
+    expect(JSON.parse(limited!.body).message).toBe(
+      'Too many requests. Please try again later.',
+    );
     await app.close();
   });
 

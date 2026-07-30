@@ -27,6 +27,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
 import {
   probeStatusPrompts,
@@ -88,16 +89,21 @@ export async function adminPromptStatusRoutes(app: FastifyInstance): Promise<voi
       const adminKey = (request.headers['x-admin-key'] as string) ?? '';
       return `prompt_status:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    errorResponseBuilder: () => ({
-      // statusCode is LOAD-BEARING. @fastify/rate-limit reads it off the error
-      // object to set the response status; the sibling admin plugins all omit
-      // it, so their limit hits return 500 instead of 429 — proven empirically
-      // in the #753 adversarial review. Fixed here; the repo-wide sweep of the
-      // other builders is rowed.
-      statusCode: 429,
-      error: 'rate_limit_exceeded',
-      message: 'Too many requests. Please try again later.',
-    }),
+    // ROADMAP 2.181 — CORRECTION to the #753 note this replaces. That note said
+    // "statusCode is LOAD-BEARING … the sibling plugins omit it, so their limit
+    // hits return 500 instead of 429". Adding `statusCode: 429` to a PLAIN
+    // OBJECT is only sufficient under Fastify's DEFAULT error handler — which is
+    // what the bare-`Fastify()` unit test uses. The real server installs a custom
+    // `setErrorHandler` that derives the status from the error.v1 code, and it
+    // received the plain object as an *unknown error type*, so this route still
+    // answered 500 on the live service (reproduced against `build()`).
+    // @fastify/rate-limit THROWS this return value (index.js:333), so it must be
+    // a real Error. See RateLimitedError.
+    errorResponseBuilder: (_req, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        'Too many requests. Please try again later.',
+      ),
   });
 
   app.get('/admin/prompts/status', async (request, reply) => {

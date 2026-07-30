@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { z } from 'zod';
 import { listDraftFailureBundles, getDraftFailureBundleById } from '../cee/draft-failures/store.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
@@ -23,10 +24,17 @@ export async function adminDraftFailureRoutes(app: FastifyInstance): Promise<voi
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `draft_failures:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    errorResponseBuilder: () => ({
-      error: 'rate_limit_exceeded',
-      message: 'Too many requests. Please try again later.',
-    }),
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS whatever this builder RETURNS
+    // (index.js:333). A plain object is not an Error, so on the real server
+    // (which installs a custom setErrorHandler) the refusal was answered
+    // 500 INTERNAL instead of 429. `statusCode` on a plain object is only read
+    // by Fastify's DEFAULT handler, which is why the bare-Fastify unit tests
+    // never saw it. Return a real Error.
+    errorResponseBuilder: (_req, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        'Too many requests. Please try again later.',
+      ),
   });
 
   app.get('/admin/v1/draft-failures', async (request: FastifyRequest, reply: FastifyReply) => {

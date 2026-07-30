@@ -22,6 +22,63 @@ export interface ErrorV1 {
 }
 
 /**
+ * The value an `@fastify/rate-limit` `errorResponseBuilder` must RETURN.
+ *
+ * ROADMAP 2.181 — the plugin does `throw params.errorResponseBuilder(req, respCtx)`
+ * (@fastify/rate-limit 10.3.0, index.js:333): it THROWS whatever the builder
+ * RETURNS, and its own default builder returns an `Error`. Every builder in
+ * this repo returned a PLAIN OBJECT instead, which is not an `Error` — so this
+ * app's central `setErrorHandler` handed a non-Error to `toErrorV1`, which fell
+ * through to its "unknown error type" branch and answered
+ * `500 INTERNAL`. Observed live on staging: `GET /healthz` request #121 came
+ * back `http=500 {"code":"INTERNAL"}` with `x-ratelimit-remaining: 0` — the
+ * limiter fired correctly, only the response shape was wrong, and a client
+ * that retries on 5xx but backs off on 429 behaves wrongly against it.
+ *
+ * Putting `statusCode: 429` on a plain object does NOT fix this app: that field
+ * is only read by Fastify's DEFAULT error handler, and this app installs a
+ * custom one that derives the status from the `error.v1` code. (That is why the
+ * sibling fix in `admin.prompts.status.ts` passed its bare-`Fastify()` unit test
+ * while the real server still returned 500.)
+ *
+ * A real `Error` satisfies both worlds: `toErrorV1` classifies it as
+ * `RATE_LIMITED` via `statusCode`/`retryAfter` (→ 429 + `retry_after_seconds`),
+ * and Fastify's default handler reads `statusCode` off it directly.
+ */
+export class RateLimitedError extends Error {
+  /** Read by Fastify's default error handler AND by `toErrorV1`. */
+  readonly statusCode = 429;
+  /** Read by `toErrorV1` into `details.retry_after_seconds`. */
+  readonly retryAfter: number;
+
+  constructor(retryAfterSeconds: number, message = 'Rate limit exceeded') {
+    super(message);
+    this.name = 'RateLimitedError';
+    this.retryAfter = retryAfterSeconds;
+  }
+}
+
+/**
+ * Derive `retry_after_seconds` from an `@fastify/rate-limit` builder context.
+ *
+ * `context.ttl` is the milliseconds remaining in the window. `context.after` is
+ * a HUMAN-READABLE STRING (`format(ttlInSeconds * 1000, true)` → e.g. "1
+ * minute"), never a number — the previous `typeof context.after === 'number'`
+ * guard therefore never matched and every refusal reported a hardcoded 60s
+ * regardless of the real window.
+ */
+export function retryAfterSecondsFromRateLimitContext(
+  context: { ttl?: unknown },
+  fallbackSeconds = 60,
+): number {
+  const ttlMs = context?.ttl;
+  if (typeof ttlMs === 'number' && Number.isFinite(ttlMs) && ttlMs > 0) {
+    return Math.max(1, Math.ceil(ttlMs / 1000));
+  }
+  return fallbackSeconds;
+}
+
+/**
  * Options for building error responses
  */
 export interface BuildErrorV1Options {

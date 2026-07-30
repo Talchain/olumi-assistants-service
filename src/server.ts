@@ -54,7 +54,7 @@ import { DEFAULT_DECOMPOSE_MODEL } from "./cee/decision-review/decompose.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
-import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode, isClientAbortError } from "./utils/errors.js";
+import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode, isClientAbortError, RateLimitedError, retryAfterSecondsFromRateLimitContext } from "./utils/errors.js";
 import { authPlugin, getRequestKeyId } from "./plugins/auth.js";
 import { responseHashPlugin } from "./plugins/response-hash.js";
 import { boundaryLoggingPlugin } from "./plugins/boundary-logging.js";
@@ -480,29 +480,22 @@ await app.register(rateLimit, {
   },
   errorResponseBuilder: (req, context) => {
     const requestId = getRequestId(req);
-    // Calculate retry_after_seconds with proper guards
-    let retryAfter = 60; // Default fallback
-    if (context.after && typeof context.after === 'number') {
-      const diff = Math.ceil((context.after - Date.now()) / 1000);
-      retryAfter = Math.max(1, diff); // Ensure at least 1 second
-    }
+    // `context.ttl` is ms remaining in the window. `context.after` is a
+    // human-readable STRING ("1 minute"), so the old numeric guard on it never
+    // matched and every refusal reported a hardcoded 60s.
+    const retryAfter = retryAfterSecondsFromRateLimitContext(context);
     app.log.warn({
       event: "rate_limit_hit",
-      max: GLOBAL_RATE_LIMIT_RPM,
+      max: context.max ?? GLOBAL_RATE_LIMIT_RPM,
       request_id: requestId,
+      retry_after_seconds: retryAfter,
     }, "Rate limit exceeded");
 
-    // Use centralized error builder for consistency
-    // Note: Must include statusCode for @fastify/rate-limit
-    return {
-      statusCode: 429,
-      ...buildErrorV1(
-        'RATE_LIMITED',
-        'Too many requests',
-        { retry_after_seconds: retryAfter },
-        requestId
-      ),
-    };
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value
+    // (index.js:333). It MUST be an Error: a plain object (even one carrying
+    // `statusCode: 429`) reaches this app's custom setErrorHandler as an
+    // unknown error type and is answered 500 INTERNAL. See RateLimitedError.
+    return new RateLimitedError(retryAfter);
   },
 });
 

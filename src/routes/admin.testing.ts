@@ -9,6 +9,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -889,14 +890,14 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `admin_test:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    errorResponseBuilder: (_request, context) => {
-      const retryAfter = Math.ceil(context.ttl / 1000);
-      return {
-        error: 'rate_limit_exceeded',
-        message: 'Too many test requests. Please wait before running more tests.',
-        retry_after_seconds: retryAfter,
-      };
-    },
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value
+    // (index.js:333); a plain object reaches the app's custom setErrorHandler as
+    // an unknown error type and is answered 500 INTERNAL. Return a real Error.
+    errorResponseBuilder: (_request, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        'Too many test requests. Please wait before running more tests.',
+      ),
     addHeadersOnExceeding: {
       'x-ratelimit-limit': true,
       'x-ratelimit-remaining': true,
