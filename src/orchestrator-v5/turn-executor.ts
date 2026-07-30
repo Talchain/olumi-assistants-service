@@ -4954,6 +4954,13 @@ export async function runTurnExecutor(
             ...(factorCap !== undefined ? { factorCap } : {}),
             ...(factorUnit !== undefined ? { factorUnit } : {}),
             ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
+            // ROADMAP 2.159 — the STORED model value / raw_value, un-inverted,
+            // so this precheck derives the factor's scale identically to the
+            // validator and the handler.
+            ...(typeof obs?.value === 'number' ? { factorObservedValue: obs.value } : {}),
+            ...(typeof obs?.raw_value === 'number'
+              ? { factorObservedRawValue: obs.raw_value }
+              : {}),
             inputHasUnit,
           });
           if (!evaluation.ok) {

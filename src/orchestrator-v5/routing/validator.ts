@@ -827,6 +827,12 @@ function preexecuteSetFactorValue(
     ...(obs?.cap !== undefined ? { factorCap: obs.cap } : {}),
     ...(obs?.unit !== undefined ? { factorUnit: obs.unit } : {}),
     ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
+    // ROADMAP 2.159 — the STORED model value / raw_value, un-inverted, so the
+    // predicate derives the factor's scale identically here and at the handler
+    // (the AC.1 parity invariant: both gates run the same predicate on the
+    // same inputs, so they cannot disagree).
+    ...(obs?.value !== undefined ? { factorObservedValue: obs.value } : {}),
+    ...(obs?.raw_value !== undefined ? { factorObservedRawValue: obs.raw_value } : {}),
     inputHasUnit: parsed.inputHasUnit,
   });
 

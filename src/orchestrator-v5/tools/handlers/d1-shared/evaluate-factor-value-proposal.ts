@@ -31,6 +31,11 @@
  * the canonical handler copy that `normaliseFactorValue` produces today.
  */
 
+import {
+  NORMALISED_FACTOR_MAX,
+  NORMALISED_FACTOR_MIN,
+  resolveFactorScale,
+} from './factor-scale.js';
 import { formatValueWithUnit } from './format-confirmation.js';
 
 /**
@@ -60,7 +65,8 @@ export type ProposalRejectionReason =
   | 'delta_no_cap_and_no_unit' // operator !== 'set' AND no cap AND no unit (ambiguous)
   | 'bare_number_outside_cap' // !inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
   | 'value_exceeds_cap' // inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
-  | 'bare_ratio_on_unit_factor'; // !inputHasUnit AND factor has a unit AND 0 < |rawInput| < 1 (looks like a normalised proportion)
+  | 'bare_ratio_on_unit_factor' // !inputHasUnit AND factor has a unit AND 0 < |rawInput| < 1 (looks like a normalised proportion)
+  | 'value_outside_normalised_range'; // ROADMAP 2.159 — no cap, but the factor's declared scale IS [0,1] and effectiveRaw is outside it
 
 /**
  * Result of evaluating a proposal. `ok: true` means the handler's
@@ -100,6 +106,23 @@ export interface EvaluateFactorValueProposalInput {
    * 2fcd2221 fixed: AC.3).
    */
   readonly factorExistingRaw?: number;
+  /**
+   * ROADMAP 2.159 — the factor's stored MODEL-scale value
+   * (`observed_state.value`), verbatim. Distinct from `factorExistingRaw`,
+   * which is the DE-NORMALISED user-unit LHS for delta operators; this is the
+   * un-inverted number the scale derivation reads.
+   *
+   * Optional: a caller that omits it (older test mock, a lookup adapter with
+   * no `observed_state`) gets `unbounded` from `resolveFactorScale`, i.e.
+   * exactly today's behaviour. Absence never tightens a guard.
+   */
+  readonly factorObservedValue?: number;
+  /**
+   * ROADMAP 2.159 — the factor's stored `observed_state.raw_value`, verbatim.
+   * Read only to detect a raw/model pair that disagrees on an uncapped factor
+   * (off-contract; scale provenance unknown → `unbounded`).
+   */
+  readonly factorObservedRawValue?: number;
   /**
    * When true, the parameter arrived with an explicit unit. Mirrors
    * `parseProposalValue`'s flag — bare numbers vs unit-bearing values
@@ -266,6 +289,8 @@ function evaluateFactorValueProposalImpl(
     factorCap,
     factorUnit,
     factorExistingRaw,
+    factorObservedValue,
+    factorObservedRawValue,
     inputHasUnit,
   } = input;
 
@@ -477,6 +502,54 @@ function evaluateFactorValueProposalImpl(
     }
   }
 
+  // 7. ROADMAP 2.159 — NORMALISED-RANGE guard. Reached only when there is no
+  //    cap, which is exactly where guard 6 does nothing and where the live
+  //    defect lived: `normaliseFactorValue` writes `value = raw = 1.5`
+  //    verbatim for an uncapped factor, so a normalised `[0,1]` factor
+  //    accepted and PERSISTED 1.5 (Codex P1, live-proven 31 Jul).
+  //
+  //    "Uncapped" is not "unbounded": for a factor whose declared state IS a
+  //    unit-interval proportion, the scale is [0,1] and a value outside it is
+  //    not a value on that factor at all. `resolveFactorScale` derives that
+  //    from already-declared fields and fails toward `unbounded` — i.e. toward
+  //    today's behaviour — whenever the declaration does not settle, so this
+  //    guard can only refuse an edit the estate's own convention already calls
+  //    out of scale. See `factor-scale.ts` for the full derivation and its
+  //    byte-level anchors.
+  //
+  //    The bound is DERIVED, never persisted: no `cap` is synthesised, so
+  //    `observed_state` gains nothing and the consented-cap-change machinery
+  //    is untouched.
+  //    ⚠ The derivation reads the FACTOR'S OWN `factorUnit`, never
+  //    `effectiveUnit`. Scale is a property of the factor, not of the proposal:
+  //    the wire event carries an OPTIONAL `unit`, so deriving from the
+  //    proposal's unit would let any client bypass the bound by attaching an
+  //    arbitrary unit string ("set the 0-1 adoption factor to 30%" → value 30,
+  //    unit '%', no cap — the same defect wearing a unit). A unit-bearing
+  //    proposal against a genuinely unitless normalised factor is refused
+  //    honestly instead of silently converting a proportion into a magnitude.
+  if (cap === undefined) {
+    const scale = resolveFactorScale({
+      ...(factorObservedValue !== undefined ? { value: factorObservedValue } : {}),
+      ...(factorObservedRawValue !== undefined ? { raw_value: factorObservedRawValue } : {}),
+      ...(factorUnit !== undefined ? { unit: factorUnit } : {}),
+    });
+    if (
+      scale.kind === 'unit_interval' &&
+      (effectiveRaw < NORMALISED_FACTOR_MIN || effectiveRaw > NORMALISED_FACTOR_MAX)
+    ) {
+      // Prediction-free copy: state the BOUND and the RECEIVED VALUE. It says
+      // nothing about what the analysis would have done with the number, and
+      // never implies a clamp — because nothing was written.
+      return {
+        ok: false,
+        reason: 'value_outside_normalised_range',
+        specific_issue:
+          `This factor is on a 0 to 1 scale, and the value given was ${effectiveRaw}.`,
+      };
+    }
+  }
+
   return { ok: true };
 }
 
@@ -516,6 +589,10 @@ export function evaluatePostOperatorFactorValue(input: {
   readonly proposalCap?: number;
   readonly factorCap?: number;
   readonly factorUnit?: string;
+  /** ROADMAP 2.159 — the factor's stored model value, for the scale derivation. */
+  readonly factorObservedValue?: number;
+  /** ROADMAP 2.159 — the factor's stored raw_value, for the scale derivation. */
+  readonly factorObservedRawValue?: number;
   readonly inputHasUnit: boolean;
 }): FactorValueProposalEvaluation {
   return evaluateFactorValueProposalImpl(
@@ -528,6 +605,18 @@ export function evaluatePostOperatorFactorValue(input: {
       ...(input.proposalCap !== undefined ? { proposalCap: input.proposalCap } : {}),
       ...(input.factorCap !== undefined ? { factorCap: input.factorCap } : {}),
       ...(input.factorUnit !== undefined ? { factorUnit: input.factorUnit } : {}),
+      // ROADMAP 2.159 — the normalised-range guard is a VALUE-level guard (like
+      // finiteness and cap-range), not a stated-input guard like bare-ratio, so
+      // it MUST run on the post-operator computed value too. Without this the
+      // handler's own execute-time re-check would be blind to it and an
+      // `increase`/`multiply` that overshoots 1 would slip through the layer
+      // that exists to be the backstop.
+      ...(input.factorObservedValue !== undefined
+        ? { factorObservedValue: input.factorObservedValue }
+        : {}),
+      ...(input.factorObservedRawValue !== undefined
+        ? { factorObservedRawValue: input.factorObservedRawValue }
+        : {}),
       inputHasUnit: input.inputHasUnit,
     },
     true,

@@ -315,6 +315,13 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
       ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
+      // ROADMAP 2.159 — the STORED model value / raw_value, un-inverted, so the
+      // predicate can derive whether this factor's scale is the unit interval.
+      // Distinct from `factorExistingRaw` (the de-normalised delta LHS).
+      ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorObservedRawValue: before.raw_value }
+        : {}),
       inputHasUnit: parsed.inputHasUnit,
     });
     if (!preEvaluation.ok) {
@@ -340,6 +347,13 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
+      // ROADMAP 2.159 — same two fields as `preEvaluation` above. The
+      // normalised-range guard is a VALUE-level guard, so it must also bound
+      // the POST-operator computed value (an `increase` that overshoots 1).
+      ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorObservedRawValue: before.raw_value }
+        : {}),
       // The ambiguity guard only fires when the PROPOSAL itself omits the
       // unit. The factor's stored unit is irrelevant to the user's intent —
       // a bare-number proposal "200" against a cap=100 factor is ambiguous
