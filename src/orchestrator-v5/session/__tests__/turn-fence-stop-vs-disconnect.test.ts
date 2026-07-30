@@ -326,13 +326,22 @@ describe('V5 turn fence — scope and fail-closed posture', () => {
     const store = makeStore(backend.client);
     const handle = await store.claimTurnFence(SCENARIO, TURN_A);
 
-    const rpc = backend.client.rpc as unknown as ReturnType<typeof vi.fn>;
+    // Typed through the RPC shape the fake actually has, not
+    // `ReturnType<typeof vi.fn>` — that resolves to a zero-arg Mock and calling
+    // `original(fn, args)` is a type error the local `pnpm typecheck` cannot see
+    // (tsconfig.build.json excludes tests) but the Typecheck Drift ratchet can.
+    type RpcFn = (fn: string, args: Record<string, unknown>) => Promise<unknown>;
+    const rpc = backend.client.rpc as unknown as {
+      getMockImplementation: () => RpcFn | undefined;
+      mockImplementation: (impl: RpcFn) => void;
+    };
     const original = rpc.getMockImplementation();
-    rpc.mockImplementation(async (fn: string, args: Record<string, unknown>) => {
+    if (original === undefined) throw new Error('the fake client must have an rpc impl');
+    rpc.mockImplementation(async (fn, args) => {
       if (fn === 'v5_evaluate_turn_fence') {
         return { data: null, error: { message: 'function v5_evaluate_turn_fence does not exist' } };
       }
-      return await original!(fn, args);
+      return await original(fn, args);
     });
 
     const refusal = await runWithTurnFence(handle as TurnFenceHandle, async () =>
