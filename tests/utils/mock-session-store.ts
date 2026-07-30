@@ -71,6 +71,9 @@ export function createMockSessionStore(
       claimed: true,
       alreadyCommitted: false,
     }),
+    // 2.174 fix a: benign default = the scenario exists, so every suite keeps
+    // recording Stops unless it seeds an unknown scenario deliberately.
+    scenarioExists: async () => true,
     // ROADMAP 2.171: benign default = NOT post-Stop, so every suite keeps the
     // ordinary coach copy unless it seeds the tombstone deliberately.
     wasLatestScenarioTurnStopped: async () => false,

@@ -151,7 +151,7 @@ import {
   isDraftShapedText,
 } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
-import { turnFencePreHandler } from './turn-fence-prehandler.js';
+import { admitCurrentTurnFence, turnFencePreHandler } from './turn-fence-prehandler.js';
 import { recordExplicitTurnStop } from '../routes/turn-stop.js';
 import {
   GraphStateIngressSchema,
@@ -2103,9 +2103,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const pre = await runPreFlight(req);
     if (!pre.ok) {
       // 4xx: pre-flight failure — request never reached dispatch, no graph
-      // state to compute readiness from; no analysis_ready stamped.
+      // state to compute readiness from; no analysis_ready stamped. The
+      // fence was NOT claimed for this request (see admission below), so a
+      // rejected request is fence-neutral: it cannot supersede a live turn
+      // and it grows no fence rows.
       return reply.code(pre.status).send(pre.error);
     }
+    // V5 TURN FENCE — ADMISSION (2.174 fix b). The request has passed auth,
+    // B1 validation and the scenario upsert, so NOW it claims its place in
+    // the scenario's start order. This is the single claim call site; it
+    // sits BEHIND the admission gate by construction, which is what makes
+    // 401/422-bound requests unable to advance the fence. Before any
+    // dispatch branch, so the whole ~50 s of work runs with the admitted
+    // handle bound. See turn-fence-prehandler.ts.
+    await admitCurrentTurnFence();
     const { requestId, ingress, extensions } = pre.context;
 
     // ═══════════════════════════════════════════════════════════════════════

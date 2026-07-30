@@ -32,6 +32,7 @@ import { SessionLRUCache } from '../cache.js';
 import { SupabaseSessionStore } from '../supabase-store.js';
 import { StateCommitFailedError, type SessionTurnWrite } from '../store.js';
 import {
+  runWithPendingTurnFence,
   runWithTurnFence,
   TurnFenceRejectedError,
   unclaimedTurnFenceHandle,
@@ -136,6 +137,42 @@ function makeFenceBackedClient(opts: { appendFails?: boolean } = {}): FenceBacke
 
       if (fn.startsWith('append_turn_atomic')) {
         if (opts.appendFails) return { data: null, error: { message: 'append blew up' } };
+        // 2.174 fix c — v4's IN-TRANSACTION fence gate (the migration's
+        // semantics: stopped wins over superseded, exactly the classifier's
+        // order; refusal = the whole transaction rolls back, so nothing
+        // below this block runs).
+        if (fn === 'append_turn_atomic_v4') {
+          const fenceGeneration = args.p_fence_generation as number | null;
+          if (fenceGeneration != null && args.p_graph != null) {
+            const mine = find(scenarioId, turnId);
+            const maxGeneration = rows
+              .filter((r) => r.scenarioId === scenarioId)
+              .reduce((n, r) => Math.max(n, r.generation), 0);
+            if (mine === undefined) {
+              return { data: null, error: { code: 'OLTF3', message: 'v4: no fence row', details: '{}' } };
+            }
+            if (mine.stoppedAt !== null) {
+              return {
+                data: null,
+                error: {
+                  code: 'OLTF1',
+                  message: 'v4: turn stopped',
+                  details: JSON.stringify({ generation: mine.generation, max_generation: maxGeneration }),
+                },
+              };
+            }
+            if (fenceGeneration < maxGeneration) {
+              return {
+                data: null,
+                error: {
+                  code: 'OLTF2',
+                  message: 'v4: superseded',
+                  details: JSON.stringify({ generation: fenceGeneration, max_generation: maxGeneration }),
+                },
+              };
+            }
+          }
+        }
         committedTurns.add(`${scenarioId}:${turnId}`);
         if (args.p_graph != null) graph = args.p_graph;
         return { data: `row-${turnId}`, error: null };
@@ -229,11 +266,16 @@ describe('V5 turn fence — the reproduced corruption (staging 2026-07-29)', () 
 
     // THE POINT: the canvas is still the one the user asked for.
     expect(backend.storedGraph()).toEqual(GRAPH_B);
-    // And no append RPC ran for A at all — the refusal is PRE-write.
+    // 2.174 fix c: the refusal is now IN-transaction — A's append RPC ran
+    // (append_turn_atomic_v4) and the fence gate inside it rolled the whole
+    // commit back. Strictly stronger than the old PRE-write check: there is
+    // no window between "checked" and "wrote" for a Stop to slip through.
     const appendArgs = backend.calls
       .filter((c) => c.fn.startsWith('append_turn_atomic'))
       .map((c) => c.args.p_turn_id);
-    expect(appendArgs).toEqual([TURN_B]);
+    expect(appendArgs).toEqual([TURN_B, TURN_A]);
+    // No separate pre-RPC evaluation round trip exists on the atomic path.
+    expect(backend.calls.filter((c) => c.fn === 'v5_evaluate_turn_fence')).toHaveLength(0);
   });
 
   it('REFUSES a superseded graph write even with NO stop at all (the pure ordering fence)', async () => {
@@ -416,6 +458,17 @@ describe('V5 turn fence — scope and fail-closed posture', () => {
     const original = rpc.getMockImplementation();
     if (original === undefined) throw new Error('the fake client must have an rpc impl');
     rpc.mockImplementation(async (fn, args) => {
+      // Model the whole fence schema being absent/broken consistently:
+      // v4 answers PGRST202 (feature-detect → the pre-v4 two-step), and the
+      // two-step's evaluation then errors — the fail-closed refusal under
+      // test is the FALLBACK path's, which is exactly the protection that
+      // must hold before the v4 migration executes.
+      if (fn === 'append_turn_atomic_v4') {
+        return {
+          data: null,
+          error: { code: 'PGRST202', message: 'function append_turn_atomic_v4 not found' },
+        };
+      }
       if (fn === 'v5_evaluate_turn_fence') {
         return { data: null, error: { message: 'function v5_evaluate_turn_fence does not exist' } };
       }
@@ -466,6 +519,35 @@ describe('V5 turn fence — scope and fail-closed posture', () => {
     );
     expect((refusal as TurnFenceRejectedError).verdict).toBe('stopped');
     expect(backend.storedGraph()).toBeNull();
+  });
+
+  it('a graph write on a PENDING slot (bound, never admitted) is REFUSED fail-closed (2.174 fix b)', async () => {
+    // The third absence: the request came through the fenced ingress (a slot
+    // exists) but never passed the admission gate, so it holds no claim. No
+    // code path dispatches work before admission — a write in this state is
+    // never trusted. Distinct from BOTH `no_ingress_fence` (no slot →
+    // proceeds, arrival 12) and `claim_did_not_land` (#759 failed claim).
+    const backend = makeFenceBackedClient();
+    const store = makeStore(backend.client);
+    const events: Array<{ event: string; payload: Record<string, unknown> }> = [];
+    setTestSink((event, payload) => events.push({ event, payload }));
+
+    const refusal = await runWithPendingTurnFence(SCENARIO, TURN_A, async () =>
+      await store.append(write(TURN_A, GRAPH_A)).then(
+        () => null,
+        (e: unknown) => e,
+      ),
+    );
+
+    expect(refusal).toBeInstanceOf(TurnFenceRejectedError);
+    expect((refusal as TurnFenceRejectedError).verdict).toBe('unclaimed');
+    expect(backend.storedGraph()).toBeNull();
+    // No fence RPC fired: the refusal needs no round trip — the absence of an
+    // admitted claim IS the answer.
+    expect(backend.calls.filter((c) => c.fn === 'v5_evaluate_turn_fence')).toHaveLength(0);
+    const refused = events.find((e) => e.event === 'v5.turn_fence.graph_write_refused');
+    expect(refused?.payload.reason).toBe('never_admitted');
+    setTestSink(null);
   });
 
   it('a graph write with NO ingress fence context proceeds, and says so', async () => {

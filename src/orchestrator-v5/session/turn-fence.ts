@@ -60,12 +60,17 @@
  *     generation, so a replay never supersedes itself.
  *  9. TWO CONCURRENT CLAIMS → the generation is a `bigserial`, not
  *     `MAX(generation)+1`, so there is no read-modify-write to race.
- * 10. A STOP INSIDE THE WINDOW between this evaluation and the append RPC →
- *     NOT SEEN. This is the honest residual: the evaluation is a SELECT and the
- *     append is a separate round trip, so the fence is a CHECK, not a LOCK, and
- *     nothing in this module or its telemetry calls it atomic. The window is
- *     one RPC (~10-40 ms) out of a ~50 s turn. Closing it needs the check
- *     inside `append_turn_atomic` itself — rowed, not smuggled in here.
+ * 10. A STOP INSIDE THE WINDOW between the evaluation and the append RPC →
+ *     ⚠ CLOSED by 2.174 fix c (this row got built): a claimed turn's graph
+ *     write now runs through `append_turn_atomic_v4`, which performs THIS
+ *     check inside the append transaction under a FOR UPDATE on the turn's
+ *     own fence row — a concurrent Stop either commits first (the append
+ *     refuses) or waits (and then `already_committed` reads true). The
+ *     pre-v4 text stands for the FALLBACK path only (v4 not yet migrated,
+ *     feature-detected via PGRST202): there the evaluation is a SELECT, the
+ *     append is a separate round trip, and the window is one RPC (~10-40 ms)
+ *     out of a ~50 s turn — the fence is then a CHECK, not a LOCK, exactly
+ *     as originally documented.
  * 11. THE FENCE RPC IS UNAVAILABLE (migration not executed, DB blip) → the
  *     graph write is REFUSED (fail closed). We cannot prove the write is
  *     current, and the whole point is not to clobber. This mirrors
@@ -116,6 +121,55 @@ export const TURN_FENCE_RPC = {
   evaluate: 'v5_evaluate_turn_fence',
   stop: 'v5_mark_turn_stopped',
 } as const;
+
+/**
+ * 2.174 fix c — the SQLSTATEs `append_turn_atomic_v4` raises when its
+ * IN-TRANSACTION fence gate refuses the commit (same custom-class convention
+ * as the CAS conflict's OLGC1). One constant per verdict so the migration,
+ * the fake backend and the app-side mapping cannot drift apart silently —
+ * the rehearsal proves the real SQL raises exactly these.
+ */
+export const TURN_FENCE_ATOMIC_SQLSTATE = {
+  stopped: 'OLTF1',
+  superseded: 'OLTF2',
+  unclaimed: 'OLTF3',
+} as const;
+
+/**
+ * Classify a v4 RPC error as an in-transaction fence refusal, or `null` when
+ * it is not one (CAS conflict, outage, missing function — the caller's other
+ * ladders handle those). `generation` / `max_generation` ride in the error's
+ * DETAIL as JSON; parsed defensively — a malformed detail costs the two
+ * numbers, never the refusal.
+ */
+export function classifyAtomicFenceError(error: unknown): TurnFenceEvaluation | null {
+  const code = (error as { code?: unknown })?.code;
+  const verdict: TurnFenceVerdict | null =
+    code === TURN_FENCE_ATOMIC_SQLSTATE.stopped
+      ? 'stopped'
+      : code === TURN_FENCE_ATOMIC_SQLSTATE.superseded
+        ? 'superseded'
+        : code === TURN_FENCE_ATOMIC_SQLSTATE.unclaimed
+          ? 'unclaimed'
+          : null;
+  if (verdict === null) return null;
+  let generation: number | null = null;
+  let maxGeneration: number | null = null;
+  try {
+    const detail = (error as { details?: unknown }).details;
+    if (typeof detail === 'string') {
+      const parsed = JSON.parse(detail) as {
+        generation?: unknown;
+        max_generation?: unknown;
+      };
+      if (typeof parsed.generation === 'number') generation = parsed.generation;
+      if (typeof parsed.max_generation === 'number') maxGeneration = parsed.max_generation;
+    }
+  } catch {
+    // Detail is diagnostic freight only.
+  }
+  return { verdict, generation, maxGeneration };
+}
 
 /**
  * The ingress-side fence claim, carried beside the request for the whole turn.
@@ -225,19 +279,78 @@ export class TurnFenceRejectedError extends StateCommitFailedError {
 }
 
 // ── The ingress context ─────────────────────────────────────────────────────
-const fenceStorage = new AsyncLocalStorage<TurnFenceHandle>();
 
 /**
- * Run `fn` with the fence handle bound for the whole turn. The `await` on the
- * turn's work MUST be inside `fn` — see the file header's warning.
+ * The per-request fence context (2.174 fix b — claim after admission).
+ *
+ * The preHandler binds this SLOT synchronously at ingress with `handle:
+ * null` and NO database write; the claim RPC runs at ADMISSION — after
+ * `runPreFlight` (auth + B1 validation + scenario upsert) succeeds — and
+ * `admitCurrentTurnFence` (turn-fence-prehandler.ts) sets `handle` on this
+ * same object, which every child async context observes by reference.
+ *
+ * Why: the original design claimed a generation from the RAW body BEFORE
+ * validation, so a request the service was about to 401/422 still advanced
+ * the scenario's generation — an unauthenticated way to make a legitimate
+ * in-flight draft evaluate `superseded` and lose its graph write (Codex
+ * round-2 P1, adjudicated real). Rejected requests are now fence-neutral by
+ * construction: the claim call site is AFTER the admission gate.
+ *
+ * The three states, and what a GRAPH WRITE does in each (enforced in
+ * supabase-store.ts):
+ *   · `handle === null`         — bound, never admitted. REFUSED fail-closed
+ *     (`unclaimed` / `never_admitted`): work dispatched without admission is
+ *     a state no code path produces, so it is never trusted.
+ *   · `handle.generation: null` — admission ran, the claim failed. REFUSED
+ *     (unchanged #759 fail-closed semantics).
+ *   · `handle.generation: n`    — the admitted claim. Evaluated as always.
  */
-export function runWithTurnFence<T>(handle: TurnFenceHandle, fn: () => T): T {
-  return fenceStorage.run(handle, fn);
+export interface TurnFenceSlot {
+  readonly scenarioId: string;
+  readonly turnId: string;
+  /** Set once, at admission. Mutable by design — see above. */
+  handle: TurnFenceHandle | null;
 }
 
-/** The current turn's fence handle, or `undefined` outside a fenced request. */
-export function currentTurnFence(): TurnFenceHandle | undefined {
+const fenceStorage = new AsyncLocalStorage<TurnFenceSlot>();
+
+/**
+ * Run `fn` with an ALREADY-ADMITTED fence handle bound for the whole turn —
+ * the shape tests and non-route producers use. The `await` on the turn's
+ * work MUST be inside `fn` — see the file header's warning.
+ */
+export function runWithTurnFence<T>(handle: TurnFenceHandle, fn: () => T): T {
+  return fenceStorage.run(
+    { scenarioId: handle.scenarioId, turnId: handle.turnId, handle },
+    fn,
+  );
+}
+
+/**
+ * Run `fn` with a PENDING slot (no claim yet) — the preHandler's binding.
+ * Synchronous by construction: there is nothing to await before admission,
+ * which is what lets the hook keep the load-bearing callback style.
+ */
+export function runWithPendingTurnFence<T>(
+  scenarioId: string,
+  turnId: string,
+  fn: () => T,
+): T {
+  return fenceStorage.run({ scenarioId, turnId, handle: null }, fn);
+}
+
+/** The current request's fence slot, or `undefined` outside a fenced request. */
+export function currentTurnFenceSlot(): TurnFenceSlot | undefined {
   return fenceStorage.getStore();
+}
+
+/**
+ * The current turn's ADMITTED fence handle. `undefined` both outside a
+ * fenced request and before admission — callers that must distinguish those
+ * two absences (the commit chokepoint) read `currentTurnFenceSlot()`.
+ */
+export function currentTurnFence(): TurnFenceHandle | undefined {
+  return fenceStorage.getStore()?.handle ?? undefined;
 }
 
 /**

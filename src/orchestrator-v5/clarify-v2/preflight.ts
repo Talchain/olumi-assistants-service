@@ -343,10 +343,21 @@ export type ClarifyV2Decision =
        * 2.171: present when this ask must carry the post-explicit-Stop
        * disclosure — the fold happened right after a user Stop, so the copy
        * names the ORIGINAL decision (the pre-fold working brief) and offers
-       * the fold-in / start-over choice. Never present on the replace arm:
-       * a standalone restatement really did switch the frame.
+       * the fold-in / start-over choice. Derived from the SAME branch that
+       * decided fold-vs-replace (30 Jul live-probe fix): post-Stop the
+       * silent replacement is disabled, so every post-Stop resume ask is a
+       * fold and carries this by construction.
        */
       readonly postStop?: { readonly originalBrief: string };
+      /**
+       * 30 Jul live-probe fix — HOW the resume incorporated the message,
+       * from the one fold-vs-replace branch. The composer derives its ack
+       * from this: the replace arm must never claim a fold (the probe
+       * caught "Thanks — I have folded that in" on a replacement, live —
+       * the exact confound copy 2.171 exists to kill). Absent on round-1
+       * asks (nothing was incorporated).
+       */
+      readonly incorporation?: 'fold' | 'replace';
     }
   | {
       /**
@@ -591,9 +602,14 @@ export function decideClarifyV2Resume(
   // Review fix A2 (1.152): replacement only for a genuinely standalone
   // restatement; the bar is checked BEFORE the not-an-answer guard so a
   // standalone decision QUESTION ("Should we focus on France instead?")
-  // replaces rather than deflects.
-  const replaces = isStandaloneBriefRestatement(message, input.messageIsDraftShaped);
-  if (!replaces && CLARIFY_V2_QUESTION_REPLY_PATTERN.test(message)) {
+  // replaces rather than deflects. (Keyed on the RESTATEMENT verdict, not on
+  // `replaces`: post-Stop the restatement folds instead of replacing — see
+  // below — but it is still never a question TO us.)
+  const standaloneRestatement = isStandaloneBriefRestatement(
+    message,
+    input.messageIsDraftShaped,
+  );
+  if (!standaloneRestatement && CLARIFY_V2_QUESTION_REPLY_PATTERN.test(message)) {
     // Review fix A1 (1.152), not-an-answer guard: a question back to us is
     // never folded into the brief. One re-offer per round, then decline.
     if (state.reoffered === true) {
@@ -606,30 +622,56 @@ export function decideClarifyV2Resume(
     };
   }
 
+  // ── 2.171 live-probe fix (30 Jul) — ONE branch, and everything derives ──
+  // from it. The acceptance probe (liveproof-post-stop-disclosure.md, Arm
+  // 2/3) proved the old shape deterministic-wrong at the copy: post-Stop, a
+  // new brief that cleared the A2 bar was SILENTLY REPLACED while the
+  // composer claimed a fold ("Thanks — I have folded that in") and the
+  // disclosure was suppressed — the exact tester confound 2.171 exists to
+  // kill, reproduced by the fix's own replace arm. And which arm a new
+  // brief landed on was textual noise: "Completely different question: …"
+  // folded (the word "question" trips the meta-reference guard) while
+  // "Different topic: …" replaced.
+  //
+  // Post-Stop, the destructive silent replacement is therefore DISABLED:
+  // the restatement FOLDS, discloses, and arms the choice — "start over"
+  // IS the consented replacement. Replacement survives post-Stop in exactly
+  // one shape (below): nothing left to ask, where the immediate draft of
+  // the NEW brief is itself the visible proof the stop took. The disclosure
+  // and the ask copy both derive from this ONE `replaces` value — a second
+  // authority that could disagree with the branch is the defect class the
+  // probe caught.
+  const postStopArmed = input.postExplicitStop === true;
+  const replaces = standaloneRestatement && !postStopArmed;
+  const newBrief = message.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+
   const workingBrief = replaces
-    ? message.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH)
+    ? newBrief
     : incorporateAnswerIntoBrief(state.brief, message);
 
   const assessment = assessBriefCompleteness(workingBrief);
-  if (assessment.complete) {
-    return { kind: 'proceed', brief: workingBrief, reason: 'complete' };
-  }
-
   // NO-REPEAT: a dimension is asked at most once per scenario.
-  const askable = assessment.missing.filter((d) => !state.asked.includes(d));
-  if (askable.length === 0) {
-    return {
-      kind: 'proceed',
-      brief: workingBrief,
-      reason: 'all_missing_already_asked',
-    };
-  }
+  const askable = assessment.complete
+    ? []
+    : assessment.missing.filter((d) => !state.asked.includes(d));
   // STOP RULE: bounded rounds, then draft with what we have.
-  if (state.round >= CLARIFY_V2_MAX_ROUNDS) {
+  const canAsk = askable.length > 0 && state.round < CLARIFY_V2_MAX_ROUNDS;
+
+  if (!canAsk) {
+    // 2.171 (30 Jul): a post-Stop standalone restatement whose fold has
+    // nothing left to ask gets the REPLACEMENT it asked for — the NEW brief
+    // alone, never a merged-topic draft. The disclosure has no ask to ride
+    // on, and the streaming new-topic draft says the stop took better than
+    // any copy could.
+    const brief = standaloneRestatement && postStopArmed ? newBrief : workingBrief;
     return {
       kind: 'proceed',
-      brief: workingBrief,
-      reason: 'round_budget_exhausted',
+      brief,
+      reason: assessment.complete
+        ? 'complete'
+        : askable.length === 0
+          ? 'all_missing_already_asked'
+          : 'round_budget_exhausted',
     };
   }
 
@@ -637,13 +679,13 @@ export function decideClarifyV2Resume(
     askable,
     CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
   );
-  // 2.171: a FOLD (never a replacement — there the frame really switched)
-  // right after an explicit Stop must disclose and arm the choice. The armed
-  // brief is the user's message verbatim under the draft cap: what "start
-  // over" would draft from.
-  const newBrief = message.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH);
-  const disclosePostStop =
-    input.postExplicitStop === true && !replaces && newBrief.length > 0;
+  // 2.171: a post-Stop FOLD must disclose and arm the choice. With the
+  // silent replacement disabled above, `!replaces` holds for EVERY post-Stop
+  // ask — the disclosure is emitted by construction whenever the fold
+  // happens, from the same branch that decided the fold. The armed brief is
+  // the user's message verbatim under the draft cap: what "start over"
+  // would draft from.
+  const disclosePostStop = postStopArmed && !replaces && newBrief.length > 0;
   return {
     kind: 'ask',
     questions,
@@ -654,6 +696,9 @@ export function decideClarifyV2Resume(
       ...(disclosePostStop ? { startOverBrief: newBrief } : {}),
     },
     phase: 'follow_up',
+    // The composer derives its ack from the SAME branch — the replace arm
+    // must never claim a fold (the probe's confound copy, live).
+    incorporation: replaces ? 'replace' : 'fold',
     ...(disclosePostStop ? { postStop: { originalBrief: state.brief } } : {}),
   };
 }
@@ -681,12 +726,23 @@ export function composeClarifyV2Response(
   questions: readonly ClarifyQuestion[],
   phase: 'initial' | 'follow_up',
   postStop?: { readonly originalBrief: string },
+  incorporation?: 'fold' | 'replace',
 ): OlumiResponse {
   const singular = questions.length === 1;
   // 2.171: in the post-explicit-Stop state the plain fold ack is the exact
   // copy the acceptance probe caught reading as "my stop didn't take" — the
   // lead instead disclosures the ORIGINAL decision and offers the choice
-  // (ratified wording). Ordinary rounds keep the pre-2.171 leads verbatim.
+  // (ratified wording). Ordinary rounds keep the pre-2.171 leads verbatim,
+  // EXCEPT the replace arm (30 Jul live-probe fix): claiming a fold on a
+  // replacement is a false statement — the ack derives from the branch.
+  const followUpAck =
+    incorporation === 'replace'
+      ? singular
+        ? "Thanks — I've switched to your new decision. One more thing would sharpen the draft."
+        : "Thanks — I've switched to your new decision. A couple more things would sharpen the draft."
+      : singular
+        ? 'Thanks — I have folded that in. One more thing would sharpen the draft.'
+        : 'Thanks — I have folded that in. A couple more things would sharpen the draft.';
   const lead =
     postStop !== undefined
       ? `Still working on your original decision — “${renderDecisionTopic(postStop.originalBrief)}”. ` +
@@ -695,9 +751,7 @@ export function composeClarifyV2Response(
         ? singular
           ? 'Before I draft the model, one quick question will make it sharper.'
           : 'Before I draft the model, a few quick questions will make it sharper.'
-        : singular
-          ? 'Thanks — I have folded that in. One more thing would sharpen the draft.'
-          : 'Thanks — I have folded that in. A couple more things would sharpen the draft.';
+        : followUpAck;
   const numbered = questions
     .map((q, i) => `${i + 1}. ${q.text} (${q.impact})`)
     .join(' ');

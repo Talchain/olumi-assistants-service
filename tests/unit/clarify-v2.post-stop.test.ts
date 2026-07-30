@@ -131,27 +131,44 @@ describe('2.171 — post-Stop fold disclosure (RED-first pin + control)', () => 
     expect(actions.some((a) => /start over/i.test(a.label ?? ''))).toBe(false);
   });
 
-  // ── SCOPE CONTROL — a REPLACEMENT is not a fold, even post-Stop ──────────
-  it('post-Stop + standalone restatement: the frame REPLACES and carries NO disclosure (it would be false)', async () => {
+  // ── ADJUDICATION FLIP (30 Jul live probe) — post-Stop, a standalone
+  // restatement that still has something to ask FOLDS AND DISCLOSES.
+  //
+  // This test previously pinned the opposite ("the frame REPLACES and
+  // carries NO disclosure (it would be false)"). The live acceptance probe
+  // (liveproof-post-stop-disclosure.md, Arm 2/3, 100% deterministic)
+  // falsified that premise at the copy: the replace-arm ask emitted the
+  // EXACT confound copy ("Thanks — I have folded that in") — a false
+  // statement about a replacement — with no disclosure and no choice, in
+  // precisely the state 2.171 exists to fix. And which arm a new brief
+  // landed on was textual noise: "Completely different question: …" folded
+  // (the word "question" trips the meta-reference guard) while "Different
+  // topic: …" replaced. Post-Stop, the destructive silent replacement now
+  // takes the user's explicit consent — which is exactly what the
+  // disclosure choice provides ("start over" = the consented replacement).
+  it('post-Stop + standalone restatement with something left to ask: FOLDS and DISCLOSES (the silent replace is gone)', async () => {
     clarifyV2Harness.seededPendings = [seedClarifyPending(...SEEDED_ROUND)];
     clarifyV2Harness.latestScenarioTurnStopped = true;
 
     // Clears the A2 replacement bar: draft-shaped, >= 60 chars, no
-    // meta-reference — the one destructive move, and it really switches frame.
+    // meta-reference. Pre-fix this silently replaced the working brief.
     const restatement =
       'Should we relocate the London office to Manchester before the lease renews next spring?';
     const { outcome, appends } = await runClarifyV2Turn({ message: restatement });
     if (outcome === null || outcome.kind !== 'respond') {
       throw new Error(`expected respond, got ${outcome?.kind}`);
     }
-    expect(outcome.response.assistant_text).not.toContain('Still working on');
+    expect(outcome.response.assistant_text).toContain('Still working on');
+    expect(outcome.response.assistant_text).toContain('German market');
     const round = roundPendingOf(appends);
     expect(round).toBeDefined();
-    // The frame switched wholesale — and the choice is NOT armed.
-    expect((round!.action as { brief: string }).brief).toBe(restatement);
+    // KEPT AS A FOLD — the original frame survives until the user chooses —
+    // and the choice is armed with the restatement verbatim.
+    expect((round!.action as { brief: string }).brief).toContain('German market');
+    expect((round!.action as { brief: string }).brief).toContain('London office');
     expect(
       (round!.action as { start_over_brief?: string }).start_over_brief,
-    ).toBeUndefined();
+    ).toBe(restatement);
   });
 
   // ── BEST-EFFORT — a throwing tombstone read must cost only the copy ──────
@@ -171,6 +188,160 @@ describe('2.171 — post-Stop fold disclosure (RED-first pin + control)', () => 
     );
     expect(outcome.response.assistant_text).not.toContain('Still working on');
     expect(appends).toHaveLength(1);
+  });
+});
+
+/**
+ * 30 Jul live-probe fix — branch-derived disclosure.
+ *
+ * The acceptance probe (liveproof-post-stop-disclosure.md) proved the miss
+ * at the bytes: the probe's brief B "Different topic: …" cleared the A2
+ * replacement bar, so the resume REPLACED the working brief — and the
+ * composer still emitted the fold ack ("Thanks — I have folded that in"),
+ * a false statement, with the disclosure suppressed. Two authorities: the
+ * branch decided REPLACE, the copy claimed FOLD. The fix collapses them:
+ * the ask copy and the disclosure both DERIVE from the one fold-vs-replace
+ * branch, and post-Stop the silent replacement is disabled (destructive
+ * move; consent comes from the disclosure choice). Replacement survives
+ * post-Stop in exactly one shape: an immediate draft of the NEW brief
+ * (nothing left to ask), where the streaming new-topic draft is itself the
+ * visible proof the stop took.
+ */
+describe('2.171 live-probe fix — branch-derived disclosure (30 Jul)', () => {
+  /** The probe's EXACT miss string (Arm 2/2b/3-meal/3-swap2, 0/4 disclosed). */
+  const PROBE_MISS_BRIEF =
+    "Different topic: we need to pick a cloud data warehouse - Snowflake versus BigQuery. Criteria: query cost at our scale, our data engineers' familiarity, and integration with dbt.";
+  /** The stopped decision the probe's miss scenarios were working on. */
+  const MEAL_KIT_BRIEF =
+    'We are deciding whether to launch a premium subscription tier for our meal-kit delivery business.';
+  const MEAL_ROUND: readonly [string, readonly string[], number] = [
+    MEAL_KIT_BRIEF,
+    ['goal', 'options', 'timeframe'],
+    1,
+  ];
+
+  beforeEach(async () => {
+    await resetClarifyV2Harness();
+  });
+  afterAll(async () => {
+    const telemetry = await import('../../src/utils/telemetry.js');
+    telemetry.setTestSink(null);
+  });
+
+  // ── THE PROBE PIN (proven RED at a1fb06bd — the live miss, verbatim) ─────
+  it('the probe miss string, post-Stop: DISCLOSES with the choice armed (was the confound copy live)', async () => {
+    clarifyV2Harness.seededPendings = [seedClarifyPending(...MEAL_ROUND)];
+    clarifyV2Harness.latestScenarioTurnStopped = true;
+
+    const { outcome, appends, events } = await runClarifyV2Turn({
+      message: PROBE_MISS_BRIEF,
+    });
+    if (outcome === null || outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${outcome?.kind}`);
+    }
+    // The disclosure, naming the ORIGINAL (stopped) decision.
+    expect(outcome.response.assistant_text).toContain('Still working on');
+    expect(outcome.response.assistant_text).toContain('meal-kit');
+    // The live confound copy must be gone.
+    expect(outcome.response.assistant_text).not.toContain(
+      'Thanks — I have folded that in',
+    );
+    const actions = (outcome.response.suggested_actions ?? []) as ReadonlyArray<{
+      label?: string;
+    }>;
+    expect(actions.some((a) => /start over/i.test(a.label ?? ''))).toBe(true);
+    // Fold kept, choice armed with the new brief verbatim.
+    const round = roundPendingOf(appends);
+    expect(round).toBeDefined();
+    expect((round!.action as { brief: string }).brief).toContain('meal-kit');
+    expect((round!.action as { brief: string }).brief).toContain('data warehouse');
+    expect(
+      (round!.action as { start_over_brief?: string }).start_over_brief,
+    ).toBe(PROBE_MISS_BRIEF);
+    // Telemetry now reports the disclosure honestly.
+    const asked = events.find(
+      (e) => (e.data as { post_stop_disclosed?: boolean }).post_stop_disclosed !== undefined,
+    );
+    expect(asked).toBeDefined();
+    expect((asked!.data as { post_stop_disclosed?: boolean }).post_stop_disclosed).toBe(true);
+  });
+
+  // ── SCOPE CONTROL — the ordinary (non-post-Stop) replacement is untouched ─
+  it('the same string WITHOUT a Stop: the A2 replacement runs exactly as ratified — no disclosure, frame switched', async () => {
+    clarifyV2Harness.seededPendings = [seedClarifyPending(...MEAL_ROUND)];
+    clarifyV2Harness.latestScenarioTurnStopped = false;
+
+    const { outcome, appends } = await runClarifyV2Turn({ message: PROBE_MISS_BRIEF });
+    if (outcome === null || outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${outcome?.kind}`);
+    }
+    expect(outcome.response.assistant_text).not.toContain('Still working on');
+    const actions = (outcome.response.suggested_actions ?? []) as ReadonlyArray<{
+      label?: string;
+    }>;
+    expect(actions.some((a) => /start over/i.test(a.label ?? ''))).toBe(false);
+    const round = roundPendingOf(appends);
+    expect(round).toBeDefined();
+    // The frame switched wholesale — the ratified A2 destructive move.
+    expect((round!.action as { brief: string }).brief).toBe(PROBE_MISS_BRIEF);
+    expect(
+      (round!.action as { start_over_brief?: string }).start_over_brief,
+    ).toBeUndefined();
+  });
+
+  // ── HONEST COPY — the replace-arm ask stops claiming a fold ──────────────
+  // The composer was the second authority: on the replace arm it said
+  // "Thanks — I have folded that in", which is false (nothing was folded;
+  // the brief was replaced). The copy now derives from the branch.
+  it('an ordinary replacement ask says the frame switched — never "folded that in"', async () => {
+    clarifyV2Harness.seededPendings = [seedClarifyPending(...MEAL_ROUND)];
+    clarifyV2Harness.latestScenarioTurnStopped = false;
+
+    const { outcome } = await runClarifyV2Turn({ message: PROBE_MISS_BRIEF });
+    if (outcome === null || outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${outcome?.kind}`);
+    }
+    expect(outcome.response.assistant_text).not.toContain(
+      'Thanks — I have folded that in',
+    );
+    expect(outcome.response.assistant_text).toContain('switched to your new decision');
+  });
+
+  // ── REPLACEMENT SURVIVOR — nothing left to ask → draft the NEW brief ─────
+  // With every dimension already asked the fold has no carrier for the
+  // disclosure, so the standalone restatement gets what it asked for: an
+  // immediate draft of the NEW brief alone (never a merged-topic draft) —
+  // the streaming new-topic draft is the visible proof the stop took.
+  it('post-Stop + standalone restatement with nothing askable: proceeds with the NEW brief alone', async () => {
+    clarifyV2Harness.seededPendings = [
+      seedClarifyPending(MEAL_KIT_BRIEF, ['goal', 'options', 'quantities', 'timeframe'], 1),
+    ];
+    clarifyV2Harness.latestScenarioTurnStopped = true;
+
+    const { outcome } = await runClarifyV2Turn({ message: PROBE_MISS_BRIEF });
+    if (outcome === null || outcome.kind !== 'draft') {
+      throw new Error(`expected draft, got ${outcome?.kind}`);
+    }
+    expect(outcome.briefOverride).toBe(PROBE_MISS_BRIEF);
+  });
+
+  // ── THE PROBE HIT stays a hit — the fold path is byte-identical ──────────
+  it('the probe HIT string (meta-word trips the restatement bar) still folds and discloses', async () => {
+    clarifyV2Harness.seededPendings = [seedClarifyPending(...MEAL_ROUND)];
+    clarifyV2Harness.latestScenarioTurnStopped = true;
+
+    const PROBE_HIT_BRIEF =
+      'Completely different question: we must choose a database vendor for our new platform - managed PostgreSQL on RDS versus CockroachDB serverless. Criteria: query latency, migration cost from our current MySQL, and multi-region failover.';
+    const { outcome, appends } = await runClarifyV2Turn({ message: PROBE_HIT_BRIEF });
+    if (outcome === null || outcome.kind !== 'respond') {
+      throw new Error(`expected respond, got ${outcome?.kind}`);
+    }
+    expect(outcome.response.assistant_text).toContain('Still working on');
+    const round = roundPendingOf(appends);
+    expect(round).toBeDefined();
+    expect(
+      (round!.action as { start_over_brief?: string }).start_over_brief,
+    ).toBe(PROBE_HIT_BRIEF);
   });
 });
 

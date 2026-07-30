@@ -45,6 +45,29 @@ export interface TurnStopReply {
 }
 
 /**
+ * 2.174 fix a — `scenarios.id` is a UUID column, so a non-UUID scenario id
+ * CANNOT name an existing scenario. Refusing it here costs no round trip and
+ * keeps garbage out of the fence entirely (pre-fix, a non-UUID reached the
+ * RPC, failed with 22P02, and surfaced as an untyped 502).
+ */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function unknownScenarioReply(requestId: string): TurnStopReply {
+  return {
+    status: 404,
+    body: {
+      error: {
+        code: "TURN_STOP_UNKNOWN_SCENARIO",
+        message: "No scenario exists with that id.",
+        source: "cee",
+        request_id: requestId,
+      },
+    },
+  };
+}
+
+/**
  * Record an explicit user Stop.
  *
  * The 200 body describes WHAT WAS RECORDED, in the past tense, and nothing
@@ -81,8 +104,60 @@ export async function recordExplicitTurnStop(
   }
 
   const { scenarioId, turnId } = identity;
+
+  // ── 2.174 fix a: the scenario must EXIST before anything is written ──────
+  // The public rung is reachable with any UUID and fence rows are never
+  // deleted, so an unchecked upsert let outsiders grow the table without
+  // bound and tombstone-spray guessed scenarios. A non-UUID id cannot exist
+  // (column type) — refused without a read. An unknown UUID is refused on a
+  // clean no-row read. A FAILED read fails OPEN and records the Stop anyway:
+  // the P0 protection (a legitimate user's Stop must land) outranks the
+  // hardening, and the pre-existing turn on that scenario proves the row
+  // existed moments ago. Priced residual, documented: a Stop that arrives
+  // before the turn's own pre-flight scenario upsert commits (sub-100 ms
+  // into the turn, vs ≥1 s for a human Stop click) would be refused — the
+  // UI's non-200 copy ("we could not confirm") is the honest surface there.
+  if (!UUID_PATTERN.test(scenarioId)) {
+    log.warn(
+      {
+        event: "v5.turn_fence.stop_refused_unknown_scenario",
+        request_id: requestId,
+        reason: "non_uuid_scenario_id",
+      },
+      "V5 turn fence — Stop refused: scenario id is not a UUID, so it cannot exist",
+    );
+    return unknownScenarioReply(requestId);
+  }
   try {
     const store = getSessionStore();
+    if (typeof store.scenarioExists === "function") {
+      let exists = true;
+      try {
+        exists = await store.scenarioExists(scenarioId);
+      } catch (err) {
+        log.warn(
+          {
+            event: "v5.turn_fence.stop_existence_read_failed",
+            request_id: requestId,
+            scenario_id: scenarioId,
+            err: errMessage(err),
+          },
+          "V5 turn fence — scenario existence read failed; failing OPEN and recording the Stop",
+        );
+      }
+      if (!exists) {
+        log.warn(
+          {
+            event: "v5.turn_fence.stop_refused_unknown_scenario",
+            request_id: requestId,
+            scenario_id: scenarioId,
+            reason: "scenario_not_found",
+          },
+          "V5 turn fence — Stop refused: no scenario exists with that id; nothing was written",
+        );
+        return unknownScenarioReply(requestId);
+      }
+    }
     if (typeof store.markTurnStopped !== "function") {
       // The production store always implements it (pinned from the class by
       // turn-fence-guards.test.ts). Reaching here means the store is a double,
