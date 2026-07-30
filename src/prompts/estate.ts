@@ -165,7 +165,7 @@ export interface GateDeclaration {
  * totals say so — see `deriveLiveEstate()`.
  */
 export const GATED_PMS_TASKS = {
-  /** `src/cee/validation-pipeline/validate-graph.ts:52` */
+  /** `src/cee/validation-pipeline/validate-graph.ts` -> `callValidateGraph()` */
   validate_graph: {
     env: 'CEE_VALIDATION_PIPELINE_ENABLED',
     isActive: () => config.cee.validationPipelineEnabled === true,

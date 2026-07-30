@@ -18,6 +18,8 @@
 
 import { getSystemPrompt } from '../../adapters/llm/prompt-loader.js';
 import { getAdapter, getMaxTokensFromConfig } from '../../adapters/llm/router.js';
+import { isDraftTruncated } from '../../adapters/llm/draft-budget.js';
+import { UpstreamTimeoutError } from '../../adapters/llm/errors.js';
 import { wrapUntrusted } from '../../adapters/llm/untrusted-envelope.js';
 import { extractJsonFromResponse } from '../../utils/json-extractor.js';
 import { log } from '../../utils/telemetry.js';
@@ -63,12 +65,27 @@ import type { CallOpts } from '../../adapters/llm/types.js';
  * that long before the cap could, so a bigger number would buy nothing real.
  *
  * What DOES matter is the ORDER the two bounds bind in, and it is deliberate:
- * the timeout must run out first. A cap-bound completion comes back EMPTY,
+ * the timeout should run out first. A cap-bound completion comes back EMPTY,
  * the adapter throws `openai_empty_response`, and the pipeline files it as
  * `api_error` — nothing in that trail names the token budget, so it reads as a
- * provider fault forever. A timeout-bound one aborts into `UpstreamTimeoutError`
- * and is classified `timeout` with elapsed ms attached. At 60 s the timeout
- * affords ~9,800 tokens (~34 edges); the cap does not bind until ~57. Pinned in
+ * provider fault. A timeout-bound one aborts into `UpstreamTimeoutError` and is
+ * classified `timeout` by `classifyValidationFailure` below.
+ *
+ * ⚠ THAT SECOND HALF WAS FALSE WHEN THIS COMMENT WAS FIRST WRITTEN, and an
+ * adversarial review caught it: the catch-site classifier tested
+ * `err.message.includes('timeout')` against a message reading "OpenAI chat
+ * timed out", so BOTH arms filed as `api_error` and the distinction this
+ * rationale rests on did not exist in telemetry. The typed check that makes it
+ * true ships in the same change. (The claim also said "with elapsed ms
+ * attached" — it is not: `UpstreamTimeoutError` carries `elapsedMs`, but the
+ * warn emits only `err.message`. Dropped rather than dressed up.)
+ *
+ * At the MEASURED serving speed of 163.1 tokens/s the 60 s timeout affords
+ * ~9,800 tokens (~34 edges) while the cap does not bind until ~57 — so the
+ * timeout binds first. This is a speed-conditional property, not a law: the
+ * FIXED := 0 conservatism that makes the per-edge costs upper bounds does NOT
+ * transfer to their ratio, and a provider serving faster than ~273 tokens/s
+ * would flip the order. Pinned, with that conditionality stated, in
  * tests/unit/cee.validation-pipeline/pass2-budget.test.ts.
  *
  * Well inside o4-mini's registry ceiling (`maxTokens: 65536`, config/models.ts).
@@ -159,16 +176,59 @@ export async function callValidateGraph(
   // reasoning the provider returns no content at all and the adapter throws
   // `openai_empty_response` first (openai.ts chat(), the `if (!content)`
   // branch), so this guard cannot cover that arm from inside this module.
-  if (result.stopReason === 'length') {
+  //
+  // PROVIDER-NEUTRAL BY CONSTRUCTION. `isDraftTruncated` is the repo's own
+  // predicate for this signal (draft-budget.ts): OpenAI reports
+  // `finish_reason: "length"`, Anthropic reports `stop_reason: "max_tokens"`.
+  // Testing the OpenAI spelling alone would silently disarm this guard the
+  // moment `CEE_MODEL_VALIDATION` re-routes Pass 2 to an Anthropic model — an
+  // override this very file documents as supported. Reusing the shared
+  // predicate means a third provider's spelling is added in one place, not
+  // two (CLAUDE.md trap 12).
+  if (isDraftTruncated(result.stopReason)) {
     throw new Error(
       `cee.validation_pipeline.truncated: Pass 2 completion was truncated at ` +
-        `max_tokens=${maxTokens} (stop_reason=length, edges=${edges.length}); ` +
-        `raise DEFAULT_PASS2_MAX_TOKENS (request_id=${callOpts.requestId})`,
+        `max_tokens=${maxTokens} (stop_reason=${result.stopReason}, ` +
+        `edges=${edges.length}); raise DEFAULT_PASS2_MAX_TOKENS ` +
+        `(request_id=${callOpts.requestId})`,
     );
   }
 
   // ── Parse and validate response ────────────────────────────────────────────
   return parsePass2Response(result.content, callOpts.requestId);
+}
+
+// ============================================================================
+// Failure classification
+// ============================================================================
+
+/**
+ * Classifies a validation-pipeline failure for telemetry
+ * (`cee.validation_pipeline.failed` → `error_type`).
+ *
+ * EXTRACTED, not invented: this was an inline expression at the catch site in
+ * unified-pipeline/index.ts, and it had **zero test coverage** — a repo-wide
+ * sweep for `validation_pipeline.failed` / `error_type` over `tests/` found
+ * nothing. That is why the bug below survived. It lives HERE, beside the errors
+ * it names, so it can be pinned without standing up the whole pipeline.
+ */
+export function classifyValidationFailure(
+  err: unknown,
+): 'timeout' | 'parse_error' | 'api_error' {
+  // ⚠ THE SUBSTRING TEST BELOW CANNOT SEE A REAL TIMEOUT, WHICH IS WHY THE
+  // TYPED CHECK LEADS. `OpenAIAdapter.chat()` throws `UpstreamTimeoutError`
+  // with the message "OpenAI chat timed out" — and `"timed out"` does not
+  // contain the substring `"timeout"`, nor is its `name` `'AbortError'`
+  // (`errors.ts:13` sets it to `'UpstreamTimeoutError'`). So before this line a
+  // genuine Pass-2 timeout was filed as `api_error`, identical to the
+  // empty-content arm: the two failure modes the budget design depends on
+  // telling apart were indistinguishable in telemetry.
+  if (err instanceof UpstreamTimeoutError) return 'timeout';
+  if (err instanceof Error && (err.name === 'AbortError' || err.message.includes('timeout'))) {
+    return 'timeout';
+  }
+  if (err instanceof Error && err.message.includes('parse_error')) return 'parse_error';
+  return 'api_error';
 }
 
 // ============================================================================

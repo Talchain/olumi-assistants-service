@@ -38,6 +38,7 @@ import { runStagePackage } from "./stages/package.js";
 import { runStageBoundary } from "./stages/boundary.js";
 import { runStageThresholdSweep } from "./stages/threshold-sweep.js";
 import { runValidationPipeline } from "../validation-pipeline/index.js";
+import { classifyValidationFailure } from "../validation-pipeline/validate-graph.js";
 import { projectGraphForStagedFrame } from "./staged-graph-projection.js";
 
 /**
@@ -874,7 +875,7 @@ export async function runUnifiedPipeline(
     //
     // ⚠ AWAITED AFTER THE COACHING PASS, NOT HERE (ROADMAP 2.146). See the await
     // site below for the full argument; the short version is that Pass 2 costs
-    // 10–25 s (30 s cap) and the coaching pass costs ~19.8 s, and the metadata's
+    // 10–28 s (60 s cap) and the coaching pass costs ~19.8 s, and the metadata's
     // only consumer is Stage 5 (Package) — so overlapping the two hides almost
     // all of Pass 2 behind latency the draft was already paying.
     //
@@ -901,14 +902,17 @@ export async function runUnifiedPipeline(
       validationPromise = runValidationPipeline(ctx).then(() => {
         ctx.pipelineOutcome.validation_status = 'passed';
       }).catch((err: unknown) => {
-        const isTimeout = err instanceof Error && (err.name === 'AbortError' || err.message.includes('timeout'));
-        const isParse = err instanceof Error && err.message.includes('parse_error');
+        // Extracted to classifyValidationFailure (validation-pipeline/
+        // validate-graph.ts) so it is pinnable. The inline version this
+        // replaces could not see a real UpstreamTimeoutError and filed every
+        // timeout as api_error; it had zero test coverage.
+        const errorType = classifyValidationFailure(err);
         log.warn(
           {
             event: "cee.validation_pipeline.failed",
             request_id: ctx.requestId,
             error: err instanceof Error ? err.message : String(err),
-            error_type: isTimeout ? 'timeout' : isParse ? 'parse_error' : 'api_error',
+            error_type: errorType,
           },
           "cee.validation_pipeline.failed",
         );
@@ -1046,8 +1050,10 @@ export async function runUnifiedPipeline(
     //   after:  graph_ready = repair                  ; total = +max(0, PASS2 − COACHING)
     //
     // With COACHING ~19.8 s measured (n=40) and PASS2 capped at
-    // CEE_VALIDATION_TIMEOUT_MS (30 s default), the typical case adds ~0 to BOTH
-    // numbers and the worst case adds ~10 s to the total only. Nothing before
+    // CEE_VALIDATION_TIMEOUT_MS (60 s default since ROADMAP 2.146 — the 30 s it
+    // replaced could not cover the task; see the constant's own derivation),
+    // the typical case adds ~0 to BOTH numbers and the worst case adds
+    // ~40 s to the total only. Nothing before
     // this line consumes validation metadata: Stage 5 (Package) is its only
     // reader (`ctx.validationSummary` → trace; `edge.validation` rides the graph),
     // and the coaching pass cannot see it — `projectStructuralGraph`

@@ -65,9 +65,10 @@ vi.mock('../../../src/utils/telemetry.js', () => ({
   emit: vi.fn(),
 }));
 
-const { callValidateGraph } = await import(
+const { callValidateGraph, classifyValidationFailure } = await import(
   '../../../src/cee/validation-pipeline/validate-graph.js'
 );
+const { UpstreamTimeoutError } = await import('../../../src/adapters/llm/errors.js');
 // REAL constants — no mock in front of them.
 const { VALIDATION_PIPELINE_TIMEOUT_MS, MAX_TIMEOUT_MS } = await import(
   '../../../src/config/timeouts.js'
@@ -276,10 +277,17 @@ describe('Pass 2 validation timeout — bounded from below by the task, above by
   });
 
   it('CEILING: the clamp cannot silently swallow the configured value', () => {
-    // clampTimeout() pins the value into [MIN_TIMEOUT_MS, MAX_TIMEOUT_MS].
-    // If the default is ever raised past MAX_TIMEOUT_MS the clamp would apply
-    // silently and the deployed timeout would not be the one in the source.
-    expect(VALIDATION_PIPELINE_TIMEOUT_MS).toBeLessThanOrEqual(MAX_TIMEOUT_MS);
+    // clampTimeout() pins the value into [MIN_TIMEOUT_MS, MAX_TIMEOUT_MS], so a
+    // default raised past MAX would arrive here as MAX and the deployed timeout
+    // would not be the one written in the source.
+    //
+    // ⚠ STRICT `toBeLessThan`, AND THAT IS THE WHOLE PIN. The first version of
+    // this test used `toBeLessThanOrEqual`, which `clampTimeout` satisfies BY
+    // CONSTRUCTION — it could never fail, at any default, and an adversarial
+    // review proved it by setting the default to 400,000 and watching the pin
+    // stay green. Equality with MAX is precisely the swallowed case, so the
+    // boundary must be excluded, not included. (Mutant M11 below.)
+    expect(VALIDATION_PIPELINE_TIMEOUT_MS).toBeLessThan(MAX_TIMEOUT_MS);
   });
 });
 
@@ -287,21 +295,32 @@ describe('Pass 2 validation timeout — bounded from below by the task, above by
 // Pin 3 — the binding order: the timeout must run out before the cap does
 // ============================================================================
 
-describe('binding order — the timeout, never the token cap, is what stops Pass 2', () => {
-  it('the timeout binds first: a full-timeout run cannot produce more tokens than the cap', async () => {
+describe('binding order — at the MEASURED serving speed, the timeout stops Pass 2 before the cap does', () => {
+  it('at 163.1 tokens/s the timeout binds first: a full-timeout run cannot produce more tokens than the cap', async () => {
     // THIS IS THE DESIGN INVARIANT, and it is why the cap is not sized for the
     // 100-edge structural maximum. The two failure modes are not equivalent:
     //
     //   cap-bound   → the provider returns EMPTY content. The adapter throws
     //                 `openai_empty_response` (openai.ts chat(), the `if
-    //                 (!content)` branch), which unified-pipeline classifies as
-    //                 `api_error`. Nothing in that trail names the token
-    //                 budget. It reads as a provider fault, on every single
-    //                 draft, forever.
-    //   timeout-bound → AbortError → `UpstreamTimeoutError` → classified
-    //                 `timeout`, with the elapsed ms attached.
+    //                 (!content)` branch), which classifies as `api_error`.
+    //                 Nothing in that trail names the token budget. It reads as
+    //                 a provider fault, on every single draft, forever.
+    //   timeout-bound → `UpstreamTimeoutError` → classified `timeout` by
+    //                 `classifyValidationFailure`. ⚠ Only true as of this
+    //                 change: the classifier it replaced tested
+    //                 `message.includes('timeout')` against "OpenAI chat timed
+    //                 out" and filed BOTH arms as `api_error`. Pinned below.
     //
     // So the cap must sit above whatever the timeout can physically produce.
+    //
+    // ⚠ SPEED-CONDITIONAL, NOT A LAW. This holds at the MEASURED 163.1
+    // tokens/s. The `FIXED := 0` conservatism that makes tokens/edge and
+    // ms/edge upper bounds does NOT transfer to their RATIO — both are inflated
+    // together, so the edge count at which each bound bites is not
+    // conservatively ordered. A provider serving faster than
+    // 16,384 / 60 s ≈ 273 tokens/s would let the cap bind first. If Pass 2 is
+    // ever re-pointed at a faster model, re-derive this rather than assuming
+    // it carried over.
     const args = await captureChatArgs();
     const producibleWithinTimeout = Math.ceil(
       TOKENS_PER_SECOND * (VALIDATION_PIPELINE_TIMEOUT_MS / 1_000),
@@ -369,5 +388,76 @@ describe('truncation is reported as truncation, not as a parse failure', () => {
     chatSpy.mockResolvedValue(chatResult(pass2Fixture(1), null));
     const result = await callValidateGraph('brief', [], [], { ...CALL_OPTS, timeoutMs: 1_000 });
     expect(result.edges).toHaveLength(1);
+  });
+
+  it("fires on Anthropic's spelling too ('max_tokens'), not just OpenAI's", async () => {
+    // `CEE_MODEL_VALIDATION` can re-point Pass 2 at an Anthropic model — an
+    // override this PR's own comment documents as supported. Anthropic reports
+    // `stop_reason: "max_tokens"`; testing only OpenAI's `"length"` would
+    // silently DISARM the guard on that route, which is the quietest kind of
+    // regression. The guard uses the repo's shared `isDraftTruncated`
+    // predicate so both spellings are covered from one place.
+    chatSpy.mockReset();
+    chatSpy.mockResolvedValue({
+      content: '{"edges":[{"from":"a",',
+      latencyMs: 1,
+      model: 'claude-sonnet-4-6',
+      stopReason: 'max_tokens',
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+
+    await expect(
+      callValidateGraph('brief', [], [], { ...CALL_OPTS, timeoutMs: 1_000 }),
+    ).rejects.toThrow(/truncated/i);
+  });
+});
+
+// ============================================================================
+// Pin 5 — a real timeout must be CLASSIFIED as a timeout
+// ============================================================================
+
+describe('classifyValidationFailure — the two budget failure arms are distinguishable', () => {
+  it('classifies a real adapter timeout as `timeout`, not `api_error`', () => {
+    // THE EXACT ERROR `OpenAIAdapter.chat()` THROWS on abort, constructed with
+    // its real message. The classifier this replaced tested
+    // `err.message.includes('timeout')` — and "timed out" does not contain
+    // "timeout" — while `err.name` is 'UpstreamTimeoutError', not 'AbortError'.
+    // So a genuine Pass-2 timeout was reported identically to an empty
+    // completion, and the binding-order rationale above rested on a
+    // distinction that did not exist.
+    const err = new UpstreamTimeoutError(
+      'OpenAI chat timed out',
+      'openai',
+      'chat',
+      'body',
+      60_000,
+    );
+    expect(err.message.includes('timeout')).toBe(false); // the trap, pinned
+    expect(err.name).not.toBe('AbortError'); // the other half of the trap
+    expect(classifyValidationFailure(err)).toBe('timeout');
+  });
+
+  it('still classifies an AbortError as `timeout` (the pre-existing arm)', () => {
+    const err = new Error('aborted');
+    err.name = 'AbortError';
+    expect(classifyValidationFailure(err)).toBe('timeout');
+  });
+
+  it('classifies the truncation guard and parse failures as `parse_error`', () => {
+    expect(
+      classifyValidationFailure(
+        new Error('cee.validation_pipeline.parse_error: Pass 2 response is not an object'),
+      ),
+    ).toBe('parse_error');
+  });
+
+  it('classifies an empty completion as `api_error` — the cap-bound arm', () => {
+    // Positive control for the distinction: if everything classified as
+    // `timeout` the first test would pass while proving nothing.
+    expect(classifyValidationFailure(new Error('openai_empty_response'))).toBe('api_error');
+  });
+
+  it('classifies a non-Error throw as `api_error` rather than crashing', () => {
+    expect(classifyValidationFailure('boom')).toBe('api_error');
   });
 });
