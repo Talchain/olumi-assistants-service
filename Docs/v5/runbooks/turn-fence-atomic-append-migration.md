@@ -6,8 +6,20 @@ INSIDE the append transaction (ROADMAP 2.174 fix c). Closes the documented
 stopped turn's commit.
 
 **Who executes:** the orchestrator (or Paul), against **staging** Supabase.
-Production is out of scope for the POC. The authoring lane REHEARSED this
-migration and never executed it.
+Production is out of scope for the POC.
+
+> **STATUS — EXECUTED. Do not re-run without reading this box.**
+> Applied to staging **2026-07-30**
+> (`PHASE0-EVIDENCE-2026-07-28/fence-migration-execution.md`, 8/8 structural +
+> 7/7 behavioural). The ledger row was **missing** until **2026-07-30**, when it
+> was backfilled along with eight other unrecorded migrations
+> (`PHASE0-EVIDENCE-2026-07-28/migration-ledger-reconciliation.md`).
+> The pre-flight below therefore now expects v4 **present** and one ledger row —
+> it is kept as written for the next executor of a migration of this shape, and
+> for the rollback path. The line that used to say the authoring lane "never
+> executed it" was true when written and went stale within hours; the file
+> header of the migration itself still says "(pending)" and is also stale.
+> **Derive status from the catalog and the ledger, never from prose.**
 
 ## Why order does not matter (but do it migration-first anyway)
 
@@ -28,15 +40,47 @@ SELECT proname FROM pg_proc WHERE proname = 'append_turn_atomic_v4';
 -- Expect 3 rows — the fence schema (20260731120000) is live:
 SELECT proname FROM pg_proc
  WHERE proname IN ('v5_claim_turn_fence','v5_evaluate_turn_fence','v5_mark_turn_stopped');
+-- Expect 0 rows — no ledger row yet for this migration:
+SELECT version FROM supabase_migrations.schema_migrations
+ WHERE version = '20260731130000';
 ```
 
 If v4 already exists, STOP and find out who executed it.
 
 ## Execute
 
+⚠️ **Applying the SQL is only half the step. The ledger row is the other half —
+they go in ONE transaction or the next `supabase db push` re-applies this file.**
+
+This is not hypothetical. On 2026-07-30 a reconciliation found **nine** migrations
+live in staging with no ledger row, this one among them, because this runbook
+told the executing lane to apply the file and never mentioned the ledger. That
+lane followed the runbook exactly and was right to. See
+`PHASE0-EVIDENCE-2026-07-28/migration-ledger-reconciliation.md`.
+
 Apply `supabase/migrations/20260731130000_v5_turn_fence_atomic_append.sql`
-verbatim (single transaction is unnecessary — one CREATE OR REPLACE plus
-grants; the file is idempotent and safe to re-apply).
+verbatim **and record it**, in a single transaction:
+
+```bash
+psql "$STAGING_DB_URL" -v ON_ERROR_STOP=1 --single-transaction \
+  -f supabase/migrations/20260731130000_v5_turn_fence_atomic_append.sql \
+  -c "INSERT INTO supabase_migrations.schema_migrations (version, name, statements)
+      VALUES ('20260731130000', 'v5_turn_fence_atomic_append',
+              ARRAY[pg_read_file('supabase/migrations/20260731130000_v5_turn_fence_atomic_append.sql')]);"
+```
+
+`pg_read_file` is server-side and will not work against hosted Supabase; if it
+fails, use `scripts/wave0-apply-migration.mjs` as the pattern instead — it does
+apply-plus-record inside one `tx` (see `:137-178`) — or read the file client-side
+and pass it as a bind parameter. The invariant that matters is **one transaction,
+both effects**, and `statements` holding the file's full text (that is the shape
+every existing row uses; verified byte-identical for `20260505120000` and
+`20260717120000`).
+
+**Never insert a ledger row for a migration you have not proven live in the
+catalog.** Recording an unapplied migration hides it permanently — a later
+`db push` skips it and the schema is silently wrong. That is strictly worse than
+the drift this step exists to prevent.
 
 ## Post-flight
 
@@ -48,6 +92,9 @@ SELECT
   has_function_privilege('service_role','public.append_turn_atomic_v4(uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb, jsonb, text, text, text, text, boolean, bigint)','EXECUTE'),
   has_function_privilege('anon',        'public.append_turn_atomic_v4(uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb, jsonb, text, text, text, text, boolean, bigint)','EXECUTE'),
   has_function_privilege('authenticated','public.append_turn_atomic_v4(uuid, text, text, text, text, boolean, integer, integer, jsonb, jsonb, text, jsonb, jsonb, text, text, text, text, boolean, bigint)','EXECUTE');
+-- Exactly one ledger row, and its bytes match the file on disk:
+SELECT version, name, array_length(statements,1) AS n_stmts
+  FROM supabase_migrations.schema_migrations WHERE version = '20260731130000';
 ```
 
 Behavioural smoke (safe on a throwaway scenario row): claim → append with the
@@ -64,6 +111,15 @@ Apply
 `supabase/migrations/rollback/20260731130000_v5_turn_fence_atomic_append_rollback.sql.do-not-apply`
 (drops only v4). The app falls back to the two-step on the next graph write
 per instance — no restart strictly required, no data migration either way.
+
+**Remove the ledger row in the same transaction**, or the ledger will claim a
+migration is applied that has been rolled back — the inverse of the drift above,
+and the more dangerous direction, because a `db push` would then skip re-applying
+it:
+
+```sql
+DELETE FROM supabase_migrations.schema_migrations WHERE version = '20260731130000';
+```
 
 ## Rehearsal evidence (2026-07-30, ephemeral Postgres 16 in Docker)
 
