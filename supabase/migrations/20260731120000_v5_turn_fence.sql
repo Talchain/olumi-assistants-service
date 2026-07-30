@@ -2,9 +2,21 @@
 -- V5 TURN FENCE — the Stop tombstone + the per-scenario generation fence.
 -- Codex P0 (`parallel-briefs/STOP-FENCE-BUILD-2026-07-31.md`), 2026-07-31.
 --
--- ⚠️  AUTHORED AS CODE — NOT YET EXECUTED. Execution is Paul-gated
---     (batched by the orchestrator), per the
---     20260710190000_v5_claim_guest_scenario.sql precedent.
+-- ✅  EXECUTED ON STAGING 2026-07-30. Authorised as the orchestrator's recorded
+--     decision under the standing staging mandate (the batching authority this
+--     header previously described as Paul-gated, per the
+--     20260710190000_v5_claim_guest_scenario.sql precedent).
+--
+--     Applied by /private/tmp/stopfence-sqlcheck-a7f3/apply-turn-fence.mjs in
+--     commit mode — byte-identical to the rehearsal that had proven it on the
+--     same database with a ROLLBACK, except the rollback is gone.
+--     Evidence: PHASE0-EVIDENCE-2026-07-28/fix-stop-fence.md
+--       §"MIGRATION EXECUTED ON STAGING".
+--     All assertions passed: pre-flight non-vacuity (both objects absent) →
+--     migration → all four objects present → ACL service_role-only with RLS on →
+--     behavioural smoke (monotonic + idempotent claim, tombstone, supersession).
+--     Re-running the applier now REFUSES at the pre-flight guard, which is the
+--     guard working rather than a fault.
 --
 -- ⚠️  MIGRATION-FIRST IS LOAD-BEARING FOR THIS ONE. The application half
 --     FAILS CLOSED: a graph-bearing commit whose fence cannot be evaluated
@@ -27,7 +39,7 @@
 --
 -- Target: Staging Supabase
 -- Date authored: 2026-07-31
--- Date executed: (pending)
+-- Date executed: 2026-07-30 (staging; production out of scope for the POC)
 --
 -- ── WHY ──────────────────────────────────────────────────────────────
 -- Reproduced live on staging 2026-07-29 (evidence:
