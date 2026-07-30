@@ -1094,6 +1094,27 @@ export const TelemetryEvents = {
   // never graph content or labels.
   V5GraphCasRpcConflict: "v5.graph_cas.rpc_conflict",
 
+  // V5 TURN FENCE (Codex P0, 2026-07-31) — one event per GRAPH-BEARING commit,
+  // emitted immediately before the append RPC. Non-graph commits emit nothing:
+  // they are never fenced. `verdict` is the closed
+  // TurnFenceVerdict ∪ {'unfenced'} (turn-fence.ts), so a new outcome cannot
+  // appear un-named. Content-free: scenario/turn ids, turn_class, the verdict,
+  // the two generation integers and a closed reason string — never graph
+  // content or labels.
+  V5TurnFenceEvaluated: "v5.turn_fence.evaluated",
+
+  // V5 TURN FENCE — the refusal. Emitted IN ADDITION to the evaluated event
+  // whenever a graph write is actually refused (verdict stopped / superseded /
+  // unclaimed / unavailable), so the alarm is countable on its own without
+  // filtering the every-commit event. Same payload and privacy contract.
+  V5TurnFenceGraphWriteRefused: "v5.turn_fence.graph_write_refused",
+
+  // V5 TURN FENCE — an explicit user Stop arrived at the server
+  // (POST /proxy/v5/turn/stop). `already_committed` records whether the turn
+  // had already been persisted when the Stop landed, which is the fact the UI's
+  // terminal notice is conditioned on. Ids + booleans only.
+  V5TurnStopRequested: "v5.turn_fence.stop_requested",
+
   // Graph Management referee (CEE_GRAPH_MANAGEMENT_MODE != 'off'). One event
   // per refereed CandidateMutationEnvelope, name = the verdict (T4.0 §5
   // no-silent-outcome contract: every held/stale/rejected/clarify verdict

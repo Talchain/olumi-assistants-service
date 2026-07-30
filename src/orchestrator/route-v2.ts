@@ -147,6 +147,7 @@ import {
   isDraftShapedText,
 } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
+import { turnFencePreHandler } from './turn-fence-prehandler.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
@@ -2049,7 +2050,15 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
   // and the cost (one URL comparison per non-V5 send) is negligible.
   app.addHook('preSerialization', v5FinaliserPreSerializationHook);
 
-  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', async (req, reply) => {
+  // V5 TURN FENCE (Codex P0) — claim this turn's place in the scenario's start
+  // order BEFORE any dispatch, and run the whole request inside the fence
+  // context so the commit chokepoint can read it ~50 s later. Route-scoped
+  // rather than app-wide: this is the only ingress that writes scenarios.graph,
+  // and app.inject() from the proxy/streamed routes runs this hook too, so
+  // every graph-writing lane is covered by construction. See
+  // turn-fence-prehandler.ts (why a hook, why callback style) and turn-fence.ts
+  // (the defect, and the arrival enumeration).
+  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', { preHandler: turnFencePreHandler }, async (req, reply) => {
     // V5 diagnostic trace (Phase A) — route-handler wall-clock baseline.
     // Threaded into `sendFinalised200` via `ctx.requestStartedAt` so the
     // minimal-trace builder can compute `total_duration_ms` from a
