@@ -26,11 +26,15 @@
  *     (`tests/meta/rate-limit-builders-return-error.test.ts` +
  *     `scripts/ci/assert-rate-limit-builders-return-error.mjs`), which REDs on
  *     any builder — including a brand-new tenth — that returns a non-Error.
- *     They are hard to reach behaviourally: every limiter is registered on the
- *     ROOT instance, so an earlier-registered hook (or the global builder, on
- *     any route carrying a route-level `config.rateLimit` override) refuses
- *     first. That is a pre-existing property of the registration layout, noted
- *     here rather than changed by this lane.
+ *     They are not merely hard to reach — they are UNREACHABLE, measured: an
+ *     independent review drove `/admin/v1/turn-debug` to refusal and got
+ *     `x-ratelimit-limit: 60`, i.e. `assist.share`'s cap, not turn-debug's own
+ *     100. Every limiter registers on the ROOT instance and the plugin is
+ *     `fp`-wrapped, so an earlier-registered hook always refuses first (and on
+ *     any route carrying a route-level `config.rateLimit` override, that is the
+ *     GLOBAL builder). Consequence worth rowing: the PUBLIC share limiter is
+ *     silently the effective 60/min cap on every admin route. Pre-existing
+ *     registration-layout property, recorded here, not changed by this lane.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
