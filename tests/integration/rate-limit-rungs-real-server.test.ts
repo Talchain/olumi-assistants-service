@@ -38,19 +38,30 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import type { FastifyInstance } from "fastify";
-import type { InjectOptions } from "light-my-request";
+import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fastify";
 
 import { build } from "../../src/server.js";
 import { _resetConfigCache } from "../../src/config/index.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
+
+// `InjectOptions`/`LightMyRequestResponse` are taken from FASTIFY, which
+// re-exports them (`fastify.d.ts:184`), not from `light-my-request` directly:
+// that package is a TRANSITIVE dependency, so importing it does not resolve
+// under this repo's node16 module resolution. `Parameters<FastifyInstance
+// ["inject"]>` is not a substitute either — `inject` is overloaded and
+// `Parameters<>` resolves to the last (zero-arg) overload.
+//
+// Worth noting how this was caught: `pnpm typecheck` uses `tsconfig.build.json`,
+// which EXCLUDES tests, so it stayed green while the separate
+// `Typecheck Drift (ratchet)` job went red. Exactly the blind spot CLAUDE.md
+// trap 2 warns about. Fixed at source; no baseline touched.
 
 /** Drive a route until the limiter refuses, or give up. Returns the refusal. */
 async function driveUntilRefused(
   app: FastifyInstance,
   opts: InjectOptions,
   attempts: number,
-): Promise<Awaited<ReturnType<FastifyInstance["inject"]>> | null> {
+): Promise<LightMyRequestResponse | null> {
   for (let i = 0; i < attempts; i++) {
     const res = await app.inject(opts);
     if (res.statusCode === 429) return res;
