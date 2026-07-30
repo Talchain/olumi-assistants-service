@@ -442,6 +442,47 @@ describe("ROADMAP 2.146 — validation_pipeline_ms attribution (review A1)", () 
     expect(t.validation_pipeline_ms).toBeLessThan(t.coaching_pass_ms / 2);
   });
 
+  it("a THROWING failure handler degrades, it does not become an unhandled rejection", async () => {
+    // Review A2. The fire site's `.catch()` handler pushes onto
+    // `ctx.pipelineOutcome.warnings`, which is initialised `[]`, so it cannot throw
+    // in production — the path is unreachable rather than merely unlikely, which is
+    // why A2 was minor. It is pinned anyway because the drain AMPLIFIES it: if the
+    // handler ever throws, the main await rejects into the outer catch, and a drain
+    // that awaited the same rejected promise a second time would reject INSIDE the
+    // catch block and propagate out of `runUnifiedPipeline` as an unhandled
+    // rejection — a handled degradation turning into a crash, on the one escape
+    // path the relocation created.
+    //
+    // The trigger is injected from the HARNESS, not by weakening production code:
+    // the parse mock corrupts `warnings` so the handler's `.push` throws.
+    mockConfig.cee.validationPipelineEnabled = true;
+    (runValidationPipeline as any).mockImplementation(async () => {
+      throw new Error("pass 2 exploded");
+    });
+    (runStageParse as any).mockImplementation(async (ctx: any) => {
+      ctx.graph = testGraph();
+      ctx.rationales = [];
+      ctx.confidence = 0.8;
+      ctx.llmMeta = { model: "test-drafter" };
+      ctx.draftAdapter = { model: "test-drafter", name: "draft_graph" };
+      // The A2 trigger: makes the `.catch()` handler's `warnings.push` throw.
+      ctx.pipelineOutcome.warnings = null;
+    });
+    (runStageNormalise as any).mockImplementation(async () => {});
+    (runStageEnrich as any).mockImplementation(async () => {});
+    (runStageRepair as any).mockImplementation(async () => {});
+    (runStageThresholdSweep as any).mockImplementation(async () => {});
+    (runStagePackage as any).mockImplementation(async () => {});
+    (runStageBoundary as any).mockImplementation(async (ctx: any) => {
+      ctx.finalResponse = { ok: true };
+    });
+
+    // THE PIN: it RESOLVES. Without `.catch(() => {})` on the drain this rejects.
+    await expect(
+      runUnifiedPipeline(baseInput as any, {}, mockRequest, { schemaVersion: "v3" } as any),
+    ).resolves.toBeDefined();
+  });
+
   it("flag ON with a SLOW Pass 2 reports Pass 2's own cost", async () => {
     // The presence half, and the control that keeps the test above honest: without
     // it, a fix that hard-coded 0 everywhere would pass both arms so far.
