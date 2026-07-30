@@ -195,7 +195,7 @@ function chatResult(parsed: unknown, stopReason: string | null = 'stop') {
 }
 
 /** Runs a real Pass-2 call and returns the args the adapter was handed. */
-async function captureChatArgs(edgeCount = PROBE.EDGES) {
+async function captureChatArgs(edgeCount: number = PROBE.EDGES) {
   chatSpy.mockReset();
   chatSpy.mockResolvedValue(chatResult(pass2Fixture(edgeCount)));
   await callValidateGraph(
