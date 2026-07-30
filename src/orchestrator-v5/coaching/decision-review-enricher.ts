@@ -232,7 +232,76 @@ export async function enrichRunAnalysisWithDecisionReview(
   // abort the monolith fallback at the very moment it was granted its floor.
   // Flag-off behaviour is byte-identical (the reserve is 0).
   const hardBudgetMs = resolveDecisionReviewHardBudgetMs(config.cee.decisionReviewDecompose);
-  const hardTimer = setTimeout(() => childAbort.abort(new Error('decision_review timeout')), hardBudgetMs);
+  // ROADMAP 2.180-B. `hardTimerFired` records whether OUR budget was what
+  // stopped the call, as a FACT rather than an inference. Before this, the only
+  // way to tell a budget abort from an ordinary upstream error was to
+  // string-match the adapter's message ("OpenAI chat aborted by external
+  // signal") on the `.failed` event — which is exactly how the 2.180 probe had
+  // to reconstruct it, and which would go silently wrong the day the adapter
+  // rewords or a second provider phrases it differently. The flag is set in the
+  // timer callback, so it is true if and only if this timer fired.
+  let hardTimerFired = false;
+  const hardTimer = setTimeout(() => {
+    hardTimerFired = true;
+    childAbort.abort(new Error('decision_review timeout'));
+  }, hardBudgetMs);
+
+  /**
+   * ROADMAP 2.180-B — MAKE THE LOSS LOUD.
+   *
+   * THE DEFECT THIS CLOSES. `v5.decision_review_degraded` had exactly ONE
+   * production emit site — `turn-executor.ts`'s OUTER defensive catch, which is
+   * reached only when this enricher RETHROWS. This enricher deliberately
+   * rethrows only when the OUTER turn budget aborted (see the catch below), so
+   * **the event literally named "degraded" could not fire for the dominant
+   * degradation**: the internal hard-budget abort. Anyone dashboarding it was
+   * watching an alarm that the real failure mode does not ring — and the 2.180
+   * probe measured that failure mode at 12 of 363 analysis runs in 14 days,
+   * 3 of 17 on one day. The alarm now rings.
+   *
+   * WHAT IT MEANS, EXACTLY (the complete manifest — this is the claim the event
+   * makes, so it is stated rather than left to be inferred):
+   * `v5.decision_review_degraded` fires on every path where the review was
+   * **INVOKED and the turn nonetheless ships without one**:
+   *   - `timeout`                  — our own hard budget aborted the call
+   *   - `upstream_error`           — the call threw for any other reason
+   *   - `shape_extraction_failed`  — the call returned, the output did not parse
+   *   - `contract_violation`       — parsed, but a SAFETY rule forced the drop
+   * It does NOT fire for the skips (`no_brief` / `no_winner` / `no_results` /
+   * `autofire_disabled`): nothing was attempted, nothing was lost, and those
+   * already have `v5.decision_review.skipped`. It does NOT fire on the outer
+   * turn-budget rethrow either: that turn FAILS wholesale (BUDGET_EXCEEDED) and
+   * is not a degrade.
+   *
+   * NO DOUBLE-EMIT with the executor's outer catch: that catch is reached only
+   * when this function throws, and this function throws only when
+   * `input.signal.aborted` — in which case the executor returns
+   * `translateExecuteError` BEFORE its own degraded emit. The two sites are
+   * mutually exclusive by construction.
+   *
+   * The graceful-degrade behaviour is UNCHANGED. Returning the facts unchanged
+   * is correct; the silence was the defect.
+   */
+  // Declared BEFORE `emitDegraded` closes over it (and before the `invoked`
+  // emit, which is a synchronous sub-millisecond call) so the closure has no
+  // temporal-dead-zone dependency on statement order further down the function.
+  const startedAt = Date.now();
+
+  const emitDegraded = (reason: string): void => {
+    emit(TelemetryEvents.V5DecisionReviewDegraded, {
+      request_id: input.requestId,
+      scenario_id: input.scenarioId,
+      reason,
+      elapsed_ms: Date.now() - startedAt,
+      // The budget that was actually in force — `resolveDecisionReviewHardBudgetMs`,
+      // NOT `DECISION_REVIEW_TIMEOUT_MS`. On the decomposed path they differ by
+      // the fallback floor, and an operator comparing elapsed against the wrong
+      // number would mis-read a legitimate decomposed run as a near-miss.
+      budget_ms: hardBudgetMs,
+      // Derived from the timer itself, never from the error text.
+      timed_out: hardTimerFired,
+    });
+  };
 
   emit(TelemetryEvents.V5DecisionReviewInvoked, {
     request_id: input.requestId,
@@ -252,7 +321,6 @@ export async function enrichRunAnalysisWithDecisionReview(
     leading_option_present: leadingOptionPresent,
   });
 
-  const startedAt = Date.now();
   try {
     // ROADMAP 1.77 (B1). Dedicated decomposed-vs-monolith selector. Flag-off
     // (default) is BYTE-IDENTICAL to today: the single gpt-4.1 monolith. Flag-on
@@ -296,6 +364,7 @@ export async function enrichRunAnalysisWithDecisionReview(
         brief_length: briefLength,
         leading_option_present: leadingOptionPresent,
       });
+      emitDegraded('shape_extraction_failed');
       return input.handlerFacts;
     }
 
@@ -342,6 +411,11 @@ export async function enrichRunAnalysisWithDecisionReview(
       });
     }
     if (contract.mustDrop) {
+      // 2.180-B: a safety-enforced drop is a review that was invoked, paid for,
+      // and not shipped — the same user-visible loss as a timeout, and until now
+      // the ONLY record of it was a `contract_violation` event whose `dropped`
+      // flag an operator had to know to read. It rings the degraded alarm too.
+      emitDegraded('contract_violation');
       return input.handlerFacts;
     }
 
@@ -458,11 +532,23 @@ export async function enrichRunAnalysisWithDecisionReview(
       brief_length: briefLength,
       leading_option_present: leadingOptionPresent,
     });
+    // ROADMAP 2.180-B — THE DOMINANT DEGRADATION, NOW LOUD. This is the branch
+    // the 22 s hard budget lands in: `hardTimerFired` true, the call cancelled,
+    // the turn about to ship with no model review. Rethrow behaviour is
+    // deliberately UNCHANGED — we still degrade gracefully and return the facts
+    // unchanged; what changes is that the loss is now announced on the event
+    // named after it, with the elapsed time and the budget it was measured
+    // against, so "how close to the wall are we" is answerable from telemetry
+    // instead of from a hand-run log sample.
+    emitDegraded(hardTimerFired ? 'timeout' : 'upstream_error');
     log.warn(
       {
         request_id: input.requestId,
         scenario_id: input.scenarioId,
         err: err instanceof Error ? err.message : String(err),
+        elapsed_ms: Date.now() - startedAt,
+        budget_ms: hardBudgetMs,
+        timed_out: hardTimerFired,
       },
       'V5 decision_review auto-fire failed, degrading to thin content',
     );

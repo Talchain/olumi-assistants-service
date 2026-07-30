@@ -35,6 +35,7 @@ import {
   getResolvedTimeouts,
 } from "../../../src/config/timeouts.js";
 import { getTurnExecutorBudgets, getHandlerBudgetMs } from "../../../src/orchestrator-v5/budgets.js";
+import { resolveDecisionReviewHardBudgetMs } from "../../../src/orchestrator-v5/coaching/decision-review-enricher.js";
 import { config } from "../../../src/config/index.js";
 
 describe("PLOT_RUN_TIMEOUT_MS ↔ handler budget lockstep", () => {
@@ -109,6 +110,11 @@ describe("boot validator carries the ladder rungs (positive control)", () => {
     handlerBudgetMs: getHandlerBudgetMs(),
     turnBudgetMs: getTurnExecutorBudgets().turn_ms,
     browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+    // ROADMAP 2.180-B: resolved through the SAME single-source function the
+    // boot path uses, against the live decompose posture — not a literal.
+    decisionReviewHardBudgetMs: resolveDecisionReviewHardBudgetMs(
+      config.cee.decisionReviewDecompose,
+    ),
   });
 
   it("is silent on the resolved default ladder", () => {
