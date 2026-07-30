@@ -30,7 +30,54 @@ import type { CallOpts } from '../../adapters/llm/types.js';
 // Default token cap for Pass 2 (o4-mini reasoning with structured JSON output)
 // ============================================================================
 
-const DEFAULT_PASS2_MAX_TOKENS = 4096;
+/**
+ * Completion-token cap for Pass 2. On a reasoning model this bounds
+ * reasoning + visible output, not just the JSON we read.
+ *
+ * ── 4096 COULD NEVER WORK. This is a defect fix, not a tuning preference. ────
+ * Measured through the deployed service on 2026-07-30 (o4-mini, served prompt
+ * validate_graph_default v4, reasoning_effort medium, 12 nodes / 16 causal
+ * edges): the task consumed **4,560 completion tokens** — 464 ABOVE the old
+ * cap. The same call replayed at exactly 4096 returned **empty content in
+ * 30,092 ms** with the request otherwise successful. So at the shipped
+ * configuration Pass 2 produced nothing on every draft: the cap was exhausted
+ * during reasoning and the visible JSON was never emitted. Full evidence:
+ * PHASE0-EVIDENCE-2026-07-28/contested-edge-probe.md.
+ *
+ * ── WHY 16,384 ──────────────────────────────────────────────────────────────
+ * It is the value with a POSITIVE CONTROL: the same probe's second call ran at
+ * max_tokens 16,384 and returned `finish_reason: "stop"` with well-formed
+ * Pass-2 JSON. Every other candidate is arithmetic; this one has a witness at
+ * the real seam.
+ *
+ * The arithmetic agrees. Fitting cost(E) = FIXED + PER_EDGE·E to that one point
+ * with FIXED := 0 maximises the slope, so 4,560 / 16 = 285 tokens per causal
+ * edge is an UPPER bound on the per-edge cost. 16,384 therefore covers ~57
+ * causal edges — comfortably past the 10–30 a real draft carries
+ * (contested-edge-slice.md C3; live drafts measure 33–35 TOTAL edges before
+ * structural filtering, cee2-live-latency.md), and 3.6× the measured need.
+ *
+ * ── WHY NOT SIZED FOR THE 100-EDGE STRUCTURAL CAP ───────────────────────────
+ * `GRAPH_MAX_EDGES` is 100, which at 285 tokens/edge is ~28,500 tokens and, at
+ * the measured 163 tokens/s, ~175 s. `VALIDATION_PIPELINE_TIMEOUT_MS` stops
+ * that long before the cap could, so a bigger number would buy nothing real.
+ *
+ * What DOES matter is the ORDER the two bounds bind in, and it is deliberate:
+ * the timeout must run out first. A cap-bound completion comes back EMPTY,
+ * the adapter throws `openai_empty_response`, and the pipeline files it as
+ * `api_error` — nothing in that trail names the token budget, so it reads as a
+ * provider fault forever. A timeout-bound one aborts into `UpstreamTimeoutError`
+ * and is classified `timeout` with elapsed ms attached. At 60 s the timeout
+ * affords ~9,800 tokens (~34 edges); the cap does not bind until ~57. Pinned in
+ * tests/unit/cee.validation-pipeline/pass2-budget.test.ts.
+ *
+ * Well inside o4-mini's registry ceiling (`maxTokens: 65536`, config/models.ts).
+ *
+ * Code default, not an env gate: `CEE_MAX_TOKENS_VALIDATION` remains an
+ * optional override, but a cap that only works while an env var survives is
+ * the hand-maintained mirror #758 closed for the model pin.
+ */
+const DEFAULT_PASS2_MAX_TOKENS = 16_384;
 
 // ============================================================================
 // Public API
@@ -99,6 +146,26 @@ export async function callValidateGraph(
     },
     'cee.validation_pipeline.pass2_call_complete',
   );
+
+  // ── Truncation guard ───────────────────────────────────────────────────────
+  // A completion that stopped because it ran out of budget is a BUDGET failure,
+  // and it must say so. Without this it reaches parsePass2Response as malformed
+  // JSON and surfaces as `parse_error` — which points the reader at the model's
+  // JSON discipline instead of at the cap that actually ran out. That misreading
+  // is not hypothetical: the 4096 defect above sat in a shipped pipeline
+  // undiagnosed because every symptom pointed somewhere else.
+  //
+  // Only the PARTIAL-content case reaches here. When the cap is exhausted during
+  // reasoning the provider returns no content at all and the adapter throws
+  // `openai_empty_response` first (openai.ts chat(), the `if (!content)`
+  // branch), so this guard cannot cover that arm from inside this module.
+  if (result.stopReason === 'length') {
+    throw new Error(
+      `cee.validation_pipeline.truncated: Pass 2 completion was truncated at ` +
+        `max_tokens=${maxTokens} (stop_reason=length, edges=${edges.length}); ` +
+        `raise DEFAULT_PASS2_MAX_TOKENS (request_id=${callOpts.requestId})`,
+    );
+  }
 
   // ── Parse and validate response ────────────────────────────────────────────
   return parsePass2Response(result.content, callOpts.requestId);
