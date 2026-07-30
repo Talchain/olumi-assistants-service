@@ -55,6 +55,22 @@ export function createMockSessionStore(
     // Consistent with the empty `readRecent` above: no turns read, none
     // stored. Tests probing the beyond-window disclosure override it.
     countTurns: async () => 0,
+    // V5 TURN FENCE (Codex P0). This helper's `Required<SessionStore>` annotation
+    // is the drift alarm described above, and it FIRED for these two the moment
+    // they were added to the interface — which is exactly why it exists.
+    // Defaults mirror production's happy path: the claim succeeds, and the turn
+    // is the newest on its scenario, so a graph write passes the fence. A test
+    // that wants a refusal overrides `claimTurnFence`.
+    claimTurnFence: async (scenarioId: string, turnId: string) => ({
+      scenarioId,
+      turnId,
+      generation: 1,
+    }),
+    markTurnStopped: async () => ({
+      stopped: true,
+      claimed: true,
+      alreadyCommitted: false,
+    }),
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
     // Consistent with the empty fact reads above: this scenario has no

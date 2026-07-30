@@ -51,6 +51,17 @@ import {
   type GraphCasMode,
   type GraphCasRpcMode,
 } from '../context/graph-cas-conflict.js';
+import {
+  claimTurnFence,
+  currentTurnFence,
+  evaluateTurnFence,
+  markTurnStopped,
+  TurnFenceRejectedError,
+  type TurnFenceEvaluation,
+  type TurnFenceHandle,
+  type TurnFenceVerdict,
+  type TurnStopOutcome,
+} from './turn-fence.js';
 import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import { parsePendingAction, type PendingAction } from './pending-action.js';
 import {
@@ -212,6 +223,13 @@ export class SupabaseSessionStore implements SessionStore {
     const useV3 = rpcMode !== 'off' && write.graph != null;
     const rpcName = useV3 ? 'append_turn_atomic_v3' : 'append_turn_atomic_v2';
 
+    // ── V5 TURN FENCE — the last thing before the write ────────────────────
+    // Placed HERE, after every argument is built and with nothing between it
+    // and the RPC dispatch below, because the fence's whole value is the
+    // narrowness of the window between "we checked" and "we wrote" (see
+    // turn-fence.ts arrival 10). Graph-bearing writes only.
+    await this.enforceTurnFence(write);
+
     const { data, error } = useV3
       ? await this.client.rpc('append_turn_atomic_v3', {
           ...baseRpcArgs,
@@ -270,6 +288,211 @@ export class SupabaseSessionStore implements SessionStore {
     this.cache.invalidateAll(write.scenario_id);
 
     return { id: data };
+  }
+
+  /**
+   * V5 TURN FENCE — claim this turn's place in the scenario's start order.
+   * Delegates to the fence module with THIS store's client, so there is one
+   * Supabase client and one set of credentials in play, not a second one built
+   * from a second env read.
+   */
+  async claimTurnFence(scenarioId: string, turnId: string): Promise<TurnFenceHandle | null> {
+    const result = await claimTurnFence(this.client, scenarioId, turnId);
+    if (result.handle === null) {
+      log.error(
+        {
+          event: 'v5.turn_fence.claim_failed',
+          scenario_id: scenarioId,
+          turn_id: turnId,
+          err: result.error,
+        },
+        'V5 turn fence — CLAIM FAILED; this turn is UNCLAIMED and any graph write it makes will be REFUSED at the commit (fail closed)',
+      );
+      return null;
+    }
+    return result.handle;
+  }
+
+  /** V5 TURN FENCE — record an explicit user Stop (server-visible). */
+  async markTurnStopped(scenarioId: string, turnId: string): Promise<TurnStopOutcome> {
+    return await markTurnStopped(this.client, scenarioId, turnId);
+  }
+
+  /**
+   * V5 TURN FENCE — refuse a graph write that the user stopped, or that a later
+   * turn has superseded.
+   *
+   * SCOPE, precisely: graph-bearing writes only. A superseded turn ROW is
+   * harmless history; a superseded GRAPH is the reproduced defect. Non-graph
+   * writes return on the first line — no RPC, no added latency, no new failure
+   * mode for answers / analysis receipts / graph-free system events.
+   *
+   * FAIL CLOSED on every outcome that is not provably `current`, including
+   * `unavailable` and `unclaimed`. That is the opposite posture to
+   * `runGraphCasHook` below, deliberately: that hook OBSERVES (and must never
+   * fail a live write), this one is the integrity check the write is not
+   * allowed to skip. If we cannot prove the graph we are about to store is
+   * still the current one, we do not store it — the same reasoning as
+   * `commit.ts`'s terminal invariant refusal.
+   *
+   * The ONE non-refusing gap is `no_ingress_fence`: a commit that never passed
+   * through the fenced ingress has no handle at all. It is logged at ERROR and
+   * emitted, never swallowed, because that is a coverage gap and not a state to
+   * be comfortable with — and `turn-fence-route-registration.test.ts` pins that
+   * the ingress does bind the handle, so the claim rests on a test rather than
+   * on this sentence.
+   *
+   * ⚠ A FAILED CLAIM IS NOT THAT GAP, AND TREATING IT AS ONE WAS THE #759
+   *   REVIEW'S SEVERE FINDING. A turn whose claim failed now arrives with a
+   *   handle whose `generation` is `null` and is REFUSED below. Before that fix
+   *   it arrived with no handle, fell through this gap, and was allowed — which
+   *   let a claim blip on turn B end with turn A CLOBBERING it, no timing
+   *   inversion required.
+   */
+  private async enforceTurnFence(write: SessionTurnWrite): Promise<void> {
+    if (write.graph == null) return;
+
+    const handle = currentTurnFence();
+    if (handle === undefined) {
+      log.error(
+        {
+          event: 'v5.turn_fence.no_ingress_fence',
+          scenario_id: write.scenario_id,
+          turn_id: write.turn_id,
+          turn_class: write.turn_class,
+        },
+        'V5 turn fence — a GRAPH WRITE reached the store with no ingress fence handle; it is proceeding UNFENCED',
+      );
+      this.emitFenceEvaluated(write, 'unfenced', null, null, 'no_ingress_fence');
+      return;
+    }
+    if (handle.scenarioId !== write.scenario_id) {
+      // A turn writing a graph to a scenario other than the one it claimed. No
+      // ordering exists for that pair, so there is nothing to compare — but it
+      // is not a state to pass over quietly either.
+      log.error(
+        {
+          event: 'v5.turn_fence.scenario_mismatch',
+          claimed_scenario_id: handle.scenarioId,
+          write_scenario_id: write.scenario_id,
+          turn_id: handle.turnId,
+        },
+        'V5 turn fence — the graph write targets a DIFFERENT scenario than this turn claimed; proceeding UNFENCED',
+      );
+      this.emitFenceEvaluated(write, 'unfenced', null, null, 'scenario_mismatch');
+      return;
+    }
+
+    // The ingress claim did not land, so this turn has NO position in the
+    // scenario's order. Refuse WITHOUT the RPC: there is nothing to ask — we
+    // already know we cannot prove the write is current, and asking would only
+    // add a round trip to a decision that is already made.
+    //
+    // ⚠ THIS IS THE BRANCH THE #759 REVIEW PROVED UNREACHABLE. It was written,
+    //   documented and tested-in-the-classifier, but no handle with a failed
+    //   claim ever reached it, because a failed claim bound no handle at all and
+    //   landed in `no_ingress_fence` above — which ALLOWS the write. See
+    //   `TurnFenceHandle.generation`.
+    if (handle.generation === null) {
+      const evaluation: TurnFenceEvaluation = {
+        verdict: 'unclaimed',
+        generation: null,
+        maxGeneration: null,
+      };
+      this.emitFenceEvaluated(write, 'unclaimed', null, null, 'claim_did_not_land');
+      log.warn(
+        {
+          event: 'v5.turn_fence.graph_write_refused',
+          scenario_id: write.scenario_id,
+          turn_id: handle.turnId,
+          turn_class: write.turn_class,
+          verdict: 'unclaimed',
+          reason: 'claim_did_not_land',
+        },
+        'V5 turn fence — REFUSING this graph write: the ingress claim did not land, so this turn has no position in the scenario order and cannot be proven current. Nothing was written.',
+      );
+      throw new TurnFenceRejectedError(
+        `V5 turn fence refused a graph write for scenario ${write.scenario_id} ` +
+          `turn ${handle.turnId} — the ingress claim did not land (fence unavailable). ` +
+          'Fail closed: an unorderable write is not stored.',
+        evaluation,
+      );
+    }
+
+    const evaluation = await evaluateTurnFence(this.client, handle);
+    this.emitFenceEvaluated(
+      write,
+      evaluation.verdict,
+      evaluation.generation,
+      evaluation.maxGeneration,
+      evaluation.unavailableReason,
+    );
+    if (evaluation.verdict === 'current') return;
+
+    const detail =
+      evaluation.verdict === 'stopped'
+        ? 'the user explicitly stopped this turn'
+        : evaluation.verdict === 'superseded'
+          ? `a later turn has claimed this scenario (generation ${String(evaluation.generation)} < ${String(evaluation.maxGeneration)})`
+          : evaluation.verdict === 'unclaimed'
+            ? 'no fence row exists for this turn, so its position in the scenario order is unknown'
+            : `the fence could not be read (${evaluation.unavailableReason ?? 'unknown'})`;
+
+    log.warn(
+      {
+        event: 'v5.turn_fence.graph_write_refused',
+        scenario_id: write.scenario_id,
+        turn_id: handle.turnId,
+        turn_class: write.turn_class,
+        verdict: evaluation.verdict,
+        generation: evaluation.generation,
+        max_generation: evaluation.maxGeneration,
+      },
+      `V5 turn fence — REFUSING this graph write: ${detail}. Nothing was written; the turn row rolled back with it.`,
+    );
+    throw new TurnFenceRejectedError(
+      `V5 turn fence refused a graph write for scenario ${write.scenario_id} ` +
+        `turn ${handle.turnId} — ${detail}. The fence is a pre-write CHECK, not a lock.`,
+      evaluation,
+    );
+  }
+
+  /**
+   * Fence telemetry. Content-free (ids, the closed-enum verdict, two integers)
+   * and guarded, on the same contract as the CAS payloads: a telemetry fault
+   * must never change which writes are refused.
+   */
+  private emitFenceEvaluated(
+    write: SessionTurnWrite,
+    verdict: TurnFenceVerdict | 'unfenced',
+    generation: number | null,
+    maxGeneration: number | null,
+    reason?: string,
+  ): void {
+    try {
+      emit(TelemetryEvents.V5TurnFenceEvaluated, {
+        scenario_id: write.scenario_id,
+        turn_id: write.turn_id,
+        turn_class: write.turn_class,
+        verdict,
+        generation,
+        max_generation: maxGeneration,
+        reason: reason ?? null,
+      });
+      if (verdict !== 'current' && verdict !== 'unfenced') {
+        emit(TelemetryEvents.V5TurnFenceGraphWriteRefused, {
+          scenario_id: write.scenario_id,
+          turn_id: write.turn_id,
+          turn_class: write.turn_class,
+          verdict,
+          generation,
+          max_generation: maxGeneration,
+          reason: reason ?? null,
+        });
+      }
+    } catch {
+      // Never let telemetry decide whether a write is fenced.
+    }
   }
 
   /**

@@ -59,6 +59,7 @@ import {
   GraphStaleWriteError,
   type CanonicalGraphReadState,
 } from './build-turn-context.js';
+import { TurnFenceRejectedError } from './session/turn-fence.js';
 import {
   buildFailureResponse,
   type FailureResponseRecoveryContext,
@@ -9587,6 +9588,57 @@ export async function runTurnExecutor(
       // GRAPH_DIVERGED (→ the route returns HTTP 409) and carry explicit
       // refresh-and-reconfirm recovery metadata so the UI can refresh canonical
       // state and reconfirm rather than blind-retrying the same stale base.
+      // ── V5 TURN FENCE — AMENDMENT A2 (#759 adversarial review) ─────────────
+      // NOTHING caught TurnFenceRejectedError, so every fence refusal flattened
+      // to STATE_COMMIT_FAILED → INTERNAL_ERROR → HTTP 500. "You stopped this
+      // turn" arrived as a 5xx: unactionable for the UI and permanent alert
+      // noise for whoever watches the error rate. The branch immediately below
+      // exists to forbid exactly that flattening for the CAS conflict; a fence
+      // refusal has the same shape and deserves the same treatment.
+      //
+      // Rides the EXISTING 409-class envelope (GRAPH_WRITE_CONFLICT →
+      // GRAPH_DIVERGED → HTTP 409) rather than minting a wire code, which would
+      // need a schemas publish. 409 is honest for all four verdicts: the write
+      // conflicts with the scenario's current state — a tombstone for this turn,
+      // or a newer turn owning it. `fence_verdict` is the machine-readable part
+      // the UI maps on, and `recovery_action` differs per verdict because the
+      // remedies genuinely differ.
+      //
+      // ⚠ HONEST RESIDUAL: `unclaimed` / `unavailable` are INFRASTRUCTURE
+      //   refusals, and 409 is a compromise for them — a 503-class code would be
+      //   more accurate but needs a contract change. They are distinguishable on
+      //   the wire via `fence_verdict`, so nothing is hidden; a dedicated code is
+      //   rowed rather than smuggled in here.
+      if (error instanceof TurnFenceRejectedError) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            fence_verdict: error.verdict,
+            generation: error.generation,
+            max_generation: error.maxGeneration,
+          },
+          'V5 TurnExecutor — turn fence refused the graph write (typed 409-class, nothing clobbered)',
+        );
+        failureType = INTERNAL_TO_WIRE.GRAPH_WRITE_CONFLICT;
+        response = buildFailureResponse(
+          'GRAPH_WRITE_CONFLICT',
+          context.stage,
+          {
+            phase: 'commit',
+            fence_verdict: error.verdict,
+            conflict_category: `turn_fence_${error.verdict}`,
+            recovery_action:
+              error.verdict === 'stopped'
+                ? 'start_new_draft'
+                : error.verdict === 'superseded'
+                  ? 'refresh_and_reconfirm'
+                  : 'retry_later',
+          },
+          recoveryCtx(),
+        );
+        return finalizeRun();
+      }
       if (error instanceof GraphStaleWriteError) {
         log.warn(
           {

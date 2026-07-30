@@ -37,6 +37,7 @@ import {
   buildSignInRequiredError,
   extractJwtCandidate,
 } from "../orchestrator/user-identity.js";
+import { recordExplicitTurnStop } from "./turn-stop.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -482,5 +483,65 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     }
 
     return reply.code(injectResponse.statusCode).send(responseBody);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // POST /proxy/v5/turn/stop — THE EXPLICIT USER STOP, MADE SERVER-VISIBLE
+  //
+  // Until this existed, pressing Stop aborted the browser's own fetch and
+  // nothing else: no cancel endpoint existed anywhere in CEE, and
+  // `streamed-turn-sse.ts:71-78` deliberately does not cancel a turn on
+  // hangup. Live-reproduced consequence (evidence
+  // PHASE0-EVIDENCE-2026-07-28/fix-stop-fence.md): a draft stopped at +4.0s
+  // ran the full 52.7s, committed, and OVERWROTE the graph of a later turn
+  // the user had sent in the meantime.
+  //
+  // ⚠ THIS ROUTE DOES NOT CANCEL THE TURN, AND THAT IS THE DESIGN. It records
+  //   a tombstone; the turn keeps running and its WRITE is refused at the
+  //   commit chokepoint. Killing the in-flight pipeline is exactly what the
+  //   #751 arc rejected — a turn destroyed mid-flight can leave a scenario
+  //   half-applied. So the observable difference between an explicit Stop and
+  //   an incidental disconnect is ONE thing: whether a tombstone exists. A
+  //   disconnect sends nothing, has no tombstone, and still commits.
+  //
+  // ⚠ THE /orchestrate SIBLING IS NOT OPTIONAL — I first shipped this without
+  //   one, on the argument that only a browser can press Stop. That argument was
+  //   WRONG, and the derivation is what corrected it: the UI derives its stop URL
+  //   as `<buffered endpoint>/stop`, and the buffered endpoint resolves to the
+  //   Netlify edge rung (`/bff/orchestrate/v2/turn`) on any deployment that does
+  //   not bake VITE_V5_ENDPOINT. Without the sibling, that rung 404s and the UI
+  //   can never confirm a Stop on it. Both exist; ONE handler
+  //   (`recordExplicitTurnStop`) serves them.
+  //
+  // Auth posture is INHERITED from POST /proxy/v5/turn above, unchanged: origin
+  // allowlist, no caller identity, guest scenarios addressable by anyone
+  // holding the UUID. That is not widened here — a caller who can stop a turn
+  // on a scenario is already a caller who can APPEND turns to it, which is
+  // strictly more power.
+  // ══════════════════════════════════════════════════════════════════════════
+  app.post("/proxy/v5/turn/stop", async (request: FastifyRequest, reply: FastifyReply) => {
+    const requestId =
+      (request.headers["x-request-id"] as string) ?? crypto.randomUUID();
+
+    // Ingress concerns ONLY — origin allowlist + CORS. Everything else is
+    // `recordExplicitTurnStop`, shared with the /orchestrate sibling.
+    const origin = request.headers.origin;
+    if (!origin || !isOriginAllowed(origin as string, allowedOrigins)) {
+      log.warn({ origin, requestId }, "[proxy-v5] stop rejected: origin not allowed");
+      return reply.code(403).send({
+        error: {
+          code: "PROXY_ORIGIN_REJECTED",
+          message: "Origin not allowed",
+          source: "proxy",
+          request_id: requestId,
+        },
+      });
+    }
+    for (const [k, v] of Object.entries(buildCorsHeaders(origin as string))) {
+      reply.header(k, v);
+    }
+
+    const result = await recordExplicitTurnStop(request.body, requestId);
+    return reply.code(result.status).send(result.body);
   });
 }

@@ -23,6 +23,10 @@ import type { HandlerFactWithTurn } from '../types/handler-fact.js';
 import type { CoachingState } from '../coaching/coaching-state.js';
 import type { CoachingStateSnapshot } from '../coaching/coaching-state-snapshot.js';
 import type { SessionTurnWithContent } from './conversation-content.js';
+// Type-only, and deliberately so: `turn-fence.ts` imports
+// `StateCommitFailedError` from THIS file, and a value import here would close
+// that into a runtime cycle. `import type` is erased entirely.
+import type { TurnFenceHandle, TurnStopOutcome } from './turn-fence.js';
 
 /**
  * Re-export so existing in-session callers (and `commit.ts` /
@@ -193,6 +197,39 @@ export interface SessionStore {
    * always implements it.
    */
   countTurns?(scenarioId: string): Promise<number>;
+  /**
+   * V5 TURN FENCE — claim this turn's place in the scenario's start order.
+   * Called ONCE per turn at ingress (`/orchestrate/v2/turn`), before any
+   * dispatch; the returned handle is bound for the whole turn and read again
+   * immediately before any graph-bearing commit. See `turn-fence.ts` for the
+   * defect this closes and the full arrival enumeration.
+   *
+   * Resolves to `null` when the claim could not be made. The ingress then binds
+   * an UNCLAIMED handle (`generation: null`) and the turn's graph write is
+   * REFUSED at the commit — fail closed there, not here, because refusing at
+   * ingress would turn a fence outage into a total outage including for turns
+   * that write no graph at all.
+   *
+   * ⚠ Until the #759 adversarial review this doc said the turn "runs UNFENCED
+   *   and its graph write is refused", which is a contradiction, and the code
+   *   implemented the first half: a failed claim bound no handle, the commit hit
+   *   `no_ingress_fence`, and the write was ALLOWED.
+   *
+   * Optional on the interface for the same reason as {@link countTurns} —
+   * existing test mocks are not forced to implement it. Production
+   * (`SupabaseSessionStore`) always implements it, and
+   * `turn-fence-guards.test.ts` pins that from the class rather than asserting
+   * it in a comment.
+   */
+  claimTurnFence?(scenarioId: string, turnId: string): Promise<TurnFenceHandle | null>;
+  /**
+   * V5 TURN FENCE — record an explicit user Stop for a turn, making it
+   * server-visible. Returns whether the turn had ALREADY committed when the
+   * Stop arrived, which is what lets the UI describe the past instead of
+   * predicting a commit. Optional for the same reason as
+   * {@link claimTurnFence}.
+   */
+  markTurnStopped?(scenarioId: string, turnId: string): Promise<TurnStopOutcome>;
   /**
    * Load handler facts for a set of prior conversation turns.
    *

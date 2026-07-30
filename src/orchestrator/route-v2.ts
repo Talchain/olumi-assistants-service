@@ -147,6 +147,8 @@ import {
   isDraftShapedText,
 } from '../schemas/assist.js';
 import { runPreFlight } from './route-v2-preflight.js';
+import { turnFencePreHandler } from './turn-fence-prehandler.js';
+import { recordExplicitTurnStop } from '../routes/turn-stop.js';
 import {
   GraphStateIngressSchema,
   type GraphStateIngress,
@@ -2049,7 +2051,37 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
   // and the cost (one URL comparison per non-V5 send) is negligible.
   app.addHook('preSerialization', v5FinaliserPreSerializationHook);
 
-  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', async (req, reply) => {
+  // ══════════════════════════════════════════════════════════════════════════
+  // POST /orchestrate/v2/turn/stop — the service-key ingress for the explicit
+  // user Stop. Auth is the file's global hook, exactly as for the buffered turn.
+  //
+  // Reached by the UI's Netlify edge rung: the UI derives its stop URL as
+  // `<buffered endpoint>/stop`, and when VITE_V5_ENDPOINT is not baked the
+  // buffered endpoint is `/bff/orchestrate/v2/turn`, which the edge function
+  // rewrites onto this route with the service key injected. The browser-facing
+  // twin is `/proxy/v5/turn/stop`. They differ ONLY in ingress; the handler is
+  // `recordExplicitTurnStop`, once — see src/routes/turn-stop.ts.
+  //
+  // NOT fenced by turnFencePreHandler: a stop request is not a turn and must
+  // never claim a generation of its own.
+  // ══════════════════════════════════════════════════════════════════════════
+  app.post('/orchestrate/v2/turn/stop', async (req, reply) => {
+    const requestId =
+      (typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : null) ??
+      randomUUID();
+    const result = await recordExplicitTurnStop(req.body, requestId);
+    return reply.code(result.status).send(result.body as never);
+  });
+
+  // V5 TURN FENCE (Codex P0) — claim this turn's place in the scenario's start
+  // order BEFORE any dispatch, and run the whole request inside the fence
+  // context so the commit chokepoint can read it ~50 s later. Route-scoped
+  // rather than app-wide: this is the only ingress that writes scenarios.graph,
+  // and app.inject() from the proxy/streamed routes runs this hook too, so
+  // every graph-writing lane is covered by construction. See
+  // turn-fence-prehandler.ts (why a hook, why callback style) and turn-fence.ts
+  // (the defect, and the arrival enumeration).
+  app.post<{ Reply: V5RouteReply }>('/orchestrate/v2/turn', { preHandler: turnFencePreHandler }, async (req, reply) => {
     // V5 diagnostic trace (Phase A) — route-handler wall-clock baseline.
     // Threaded into `sendFinalised200` via `ctx.requestStartedAt` so the
     // minimal-trace builder can compute `total_duration_ms` from a
@@ -4598,6 +4630,11 @@ function extractGraphConflictRecovery(
   const out: Record<string, unknown> = {};
   if (typeof d.recovery_action === 'string') out.recovery_action = d.recovery_action;
   if (typeof d.conflict_category === 'string') out.conflict_category = d.conflict_category;
+  // V5 turn fence (A2, #759 review) — the machine-readable verdict rides the same
+  // 409 envelope so the UI can tell "you stopped this" from "a later turn owns
+  // the scenario" from "the fence was unreadable". Without it the three collapse
+  // into one opaque conflict.
+  if (typeof d.fence_verdict === 'string') out.fence_verdict = d.fence_verdict;
   if ('expected_base_graph_hash' in d) {
     out.expected_base_graph_hash = d.expected_base_graph_hash;
   }
