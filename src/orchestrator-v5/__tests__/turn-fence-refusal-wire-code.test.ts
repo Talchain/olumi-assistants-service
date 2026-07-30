@@ -20,10 +20,25 @@
  *      `STATE_COMMIT_FAILED` fallback, and carries `fence_verdict`;
  *   4. every verdict has a recovery_action, so no verdict reaches the wire mute.
  *
- * Pin 3 is read off the SOURCE, and that is a weaker claim than executing the
- * branch — stated plainly rather than dressed up. It is the same technique the
- * repo's other static guards use, and the mutation table exercises it: deleting
- * the branch turns this file RED.
+ * ⚠⚠ EVERY PIN IN THIS FILE IS SOURCE-TEXT ONLY, AND THAT IS WEAKER THAN I FIRST
+ *    ADMITTED. My original note said "weaker than executing the branch" and then
+ *    relied on it anyway. The #759 round-2 review measured the gap: it neutered the
+ *    branch with `if (false && error instanceof TurnFenceRejectedError)` — source
+ *    text fully intact — and this file stayed GREEN, twice, reproducibly. `toContain`
+ *    cannot see a dead branch. A guarantee asserted against source text is not a
+ *    guarantee about behaviour.
+ *
+ *    THE LOAD-BEARING PIN IS NOW ELSEWHERE:
+ *    `tests/integration/orchestrate-v2-fail-closed.test.ts` drives a REAL turn
+ *    through `app.inject` and asserts the REAL response is 409 + GRAPH_DIVERGED +
+ *    `fence_verdict` + `recovery_action`, for a user-facing verdict (`stopped`) and
+ *    an infrastructure one (`unavailable`). Under the same neuter it REDs with
+ *    `expected 500 to be 409`.
+ *
+ *    These tests stay because they pin things the runtime test cannot see cheaply —
+ *    branch ORDER relative to the generic fallback, and the wire-map entry itself —
+ *    but they are DEFENCE IN DEPTH, not the guarantee. Do not add a behavioural
+ *    claim to this file; add it to the integration suite.
  */
 
 import { describe, it, expect } from 'vitest';

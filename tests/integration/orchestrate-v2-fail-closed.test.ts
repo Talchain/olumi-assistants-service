@@ -23,6 +23,7 @@ import { BoundaryErrorSchema } from '@talchain/schemas/boundary';
 // F4 — the REAL error class (session/store.js is NOT mocked here, so the
 // executor's `instanceof GraphStaleWriteError` check matches this one).
 import { GraphStaleWriteError } from '../../src/orchestrator-v5/session/store.js';
+import { TurnFenceRejectedError } from '../../src/orchestrator-v5/session/turn-fence.js';
 
 const SCENARIO = 'b0000000-0000-4000-8000-000000000001';
 
@@ -64,6 +65,12 @@ vi.mock('../../src/adapters/llm/prompt-loader.js', () => ({
 let commitShouldFail = false;
 // F4 — flip to make the commit raise a graph CAS conflict (OLGC1-class).
 let commitShouldConflict = false;
+// #759 review round 2 — flip to make the commit raise a TURN FENCE refusal, and
+// with which verdict. RUNTIME counterpart to the source-text pins in
+// turn-fence-refusal-wire-code.test.ts, which the reviewer neutered with
+// `if (false && error instanceof TurnFenceRejectedError)` while the suite stayed
+// 48/48 green — the source text was intact, so `toContain` could not tell.
+let fenceRefusalVerdict: 'stopped' | 'unavailable' | null = null;
 
 // ROADMAP 1.148 — importOriginal-spread + complete shared store mock
 // (derive, don't mirror): real module exports stay real; the store double
@@ -85,6 +92,16 @@ vi.mock('../../src/orchestrator-v5/session/index.js', async (importOriginal) => 
               {
                 conflict_category: 'rpc_cas_conflict',
                 expected_base_graph_hash: 'deadbeefcafe0001',
+              },
+            );
+          }
+          if (fenceRefusalVerdict !== null) {
+            throw new TurnFenceRejectedError(
+              `V5 turn fence refused a graph write (${fenceRefusalVerdict})`,
+              {
+                verdict: fenceRefusalVerdict,
+                generation: fenceRefusalVerdict === 'stopped' ? 1 : null,
+                maxGeneration: fenceRefusalVerdict === 'stopped' ? 2 : null,
               },
             );
           }
@@ -160,6 +177,7 @@ describe('POST /orchestrate/v2/turn — Group 3 Task B fail-closed on commit fai
     llmCallCount = 0;
     commitShouldFail = false;
     commitShouldConflict = false;
+    fenceRefusalVerdict = null;
   });
 
   it('commit success path: HTTP 200, retryable is NOT relevant (no error envelope)', async () => {
@@ -231,6 +249,62 @@ describe('POST /orchestrate/v2/turn — Group 3 Task B fail-closed on commit fai
     expect(completed).toHaveLength(1);
     expect(completed[0]!.data.commit_performed).toBe(false);
     expect(completed[0]!.data.failure_type).toBe('GRAPH_DIVERGED');
+  });
+
+  // ── V5 TURN FENCE — THE RUNTIME PIN (#759 review round 2) ──────────────────
+  //
+  // My own wire-code tests for this were `readFileSync` + `toContain` over
+  // turn-executor.ts. The reviewer neutered the branch with
+  // `if (false && error instanceof TurnFenceRejectedError)` — source text intact —
+  // and all 48 stayed GREEN. A guarantee asserted against source text is not a
+  // guarantee about behaviour, which is the exact defect class this lane keeps
+  // being caught on. These two drive a REAL turn through `app.inject` and read the
+  // REAL response, following the CAS-conflict test directly above.
+  //
+  // BOTH a user-facing verdict and an infrastructure verdict, because they take
+  // different `recovery_action` legs and a single case would leave one unproven.
+  it('turn fence refusal (stopped): HTTP 409 + GRAPH_DIVERGED + fence_verdict + start_new_draft', async () => {
+    fenceRefusalVerdict = 'stopped';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest('b7777777-7777-4777-8777-777777777777'),
+    });
+    // 409, not the flattened 500 that "you stopped this turn" used to arrive as.
+    expect(res.statusCode).toBe(409);
+    const parsed = BoundaryErrorSchema.parse(JSON.parse(res.body));
+    expect(parsed.error).toBe('GRAPH_DIVERGED');
+    expect(parsed.details).toMatchObject({
+      failure_type: 'GRAPH_DIVERGED',
+      fence_verdict: 'stopped',
+      conflict_category: 'turn_fence_stopped',
+      recovery_action: 'start_new_draft',
+    });
+    const completed = events.filter((e) => e.event === 'turn_executor.completed');
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.data.commit_performed).toBe(false);
+    expect(completed[0]!.data.failure_type).toBe('GRAPH_DIVERGED');
+  });
+
+  it('turn fence refusal (unavailable — an INFRASTRUCTURE verdict): 409 + retry_later', async () => {
+    fenceRefusalVerdict = 'unavailable';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest('b8888888-8888-4888-8888-888888888888'),
+    });
+    expect(res.statusCode).toBe(409);
+    const parsed = BoundaryErrorSchema.parse(JSON.parse(res.body));
+    expect(parsed.error).toBe('GRAPH_DIVERGED');
+    // The verdict is the machine-readable part, and it must NOT be the stopped
+    // one — that is what lets a client tell "you cancelled this" from "we could
+    // not read the fence", which the shared 409 envelope otherwise collapses.
+    expect(parsed.details).toMatchObject({
+      fence_verdict: 'unavailable',
+      conflict_category: 'turn_fence_unavailable',
+      recovery_action: 'retry_later',
+    });
+    expect((parsed.details as { fence_verdict?: string }).fence_verdict).not.toBe('stopped');
   });
 
   it('graph CAS conflict does NOT re-invoke the LLM (no silent retry loop)', async () => {
