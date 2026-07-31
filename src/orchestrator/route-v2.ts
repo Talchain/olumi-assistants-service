@@ -135,6 +135,7 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 // to be called from inside `sanitiseOlumiResponseForEgress`, which this file
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
+import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
 import {
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
@@ -1184,17 +1185,25 @@ function sendFinalised200(
   // body-attach was dropped by the strip step above. Re-finalise for WeakSet
   // membership, same as the other surfaces.
   //
-  // Stale-sidecar fail-closed (P1 hardening): this block is the LAST body
-  // mutation before send, so the tie between the shape and the text the
-  // user actually receives is verified HERE, at the true final egress —
-  // covering every rewriter between the executor's compose-time capture and
-  // the wire (the executor's own STEP 6.6 / goal-receipt / backstop /
-  // finaliser guards are re-checked in finalizeRun; THIS check additionally
-  // covers the route-level sanitiseOlumiResponseForEgress entity-id scrub
-  // and any future mutator on this path). Mismatch ⇒ ship the body WITHOUT
-  // the sidecar, never a shape describing text the user never sees. The
-  // comparison runs on the POST-sanitise augmented body, i.e. the exact
-  // bytes `reply.send` would carry.
+  // Stale-sidecar fail-closed (P1 hardening): the tie between the shape and the
+  // text the user actually receives is verified HERE — covering every rewriter
+  // between the executor's compose-time capture and this point (the executor's
+  // own STEP 6.6 / goal-receipt / backstop / finaliser guards are re-checked in
+  // finalizeRun; THIS check additionally covers the route-level
+  // sanitiseOlumiResponseForEgress entity-id scrub). Mismatch ⇒ ship the body
+  // WITHOUT the sidecar, never a shape describing text the user never sees. The
+  // comparison runs on the POST-sanitise augmented body.
+  //
+  // ⚠ THIS BLOCK IS NO LONGER "THE LAST BODY MUTATION BEFORE SEND" — corrected
+  // 2026-07-31, and the old sentence is quoted rather than deleted (CLAUDE.md
+  // trap #14) because it was load-bearing for the argument above: it read
+  // *"this block is the LAST body mutation before send, so the tie … is verified
+  // HERE, at the true final egress"*. ROADMAP 2.149 added the claim-safety wire
+  // gate DOWNSTREAM of both shape passes, and that gate can rewrite
+  // `assistant_text`. The tie check here is therefore no longer sufficient on
+  // its own, which is exactly why the wire gate DROPS `_answer_shape` whenever
+  // it edits the answer rather than relying on this comparison to notice.
+  // Neither guard is now the last word alone; read them together.
   if (egress.ok && ctx.answerShape) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
@@ -1311,6 +1320,93 @@ function sendFinalised200(
     }
   }
   // ═══════════════════════════════════════════════════════════════════════════
+  // T1 claim safety — ENFORCEMENT AT THE WIRE. (ROADMAP 2.149.)
+  //
+  // THE POPULATION. Eighteen of this file's nineteen `sendFinalised200` call
+  // sites return BEFORE `runTurnExecutor` (`:4427`), so eighteen never pass
+  // through `finalizeRun`'s `enforceWithheldLeaderClaimGuard` (#755) — which is
+  // a function NESTED inside `runTurnExecutor`, closed over run-local state, and
+  // therefore not callable from here even deliberately. Three of the eighteen
+  // can carry model-authored text (`chip_click` ok, `draft_graph`, and the MAIN
+  // edit exit), and the main edit exit is where the 28 Jul live confirmation
+  // caught a withheld leader claim shipping at HTTP 200.
+  //
+  // WHY HERE AND NOT PER-EXIT. Eighteen per-exit edits is eighteen places for
+  // the nineteenth exit to be forgotten — the hand-maintained mirror
+  // (CLAUDE.md trap #12). This is the file's SOLE `reply.code(200).send`, it is
+  // type-branded and grep-gated, and every exit already threads a REAL verdict
+  // (#737 / ROADMAP 1.233 — no literal survives, pinned by
+  // `claim-safety-non-execute-exits-route-level.test.ts`'s drift guard). So the
+  // guard consumes `ctx.mayNameLeadingOption` and covers every exit by
+  // construction, including exits that do not exist yet.
+  //
+  // ORDERING — THREE CONSTRAINTS, ALL SATISFIED AT THIS LINE:
+  //   1. AFTER every pass that can edit user-facing prose. `compose/
+  //      terminology-rewrite.ts` MANUFACTURES "leading option"; a gate upstream
+  //      of it reads clean prose and passes the banned string through.
+  //   2. AFTER both `_answer_shape` passes above, which rewrite
+  //      `assistant_text` wholesale. Hence the sidecar drop below.
+  //   3. BEFORE the Layer-3 alarm, and that is deliberate — see the alarm's own
+  //      block, which now explains why.
+  //
+  // BYTE-NEUTRAL WHEN PERMITTED. `enforceLeadingOptionClaimsAtWire` returns the
+  // input BY REFERENCE on a permitted turn and on a withheld turn whose prose
+  // designates nothing, so `wireBody` is not even reassigned. Over-suppression
+  // is a failure here, not a safe default (#755's first cut destroyed an honest
+  // receipt); the PERMIT-WINS arms in the route-level suite are what pin it.
+  //
+  // NO RE-SANITISE. The projection only REMOVES text and substitutes one fixed,
+  // module-load-probed constant, so it cannot introduce the entity-ID leak
+  // `sanitiseOlumiResponseForEgress` exists to catch. Re-finalising is still
+  // required: the spread breaks WeakSet membership (the finaliser brand).
+  // ═══════════════════════════════════════════════════════════════════════════
+  const wireEnforcement = enforceLeadingOptionClaimsAtWire(wireBody, {
+    requestId,
+    exitPath,
+    mayNameLeadingOption: ctx.mayNameLeadingOption,
+    // Read ONLY for the option ROSTER — "which options exist", never "which one
+    // leads". The gate enters only when the prose NAMES one of this scenario's
+    // own options, which is what spares "sales leads improved" and every other
+    // ordinary use of the shared vocabulary. `null` here disarms the gate for
+    // this turn and is REPORTED, not silent — see the opts docstring.
+    graph: ctx.graph,
+  });
+  if (wireEnforcement.changed) {
+    let projected: import('@talchain/schemas/boundary').OlumiResponse =
+      wireEnforcement.response;
+    // ⚠ THE SIDECAR MUST GO WITH THE EDIT, and this is the whole reason the
+    // guard can sit downstream of the shape passes. `_answer_shape`
+    // RECONSTRUCTS the answer verbatim (`deriveAnswerTextFromShape` rejoins
+    // headline + bullets + detail). Left attached after a claim-safety edit it
+    // would (a) describe text the user never sees and (b) carry the removed
+    // designation in its own fields — the suppression would be undone by its
+    // own sidecar. The two exact-equality checks above fail closed on a
+    // mismatch, but neither is a test and neither knows about this edit, so the
+    // drop is explicit here rather than inherited from another guard's
+    // unpinned invariant. Pinned by the route-level suite: `_answer_shape` must
+    // be ABSENT from the wire body whenever this gate edited the ANSWER.
+    //
+    // SCOPED TO `assistant_text`, deliberately. The sidecar describes THAT
+    // field and no other, so a `framing_question`-only edit leaves a sidecar
+    // that is still exactly true — dropping it there would be over-suppression
+    // of a debug surface for no honesty gain.
+    if (wireEnforcement.editedFields.includes('assistant_text')) {
+      const { _answer_shape: droppedShape, ...withoutShape } =
+        wireEnforcement.response as OlumiResponseWithDebugFields;
+      if (droppedShape !== undefined) {
+        emit(TelemetryEvents.V5AnswerShapeDroppedStale, {
+          request_id: requestId,
+          exit_path: exitPath,
+          dispatch_path: 'route_egress_claim_safety',
+          final_text_length: wireEnforcement.response.assistant_text.length,
+          derived_text_length: deriveAnswerTextFromShape(droppedShape).length,
+        });
+      }
+      projected = withoutShape;
+    }
+    wireBody = finaliseV5Response(projected, ctx);
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety, LAYER 3 — THE SINGLE EGRESS SCAN. (ROADMAP 1.272 E1.)
   //
   // Placed here, and only here, for two reasons — one of which is correctness
@@ -1346,6 +1442,34 @@ function sendFinalised200(
   // `ctx.mayNameLeadingOption` is the SAME value that was previously handed to
   // every sanitiser call on this path (it is passed to each of them from this
   // ctx, unmodified), so the permission the alarm is armed with is unchanged.
+  //
+  // ⚠ WHAT THIS ALARM MEASURES CHANGED ON 2026-07-31 (ROADMAP 2.149), AND THE
+  // CHANGE IS RECORDED HERE RATHER THAN LEFT FOR A DASHBOARD READER TO DISCOVER
+  // AS A DROP IN THE GRAPH.
+  //
+  // The ENFORCING wire gate now runs immediately above, so this scan reports
+  // the RESIDUE THAT STILL SHIPS, not everything the producers emitted. The
+  // enforcer covers `assistant_text` and `framing_question`; block prose,
+  // enrichment blobs and structured key designations are producer-owned
+  // (`compose/withheld-claim-projection.ts`) and are NOT edited here — so a hit
+  // on this alarm after 2.149 names a surface the wire gate does not cover, or
+  // a phrasing the wide ALARM reader sees and the narrow ENFORCER reader
+  // deliberately spares. Both are real signal; neither is the old signal.
+  //
+  // WHY THE ALARM RUNS SECOND AND NOT FIRST. Two reasons, and only the first is
+  // about doctrine:
+  //   1. E1's position pin (`compose/__tests__/single-pass-egress-byte-
+  //      identity.test.ts`) requires this scan to sit after the LAST `wireBody`
+  //      write and immediately before the send, because that is the only
+  //      position that scans the bytes the user receives. An enforcing pass
+  //      downstream of the alarm would make the alarm's report a report about
+  //      an object that no longer ships.
+  //   2. The ordering rule this block states above — "after every pass that can
+  //      edit user-facing prose" — is about passes that can MANUFACTURE the
+  //      banned vocabulary (terminology-rewrite). The wire gate is
+  //      monotone-REMOVING and its replacement copy is module-load-probed
+  //      leader-free under BOTH readers, so it cannot introduce a claim for
+  //      this scan to miss.
   // ═══════════════════════════════════════════════════════════════════════════
   guardLeadingOptionClaimsAtEgress(wireBody, {
     requestId,

@@ -248,6 +248,55 @@ describe('E1: the Layer-3 scan happens ONCE, on the bytes that ship', () => {
     expect(planted).toContain('guardLeadingOptionClaimsAtEgress(sanitised');
   });
 
+  // ── ROADMAP 2.149 — the ENFORCING rail's position, pinned in the file that
+  //    owns position pins, because 2.149 inherits every constraint E1 wrote.
+  it('the WIRE enforcer sits inside sendFinalised200, AFTER both shape passes and BEFORE the alarm', () => {
+    // ⚠ THREE ORDERING CONSTRAINTS, AND EACH ONE HAS A FAILURE THAT LOOKS FINE.
+    //
+    //   (a) BEFORE the alarm — because E1's own pin above requires the alarm to
+    //       be the LAST thing before the send and after the last `wireBody`
+    //       write. An enforcing pass downstream of the alarm would make the
+    //       alarm's report describe an object that no longer ships.
+    //   (b) AFTER the `_answer_shape` synthesis pass — that pass REWRITES
+    //       `assistant_text` wholesale (`assistant_text := deriveAnswerText
+    //       FromShape(synth)`), so an enforcer upstream of it would have its
+    //       edit overwritten silently.
+    //   (c) AFTER the terminology rewrite, which is upstream in compose and
+    //       MANUFACTURES the banned vocabulary. Satisfied transitively by (a).
+    const enforceAt = ROUTE_V2.indexOf('enforceLeadingOptionClaimsAtWire(wireBody, {');
+    const scanAt = ROUTE_V2.indexOf('guardLeadingOptionClaimsAtEgress(wireBody, {');
+    const sendAt = ROUTE_V2.indexOf('return reply.code(200).send(wireBody);');
+    const synthAt = ROUTE_V2.indexOf('synthesiseAnswerShapeFromText(wireBody.assistant_text)');
+
+    expect(enforceAt, 'the wire enforcer call was not found in route-v2.ts').toBeGreaterThan(0);
+    expect(synthAt, 'the answer-shape synthesis pass was not found').toBeGreaterThan(0);
+    expect(enforceAt, 'the enforcer must run AFTER the answer-shape synthesis pass').toBeGreaterThan(
+      synthAt,
+    );
+    expect(enforceAt, 'the enforcer must run BEFORE the observe-only alarm').toBeLessThan(scanAt);
+    expect(scanAt, 'the alarm must still be the last thing before the send').toBeLessThan(sendAt);
+  });
+
+  it('the enforcer drops `_answer_shape` when it edits the answer', () => {
+    // The sidecar RECONSTRUCTS the answer verbatim. Shipping it beside an edited
+    // `assistant_text` would carry the removed designation in its own fields and
+    // undo the suppression. Behaviourally driven in
+    // `claim-safety-non-execute-exits-route-level.test.ts`; pinned structurally
+    // here because the coupling is a POSITION property, not a value property.
+    const block = ROUTE_V2.slice(
+      ROUTE_V2.indexOf('enforceLeadingOptionClaimsAtWire(wireBody, {'),
+      ROUTE_V2.indexOf('guardLeadingOptionClaimsAtEgress(wireBody, {'),
+    );
+    expect(block).toContain("editedFields.includes('assistant_text')");
+    expect(block).toContain('_answer_shape: droppedShape');
+  });
+
+  it('POSITIVE CONTROL: the enforcer-position check can FAIL', () => {
+    // Rule 2 — the index arithmetic above is only meaningful if a missing call
+    // would actually be seen. `indexOf` returns -1, which fails `toBeGreaterThan(0)`.
+    expect('const nothing = 1;'.indexOf('enforceLeadingOptionClaimsAtWire(wireBody, {')).toBe(-1);
+  });
+
   it('the multiplicity documentation no longer tells readers to divide by 4', () => {
     // trap #14: the number was load-bearing (a dashboard instruction), it was
     // an undercount, and it was not even a constant — the true re-entry count

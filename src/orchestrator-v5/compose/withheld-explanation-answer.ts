@@ -200,9 +200,39 @@ export const WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN =
  * have evidence for. "put forward", never "recommended" —
  * `FORBIDDEN_HEADLINE_VOCABULARY_REGEX` bans the whole `recommend*` family and
  * the shared leader vocabulary matches it too.
+ *
+ * ⚠ "ON THIS RESULT" WAS REMOVED — 2026-07-31, ROADMAP 2.149 residual (c), and
+ * the words are recorded rather than quietly dropped (CLAUDE.md trap #14).
+ * The constant read `' No single option can be put forward on this result yet.'`
+ *
+ * "this result" is a DEIXIS: it points at a result and thereby presupposes one
+ * exists. That is true on the populations this copy was written for and FALSE on
+ * the three provenance branches that withhold precisely BECAUSE they could not
+ * establish existence — `fail_closed_truncated`, `fail_closed_uninterpretable`
+ * and `fail_closed_no_turn_context` (see
+ * {@link WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN}'s docstring, where the
+ * same defect was fixed one layer up by gating the OPENINGS on
+ * `provenanceProvesAnalysisExists`). The openings were gated; this tail — which
+ * ships ALONE on exactly those populations, precisely because the openings were
+ * dropped — kept the presupposition. So the sentence engineered to be safe when
+ * nothing else could be said was the one still saying something.
+ *
+ * ⭐ AND IT IS FIXED HERE, ONCE, ON PURPOSE. This constant is consumed by BOTH
+ * enforcement gates — the in-flow explanation gate (`turn-executor.ts`) and the
+ * finalise chokepoint — through `projectExplanationAnswerForWithheldClaim`, and
+ * as of ROADMAP 2.149 by the WIRE gate as well
+ * (`compose/leading-option-wire-enforcement.ts`, which uses it TRIMMED as the
+ * per-sentence replacement). Three gates, one sentence, no twin to keep in step:
+ * a route-level fallback that minted its own copy would have doubled the false
+ * population instead of halving it (CLAUDE.md trap #12).
+ *
+ * It still asserts NOTHING about currency, which is what makes it safe to use at
+ * the wire seam where the four substitution inputs the executor has are not
+ * available (ROADMAP 2.149 §1; the F1 referent split stays rowed and is moot
+ * for this population by construction).
  */
 export const WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL =
-  ' No single option can be put forward on this result yet.';
+  ' No single option can be put forward yet.';
 
 /** Why an answer was projected. Bounded — this is the telemetry cardinality. */
 export type WithheldExplanationReason =

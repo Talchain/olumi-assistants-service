@@ -134,6 +134,10 @@ import type {
   ContextPackConversationTurn,
 } from './context-pack-assembler.js';
 import { textNamesLeadingOption } from '../compose/leading-option-egress-guard.js';
+import {
+  splitIntoRedactableUnits,
+  replaceAssertingUnits,
+} from '../compose/redactable-units.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
 import {
   ROLLING_SUMMARY_SLOTS,
@@ -272,44 +276,6 @@ export function historyAssertsLeaderClaim(value: string): boolean {
 }
 
 /**
- * Split prose into redactable units: LINES first, then sentences within a line.
- *
- * LINES FIRST IS LOAD-BEARING. The live leaking answers are bullet lists
- * (`• **Your stored lean is …**`), and a naive sentence split over the whole
- * message would fuse a bullet's tail to the next bullet's head and redact both
- * on one hit. Splitting on newlines first bounds the blast radius of a hit to
- * the line it occurred on, which is the difference between losing one bullet
- * and losing the answer.
- *
- * The separators are RETAINED in the returned units so `units.join('')` is the
- * input, exactly — that identity is what makes the "no claim ⇒ byte-identical"
- * property a derivation rather than a hope, and it is asserted at module load.
- */
-function splitIntoRedactableUnits(text: string): string[] {
-  const units: string[] = [];
-  // Keep the newline runs as their own units: they are separators, never
-  // content, and they must survive redaction so the answer's shape is intact.
-  for (const line of text.split(/(\n+)/)) {
-    if (line === '') continue;
-    if (/^\n+$/.test(line)) {
-      units.push(line);
-      continue;
-    }
-    // Sentence boundary: terminal punctuation followed by whitespace. The
-    // whitespace rides with the sentence it follows, so the join is lossless.
-    let start = 0;
-    const re = /[.!?]+["')\]]*\s+/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(line)) !== null) {
-      units.push(line.slice(start, m.index + m[0].length));
-      start = m.index + m[0].length;
-    }
-    if (start < line.length) units.push(line.slice(start));
-  }
-  return units;
-}
-
-/**
  * Redact the ordering claims from ONE prior-turn assistant message.
  *
  * `null` in ⇒ `null` out. A message with no ordering claim is returned
@@ -331,47 +297,23 @@ function splitIntoRedactableUnits(text: string): string[] {
  * by {@link assertRedactionNeverEmpties}.
  *
  * PURE. Never throws, never mutates.
+ *
+ * ⚠ THE MECHANICS MOVED, THE PROPERTIES DID NOT (ROADMAP 2.149). The splitter
+ * and the replace-and-collapse loop now live in `compose/redactable-units.ts`
+ * because the WIRE gate needs the identical three properties (lossless split,
+ * byte-identity on clean prose, never-empties) with a different per-unit reader
+ * and a different replacement string. Two copies of this loop is exactly the
+ * hand-maintained mirror of CLAUDE.md trap #12, so there is one. The four
+ * module-load probes at the bottom of THIS file are unchanged and now certify
+ * the shared implementation.
  */
 export function redactLeaderClaimsFromHistoryMessage(message: string | null): string | null {
   if (message === null || typeof message !== 'string' || message.length === 0) return message;
-  const units = splitIntoRedactableUnits(message);
-  if (!units.some((unit) => historyAssertsLeaderClaim(unit))) return message;
-
-  const out: string[] = [];
-  // A separator between two REDACTED units is dropped with the second of them
-  // (one marker per contiguous run); a separator between a marker and surviving
-  // prose is kept, or the two would be concatenated with no break at all.
-  // Buffering is what lets that decision be made after seeing what comes next.
-  let pendingSeparator = '';
-  let lastWasMarker = false;
-  for (const unit of units) {
-    if (/^\s+$/.test(unit)) {
-      pendingSeparator += unit;
-      continue;
-    }
-    if (historyAssertsLeaderClaim(unit)) {
-      if (lastWasMarker) {
-        pendingSeparator = '';
-        continue;
-      }
-      out.push(pendingSeparator);
-      pendingSeparator = '';
-      out.push(WITHHELD_HISTORY_REDACTION_MARKER);
-      // The unit's OWN trailing whitespace rides with the marker: sentence
-      // units carry the space that followed their full stop, and losing it
-      // would run the marker straight into the next sentence.
-      const trailing = /\s+$/.exec(unit);
-      if (trailing !== null) pendingSeparator = trailing[0];
-      lastWasMarker = true;
-      continue;
-    }
-    out.push(pendingSeparator);
-    pendingSeparator = '';
-    out.push(unit);
-    lastWasMarker = false;
-  }
-  out.push(pendingSeparator);
-  return out.join('');
+  return replaceAssertingUnits(
+    message,
+    historyAssertsLeaderClaim,
+    WITHHELD_HISTORY_REDACTION_MARKER,
+  );
 }
 
 /**
