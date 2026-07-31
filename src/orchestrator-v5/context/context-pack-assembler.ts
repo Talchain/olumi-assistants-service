@@ -905,8 +905,12 @@ export function assembleContextPackWithSummary(
     // AMENDMENT A1(a) — thread the live freshness verdict so the flip-point
     // display licence can fail closed on a stale turn, where compose ships NO
     // review cards and the digits are therefore on no screen.
+    // No `?? null` default here, deliberately: the option is optional and the
+    // formatter treats undefined and null IDENTICALLY (both fail closed), so a
+    // coalescing default would add a science-field fallback the
+    // forbidden-boundary gate rightly flags, while changing nothing.
     display_analysis: formatAnalysisForContext(rawAnalysis, {
-      analysisFreshness: input.coachingContext?.freshness ?? null,
+      analysisFreshness: input.coachingContext?.freshness,
     }),
     // Display-safe graph projection — what Sonnet actually sees in
     // place of the raw graph. Edge `strength` floats become decision-
