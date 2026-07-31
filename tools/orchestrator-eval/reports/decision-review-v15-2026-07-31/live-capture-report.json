@@ -1,0 +1,2323 @@
+{
+  "_doc": "decision_review v15 (PMS row 15) fixture-mode scoring, n=21 = 7 committed fixtures x 3 independent arms, gpt-4.1, OFFLINE (zero staging traffic). Produced by the fix-decision-review-v15 lane. This is the corpus reports/promotion/decision_review.json aggregates; the raw per-call model text, latency and token counts live in PHASE0-EVIDENCE-2026-07-28/fix-decision-review-v15-artifacts/runs-final2/.",
+  "servedHash": "ba4879dd0a714b8f",
+  "model": "gpt-4.1",
+  "candidateLabel": "served_v15",
+  "arms": 3,
+  "fixtures": 7,
+  "scoredOutputs": 21,
+  "modelErrors": 0,
+  "samplingPosture": "provider DEFAULT sampling. NOT a deviation from production: invoke.ts:505 passes temperature 0, but buildModelParams (adapters/llm/openai.ts:155-198) DROPS it for gpt-4.1 (requiresMaxCompletionTokens branch, 'these models reject temperature=0'). Production runs at provider default too.",
+  "reports": [
+    {
+      "fixtureId": "r1/01-clear-winner",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "27 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "27 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "27 user-facing string(s), 2441 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r1/02-close-call",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "23 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "23 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "23 prose string(s) clean at tone \"balanced, both options viable\" against 2 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "pass",
+              "detail": "1 key(s) checked against 1 fragile edge id(s), all present"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "23 user-facing string(s), 2034 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r1/03-needs-evidence",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "24 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "24 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "24 prose string(s) clean at tone \"cautious, evidence first\" against 3 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "24 user-facing string(s), 2192 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r1/04-scaffolded-options",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "21 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "21 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "21 user-facing string(s), 1862 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r1/05-constraint-infeasible",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "15 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "15 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "15 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "pass",
+              "detail": "infeasibility disclosed (marker: infeasible)"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "15 user-facing string(s), 1600 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r1/06-duplicate-headlines",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "29 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "29 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 4 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "4 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "pass",
+              "detail": "1 key(s) checked against 1 fragile edge id(s), all present"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "29 user-facing string(s), 2644 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r1/07-single-option",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "2 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "14 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "14 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 1 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — only 1 headline(s) — a collision is impossible, so nothing was tested"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the run has no fragile edges and the review emitted no scenario_contexts — nothing to check"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "14 user-facing string(s), 1425 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r2/01-clear-winner",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "27 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "27 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "27 user-facing string(s), 2465 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r2/02-close-call",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "28 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "28 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "28 prose string(s) clean at tone \"balanced, both options viable\" against 2 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "pass",
+              "detail": "1 key(s) checked against 1 fragile edge id(s), all present"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "28 user-facing string(s), 2245 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r2/03-needs-evidence",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "23 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "23 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "23 prose string(s) clean at tone \"cautious, evidence first\" against 3 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "23 user-facing string(s), 2030 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r2/04-scaffolded-options",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "28 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "28 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "28 user-facing string(s), 2685 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r2/05-constraint-infeasible",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "14 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "14 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "14 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "pass",
+              "detail": "infeasibility disclosed (marker: constraint)"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "14 user-facing string(s), 1283 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r2/06-duplicate-headlines",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "2 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "27 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "27 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 4 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "4 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "27 user-facing string(s), 2561 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r2/07-single-option",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "17 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "17 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 1 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — only 1 headline(s) — a collision is impossible, so nothing was tested"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the run has no fragile edges and the review emitted no scenario_contexts — nothing to check"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "17 user-facing string(s), 1437 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r3/01-clear-winner",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "27 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "27 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "27 user-facing string(s), 2516 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r3/02-close-call",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "28 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "28 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "28 prose string(s) clean at tone \"balanced, both options viable\" against 2 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "pass",
+              "detail": "1 key(s) checked against 1 fragile edge id(s), all present"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "28 user-facing string(s), 2511 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r3/03-needs-evidence",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "4 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "22 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "22 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "22 prose string(s) clean at tone \"cautious, evidence first\" against 3 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "22 user-facing string(s), 2182 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r3/04-scaffolded-options",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "26 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "26 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "26 user-facing string(s), 2308 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r3/05-constraint-infeasible",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "13 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "13 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "pass",
+              "detail": "13 prose string(s) clean at tone \"structural concern\" against 3 forbidden phrasing(s)"
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 2 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "2 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 scenario_keys); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "pass",
+              "detail": "infeasibility disclosed (marker: not feasible)"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "13 user-facing string(s), 1475 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r3/06-duplicate-headlines",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "3 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "30 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "30 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 4 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "pass",
+              "detail": "4 distinct headline(s)"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "pass",
+              "detail": "1 key(s) checked against 1 fragile edge id(s), all present"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 3 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "30 user-facing string(s), 2551 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "fixtureId": "r3/07-single-option",
+      "scores": [
+        {
+          "candidate": "served_v15",
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "status": "pass",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "status": "pass",
+              "detail": "no invented conversational callbacks"
+            },
+            {
+              "name": "entity_references_grounded",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — nothing to examine (0 entity_refs); a clean verdict over an empty corpus is not a pass"
+            },
+            {
+              "name": "contract_caps_respected",
+              "status": "pass",
+              "detail": "2 capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (4 rules applied)"
+            },
+            {
+              "name": "shape_valid",
+              "status": "pass",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "status": "pass",
+              "detail": "every number in a descriptive field is within ±10% of an input value"
+            },
+            {
+              "name": "no_internal_term_leak",
+              "status": "pass",
+              "detail": "clean"
+            },
+            {
+              "name": "no_banned_lexicon",
+              "status": "pass",
+              "detail": "15 prose string(s) clean against 10 banned terms parsed from the served prompt"
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "status": "pass",
+              "detail": "15 prose string(s) clean against 21 internal terms parsed from the served prompt"
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "status": "pass",
+              "detail": "no bare probability-band decimals in output strings"
+            },
+            {
+              "name": "no_dashes",
+              "status": "pass",
+              "detail": "no em/en dashes in any output string"
+            },
+            {
+              "name": "tone_alignment",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the served table forbids no phrasing at tone \"confident, forward-looking\""
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "status": "pass",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)"
+            },
+            {
+              "name": "story_headlines_match_options",
+              "status": "pass",
+              "detail": "all 1 option key(s) present, none extra"
+            },
+            {
+              "name": "story_headlines_distinct",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — only 1 headline(s) — a collision is impossible, so nothing was tested"
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the run has no fragile edges and the review emitted no scenario_contexts — nothing to check"
+            },
+            {
+              "name": "primary_risk_coherent",
+              "status": "pass",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)"
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "status": "not_applicable",
+              "detail": "NOT APPLICABLE — the leading option is feasible, so there is no infeasibility to disclose"
+            },
+            {
+              "name": "substance_present",
+              "status": "pass",
+              "detail": "15 user-facing string(s), 1373 chars"
+            },
+            {
+              "name": "extraction_contract",
+              "status": "pass",
+              "detail": "v30.3 envelope parsed; `text` field scored"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

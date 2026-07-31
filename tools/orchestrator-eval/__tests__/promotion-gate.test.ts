@@ -24,7 +24,7 @@ import {
   type LiveCaptureReport,
 } from '../src/decision-review/promotion-report.js';
 import { applyGrandfather } from '../src/promotion-gate/grandfather.js';
-import { loadManifestPrompts, promptHash16 } from '../src/promotion-gate/manifest.js';
+import { hashCanonicalFile, loadManifestPrompts, promptHash16 } from '../src/promotion-gate/manifest.js';
 import { discoverPacks } from '../src/promotion-gate/packs.js';
 import { loadPromotionReports, parsePromotionReport } from '../src/promotion-gate/reports.js';
 import { MIN_CERTIFYING_SAMPLE_SIZE } from '../src/promotion-gate/types.js';
@@ -263,10 +263,22 @@ describe('pack discovery is derived and fail-loud', () => {
 // ============================================================================
 
 describe('loaders fail loud on malformed input', () => {
-  it('loads the real manifest and finds decision_review at hash b4f15305c2bb32e9', () => {
+  it('loads the real manifest, and decision_review\'s hash MATCHES ITS OWN EXPORT', () => {
+    // ⚠ THIS ASSERTION USED TO PIN THE LITERAL `b4f15305c2bb32e9`, and that was
+    // trap 12 sitting inside the gate's own test suite: a hand-typed copy of a
+    // value that moves every time a prompt is promoted. It went red on the
+    // v14→v15 promotion for no reason other than that the number changed, which
+    // teaches the next promoter to edit the test rather than read it.
+    //
+    // What the loader is actually FOR is checked instead, and it is derived:
+    // the hash the manifest records must equal the hash of the file the manifest
+    // points at. That is the manifest/export skew invariant, it cannot rot, and
+    // it fails for a REASON when it fails.
     const entries = loadManifestPrompts();
     const dr = entries.find((e) => e.task === 'decision_review');
-    expect(dr?.servedHash).toBe('b4f15305c2bb32e9');
+    expect(dr, 'decision_review must have a manifest row').toBeDefined();
+    expect(dr?.servedHash).toMatch(/^[0-9a-f]{16}$/);
+    expect(dr?.servedHash).toBe(hashCanonicalFile(dr!.canonicalFile));
     expect(entries.length).toBeGreaterThanOrEqual(6);
   });
 
@@ -473,7 +485,17 @@ describe('A5 — future-dated reports and the canonical-path binding', () => {
 // ============================================================================
 
 describe('real committed state', () => {
-  it('is GREEN with the real baseline, and would RED WITHOUT it (decision_review really is BLOCK)', async () => {
+  it('is GREEN because decision_review EARNED it — and reds the moment the earning is removed', async () => {
+    // ⚠ REWRITTEN 2026-07-31, at the v14→v15 promotion. This test used to assert
+    // `decision_review` is BLOCK/EVAL_FAILED and green only via the grandfather
+    // baseline. That was the honest description of the world when it was
+    // written, and it is now false: v15 ships a hash-matched PASS report at
+    // n=21, the grandfather entry is REMOVED, and the row is GATED_PASS on its
+    // own evidence.
+    //
+    // The test's JOB has not changed — prove the green is EARNED, not vacuous —
+    // so only its mechanism moved: instead of "would red without the baseline"
+    // it is now "would red without the REPORT", which is a stronger claim.
     const manifest = loadManifestPrompts();
     const packs = await discoverPacks();
     const reports = loadPromotionReports();
@@ -483,21 +505,32 @@ describe('real committed state', () => {
       maxFutureSkewDays: 1,
     });
 
-    // decision_review must be a BLOCK before grandfathering — this is the
-    // anti-vacuity proof for the real data: the gate SEES the un-evalled prompt.
+    // decision_review passes the gate on its own committed report.
     const dr = gate.rows.find((r) => r.task === 'decision_review');
-    expect(dr?.decision).toBe('BLOCK');
-    expect(dr?.blockKind).toBe('EVAL_FAILED');
+    expect(dr?.decision).toBe('GATED_PASS');
+    expect(dr?.matchedReportSha16).toBe(dr?.promotedHash);
 
-    // Without the baseline, the whole gate is RED.
-    expect(applyGrandfather(gate, []).ok).toBe(false);
+    // ANTI-VACUITY, the point of the whole test: strip the reports and the SAME
+    // real manifest + packs must BLOCK. A green that survives having its
+    // evidence deleted is a green that was never reading it.
+    const withoutReports = computePromotionGate(manifest, packs, [], {
+      now: new Date('2026-07-31T00:00:00Z'),
+      maxReportAgeDays: 90,
+      maxFutureSkewDays: 1,
+    });
+    expect(withoutReports.rows.find((r) => r.task === 'decision_review')?.decision).toBe('BLOCK');
+    expect(withoutReports.rows.find((r) => r.task === 'decision_review')?.blockKind).toBe('NO_REPORT');
 
-    // With the committed baseline, it is GREEN and decision_review is visibly
-    // grandfathered (not silently passed).
-    const { loadGrandfatherBaseline } = await import('../src/promotion-gate/baseline.js');
-    const final = applyGrandfather(gate, loadGrandfatherBaseline());
+    // And the earned pass needs NO grandfathering: the whole gate is green with
+    // an EMPTY baseline, and decision_review is not flagged as grandfathered.
+    const final = applyGrandfather(gate, []);
     expect(final.ok).toBe(true);
-    expect(final.rows.find((r) => r.task === 'decision_review')?.grandfathered).toBe(true);
+    expect(final.rows.find((r) => r.task === 'decision_review')?.grandfathered).toBeFalsy();
+
+    // The committed baseline really is empty — the ratchet tightened rather
+    // than the entry being moved to the new hash.
+    const { loadGrandfatherBaseline } = await import('../src/promotion-gate/baseline.js');
+    expect(loadGrandfatherBaseline()).toEqual([]);
   });
 });
 

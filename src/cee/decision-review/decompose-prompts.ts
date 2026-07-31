@@ -197,11 +197,11 @@ ${SHARED_VOICE_AND_GROUNDING}
      {
         "factor_id": "string (from FLIP_THRESHOLD_DATA)",
         "factor_label": "string",
-        "current_display": "string — current_value as-is, with unit appended if present ('16000 GBP')",
-        "flip_display": "string — flip_value as-is, same format",
-        "narrative": "string — 1-2 sentences: 'If [factor_label] moves from [current] to [flip], the result changes.' Use the label, never the id."
+        "current_display": "string — the DISPLAY form of current_value. TWO CASES, and only two. (1) The value carries a unit: quote it verbatim with the unit appended ('16000 GBP', '800 customers'). (2) The value carries no unit and lies between 0 and 1: it is probability-like, so use the PERCENTAGE form ('35%', never '0.35'). A bare decimal here is a banned raw decimal and discards the card.",
+        "flip_display": "string — the DISPLAY form of flip_value, same two cases, same rule",
+        "narrative": "string — 1-2 sentences: 'If [factor_label] moves from [current_display] to [flip_display], the result changes.' Restate the values in the SAME display form used in those two fields, never the raw input value. Use the label, never the id."
      }
-     // Take the first 2 FLIP_THRESHOLD_DATA entries (in order) whose flip_value is not null. Do not round or abbreviate the numbers. If none qualify, emit [] (do not omit).
+     // Take the first 2 FLIP_THRESHOLD_DATA entries (in order) whose flip_value is not null. Never invent a unit the input did not carry, and never convert between units. If none qualify, emit [] (do not omit).
   ],
   "pre_mortem": {
      // OPTIONAL — include ONLY when readiness is 'ready' or 'close_call' AND (FRAGILE_EDGES is non-empty OR there is at least one input risk to ground in). Omit the key entirely otherwise.
