@@ -709,6 +709,10 @@ describe('FORBIDDEN_USER_FACING_PHRASES — no-recommendations doctrine (2.213)'
     ['Increase price to £59 gives you the best chance of £20k MRR.', 'key-insight: best chance'],
     // The generate-recommendation strings.
     ['Hire a tech lead is your best bet for the quarter.', 'narrative: your best bet'],
+    // No copula — the headline shape. Pattern 1 is the ONLY pattern that
+    // catches this; without this case pattern 1 is shadowed by the
+    // copula-anchored crowning pattern and could be deleted unnoticed.
+    ['Your best bet: Hire a tech lead.', 'narrative: your best bet, headline/colon shape'],
     ['Hire a tech lead looks like the better choice here.', 'narrative: looks like the better choice'],
     ['Hire a tech lead is the way to go.', 'narrative: the way to go'],
     ['Hire a tech lead is advisable compared to Hire two juniors.', 'narrative: advisable'],
@@ -782,6 +786,7 @@ describe('2.213 remedy class — a choice directive has no safe rewrite', () => 
   const fatalCases = [
     'Increase price to £59 is the clear best choice.',
     'Hire a tech lead is your best bet.',
+    'Your best bet: Hire a tech lead.',
     'Hire a tech lead is the way to go.',
     'Increase price to £59 is advisable at this time.',
     'You should choose Option A.',
