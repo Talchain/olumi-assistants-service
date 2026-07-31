@@ -48,6 +48,55 @@
  * property a derivation rather than a hope, and it is asserted at module load in
  * `withheld-history-redaction.ts`'s `assertSupersetAndLosslessSplit`.
  */
+/**
+ * Is this terminal-punctuation run a real sentence boundary, or an abbreviation?
+ *
+ * ⚠ A FALSE BOUNDARY IS NOT COSMETIC — IT GARBLES PROSE AND CAN AMPLIFY A LEAK.
+ * (Found by adversarial review of #768.) `"Compare Hire vs. Hold. Hire leads."`
+ * split after `vs.`, so the "sentence" the gate removed was half a clause: the
+ * user got a mangled fragment, and the half that survived could still carry the
+ * designation. Splitting too eagerly makes surgery LESS surgical, not more.
+ *
+ * ⚠ AND THE FIX IS DELIBERATELY NOT AN ABBREVIATION ALLOWLIST. `["vs", "i.e",
+ * "e.g", "No", "Inc", …]` is precisely the hand-maintained mirror CLAUDE.md trap
+ * #12 is about: the abbreviation nobody listed reads as green on the day it
+ * ships, and prose vocabulary is unbounded. Two STRUCTURAL rules instead, each
+ * derived from what a sentence boundary IS rather than from a list of things it
+ * is not:
+ *
+ *   1. WHAT FOLLOWS MUST BE ABLE TO OPEN A SENTENCE. A lowercase letter after
+ *      the whitespace means the sentence continued — `"e.g. the second option"`,
+ *      `"Acme Inc. reported"`. `!` and `?` are exempt: no abbreviation ends in
+ *      one, so they are boundaries unconditionally.
+ *   2. WHAT PRECEDES MUST NOT BE ABBREVIATION-SHAPED. Abbreviations are SHORT or
+ *      INTERNALLY DOTTED, and that is a property of the token, not of a lexicon:
+ *      a token containing its own `.` (`i.e`, `e.g`, `U.S`) or of one-to-two
+ *      letters (`vs`, `No`, `Dr`, `Mr`) is not a sentence's last word.
+ *
+ * RESIDUAL, STATED RATHER THAN LEFT TO BE DISCOVERED: a ≥3-letter abbreviation
+ * followed by a capital (`"Acme Inc. Revenue fell."`) is structurally
+ * indistinguishable from a sentence end and still splits. The failure is bounded
+ * (one extra unit boundary) and the direction is the same as before this fix.
+ * The opposite error — a genuine 1-2 letter sentence-final word (`"It is so. Now
+ * we act."`) — MERGES two sentences into one unit, which is the SAFE direction:
+ * a larger unit removes more, never less, and can never leave half a claim.
+ */
+function isSentenceBoundary(line: string, matchIndex: number, matchText: string): boolean {
+  if (/[!?]/.test(matchText)) return true;
+
+  // Rule 1 — what follows must be able to open a sentence. An empty tail means
+  // the line ends in trailing whitespace, which is a boundary by exhaustion.
+  const nextChar = line.slice(matchIndex + matchText.length).charAt(0);
+  if (nextChar !== '' && !/[A-Z0-9"'([]/.test(nextChar)) return false;
+
+  // Rule 2 — what precedes must not be abbreviation-shaped.
+  const token = /(\S*)$/.exec(line.slice(0, matchIndex))?.[1] ?? '';
+  if (token.includes('.')) return false;
+  if (/^[A-Za-z]{1,2}$/.test(token)) return false;
+
+  return true;
+}
+
 export function splitIntoRedactableUnits(text: string): string[] {
   const units: string[] = [];
   // Keep the newline runs as their own units: they are separators, never
@@ -60,10 +109,14 @@ export function splitIntoRedactableUnits(text: string): string[] {
     }
     // Sentence boundary: terminal punctuation followed by whitespace. The
     // whitespace rides with the sentence it follows, so the join is lossless.
+    // A candidate that {@link isSentenceBoundary} rejects is simply not cut on —
+    // `start` does not move, so the text stays in the current unit and the join
+    // identity is untouched.
     let start = 0;
     const re = /[.!?]+["')\]]*\s+/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(line)) !== null) {
+      if (!isSentenceBoundary(line, m.index, m[0])) continue;
       units.push(line.slice(start, m.index + m[0].length));
       start = m.index + m[0].length;
     }
@@ -116,7 +169,22 @@ export function replaceAssertingUnits(
     }
     if (asserts(unit)) {
       if (lastWasReplacement) {
-        pendingSeparator = '';
+        // ⚠ THIS USED TO BE `pendingSeparator = ''` AND IT GLUED SENTENCES
+        // TOGETHER. (Found by adversarial review of #768; pre-existing, moved
+        // here verbatim from `withheld-history-redaction.ts`, and invisible to
+        // that module's four probes because none of them has TWO consecutive
+        // offending units followed by surviving prose.)
+        //
+        //   "X leads. Y comes out ahead. Done."
+        //     u1 replaced → pendingSeparator = ' ' (u1's trailing space)
+        //     u2 collapses → separator CLEARED
+        //     u3 pushed with no separator → "…put forward yet.Done."
+        //
+        // The collapsed unit's OWN trailing whitespace has to take over as the
+        // pending separator, exactly as the first replaced unit's did — the run
+        // is one replacement, so it ends where the LAST collapsed unit ended.
+        const collapsedTrailing = /\s+$/.exec(unit);
+        pendingSeparator = collapsedTrailing !== null ? collapsedTrailing[0] : '';
         continue;
       }
       out.push(pendingSeparator);

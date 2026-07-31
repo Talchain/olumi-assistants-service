@@ -66,6 +66,55 @@
  * neighbour).
  *
  * ═══════════════════════════════════════════════════════════════════════════
+ * ⭐ THE ENTRY CRITERION, AND WHY VOCABULARY ALONE WAS THE WRONG ONE.
+ *
+ * The first cut of this gate entered on VOCABULARY alone: any unit that tripped
+ * `textAssertsLeadingOption` was replaced. Adversarial review reproduced two
+ * defects from that, and they pull in OPPOSITE directions — which is why the
+ * answer is a redesigned criterion and not two patches.
+ *
+ *   OVER-SUPPRESSION. Ordinary decision vocabulary feeds the DELETING reader:
+ *   "sales leads improved", "lead time is down", "who leads this?", "ahead of
+ *   plan". None designates anything. All were destroyed on any withheld turn.
+ *   Worse, `compose/terminology-rewrite.ts` MANUFACTURES "leading option(s)"
+ *   upstream of this seam, so the estate's own safety pass fed the deleter.
+ *   This is #755's canary class — an honest receipt destroyed by a guard —
+ *   reopened at a new address.
+ *
+ *   LEAK. A distributed claim defeats sentence surgery: "Hire Marketing Manager
+ *   is strong. It leads at 72%." The vocabulary sits in unit 2 and the NAME in
+ *   unit 1, so surgery removed unit 2 and shipped the designation.
+ *
+ * THE CRITERION THAT CLOSES BOTH. Enforcement needs TWO independent facts, and
+ * neither alone is sufficient:
+ *
+ *   1. A CLAIM IS PRESENT — `textAssertsLeadingOption` at FIELD level (not unit
+ *      level: a claim that straddles a sentence split must still count).
+ *   2. A DESIGNATION IS POSSIBLE — the field NAMES one of the scenario's own
+ *      options. Vocabulary with no option name designates nobody: "one option
+ *      leads" is not a claim about which. No name ⇒ ship unchanged, and the
+ *      Layer-3 alarm observes it.
+ *
+ * Rule 2 is what spares the whole "sales leads" class, and it does NOT re-derive
+ * "who is leading" (which would be a second authority beside the verdict —
+ * CLAUDE.md trap #12). It derives only WHICH OPTIONS EXIST, from the graph the
+ * exit is already shipping. Those are different questions.
+ *
+ * Then, having entered, the residual is POST-CHECKED and escalated stepwise —
+ * because removing the vocabulary unit is exactly what leaves a distributed
+ * claim's naming half behind. See {@link projectField}.
+ *
+ * ⚠ THE COST OF ESCALATION, PRICED RATHER THAN HIDDEN. On a field that both
+ * names an option AND asserts a leader, escalation removes the NAME-BEARING
+ * units too — so an edit receipt in such an answer ("Added a risk to Hire
+ * Marketing Manager. It leads at 72%.") loses the receipt as well as the claim.
+ * That is a real cost and it is pinned by a test rather than discovered later.
+ * It is also NOT worse than the estate's proven design: #755's chokepoint
+ * replaces the WHOLE answer on exactly these inputs. This gate is strictly more
+ * conservative everywhere else — a receipt with no leader vocabulary, or leader
+ * vocabulary with no option name, is untouched.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
  * ⚠ SCOPE — STATED, NOT IMPLIED. What this gate does NOT cover.
  *
  * A chokepoint that claims to cover "the wire" and quietly covers less is the
@@ -99,6 +148,31 @@
  *     - The three execute-intent receipts (`set_factor_value`, `add_constraint`,
  *       `adjust_edge_strength`), which are EXECUTOR-side and excluded by the
  *       #755 guard's own scope check (`turn-executor.ts:10112`).
+ *
+ * ⚠⚠ THE VOCABULARY-BOUNDED CEILING — READ THIS BEFORE QUOTING THE HEADLINE.
+ *
+ * This gate can only see designations made with the SHARED VOCABULARY. A
+ * designation that uses none of it ships unchanged:
+ *
+ *     "Hire Marketing Manager is your strongest bet."
+ *     "Hire Marketing Manager is the frontrunner."
+ *     "Go with the first one."
+ *
+ * That ceiling is PRE-EXISTING and SHARED — the Layer-3 alarm cannot see these
+ * either, and neither can the #755 executor chokepoint, which triggers on the
+ * same reader. So this is not a limitation introduced here; it is the estate's
+ * standing exposure, and it means "the withheld leader claim no longer ships"
+ * must always be read as "…no leader claim EXPRESSIBLE IN THIS VOCABULARY
+ * ships". Widening the vocabulary is a shared change with its own
+ * over-suppression controls (`leader-vocabulary-producer-control.test.ts` is the
+ * mechanism that would demand it) and is NOT part of this slice.
+ *
+ * Positional designation in PROSE ("the first option") sits under the same
+ * ceiling. Positional designation in STRUCTURED data does NOT: the producer
+ * already drops `rank` and re-orders `decision_brief.options[]` by `option_id`
+ * (`withheld-claim-projection.ts` — `WITHHELD_DROPPED_OPTION_MEMBERS`,
+ * `projectOptionsForWithheldClaim`), so ordinal and array order carry no
+ * designation by the time a body reaches this seam.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -136,18 +210,92 @@ type WireEnforcedProseField = (typeof WIRE_ENFORCED_PROSE_FIELDS)[number];
 
 /** How the designation was removed. Bounded — this is the telemetry cardinality. */
 export type WireEnforcementMode =
-  /** The normal path: only the offending sentence(s) were replaced. */
+  /** The normal path: only the vocabulary-bearing sentence(s) were replaced. */
   | 'surgical'
   /**
-   * LAST RESORT. The field asserts a leader but NO single unit does — the match
-   * straddles a unit boundary (e.g. `"the leading\noption"`, where the split is
-   * on the newline). Surgery cannot localise it, and claim safety's failure
-   * direction is suppression, never the claim, so the whole FIELD is replaced.
+   * The DISTRIBUTED-CLAIM path. Surgery removed the vocabulary, and the residual
+   * STILL named the option — "Hire Marketing Manager is strong. It leads at
+   * 72%." So the name-bearing units went too. This is the mode that closes the
+   * leak sentence surgery trades away, and it is the mode that costs a receipt
+   * when one shares a field with a leader claim.
+   */
+  | 'surgical_escalated'
+  /**
+   * LAST RESORT. Two escalations and the residual still names or asserts. Now
+   * NAME-GATED: it cannot fire on a field that never named an option, which is
+   * what previously let ordinary prose reach it through a straddling match.
    * Separately coded precisely so it can never be mistaken for the normal path
-   * on a dashboard: a non-trivial rate here means the splitter and the reader
+   * on a dashboard: a non-trivial rate here means the splitter and the readers
    * disagree and the splitter needs work, not that the gate is doing its job.
    */
   | 'whole_field';
+
+/**
+ * Shortest option label this gate will treat as NAME EVIDENCE.
+ *
+ * Matching is already word-boundaried, so a short label cannot match inside a
+ * longer word — but a one- or two-character label ("A", "B", "US") collides with
+ * ordinary prose as a whole token far too easily, and a false name-match is what
+ * opens the gate on an honest receipt. Below this length the roster entry is
+ * simply not used as evidence: the field is treated as naming nothing, and the
+ * alarm observes. Fails toward the receipt, which is the direction the
+ * over-suppression finding demands.
+ */
+const MIN_OPTION_LABEL_LENGTH = 3;
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The scenario's OPTION ROSTER, read off the graph the exit is already shipping.
+ *
+ * ⚠ THIS IS NOT A SECOND DERIVATION OF THE VERDICT, and the distinction is the
+ * whole licence for reading the graph here. `context/withheld-history-
+ * redaction.ts` deliberately refuses to anchor on option labels, because there
+ * the reader would have had to decide WHO IS LEADING — a second authority beside
+ * the constraint verdict (CLAUDE.md trap #12). This function decides only WHICH
+ * OPTIONS EXIST. It never ranks them, never reads a win probability, and never
+ * consults an analysis fact. The permission still comes from one place:
+ * `ctx.mayNameLeadingOption`.
+ *
+ * Shape read defensively, mirroring the in-repo precedent at
+ * `turn-executor.ts:1900-1907` (filter to `kind === 'option'`, take `label` only
+ * when it is a string).
+ */
+export function optionRosterFromGraph(graph: unknown): readonly string[] {
+  const nodes = (graph as { readonly nodes?: unknown } | null | undefined)?.nodes;
+  if (!Array.isArray(nodes)) return [];
+  const roster: string[] = [];
+  for (const raw of nodes) {
+    const node = raw as { readonly kind?: unknown; readonly label?: unknown } | null;
+    if (node === null || typeof node !== 'object') continue;
+    if (node.kind !== 'option') continue;
+    if (typeof node.label !== 'string') continue;
+    const label = node.label.trim();
+    if (label.length < MIN_OPTION_LABEL_LENGTH) continue;
+    roster.push(label);
+  }
+  return roster;
+}
+
+/**
+ * Does this text NAME one of the scenario's options?
+ *
+ * Whole-token, case-insensitive. The boundaries are written as Unicode
+ * lookarounds rather than `\b` because `\b` is defined against ASCII word
+ * characters and silently mis-anchors on a label that starts or ends with
+ * punctuation ("Hire (Senior)") or carries non-ASCII letters.
+ */
+function textNamesAnOption(value: string, roster: readonly string[]): boolean {
+  if (typeof value !== 'string' || value.length === 0 || roster.length === 0) return false;
+  return roster.some((label) =>
+    new RegExp(
+      `(?<![\\p{L}\\p{N}_])${escapeForRegExp(label)}(?![\\p{L}\\p{N}_])`,
+      'iu',
+    ).test(value),
+  );
+}
 
 export interface WireLeaderClaimEnforcementOpts {
   readonly requestId: string;
@@ -159,6 +307,29 @@ export interface WireLeaderClaimEnforcementOpts {
    * by-reference no-op.
    */
   readonly mayNameLeadingOption: boolean;
+  /**
+   * The graph this exit is shipping (`ctx.graph`), read ONLY for the option
+   * ROSTER — see {@link optionRosterFromGraph} for why that is not a second
+   * derivation of the verdict.
+   *
+   * Typed `unknown` on purpose: this module lives in `compose/` and must not
+   * take a dependency on the route's `GraphV3T` alias to read two fields
+   * defensively.
+   *
+   * ⚠ A NULL GRAPH MEANS NO ROSTER MEANS NO ENFORCEMENT, and the hole is real:
+   * **13 of `route-v2.ts`'s 19 exits pass `graph: null`** (derived at
+   * `16d0d704`, not assumed). They are exactly the deterministic-copy exits —
+   * all three model-text-capable exits (`chip_click` ok `:2420`, `draft_graph`
+   * `:3520`, MAIN edit `:4192`) and the executor exit `:4650` thread a real
+   * graph. But a dispatch that returns a null graph on some branch disarms this
+   * gate for that turn, so the stand-down is REPORTED
+   * (`mode: 'roster_unavailable'`) rather than silent.
+   *
+   * It is the same epistemic position as "no option name in the field": we
+   * cannot establish that a designation is present, so we do not delete the
+   * user's prose. The Layer-3 alarm still reports the leak.
+   */
+  readonly graph: unknown;
 }
 
 export interface WireLeaderClaimEnforcementResult {
@@ -175,22 +346,87 @@ function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
 }
 
 /**
- * Project ONE prose field. Returns `null` when the field is absent, empty, or
- * carries no unlicensed designation — `null` means "do not touch this field",
- * which is how byte-identity is preserved by construction rather than by test.
+ * Project ONE prose field. Returns `null` when the field must not be touched —
+ * and `null` means the caller returns the input BY REFERENCE, which is how
+ * byte-identity is preserved by construction rather than by test.
+ *
+ * ⭐ THE DECISION TABLE, in the order the code evaluates it:
+ *
+ * | claim present | names an option | outcome                                  |
+ * |---------------|-----------------|------------------------------------------|
+ * | no            | no              | untouched                                |
+ * | no            | YES             | untouched — a receipt naming the option   |
+ * |               |                 | the user just edited is not a claim       |
+ * | YES           | no              | untouched — "sales leads improved" and    |
+ * |               |                 | the terminology-rewrite's manufactured    |
+ * |               |                 | "leading option" designate nobody         |
+ * | YES           | YES             | ENTER: surgery, then post-check           |
+ *
+ * "Claim present" is read at FIELD level, deliberately: a claim that straddles a
+ * sentence split ("the leading\noption") trips no single unit, and a unit-level
+ * entry test would miss exactly the case the escalation exists for.
+ *
+ * ⭐ THE POST-CHECK, and why the residual is re-read at all. Removing the
+ * vocabulary unit is precisely what leaves a distributed claim's naming half
+ * behind. So after each pass the residual must satisfy BOTH:
+ *   - it asserts no leader (`textAssertsLeadingOption` — the ENFORCER reader),
+ *   - it names no option (`textNamesAnOption`).
+ * Failing either escalates: first the name-bearing units go too, then, if the
+ * residual STILL fails, the whole field.
+ *
+ * ⚠ THE POST-CHECK DELIBERATELY DOES NOT USE `textNamesLeadingOption` (the wide
+ * ALARM reader), and the review shape that proposed it is refuted here rather
+ * than silently dropped. The only strings the wide reader sees and the narrow
+ * one does not are the two documented carve-outs — causal "leads to" and
+ * job-title "team/tech/engineering/project/squad lead(s)" — and NEITHER CAN
+ * DESIGNATE ANYTHING. Escalating on them would delete ordinary English inside an
+ * entered field:
+ *
+ *     "Hire Marketing Manager is the option. Higher capacity leads to faster
+ *      delivery."
+ *
+ * Under a wide post-check the causal clause forces `whole_field` and the user
+ * loses a true, useful sentence — the over-suppression finding rebuilt one layer
+ * in. The narrow reader is the ENFORCER's reader by the module's own
+ * cost-function doctrine, and `assertEnforcerIsNarrowerThanAlarm` now pins
+ * narrow ⊆ wide, so nothing designating can hide in the gap.
  */
-function projectField(value: string): { text: string; mode: WireEnforcementMode } | null {
+function projectField(
+  value: string,
+  roster: readonly string[],
+): { text: string; mode: WireEnforcementMode } | null {
   if (typeof value !== 'string' || value.length === 0) return null;
+  // (1) A CLAIM IS PRESENT — field level, so a straddling match still counts.
   if (!textAssertsLeadingOption(value)) return null;
+  // (2) A DESIGNATION IS POSSIBLE — the field names one of this scenario's own
+  //     options. Vocabulary with no name designates nobody.
+  if (!textNamesAnOption(value, roster)) return null;
+
+  const isClean = (candidate: string): boolean =>
+    !textAssertsLeadingOption(candidate) && !textNamesAnOption(candidate, roster);
 
   const surgical = replaceAssertingUnits(
     value,
     textAssertsLeadingOption,
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
-  if (surgical !== value) return { text: surgical, mode: 'surgical' };
+  if (isClean(surgical)) return { text: surgical, mode: 'surgical' };
 
-  // The field asserts but no unit does. See {@link WireEnforcementMode}.
+  // ⚠ ESCALATION RUNS FROM THE ORIGINAL VALUE, NOT FROM `surgical`. Running it
+  // over the surgical output leaves the replacement sentence sitting in the text
+  // as ORDINARY PROSE — it neither asserts nor names, so the collapse logic
+  // cannot see it as a replacement, and a name-bearing neighbour that is
+  // replaced next lands the SAME sentence twice in a row ("No single option can
+  // be put forward yet. No single option can be put forward yet."). Re-deriving
+  // from the original makes the two removals one contiguous run, which is
+  // exactly what the collapse rule is for.
+  const escalated = replaceAssertingUnits(
+    value,
+    (unit) => textAssertsLeadingOption(unit) || textNamesAnOption(unit, roster),
+    WIRE_WITHHELD_LEADER_REPLACEMENT,
+  );
+  if (isClean(escalated)) return { text: escalated, mode: 'surgical_escalated' };
+
   return { text: WIRE_WITHHELD_LEADER_REPLACEMENT, mode: 'whole_field' };
 }
 
@@ -214,28 +450,60 @@ export function enforceLeadingOptionClaimsAtWire(
   if (opts.mayNameLeadingOption) return unchanged(response);
 
   try {
+    const roster = optionRosterFromGraph(opts.graph);
+
+    if (roster.length === 0) {
+      // STAND DOWN, LOUDLY. Without a roster the gate cannot establish that any
+      // designation is possible, so deleting prose would be a guess. Reported
+      // rather than silent, because a silent stand-down is how a guarantee turns
+      // into theatre: a reader of the dashboard must be able to see the
+      // difference between "nothing to do" and "could not look".
+      const couldHaveMattered =
+        textAssertsLeadingOption(response.assistant_text) ||
+        (typeof response.framing_question === 'string' &&
+          textAssertsLeadingOption(response.framing_question));
+      if (couldHaveMattered) {
+        emit(TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire, {
+          request_id: opts.requestId,
+          exit_path: opts.exitPath,
+          edited_fields: 'none',
+          mode: 'roster_unavailable',
+          original_length: 0,
+          projected_length: 0,
+        });
+      }
+      return unchanged(response);
+    }
+
     const editedFields: WireEnforcedProseField[] = [];
+    // The LOUDEST mode wins the report: `whole_field` over `surgical_escalated`
+    // over `surgical`. A field edited surgically must never mask a sibling field
+    // that needed the last resort.
     let modes: WireEnforcementMode = 'surgical';
+    const escalate = (mode: WireEnforcementMode): void => {
+      if (mode === 'whole_field') modes = 'whole_field';
+      else if (mode === 'surgical_escalated' && modes === 'surgical') modes = 'surgical_escalated';
+    };
     let originalLength = 0;
     let projectedLength = 0;
     let next = response;
 
-    const answer = projectField(response.assistant_text);
+    const answer = projectField(response.assistant_text, roster);
     if (answer !== null) {
       originalLength += response.assistant_text.length;
       projectedLength += answer.text.length;
-      if (answer.mode === 'whole_field') modes = 'whole_field';
+      escalate(answer.mode);
       editedFields.push('assistant_text');
       next = { ...next, assistant_text: answer.text };
     }
 
     const framing = response.framing_question;
     if (typeof framing === 'string') {
-      const projected = projectField(framing);
+      const projected = projectField(framing, roster);
       if (projected !== null) {
         originalLength += framing.length;
         projectedLength += projected.text.length;
-        if (projected.mode === 'whole_field') modes = 'whole_field';
+        escalate(projected.mode);
         editedFields.push('framing_question');
         next = { ...next, framing_question: projected.text };
       }

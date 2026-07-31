@@ -90,7 +90,18 @@ const EDIT_HANDLER_IDS = new Set([
 // Coaching-text bank. British English, sentence case, no em-dashes.
 // Typed Record over the derived CoachingSignalId union (coaching/types.ts):
 // adding an id to COACHING_SIGNAL_IDS without a bank entry fails to compile.
-const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
+/**
+ * ⚠ EXPORTED 2026-07-31 (ROADMAP 2.149) SO A CANARY CAN USE THE PRODUCTION COPY.
+ *
+ * `FIRST_ANALYSIS_COMPLETE` is the sentence #755's first cut destroyed — it says
+ * "explore the leading option", which trips the shared leader vocabulary and
+ * DESIGNATES NOTHING. The wire gate has the same exposure at a new address, and
+ * its canary must assert against THIS constant rather than a paraphrase: a
+ * paraphrase proves the gate spares a sentence the test author wrote, which is
+ * the one sentence that never changes. Reword the copy and the canary follows it
+ * in the same commit (CLAUDE.md trap #12).
+ */
+export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   readonly factorLabel?: string;
   readonly runDelta?: RunDelta | null;
 }) => string> = {

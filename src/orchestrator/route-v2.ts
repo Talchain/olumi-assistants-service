@@ -1185,17 +1185,25 @@ function sendFinalised200(
   // body-attach was dropped by the strip step above. Re-finalise for WeakSet
   // membership, same as the other surfaces.
   //
-  // Stale-sidecar fail-closed (P1 hardening): this block is the LAST body
-  // mutation before send, so the tie between the shape and the text the
-  // user actually receives is verified HERE, at the true final egress —
-  // covering every rewriter between the executor's compose-time capture and
-  // the wire (the executor's own STEP 6.6 / goal-receipt / backstop /
-  // finaliser guards are re-checked in finalizeRun; THIS check additionally
-  // covers the route-level sanitiseOlumiResponseForEgress entity-id scrub
-  // and any future mutator on this path). Mismatch ⇒ ship the body WITHOUT
-  // the sidecar, never a shape describing text the user never sees. The
-  // comparison runs on the POST-sanitise augmented body, i.e. the exact
-  // bytes `reply.send` would carry.
+  // Stale-sidecar fail-closed (P1 hardening): the tie between the shape and the
+  // text the user actually receives is verified HERE — covering every rewriter
+  // between the executor's compose-time capture and this point (the executor's
+  // own STEP 6.6 / goal-receipt / backstop / finaliser guards are re-checked in
+  // finalizeRun; THIS check additionally covers the route-level
+  // sanitiseOlumiResponseForEgress entity-id scrub). Mismatch ⇒ ship the body
+  // WITHOUT the sidecar, never a shape describing text the user never sees. The
+  // comparison runs on the POST-sanitise augmented body.
+  //
+  // ⚠ THIS BLOCK IS NO LONGER "THE LAST BODY MUTATION BEFORE SEND" — corrected
+  // 2026-07-31, and the old sentence is quoted rather than deleted (CLAUDE.md
+  // trap #14) because it was load-bearing for the argument above: it read
+  // *"this block is the LAST body mutation before send, so the tie … is verified
+  // HERE, at the true final egress"*. ROADMAP 2.149 added the claim-safety wire
+  // gate DOWNSTREAM of both shape passes, and that gate can rewrite
+  // `assistant_text`. The tie check here is therefore no longer sufficient on
+  // its own, which is exactly why the wire gate DROPS `_answer_shape` whenever
+  // it edits the answer rather than relying on this comparison to notice.
+  // Neither guard is now the last word alone; read them together.
   if (egress.ok && ctx.answerShape) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
@@ -1356,6 +1364,12 @@ function sendFinalised200(
     requestId,
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    // Read ONLY for the option ROSTER — "which options exist", never "which one
+    // leads". The gate enters only when the prose NAMES one of this scenario's
+    // own options, which is what spares "sales leads improved" and every other
+    // ordinary use of the shared vocabulary. `null` here disarms the gate for
+    // this turn and is REPORTED, not silent — see the opts docstring.
+    graph: ctx.graph,
   });
   if (wireEnforcement.changed) {
     let projected: import('@talchain/schemas/boundary').OlumiResponse =

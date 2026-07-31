@@ -19,6 +19,7 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
 import {
   enforceLeadingOptionClaimsAtWire,
+  optionRosterFromGraph,
   WIRE_ENFORCED_PROSE_FIELDS,
   WIRE_WITHHELD_LEADER_REPLACEMENT,
 } from '../leading-option-wire-enforcement.js';
@@ -45,7 +46,22 @@ function envelope(assistantText: string, extra: Record<string, unknown> = {}): O
   } as OlumiResponse;
 }
 
-const OPTS = { requestId: 'req-2149', exitPath: 'edit_graph' as const };
+/**
+ * The scenario's own graph — the ONLY thing this gate reads it for is the option
+ * ROSTER ("which options exist"), never a ranking. Without it the gate stands
+ * down, which is itself pinned below.
+ */
+const ROSTER_GRAPH = {
+  nodes: [
+    { id: 'goal_growth', kind: 'goal', label: 'Customer growth' },
+    { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
+    { id: 'opt_hire', kind: 'option', label: LEADER },
+    { id: 'opt_hold', kind: 'option', label: 'Hold' },
+  ],
+  edges: [],
+};
+
+const OPTS = { requestId: 'req-2149', exitPath: 'edit_graph' as const, graph: ROSTER_GRAPH };
 
 let events: Array<{ name: string; data: Record<string, unknown> }> = [];
 beforeEach(() => {
@@ -199,10 +215,11 @@ describe('framing_question — the second covered surface', () => {
 });
 
 describe('the whole_field LAST RESORT — bounded, coded, and not the normal path', () => {
-  it('fires only when no single unit carries the claim, and says so on the wire', () => {
-    // The claim straddles a unit boundary: the splitter cuts on the newline, so
-    // "leading" and "option" land in different units and neither asserts alone.
-    const straddling = 'The leading\noption is clear.';
+  it('fires only when BOTH escalations leave a residual that still asserts', () => {
+    // The claim straddles a soft wrap: the splitter cuts on the newline, so
+    // "leading" and "option" land in different units and neither asserts alone —
+    // and removing the name-bearing unit does not fix that either.
+    const straddling = 'Hire Marketing Manager.\nIt is the leading\noption.';
     expect(
       textAssertsLeadingOption(straddling),
       'fixture check — the whole field must assert, or this arm tests nothing',
@@ -226,6 +243,25 @@ describe('the whole_field LAST RESORT — bounded, coded, and not the normal pat
       emitted[0]!.data['mode'],
       'coded separately so a dashboard cannot sum the last resort into the success number',
     ).toBe('whole_field');
+  });
+
+  it('⭐ P2 SOFT-WRAP: non-naming prose can NO LONGER reach the last resort', () => {
+    // ⭐ THE FIX THE NAME GATE BUYS FOR FREE. Before it, ANY field that asserted
+    // while no unit did — a claim straddling a soft wrap, an abbreviation-split
+    // sentence — was replaced WHOLE, even though it designated nobody. Now
+    // `whole_field` is name-gated, so ordinary wrapped prose is untouchable.
+    const wrapped = 'Our capacity work is the leading\noption for next quarter, we think.';
+    expect(
+      textAssertsLeadingOption(wrapped),
+      'fixture check — this must still assert at field level, or the arm is vacuous',
+    ).toBe(true);
+    const input = envelope(wrapped);
+    const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: false,
+    });
+    expect(changed).toBe(false);
+    expect(response).toBe(input);
   });
 
   it('and the ordinary case is NOT coded whole_field', () => {
@@ -321,6 +357,234 @@ describe('residual (a) — the enforcer is NEVER wider than the alarm', () => {
   });
 });
 
+describe('⭐ P1-LEAK — the DISTRIBUTED claim, verbatim from the adversarial review', () => {
+  // ⭐ RED-FIRST, AND IT WAS RED ON THE FIRST CUT OF THIS GATE. Sentence surgery
+  // removes the unit carrying the VOCABULARY and ships the unit carrying the
+  // NAME — so the designation survives in two halves. The review reproduced this
+  // end to end and showed the #755 executor chokepoint suppresses the same input
+  // completely, i.e. the estate's proven design covers what surgery traded away.
+  const DISTRIBUTED = `${LEADER} is strong. It leads at 72%.`;
+
+  it('the naming half does NOT ship', () => {
+    const { response } = enforceLeadingOptionClaimsAtWire(envelope(DISTRIBUTED), {
+      ...OPTS,
+      mayNameLeadingOption: false,
+    });
+    expect(
+      response.assistant_text,
+      'surgery removed the vocabulary and left the NAME — the claim survives distributed',
+    ).not.toContain(LEADER);
+  });
+
+  it('and it is reported as an ESCALATION, not as ordinary surgery', () => {
+    enforceLeadingOptionClaimsAtWire(envelope(DISTRIBUTED), {
+      ...OPTS,
+      mayNameLeadingOption: false,
+    });
+    const emitted = events.filter(
+      (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+    );
+    expect(emitted[0]!.data['mode']).toBe('surgical_escalated');
+  });
+
+  it('INSTRUMENT: the permitted twin ships the distributed claim intact', () => {
+    // Positive control (trap #13) — without it, "the name is absent" could just
+    // mean this fixture never carried one.
+    const { response } = enforceLeadingOptionClaimsAtWire(envelope(DISTRIBUTED), {
+      ...OPTS,
+      mayNameLeadingOption: true,
+    });
+    expect(response.assistant_text).toBe(DISTRIBUTED);
+  });
+
+  it('a pronoun-free distributed claim is closed too', () => {
+    const spread = `${LEADER} came through well. The gap is real. That option comes out ahead.`;
+    const { response } = enforceLeadingOptionClaimsAtWire(envelope(spread), {
+      ...OPTS,
+      mayNameLeadingOption: false,
+    });
+    expect(response.assistant_text).not.toContain(LEADER);
+    expect(response.assistant_text).not.toContain('comes out ahead');
+  });
+});
+
+describe('⭐ P1-OVERSUPPRESS — honest receipts survive a withheld turn', () => {
+  // ⭐ RED-FIRST, AND ALSO RED ON THE FIRST CUT. Ordinary decision vocabulary fed
+  // the DELETING reader on every withheld turn. This is #755's canary class — an
+  // honest receipt destroyed by a guard — reopened at a new address, and the
+  // executor's own canaries are structurally BLIND to it because they drive the
+  // executor, not the wire.
+  it.each([
+    ['the review fixture, verbatim', 'Your sales leads improved this quarter.'],
+    ['lead time', 'Lead time is down to four weeks.'],
+    ['who leads', 'Who leads the coordination work?'],
+    ['ahead of plan', 'The rollout is ahead of plan.'],
+    [
+      'the estate MANUFACTURING its own banned vocabulary upstream',
+      'Explore the leading option and the factors shaping it.',
+    ],
+  ])('%s ships BYTE-IDENTICAL', (_label, text) => {
+    const input = envelope(text);
+    const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: false,
+    });
+    expect(changed, 'no option is named, so no designation is possible').toBe(false);
+    expect(response).toBe(input);
+  });
+
+  it('INSTRUMENT: four of those five really do trip the deleting reader', () => {
+    // ⭐ THE POSITIVE CONTROL THAT MAKES THE ARMS ABOVE MEAN SOMETHING: they are
+    // spared by the NAME gate, not because the vocabulary reader is asleep.
+    //
+    // ⚠ "Lead time is down to four weeks." IS DELIBERATELY NOT IN THIS LIST, and
+    // the omission is the finding rather than a gap. It does NOT trip the reader
+    // at all — `\bleads\b` is plural-only, so the singular noun "Lead" was never
+    // at risk. Listing it here would have manufactured a false positive control:
+    // the arm above would have "proved" the name gate spared a string nothing
+    // threatened. Checked, not assumed — see the explicit assertion below.
+    for (const text of [
+      'Your sales leads improved this quarter.',
+      'Who leads the coordination work?',
+      'The rollout is ahead of plan.',
+      'Explore the leading option and the factors shaping it.',
+    ]) {
+      expect(textAssertsLeadingOption(text), `expected the reader to fire on: ${text}`).toBe(true);
+    }
+    expect(
+      textAssertsLeadingOption('Lead time is down to four weeks.'),
+      'if this ever becomes true, the singular "lead" entered the shared vocabulary and the ' +
+        'over-suppression surface widened — move it into the loop above deliberately',
+    ).toBe(false);
+  });
+
+  it('a receipt that NAMES the edited option, with no claim, is untouched', () => {
+    // The other half: naming an option is not asserting a leader. An edit turn
+    // names the thing the user just edited, constantly.
+    const input = envelope(`Added a risk to ${LEADER}.`);
+    const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: false,
+    });
+    expect(changed).toBe(false);
+    expect(response).toBe(input);
+  });
+
+  it('⚠ PRICED, NOT HIDDEN: a receipt SHARING a field with a leader claim IS lost', () => {
+    // ⚠ THIS ARM EXISTS TO MAKE A COST VISIBLE, NOT TO BLESS IT. When a field
+    // both names an option and asserts a leader, escalation removes the
+    // name-bearing units — including an honest receipt. That is the price of
+    // closing the distributed leak, it is NOT worse than #755's chokepoint
+    // (which replaces the whole answer on exactly this input), and it must be a
+    // deliberate, reviewable decision rather than something discovered on
+    // staging. If this arm is ever "fixed", the P1-LEAK arms above go red.
+    const { response } = enforceLeadingOptionClaimsAtWire(
+      envelope(`Added a risk to ${LEADER}. It leads at 72%.`),
+      { ...OPTS, mayNameLeadingOption: false },
+    );
+    expect(response.assistant_text).toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
+  });
+});
+
+describe('THE ROSTER — "which options exist", never "which one leads"', () => {
+  it('a null graph stands the gate DOWN, and says so', () => {
+    const input = envelope(`${RECEIPT} ${CLAIM}`);
+    const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      graph: null,
+      mayNameLeadingOption: false,
+    });
+    expect(changed, 'no roster ⇒ no designation can be established ⇒ do not delete prose').toBe(
+      false,
+    );
+    expect(response).toBe(input);
+    const emitted = events.filter(
+      (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+    );
+    expect(
+      emitted[0]!.data['mode'],
+      'a SILENT stand-down is how a guarantee becomes theatre — the hole must be countable',
+    ).toBe('roster_unavailable');
+  });
+
+  it('a null graph on a body with NO leader vocabulary is silent', () => {
+    enforceLeadingOptionClaimsAtWire(envelope(RECEIPT), {
+      ...OPTS,
+      graph: null,
+      mayNameLeadingOption: false,
+    });
+    expect(
+      events.filter((e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire),
+      'reporting a stand-down that could not have mattered would drown the signal',
+    ).toEqual([]);
+  });
+
+  it('reads option nodes only, and ignores goals and factors', () => {
+    expect([...optionRosterFromGraph(ROSTER_GRAPH)]).toEqual([LEADER, 'Hold']);
+  });
+
+  it('ignores labels too short to be evidence', () => {
+    const roster = optionRosterFromGraph({
+      nodes: [
+        { id: 'a', kind: 'option', label: 'A' },
+        { id: 'b', kind: 'option', label: 'AB' },
+        { id: 'c', kind: 'option', label: 'Buy' },
+      ],
+    });
+    expect([...roster], 'a one- or two-character label collides with ordinary prose').toEqual([
+      'Buy',
+    ]);
+  });
+
+  it('is total over malformed shapes and never throws', () => {
+    expect(optionRosterFromGraph(null)).toEqual([]);
+    expect(optionRosterFromGraph(undefined)).toEqual([]);
+    expect(optionRosterFromGraph({})).toEqual([]);
+    expect(optionRosterFromGraph({ nodes: 'not-an-array' })).toEqual([]);
+    expect(optionRosterFromGraph({ nodes: [null, 7, { kind: 'option' }] })).toEqual([]);
+  });
+
+  it('matches option names as WHOLE TOKENS, not substrings', () => {
+    // "Hold" is an option; "holding" and "household" are not it.
+    const input = envelope('We are holding the household budget. The lead time is fine.');
+    const { changed } = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: false,
+    });
+    expect(changed).toBe(false);
+  });
+});
+
+describe('REFUTED — why the post-check does NOT use the wide ALARM reader', () => {
+  it('a carve-out phrase inside an ENTERED field must not force escalation', () => {
+    // ⚠ THE REVIEW'S PROPOSED POST-CHECK WAS "BOTH textAsserts AND textNames
+    // must be false". `textNamesLeadingOption` is the WIDE reader, and the only
+    // strings it sees that the narrow one does not are the two documented
+    // carve-outs — causal "leads to" and job-title "team leads". Neither can
+    // designate anything, so escalating on them deletes true, useful prose: the
+    // over-suppression finding rebuilt one layer in. Refuted with this case.
+    const text = `${LEADER} leads at 72%. Higher capacity leads to faster delivery.`;
+    expect(
+      textNamesLeadingOption('Higher capacity leads to faster delivery.'),
+      'fixture check — the WIDE reader must see this, or the refutation is empty',
+    ).toBe(true);
+    expect(
+      textAssertsLeadingOption('Higher capacity leads to faster delivery.'),
+      'fixture check — and the NARROW reader must not',
+    ).toBe(false);
+
+    const { response } = enforceLeadingOptionClaimsAtWire(envelope(text), {
+      ...OPTS,
+      mayNameLeadingOption: false,
+    });
+    expect(
+      response.assistant_text,
+      'the causal clause is true, useful, and designates nobody — it must survive',
+    ).toContain('Higher capacity leads to faster delivery.');
+    expect(response.assistant_text).not.toContain(LEADER);
+  });
+});
+
 describe('SCOPE — stated, asserted, and not implied by which arms exist', () => {
   it('exactly two prose fields are covered', () => {
     // ⚠ THIS ARM IS A CONVERSATION, NOT A RUBBER STAMP. If it goes red, the
@@ -359,5 +623,90 @@ describe('the shared unit machinery is SHARED, not copied', () => {
   it('replaceAssertingUnits returns the INPUT REFERENCE when nothing asserts', () => {
     const clean = 'Nothing here designates anything at all.';
     expect(replaceAssertingUnits(clean, textAssertsLeadingOption, 'X')).toBe(clean);
+  });
+
+  describe('⭐ P2 — ABBREVIATIONS ARE NOT SENTENCE ENDS', () => {
+    // ⚠ A FALSE BOUNDARY MAKES SURGERY LESS SURGICAL, NOT MORE: the "sentence"
+    // removed is half a clause, the user gets a mangled fragment, and the
+    // surviving half can still carry the designation. Structural rules, never an
+    // abbreviation allowlist (that is the trap-#12 mirror).
+    it.each([
+      ['vs. before a capital', 'Compare Hire vs. Hold on cost. Then decide.', 2],
+      ['i.e. before lowercase', 'Use the baseline, i.e. the current plan. Then decide.', 2],
+      ['e.g. before lowercase', 'Pick one, e.g. the cheaper route. Then decide.', 2],
+      ['No. before a digit', 'See No. 3 in the list. Then decide.', 2],
+      ['Inc. before lowercase', 'Acme Inc. reported a loss. Then decide.', 2],
+    ])('%s does not split', (_label, text, expectedUnits) => {
+      expect(splitIntoRedactableUnits(text)).toHaveLength(expectedUnits);
+    });
+
+    it('INSTRUMENT: a real sentence end still splits', () => {
+      // Otherwise the arms above would pass under a splitter that never splits.
+      expect(splitIntoRedactableUnits('It ran well. Then we decided.')).toHaveLength(2);
+      expect(splitIntoRedactableUnits('Did it work? We think so.')).toHaveLength(2);
+    });
+
+    it('the split stays LOSSLESS under the new rules', () => {
+      for (const sample of [
+        'Compare Hire vs. Hold on cost. Then decide.',
+        'Use the baseline, i.e. the current plan.\n\n• A bullet, no claim.\nTrailing',
+        'Did it work? Yes! Definitely.',
+      ]) {
+        expect(splitIntoRedactableUnits(sample).join('')).toBe(sample);
+      }
+    });
+
+    it('an abbreviation INSIDE a claim no longer leaves an orphaned fragment', () => {
+      // ⭐ THE END-TO-END CONSEQUENCE, and the reason this is a P1-adjacent fix
+      // rather than a cosmetic one. The claim is ONE sentence containing "vs.".
+      // Before the guard the splitter cut it in two, surgery removed only the
+      // first half, and the user received the tail as a free-standing sentence:
+      //
+      //   "No single option can be put forward yet. roughly 28% for the alternative."
+      //
+      // Half a claim, mid-clause, presented as prose. With the guard the sentence
+      // is one unit and goes whole.
+      const claimWithAbbrev = `${LEADER} leads at 72% vs. roughly 28% for the alternative.`;
+      expect(
+        splitIntoRedactableUnits(claimWithAbbrev),
+        'fixture check — this must be ONE unit, or the arm is not testing the guard',
+      ).toHaveLength(1);
+
+      const { response } = enforceLeadingOptionClaimsAtWire(envelope(claimWithAbbrev), {
+        ...OPTS,
+        mayNameLeadingOption: false,
+      });
+      expect(response.assistant_text).toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
+      expect(
+        response.assistant_text,
+        'the orphaned tail is what the false boundary used to leave behind',
+      ).not.toContain('roughly 28%');
+    });
+  });
+
+  describe('⭐ P2 — COLLAPSED REPLACEMENTS DO NOT GLUE THE NEXT SENTENCE ON', () => {
+    it('keeps the separator across a collapsed run', () => {
+      // ⚠ PRE-EXISTING, INHERITED WITH THE MOVE, AND INVISIBLE TO THE FOUR PROBES
+      // IN `withheld-history-redaction.ts` — none of them has TWO consecutive
+      // offending units followed by surviving prose. It produced "…yet.Done."
+      const glued = `${LEADER} leads at 72%. ${LEADER} comes out ahead. Done.`;
+      const { response } = enforceLeadingOptionClaimsAtWire(envelope(glued), {
+        ...OPTS,
+        mayNameLeadingOption: false,
+      });
+      expect(response.assistant_text).not.toContain('yet.Done');
+      expect(response.assistant_text).toBe(`${WIRE_WITHHELD_LEADER_REPLACEMENT} Done.`);
+    });
+
+    it('INSTRUMENT: the run really did collapse to one replacement', () => {
+      const glued = `${LEADER} leads at 72%. ${LEADER} comes out ahead. Done.`;
+      const { response } = enforceLeadingOptionClaimsAtWire(envelope(glued), {
+        ...OPTS,
+        mayNameLeadingOption: false,
+      });
+      const occurrences =
+        response.assistant_text.split(WIRE_WITHHELD_LEADER_REPLACEMENT).length - 1;
+      expect(occurrences).toBe(1);
+    });
   });
 });

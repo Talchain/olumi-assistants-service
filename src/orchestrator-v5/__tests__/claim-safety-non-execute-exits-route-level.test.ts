@@ -58,6 +58,9 @@ import { SIMPLIFY_CHANGE_CHIP_PROMPT } from '../routing/chip-simplify-intercept.
 // The WIRE gate's OWN replacement constant, so this file and the gate cannot
 // drift apart on the substituted copy (ROADMAP 2.149).
 import { WIRE_WITHHELD_LEADER_REPLACEMENT } from '../compose/leading-option-wire-enforcement.js';
+// The PRODUCER's own coaching copy, so the canary below cannot drift from the
+// sentence it exists to protect (CLAUDE.md trap #12).
+import { COACHING_TEXT } from '../signals/coaching-signals.js';
 
 const SCENARIO_ID = 'a1b2c3d4-1349-4123-8123-a1b2c3d41349';
 const LEADER_LABEL = 'Hire Marketing Manager';
@@ -622,7 +625,10 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     beforeEach(() => {
       dispatchEditGraphMock.mockResolvedValue({
         commitPerformed: true,
-        graph: null,
+        // The gate reads this for the option ROSTER only. A `graph: null` mock
+        // would silently disarm enforcement and every RED below would pass by
+        // testing nothing — the exits under test all ship a real graph.
+        graph: READY_GRAPH,
         response: {
           response_version: 2,
           assistant_text: EDIT_RECEIPT,
@@ -692,7 +698,10 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     function mockEditAnswer(assistantText: string): void {
       dispatchEditGraphMock.mockResolvedValue({
         commitPerformed: true,
-        graph: null,
+        // The gate reads this for the option ROSTER only. A `graph: null` mock
+        // would silently disarm enforcement and every RED below would pass by
+        // testing nothing — the exits under test all ship a real graph.
+        graph: READY_GRAPH,
         response: {
           response_version: 2,
           assistant_text: assistantText,
@@ -844,7 +853,10 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     beforeEach(() => {
       dispatchEditGraphMock.mockResolvedValue({
         commitPerformed: true,
-        graph: null,
+        // The gate reads this for the option ROSTER only. A `graph: null` mock
+        // would silently disarm enforcement and every RED below would pass by
+        // testing nothing — the exits under test all ship a real graph.
+        graph: READY_GRAPH,
         response: {
           response_version: 2,
           assistant_text: CAUSAL_ANSWER,
@@ -891,7 +903,7 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     function mockChipOk(opts: { mayName: boolean; text: string }): void {
       dispatchDeterministicChipClickMock.mockResolvedValue({
         outcome: 'ok',
-        graph: null,
+        graph: READY_GRAPH,
         mayNameLeadingOption: opts.mayName,
         // SUBSTANTIVE, deliberately: it is what makes the egress answer-shape
         // synthesiser attach `_answer_shape`, which is the sidecar this
@@ -984,6 +996,131 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     });
   });
 
+  // ── ⭐ THE WIRE-GATE CANARY — the blindness that let this slip ────────────
+
+  describe('⭐ CANARY: honest receipts survive the WIRE gate on a withheld turn', () => {
+    /**
+     * ⚠ WHY THIS LIVES HERE AND NOT IN THE EXISTING CANARY SUITE, which is the
+     * whole finding.
+     *
+     * `turn-executor-compound-edit-disclosure.test.ts` is the suite that caught
+     * #755's first cut destroying an honest receipt. It drives `runTurnExecutor`
+     * DIRECTLY — so it is STRUCTURALLY BLIND to anything `sendFinalised200` does.
+     * The wire gate reopened the identical defect class at a new address and
+     * every one of those canaries stayed green, because none of them can see the
+     * route. A canary that cannot reach the new seam is not a canary for it.
+     *
+     * These arms drive the REAL ROUTE with the same class of copy.
+     */
+    const MESSAGE = 'Add a risk for coordination overhead';
+
+    function driveEditWith(assistantText: string) {
+      dispatchEditGraphMock.mockResolvedValue({
+        commitPerformed: true,
+        graph: READY_GRAPH,
+        response: {
+          response_version: 2,
+          assistant_text: assistantText,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+      return postTurn(app, MESSAGE);
+    }
+
+    it("⭐ the #755 receipt — production copy, trips the vocabulary, designates NOTHING", async () => {
+      // ⭐ THE EXACT SENTENCE #755's FIRST CUT DESTROYED, imported from the
+      // producer so a reword cannot silently decouple this test from it.
+      // "explore the leading option" trips the shared vocabulary and names no
+      // option, so it must reach the user untouched.
+      const receipt = COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({});
+      const { status, body } = await driveEditWith(receipt);
+      expect(status).toBe(200);
+      expect(
+        body.assistant_text,
+        'the wire gate destroyed an honest receipt — this is #755 rebuilt at a new address',
+      ).toBe(receipt);
+    });
+
+    it('INSTRUMENT: that receipt really does trip the deleting reader', async () => {
+      // Without this, the arm above could be passing because the vocabulary
+      // reader never fires — i.e. testing nothing (CLAUDE.md trap #13).
+      const { textAssertsLeadingOption } = await import(
+        '../compose/leading-option-egress-guard.js'
+      );
+      expect(textAssertsLeadingOption(COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}))).toBe(true);
+    });
+
+    it.each([
+      ['sales leads', 'Added the risk. Your sales leads improved this quarter.'],
+      ['who leads', 'Added the risk. Who leads the coordination work?'],
+      ['ahead of plan', 'Added the risk. The rollout is ahead of plan.'],
+      ['causal leads-to', 'Added the risk. Higher capacity leads to faster delivery.'],
+    ])('ordinary decision vocabulary survives — %s', async (_label, text) => {
+      const { body } = await driveEditWith(text);
+      expect(body.assistant_text).toBe(text);
+    });
+
+    it('and the gate stays SILENT on all of them', async () => {
+      await driveEditWith('Added the risk. Your sales leads improved this quarter.');
+      expect(
+        events.filter(
+          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+        ),
+        'an edit that neutralised nothing must not report a neutralisation',
+      ).toEqual([]);
+    });
+  });
+
+  // ── ⭐ THE DISTRIBUTED CLAIM, AT THE ROUTE ───────────────────────────────
+
+  describe('⭐ the DISTRIBUTED claim does not ship at the main edit exit', () => {
+    const MESSAGE = 'Add a risk for coordination overhead';
+    // Name in one sentence, vocabulary in another. Sentence surgery alone
+    // removes the vocabulary and ships the name — the leak the review reproduced.
+    const DISTRIBUTED = `${LEADER_LABEL} is strong. It leads at 72%.`;
+
+    beforeEach(() => {
+      dispatchEditGraphMock.mockResolvedValue({
+        commitPerformed: true,
+        graph: READY_GRAPH,
+        response: {
+          response_version: 2,
+          assistant_text: DISTRIBUTED,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+    });
+
+    it('the naming half is gone from the wire', async () => {
+      const { status, body } = await postTurn(app, MESSAGE);
+      expect(status).toBe(200);
+      expect(
+        body.assistant_text,
+        'the vocabulary was removed and the NAME shipped — the claim survives distributed',
+      ).not.toContain(LEADER_LABEL);
+    });
+
+    it('and the escalation is visible on the dashboard', async () => {
+      await postTurn(app, MESSAGE);
+      const emitted = events.filter(
+        (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+      );
+      expect(emitted[0]!.data['mode']).toBe('surgical_escalated');
+    });
+
+    it('PERMIT-WINS: the permitted twin ships it BYTE-IDENTICAL', async () => {
+      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
+      const { body } = await postTurn(app, MESSAGE);
+      expect(body.assistant_text).toBe(DISTRIBUTED);
+    });
+  });
+
   // ── PROVENANCE VARIATION (the R3-M2 obligation) ──────────────────────────
 
   describe('PROVENANCE — the gate is not coupled to how the verdict was reached', () => {
@@ -1022,7 +1159,10 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     beforeEach(() => {
       dispatchEditGraphMock.mockResolvedValue({
         commitPerformed: true,
-        graph: null,
+        // The gate reads this for the option ROSTER only. A `graph: null` mock
+        // would silently disarm enforcement and every RED below would pass by
+        // testing nothing — the exits under test all ship a real graph.
+        graph: READY_GRAPH,
         response: {
           response_version: 2,
           assistant_text: LEADER_ANSWER,

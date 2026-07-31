@@ -861,8 +861,16 @@ export const TelemetryEvents = {
   // covers the population the other two structurally cannot. Read all three
   // together:
   //
-  //   ...leading_option_claim_withheld_violated  the ALARM. Observe-only,
-  //       measures what the PRODUCERS emitted. Non-zero is expected.
+  //   ...leading_option_claim_withheld_violated  the ALARM. Observe-only, and
+  //       since 2.149 it runs DOWNSTREAM of the wire gate, so it measures the
+  //       RESIDUE THAT STILL SHIPS — not everything the producers emitted.
+  //       (An earlier draft of this comment said "what the PRODUCERS emitted",
+  //       which contradicted the re-documentation at the alarm's own call site
+  //       in `route-v2.ts`. Two descriptions of one mechanism is the
+  //       hand-maintained mirror; the call site is the authority and this now
+  //       matches it.) Non-zero is expected: a hit names a surface the wire gate
+  //       does not cover, or a phrasing the wide ALARM reader sees and the
+  //       narrow ENFORCER reader deliberately spares.
   //   ...leading_option_claim_neutralised_at_finalise  the #755 chokepoint.
   //       Covers `runTurnExecutor`'s exits only — one of route-v2.ts's 19.
   //   ...leading_option_claim_neutralised_at_wire  THIS one. Covers the 18
@@ -873,14 +881,31 @@ export const TelemetryEvents = {
   // withheld turn emit nothing, so a non-zero rate here is real suppressed
   // leakage on a route exit, not gate traffic.
   //
-  // ⚠ READ `mode` BEFORE CELEBRATING A NON-ZERO RATE. `surgical` is the gate
-  // working: one sentence replaced, the rest of the answer byte-identical.
-  // `whole_field` is the LAST RESORT — the field asserts a leader but no single
-  // sentence does, so the split and the reader disagree and the whole field went.
-  // A non-trivial `whole_field` rate is a defect in the SPLITTER, not a success,
-  // and it is coded separately precisely so the two cannot be summed into one
-  // reassuring number. `enforcement_failed` means the projector threw and the
-  // response shipped unedited (the alarm above still reports the leak).
+  // ⚠ READ `mode` BEFORE CELEBRATING A NON-ZERO RATE. Two of the five mean
+  // NOTHING WAS NEUTRALISED, despite the event's name:
+  //
+  //   surgical            the gate working: only the vocabulary-bearing
+  //                       sentence(s) replaced, the rest byte-identical.
+  //   surgical_escalated  the DISTRIBUTED-CLAIM path — the residual still named
+  //                       the option after surgery, so the name-bearing
+  //                       sentences went too. Expected and correct; it is also
+  //                       the mode that costs a receipt when one shares a field
+  //                       with a leader claim.
+  //   whole_field         LAST RESORT — two escalations and the residual still
+  //                       named or asserted. Name-gated, so it can no longer
+  //                       fire on prose that never named an option. A
+  //                       non-trivial rate is a defect in the SPLITTER, not a
+  //                       success.
+  //   roster_unavailable  ⚠ NOTHING WAS EDITED. The exit shipped `graph: null`,
+  //                       so the option roster could not be built and the gate
+  //                       stood down on a body that DID carry leader vocabulary.
+  //                       This is the gate's known hole, reported rather than
+  //                       silent — a rising rate here means an exit stopped
+  //                       threading its graph.
+  //   enforcement_failed  ⚠ NOTHING WAS EDITED. The projector threw; the
+  //                       response shipped unedited (the alarm still reports it).
+  //
+  // The three edit modes and the two stand-down modes must never be summed.
   //
   // Privacy contract (R-004): `edited_fields` is a sorted join of a two-member
   // vocabulary; `mode` is the bounded union above; the lengths are finite
