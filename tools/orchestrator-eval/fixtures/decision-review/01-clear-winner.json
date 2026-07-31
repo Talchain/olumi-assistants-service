@@ -235,7 +235,7 @@
     },
     {
       "label": "banned_lexicon",
-      "note": "Uses \"winner\", \"wins\" and \"the best choice\" — three terms the served prompt bans outright.",
+      "note": "Uses \"winner\", \"wins\" and \"the best choice\" — three terms the served prompt bans outright. Trips TWO dimensions BY DESIGN: no_banned_lexicon (the eval pack's own served-contract list) and no_internal_term_leak (the runtime FORBIDDEN_USER_FACING_PHRASES, re-exported through guards.ts). \"is the best choice\" joined the runtime list under ROADMAP 2.213 (no-recommendations doctrine), so the runtime dimension now names it too. Both are TRUE positives on this deliberately-bad candidate — the second name was added when 2.213 landed, not a weakening of the exact-match rule.",
       "source": "recorded",
       "output": {
         "narrative_summary": "Enter European Market is the clear winner and wins by about 44 percentage points, so it is the best choice here. Competitive intensity is the main fragility.",
@@ -527,7 +527,8 @@
   },
   "expectedFailedDimensions": {
     "banned_lexicon": [
-      "no_banned_lexicon"
+      "no_banned_lexicon",
+      "no_internal_term_leak"
     ],
     "raw_decimal": [
       "no_raw_probability_decimals"

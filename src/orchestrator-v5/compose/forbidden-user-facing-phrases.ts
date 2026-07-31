@@ -136,6 +136,62 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   /\brecommended\b/i,
   /\bthe\s+winners?\b/i,
   /\bwinning\s+(?:option|probability|side|choice|outcome)\b/i,
+  // ROADMAP 2.213 — the no-recommendations doctrine, at the wire seam.
+  //
+  // Founder's BINDING ruling: "the product should not be recommending
+  // anything. It should be just providing science-grounded data and
+  // coaching." The four patterns above ban the recommendation NOUNS. They
+  // let the whole ADVISORY REGISTER through: "X is the clear best choice",
+  // "X is your best bet", "X is advisable", "X is the way to go", "you
+  // should choose X" all passed clean. `src/cee/key-insight/index.ts` (12
+  // strings) and `src/cee/recommendation-narrative/templates.ts` (11) shipped
+  // exactly that copy on live registered routes behind this guard until 2.213
+  // deleted both. The guard read as protection and was not.
+  //
+  // REMEDY CLASS — deliberately FATAL, not rewritable. The RC4 rewrite-first
+  // path (`applyTerminologyRewrite`) fixes a vocabulary offence in place
+  // ("recommendation" → "leading option"). A choice directive is not a
+  // vocabulary offence: substituting a noun leaves the product still telling
+  // the user what to pick. So there is NO TERMINOLOGY_RULES entry for this
+  // family, and a hit takes the whole-response neutral fallback. Because that
+  // remedy is destructive, every pattern below is anchored to a CHOICE frame
+  // rather than to bare English, and each was false-positive-swept over all
+  // 2,813 string-bearing files in this repo (src, tests, Prompts, tools,
+  // contracts, config, data, openapi.yaml) before being added.
+  //
+  // 1. The superlative-choice crowning: "<X> is/remains/looks like/appears to
+  //    be [the|your|clearly the|…] <superlative> <choice-noun>". The copula
+  //    anchor is what keeps legitimate coaching sayable — "what would make
+  //    Option B the better choice?" (adapters/llm/router.ts) and "the optimal
+  //    choice shifts from A to B" (assist.v1.isl-synthesis.ts) carry no
+  //    copula and do not match. The negation lookahead keeps the product able
+  //    to DE-recommend: "the status quo is not always the safest choice"
+  //    (cee/validation/pre-decision-checks.ts) must survive, and does.
+  //    `become` is deliberately absent from the copula set so conditional
+  //    flip readings ("X could become the better choice") stay sayable.
+  /\b(?:is|are|was|were|remains?|looks?\s+like|seems?|appears?\s+to\s+be)\s+(?!not\b|never\b|no\b|rarely\b|seldom\b)(?:\w+\s+){0,2}(?:best|better|optimal|right|obvious|clear|clearest|smartest|safest|sensible|superior|preferable)\s+(?:choice|option|bet|path|route)\b/i,
+  // 2. "your/the best bet" without a copula ("Your best bet: X").
+  /\b(?:your|the)\s+best\s+bet\b/i,
+  // 3. "advisable" — the ruling's exact prohibited verb. Bare-word safe: the
+  //    sweep found it in exactly four places, all inside the two modules 2.213
+  //    deleted, and nowhere else in the repo.
+  /\badvisable\b/i,
+  // 4. "the way to go" — one occurrence repo-wide, in a deleted template. No
+  //    legitimate use in data or coaching register.
+  /\bthe\s+way\s+to\s+go\b/i,
+  // 5. "gives you the best chance of <goal>" — a superlative crowning wearing
+  //    a probability's clothes, with no number attached.
+  /\bgives?\s+you\s+the\s+best\s+chance\b/i,
+  // 6. The explicit choice directive. This mirrors, verbatim, the pattern
+  //    `coaching/copy-quality-gate.ts:127` has policed on the COACHING path
+  //    since PR #171 — the gap 2.213 closes is that the WIRE guard never
+  //    carried it. Reusing the already-swept shape (rather than inventing a
+  //    wider one) is why bare "go with" / "proceed with" are NOT here: the
+  //    sweep found 66 legitimate "proceed with" and 69 legitimate "go with"
+  //    hits — option labels ("Proceed with acquisition"), coaching ("proceed
+  //    with caution"), and the user's own quoted question ("Should I go with
+  //    A or B?"). Banning them bare would erase real responses.
+  /\b(?:you|i)\s+(?:should|would)\s+(?:choose|pick|go\s+with|select)\b/i,
   // V5 deterministic-copy hardening (Area A) — internal implementation
   // vocabulary that must never reach user-facing prose. CONSERVATIVE set:
   // only multi-word internal phrases + single words with no legitimate

@@ -1,18 +1,18 @@
 /**
- * CEE Recommendation Narrative Module
+ * CEE Narrative Module (formerly "Recommendation Narrative")
  *
- * Generates human-readable recommendation narratives from graph analysis results.
- * Three main capabilities:
- * - generateRecommendation: Convert ranked options into prose
- * - narrateConditions: Generate conditional recommendation narratives
- * - explainPolicy: Explain sequential decision logic
+ * Two capabilities, both template-based (no LLM calls), both deterministic:
+ * - narrateConditions: narrate the caller's conditional branches
+ * - explainPolicy: explain sequential decision logic
  *
- * All functions are template-based (no LLM calls) for deterministic output.
+ * ROADMAP 2.213 (no-recommendations doctrine): `generateRecommendation` and
+ * its `/assist/v1/generate-recommendation` route were DELETED. They crowned
+ * a winner in the advisory register and had no caller in UI `src/**` or CEE
+ * `src/**`; the module's own egress-guard note already recorded the route as
+ * dead pending the V4 retirement decision.
  */
 
 import type {
-  GenerateRecommendationInput,
-  GenerateRecommendationOutput,
   NarrateConditionsInput,
   NarrateConditionsOutput,
   ExplainPolicyInput,
@@ -20,70 +20,16 @@ import type {
 } from "./types.js";
 
 import {
-  generateHeadline,
-  generateNarrative,
-  generateConfidenceStatement,
-  generateAlternativesSummary,
-  generateCaveat,
   generateConditionalNarrative,
   extractKeyDecisionPoints,
   generatePolicyNarrative,
   generateStepExplanations,
   generateDependenciesExplanation,
-  extractGoalContext,
-  generateWhyExplanation,
 } from "./templates.js";
 
 import { sanitiseLabel } from "../../utils/label-sanitiser.js";
 
 export * from "./types.js";
-
-/**
- * Generate a recommendation narrative from ranked actions.
- */
-export function generateRecommendation(
-  input: GenerateRecommendationInput,
-): GenerateRecommendationOutput {
-  const { ranked_actions, goal_label, brief, context: _context, tone = "formal", drivers } = input;
-
-  // Sort by rank (ascending) to get winner
-  const sorted = [...ranked_actions].sort((a, b) => a.rank - b.rank);
-  const winner = sorted[0];
-  const runnerUp = sorted[1];
-
-  // Extract goal context from brief or use explicit goal_label
-  const goalContext = extractGoalContext(brief, goal_label);
-
-  // Get confidence level for headline
-  const { statement: confidence_statement, confidence } =
-    generateConfidenceStatement(winner, ranked_actions, tone);
-
-  // Generate contextualised headline with goal and confidence
-  const headline = generateHeadline(winner, runnerUp, tone, goalContext, confidence);
-
-  const recommendation_narrative = generateNarrative(
-    winner,
-    runnerUp,
-    goal_label,
-    tone,
-  );
-
-  const alternatives_summary = generateAlternativesSummary(ranked_actions, tone);
-  const caveat = generateCaveat(winner, runnerUp, tone);
-
-  // Generate "why" explanation with driver impact
-  const why = generateWhyExplanation(winner, drivers, goal_label);
-
-  return {
-    headline,
-    recommendation_narrative,
-    confidence_statement,
-    alternatives_summary,
-    caveat,
-    why,
-    provenance: "cee",
-  };
-}
 
 /**
  * Generate conditional recommendation narratives.
@@ -129,50 +75,6 @@ export function explainPolicy(
     dependencies_explained,
     provenance: "cee",
   };
-}
-
-/**
- * Validate input for generate-recommendation.
- */
-export function validateGenerateRecommendationInput(
-  input: unknown,
-): input is GenerateRecommendationInput {
-  if (!input || typeof input !== "object") {
-    return false;
-  }
-
-  const obj = input as Record<string, unknown>;
-
-  // Check ranked_actions array
-  if (!Array.isArray(obj.ranked_actions) || obj.ranked_actions.length === 0) {
-    return false;
-  }
-
-  for (const action of obj.ranked_actions) {
-    if (typeof action !== "object" || !action) return false;
-    const a = action as Record<string, unknown>;
-    if (typeof a.node_id !== "string") return false;
-    if (typeof a.label !== "string") return false;
-    if (typeof a.score !== "number") return false;
-    if (typeof a.rank !== "number") return false;
-  }
-
-  // Optional fields
-  if (obj.goal_label !== undefined && typeof obj.goal_label !== "string") {
-    return false;
-  }
-  if (obj.context !== undefined && typeof obj.context !== "string") {
-    return false;
-  }
-  if (
-    obj.tone !== undefined &&
-    obj.tone !== "formal" &&
-    obj.tone !== "conversational"
-  ) {
-    return false;
-  }
-
-  return true;
 }
 
 /**

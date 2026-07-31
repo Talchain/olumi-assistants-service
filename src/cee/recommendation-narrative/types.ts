@@ -1,56 +1,14 @@
 /**
- * CEE Recommendation Narrative Types
+ * CEE Narrative Types
  *
- * Shared types for the three recommendation narrative endpoints:
- * - generate-recommendation
+ * Shared types for the two ACTIVE narrative endpoints:
  * - narrate-conditions
  * - explain-policy
+ *
+ * ROADMAP 2.213: the generate-recommendation types (`RankedAction`,
+ * `GenerateRecommendationInput`, `GenerateRecommendationOutput`) were deleted
+ * with the route and composer they served.
  */
-
-export type Tone = "formal" | "conversational";
-export type Confidence = "high" | "medium" | "low";
-
-// Generate Recommendation types
-export interface RankedAction {
-  node_id: string;
-  label: string;
-  score: number; // 0-100
-  rank: number; // 1-based
-  /** Optional outcome quality indicator - used to avoid contradictory messaging */
-  outcome_quality?: "positive" | "neutral" | "negative" | "mixed";
-  /** Optional: whether this option has associated risks */
-  has_risks?: boolean;
-  /** Optional: primary outcome label for context */
-  primary_outcome?: string;
-}
-
-export interface GenerateRecommendationInput {
-  ranked_actions: RankedAction[];
-  goal_label?: string;
-  /** User's original decision brief for context extraction */
-  brief?: string;
-  context?: string;
-  tone?: Tone;
-  /** Top drivers influencing the recommendation */
-  drivers?: Array<{
-    id?: string;
-    label: string;
-    /** Impact as a percentage (0-100) */
-    impact_pct?: number;
-    direction?: "positive" | "negative" | "neutral";
-  }>;
-}
-
-export interface GenerateRecommendationOutput {
-  headline: string;
-  recommendation_narrative: string;
-  confidence_statement: string;
-  alternatives_summary?: string;
-  caveat?: string;
-  /** Why this option is recommended, including driver impact */
-  why?: string;
-  provenance: "cee";
-}
 
 // Narrate Conditions types
 export interface ConditionBranch {

@@ -291,7 +291,7 @@ export interface CeeFeatureRateLimiter {
 /**
  * Get or create a rate limiter for a CEE feature.
  *
- * @param feature - Feature name (e.g., "generate_recommendation")
+ * @param feature - Feature name (e.g., "narrate_conditions")
  * @param envVarName - Environment variable for RPM config (optional)
  */
 export function getCeeFeatureRateLimiter(

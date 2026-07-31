@@ -1,20 +1,22 @@
 /**
  * Route-level forbidden-phrase egress guard for the active V1 narrative
- * routes (`narrate-conditions`, `explain-policy`, `key-insight`).
+ * routes (`narrate-conditions`, `explain-policy`).
  *
  * Why: PR #173's `FORBIDDEN_USER_FACING_PHRASES` is the single source of
  * truth for banned user-facing copy (`recommendation`, `recommended`,
- * `the winner`, `winning <X>`, plus the V5 staleness / denial set). The
- * V5 turn-executor applies it via `applyEgressForbiddenPhraseGuard`,
- * but the V1 routes that pre-date V5 — narrate-conditions, explain-
- * policy, key-insight — emit their composer output verbatim to the
- * wire. The P0 cleanup rewrites the obvious template hits, and this
- * guard catches anything a future template regression introduces.
+ * `the winner`, `winning <X>`, the ROADMAP 2.213 choice-directive set,
+ * plus the V5 staleness / denial set). The V5 turn-executor applies it
+ * via `applyEgressForbiddenPhraseGuard`, but the V1 routes that pre-date
+ * V5 — narrate-conditions, explain-policy — emit their composer output
+ * verbatim to the wire. The P0 cleanup rewrites the obvious template
+ * hits, and this guard catches anything a future template regression
+ * introduces.
  *
- * Wired into the three ACTIVE routes only. The dead
- * /assist/v1/generate-recommendation route is left out per the V4
- * retirement decision recorded in the P0 plan; adding it to a
- * caller-less route would be complexity for no defended surface.
+ * ROADMAP 2.213: the two other routes this guard used to serve are gone.
+ * `/assist/v1/key-insight` was DELETED (12 recommendation-class strings,
+ * no caller end-to-end); `/assist/v1/generate-recommendation` was DELETED
+ * (11 such strings, already recorded here as dead pending the V4
+ * retirement decision, and never wired to this guard).
  *
  * Hard rule: NEVER mutate the response shape. Replace only string
  * field values with the neutral fallback when a banned phrase fires.
