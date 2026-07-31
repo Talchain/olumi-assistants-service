@@ -17,7 +17,11 @@
  * conditional branches.
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterAll, describe, expect, it } from 'vitest';
 import {
   buildDecisionReviewUserMessage,
   DECISION_REVIEW_MAX_GRAPH_NODES,
@@ -33,6 +37,7 @@ import { loadDecisionReviewFixtures } from '../src/decision-review/run.js';
 import type { DecisionReviewEvalInput } from '../src/decision-review/types.js';
 
 const fixtures = loadDecisionReviewFixtures();
+const HERE_REPORTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'reports');
 
 describe('the eval calls the PRODUCTION assembler', () => {
   it('produces byte-identical output to a direct runtime call', () => {
@@ -138,6 +143,55 @@ describe('the runtime caps still apply through the eval', () => {
       brief: 'x'.repeat(DECISION_REVIEW_MAX_BRIEF_CHARS + 100),
     };
     expect(assembleDecisionReviewUserMessage(long).userMessage).toContain('brief truncated at');
+  });
+});
+
+describe('the fixture LOADER refuses junk and refuses emptiness', () => {
+  // The regression: the loader globbed every *.json and cast the result, so
+  // once the baseline run wrote its report JSON beside the capture fixtures,
+  // the README's own documented command crashed. The flagship artefact was not
+  // reproducible by following the committed instructions.
+  const tmp = mkdtempSync(join(tmpdir(), 'dr-fixtures-'));
+
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  it('RED: a non-fixture *.json in the directory is REFUSED BY NAME', () => {
+    const dir = mkdtempSync(join(tmp, 'withreport-'));
+    writeFileSync(join(dir, '01-real.json'), JSON.stringify(fixtures[0]));
+    writeFileSync(join(dir, 'zz-report.json'), JSON.stringify({ servedHash: 'abc', reports: [] }));
+    expect(() => loadDecisionReviewFixtures(dir)).toThrow(/zz-report\.json is not a decision_review fixture/);
+  });
+
+  it('the refusal names the MISSING KEYS, so the fix is obvious', () => {
+    const dir = mkdtempSync(join(tmp, 'partial-'));
+    writeFileSync(join(dir, 'broken.json'), JSON.stringify({ id: 'x', input: {} }));
+    expect(() => loadDecisionReviewFixtures(dir)).toThrow(/missing: candidates, expected/);
+  });
+
+  it('RED: an EMPTY load throws rather than reporting a green run over nothing', () => {
+    // Trap 13 one level above the scorer: an empty pack makes every downstream
+    // assertion pass by iterating nothing, and takes the whole suite green.
+    const dir = mkdtempSync(join(tmp, 'empty-'));
+    expect(() => loadDecisionReviewFixtures(dir)).toThrow(/Refusing an empty pack/);
+  });
+
+  it('GREEN: a directory of real fixtures still loads', () => {
+    const dir = mkdtempSync(join(tmp, 'clean-'));
+    writeFileSync(join(dir, '01-real.json'), JSON.stringify(fixtures[0]));
+    expect(loadDecisionReviewFixtures(dir)).toHaveLength(1);
+  });
+
+  it('the COMMITTED baseline captures directory loads cleanly (the README command works)', () => {
+    // The flagship artefact must be reproducible as documented. This is that
+    // claim, asserted rather than asserted-in-prose.
+    const captures = join(
+      HERE_REPORTS,
+      'decision-review-v14-baseline-2026-07-31',
+      'captures',
+    );
+    const loaded = loadDecisionReviewFixtures(captures);
+    expect(loaded.length).toBe(2);
+    expect(loaded.map((f) => f.id).sort()).toEqual(['live-r1-crm-status-quo', 'live-r3-crm-rerun']);
   });
 });
 

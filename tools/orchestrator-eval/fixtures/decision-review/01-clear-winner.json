@@ -535,7 +535,10 @@
     ],
     "degenerate_empty": [
       "substance_present",
-      "review_card_coverage"
+      "review_card_coverage",
+      "shape_valid",
+      "story_headlines_match_options",
+      "primary_risk_coherent"
     ]
   }
 }

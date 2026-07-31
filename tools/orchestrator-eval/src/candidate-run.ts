@@ -33,6 +33,7 @@
  * sample, not a proof.
  */
 
+import { createHash } from 'node:crypto';
 import { assembleAnalysis } from './assemble.js';
 import { scoreCandidate } from './scorer.js';
 import { enforceTurnCap, resolveLiveGate, type LiveGateInput, type LiveGateResult } from './live-gate.js';
@@ -40,7 +41,12 @@ import { resolvePmsPromptText, type CandidatePromptSpec } from './prompt-source.
 import type { EvalTaskKey } from './tasks.js';
 import type { EvalTaskAdapter, ExtractionMode, ScoredOutput } from './task-adapter.js';
 import { loadFixtures } from './run.js';
-import type { DimensionResult, OrchestratorEvalFixture, ScoreResult } from './types.js';
+import { finaliseScore, type DimensionResult, type OrchestratorEvalFixture, type ScoreResult } from './types.js';
+
+/** sha256, first 16 hex chars — the same shape `Prompts/canonical/manifest.json` records. */
+function sha16(text: string): string {
+  return createHash('sha256').update(text, 'utf-8').digest('hex').slice(0, 16);
+}
 
 /** The v30.3 JSON-forcing suffix (mirrors tools/graph-evaluator adapters/orchestrator.ts). */
 const JSON_FORCING_SUFFIX = '\n\nRespond with valid JSON only.';
@@ -79,6 +85,19 @@ export interface CandidateReport {
   readonly label: string;
   readonly ref: string;
   readonly kind: CandidatePromptSpec['kind'];
+  /**
+   * SELF-WITNESS: sha256 (first 16 hex) of the prompt text this arm actually
+   * SENT. Null for `mock:` arms, which send no prompt.
+   *
+   * Recorded because attribution-by-pointer is not attribution. The first
+   * baseline stated "the served v14 prompt" on the strength of a manifest
+   * pointer read days before the captures — and a pointer is exactly what trap
+   * 12c is about: `stagingVersion` read 120 while turns were still being served
+   * 119. For a direct-model run the prompt is supplied by this tool, so hashing
+   * what was sent is a genuine per-run witness rather than a second pointer,
+   * and a report can be tied to prompt BYTES instead of a version number.
+   */
+  readonly promptSha16: string | null;
   readonly results: readonly CandidateFixtureResult[];
   readonly passCount: number;
   /**
@@ -213,6 +232,7 @@ export function applyExtractionContract(score: ScoreResult, extraction: Extracti
       ? {
           ...d,
           pass: false,
+          status: 'fail' as const,
           detail: 'fail-closed: envelope did not parse, so no user-facing text was extractable — counts as empty',
         }
       : d,
@@ -220,12 +240,16 @@ export function applyExtractionContract(score: ScoreResult, extraction: Extracti
   dimensions.push({
     name: 'extraction_contract',
     pass: extracted,
+    status: extracted ? 'pass' : 'fail',
     source: 'eval-assertion',
     detail: extracted
       ? 'v30.3 envelope parsed; `text` field scored'
       : 'raw output did not parse as the v30.3 envelope — a flagged turn is a failed turn',
   });
-  return { ...score, dimensions, pass: dimensions.every((d) => d.pass) };
+  // Re-finalised (not spread) so `measured` / `notApplicable` / `passed` are
+  // recomputed over the amended dimension list. Spreading the old counts would
+  // leave the denominator one short of the dimensions actually present.
+  return finaliseScore(score.candidate, dimensions);
 }
 
 /**
@@ -469,10 +493,12 @@ export async function runCandidateEval<F = OrchestratorEvalFixture>(
       (n, r) => n + (r.score ? r.score.dimensions.filter((d) => !d.pass).length : 0),
       0,
     );
+    const sentPrompt = promptTexts.get(spec.label) ?? null;
     candidates.push({
       label: spec.label,
       ref: spec.ref,
       kind: spec.kind,
+      promptSha16: sentPrompt === null ? null : sha16(sentPrompt),
       results,
       passCount,
       substanceFailedTurnCount,

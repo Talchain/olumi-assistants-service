@@ -4,10 +4,25 @@ The tool's first real run artefact, and the point of Harness H1: the pending v14
 rewrite is Paul-approved **conditional on carrying its own before/after eval**
 ("do not rewrite blind"). This is the *before*.
 
-**Contract measured:** PMS `decision_review_default` **v14**, sha256
-`b4f15305c2bb32e9…` — byte-identical to the manifest's
-`live_served_hash_observed` with `served_hash_verified: true`. Not a proxy for
-the served prompt; the served prompt.
+**Contract measured:** `Prompts/canonical/decision_review.txt`, sha256
+`b4f15305c2bb32e9…`. That IS the text the eval parses its rules from, verified by
+hashing the file — no proxy there.
+
+**⚠ Its attribution to PMS v14 is a POINTER, not a witness.** The manifest
+recorded `live_served_hash_observed: b4f15305c2bb32e9` with
+`served_hash_verified: true` when it was generated on **2026-07-27** — roughly
+**2.5 days before** the captures below were taken (2026-07-30). The captures
+carry no per-response prompt hash, so **nothing here witnesses which prompt
+version actually served those turns.** That gap is not hypothetical on this
+platform: a prompt pointer has read 120 while live turns were still being served
+119, with a ~5-minute per-instance loader TTL, so a version pin and what is
+served can disagree for a window nobody sees. Read "v14" throughout this document
+as *best available attribution*, never as established fact.
+
+**The fix is wired for next time:** the live candidate path now records the
+sha256 prefix of the prompt text it sent (`CandidateReport.promptSha16`, printed
+by the CLI). The first paid baseline run will therefore self-witness its own
+prompt bytes instead of inheriting a pointer.
 
 **Model:** gpt-4.1 (`src/config/model-routing.ts:152`, the registered pin).
 
@@ -21,9 +36,10 @@ the served prompt; the served prompt.
 |---|---|
 | fixtures | 7 |
 | candidates scored | 27 (7 good, 20 seeded-bad) |
-| candidates passing all 19 dimensions | 7 — exactly the 7 good ones |
+| candidates passing every MEASURED dimension | 7 — exactly the 7 good ones |
 | fixtures agreeing with their recorded expectations | 7/7 |
 | dimensions with a seeded RED somewhere in the pack | 19/19 |
+| seeds failing EXACTLY their named dimensions | 20/20 (exact set equality, not subset) |
 
 This half measures the **pack**, not the prompt: it proves each dimension fires
 on a defect it was built for and stays quiet on a clean review. It is the CI-safe
@@ -42,14 +58,37 @@ against the served v14 prompt. Scoring them costs nothing and measures the thing
 that matters — what v14 actually emits — rather than what it emits to a
 freshly-invented fixture.
 
-### Result: 18/19 on both runs, and they fail DIFFERENT rules
+### Result: **15/16 MEASURED** on both runs — and they fail DIFFERENT rules
 
-| run | verdict | failing dimension | the actual string |
-|---|---|---|---|
-| r1 | 18/19 | `no_internal_vocabulary` (served-prompt-derived) | `readiness_rationale`: *"**The readiness is high** because the current setup outperforms alternatives…"* |
-| r3 | 18/19 | `no_dashes` (served-prompt-derived) | `narrative_summary`: *"…leads by a wide margin**—**about 88 percentage points ahead of HubSpot…"* |
+| run | measured | not applicable | failing dimension | the actual string |
+|---|---|---|---|---|
+| r1 | **15/16** | 3 | `no_internal_vocabulary` (served-prompt-derived) | `readiness_rationale`: *"**The readiness is high** because the current setup outperforms alternatives…"* |
+| r3 | **15/16** | 3 | `no_dashes` (served-prompt-derived) | `narrative_summary`: *"…leads by a wide margin**—**about 88 percentage points ahead of HubSpot…"* |
 
-Both are breaches of the served prompt's **own** banned list:
+> **This figure was previously published as 18/19 and that was wrong.** The
+> earlier pack had only pass/fail, so a dimension that could not be evaluated
+> reported `pass: true` and sat in the denominator. Three dimensions here measure
+> nothing, and counting them as passes is precisely the "asserted, not measured"
+> failure this pack exists to end — committed inside the pack itself. The
+> denominator is now MEASURED dimensions only, and the three below are reported
+> out of band.
+
+**The three NOT-APPLICABLE dimensions, and why each is genuinely unmeasurable:**
+
+| dimension | why |
+|---|---|
+| `tone_alignment` | resolves its row from `deterministic_coaching.readiness` / `headline_type`, which is CEE-internal and never echoed to the wire. **v14's tone compliance is UNMEASURED**, not measured-and-clean. |
+| `entity_references_grounded` | **both runs emitted `bias_findings: []`** — zero references for the grounding rule to check. The rule ran over an empty corpus. |
+| `infeasible_winner_disclosed` | the leading option is feasible, so there is no infeasibility to disclose. Correctly inapplicable. |
+
+**A finding in its own right: v14 produced NO bias findings at all on either
+run.** The #645 contract gate's `ungrounded_entity_reference` rule, the
+`bias_findings` count cap, and this pack's grounding dimension are therefore all
+unexercised in production on this scenario — not passing, unexercised. A gate
+that never fires is indistinguishable from one that works until something makes
+it fire.
+
+Both failures breach the served prompt's **own** banned list:
 
 - `readiness` is named in the internal-vocabulary ban
   (`Prompts/canonical/decision_review.txt:121`), which instructs the model to say
@@ -68,9 +107,25 @@ DIFFERENT rules.** Same scenario, same prompt, same model: one run leaked a fiel
 name, the other an em dash. That is not a stable defect that a single spot-check
 would have characterised — it is a compliance RATE, and n=2 is far too small to
 estimate one. Any before/after comparison for the rewrite needs repeated runs per
-arm, which is exactly what `tools/conversation-harness/scorer/ab-verdict.ts`
-already implements (N≥3, median for quality dims, WORST-run for safety dims).
-Treat "18/19" as one sample, never as a score.
+arm, which `tools/conversation-harness/scorer/ab-verdict.ts` already implements
+(N≥3, median for quality dims, WORST-run for safety dims). Treat "15/16" as one
+sample, never as a score.
+
+### Reproducing this
+
+```bash
+pnpm eval:decision-review --fixtures-dir tools/orchestrator-eval/reports/decision-review-v14-baseline-2026-07-31/captures --verbose
+```
+
+The capture fixtures live in `captures/`, deliberately NOT beside the report
+JSONs: the fixture loader globs `*.json`, so a report written into the fixture
+directory made this exact command crash in the first release. The loader now
+validates fixture shape and refuses an empty load, and a test runs this directory
+so the documented command cannot silently rot again.
+
+The recorded `expected` verdict on each capture is an **observation frozen on
+2026-07-31, not a target**. The outputs are immutable, so a change in these
+verdicts means the SCORER moved — which is what the pin is for.
 
 ### What this baseline does NOT measure — read before quoting it
 

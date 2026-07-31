@@ -130,6 +130,103 @@ describe('RED-first: each seeded candidate fails the dimension it names', () => 
   }
 });
 
+describe('exact-match agreement (amendment: the check said EXACTLY, the code checked SUBSET)', () => {
+  it('RED: naming FEWER dimensions than a candidate fails is a DISAGREEMENT', () => {
+    // The bug this pins: `every(name => failed.has(name))` accepted any
+    // superset, so a seed that tripped extra dimensions still "agreed". Three
+    // of the pack's twenty seeds were doing exactly that, and the README, PR
+    // body and evidence file all repeated "fails exactly the dimension each
+    // names" on the strength of a check that could not have detected otherwise.
+    const fixture = fixtures.find((f) => f.id === '01-clear-winner')!;
+    const understated: DecisionReviewEvalFixture = {
+      ...fixture,
+      expectedFailedDimensions: {
+        ...fixture.expectedFailedDimensions,
+        degenerate_empty: ['substance_present'], // it actually fails five
+      },
+    };
+    expect(runDecisionReviewFixture(understated).dimensionAgreement.degenerate_empty).toBe(false);
+  });
+
+  it('RED: naming a dimension the candidate does NOT fail is a disagreement', () => {
+    const fixture = fixtures.find((f) => f.id === '01-clear-winner')!;
+    const overstated: DecisionReviewEvalFixture = {
+      ...fixture,
+      expectedFailedDimensions: {
+        ...fixture.expectedFailedDimensions,
+        banned_lexicon: ['no_banned_lexicon', 'no_dashes'], // no_dashes is clean here
+      },
+    };
+    expect(runDecisionReviewFixture(overstated).dimensionAgreement.banned_lexicon).toBe(false);
+  });
+
+  it('GREEN: the shipped pack names every failure of every seed', () => {
+    for (const fixture of fixtures) {
+      const report = runDecisionReviewFixture(fixture);
+      for (const [label, ok] of Object.entries(report.dimensionAgreement)) {
+        expect(ok, `${fixture.id}/${label} does not fail EXACTLY its named dimensions`).toBe(true);
+      }
+    }
+  });
+
+  it('RED: a candidate missing from `expected` is refused, not silently agreed', () => {
+    // Previously an unlisted candidate defaulted to "agrees" — so a candidate
+    // dropped from `expected` by a rename or a merge would be scored and then
+    // ignored, while the pack still reported full agreement.
+    const fixture = fixtures[0];
+    const { good: _dropped, ...rest } = fixture.expected as Record<string, boolean>;
+    expect(() =>
+      runDecisionReviewFixture({ ...fixture, expected: rest }),
+    ).toThrow(/have no entry in/);
+  });
+});
+
+describe('tone matching is word-boundary, not substring', () => {
+  // Both strings are the reviewer's demonstrated cases. Substring matching made
+  // COMPLIANT cautious prose score as a tone breach — an alarm that fires on
+  // correct output, which is worse than one that misses a defect: it trains
+  // operators to ignore it, and it would have penalised a rewrite for doing
+  // exactly what the cautious row demands.
+  const cautious = fixtures.find((f) => f.id === '03-needs-evidence')!; // forbids "ready", "confident", "clear"
+
+  const withNarrative = (text: string): DecisionReviewEvalFixture => {
+    const good = cautious.candidates.find((c) => c.label === 'good')!;
+    return {
+      ...cautious,
+      candidates: [{ ...good, label: 'probe', output: { ...good.output, readiness_rationale: text } }],
+      expected: { probe: true },
+      expectedFailedDimensions: {},
+    };
+  };
+
+  const toneOf = (fixture: DecisionReviewEvalFixture) =>
+    runDecisionReviewFixture(fixture).scores[0].dimensions.find((d) => d.name === 'tone_alignment')!;
+
+  it('NEGATIVE CONTROL: "already" does not trip the forbidden word "ready"', () => {
+    const dim = toneOf(
+      withNarrative('Engineering capacity evidence has already been requested from the team.'),
+    );
+    expect(dim.status).toBe('pass');
+  });
+
+  it('NEGATIVE CONTROL: "unclear" does not trip the forbidden word "clear"', () => {
+    const dim = toneOf(
+      withNarrative('Engineering capacity remains unclear, so evidence should come first.'),
+    );
+    expect(dim.status).toBe('pass');
+  });
+
+  it('POSITIVE CONTROL: the bare forbidden word still trips it', () => {
+    // Without this, the boundary fix could have been "match nothing" and both
+    // negative controls above would still pass.
+    const dim = toneOf(
+      withNarrative('Engineering capacity is clear, so the team is ready to proceed.'),
+    );
+    expect(dim.status).toBe('fail');
+    expect(dim.detail).toContain('ready to proceed');
+  });
+});
+
 describe('dimension coverage', () => {
   /**
    * Dimensions with no seeded RED candidate, each with the reason it has none.

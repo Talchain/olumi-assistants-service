@@ -393,12 +393,32 @@ prompt bans today. A term the prompt silently RETIRES turns
 failed. Never "refresh" the floor to match a newer prompt — record the
 retirement as a dated exception instead.
 
-**Anti-vacuity.** Eleven of the 19 dimensions are ABSENCE checks, which an empty
-output satisfies for free. Two structural defences: `substance_present` is a
-floor that a degenerate output must fail, and every absence dimension reports
-`scanned` — the size of the corpus it actually examined — which the anti-vacuity
-test requires to be non-zero on every good candidate. A dimension that quietly
-stops looking goes RED even while it reports "clean".
+**Three states, not two.** A dimension that could not be evaluated — because the
+input lacks the field it reads, or the served contract constrains nothing on this
+run — is `not_applicable`. It is **excluded from the measured denominator** and
+reported out of band. Every "N/M" this tool prints is `passed/measured`.
+
+This is an amendment, and it changed a published number: the first baseline read
+**18/19** on the live captures because three unevaluable dimensions were counted
+as passes. It is **15/16 measured, 3 not applicable**. An unmeasured dimension
+counting as a pass is the exact failure this pack exists to end, and it had
+happened inside the pack.
+
+**Anti-vacuity.** Most dimensions are ABSENCE checks, which an empty output
+satisfies for free. Three structural defences:
+
+- `substance_present` is a FLOOR a degenerate output must fail;
+- every dimension reports `scanned` — **always the CONTENT it examined**, never
+  the number of rules it applied. (An earlier draft let it mean either, and
+  `no_banned_lexicon` reported `scanned: 10` — its parsed rule count — on an
+  output with no prose at all. Ten rules times zero strings is zero checks. Rule
+  counts now live in the `detail` string, where they inform without inflating.)
+- a dimension that PASSES over a zero corpus is **demoted to `not_applicable`
+  by construction**, in one place, so a new dimension inherits the rule by
+  existing rather than by being remembered.
+
+Together these mean a degenerate output reports `measured=5, NA=14, passed=0` —
+visibly unmeasurable rather than mostly clean.
 
 **Judge layer: deliberately NOT wired.** SEAM-2 stays closed. The rubric-judge
 pattern already exists twice (`tools/conversation-harness/scorer/llm-judge.ts`,
@@ -427,6 +447,22 @@ lexically.
   shape check is the contract this pack enforces; the prompt specifies more
   (character caps, technique tables, `brief_evidence` substring rules) that
   nothing here checks yet.
+- **One unavoidable MIRROR of runtime state, made loud.** `countDescriptiveNumbers`
+  reproduces `DESCRIPTIVE_FIELD_KEYS`, `NUMBER_PATTERN` and `PERCENTAGE_PATTERN`,
+  all module-private in `src/cee/decision-review/shape-check.ts`, because
+  `checkNumberGrounding` returns only warnings — a clean result is
+  indistinguishable from "there were no numbers here", which is the vacuity
+  `scanned` exists to expose. That is a hand-maintained mirror inside the
+  anti-vacuity machinery. It cannot be fixed from here (exporting the constants
+  is a `src/` change, outside this lane's file-set boundary), so
+  `decision-review-runtime-mirror.test.ts` reads `shape-check.ts` **as text** at
+  test time and asserts the copies match the source bytes. **The clean fix —
+  export the three constants and import them — belongs to the next src-side
+  decision_review lane.**
+- **`ENTITY_ID_IN_PROSE_PATTERN` carries a hand-maintained prefix list**
+  (derived 2026-07-31, no runtime constant exists to derive it from). A new
+  entity kind will go undetected silently; the backstop and the second list to
+  update are named at the definition site.
 
 ## Deliberately deferred (co-owned with the prompt workstream / "Brief I")
 

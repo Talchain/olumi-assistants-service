@@ -1,10 +1,10 @@
 {
   "id": "live-r3-crm-rerun",
-  "description": "Deployed-pair capture r3: the same scenario re-run \u2014 a second independent sample of the served v14 prompt.",
+  "description": "Deployed-pair capture r3: the same scenario re-run \u2014 a second independent sample of the served v14 prompt. Recorded verdict is an OBSERVATION frozen on 2026-07-31, not a target: the output is immutable, so a change in this verdict means the SCORER moved, and that is what this pin exists to catch.",
   "provenance": {
     "origin": "live-capture-derived",
     "source": "PHASE0-EVIDENCE-2026-07-28/adjudicate-decision-review-raw/r3-bodies.json (deployed staging pair, captured 2026-07-30)",
-    "note": "REAL gpt-4.1 output of the SERVED v14 prompt. Input RECONSTRUCTED from the same response payload \u2014 see the report README for exactly which fields are real and which are unrecoverable from a response-only capture."
+    "note": "REAL gpt-4.1 output captured from the deployed staging pair. Input RECONSTRUCTED from the same response payload \u2014 see the report README for exactly which fields are real and which are unrecoverable from a response-only capture. ATTRIBUTION IS BY POINTER, NOT BY WITNESS. The prompt is attributed to PMS decision_review_default v14 because Prompts/canonical/manifest.json recorded live_served_hash_observed=b4f15305c2bb32e9 with served_hash_verified:true when it was generated (2026-07-27) \u2014 roughly 2.5 days BEFORE this capture was taken (2026-07-30). The capture itself carries NO per-response prompt hash, so nothing here witnesses which prompt version actually served THIS turn. That gap is not hypothetical: a prompt pointer read 120 while live turns were still being served 119 during a re-pin, with a ~5-minute per-instance loader TTL. Treat the version as the best available attribution, not as established fact. The first paid live run must capture the per-response prompt hash \u2014 the candidate path now records the sha256 of the prompt it sent for exactly this reason."
   },
   "input": {
     "brief": "[NOT RECOVERABLE from a response-only capture: the user brief lives in the turn REQUEST, which this probe did not record. Present only so the production assembler has a <BRIEF> section; it feeds no scored dimension.]",
@@ -907,5 +907,12 @@
       }
     }
   ],
-  "expected": {}
+  "expected": {
+    "served_v14": false
+  },
+  "expectedFailedDimensions": {
+    "served_v14": [
+      "no_dashes"
+    ]
+  }
 }

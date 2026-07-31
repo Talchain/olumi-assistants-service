@@ -29,7 +29,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   ABSENCE_DIMENSIONS,
-  PACK_LEVEL_ABSENCE_DIMENSIONS,
   collectProseStrings,
   scoreDecisionReview,
 } from '../src/decision-review/scorer.js';
@@ -66,16 +65,102 @@ describe('1. the anti-vacuity FLOOR', () => {
     expect(substance?.pass).toBe(false);
   });
 
-  it('and EVERY absence dimension passes on it — which is exactly why the floor exists', () => {
+  it('and NO absence dimension FAILS on it — which is exactly why the floor exists', () => {
     // This is the assertion that justifies the floor's existence rather than
-    // merely exercising it. If some absence dimension started failing on an
-    // empty output, the floor would look redundant; it is not — this proves the
-    // absence dimensions really are all vacuously satisfiable.
+    // merely exercising it. No absence dimension catches an empty output; the
+    // floor is the only thing that does.
     const score = scoreCandidate(degenerate!, 'degenerate_empty');
-    const vacuouslyGreen = ABSENCE_DIMENSIONS.filter(
-      (name) => score.dimensions.find((d) => d.name === name)?.pass === true,
+    const caught = ABSENCE_DIMENSIONS.filter(
+      (name) => score.dimensions.find((d) => d.name === name)?.status === 'fail',
     );
-    expect(vacuouslyGreen.length).toBe(ABSENCE_DIMENSIONS.length);
+    expect(caught).toEqual([]);
+  });
+
+  it('nor does any of them claim a PASS on it — they report not-applicable', () => {
+    // The amendment. Previously five prose-scanning dimensions reported clean
+    // over zero prose and were counted as measured passes, so a degenerate
+    // output scored 14/19 rather than being visibly unmeasurable.
+    const score = scoreCandidate(degenerate!, 'degenerate_empty');
+    const vacuousPasses = ABSENCE_DIMENSIONS.filter(
+      (name) => score.dimensions.find((d) => d.name === name)?.status === 'pass',
+    );
+    expect(
+      vacuousPasses,
+      `these absence dimensions PASSED over an empty output: ${vacuousPasses.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('so the degenerate output is reported as mostly UNMEASURABLE, not mostly clean', () => {
+    const score = scoreCandidate(degenerate!, 'degenerate_empty');
+    expect(score.notApplicable).toBeGreaterThan(score.measured);
+    expect(score.pass).toBe(false);
+  });
+});
+
+describe('1b. the THREE-state contract (the amendment that matters most)', () => {
+  it('not_applicable is EXCLUDED from the measured denominator', () => {
+    for (const fixture of fixtures) {
+      const score = scoreCandidate(fixture, 'good');
+      expect(score.measured + score.notApplicable).toBe(score.dimensions.length);
+      expect(score.measured).toBe(
+        score.dimensions.filter((d) => d.status !== 'not_applicable').length,
+      );
+    }
+  });
+
+  it('not_applicable never counts toward `passed`', () => {
+    for (const fixture of fixtures) {
+      const score = scoreCandidate(fixture, 'good');
+      expect(score.passed).toBe(score.dimensions.filter((d) => d.status === 'pass').length);
+      expect(score.passed).toBeLessThanOrEqual(score.measured);
+    }
+  });
+
+  it('not_applicable is not a failure either — it must not sink a candidate', () => {
+    // A good candidate on a sparse fixture (07 has four NA dimensions) must
+    // still pass. NA is a third state, not a soft fail.
+    const sparse = fixtures.find((f) => scoreCandidate(f, 'good').notApplicable >= 3);
+    expect(sparse, 'no fixture exercises multiple NA dimensions').toBeDefined();
+    expect(scoreCandidate(sparse!, 'good').pass).toBe(true);
+  });
+
+  it('an NA detail is UNMISTAKABLE in output — never skim-readable as a pass', () => {
+    // The regression this pins: an NA row that printed like a clean row is how
+    // the first baseline's "18/19" got written down as if it meant something.
+    for (const fixture of fixtures) {
+      for (const d of scoreCandidate(fixture, 'good').dimensions) {
+        if (d.status === 'not_applicable') {
+          expect(d.detail.startsWith('NOT APPLICABLE — ')).toBe(true);
+          expect(d.scanned, 'an NA dimension must not report a scanned count').toBeUndefined();
+        }
+      }
+    }
+  });
+
+  it('RED-first: tone_alignment on a coaching-less input is NA, NOT a pass', () => {
+    // The exact live-capture condition. Before the amendment this returned
+    // pass:true / scanned:0 and was counted in the denominator.
+    const fixture = fixtures[0];
+    const good = fixture.candidates.find((c) => c.label === 'good')!;
+    const score = scoreDecisionReview({
+      output: good.output,
+      input: { ...fixture.input, deterministic_coaching: {} },
+      candidateLabel: 'coaching-less',
+    });
+    const tone = score.dimensions.find((d) => d.name === 'tone_alignment');
+    expect(tone?.status).toBe('not_applicable');
+    expect(tone?.pass, 'NA must not read as a failure').toBe(true);
+    expect(score.measured).toBeLessThan(score.dimensions.length);
+  });
+
+  it('RED-first: a tone row that forbids NOTHING is NA, not a free pass', () => {
+    // fixture 01 is `ready | clear_winner`, whose Forbidden-phrasing cell is
+    // literally `none`. The contract constrains nothing, so the dimension
+    // cannot fail — and must not claim a pass.
+    const confident = fixtures.find((f) => f.id === '01-clear-winner')!;
+    const tone = scoreCandidate(confident, 'good').dimensions.find((d) => d.name === 'tone_alignment');
+    expect(tone?.status).toBe('not_applicable');
+    expect(tone?.detail).toContain('forbids no phrasing');
   });
 });
 
@@ -116,35 +201,74 @@ describe('2. positive control per absence dimension', () => {
   }
 });
 
-describe('3. non-empty corpus (scanned > 0)', () => {
-  const perCandidate = ABSENCE_DIMENSIONS.filter((d) => !PACK_LEVEL_ABSENCE_DIMENSIONS.includes(d));
+describe('3. non-empty corpus (scanned > 0) — no carve-outs', () => {
+  // The previous release needed a PACK_LEVEL_ABSENCE_DIMENSIONS escape hatch so
+  // tone_alignment could report scanned:0 without failing. That hatch WAS the
+  // bug: a zero-corpus row is not a tolerable pass, it is an unmeasured
+  // dimension in the denominator. With the NA state the rule needs no
+  // exceptions, which is the strongest form of it.
+  for (const fixture of fixtures) {
+    it(`${fixture.id}: NO measured-PASS dimension anywhere reports a zero corpus`, () => {
+      for (const candidate of fixture.candidates) {
+        const score = scoreCandidate(fixture, candidate.label);
+        const blind = score.dimensions.filter(
+          (d) => d.status === 'pass' && d.scanned !== undefined && d.scanned === 0,
+        );
+        expect(
+          blind.map((d) => d.name),
+          `${fixture.id}/${candidate.label}: measured-clean with an EMPTY corpus — "passed" and "did not look" render alike`,
+        ).toEqual([]);
+      }
+    });
+  }
 
   for (const fixture of fixtures) {
-    it(`${fixture.id}/good: every per-candidate absence dimension actually scanned something`, () => {
+    it(`${fixture.id}/good: every MEASURED absence dimension scanned something`, () => {
       const score = scoreCandidate(fixture, 'good');
-      const blind = perCandidate.filter((name) => {
+      const blind = ABSENCE_DIMENSIONS.filter((name) => {
         const d = score.dimensions.find((x) => x.name === name);
-        return d === undefined || d.scanned === undefined || d.scanned === 0;
+        if (d === undefined || d.status === 'not_applicable') return false;
+        return d.scanned === undefined || d.scanned === 0;
       });
       expect(
         blind,
-        `these absence dimensions reported a ZERO corpus on a good candidate — their "clean" verdict is vacuous: ${blind.join(', ')}`,
+        `these MEASURED absence dimensions reported a ZERO corpus: ${blind.join(', ')}`,
       ).toEqual([]);
     });
   }
 
-  for (const dimension of PACK_LEVEL_ABSENCE_DIMENSIONS) {
-    it(`${dimension}: exercised with a non-empty corpus SOMEWHERE in the pack`, () => {
-      const exercised = fixtures.some((f) => {
-        const d = scoreCandidate(f, 'good').dimensions.find((x) => x.name === dimension);
-        return (d?.scanned ?? 0) > 0;
-      });
-      expect(
-        exercised,
-        `${dimension} has a zero corpus on EVERY fixture — it is never actually exercised`,
-      ).toBe(true);
-    });
-  }
+  it('every absence dimension is MEASURED (not NA) somewhere in the pack', () => {
+    const measuredSomewhere = new Set<string>();
+    for (const f of fixtures)
+      for (const d of scoreCandidate(f, 'good').dimensions)
+        if (d.status !== 'not_applicable') measuredSomewhere.add(d.name);
+    const neverMeasured = ABSENCE_DIMENSIONS.filter((d) => !measuredSomewhere.has(d));
+    expect(
+      neverMeasured,
+      `NA everywhere = never exercised by the pack: ${neverMeasured.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('scanned is ALWAYS content, never a rule-set size', () => {
+    // The ambiguity this pins out: `no_banned_lexicon` used to report
+    // `scanned: 10` (ten parsed terms) on an output with no prose at all.
+    // Ten rules applied to zero strings is zero checks, and it read as
+    // thoroughly measured. Rule counts now live in `detail`.
+    for (const f of fixtures) {
+      for (const d of scoreCandidate(f, 'good').dimensions) {
+        if (d.scanned === undefined) continue;
+        expect(d.scannedUnit, `${d.name} reports scanned with no unit`).toBeDefined();
+      }
+    }
+    // Concretely: on a prose-less output the lexicon dimension must NOT report
+    // its rule-set size as if it were a corpus.
+    const lexicon = scoreDecisionReview({
+      output: { narrative_summary: '', story_headlines: {}, robustness_explanation: {}, readiness_rationale: '', evidence_enhancements: {}, bias_findings: [], key_assumptions: [], decision_quality_prompts: [] },
+      input: fixtures[0].input,
+      candidateLabel: 'prose-less',
+    }).dimensions.find((d) => d.name === 'no_banned_lexicon');
+    expect(lexicon?.status).toBe('not_applicable');
+  });
 
   it('the prose walker sees real prose on every good candidate', () => {
     // The corpus every prose-scanning dimension shares. If this collapses, the

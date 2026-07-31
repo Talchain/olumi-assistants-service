@@ -362,7 +362,8 @@
       "tone_alignment"
     ],
     "internal_vocabulary": [
-      "no_internal_vocabulary"
+      "no_internal_vocabulary",
+      "no_banned_lexicon"
     ]
   }
 }

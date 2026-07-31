@@ -107,7 +107,8 @@ function printReport(report: CandidateEvalReport): void {
   for (const c of report.candidates) {
     const empty = c.substanceFailedTurnCount > 0 ? `, ${c.substanceFailedTurnCount} turn(s) EMPTY (substance failed)` : '';
     const flagged = c.flaggedTurnCount > 0 ? `, ${c.flaggedTurnCount} turn(s) FLAGGED raw_unparsed` : '';
-    console.log(`\n━━ candidate ${c.label} (${c.kind}: ${c.ref}) — ${c.passCount}/${c.results.length} fixtures pass${empty}${flagged} ━━`);
+    const witness = c.promptSha16 === null ? '' : ` [prompt sha256 ${c.promptSha16}]`;
+    console.log(`\n━━ candidate ${c.label} (${c.kind}: ${c.ref})${witness} — ${c.passCount}/${c.results.length} fixtures pass${empty}${flagged} ━━`);
     for (const r of c.results) {
       const verdict = r.pass ? 'PASS' : 'FAIL';
       console.log(`  - ${r.fixtureId}: ${verdict}  [extraction: ${r.extraction}]`);

@@ -69,14 +69,25 @@ function printReport(reports: readonly DecisionReviewFixtureReport[], verbose: b
     );
     for (const s of r.scores) {
       const agree = r.agreement[s.candidate] && r.dimensionAgreement[s.candidate];
-      const failed = s.dimensions.filter((d) => !d.pass);
+      const failed = s.dimensions.filter((d) => d.status === 'fail');
+      // The denominator is MEASURED dimensions, never dimensions.length.
+      // not-applicable rows are reported separately, on their own line, so a
+      // reader cannot mistake "could not check" for "checked and clean".
+      const na = s.notApplicable > 0 ? `  (+${s.notApplicable} not applicable)` : '';
       console.log(
-        `  ${agree ? ' ' : '!'} ${s.candidate}: ${s.pass ? 'PASS' : `FAIL (${failed.length}/${s.dimensions.length})`}${agree ? '' : '   <-- DISAGREES WITH FIXTURE'}`,
+        `  ${agree ? ' ' : '!'} ${s.candidate}: ${s.passed}/${s.measured} measured${na}${s.pass ? '' : `  FAIL`}${agree ? '' : '   <-- DISAGREES WITH FIXTURE'}`,
       );
-      for (const d of verbose ? s.dimensions : failed) {
-        const mark = d.pass ? '·' : '✗';
-        const scanned = d.scanned === undefined ? '' : ` [scanned ${d.scanned}]`;
+      const shown = verbose ? s.dimensions : failed;
+      for (const d of shown) {
+        const mark = d.status === 'fail' ? '✗' : d.status === 'not_applicable' ? '–' : '·';
+        const scanned =
+          d.scanned === undefined ? '' : ` [scanned ${d.scanned} ${d.scannedUnit ?? 'units'}]`;
         console.log(`      ${mark} ${d.name} (${d.source})${scanned}: ${d.detail}`);
+      }
+      if (!verbose && s.notApplicable > 0) {
+        for (const d of s.dimensions.filter((x) => x.status === 'not_applicable')) {
+          console.log(`      – ${d.name} (${d.source}): ${d.detail}`);
+        }
       }
     }
   }

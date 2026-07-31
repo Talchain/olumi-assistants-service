@@ -59,7 +59,12 @@ import {
 } from '../../../../src/cee/decision-review/shape-check.js';
 import { findForbiddenMatches } from '../guards.js';
 import { computeMargin } from './assemble.js';
-import type { DimensionResult, ScoreResult } from '../types.js';
+import {
+  finaliseScore,
+  type DimensionResult,
+  type ScannedUnit,
+  type ScoreResult,
+} from '../types.js';
 import type { DecisionReviewEvalInput } from './types.js';
 import {
   parseServedTerminologyContract,
@@ -162,13 +167,54 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
+/** Key count of a plain object value, or 0 when it is not one. */
+function objectKeyCount(value: unknown): number {
+  const record = readRecord(value);
+  return record ? Object.keys(record).length : 0;
+}
+
+/**
+ * Build a MEASURED dimension (pass or fail).
+ *
+ * INVARIANT, asserted pack-wide in decision-review-anti-vacuity.test.ts: a
+ * measured dimension that reports a `scanned` count and PASSES must report a
+ * NON-ZERO one. "I looked and found nothing" and "I could not look" must never
+ * render identically — that identity is what let the first baseline report a
+ * vacuous `tone_alignment` as one of nineteen passes. When a dimension cannot
+ * look, it must return {@link na} instead of passing with a zero count.
+ */
 const dim = (
   name: string,
   pass: boolean,
   source: DimensionResult['source'],
   detail: string,
   scanned?: number,
-): DimensionResult => (scanned === undefined ? { name, pass, source, detail } : { name, pass, source, detail, scanned });
+  scannedUnit?: ScannedUnit,
+): DimensionResult => ({
+  name,
+  pass,
+  status: pass ? 'pass' : 'fail',
+  source,
+  detail,
+  ...(scanned === undefined ? {} : { scanned }),
+  ...(scannedUnit === undefined ? {} : { scannedUnit }),
+});
+
+/**
+ * Build a NOT-APPLICABLE dimension: this run gave it nothing to evaluate.
+ *
+ * `pass` is true because NA must not fail a candidate, but `status` is what
+ * every report reads — NA is excluded from the measured denominator and shown
+ * out of band. The `reason` is mandatory and prefixed, so an NA row can never
+ * be skim-read as a clean pass in CLI output.
+ */
+const na = (name: string, source: DimensionResult['source'], reason: string): DimensionResult => ({
+  name,
+  pass: true,
+  status: 'not_applicable',
+  source,
+  detail: `NOT APPLICABLE — ${reason}`,
+});
 
 // ============================================================================
 // Dimension helpers with their own reasoning
@@ -216,10 +262,54 @@ function bannedTermRegex(term: string): RegExp {
   return new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!_)`, 'i');
 }
 
+/**
+ * Match one FORBIDDEN TONE PHRASING in prose, on word boundaries.
+ *
+ * ⚠ THIS WAS A SUBSTRING MATCH AND IT WAS WRONG IN THE WORST DIRECTION. The
+ * served table forbids the bare words "ready" and "clear" at its cautious rows,
+ * and `proseBlobLower.includes('ready')` fires on "**alrea dy**" and
+ * `includes('clear')` on "un**clear**" — so a review writing exactly the
+ * hedged prose the cautious row DEMANDS ("the picture is unclear", "we have
+ * already gathered…") scored as a tone breach. A dimension that fails compliant
+ * output is worse than one that misses a defect: it trains operators to ignore
+ * the alarm, and it would have made the rewrite look better than the incumbent
+ * for doing the right thing.
+ *
+ * Both demonstrated strings are pinned as negative controls in
+ * decision-review-scorer.test.ts.
+ *
+ * Boundaries on BOTH sides here (unlike the banned-lexicon matcher, which is
+ * leading-only so inflections are caught): these are tone PHRASINGS quoted
+ * verbatim from the table, not lexemes whose plural forms are also banned.
+ */
+function forbiddenPhraseRegex(phrase: string): RegExp {
+  return new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+}
+
 /** Em dash (U+2014) and en dash (U+2013) — both banned by the OUTPUT_SCHEMA. */
 const DASH_PATTERN = /[–—]/;
 
-/** Raw entity-id shapes that must not appear inside user-facing prose. */
+/**
+ * Raw entity-id shapes that must not appear inside user-facing prose.
+ *
+ * ⚠ HAND-MAINTAINED PREFIX LIST — derived 2026-07-31 from the id prefixes
+ * observed across this pack's fixtures and the two deployed-pair captures
+ * (`dec_`, `opt_`, `fac_`, `out_`, `goal_`, `risk_`) plus the two structural
+ * kinds (`edge_`, `node_`). It is NOT derived from a runtime constant, because
+ * none exists to derive from: the runtime's own detector
+ * (`tools/v5-journey-replay/forbidden-terms.ts` `ID_PREFIX_REGEX`) carries its
+ * own narrower list (`opt|fac|goal|risk|out`) and is itself hand-maintained.
+ *
+ * SO IT WILL GO STALE when a new entity kind ships, and it will go stale
+ * SILENTLY — a new prefix simply stops being detected, which reads as clean.
+ *
+ * The backstop is that this dimension is NOT the only reader: the
+ * `no_internal_term_leak` dimension applies the runtime's `findForbiddenMatches`
+ * to the same prose, so an id from the runtime's five prefixes is caught twice
+ * and an id from a NEW kind is caught by neither. Whoever adds an entity kind
+ * must update BOTH lists. Both are named here so the search that finds one
+ * finds the other.
+ */
 const ENTITY_ID_IN_PROSE_PATTERN = /\b(fac|opt|out|dec|risk|goal|edge|node)_[A-Za-z0-9_]+/;
 
 /**
@@ -299,34 +389,56 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
         ? `R-CONT: ${observedFor('fabricated_continuity_phrase') ?? '?'} string(s) reference a prior exchange the input does not contain`
         : 'no invented conversational callbacks',
       allStrings.length,
+      'output_strings',
     ),
   );
 
+  // The runtime SKIPS this rule when the graph carries no id corpus
+  // ("no corpus => cannot check", contract-gate.ts:206-208). The eval reports
+  // that skip as NOT APPLICABLE rather than as a pass — a clean verdict from a
+  // rule that never ran is the vacuity this pack exists to refuse.
+  const graphIdCount = countGraphIds(input);
+  // Corpus = the REFERENCES examined, not the ids available to check against.
+  // A run with a rich graph and a review citing nothing examines nothing.
+  const entityRefCount = countBiasEntityRefs(output);
   dimensions.push(
-    dim(
-      'entity_references_grounded',
-      !rulesHit.has('ungrounded_entity_reference'),
-      'production-guard',
-      rulesHit.has('ungrounded_entity_reference')
-        ? `${observedFor('ungrounded_entity_reference') ?? '?'} bias affected_elements reference ids absent from the graph`
-        : 'every bias affected_element resolves to a graph node/edge id',
-      // Corpus = the id set the rule grounds against. Zero means the rule was
-      // SKIPPED (the runtime skips on an empty corpus), which the anti-vacuity
-      // test refuses on a good candidate.
-      countGraphIds(input),
-    ),
+    graphIdCount === 0
+      ? na(
+          'entity_references_grounded',
+          'production-guard',
+          'the run graph carries no node/edge ids, so the runtime rule has no corpus and skips',
+        )
+      : dim(
+          'entity_references_grounded',
+          !rulesHit.has('ungrounded_entity_reference'),
+          'production-guard',
+          rulesHit.has('ungrounded_entity_reference')
+            ? `${observedFor('ungrounded_entity_reference') ?? '?'} bias affected_elements reference ids absent from the graph`
+            : `${entityRefCount} bias affected_element(s) checked against ${graphIdCount} graph id(s), all resolve`,
+          entityRefCount,
+          'entity_refs',
+        ),
   );
 
   const capRulesHit = [...rulesHit].filter((r) => COUNT_CAP_RULES.has(r));
+  // Corpus = the ITEMS the caps were applied to. Four rules applied to zero
+  // items is not a check; `COUNT_CAP_RULES.size` would have reported 4 and
+  // looked well-fed on an output carrying nothing.
+  const cappedItemCount =
+    (Array.isArray(output.bias_findings) ? output.bias_findings.length : 0) +
+    (Array.isArray(output.decision_quality_prompts) ? output.decision_quality_prompts.length : 0) +
+    (Array.isArray(output.key_assumptions) ? output.key_assumptions.length : 0) +
+    objectKeyCount(output.scenario_contexts);
   dimensions.push(
     dim(
       'contract_caps_respected',
       capRulesHit.length === 0,
       'production-guard',
       capRulesHit.length === 0
-        ? 'bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts all within the tight prompt bound'
+        ? `${cappedItemCount} capped item(s) across bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts, all within the tight prompt bound (${COUNT_CAP_RULES.size} rules applied)`
         : `tight-bound breach: ${capRulesHit.sort().join(', ')}`,
-      COUNT_CAP_RULES.size,
+      cappedItemCount,
+      'capped_items',
     ),
   );
 
@@ -357,16 +469,24 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
     ...input,
     margin: computeMargin(input),
   });
+  const descriptiveNumbers = countDescriptiveNumbers(output);
   dimensions.push(
-    dim(
-      'numbers_grounded',
-      groundingWarnings.length === 0,
-      'production-guard',
-      groundingWarnings.length === 0
-        ? 'every number in a descriptive field is within ±10% of an input value'
-        : `${groundingWarnings.length} ungrounded: ${groundingWarnings.slice(0, 2).join(' | ')}`,
-      countDescriptiveNumbers(output),
-    ),
+    descriptiveNumbers === 0
+      ? na(
+          'numbers_grounded',
+          'production-guard',
+          'the descriptive fields carry no numbers, so there is nothing to ground',
+        )
+      : dim(
+          'numbers_grounded',
+          groundingWarnings.length === 0,
+          'production-guard',
+          groundingWarnings.length === 0
+            ? 'every number in a descriptive field is within ±10% of an input value'
+            : `${groundingWarnings.length} ungrounded: ${groundingWarnings.slice(0, 2).join(' | ')}`,
+          descriptiveNumbers,
+          'descriptive_numbers',
+        ),
   );
 
   // ── PRODUCTION GUARD 7: internal-term leak ──────────────────────────────
@@ -380,6 +500,7 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
       'production-guard',
       forbidden.length === 0 ? 'clean' : `hits: ${forbidden.slice(0, 4).join(', ')}`,
       proseStrings.length,
+      'prose_strings',
     ),
   );
 
@@ -391,9 +512,10 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
       lexiconHits.length === 0,
       'served-prompt-derived',
       lexiconHits.length === 0
-        ? `clean against ${contract.bannedTerms.length} banned terms parsed from the served prompt`
+        ? `${proseStrings.length} prose string(s) clean against ${contract.bannedTerms.length} banned terms parsed from the served prompt`
         : `banned terms present: ${lexiconHits.join(', ')}`,
-      contract.bannedTerms.length,
+      proseStrings.length,
+      'prose_strings',
     ),
   );
 
@@ -407,9 +529,10 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
       vocabHits.length === 0,
       'served-prompt-derived',
       vocabHits.length === 0
-        ? `clean against ${contract.internalVocabulary.length} internal terms parsed from the served prompt`
+        ? `${proseStrings.length} prose string(s) clean against ${contract.internalVocabulary.length} internal terms parsed from the served prompt`
         : `internal vocabulary surfaced: ${vocabHits.join(', ')}`,
-      contract.internalVocabulary.length,
+      proseStrings.length,
+      'prose_strings',
     ),
   );
 
@@ -424,23 +547,25 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
         ? 'no bare probability-band decimals in output strings'
         : `bare decimals: ${[...new Set(decimalHits)].slice(0, 4).join(', ')} (the prompt requires "62%", never "0.62")`,
       proseStrings.length,
+      'prose_strings',
     ),
   );
 
   // ── SERVED-PROMPT-DERIVED 4: dashes ─────────────────────────────────────
   const dashHits = proseStrings.filter((s) => DASH_PATTERN.test(s));
   dimensions.push(
-    dim(
-      'no_dashes',
-      !contract.bansEmDashes || dashHits.length === 0,
-      'served-prompt-derived',
-      !contract.bansEmDashes
-        ? 'served prompt no longer bans dashes — dimension inactive'
-        : dashHits.length === 0
-          ? 'no em/en dashes in any output string'
-          : `${dashHits.length} string(s) contain an em or en dash`,
-      proseStrings.length,
-    ),
+    !contract.bansEmDashes
+      ? na('no_dashes', 'served-prompt-derived', 'the served prompt no longer bans em/en dashes')
+      : dim(
+          'no_dashes',
+          dashHits.length === 0,
+          'served-prompt-derived',
+          dashHits.length === 0
+            ? 'no em/en dashes in any output string'
+            : `${dashHits.length} string(s) contain an em or en dash`,
+          proseStrings.length,
+          'prose_strings',
+        ),
   );
 
   // ── SERVED-PROMPT-DERIVED 5: tone alignment ─────────────────────────────
@@ -450,19 +575,39 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
     readString(coaching.readiness),
     readString(coaching.headline_type),
   );
-  const toneHits = toneRow ? toneRow.forbidden.filter((p) => proseBlobLower.includes(p)) : [];
+  // TWO distinct vacuous cases, both NOT APPLICABLE rather than passes:
+  //  (a) no row resolves — the run's readiness/headline_type is absent or
+  //      unknown, so the served table says nothing about it. This is the case a
+  //      response-only capture always lands in, and reporting it as a pass is
+  //      what made the first baseline read 18/19.
+  //  (b) a row resolves but its Forbidden-phrasing cell is literally `none`
+  //      (the `ready | clear_winner` row). The tone IS known and the contract
+  //      simply constrains nothing — the dimension cannot fail, so it must not
+  //      claim a pass either.
+  const toneHits = toneRow ? toneRow.forbidden.filter((p) => forbiddenPhraseRegex(p).test(proseBlob)) : [];
   dimensions.push(
-    dim(
-      'tone_alignment',
-      toneHits.length === 0,
-      'served-prompt-derived',
-      toneRow === null
-        ? 'no tone row matches this run\'s readiness/headline_type — dimension not applicable'
-        : toneHits.length === 0
-          ? `clean at tone "${toneRow.tone}" (${toneRow.forbidden.length} forbidden phrasing(s))`
-          : `forbidden at tone "${toneRow.tone}": ${toneHits.join(', ')}`,
-      toneRow?.forbidden.length ?? 0,
-    ),
+    toneRow === null
+      ? na(
+          'tone_alignment',
+          'served-prompt-derived',
+          "no tone row matches this run's readiness/headline_type (deterministic_coaching absent or unknown vocabulary)",
+        )
+      : toneRow.forbidden.length === 0
+        ? na(
+            'tone_alignment',
+            'served-prompt-derived',
+            `the served table forbids no phrasing at tone "${toneRow.tone}"`,
+          )
+        : dim(
+            'tone_alignment',
+            toneHits.length === 0,
+            'served-prompt-derived',
+            toneHits.length === 0
+              ? `${proseStrings.length} prose string(s) clean at tone "${toneRow.tone}" against ${toneRow.forbidden.length} forbidden phrasing(s)`
+              : `forbidden at tone "${toneRow.tone}": ${toneHits.join(', ')}`,
+            proseStrings.length,
+            'prose_strings',
+          ),
   );
 
   // ── EVAL-ASSERTION 1: entity ids in prose ───────────────────────────────
@@ -476,6 +621,7 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
         ? 'no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)'
         : `${idHits.length} user-facing string(s) carry a raw entity id`,
       proseStrings.length,
+      'prose_strings',
     ),
   );
 
@@ -492,7 +638,7 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
   dimensions.push(scoreCoherence(output));
 
   // ── EVAL-ASSERTION 6: infeasible winner disclosed ───────────────────────
-  dimensions.push(scoreInfeasibleWinnerDisclosure(output, input, proseBlobLower));
+  dimensions.push(scoreInfeasibleWinnerDisclosure(output, input, proseBlobLower, proseStrings.length));
 
   // ── EVAL-ASSERTION 7: the anti-vacuity FLOOR ────────────────────────────
   const proseChars = proseBlob.trim().length;
@@ -505,19 +651,62 @@ export function scoreDecisionReview(options: DecisionReviewScoreOptions): ScoreR
         ? `${proseStrings.length} user-facing string(s), ${proseChars} chars`
         : 'no user-facing prose at all — an empty review is a failed turn, not a clean one',
       proseStrings.length,
+      'prose_strings',
     ),
   );
 
+  return finaliseScore(candidateLabel, dimensions.map(demoteEmptyCorpusToNotApplicable));
+}
+
+/**
+ * THE INVARIANT, ENFORCED IN ONE PLACE: a dimension that PASSED while examining
+ * an EMPTY corpus did not pass — it could not look, and it must say so.
+ *
+ * Each dimension above already returns {@link na} for the inapplicability it can
+ * see locally (no tone row, no graph ids, no numbers). This is the catch-all for
+ * the case none of them can see individually: an output carrying NO user-facing
+ * prose at all, where every prose-scanning dimension reports "clean" over
+ * nothing. That is precisely the `degenerate_empty` control — structurally valid
+ * keys, zero prose — and before this rule it produced FIVE vacuous passes that
+ * the pack counted as measured.
+ *
+ * Applying it uniformly is deliberate: a per-dimension guard would have to be
+ * remembered for each new dimension, which is the hand-maintained-mirror shape
+ * this pack keeps finding. Here a new dimension inherits the rule by existing.
+ * The reason string names the unit, so the NA row still explains itself.
+ *
+ * `substance_present` is exempt: it is the FLOOR, and an empty corpus is exactly
+ * the condition it exists to FAIL on. Demoting it would delete the one
+ * dimension that catches a degenerate output.
+ */
+function demoteEmptyCorpusToNotApplicable(d: DimensionResult): DimensionResult {
+  if (d.name === 'substance_present') return d;
+  if (d.status !== 'pass' || d.scanned === undefined || d.scanned > 0) return d;
   return {
-    candidate: candidateLabel,
-    pass: dimensions.every((d) => d.pass),
-    dimensions,
+    name: d.name,
+    pass: true,
+    status: 'not_applicable',
+    source: d.source,
+    detail: `NOT APPLICABLE — nothing to examine (0 ${d.scannedUnit ?? 'units'}); a clean verdict over an empty corpus is not a pass`,
   };
 }
 
 // ============================================================================
 // Dimension implementations that need more than a line
 // ============================================================================
+
+/** How many bias `affected_elements` references the grounding rule inspected. */
+function countBiasEntityRefs(output: Record<string, unknown>): number {
+  let n = 0;
+  for (const raw of Array.isArray(output.bias_findings) ? output.bias_findings : []) {
+    const finding = readRecord(raw);
+    if (!finding || !Array.isArray(finding.affected_elements)) continue;
+    for (const ref of finding.affected_elements) {
+      if (typeof ref === 'string' && ref.length > 0) n += 1;
+    }
+  }
+  return n;
+}
 
 function countGraphIds(input: DecisionReviewEvalInput): number {
   let n = 0;
@@ -539,7 +728,34 @@ function countGraphIds(input: DecisionReviewEvalInput): number {
  * vacuity this instrument exists to expose. Recomputed here over the same
  * descriptive fields the runtime scans.
  */
-const RUNTIME_DESCRIPTIVE_FIELDS = [
+/**
+ * ⚠⚠ MIRROR OF UNEXPORTED RUNTIME STATE — GUARDED, NOT TRUSTED.
+ *
+ * `DESCRIPTIVE_FIELD_KEYS`, `NUMBER_PATTERN` and `PERCENTAGE_PATTERN` are
+ * MODULE-PRIVATE in `src/cee/decision-review/shape-check.ts`
+ * (:208, :212, :255-262). `checkNumberGrounding` returns only WARNINGS, so a
+ * clean result is indistinguishable from "there were no numbers here" — and
+ * that is exactly the vacuity `scanned` exists to expose. Counting what the
+ * runtime WOULD have scanned therefore requires reproducing three private
+ * constants.
+ *
+ * That is a hand-maintained mirror sitting INSIDE the anti-vacuity machinery —
+ * trap 12 in the last place it should appear. If the runtime widened its
+ * descriptive-field list or tightened its number regex, this counter would keep
+ * returning a plausible non-zero number for a corpus the runtime no longer
+ * scans, and the anti-vacuity assertion would pass while measuring the wrong
+ * thing.
+ *
+ * It cannot be fixed properly from here: exporting the constants is a `src/`
+ * change and this lane's file-set boundary forbids one. So the mirror is made
+ * FAIL-LOUD instead — `decision-review-runtime-mirror.test.ts` reads
+ * `shape-check.ts` as TEXT at test time and asserts these three literals match
+ * the source bytes. Drift turns that test RED with the two versions printed.
+ *
+ * The clean fix (export the three constants and import them) belongs to the
+ * next src-side decision_review lane.
+ */
+export const RUNTIME_DESCRIPTIVE_FIELDS = [
   'narrative_summary',
   'robustness_explanation',
   'readiness_rationale',
@@ -548,21 +764,49 @@ const RUNTIME_DESCRIPTIVE_FIELDS = [
   'pre_mortem',
 ] as const;
 
+/** MIRROR of shape-check.ts:208 `NUMBER_PATTERN`. Guarded — see above. */
+export const RUNTIME_NUMBER_PATTERN_SOURCE =
+  '(?<![a-zA-Z_\\-\\d])(-?\\d+(?:\\.\\d+)?)(?![a-zA-Z\\d])';
+/** MIRROR of shape-check.ts:212 `PERCENTAGE_PATTERN`. Guarded — see above. */
+export const RUNTIME_PERCENTAGE_PATTERN_SOURCE =
+  '(?<![a-zA-Z_\\-\\d])(-?\\d+(?:\\.\\d+)?)%';
+
+/**
+ * How many numbers the runtime's grounding rule actually inspected.
+ *
+ * Reproduces the runtime's TWO-PASS scan (percentages first, then standalone
+ * numbers not followed by `%`) with the runtime's own boundary-anchored
+ * patterns. The first draft used a bare `/-?\d+(?:\.\d+)?/g`, which counts
+ * numbers the runtime deliberately skips — digits inside ids like `opt_3`, and
+ * every percentage twice — so the instrument overstated the corpus in exactly
+ * the direction that makes a vacuous dimension look well-fed.
+ */
 function countDescriptiveNumbers(output: Record<string, unknown>): number {
-  let n = 0;
+  const numberRe = new RegExp(RUNTIME_NUMBER_PATTERN_SOURCE, 'g');
+  const percentRe = new RegExp(RUNTIME_PERCENTAGE_PATTERN_SOURCE, 'g');
+  const countIn = (text: string): number => {
+    let n = 0;
+    percentRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = percentRe.exec(text)) !== null) n += 1;
+    numberRe.lastIndex = 0;
+    while ((m = numberRe.exec(text)) !== null) {
+      if (text[m.index + m[0].length] === '%') continue; // counted in pass 1
+      n += 1;
+    }
+    return n;
+  };
+
+  let total = 0;
   for (const key of RUNTIME_DESCRIPTIVE_FIELDS) {
     if (!(key in output)) continue;
-    for (const s of collectStrings(output[key])) {
-      n += (s.match(/-?\d+(?:\.\d+)?/g) ?? []).length;
-    }
+    for (const str of collectStrings(output[key])) total += countIn(str);
   }
   for (const raw of Array.isArray(output.bias_findings) ? output.bias_findings : []) {
     const bf = readRecord(raw);
-    if (bf && typeof bf.description === 'string') {
-      n += (bf.description.match(/-?\d+(?:\.\d+)?/g) ?? []).length;
-    }
+    if (bf && typeof bf.description === 'string') total += countIn(bf.description);
   }
-  return n;
+  return total;
 }
 
 /**
@@ -593,6 +837,7 @@ function scoreStoryHeadlineKeys(
       'eval-assertion',
       'story_headlines is absent or not an object',
       expected.size,
+      'option_keys',
     );
   }
   const actual = new Set(Object.keys(headlines));
@@ -607,6 +852,7 @@ function scoreStoryHeadlineKeys(
       ? `all ${expected.size} option key(s) present, none extra`
       : `missing: [${missing.join(', ')}] extra: [${extra.join(', ')}]`,
     expected.size,
+    'option_keys',
   );
 }
 
@@ -626,12 +872,12 @@ function scoreStoryHeadlineDistinctness(output: Record<string, unknown>): Dimens
     ? Object.values(headlines).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
     : [];
   if (values.length < 2) {
-    return dim(
+    // A single-option run cannot collide. Reporting that as a PASS would let a
+    // sparse fixture inflate the numerator with a check that could not fail.
+    return na(
       'story_headlines_distinct',
-      true,
       'eval-assertion',
-      `fewer than two headlines (${values.length}) — collision impossible`,
-      values.length,
+      `only ${values.length} headline(s) — a collision is impossible, so nothing was tested`,
     );
   }
   const normalised = values.map((v) => v.trim().toLowerCase().replace(/\s+/g, ' '));
@@ -645,6 +891,7 @@ function scoreStoryHeadlineDistinctness(output: Record<string, unknown>): Dimens
       ? `${unique.size} distinct headline(s)`
       : `${normalised.length - unique.size} duplicate headline(s) — the 1.121 dedupe-collision defect`,
     values.length,
+    'headlines',
   );
 }
 
@@ -668,14 +915,23 @@ function scoreScenarioContextKeys(
   const contexts = readRecord(output.scenario_contexts);
   const keys = contexts ? Object.keys(contexts) : [];
   if (fragileIds.size === 0) {
+    // Nothing to key ON and nothing keyed: there was nothing to be right about.
+    if (keys.length === 0) {
+      return na(
+        'scenario_contexts_keyed_on_fragile_edges',
+        'eval-assertion',
+        'the run has no fragile edges and the review emitted no scenario_contexts — nothing to check',
+      );
+    }
+    // Keys on a run with no fragile edges IS measurable, and every key is
+    // ungrounded by construction. The corpus here is the keys themselves.
     return dim(
       'scenario_contexts_keyed_on_fragile_edges',
-      keys.length === 0,
+      false,
       'eval-assertion',
-      keys.length === 0
-        ? 'no fragile edges and no scenario_contexts — consistent'
-        : `${keys.length} scenario_context(s) on a run with NO fragile edges — every key is ungrounded`,
-      fragileIds.size,
+      `${keys.length} scenario_context(s) on a run with NO fragile edges — every key is ungrounded`,
+      keys.length,
+      'scenario_keys',
     );
   }
   const ungrounded = keys.filter((k) => !fragileIds.has(k));
@@ -684,9 +940,10 @@ function scoreScenarioContextKeys(
     ungrounded.length === 0,
     'eval-assertion',
     ungrounded.length === 0
-      ? `${keys.length} key(s), all present in fragile_edges`
+      ? `${keys.length} key(s) checked against ${fragileIds.size} fragile edge id(s), all present`
       : `keys absent from fragile_edges: ${ungrounded.join(', ')}`,
-    fragileIds.size,
+    keys.length,
+    'scenario_keys',
   );
 }
 
@@ -716,7 +973,6 @@ function scoreCoherence(output: Record<string, unknown>): DimensionResult {
       false,
       'eval-assertion',
       'robustness_explanation.primary_risk is absent or empty — nothing for the other sections to cohere with',
-      0,
     );
   }
   const riskTokens = contentTokens(primaryRisk);
@@ -726,7 +982,6 @@ function scoreCoherence(output: Record<string, unknown>): DimensionResult {
       false,
       'eval-assertion',
       'primary_risk carries no content tokens — coherence is unmeasurable, refused rather than passed',
-      0,
     );
   }
 
@@ -754,7 +1009,6 @@ function scoreCoherence(output: Record<string, unknown>): DimensionResult {
       false,
       'eval-assertion',
       'no sibling section carried text to compare against primary_risk — refused rather than passed vacuously',
-      0,
     );
   }
   return dim(
@@ -765,6 +1019,7 @@ function scoreCoherence(output: Record<string, unknown>): DimensionResult {
       ? `all ${checked} sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)`
       : `no shared content token with primary_risk in: ${incoherent.join(', ')}`,
     checked,
+    'sibling_sections',
   );
 }
 
@@ -801,16 +1056,15 @@ function scoreInfeasibleWinnerDisclosure(
   _output: Record<string, unknown>,
   input: DecisionReviewEvalInput,
   proseBlobLower: string,
+  proseCount: number,
 ): DimensionResult {
   const flagged =
     input.winner.constraint_infeasible === true || input.winner.recommendation_suppressed === true;
   if (!flagged) {
-    return dim(
+    return na(
       'infeasible_winner_disclosed',
-      true,
       'eval-assertion',
-      'leading option is feasible — dimension not applicable',
-      0,
+      'the leading option is feasible, so there is no infeasibility to disclose',
     );
   }
   const hits = INFEASIBILITY_MARKERS.filter((m) => proseBlobLower.includes(m));
@@ -821,7 +1075,8 @@ function scoreInfeasibleWinnerDisclosure(
     hits.length > 0
       ? `infeasibility disclosed (marker: ${hits[0]})`
       : 'winner.constraint_infeasible is set but no output string discloses it — the review frames an infeasible option as a clean lead',
-    INFEASIBILITY_MARKERS.length,
+    proseCount,
+    'prose_strings',
   );
 }
 
@@ -854,19 +1109,33 @@ export const ABSENCE_DIMENSIONS: readonly string[] = [
 ];
 
 /**
- * Absence dimensions whose corpus is legitimately EMPTY on some runs, so the
- * `scanned > 0` requirement is PACK-LEVEL (at least one good candidate must
- * exercise a non-empty corpus) rather than per-candidate.
+ * ONE NUMBER, ONE MEANING.
  *
- * `tone_alignment` is the only one: at the `ready | clear_winner` row the served
- * table's Forbidden-phrasing cell is literally `none`, so the dimension has
- * nothing to check by the prompt's own design. Demanding a non-empty corpus per
- * candidate would force every fixture to be a cautious-tone run and delete the
- * confident-tone case from the pack — measuring less in the name of measuring
- * carefully. The pack-level requirement keeps the guarantee that the dimension
- * is exercised SOMEWHERE without distorting the fixture set.
+ * An earlier draft let `scanned` mean two different things — sometimes the
+ * CONTENT examined, sometimes the number of RULES applied — and exported a
+ * `RULE_COUNT_DIMENSIONS` list so readers could tell which. That split was the
+ * problem, not the fix: `no_banned_lexicon` reporting `scanned: 10` on an
+ * output with no prose at all looked thoroughly measured, when what it had
+ * actually examined was nothing. Ten rules times zero strings is zero checks.
+ *
+ * `scanned` is now ALWAYS the CONTENT the dimension inspected — prose strings,
+ * capped items, entity references, headlines, numbers. Rule-set sizes live in
+ * the `detail` string ("clean against 10 banned terms"), where they inform
+ * without inflating. The anti-vacuity assertion therefore needs no per-dimension
+ * exceptions and no reader-side interpretation.
  */
-export const PACK_LEVEL_ABSENCE_DIMENSIONS: readonly string[] = ['tone_alignment'];
+
+/**
+ * The previous release carried a `PACK_LEVEL_ABSENCE_DIMENSIONS` escape hatch so
+ * `tone_alignment` could report `scanned: 0` on confident-tone runs without
+ * failing the anti-vacuity assertion. THAT ESCAPE HATCH WAS THE BUG: a
+ * zero-corpus tone row was not a tolerable pass, it was an unmeasured dimension
+ * being counted as a measured one. It is gone — such a row is now
+ * `not_applicable`, so the rule below needs no exceptions at all:
+ *
+ *   EVERY MEASURED dimension that reports a `scanned` count reports a NON-ZERO
+ *   one. No per-dimension carve-outs.
+ */
 
 /** Every dimension the scorer emits, in emission order. */
 export const DECISION_REVIEW_DIMENSIONS: readonly string[] = [

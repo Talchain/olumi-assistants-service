@@ -15,6 +15,7 @@
  * against, one level up.
  */
 
+import { createHash } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCandidateEval, ROUTING_ADAPTER, type CandidateModel } from '../src/candidate-run.js';
 import { DECISION_REVIEW_ADAPTER } from '../src/decision-review/adapter.js';
@@ -255,6 +256,44 @@ describe('the live request is built by the PRODUCTION assembler', () => {
     // The routing chassis wraps its context in <TURN_CONTEXT> inside the SYSTEM
     // message. decision_review must NOT inherit that shape.
     expect(seen[0].system).not.toContain('<TURN_CONTEXT>');
+  });
+});
+
+describe('the live path SELF-WITNESSES the prompt it sent (P1b)', () => {
+  it('records the sha256 prefix of the prompt text actually sent', async () => {
+    // Attribution-by-pointer is not attribution: the first baseline said "the
+    // served v14 prompt" on the strength of a manifest pointer read days
+    // earlier, which is trap 12c exactly (stagingVersion read 120 while turns
+    // were served 119). A run that hashes what it sent is tied to BYTES.
+    const capture: CandidateModel = async () => {
+      const good = fixtures[0].candidates.find((c) => c.label === 'good')!;
+      return { ok: true, text: JSON.stringify(good.output), error: null };
+    };
+    const report = await runCandidateEval({
+      specs: [fileSpec('A', 'CANDIDATE PROMPT TEXT')],
+      adapter: DECISION_REVIEW_ADAPTER,
+      fixtures: fixtures.slice(0, 1),
+      gateInput: { env: { [LIVE_ENV_KEY]: '1' }, argv: ['node', 'cli', '--live'] },
+      modelId: 'test-model',
+      createLiveModel: async () => capture,
+    });
+    const sha = report.candidates[0].promptSha16;
+    expect(sha).toMatch(/^[0-9a-f]{16}$/);
+    // sha256("CANDIDATE PROMPT TEXT") — pinned, so a change to what gets hashed
+    // (e.g. hashing the assembled request instead of the prompt) turns this RED.
+    expect(sha).toBe(
+      createHash('sha256').update('CANDIDATE PROMPT TEXT', 'utf-8').digest('hex').slice(0, 16),
+    );
+  });
+
+  it('is null for a mock arm, which sends no prompt', async () => {
+    const report = await runCandidateEval({
+      specs: [parsePromptSpec('A=mock:good')],
+      adapter: DECISION_REVIEW_ADAPTER,
+      fixtures: fixtures.slice(0, 1),
+      gateInput: OFFLINE,
+    });
+    expect(report.candidates[0].promptSha16).toBeNull();
   });
 });
 
