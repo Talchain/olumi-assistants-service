@@ -29,14 +29,18 @@ import type { ContextPackAnalysis } from '../../../src/orchestrator-v5/context/c
 import { findForbiddenMatches, containsMutationLanguage, findSuccessClaimHit } from './guards.js';
 import { detectGoalFitConflation } from './goal-fit-conflation.js';
 import { detectHeldScience } from './held-science.js';
-import type { CandidateResponse, DimensionResult, ScoreResult } from './types.js';
+import { finaliseScore, type CandidateResponse, type DimensionResult, type ScoreResult } from './types.js';
 
 export function scoreCandidate(
   raw: ContextPackAnalysis,
   candidate: CandidateResponse,
 ): ScoreResult {
   const text = candidate.text;
-  const dimensions: DimensionResult[] = [];
+  // Built without `status`, then finalised below. The routing pack has no
+  // `not_applicable` dimension — every one of its six rules applies to every
+  // turn — so its statuses derive straight from `pass`. The decision_review
+  // pack, whose rules CAN be inapplicable, sets `status` explicitly.
+  const dimensions: Array<Omit<DimensionResult, 'status'>> = [];
 
   // 1. Production guard — forbidden user-facing phrases / raw-id / hash / dev leaks.
   const forbidden = findForbiddenMatches(text);
@@ -98,6 +102,8 @@ export function scoreCandidate(
     detail: substantive ? 'non-empty prose' : 'empty/whitespace-only text — an empty answer is a failed turn, not a clean one',
   });
 
-  const pass = dimensions.every((d) => d.pass);
-  return { candidate: candidate.label, pass, dimensions };
+  return finaliseScore(
+    candidate.label,
+    dimensions.map((d) => ({ ...d, status: d.pass ? ('pass' as const) : ('fail' as const) })),
+  );
 }

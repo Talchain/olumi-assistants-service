@@ -16,6 +16,10 @@
  * ranks, it never ships).
  *
  * Flags:
+ *   --task <key>             routing (default) | decision_review — selects the
+ *                            fixture pack, the request assembly, the scoring
+ *                            dimensions, AND the PMS task a pms:<version> ref
+ *                            resolves against
  *   --prompt <label>=<ref>   candidate; ref = file path | pms:<version> | mock:<label>
  *   --live                   CLI half of the live double opt-in
  *   --model <id>             model for live production (required in live mode)
@@ -25,12 +29,24 @@
  */
 
 import { writeFileSync } from 'node:fs';
-import { runCandidateEval, type CandidateEvalReport } from './src/candidate-run.js';
+import { ROUTING_ADAPTER, runCandidateEval, type CandidateEvalReport } from './src/candidate-run.js';
+import { DECISION_REVIEW_ADAPTER } from './src/decision-review/adapter.js';
 import { parsePromptSpec, type CandidatePromptSpec } from './src/prompt-source.js';
-import { loadFixtures } from './src/run.js';
+import type { EvalTaskAdapter } from './src/task-adapter.js';
+import { DEFAULT_EVAL_TASK, parseEvalTask, type EvalTaskKey } from './src/tasks.js';
+
+/**
+ * Task key -> adapter. The ONE place a task is bound to its evaluation, so a
+ * task key that parses but has no adapter is impossible by construction.
+ */
+const ADAPTERS: Record<EvalTaskKey, EvalTaskAdapter<never>> = {
+  routing: ROUTING_ADAPTER as EvalTaskAdapter<never>,
+  decision_review: DECISION_REVIEW_ADAPTER as EvalTaskAdapter<never>,
+};
 
 interface CliArgs {
   readonly specs: CandidatePromptSpec[];
+  readonly task: EvalTaskKey;
   readonly modelId?: string;
   readonly maxTurns?: number;
   readonly fixturesDir?: string;
@@ -39,6 +55,7 @@ interface CliArgs {
 
 function parseArgs(argv: readonly string[]): CliArgs {
   const specs: CandidatePromptSpec[] = [];
+  let task: EvalTaskKey = DEFAULT_EVAL_TASK;
   let modelId: string | undefined;
   let maxTurns: number | undefined;
   let fixturesDir: string | undefined;
@@ -55,6 +72,9 @@ function parseArgs(argv: readonly string[]): CliArgs {
     switch (arg) {
       case '--prompt':
         specs.push(parsePromptSpec(next()));
+        break;
+      case '--task':
+        task = parseEvalTask(next());
         break;
       case '--model':
         modelId = next();
@@ -75,18 +95,20 @@ function parseArgs(argv: readonly string[]): CliArgs {
         if (arg !== '--live' && arg !== '--' && arg.startsWith('--')) throw new Error(`unknown flag: ${arg}`);
     }
   }
-  return { specs, modelId, maxTurns, fixturesDir, outPath };
+  return { specs, task, modelId, maxTurns, fixturesDir, outPath };
 }
 
 function printReport(report: CandidateEvalReport): void {
-  console.log(`\nmode: ${report.live ? 'LIVE' : 'offline'} (${report.gateReason})`);
+  console.log(`\ntask: ${report.task}`);
+  console.log(`mode: ${report.live ? 'LIVE' : 'offline'} (${report.gateReason})`);
   if (report.model) console.log(`model: ${report.model}`);
   console.log(`turns used: ${report.turnsUsed}`);
 
   for (const c of report.candidates) {
     const empty = c.substanceFailedTurnCount > 0 ? `, ${c.substanceFailedTurnCount} turn(s) EMPTY (substance failed)` : '';
     const flagged = c.flaggedTurnCount > 0 ? `, ${c.flaggedTurnCount} turn(s) FLAGGED raw_unparsed` : '';
-    console.log(`\n━━ candidate ${c.label} (${c.kind}: ${c.ref}) — ${c.passCount}/${c.results.length} fixtures pass${empty}${flagged} ━━`);
+    const witness = c.promptSha16 === null ? '' : ` [prompt sha256 ${c.promptSha16}]`;
+    console.log(`\n━━ candidate ${c.label} (${c.kind}: ${c.ref})${witness} — ${c.passCount}/${c.results.length} fixtures pass${empty}${flagged} ━━`);
     for (const r of c.results) {
       const verdict = r.pass ? 'PASS' : 'FAIL';
       console.log(`  - ${r.fixtureId}: ${verdict}  [extraction: ${r.extraction}]`);
@@ -124,14 +146,17 @@ async function main(): Promise<number> {
     console.error(
       'usage: pnpm eval:orchestrator:candidates -- --prompt <label>=<ref> [--prompt <label>=<ref> ...]\n' +
         '  ref = file path | pms:<version> | mock:<recorded-label>\n' +
+        '  --task routing | decision_review   (default routing; selects the fixture pack AND the scoring dimensions)\n' +
         '  live production additionally needs ORCHESTRATOR_EVAL_LIVE_CANDIDATES=1, --live, and --model <id>.',
     );
     return 1;
   }
 
-  const report = await runCandidateEval({
+  const adapter = ADAPTERS[args.task];
+  const report = await runCandidateEval<never>({
     specs: args.specs,
-    fixtures: loadFixtures(args.fixturesDir),
+    adapter,
+    fixtures: adapter.loadFixtures(args.fixturesDir),
     gateInput: { env: process.env, argv: process.argv },
     maxTurns: args.maxTurns,
     modelId: args.modelId,

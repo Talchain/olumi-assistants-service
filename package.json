@@ -72,6 +72,7 @@
     "eval:orchestrator:test": "vitest run tools/orchestrator-eval",
     "eval:orchestrator:candidates": "tsx tools/orchestrator-eval/candidate-cli.ts",
     "eval:orchestrator:typecheck": "tsc -p tools/orchestrator-eval/tsconfig.json --noEmit",
+    "eval:decision-review": "tsx tools/orchestrator-eval/decision-review-cli.ts",
     "preharness:typecheck": "pnpm openapi:generate",
     "harness:typecheck": "tsc -p tools/conversation-harness/tsconfig.json --noEmit",
     "harness:test": "vitest run --config tools/conversation-harness/vitest.config.ts"

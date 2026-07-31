@@ -314,11 +314,155 @@ tools/orchestrator-eval/
 │   ├── judge-seam.ts            # seam docs: SEAM-1 wired ↓, SEAM-2 (paid judge) still open
 │   ├── live-gate.ts             # SEAM-1: fail-closed double opt-in + hard turn cap
 │   ├── prompt-source.ts         # SEAM-1: candidate refs (file | pms:<version> | mock:<label>)
-│   └── candidate-run.ts         # SEAM-1: produce → extract → score → rank
+│   ├── candidate-run.ts         # SEAM-1: produce → extract → score → rank (+ ROUTING_ADAPTER)
+│   ├── tasks.ts                 # the task keys (routing | decision_review)
+│   ├── task-adapter.ts          # the per-task seam: request / mock / extract+score
+│   └── decision-review/         # the decision_review task (see below)
+│       ├── types.ts             # fixture types, grounded on the PRODUCTION input types
+│       ├── assemble.ts          # REAL assembly via production buildDecisionReviewUserMessage
+│       ├── served-contract.ts   # the served prompt's own bans + tone table, PARSED
+│       ├── scorer.ts            # 19 deterministic dimensions
+│       ├── run.ts               # load → assemble → score → agree (+ named-dimension pins)
+│       └── adapter.ts           # the EvalTaskAdapter implementation
+├── decision-review-cli.ts       # decision_review fixture regression (pnpm eval:decision-review)
+├── reports/                     # committed baseline runs
 └── __tests__/
     ├── orchestrator-eval.test.ts
-    └── candidate-eval.test.ts   # gate/cap/zero-network(+positive control)/mock-pipeline
+    ├── candidate-eval.test.ts   # gate/cap/zero-network(+positive control)/mock-pipeline
+    ├── decision-review-scorer.test.ts        # RED-first, one NAMED dimension at a time
+    ├── decision-review-anti-vacuity.test.ts  # floor + positive control + scanned>0 per dim
+    ├── decision-review-contract-drift.test.ts# derived-vs-frozen-v14-floor drift guard
+    ├── decision-review-assembly.test.ts      # byte-identity with the runtime assembler
+    └── decision-review-candidates.test.ts    # SEAM-1 guarantees INHERITED by the new task
 ```
+
+## Tasks
+
+The chassis is parameterised by a **task key** — the same string the runtime
+passes to `getSystemPrompt(...)`, so a `pms:<version>` ref resolves the prompt
+the runtime actually serves for that task.
+
+| task | fixtures | request assembly | dimensions |
+|---|---|---|---|
+| `routing` (default) | `fixtures/` | candidate prompt + `<TURN_CONTEXT>` carrying the assembled analysis | 6 prose dimensions + extraction contract |
+| `decision_review` | `fixtures/decision-review/` | candidate prompt as SYSTEM, production `buildDecisionReviewUserMessage` output as USER | 19 dimensions + extraction contract |
+
+```bash
+pnpm eval:decision-review                      # fixture regression, offline, zero LLM
+pnpm eval:decision-review --verbose             # print every dimension, not just failures
+pnpm eval:orchestrator:candidates -- --task decision_review --prompt A=mock:good --prompt B=mock:tone_breach
+```
+
+Everything else — the fail-closed double opt-in, the 24-turn hard cap, `mock:`
+zero-network playback, fail-closed extraction, the ranking-key invariants — is
+INHERITED by every task. That is the point of the adapter seam: a new task has
+no code path in which to opt out of them, and
+`__tests__/decision-review-candidates.test.ts` re-proves each one through the
+new adapter rather than assuming the routing tests cover it.
+
+## The `decision_review` pack
+
+**Provenance discipline.** Each of the 19 dimensions declares where its rule
+comes from, ranked by how hard it is to drift:
+
+- **`production-guard` (7)** — the runtime's own exported functions, imported:
+  `checkDecisionReviewContract` (#645 contract gate — coverage floor, R-CONT
+  fabricated callbacks, entity grounding, the four tight count caps),
+  `performShapeCheck`, `checkNumberGrounding`, and the composed
+  `findForbiddenMatches`. These cannot disagree with staging because they ARE
+  staging's code.
+- **`served-prompt-derived` (5)** — PARSED out of
+  `Prompts/canonical/decision_review.txt` at run time: the banned lexicon, the
+  internal-vocabulary list, the raw-decimal rule, the dash ban, and the TONE
+  ALIGNMENT table. The canonical export hashes to `b4f15305c2bb32e9`, which is
+  the manifest's `live_served_hash_observed` for PMS v14 — so this is the served
+  contract, not a proxy for it. `tools/graph-evaluator` retyped the same two
+  lists as `BANNED_TERMS` / `TONE_RULES` constants in March 2026 and they have
+  not been re-checked since; that is the drift this parse exists to avoid.
+- **`eval-assertion` (7)** — this pack's own worked logic, with its reasoning and
+  its LIMITS written at the definition site (`primary_risk_coherent` is
+  explicitly a lexical proxy for a semantic rule; `infeasible_winner_disclosed`
+  is explicitly not derivable from v14).
+
+**The frozen floor.** A purely-derived rule has the opposite failure mode from a
+mirror: pinned to "whatever is current", it becomes a tautology the moment
+current changes. So the derived sets are paired with a permanently frozen v14
+snapshot (`V14_BANNED_LEXICON_FLOOR`), asserted as a SUBSET of whatever the
+prompt bans today. A term the prompt silently RETIRES turns
+`decision-review-contract-drift.test.ts` red; a term it ADDS is reported, not
+failed. Never "refresh" the floor to match a newer prompt — record the
+retirement as a dated exception instead.
+
+**Three states, not two.** A dimension that could not be evaluated — because the
+input lacks the field it reads, or the served contract constrains nothing on this
+run — is `not_applicable`. It is **excluded from the measured denominator** and
+reported out of band. Every "N/M" this tool prints is `passed/measured`.
+
+This is an amendment, and it changed a published number: the first baseline read
+**18/19** on the live captures because three unevaluable dimensions were counted
+as passes. It is **15/16 measured, 3 not applicable**. An unmeasured dimension
+counting as a pass is the exact failure this pack exists to end, and it had
+happened inside the pack.
+
+**Anti-vacuity.** Most dimensions are ABSENCE checks, which an empty output
+satisfies for free. Three structural defences:
+
+- `substance_present` is a FLOOR a degenerate output must fail;
+- every dimension reports `scanned` — **always the CONTENT it examined**, never
+  the number of rules it applied. (An earlier draft let it mean either, and
+  `no_banned_lexicon` reported `scanned: 10` — its parsed rule count — on an
+  output with no prose at all. Ten rules times zero strings is zero checks. Rule
+  counts now live in the `detail` string, where they inform without inflating.)
+- a dimension that PASSES over a zero corpus is **demoted to `not_applicable`
+  by construction**, in one place, so a new dimension inherits the rule by
+  existing rather than by being remembered.
+
+Together these mean a degenerate output reports `measured=5, NA=14, passed=0` —
+visibly unmeasurable rather than mostly clean.
+
+**Judge layer: deliberately NOT wired.** SEAM-2 stays closed. The rubric-judge
+pattern already exists twice (`tools/conversation-harness/scorer/llm-judge.ts`,
+`tools/graph-evaluator/src/orchestrator-judge.ts`), both opt-in and cost-capped,
+and layering one here would have been cheap. It was left out because the
+deterministic floor is what the baseline needed to be trustworthy, and a judge
+whose scores nobody has calibrated against this pack would add a number without
+adding a guarantee. `primary_risk_coherent` names the specific place a judge
+would earn its keep: the semantic version of a rule this pack can only check
+lexically.
+
+## Known gaps in the `decision_review` pack (stated, not papered over)
+
+- **DSK dimensions not revived.** `invokeDecisionReview` injects a
+  `<SCIENCE_CLAIMS>` section built from the DSK registry through runtime config
+  when the served prompt lacks one. Reproducing that would make the offline path
+  depend on config state, so it is omitted — which means this pack scores the
+  NON-DSK assembly, and the March pack's `dsk_fields_correct` dimension is
+  consciously not carried over.
+- **Product-knowledge currency is NOT measured.** The register's headline
+  complaint about v14 is that it "predates held-proposals / goal-fit /
+  calibrated-uncertainty". Those fields are absent from the prompt AND from
+  `DecisionReviewInvokeInput`, so a fixture cannot carry them and a dimension
+  cannot score them without a `src/` change. Flagged rather than faked.
+- **Sub-field shapes below `performShapeCheck` are not asserted.** The runtime
+  shape check is the contract this pack enforces; the prompt specifies more
+  (character caps, technique tables, `brief_evidence` substring rules) that
+  nothing here checks yet.
+- **One unavoidable MIRROR of runtime state, made loud.** `countDescriptiveNumbers`
+  reproduces `DESCRIPTIVE_FIELD_KEYS`, `NUMBER_PATTERN` and `PERCENTAGE_PATTERN`,
+  all module-private in `src/cee/decision-review/shape-check.ts`, because
+  `checkNumberGrounding` returns only warnings — a clean result is
+  indistinguishable from "there were no numbers here", which is the vacuity
+  `scanned` exists to expose. That is a hand-maintained mirror inside the
+  anti-vacuity machinery. It cannot be fixed from here (exporting the constants
+  is a `src/` change, outside this lane's file-set boundary), so
+  `decision-review-runtime-mirror.test.ts` reads `shape-check.ts` **as text** at
+  test time and asserts the copies match the source bytes. **The clean fix —
+  export the three constants and import them — belongs to the next src-side
+  decision_review lane.**
+- **`ENTITY_ID_IN_PROSE_PATTERN` carries a hand-maintained prefix list**
+  (derived 2026-07-31, no runtime constant exists to derive it from). A new
+  entity kind will go undetected silently; the backstop and the second list to
+  update are named at the definition site.
 
 ## Deliberately deferred (co-owned with the prompt workstream / "Brief I")
 
@@ -328,6 +472,17 @@ tools/orchestrator-eval/
   stage; wiring the whole context-pack → system-prompt compose is the next step.
 - **Paid LLM judge** — the deterministic scorer is the floor; the judge is
   additive.
-- **CI gate wiring** — this is NOT yet a blocking CI gate. Once the fixture set
-  is real, wire it so no orchestrator prompt reaches staging without a green
-  `pnpm eval:orchestrator`.
+- **Paid judge inside this tool (SEAM-2)** — typed but unwired
+  (`src/judge-seam.ts`, `NO_PAID_JUDGE`). The deterministic scorer is the floor
+  and the gate never depends on a paid call; a rubric judge is additive. The
+  `decision_review` pack deliberately did NOT wire it — see "Judge layer" below.
+
+> **CORRECTED 2026-07-31.** This section used to close with *"CI gate wiring —
+> this is NOT yet a blocking CI gate"*. **That was stale by twelve days.**
+> `pnpm eval:orchestrator:test` has been a REQUIRED CI step since PR #532
+> (`8f1667ae`, 19 Jul) — `.github/workflows/ci.yml:97`, inside the
+> `Lint, TypeCheck, Unit Tests` job, deliberately placed BEFORE `test:required`
+> so a prompt regression is the attributable signal rather than being shadowed.
+> The note stayed wrong because nobody re-read the README when the wiring
+> landed: a hand-maintained description of a gate is itself a mirror, and it
+> drifted exactly the way mirrors do here.
