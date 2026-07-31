@@ -2043,17 +2043,29 @@ describe('Finding 1 — lever-naming guard on all free-text surfaces', () => {
     ).toBeDefined();
   });
 
-  it('pre_mortem whose failure prose names the lever is dropped', () => {
+  // ⚠ INVERTED BY RULING (2026-07-31). This test used to assert the pre_mortem
+  // card was DROPPED when its failure prose named a lever, and it was correct
+  // for the doctrine as then scoped. The guard was then MEASURED against the
+  // walk's real captured bytes (fix-2211-lens-emission.md §1.1-1.4) and found
+  // to be eating 2 of the 4 turns where the producer emitted anything — a 50%
+  // loss rate on this card from a guard written for a different surface.
+  //
+  // RULING: a pre-mortem names the lever as a failure WATCH-POINT ("imagine the
+  // option you chose did not pay off"), which is coaching, not steering. The
+  // ban is scoped out of THIS surface only; every sibling assertion in this
+  // describe block is unchanged and still passing, which is what keeps the
+  // ruling narrow. Full scope pins live in `pre-mortem-lever-ruling.test.ts`.
+  it('pre_mortem whose failure prose names the lever now SHIPS (lever ban scoped out of this surface)', () => {
     const fact = makeFact({
       decisionReview: {
         pre_mortem: { failure_scenario: 'The project fails because Delivery risk was mismanaged.' },
       },
       graphNodes: STANDARD_GRAPH_NODES,
     });
-    expect(
-      buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
-        .find((b) => b.card_kind === 'pre_mortem'),
-    ).toBeUndefined();
+    const card = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
+      .find((b) => b.card_kind === 'pre_mortem');
+    expect(card).toBeDefined();
+    expect(card?.body).toContain('Delivery risk');
   });
 
   it('scenario_context whose trigger/consequence names the lever is skipped', () => {

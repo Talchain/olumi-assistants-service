@@ -687,7 +687,12 @@ export function buildReviewCardBlocks(
   if (narrative !== null) blocks.push(narrative);
 
   // pre_mortem (rank 2) — optional in the LLM output; free-text failure prose.
-  const preMortem = buildPreMortemCard(dr, lookup, ctx, leverLabels);
+  // `leverLabels` is deliberately NOT passed: the D-U F2 lever-naming ban is
+  // scoped OUT of this one surface by ruling (a pre-mortem names the lever as a
+  // failure WATCH-POINT, which is coaching, not steering). See the block
+  // comment on buildPreMortemCard for the measurement and the reasoning. Every
+  // other surface in this file still receives it.
+  const preMortem = buildPreMortemCard(dr, lookup, ctx);
   if (preMortem !== null) blocks.push(preMortem);
 
   // flip_threshold (rank 3) — one per entry; within-kind sub-rank by order
@@ -1666,25 +1671,62 @@ function proseNamesGraphNode(text: string, lookup: GraphNodeLookup): boolean {
   return false;
 }
 
+/**
+ * ⚠ NOTE THE ABSENT PARAMETER: this builder takes NO `leverLabels`, and that is
+ * a RULING, not an oversight.
+ *
+ * Doctrine D-U F2 bans NAMING an option-set lever as an uncertainty, and it is
+ * applied on every other free-text decision-review surface (narrative,
+ * scenario_context, calibration, assumption) plus the structural
+ * `isLeverFactor` skip on the evidence surfaces. It used to be applied here
+ * too — and it was eating the card.
+ *
+ * MEASURED (fix-2211-lens-emission.md §1.1–1.4, replayed over the walk's real
+ * captured wire bytes): of the 4 turns where the producer emitted a
+ * `pre_mortem` object, the `lever_named` guard dropped **2** — a 50% loss rate
+ * on this card, from a guard written for a different surface. The attribution
+ * was witnessed, not assumed (the discriminating a3/a5 pair).
+ *
+ * RULING (orchestrator, with the no-recommendations doctrine as the frame): a
+ * pre-mortem is a different SPEECH ACT from the surfaces the ban protects. It
+ * says "imagine the option you chose did not pay off — what broke?". Naming the
+ * chosen lever as the thing that FAILED is a failure watch-point: coaching, not
+ * steering. The ban stays, unchanged, everywhere naming a lever would steer a
+ * choice; it is scoped out of THIS path only.
+ *
+ * Everything else on this path is untouched and still enforced — BIND (the
+ * hypothetical frame) and ANCHOR (`context_unanchored`) both still drop. Do not
+ * read this ruling as "ship anything".
+ */
 function buildPreMortemCard(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
-  leverLabels: readonly string[] = [],
 ): ReviewCardBlock | null {
   const pm = readRecord(dr.pre_mortem);
-  if (pm === null) return null;
-  const failure = typeof pm.failure_scenario === 'string'
-    ? pm.failure_scenario.trim()
-    : '';
-  if (failure.length === 0) return null;
-  // Doctrine D-U F2 / Finding 1: drop the pre-mortem when its failure prose
-  // NAMES an option-set lever as an uncertainty. Empty labels ⇒ no suppression.
-  if (proseNamesLever(failure, leverLabels)) {
+  // Previously a SILENT `return null`. On the walk this exit and the one below
+  // accounted for 2 of 6 turns — so the two commonest causes of "no card" were
+  // exactly the two the drop dashboard could not see, and it under-counted the
+  // true drop rate by precisely the producer-absent rate. A counter that reads
+  // healthy because it is blind is a broken alarm (CLAUDE.md trap 7).
+  if (pm === null) {
     emitDrop({
       block_type: 'review_card',
       kind: 'pre_mortem',
-      reason: 'lever_named',
+      reason: 'producer_absent',
+      field: 'pre_mortem',
+    });
+    return null;
+  }
+  const failure = typeof pm.failure_scenario === 'string'
+    ? pm.failure_scenario.trim()
+    : '';
+  // Also previously silent — see the note above.
+  if (failure.length === 0) {
+    emitDrop({
+      block_type: 'review_card',
+      kind: 'pre_mortem',
+      reason: 'failure_scenario_empty',
       field: 'failure_scenario',
     });
     return null;
