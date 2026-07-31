@@ -303,7 +303,7 @@ describe('capability P1 — companion is ABSENT on the stale branch', () => {
     const priorFact = makeFact();
     const staleness: FreshnessDerivation = {
       freshness: 'stale',
-      reason: 'graph_hash_mismatch',
+      reason: 'graph_hash_diverged',
       selected_fact_index: 0,
       graph_hash_at_run: GRAPH_HASH,
       current_graph_hash: DIVERGED_GRAPH_HASH,
@@ -336,7 +336,7 @@ describe('capability P1 — companion is ABSENT on the stale branch', () => {
           priorFacts: [priorFact],
           freshness: {
             freshness: 'fresh',
-            reason: 'graph_hash_matches',
+            reason: 'graph_hash_match',
             selected_fact_index: 0,
             graph_hash_at_run: GRAPH_HASH,
             current_graph_hash: GRAPH_HASH,
