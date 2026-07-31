@@ -1,13 +1,14 @@
 {
   "_meta": {
-    "generated_utc": "2026-07-27T10:19:26.277587+00:00",
+    "generated_utc": "2026-07-31T18:47:15.746+00:00",
     "cee_commit": "74936a650e4b97d9f06d7ee740394c135396edf4",
     "cee_deployed_build_at_capture": "74936a6",
     "pms_source": "supabase staging project etmmuzwxtcjipwphdola, tables cee_prompts / cee_prompt_versions",
     "pointer_resolved": "PROMPTS_USE_STAGING=True on cee-staging => served version = staging_version ?? active_version (src/prompts/stores/supabase.ts:612)",
     "served_hash_algo": "sha256(content).hex[:16]  (src/prompts/loader.ts:33)",
     "served_hash_crosscheck": "each key below whose served_hash_verified=true had its exported bytes hashed and matched against the LIVE /admin/prompts/status sent_hash/content_hash on cee-staging; sampled 8x with no instance split",
-    "not_exported_deliberately": "Code-constant prompts already live in src/ and are NOT duplicated here \u2014 duplicating them would create exactly the hand-maintained mirror this manifest exists to remove. They are listed under code_constant_live_prompts with their authoritative file path."
+    "not_exported_deliberately": "Code-constant prompts already live in src/ and are NOT duplicated here — duplicating them would create exactly the hand-maintained mirror this manifest exists to remove. They are listed under code_constant_live_prompts with their authoritative file path.",
+    "decision_review_regen_note": "decision_review row REGENERATED 2026-07-31 by the fix-decision-review-v15 lane at the moment of promotion: PMS row version 15 created, stagingVersion patched 14->15, reload issued, and the served hash read back from the LIVE /admin/prompts/status (version=15, content_hash=ba4879dd0a714b8f, chars=33049) — not inferred from the file. The other rows are unchanged from the 2026-07-27 generation at cee_commit 74936a65 and remain as stale or as fresh as they were."
   },
   "pms_prompts": [
     {
@@ -24,7 +25,7 @@
       "chars": 25149,
       "served_hash_verified": true,
       "live_served_hash_observed": "adcc5128d4e6e6bc",
-      "trigger": "EVERY turn (ORIENT system prompt) \u2014 no gate"
+      "trigger": "EVERY turn (ORIENT system prompt) — no gate"
     },
     {
       "key": "draft_graph",
@@ -63,15 +64,15 @@
       "pms_task_id": "decision_review",
       "pms_prompt_id": "decision_review_default",
       "file": "Prompts/canonical/decision_review.txt",
-      "served_version": 14,
+      "served_version": 15,
       "pms_active_version": 11,
-      "pms_staging_version": 14,
-      "sha256": "b4f15305c2bb32e9981c774734c4f8e1792d9ef274a0e6c425886c24fbe190a2",
-      "cee_content_hash_16": "b4f15305c2bb32e9",
-      "bytes": 27257,
-      "chars": 27256,
+      "pms_staging_version": 15,
+      "sha256": "ba4879dd0a714b8f830d9d0b21353b428d78dd2e1c11b4ad3afe1ed033cd16fd",
+      "cee_content_hash_16": "ba4879dd0a714b8f",
+      "bytes": 33050,
+      "chars": 33049,
       "served_hash_verified": true,
-      "live_served_hash_observed": "b4f15305c2bb32e9",
+      "live_served_hash_observed": "ba4879dd0a714b8f",
       "trigger": "run_analysis outcome auto-fire (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true) AND the PLoT->CEE callback POST /assist/v1/decision-review (PLoT DECISION_REVIEW_ENABLE=1)"
     },
     {
@@ -111,22 +112,22 @@
     {
       "name": "COACHING_SYSTEM",
       "path": "src/cee/unified-pipeline/stages/coaching-pass.ts:79",
-      "trigger": "every draft turn (call site unified-pipeline/index.ts:897 is unconditional, but the stage returns WITHOUT an LLM call when ctx.coaching is already set, when there is no draftAdapter, when the graph has no nodes, or when the remaining request budget is < 28,000 ms \u2014 coaching-pass.ts skip gates)",
-      "gate": "invocation: none (no env var / flag; see trigger for the four runtime skip gates). output: NOT none, and NOT uniform across surfaces \u2014 assistant_text is gated by the premature-recommendation lexicon in orchestrator-v5/coaching/copy-quality-gate.ts (gateFullResponse / gateAssumptionFragment); blocks[].body bias cards are gated by gateCoachingCardBody (content rules, drop-on-trip, added 2026-07-27); the raw /assist/v1/draft-graph HTTP response is ungated.",
-      "corrected": "2026-07-27 \u2014 the previous \"gate\": \"none\" was FALSE for assistant_text, which has carried the copy-quality lexicon all along, and \"unconditional\" was false for the stage. The register under-described the defence on the biggest user-visible surface and thereby mis-priced the risk (COACHING-SYSTEM-AUDIT-2026-07-27 R2/R4)."
+      "trigger": "every draft turn (call site unified-pipeline/index.ts:897 is unconditional, but the stage returns WITHOUT an LLM call when ctx.coaching is already set, when there is no draftAdapter, when the graph has no nodes, or when the remaining request budget is < 28,000 ms — coaching-pass.ts skip gates)",
+      "gate": "invocation: none (no env var / flag; see trigger for the four runtime skip gates). output: NOT none, and NOT uniform across surfaces — assistant_text is gated by the premature-recommendation lexicon in orchestrator-v5/coaching/copy-quality-gate.ts (gateFullResponse / gateAssumptionFragment); blocks[].body bias cards are gated by gateCoachingCardBody (content rules, drop-on-trip, added 2026-07-27); the raw /assist/v1/draft-graph HTTP response is ungated.",
+      "corrected": "2026-07-27 — the previous \"gate\": \"none\" was FALSE for assistant_text, which has carried the copy-quality lexicon all along, and \"unconditional\" was false for the stage. The register under-described the defence on the biggest user-visible surface and thereby mis-priced the risk (COACHING-SYSTEM-AUDIT-2026-07-27 R2/R4)."
     },
     {
       "name": "SUMMARISER_SYSTEM_PROMPT",
       "path": "src/orchestrator-v5/rolling-summary/summariser.ts:27",
       "trigger": "every commit seam, fire-and-forget (off the response path)",
-      "gate": "none \u2014 CEE_ROLLING_SUMMARY deleted"
+      "gate": "none — CEE_ROLLING_SUMMARY deleted"
     },
     {
       "name": "ENRICH_FACTORS_PROMPT",
       "path": "src/prompts/enrich-factors.ts:117 (used raw at src/services/review/enrichFactors.ts:429)",
       "trigger": "PLoT->CEE callback POST /assist/v1/review on every /v2/run with a brief + ISL enabled",
       "gate": "none in CEE; requires PLoT CEE_BASE_URL+CEE_API_KEY (both set on staging)",
-      "warning": "The PMS row 'enrich_factors' is a STALE MIRROR with ZERO runtime readers \u2014 editing it in PMS silently no-ops. The code constant is the only live source."
+      "warning": "The PMS row 'enrich_factors' is a STALE MIRROR with ZERO runtime readers — editing it in PMS silently no-ops. The code constant is the only live source."
     },
     {
       "name": "DRAFT_COMPLIANCE_REMINDER",

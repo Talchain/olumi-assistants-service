@@ -1413,13 +1413,21 @@ flip_thresholds (array, max 3 — always present, may be empty):
   Take the first 3 entries from flip_threshold_data (in order provided) where flip_value is not null:
     factor_id (string): from flip_threshold_data[].factor_id
     factor_label (string): from flip_threshold_data[].factor_label
-    current_display (string): current_value as-is, appended with unit if provided (e.g., "16000 GBP", "800 customers")
-    flip_display (string): flip_value as-is, same format as current_display
-    Do not round, abbreviate (no "k", "m"), add commas, or insert currency symbols unless
-    the unit field already contains them. Output the number exactly as provided.
+    current_display / flip_display (string): the DISPLAY form of current_value / flip_value.
+      TWO CASES, and only two:
+      1. The value carries a unit. Quote it verbatim with the unit appended
+         (e.g., "16000 GBP", "800 customers"). Do not round, abbreviate (no "k", "m"),
+         add commas, or insert currency symbols unless the unit field already contains them.
+      2. The value carries no unit and lies between 0 and 1. It is probability-like, so it takes
+         the PERCENTAGE form, exactly as everywhere else in this response: write "35%", never
+         "0.35"; write "62%", never "0.62". Multiplying by 100 is the one permitted transformation.
+      A bare decimal in either field is a raw probability decimal and gets the whole card
+      discarded. There is no third case: never invent a unit the input did not carry, and
+      never convert between units.
     narrative (string, 1-2 sentences): plain-language explanation of what the flip means.
-      Use factor_label (never factor_id). Frame as "If [factor_label] moves from [current] to [flip],
-      the result changes." Include the unit if provided; if unit is absent, do not add one.
+      Use factor_label (never factor_id). Frame as "If [factor_label] moves from [current_display]
+      to [flip_display], the result changes." Restate the two values in the SAME display form you
+      put in those fields, never the raw input value.
       Use language appropriate to headline_type tone.
       Do not restate factor_id — use display forms only.
   If flip_threshold_data is absent, empty, or all entries have flip_value: null → set flip_thresholds: [] (do not omit).

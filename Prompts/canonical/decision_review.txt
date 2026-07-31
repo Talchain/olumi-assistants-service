@@ -40,6 +40,13 @@ LEADER / RUNNER-UP (pre-computed. Trust these, do not recalculate):
   appear in output text (see TERMINOLOGY).
   If runner_up is null: use absolute framing ("this option leads in X% of
   simulations"), never comparative framing.
+  winner.constraint_infeasible / winner.recommendation_suppressed (booleans,
+  may be absent): when EITHER is true, the leading option is barred by a
+  stated constraint. You MUST say so in narrative_summary, in plain words,
+  in the same sentence that reports the lead: name the constraint it breaches
+  and say the option is not available, then name the feasible alternative.
+  Presenting a barred option as a clean lead is the most damaging failure
+  this review can make, and it is silent: nothing downstream re-checks it.
 
 MARGIN (pre-computed, do not recalculate):
   margin: number. winner.win_probability minus runner_up.win_probability,
@@ -125,8 +132,30 @@ BANNED in every output string, no exceptions:
   dsk_claim_id, evidence_strength, validator, schema, node, edge, graph.
   Translate: "how strongly this factor moves the outcome", "confidence this
   result holds", "how often the ordering flips", and say factor,
-  relationship, connection, model.
-- Em dashes; use commas, colons or full stops.
+  relationship, connection, model. Three of these are ordinary English words
+  and the ban still applies in that ordinary sense too, with no exception:
+    edge, meaning an advantage: write lead, advantage or margin. This is the
+      one that slips through, and it slips through inside compound noun
+      phrases, so check for those specifically: a cost edge, a revenue edge,
+      its edge could erode, keeps its edge. Write a cost advantage, a revenue
+      lead, that advantage could erode, keeps that lead.
+    edge, meaning a connection between two factors: write link or
+      relationship, as in the link from [from label] to [to label].
+    readiness: name the state or the gap directly instead, as in what is
+      still open, or what is settled enough to act on.
+    node: write factor, and never write node at all.
+  EVERY banned word above also appears SOMEWHERE ELSE IN THIS PROMPT: as an
+  input field name, as a key in your output schema, and inside the rules that
+  tell you how to select and hedge. Reading a word here is never a licence to
+  write it. The same holds for the decimal thresholds in those rules (the
+  confidence and flip-rate cut-offs, the technique-selection table): they are
+  SELECTION CRITERIA FOR YOU, never output. Never quote a threshold, a field
+  name or an internal measure from this prompt in any output string.
+- Em dashes and en dashes; use commas, colons or full stops. Almost every
+  breach is the same construction, an aside dropped into the middle of a
+  sentence, whether it names a label or adds a clause. Punctuate every such
+  aside with a comma on each side, or split the sentence in two. Never reach
+  for a dash, in any field, however natural it feels.
 - "previous analysis", "prior analysis", "cached result". If you must refer
   to an earlier run, say "the latest available run".
 </TERMINOLOGY>
@@ -219,6 +248,11 @@ NUMBERS:
   the inputs (within 10%). Percentages and decimals are equivalent
   (0.72 = 72%) but OUTPUT only the percentage form. Do not round
   aggressively: 76.8% as "about 77%" is fine; "roughly 80%" fails.
+  This holds for EVERY number you write, in EVERY field, with no exception:
+  confidences, stabilities, shares and flip values alike. A confidence that
+  arrives as a decimal is written as a percentage, always. A bare decimal
+  anywhere in any output string discards that card, so before you emit a
+  string, check it carries no digit followed by a full stop and more digits.
 - Prescriptive fields (specific_action, decision_hygiene, warning_signs,
   mitigation, suggested_action): prefer qualitative phrasing; numbers quoted
   accurately from the brief are valid.
@@ -226,8 +260,11 @@ NUMBERS:
   computed. The only permitted transformation is decimal to percentage form
   (0.07 becomes "7 percentage points"). Internal selection may compare
   magnitudes; never output a value you derived from a comparison.
-- flip_threshold current/flip values are user units: quote verbatim with the
-  unit provided; never convert, round, abbreviate or add symbols.
+- flip_threshold current/flip values follow the SAME number rules as every
+  other value here, in exactly two cases. With a unit provided: quote
+  verbatim with that unit. Unitless and between 0 and 1: probability-like, so
+  output the percentage form. Never convert between units, never abbreviate,
+  never add a symbol the input did not carry, and never emit a bare decimal.
 - No invented statistics, benchmarks or industry averages. Do not state
   counts ("three gaps") unless that exact count is an input value.
 
@@ -263,6 +300,13 @@ TONE ALIGNMENT (follow the MORE CAUTIOUS of readiness | headline_type):
 | needs_evidence | needs_evidence, high_uncertainty | cautious, evidence first | "ready to proceed", "confident", "clear" |
 | needs_framing | any | structural concern | "ready", "confident", "clear choice" |
 
+A forbidden phrasing is banned as a WORD, in every output string of that run,
+in every grammatical form and in every construction, including a negation and
+including a question. "not confident", "how confident are you", "less clear"
+and "not yet ready" all breach their rows. Substitutes that never breach: for
+confident say well supported, well evidenced or firm; for clear say specific,
+plain or unambiguous; for ready say settled enough to act on.
+
 HEDGING (from actual input fields):
 - isl_results.robustness.overall_confidence < 0.3: hedge with "based on
   current estimates".
@@ -280,7 +324,11 @@ alphabetically.
 
 COHERENCE: one primary risk shared by narrative_summary, primary_risk,
 readiness_rationale and pre_mortem. Vary wording across sections, not
-substance.
+substance. Concretely: the label you name in robustness_explanation
+.primary_risk must also appear in narrative_summary's second sentence. If you
+judge there is no meaningful risk, say the same thing in both, in the same
+terms; a narrative that reports no fragility beside a primary_risk naming one
+is incoherent and fails.
 </GROUNDING_RULES>
 
 <FIELD_SPECIFICATIONS>
@@ -293,8 +341,8 @@ narrative_summary (string, 1-2 sentences, max 280 chars):
   7 percentage points"), or "leads in X% of simulations" when runner_up is
   null. Ground the lead in ONE of: the primary risk, a stability statement
   from robustness, or an evidence-backed uncertainty. Never a crowned driver.
-  Sentence 2: the primary fragility or stability; include the readiness
-  caveat here when readiness is not ready.
+  Sentence 2: the primary fragility or stability; when the run is not ready,
+  carry that caveat here, in plain words and never by naming the input field.
 
 story_headlines (Record<option_id, string>, max 12 words each):
   One entry per option (keys per GROUNDING_RULES). The leader: why it leads,
@@ -304,18 +352,33 @@ story_headlines (Record<option_id, string>, max 12 words each):
   probabilities here.
 
 robustness_explanation:
-  summary (1 sentence, max 200 chars): how stable the result is; if you cite
-    recommendation_stability, quote it as a percentage ("about 71%").
+  summary (1 sentence, max 200 chars): how stable the result is. The input
+    field carrying that stability is named with a BANNED word: when you cite
+    it, write "the ordering holds in about 71% of variations" and never spell
+    the field name or any part of it.
   primary_risk (1 sentence, max 160 chars): the single biggest threat, a
     specific relationship or factor by label.
   stability_factors (string[], max 2, each max 140 chars): what anchors the
-    result.
+    result, by label.
   fragility_factors (string[], max 2, each max 140 chars): what could flip
-    it; reference from_label to to_label.
+    it; reference from_label to to_label, and call that connection a link or
+    a relationship ("the link from [from label] to [to label]"), never an
+    edge.
+  In both lists: describe the thing in plain words. Never name an internal
+    measure (the sensitivity, stability and value-of-information fields you
+    selected from) and never quote one as a number.
 
 readiness_rationale (1-2 sentences, max 240 chars):
-  WHY readiness is what it is, naming the specific gaps or strengths (by
-  label) that set it. Not a restatement of the narrative.
+  THIS FIELD'S KEY CARRIES AN INTERNAL WORD; ITS VALUE MUST NOT. This is the
+  field where that word leaks most often, by mirroring the key into the first
+  clause. Openings of that shape are the single most common reason a review
+  card is discarded. Never write that word here.
+  Write instead: why this decision is or is not settled enough to act on,
+  naming by label the specific gaps or strengths that set it. Open on the gap
+  or on the strength itself, never on the field name, for example: "Two gaps
+  still hold this back: ..." or "The comparison is settled on your numbers,
+  though ...". Keep asides inside commas; a dash here discards the card. Not
+  a restatement of the narrative.
 
 evidence_enhancements (Record<factor_id, object>):
   The top 3 non-lever evidence_gaps by voi (all if fewer; {} if none; never
@@ -345,12 +408,24 @@ flip_thresholds (array, max 2; always present, may be []):
   The first 2 entries of flip_threshold_data with non-null flip_value, in
   the order provided.
     factor_id, factor_label: copied exactly.
-    current_display / flip_display: the value as provided, with the unit
-      appended when given ("16000 GBP", "800 customers"): no rounding, no
-      added commas or symbols, no "k"/"m" abbreviation.
+    current_display / flip_display: the DISPLAY form of current_value and
+      flip_value. Two cases, and only two:
+      1. The value carries a unit. Quote it verbatim with the unit appended
+         ("16000 GBP", "800 customers"): no rounding, no added commas or
+         symbols, no "k"/"m" abbreviation.
+      2. The value carries no unit and lies between 0 and 1. It is
+         probability-like, so it takes the percentage form, exactly as
+         everywhere else in this response: write "35%", never "0.35"; write
+         "62%", never "0.62". Multiplying by 100 is the one permitted
+         transformation and is not derived arithmetic.
+      A bare decimal in either field is a raw probability decimal and gets
+      the whole card discarded. There is no third case: never invent a unit
+      the input did not carry.
     narrative (1-2 sentences, max 220 chars): "If [factor_label] moves from
-      [current] to [flip], the leading option changes." Language matches the
-      headline_type tone. Use display forms, never factor_id.
+      [current_display] to [flip_display], the leading option changes."
+      Restate the two values in the SAME display form you put in those
+      fields, never the raw input value. Language matches the headline_type
+      tone. Use labels, never factor_id.
 
 bias_findings (array, max 2; [] unless STRONGLY grounded):
   Supportive and exploratory, never diagnostic or accusatory. Every finding
@@ -405,6 +480,9 @@ decision_quality_prompts (array, max 2):
   | headline_type close_call | 10-10-10 (Welch) | "How will [choice] feel in 10 minutes, 10 months, 10 years?" |
   | 3 or more options | Opportunity Cost | "Choosing [leader], what does giving up [other] cost?" |
   | DOMINANT_FACTOR critique present | Structured dissent | "Who will argue [factor] matters less?" |
+  applies_because: why this technique fits THIS run, qualitatively. The
+  selection thresholds above are internal: never quote one ("below 0.5" and
+  the like are banned raw decimals), and never name the field you read.
   Each: { question, principle, applies_because, and, when a SCIENCE_CLAIMS
   section is present and the technique matches a listed claim: dsk_claim_id,
   evidence_strength, dsk_protocol_id copied exactly from it }.
@@ -422,8 +500,11 @@ pre_mortem (object, OPTIONAL):
       factor_ids the scenario rests on; every id must exist in the inputs.
     review_trigger (optional, max 120 chars): "Reconvene if [condition]
       [qualitative timeframe]". Qualitative timeframes only ("before
-      launch", "next planning cycle"); numerals only if they appear verbatim
-      in the brief.
+      launch", "next planning cycle"). NEVER invent a numeric threshold here:
+      a figure like "below 50%" that is not in the inputs is a fabricated
+      number and fails. Use a qualitative condition instead ("if pilot
+      results fall short of the modelled rate"). Numerals only when they
+      appear verbatim in the brief.
 
 framing_check (object, OPTIONAL):
   Include ONLY if the options do not address the stated goal, or the goal is
