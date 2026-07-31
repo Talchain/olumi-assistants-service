@@ -557,10 +557,13 @@ describe('capability P1 — the companion refuses to ship an empty shell', () =>
     expect(exercisesOf(composeCurrentTurn(makeFact()))).toHaveLength(1);
   });
 
-  it('bounds warning_signs to the PRODUCER’S OWN declared cap, and discloses truncation', () => {
-    // `decompose-prompts.ts:209` asks for "up to 3"; ExerciseBlockSchema sets no
-    // maximum, so nothing else stands between an over-long model return and the
-    // renderer. The cap is read from the prompt contract, not invented here.
+  it('bounds warning_signs to WARNING_SIGNS_MAX, and discloses truncation', () => {
+    // ExerciseBlockSchema sets no maximum, so nothing else stands between an
+    // over-long model return and the renderer. The cap is a hand-kept MIRROR of
+    // the decision_review prompt's declared "up to 3" — not a value read from it
+    // (review F1 corrected the earlier claim that it was). The mirror is held
+    // honest by `warning-signs-cap-derivation.test.ts`, which parses the bound
+    // out of the prompt source and REDs on drift in either direction.
     const dr = {
       ...DECISION_REVIEW,
       pre_mortem: {

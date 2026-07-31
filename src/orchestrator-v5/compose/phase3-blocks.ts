@@ -109,14 +109,33 @@ const SOURCE_HANDLER = 'decision_review_enricher';
 
 const TITLE_MAX = 80;
 /**
- * Capability P1 — the producer's OWN declared cap on `pre_mortem.warning_signs`,
- * mirrored from `src/cee/decision-review/decompose-prompts.ts:209`
- * (`"warning_signs": ["string"]   // up to 3, observable and actionable`).
+ * Capability P1 — the composer's cap on `pre_mortem.warning_signs`.
+ *
+ * ⚠ THIS IS A HAND-KEPT MIRROR, NOT A DERIVATION — say so plainly, because the
+ * first version of this comment said the cap was "READ FROM the producer's
+ * contract" and that was FALSE (CEE #770 review F1). It is a bare literal. The
+ * authority it mirrors is the decision_review prompt's own declared bound,
+ * `src/cee/decision-review/decompose-prompts.ts` —
+ * `"warning_signs": ["string"],   // up to 3, observable and actionable`.
+ *
+ * Why a mirror at all, rather than parsing the prompt at runtime: a production
+ * composer that reads a number out of a prompt STRING to decide how much user
+ * content to keep is a worse failure mode than a guarded constant — one prompt
+ * reword and the composer silently changes what users see, with no review.
+ *
+ * So the mirror is made FAIL-LOUD instead (CLAUDE.md trap 12; same shape as
+ * `scripts/ci/assert-pnpm-overrides-readable.mjs`):
+ * `warning-signs-cap-derivation.test.ts` parses the bound OUT of the prompt
+ * source and asserts equality with this constant, and fails just as loudly if
+ * the anchor it parses ever disappears. If the prompt moves to "up to 5", that
+ * test REDs — instead of this composer quietly truncating conforming output and
+ * firing a producer-drift alarm at a producer that did nothing wrong.
+ *
  * `ExerciseBlockSchema` sets no maximum, so without this an over-long model
  * return rides to the renderer unbounded. Exceeding it is DISCLOSED via
  * `v5.capability.lens_companion_truncated`, never silently swallowed.
  */
-const WARNING_SIGNS_MAX = 3;
+export const WARNING_SIGNS_MAX = 3;
 const BODY_MAX = 300;
 const ACTION_LABEL_MAX = 40;
 const TECHNIQUE_MAX = 300;
@@ -1421,13 +1440,14 @@ function buildPreMortemExerciseBlock(
       return trimmed.length > 0 ? [truncate(trimmed, BODY_MAX)] : [];
     },
   );
-  // Bound to the PRODUCER'S OWN declared cap. `decompose-prompts.ts:209` asks for
-  // `"warning_signs": ["string"]   // up to 3, observable and actionable`, and
-  // the ExerciseBlock schema sets no max — so an over-long model return would
-  // ride to the UI as an unbounded bullet list with nothing between it and the
-  // renderer. The cap is READ FROM the prompt's contract, not chosen here, and
-  // truncation is DISCLOSED (never silent): a producer that starts exceeding its
-  // own declared bound is a drift signal worth seeing, not noise to swallow.
+  // Bound to `WARNING_SIGNS_MAX` — a hand-kept mirror of the decision_review
+  // prompt's own declared bound ("up to 3"), NOT a value read from it at
+  // runtime. See the constant's docstring for why it is a mirror and for the
+  // fail-loud derivation guard that REDs if the prompt and the constant drift.
+  // The ExerciseBlock schema sets no max, so without this an over-long model
+  // return rides to the UI as an unbounded bullet list. Truncation is DISCLOSED
+  // (never silent): a producer exceeding its own declared bound is a drift
+  // signal worth seeing, not noise to swallow.
   const warningSigns = allWarningSigns.slice(0, WARNING_SIGNS_MAX);
   if (allWarningSigns.length > warningSigns.length) {
     emit(TelemetryEvents.V5LensCompanionTruncated, {
