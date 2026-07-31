@@ -47,6 +47,32 @@
  * usefulness; on consecutive turns, diversity IS usefulness. The rule therefore
  * refines what "most useful" means over time rather than re-ranking the lenses.
  *
+ * ── AMENDMENT 2.211-①, 2026-07-31 (founder-ratified): CORRELATED-ONLY YIELD ──
+ * The ORDER above is still not changed. What is narrowed is rule 1's TRIGGER:
+ * when flip-risk's hit is `FLIP_RISK_CORRELATED` — which, by the evaluator's
+ * isolated-first precedence, already means NO isolated flip factor exists — AND
+ * at least one other lens is triggered with an available executor on the same
+ * turn, flip-risk YIELDS the head slot: it steps to the END of this turn's
+ * eligible ladder, and the no-immediate-repeat tie-break below then runs
+ * unchanged over the adjusted ladder. An ISOLATED hit keeps priority 1
+ * unconditionally; a CORRELATED hit with nothing else triggered still emits
+ * (yielding to nothing would be suppression, which is not the ruling).
+ *
+ * EVIDENCE: `PHASE0-EVIDENCE-2026-07-28/probe-premortem-chain-final.md` — a
+ * 12-turn live walk on staging: `sensitivity_flip_risk` won the lens race
+ * 12/12 (10 on `FLIP_RISK_CORRELATED`, 2 on `FLIP_RISK_ISOLATED`); pre_mortem
+ * and EVPI emitted 0/12 with their own triggers simultaneously true on several
+ * turns. The correlated claim is the WEAKEST rule-1 door ("flips only in
+ * combination"), yet it was preempting every stronger-fit lens below it.
+ *
+ * WHY YIELD-TO-END RATHER THAN REMOVAL: removal would make the walk's dominant
+ * shape (correlated + pre-mortem triggering together every turn) emit
+ * pre_mortem unboundedly — recreating the monotony the no-repeat amendment
+ * exists to kill, and suppressing a genuinely-triggered lens in steady state.
+ * Demoted-to-end, the steady state alternates (pre_mortem leads, correlated
+ * flip-risk surfaces only as the no-repeat alternate), and the locked order
+ * among the OTHER lenses is untouched.
+ *
  * PURITY IS PRESERVED. The selector gains exactly ONE input —
  * {@link LensSelectorOptions.previousAnalysisLens} — and stays a pure function
  * of (fact, options). It performs no read of its own; the caller derives the
@@ -157,10 +183,18 @@ export interface LensSelection {
    */
   readonly subjectRef?: LensSubjectRef;
   /**
-   * ROADMAP 2.211 — set ONLY when the no-immediate-repeat rule displaced the
-   * lens that would otherwise have won the slot. Carries the DISPLACED lens so
-   * the emitter can log the (displaced, chosen) pair; absent on every turn
-   * where the head lens won normally. CEE-INTERNAL: never a wire field.
+   * ROADMAP 2.211 / 2.211-① — set ONLY when a tie-break moved the slot: either
+   * the no-immediate-repeat rule or the correlated-only yield displaced the
+   * lens that would otherwise have won it. Carries the DISPLACED lens so the
+   * emitter can log the (displaced, chosen) pair; absent on every turn where
+   * the head lens won normally. Which rule moved the slot is discriminated by
+   * {@link displacementCause} — the two fields are present together or absent
+   * together. CEE-INTERNAL: never a wire field.
+   *
+   * When BOTH rules act on one turn (a correlated yield whose beneficiary is
+   * itself an immediate repeat, pushed on by no-repeat), the recorded pair is
+   * the PROXIMATE displacement — the no-repeat one — because that is the
+   * decision that placed the final lens.
    *
    * It lives on the SELECTION rather than being emitted from inside
    * `selectLens` on purpose — the selector is a pure function and must stay
@@ -169,6 +203,12 @@ export interface LensSelection {
    * graph hash to stamp on it.
    */
   readonly displacedLens?: LensId;
+  /**
+   * ROADMAP 2.211-① — WHY the slot moved, present exactly when
+   * {@link displacedLens} is: `'no_repeat'` for the 2.211 tie-break,
+   * `'correlated_yield'` for the correlated-only yield. CEE-INTERNAL.
+   */
+  readonly displacementCause?: 'no_repeat' | 'correlated_yield';
 }
 
 // ============================================================================
@@ -573,6 +613,7 @@ function buildSelection(
   lens: LensId,
   hit: EvaluatorHit,
   displacedLens?: LensId,
+  displacementCause?: 'no_repeat' | 'correlated_yield',
 ): LensSelection {
   return {
     lens,
@@ -586,10 +627,13 @@ function buildSelection(
     ...(hit.subjectFactorId !== null
       ? { subjectRef: { id: hit.subjectFactorId, kind: 'factor' as const } }
       : {}),
-    // ROADMAP 2.211: present ONLY on a displacement, so the absence of the key
-    // is itself the "the head lens won normally" assertion (and `toStrictEqual`
-    // against a pre-amendment selection stays exact).
-    ...(displacedLens !== undefined ? { displacedLens } : {}),
+    // ROADMAP 2.211 / 2.211-①: present ONLY on a displacement (either cause),
+    // so the absence of the keys is itself the "the head lens won normally"
+    // assertion (and `toStrictEqual` against a pre-amendment selection stays
+    // exact). The pair is set together or not at all.
+    ...(displacedLens !== undefined && displacementCause !== undefined
+      ? { displacedLens, displacementCause }
+      : {}),
   };
 }
 
@@ -648,10 +692,39 @@ export function selectLens(
   }
 
   // Load-bearing negative: no lens whose evidence fired has an available executor.
-  const head = eligible[0];
-  if (head === undefined) return null;
+  const eligibleHead = eligible[0];
+  if (eligibleHead === undefined) return null;
 
-  // ROADMAP 2.211 — NO IMMEDIATE REPEAT. Two conditions, both required:
+  // ROADMAP 2.211-① — THE CORRELATED-ONLY YIELD (founder-ratified; module
+  // header). Two conditions, both required:
+  //   (1) the eligible head is flip-risk on its CORRELATED hit — the weakest
+  //       rule-1 door, and by evaluator precedence one that only exists when NO
+  //       isolated flip factor does ("only because of correlated" holds by
+  //       construction), and
+  //   (2) at least one OTHER lens fired with an available executor.
+  // Then flip-risk steps to the END of this turn's ladder — a yield, not a
+  // removal: it remains the last-resort alternate (so the no-repeat tie-break
+  // below can still alternate onto it rather than repeating the beneficiary),
+  // and with nothing else triggered the condition (2) guard means it still
+  // emits (yield-to-nothing would be suppression, which is not the ruling).
+  // An ISOLATED or DOMINANT_DRIVER hit never yields. The order of the OTHER
+  // lenses is untouched — this narrows rule 1's trigger; it does not re-rank
+  // the locked ladder.
+  let slotOrder: readonly { lens: LensId; hit: EvaluatorHit }[] = eligible;
+  let yieldedLens: LensId | undefined;
+  if (
+    eligibleHead.lens === 'sensitivity_flip_risk' &&
+    eligibleHead.hit.code === 'FLIP_RISK_CORRELATED' &&
+    eligible.length > 1
+  ) {
+    slotOrder = [...eligible.slice(1), eligibleHead];
+    yieldedLens = eligibleHead.lens;
+  }
+
+  const head = slotOrder[0]!;
+
+  // ROADMAP 2.211 — NO IMMEDIATE REPEAT, over the (possibly yield-adjusted)
+  // ladder. Two conditions, both required:
   //   (1) the head lens is the SAME lens the immediately-preceding analysis turn
   //       of this scenario selected, and
   //   (2) a NEXT lens exists that ALSO fired and ALSO has an available executor.
@@ -660,14 +733,19 @@ export function selectLens(
   // taken from the SAME ladder in the SAME order, so this is a tie-break within
   // the locked priority, never a re-ranking of it. `next` is never equal to
   // `head` (each lens appears once), so one displacement cannot cascade.
-  const runnerUp = eligible[1];
+  const runnerUp = slotOrder[1];
   if (
     options?.previousAnalysisLens != null &&
     options.previousAnalysisLens === head.lens &&
     runnerUp !== undefined
   ) {
-    return buildSelection(runnerUp.lens, runnerUp.hit, head.lens);
+    return buildSelection(runnerUp.lens, runnerUp.hit, head.lens, 'no_repeat');
   }
 
-  return buildSelection(head.lens, head.hit);
+  return buildSelection(
+    head.lens,
+    head.hit,
+    yieldedLens,
+    yieldedLens !== undefined ? 'correlated_yield' : undefined,
+  );
 }
