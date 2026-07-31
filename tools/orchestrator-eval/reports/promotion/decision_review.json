@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "task": "decision_review",
+  "promptSha16": "b4f15305c2bb32e9",
+  "generatedAt": "2026-07-30T00:00:00.000Z",
+  "verdict": "BLOCK",
+  "sampleSize": 2,
+  "dims": [
+    {
+      "name": "contract_caps_respected",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "entity_references_grounded",
+      "status": "not_applicable",
+      "required": false
+    },
+    {
+      "name": "infeasible_winner_disclosed",
+      "status": "not_applicable",
+      "required": false
+    },
+    {
+      "name": "no_banned_lexicon",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_dashes",
+      "status": "fail",
+      "required": true
+    },
+    {
+      "name": "no_entity_ids_in_prose",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_fabricated_continuity",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_internal_term_leak",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "no_internal_vocabulary",
+      "status": "fail",
+      "required": true
+    },
+    {
+      "name": "no_raw_probability_decimals",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "numbers_grounded",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "primary_risk_coherent",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "review_card_coverage",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "scenario_contexts_keyed_on_fragile_edges",
+      "status": "pass",
+      "required": false
+    },
+    {
+      "name": "shape_valid",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "story_headlines_distinct",
+      "status": "pass",
+      "required": false
+    },
+    {
+      "name": "story_headlines_match_options",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "substance_present",
+      "status": "pass",
+      "required": true
+    },
+    {
+      "name": "tone_alignment",
+      "status": "not_applicable",
+      "required": true
+    }
+  ],
+  "evidence": {
+    "source": "H1 #767 live-capture scoring of the served v14 prompt (two 2026-07-30 deployed-pair captures)",
+    "model": "gpt-4.1-2025-04-14",
+    "aggregation": "worst-case per dimension across captures (ab-verdict safety discipline)",
+    "block_reasons": [
+      "observed failures: r1 no_internal_vocabulary, r3 no_dashes (both breach the served prompt own banned list)",
+      "required dimension unmeasured on response-only captures (tone_alignment)",
+      "n=2 < 3: a promotion verdict needs ≥3 paired reruns (ab-verdict); this is a compliance rate, not a score"
+    ],
+    "note": "PRE-GATE promotion — grandfathered at this hash. A rewrite must ship a PASS report at the new hash; that makes this report and its grandfather entry stale (the ratchet forces removal)."
+  }
+}
