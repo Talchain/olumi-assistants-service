@@ -29,6 +29,7 @@ import type {
   ContextPackAnalysisOption,
 } from '../context/context-pack-assembler.js';
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
+import { looksLikeRawDecimal } from './format-graph-for-context.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
 
 export interface DisplaySafeAnalysisOption {
@@ -99,6 +100,37 @@ export interface DisplaySafeRankedOption {
 export interface DisplaySafeTippingPoint {
   readonly label: string;
   readonly risk: string;
+  /**
+   * ROADMAP 2.205 PRACTICAL RESOLUTION (2026-07-31) — the one un-banded
+   * quantity, and the reason it is allowed.
+   *
+   * A pre-formatted display string with units, e.g.
+   * `"currently 40000 GBP; flips at 34500 GBP"` — exactly the trick
+   * `DisplaySafeNode.display_value` already uses. Present ONLY when the same
+   * digits are already on the USER'S SCREEN for this analysis; the licence
+   * chain is traced hop by hop at
+   * `../context/analysis-signals.ts` → `deriveFlipDisplayLicences`.
+   *
+   * THE ADJUDICATED RULE (orchestrator, Paul veto open; grounded in the
+   * data+coaching doctrine): *a number already display-licensed to the USER on
+   * the same turn is speakable by the coach — same licence, same register. The
+   * Tier-3 deny (`../compose/claim-safety-cage.ts` TIER3_LEAK_BLOCK_FIELDS)
+   * continues to bind any value NOT shown to the user.*
+   *
+   * WHAT THIS DOES NOT REOPEN. The float cage is untouched: this key admits a
+   * producer-authored DISPLAY STRING and refuses it if
+   * {@link looksLikeRawDecimal} matches — the same predicate that keeps a bare
+   * `0.345` out of `display_value`. `"£34,500"` is not `0.345`. Nothing else
+   * moved: `top_drivers[].influence` (sensitivity magnitude) and
+   * `value_of_information[]` (VOI score) remain bands, because the licence
+   * trace found NO user-facing surface for either — see the manifest in
+   * `PHASE0-EVIDENCE-2026-07-28/fix-context-unband.md` §1.2-1.3.
+   *
+   * ADDITIVE, never a replacement: `risk` is always emitted. Where the display
+   * pair is absent the band alone remains — a disclosed band, never a silent
+   * hole (the same doctrine as `goal_fit` / `value_of_information_note`).
+   */
+  readonly flip_point?: string;
 }
 
 /** Lane 21 — banded value-of-information entry (influence-band vocabulary). */
@@ -653,6 +685,35 @@ function goalFitPhrase(goalFit: { scored: boolean; basis: string | null }): stri
   );
 }
 
+/**
+ * ROADMAP 2.205 practical resolution — render the display-licensed flip pair
+ * into ONE pre-formatted string, or return null so the caller emits the band
+ * alone.
+ *
+ * THE FLOAT CAGE IS ENFORCED HERE, at the boundary that owns it. Either string
+ * that reads as a bare number ({@link looksLikeRawDecimal} — the SAME predicate
+ * `format-graph-for-context.ts` applies to `display_value`, imported rather
+ * than copied) fails the whole pair: a producer that emitted `"0.345"` did not
+ * write a display form, it echoed a model value, and admitting one half of the
+ * pair would be worse than admitting neither.
+ *
+ * Both-or-neither, and only on a real flip pair — `no_flip_within_bounds`
+ * entries never reach here with a licence (the derivation withholds it), and
+ * the guard is repeated at the fork so the invariant is visible where the
+ * string is built.
+ */
+export function formatFlipPointDisplay(
+  entry: ContextPackAnalysisFlipThreshold,
+): string | null {
+  if (entry.no_flip_within_bounds) return null;
+  const current = entry.current_display;
+  const flip = entry.flip_display;
+  if (typeof current !== 'string' || typeof flip !== 'string') return null;
+  if (current.length === 0 || flip.length === 0) return null;
+  if (looksLikeRawDecimal(current) || looksLikeRawDecimal(flip)) return null;
+  return `currently ${current}; flips at ${flip}`;
+}
+
 function formatTippingPoint(
   entry: ContextPackAnalysisFlipThreshold,
 ): DisplaySafeTippingPoint | null {
@@ -662,7 +723,14 @@ function formatTippingPoint(
     entry.no_flip_within_bounds,
   );
   if (risk === null) return null;
-  return { label: entry.factor_label, risk };
+  // ROADMAP 2.205 — the band is ALWAYS emitted; the licensed number is
+  // additive. Absent licence ⇒ key absent ⇒ byte-identical to the pre-fix pack.
+  const flipPoint = formatFlipPointDisplay(entry);
+  return {
+    label: entry.factor_label,
+    risk,
+    ...(flipPoint !== null ? { flip_point: flipPoint } : {}),
+  };
 }
 
 function formatEvidenceGap(

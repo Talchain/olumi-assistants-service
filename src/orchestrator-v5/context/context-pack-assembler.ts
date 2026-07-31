@@ -182,6 +182,22 @@ export interface ContextPackAnalysisFlipThreshold {
   readonly flip_value: number | null;
   readonly unit: string | null;
   readonly no_flip_within_bounds: boolean;
+  /**
+   * ROADMAP 2.205 practical resolution (2026-07-31) — the DISPLAY LICENCE.
+   * The producer's own display strings for this factor's current/flip values,
+   * present exactly when those digits are already on the user's screen for
+   * this analysis (chain traced at
+   * `./analysis-signals.ts` → {@link deriveFlipDisplayLicences}). Both keys or
+   * neither. ABSENT when unlicensed — key-absence doctrine, so an unlicensed
+   * pack stays byte-identical to today's.
+   *
+   * Strings, never floats: `"40000 GBP"`, not `0.4`. The float cage is
+   * enforced downstream at `../format/format-analysis-for-context.ts`, which
+   * is the boundary that owns it, using the SAME `looksLikeRawDecimal`
+   * predicate the display-graph projection applies to `display_value`.
+   */
+  readonly current_display?: string;
+  readonly flip_display?: string;
 }
 
 /** Lane 21 — raw evidence-gap (VOI) projection entry. `voi_score` ∈ [0,1]. */
@@ -1265,12 +1281,26 @@ function tippingFromFlipThreshold(entry: FlipThreshold): ContextPackAnalysisFlip
 }
 
 function tippingFromSignal(entry: TippingPointSignal): ContextPackAnalysisFlipThreshold {
+  // ROADMAP 2.205 — carry the display licence through, both keys or neither.
+  // `factor_id` is still stripped here (internal match key only); the licence
+  // was already resolved against it upstream.
+  const currentDisplay =
+    typeof entry.current_display === 'string' && entry.current_display.length > 0
+      ? entry.current_display
+      : null;
+  const flipDisplay =
+    typeof entry.flip_display === 'string' && entry.flip_display.length > 0
+      ? entry.flip_display
+      : null;
   return {
     factor_label: entry.factor_label,
     current_value: entry.current_value,
     flip_value: entry.flip_value,
     unit: entry.unit,
     no_flip_within_bounds: entry.no_flip_within_bounds,
+    ...(currentDisplay !== null && flipDisplay !== null
+      ? { current_display: currentDisplay, flip_display: flipDisplay }
+      : {}),
   };
 }
 

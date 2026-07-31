@@ -164,6 +164,15 @@ const ContextPackAnalysisFlipThresholdSchema = z
     flip_value: z.number().finite().nullable(),
     unit: z.string().nullable(),
     no_flip_within_bounds: z.boolean(),
+    /**
+     * ROADMAP 2.205 practical resolution (2026-07-31) — the display licence
+     * (see `ContextPackAnalysisFlipThreshold`). Optional and ABSENT when
+     * unlicensed, so an unlicensed pack is byte-identical to today's. Kept
+     * `.strict()`-compatible deliberately: a stray display key on an entry
+     * that never earned one must still fail the schema.
+     */
+    current_display: z.string().min(1).optional(),
+    flip_display: z.string().min(1).optional(),
   })
   .strict();
 

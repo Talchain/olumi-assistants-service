@@ -72,6 +72,21 @@ export interface TippingPointSignal {
   readonly flip_value: number | null;
   readonly unit: string | null;
   readonly no_flip_within_bounds: boolean;
+  /**
+   * ROADMAP 2.205 practical resolution (2026-07-31) — THE DISPLAY LICENCE.
+   *
+   * The producer's own display strings for this factor's current and flip
+   * values, carried ONLY when they are display-licensed to the user: see
+   * {@link deriveFlipDisplayLicences} for the exact chain. Both present or
+   * both absent — a half licence would let the projection say "flips at X"
+   * with no anchor, which is a worse claim than the band it replaces.
+   *
+   * NOT raw floats: these are the strings the producer wrote for the user
+   * ("40000 GBP"), not the numbers. The float cage is applied at the display
+   * formatter, which is the boundary that owns it.
+   */
+  readonly current_display?: string | null;
+  readonly flip_display?: string | null;
 }
 
 /**
@@ -197,6 +212,99 @@ function readFactorId(entry: Record<string, unknown>): string | null {
 }
 
 /**
+ * ROADMAP 2.205 practical resolution (2026-07-31) — the flip-point DISPLAY
+ * LICENCE, derived at the bytes rather than assumed.
+ *
+ * THE RULE (adjudicated; orchestrator, Paul veto open): *a number already
+ * display-licensed to the USER on the same turn is speakable by the coach —
+ * same licence, same register. The Tier-3 deny continues to bind any value NOT
+ * shown to the user.* This function is the "shown to the user" half; it must
+ * therefore be a TRACE, never a guess.
+ *
+ * THE CHAIN, hop by hop:
+ *   1. `enrichment.decision_review.flip_thresholds[]` is the array
+ *      `buildFlipThresholdCards` (compose/phase3-blocks.ts:1799) consumes.
+ *   2. For each row it composes a `review_card` whose BODY is that row's
+ *      `narrative`, verbatim (`:1843`).
+ *   3. The producing prompt (prompts/defaults.ts:1412-1424) ORDERS that
+ *      narrative to restate the values: *"Frame as 'If [factor_label] moves
+ *      from [current] to [flip], the result changes.' Include the unit if
+ *      provided"* — and orders `current_display` / `flip_display` to carry
+ *      `current_value` / `flip_value` *"as-is, appended with unit … Do not
+ *      round, abbreviate … Output the number exactly as provided."*
+ *   4. CEE's own byte-check note records the consequence:
+ *      *"buildFlipThresholdCards ships narratives the prompt ORDERS to restate
+ *      unrounded flip values"* (phase3-blocks.ts:1476-1478).
+ *
+ * So a row with a non-empty `narrative` put those digits on the user's screen,
+ * and `current_display` / `flip_display` are their structured form.
+ *
+ * FAIL-CLOSED, in every direction that matters:
+ *   - the JOIN IS ON THE DETERMINISTIC `factor_id`. The caller keys this map
+ *     with the id off PLoT's own `enrichment.flip_thresholds[]` row, so a
+ *     producer that invented a factor_id simply fails to join and licenses
+ *     nothing. Labels are never used — labels collide.
+ *   - `narrative` must be non-empty: it is the necessary condition for a card
+ *     to exist at all, and it is the carrier the user actually reads.
+ *   - both display strings must be present and non-empty. Bounded at
+ *     {@link FLIP_DISPLAY_MAX_CHARS} — a producer-authored string of arbitrary
+ *     length must not be able to move the display-analysis char budget.
+ *   - first occurrence per factor wins (the producer orders by importance).
+ *
+ * ⚠ ONE RESIDUAL, STATED RATHER THAN PAPERED OVER. `buildFlipThresholdCards`
+ * ALSO drops a row when `lookup.get(factor_id)` misses the canonical graph
+ * (`:1827-1836`). This function cannot see that lookup — it has the enrichment,
+ * not the graph. So a factor present in PLoT's deterministic array but absent
+ * from the graph the pack is built over (analysis older than the graph) would
+ * be licensed here while its card was dropped. The join direction contains the
+ * common case (a fabricated id never joins); this residual is graph-drift only,
+ * and it is a narrowing of the card set, not of the value's truth. Reported,
+ * not improvised around: closing it means threading the node lookup into pack
+ * assembly, which is a larger change than this one.
+ */
+export const FLIP_DISPLAY_MAX_CHARS = 40;
+
+/** One factor's display-licensed current/flip pair. */
+export interface FlipDisplayLicence {
+  readonly current_display: string;
+  readonly flip_display: string;
+}
+
+function readLicensedDisplay(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > FLIP_DISPLAY_MAX_CHARS) return null;
+  return trimmed;
+}
+
+export function deriveFlipDisplayLicences(
+  enrichment: Record<string, unknown>,
+): Map<string, FlipDisplayLicence> {
+  const out = new Map<string, FlipDisplayLicence>();
+  const dr = asRecord(enrichment.decision_review);
+  if (dr === null) return out;
+  const rows = dr.flip_thresholds;
+  if (!Array.isArray(rows)) return out;
+
+  for (const item of rows) {
+    const row = asRecord(item);
+    if (row === null) continue;
+    const factorId = readFactorId(row);
+    if (factorId === null || out.has(factorId)) continue;
+    // The card's BODY. No narrative ⇒ `buildFlipThresholdCards` drops the row
+    // (`:1819`) ⇒ nothing was shown ⇒ no licence. Length is deliberately NOT
+    // bounded here: the narrative is a PREDICATE, never carried into the pack.
+    const narrative = typeof row.narrative === 'string' ? row.narrative.trim() : '';
+    if (narrative.length === 0) continue;
+    const currentDisplay = readLicensedDisplay(row.current_display);
+    const flipDisplay = readLicensedDisplay(row.flip_display);
+    if (currentDisplay === null || flipDisplay === null) continue;
+    out.set(factorId, { current_display: currentDisplay, flip_display: flipDisplay });
+  }
+  return out;
+}
+
+/**
  * Derive tipping-point signals from the TOP-LEVEL `enrichment.flip_thresholds[]`
  * (the staging shape — entries carry `{factor_id, factor_label, current_value,
  * flip_value, unit, flip_reason}`; `flip_value` is null when no flip exists in
@@ -212,6 +320,10 @@ export function deriveTippingPointsFromTopLevel(
 ): TippingPointSignal[] {
   const raw = enrichment.flip_thresholds;
   if (!Array.isArray(raw) || raw.length === 0) return [];
+
+  // ROADMAP 2.205 practical resolution — the display licence, keyed by the
+  // DETERMINISTIC factor_id of the row we are about to project.
+  const licences = deriveFlipDisplayLicences(enrichment);
 
   const out: TippingPointSignal[] = [];
   const seen = new Set<string>();
@@ -241,14 +353,23 @@ export function deriveTippingPointsFromTopLevel(
     if (!hasFlipPair && !noFlip) continue;
 
     const unit = typeof entry.unit === 'string' && entry.unit.length > 0 ? entry.unit : null;
+    const factorId = readFactorId(entry);
+    // A producer-attested no-flip has no flip value to display, so it gets no
+    // licence regardless of what decision_review wrote: "flips at X" alongside
+    // "no flip point found within the tested range" would be two states in one
+    // entry. Only a REAL flip pair can carry the pair.
+    const licence = hasFlipPair && factorId !== null ? licences.get(factorId) : undefined;
     seen.add(label);
     out.push({
-      factor_id: readFactorId(entry),
+      factor_id: factorId,
       factor_label: label,
       current_value: currentValue,
       flip_value: flipValue,
       unit,
       no_flip_within_bounds: noFlip,
+      ...(licence !== undefined
+        ? { current_display: licence.current_display, flip_display: licence.flip_display }
+        : {}),
     });
     if (out.length >= TIPPING_POINT_SIGNAL_CAP) break;
   }
