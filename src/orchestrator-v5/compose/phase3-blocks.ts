@@ -99,6 +99,10 @@ import {
   TIER2_ACTIVATION_ENABLED,
   type ClaimUsableInput,
 } from './claim-safety-cage.js';
+import {
+  flipThresholdCardBody,
+  readFlipThresholdCardRow,
+} from './flip-threshold-card-row.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
@@ -1805,18 +1809,12 @@ function buildFlipThresholdCards(
   const out: ReviewCardBlock[] = [];
   let idx = 0;
   for (const raw of dr.flip_thresholds) {
-    const entry = readRecord(raw);
-    if (entry === null) continue;
-    const factorId = typeof entry.factor_id === 'string'
-      ? entry.factor_id
-      : '';
-    const factorLabel = typeof entry.factor_label === 'string'
-      ? entry.factor_label.trim()
-      : '';
-    const narrative = typeof entry.narrative === 'string'
-      ? entry.narrative.trim()
-      : '';
-    if (factorId.length === 0 || factorLabel.length === 0 || narrative.length === 0) continue;
+    // Amendment A1 — the row-shape gate now lives in ONE place, shared with the
+    // ContextPack display licence (./flip-threshold-card-row.ts). The licence
+    // must be the CARD's predicate, not a near-copy of it.
+    const row = readFlipThresholdCardRow(raw);
+    if (row === null) continue;
+    const { factor_id: factorId, narrative } = row;
     // Round-3 review correction: drop when the LLM-claimed factor isn't
     // in the canonical graph lookup. Prior behaviour fell back to the
     // LLM-provided factor_label, but we have no proof the LLM honoured
@@ -1840,7 +1838,10 @@ function buildFlipThresholdCards(
       type: 'review_card' as const,
       card_kind: 'flip_threshold' as const,
       title: truncate(`What would flip the result on ${ref.label}`, TITLE_MAX),
-      body: truncate(narrative, BODY_MAX),
+      // Amendment A1(b) / exit 4 — the emitted body is now produced by the
+      // SHARED function the display licence checks the digits against, so the
+      // licence can never believe digits survived a cut they did not.
+      body: flipThresholdCardBody(narrative),
       ...reviewCardSignals('flip_threshold', 'warning'),
       target_refs: [ref] as readonly TargetRef[],
       priority_rank: 30 + idx,

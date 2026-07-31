@@ -902,7 +902,12 @@ export function assembleContextPackWithSummary(
     // Display-safe analysis projection — what Sonnet actually sees.
     // Sources structured fragile-edge labels off the raw projection
     // (no longer needs the upstream summary as a second argument).
-    display_analysis: formatAnalysisForContext(rawAnalysis),
+    // AMENDMENT A1(a) — thread the live freshness verdict so the flip-point
+    // display licence can fail closed on a stale turn, where compose ships NO
+    // review cards and the digits are therefore on no screen.
+    display_analysis: formatAnalysisForContext(rawAnalysis, {
+      analysisFreshness: input.coachingContext?.freshness ?? null,
+    }),
     // Display-safe graph projection — what Sonnet actually sees in
     // place of the raw graph. Edge `strength` floats become decision-
     // language `relationship` phrases; `exists` and `plain_interpretation`

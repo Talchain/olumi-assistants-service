@@ -88,13 +88,14 @@ function enrichment(overrides: Record<string, unknown> = {}): Record<string, unk
   };
 }
 
+/**
+ * The base-case pack. AMENDED: it now supplies a FRESH verdict, because after
+ * amendment A1(a) the licence is gated on freshness and a pack with no verdict
+ * is correctly closed. The no-verdict and stale cases are pinned explicitly in
+ * the A1(a) block below — they are behaviour under test, not a default.
+ */
 function packFrom(enr: Record<string, unknown>) {
-  const { summary } = reconcileAnalysisSummaryWithEnrichment(makeSummary(), enr);
-  const pack = assembleContextPack({ payload: BASE_PAYLOAD, priorTurns: [], analysis: summary });
-  // The pack must stay valid against the STRICT schema — a new key that the
-  // schema rejects would be a silent contract break, not a feature.
-  expect(() => ContextPackSchema.parse(pack)).not.toThrow();
-  return pack;
+  return packAt(enr, 'fresh');
 }
 
 /** Recursive walk: no `number` at any depth in the LLM-facing projection. */
@@ -215,5 +216,212 @@ describe('the Tier-3 values that are NOT display-licensed stay banded', () => {
       { label: 'Churn rate', value_of_information: 'strong' },
     ]);
     expect(JSON.stringify(pack.display_analysis?.value_of_information)).not.toContain('0.82');
+  });
+});
+
+// ===========================================================================
+// AMENDMENT ROUND (review of PR #776) — one describe per finding, each a gate
+// the first cut did not have. Every one of these is RED before its fix.
+// ===========================================================================
+
+/** A pack built with an explicit freshness verdict. */
+function packAt(enr: Record<string, unknown>, freshness: string | null) {
+  const { summary } = reconcileAnalysisSummaryWithEnrichment(makeSummary(), enr);
+  const pack = assembleContextPack({
+    payload: BASE_PAYLOAD,
+    priorTurns: [],
+    analysis: summary,
+    ...(freshness !== null
+      ? {
+          coachingContext: {
+            analysis_present: true,
+            freshness,
+            readiness_status: null,
+            rerun_required: freshness !== 'fresh',
+            usable_for_prose: true,
+            usable_for_chips: freshness === 'fresh',
+            blocked: false,
+            actionable_blocker_count: 0,
+          },
+        }
+      : {}),
+  } as Parameters<typeof assembleContextPack>[0]);
+  expect(() => ContextPackSchema.parse(pack)).not.toThrow();
+  return pack;
+}
+
+describe('A1(a) — the licence is gated on the FRESH verdict', () => {
+  it('a FRESH turn licenses the flip point', () => {
+    const t = packAt(enrichment(), 'fresh').display_analysis?.tipping_points;
+    expect(t?.[0]?.flip_point).toBe('currently 40000 GBP; flips at 34500 GBP');
+  });
+
+  it('a STALE turn does NOT — compose ships no review card, so no screen carries the digits', () => {
+    const t = packAt(enrichment(), 'stale').display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+    expect(t?.[0]?.risk).toBe('a moderate decrease could flip the result');
+    expect(JSON.stringify(t)).not.toContain('34500');
+  });
+
+  it.each(['unknown', 'none'])('a %s verdict does NOT license', (v) => {
+    const t = packAt(enrichment(), v).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+  });
+
+  it('NO verdict at all does NOT license — absence is closed, never open', () => {
+    const t = packAt(enrichment(), null).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+  });
+});
+
+describe('A1 core — the licence uses the CARD\'S predicate, not a near-copy', () => {
+  it('D1: a row keyed by `node_id` instead of `factor_id` cards NOTHING, so licenses nothing', () => {
+    const { factor_id: _drop, ...noFactorId } = CARDED_FLIP_ROW;
+    const t = packAt(
+      enrichment({
+        decision_review: {
+          flip_thresholds: [{ ...noFactorId, node_id: 'fac_marketing_budget' }],
+        },
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+  });
+
+  it('D2: a row with no `factor_label` cards NOTHING, so licenses nothing', () => {
+    const t = packAt(
+      enrichment({
+        decision_review: { flip_thresholds: [{ ...CARDED_FLIP_ROW, factor_label: '  ' }] },
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+  });
+});
+
+describe('A1(b) / D4 — the digits must survive BODY_MAX truncation', () => {
+  it('a narrative long enough to push the flip value past the card body loses the licence', () => {
+    const longNarrative = `${'Context. '.repeat(40)}It flips at 34500 GBP from 40000 GBP.`;
+    expect(longNarrative.length).toBeGreaterThan(300);
+    const t = packAt(
+      enrichment({
+        decision_review: { flip_thresholds: [{ ...CARDED_FLIP_ROW, narrative: longNarrative }] },
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+  });
+
+  it('a narrative that keeps the digits INSIDE the body keeps the licence', () => {
+    const shortEnough = 'If Marketing budget moves from 40000 GBP to 34500 GBP, the result changes.';
+    expect(shortEnough.length).toBeLessThan(300);
+    const t = packAt(
+      enrichment({
+        decision_review: { flip_thresholds: [{ ...CARDED_FLIP_ROW, narrative: shortEnough }] },
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]?.flip_point).toBe('currently 40000 GBP; flips at 34500 GBP');
+  });
+});
+
+describe('A2 — model scale fails closed, and the cage sees unit-suffixed decimals', () => {
+  it('an uninverted model-scale pair with a unit is REFUSED ("0.8625 GBP" is not £34,500)', () => {
+    const t = packAt(
+      enrichment({
+        flip_thresholds: [
+          { ...PLOT_FLIP_ROW, current_value: 0.4, flip_value: 0.8625 },
+        ],
+        decision_review: {
+          flip_thresholds: [
+            { ...CARDED_FLIP_ROW, current_display: '0.4 GBP', flip_display: '0.8625 GBP',
+              narrative: 'If Marketing budget moves from 0.4 GBP to 0.8625 GBP, the result changes.' },
+          ],
+        },
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+    expect(JSON.stringify(t)).not.toContain('0.8625');
+  });
+
+  it('ISOLATES THE CAGE: even an ATTESTED display-scale sub-unit decimal is refused', () => {
+    // This case exists because the first version of the "0.8625 GBP" test above
+    // passed with the cage REVERTED — the scale gate was catching it, so the
+    // cage assertion was vacuous (trap 13). Here `value_scale: 'display'` is
+    // attested and the strings agree with the raw values, so the scale gate and
+    // the agreement gate BOTH pass and only the widened cage can refuse.
+    const t = packAt(
+      enrichment({
+        flip_thresholds: [
+          { ...PLOT_FLIP_ROW, current_value: 0.4, flip_value: 0.8625, value_scale: 'display' },
+        ],
+        decision_review: {
+          flip_thresholds: [
+            { ...CARDED_FLIP_ROW, current_display: '0.4 GBP', flip_display: '0.8625 GBP',
+              narrative: 'If Marketing budget moves from 0.4 GBP to 0.8625 GBP, the result changes.' },
+          ],
+        },
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+    expect(JSON.stringify(t)).not.toContain('0.8625');
+  });
+
+  it('CONTROL for the cage: the same shape with user-scale integers IS licensed', () => {
+    // Proves the isolating test above fails for the CAGE and not because this
+    // whole configuration is unlicensable.
+    const t = packAt(
+      enrichment({
+        flip_thresholds: [{ ...PLOT_FLIP_ROW, value_scale: 'display' }],
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]?.flip_point).toBe('currently 40000 GBP; flips at 34500 GBP');
+  });
+
+  it('an explicit value_scale of "model" is REFUSED even when the values look user-scale', () => {
+    const t = packAt(
+      enrichment({ flip_thresholds: [{ ...PLOT_FLIP_ROW, value_scale: 'model' }] }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+  });
+
+  it('an UNRECOGNISED value_scale token is REFUSED (never guessed)', () => {
+    const t = packAt(
+      enrichment({ flip_thresholds: [{ ...PLOT_FLIP_ROW, value_scale: 'normalised' }] }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+  });
+
+  it('an explicit value_scale of "display" nested under margin_sensitivity is honoured', () => {
+    const t = packAt(
+      enrichment({
+        flip_thresholds: [
+          { ...PLOT_FLIP_ROW, margin_sensitivity: { movement: 'weakened', value_scale: 'display' } },
+        ],
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]?.flip_point).toBe('currently 40000 GBP; flips at 34500 GBP');
+  });
+
+  it('the display strings must DESCRIBE these raw values — they come from a different array', () => {
+    const t = packAt(
+      enrichment({
+        decision_review: {
+          flip_thresholds: [
+            { ...CARDED_FLIP_ROW, current_display: '12000 GBP', flip_display: '7800 GBP',
+              narrative: 'If Marketing budget moves from 12000 GBP to 7800 GBP, the result changes.' },
+          ],
+        },
+      }),
+      'fresh',
+    ).display_analysis?.tipping_points;
+    expect(t?.[0]).not.toHaveProperty('flip_point');
+    expect(JSON.stringify(t)).not.toContain('7800');
   });
 });

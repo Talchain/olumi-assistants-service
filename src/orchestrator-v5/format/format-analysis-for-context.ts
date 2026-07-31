@@ -96,6 +96,32 @@ export interface DisplaySafeRankedOption {
   readonly constraint_infeasible?: true;
 }
 
+/**
+ * AMENDMENT A1(a) — options for the display projection.
+ *
+ * THE DEFECT THIS CLOSES, and it was the worst reachable case in the first cut.
+ * On a STALE turn `compose.ts` emits ONLY the stale-rerun coaching block and
+ * SUPPRESSES every Phase 3 block (`:1185`, `:1258-1262`), so no flip card ships
+ * — but `buildAnalysisFromPriorFacts` has no freshness gate and re-projects the
+ * persisted analysis regardless. The coach would therefore hold the flip digits
+ * on precisely the turn the user is being told the analysis is out of date.
+ * A licence whose premise ("this is on the user's screen") is false is not a
+ * narrow licence; it is a wrong one.
+ */
+export interface FormatAnalysisOptions {
+  /**
+   * The live `deriveAnalysisFreshness` verdict for this turn
+   * (`ContextPack.coaching_context.freshness`). The flip-point licence opens
+   * ONLY on the literal `'fresh'`. Absent / stale / unknown / degraded all keep
+   * the band — the same fail-closed rule `classifyClaimUsable` applies to its
+   * own freshness gate ("anything but 'fresh' — including absence").
+   *
+   * Defaulting to absent is deliberate: a caller that has not wired the verdict
+   * gets the pre-fix behaviour, never an ungated licence.
+   */
+  readonly analysisFreshness?: string | null;
+}
+
 /** Lane 21 — banded tipping-risk entry. `risk` is decision-language prose. */
 export interface DisplaySafeTippingPoint {
   readonly label: string;
@@ -117,10 +143,13 @@ export interface DisplaySafeTippingPoint {
    * Tier-3 deny (`../compose/claim-safety-cage.ts` TIER3_LEAK_BLOCK_FIELDS)
    * continues to bind any value NOT shown to the user.*
    *
-   * WHAT THIS DOES NOT REOPEN. The float cage is untouched: this key admits a
-   * producer-authored DISPLAY STRING and refuses it if
-   * {@link looksLikeRawDecimal} matches — the same predicate that keeps a bare
-   * `0.345` out of `display_value`. `"£34,500"` is not `0.345`. Nothing else
+   * WHAT THIS DOES NOT REOPEN. The float cage is WIDER than before, not weaker:
+   * this key admits a producer-authored DISPLAY STRING and refuses it unless
+   * {@link isDisplaySafeFlipString} passes — `looksLikeRawDecimal` (the same
+   * predicate that keeps a bare `0.345` out of `display_value`) PLUS a refusal
+   * of sub-unit decimals wearing a unit or a currency prefix, the shape an
+   * uninverted model-scale value takes (`"0.8625 GBP"`). `"£34,500"` is not
+   * `0.345`; `"0.8625 GBP"` is, and is refused. Nothing else
    * moved: `top_drivers[].influence` (sensitivity magnitude) and
    * `value_of_information[]` (VOI score) remain bands, because the licence
    * trace found NO user-facing surface for either — see the manifest in
@@ -129,6 +158,19 @@ export interface DisplaySafeTippingPoint {
    * ADDITIVE, never a replacement: `risk` is always emitted. Where the display
    * pair is absent the band alone remains — a disclosed band, never a silent
    * hole (the same doctrine as `goal_fit` / `value_of_information_note`).
+   *
+   * ⚠ POLICY-INVISIBLE, stated plainly (amendment A3; an earlier note implied
+   * otherwise). The ContextPolicy conformance anchor and the live
+   * `v5.context_policy.divergence` tripwire both work at SECTION granularity —
+   * they walk section NAMES and their measured char counts
+   * (`findContextPolicyDivergences('routing', { display_analysis: N })`). This
+   * key lives INSIDE `display_analysis`, so neither of them can see it, and
+   * neither will ever RED on its presence, absence or content. What DOES cover
+   * it is the enforced `DISPLAY_ANALYSIS_CHAR_BUDGET` (its bytes are counted in
+   * the section total) and `DISPLAY_ANALYSIS_TRUNCATION_ORDER`, where
+   * `tipping_points` is rank 2 — so a budget drop takes this key with the rest
+   * of its section and DISCLOSES it via `truncation_note`. "Budget-covered" is
+   * true; "policy-visible" is not, and the two are not the same claim.
    */
   readonly flip_point?: string;
 }
@@ -686,6 +728,36 @@ function goalFitPhrase(goalFit: { scored: boolean; basis: string | null }): stri
 }
 
 /**
+ * AMENDMENT A2 — THE WIDENED FLOAT CAGE.
+ *
+ * The first cut used `looksLikeRawDecimal` alone. That predicate only matches a
+ * string composed ENTIRELY of a number, so it admitted `"0.8625 GBP"` — a raw
+ * model-scale probability wearing a unit, which is exactly the shape the
+ * producer emits when PLoT hands it an uninverted value (the prompt tells it to
+ * quote the number with its unit). Reproduced by the reviewer; the cage now
+ * refuses both shapes.
+ *
+ * REFUSED:
+ *   - a bare number, with or without thousands separators (`looksLikeRawDecimal`,
+ *     shared with the display-graph projection);
+ *   - a value whose leading numeric token is a sub-unit decimal, with or without
+ *     a currency prefix or a trailing unit — `"0.8625 GBP"`, `"£0.345"`,
+ *     `".86"`. Nothing in a decision graph is legitimately expressed as a bare
+ *     fraction of a unit at this seam, and a normalised probability always is.
+ *
+ * ADMITTED: `"40000 GBP"`, `"£34,500"`, `"8.5%"`, `"6.1 story points"`,
+ * `"18 months"` — every shape the user-facing chip formatter itself produces.
+ */
+export function isDisplaySafeFlipString(value: string): boolean {
+  if (looksLikeRawDecimal(value)) return false;
+  // Strip a leading sign and any currency/space prefix, then look for a
+  // sub-unit decimal at the head of the numeric part: `0.x`, `.x`, `-0.x`.
+  const head = value.trim().replace(/^[^0-9.-]+/, '');
+  if (/^-?(?:0*)?\.\d/.test(head)) return false;
+  return true;
+}
+
+/**
  * ROADMAP 2.205 practical resolution — render the display-licensed flip pair
  * into ONE pre-formatted string, or return null so the caller emits the band
  * alone.
@@ -710,12 +782,13 @@ export function formatFlipPointDisplay(
   const flip = entry.flip_display;
   if (typeof current !== 'string' || typeof flip !== 'string') return null;
   if (current.length === 0 || flip.length === 0) return null;
-  if (looksLikeRawDecimal(current) || looksLikeRawDecimal(flip)) return null;
+  if (!isDisplaySafeFlipString(current) || !isDisplaySafeFlipString(flip)) return null;
   return `currently ${current}; flips at ${flip}`;
 }
 
 function formatTippingPoint(
   entry: ContextPackAnalysisFlipThreshold,
+  licenceOpen: boolean,
 ): DisplaySafeTippingPoint | null {
   const risk = tippingRiskPhrase(
     entry.current_value,
@@ -725,7 +798,7 @@ function formatTippingPoint(
   if (risk === null) return null;
   // ROADMAP 2.205 — the band is ALWAYS emitted; the licensed number is
   // additive. Absent licence ⇒ key absent ⇒ byte-identical to the pre-fix pack.
-  const flipPoint = formatFlipPointDisplay(entry);
+  const flipPoint = licenceOpen ? formatFlipPointDisplay(entry) : null;
   return {
     label: entry.factor_label,
     risk,
@@ -753,8 +826,12 @@ function formatEvidenceGap(
  */
 export function formatAnalysisForContext(
   raw: ContextPackAnalysis | null,
+  options: FormatAnalysisOptions = {},
 ): DisplaySafeAnalysis | null {
   if (raw === null) return null;
+  // AMENDMENT A1(a) — the flip-point licence is gated on the FRESH verdict,
+  // fail-closed on absence. See {@link FormatAnalysisOptions.analysisFreshness}.
+  const flipLicenceOpen = options.analysisFreshness === 'fresh';
 
   const out: MutableDisplaySafeAnalysis = {
     status: raw.status,
@@ -816,7 +893,7 @@ export function formatAnalysisForContext(
   // Banded tipping risks. Entries with nothing safe to say are dropped by
   // the formatter (null risk), never fabricated.
   const tipping = (raw.flip_thresholds ?? [])
-    .map(formatTippingPoint)
+    .map((e) => formatTippingPoint(e, flipLicenceOpen))
     .filter((t): t is DisplaySafeTippingPoint => t !== null);
   if (tipping.length > 0) {
     out.tipping_points = tipping;
