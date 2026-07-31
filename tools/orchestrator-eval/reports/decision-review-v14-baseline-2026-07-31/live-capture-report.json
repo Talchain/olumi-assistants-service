@@ -1,0 +1,327 @@
+{
+  "servedHash": "b4f15305c2bb32e9",
+  "reports": [
+    {
+      "fixtureId": "live-r1-crm-status-quo",
+      "assembly": {
+        "sections": [
+          "BRIEF",
+          "GRAPH",
+          "ISL_RESULTS",
+          "DETERMINISTIC_COACHING",
+          "DECISION_CONTEXT",
+          "FLIP_THRESHOLD_DATA"
+        ],
+        "userMessageChars": 15350,
+        "margin": 0.78625
+      },
+      "scores": [
+        {
+          "candidate": "served_v14",
+          "pass": false,
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "no invented conversational callbacks",
+              "scanned": 33
+            },
+            {
+              "name": "entity_references_grounded",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "every bias affected_element resolves to a graph node/edge id",
+              "scanned": 16
+            },
+            {
+              "name": "contract_caps_respected",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts all within the tight prompt bound",
+              "scanned": 4
+            },
+            {
+              "name": "shape_valid",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "every number in a descriptive field is within ±10% of an input value",
+              "scanned": 6
+            },
+            {
+              "name": "no_internal_term_leak",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "clean",
+              "scanned": 31
+            },
+            {
+              "name": "no_banned_lexicon",
+              "pass": true,
+              "source": "served-prompt-derived",
+              "detail": "clean against 10 banned terms parsed from the served prompt",
+              "scanned": 10
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "pass": false,
+              "source": "served-prompt-derived",
+              "detail": "internal vocabulary surfaced: readiness",
+              "scanned": 21
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "pass": true,
+              "source": "served-prompt-derived",
+              "detail": "no bare probability-band decimals in output strings",
+              "scanned": 31
+            },
+            {
+              "name": "no_dashes",
+              "pass": true,
+              "source": "served-prompt-derived",
+              "detail": "no em/en dashes in any output string",
+              "scanned": 31
+            },
+            {
+              "name": "tone_alignment",
+              "pass": true,
+              "source": "served-prompt-derived",
+              "detail": "no tone row matches this run's readiness/headline_type — dimension not applicable",
+              "scanned": 0
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
+              "scanned": 31
+            },
+            {
+              "name": "story_headlines_match_options",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "all 4 option key(s) present, none extra",
+              "scanned": 4
+            },
+            {
+              "name": "story_headlines_distinct",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "4 distinct headline(s)",
+              "scanned": 4
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "2 key(s), all present in fragile_edges",
+              "scanned": 14
+            },
+            {
+              "name": "primary_risk_coherent",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)",
+              "scanned": 2
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "leading option is feasible — dimension not applicable",
+              "scanned": 0
+            },
+            {
+              "name": "substance_present",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "31 user-facing string(s), 3021 chars",
+              "scanned": 31
+            }
+          ]
+        }
+      ],
+      "agreement": {
+        "served_v14": true
+      },
+      "dimensionAgreement": {
+        "served_v14": true
+      },
+      "ok": true
+    },
+    {
+      "fixtureId": "live-r3-crm-rerun",
+      "assembly": {
+        "sections": [
+          "BRIEF",
+          "GRAPH",
+          "ISL_RESULTS",
+          "DETERMINISTIC_COACHING",
+          "DECISION_CONTEXT",
+          "FLIP_THRESHOLD_DATA"
+        ],
+        "userMessageChars": 14980,
+        "margin": 0.8827499999999999
+      },
+      "scores": [
+        {
+          "candidate": "served_v14",
+          "pass": false,
+          "dimensions": [
+            {
+              "name": "review_card_coverage",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "narrative_summary present; the primary review_card composes"
+            },
+            {
+              "name": "no_fabricated_continuity",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "no invented conversational callbacks",
+              "scanned": 36
+            },
+            {
+              "name": "entity_references_grounded",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "every bias affected_element resolves to a graph node/edge id",
+              "scanned": 16
+            },
+            {
+              "name": "contract_caps_respected",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "bias_findings / decision_quality_prompts / key_assumptions / scenario_contexts all within the tight prompt bound",
+              "scanned": 4
+            },
+            {
+              "name": "shape_valid",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "passes the runtime block-parse shape check"
+            },
+            {
+              "name": "numbers_grounded",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "every number in a descriptive field is within ±10% of an input value",
+              "scanned": 3
+            },
+            {
+              "name": "no_internal_term_leak",
+              "pass": true,
+              "source": "production-guard",
+              "detail": "clean",
+              "scanned": 34
+            },
+            {
+              "name": "no_banned_lexicon",
+              "pass": true,
+              "source": "served-prompt-derived",
+              "detail": "clean against 10 banned terms parsed from the served prompt",
+              "scanned": 10
+            },
+            {
+              "name": "no_internal_vocabulary",
+              "pass": true,
+              "source": "served-prompt-derived",
+              "detail": "clean against 21 internal terms parsed from the served prompt",
+              "scanned": 21
+            },
+            {
+              "name": "no_raw_probability_decimals",
+              "pass": true,
+              "source": "served-prompt-derived",
+              "detail": "no bare probability-band decimals in output strings",
+              "scanned": 34
+            },
+            {
+              "name": "no_dashes",
+              "pass": false,
+              "source": "served-prompt-derived",
+              "detail": "1 string(s) contain an em or en dash",
+              "scanned": 34
+            },
+            {
+              "name": "tone_alignment",
+              "pass": true,
+              "source": "served-prompt-derived",
+              "detail": "no tone row matches this run's readiness/headline_type — dimension not applicable",
+              "scanned": 0
+            },
+            {
+              "name": "no_entity_ids_in_prose",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "no raw entity ids in user-facing strings (id-bearing fields exempt per the prompt)",
+              "scanned": 34
+            },
+            {
+              "name": "story_headlines_match_options",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "all 4 option key(s) present, none extra",
+              "scanned": 4
+            },
+            {
+              "name": "story_headlines_distinct",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "4 distinct headline(s)",
+              "scanned": 4
+            },
+            {
+              "name": "scenario_contexts_keyed_on_fragile_edges",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "2 key(s), all present in fragile_edges",
+              "scanned": 12
+            },
+            {
+              "name": "primary_risk_coherent",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "all 2 sibling section(s) share a content token with primary_risk (lexical proxy for the COHERENCE rule)",
+              "scanned": 2
+            },
+            {
+              "name": "infeasible_winner_disclosed",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "leading option is feasible — dimension not applicable",
+              "scanned": 0
+            },
+            {
+              "name": "substance_present",
+              "pass": true,
+              "source": "eval-assertion",
+              "detail": "34 user-facing string(s), 3099 chars",
+              "scanned": 34
+            }
+          ]
+        }
+      ],
+      "agreement": {
+        "served_v14": true
+      },
+      "dimensionAgreement": {
+        "served_v14": true
+      },
+      "ok": true
+    }
+  ]
+}
