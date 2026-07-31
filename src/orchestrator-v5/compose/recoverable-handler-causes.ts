@@ -39,6 +39,17 @@ export const RECOVERABLE_HANDLER_CAUSES: ReadonlySet<HandlerInvocationFailedCaus
     // convention: control to record against the handler-failure-scope doc.)
     'analysis_not_ready',
     'analysis_blocked',
+    // ROADMAP 2.202 fix ③ (diagnosis-run-analysis-500s.md §7 FIX 3). A
+    // downstream 429 is CAPACITY, not infrastructure failure: the engine is
+    // busy, the user's model is fine, and a retry in a few seconds plausibly
+    // works. Surfacing it as a 500 INTERNAL_ERROR was a false claim about the
+    // system's health — the honest shape is the same graceful 200 + retry chip
+    // this list already gives `analysis_not_ready`. Deliberately NARROW: only a
+    // 429 recovers; every other typed failure (incl. a downstream 500) stays
+    // FATAL, because a fix that recovered them all would hide genuine breakage.
+    // CEE accepted the identical principle for its own ingress limiter in
+    // 41d5ecf0 ("429 RATE_LIMITED, not 500 INTERNAL").
+    'analysis_engine_busy',
     'parameter_invalid_at_execute',
     'entity_not_found_in_graph',
     'entity_kind_mismatch_at_execute',

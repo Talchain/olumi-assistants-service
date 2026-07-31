@@ -53,7 +53,7 @@ import {
   projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
-import type { PLoTClient } from '../../../orchestrator/plot-client.js';
+import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
 import { getHandlerBudgetMs } from '../../budgets.js';
@@ -644,6 +644,38 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // `plot_error` (the 422→recoverable reroute is War-Room-gated).
         const isTypedFailedEnvelope =
           runError.status !== 422 && v2Err?.analysis_status === 'failed';
+
+        // ROADMAP 2.202 fix ③ — BUSY, not INTERNAL_ERROR. Two ways a 429
+        // reaches this seam, and both mean the same product truth ("the engine
+        // is at capacity; retry shortly"):
+        //   1. PLoT's own limiter rejected CEE            → runError.status 429
+        //   2. ISL's compute governor rejected PLoT       → typed FAILED
+        //      envelope whose status_reason names HTTP 429
+        // Narrow on purpose. `blocked` is excluded (PLoT DECIDED it cannot
+        // answer — telling the user to retry that would be a lie), and every
+        // non-429 status keeps the fatal `analysis_failed` mapping so genuine
+        // breakage stays a visible 500.
+        const downstreamStatus = runError.status === 429
+          ? 429
+          : isTypedFailedEnvelope
+            ? readDownstreamHttpStatus(v2Err)
+            : null;
+        if (downstreamStatus === 429) {
+          throw new HandlerInvocationFailedError(
+            `PLoT returned error: ${runError.message}`,
+            {
+              cause_kind: 'analysis_engine_busy',
+              retryable: true,
+              details: {
+                ...errorDetailsBase,
+                ...extractPlotFailureDetails(v2Err),
+                downstream_http_status: 429,
+              },
+              cause: runError,
+            },
+          );
+        }
+
         throw new HandlerInvocationFailedError(
           `PLoT returned error: ${runError.message}`,
           {
@@ -1128,6 +1160,46 @@ function readAnalysisStatus(response: V2RunResponseEnvelope): string | null {
  * rendered (no prose-safety gate exists on this path). Returns {} for
  * shapes with nothing to carry, so unknown-error fallbacks stay unchanged.
  */
+/**
+ * ROADMAP 2.202 fix ③ — recover the DOWNSTREAM HTTP status from PLoT's typed
+ * failure envelope.
+ *
+ * ⚠ THIS IS A PROSE READ, AND THAT IS THE ONLY CARRIER THAT EXISTS. PLoT's
+ * envelope has no structured downstream-status field on the wire: the critique
+ * codes (`ISL_ERROR`, `ISL_CALL_FAILED`) do not distinguish a 429 from a 500,
+ * and `isl_status_reason` is not lifted by the plot-client's
+ * `extractTypedFailureEnvelope` (which carries `analysis_status`,
+ * `status_reason`, `critiques` only).
+ *
+ * The template is fixed and verified at PLoT's own staging tip `5ab93383`,
+ * `src/routes/v2/run.ts:1606` (`buildIslFailureDetail`):
+ *
+ *     error.code === 'ISL_ERROR' && error.status
+ *       ? `The analysis service returned an error (HTTP ${error.status}).`
+ *       : classStatusReason
+ *
+ * So the `(HTTP <n>)` suffix is emitted by exactly one site, only for
+ * `ISL_ERROR`, and always in that form. We parse the STATUS NUMBER rather than
+ * substring-matching "429", so the reader states what it means and a 500 can
+ * never be mistaken for a 429.
+ *
+ * Fail-CLOSED by construction: no match ⇒ `null` ⇒ the caller keeps the
+ * existing fatal mapping. If PLoT ever reworded the template the effect is a
+ * return to today's behaviour (an honest 500), never a false "busy" — the safe
+ * direction. Should PLoT gain a structured status field, prefer it and delete
+ * this.
+ */
+const PLOT_DOWNSTREAM_HTTP_STATUS_RE = /\(HTTP\s+(\d{3})\)/;
+
+function readDownstreamHttpStatus(v2Err: V2RunError | undefined): number | null {
+  const reason = v2Err?.status_reason;
+  if (typeof reason !== 'string') return null;
+  const match = PLOT_DOWNSTREAM_HTTP_STATUS_RE.exec(reason);
+  if (match === null || match[1] === undefined) return null;
+  const status = Number.parseInt(match[1], 10);
+  return Number.isFinite(status) ? status : null;
+}
+
 function extractPlotFailureDetails(source: unknown): Record<string, unknown> {
   if (source === null || typeof source !== 'object') return {};
   const rec = source as Record<string, unknown>;
