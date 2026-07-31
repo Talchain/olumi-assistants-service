@@ -296,8 +296,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeGraphReadinessCompleted: "cee.graph_readiness.completed",
         CeeGraphReadinessFailed: "cee.graph_readiness.failed",
 
-        // Key Insight events (v2.4)
-
         // Elicit Belief events (v2.5)
         CeeElicitBeliefRequested: "cee.elicit_belief.requested",
         CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
@@ -323,7 +321,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         EdgeDirectionValidationPassed: "cee.edge_direction.validation_passed",
 
         // Phase 4: Recommendation Narratives events
-
         CeeNarrateConditionsRequested: "cee.narrate_conditions.requested",
         CeeNarrateConditionsCompleted: "cee.narrate_conditions.completed",
         CeeNarrateConditionsFailed: "cee.narrate_conditions.failed",
@@ -966,8 +963,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.graph_readiness.completed": [TelemetryEvents.CeeGraphReadinessCompleted],
         "cee.graph_readiness.failed": [TelemetryEvents.CeeGraphReadinessFailed],
 
-        // Key Insight events (v2.4)
-
         // Elicit Belief events (v2.5)
         "cee.elicit_belief.requested": [TelemetryEvents.CeeElicitBeliefRequested],
         "cee.elicit_belief.succeeded": [TelemetryEvents.CeeElicitBeliefSucceeded],
@@ -993,7 +988,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_direction.validation_passed": [TelemetryEvents.EdgeDirectionValidationPassed],
 
         // Phase 4: Recommendation Narratives events
-
         "cee.narrate_conditions.requested": [TelemetryEvents.CeeNarrateConditionsRequested],
         "cee.narrate_conditions.completed": [TelemetryEvents.CeeNarrateConditionsCompleted],
         "cee.narrate_conditions.failed": [TelemetryEvents.CeeNarrateConditionsFailed],
@@ -1796,8 +1790,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.graph_readiness.completed",
         "cee.graph_readiness.failed",
 
-        // Key Insight events (v2.4)
-
         // Elicit Belief events (v2.5)
         "cee.elicit_belief.requested",
         "cee.elicit_belief.succeeded",
@@ -1822,11 +1814,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_direction.violation_detected",
         "cee.edge_direction.validation_passed",
 
-        // Phase 4: Recommendation Narratives events
-
         // Goal generation tracking (prompt tuning)
         "cee.goal_generation",
 
+        // Phase 4: Recommendation Narratives events
         "cee.narrate_conditions.requested",
         "cee.narrate_conditions.completed",
         "cee.narrate_conditions.failed",

@@ -7,7 +7,9 @@
  *
  * ROADMAP 2.213: the generate-recommendation types (`RankedAction`,
  * `GenerateRecommendationInput`, `GenerateRecommendationOutput`) were deleted
- * with the route and composer they served.
+ * with the route and composer they served. Doctrine and rationale:
+ * `DOCTRINE_FATAL_PATTERNS` in
+ * `orchestrator-v5/compose/forbidden-user-facing-phrases.ts`.
  */
 
 // Narrate Conditions types

@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DOCTRINE_FATAL_PATTERNS,
   FORBIDDEN_USER_FACING_PHRASES,
   findForbiddenPhraseHit,
   findSuccessClaimHit,
@@ -17,6 +18,7 @@ import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
   applyEgressForbiddenPhraseGuard,
 } from '../forbidden-user-facing-phrases.js';
+import { applyTerminologyRewrite } from '../terminology-rewrite.js';
 import { RUN_ANALYSIS_LOCKED_TEMPLATES } from '../../coaching/analysis-result-headline.js';
 import { composeEditClarifyResponse } from '../edit-clarify-response.js';
 
@@ -681,21 +683,9 @@ describe('applyEgressForbiddenPhraseGuard — proportionate remedies (RC4)', () 
 // ============================================================================
 // ROADMAP 2.213 — the no-recommendations doctrine at the wire seam.
 //
-// Founder's BINDING ruling: "the product should not be recommending anything.
-// It should be just providing science-grounded data and coaching."
-//
-// The V5 P0 set above banned the recommendation NOUNS ("recommendation",
-// "recommended", "the winner", "winning <X>"). It let the whole ADVISORY
-// REGISTER through: "X is the clear best choice", "X is your best bet", "X is
-// advisable", "X is the way to go", "you should choose X". Those phrases name
-// no banned noun and passed the guard clean — the gap that
-// `src/cee/key-insight/index.ts` (12 strings) and
-// `src/cee/recommendation-narrative/templates.ts` (11 strings) shipped through
-// on live registered routes until this change deleted both.
-//
-// Every pattern below was false-positive-swept over all 2,813 string-bearing
-// files in this repo before adding (src, tests, Prompts, tools, contracts,
-// config, data, openapi.yaml). Adjudication is in the PR body.
+// Doctrine, gap history, and the false-positive sweep: see
+// `DOCTRINE_FATAL_PATTERNS` in `../forbidden-user-facing-phrases.ts`.
+// Adjudication is in the PR body.
 // ============================================================================
 
 describe('FORBIDDEN_USER_FACING_PHRASES — no-recommendations doctrine (2.213)', () => {
@@ -783,7 +773,22 @@ describe('2.213 remedy class — a choice directive has no safe rewrite', () => 
   // a vocabulary problem: swapping a noun leaves the product still telling the
   // user what to pick. So the doctrine set is deliberately FATAL-class — no
   // TERMINOLOGY_RULES entry — and takes the whole-response fallback.
-  const fatalCases = [
+  //
+  // ⚠ THIS SUITE IS DERIVED, NOT HAND-LISTED (trap 12). It iterates the
+  // exported DOCTRINE_FATAL_PATTERNS rather than a fixed array of exemplar
+  // strings, because the fatal class is defined by an ABSENCE — no
+  // TERMINOLOGY_RULES entry matches these frames — and an absence cannot be
+  // asserted against a hand-maintained mirror without the mirror going stale
+  // silently. Two drift directions are now RED rather than green:
+  //   · a SEVENTH doctrine pattern added with no exemplar → the coverage
+  //     assertion below fails (no exemplar matches it);
+  //   · a TERMINOLOGY_RULES entry added that happens to match one of these
+  //     frames → that pattern's remedy silently becomes the content-preserving
+  //     'terminology_rewrite', and the per-pattern assertions fail.
+  // The exemplars remain hand-written (a regex cannot generate its own prose),
+  // but they are no longer the SPINE of the test — the exported set is, and
+  // every member of it must be covered.
+  const exemplars = [
     'Increase price to £59 is the clear best choice.',
     'Hire a tech lead is your best bet.',
     'Your best bet: Hire a tech lead.',
@@ -793,16 +798,48 @@ describe('2.213 remedy class — a choice directive has no safe rewrite', () => 
     'Increase price to £59 gives you the best chance of £20k MRR.',
   ];
 
-  for (const text of fatalCases) {
-    it(`replaces rather than rewrites: ${text}`, () => {
-      const guarded = applyEgressForbiddenPhraseGuard(text);
-      expect(guarded.rewritten).toBe(true);
-      expect(guarded.remedy).toBe('fallback_replacement');
-      expect(guarded.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+  // Positive control on the derivation itself: if the export is ever emptied
+  // or tree-shaken to nothing, every `for` below would vacuously pass.
+  it('the doctrine set is non-empty and every member is a RegExp', () => {
+    expect(DOCTRINE_FATAL_PATTERNS.length).toBeGreaterThan(0);
+    for (const p of DOCTRINE_FATAL_PATTERNS) expect(p).toBeInstanceOf(RegExp);
+  });
+
+  it('every doctrine pattern is also live in the flat guard list', () => {
+    for (const p of DOCTRINE_FATAL_PATTERNS) {
+      expect(FORBIDDEN_USER_FACING_PHRASES.some((f) => f.source === p.source)).toBe(true);
+    }
+  });
+
+  for (const [i, pattern] of DOCTRINE_FATAL_PATTERNS.entries()) {
+    describe(`doctrine pattern ${i + 1}: ${pattern.source.slice(0, 60)}…`, () => {
+      const covering = exemplars.filter((t) => pattern.test(t));
+
+      it('has at least one exemplar (a new pattern must arrive with one)', () => {
+        expect(covering.length).toBeGreaterThan(0);
+      });
+
+      for (const text of covering) {
+        it(`is DETECTED and has no safe rewrite: ${text}`, () => {
+          // 1. It hits.
+          expect(findForbiddenPhraseHit(text)).not.toBeNull();
+          // 2. No terminology rewrite applies — this is the ABSENCE the fatal
+          //    class rests on, asserted directly rather than inferred.
+          expect(applyTerminologyRewrite(text).applied).toEqual([]);
+          // 3. The remedy is therefore the whole-response fallback.
+          const guarded = applyEgressForbiddenPhraseGuard(text);
+          expect(guarded.rewritten).toBe(true);
+          expect(guarded.remedy).toBe('fallback_replacement');
+          expect(guarded.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+        });
+      }
     });
   }
 
   it('the neutral fallback itself trips none of the doctrine patterns', () => {
     expect(findForbiddenPhraseHit(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT)).toBeNull();
+    for (const p of DOCTRINE_FATAL_PATTERNS) {
+      expect(p.test(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT)).toBe(false);
+    }
   });
 });

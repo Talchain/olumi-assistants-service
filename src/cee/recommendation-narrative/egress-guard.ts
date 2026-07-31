@@ -12,11 +12,10 @@
  * hits, and this guard catches anything a future template regression
  * introduces.
  *
- * ROADMAP 2.213: the two other routes this guard used to serve are gone.
- * `/assist/v1/key-insight` was DELETED (12 recommendation-class strings,
- * no caller end-to-end); `/assist/v1/generate-recommendation` was DELETED
- * (11 such strings, already recorded here as dead pending the V4
- * retirement decision, and never wired to this guard).
+ * ROADMAP 2.213: the two other routes this guard used to serve are gone
+ * (`/assist/v1/key-insight`, `/assist/v1/generate-recommendation`). Doctrine
+ * and rationale: `DOCTRINE_FATAL_PATTERNS` in
+ * `orchestrator-v5/compose/forbidden-user-facing-phrases.ts`.
  *
  * Hard rule: NEVER mutate the response shape. Replace only string
  * field values with the neutral fallback when a banned phrase fires.

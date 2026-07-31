@@ -23,7 +23,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
-import { findForbiddenPhraseHit } from '../compose/forbidden-user-facing-phrases.js';
+import {
+  EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
+  findForbiddenPhraseHit,
+} from '../compose/forbidden-user-facing-phrases.js';
 import { _resetConfigCache } from '../../config/index.js';
 import type {
   ChatWithToolsArgs,
@@ -182,10 +185,17 @@ describe('turn-executor — Coaching Context Pack v1 post-check (unconditional)'
       { routingAdapter: mockRoutingAdapter(DIRECTIONAL) },
     );
 
-    // The choice directive does not reach the user.
+    // The choice directive does not reach the user. Asserted against the
+    // GUARD ITSELF rather than against two hand-copied regexes: a per-phrase
+    // `not.toMatch(/you should choose/i)` only ever pins the two frames
+    // someone remembered to copy, so a leak through any of the other doctrine
+    // patterns would pass. `findForbiddenPhraseHit` is the same function the
+    // egress seam runs, so this catches ANY pattern's leak, present or future.
     expect(response.assistant_text).not.toBe(DIRECTIONAL);
-    expect(response.assistant_text).not.toMatch(/you should choose/i);
-    expect(response.assistant_text).not.toMatch(/the best option/i);
+    expect(findForbiddenPhraseHit(response.assistant_text ?? '')).toBeNull();
+    // The directive fixture trips a FATAL-class pattern, so the remedy is the
+    // whole-response neutral fallback — not a terminology rewrite.
+    expect(response.assistant_text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
     // …and it is NOT the canned no-analysis dead-end either (T1/T2 intact).
     expect(response.assistant_text).not.toMatch(/no analysis has been run/i);
     // The coaching post-check is not what replaced it.

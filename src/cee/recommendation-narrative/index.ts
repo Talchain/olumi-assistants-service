@@ -6,10 +6,9 @@
  * - explainPolicy: explain sequential decision logic
  *
  * ROADMAP 2.213 (no-recommendations doctrine): `generateRecommendation` and
- * its `/assist/v1/generate-recommendation` route were DELETED. They crowned
- * a winner in the advisory register and had no caller in UI `src/**` or CEE
- * `src/**`; the module's own egress-guard note already recorded the route as
- * dead pending the V4 retirement decision.
+ * its `/assist/v1/generate-recommendation` route were DELETED. Doctrine and
+ * rationale: `DOCTRINE_FATAL_PATTERNS` in
+ * `orchestrator-v5/compose/forbidden-user-facing-phrases.ts`.
  */
 
 import type {

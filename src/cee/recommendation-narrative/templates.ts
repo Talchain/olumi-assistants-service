@@ -7,12 +7,10 @@
  *
  * ROADMAP 2.213 (no-recommendations doctrine): the generate-recommendation
  * template family that used to live above this point was DELETED with the
- * `/assist/v1/generate-recommendation` route it served. Those templates
- * crowned a winner in the advisory register ("{X} is your best bet", "{X}
- * is the way to go", "{X} is advisable"); the route had no caller in UI
- * `src/**` or CEE `src/**`, and its own egress-guard note recorded it as
- * dead pending the V4 retirement decision. The surviving templates state
- * conditions and policy steps supplied by the caller; they crown nothing.
+ * `/assist/v1/generate-recommendation` route it served. The surviving
+ * templates state conditions and policy steps supplied by the caller; they
+ * crown nothing. Doctrine and rationale: `DOCTRINE_FATAL_PATTERNS` in
+ * `orchestrator-v5/compose/forbidden-user-facing-phrases.ts`.
  */
 
 import { labelForDisplay, sanitiseLabel } from "../../utils/label-sanitiser.js";
