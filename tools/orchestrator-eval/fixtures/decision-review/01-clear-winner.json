@@ -4,7 +4,7 @@
   "provenance": {
     "origin": "graph-evaluator-revival",
     "source": "tools/graph-evaluator/fixtures/decision-review/01-clear-winner.json (committed 11078d28, 2026-03-06)",
-    "note": "Revived and refreshed to the current input shape: graph edges now carry ids (the March graphs had none, so the runtime entity-grounding corpus was node-only), flip_threshold_data added (post-v11, invoke.ts:123), and the March fixture's hand-written margin of 0.15 dropped — it disagreed with its own winner/runner_up (0.72 - 0.28 = 0.44). Margin is now computed the way invoke.ts computes it."
+    "note": "Revived and refreshed to the current input shape: graph edges now carry ids (the March graphs had none, so the runtime entity-grounding corpus was node-only), flip_threshold_data added (post-v11, invoke.ts:123), and the March fixture's hand-written margin of 0.15 dropped — it disagreed with its own winner/runner_up (0.72 - 0.28 = 0.44). Margin is now computed the way invoke.ts computes it. | FLIP_THRESHOLDS GOLDEN CORRECTED 2026-07-31 (fix-decision-review-v15 lane, disclosed): the golden flip_thresholds entries were hand-written as { factor_label, current, flip_at, note } with rounded values. Two independent defects. (a) FIELD NAMES: the runtime contract is { factor_id, factor_label, current_display, flip_display, narrative } (src/orchestrator-v5/compose/phase3-blocks.ts:1703-1765 reads factor_id/factor_label/narrative and DROPS any entry missing one), so the old goldens described a shape production would discard entirely — a golden nothing could ever produce. (b) VALUE FORM: the served v14 prompt contradicts itself here — :344-350 orders the raw value verbatim while :116-118/:220 order the percentage form and no_raw_probability_decimals scores the raw form as a failure. The goldens now follow the NON-self-contradictory rule (percentage form) and the runtime field names. The prompt-side resolution is drafted but NOT YET PROMOTED (tools/orchestrator-eval/drafts/decision_review.v15-draft.txt); until it is, this fixture encodes the contract the runtime and the scorer agree on, not the flip bullet the served prompt still carries."
   },
   "input": {
     "brief": "Should we expand into the European market? We have four hundred pro customers and want to reach eight hundred.",
@@ -200,10 +200,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_competition",
             "factor_label": "Competitive Intensity",
-            "current": "about 35%",
-            "flip_at": "about 62%",
-            "note": "Beyond that level the ordering would change."
+            "current_display": "35%",
+            "flip_display": "62%",
+            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
           }
         ],
         "bias_findings": [
@@ -266,10 +267,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_competition",
             "factor_label": "Competitive Intensity",
-            "current": "about 35%",
-            "flip_at": "about 62%",
-            "note": "Beyond that level the ordering would change."
+            "current_display": "35%",
+            "flip_display": "62%",
+            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
           }
         ],
         "bias_findings": [
@@ -332,10 +334,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_competition",
             "factor_label": "Competitive Intensity",
-            "current": "about 35%",
-            "flip_at": "about 62%",
-            "note": "Beyond that level the ordering would change."
+            "current_display": "35%",
+            "flip_display": "62%",
+            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
           }
         ],
         "bias_findings": [
@@ -398,10 +401,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_competition",
             "factor_label": "Competitive Intensity",
-            "current": "about 35%",
-            "flip_at": "about 62%",
-            "note": "Beyond that level the ordering would change."
+            "current_display": "35%",
+            "flip_display": "62%",
+            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
           }
         ],
         "bias_findings": [
@@ -464,10 +468,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_competition",
             "factor_label": "Competitive Intensity",
-            "current": "about 35%",
-            "flip_at": "about 62%",
-            "note": "Beyond that level the ordering would change."
+            "current_display": "35%",
+            "flip_display": "62%",
+            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
           }
         ],
         "bias_findings": [

@@ -72,6 +72,26 @@ export interface BuildOptions {
   readonly promptSha16: string;
   /** ISO timestamp for the report. */
   readonly generatedAt: string;
+  /**
+   * PROVENANCE, REQUIRED: what corpus produced the outputs being aggregated.
+   *
+   * ⚠ This is required rather than defaulted on purpose. It used to be a
+   * string LITERAL inside the builder naming H1 #767's two captures, so every
+   * later report described a corpus it had never seen (E1, 2026-07-31). A
+   * defaulted provenance is the same defect with a politer name: the caller
+   * must state what was scored, because only the caller knows.
+   */
+  readonly evidenceSource: string;
+  /** PROVENANCE, REQUIRED: the model id whose outputs were scored. */
+  readonly model: string;
+  /** Optional free-text note appended to the evidence block. */
+  readonly note?: string;
+  /**
+   * Optional additional provenance fields (run ids, sampling posture, artefact
+   * paths). Merged into `evidence`; it cannot overwrite the derived keys, which
+   * are written last.
+   */
+  readonly extraEvidence?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -115,8 +135,16 @@ export function buildDecisionReviewPromotionReport(
       required: !CONDITIONAL_DIMS.has(name),
     }));
 
-  const anyFail = dims.some((d) => d.status === 'fail');
-  const requiredNa = dims.some((d) => d.required && d.status === 'not_applicable');
+  // DERIVED block reasons: the names come from the aggregation itself, so they
+  // cannot describe a corpus other than the one scored. The previous version
+  // emitted a fixed sentence naming "r1 no_internal_vocabulary, r3 no_dashes"
+  // on ANY failing input — a gate artifact that lied about its own evidence.
+  const failedDims = dims.filter((d) => d.status === 'fail').map((d) => d.name);
+  const naRequiredDims = dims
+    .filter((d) => d.required && d.status === 'not_applicable')
+    .map((d) => d.name);
+  const anyFail = failedDims.length > 0;
+  const requiredNa = naRequiredDims.length > 0;
   // The n-threshold is the SHARED constant the gate's floor re-derives from —
   // one source, no twin (trap 12). A literal here would drift the moment the
   // gate's minimum moved, and the drift would read as green.
@@ -132,17 +160,24 @@ export function buildDecisionReviewPromotionReport(
     sampleSize: scoredCaptures,
     dims,
     evidence: {
-      source: 'H1 #767 live-capture scoring of the served v14 prompt (two 2026-07-30 deployed-pair captures)',
-      model: 'gpt-4.1-2025-04-14',
+      // Caller-supplied provenance first, so a stray `extraEvidence` key can
+      // never shadow a DERIVED one.
+      ...(opts.extraEvidence ?? {}),
+      source: opts.evidenceSource,
+      model: opts.model,
       aggregation: 'worst-case per dimension across captures (ab-verdict safety discipline)',
       block_reasons: [
-        anyFail ? 'observed failures: r1 no_internal_vocabulary, r3 no_dashes (both breach the served prompt own banned list)' : null,
-        requiredNa ? 'required dimension unmeasured on response-only captures (tone_alignment)' : null,
+        anyFail
+          ? `observed failures on ${failedDims.length} dimension(s): ${failedDims.join(', ')}`
+          : null,
+        requiredNa
+          ? `required dimension(s) not measured on this corpus (not_applicable): ${naRequiredDims.join(', ')}`
+          : null,
         tooFewSamples
           ? `n=${scoredCaptures} < ${MIN_CERTIFYING_SAMPLE_SIZE}: a promotion verdict needs ≥${MIN_CERTIFYING_SAMPLE_SIZE} paired reruns (ab-verdict); this is a compliance rate, not a score`
           : null,
       ].filter((x): x is string => x !== null),
-      note: 'PRE-GATE promotion — grandfathered at this hash. A rewrite must ship a PASS report at the new hash; that makes this report and its grandfather entry stale (the ratchet forces removal).',
+      ...(opts.note === undefined ? {} : { note: opts.note }),
     },
   };
 }

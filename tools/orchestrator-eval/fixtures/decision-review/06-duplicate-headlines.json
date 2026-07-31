@@ -4,7 +4,7 @@
   "provenance": {
     "origin": "defect-reproduction",
     "source": "ROADMAP.md:532 (row 1.121)",
-    "note": "The only fixture with more than two options, so it is also the only one where headline collision is POSSIBLE — the distinctness dimension reports \"collision impossible\" everywhere else and says so rather than claiming a pass it did not earn."
+    "note": "The only fixture with more than two options, so it is also the only one where headline collision is POSSIBLE — the distinctness dimension reports \"collision impossible\" everywhere else and says so rather than claiming a pass it did not earn. | UNIT-BEARING FLIP BRANCH ADDED 2026-07-31 (fix-decision-review-v15 amendment round, review item 3): the flip-threshold contract has TWO branches — a value WITH a unit is quoted verbatim with that unit, a UNITLESS value in [0,1] takes the percentage form — and at n=21 the unit branch was measured by NOTHING (all three flip-bearing fixtures, 01/02/04, carry unitless probabilities). An absence assertion over a branch no fixture exercises is vacuous (trap 13). fac_cac is this graph own factor and Customer Acquisition Cost is naturally monetary, so the entry is in-domain rather than bolted on. The values (420/610) deliberately differ from the prompt own worked example (16000 GBP) so that a model COPYING the example is distinguishable from a model APPLYING the rule."
   },
   "input": {
     "brief": "Which of our four growth bets should get next quarter budget?",
@@ -145,7 +145,17 @@
       "label": "Paid Acquisition",
       "win_probability": 0.27,
       "outcome_mean": 0.45
-    }
+    },
+    "flip_threshold_data": [
+      {
+        "factor_id": "fac_cac",
+        "factor_label": "Customer Acquisition Cost",
+        "current_value": 420,
+        "flip_value": 610,
+        "direction": "increase",
+        "unit": "GBP"
+      }
+    ]
   },
   "candidates": [
     {
@@ -188,6 +198,15 @@
           {
             "prompt": "What would have to happen to customer acquisition cost for the ordering to change?",
             "technique": "assumption test"
+          }
+        ],
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_cac",
+            "factor_label": "Customer Acquisition Cost",
+            "current_display": "420 GBP",
+            "flip_display": "610 GBP",
+            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, the leading option changes."
           }
         ]
       }
@@ -233,6 +252,15 @@
             "prompt": "What would have to happen to customer acquisition cost for the ordering to change?",
             "technique": "assumption test"
           }
+        ],
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_cac",
+            "factor_label": "Customer Acquisition Cost",
+            "current_display": "420 GBP",
+            "flip_display": "610 GBP",
+            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, the leading option changes."
+          }
         ]
       }
     },
@@ -276,6 +304,15 @@
           {
             "prompt": "What would have to happen to customer acquisition cost for the ordering to change?",
             "technique": "assumption test"
+          }
+        ],
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_cac",
+            "factor_label": "Customer Acquisition Cost",
+            "current_display": "420 GBP",
+            "flip_display": "610 GBP",
+            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, the leading option changes."
           }
         ]
       }
