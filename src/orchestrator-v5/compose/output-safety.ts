@@ -386,9 +386,20 @@ function sanitiseBlock(block: Block, collect: (s: string) => string): Block {
       //   failure_scenario, mitigation, reference_class, counter_case,
       //   review_trigger, plus each warning_signs[] entry.
       // exercise_kind (enum), target_element_ref / target_refs
-      // (structured) — untouched. ExerciseBlock is NOT auto-emitted by
-      // any composer in PR 2 (handler-only per v1.3 §1.4); the case
-      // exists for exhaustiveness + future on-demand handler wiring.
+      // (structured) — untouched.
+      //
+      // ⚠ AMENDED 2026-07-31 (capability P1, CEE #770). This comment read
+      // "ExerciseBlock is NOT auto-emitted by any composer in PR 2
+      // (handler-only per v1.3 §1.4); the case exists for exhaustiveness +
+      // future on-demand handler wiring." It was accurate when written (#178,
+      // cf7c85f7 — checked: introduced there, never overwritten, so this is an
+      // OVERTAKEN label and not a swapped confession) and is now FALSE. A V5
+      // composer DOES auto-emit this kind: the pre-mortem lens companion
+      // (`buildPreMortemExerciseBlock` -> `rebuildPhase3BlocksFresh`, permitted
+      // arm only). The scrub arm below is a LIVE path, not a dormant one — the
+      // three fields #770 emits (warning_signs / mitigation / review_trigger)
+      // now carry producer prose to real users, so a change here has user-facing
+      // consequences.
       return {
         ...block,
         ...(block.failure_scenario !== undefined

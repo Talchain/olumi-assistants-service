@@ -568,12 +568,72 @@ const BLOCK_PROSE_FIELDS: readonly string[] = [
   'suggested_technique',
   'impact_if_gathered',
   'note',
+  // ⚠ THE SIX EXERCISE PROSE FIELDS — ADDED 2026-07-31 (capability P1, CEE #770
+  // adversarial review B1), AND THEY ARE THE FOURTH INSTANCE OF THIS EXACT
+  // DEFECT. `signal` and `summary` above were both added only after the field
+  // had shipped unobserved; this one was caught BEFORE a producer existed for
+  // more than a day, which is the only difference.
+  //
+  // Until #770 the `exercise` block kind had no V5 producer at all, so its prose
+  // was unobservable-but-harmless. #770 gives `warning_signs` / `mitigation` /
+  // `review_trigger` a live producer, and the 2.149 scope block's stated
+  // justification for leaving `blocks[]` out of WIRE enforcement is precisely
+  // "the alarm keeps observing them". That sentence was FALSE for this block
+  // kind: the paired probe put the identical roster sentence
+  // ("The MacBook Pro leads by a margin of about 52 percentage points.") in the
+  // exercise prose fields and in `review_card.body` — ZERO hits vs one hit.
+  //
+  // All SIX are listed, not only the three #770 emits. Listing what today's
+  // builder happens to emit is the mirror defect one layer down: the next
+  // exercise_kind (outside_view / devils_advocacy / consider_opposite) reaches
+  // for `reference_class` and `counter_case`, and would arrive unobserved.
+  // `exercise-prose-alarm-coverage` in the guard's own spec DERIVES this set
+  // from `ExerciseBlockSchema.shape` and REDs on any schema addition that is
+  // neither listed here nor explicitly classified non-prose — so this list
+  // fails loud on drift rather than rotting quietly (CLAUDE.md trap 12).
+  //
+  // NOT a live leak today: the positional gate in `rebuildPhase3BlocksFresh`
+  // means no companion reaches a withheld response at all. This restores
+  // defence in depth and the truth of a stated guarantee.
+  'failure_scenario',
+  'warning_signs', // ARRAY — see `scanProseField`; `scanString` alone is blind to it
+  'mitigation',
+  'reference_class',
+  'counter_case',
+  'review_trigger',
 ];
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+/**
+ * Scan one {@link BLOCK_PROSE_FIELDS} member, which may be a STRING or an ARRAY
+ * OF STRINGS.
+ *
+ * WHY THIS EXISTS RATHER THAN JUST LISTING THE FIELD. `scanString` opens with
+ * `if (typeof value !== 'string' ...) return;` — a silent early return. So
+ * `warning_signs` (the ExerciseBlock's `z.array(z.string().min(1))`) would have
+ * been invisible to the alarm EVEN AFTER being added to the field list: the list
+ * entry would have read as coverage while scanning nothing. That is the
+ * vacuous-guard shape, and adding the name alone would have written a false
+ * coverage claim into the very list whose job is to be true.
+ *
+ * Array entries get an indexed path (`blocks[0].warning_signs[1]`) so the
+ * telemetry names the offending entry, not just the field. Non-string entries
+ * are skipped by `scanString` exactly as before — this widens the walk, it does
+ * not loosen the match.
+ */
+function scanProseField(path: string, value: unknown, out: LeaderClaimHit[]): void {
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      scanString(`${path}[${i}]`, value[i], out);
+    }
+    return;
+  }
+  scanString(path, value, out);
 }
 
 /**
@@ -702,7 +762,11 @@ export function findLeaderClaims(response: OlumiResponse): LeaderClaimHit[] {
     const block = asRecord(blocks[i]);
     if (block === null) continue;
     for (const field of BLOCK_PROSE_FIELDS) {
-      scanString(`blocks[${i}].${field}`, block[field], hits);
+      // `scanProseField`, not `scanString`: one member of this list
+      // (`warning_signs`) is an ARRAY, and `scanString` early-returns on
+      // non-strings — listing it without this would have been coverage on paper
+      // and a blind spot in fact.
+      scanProseField(`blocks[${i}].${field}`, block[field], hits);
     }
 
     // The block's OWN keys, by name. `blocks[i].leading_option_id` is the field

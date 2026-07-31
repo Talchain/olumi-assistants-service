@@ -23,7 +23,8 @@ import {
   buildFactorConfidenceLookup,
   buildGraphNodeLookup,
   buildGraphNodeLookupFromGraph,
-  buildLensSuggestionCoachingBlock,
+  buildLensCompanionBlocks,
+  buildLensSurface,
   buildReviewCardBlocks,
   buildStaleRerunCoachingBlock,
   type BlockBuildCtx,
@@ -923,13 +924,38 @@ function rebuildPhase3BlocksFresh(
   // analysis (only ever fires on a fresh verdict — the stale branch returns
   // before reaching this helper, so a lens is never suggested off stale signals).
   // `selectLens` returns at most one, and null when nothing is justified.
-  const lensSuggestion = buildLensSuggestionCoachingBlock(fact, ctx);
+  const lensSurface = buildLensSurface(fact, ctx);
+  const reviewCards = buildReviewCardBlocks(
+    fact,
+    lookup,
+    ctx,
+    interventionControlledFactorIds,
+  );
   const built = [
-    ...buildReviewCardBlocks(fact, lookup, ctx, interventionControlledFactorIds),
+    ...reviewCards,
     ...buildCoachingBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...buildEvidenceBlocks(fact, lookup, confidenceLookup, ctx, interventionControlledFactorIds),
-    ...(lensSuggestion !== null ? [lensSuggestion] : []),
+    ...(lensSurface !== null ? [lensSurface.suggestion] : []),
   ];
+  // Capability layer P1 (ROADMAP 1.183): the STRUCTURED artefact for the lens
+  // P0 announced — built from the SAME selection object (never a second
+  // `selectLens` call, which is how two derivations of one fact drift), and only
+  // when the suggestion itself SURVIVED its prose/schema gate. A companion with
+  // no suggestion is a card with no sentence explaining why it is there.
+  //
+  // DELIBERATELY NOT ALSO GATED ON THE VERDICT HERE (CEE #770 review B4). Adding
+  // `&& mayNameLeadingOptionForFact(fact)` to this line would skip wasted work on
+  // withheld turns — and would HOLLOW the only mutant that proves the positional
+  // gate below: with the build gated, appending the companions outside the
+  // permitted branch appends an empty array and nothing REDs. Two gates neither
+  // of which is individually provable is weaker than one that is. The cost of
+  // the ungated build is a pure, cheap construction whose result is discarded on
+  // a minority of turns; it emits no telemetry of its own (see
+  // `buildPreMortemExerciseBlock`) so it cannot mislead a dashboard.
+  const lensCompanions =
+    lensSurface !== null
+      ? buildLensCompanionBlocks(fact, ctx, lensSurface.selection, reviewCards)
+      : [];
 
   // T1 CLAIM SAFETY — THE SINGLE FUNNEL.
   //
@@ -975,8 +1001,36 @@ function rebuildPhase3BlocksFresh(
   // silently strip useful content, and the egress guard is the layer that
   // catches an unrecognised producer LOUDLY. Layer 2 suppresses what we know is
   // unsafe; Layer 3 alarms on what we do not.
+  //
+  // CAPABILITY P1 — WHY THE COMPANIONS ARE APPENDED INSIDE THE PERMITTED ARM
+  // AND NOWHERE ELSE. `presumesLeadingOption` below keys on `card_kind` /
+  // `coaching_kind`. A P1 companion has neither: `ExerciseBlock` carries no such
+  // discriminator, and `ComparisonBlock`/`FlipAnalysisBlock` are `.strict()`
+  // with NO metadata fields at all, so there is no wire tag any predicate could
+  // read. Adding a hand-listed block-TYPE set to the filter would work today and
+  // rot the first time a companion kind is added without touching it — the
+  // hand-maintained-mirror class (CLAUDE.md trap 12). Position is the gate
+  // instead: a companion can only be reached through the `true` branch, so the
+  // withheld arm cannot emit one however the set of companion kinds grows.
+  //
+  // This is not over-caution. Every lens suggestion is `coaching_kind:
+  // 'strengthen'`, which IS in `LEADER_PRESUMING_COACHING_KINDS` — so on a
+  // withheld turn the suggestion is dropped by the filter below. A companion
+  // that survived would be a structured decision-science artefact standing alone
+  // on exactly the turn whose disclosure says no option can be put forward.
   if (mayNameLeadingOptionForFact(fact)) {
-    return built;
+    // Observability at the WIRE decision, not at construction: a companion that
+    // survived its builder but was dropped here would otherwise be reported as
+    // emitted on precisely the turns where it was suppressed.
+    for (const companion of lensCompanions) {
+      emit(TelemetryEvents.V5LensCompanionEmitted, {
+        lens_id: lensSurface?.selection.lens,
+        block_type: companion.type,
+        exercise_kind: companion.exercise_kind,
+        graph_hash_at_generation: ctx.graph_hash_at_generation,
+      });
+    }
+    return [...built, ...lensCompanions];
   }
   return built.filter(
     (block) => !presumesLeadingOption(block) && !evidenceGapPresumesLeadingOption(block),

@@ -199,9 +199,16 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
 // `enrichment.decision_review` carries a representative slice of v11 LLM
 // output fields, plus `graph_hash_at_run` and `enrichment.graph.nodes[]`,
 // is decomposed into typed Phase 3 blocks per Analysis tab data
-// contract v1.3 §1.1–§1.3. ExerciseBlock is NOT auto-emitted from this
-// path (handler-only per §1.4); the case exists in output-safety for
-// exhaustiveness but no composer builds it from decision_review.
+// contract v1.3 §1.1-§1.3.
+//
+// ⚠ AMENDED 2026-07-31 (capability P1, CEE #770). This header read
+// "ExerciseBlock is NOT auto-emitted from this path (handler-only per §1.4);
+// the case exists in output-safety for exhaustiveness but no composer builds it
+// from decision_review." Both halves are now FALSE: a composer DOES build one
+// from `decision_review.pre_mortem`, on this path. What is still true — and is
+// now pinned explicitly rather than left to hold by accident, see the
+// `no ExerciseBlocks` test below — is that THIS FIXTURE does not produce one,
+// because its enrichment does not select the `pre_mortem` lens.
 // ============================================================================
 
 describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
@@ -343,8 +350,57 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     expect(byType('review_card').length).toBeGreaterThan(0);
     expect(byType('coaching').length).toBeGreaterThan(0);
     expect(byType('evidence').length).toBeGreaterThan(0);
-    // ExerciseBlock is handler-only per v1.3 §1.4 — never auto-emitted.
+    // ⚠ AMENDED 2026-07-31 (capability P1, CEE #770). This assertion used to
+    // carry the comment "ExerciseBlock is handler-only per v1.3 §1.4 — never
+    // auto-emitted", which is now FALSE — and, worse, the assertion had started
+    // passing INCIDENTALLY: #770 emits an ExerciseBlock companion, just not for
+    // THIS fixture. A pin that holds by accident is a pin that stops meaning
+    // anything the moment the accident changes.
+    //
+    // The invariant it now states explicitly: the companion is LENS-KEYED, and
+    // this fixture selects NO lens at all (its `factor_sensitivity` rows carry
+    // only `factor_id` + `confidence` — no `flip_risk_category`, no
+    // `influence_score`, no `influence_rank`; and the enrichment has no
+    // `confidence_tier`, no `option_comparison`, no EVPI — so every `selectLens`
+    // rule misses and it returns its load-bearing `null`).
+    //
+    // The precondition is asserted, not assumed: no lens suggestion block ⇒ no
+    // companion. The POSITIVE CONTROL that this file can still see an exercise
+    // when one is due lives in
+    // `compose/__tests__/lens-companion-blocks.test.ts` (arm 1 + the arm-3
+    // control), which drives the same `composeToolCallResponse` funnel.
+    expect(
+      parsed.blocks.some((b) => b.type === 'coaching' && b.signal_id.startsWith('coach:lens:')),
+      'precondition: this fixture must select NO lens — otherwise the exercise absence below is about the wrong thing',
+    ).toBe(false);
     expect(byType('exercise')).toHaveLength(0);
+  });
+
+  it('emits an ExerciseBlock companion once the SAME funnel selects the pre_mortem lens (positive control)', () => {
+    // The control for the assertion above: identical composer, identical
+    // fixture, ONE added enrichment key (`confidence_tier: 'needs_work'`, which
+    // is `selectLens` rule 2a) plus the pre_mortem prose the builder reads. If
+    // this ever stops emitting, the absence assertion above is measuring a dead
+    // funnel rather than a lens decision.
+    const fact = phase3Fact();
+    const enrichment = (fact.result as Record<string, unknown>)
+      .enrichment as Record<string, unknown>;
+    enrichment.confidence_tier = 'needs_work';
+    (enrichment.decision_review as Record<string, unknown>).pre_mortem = {
+      failure_scenario:
+        'Delivery risk was underestimated and the rollout slipped past the planned window.',
+      warning_signs: ['Sprint burndown flattens for two consecutive weeks.'],
+      mitigation: 'Book a mid-point checkpoint before committing budget.',
+      grounded_in: ['fac_delivery_risk'],
+    };
+
+    const parsed = OlumiResponseSchema.parse(
+      composeToolCallResponse({ ...baseInput, handlerFacts: [fact] }),
+    );
+    expect(
+      parsed.blocks.some((b) => b.type === 'coaching' && b.signal_id.includes('coach:lens:pre_mortem')),
+    ).toBe(true);
+    expect(parsed.blocks.filter((b) => b.type === 'exercise')).toHaveLength(1);
   });
 
   it('emits expected counts per card_kind from the rich-fixture decision_review', () => {

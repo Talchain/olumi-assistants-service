@@ -23,6 +23,7 @@ import {
   guardLeadingOptionClaimsAtEgress,
 } from '../leading-option-egress-guard.js';
 import { setTestSink } from '../../../utils/telemetry.js';
+import { ExerciseBlockSchema } from '@talchain/schemas/boundary';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
 /** Minimal envelope; `patch` overlays the field under test. */
@@ -269,5 +270,221 @@ describe('guardLeadingOptionClaimsAtEgress — behaviour', () => {
     expect(events[0]!.data.hit_count).toBe(3);
     // Primary code only on the tag; `leads` sorts before `recommend`.
     expect(events[0]!.data.reason).toBe('leads');
+  });
+});
+
+// ===========================================================================
+// EXERCISE-BLOCK PROSE COVERAGE (capability P1 / CEE #770 adversarial review B1)
+//
+// Until #770 the `exercise` block kind had no V5 producer, and none of its six
+// prose fields were in `BLOCK_PROSE_FIELDS`. That made the 2.149 scope block's
+// stated justification for leaving `blocks[]` out of WIRE enforcement — "the
+// alarm keeps observing them" — FALSE for this block kind.
+//
+// The paired probe that established it, reproduced verbatim as the first test
+// below: the SAME roster sentence in the exercise prose fields returned ZERO
+// hits while `review_card.body` returned one. That pairing is what makes these
+// assertions field-driven rather than vacuous — a scanner that had simply
+// stopped working would fail the `review_card` arm too.
+// ===========================================================================
+
+describe('findLeaderClaims — ExerciseBlock prose (B1)', () => {
+  const ROSTER = 'The MacBook Pro leads by a margin of about 52 percentage points.';
+
+  function exerciseBlock(patch: Record<string, unknown>): Record<string, unknown> {
+    return {
+      type: 'exercise',
+      exercise_kind: 'pre_mortem',
+      target_refs: [],
+      ...patch,
+    };
+  }
+
+  it('THE PAIRED PROBE — the roster sentence is seen in exercise prose AND in review_card.body', () => {
+    const inExercise = findLeaderClaims(
+      envelope({
+        blocks: [
+          exerciseBlock({
+            failure_scenario: ROSTER,
+            warning_signs: [ROSTER],
+            mitigation: ROSTER,
+            reference_class: ROSTER,
+            counter_case: ROSTER,
+            review_trigger: ROSTER,
+          }),
+        ],
+      }),
+    );
+    // The control leg: the identical sentence on an already-covered field. If
+    // this ever stops hitting, the probe is measuring a broken scanner and the
+    // exercise leg's result means nothing.
+    const inReviewCard = findLeaderClaims(
+      envelope({ blocks: [{ type: 'review_card', card_kind: 'narrative', body: ROSTER }] }),
+    );
+
+    expect(inReviewCard.map((h) => h.path)).toEqual(['blocks[0].body']);
+    expect(inExercise.map((h) => h.path).sort()).toEqual(
+      [
+        'blocks[0].counter_case',
+        'blocks[0].failure_scenario',
+        'blocks[0].mitigation',
+        'blocks[0].reference_class',
+        'blocks[0].review_trigger',
+        'blocks[0].warning_signs[0]',
+      ].sort(),
+    );
+  });
+
+  // One assertion per field, each with its own clean-prose negative — the
+  // file's established "coverage CLAIM needs a field-by-field manifest" rule.
+  for (const field of [
+    'failure_scenario',
+    'mitigation',
+    'reference_class',
+    'counter_case',
+    'review_trigger',
+  ] as const) {
+    it(`scans exercise.${field}`, () => {
+      expect(
+        findLeaderClaims(envelope({ blocks: [exerciseBlock({ [field]: ROSTER })] })).map(
+          (h) => h.path,
+        ),
+      ).toEqual([`blocks[0].${field}`]);
+      expect(
+        findLeaderClaims(envelope({ blocks: [exerciseBlock({ [field]: CLEAN_PROSE })] })),
+      ).toEqual([]);
+    });
+  }
+
+  it('scans EVERY entry of the warning_signs ARRAY, with indexed paths', () => {
+    // `scanString` early-returns on non-strings, so listing `warning_signs` in
+    // BLOCK_PROSE_FIELDS without array handling would read as coverage and scan
+    // NOTHING. This is the assertion that separates the two.
+    const hits = findLeaderClaims(
+      envelope({
+        blocks: [
+          exerciseBlock({
+            warning_signs: [CLEAN_PROSE, 'Dell XPS is ahead on cost.', CLEAN_PROSE, ROSTER],
+          }),
+        ],
+      }),
+    );
+    expect(hits.map((h) => h.path)).toEqual([
+      'blocks[0].warning_signs[1]',
+      'blocks[0].warning_signs[3]',
+    ]);
+    expect(
+      findLeaderClaims(
+        envelope({ blocks: [exerciseBlock({ warning_signs: [CLEAN_PROSE, CLEAN_PROSE] })] }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('tolerates a malformed warning_signs (non-array, non-string entries) without throwing', () => {
+    expect(() =>
+      findLeaderClaims(
+        envelope({
+          blocks: [
+            exerciseBlock({ warning_signs: 'not an array but still prose — Dell leads.' }),
+            exerciseBlock({ warning_signs: [null, 42, { a: 1 }, ROSTER] }),
+          ],
+        }),
+      ),
+    ).not.toThrow();
+    const hits = findLeaderClaims(
+      envelope({
+        blocks: [
+          exerciseBlock({ warning_signs: 'not an array but still prose — Dell leads.' }),
+          exerciseBlock({ warning_signs: [null, 42, { a: 1 }, ROSTER] }),
+        ],
+      }),
+    );
+    // A non-array string still scans (scalar path); non-string entries skip.
+    expect(hits.map((h) => h.path)).toEqual([
+      'blocks[0].warning_signs',
+      'blocks[1].warning_signs[3]',
+    ]);
+  });
+
+  /**
+   * THE DRIFT GUARD — and it is BEHAVIOURAL, not a list comparison.
+   *
+   * The obvious form is "assert every prose key of `ExerciseBlockSchema` appears
+   * in `BLOCK_PROSE_FIELDS`". That form is exactly the vacuity this amendment
+   * was raised to fix: `warning_signs` WAS going to be in the list and STILL
+   * scan nothing, because `scanString` early-returns on arrays. A membership
+   * check would have gone green on a blind scanner.
+   *
+   * So the derivation drives the SCANNER instead: for every schema key not
+   * explicitly classified as structured/metadata, put a known leader claim in
+   * that field and require a hit. A future schema minor that adds an exercise
+   * prose field REDs here — unobserved-by-default is how `signal` and `summary`
+   * got into this list years late — and a field that is listed but unscannable
+   * REDs too.
+   */
+  it('every prose-bearing ExerciseBlockSchema key is actually SCANNED (derived, behavioural)', () => {
+    const STRUCTURED_OR_METADATA = new Set([
+      'block_id',
+      'signal_id',
+      'created_at',
+      'source_handler',
+      'graph_hash_at_generation',
+      'freshness',
+      'type',
+      'exercise_kind',
+      'target_element_ref',
+      'target_refs',
+      'category',
+      'priority',
+      'signal_code',
+    ]);
+    const proseKeys = Object.keys(ExerciseBlockSchema.shape).filter(
+      (k) => !STRUCTURED_OR_METADATA.has(k),
+    );
+    // Non-vacuity: the derivation must actually yield the fields we know exist,
+    // including the array one and the already-covered `signal`.
+    expect(proseKeys.length).toBeGreaterThanOrEqual(7);
+    expect(proseKeys).toContain('warning_signs');
+    expect(proseKeys).toContain('signal');
+
+    // A SCHEMA-VALID exercise block, so the array-vs-scalar question below is
+    // answered by the contract rather than by poking at Zod internals.
+    const VALID_BASE = {
+      block_id: '550e8400-e29b-41d4-a716-446655440099',
+      signal_id: 'exercise:pre_mortem:gh',
+      created_at: '2026-07-31T09:00:00.000Z',
+      source_handler: 'decision_review_enricher',
+      graph_hash_at_generation: 'gh_drift_guard',
+      freshness: 'fresh',
+      type: 'exercise',
+      exercise_kind: 'pre_mortem',
+      target_refs: [],
+    } as const;
+
+    for (const key of proseKeys) {
+      // Ask the CONTRACT which shape this key takes. Guessing wrong would make
+      // this whole loop vacuous for `warning_signs`: a bare string in that field
+      // hits via the scalar path even when array handling is absent (see the
+      // malformed-input test above), so a mis-shaped payload would pass while
+      // the real array stayed invisible — the exact failure this amendment fixes.
+      const arrayForm = ExerciseBlockSchema.safeParse({ ...VALID_BASE, [key]: [ROSTER] }).success;
+      const scalarForm = ExerciseBlockSchema.safeParse({ ...VALID_BASE, [key]: ROSTER }).success;
+      expect(
+        arrayForm || scalarForm,
+        `could not construct a schema-valid payload for exercise prose key '${key}'`,
+      ).toBe(true);
+
+      const hits = findLeaderClaims(
+        envelope({ blocks: [{ ...VALID_BASE, [key]: arrayForm ? [ROSTER] : ROSTER }] }),
+      );
+      expect(
+        hits.length,
+        `ExerciseBlockSchema prose key '${key}' is INVISIBLE to the Layer-3 alarm — ` +
+          'add it to BLOCK_PROSE_FIELDS (and give it array handling if it is an array)',
+      ).toBeGreaterThan(0);
+      // …and name the path, so a hit that came from some OTHER field cannot
+      // stand in for this one.
+      expect(hits.some((h) => h.path.startsWith(`blocks[0].${key}`))).toBe(true);
+    }
   });
 });
