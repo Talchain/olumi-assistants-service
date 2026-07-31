@@ -111,6 +111,25 @@ jobs:
         # RED. Running it first makes it the attributable signal for prompt drift.
         run: pnpm eval:orchestrator:test
 
+      - name: Eval-pass promotion gate
+        # REQUIRED, hermetic check (Harness H2). Makes an eval PASS a structural
+        # precondition of promoting a prompt version: for every prompt with an
+        # eval pack (DERIVED from the filesystem pack markers, never hand-listed),
+        # a commit that promotes it — i.e. changes the served hash in
+        # Prompts/canonical/manifest.json + the canonical export — must carry a
+        # committed, in-date, HASH-MATCHED, floor-PASSING promotion report, or the
+        # merge is blocked. Prompts with no pack promote as today but are marked
+        # UNGATED (visible, not silent). Pre-gate promotions with no passing eval
+        # are grandfathered at their exact hash by promotion-gate-baseline.json (a
+        # shrink-only ratchet); a bump voids the grandfather and re-requires a
+        # passing eval. Reads only committed git state — ZERO network / LLM calls.
+        #
+        # ⚠ This gates the GIT source-of-truth. A live-only staging promotion via
+        # the admin API that never regenerates+commits the manifest is not visible
+        # here — closing that hole is the runtime seam in src/routes/admin.prompts.ts
+        # (sequenced separately). See tools/orchestrator-eval/src/promotion-gate.
+        run: pnpm eval:promotion-gate
+
       - name: Run required test subset
         # Deterministic, in-process suite (see vitest.required.config.ts).
         # Since O-6 this INCLUDES the ~155 in-process tests/integration files —

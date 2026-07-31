@@ -1,0 +1,11 @@
+{
+  "_doc": "PROMOTION-GATE grandfather baseline. A frozen, SHRINK-ONLY allowlist of prompts that were promoted BEFORE this gate existed and have no passing eval. Each is tolerated ONLY at the exact promotedHash recorded. Adding an entry is a deliberate, reviewed act (a promotion knowingly shipped un-evalled); the gate FAILS LOUD if a listed hash no longer matches the manifest, if a listed task now has a passing eval (remove it — the ratchet tightens), or if it references a task with no manifest row. This is the same discipline as scripts/ci/typecheck-baseline.txt.",
+  "entries": [
+    {
+      "task": "decision_review",
+      "promotedHash": "b4f15305c2bb32e9",
+      "reason": "v14 was promoted to staging BEFORE the promotion gate. H1 (#767) evaluated it (reports/promotion/decision_review.json): live-capture n=2 both runs FAIL a banned-lexicon rule (r1 no_internal_vocabulary, r3 no_dashes), and n<3 cannot certify a promotion verdict. No valid passing eval exists. LOCKED at this hash: the pending rewrite must ship a PASS report at its new hash, which makes this entry stale and forces its removal.",
+      "recordedAt": "2026-07-31"
+    }
+  ]
+}
