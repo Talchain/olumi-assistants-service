@@ -1171,11 +1171,28 @@ export interface LensSurface {
   readonly selection: LensSelection;
 }
 
+/**
+ * ⚠ TEST-ONLY as of ROADMAP 2.211. Complete caller manifest at this tip
+ * (`rg -a` over the whole repo excluding `node_modules`): this definition, one
+ * prose mention in `lens-selector.ts`, and three spec files
+ * (`lens-suggestion-block`, `claim-cage-wiring`, `ui-directive-focus`).
+ * **Zero production callers.** The live path goes through
+ * {@link buildLensSurface}, which `compose.ts` calls with the turn's lens
+ * history.
+ *
+ * `previousAnalysisLens` is REQUIRED rather than optional on purpose. This
+ * function is a second, live-LOOKING door into lens selection, and an optional
+ * parameter is exactly how a future caller wires one up while silently
+ * defaulting the history away — shipping a lens that ignores the
+ * no-immediate-repeat rule with nothing going red. Required, the compiler makes
+ * that a decision: pass the turn's history, or pass `null` and mean it.
+ */
 export function buildLensSuggestionCoachingBlock(
   fact: RunAnalysisHandlerFact,
   ctx: BlockBuildCtx,
+  previousAnalysisLens: LensId | null,
 ): CoachingBlock | null {
-  return buildLensSurface(fact, ctx)?.suggestion ?? null;
+  return buildLensSurface(fact, ctx, previousAnalysisLens)?.suggestion ?? null;
 }
 
 /**

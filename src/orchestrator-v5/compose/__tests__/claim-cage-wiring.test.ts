@@ -143,7 +143,7 @@ function winProbModerateFact(): RunAnalysisHandlerFact {
 describe('buildLensSuggestionCoachingBlock — cage consult is LIVE + byte-inert (σ)', () => {
   it('FRESH verdict: the SAME prose-only strengthen block (byte-inert) AND an allow cage event for the allow-listed grounding field', () => {
     // Positive control on the wired path — an explicit fresh verdict.
-    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX_FRESH);
+    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX_FRESH, null);
     // Byte-inert: the block is unchanged by the cage consult (prose-only, no value).
     expect(block).not.toBeNull();
     expect(block!.coaching_kind).toBe('strengthen');
@@ -160,7 +160,7 @@ describe('buildLensSuggestionCoachingBlock — cage consult is LIVE + byte-inert
     // CTX omits `freshness`. Before F8 the live caller supplied `?? 'fresh'`, so
     // this allow-listed + companion-safe grounding field would have passed the
     // cage. With F8 it must DENY with not_fresh — deny-by-default at the caller.
-    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX);
+    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX, null);
     expect(block).not.toBeNull(); // still byte-inert — the block always emits
     const evt = cageEvents();
     expect(evt).toHaveLength(1);
@@ -168,7 +168,7 @@ describe('buildLensSuggestionCoachingBlock — cage consult is LIVE + byte-inert
   });
 
   it('STAGING-OBSERVABLE DENIAL: a pre-mortem lens grounded in option_comparison fires a not_allowlisted deny event, block still emits', () => {
-    const block = buildLensSuggestionCoachingBlock(winProbModerateFact(), CTX);
+    const block = buildLensSuggestionCoachingBlock(winProbModerateFact(), CTX, null);
     // The block still emits (byte-inert — the denial omits a value that was never
     // surfaced, never the block).
     expect(block).not.toBeNull();

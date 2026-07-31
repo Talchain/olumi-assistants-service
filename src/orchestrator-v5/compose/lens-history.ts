@@ -32,30 +32,85 @@
  * precisely what the amendment exists to prevent. The replay carries the rule
  * forward through the window so the alternation is real.
  *
- * ── HONEST SCOPE (three limits, all fail-safe) ───────────────────────────────
+ * ── ⭐ THE FACT SET MUST BE THE EMISSION'S FACT SET (ROADMAP 2.211 amendment A2)
+ * The replay answers "which lens did the previous analysis turn emit?". It is
+ * therefore only as correct as the agreement between the facts IT walks and the
+ * facts that can actually EMIT a lens. Wherever the two sets differ, a lens that
+ * really shipped is invisible to the next turn's history and repeats.
+ *
+ * The emission side applies exactly TWO conditions (`compose.ts`, current-turn
+ * branch): the fact is a non-noop `run_analysis`, and its `graph_hash_at_run` is
+ * a non-empty string. **There is NO status gate** — `selectLens` never reads
+ * `analysis_status`, and neither does the compose branch that ships the block.
+ *
+ * So this walks the ENTITLEMENT ordering
+ * (`orderClaimBearingRunAnalysisFactsNewestFirst`), NOT the freshness one. The
+ * distinction is `freshness.ts`'s own: FRESHNESS asks "is this analysis good
+ * enough to build a result view from?", ENTITLEMENT asks "did this analysis make
+ * a claim?". A lens IS a claim this system made, whatever the analysis status —
+ * so the entitlement question is the right one, and using the freshness filter
+ * here was a real divergence, not a conservative choice.
+ *
+ * It is REACHABLE, not theoretical: the run_analysis handler accepts `partial`
+ * unconditionally, and accepts an UNRECOGNISED status precisely WHEN a finite
+ * `option_comparison[].win_probability` is present — the same bytes rule 2c
+ * reads. On that arm, acceptance GUARANTEES a lens-bearing signal.
+ *
+ * The `graph_hash_at_run` condition is applied here too (the field is OPTIONAL
+ * in the contract, so a fact can lack it). That one IS a second expression of a
+ * condition compose owns, so its agreement is not asserted — it is MEASURED from
+ * both sides in `__tests__/lens-history.test.ts` ("both sides measured"): one
+ * test drives the real compose path and proves no lens block is emitted, another
+ * proves this replay excludes the same fact. If compose's gate ever moves, that
+ * pair goes RED rather than drifting silently.
+ *
+ * ── HONEST SCOPE (two limits) ────────────────────────────────────────────────
  *  1. **SELECTED, not "provably seen".** This returns the lens the previous
  *     analysis fact SELECTS. Whether that lens's block actually reached the wire
  *     additionally depends on the prose/schema gate and the withheld-verdict arm
  *     (`compose.ts`'s permitted branch). Re-testing those conditions here would
- *     be a second copy of the wire gate — the mirror we are avoiding — so it is
- *     deliberately not done. The imprecision runs in ONE direction only: it can
- *     cause one extra turn of lens DIVERSITY, never a suppressed or invented
- *     lens.
- *  2. **Window-bounded.** `prior_facts` is a bounded recent-turn window. An
- *     analysis older than the window is invisible, so the replay starts cold at
- *     the window edge — worth at most one repeated lens, never a wrong one. The
- *     scenario-scoped `newest_analysis_fact` channel is contractually reserved
- *     to the claim-safety verdict reader and is deliberately NOT used here.
- *  3. **Same-selector family.** The ordering comes from
- *     `orderSuccessfulRunAnalysisFactsNewestFirst`, of which
- *     `selectRunAnalysisFact` is the head — so "the newest fact in this replay"
- *     and "the fact every other compose consumer calls the prior analysis" are
- *     the same fact by construction, not by agreement between two sorts.
+ *     be a second copy of the wire gate, so it is deliberately not done. This
+ *     imprecision runs in ONE direction only: it can cause one extra turn of
+ *     lens DIVERSITY, never a suppressed or invented lens.
+ *
+ *  2. ⚠ **WINDOW-BOUNDED — AND THE COST IS NOT BOUNDED BY ONE.** `prior_facts`
+ *     is read through a bounded window (`SESSION_READ_WINDOW_DEFAULT = 20`
+ *     turns, overridable by `SESSION_READ_WINDOW_TURNS` — `session/index.ts:40`,
+ *     `:93-96`; absent from both render YAMLs, so the DEPLOYED value is not
+ *     derivable from this repo — CLAUDE.md trap 18). Once a scenario has more
+ *     analysis facts than the window holds, the replay always starts cold the
+ *     same number of steps back, so its answer stops depending on the turn
+ *     number and **the emitted lens becomes a CONSTANT — consecutive repeats
+ *     are unbounded.** Which constant depends on the PARITY of the in-window
+ *     analysis-fact count (odd → the cold replay ends on the head lens, so the
+ *     head is displaced every turn; even → the head wins every turn).
+ *
+ *     An earlier revision of this comment said the window was "worth at most one
+ *     repeated lens, never a wrong one". The second half is true and load-bearing
+ *     (see below); **the first half was false** and is corrected here — measured,
+ *     not argued, in `__tests__/lens-history.test.ts` §5, which pins the exact
+ *     sequences (a window of 2 over 10 turns yields `FPFFFFFFFF`). "At most one"
+ *     IS true of the OTHER fail-safe mode — an absent history, where the
+ *     selection is byte-identical to pre-amendment — which is where the sentence
+ *     came from and where it should have stayed.
+ *
+ *     WHY IT IS NOT ESCALATED HERE: the degradation only costs DIVERSITY. Every
+ *     emitted lens is still a genuinely triggered, executor-available lens from
+ *     the LOCKED priority order, and `may-recommend-nothing` is unreachable from
+ *     this input — both pinned. The durable fix is to stop deriving history from
+ *     a windowed read, which means either a scenario-scoped analysis-fact read
+ *     or a persisted emitted-lens record; both are larger decisions than this
+ *     amendment and neither is improvised here.
+ *
+ * ── Same-selector family ─────────────────────────────────────────────────────
+ * The ordering comes from `orderClaimBearingRunAnalysisFactsNewestFirst`, of
+ * which `selectClaimBearingRunAnalysisFact` is the head — so the sort is shared,
+ * never copied (`freshness.ts`'s "ONE ORDERING CORE").
  */
 
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import { orderSuccessfulRunAnalysisFactsNewestFirst } from '../context/freshness.js';
+import { orderClaimBearingRunAnalysisFactsNewestFirst } from '../context/freshness.js';
 
 import { selectLens, type LensId, type LensSelectorOptions } from './lens-selector.js';
 
@@ -81,7 +136,14 @@ export function derivePreviousAnalysisLens(
   priorFacts: readonly HandlerFact[],
   baseOptions?: LensSelectorOptions,
 ): LensId | null {
-  const newestFirst = orderSuccessfulRunAnalysisFactsNewestFirst(priorFacts);
+  // ENTITLEMENT ordering, not freshness — see the fact-set note above. Then the
+  // ONE remaining emission precondition: a fact with no `graph_hash_at_run`
+  // never reaches the Phase-3 rebuild, so it can never have emitted a lens and
+  // must not appear in the history either (agreement measured from both sides
+  // in the tests, not asserted here).
+  const newestFirst = orderClaimBearingRunAnalysisFactsNewestFirst(priorFacts).filter(
+    (view) => view.graph_hash_at_run !== null,
+  );
   if (newestFirst.length === 0) return null;
 
   // Replay oldest → newest so each step sees the selection the step before it

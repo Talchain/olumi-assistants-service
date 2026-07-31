@@ -19,7 +19,7 @@ import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orch
 
 import { composeToolCallResponse } from '../../compose.js';
 import { derivePreviousAnalysisLens } from '../lens-history.js';
-import { BODY_BY_RATIONALE } from '../lens-selector.js';
+import { BODY_BY_RATIONALE, selectLens } from '../lens-selector.js';
 import { buildFocusInspectorDirective } from '../ui-directive.js';
 import { buildGraphNodeLookupFromGraph, buildLensSurface } from '../phase3-blocks.js';
 import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
@@ -315,5 +315,217 @@ describe('2.211 — displaced-lens telemetry', () => {
     // Positive control (trap 13): the sink is NOT dark — the suggestion event
     // fired on the same call.
     expect(sink.filter((e) => e.event === TelemetryEvents.V5LensSuggestionEmitted)).toHaveLength(1);
+  });
+});
+
+
+// ============================================================================
+// 5. AMENDMENT A1 — WINDOW-EDGE BEHAVIOUR, DERIVED RATHER THAN ASSERTED.
+//
+// `prior_facts` is read through a bounded window (`SESSION_READ_WINDOW_DEFAULT
+// = 20` turns, overridable by `SESSION_READ_WINDOW_TURNS` —
+// `session/index.ts:40,93-96`). Once a scenario has more analysis facts than
+// the window holds, the replay ALWAYS starts cold the same number of steps
+// back, so its output stops depending on N — and the emitted lens becomes a
+// CONSTANT. Consecutive repeats are therefore UNBOUNDED, not "at most one".
+//
+// These sequences are MEASURED, not predicted. `w` slices the visible history
+// exactly as the store's `defaultReadLimit` does.
+// ============================================================================
+
+describe('2.211 A1 — the replay degrades to a constant lens beyond the read window', () => {
+  const SHORT: Record<string, string> = { sensitivity_flip_risk: 'F', pre_mortem: 'P' };
+
+  /** The TRUE emitted-lens sequence over `turns` consecutive both-trigger
+   *  analysis turns, when only the newest `windowSize` analysis facts are
+   *  visible to the replay. `Infinity` = no window (the intended behaviour). */
+  function emittedSequence(windowSize: number, turns: number): string {
+    const history: HandlerFact[] = []; // newest-first, the loader convention
+    const out: string[] = [];
+    for (let t = 0; t < turns; t += 1) {
+      const visible = windowSize === Infinity ? history : history.slice(0, windowSize);
+      const previous = derivePreviousAnalysisLens(visible);
+      const at = new Date(Date.UTC(2026, 6, 31, 10 + t)).toISOString();
+      const selection = selectLens(bothTriggerFact(at) as RunAnalysisHandlerFact, {
+        previousAnalysisLens: previous,
+      });
+      out.push(selection === null ? '-' : (SHORT[selection.lens] ?? selection.lens));
+      history.unshift(bothTriggerFact(at));
+    }
+    return out.join('');
+  }
+
+  function longestRun(s: string): number {
+    let best = 1;
+    let cur = 1;
+    for (let i = 1; i < s.length; i += 1) {
+      cur = s[i] === s[i - 1] ? cur + 1 : 1;
+      if (cur > best) best = cur;
+    }
+    return best;
+  }
+
+  it('POSITIVE CONTROL — with no window the lenses alternate perfectly', () => {
+    expect(emittedSequence(Infinity, 10)).toBe('FPFPFPFPFP');
+    expect(longestRun(emittedSequence(Infinity, 10))).toBe(1);
+  });
+
+  it('a window of 20 does not bind over 10 turns — still alternating', () => {
+    expect(emittedSequence(20, 10)).toBe('FPFPFPFPFP');
+  });
+
+  it('beyond the window the emitted lens is CONSTANT — repeats are unbounded', () => {
+    // The exact measured sequences. Note the run length grows as the window
+    // SHRINKS, and is bounded only by the number of turns — never by 1.
+    expect(emittedSequence(1, 10)).toBe('FPPPPPPPPP');
+    expect(emittedSequence(2, 10)).toBe('FPFFFFFFFF');
+    expect(emittedSequence(3, 10)).toBe('FPFPPPPPPP');
+    expect(emittedSequence(4, 10)).toBe('FPFPFFFFFF');
+    expect(emittedSequence(5, 10)).toBe('FPFPFPPPPP');
+  });
+
+  it('which constant it settles on is the PARITY of the in-window fact count', () => {
+    // Odd window → the cold replay ends on flip-risk → the head is displaced →
+    // pre-mortem forever. Even window → it ends on pre-mortem → flip-risk
+    // forever. This is why the failure is invisible in testing: it depends on a
+    // deployment value, not on the analysis.
+    for (const odd of [1, 3, 5]) expect(emittedSequence(odd, 10).endsWith('P')).toBe(true);
+    for (const even of [2, 4]) expect(emittedSequence(even, 10).endsWith('F')).toBe(true);
+  });
+
+  it('the degradation NEVER breaks the two load-bearing invariants', () => {
+    // Whatever the window does to diversity, every emitted lens is still a
+    // genuinely triggered, executor-available lens from the LOCKED order, and
+    // may-recommend-nothing is never reached from a history value.
+    for (const w of [1, 2, 3, 4, 5, 20, Infinity]) {
+      const seq = emittedSequence(w, 10);
+      expect(seq).toMatch(/^[FP]+$/); // never '-', i.e. never a spurious null
+    }
+  });
+
+  it('the OTHER fail-safe mode really is "no change at all"', () => {
+    // An absent history (unthreaded call site, empty prior facts, or a fact set
+    // the replay cannot read) degrades to EXACTLY the pre-amendment selection —
+    // this is the mode the "at most one" claim was true of.
+    const base = selectLens(bothTriggerFact('2026-07-31T11:00:00.000Z') as RunAnalysisHandlerFact);
+    expect(
+      selectLens(bothTriggerFact('2026-07-31T11:00:00.000Z') as RunAnalysisHandlerFact, {
+        previousAnalysisLens: derivePreviousAnalysisLens([]),
+      }),
+    ).toStrictEqual(base);
+  });
+});
+
+// ============================================================================
+// 6. AMENDMENT A2 — THE REPLAY'S FACT SET MUST BE THE EMISSION'S FACT SET.
+//
+// `selectLens` has no status gate, and compose's current-turn branch gates only
+// on `graph_hash_at_run` (compose.ts:395-396). So a lens IS emitted off a
+// degraded analysis. The replay must therefore see the same facts, or a lens
+// emitted off one is invisible to the next turn's history and repeats.
+//
+// Reachability is not hypothetical: `run-analysis.ts:1221` accepts `partial`
+// unconditionally, and `:1244` accepts an UNRECOGNISED status precisely WHEN a
+// finite `option_comparison[].win_probability` is present — the same bytes rule
+// 2c reads. On that arm, acceptance GUARANTEES a lens-bearing signal.
+// ============================================================================
+
+/** A degraded-but-accepted analysis: the permissive accept matrix's `partial`
+ *  arm, carrying the same signals as `bothTriggerFact`. The win probability
+ *  0.62 is the one used by the handler's own permissive-status test fixture
+ *  (`tools/handlers/__tests__/run-analysis-permissive-status.test.ts:91-96`). */
+function degradedFact(computedAt: string, status = 'partial'): HandlerFact {
+  const fact = bothTriggerFact(computedAt) as unknown as {
+    result: { enrichment: Record<string, unknown> };
+  };
+  fact.result.enrichment.analysis_status = status;
+  return fact as unknown as HandlerFact;
+}
+
+/** A run_analysis fact with NO `graph_hash_at_run` — the contract marks it
+ *  OPTIONAL (`@talchain/schemas` handler-fact.d.ts: `z.ZodOptional<z.ZodString>`),
+ *  and compose's emission gate rejects it, so it emits no lens. */
+function noGraphHashFact(computedAt: string): HandlerFact {
+  const fact = bothTriggerFact(computedAt) as unknown as {
+    result: Record<string, unknown>;
+  };
+  delete fact.result.graph_hash_at_run;
+  return fact as unknown as HandlerFact;
+}
+
+describe('2.211 A2 — a lens emitted off a DEGRADED analysis is visible to the history', () => {
+  it('POSITIVE CONTROL — a degraded analysis really does emit a lens today', () => {
+    // The emission path has no status gate. If this ever goes RED the
+    // divergence has been closed from the other side and the tests below
+    // should be re-derived, not "fixed".
+    const selection = selectLens(degradedFact('2026-07-31T10:00:00.000Z') as RunAnalysisHandlerFact);
+    expect(selection?.lens).toBe('sensitivity_flip_risk');
+  });
+
+  it('the replay SEES a partial-status analysis', () => {
+    expect(derivePreviousAnalysisLens([degradedFact('2026-07-31T10:00:00.000Z')])).toBe(
+      'sensitivity_flip_risk',
+    );
+  });
+
+  it('the replay SEES an unrecognised-status analysis (the accept-by-usable-fields arm)', () => {
+    expect(
+      derivePreviousAnalysisLens([degradedFact('2026-07-31T10:00:00.000Z', 'still_thinking')]),
+    ).toBe('sensitivity_flip_risk');
+  });
+
+  it('so a lens emitted off a degraded analysis is NOT repeated on the next turn', () => {
+    const previous = derivePreviousAnalysisLens([degradedFact('2026-07-31T10:00:00.000Z')]);
+    const selection = selectLens(bothTriggerFact('2026-07-31T11:00:00.000Z') as RunAnalysisHandlerFact, {
+      previousAnalysisLens: previous,
+    });
+    expect(selection?.lens).toBe('pre_mortem');
+  });
+
+  it('a degraded analysis mixes correctly into a longer history', () => {
+    // successful → degraded → (this turn). The replay must alternate across
+    // BOTH, so the newest (degraded) turn was displaced to pre-mortem.
+    expect(
+      derivePreviousAnalysisLens([
+        degradedFact('2026-07-31T11:00:00.000Z'),
+        bothTriggerFact('2026-07-31T10:00:00.000Z'),
+      ]),
+    ).toBe('pre_mortem');
+  });
+});
+
+describe('2.211 A2 — a fact that CANNOT have emitted a lens is excluded, both sides measured', () => {
+  it('EMISSION side: a fact with no graph_hash_at_run emits no lens block', () => {
+    const response = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [noGraphHashFact('2026-07-31T10:00:00.000Z')],
+      persistedGraph: GRAPH,
+      persistedGraphHash: GRAPH_HASH,
+      priorTurnFactsForLensHistory: [],
+    });
+    const lensBlocks = response.blocks.filter((raw) => {
+      const b = raw as Record<string, unknown>;
+      return b.type === 'coaching' && b.source === 'deterministic_signal';
+    });
+    expect(lensBlocks).toHaveLength(0);
+  });
+
+  it('POSITIVE CONTROL — the same fact WITH a graph hash does emit one', () => {
+    const response = composeToolCallResponse({
+      ...BASE_INPUT,
+      handlerFacts: [bothTriggerFact('2026-07-31T10:00:00.000Z')],
+      persistedGraph: GRAPH,
+      persistedGraphHash: GRAPH_HASH,
+      priorTurnFactsForLensHistory: [],
+    });
+    const lensBlocks = response.blocks.filter((raw) => {
+      const b = raw as Record<string, unknown>;
+      return b.type === 'coaching' && b.source === 'deterministic_signal';
+    });
+    expect(lensBlocks).toHaveLength(1);
+  });
+
+  it('HISTORY side: the replay excludes it too — the two sides AGREE by measurement', () => {
+    expect(derivePreviousAnalysisLens([noGraphHashFact('2026-07-31T10:00:00.000Z')])).toBeNull();
   });
 });

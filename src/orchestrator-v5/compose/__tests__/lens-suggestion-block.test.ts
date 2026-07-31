@@ -94,7 +94,7 @@ function healthyFact(): RunAnalysisHandlerFact {
 
 describe('buildLensSuggestionCoachingBlock', () => {
   it('emits a schema-valid strengthen coaching block (egress wire-surface pin)', () => {
-    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX);
+    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX, null);
     expect(block).not.toBeNull();
     // Strict parse against the VENDORED 0.21.0 schema — proves no unknown field
     // rides the wire and every field is 0.21-present.
@@ -103,7 +103,7 @@ describe('buildLensSuggestionCoachingBlock', () => {
   });
 
   it('is a deterministic_signal-sourced strengthen card with NO inert chip', () => {
-    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX)!;
+    const block = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX, null)!;
     expect(block.type).toBe('coaching');
     expect(block.coaching_kind).toBe('strengthen');
     // Honest provenance: derived from analysis signals, not the LLM review pass.
@@ -120,7 +120,7 @@ describe('buildLensSuggestionCoachingBlock', () => {
   });
 
   it('fires exactly one frozen-manifest telemetry event on emission (no user text)', () => {
-    buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX);
+    buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX, null);
     const events = sink.filter((e) => e.event === 'v5.capability.lens_suggestion_emitted');
     expect(events).toHaveLength(1);
     expect(events[0]!.data.lens_id).toBe('sensitivity_flip_risk');
@@ -131,20 +131,21 @@ describe('buildLensSuggestionCoachingBlock', () => {
   });
 
   it('returns null and emits NOTHING when the selector recommends nothing', () => {
-    const block = buildLensSuggestionCoachingBlock(healthyFact(), CTX);
+    const block = buildLensSuggestionCoachingBlock(healthyFact(), CTX, null);
     expect(block).toBeNull();
     expect(sink.filter((e) => e.event === 'v5.capability.lens_suggestion_emitted')).toHaveLength(0);
   });
 
   it('keeps a stable block_id / signal_id per (lens, graph_hash) for dedupe', () => {
-    const a = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX)!;
-    const b = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX)!;
+    const a = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX, null)!;
+    const b = buildLensSuggestionCoachingBlock(dominantDriverFact(), CTX, null)!;
     expect(a.signal_id).toBe(b.signal_id);
     expect(a.block_id).toBe(b.block_id);
     // Different graph hash → different identity.
     const c = buildLensSuggestionCoachingBlock(
       dominantDriverFact('gh_different000000002'),
       { ...CTX, graph_hash_at_generation: 'gh_different000000002' },
+      null,
     )!;
     expect(c.signal_id).not.toBe(a.signal_id);
   });

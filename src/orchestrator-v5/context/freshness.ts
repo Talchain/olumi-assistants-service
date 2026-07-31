@@ -449,6 +449,27 @@ export function orderSuccessfulRunAnalysisFactsNewestFirst(
   return orderRunAnalysisFacts(priorFacts, { requireSuccessfulStatus: true });
 }
 
+/**
+ * The CLAIM-BEARING run_analysis facts of this window, newest-first — the
+ * ENTITLEMENT ordering, of which {@link selectClaimBearingRunAnalysisFact} is
+ * the head. Same filter, same sort, same array, so "the newest claim-bearing
+ * fact" and "the head of this list" are one fact by construction rather than by
+ * two selectors agreeing (the property {@link orderSuccessfulRunAnalysisFactsNewestFirst}
+ * exists to preserve, and for the same reason).
+ *
+ * Exists for ROADMAP 2.211's lens history (`compose/lens-history.ts`), which
+ * needs the whole list rather than its head, and which must ask the ENTITLEMENT
+ * question, not the freshness one: a lens is EMITTED with no status gate at all
+ * (`compose.ts`'s current-turn branch gates only on `graph_hash_at_run`), so a
+ * history built on the freshness filter would be blind to lenses that really
+ * shipped — see that file's fact-set note.
+ */
+export function orderClaimBearingRunAnalysisFactsNewestFirst(
+  priorFacts: readonly HandlerFact[],
+): readonly SelectedRunAnalysisFact[] {
+  return orderRunAnalysisFacts(priorFacts, { requireSuccessfulStatus: false });
+}
+
 /** The shared newest-first pick: the head of {@link orderRunAnalysisFacts}. */
 function selectNewestRunAnalysisFact(
   priorFacts: readonly HandlerFact[],
