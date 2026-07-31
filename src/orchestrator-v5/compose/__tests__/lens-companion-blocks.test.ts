@@ -218,38 +218,83 @@ describe('capability P1 — pre_mortem lens companion ARRIVES on the wire', () =
     expect(exercises[0]!.exercise_kind).toBe('pre_mortem');
   });
 
-  it('carries the PRODUCER strings verbatim — no CEE-authored copy, no numbers', () => {
+  /**
+   * ⚠ THIS ASSERTION WAS VACUOUS IN ITS FIRST FORM, AND THE MUTANT PROVED IT.
+   *
+   * The original walked a HAND-LISTED set of prose fields
+   * (`warning_signs`/`mitigation`/`review_trigger`/`failure_scenario`) and
+   * asserted each was a producer string. Mutant M1 — a builder that fabricates
+   * `reference_class: 'Comparable rollouts slipped by 3 weeks on average.'` —
+   * passed all 18 tests, because the guard could not see a field it had not been
+   * told about. A hand-kept list inside an anti-fabrication check is the
+   * fabrication defect wearing the guard's uniform (CLAUDE.md trap 12 inside
+   * trap 13).
+   *
+   * The replacement is COMPLETE OVER THE BLOCK by construction:
+   *   (a) the emitted key set is pinned EXACTLY — any field the builder invents,
+   *       prose or numeric, fails here before its content is even inspected;
+   *   (b) every key in that pinned set is then classified as metadata (asserted
+   *       against its DERIVED value) or prose (asserted to be a producer string).
+   * Because (a) fixes the key set, (b)'s coverage is total: there is nowhere for
+   * a fabricated value to hide.
+   */
+  it('carries ONLY producer strings, in an exactly-pinned field set (anti-fabrication)', () => {
     const block = exercisesOf(composeCurrentTurn(makeFact()))[0]!;
+    const raw = block as unknown as Record<string, unknown>;
 
-    // Compared against the fixture CONSTANT, not a retyped literal: this is a
-    // provenance assertion, not a spelling one.
-    expect(block.warning_signs).toEqual([...PRODUCER_PRE_MORTEM.warning_signs]);
-    expect(block.mitigation).toBe(PRODUCER_PRE_MORTEM.mitigation);
-    expect(block.review_trigger).toBe(PRODUCER_PRE_MORTEM.review_trigger);
+    // (a) THE KEY SET. A builder that adds any field — a fabricated
+    // `reference_class`, a `counter_case`, a `priority` number — REDs here.
+    expect(Object.keys(raw).sort()).toEqual(
+      [
+        'block_id',
+        'created_at',
+        'exercise_kind',
+        'freshness',
+        'graph_hash_at_generation',
+        'mitigation',
+        'review_trigger',
+        'signal_id',
+        'source_handler',
+        'target_refs',
+        'type',
+        'warning_signs',
+      ].sort(),
+    );
 
-    // ANTI-FABRICATION. Every user-facing string on this block must be a
-    // substring-identical member of the producer's own object. A builder that
-    // synthesised, templated or interpolated ANY prose fails here.
+    // (b1) METADATA — derived values, not producer prose.
+    expect(raw.type).toBe('exercise');
+    expect(raw.exercise_kind).toBe('pre_mortem');
+    expect(raw.source_handler).toBe('decision_review_enricher');
+    expect(raw.freshness).toBe('fresh');
+    expect(raw.created_at).toBe(new Date(raw.created_at as string).toISOString());
+    expect(raw.graph_hash_at_generation).toBe(GRAPH_HASH);
+    expect(raw.signal_id).toBe(`exercise:pre_mortem:${GRAPH_HASH}`);
+    expect(typeof raw.block_id).toBe('string');
+    // target_refs are GRAPH-sourced identity, not authored copy.
+    expect(raw.target_refs).toEqual([FACTOR_DELIVERY]);
+
+    // (b2) PROSE — every remaining user-facing string is the producer's own,
+    // compared against the fixture CONSTANT rather than a retyped literal (a
+    // literal that happens to match proves nothing about provenance).
     const producerStrings = new Set<string>([
       ...PRODUCER_PRE_MORTEM.warning_signs,
       PRODUCER_PRE_MORTEM.mitigation,
       PRODUCER_PRE_MORTEM.review_trigger,
       PRODUCER_PRE_MORTEM.failure_scenario,
     ]);
-    for (const value of [
-      ...(block.warning_signs ?? []),
-      ...(block.mitigation === undefined ? [] : [block.mitigation]),
-      ...(block.review_trigger === undefined ? [] : [block.review_trigger]),
-      ...(block.failure_scenario === undefined ? [] : [block.failure_scenario]),
-    ]) {
-      expect(producerStrings.has(value), `not a producer string: ${value}`).toBe(true);
+    for (const value of [...(raw.warning_signs as string[]), raw.mitigation, raw.review_trigger]) {
+      expect(producerStrings.has(value as string), `not a producer string: ${String(value)}`).toBe(
+        true,
+      );
     }
+    // Order and completeness of the producer's own list, not just membership.
+    expect(raw.warning_signs).toEqual([...PRODUCER_PRE_MORTEM.warning_signs]);
+    expect(raw.mitigation).toBe(PRODUCER_PRE_MORTEM.mitigation);
+    expect(raw.review_trigger).toBe(PRODUCER_PRE_MORTEM.review_trigger);
 
-    // The block carries NO numeric field at all — the fabrication surface is
-    // absent by construction, not merely unfabricated today.
-    for (const value of Object.values(block as unknown as Record<string, unknown>)) {
-      expect(typeof value).not.toBe('number');
-    }
+    // No numeric field survives the key pin, but state the invariant anyway:
+    // this block's fabrication surface is absent by construction.
+    for (const value of Object.values(raw)) expect(typeof value).not.toBe('number');
   });
 
   it('surfaces the three producer fields the pre_mortem review card DISCARDS', () => {
