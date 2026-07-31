@@ -21,19 +21,28 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { parse as parseYaml } from 'yaml';
+
 import {
   baselineKey,
   checkGatedSetShrink,
   extractPackTaskFromMarkerSource,
   loadAcknowledgments,
   readGateSetSnapshotAtRef,
+  requireBaseRef,
+  resolveBaseRef,
+  ACKNOWLEDGMENTS_REPO_PATH,
   BASELINE_REPO_PATH,
   MANIFEST_REPO_PATH,
+  PACK_MARKER_SUFFIX,
   DEFAULT_ACKNOWLEDGMENTS_PATH,
+  REPO_ROOT as GUARD_REPO_ROOT,
   type Acknowledgment,
   type GateSetSnapshot,
 } from '../src/promotion-gate/shrink-guard.js';
-import { discoverPacks } from '../src/promotion-gate/packs.js';
+import { discoverPacks, MARKER } from '../src/promotion-gate/packs.js';
+import { CANONICAL_MANIFEST_PATH } from '../src/promotion-gate/manifest.js';
+import { DEFAULT_BASELINE_PATH } from '../src/promotion-gate/baseline.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const tmpDirs: string[] = [];
@@ -320,5 +329,130 @@ describe('acknowledgment ledger', () => {
       JSON.stringify({ acknowledgments: [{ kind: 'baseline_addition', task: 't', reason: 'r', acknowledgedAt: 'd' }] }),
     );
     expect(() => loadAcknowledgments(noHash)).toThrow(/malformed/);
+  });
+});
+
+// ============================================================================
+// FAIL-CLOSED ON UNREADABLE HISTORY (final amendment)
+//
+// The guard's own fail-open boundary was the defect: `resolveBaseRef()` returns
+// null in a SHALLOW checkout (actions/checkout defaults to depth 1, so the
+// grafted HEAD has no parent git can name), and the CLI collapsed that null
+// into {present:false} — the snapshot shape for "the gate did not exist at the
+// merge-base". Result, reproduced end-to-end in the exact CI shape: a depth-1
+// checkout whose HEAD CONTAINED a real gated-set shrink printed the reassuring
+// "first landing" note and exited 0. One deleted line of YAML disabled the whole
+// guard.
+//
+// "I cannot see history" and "there was nothing there" are different answers.
+// They must never share a code path.
+// ============================================================================
+
+describe('unreadable history FAILS CLOSED — it is not a first landing', () => {
+  /** A depth-1 clone: the re-verifier's reproduction, and CI's default shape. */
+  function shallowClone(): string {
+    const src = tmpRepo();
+    writeGateState(src, { tasks: ['decision_review'], baseline: [] });
+    commitAll(src, 'c1');
+    writeGateState(src, { tasks: ['decision_review', 'edit_graph'], baseline: [] });
+    commitAll(src, 'c2');
+    const dest = mkdtempSync(join(tmpdir(), 'shrink-guard-shallow-'));
+    tmpDirs.push(dest);
+    rmSync(dest, { recursive: true, force: true }); // git clone wants a fresh path
+    execFileSync('git', ['clone', '--quiet', '--depth', '1', `file://${src}`, dest], { encoding: 'utf-8' });
+    return dest;
+  }
+
+  it('a depth-1 clone has a grafted HEAD with no nameable parent (the trigger)', () => {
+    const dir = shallowClone();
+    expect(execFileSync('git', ['rev-parse', '--is-shallow-repository'], { cwd: dir, encoding: 'utf-8' }).trim()).toBe(
+      'true',
+    );
+    expect(resolveBaseRef(dir, {})).toBeNull();
+  });
+
+  it('requireBaseRef THROWS in a depth-1 clone, naming fetch-depth: 0', () => {
+    const dir = shallowClone();
+    expect(() => requireBaseRef(dir, {})).toThrow(/fetch-depth: 0/);
+    expect(() => requireBaseRef(dir, {})).toThrow(/FAILS\s+CLOSED|FAILS CLOSED/);
+  });
+
+  it('requireBaseRef THROWS on a parentless root commit (the same null, other cause)', () => {
+    const dir = tmpRepo();
+    writeGateState(dir, { tasks: ['decision_review'], baseline: [] });
+    commitAll(dir, 'root only');
+    expect(resolveBaseRef(dir, {})).toBeNull();
+    expect(() => requireBaseRef(dir, {})).toThrow(/real git history/);
+  });
+
+  it('requireBaseRef RETURNS the ref when history IS readable (not an always-throw)', () => {
+    const dir = tmpRepo();
+    writeGateState(dir, { tasks: ['decision_review'], baseline: [] });
+    const c1 = commitAll(dir, 'c1');
+    writeGateState(dir, { tasks: ['decision_review', 'edit_graph'], baseline: [] });
+    commitAll(dir, 'c2');
+    expect(requireBaseRef(dir, {})).toBe(c1);
+  });
+
+  it('the FAIL-OPEN stays available for its ONE intended cause: a RESOLVED base with no gate', () => {
+    const dir = tmpRepo();
+    writeFileSync(join(dir, 'README.md'), 'pre-gate\n');
+    commitAll(dir, 'pre-gate');
+    writeGateState(dir, { tasks: ['decision_review'], baseline: [] });
+    commitAll(dir, 'gate lands');
+    const baseRef = requireBaseRef(dir, {}); // resolves fine
+    const r = checkGatedSetShrink(readGateSetSnapshotAtRef(baseRef, dir), snap(), []);
+    expect(r.ok).toBe(true);
+    expect(r.notes.join(' ')).toMatch(/FAIL-OPEN \(once, deliberately\)/);
+  });
+
+  it('a base ref whose MANIFEST is unreadable while packs exist THROWS (an empty base set hides every shrink)', () => {
+    const dir = tmpRepo();
+    writeGateState(dir, { tasks: ['decision_review'], baseline: [] });
+    rmSync(join(dir, MANIFEST_REPO_PATH));
+    const c = commitAll(dir, 'packs but no manifest');
+    expect(() => readGateSetSnapshotAtRef(c, dir)).toThrow(/EMPTY gated set/);
+  });
+});
+
+// ============================================================================
+// The fetch-depth coupling is DERIVED from ci.yml, not asserted in prose
+// (pattern: scripts/ci/assert-pnpm-overrides-readable.mjs, which parses the YAML
+// rather than trusting a comment). Belt to the fail-closed brace above: that
+// makes the coupling self-enforcing at RUNTIME; this catches the same mistake at
+// review time, and catches the step being MOVED to a job that lacks the depth.
+// ============================================================================
+
+describe('ci.yml — the job that runs the shrink guard checks out with full history', () => {
+  it('derives the job from the workflow and asserts its checkout fetch-depth', () => {
+    const wf = parseYaml(
+      readFileSync(join(HERE, '..', '..', '..', '.github', 'workflows', 'ci.yml'), 'utf-8'),
+    ) as { jobs: Record<string, { steps?: { uses?: string; run?: string; with?: Record<string, unknown> }[] }> };
+
+    const owning = Object.entries(wf.jobs).filter(([, job]) =>
+      (job.steps ?? []).some((s) => typeof s.run === 'string' && s.run.includes('eval:promotion-gate:shrink-guard')),
+    );
+    // Positive control: if the step is not found at all, this test would pass
+    // vacuously, so the count is asserted first.
+    expect(owning).toHaveLength(1);
+
+    const [, job] = owning[0];
+    const checkouts = (job.steps ?? []).filter((s) => typeof s.uses === 'string' && s.uses.startsWith('actions/checkout'));
+    expect(checkouts).toHaveLength(1);
+    expect(checkouts[0].with?.['fetch-depth']).toBe(0);
+  });
+});
+
+// ============================================================================
+// The git-side path constants are CROSS-ASSERTED against the loaders that own
+// them — three hand-mirrored strings with no check was itself a trap-12 seam.
+// ============================================================================
+
+describe('the shrink guard reads the same paths the gate loaders do', () => {
+  it('manifest / baseline / acknowledgments / marker constants agree with their owners', () => {
+    expect(join(GUARD_REPO_ROOT, MANIFEST_REPO_PATH)).toBe(CANONICAL_MANIFEST_PATH);
+    expect(join(GUARD_REPO_ROOT, BASELINE_REPO_PATH)).toBe(DEFAULT_BASELINE_PATH);
+    expect(join(GUARD_REPO_ROOT, ACKNOWLEDGMENTS_REPO_PATH)).toBe(DEFAULT_ACKNOWLEDGMENTS_PATH);
+    expect(PACK_MARKER_SUFFIX).toBe(`/${MARKER}`);
   });
 });

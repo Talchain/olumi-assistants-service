@@ -24,9 +24,9 @@ import {
   loadAcknowledgments,
   readGateSetSnapshotAtRef,
   renderShrinkGuardResult,
+  requireBaseRef,
   type GateSetSnapshot,
 } from './shrink-guard.js';
-import { resolveBaseRef } from './shrink-guard.js';
 
 /** The HEAD side is read through the gate's OWN loaders — the authoritative
  * answer to "what is gated right now", not a second implementation of it. */
@@ -41,10 +41,13 @@ async function headSnapshot(): Promise<GateSetSnapshot> {
 }
 
 async function main(): Promise<number> {
-  const baseRef = resolveBaseRef();
-  const base: GateSetSnapshot = baseRef
-    ? readGateSetSnapshotAtRef(baseRef)
-    : { present: false, gatedTasks: [], baselineEntries: [] };
+  // FAIL CLOSED when history is unreadable. `requireBaseRef` THROWS rather than
+  // returning null, because the old `null -> {present:false}` collapse made a
+  // shallow checkout look exactly like a genuine first landing — the guard
+  // passed over a real shrink. The fail-open below is reserved for a base that
+  // RESOLVED and carries no gate.
+  const baseRef = requireBaseRef();
+  const base: GateSetSnapshot = readGateSetSnapshotAtRef(baseRef);
   const head = await headSnapshot();
   const result = checkGatedSetShrink(base, head, loadAcknowledgments());
 

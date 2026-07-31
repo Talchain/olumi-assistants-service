@@ -21,9 +21,18 @@ jobs:
           # FULL history: the promotion-gate SHRINK GUARD below derives its
           # reference from `git merge-base HEAD <base>` and reads the gate's
           # files out of the object store at that commit. A shallow checkout has
-          # no merge-base, and the guard REFUSES to pass on history it cannot
-          # read (a guard that silently no-ops on a shallow clone is the
-          # silent-escape it exists to prevent).
+          # no merge-base.
+          #
+          # ⚠ This line is LOAD-BEARING, and the coupling is ENFORCED, not
+          # documented. As first shipped the claim below was FALSE: deleting
+          # this line made the guard resolve no base ref, collapse that into
+          # "the gate did not exist at the merge-base", print a reassuring
+          # "first landing" note and exit 0 — over a real gated-set shrink.
+          # `requireBaseRef` now FAILS CLOSED on unreadable history, so removing
+          # this line REDs this required job instead of silently disabling the
+          # guard; a test in promotion-gate-shrink-guard.test.ts additionally
+          # derives this job from the workflow and asserts the depth (so moving
+          # the step to a job without it also REDs).
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
@@ -150,7 +159,8 @@ jobs:
         # This step derives both sets from GIT at the merge-base (never a
         # hand-pinned list, trap 12) and FAILS unless the shrink/widen is
         # recorded in promotion-gate-acknowledgments.json in the SAME diff.
-        # Needs the full history fetched above.
+        # Needs the full history fetched above — and FAILS CLOSED if it is not
+        # there, rather than reporting a vacuous pass (see the checkout note).
         run: pnpm eval:promotion-gate:shrink-guard
 
       - name: Run required test subset

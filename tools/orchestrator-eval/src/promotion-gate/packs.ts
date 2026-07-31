@@ -24,7 +24,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /** The directory whose immediate subdirectories may each carry a pack marker. */
 export const DEFAULT_PACK_SEARCH_ROOT = join(HERE, '..');
 
-const MARKER = 'promotion-pack.ts';
+/** The marker filename discovery keys on. EXPORTED so the shrink guard's
+ * git-side path constant can be cross-asserted against it rather than
+ * hand-mirroring it (trap 12). */
+export const MARKER = 'promotion-pack.ts';
 
 function isPackDescriptor(v: unknown): v is PackDescriptor {
   if (v === null || typeof v !== 'object') return false;

@@ -36,10 +36,17 @@
  * every unrelated PR until someone cleans up is a red people learn to ignore,
  * trap 7).
  *
- * FAIL-OPEN, EXACTLY ONCE, LOUDLY: if the promotion gate does not exist at the
- * merge-base at all (its first landing — this PR), there is nothing to compare
- * against. The guard says so in its output and passes. Every subsequent run has
- * a real reference.
+ * FAIL-OPEN, EXACTLY ONCE, LOUDLY, AND ONLY FOR ONE CAUSE: if a base commit
+ * RESOLVED and the promotion gate does not exist there (its first landing — this
+ * PR), there is nothing to compare against; the guard says so and passes. Every
+ * subsequent run has a real reference.
+ *
+ * ⚠ CORRECTED — this sentence was FALSE as first shipped, and the bug was
+ * exactly the one it claimed to have avoided. "No base ref could be resolved"
+ * (a shallow checkout: `actions/checkout` defaults to depth 1) was collapsed
+ * into the same fail-open, so the guard printed "first landing" and exited 0
+ * over a real gated-set shrink. It now FAILS CLOSED on unreadable history —
+ * see {@link requireBaseRef}, which carries the reproduction.
  *
  * THREAT MODEL: as with the gate itself (see `types.ts`), this is a DRIFT
  * guard, not an anti-forgery device. A maintainer who writes a false
@@ -292,14 +299,26 @@ function baselineKeysFromJson(text: string, where: string): string[] {
   });
 }
 
+/**
+ * The one message both no-history paths raise. Hoisted because the guard has
+ * TWO ways to meet a checkout it cannot read — the tree at a resolved ref is
+ * missing, or no base ref resolves at all — and the second one shipped
+ * FAIL-OPEN by mistake (see {@link requireBaseRef}).
+ */
+export function noHistoryError(detail: string): Error {
+  return new Error(
+    `promotion-gate shrink-guard: ${detail} The guard needs real git history: in CI the job must ` +
+      'check out with `fetch-depth: 0`, because a shallow checkout has no merge-base. It FAILS ' +
+      'CLOSED here rather than reporting "first landing" — a guard that no-ops on a shallow clone ' +
+      'is the silent escape it exists to prevent.',
+  );
+}
+
 /** Read the gate's SET as it stood at an arbitrary git ref. */
 export function readGateSetSnapshotAtRef(ref: string, cwd: string = REPO_ROOT): GateSetSnapshot {
   const tree = gitOrNull(['ls-tree', '-r', '--name-only', ref], cwd);
   if (tree === null) {
-    throw new Error(
-      `promotion-gate shrink-guard: cannot list the tree at ${ref}. In CI this usually means the ` +
-        'checkout is shallow — the job needs `fetch-depth: 0` so the merge-base is present.',
-    );
+    throw noHistoryError(`cannot list the tree at ${ref}.`);
   }
   const markerPaths = tree
     .split('\n')
@@ -323,6 +342,17 @@ export function readGateSetSnapshotAtRef(ref: string, cwd: string = REPO_ROOT): 
   );
 
   const manifestText = gitOrNull(['show', `${ref}:${MANIFEST_REPO_PATH}`], cwd);
+  // A manifest we cannot read while packs DO exist would compute an empty gated
+  // set at this ref — and an empty base set hides every shrink from it. Loud,
+  // not silent. (With zero packs the manifest cannot change the answer, so it is
+  // not required.)
+  if (manifestText === null && packTasks.size > 0) {
+    throw new Error(
+      `promotion-gate shrink-guard: ${packTasks.size} pack marker(s) exist at ${ref} but ` +
+        `${MANIFEST_REPO_PATH} cannot be read there. Refusing to derive an EMPTY gated set from a ` +
+        'ref whose manifest is missing — an empty base set silently tolerates every removal.',
+    );
+  }
   const manifestKeys = new Set(
     manifestText === null ? [] : manifestKeysFromJson(manifestText, `${ref}:${MANIFEST_REPO_PATH}`),
   );
@@ -343,9 +373,15 @@ export function readGateSetSnapshotAtRef(ref: string, cwd: string = REPO_ROOT): 
  *     are on the base branch), fall back to `HEAD^` so a direct push is still
  *     compared against the previous tip rather than against itself.
  *
- * Returns null only when HEAD has no usable ancestor at all (a root commit) —
- * the caller treats that as "no reference", the same fail-open as a merge-base
- * with no gate.
+ * Returns null when HEAD has no usable ancestor at all: a root commit, or — the
+ * case that matters — a SHALLOW checkout, where the grafted HEAD has no parent
+ * git can name. `actions/checkout`'s DEFAULT is depth 1, so this is one deleted
+ * YAML line away at all times.
+ *
+ * ⚠ null is NOT "no reference, carry on". Callers must go through
+ * {@link requireBaseRef}: a null here means the guard cannot see history, which
+ * is indistinguishable from a genuine first landing at the SNAPSHOT level and
+ * must therefore be resolved HERE, where the two causes are still separable.
  */
 export function resolveBaseRef(cwd: string = REPO_ROOT, env: NodeJS.ProcessEnv = process.env): string | null {
   const head = gitOrNull(['rev-parse', 'HEAD'], cwd)?.trim();
@@ -371,6 +407,36 @@ export function resolveBaseRef(cwd: string = REPO_ROOT, env: NodeJS.ProcessEnv =
   }
   const parent = gitOrNull(['rev-parse', '--verify', 'HEAD^{commit}^'], cwd)?.trim();
   return parent ?? null;
+}
+
+/**
+ * Resolve the base ref, or FAIL CLOSED.
+ *
+ * ⚠ THIS FUNCTION EXISTS BECAUSE ITS ABSENCE WAS A REAL DEFECT, not as belt and
+ * braces. The first cut of the CLI collapsed `resolveBaseRef() === null` into
+ * `{present: false}`, which is the snapshot shape for "the gate did not exist at
+ * the merge-base" — so a depth-1 checkout (the `actions/checkout` DEFAULT)
+ * printed the reassuring FAIL-OPEN "first landing" note and exited 0 **with a
+ * real gated-set shrink in the tree**. Reproduced end-to-end: a commit that
+ * dropped `decision_review` out of the gated set PASSED. Deleting one line from
+ * ci.yml disabled the entire guard, silently — the exact failure mode the guard
+ * was built to make impossible.
+ *
+ * The fail-open is now reserved for its ONE intended case: a base ref that
+ * RESOLVED and genuinely carries no gate. "I cannot see history" and "there was
+ * nothing there" are different answers and must never share a code path.
+ *
+ * This is also what makes `fetch-depth: 0` self-enforcing rather than a comment
+ * somebody has to honour: drop it and the required CI job goes RED here.
+ */
+export function requireBaseRef(cwd: string = REPO_ROOT, env: NodeJS.ProcessEnv = process.env): string {
+  const ref = resolveBaseRef(cwd, env);
+  if (ref === null) {
+    throw noHistoryError(
+      'no base commit could be resolved — neither a merge-base with the base branch nor a parent of HEAD.',
+    );
+  }
+  return ref;
 }
 
 // ============================================================================
