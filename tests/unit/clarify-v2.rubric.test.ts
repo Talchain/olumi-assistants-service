@@ -220,7 +220,7 @@ describe("clarify_v2 rubric — completeness table", () => {
       ["goal", "options", "quantities"],
     ],
     [
-      "2.162a B: TWO items is not a serial list — the arm requires two commas (≥3 items)",
+      "2.162a B: TWO items is not a serial list — the arm requires ≥3 verb-led items",
       "Should we rebuild billing in-house, and stay put?",
       ["goal", "options", "timeframe", "quantities"],
     ],
@@ -235,13 +235,64 @@ describe("clarify_v2 rubric — completeness table", () => {
       ["goal", "options", "timeframe", "quantities"],
     ],
     [
-      "2.162a B: the same guard RETIRES a pre-existing false satisfied — 'our choices are limited' named no alternatives and used to silence options",
+      "2.162a copula arm is UNCHANGED from pre-2.162a: 'our choices are limited' still credits options. A PRE-EXISTING false satisfied this lane does NOT fix — pinned so the residual is visible, not so it is endorsed",
       "Should we expand into Germany? Our choices are limited.",
-      ["goal", "options", "timeframe", "quantities"],
+      ["goal", "timeframe", "quantities"],
     ],
     [
-      "2.162a positive control: the enumeration guard keeps a real two-item copula list ('the candidates are A and B')",
+      "2.162a positive control: a real two-item copula list still credits ('the candidates are A and B')",
       "Should we expand into Germany? The candidates are Alice and Bob.",
+      ["goal", "timeframe", "quantities"],
+    ],
+    // ── ROADMAP 2.162a AMENDMENT ROUND. Adversarial review measured the first
+    // cut against an UNTARGETED corpus of naturally-written thin briefs and
+    // found 11 of 36 over-credited (base: 2 of 36) — every widened arm leaked,
+    // and 11 briefs naming no alternatives scored COMPLETE and would have
+    // proceeded silently, leaving the drafter to invent options. Every row
+    // below is one of those leaks, pinned at the exact brief that found it.
+    [
+      "A1: a widened noun in ordinary COPULA prose is not an enumeration ('our plans are ambitious, but our budget is tight' — the first cut's 160-char list-guard fired on the subordinate clause's comma)",
+      "Should we rebuild billing this year? Our plans are ambitious, but our budget is tight at £180,000 and the goal is to cut costs.",
+      ["options"],
+    ],
+    [
+      "A1: the same noun with a trailing clause and no punctuation list",
+      "Should we expand into Germany next year? Our plans are still forming, the goal is to grow revenue, and we have £300,000.",
+      ["options"],
+    ],
+    [
+      "A1: a widened noun as a bare copula subject",
+      "Should we rebuild the data warehouse this year? The paths are unclear, we want to reduce reporting lag, and it is a £250,000 project.",
+      ["options"],
+    ],
+    [
+      "A2: a COUNT in front of a widened noun counts failure modes, not alternatives ('three ways this could go wrong')",
+      "Should we migrate to the new platform this quarter? There are three ways this could go wrong and the goal is to avoid downtime on a £90,000 budget.",
+      ["options"],
+    ],
+    [
+      "A2: … and outcomes ('two directions the market could move')",
+      "Should we raise prices this year? There are two directions the market could move and we want to protect margin on £4m of revenue.",
+      ["options"],
+    ],
+    [
+      "A2 positive control: the SAME counted widened noun WITH a decision frame still credits",
+      "We are considering three approaches to the billing rebuild this year.",
+      ["goal"],
+    ],
+    [
+      "A3: THE ONE-WORD BREAK — a serial list whose MIDDLE item is not an action. Verb at each end, junk between; the first cut scored this COMPLETE and proceeded silently",
+      "Should we launch in France, Spain, Italy, and hire locally this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      ["options"],
+    ],
+    [
+      "A4: an ASSERTIVE lead announces a plan, not a choice — every item IS an action here, so only the lead can reject it",
+      "We will launch in Q1, hire in Q2, and expand in Q3. The goal is to grow revenue by 30% on a £1m budget.",
+      ["options"],
+    ],
+    [
+      "A6: the serial arm must not depend on punctuation style — the same list without the Oxford comma credits",
+      "Should we rebuild billing in-house, buy Vendor A and stay put?",
       ["goal", "timeframe", "quantities"],
     ],
   ];
