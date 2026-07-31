@@ -696,6 +696,14 @@ export const TelemetryEvents = {
   // producer output — so suggestion-without-companion is the normal case, not a
   // fault signal.
   V5LensCompanionEmitted: "v5.capability.lens_companion_emitted",
+  // Capability layer P1 (ROADMAP 1.183). The producer returned MORE
+  // `pre_mortem.warning_signs` than its own prompt contract declares ("up to 3",
+  // decompose-prompts.ts:209) and the composer truncated to the cap. Payload:
+  // lens_id + field name + received/kept counts — NO prose. Content-free;
+  // log-only. Fires at the BUILDER (this is a producer-drift signal about the
+  // input, not a statement about what reached the wire), and a non-zero rate is
+  // a prompt-vs-composer contract drift worth seeing, not noise.
+  V5LensCompanionTruncated: "v5.capability.lens_companion_truncated",
   // Wave-3 σ (ROADMAP 1.203) — the field-level claim-safety cage
   // (`isClaimUsable`/`composeCagedField`) evaluated whether a surface may claim
   // about a science-bearing enrichment field. Payload: field (name only),

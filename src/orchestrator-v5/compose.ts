@@ -924,7 +924,6 @@ function rebuildPhase3BlocksFresh(
   // analysis (only ever fires on a fresh verdict — the stale branch returns
   // before reaching this helper, so a lens is never suggested off stale signals).
   // `selectLens` returns at most one, and null when nothing is justified.
-  // `selectLens` returns at most one, and null when nothing is justified.
   const lensSurface = buildLensSurface(fact, ctx);
   const reviewCards = buildReviewCardBlocks(
     fact,
@@ -943,6 +942,16 @@ function rebuildPhase3BlocksFresh(
   // `selectLens` call, which is how two derivations of one fact drift), and only
   // when the suggestion itself SURVIVED its prose/schema gate. A companion with
   // no suggestion is a card with no sentence explaining why it is there.
+  //
+  // DELIBERATELY NOT ALSO GATED ON THE VERDICT HERE (CEE #770 review B4). Adding
+  // `&& mayNameLeadingOptionForFact(fact)` to this line would skip wasted work on
+  // withheld turns — and would HOLLOW the only mutant that proves the positional
+  // gate below: with the build gated, appending the companions outside the
+  // permitted branch appends an empty array and nothing REDs. Two gates neither
+  // of which is individually provable is weaker than one that is. The cost of
+  // the ungated build is a pure, cheap construction whose result is discarded on
+  // a minority of turns; it emits no telemetry of its own (see
+  // `buildPreMortemExerciseBlock`) so it cannot mislead a dashboard.
   const lensCompanions =
     lensSurface !== null
       ? buildLensCompanionBlocks(fact, ctx, lensSurface.selection, reviewCards)

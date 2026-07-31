@@ -292,9 +292,62 @@ describe('capability P1 — pre_mortem lens companion ARRIVES on the wire', () =
     expect(raw.mitigation).toBe(PRODUCER_PRE_MORTEM.mitigation);
     expect(raw.review_trigger).toBe(PRODUCER_PRE_MORTEM.review_trigger);
 
-    // No numeric field survives the key pin, but state the invariant anyway:
-    // this block's fabrication surface is absent by construction.
+    // No CEE-AUTHORED numeric field. Note the exact scope: this says the BUILDER
+    // authors no number, NOT that the block carries none — see the
+    // producer-numbers test below for the enforced boundary.
     for (const value of Object.values(raw)) expect(typeof value).not.toBe('number');
+  });
+
+  /**
+   * THE ENFORCED BOUNDARY, PINNED HONESTLY (CEE #770 adversarial review B2;
+   * ROADMAP 2.205).
+   *
+   * An earlier revision of this PR claimed the block "carries NO numbers at all:
+   * pure producer prose" — in the code comment, the PR body and the evidence
+   * file. That was FALSE, and it is the trap-14 shape: a label that reads as a
+   * guarantee, is not one, and teaches the next session to stop looking.
+   *
+   * The R3 decision_review completion that authors these strings RECEIVES the
+   * Tier-3-denied `flip_thresholds` values in its prompt input and is taught a
+   * verbatim `'16000 GBP'` format; `RAW_DECIMAL_RE` is deliberately narrow
+   * (leading `0.\d` / `.\d` only). Verified at the bytes:
+   *   SHIPS  "Costs reach 16000 GBP before the window closes."
+   *   SHIPS  "Win probability sits at 55%."
+   *   SHIPS  "The driver sits at ~0.55 today."   (`~` is outside the prefix class)
+   *   CAUGHT "It drops to 0.55 in the bad case."
+   *
+   * This test PINS that boundary rather than hiding it. It is NOT a blessing:
+   * whether the Tier-3 deny should extend to LLM prose echoes is ROADMAP 2.205,
+   * a design ruling. If 2.205 lands a numeric-token scan, this test REDs and
+   * must be rewritten deliberately — which is the point.
+   *
+   * Ship-decision context (the review's own decisive finding): the identical
+   * channel already ships at base via `buildPreMortemCard` (same completion,
+   * `failure_scenario`) and `buildFlipThresholdCards` (narratives contractually
+   * ordered to restate unrounded flip values). This block adds fields to an
+   * existing carrier; it does not open a new class.
+   */
+  it('does NOT block producer-authored numbers in prose — the enforced boundary (2.205)', () => {
+    const dr = {
+      ...DECISION_REVIEW,
+      pre_mortem: {
+        ...PRODUCER_PRE_MORTEM,
+        warning_signs: ['Spend passes 16000 GBP before the checkpoint.'],
+        mitigation: 'Hold the go/no-go until win probability clears 55%.',
+      },
+    };
+    const block = exercisesOf(composeCurrentTurn(makeFact({ decisionReview: dr })))[0];
+    expect(block, 'the block still ships — that IS the finding').toBeDefined();
+    expect(block!.warning_signs).toEqual(['Spend passes 16000 GBP before the checkpoint.']);
+    expect(block!.mitigation).toBe('Hold the go/no-go until win probability clears 55%.');
+
+    // The one numeric form the prose guard DOES catch, for contrast — so this
+    // test cannot be read as "the guard does nothing".
+    const caught = {
+      ...DECISION_REVIEW,
+      pre_mortem: { ...PRODUCER_PRE_MORTEM, mitigation: 'Hold if it drops to 0.55 or lower.' },
+    };
+    expect(exercisesOf(composeCurrentTurn(makeFact({ decisionReview: caught })))).toHaveLength(0);
   });
 
   it('surfaces the three producer fields the pre_mortem review card DISCARDS', () => {
@@ -504,6 +557,32 @@ describe('capability P1 — the companion refuses to ship an empty shell', () =>
     expect(exercisesOf(composeCurrentTurn(makeFact()))).toHaveLength(1);
   });
 
+  it('bounds warning_signs to the PRODUCER’S OWN declared cap, and discloses truncation', () => {
+    // `decompose-prompts.ts:209` asks for "up to 3"; ExerciseBlockSchema sets no
+    // maximum, so nothing else stands between an over-long model return and the
+    // renderer. The cap is read from the prompt contract, not invented here.
+    const dr = {
+      ...DECISION_REVIEW,
+      pre_mortem: {
+        ...PRODUCER_PRE_MORTEM,
+        warning_signs: ['Sign one.', 'Sign two.', 'Sign three.', 'Sign four.', 'Sign five.'],
+      },
+    };
+    const block = exercisesOf(composeCurrentTurn(makeFact({ decisionReview: dr })))[0]!;
+    expect(block.warning_signs).toEqual(['Sign one.', 'Sign two.', 'Sign three.']);
+  });
+
+  it('does NOT truncate — or fire the drift signal — at or under the cap', () => {
+    // Non-vacuity for the assertion above: the cap must be a CAP, not a slice
+    // that always fires.
+    const dr = {
+      ...DECISION_REVIEW,
+      pre_mortem: { ...PRODUCER_PRE_MORTEM, warning_signs: ['Sign one.', 'Sign two.'] },
+    };
+    const block = exercisesOf(composeCurrentTurn(makeFact({ decisionReview: dr })))[0]!;
+    expect(block.warning_signs).toEqual(['Sign one.', 'Sign two.']);
+  });
+
   it('inherits the review card’s drop rules — a grounding lookup miss kills both', () => {
     const dr = {
       ...DECISION_REVIEW,
@@ -548,6 +627,32 @@ describe('capability P1 — the emitted-telemetry event is wire-truthful', () =>
     expect(events[0]!.lens_id).toBe('pre_mortem');
     expect(events[0]!.block_type).toBe('exercise');
     expect(events[0]!.graph_hash_at_generation).toBe(GRAPH_HASH);
+  });
+
+  it('discloses warning_signs truncation with received/kept counts, and stays silent under the cap', () => {
+    const over = {
+      ...DECISION_REVIEW,
+      pre_mortem: {
+        ...PRODUCER_PRE_MORTEM,
+        warning_signs: ['Sign one.', 'Sign two.', 'Sign three.', 'Sign four.', 'Sign five.'],
+      },
+    };
+    composeCurrentTurn(makeFact({ decisionReview: over }));
+    const truncations = sink.filter(
+      (e) => e.event === 'v5.capability.lens_companion_truncated',
+    );
+    expect(truncations).toHaveLength(1);
+    expect(truncations[0]!.field).toBe('warning_signs');
+    expect(truncations[0]!.received).toBe(5);
+    expect(truncations[0]!.kept).toBe(3);
+
+    // Silent when the producer honours its own contract — an alarm that fires on
+    // the normal case is an alarm that gets muted.
+    sink.length = 0;
+    composeCurrentTurn(makeFact());
+    expect(sink.filter((e) => e.event === 'v5.capability.lens_companion_truncated')).toHaveLength(
+      0,
+    );
   });
 
   it('does NOT fire on the withheld arm, where the block is built and then dropped', () => {

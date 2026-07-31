@@ -444,8 +444,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Capability layer P0 (ROADMAP 1.183) — log-only (see debugOnlyEvents).
         V5LensSuggestionEmitted: "v5.capability.lens_suggestion_emitted",
         // Capability layer P1 (ROADMAP 1.183) — the structured lens companion
-        // that reached the wire. Log-only (see debugOnlyEvents).
+        // that reached the wire, and the producer-drift truncation signal.
+        // Log-only (see debugOnlyEvents).
         V5LensCompanionEmitted: "v5.capability.lens_companion_emitted",
+        V5LensCompanionTruncated: "v5.capability.lens_companion_truncated",
         V5ClaimCageFieldEvaluated: "v5.claim_cage.field_evaluated",
         // Context Architecture v2 S6 — enrichment shadow validation.
         V5EnrichmentSchemaMismatch: "v5.enrichment.schema_mismatch",
@@ -1199,8 +1201,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // signal — log-only, no Datadog mapping.
         TelemetryEvents.V5LensSuggestionEmitted,
         // Capability layer P1 (ROADMAP 1.183): content-free lens-companion
-        // wire-arrival signal — log-only, no Datadog mapping.
+        // wire-arrival + producer-drift truncation signals — log-only, no
+        // Datadog mapping.
         TelemetryEvents.V5LensCompanionEmitted,
+        TelemetryEvents.V5LensCompanionTruncated,
         // Wave-3 σ (ROADMAP 1.203): field-level claim-safety cage decision —
         // content-free (field name + decision + reason tag), log-only.
         TelemetryEvents.V5ClaimCageFieldEvaluated,
@@ -2126,6 +2130,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Capability layer P1 (ROADMAP 1.183) — structured lens companion,
         // fired from the compose funnel's PERMITTED branch only.
         "v5.capability.lens_companion_emitted",
+        // Capability layer P1 — producer returned more warning_signs than its
+        // own prompt contract declares; composer truncated and disclosed.
+        "v5.capability.lens_companion_truncated",
         // Wave-3 σ (ROADMAP 1.203) — field-level claim-safety cage decision.
         "v5.claim_cage.field_evaluated",
         // Context Architecture v2 S6 — enrichment shadow validation.

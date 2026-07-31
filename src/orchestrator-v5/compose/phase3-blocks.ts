@@ -108,6 +108,15 @@ import {
 const SOURCE_HANDLER = 'decision_review_enricher';
 
 const TITLE_MAX = 80;
+/**
+ * Capability P1 — the producer's OWN declared cap on `pre_mortem.warning_signs`,
+ * mirrored from `src/cee/decision-review/decompose-prompts.ts:209`
+ * (`"warning_signs": ["string"]   // up to 3, observable and actionable`).
+ * `ExerciseBlockSchema` sets no maximum, so without this an over-long model
+ * return rides to the renderer unbounded. Exceeding it is DISCLOSED via
+ * `v5.capability.lens_companion_truncated`, never silently swallowed.
+ */
+const WARNING_SIGNS_MAX = 3;
 const BODY_MAX = 300;
 const ACTION_LABEL_MAX = 40;
 const TECHNIQUE_MAX = 300;
@@ -1210,6 +1219,23 @@ export function buildLensSurface(
     freshness: ctx.freshness,
   });
 
+  // ⚠ KNOWN SKEW, PRE-EXISTING, DELIBERATELY NOT FIXED HERE (CEE #770 review B4).
+  // This event fires when the block survives CONSTRUCTION. It does NOT mean the
+  // block reached the wire: every lens suggestion is `coaching_kind:'strengthen'`,
+  // which is in `LEADER_PRESUMING_COACHING_KINDS`, so the compose funnel DROPS it
+  // on a withheld turn — after this line has already fired. So
+  // `v5.capability.lens_suggestion_emitted` OVER-REPORTS by exactly the withheld
+  // rate, and has since #632.
+  //
+  // The P1 companion's own event (`V5LensCompanionEmitted`) is fired from the
+  // funnel instead, for exactly this reason — so the two events are NOT
+  // comparable one-to-one: companion < suggestion partly by gating, partly by
+  // this skew. Anyone sizing P1 uptake from that ratio must account for it.
+  //
+  // Not fixed in #770: moving it changes the semantics of a shipped P0
+  // observability surface and rewrites its existing unit assertion
+  // (`lens-suggestion-block.test.ts` drives this builder directly). That is a
+  // reviewable behaviour change in its own right, not a drive-by. ROWED.
   emit(TelemetryEvents.V5LensSuggestionEmitted, {
     lens_id: selection.lens,
     rationale_code: selection.rationaleCode,
@@ -1235,9 +1261,15 @@ export function buildLensSurface(
  * by the claim-safety cage, not by effort. Recording the derivation here because
  * the next reader's first instinct will be to "finish the set":
  *
- *   pre_mortem            → ExerciseBlock (built — see below). Carries NO
- *                           numbers at all: pure producer prose that the
- *                           pipeline already computes and today DISCARDS.
+ *   pre_mortem            → ExerciseBlock (built — see below). Carries no
+ *                           CEE-AUTHORED numeric fields (the emitted key set is
+ *                           pinned by spec); the PROSE is the producer's, and
+ *                           producer-authored numbers inside it are guarded only
+ *                           against leading-decimal form. See the scope note on
+ *                           `buildPreMortemExerciseBlock` — an earlier revision
+ *                           of this line said "carries NO numbers at all: pure
+ *                           producer prose", which was FALSE and is exactly the
+ *                           label that teaches the next reader to stop looking.
  *
  *   sensitivity_flip_risk → FlipAnalysisBlock: NOT BUILT. The block's payload is
  *                           `flip_scenarios[].{current_value, flip_threshold}`,
@@ -1302,8 +1334,16 @@ export function buildLensCompanionBlocks(
     case 'what_if_counterfactual':
       return [];
     default: {
+      // Exhaustiveness is kept by the `never` binding (a new LensId fails the
+      // BUILD here). But the RUNTIME value must be a typed empty, not the
+      // narrowed variable: `return exhaustive` returns whatever unexpected value
+      // actually arrived — at runtime a string, where the caller spreads a
+      // `readonly ExerciseBlock[]`. Compile-safe, runtime-nonsense. Fail closed
+      // to "no companion" instead, which is this module's safe direction
+      // everywhere else.
       const exhaustive: never = selection.lens;
-      return exhaustive;
+      void exhaustive;
+      return [];
     }
   }
 }
@@ -1323,6 +1363,33 @@ export function buildLensCompanionBlocks(
  * They are computed on every analysis and discarded. So this block is NEW
  * content, not a second rendering of the card above it — and it fabricates
  * nothing: every string is the producer's own, verbatim.
+ *
+ * ⚠ WHAT "NO FABRICATION" DOES AND DOES NOT MEAN HERE — the honest scope, after
+ * CEE #770's adversarial review (B2) found the first wording overstated.
+ *
+ *   TRUE, and enforced: this builder authors NO numeric field of its own. The
+ *   emitted key set is pinned exactly by `lens-companion-blocks.test.ts`, so a
+ *   builder that invents any field — numeric or prose — REDs; and every emitted
+ *   string is asserted byte-identical to a member of the producer's own
+ *   `pre_mortem` object, so interpolation REDs too.
+ *
+ *   NOT TRUE, and NOT claimed: that the block carries no numbers. These strings
+ *   are authored by the R3 decision_review completion, whose PROMPT INPUT
+ *   includes the Tier-3-denied `flip_thresholds` values and fragile-edge
+ *   probabilities, and which is taught a verbatim `'16000 GBP'` value format.
+ *   `scanProse`'s `RAW_DECIMAL_RE` catches LEADING-DECIMAL form only — `'16000
+ *   GBP'`, `'55%'` and `'~0.55'` all pass it (probe: 4/4). So a producer-authored
+ *   number CAN ride these fields.
+ *
+ *   WHY THAT IS NOT A BLOCKER FOR THIS INCREMENT, stated rather than assumed:
+ *   the identical channel already ships at base. `buildPreMortemCard` surfaces
+ *   `failure_scenario` from the SAME completion, and `buildFlipThresholdCards`
+ *   ships narratives the prompt ORDERS to restate unrounded flip values. This
+ *   block adds no new defect class — it adds three more fields to a carrier that
+ *   already exists. The open question (is the Tier-3 deny composition-only by
+ *   design, or do LLM prose echoes need a numeric-token scan?) is ROADMAP 2.205:
+ *   a design ruling with its own lane, because a blanket numeric block would gut
+ *   legitimate prose ("review in 3 months").
  *
  * WHY IT IS COUPLED TO THE SURVIVING REVIEW CARD. The same prose object is
  * already governed by four independent drop rules inside `buildPreMortemCard`
@@ -1347,12 +1414,29 @@ function buildPreMortemExerciseBlock(
   const pm = readRecord(dr.pre_mortem);
   if (pm === null) return null;
 
-  const warningSigns = (Array.isArray(pm.warning_signs) ? pm.warning_signs : [])
-    .flatMap((raw) => {
+  const allWarningSigns = (Array.isArray(pm.warning_signs) ? pm.warning_signs : []).flatMap(
+    (raw) => {
       if (typeof raw !== 'string') return [];
       const trimmed = raw.trim();
       return trimmed.length > 0 ? [truncate(trimmed, BODY_MAX)] : [];
+    },
+  );
+  // Bound to the PRODUCER'S OWN declared cap. `decompose-prompts.ts:209` asks for
+  // `"warning_signs": ["string"]   // up to 3, observable and actionable`, and
+  // the ExerciseBlock schema sets no max — so an over-long model return would
+  // ride to the UI as an unbounded bullet list with nothing between it and the
+  // renderer. The cap is READ FROM the prompt's contract, not chosen here, and
+  // truncation is DISCLOSED (never silent): a producer that starts exceeding its
+  // own declared bound is a drift signal worth seeing, not noise to swallow.
+  const warningSigns = allWarningSigns.slice(0, WARNING_SIGNS_MAX);
+  if (allWarningSigns.length > warningSigns.length) {
+    emit(TelemetryEvents.V5LensCompanionTruncated, {
+      lens_id: 'pre_mortem',
+      field: 'warning_signs',
+      received: allWarningSigns.length,
+      kept: warningSigns.length,
     });
+  }
   const mitigation =
     typeof pm.mitigation === 'string' && pm.mitigation.trim().length > 0
       ? truncate(pm.mitigation.trim(), BODY_MAX)
