@@ -4,7 +4,7 @@
   "provenance": {
     "origin": "graph-evaluator-revival",
     "source": "tools/graph-evaluator/fixtures/decision-review/02-close-call.json (committed 11078d28, 2026-03-06)",
-    "note": "Revived; edge ids added, flip_threshold_data added, and the readiness/headline_type pair kept so the tone row resolves to the close_call row rather than being asserted by hand."
+    "note": "Revived; edge ids added, flip_threshold_data added, and the readiness/headline_type pair kept so the tone row resolves to the close_call row rather than being asserted by hand. | FLIP_THRESHOLDS GOLDEN CORRECTED 2026-07-31 (fix-decision-review-v15 lane, disclosed): the golden flip_thresholds entries were hand-written as { factor_label, current, flip_at, note } with rounded values. Two independent defects. (a) FIELD NAMES: the runtime contract is { factor_id, factor_label, current_display, flip_display, narrative } (src/orchestrator-v5/compose/phase3-blocks.ts:1703-1765 reads factor_id/factor_label/narrative and DROPS any entry missing one), so the old goldens described a shape production would discard entirely — a golden nothing could ever produce. (b) VALUE FORM: the served v14 prompt contradicts itself here — :344-350 orders the raw value verbatim while :116-118/:220 order the percentage form and no_raw_probability_decimals scores the raw form as a failure. The goldens now follow the NON-self-contradictory rule (percentage form) and the runtime field names. The prompt-side resolution is drafted but NOT YET PROMOTED (tools/orchestrator-eval/drafts/decision_review.v15-draft.txt); until it is, this fixture encodes the contract the runtime and the scorer agree on, not the flip bullet the served prompt still carries."
   },
   "input": {
     "brief": "Do we move the team to a four day week or keep the current schedule?",
@@ -175,10 +175,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_throughput",
             "factor_label": "Delivery Throughput",
-            "current": "about 44%",
-            "flip_at": "about 49%",
-            "note": "A small move reverses the ordering."
+            "current_display": "44%",
+            "flip_display": "49%",
+            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
           }
         ],
         "bias_findings": [],
@@ -226,10 +227,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_throughput",
             "factor_label": "Delivery Throughput",
-            "current": "about 44%",
-            "flip_at": "about 49%",
-            "note": "A small move reverses the ordering."
+            "current_display": "44%",
+            "flip_display": "49%",
+            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
           }
         ],
         "bias_findings": [],
@@ -277,10 +279,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_throughput",
             "factor_label": "Delivery Throughput",
-            "current": "about 44%",
-            "flip_at": "about 49%",
-            "note": "A small move reverses the ordering."
+            "current_display": "44%",
+            "flip_display": "49%",
+            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
           }
         ],
         "bias_findings": [],
@@ -328,10 +331,11 @@
         },
         "flip_thresholds": [
           {
+            "factor_id": "fac_throughput",
             "factor_label": "Delivery Throughput",
-            "current": "about 44%",
-            "flip_at": "about 49%",
-            "note": "A small move reverses the ordering."
+            "current_display": "44%",
+            "flip_display": "49%",
+            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
           }
         ],
         "bias_findings": [],

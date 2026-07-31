@@ -397,6 +397,8 @@ describe('A1 — the floor RE-DERIVES the sample-size minimum (n<3 cannot certif
     const build = (n: number) =>
       buildDecisionReviewPromotionReport(capture(n), {
         candidateLabel: 'served',
+        evidenceSource: 'unit-test synthetic capture',
+        model: 'test-model',
         promptSha16: 'aaaaaaaaaaaaaaaa',
         generatedAt: '2026-07-30T00:00:00.000Z',
       });
@@ -496,5 +498,112 @@ describe('real committed state', () => {
     const final = applyGrandfather(gate, loadGrandfatherBaseline());
     expect(final.ok).toBe(true);
     expect(final.rows.find((r) => r.task === 'decision_review')?.grandfathered).toBe(true);
+  });
+});
+
+// ============================================================================
+// The report builder's PROVENANCE must describe the evidence it actually
+// aggregated.
+//
+// ⚠ WHY THESE TESTS EXIST (E1, 2026-07-31). The builder wrote its `evidence`
+// block as STRING LITERALS: `source: 'H1 #767 … two 2026-07-30 deployed-pair
+// captures'`, `model: 'gpt-4.1-2025-04-14'`, and block reasons naming
+// *"r1 no_internal_vocabulary, r3 no_dashes"* — regardless of what was passed
+// in. Reused on any new corpus it emitted a gate artifact that MISDESCRIBED its
+// own source, which is the guarantee-theatre pattern one level up: a report
+// whose provenance cannot be wrong is a provenance nobody is checking.
+//
+// The fix makes provenance a REQUIRED input (a caller cannot forget it) and
+// DERIVES the block reasons from the aggregated dims (they cannot drift from
+// what was scored).
+// ============================================================================
+describe('promotion report — provenance is carried, never asserted', () => {
+  const captureOf = (
+    dims: ReadonlyArray<{ name: string; status: string }>,
+    n = 3,
+  ): LiveCaptureReport => ({
+    servedHash: 'aaaaaaaaaaaaaaaa',
+    reports: Array.from({ length: n }, (_, i) => ({
+      fixtureId: `f${i}`,
+      scores: [{ candidate: 'served', dimensions: dims }],
+    })),
+  });
+
+  const OPTS_BASE = {
+    candidateLabel: 'served',
+    promptSha16: 'bbbbbbbbbbbbbbbb',
+    generatedAt: '2026-07-31T00:00:00.000Z',
+    evidenceSource: 'lane corpus: 7 fixtures x 3 arms, offline',
+    model: 'some-model-id-9',
+  };
+
+  it('the evidence block reports the CALLER provenance, not a literal', () => {
+    const r = buildDecisionReviewPromotionReport(
+      captureOf([{ name: 'safety', status: 'pass' }]),
+      OPTS_BASE,
+    );
+    const ev = r.evidence as Record<string, unknown>;
+    expect(ev.source).toBe(OPTS_BASE.evidenceSource);
+    expect(ev.model).toBe(OPTS_BASE.model);
+    // and it must not smuggle in the frozen H1 provenance
+    expect(JSON.stringify(ev)).not.toContain('H1 #767');
+    expect(JSON.stringify(ev)).not.toContain('gpt-4.1-2025-04-14');
+  });
+
+  it('block_reasons NAME THE DIMENSIONS THAT ACTUALLY FAILED', () => {
+    const r = buildDecisionReviewPromotionReport(
+      captureOf([
+        { name: 'safety', status: 'pass' },
+        { name: 'tone_alignment', status: 'fail' },
+        { name: 'numbers_grounded', status: 'fail' },
+      ]),
+      OPTS_BASE,
+    );
+    const reasons = ((r.evidence as Record<string, unknown>).block_reasons ?? []) as string[];
+    const blob = reasons.join(' | ');
+    expect(r.verdict).toBe('BLOCK');
+    expect(blob).toContain('tone_alignment');
+    expect(blob).toContain('numbers_grounded');
+    // the OLD literal named dimensions that did not fail in THIS corpus
+    expect(blob).not.toContain('no_internal_vocabulary');
+    expect(blob).not.toContain('no_dashes');
+  });
+
+  it('a required dim that went NOT_APPLICABLE is named as the reason it is', () => {
+    const r = buildDecisionReviewPromotionReport(
+      captureOf([
+        { name: 'safety', status: 'pass' },
+        { name: 'tone_alignment', status: 'not_applicable' },
+      ]),
+      OPTS_BASE,
+    );
+    const blob = (((r.evidence as Record<string, unknown>).block_reasons ?? []) as string[]).join(' | ');
+    expect(r.verdict).toBe('BLOCK');
+    expect(blob).toContain('tone_alignment');
+    expect(blob).toMatch(/unmeasured|not_applicable/i);
+  });
+
+  it('a clean PASS carries NO block reasons at all', () => {
+    const r = buildDecisionReviewPromotionReport(
+      captureOf([{ name: 'safety', status: 'pass' }]),
+      OPTS_BASE,
+    );
+    expect(r.verdict).toBe('PASS');
+    expect((r.evidence as Record<string, unknown>).block_reasons).toEqual([]);
+  });
+
+  it('SOURCE GUARD — no frozen H1 provenance literal survives in the builder', () => {
+    const builderSrc = readFileSync(join(SRC_ROOT, 'decision-review', 'promotion-report.ts'), 'utf-8');
+    // These are the exact strings the builder used to emit unconditionally.
+    // A literal here can only ever describe ONE corpus, so it is wrong for
+    // every other one; the mention in a comment is fine, an emitted string
+    // is not. Scope the check to the returned object by requiring the
+    // literal not appear inside quotes on a non-comment line.
+    for (const line of builderSrc.split('\n')) {
+      if (/^\s*(\*|\/\/)/.test(line)) continue;
+      expect(line).not.toContain('H1 #767');
+      expect(line).not.toContain('gpt-4.1-2025-04-14');
+      expect(line).not.toContain('r1 no_internal_vocabulary');
+    }
   });
 });

@@ -36,6 +36,15 @@ const servedSha16 = promptHash16(readServedPromptText());
 const report = buildDecisionReviewPromotionReport(capture, {
   candidateLabel: 'served_v14',
   promptSha16: servedSha16,
+  // Provenance is now a REQUIRED input, not a literal inside the builder — this
+  // CLI states the corpus IT reads, and any other caller states its own.
+  evidenceSource:
+    'H1 #767 live-capture scoring of the served v14 prompt (two 2026-07-30 deployed-pair captures) — ' +
+    'reports/decision-review-v14-baseline-2026-07-31/live-capture-report.json',
+  model: 'gpt-4.1-2025-04-14',
+  note:
+    'PRE-GATE promotion, grandfathered at this hash. A rewrite must ship a PASS report at the new hash; ' +
+    'that makes this report and its grandfather entry stale (the ratchet forces removal).',
   // Pinned to the capture date, not "now": the outputs are frozen, so the report
   // is a frozen observation. (The gate's expiry window is measured against this.)
   generatedAt: '2026-07-30T00:00:00.000Z',

@@ -11,6 +11,52 @@ import type { LLMProvider, LLMResult, ModelConfig } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+/**
+ * Build the Responses-API request body from a {@link ModelConfig}.
+ *
+ * ⚠ WHY THIS IS A SEPARATE, EXPORTED, PURE FUNCTION (E1, 2026-07-31).
+ * `ModelConfig` has declared `params?: Record<string, unknown>` — commented
+ * *"Arbitrary model params (e.g. temperature)"* — since it was written, and the
+ * sibling Anthropic provider honours it (`anthropic-provider.ts:40`). THIS
+ * provider silently ignored it, so the OpenAI arm of every bake-off ran at the
+ * provider default while the config said otherwise, and nothing could tell.
+ * That is a declared capability that never executed: a caller could pin
+ * `temperature: 0`, see no error, and get an unpinned run.
+ *
+ * Extracting the body-builder makes the behaviour testable WITHOUT a network
+ * call, which is the only way an assertion about "what we send" can be honest.
+ *
+ * `config.params` is passed through as-is (it is the caller's escape hatch, and
+ * the Responses API validates its own field names) but it is applied FIRST, so
+ * it can never overwrite the three identity fields below.
+ */
+export function buildResponsesParams(
+  system: string,
+  user: string,
+  config: ModelConfig,
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    ...(config.params ?? {}),
+    model: config.model,
+    instructions: system,
+    input: user,
+  };
+
+  // `max_tokens` is the cross-provider field name in ModelConfig; the Responses
+  // API calls the same thing `max_output_tokens`. Mapped rather than passed
+  // through, so a config that pins an output budget actually pins one.
+  if (config.max_tokens != null && params["max_output_tokens"] === undefined) {
+    params["max_output_tokens"] = config.max_tokens;
+  }
+
+  // Reasoning effort — only pass when explicitly set (not null/undefined)
+  if (config.reasoning_effort != null) {
+    params["reasoning"] = { effort: config.reasoning_effort };
+  }
+
+  return params;
+}
+
 export class OpenAIProvider implements LLMProvider {
   async chat(system: string, user: string, config: ModelConfig): Promise<LLMResult> {
     let apiKey: string;
@@ -30,16 +76,7 @@ export class OpenAIProvider implements LLMProvider {
     const client = new OpenAI({ apiKey });
     const timeoutMs = config.timeout_ms ?? DEFAULT_TIMEOUT_MS;
 
-    const params: Record<string, unknown> = {
-      model: config.model,
-      instructions: system,
-      input: user,
-    };
-
-    // Reasoning effort — only pass when explicitly set (not null/undefined)
-    if (config.reasoning_effort != null) {
-      params["reasoning"] = { effort: config.reasoning_effort };
-    }
+    const params = buildResponsesParams(system, user, config);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
