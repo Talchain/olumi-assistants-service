@@ -655,11 +655,8 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // answer — telling the user to retry that would be a lie), and every
         // non-429 status keeps the fatal `analysis_failed` mapping so genuine
         // breakage stays a visible 500.
-        const downstreamStatus = runError.status === 429
-          ? 429
-          : isTypedFailedEnvelope
-            ? readDownstreamHttpStatus(v2Err)
-            : null;
+        const parsedStatus = isTypedFailedEnvelope ? readDownstreamHttpStatus(v2Err) : null;
+        const downstreamStatus = runError.status === 429 ? 429 : parsedStatus;
         if (downstreamStatus === 429) {
           throw new HandlerInvocationFailedError(
             `PLoT returned error: ${runError.message}`,
@@ -676,12 +673,33 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           );
         }
 
+        // N1 — CARRY THE PARSE OUTCOME ON THE FATAL PATH TOO.
+        // The busy classification rests on a prose read of a template owned by
+        // ANOTHER SERVICE. If PLoT rewords it, busy-classification dies and
+        // every 429 quietly returns to being a 500 — and without this, with no
+        // signal anywhere. That is the guarantee-theatre shape: machinery that
+        // stops working and says nothing. So the fatal error carries the status
+        // when one was read, and an explicit `downstream_http_status_parsed:
+        // false` when a typed failure arrived bearing a status_reason the
+        // pattern could NOT read. The second is the tripwire: a sudden run of
+        // them IS the rewording, visible in telemetry before anyone has to
+        // notice a rise in 500s.
+        const unreadableStatusReason =
+          isTypedFailedEnvelope &&
+          typeof v2Err?.status_reason === 'string' &&
+          v2Err.status_reason.length > 0 &&
+          parsedStatus === null;
         throw new HandlerInvocationFailedError(
           `PLoT returned error: ${runError.message}`,
           {
             cause_kind: isTypedFailedEnvelope ? 'analysis_failed' : 'plot_error',
             retryable: true,
-            details: { ...errorDetailsBase, ...extractPlotFailureDetails(v2Err) },
+            details: {
+              ...errorDetailsBase,
+              ...extractPlotFailureDetails(v2Err),
+              ...(parsedStatus !== null ? { downstream_http_status: parsedStatus } : {}),
+              ...(unreadableStatusReason ? { downstream_http_status_parsed: false } : {}),
+            },
             cause: runError,
           },
         );

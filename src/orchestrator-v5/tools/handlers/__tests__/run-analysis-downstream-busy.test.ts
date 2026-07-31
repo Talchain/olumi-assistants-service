@@ -191,7 +191,12 @@ describe('run_analysis — a downstream 429 is BUSY, not a fatal INTERNAL_ERROR'
 
     expect(caught.cause_kind).toBe('analysis_failed');
     expect(isRecoverableHandlerCause(caught.cause_kind)).toBe(false);
-    expect(caught.details.downstream_http_status).toBeUndefined();
+    // ⚠ ASSERTION CORRECTED (N1, review 2026-07-31). This used to assert
+    // `downstream_http_status` was UNDEFINED here — which quietly pinned the
+    // very blindness N1 removes: the fatal path carrying no parse outcome at
+    // all. The claim that matters on this arm is that the CAUSE stays fatal,
+    // not that the details are empty; carrying the 500 makes it attributable.
+    expect(caught.details.downstream_http_status).toBe(500);
   });
 
   it('SECOND ARM: a typed failure with no HTTP status at all stays analysis_failed (fatal)', async () => {
@@ -247,5 +252,106 @@ describe('run_analysis — a downstream 429 is BUSY, not a fatal INTERNAL_ERROR'
 
     expect(caught.cause_kind).toBe('plot_error');
     expect(isRecoverableHandlerCause(caught.cause_kind)).toBe(false);
+  });
+});
+
+/**
+ * N2 (review) — STRICTNESS PINS ON THE PARSE.
+ *
+ * The reviewer mutated `PLOT_DOWNSTREAM_HTTP_STATUS_RE` two ways and BOTH
+ * mutants survived green against the first cut's fixtures:
+ *
+ *   - `/(429)/`   — a bare substring hunt for "429" anywhere in the prose
+ *   - `/(\d{3})/` — the first three-digit run anywhere, ignoring the `(HTTP …)`
+ *                   frame
+ *
+ * Surviving mutants mean the strictness was asserted in a comment but proven by
+ * nothing. These two fixtures kill them, and they are not hypothetical shapes:
+ * "429 requests per minute" is ordinary rate-limit prose, and an id containing
+ * digits next to a real status is exactly what a request-scoped message looks
+ * like.
+ *
+ * Direction of failure matters. Both mutants make the parser TOO EAGER, i.e.
+ * they manufacture a FALSE BUSY — a genuine failure silently downgraded to
+ * "engine busy, try again", which is the one outcome this fix must never
+ * produce. So both pins assert `analysis_failed`, not merely "not busy".
+ */
+describe('run_analysis — the downstream-status parse is STRICT (kills eager-match mutants)', () => {
+  it("N2: '429' in ordinary prose is NOT a status — kills the /(429)/ mutant", async () => {
+    const caught = await invokeAndCatch(() => {
+      const v2Err: V2RunError = {
+        analysis_status: 'failed',
+        status_reason: 'Rate limited: 429 requests per minute exceeded.',
+        critiques: [{ code: 'ISL_CALL_FAILED', message: 'ISL analysis failed. Please try again.' }],
+      };
+      const err = new PLoTError('PLoT run analysis failed', 200, 'run', 50, 'req-id');
+      err.v2RunError = v2Err;
+      return err;
+    });
+
+    expect(caught.cause_kind).toBe('analysis_failed');
+    expect(isRecoverableHandlerCause(caught.cause_kind)).toBe(false);
+  });
+
+  it("N2: digits before the real status do not win — kills the /(\\d{3})/ mutant", async () => {
+    const caught = await invokeAndCatch(() => {
+      const v2Err: V2RunError = {
+        analysis_status: 'failed',
+        // '429' appears FIRST, inside an id; the true status is the 500.
+        status_reason: 'Request 429-abc failed (HTTP 500).',
+        critiques: [{ code: 'ISL_ERROR', message: 'Request 429-abc failed (HTTP 500).' }],
+      };
+      const err = new PLoTError('PLoT run analysis failed', 200, 'run', 50, 'req-id');
+      err.v2RunError = v2Err;
+      return err;
+    });
+
+    expect(caught.cause_kind).toBe('analysis_failed');
+    expect(isRecoverableHandlerCause(caught.cause_kind)).toBe(false);
+    // N1: and the parsed status is CARRIED, so the 500 is attributable.
+    expect(caught.details.downstream_http_status).toBe(500);
+  });
+});
+
+/**
+ * N1 (review) — THE FATAL PATH MUST CARRY THE PARSE OUTCOME.
+ *
+ * The busy classification rests on a prose read of a template owned by another
+ * service. If PLoT ever rewords it, busy-classification dies and every 429
+ * silently returns to being a 500 — with, in the first cut, NO SIGNAL ANYWHERE.
+ * That is the guarantee-theatre shape: machinery that stops working and says
+ * nothing.
+ *
+ * So the fatal path now carries the parse outcome too: the status when one was
+ * read, and an explicit `downstream_http_status_parsed: false` when a typed
+ * failure arrived with a status_reason the pattern could not read. The second
+ * is the tripwire — a sudden run of them IS the rewording, visible in telemetry
+ * before anyone has to notice 500s.
+ */
+describe('run_analysis — the parse outcome is observable on the FATAL path too (N1)', () => {
+  it('a parsed non-429 status is carried on the fatal error', async () => {
+    const caught = await invokeAndCatch(makeIsl500Error);
+
+    expect(caught.cause_kind).toBe('analysis_failed');
+    expect(caught.details.downstream_http_status).toBe(500);
+    expect(caught.details.downstream_http_status_parsed).toBeUndefined();
+  });
+
+  it('an UNPARSEABLE status_reason is flagged — the rewording tripwire', async () => {
+    const caught = await invokeAndCatch(() => {
+      const v2Err: V2RunError = {
+        analysis_status: 'failed',
+        // A plausible future PLoT rewording: no `(HTTP nnn)` frame at all.
+        status_reason: 'The analysis service rejected the request: too many concurrent runs.',
+        critiques: [{ code: 'ISL_ERROR', message: 'rejected' }],
+      };
+      const err = new PLoTError('PLoT run analysis failed', 200, 'run', 50, 'req-id');
+      err.v2RunError = v2Err;
+      return err;
+    });
+
+    expect(caught.cause_kind).toBe('analysis_failed');
+    expect(caught.details.downstream_http_status).toBeUndefined();
+    expect(caught.details.downstream_http_status_parsed).toBe(false);
   });
 });
