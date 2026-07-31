@@ -8296,6 +8296,13 @@ export async function runTurnExecutor(
         // fails closed to pre-fix behaviour instead of resolving stale
         // labels. No new hashing here.
         persistedGraphHash: currentAnalysisGraphHashForTurn,
+        // ROADMAP 2.211 — the PRIOR fact array (this turn's facts EXCLUDED), for
+        // the no-immediate-repeat lens tie-break only. Deliberately NOT
+        // `unifiedFactsForPostHandler`, which is what `lifecycle.priorFacts`
+        // below carries: that array begins with THIS turn's run_analysis fact,
+        // so deriving the previous lens from it would report every turn as a
+        // repeat of itself. Already loaded for the turn — no extra DB read.
+        priorTurnFactsForLensHistory: context.prior_facts,
         // PR 3 — thread lifecycle context so the composer can serve
         // Phase 3 blocks from prior_facts when the current turn produced
         // no run_analysis fact, or emit the stale-safe rerun coaching

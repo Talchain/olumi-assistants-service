@@ -448,6 +448,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Log-only (see debugOnlyEvents).
         V5LensCompanionEmitted: "v5.capability.lens_companion_emitted",
         V5LensCompanionTruncated: "v5.capability.lens_companion_truncated",
+        // Capability layer (ROADMAP 2.211) — the no-immediate-repeat tie-break
+        // displaced the head lens. Log-only (see debugOnlyEvents).
+        V5LensNoRepeatDisplaced: "v5.capability.lens_no_repeat_displaced",
         V5ClaimCageFieldEvaluated: "v5.claim_cage.field_evaluated",
         // Context Architecture v2 S6 — enrichment shadow validation.
         V5EnrichmentSchemaMismatch: "v5.enrichment.schema_mismatch",
@@ -1205,6 +1208,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Datadog mapping.
         TelemetryEvents.V5LensCompanionEmitted,
         TelemetryEvents.V5LensCompanionTruncated,
+        // Capability layer (ROADMAP 2.211): content-free displaced/chosen lens
+        // pair — log-only, no Datadog mapping.
+        TelemetryEvents.V5LensNoRepeatDisplaced,
         // Wave-3 σ (ROADMAP 1.203): field-level claim-safety cage decision —
         // content-free (field name + decision + reason tag), log-only.
         TelemetryEvents.V5ClaimCageFieldEvaluated,
@@ -2133,6 +2139,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Capability layer P1 — producer returned more warning_signs than its
         // own prompt contract declares; composer truncated and disclosed.
         "v5.capability.lens_companion_truncated",
+        // Capability layer (ROADMAP 2.211) — the no-immediate-repeat tie-break
+        // displaced the head lens; carries the (displaced, chosen) pair.
+        "v5.capability.lens_no_repeat_displaced",
         // Wave-3 σ (ROADMAP 1.203) — field-level claim-safety cage decision.
         "v5.claim_cage.field_evaluated",
         // Context Architecture v2 S6 — enrichment shadow validation.

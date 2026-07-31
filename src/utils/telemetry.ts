@@ -704,6 +704,17 @@ export const TelemetryEvents = {
   // input, not a statement about what reached the wire), and a non-zero rate is
   // a prompt-vs-composer contract drift worth seeing, not noise.
   V5LensCompanionTruncated: "v5.capability.lens_companion_truncated",
+  // Capability layer, ROADMAP 2.211 — the no-immediate-repeat tie-break moved
+  // the lens slot: the lens that would have won it had already won the
+  // immediately-preceding analysis turn of this scenario, and another lens's
+  // trigger was live. Payload: displaced_lens_id + chosen_lens_id +
+  // rationale_code (all closed enums) + graph_hash_at_generation — NO user text.
+  // Content-free; log-only (no Datadog mapping). This is the amendment's own
+  // observability: a ZERO rate against a non-zero
+  // `lens_suggestion_emitted` means the rule is never firing (either every turn
+  // has a single trigger, or the history input is not reaching the selector) —
+  // which is the broken-alarm question this event exists to make answerable.
+  V5LensNoRepeatDisplaced: "v5.capability.lens_no_repeat_displaced",
   // Wave-3 σ (ROADMAP 1.203) — the field-level claim-safety cage
   // (`isClaimUsable`/`composeCagedField`) evaluated whether a surface may claim
   // about a science-bearing enrichment field. Payload: field (name only),
