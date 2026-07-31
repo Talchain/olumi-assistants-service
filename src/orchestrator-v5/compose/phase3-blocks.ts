@@ -70,9 +70,11 @@ import {
   ReviewCardBlockSchema,
   CoachingBlockSchema,
   EvidenceBlockSchema,
+  ExerciseBlockSchema,
   type ActionIntentLiteral,
   type CoachingBlock,
   type EvidenceBlock,
+  type ExerciseBlock,
   type Phase3BlockSeverityLiteral,
   type ReviewCardBlock,
   type TargetRef,
@@ -84,7 +86,11 @@ import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.j
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
 import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
-import { selectLens, whatIfSuggestionExecutorAvailable } from './lens-selector.js';
+import {
+  selectLens,
+  whatIfSuggestionExecutorAvailable,
+  type LensSelection,
+} from './lens-selector.js';
 import { config } from '../../config/index.js';
 import {
   classifyClaimUsable,
@@ -1116,10 +1122,36 @@ export function deriveCompanionClaimSafe(fact: RunAnalysisHandlerFact, field: st
   return validate !== undefined && validate(enrichment[field]);
 }
 
+/**
+ * Capability layer P1 — the lens surface for one fact: the suggestion block
+ * that reached the wire AND the selection that produced it, together.
+ *
+ * WHY THE PAIR IS RETURNED RATHER THAN RE-DERIVED. The P1 companion block
+ * (`buildLensCompanionBlocks`) must accompany EXACTLY the lens the suggestion
+ * announced. Calling `selectLens` a second time at the companion site would be
+ * two derivations of one fact over inputs that a future refactor can let
+ * diverge — the same shape as the two `generateGraphHash` twins and the
+ * re-derived constraint verdict this funnel's own comment refuses (CLAUDE.md
+ * trap 12/16). One selection, threaded.
+ */
+export interface LensSurface {
+  /** The coaching block that SURVIVED the prose/schema gate. */
+  readonly suggestion: CoachingBlock;
+  /** The selection that produced it — the companion's only key. */
+  readonly selection: LensSelection;
+}
+
 export function buildLensSuggestionCoachingBlock(
   fact: RunAnalysisHandlerFact,
   ctx: BlockBuildCtx,
 ): CoachingBlock | null {
+  return buildLensSurface(fact, ctx)?.suggestion ?? null;
+}
+
+export function buildLensSurface(
+  fact: RunAnalysisHandlerFact,
+  ctx: BlockBuildCtx,
+): LensSurface | null {
   // Wave-3 λ (ROADMAP 1.203): inject the what-if lens's executor availability so
   // the selector never suggests a lens it cannot honestly run (design §2.6/2.7).
   // Availability = the ROADMAP 1.195 enable-gate (items 2/3/4, a fail-closed code
@@ -1183,6 +1215,214 @@ export function buildLensSuggestionCoachingBlock(
     rationale_code: selection.rationaleCode,
     graph_hash_at_generation: ctx.graph_hash_at_generation,
   });
+  return { suggestion: block, selection };
+}
+
+// ============================================================================
+// Capability layer P1 — structured lens COMPANION blocks (ROADMAP 1.183 P1).
+// ============================================================================
+
+/**
+ * The structured artefact that accompanies the P0 lens suggestion.
+ *
+ * P0 ships the lens as coach TEXT. P1 attaches, for the lens `selectLens`
+ * actually chose, the structured block the contract already carries and the UI
+ * already renders — so the user gets the decision-science artefact, not only a
+ * sentence about it.
+ *
+ * ── WHAT IS BUILT, AND — MORE IMPORTANTLY — WHAT IS NOT ─────────────────────
+ * Exactly ONE companion is buildable at this tip, and the other two are blocked
+ * by the claim-safety cage, not by effort. Recording the derivation here because
+ * the next reader's first instinct will be to "finish the set":
+ *
+ *   pre_mortem            → ExerciseBlock (built — see below). Carries NO
+ *                           numbers at all: pure producer prose that the
+ *                           pipeline already computes and today DISCARDS.
+ *
+ *   sensitivity_flip_risk → FlipAnalysisBlock: NOT BUILT. The block's payload is
+ *                           `flip_scenarios[].{current_value, flip_threshold}`,
+ *                           whose only real source is `enrichment.flip_thresholds`
+ *                           — a RATIFIED TIER-3 CLAIM-DENY key
+ *                           (claim-safety-cage.ts TIER3_LEAK_BLOCK_FIELDS, whose
+ *                           own header names this field as the canonical
+ *                           "transport-clean, claim-denied" case). Surfacing it
+ *                           is denied at the first fork of `classifyClaimUsable`,
+ *                           both locks notwithstanding. The residual — a block
+ *                           whose every numeric field is `null` — renders in the
+ *                           live UI as "Factor: — → —" (V5FlipAnalysisBlock's
+ *                           `formatValue` returns an em-dash for null). That is a
+ *                           card that reads as an analysis and contains none:
+ *                           the guarantee-theatre class this programme exists to
+ *                           refuse. Unblocking it is a Tier-3 ratification
+ *                           decision, not a builder.
+ *
+ *   evpi_evidence_priority→ ComparisonBlock: NOT BUILT. Its payload is
+ *                           `option_comparison[].win_probability`, and
+ *                           `option_comparison` is deliberately NOT in Lock 2
+ *                           (`TIER2_COACHING_ALLOWLIST`) — lens-selector.ts's
+ *                           `GROUNDING_FIELD_BY_RATIONALE` comment states the
+ *                           omission is intentional and serves as a live cage
+ *                           DENIAL control. Adding it is Brief 4 gate G2: a
+ *                           per-field decision with science sign-off, not a
+ *                           build-lane edit. (The EVPI lens's evidence is already
+ *                           surfaced first-class by the EvidenceBlocks.)
+ *
+ *   what_if_counterfactual→ nothing: the lens itself is fail-closed
+ *                           (WHATIF_SUGGESTION_GATE_CLEARED === false).
+ *
+ * ── WITHHELD-VERDICT DISCIPLINE ────────────────────────────────────────────
+ * Companions are appended by `rebuildPhase3BlocksFresh` on the PERMITTED arm
+ * only. That is not belt-and-braces, it is required: every lens suggestion is
+ * `coaching_kind: 'strengthen'`, which is in `LEADER_PRESUMING_COACHING_KINDS`,
+ * so on a withheld turn the suggestion itself is dropped. A companion surviving
+ * that drop would be an orphan structured artefact on precisely the turn the
+ * disclosure withholds — the R3-M2 shape. It also cannot be caught by the
+ * existing `presumesLeadingOption` predicate, which keys on
+ * `card_kind`/`coaching_kind`: an ExerciseBlock has neither, and
+ * comparison/flip_analysis are `.strict()` with no metadata at all, so no wire
+ * tag could ever carry the verdict. Placement inside the permitted branch is
+ * the only gate that cannot rot into a hand-kept type list (trap 12).
+ */
+export function buildLensCompanionBlocks(
+  fact: RunAnalysisHandlerFact,
+  ctx: BlockBuildCtx,
+  selection: LensSelection,
+  reviewCards: readonly ReviewCardBlock[],
+): readonly ExerciseBlock[] {
+  // Compile-exhaustive over `LensId`: a NEW lens fails the build here until it
+  // declares its companion (or declares that it has none). Fail-loud on drift,
+  // never a silent default.
+  switch (selection.lens) {
+    case 'pre_mortem': {
+      const block = buildPreMortemExerciseBlock(fact, ctx, reviewCards);
+      return block === null ? [] : [block];
+    }
+    case 'sensitivity_flip_risk':
+    case 'evpi_evidence_priority':
+    case 'what_if_counterfactual':
+      return [];
+    default: {
+      const exhaustive: never = selection.lens;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * The pre-mortem lens's structured form: an `ExerciseBlock`
+ * (`exercise_kind: 'pre_mortem'`) carrying the producer's `warning_signs`,
+ * `mitigation` and `review_trigger`.
+ *
+ * WHY THOSE THREE FIELDS AND NOT `failure_scenario`. The v11 producer emits
+ * `pre_mortem: { failure_scenario, warning_signs[], mitigation, grounded_in[],
+ * review_trigger? }`. `buildPreMortemCard` renders ONLY `failure_scenario`
+ * (as the "If things go wrong" review card body) and throws the other three
+ * away: an `rg` over `src/` (non-test) finds no producer of `warning_signs` /
+ * `mitigation` / `review_trigger` on any wire surface — the sole hits are
+ * `output-safety.ts`'s defensive scrub arms for a block kind nothing emitted.
+ * They are computed on every analysis and discarded. So this block is NEW
+ * content, not a second rendering of the card above it — and it fabricates
+ * nothing: every string is the producer's own, verbatim.
+ *
+ * WHY IT IS COUPLED TO THE SURVIVING REVIEW CARD. The same prose object is
+ * already governed by four independent drop rules inside `buildPreMortemCard`
+ * (lever-named, grounding lookup-miss, context-unanchored, prose guard/schema).
+ * Restating any of them here would be a second hand-kept copy of a safety rule
+ * — the dominant defect class. Instead this builder DERIVES its permission:
+ * the exercise ships only when the pre_mortem review card built from the same
+ * object survived, and it reuses that card's already-resolved `target_refs`.
+ * Every present and future rule the card gains is inherited for free; a rule
+ * that starts dropping the card automatically stops the exercise.
+ */
+function buildPreMortemExerciseBlock(
+  fact: RunAnalysisHandlerFact,
+  ctx: BlockBuildCtx,
+  reviewCards: readonly ReviewCardBlock[],
+): ExerciseBlock | null {
+  const card = reviewCards.find((c) => c.card_kind === 'pre_mortem');
+  if (card === undefined) return null;
+
+  const dr = readDecisionReview(fact);
+  if (dr === null) return null;
+  const pm = readRecord(dr.pre_mortem);
+  if (pm === null) return null;
+
+  const warningSigns = (Array.isArray(pm.warning_signs) ? pm.warning_signs : [])
+    .flatMap((raw) => {
+      if (typeof raw !== 'string') return [];
+      const trimmed = raw.trim();
+      return trimmed.length > 0 ? [truncate(trimmed, BODY_MAX)] : [];
+    });
+  const mitigation =
+    typeof pm.mitigation === 'string' && pm.mitigation.trim().length > 0
+      ? truncate(pm.mitigation.trim(), BODY_MAX)
+      : undefined;
+  const reviewTrigger =
+    typeof pm.review_trigger === 'string' && pm.review_trigger.trim().length > 0
+      ? truncate(pm.review_trigger.trim(), BODY_MAX)
+      : undefined;
+
+  // Fail closed on a content-less card. This is not defensive padding: the live
+  // UI adapter (`src/v5/phase3TypedBlocks.ts::adaptTypedExerciseBlock`) drops a
+  // schema-valid exercise carrying no producer prose, so a content-less block
+  // would ARRIVE and never render — the arrived-unrendered class, invisible from
+  // this side. Refuse to emit it here instead.
+  if (warningSigns.length === 0 && mitigation === undefined && reviewTrigger === undefined) {
+    emitDrop({
+      block_type: 'exercise',
+      kind: 'pre_mortem',
+      reason: 'no_producer_content',
+      field: 'warning_signs|mitigation|review_trigger',
+    });
+    return null;
+  }
+
+  // `warning_signs` is an ARRAY, and `validateProseAndSchemaOrDrop`'s
+  // terminology-rewrite patch is keyed by top-level field NAME — an indexed
+  // pseudo-name would write a bogus key onto a `.strict()` candidate. So the
+  // signs get the prose scan WITHOUT the rewrite fallback: any hit drops the
+  // whole block. Strictly more conservative than the scalar path, deliberately.
+  const signsHit = scanProse(
+    warningSigns.map((value, i) => ({ name: `warning_signs[${i}]`, value })),
+  );
+  if (signsHit !== null) {
+    emitDrop({
+      block_type: 'exercise',
+      kind: 'pre_mortem',
+      reason: `prose_guard_${signsHit.reason}`,
+      field: signsHit.field,
+      sample: signsHit.sample,
+    });
+    return null;
+  }
+
+  const candidate = {
+    ...commonMetadata('exercise:pre_mortem', '', ctx),
+    type: 'exercise' as const,
+    exercise_kind: 'pre_mortem' as const,
+    ...(warningSigns.length > 0 ? { warning_signs: warningSigns } : {}),
+    ...(mitigation !== undefined ? { mitigation } : {}),
+    ...(reviewTrigger !== undefined ? { review_trigger: reviewTrigger } : {}),
+    // Derived, not re-resolved: the card already turned `grounded_in` into
+    // canonical refs and DROPPED itself when that resolution failed.
+    target_refs: card.target_refs,
+  };
+
+  const block = validateProseAndSchemaOrDrop(ExerciseBlockSchema, candidate, {
+    block_type: 'exercise',
+    kind: 'pre_mortem',
+    prose: [
+      { name: 'mitigation', value: mitigation },
+      { name: 'review_trigger', value: reviewTrigger },
+    ],
+  });
+  // NOTE — no telemetry here, deliberately. Surviving this builder is NOT the
+  // same event as reaching the wire: the funnel drops every companion on the
+  // withheld arm AFTER this point. An "emitted" event fired here would report a
+  // block the user never saw, on exactly the turns that matter most — a broken
+  // alarm of the kind this estate has been bitten by. `V5LensCompanionEmitted`
+  // fires at the funnel, from the permitted branch, where the wire decision is
+  // actually made.
   return block;
 }
 

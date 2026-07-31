@@ -683,6 +683,19 @@ export const TelemetryEvents = {
   // text. Content-free; log-only (no Datadog mapping). Zero events means no
   // analysis in the window justified a lens (the may-recommend-nothing default).
   V5LensSuggestionEmitted: "v5.capability.lens_suggestion_emitted",
+  // Capability layer P1 (ROADMAP 1.183). Fires when the STRUCTURED companion
+  // block for the selected lens actually REACHES THE WIRE beside the P0
+  // suggestion. Fired from the compose funnel's PERMITTED branch, never from the
+  // builder: surviving construction is not the same event as reaching the wire,
+  // and a companion built and then dropped on the withheld arm must not be
+  // reported as emitted (the broken-alarm class). Payload: lens_id + block_type +
+  // exercise_kind (all closed enums) + graph_hash_at_generation — NO user text
+  // and no producer prose. Content-free; log-only (no Datadog mapping). It is
+  // strictly rarer than the suggestion event: a companion exists for one lens
+  // today, rides the PERMITTED claim arm only, and fails closed on content-less
+  // producer output — so suggestion-without-companion is the normal case, not a
+  // fault signal.
+  V5LensCompanionEmitted: "v5.capability.lens_companion_emitted",
   // Wave-3 σ (ROADMAP 1.203) — the field-level claim-safety cage
   // (`isClaimUsable`/`composeCagedField`) evaluated whether a surface may claim
   // about a science-bearing enrichment field. Payload: field (name only),
