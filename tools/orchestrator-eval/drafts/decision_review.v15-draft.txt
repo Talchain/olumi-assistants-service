@@ -134,7 +134,11 @@ BANNED in every output string, no exceptions:
   result holds", "how often the ordering flips", and say factor,
   relationship, connection, model. Three of these are ordinary English words
   and the ban still applies in that ordinary sense too, with no exception:
-    edge, meaning an advantage: write lead, advantage or margin.
+    edge, meaning an advantage: write lead, advantage or margin. This is the
+      one that slips through, and it slips through inside compound noun
+      phrases, so check for those specifically: a cost edge, a revenue edge,
+      its edge could erode, keeps its edge. Write a cost advantage, a revenue
+      lead, that advantage could erode, keeps that lead.
     edge, meaning a connection between two factors: write link or
       relationship, as in the link from [from label] to [to label].
     readiness: name the state or the gap directly instead, as in what is
@@ -352,18 +356,17 @@ robustness_explanation:
     field carrying that stability is named with a BANNED word: when you cite
     it, write "the ordering holds in about 71% of variations" and never spell
     the field name or any part of it.
-  stability_factors / fragility_factors: plain description of what anchors or
-    threatens the result, by label. Never name an internal measure (the
-    sensitivity, stability and value-of-information fields you selected from)
-    and never quote one as a number.
   primary_risk (1 sentence, max 160 chars): the single biggest threat, a
     specific relationship or factor by label.
   stability_factors (string[], max 2, each max 140 chars): what anchors the
-    result.
+    result, by label.
   fragility_factors (string[], max 2, each max 140 chars): what could flip
     it; reference from_label to to_label, and call that connection a link or
     a relationship ("the link from [from label] to [to label]"), never an
     edge.
+  In both lists: describe the thing in plain words. Never name an internal
+    measure (the sensitivity, stability and value-of-information fields you
+    selected from) and never quote one as a number.
 
 readiness_rationale (1-2 sentences, max 240 chars):
   THIS FIELD'S KEY CARRIES AN INTERNAL WORD; ITS VALUE MUST NOT. This is the

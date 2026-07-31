@@ -570,17 +570,27 @@ describe('promotion report — provenance is carried, never asserted', () => {
   });
 
   it('a required dim that went NOT_APPLICABLE is named as the reason it is', () => {
+    // ⚠ THE FIXTURE DIM IS `numbers_grounded`, NOT `tone_alignment`, AND THAT IS
+    // THE WHOLE TEST. The literal this dimension-naming replaced was
+    // `'required dimension unmeasured on response-only captures (tone_alignment)'`
+    // — it CONTAINED the word `tone_alignment` and the word `unmeasured`, so a
+    // version of this test that asserted on `tone_alignment` passed against the
+    // DEFECT it was written to catch. Trap 11 in miniature: a test that cannot
+    // fail is not a test, and the way it could not fail was that its fixture
+    // happened to name the one dimension the hardcoded string already mentioned.
+    // Any required dim OTHER than tone_alignment/no_dashes/no_internal_vocabulary
+    // works; this one is mutation-proven to RED against the old builder.
     const r = buildDecisionReviewPromotionReport(
       captureOf([
         { name: 'safety', status: 'pass' },
-        { name: 'tone_alignment', status: 'not_applicable' },
+        { name: 'numbers_grounded', status: 'not_applicable' },
       ]),
       OPTS_BASE,
     );
     const blob = (((r.evidence as Record<string, unknown>).block_reasons ?? []) as string[]).join(' | ');
     expect(r.verdict).toBe('BLOCK');
-    expect(blob).toContain('tone_alignment');
-    expect(blob).toMatch(/unmeasured|not_applicable/i);
+    expect(blob).toContain('numbers_grounded');
+    expect(blob).toMatch(/not measured|unmeasured|not_applicable/i);
   });
 
   it('a clean PASS carries NO block reasons at all', () => {
