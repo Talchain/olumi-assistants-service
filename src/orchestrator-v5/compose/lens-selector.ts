@@ -22,6 +22,40 @@
  *   2. pre-mortem (review-path form)
  *   3. EVPI-ranked evidence priority
  *
+ * ── AMENDMENT, 2026-07-31 (ROADMAP 2.211): NO IMMEDIATE REPEAT ──────────────
+ * The ORDER above is NOT changed and is not up for change here. What is added
+ * is a tie-break on CONSECUTIVE analysis turns: when the lens that would win
+ * the slot is the SAME lens that won it on the immediately-preceding analysis
+ * turn of this scenario, AND at least one other lens's trigger is currently
+ * true with an available executor, the NEXT-PRIORITY triggered lens takes the
+ * slot instead. When only one lens triggers, REPEATING IS CORRECT and the
+ * repeat stands — and `may-recommend-nothing` is untouched in both directions
+ * (no repeat ever manufactures a lens, and no repeat ever suppresses one).
+ *
+ * EVIDENCE: `PHASE0-EVIDENCE-2026-07-28/probe-premortem-live.md` — a live walk
+ * over 7 completed analysis turns on deployed staging measured
+ * `sensitivity_flip_risk` winning the slot on 6 of 6 turns where the lens was
+ * recorded (100%), and on 5 of those 6 the pre-mortem lens's OWN trigger was
+ * simultaneously true and discarded. The reason is structural, not luck: rule
+ * 2's most reachable door is a finely-balanced result (`WIN_PROB_MODERATE`),
+ * and a finely-balanced result is precisely what produces the fragile edges
+ * that make rule 1a fire — so the ladder is self-defeating for lens #2 and the
+ * capability layer's first ship was invisible at an emission rate of 0/7.
+ *
+ * WHY THIS IS INSIDE THE LOCKED DOCTRINE, NOT AGAINST IT: item 5 says "most
+ * USEFUL available lens". A lens the user was shown seconds ago has diminishing
+ * usefulness; on consecutive turns, diversity IS usefulness. The rule therefore
+ * refines what "most useful" means over time rather than re-ranking the lenses.
+ *
+ * PURITY IS PRESERVED. The selector gains exactly ONE input —
+ * {@link LensSelectorOptions.previousAnalysisLens} — and stays a pure function
+ * of (fact, options). It performs no read of its own; the caller derives the
+ * previous lens from state the pipeline already holds (see
+ * `compose/lens-history.ts`, which REPLAYS this same function over the prior
+ * `run_analysis` facts rather than persisting a new "last lens" column — a
+ * stored copy would be a hand-maintained mirror of a pure derivation, the
+ * dominant defect class in this estate).
+ *
  * P0 honesty note: every lens here points at an action that EXECUTES on the
  * live path today (sensitivity → `what_would_flip`; pre-mortem → the
  * review-path pre_mortem card; evidence priority → `gather_evidence`). The
@@ -122,6 +156,19 @@ export interface LensSelection {
    * v1 highlight (the safe floor). NOT a wire field — see {@link LensSubjectRef}.
    */
   readonly subjectRef?: LensSubjectRef;
+  /**
+   * ROADMAP 2.211 — set ONLY when the no-immediate-repeat rule displaced the
+   * lens that would otherwise have won the slot. Carries the DISPLACED lens so
+   * the emitter can log the (displaced, chosen) pair; absent on every turn
+   * where the head lens won normally. CEE-INTERNAL: never a wire field.
+   *
+   * It lives on the SELECTION rather than being emitted from inside
+   * `selectLens` on purpose — the selector is a pure function and must stay
+   * one. The observable event is fired by the caller that actually places the
+   * block (`buildLensSurface`), which is also the only place that knows the
+   * graph hash to stamp on it.
+   */
+  readonly displacedLens?: LensId;
 }
 
 // ============================================================================
@@ -209,6 +256,24 @@ export interface LensSelectorOptions {
    * lens is not suggested (fail-closed).
    */
   readonly executorAvailable?: Partial<Record<LensId, boolean>>;
+  /**
+   * ROADMAP 2.211 (the no-immediate-repeat amendment — see the module header).
+   * The lens that won the slot on the IMMEDIATELY-PRECEDING analysis turn of
+   * this scenario, or `null` / omitted when there was no preceding analysis
+   * turn (a first run, or one that recommended nothing, or one that has aged
+   * out of the caller's fact window).
+   *
+   * "Analysis TURN", not "turn": the unit is a `run_analysis` fact. A
+   * non-analysis turn that re-presents an earlier analysis through the
+   * prior-fact lifecycle branch re-shows that analysis's own lens and does NOT
+   * count as a preceding analysis turn — see `compose.ts`, which passes this
+   * only on the current-turn fresh branch.
+   *
+   * Omitted / `null` ⇒ byte-identical to the pre-amendment selection. This is
+   * the fail-safe direction: an unavailable history can only cost diversity,
+   * never manufacture or suppress a lens.
+   */
+  readonly previousAnalysisLens?: LensId | null;
 }
 
 function isLensExecutorAvailable(lens: LensId, options?: LensSelectorOptions): boolean {
@@ -504,7 +569,11 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   WHATIF_EXPLORE_DRIVER: 'option_comparison',
 };
 
-function buildSelection(lens: LensId, hit: EvaluatorHit): LensSelection {
+function buildSelection(
+  lens: LensId,
+  hit: EvaluatorHit,
+  displacedLens?: LensId,
+): LensSelection {
   return {
     lens,
     rationaleCode: hit.code,
@@ -517,6 +586,10 @@ function buildSelection(lens: LensId, hit: EvaluatorHit): LensSelection {
     ...(hit.subjectFactorId !== null
       ? { subjectRef: { id: hit.subjectFactorId, kind: 'factor' as const } }
       : {}),
+    // ROADMAP 2.211: present ONLY on a displacement, so the absence of the key
+    // is itself the "the head lens won normally" assertion (and `toStrictEqual`
+    // against a pre-amendment selection stays exact).
+    ...(displacedLens !== undefined ? { displacedLens } : {}),
   };
 }
 
@@ -558,26 +631,43 @@ export function selectLens(
   const signals = readAnalysisSignals(fact);
   if (signals === null) return null;
 
-  const sensitivity = evaluateSensitivityFlipRisk(signals);
-  if (sensitivity !== null && isLensExecutorAvailable('sensitivity_flip_risk', options)) {
-    return buildSelection('sensitivity_flip_risk', sensitivity);
-  }
-
-  const preMortem = evaluatePreMortem(signals);
-  if (preMortem !== null && isLensExecutorAvailable('pre_mortem', options)) {
-    return buildSelection('pre_mortem', preMortem);
-  }
-
-  const evpi = evaluateEvpiEvidencePriority(signals);
-  if (evpi !== null && isLensExecutorAvailable('evpi_evidence_priority', options)) {
-    return buildSelection('evpi_evidence_priority', evpi);
-  }
-
-  const whatIf = evaluateWhatIfCounterfactual(signals);
-  if (whatIf !== null && isLensExecutorAvailable('what_if_counterfactual', options)) {
-    return buildSelection('what_if_counterfactual', whatIf);
+  // THE PRIORITY LADDER, unchanged and still the only ordering in this file.
+  // Materialised as a list rather than four sequential early-returns purely so
+  // the 2.211 tie-break can ask "is there a NEXT one?" — the ladder's ORDER and
+  // its per-lens executor gate are byte-identical to the early-return form, and
+  // an empty list still means "recommend nothing".
+  const ladder: readonly (readonly [LensId, EvaluatorHit | null])[] = [
+    ['sensitivity_flip_risk', evaluateSensitivityFlipRisk(signals)],
+    ['pre_mortem', evaluatePreMortem(signals)],
+    ['evpi_evidence_priority', evaluateEvpiEvidencePriority(signals)],
+    ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
+  ];
+  const eligible: { lens: LensId; hit: EvaluatorHit }[] = [];
+  for (const [lens, hit] of ladder) {
+    if (hit !== null && isLensExecutorAvailable(lens, options)) eligible.push({ lens, hit });
   }
 
   // Load-bearing negative: no lens whose evidence fired has an available executor.
-  return null;
+  const head = eligible[0];
+  if (head === undefined) return null;
+
+  // ROADMAP 2.211 — NO IMMEDIATE REPEAT. Two conditions, both required:
+  //   (1) the head lens is the SAME lens the immediately-preceding analysis turn
+  //       of this scenario selected, and
+  //   (2) a NEXT lens exists that ALSO fired and ALSO has an available executor.
+  // Condition (2) is what makes a single-trigger repeat correct rather than a
+  // suppression: with nothing to move to, the head stands. The replacement is
+  // taken from the SAME ladder in the SAME order, so this is a tie-break within
+  // the locked priority, never a re-ranking of it. `next` is never equal to
+  // `head` (each lens appears once), so one displacement cannot cascade.
+  const runnerUp = eligible[1];
+  if (
+    options?.previousAnalysisLens != null &&
+    options.previousAnalysisLens === head.lens &&
+    runnerUp !== undefined
+  ) {
+    return buildSelection(runnerUp.lens, runnerUp.hit, head.lens);
+  }
+
+  return buildSelection(head.lens, head.hit);
 }

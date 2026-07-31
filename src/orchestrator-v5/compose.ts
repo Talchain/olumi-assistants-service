@@ -27,9 +27,16 @@ import {
   buildLensSurface,
   buildReviewCardBlocks,
   buildStaleRerunCoachingBlock,
+  liveLensExecutorAvailability,
   type BlockBuildCtx,
   type GraphNodeLookup,
 } from './compose/phase3-blocks.js';
+// ROADMAP 2.211 — the no-immediate-repeat tie-break's single input, RE-DERIVED
+// from the prior run_analysis facts rather than stored (see lens-history.ts for
+// why a persisted "last lens" would be a hand-maintained mirror of a pure
+// derivation).
+import { derivePreviousAnalysisLens } from './compose/lens-history.js';
+import type { LensId } from './compose/lens-selector.js';
 // T1 claim safety — the SINGLE owner of "may a leading option be named" is
 // `deriveConstraintVerdict`, called ONCE in the run_analysis handler and
 // persisted on the fact there. This funnel READS that verdict; it does not
@@ -242,6 +249,27 @@ export interface ComposeToolCallInput {
    * derived against the same persisted graph. No hashing happens here.
    */
   readonly persistedGraphHash?: string | null;
+  /**
+   * ROADMAP 2.211 — the turn's PRIOR handler facts, used for ONE thing: deriving
+   * which lens the immediately-preceding ANALYSIS turn of this scenario selected,
+   * so the no-immediate-repeat tie-break has its single input
+   * (`compose/lens-history.ts`). Already loaded by `buildTurnContext`
+   * (`EnrichedTurnContext.prior_facts`) — no new DB read, no new persisted state.
+   *
+   * ⚠ THIS IS NOT `lifecycle.priorFacts`, AND THE DIFFERENCE IS LOAD-BEARING.
+   * `lifecycle.priorFacts` is the UNIFIED array
+   * `[...handlerFactsForCommit, ...context.prior_facts]` (see the turn-executor
+   * call site, which passes it deliberately so `selected_fact_index` has a
+   * consistent basis). On an analysis turn that array BEGINS with this turn's own
+   * run_analysis fact, so deriving the "previous" lens from it would return the
+   * CURRENT turn's lens and mark every single turn as a repeat. The two arrays
+   * are identical at the type level and one call site apart, which is why they
+   * are separate fields rather than one reused one.
+   *
+   * Omitted ⇒ no history ⇒ byte-identical to the pre-amendment selection. Fail
+   * safe: an unthreaded call site loses lens diversity, never correctness.
+   */
+  readonly priorTurnFactsForLensHistory?: readonly HandlerFact[];
 }
 
 export function composeToolCallResponse(input: ComposeToolCallInput): OlumiResponse {
@@ -257,6 +285,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.lifecycle,
     input.persistedGraph,
     input.persistedGraphHash,
+    input.priorTurnFactsForLensHistory,
   );
 
   return {
@@ -316,10 +345,29 @@ function buildBlocksFromFacts(
   lifecycle?: ComposeToolCallInput['lifecycle'],
   persistedGraph?: unknown,
   persistedGraphHash?: string | null,
+  priorTurnFactsForLensHistory?: readonly HandlerFact[],
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
   let uiDirectiveEmitted = false;
+
+  // ROADMAP 2.211 — the no-immediate-repeat tie-break's ONE input, derived ONCE
+  // per turn and shared by BOTH `selectLens` call sites below (the lens block and
+  // the `focus` ui_directive). One derivation, two read points — never two
+  // derivations of one fact (CLAUDE.md trap 12/16).
+  //
+  // Scope: the CURRENT-TURN fresh branch only. The prior-fact lifecycle branch
+  // RE-PRESENTS an analysis the user has already been shown; its lens must stay
+  // the lens that analysis chose, so applying a "don't repeat" rule there would
+  // make one analysis show two different lenses on two turns. That branch is
+  // reached from `buildLifecycleBlocksFromPrior`, which passes nothing.
+  const previousAnalysisLens =
+    priorTurnFactsForLensHistory === undefined
+      ? null
+      : derivePreviousAnalysisLens(
+          priorTurnFactsForLensHistory,
+          liveLensExecutorAvailability(),
+        );
 
   // At most ONE ui_directive per turn (N=1 latch). Owns the latch + push + set so
   // the emit protocol lives in one place (simplification F4, 2026-07-24) rather
@@ -331,7 +379,7 @@ function buildBlocksFromFacts(
     fresh: OlumiResponse['blocks'],
   ): void => {
     if (uiDirectiveEmitted) return;
-    const directive = buildFocusInspectorDirective(fact, lookup, fresh);
+    const directive = buildFocusInspectorDirective(fact, lookup, fresh, previousAnalysisLens);
     if (directive !== null) {
       blocks.push(directive);
       uiDirectiveEmitted = true;
@@ -369,6 +417,7 @@ function buildBlocksFromFacts(
           lookup,
           'fresh',
           fallbackForFact,
+          previousAnalysisLens,
         );
         blocks.push(...freshBlocks);
 
@@ -897,6 +946,13 @@ function rebuildPhase3BlocksFresh(
   lookup: GraphNodeLookup,
   freshness: 'fresh' | 'stale' = 'fresh',
   rawPersistedGraphForLevers?: unknown,
+  /**
+   * ROADMAP 2.211 — the lens selected by the immediately-preceding ANALYSIS turn
+   * of this scenario, for the no-immediate-repeat tie-break. Passed by the
+   * current-turn branch only; the prior-fact lifecycle branch omits it (see the
+   * derivation comment in `buildBlocksFromFacts`).
+   */
+  previousAnalysisLens?: LensId | null,
 ): OlumiResponse['blocks'] {
   const ctx: BlockBuildCtx = {
     created_at: new Date().toISOString(),
@@ -924,7 +980,7 @@ function rebuildPhase3BlocksFresh(
   // analysis (only ever fires on a fresh verdict — the stale branch returns
   // before reaching this helper, so a lens is never suggested off stale signals).
   // `selectLens` returns at most one, and null when nothing is justified.
-  const lensSurface = buildLensSurface(fact, ctx);
+  const lensSurface = buildLensSurface(fact, ctx, previousAnalysisLens);
   const reviewCards = buildReviewCardBlocks(
     fact,
     lookup,

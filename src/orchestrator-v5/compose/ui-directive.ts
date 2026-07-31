@@ -42,10 +42,13 @@ import {
 } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import type { GraphNodeLookup, GraphNodeRef } from './phase3-blocks.js';
-import { selectLens, whatIfSuggestionExecutorAvailable } from './lens-selector.js';
+import {
+  liveLensExecutorAvailability,
+  type GraphNodeLookup,
+  type GraphNodeRef,
+} from './phase3-blocks.js';
+import { selectLens, type LensId } from './lens-selector.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
-import { config } from '../../config/index.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 
 /**
@@ -166,16 +169,23 @@ function buildRunAnalysisDirective(
   fact: RunAnalysisHandlerFact,
   lookup: GraphNodeLookup,
   freshBlocks: OlumiResponse['blocks'],
+  previousAnalysisLens?: LensId | null,
 ): UiDirectiveBlock | null {
   if (fact.noop) return suppressDirective('run_analysis', 'noop');
 
   // Row 2 — the lens focus supersedes the winner highlight (D-53-1), gated on the
   // lens block's σ/prose survival AND a resolvable subject id.
   if (hasSurvivingLensBlock(freshBlocks)) {
+    // ⚠ ROADMAP 2.211 — THIS IS THE SECOND `selectLens` DERIVATION OF ONE TURN,
+    // and it MUST be handed the same `previousAnalysisLens` the block builder
+    // got. Without it the tie-break applies at one call site and not the other:
+    // the card would announce the pre-mortem lens while this directive told the
+    // canvas to focus the flip-risk lens's factor — two derivations of one fact
+    // disagreeing on one screen (CLAUDE.md trap 12/16). The executor injection
+    // is shared for the same reason (`liveLensExecutorAvailability`).
     const selection = selectLens(fact, {
-      executorAvailable: {
-        what_if_counterfactual: whatIfSuggestionExecutorAvailable(Boolean(config.isl.baseUrl)),
-      },
+      ...liveLensExecutorAvailability(),
+      previousAnalysisLens: previousAnalysisLens ?? null,
     });
     const subjectRef = selection?.subjectRef;
     if (subjectRef !== undefined) {
@@ -279,10 +289,11 @@ export function buildFocusInspectorDirective(
   fact: HandlerFact,
   lookup: GraphNodeLookup,
   freshBlocks: OlumiResponse['blocks'],
+  previousAnalysisLens?: LensId | null,
 ): UiDirectiveBlock | null {
   switch (fact.fact_type) {
     case 'run_analysis':
-      return buildRunAnalysisDirective(fact, lookup, freshBlocks);
+      return buildRunAnalysisDirective(fact, lookup, freshBlocks, previousAnalysisLens);
     case 'set_factor_value':
     case 'adjust_edge_strength':
       return buildMutationInspectorDirective(fact, lookup);

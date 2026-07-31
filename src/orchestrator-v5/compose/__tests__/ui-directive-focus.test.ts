@@ -229,7 +229,7 @@ describe('δ2 §Q3 — a directive fires only if the accompanying lens block sur
   const fact = dominantFact() as RunAnalysisHandlerFact;
   const lookup = buildGraphNodeLookup(fact);
   const ctx: BlockBuildCtx = { created_at: '2026-07-23T00:00:00.000Z', graph_hash_at_generation: GRAPH_HASH };
-  const lensBlock = buildLensSuggestionCoachingBlock(fact, ctx)!;
+  const lensBlock = buildLensSuggestionCoachingBlock(fact, ctx, null)!;
 
   it('POSITIVE CONTROL: lens block PRESENT in freshBlocks → focus @ the subject', () => {
     const dir = buildFocusInspectorDirective(fact, lookup, [lensBlock]);

@@ -89,7 +89,9 @@ import { deterministicBlockId } from './block-id.js';
 import {
   selectLens,
   whatIfSuggestionExecutorAvailable,
+  type LensId,
   type LensSelection,
+  type LensSelectorOptions,
 } from './lens-selector.js';
 import { config } from '../../config/index.js';
 import {
@@ -1169,28 +1171,63 @@ export interface LensSurface {
   readonly selection: LensSelection;
 }
 
+/**
+ * ⚠ TEST-ONLY as of ROADMAP 2.211. Complete caller manifest at this tip
+ * (`rg -a` over the whole repo excluding `node_modules`): this definition, one
+ * prose mention in `lens-selector.ts`, and three spec files
+ * (`lens-suggestion-block`, `claim-cage-wiring`, `ui-directive-focus`).
+ * **Zero production callers.** The live path goes through
+ * {@link buildLensSurface}, which `compose.ts` calls with the turn's lens
+ * history.
+ *
+ * `previousAnalysisLens` is REQUIRED rather than optional on purpose. This
+ * function is a second, live-LOOKING door into lens selection, and an optional
+ * parameter is exactly how a future caller wires one up while silently
+ * defaulting the history away — shipping a lens that ignores the
+ * no-immediate-repeat rule with nothing going red. Required, the compiler makes
+ * that a decision: pass the turn's history, or pass `null` and mean it.
+ */
 export function buildLensSuggestionCoachingBlock(
   fact: RunAnalysisHandlerFact,
   ctx: BlockBuildCtx,
+  previousAnalysisLens: LensId | null,
 ): CoachingBlock | null {
-  return buildLensSurface(fact, ctx)?.suggestion ?? null;
+  return buildLensSurface(fact, ctx, previousAnalysisLens)?.suggestion ?? null;
+}
+
+/**
+ * Wave-3 λ (ROADMAP 1.203): the what-if lens's executor availability —
+ * the ROADMAP 1.195 enable-gate (items 2/3/4, a fail-closed code constant,
+ * currently CLOSED) AND the ISL transport being configured (item 1:
+ * `config.isl.baseUrl` set ≡ `createCounterfactualClient() !== null`). While the
+ * gate ships closed this is always `false` regardless of transport, so the
+ * proactive what-if suggestion CANNOT fire.
+ *
+ * EXPORTED and shared (ROADMAP 2.211) because there are now THREE `selectLens`
+ * call sites for one turn — the suggestion block, the `focus` ui_directive, and
+ * the prior-lens replay — and they must be handed the SAME availability. Three
+ * copies of this literal is the two-derivations-of-one-fact shape the funnel's
+ * own comments refuse (CLAUDE.md trap 12/16); the env read still happens at the
+ * compose layer, keeping `lens-selector.ts` env-free.
+ */
+export function liveLensExecutorAvailability(): LensSelectorOptions {
+  return {
+    executorAvailable: {
+      what_if_counterfactual: whatIfSuggestionExecutorAvailable(Boolean(config.isl.baseUrl)),
+    },
+  };
 }
 
 export function buildLensSurface(
   fact: RunAnalysisHandlerFact,
   ctx: BlockBuildCtx,
+  previousAnalysisLens?: LensId | null,
 ): LensSurface | null {
-  // Wave-3 λ (ROADMAP 1.203): inject the what-if lens's executor availability so
-  // the selector never suggests a lens it cannot honestly run (design §2.6/2.7).
-  // Availability = the ROADMAP 1.195 enable-gate (items 2/3/4, a fail-closed code
-  // constant, currently CLOSED) AND the ISL transport being configured (item 1:
-  // `config.isl.baseUrl` set ≡ `createCounterfactualClient() !== null`). While the
-  // gate ships closed, this is always `false` regardless of transport, so the
-  // proactive what-if suggestion CANNOT fire.
   const selection = selectLens(fact, {
-    executorAvailable: {
-      what_if_counterfactual: whatIfSuggestionExecutorAvailable(Boolean(config.isl.baseUrl)),
-    },
+    ...liveLensExecutorAvailability(),
+    // ROADMAP 2.211 — the no-immediate-repeat tie-break's ONE input. Omitted /
+    // null ⇒ byte-identical to the pre-amendment selection.
+    previousAnalysisLens: previousAnalysisLens ?? null,
   });
   if (selection === null) return null;
 
@@ -1260,6 +1297,23 @@ export function buildLensSurface(
     rationale_code: selection.rationaleCode,
     graph_hash_at_generation: ctx.graph_hash_at_generation,
   });
+
+  // ROADMAP 2.211 — the displaced/chosen PAIR, emitted only when the
+  // no-immediate-repeat tie-break actually moved the slot. Fired here rather
+  // than inside `selectLens` so the selector stays a pure function, and AFTER
+  // the prose/schema gate so it counts displacements that produced a real block
+  // rather than displacements that were then discarded. It carries the same
+  // known construction-vs-wire skew as the suggestion event above (both fire
+  // before the withheld-arm filter) — sized identically, so the RATIO of
+  // displaced to suggested is unaffected by it.
+  if (selection.displacedLens !== undefined) {
+    emit(TelemetryEvents.V5LensNoRepeatDisplaced, {
+      displaced_lens_id: selection.displacedLens,
+      chosen_lens_id: selection.lens,
+      rationale_code: selection.rationaleCode,
+      graph_hash_at_generation: ctx.graph_hash_at_generation,
+    });
+  }
   return { suggestion: block, selection };
 }
 

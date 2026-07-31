@@ -823,6 +823,13 @@ export async function dispatchChipClickRunAnalysis(
       // registry test path fall back to the turn context's persisted graph.
       persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
       persistedGraphHash: composedRunFactGraphHash,
+      // ROADMAP 2.211 — the PRIOR fact array (this turn's `enrichedFacts`
+      // EXCLUDED), for the no-immediate-repeat lens tie-break. This path is the
+      // one the live walk exercised (the "Run analysis" chip) and it passes no
+      // `lifecycle` at all, so without this line the amendment would be dead on
+      // exactly the journey it was measured against. Already loaded for the turn
+      // — no extra DB read.
+      priorTurnFactsForLensHistory: context.prior_facts,
     });
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.
