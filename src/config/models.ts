@@ -20,7 +20,30 @@ export interface ModelConfig {
   enabled: boolean;
   /** Maximum tokens for responses */
   maxTokens: number;
-  /** Cost per 1K tokens (for monitoring/alerting) */
+  /**
+   * ⚠ DISCLOSED CORRECTION (2026-07-31) — **THIS FIELD IS MIS-NAMED AND
+   * INCOMPLETE. Do not use it for a cost figure without fixing it first.**
+   *
+   * The name says per-1K tokens; every value in MODEL_REGISTRY is in fact the
+   * provider's per-MILLION INPUT price (e.g. `gpt-4o-mini: 0.15` is $0.15 per
+   * 1M input tokens, not per 1K — a 1000× error if read literally; `gpt-4o:
+   * 2.5` = $2.50/1M; `gpt-4.1-2025-04-14: 2.0` = $2.00/1M). There is also NO
+   * output price anywhere in the registry, and output is the more expensive
+   * side, so even a corrected unit could not produce a true call cost.
+   *
+   * Left in place rather than renamed because the blast radius is provably
+   * ZERO: the field has NO READERS. Scope of that absence claim — `rg -a -n
+   * 'costPer1kTokens'` over `src/` and `tools/` at staging tip 23922368
+   * returns 3 hits: this declaration and two lines of the MAINTENANCE NOTE
+   * below, plus the literal values inside MODEL_REGISTRY itself. Nothing
+   * computes with it, logs it, or bills on it (CLAUDE.md trap 10 — a
+   * write-only field cannot poison anything downstream).
+   *
+   * The honest repair is a rename to `inputCostPerMillionTokens` plus an
+   * `outputCostPerMillionTokens` sibling, re-derived from live provider
+   * pricing. ROWED, not done here: it touches every registry entry and would
+   * bury three unrelated fixes in a 40-row diff.
+   */
   costPer1kTokens: number;
   /** Expected average latency in milliseconds */
   averageLatencyMs: number;
@@ -469,16 +492,76 @@ export function validateModelRegistered(
 
 /**
  * Boot fail-loud registry drift guard for a BATCH of default model assignments.
- * The server derives the batch from the real sources — every TASK_MODEL_DEFAULTS
- * value plus the two router-bypass defaults (rolling-summary, decision-review
- * decompose) — so a new default with a bad/retired/disabled id trips the guard
- * at boot instead of drifting silently (the estate's dominant defect class,
- * CLAUDE.md trap-12). Returns the concatenated fail-loud errors (empty = clean).
+ * The server derives the batch from the real sources (see
+ * {@link buildModelRegistryCheckBatch}) so a bad/retired/disabled id trips the
+ * guard at boot instead of drifting silently (the estate's dominant defect
+ * class, CLAUDE.md trap-12). Returns the concatenated fail-loud errors
+ * (empty = clean).
  */
 export function validateModelsRegistered(
   entries: ReadonlyArray<{ readonly label: string; readonly modelId: string | null | undefined }>,
 ): string[] {
   return entries.flatMap((entry) => validateModelRegistered(entry.label, entry.modelId));
+}
+
+/** One labelled model id awaiting the boot registry check. */
+export interface ModelRegistryCheckEntry {
+  readonly label: string;
+  readonly modelId: string | null | undefined;
+}
+
+/**
+ * Assemble the boot registry drift guard's batch — DERIVED, never hand-listed.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * Why this exists (assessment-models-prompts.md §1.5, 2026-07-31)
+ * ─────────────────────────────────────────────────────────────────
+ * The guard used to check `draft_graph` EFFECTIVE + every CHECKED-IN
+ * `TASK_MODEL_DEFAULTS` value. But env overrides WIN over checked-in defaults
+ * (router precedence step 3 > step 4, `adapters/llm/router.ts`), so the model
+ * ids that actually SERVE were exactly the ones the guard never saw. Three live
+ * tasks were running on the bare, UNREGISTERED alias `gpt-4.1`
+ * (`CEE_MODEL_DECISION_REVIEW` / `_REPAIR` / `_EXTRACTION`) — a floating alias
+ * OpenAI can repoint at any time — and nothing in the estate said so out loud.
+ *
+ * Coverage argument, stated exactly rather than implied: the EFFECTIVE model
+ * for a task is `env ?? checked-in default`. This batch carries EVERY env value
+ * AND EVERY checked-in default, so it is a SUPERSET of the effective set. It
+ * cannot miss an effective id — including for `extraction`, which is not a
+ * `CeeTask` at all and has no checked-in default (its only consumer reads
+ * `config.cee.models.extraction` directly, `adapters/llm/extraction.ts:65`).
+ *
+ * DERIVE-DON'T-MIRROR (CLAUDE.md trap 12): `envModels` is walked as a RECORD,
+ * not as a hand-written task list, so a `CEE_MODEL_*` key added to the config
+ * schema tomorrow is validated without anyone remembering to edit this file.
+ *
+ * Unset / empty / whitespace env values are SKIPPED, not reported: an unset
+ * `CEE_MODEL_*` is the normal posture (the task lands on its checked-in
+ * default, which is validated separately). Reporting it would make the guard
+ * cry wolf, and an alarm everyone learns to ignore is a broken alarm
+ * (CLAUDE.md trap 7).
+ */
+export function buildModelRegistryCheckBatch(
+  taskDefaults: Readonly<Record<string, string>>,
+  envModels: Readonly<Record<string, string | undefined>>,
+  extra: ReadonlyArray<ModelRegistryCheckEntry> = [],
+): ModelRegistryCheckEntry[] {
+  return [
+    // Every checked-in task default (the mirrors most likely to drift).
+    ...Object.entries(taskDefaults).map(([task, modelId]) => ({
+      label: `task_default:${task}`,
+      modelId,
+    })),
+    // Every operator-supplied CEE_MODEL_* value — the EFFECTIVE ids.
+    ...Object.entries(envModels)
+      .filter(
+        (pair): pair is [string, string] =>
+          typeof pair[1] === 'string' && pair[1].trim().length > 0,
+      )
+      .map(([key, modelId]) => ({ label: `env_model:${key}`, modelId })),
+    // Router-bypass defaults the caller resolves itself.
+    ...extra,
+  ];
 }
 
 /**
