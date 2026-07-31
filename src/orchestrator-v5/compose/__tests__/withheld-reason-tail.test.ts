@@ -17,7 +17,14 @@
 import { describe, it, expect } from 'vitest';
 
 import { composeWithheldReasonTail } from '../withheld-reason-tail.js';
-import { projectExplanationAnswerForWithheldClaim } from '../withheld-explanation-answer.js';
+import {
+  projectExplanationAnswerForWithheldClaim,
+  // ROADMAP 2.149: assert against the CONSTANT, never a literal copy of it. The
+  // tail was reworded (the 'on this result' deixis presupposed a result on the
+  // three provenances that withhold precisely because none is proven) and a
+  // literal here would have gone stale silently — CLAUDE.md trap #12.
+  WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL,
+} from '../withheld-explanation-answer.js';
 import {
   textNamesLeadingOption,
   findLeaderClaims,
@@ -355,7 +362,7 @@ describe('the FRESHNESS SPLIT — the two branches must not be gated together', 
     expect(stale.text).not.toContain('comes out ahead');
     // Cause-free: it must NOT name a condition it cannot vouch for on this graph.
     expect(stale.text).not.toContain('“Three-Year Total Cost of Ownership”');
-    expect(stale.text).toContain('No single option can be put forward on this result yet');
+    expect(stale.text).toContain(WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL.trim());
 
     // POSITIVE CONTROL — the same input on a FRESH run does name it, so the
     // absence above is the freshness gate and not a broken fixture.

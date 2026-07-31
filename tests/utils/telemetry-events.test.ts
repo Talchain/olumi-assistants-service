@@ -620,6 +620,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
         V5WithheldExplanationAnswerProjected: "v5.explanation.withheld_answer_projected",
         V5WithheldLeaderClaimNeutralisedAtFinalise: "v5.egress.leading_option_claim_neutralised_at_finalise",
+        // ROADMAP 2.149 — the third member of the family. Covers the eighteen
+        // `sendFinalised200` exits that return BEFORE `runTurnExecutor` and so
+        // never reach the finalise guard above.
+        V5WithheldLeaderClaimNeutralisedAtWire: "v5.egress.leading_option_claim_neutralised_at_wire",
         V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
         V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
@@ -949,6 +953,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.egress.leading_option_claim_withheld_violated": [TelemetryEvents.V5LeadingOptionClaimAtEgress],
         "v5.egress.leading_option_claim_neutralised_at_finalise": [
           TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise,
+        ],
+        "v5.egress.leading_option_claim_neutralised_at_wire": [
+          TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
         ],
         "v5.explanation.withheld_answer_projected": [TelemetryEvents.V5WithheldExplanationAnswerProjected],
 
@@ -2069,6 +2076,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // observes and changes nothing; this one is emitted by the third
         // `finalizeRun` guard when the claim was actually replaced.
         "v5.egress.leading_option_claim_neutralised_at_finalise",
+        // ROADMAP 2.149 — the ROUTE-SEAM sibling. Same subject and namespace
+        // again; the population is the eighteen `sendFinalised200` exits that
+        // structurally cannot reach `finalizeRun`.
+        "v5.egress.leading_option_claim_neutralised_at_wire",
         "v5.explanation.withheld_answer_projected",
         "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).

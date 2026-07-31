@@ -855,6 +855,39 @@ export const TelemetryEvents = {
   // original_length, projected_length, dispatch_path }.
   V5WithheldLeaderClaimNeutralisedAtFinalise:
     "v5.egress.leading_option_claim_neutralised_at_finalise",
+  // V5WithheldLeaderClaimNeutralisedAtWire — THE ROUTE-SEAM GATE (ROADMAP 2.149).
+  //
+  // Third member of the `v5.egress.*` claim-safety family, and the one that
+  // covers the population the other two structurally cannot. Read all three
+  // together:
+  //
+  //   ...leading_option_claim_withheld_violated  the ALARM. Observe-only,
+  //       measures what the PRODUCERS emitted. Non-zero is expected.
+  //   ...leading_option_claim_neutralised_at_finalise  the #755 chokepoint.
+  //       Covers `runTurnExecutor`'s exits only — one of route-v2.ts's 19.
+  //   ...leading_option_claim_neutralised_at_wire  THIS one. Covers the 18
+  //       `sendFinalised200` exits that return BEFORE the executor and
+  //       therefore never reach `finalizeRun` at all.
+  //
+  // Emitted ONLY when bytes actually changed. A permitted turn and a clean
+  // withheld turn emit nothing, so a non-zero rate here is real suppressed
+  // leakage on a route exit, not gate traffic.
+  //
+  // ⚠ READ `mode` BEFORE CELEBRATING A NON-ZERO RATE. `surgical` is the gate
+  // working: one sentence replaced, the rest of the answer byte-identical.
+  // `whole_field` is the LAST RESORT — the field asserts a leader but no single
+  // sentence does, so the split and the reader disagree and the whole field went.
+  // A non-trivial `whole_field` rate is a defect in the SPLITTER, not a success,
+  // and it is coded separately precisely so the two cannot be summed into one
+  // reassuring number. `enforcement_failed` means the projector threw and the
+  // response shipped unedited (the alarm above still reports the leak).
+  //
+  // Privacy contract (R-004): `edited_fields` is a sorted join of a two-member
+  // vocabulary; `mode` is the bounded union above; the lengths are finite
+  // integers. The matched prose is the user's own decision content and never
+  // appears — field names travel, field CONTENT does not.
+  V5WithheldLeaderClaimNeutralisedAtWire:
+    "v5.egress.leading_option_claim_neutralised_at_wire",
   // Track S 0.13c-4 — persist-site intercept repair summary (non-draft chokepoint).
   // Redacted: corrected_count + node IDs (+ turn_class/source) only, no magnitudes.
   V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",

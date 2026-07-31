@@ -268,6 +268,46 @@ const ENFORCEMENT_FALSE_POSITIVE_SPANS: readonly RegExp[] = [
 ];
 
 /**
+ * ⚠ WHAT A NEUTRALISED SPAN IS REPLACED WITH — and why it is NOT a space.
+ * (ROADMAP 2.149 residual (a); found by the #755 adversarial review, fixed here
+ * because 2.149 makes the ENFORCER live over every exit family's copy.)
+ *
+ * This used to be `' '`. Blanking a span to whitespace does not merely remove
+ * the span — it brings the span's two NEIGHBOURS into adjacency, and every
+ * pattern in {@link LEADER_CLAIM_PATTERNS} is an adjacency test (`\s+` between
+ * words). So the carve-out could MANUFACTURE a match the original string did
+ * not contain, and the enforcer became STRICTLY WIDER than the alarm on exactly
+ * the strings the carve-out exists to spare:
+ *
+ *     "Bob is tech lead ahead of Carol."
+ *        wide  (textNamesLeadingOption)   → false   — no `is ahead`, no `leads`
+ *        narrow, with ' '                 → TRUE    — "Bob is   ahead of Carol."
+ *                                                     now matches `\b(?:is|are|
+ *                                                     was|were)\s+ahead\b`
+ *        narrow, with this token          → false   — adjacency is broken
+ *
+ * A wider ENFORCER than ALARM inverts the whole cost-function doctrine above:
+ * the reader that DELETES user content would fire on a string the observe-only
+ * reader would not even log. Latent until now (no shipping copy tripped it —
+ * all five run-comparison constants measure false on both readers), and the
+ * blast radius widens the moment a wire-level enforcer runs over every exit.
+ *
+ * REQUIREMENTS ON THE TOKEN, all three load-bearing:
+ *   - NOT whitespace — `\s+` must not match it, or adjacency re-forms.
+ *   - NOT a word character — or it would fuse with a neighbouring word and
+ *     could change what `\b` sees.
+ *   - NOT `\0` — CLAUDE.md trap #17: a NUL byte makes `file(1)` classify the
+ *     source as binary, which blinds plain `grep` and renders the file as
+ *     binary in `gh pr diff`. That sentinel pattern is being REMOVED from this
+ *     estate (ROADMAP 2.119), not added to.
+ *
+ * Because the token is non-word and non-space and the spans are `\b`-anchored,
+ * neutralisation can only ever REMOVE matches, never add one — which is the
+ * property {@link assertEnforcerIsNarrowerThanAlarm} pins at module load.
+ */
+const ENFORCEMENT_NEUTRALISED_SPAN = '#';
+
+/**
  * Does one string ASSERT a leading option, for the purposes of ENFORCEMENT?
  *
  * Same vocabulary as {@link textNamesLeadingOption}, minus the documented
@@ -282,9 +322,79 @@ export function textAssertsLeadingOption(value: string): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
   let neutralised = value;
   for (const re of ENFORCEMENT_FALSE_POSITIVE_SPANS) {
-    neutralised = neutralised.replace(re, ' ');
+    neutralised = neutralised.replace(re, ENFORCEMENT_NEUTRALISED_SPAN);
   }
   return textNamesLeadingOption(neutralised);
+}
+
+/**
+ * BUILD-TIME PROBE — THE ENFORCER IS NEVER WIDER THAN THE ALARM.
+ *
+ * `textAssertsLeadingOption(s) ⟹ textNamesLeadingOption(s)`. That implication is
+ * the entire cost-function doctrine at {@link ENFORCEMENT_FALSE_POSITIVE_SPANS}
+ * expressed as a property, and until ROADMAP 2.149 it did NOT hold — the
+ * space-blanking carve-out could manufacture an adjacency the input lacked.
+ *
+ * Runs at module load and throws, so a regression fails the process at startup
+ * and every test that imports the vocabulary (CLAUDE.md trap #12: a guarantee a
+ * human must remember to re-check is a guarantee that drifts).
+ *
+ * ⚠ EVERY ARM HAS A POSITIVE CONTROL (trap #13). An implication probe passes
+ * vacuously if the enforcer never fires, so the corpus contains strings the
+ * enforcer MUST see as well as strings it must spare, and the probe fails if
+ * either half stops discriminating.
+ */
+const ENFORCER_NARROWNESS_CORPUS: readonly string[] = Object.freeze([
+  // ⭐ THE RECORDED DEFECT, verbatim from the #755 adversarial review
+  // (adv-review-cee-755.md:315-345). Wide=false; narrow was TRUE under ' '.
+  'Bob is tech lead ahead of Carol.',
+  // The two carve-out shapes themselves, which must stay spared.
+  'Higher capacity leads to faster delivery.',
+  'Your team leads will need to agree the rollout window.',
+  // Adjacency the carve-out could forge on the OTHER span.
+  'The engineering leads recommend nothing in particular.',
+  // Ordinary prose with no ordering claim at all.
+  'What would firm this up is real enterprise figures from your pipeline.',
+]);
+
+/** Strings the ENFORCER must SEE, or the probe above proves nothing. */
+const ENFORCER_MUST_FIRE_CORPUS: readonly string[] = Object.freeze([
+  'Hire Marketing Manager leads at 72% against Hold at 28%.',
+  'Standardise on MacBook Pro comes out ahead, leading in 44% of simulations.',
+  'Double Down on SMB is slightly ahead.',
+  'Standardise on Dell XPS performs best, with a probability of 56%.',
+]);
+
+function assertEnforcerIsNarrowerThanAlarm(): void {
+  for (const sentence of ENFORCER_NARROWNESS_CORPUS) {
+    if (textAssertsLeadingOption(sentence) && !textNamesLeadingOption(sentence)) {
+      throw new Error(
+        'leading-option-egress-guard: the ENFORCEMENT reader fires on a string the ALARM reader ' +
+          `does not see — ${JSON.stringify(sentence)}. The carve-out neutralisation has ` +
+          'manufactured a word adjacency the input never had, so the reader that DELETES user ' +
+          'content is now wider than the reader that only logs. Fix ENFORCEMENT_NEUTRALISED_SPAN ' +
+          '(it must be non-word and non-whitespace); do not narrow LEADER_CLAIM_PATTERNS, which ' +
+          'is shared with the alarm and the producer controls.',
+      );
+    }
+  }
+  for (const sentence of ENFORCER_MUST_FIRE_CORPUS) {
+    if (!textAssertsLeadingOption(sentence)) {
+      throw new Error(
+        'leading-option-egress-guard: the ENFORCEMENT reader is blind to a leader claim — ' +
+          `${JSON.stringify(sentence)}. The narrowness probe above would then pass by testing ` +
+          'nothing (CLAUDE.md trap #13). Restore the pattern this string exercises.',
+      );
+    }
+  }
+  // The specific historical defect, asserted as a NAMED case rather than left to
+  // the loop: if this line ever throws, the space-collapse adjacency is back.
+  if (textAssertsLeadingOption('Bob is tech lead ahead of Carol.')) {
+    throw new Error(
+      'leading-option-egress-guard: the space-collapse adjacency defect has returned — ' +
+        '"tech lead" is being blanked into "is ␣ ahead". See ENFORCEMENT_NEUTRALISED_SPAN.',
+    );
+  }
 }
 
 /**
@@ -736,8 +846,32 @@ export function guardLeadingOptionClaimsAtEgress(
     dropped: opts.enforce,
   });
 
-  // OBSERVE-ONLY: report, change nothing. When enforcement is wired, the drop
-  // decision belongs HERE and must be per-field, not whole-response — blanking
-  // an envelope at egress trades one dishonest answer for no answer at all.
+  // OBSERVE-ONLY: report, change nothing.
+  //
+  // ⚠ THE INSTRUCTION THAT USED TO END THIS FILE HAS BEEN ACTED ON, AND IS
+  // REPLACED RATHER THAN DELETED (CLAUDE.md trap #14). It read: *"When
+  // enforcement is wired, the drop decision belongs HERE and must be per-field,
+  // not whole-response — blanking an envelope at egress trades one dishonest
+  // answer for no answer at all."*
+  //
+  // Enforcement IS now wired (ROADMAP 2.149), and it deliberately did NOT land
+  // in this function. It lives in `compose/leading-option-wire-enforcement.ts`,
+  // one rail over, for two reasons:
+  //
+  //   1. ENFORCEMENT AND OBSERVATION ARE SEPARATE RAILS. This guard measures
+  //      the residue the PRODUCERS emit. If it also removed what it found, the
+  //      meter would report its own success and the producer defect would go
+  //      dark — the alarm would be measuring the enforcer, not the estate.
+  //   2. The enforcer needs the substituted COPY, which lives in
+  //      `withheld-explanation-answer.ts`, which imports the predicate from
+  //      HERE. Putting the enforcer in this module makes that a cycle.
+  //
+  // The "per-field, not whole-response" instruction is honoured — the enforcer
+  // is per-field AND per-SENTENCE (see `compose/redactable-units.ts`). This
+  // function remains observe-only and `enforce` remains the telemetry tag that
+  // separates the two rails on the dashboard.
   return response;
 }
+
+// Module-load probes last, so every declaration they read is initialised.
+assertEnforcerIsNarrowerThanAlarm();

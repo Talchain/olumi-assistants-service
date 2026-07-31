@@ -55,6 +55,9 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 // The production intercept's OWN constant, so this test and the intercept
 // cannot drift apart on the chip copy.
 import { SIMPLIFY_CHANGE_CHIP_PROMPT } from '../routing/chip-simplify-intercept.js';
+// The WIRE gate's OWN replacement constant, so this file and the gate cannot
+// drift apart on the substituted copy (ROADMAP 2.149).
+import { WIRE_WITHHELD_LEADER_REPLACEMENT } from '../compose/leading-option-wire-enforcement.js';
 
 const SCENARIO_ID = 'a1b2c3d4-1349-4123-8123-a1b2c3d41349';
 const LEADER_LABEL = 'Hire Marketing Manager';
@@ -184,6 +187,17 @@ let persistedGraph: unknown = READY_GRAPH;
 let turnReadFails = false;
 /** Make EVERY claim-safety-relevant read throw — a fully degraded store. */
 let allReadsFail = false;
+/**
+ * Make ONLY the SCENARIO-scoped read throw, leaving `countTurns` alive.
+ * (ROADMAP 2.149.) That is the exact shape `fail_closed_truncated` requires:
+ * `readOk === false` AND a `prior_turns_total` big enough to prove truncation
+ * (`claim-safety-read.ts:517`, scope built at `:642-655`). `allReadsFail` cannot
+ * produce it — killing `countTurns` too is what disarms the fail-closed guard
+ * and lands on the KNOWN-GAP branch pinned below.
+ */
+let scenarioReadFails = false;
+/** What `countTurns` reports. `> prior_turns.length` ⇒ `windowTruncated`. */
+let priorTurnsTotal = 1;
 
 function makeStore(): Record<string, unknown> {
   return {
@@ -192,7 +206,7 @@ function makeStore(): Record<string, unknown> {
       if (turnReadFails) throw new Error('simulated session store failure');
       return [ANALYSIS_TURN].slice(0, limit);
     },
-    countTurns: async () => { if (allReadsFail) throw new Error("degraded"); return 1; },
+    countTurns: async () => { if (allReadsFail) throw new Error("degraded"); return priorTurnsTotal; },
     readFactsFor: async (turnRowIds: readonly string[]) =>
       turnRowIds.flatMap((id) => factsByTurnRowId[id] ?? []),
     readFactsWithTurnFor: async (turnRowIds: readonly string[]) =>
@@ -205,7 +219,7 @@ function makeStore(): Record<string, unknown> {
       ),
     // SCENARIO-SCOPED: newest non-noop run_analysis fact across ALL turns.
     readNewestAnalysisFactFor: async () => {
-      if (allReadsFail) throw new Error("degraded");
+      if (allReadsFail || scenarioReadFails) throw new Error("degraded");
       const all = Object.values(factsByTurnRowId).flat();
       return all.find((f) => f.fact_type === 'run_analysis' && f.noop === false) ?? null;
     },
@@ -256,6 +270,24 @@ vi.mock('../handlers/edit-graph-dispatch.js', async () => {
     '../handlers/edit-graph-dispatch.js',
   );
   return { ...actual, dispatchEditGraph: dispatchEditGraphMock };
+});
+
+/**
+ * The chip_click `ok` exit (`route-v2.ts:2411`) is the one exit whose verdict
+ * comes from the DISPATCH rather than the turn-entry resolver
+ * (`cc.mayNameLeadingOption`, REQUIRED on `ok`). Mocked so the arm measures the
+ * WIRE gate on a model-text-capable exit the claim-safety estate has never
+ * driven. `importOriginal`-spread, never a hand-listed factory: a `vi.mock`
+ * factory REPLACES the module, so listing only the export this file stubs would
+ * silently blank `isDeterministicChipClickActionType` and route every chip click
+ * to the executor instead (CLAUDE.md trap #12).
+ */
+const dispatchDeterministicChipClickMock = vi.fn();
+vi.mock('../handlers/chip-click-dispatch.js', async () => {
+  const actual = await vi.importActual<typeof import('../handlers/chip-click-dispatch.js')>(
+    '../handlers/chip-click-dispatch.js',
+  );
+  return { ...actual, dispatchDeterministicChipClick: dispatchDeterministicChipClickMock };
 });
 
 const routeWithToolUseMock = vi.fn();
@@ -374,6 +406,9 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     persistedGraph = READY_GRAPH;
     turnReadFails = false;
     allReadsFail = false;
+    scenarioReadFails = false;
+    priorTurnsTotal = 1;
+    dispatchDeterministicChipClickMock.mockReset();
     factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [withheldRunAnalysisFact()] };
   });
   afterEach(() => {
@@ -631,64 +666,487 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     });
 
     // ── THE EGRESS INTERACTION — the point of the whole exercise ───────────
+    //
+    // ⚠ WHAT THESE ARMS ASSERT CHANGED ON 2026-07-31 (ROADMAP 2.149), AND THE
+    // OLD ASSERTION IS RECORDED HERE RATHER THAN DELETED (CLAUDE.md trap #14).
+    //
+    // The arm below used to be called "the Layer-3 alarm is ARMED by the
+    // inherited verdict, and FIRES on leader prose", and it asserted EXACTLY
+    // three things: `status === 200`, exactly one alarm event, `hit_count > 0`.
+    // NOTHING touched the body. That is a faithful record of the state #737 left
+    // behind — the alarm was armed and the leader claim SHIPPED ANYWAY, because
+    // `enforce: false` is the alarm's only wired mode and the #755 enforcing
+    // guard is a function nested inside `runTurnExecutor` that this exit returns
+    // before ever reaching. The test pinned the harm; it did not fix it.
+    //
+    // The harm is now fixed at the wire, so the arm asserts the BODY. The alarm
+    // arms survive one describe below, on a string the ALARM sees and the
+    // ENFORCER deliberately spares — so "the alarm still works" is proven on a
+    // case where it is the only thing that can fire, rather than by an assertion
+    // that enforcement has quietly hollowed out (trap #12b).
 
-    it('the Layer-3 alarm is ARMED by the inherited verdict, and FIRES on leader prose', async () => {
-      // ⭐ THE HARM, END TO END. The permission is not an end in itself: it is
-      // what the alarm is armed with. `guardLeadingOptionClaimsAtEgress` opens
-      // with `if (opts.mayNameLeadingOption) return response` — so the
-      // hardcoded `true` did not merely fail to help, it was an explicit
-      // instruction not to scan. This drives an edit response that DOES name
-      // the withheld leader and proves the alarm now sees it.
+    const RECEIPT_SENTENCE = 'Added the risk.';
+    const LEADER_SENTENCE = `For context, ${LEADER_LABEL} leads at 72% against ${RUNNER_LABEL} at 28%.`;
+    const LEADER_ANSWER = `${RECEIPT_SENTENCE} ${LEADER_SENTENCE}`;
+
+    function mockEditAnswer(assistantText: string): void {
       dispatchEditGraphMock.mockResolvedValue({
         commitPerformed: true,
         graph: null,
         response: {
           response_version: 2,
-          assistant_text:
-            `Added the risk. For context, ${LEADER_LABEL} leads at 72% against ${RUNNER_LABEL} at 28%.`,
+          assistant_text: assistantText,
           blocks: [],
           suggested_actions: [],
           insights: [],
           stage_indicator: 'analyse',
         },
       });
-      const { status } = await postTurn(app, MESSAGE);
+    }
+
+    it('⭐ THE HARM, END TO END: the withheld leader claim NO LONGER SHIPS at the main edit exit', async () => {
+      // ⭐ THE FLAGSHIP. This is the exact body the 28 Jul live confirmation
+      // caught, at the exact exit that produced it, under the exact fixture.
+      mockEditAnswer(LEADER_ANSWER);
+      const { status, body } = await postTurn(app, MESSAGE);
       expect(status).toBe(200);
 
+      const text = body.assistant_text as string;
+      expect(
+        text,
+        'the withheld leader is still being NAMED on the wire — this is the live defect',
+      ).not.toContain(LEADER_LABEL);
+      expect(text, 'the designation phrasing still ships').not.toContain('leads at 72%');
+    });
+
+    it('⭐ SURGICAL: the receipt sentence survives BYTE-IDENTICAL, and only the claim goes', async () => {
+      // ⭐ THE OTHER HALF, AND THE ONE THAT IS EASY TO LOSE. #755's first cut
+      // replaced the WHOLE answer and destroyed a `run_analysis` receipt plus an
+      // honest compound-edit disclosure in one string (turn-executor.ts:10017-
+      // 10054). A gate that removes the claim by removing the answer has traded
+      // one dishonest answer for no answer at all — the in-repo instruction at
+      // `leading-option-egress-guard.ts`'s closing comment, verbatim.
+      mockEditAnswer(LEADER_ANSWER);
+      const { body } = await postTurn(app, MESSAGE);
+      const text = body.assistant_text as string;
+
+      expect(
+        text.startsWith(RECEIPT_SENTENCE),
+        'the user asked for an edit and it happened — the receipt must survive the claim-safety edit',
+      ).toBe(true);
+      expect(
+        text,
+        'the substituted copy must be the SHARED constant, never a route-level twin',
+      ).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
+      // Non-vacuity: the whole answer was not simply replaced by the constant.
+      expect(text).not.toBe(WIRE_WITHHELD_LEADER_REPLACEMENT);
+      expect(text.length).toBeGreaterThan(WIRE_WITHHELD_LEADER_REPLACEMENT.length);
+    });
+
+    it('PERMIT-WINS: identical prose on a PERMITTED scenario ships BYTE-IDENTICAL', async () => {
+      // ⭐ THE OVER-SUPPRESSION CONTROL, AND SIMULTANEOUSLY THE POSITIVE CONTROL
+      // FOR THE TWO ARMS ABOVE (trap #13): it proves this drive really can carry
+      // the designation to the wire, so "the designation is absent" upstairs is
+      // measuring suppression rather than a fixture that never had one.
+      //
+      // A blanket `false` at these exits — the failure mode #737's own header
+      // warns about — would turn this arm red, which is exactly its job.
+      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
+      mockEditAnswer(LEADER_ANSWER);
+      const { body } = await postTurn(app, MESSAGE);
+      expect(
+        body.assistant_text,
+        'a permitted scenario must reach the user with its prose untouched, to the byte',
+      ).toBe(LEADER_ANSWER);
+      expect(
+        events.filter((e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress),
+        'a permitted scenario must not trip the alarm — identical prose, opposite verdict',
+      ).toEqual([]);
+      expect(
+        events.filter(
+          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+        ),
+        'the wire gate must not even run on a permitted turn',
+      ).toEqual([]);
+    });
+
+    it('a withheld turn whose answer designates NOTHING ships BYTE-IDENTICAL', async () => {
+      // The second over-suppression arm, and the one that catches a gate wired
+      // to the VERDICT rather than to the CLAIM. `EDIT_RECEIPT` is the ordinary
+      // edit confirmation; a withheld verdict must not cost the user their
+      // receipt.
+      mockEditAnswer(EDIT_RECEIPT);
+      const { body } = await postTurn(app, MESSAGE);
+      expect(body.assistant_text).toBe(EDIT_RECEIPT);
+      expect(
+        events.filter(
+          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+        ),
+        'nothing was designated, so nothing may be edited — and the gate must be silent',
+      ).toEqual([]);
+    });
+
+    it('the gate reports itself: one SURGICAL event, with lengths and no prose', async () => {
+      mockEditAnswer(LEADER_ANSWER);
+      await postTurn(app, MESSAGE);
+      const emitted = events.filter(
+        (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+      );
+      expect(emitted.length, 'exactly one event per edited response').toBe(1);
+      const data = emitted[0]!.data;
+      expect(
+        data['mode'],
+        '`whole_field` here would mean the splitter and the reader disagree — see the mode union',
+      ).toBe('surgical');
+      expect(data['edited_fields']).toBe('assistant_text');
+      expect(data['exit_path']).toBe('edit_graph');
+      expect(typeof data['original_length']).toBe('number');
+      expect(
+        JSON.stringify(data),
+        'the matched prose is the user\'s own decision content and must never ride telemetry',
+      ).not.toContain(LEADER_LABEL);
+    });
+
+    it('IDEMPOTENT: re-running the gate over its own output changes nothing', async () => {
+      // A gate whose replacement trips its own reader would eat the answer one
+      // sentence at a time on any future second pass. Pinned at module load too
+      // (`assertReplacementIsInertAndNonVacuous`), and driven here end to end.
+      mockEditAnswer(`${RECEIPT_SENTENCE} ${WIRE_WITHHELD_LEADER_REPLACEMENT}`);
+      const { body } = await postTurn(app, MESSAGE);
+      expect(body.assistant_text).toBe(`${RECEIPT_SENTENCE} ${WIRE_WITHHELD_LEADER_REPLACEMENT}`);
+    });
+  });
+
+  // ── THE ALARM IS NOT HOLLOWED — the residue rail still fires ──────────────
+
+  describe('the Layer-3 ALARM after enforcement — still armed, on the bytes that ship', () => {
+    const MESSAGE = 'Add a risk for coordination overhead';
+
+    /**
+     * ⭐ THE STRING THAT SEPARATES THE TWO RAILS, and it is not a contrivance —
+     * it is the documented carve-out.
+     *
+     * `"leads to"` is CAUSAL. The ALARM reader (`textNamesLeadingOption`, wide,
+     * observe-only, false positive costs one log line) SEES it. The ENFORCER
+     * reader (`textAssertsLeadingOption`, narrow, false positive DELETES user
+     * content) blanks the span first and does NOT. So this one turn proves three
+     * things at once:
+     *
+     *   1. the alarm is still armed and still fires ON THE SHIPPED BYTES after
+     *      enforcement runs — it has not been hollowed into a tautology by its
+     *      own success (CLAUDE.md trap #12b);
+     *   2. the enforcer is NARROWER than the alarm, which is the cost-function
+     *      doctrine both readers are built around; and
+     *   3. ordinary causal English survives a withheld turn untouched.
+     */
+    const CAUSAL_ANSWER = 'Added the risk. Higher capacity leads to faster delivery.';
+
+    beforeEach(() => {
+      dispatchEditGraphMock.mockResolvedValue({
+        commitPerformed: true,
+        graph: null,
+        response: {
+          response_version: 2,
+          assistant_text: CAUSAL_ANSWER,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+    });
+
+    it('the alarm FIRES exactly once on a string the enforcer spares', async () => {
+      const { status } = await postTurn(app, MESSAGE);
+      expect(status).toBe(200);
       const alarms = events.filter(
         (e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress,
       );
       expect(
         alarms.length,
-        'ZERO means the alarm was never armed — the pre-fix state, where an edit turn could ' +
-          'name a withheld leader and produce no telemetry at all. More than one means the ' +
-          'Layer-3 scan has been re-added to a re-entered chokepoint.',
+        'ZERO means the alarm has been hollowed out by the enforcer running upstream of it — ' +
+          'the observe rail must keep measuring the residue that still ships. More than one ' +
+          'means the Layer-3 scan has been re-added to a re-entered chokepoint (E1).',
       ).toBe(1);
       expect(alarms[0]!.data['hit_count']).toBeGreaterThan(0);
     });
 
-    it('POSITIVE CONTROL: the alarm stays SILENT when the scenario PERMITS', async () => {
-      // The over-suppression twin of the arm above. If the fix had blanket-
-      // falsed the exits, this would fire and the product would be reporting
-      // invariant violations on legitimate prose.
-      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
-      dispatchEditGraphMock.mockResolvedValue({
-        commitPerformed: true,
+    it('and the enforcer leaves that same string BYTE-IDENTICAL', async () => {
+      const { body } = await postTurn(app, MESSAGE);
+      expect(
+        body.assistant_text,
+        'causal "leads to" is ordinary English; deleting it is the over-suppression the ' +
+          'ENFORCEMENT_FALSE_POSITIVE_SPANS carve-out exists to prevent',
+      ).toBe(CAUSAL_ANSWER);
+    });
+  });
+
+  // ── THE OTHER MODEL-TEXT EXIT: chip_click `ok` ───────────────────────────
+
+  describe('the CHIP-CLICK ok exit — the second model-text exit, and the _answer_shape pin', () => {
+    const CHIP_RECEIPT = 'Analysis complete.';
+    const CHIP_LEADER_SENTENCE = `${LEADER_LABEL} leads at 72% on this run.`;
+    const CHIP_ANSWER = `${CHIP_RECEIPT} ${CHIP_LEADER_SENTENCE} The gap is not stable across the runs.`;
+
+    function mockChipOk(opts: { mayName: boolean; text: string }): void {
+      dispatchDeterministicChipClickMock.mockResolvedValue({
+        outcome: 'ok',
         graph: null,
+        mayNameLeadingOption: opts.mayName,
+        // SUBSTANTIVE, deliberately: it is what makes the egress answer-shape
+        // synthesiser attach `_answer_shape`, which is the sidecar this
+        // describe exists to pin. A `functional` chip answer never shapes.
+        answerKind: 'substantive',
         response: {
           response_version: 2,
-          assistant_text:
-            `Added the risk. For context, ${LEADER_LABEL} leads at 72% against ${RUNNER_LABEL} at 28%.`,
+          assistant_text: opts.text,
           blocks: [],
           suggested_actions: [],
           insights: [],
           stage_indicator: 'analyse',
         },
       });
-      await postTurn(app, MESSAGE);
+    }
+
+    async function postChip(app: FastifyInstance) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'message',
+          turn_id: randomUUID(),
+          scenario_id: SCENARIO_ID,
+          stage: 'analyse',
+          message: 'Run analysis',
+          turn_class: 'decide',
+          source: 'chip_click',
+          chip: { action_type: 'run_analysis' },
+          graph_state: READY_GRAPH,
+        },
+      });
+      return { status: res.statusCode, body: JSON.parse(res.body) as Record<string, any> };
+    }
+
+    it('BRANCH DISCRIMINATOR: this turn really reaches the deterministic chip dispatch', async () => {
+      mockChipOk({ mayName: false, text: CHIP_ANSWER });
+      await postChip(app);
       expect(
-        events.filter((e) => e.name === TelemetryEvents.V5LeadingOptionClaimAtEgress),
-        'a permitted scenario must not trip the alarm — identical prose, opposite verdict',
+        dispatchDeterministicChipClickMock,
+        'the chip_click ok exit is downstream of dispatchDeterministicChipClick — if it never ' +
+          'ran, this case fell through to the TurnExecutor and is testing a different exit',
+      ).toHaveBeenCalled();
+      expect(routeWithToolUseMock).not.toHaveBeenCalled();
+    });
+
+    it('INSTRUMENT: the PERMITTED chip answer carries `_answer_shape` on the wire', async () => {
+      // ⭐ THE POSITIVE CONTROL FOR THE PIN BELOW (trap #13). "the sidecar is
+      // absent" proves nothing unless this drive can be shown to produce one.
+      mockChipOk({ mayName: true, text: CHIP_ANSWER });
+      const { body } = await postChip(app);
+      expect(
+        body._answer_shape,
+        'if this is undefined the sidecar pin below is vacuous — the synthesiser did not run at all',
+      ).toBeDefined();
+      expect(body.assistant_text, 'permitted ⇒ the claim survives').toContain(LEADER_LABEL);
+    });
+
+    it('the withheld chip answer loses the designation and KEEPS the receipt', async () => {
+      mockChipOk({ mayName: false, text: CHIP_ANSWER });
+      const { status, body } = await postChip(app);
+      expect(status).toBe(200);
+      const text = body.assistant_text as string;
+      expect(text).not.toContain(LEADER_LABEL);
+      expect(text).not.toContain('leads at 72%');
+      expect(text).toContain(CHIP_RECEIPT);
+      expect(
+        text,
+        'the sentence AFTER the claim is not a claim and must survive too',
+      ).toContain('not stable across the runs');
+    });
+
+    it('⭐ `_answer_shape` is ABSENT whenever the gate edited the answer', async () => {
+      // ⭐ THE SIDECAR PIN (derivation §3(b)). `_answer_shape` RECONSTRUCTS the
+      // answer verbatim — `deriveAnswerTextFromShape` rejoins headline, bullets
+      // and detail. Left attached after a claim-safety edit it would ship a
+      // structured copy of the very sentence just removed, and the suppression
+      // would be undone by its own debug surface. Nothing pinned this coupling
+      // before (zero hits for `_answer_shape` in any chokepoint suite).
+      mockChipOk({ mayName: false, text: CHIP_ANSWER });
+      const { body } = await postChip(app);
+      expect(
+        body._answer_shape,
+        'the sidecar reconstructs the pre-edit prose verbatim; it must go with the edit',
+      ).toBeUndefined();
+      expect(
+        JSON.stringify(body),
+        'and no other surface may carry the removed designation either',
+      ).not.toContain(LEADER_LABEL);
+    });
+  });
+
+  // ── PROVENANCE VARIATION (the R3-M2 obligation) ──────────────────────────
+
+  describe('PROVENANCE — the gate is not coupled to how the verdict was reached', () => {
+    const MESSAGE = 'Add a risk for coordination overhead';
+    const LEADER_ANSWER = `Added the risk. ${LEADER_LABEL} leads at 72%.`;
+
+    /**
+     * ⚠ WHY THIS DESCRIBE IS SHORTER THAN THE R3-M2 LESSON MIGHT SUGGEST, stated
+     * so nobody reads the gap as an oversight.
+     *
+     * R3-M2 (`fix-finalize-gate.md:490,501-508`) was a WIRING mutant: #755's
+     * round-3 hardcoded `analysisExistenceProven = true` inside the executor
+     * guard and all 32 tests stayed green, because every route-level fixture
+     * carried `scenario_fact` provenance — the one value on which the hardcode
+     * is indistinguishable from the derivation. The closure was a fixture whose
+     * provenance DIFFERS.
+     *
+     * At THIS seam the mutant has no target. The wire gate's substituted copy
+     * takes NO provenance, existence or currency input — that is a design
+     * decision (ROADMAP 2.149 §1: the fallback makes no currency claim, which
+     * also sidesteps the F1 referent split for the whole route population), and
+     * it is enforced as a SOURCE-DERIVED property by the drift guard at the
+     * bottom of this file rather than inferred from these two arms. So there is
+     * no input to hardcode and no copy to get wrong per provenance; what these
+     * arms check is the weaker but still real claim that ENFORCEMENT ITSELF is
+     * not accidentally coupled to the provenance value.
+     *
+     * `fail_closed_uninterpretable` is deliberately NOT driven: it is returned
+     * only by `readMayNameLeadingOptionVerdictForFact` for a non-`run_analysis`
+     * fact (`claim-safety-read.ts:393-397`), and the scenario selector returns
+     * `run_analysis` facts only — the branch's own comment says "unreachable
+     * from the scenario selector". Claiming coverage of it here would be the
+     * theatre this estate hunts.
+     */
+
+    beforeEach(() => {
+      dispatchEditGraphMock.mockResolvedValue({
+        commitPerformed: true,
+        graph: null,
+        response: {
+          response_version: 2,
+          assistant_text: LEADER_ANSWER,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+    });
+
+    it('scenario_fact — enforcement fires, and the provenance is the real one', async () => {
+      const { body } = await postTurn(app, MESSAGE);
+      expect(provenanceOnTheWire(body)).toBe('scenario_fact');
+      expect(body.assistant_text).not.toContain(LEADER_LABEL);
+    });
+
+    it('fail_closed_truncated — a withhold with NO fact selected still enforces', async () => {
+      // The degraded shape: the scenario-scoped read is down (`readOk === false`)
+      // and the window is provably truncated (`countTurns` 999 > 1 turn read), so
+      // `claim-safety-read.ts:517` withholds having selected nothing at all.
+      // There is no fact, no verdict state and no proven existence here — and the
+      // gate must still remove the designation, because its copy asserts none of
+      // those things.
+      scenarioReadFails = true;
+      priorTurnsTotal = 999;
+      factsByTurnRowId = {};
+      const { status, body } = await postTurn(app, MESSAGE);
+      expect(status).toBe(200);
+      expect(
+        provenanceOnTheWire(body),
+        'if this is not fail_closed_truncated the fixture missed its branch and the arm is vacuous',
+      ).toBe('fail_closed_truncated');
+      expect(permissionOnTheWire(body)).toBe(false);
+      expect(body.assistant_text).not.toContain(LEADER_LABEL);
+      expect(body.assistant_text).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
+    });
+
+    it('no_analysis_exists — the honest PERMIT, and the answer ships untouched', async () => {
+      // The permitted control on a DIFFERENT provenance from the one above: a
+      // scenario with no analysis has nothing to withhold, and a gate that fired
+      // here would suppress prose on every fresh scenario in the product.
+      factsByTurnRowId = {};
+      const { body } = await postTurn(app, MESSAGE);
+      expect(provenanceOnTheWire(body)).toBe('no_analysis_exists');
+      expect(permissionOnTheWire(body)).toBe(true);
+      expect(body.assistant_text).toBe(LEADER_ANSWER);
+    });
+  });
+
+  // ── OVER-SUPPRESSION CONTROLS ON THE DETERMINISTIC EXITS ─────────────────
+
+  describe('BYTE-IDENTITY on the deterministic-copy exits', () => {
+    // The fifteen exits whose copy is templated cannot carry a model's leader
+    // claim, so under enforcement they are pure over-suppression controls: their
+    // bytes must not move at all on a withheld turn. If the gate ever starts
+    // editing them, one of these turns red and names the exit.
+
+    it('the VAGUE-EDIT intercept copy is untouched', async () => {
+      const { body } = await postTurn(app, 'Make the model better');
+      expect(permissionOnTheWire(body)).toBe(false);
+      expect(typeof body.assistant_text).toBe('string');
+      expect((body.assistant_text as string).length).toBeGreaterThan(0);
+      expect(body.assistant_text).not.toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
+    });
+
+    it('the EDIT-GRAPH RECOVERY copy is untouched, to the byte', async () => {
+      persistedGraph = null;
+      const { body } = await postTurn(app, 'Add a risk for coordination overhead', {
+        withGraphState: false,
+      });
+      expect(permissionOnTheWire(body)).toBe(false);
+      expect(
+        body.assistant_text,
+        'the recovery constant is the production copy — the gate must not have rewritten it',
+      ).toBe(EDIT_GRAPH_RECOVERY_TEXT);
+    });
+
+    it('a SYSTEM EVENT (fail_closed_no_turn_context) ships its own copy untouched', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: {
+          kind: 'system_event',
+          turn_id: randomUUID(),
+          scenario_id: SCENARIO_ID,
+          stage: 'analyse',
+          event: { kind: 'undo' },
+        },
+      });
+      const body = JSON.parse(res.body) as Record<string, any>;
+      expect(res.statusCode).toBe(200);
+      expect(provenanceOnTheWire(body)).toBe('fail_closed_no_turn_context');
+      expect(
+        events.filter(
+          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+        ),
+        'the most fail-closed verdict in the union must still not edit deterministic copy',
+      ).toEqual([]);
+    });
+
+    it('the turn_executor exit is BYTE-NEUTRAL — no double substitution', async () => {
+      // ⭐ IDEMPOTENCE ACROSS THE TWO GATES. The converse exit is the ONE exit
+      // downstream of `finalizeRun`, whose #755 guard already substitutes for
+      // this population. The wire gate must therefore find nothing left to do:
+      // two gates that both fire would append the refusal twice, and a user
+      // being told the same thing twice is how a safety gate reads as a bug.
+      routeWithToolUseMock.mockResolvedValue(
+        converseTextOnly(`For context, ${LEADER_LABEL} leads at 72%.`),
+      );
+      const { status, body } = await postTurn(app, 'Where does this leave things?');
+      expect(status).toBe(200);
+      const text = body.assistant_text as string;
+      expect(text).not.toContain(LEADER_LABEL);
+      const occurrences = text.split(WIRE_WITHHELD_LEADER_REPLACEMENT).length - 1;
+      expect(
+        occurrences,
+        'the refusal appears more than once — the executor chokepoint and the wire gate both fired',
+      ).toBeLessThanOrEqual(1);
+      expect(
+        events.filter(
+          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+        ),
+        'the executor already neutralised this answer; the wire gate must be a no-op here',
       ).toEqual([]);
     });
   });
@@ -746,6 +1204,68 @@ describe('T1 claim safety — no route exit may stamp a LITERAL permission', () 
     const base = sourceWithoutComments();
     const count = (s: string) => (s.match(/mayNameLeadingOption:\s*(true|false)\b/g) ?? []).length;
     expect(count(`${base}\nconst x = { mayNameLeadingOption: true };`) - count(base)).toBe(1);
+  });
+
+  /**
+   * ⭐ THE R3-M2 CLOSURE, IN ITS DERIVED FORM (ROADMAP 2.149).
+   *
+   * R3-M2 was #755's round-3 mutant: `analysisExistenceProven` hardcoded `true`
+   * inside the guard, 32 tests green, because every route-level fixture carried
+   * `scenario_fact` provenance — the one value on which the hardcode and the
+   * derivation agree. The closure there was a provenance-varied fixture.
+   *
+   * The WIRE gate closes it differently and more strongly: it takes NO such
+   * input at all. Its substituted copy asserts nothing about currency, nothing
+   * about existence and nothing about the cause, so there is no derivation to
+   * bypass and no wiring to mutate. That is a design decision (2.149 §1 — the
+   * fallback makes no currency claim, which also sidesteps the F1 referent split
+   * for the whole route population), and a design decision that is not enforced
+   * is a comment. So it is enforced HERE, from the source.
+   *
+   * If a future change gives the wire copy a currency or existence claim, that
+   * change must ALSO bring the provenance-varied fixtures R3-M2 demands — and
+   * this test going red is what will say so.
+   */
+  describe('the WIRE gate takes no provenance / currency / existence input', () => {
+    const WIRE_GATE = new URL(
+      '../compose/leading-option-wire-enforcement.ts',
+      import.meta.url,
+    );
+
+    function gateSourceWithoutComments(): string {
+      const raw = readFileSync(WIRE_GATE, 'utf8');
+      return raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    }
+
+    it('INSTRUMENT: the stripper strips and keeps code', () => {
+      const stripped = gateSourceWithoutComments();
+      expect(stripped).toContain('export function enforceLeadingOptionClaimsAtWire');
+      expect(
+        stripped,
+        'a comment-only phrase must be GONE, or every absence below is vacuous',
+      ).not.toContain('NOT COVERED, DELIBERATELY');
+    });
+
+    it.each([
+      'provenance',
+      'analysisExistenceProven',
+      'conditionsAreCurrent',
+      'ConstraintVerdictState',
+      'readRatifiedConstraints',
+    ])('the gate does not read `%s`', (symbol) => {
+      expect(
+        gateSourceWithoutComments(),
+        `the wire gate now consumes \`${symbol}\`. Its copy can therefore make a claim that is ` +
+          'true on some populations and false on others — the exact defect ' +
+          'WITHHELD_EXPLANATION_OPENING cost two review rounds. Add the provenance-varied ' +
+          'fixtures (R3-M2) before landing that, and update this guard deliberately.',
+      ).not.toContain(symbol);
+    });
+
+    it('POSITIVE CONTROL: the scan can SEE one of those symbols when present', () => {
+      const planted = `${gateSourceWithoutComments()}\nconst x = analysisExistenceProven;`;
+      expect(planted).toContain('analysisExistenceProven');
+    });
   });
 
   it('every exit INHERITS: zero hardcoded true/false permissions remain', () => {

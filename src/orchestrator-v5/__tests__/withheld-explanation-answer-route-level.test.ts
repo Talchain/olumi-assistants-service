@@ -558,6 +558,15 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       expect(turn.assistantText).not.toContain('comes out ahead');
       // State unreadable ⇒ leader-free copy with NO named condition. It must
       // not guess a voice.
+      // ⚠ THIS IS THE REASON-UNRECORDED TAIL (`withheld-reason-tail.ts:332`),
+      // NOT `WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL` — recorded because the
+      // 2.149 lane swapped it for the latter and this test correctly refused.
+      // This turn is FRESH, so `composeWithheldReasonTail` runs and supplies the
+      // reason-unrecorded voice; the no-disclosure tail is the STALE / no-reason
+      // fallback and never ships here. The two strings share a prefix, so a
+      // substring assertion cannot tell them apart on its own — hence the note.
+      // 2.149 reworded only the no-disclosure tail's deixis; this string is
+      // unchanged and still correct.
       expect(turn.assistantText).toContain('No single option can be put forward on this result yet');
       expect(turn.assistantText).not.toContain('Three-Year Total Cost of Ownership');
     });
