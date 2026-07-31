@@ -135,12 +135,20 @@ const A5_GOLDEN: EnrichmentInput = {
 // ============================================================================
 
 describe('2.211 — no-immediate-repeat over two consecutive analysis turns', () => {
-  it('turn 1: flip-risk wins the slot even though pre-mortem also triggers', () => {
+  // ⚠ AMENDED by 2.211-① (the correlated-only yield): BOTH_TRIGGER's flip-risk
+  // hit is CORRELATED, so with pre-mortem also triggered, turn 1 now YIELDS —
+  // the pre-amendment expectation ("flip-risk wins the slot even though
+  // pre-mortem also triggers") was the measured 12/12 starvation defect
+  // (probe-premortem-chain-final.md), and is exactly what the ratified ruling
+  // reversed. The alternation the no-repeat rule guarantees is unchanged; its
+  // PHASE flips (pre-mortem now leads). See lens-correlated-yield.test.ts.
+  it('turn 1 (2.211-①): the CORRELATED flip-risk hit yields the slot to pre-mortem', () => {
     const selection = selectLens(makeFact(BOTH_TRIGGER));
-    expect(selection?.lens).toBe('sensitivity_flip_risk');
-    expect(selection?.rationaleCode).toBe('FLIP_RISK_CORRELATED');
-    // No displacement happened, so nothing is recorded as displaced.
-    expect(selection?.displacedLens).toBeUndefined();
+    expect(selection?.lens).toBe('pre_mortem');
+    expect(selection?.rationaleCode).toBe('WIN_PROB_MODERATE');
+    // The yield is a real displacement and is recorded as one.
+    expect(selection?.displacedLens).toBe('sensitivity_flip_risk');
+    expect(selection?.displacementCause).toBe('correlated_yield');
   });
 
   it('turn 2: the SAME lens fired last turn and pre-mortem still triggers → pre-mortem is selected', () => {
@@ -164,7 +172,11 @@ describe('2.211 — no-immediate-repeat over two consecutive analysis turns', ()
       previousAnalysisLens: 'pre_mortem',
     });
     expect(selection?.lens).toBe('sensitivity_flip_risk');
-    expect(selection?.displacedLens).toBeUndefined();
+    // 2.211-① route: the correlated yield puts pre-mortem at the head, and the
+    // no-repeat tie-break then displaces it (an immediate repeat) back onto
+    // flip-risk — so the displacement IS recorded now, with the no-repeat cause.
+    expect(selection?.displacedLens).toBe('pre_mortem');
+    expect(selection?.displacementCause).toBe('no_repeat');
   });
 });
 
