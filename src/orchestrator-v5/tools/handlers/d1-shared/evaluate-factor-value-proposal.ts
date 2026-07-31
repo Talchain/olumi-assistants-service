@@ -45,6 +45,42 @@ import { formatValueWithUnit } from './format-confirmation.js';
 export type FactorValueOperator = 'set' | 'increase' | 'decrease' | 'multiply';
 
 /**
+ * AN EMPTY OR WHITESPACE-ONLY UNIT IS NOT A UNIT. Canonicalise it to
+ * `undefined` so exactly one representation of "this has no unit" exists.
+ *
+ * ⚠ THE DEFECT THIS CLOSES (found in review of the 2.159 salvage, proven at the
+ * bytes). Both parse sites already computed `inputHasUnit` as
+ * `unit.length > 0` — i.e. they ALREADY treated `''` as "no unit" — while
+ * carrying `''` through in the `unit` field itself. Two fields, two answers,
+ * from the same input. The consequences of that disagreement:
+ *
+ *   • `{ value: 5, unit: '' }` on a unitless factor passed guard 2c (whose
+ *     exemption was `unit.length > 0`) and the handler then PERSISTED
+ *     `unit: ''` via `after.unit = parsed.unit ?? before.unit`;
+ *   • from then on `factorUnit === ''`, so 2c was permanently inert for that
+ *     factor — falsifying the guard's own claim ("a unit it did not have");
+ *   • and every later bare sub-1 edit hit `bare_ratio_on_unit_factor`, whose
+ *     copy interpolates the unit: "0.5 looks like a proportion, not a value
+ *     in . Tell me the amount in ." — malformed text shown to a user.
+ *
+ * Canonicalising is preferred over widening 2c to "any defined unit is a
+ * declaration": that alternative would REFUSE `{ unit: '' }` and render
+ * "applying a value in  would change what it measures" — creating a second
+ * malformed-copy path inside the guard meant to remove one. It also leaves the
+ * `inputHasUnit` disagreement in place.
+ *
+ * Applied at BOTH ends, deliberately: at the two parse sites so `''` is never
+ * WRITTEN, and at this predicate's entry so a factor already carrying `''`
+ * (reachable before any of this work) READS as unitless — which is what
+ * retires the malformed-copy path rather than merely stopping new instances.
+ */
+export function canonicaliseUnit(unit: string | undefined): string | undefined {
+  if (unit === undefined) return undefined;
+  const trimmed = unit.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
  * Granular rejection reasons. Bound to the telemetry enum — additions
  * here require a plan amendment (see "Locked telemetry enums" in the
  * workstream plan). Reasons are ordered roughly by check sequence:
@@ -60,7 +96,13 @@ export type ProposalRejectionReason =
   | 'delta_no_cap_and_no_unit' // operator !== 'set' AND no cap AND no unit (ambiguous)
   | 'bare_number_outside_cap' // !inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
   | 'value_exceeds_cap' // inputHasUnit AND cap defined AND effectiveRaw outside [0, cap]
-  | 'bare_ratio_on_unit_factor'; // !inputHasUnit AND factor has a unit AND 0 < |rawInput| < 1 (looks like a normalised proportion)
+  | 'bare_ratio_on_unit_factor' // !inputHasUnit AND factor has a unit AND 0 < |rawInput| < 1 (looks like a normalised proportion)
+  // ROADMAP 2.159 — SILENT SCALE REDECLARATION. The proposal would give a
+  // factor that HAS a recorded value a unit / an upper limit it did not have.
+  // That is a permanent change to what the factor MEASURES, not to its value,
+  // and it happened with no consent step and no renormalisation.
+  | 'unit_redeclares_scale'
+  | 'cap_redeclares_scale';
 
 /**
  * Result of evaluating a proposal. `ok: true` means the handler's
@@ -100,6 +142,24 @@ export interface EvaluateFactorValueProposalInput {
    * 2fcd2221 fixed: AC.3).
    */
   readonly factorExistingRaw?: number;
+  /**
+   * ROADMAP 2.159 — the factor's stored `observed_state.value` /
+   * `observed_state.raw_value`, verbatim. Distinct from `factorExistingRaw`,
+   * which is the DE-NORMALISED user-unit LHS for delta operators; these are
+   * the un-inverted stored numbers.
+   *
+   * Read for ONE purpose: to establish that the factor already carries a
+   * recorded state, which is what makes a proposal-supplied unit or cap a
+   * REDECLARATION (guards 2c / 2d) rather than a first-time declaration.
+   * Their MAGNITUDE is deliberately never inspected — see the note above
+   * guard 2c for why value magnitude cannot classify a factor's scale.
+   *
+   * Optional: a caller that omits them (an older test mock, a lookup adapter
+   * with no `observed_state`, or `encode-option-interventions.ts`) leaves both
+   * gates inert — exactly today's behaviour. Absence never tightens a guard.
+   */
+  readonly factorObservedValue?: number;
+  readonly factorObservedRawValue?: number;
   /**
    * When true, the parameter arrived with an explicit unit. Mirrors
    * `parseProposalValue`'s flag — bare numbers vs unit-bearing values
@@ -261,15 +321,25 @@ function evaluateFactorValueProposalImpl(
   const {
     rawInput,
     operator: rawOperator,
-    unit,
+    unit: rawUnit,
     proposalCap,
     factorCap,
-    factorUnit,
+    factorUnit: rawFactorUnit,
     factorExistingRaw,
+    factorObservedValue,
+    factorObservedRawValue,
     inputHasUnit,
   } = input;
 
   const operator: FactorValueOperator = rawOperator ?? 'set';
+
+  // An empty / whitespace-only unit is NOT a unit — see `canonicaliseUnit`.
+  // Applied to the FACTOR's unit as well as the proposal's, so a factor already
+  // carrying `''` reads as unitless here: that is what retires the malformed
+  // `bare_ratio_on_unit_factor` copy ("not a value in .") and restores guard
+  // 2c for such a factor, rather than only preventing new `''` writes.
+  const unit = canonicaliseUnit(rawUnit);
+  const factorUnit = canonicaliseUnit(rawFactorUnit);
 
   // 1. Structural: rawInput must be finite. Matches the
   //    "Value must be a finite number." guard at normalise-factor-value.ts:62.
@@ -314,6 +384,80 @@ function evaluateFactorValueProposalImpl(
       ok: false,
       reason: 'unit_mismatch',
       specific_issue: `This factor uses ${factorUnit}; the value provided is in ${unit}.`,
+    };
+  }
+
+  // ── ROADMAP 2.159 — SILENT SCALE REDECLARATION ────────────────────────────
+  //
+  // 2c / 2d judge the PROPOSAL'S DECLARATION against the FACTOR'S, which is a
+  // structural comparison of two recorded facts. They make no inference about
+  // what a factor "probably is" from the magnitude of its value — an earlier
+  // attempt at this workstream did exactly that and was refuted: a unitless,
+  // uncapped small COUNT factor sitting at 0 or 1 is indistinguishable, BY
+  // VALUE, from a normalised proportion, so magnitude cannot carry the
+  // classification. (`prompts/defaults-v187.ts:301` sanctions "Small count
+  // (0-10) | raw integer" as its own class.) Bounding a normalised factor
+  // needs a DECLARED scale on the contract — rowed separately as 2.193; it is
+  // deliberately NOT attempted here, and an uncapped unitless factor is left
+  // exactly as unbounded as it is today.
+  //
+  // What IS sound without any declaration is this: the handler persists
+  // `after.unit = parsed.unit ?? before.unit` and `after.cap = parsed.cap ??
+  // before.cap` (`set-factor-value.ts`), so a proposal carrying a unit or a cap
+  // permanently changes WHAT A FACTOR MEASURES — not merely its value — on a
+  // factor that had neither. Two measured consequences at the bytes:
+  //
+  //   • the two-turn launder: turn 1 `{value: 0.9, unit: '%'}` on a unitless
+  //     factor is accepted and PERSISTS the unit; the factor is now a
+  //     different kind of thing, in an ordinary 200, with no consent step.
+  //   • the one-step cap dodge: `{value: 1.5, cap: 2}` on an UNCAPPED factor
+  //     writes `cap: 2` — and `capChanged` is computed as `before.cap !==
+  //     undefined && …`, so an absent→present cap is NOT treated as a cap
+  //     change and option interventions are NOT renormalised. Every option's
+  //     absolute configuration on that factor silently shifts meaning.
+  //
+  // Both are refused here rather than silently applied. Refusing is strictly
+  // more conservative than today, states only observed facts, and promises no
+  // capability that does not exist.
+  //
+  // ⚠ INERT WHEN THE FACTOR HAS NO RECORDED STATE. Both gates require the
+  // factor to already carry a value — first-time declaration ("this factor is
+  // in £") must keep working, and `orchestrator/tools/encode-option-
+  // interventions.ts`, which calls this predicate through `normaliseFactorValue`
+  // without threading the factor's observed value, is unaffected by
+  // construction rather than by assumption.
+  const factorHasRecordedValue =
+    factorObservedValue !== undefined || factorObservedRawValue !== undefined;
+
+  // 2c. unit_redeclares_scale. The proposal states a unit; the factor has
+  //     none. `unit_mismatch` (2b) cannot see this case — it requires BOTH
+  //     sides to carry a unit.
+  if (factorHasRecordedValue && unit !== undefined && factorUnit === undefined) {
+    return {
+      ok: false,
+      reason: 'unit_redeclares_scale',
+      // Prediction-free, and free of computed numbers: the only interpolation
+      // is the unit the user themselves stated. (An earlier draft of this
+      // workstream interpolated a post-operator float and rendered
+      // "the value given was 1.2999999999999998" — never echo computed
+      // arithmetic back to a user.)
+      specific_issue:
+        `This factor is recorded without a unit, so applying a value in ${unit} ` +
+        `would change what it measures.`,
+    };
+  }
+
+  // 2d. cap_redeclares_scale. The proposal states a cap; the factor has none.
+  //     Distinct from the CONSENTED extension of an EXISTING cap (1.16 item
+  //     A2), which is unaffected: that path only ever fires on a factor whose
+  //     cap is already set, and it renormalises option interventions.
+  if (factorHasRecordedValue && proposalCap !== undefined && factorCap === undefined) {
+    return {
+      ok: false,
+      reason: 'cap_redeclares_scale',
+      specific_issue:
+        `This factor is recorded without an upper limit, so applying this change ` +
+        `would set one and rescale the factor.`,
     };
   }
 
@@ -516,6 +660,10 @@ export function evaluatePostOperatorFactorValue(input: {
   readonly proposalCap?: number;
   readonly factorCap?: number;
   readonly factorUnit?: string;
+  /** ROADMAP 2.159 — the factor's stored value / raw_value, for the
+   *  redeclaration gates (2c / 2d). Magnitude is never inspected. */
+  readonly factorObservedValue?: number;
+  readonly factorObservedRawValue?: number;
   readonly inputHasUnit: boolean;
 }): FactorValueProposalEvaluation {
   return evaluateFactorValueProposalImpl(
@@ -528,6 +676,16 @@ export function evaluatePostOperatorFactorValue(input: {
       ...(input.proposalCap !== undefined ? { proposalCap: input.proposalCap } : {}),
       ...(input.factorCap !== undefined ? { factorCap: input.factorCap } : {}),
       ...(input.factorUnit !== undefined ? { factorUnit: input.factorUnit } : {}),
+      // ROADMAP 2.159 — forwarded so the execute-time re-check applies the same
+      // redeclaration gates the validator and the handler's `preEvaluation`
+      // do. Without this the backstop layer would enforce a weaker rule set
+      // than the gates in front of it.
+      ...(input.factorObservedValue !== undefined
+        ? { factorObservedValue: input.factorObservedValue }
+        : {}),
+      ...(input.factorObservedRawValue !== undefined
+        ? { factorObservedRawValue: input.factorObservedRawValue }
+        : {}),
       inputHasUnit: input.inputHasUnit,
     },
     true,

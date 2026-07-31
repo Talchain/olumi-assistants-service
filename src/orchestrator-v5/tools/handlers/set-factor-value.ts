@@ -39,6 +39,7 @@ import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
 import {
   applyFactorValueOperator,
+  canonicaliseUnit,
   evaluateFactorValueProposal,
   resolveExistingRawValue,
 } from './d1-shared/evaluate-factor-value-proposal.js';
@@ -158,11 +159,17 @@ function parseProposalValue(raw: unknown): ParsedValue {
   }
   if (raw && typeof raw === 'object') {
     const obj = raw as { value: number; unit?: string; cap?: number };
+    // An empty / whitespace-only unit is NOT a unit — canonicalise it away here
+    // so it can never be PERSISTED by `after.unit = parsed.unit ?? before.unit`.
+    // `inputHasUnit` already treated `''` as no-unit; carrying `''` in `unit`
+    // while saying "no unit" in `inputHasUnit` is the disagreement that let a
+    // `unit: ''` write through. See `canonicaliseUnit`.
+    const unit = canonicaliseUnit(obj.unit);
     return {
       numeric: obj.value,
-      ...(obj.unit !== undefined ? { unit: obj.unit } : {}),
+      ...(unit !== undefined ? { unit } : {}),
       ...(obj.cap !== undefined ? { cap: obj.cap } : {}),
-      inputHasUnit: typeof obj.unit === 'string' && obj.unit.length > 0,
+      inputHasUnit: unit !== undefined,
     };
   }
   throw new D1HandlerError(
@@ -315,6 +322,13 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
       ...(existing.kind === 'resolved' ? { factorExistingRaw: existing.raw } : {}),
+      // ROADMAP 2.159 — the STORED model value / raw_value, un-inverted, so the
+      // predicate can tell a scale REDECLARATION from a first-time declaration.
+      // Distinct from `factorExistingRaw` (the de-normalised delta LHS).
+      ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorObservedRawValue: before.raw_value }
+        : {}),
       inputHasUnit: parsed.inputHasUnit,
     });
     if (!preEvaluation.ok) {
@@ -340,6 +354,13 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(parsed.cap !== undefined ? { proposalCap: parsed.cap } : {}),
       ...(before.cap !== undefined ? { factorCap: before.cap } : {}),
       ...(before.unit !== undefined ? { factorUnit: before.unit } : {}),
+      // ROADMAP 2.159 — same two fields as `preEvaluation` above, so the
+      // execute-time re-check enforces the same redeclaration gates rather
+      // than a weaker rule set (the AC.1 parity invariant).
+      ...(before.value !== undefined ? { factorObservedValue: before.value } : {}),
+      ...(before.raw_value !== undefined
+        ? { factorObservedRawValue: before.raw_value }
+        : {}),
       // The ambiguity guard only fires when the PROPOSAL itself omits the
       // unit. The factor's stored unit is irrelevant to the user's intent —
       // a bare-number proposal "200" against a cap=100 factor is ambiguous
