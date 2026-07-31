@@ -112,6 +112,46 @@ export const TIER2_ACTIVATION_ENABLED = true;
  * escalated to Brief 4 §9, NOT silently covered here).
  *
  * Blocked outright from user-facing strings, both locks notwithstanding.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ⭐ ROADMAP 2.205 — THE PRACTICAL RESOLUTION, ADJUDICATED 2026-07-31.
+ *
+ * 2.205 asked: *is the Tier-3 deny composition-only by design, or do LLM prose
+ * echoes need a numeric-token scan?* (raised at
+ * `phase3-blocks.ts:1478`, after that file measured that `buildFlipThresholdCards`
+ * already ships narratives the prompt ORDERS to restate unrounded flip values).
+ *
+ * THE RULE (orchestrator ruling; Paul veto open; grounded in his data+coaching
+ * doctrine): **a number already DISPLAY-LICENSED to the USER on the same turn
+ * is speakable by the coach — same licence, same register. The Tier-3 deny
+ * continues to bind any value NOT shown to the user.**
+ *
+ * WHAT CHANGED, AND WHAT DID NOT.
+ *   - NOTHING in this file changed. `flip_thresholds` is still Tier-3
+ *     claim-denied, `classifyClaimUsable` still denies it at the first fork,
+ *     and no COMPOSITION surface may author a flip number from the raw field.
+ *   - What the resolution permits is narrower and lives entirely in the
+ *     coach's CONTEXT ASSEMBLY: the ContextPack may carry the flip point as
+ *     the PRE-FORMATTED DISPLAY STRING the producer already wrote for the
+ *     user's screen, for exactly those factors whose flip_threshold review card
+ *     shipped. Trace + fail-closed rules:
+ *     `../context/analysis-signals.ts` → `deriveFlipDisplayLicences`;
+ *     float cage + the emitted string:
+ *     `../format/format-analysis-for-context.ts` → `formatFlipPointDisplay`.
+ *   - The two OTHER quantities the un-banding brief proposed did NOT qualify
+ *     and stay banded: the sensitivity magnitude (no CEE surface renders it —
+ *     compose reads only `factor_sensitivity[].confidence`, banded, and
+ *     `.interpretation`, prose) and the VOI score (`m1_coaching` is
+ *     TRANSPORT-banned, see {@link TIER3_TRANSPORT_BANNED_FIELDS} — it never
+ *     reaches the wire, so it can never have a display licence).
+ *   - The general question 2.205 raised — whether producer prose echoes need a
+ *     numeric-token scan — is NOT answered by this ruling and stays open. The
+ *     ruling is about what the COACH may be TOLD, not about widening what any
+ *     producer may SAY.
+ *
+ * Evidence, with the complete manifests and the scope of each absence claim:
+ * `PHASE0-EVIDENCE-2026-07-28/fix-context-unband.md`.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 export const TIER3_LEAK_BLOCK_FIELDS: readonly string[] = Object.freeze([
   'flip_thresholds',
