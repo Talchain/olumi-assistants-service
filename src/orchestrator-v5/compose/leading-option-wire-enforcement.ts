@@ -115,64 +115,64 @@
  * vocabulary with no option name, is untouched.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * ⚠ SCOPE — STATED, NOT IMPLIED. What this gate does NOT cover.
- *
- * A chokepoint that claims to cover "the wire" and quietly covers less is the
- * guarantee-theatre class this programme exists to hunt. So, explicitly:
+ * ⚠ SCOPE — STATED, NOT IMPLIED. A chokepoint that claims to cover "the wire"
+ * and quietly covers less is the guarantee-theatre class this programme hunts.
  *
  *   COVERED   `assistant_text` and `framing_question` — the two top-level
  *             unbounded prose surfaces, both rendered VERBATIM by the UI, and
  *             the surfaces that carry the model-authored ANSWER on all three
  *             model-text-capable pre-executor exits.
  *
- *   NOT COVERED, DELIBERATELY:
- *     - `blocks[].{title,body,signal,summary,…}` and every enrichment blob.
- *       These are PRODUCER-owned: `compose/withheld-claim-projection.ts` drops
- *       `decision_review` whole, projects `decision_brief` and `robustness`
- *       member-wise, nulls `blocks[].leading_option_id`, and `compose.ts` drops
- *       leader-presuming Phase-3 blocks. A SECOND, wire-level structured
- *       projection would be a second authority over the same question — the
- *       exact trap-#12 shape this estate has already paid for twice. The alarm
- *       keeps observing them, which is what keeps the producer defect visible
- *       instead of masked by a downstream repair.
- *     - STRUCTURED key designations (`leading_option_id`, `recommended_option_
- *       label`, …). There is no "unit" of a key to be surgical about; removing
- *       one is a schema decision, and the schema's own honest value (`null`) is
- *       already set by the producer.
- *     - `_reasoning`. VERBATIM extended-thinking text, ruled (ROADMAP 1.42) to
- *       bypass the egress claim-safety cage by design; containment is
- *       flag-default-off + collapsed UI + explicit label.
- *     - The SSE MID-STREAM frames (`GRAPH_READY`, `PROGRESS`). They ship before
- *       the turn completes and therefore before `sendFinalised200` exists to be
- *       a chokepoint. No leader-claim prose rides them today.
- *     - The three execute-intent receipts (`set_factor_value`, `add_constraint`,
- *       `adjust_edge_strength`), which are EXECUTOR-side and excluded by the
- *       #755 guard's own scope check (`turn-executor.ts:10112`).
+ * ⚠⚠ THE CEILING — READ THIS BEFORE QUOTING THE HEADLINE. What this gate closes
+ * is BOUNDED on THREE axes, and the headline must name all three or it over-reads
+ * (which is the trap-class this programme hunts — the over-read is a worse defect
+ * than the residual it hides).
  *
- * ⚠⚠ THE VOCABULARY-BOUNDED CEILING — READ THIS BEFORE QUOTING THE HEADLINE.
+ * This gate suppresses a withheld leader claim only when the field BOTH
+ *   (a) uses the shared leader VOCABULARY, AND
+ *   (b) names a roster option as an EXACT token sequence (whitespace-flexible).
  *
- * This gate can only see designations made with the SHARED VOCABULARY. A
- * designation that uses none of it ships unchanged:
+ * The stated residual — leak surface, NOT closed here, observed by the alarm:
  *
- *     "Hire Marketing Manager is your strongest bet."
- *     "Hire Marketing Manager is the frontrunner."
- *     "Go with the first one."
+ *   1. VOCABULARY-FREE designations — "your strongest bet", "the frontrunner",
+ *      "go with the first one". No shared vocabulary ⇒ neither reader sees it.
+ *      Pre-existing and SHARED: the Layer-3 alarm and the #755 executor
+ *      chokepoint are blind to these too. Positional designation in PROSE
+ *      ("the first option") sits here. (Positional designation in STRUCTURED
+ *      data does NOT — the producer drops `rank` and re-orders
+ *      `decision_brief.options[]` by `option_id`, so ordinal and array order
+ *      carry no designation by the time a body reaches this seam.)
  *
- * That ceiling is PRE-EXISTING and SHARED — the Layer-3 alarm cannot see these
- * either, and neither can the #755 executor chokepoint, which triggers on the
- * same reader. So this is not a limitation introduced here; it is the estate's
- * standing exposure, and it means "the withheld leader claim no longer ships"
- * must always be read as "…no leader claim EXPRESSIBLE IN THIS VOCABULARY
- * ships". Widening the vocabulary is a shared change with its own
- * over-suppression controls (`leader-vocabulary-producer-control.test.ts` is the
- * mechanism that would demand it) and is NOT part of this slice.
+ *   2. SHORT FORMS — "Marketing Manager" for a roster label "Hire Marketing
+ *      Manager". The exact-sequence matcher misses them, deliberately: see
+ *      {@link textNamesAnOption}'s note on why partial matching is refused (it
+ *      re-opens P1-OVERSUPPRESS). This is the REALISTIC residual — models shorten
+ *      multi-word labels. A wrapped name whose claim unit is surgically removed
+ *      can also LEAVE a claimless short-form fragment ("Hire Marketing" once
+ *      "…Manager leads at 72%." is gone) — same residual class: a partial label
+ *      with NO claim attached to it.
  *
- * Positional designation in PROSE ("the first option") sits under the same
- * ceiling. Positional designation in STRUCTURED data does NOT: the producer
- * already drops `rank` and re-orders `decision_brief.options[]` by `option_id`
- * (`withheld-claim-projection.ts` — `WITHHELD_DROPPED_OPTION_MEMBERS`,
- * `projectOptionsForWithheldClaim`), so ordinal and array order carry no
- * designation by the time a body reaches this seam.
+ *   3. PARAPHRASES — a naming that is neither the exact label nor shares the
+ *      vocabulary.
+ *
+ * The fix path for 2 and 3 is a semantic judge — ROADMAP 2.198, converging with
+ * the harness eval track — NOT a fuzzy matcher here. The honest headline is
+ * therefore: "a withheld leader claim naming a roster option in RECOGNISABLE
+ * FORM (shared vocabulary + exact whitespace-flexible label) no longer ships at
+ * these exits; short-form / paraphrase / vocabulary-free designations remain the
+ * stated ceiling (2.197 / 2.198)." Never the bare "the withheld leader claim no
+ * longer ships".
+ *
+ * ── The seam's own exclusions (structural, not the ceiling above) ──
+ *     - `blocks[].{title,body,signal,summary,…}` and every enrichment blob:
+ *       PRODUCER-owned (`compose/withheld-claim-projection.ts`). A second,
+ *       wire-level structured projection is a second authority over one question
+ *       (trap #12). The alarm keeps observing them.
+ *     - STRUCTURED key designations (`leading_option_id`, …): no prose "unit" to
+ *       be surgical about; the producer already nulls them.
+ *     - `_reasoning`: verbatim, ruled to bypass the cage (ROADMAP 1.42).
+ *     - SSE MID-STREAM frames: ship before `sendFinalised200` exists.
+ *     - The three execute-intent receipts: EXECUTOR-side (`turn-executor.ts`).
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -286,16 +286,56 @@ export function optionRosterFromGraph(graph: unknown): readonly string[] {
  * lookarounds rather than `\b` because `\b` is defined against ASCII word
  * characters and silently mis-anchors on a label that starts or ends with
  * punctuation ("Hire (Senior)") or carries non-ASCII letters.
+ *
+ * ⚠ WHITESPACE INSIDE THE LABEL IS NORMALISED TO `\s+`, AND THAT IS LOAD-BEARING
+ * — the same soft-wrap defect the vocabulary side and the splitter already fixed,
+ * left on the name matcher until an adversarial re-verify of the redesign caught
+ * it (31 Jul). Model prose soft-wraps: "Hire Marketing\nManager leads at 72%."
+ * carries the roster label "Hire Marketing Manager" across a newline. With the
+ * space escaped as a LITERAL space, the name check missed, the field fell to the
+ * "asserts but names nobody ⇒ ship unchanged" row, and the withheld designation
+ * shipped byte-identical. It is NOT the vocabulary-bounded ceiling (that is a
+ * designation using no vocabulary at all): here the vocabulary IS present and the
+ * option IS named — only the matcher was brittle. Normalising every internal
+ * whitespace run to `\s+` matches a label however the prose happened to wrap.
  */
-function textNamesAnOption(value: string, roster: readonly string[]): boolean {
+export function textNamesAnOption(value: string, roster: readonly string[]): boolean {
   if (typeof value !== 'string' || value.length === 0 || roster.length === 0) return false;
-  return roster.some((label) =>
-    new RegExp(
-      `(?<![\\p{L}\\p{N}_])${escapeForRegExp(label)}(?![\\p{L}\\p{N}_])`,
-      'iu',
-    ).test(value),
-  );
+  return roster.some((label) => {
+    // Escape metacharacters FIRST (so a label's own `.`/`(` is literal), then
+    // relax the already-escaped inter-word whitespace to `\s+`. `escapeForRegExp`
+    // does not touch space characters, so this rewrite cannot corrupt an escape.
+    const pattern = escapeForRegExp(label).replace(/\s+/g, '\\s+');
+    return new RegExp(`(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`, 'iu').test(value);
+  });
 }
+
+/**
+ * ⚠ WHY THIS IS AN EXACT TOKEN SEQUENCE AND NOT A FUZZY / PARTIAL MATCH — an
+ * ARCHITECT CALL, recorded so the next reader does not "fix" it into the defect
+ * it is avoiding. (ROADMAP 2.149, adjudicated 31 Jul.)
+ *
+ * The matcher above requires the roster label as a whole, whitespace-flexible
+ * token SEQUENCE. It therefore MISSES short forms ("Marketing Manager" for a
+ * roster label "Hire Marketing Manager") and paraphrases. Models do shorten
+ * multi-word labels, so this is a real residual, not a contrived one.
+ *
+ * Closing it would mean fuzzy or partial-token matching — and that RE-OPENS the
+ * exact over-suppression the name gate was added to close. A partial matcher
+ * that fired on "Marketing" would destroy "the marketing budget improved" on
+ * every withheld turn; one that fired on "Hire" would destroy "we should hire
+ * two engineers". The gate would be back to deleting honest receipts, which is
+ * P1-OVERSUPPRESS rebuilt.
+ *
+ * So the call is: DO NOT fuzzy-match here. The strict matcher is a real net gain
+ * for pass-condition 2 — it reduces the leak surface from "every non-execute
+ * exit ships the claim" to "short-form / paraphrase / vocabulary-free only", and
+ * an exact runner-up naming is still caught by escalation. The complete fix is a
+ * semantic judge (heavier, separate, converging with the harness eval track) —
+ * ROADMAP 2.198. Perfect must not block the strict improvement; the only
+ * unacceptable thing is OVER-CLAIMING what this closes, which is why the ceiling
+ * is stated in the SCOPE block and in the headline, not left implicit.
+ */
 
 export interface WireLeaderClaimEnforcementOpts {
   readonly requestId: string;

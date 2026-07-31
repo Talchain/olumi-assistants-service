@@ -1119,6 +1119,54 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       const { body } = await postTurn(app, MESSAGE);
       expect(body.assistant_text).toBe(DISTRIBUTED);
     });
+
+    it('⭐ SOFT-WRAPPED NAME: a newline inside the option name ENTERS and strips the claim', async () => {
+      // ⭐ RED-FIRST at the ROUTE. Before the name matcher's `\s+` normalisation,
+      // a name spanning a soft wrap failed the name check, the field fell to the
+      // "asserts but names nobody ⇒ ship unchanged" row, and the withheld
+      // designation shipped byte-identical at HTTP 200 — the exact leak this PR
+      // exists to stop, defeated by the matcher rather than the criterion. Now
+      // the field ENTERS and the CLAIM is removed. (A claimless short-form
+      // fragment may remain — the stated ceiling, fixed by 2.198.)
+      dispatchEditGraphMock.mockResolvedValue({
+        commitPerformed: true,
+        graph: READY_GRAPH,
+        response: {
+          response_version: 2,
+          // A wrap between the LAST two words, so the asserting unit removed by
+          // surgery carries a real word of the name (not just "Hire").
+          assistant_text: `${LEADER_LABEL.replace(/ (\S+)$/, '\n$1')} leads at 72%.`,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+      const { status, body } = await postTurn(app, MESSAGE);
+      expect(status).toBe(200);
+      expect(body.assistant_text, 'the CLAIM must be gone from the wire').not.toContain('72%');
+      expect(body.assistant_text).not.toContain('leads at');
+      expect(body.assistant_text).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
+    });
+
+    it('PERMIT-WINS on the wrapped name too', async () => {
+      factsByTurnRowId = { [ANALYSIS_TURN_ROW_ID]: [permittedRunAnalysisFact()] };
+      const wrapped = `${LEADER_LABEL.replace(/ (\S+)$/, '\n$1')} leads at 72%.`;
+      dispatchEditGraphMock.mockResolvedValue({
+        commitPerformed: true,
+        graph: READY_GRAPH,
+        response: {
+          response_version: 2,
+          assistant_text: wrapped,
+          blocks: [],
+          suggested_actions: [],
+          insights: [],
+          stage_indicator: 'analyse',
+        },
+      });
+      const { body } = await postTurn(app, MESSAGE);
+      expect(body.assistant_text).toBe(wrapped);
+    });
   });
 
   // ── PROVENANCE VARIATION (the R3-M2 obligation) ──────────────────────────
@@ -1383,7 +1431,7 @@ describe('T1 claim safety — no route exit may stamp a LITERAL permission', () 
       expect(
         stripped,
         'a comment-only phrase must be GONE, or every absence below is vacuous',
-      ).not.toContain('NOT COVERED, DELIBERATELY');
+      ).not.toContain('READ THIS BEFORE QUOTING THE HEADLINE');
     });
 
     it.each([

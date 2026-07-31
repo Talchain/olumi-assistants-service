@@ -20,6 +20,7 @@ import { setTestSink, TelemetryEvents } from '../../../utils/telemetry.js';
 import {
   enforceLeadingOptionClaimsAtWire,
   optionRosterFromGraph,
+  textNamesAnOption,
   WIRE_ENFORCED_PROSE_FIELDS,
   WIRE_WITHHELD_LEADER_REPLACEMENT,
 } from '../leading-option-wire-enforcement.js';
@@ -552,6 +553,100 @@ describe('THE ROSTER — "which options exist", never "which one leads"', () => 
       mayNameLeadingOption: false,
     });
     expect(changed).toBe(false);
+  });
+
+  describe('⭐ SOFT-WRAPPED NAMES — the matcher catches up to the criterion', () => {
+    // ⭐ RED-FIRST. Model prose soft-wraps a multi-word option label across a
+    // newline. Before the `\s+` normalisation the escaped label carried a
+    // LITERAL space, the name check missed, and the withheld designation shipped
+    // byte-identical — the exact leak this PR exists to stop, defeated by the
+    // matcher rather than by the criterion.
+    it('a newline inside the option name ENTERS and removes the CLAIM', () => {
+      // ⭐ THE CORE FIX. Before the `\s+` normalisation this shipped
+      // BYTE-IDENTICAL (changed=false) — the matcher missed the wrapped name, the
+      // field fell to the "asserts but names nobody ⇒ ship unchanged" row, and
+      // the withheld designation shipped at HTTP 200. Now the field ENTERS and
+      // the CLAIM ("leads at 72%") is removed.
+      //
+      // ⚠ WHAT SURVIVES IS THE STATED CEILING, NOT A BUG. The name straddles the
+      // `\n` unit boundary, so surgery removes the asserting unit ("Manager leads
+      // at 72%.") and leaves the claimless fragment "Hire Marketing". That
+      // fragment is a SHORT FORM with NO claim attached — exactly the residual
+      // the module docstring and the SCOPE block name (fixed by the semantic
+      // judge, ROADMAP 2.198), NOT closed here. Chasing it means partial matching,
+      // which re-opens P1-OVERSUPPRESS. See `textNamesAnOption`'s note.
+      const wrapped = 'Hire Marketing\nManager leads at 72%.';
+      const { response, changed } = enforceLeadingOptionClaimsAtWire(envelope(wrapped), {
+        ...OPTS,
+        mayNameLeadingOption: false,
+      });
+      expect(changed, 'the name spans a soft wrap — it must still be recognised at field level').toBe(
+        true,
+      );
+      expect(response.assistant_text, 'the CLAIM must be gone').not.toContain('72%');
+      expect(response.assistant_text).not.toContain('leads at');
+      expect(response.assistant_text).toContain(WIRE_WITHHELD_LEADER_REPLACEMENT);
+    });
+
+    it('CEILING, stated: a claimless short-form fragment of a wrapped name MAY survive', () => {
+      // ⚠ PINNED SO THE CEILING IS HONEST, NOT DISCOVERED. This documents the
+      // residual rather than blessing it: the fragment carries NO leader claim,
+      // so it designates nothing on its own. If a future semantic judge (2.198)
+      // closes it, this arm changes deliberately.
+      const { response } = enforceLeadingOptionClaimsAtWire(
+        envelope('Hire Marketing\nManager leads at 72%.'),
+        { ...OPTS, mayNameLeadingOption: false },
+      );
+      expect(response.assistant_text).toBe(
+        `Hire Marketing\n${WIRE_WITHHELD_LEADER_REPLACEMENT}`,
+      );
+    });
+
+    it('a name wholly WITHIN one line keeps the receipt (surgical, no fragment)', () => {
+      const { response, changed } = enforceLeadingOptionClaimsAtWire(
+        envelope(`Added the risk. ${LEADER} leads at 72%.`),
+        { ...OPTS, mayNameLeadingOption: false },
+      );
+      expect(changed).toBe(true);
+      expect(response.assistant_text.startsWith('Added the risk.')).toBe(true);
+      expect(response.assistant_text).not.toContain(LEADER);
+    });
+
+    it('a run of spaces / tabs inside the name is matched too', () => {
+      const spaced = 'Hire Marketing   Manager leads at 72%.';
+      const { changed } = enforceLeadingOptionClaimsAtWire(envelope(spaced), {
+        ...OPTS,
+        mayNameLeadingOption: false,
+      });
+      expect(changed).toBe(true);
+    });
+
+    it('PERMIT-WINS: a wrapped mention on a PERMITTED turn stays byte-identical', () => {
+      const wrapped = 'Hire Marketing\nManager leads at 72%.';
+      const input = envelope(wrapped);
+      const { response, changed } = enforceLeadingOptionClaimsAtWire(input, {
+        ...OPTS,
+        mayNameLeadingOption: true,
+      });
+      expect(changed).toBe(false);
+      expect(response).toBe(input);
+    });
+
+    it('REGRESSION GUARD: possessive / case / punctuation variants stay matched', () => {
+      // The reviewer confirmed these already worked; pin them so the `\s+`
+      // rewrite cannot quietly regress them.
+      const roster = [LEADER]; // "Hire Marketing Manager"
+      // Possessive — the `'s` is outside the name, so the right boundary holds.
+      expect(textNamesAnOption("Hire Marketing Manager's edge is real.", roster)).toBe(true);
+      // Case-insensitive.
+      expect(textNamesAnOption('hire marketing manager leads.', roster)).toBe(true);
+      // Trailing punctuation.
+      expect(textNamesAnOption('The pick is Hire Marketing Manager.', roster)).toBe(true);
+      // A leading paren before the name.
+      expect(textNamesAnOption('(Hire Marketing Manager) leads.', roster)).toBe(true);
+      // Still whole-token: a substring is not a match.
+      expect(textNamesAnOption('Rehire Marketing Managerial staff.', roster)).toBe(false);
+    });
   });
 });
 
