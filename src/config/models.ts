@@ -467,6 +467,7 @@ export function isModelEnabled(modelId: string): boolean {
 export function validateModelRegistered(
   label: string,
   modelId: string | null | undefined,
+  kind: ModelRegistryCheckKind = 'checked_in_default',
 ): string[] {
   const errors: string[] = [];
   if (!modelId) {
@@ -474,6 +475,49 @@ export function validateModelRegistered(
       `The resolved default model for "${label}" is empty — no model is configured and no code default resolved. ` +
       `That call site would fail at request time. Set the ${label} model (PMS prompt config / CEE_MODEL_* / TASK_MODEL_DEFAULTS).`,
     );
+    return errors;
+  }
+  // ⚠ A3 (review, 2026-07-31) — AN OPERATOR OVERRIDE GETS DIFFERENT, TRUE COPY.
+  //
+  // The checked-in-default wording below says "Requests routed to it would fail
+  // at the adapter". For an operator-supplied CEE_MODEL_* value that sentence is
+  // FALSE, and the live estate is the proof: `gpt-4.1` is unregistered and has
+  // been serving `decision_review` on staging without incident. Complete
+  // manifest behind that claim, scope `rg -a` over `src/` excluding `__tests__`:
+  // `isKnownModel` and `isModelEnabled` have exactly ONE caller each — this
+  // function — and `MODEL_REGISTRY` / `isKnownModel` / `isModelEnabled` return
+  // ZERO hits in `src/adapters/`. Registry membership is consulted at BOOT ONLY,
+  // by this guard. No adapter checks it.
+  //
+  // Printing a false failure claim three times per boot is how an alarm gets
+  // trained out of an operator's attention (CLAUDE.md trap 7; trap 7b is the
+  // same lesson one level up — a wrong label made a whole programme stop
+  // looking at a real security red). So this branch states only what is true,
+  // and every clause is verified: no registry metadata; `getModelProvider`
+  // returns undefined so the router's provider-match step silently no-ops
+  // (harmless while the provider already matches, a trap the day LLM_PROVIDER
+  // changes); `isModelClientAllowed` REJECTS the same id from a client while
+  // the server-side value is accepted (router.ts:818, extraction.ts:405 —
+  // genuinely asymmetric); and a floating alias can be repointed upstream at
+  // any time, silently changing the model behind an eval baseline.
+  if (kind === 'operator_override') {
+    if (!isKnownModel(modelId)) {
+      errors.push(
+        `The model "${modelId}" configured for "${label}" is NOT in the model registry (config/models.ts). ` +
+        `It may still serve — the adapters never consult the registry — but nothing validated it at boot, and no ` +
+        `registry metadata (tier, max tokens, client-allow, sampling-param rules) exists for it: getModelProvider() ` +
+        `returns undefined, so the router's provider-match step no-ops, and a CLIENT sending this same id would be ` +
+        `rejected while this server-side value is accepted. If it is a floating provider ALIAS it can be repointed ` +
+        `upstream at any time, silently changing the model. Pin ${label} to a dated registry member.`,
+      );
+    } else if (!isModelEnabled(modelId)) {
+      errors.push(
+        `The model "${modelId}" configured for "${label}" is registered but DISABLED in the model registry ` +
+        `(config/models.ts). It may still serve — the adapters never consult the registry — so this is a ` +
+        `contradiction between stated intent and live configuration, not an outage. Enable the model or point ` +
+        `${label} at an enabled one.`,
+      );
+    }
     return errors;
   }
   if (!isKnownModel(modelId)) {
@@ -499,15 +543,28 @@ export function validateModelRegistered(
  * (empty = clean).
  */
 export function validateModelsRegistered(
-  entries: ReadonlyArray<{ readonly label: string; readonly modelId: string | null | undefined }>,
+  entries: ReadonlyArray<ModelRegistryCheckEntry>,
 ): string[] {
-  return entries.flatMap((entry) => validateModelRegistered(entry.label, entry.modelId));
+  return entries.flatMap((entry) =>
+    validateModelRegistered(entry.label, entry.modelId, entry.kind),
+  );
 }
+
+/**
+ * What KIND of configuration produced this model id. It selects the failure
+ * copy, because the two classes have genuinely different truths (see the A3
+ * note on `validateModelRegistered`):
+ *   - `checked_in_default`  a value in this repo — drift/typo in our own source
+ *   - `operator_override`   a live `CEE_MODEL_*` env value — may serve fine
+ */
+export type ModelRegistryCheckKind = 'checked_in_default' | 'operator_override';
 
 /** One labelled model id awaiting the boot registry check. */
 export interface ModelRegistryCheckEntry {
   readonly label: string;
   readonly modelId: string | null | undefined;
+  /** Defaults to `checked_in_default` when omitted. */
+  readonly kind?: ModelRegistryCheckKind;
 }
 
 /**
@@ -531,19 +588,33 @@ export interface ModelRegistryCheckEntry {
  * `CeeTask` at all and has no checked-in default (its only consumer reads
  * `config.cee.models.extraction` directly, `adapters/llm/extraction.ts:65`).
  *
- * DERIVE-DON'T-MIRROR (CLAUDE.md trap 12): `envModels` is walked as a RECORD,
- * not as a hand-written task list, so a `CEE_MODEL_*` key added to the config
- * schema tomorrow is validated without anyone remembering to edit this file.
+ * DERIVE-DON'T-MIRROR (CLAUDE.md trap 12), at BOTH levels: each env record is
+ * walked as a RECORD (so a `CEE_MODEL_*` key added to the config schema
+ * tomorrow is validated with no edit here), and the records themselves are
+ * passed as a MAP (so a whole new env tier is one line at the seam, not a
+ * rewrite here).
+ *
+ * ⚠ THE SECOND LEVEL EXISTS BECAUSE THE FIRST CUT MISSED A WHOLE RECORD (A2,
+ * review 2026-07-31). It walked only `config.cee.models` (14 keys) while
+ * claiming any new `CEE_MODEL_*` key was covered. False: `config.cee.
+ * modelSelection.taskModels` is a SECOND record of ten `CEE_MODEL_TASK_*` keys
+ * (config/index.ts:1664-1675), and `model-resolution-logger.ts`
+ * `resolveTaskModel` ranks it ABOVE the legacy tier. The claim was nearly
+ * true, which is the most dangerous kind.
  *
  * Unset / empty / whitespace env values are SKIPPED, not reported: an unset
  * `CEE_MODEL_*` is the normal posture (the task lands on its checked-in
  * default, which is validated separately). Reporting it would make the guard
  * cry wolf, and an alarm everyone learns to ignore is a broken alarm
  * (CLAUDE.md trap 7).
+ *
+ * @param envModelRecords label-prefix → record of operator-supplied ids, e.g.
+ *   `{ env_model: config.cee.models, env_task_model: …taskModels }`. The prefix
+ *   becomes the error label so an operator can tell WHICH env var to fix.
  */
 export function buildModelRegistryCheckBatch(
   taskDefaults: Readonly<Record<string, string>>,
-  envModels: Readonly<Record<string, string | undefined>>,
+  envModelRecords: Readonly<Record<string, Readonly<Record<string, string | undefined>> | undefined>>,
   extra: ReadonlyArray<ModelRegistryCheckEntry> = [],
 ): ModelRegistryCheckEntry[] {
   return [
@@ -551,14 +622,21 @@ export function buildModelRegistryCheckBatch(
     ...Object.entries(taskDefaults).map(([task, modelId]) => ({
       label: `task_default:${task}`,
       modelId,
+      kind: 'checked_in_default' as const,
     })),
-    // Every operator-supplied CEE_MODEL_* value — the EFFECTIVE ids.
-    ...Object.entries(envModels)
-      .filter(
-        (pair): pair is [string, string] =>
-          typeof pair[1] === 'string' && pair[1].trim().length > 0,
-      )
-      .map(([key, modelId]) => ({ label: `env_model:${key}`, modelId })),
+    // Every operator-supplied value in every env tier — the EFFECTIVE ids.
+    ...Object.entries(envModelRecords).flatMap(([prefix, record]) =>
+      Object.entries(record ?? {})
+        .filter(
+          (pair): pair is [string, string] =>
+            typeof pair[1] === 'string' && pair[1].trim().length > 0,
+        )
+        .map(([key, modelId]) => ({
+          label: `${prefix}:${key}`,
+          modelId,
+          kind: 'operator_override' as const,
+        })),
+    ),
     // Router-bypass defaults the caller resolves itself.
     ...extra,
   ];

@@ -40,7 +40,7 @@ describe('boot model-registry check batch', () => {
       edit_graph: 'claude-sonnet-4-6',
     };
 
-    const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, envModels);
+    const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, { env_model: envModels });
     const errors = validateModelsRegistered(batch);
 
     // All three unregistered aliases must be named, each against its own key.
@@ -53,11 +53,19 @@ describe('boot model-registry check batch', () => {
     }
   });
 
-  it('the batch is DERIVED from the env record — a NEW CEE_MODEL_* key is covered without a code edit', () => {
+  it('the batch is DERIVED from each env record — a NEW key IN A WALKED RECORD needs no code edit', () => {
     // Trap 12: the guard must not be a hand-maintained task list. A key the
     // batch builder has never heard of must still be validated.
+    //
+    // ⚠ TITLE NARROWED (A2, review 2026-07-31). This used to read "a NEW
+    // CEE_MODEL_* key is covered without a code edit", which was FALSE as
+    // stated: it holds for a key added to a record that is already WALKED, not
+    // for a key in a record nobody passes. A whole second tier
+    // (`CEE_MODEL_TASK_*`) was invisible for exactly that reason. The
+    // record-level derivation is pinned at the seam, in
+    // `boot-model-registry-batch.test.ts`.
     const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, {
-      some_future_task: 'not-a-real-model-id',
+      env_model: { some_future_task: 'not-a-real-model-id' },
     });
     const errors = validateModelsRegistered(batch);
     expect(
@@ -68,7 +76,7 @@ describe('boot model-registry check batch', () => {
   });
 
   it('still covers EVERY checked-in task default (the widening did not drop coverage)', () => {
-    const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, {});
+    const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, { env_model: {} });
     const labels = batch.map((entry) => entry.label);
     for (const task of Object.keys(TASK_MODEL_DEFAULTS)) {
       expect(labels).toContain(`task_default:${task}`);
@@ -82,16 +90,14 @@ describe('boot model-registry check batch', () => {
     // checked-in default). Reporting it would make the guard cry wolf, and a
     // guard everyone learns to ignore is a broken alarm (CLAUDE.md trap 7).
     const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, {
-      decision_review: undefined,
-      repair: '',
-      extraction: '   ',
+      env_model: { decision_review: undefined, repair: '', extraction: '   ' },
     });
     expect(batch.some((entry) => entry.label.startsWith('env_model:'))).toBe(false);
     expect(validateModelsRegistered(batch)).toEqual([]);
   });
 
   it('extra router-bypass entries are appended verbatim', () => {
-    const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, {}, [
+    const batch = buildModelRegistryCheckBatch(TASK_MODEL_DEFAULTS, { env_model: {} }, [
       { label: 'rolling_summary_default', modelId: 'claude-haiku-4-5' },
     ]);
     expect(batch).toContainEqual({

@@ -48,7 +48,8 @@ import observabilityPlugin from "./plugins/observability.js";
 import { performanceMonitoring } from "./plugins/performance-monitoring.js";
 import { getAdapter, warmProviderConfigCache, getMaxTokensFromConfig } from "./adapters/llm/router.js";
 import { validateDraftThinkingAffordability } from "./adapters/llm/draft-budget.js";
-import { validateModelsAtStartup, getEnabledModelsSummary, validateModelsRegistered, buildModelRegistryCheckBatch } from "./config/models.js";
+import { validateModelsAtStartup, getEnabledModelsSummary, validateModelsRegistered } from "./config/models.js";
+import { buildBootModelRegistryBatch } from "./config/boot-model-registry-batch.js";
 import { DEFAULT_SUMMARY_MODEL } from "./orchestrator-v5/rolling-summary/summary-types.js";
 import { DEFAULT_DECOMPOSE_MODEL } from "./cee/decision-review/decompose.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
@@ -273,33 +274,30 @@ export async function build() {
   // EFFECTIVE + every CHECKED-IN default. Env overrides WIN over checked-in
   // defaults (router precedence step 3 > step 4), so the ids that actually
   // served were the only ones never checked — and three live tasks were running
-  // on the bare, unregistered, FLOATING alias `gpt-4.1` unnoticed. The batch is
-  // now DERIVED (see buildModelRegistryCheckBatch) from every checked-in default
-  // AND every set CEE_MODEL_* value, a superset of the effective set, so it
-  // cannot silently agree with a stale hand-list.
+  // on the bare, unregistered, FLOATING alias `gpt-4.1` unnoticed.
+  //
+  // ⚠ AND NOTE WHAT IS *NOT* HERE: no `config` argument. The batch used to be
+  // assembled inline on this line, and a review proved that wiring was pinned by
+  // NOTHING — passing `{}` instead of `config.cee.models` restored the exact
+  // pre-fix blindness with the full test suite still green (CLAUDE.md trap 11).
+  // `buildBootModelRegistryBatch` now reads live config itself, so there is no
+  // argument here left to hollow out, and the equivalent mutation lives inside
+  // the seam where env-driven tests catch it. Do not "simplify" this back into
+  // an inline assembly.
   //
   // Reads the registry directly, logs ERROR and continues in the same
   // fire-but-continue style as the draft-token / thinking affordability asserts
   // below (a config the runtime clamps has already made safe should not brick
   // the pod on boot).
-  const modelDefaultChecks = buildModelRegistryCheckBatch(
-    TASK_MODEL_DEFAULTS,
-    config.cee.models,
-    [
-      // Effective draft model (env override applied) — preserves the Lane-F
-      // check under its original label. Redundant with the derived rows above
-      // (both `env_model:draft` and `task_default:draft_graph` are covered);
-      // kept so the Lane-F locus stays named in the boot log.
-      { label: 'draft_graph (effective)', modelId: effectiveTaskModels.draft_graph },
-      // Router-bypass defaults: the two resolvers that don't consult
-      // TASK_MODEL_DEFAULTS (summariser + decision-review decompose). Their env
-      // overrides (`CEE_MODEL_SUMMARY`, `CEE_MODEL_DECISION_REVIEW_HAIKU`) are
-      // covered by the derived `env_model:*` rows, so default + override are
-      // both validated.
-      { label: 'rolling_summary_default', modelId: DEFAULT_SUMMARY_MODEL },
-      { label: 'decision_review_decompose_default', modelId: DEFAULT_DECOMPOSE_MODEL },
-    ],
-  );
+  const modelDefaultChecks = buildBootModelRegistryBatch([
+    // Router-bypass defaults: the two resolvers that don't consult
+    // TASK_MODEL_DEFAULTS (summariser + decision-review decompose). Their env
+    // overrides (`CEE_MODEL_SUMMARY`, `CEE_MODEL_DECISION_REVIEW_HAIKU`) are
+    // covered by the derived `env_model:*` rows, so default + override are
+    // both validated.
+    { label: 'rolling_summary_default', modelId: DEFAULT_SUMMARY_MODEL },
+    { label: 'decision_review_decompose_default', modelId: DEFAULT_DECOMPOSE_MODEL },
+  ]);
   const modelRegistryErrors = validateModelsRegistered(modelDefaultChecks);
   for (const modelError of modelRegistryErrors) {
     log.error({ event: 'config.model_registered' }, modelError);
