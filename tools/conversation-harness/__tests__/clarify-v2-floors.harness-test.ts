@@ -25,6 +25,12 @@
  *      itself supplies. This is the micro eval set the 2.103 fix rides —
  *      golden briefs + a deterministic assertion, run before and after the
  *      change. See `no_reask_cases` in the fixture pack.
+ *      ROADMAP 2.162a widened this floor to assert BOTH directions per case:
+ *      `supplied` dimensions must never be asked, and `must_ask` dimensions
+ *      must always be. The second half is what lets the floor see a detector
+ *      that has widened into crediting a brief which names no alternatives —
+ *      the failure mode that is worse than the one 2.103 fixed, because it
+ *      drafts a model from options the user never gave.
  *
  * House rule (scorer/score-run.ts): floors import the PRODUCTION modules
  * from src/ — never copies. New file; touches nothing owned by the
@@ -84,6 +90,21 @@ interface NoReaskCase {
    * `supplied: []` control the ask-floor below goes red.
    */
   readonly supplied: readonly ClarifyDimension[];
+  /**
+   * ROADMAP 2.162a — dimensions the pre-draft flow MUST actually ask about.
+   *
+   * `supplied` is a one-directional guard: it catches a detector that is too
+   * NARROW (the intake asks for a fact the brief gave). It is structurally
+   * blind to the opposite error — a detector widened until it credits a brief
+   * that names no alternatives at all. Such a case still asks about its other
+   * missing dimensions, so `askedDimensions.length > 0` holds and the floor
+   * stays green while the product silently drafts from options the user never
+   * supplied, which this file's own philosophy ranks as the WORSE failure.
+   *
+   * `must_ask` is the presence proof for that direction (trap 13). Optional:
+   * cases that predate 2.162a keep their original assertion exactly.
+   */
+  readonly must_ask?: readonly ClarifyDimension[];
   readonly expect: 'silent' | 'ask_only_unsupplied';
   readonly note: string;
 }
@@ -237,6 +258,22 @@ describe('FLOOR 6 — the intake never asks for a fact the brief supplied (ROADM
     expect(
       noReask.some((c) => c.supplied.length > 0 && c.expect === 'ask_only_unsupplied'),
     ).toBe(true);
+    // ROADMAP 2.162a: at least one OVER-CREDIT negative — a brief that names
+    // no alternatives and must still be asked for them. Without it, every
+    // widening of the `options` battery is a control pinned to "whatever
+    // passes today" (trap 12b) and the floor cannot see a detector that has
+    // widened into crediting briefs that supply nothing.
+    expect(
+      noReask.some((c) => (c.must_ask ?? []).includes('options')),
+      'no over-credit negative left in the pack: FLOOR 6 can no longer see a too-wide options detector',
+    ).toBe(true);
+    // A golden that both supplies and demands the same dimension is
+    // self-contradictory and would make one of the two assertions
+    // unfalsifiable. Fail on the fixture, not on the product.
+    for (const c of noReask) {
+      const contradictory = (c.must_ask ?? []).filter((d) => c.supplied.includes(d));
+      expect(contradictory, `${c.id}: supplied and must_ask overlap`).toEqual([]);
+    }
   });
 
   it.each(noReask.map((c) => [c.id, c] as const))(
@@ -282,6 +319,18 @@ describe('FLOOR 6 — the intake never asks for a fact the brief supplied (ROADM
       // The stop rule must terminate — an intake that never drafts is the
       // same user-visible failure by another route.
       expect(decision.kind, `${c.id}: the pre-draft flow never terminated`).not.toBe('ask');
+
+      // ROADMAP 2.162a — the OVER-CREDIT direction. Every dimension the
+      // golden says is genuinely absent must actually have been asked. This
+      // is what makes the `noask-*` negatives bite: a serial-list detector
+      // widened until it credits a geography list or a bullet list of facts
+      // leaves `options` un-asked here and reddens the floor, instead of
+      // passing because the flow happened to ask about something else.
+      const neverAsked = (c.must_ask ?? []).filter((d) => !askedDimensions.includes(d));
+      expect(
+        neverAsked,
+        `${c.id}: the intake NEVER asked about ${JSON.stringify(neverAsked)}, which this brief does not supply — a detector has widened into crediting it. ${c.note}`,
+      ).toEqual([]);
 
       const redundant = askedDimensions.filter((d) => c.supplied.includes(d));
       expect(

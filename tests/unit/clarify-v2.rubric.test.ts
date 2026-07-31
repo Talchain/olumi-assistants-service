@@ -151,6 +151,99 @@ describe("clarify_v2 rubric — completeness table", () => {
       "Do we go after the target account list this 2026 or focus on the one big account? I care about growth.",
       ["goal", "quantities"],
     ],
+    // ── ROADMAP 2.162a — alternatives named as an ORDINARY SERIAL LIST, plus
+    // the choice-set noun vocabulary. Direction A (missed satisfiers): the
+    // commonest way people name alternatives in English — "A, B, and C" —
+    // was credited by NOTHING in the options battery, so the intake asked
+    // "What alternatives are you weighing this against?" over a brief that
+    // had just named three. Direction B (over-matching satisfiers): ordinary
+    // serial grammar is used for lots of things that are NOT alternatives,
+    // and every one of those must still be asked.
+    [
+      "2.162a A: THE MINIMAL FAILING INPUT — a serial 'and' list of three alternatives satisfies options",
+      "Should we rebuild billing in-house, buy Vendor A, and stay put?",
+      ["goal", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a A: its one-character control (final 'and' → 'or') was already satisfied — the flip was one word",
+      "Should we rebuild billing in-house, buy Vendor A, or stay put?",
+      ["goal", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a A: 'and/or' is a disjunction — the bare-joiner arm required whitespace before 'or', which a slash is not",
+      "Should we hire a lead, hire two juniors, outsource, and/or promote internally?",
+      ["goal", "timeframe"],
+    ],
+    [
+      "2.162a A: counted 'four ways' satisfies options …",
+      "Should we modernise billing? There are four ways: rebuild, Vendor A, Vendor B, and stay put.",
+      ["goal", "timeframe"],
+    ],
+    [
+      "2.162a A: … identically to 'four routes' — the two noun lists in the rubric had drifted (trap 12)",
+      "Should we modernise billing? There are four routes: rebuild, Vendor A, Vendor B, and stay put.",
+      ["goal", "timeframe"],
+    ],
+    [
+      "2.162a A: the colon/enumeration arm now carries routes|paths too",
+      "Should we modernise billing? Routes: rebuild in-house, Vendor A, Vendor B.",
+      ["goal", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a B: a GEOGRAPHY list is not alternatives — one action, three places — and must still be asked",
+      "Should we launch in France, Spain and Italy this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      ["options"],
+    ],
+    [
+      "2.162a B: the same list WITH an Oxford comma defeats a comma-counting guard; the action-verb anchor is what rejects it",
+      "Should we launch in France, Spain, and Italy this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      ["options"],
+    ],
+    [
+      "2.162a B: bulleted FACTS are not alternatives (no bullet-list arm ships — Slice B is deliberately not implemented)",
+      "Should we expand into Europe next year?\n- Our revenue is £2m\n- We have 40 staff\n- Churn is 8%",
+      ["goal", "options"],
+    ],
+    [
+      "2.162a B: a serial list of facts under a choice lead is not alternatives",
+      "Should we expand into Europe next year? We have 40 staff, £2m revenue, and 8% churn.",
+      ["goal", "options"],
+    ],
+    [
+      "2.162a B: a BUNDLE of things to hire is not a choice between them",
+      "Should we hire a designer, a developer, and a PM?",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a B: a shopping list is not a choice set",
+      "Should we buy laptops, monitors, and desks this year?",
+      ["goal", "options", "quantities"],
+    ],
+    [
+      "2.162a B: TWO items is not a serial list — the arm requires two commas (≥3 items)",
+      "Should we rebuild billing in-house, and stay put?",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a B: 'and/or not' still restates the yes/no framing and names no second alternative",
+      "Should we renew the vendor contract and/or not this quarter?",
+      ["goal", "options", "quantities"],
+    ],
+    [
+      "2.162a B: widening the noun set must not let a bare adjective fake an enumeration ('our plans are ambitious')",
+      "Should we expand into Germany? Our plans are ambitious.",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a B: the same guard RETIRES a pre-existing false satisfied — 'our choices are limited' named no alternatives and used to silence options",
+      "Should we expand into Germany? Our choices are limited.",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a positive control: the enumeration guard keeps a real two-item copula list ('the candidates are A and B')",
+      "Should we expand into Germany? The candidates are Alice and Bob.",
+      ["goal", "timeframe", "quantities"],
+    ],
   ];
 
   it.each(TABLE)("%s", (_name, brief, expectedMissing) => {

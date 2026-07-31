@@ -15,9 +15,11 @@
  *   - `goal`       — an explicit outcome/purpose marker ("the goal is…",
  *                    "in order to…", "to increase…").
  *   - `options`    — evidence of ≥2 alternatives, either JOINED ("X or Y",
- *                    "versus", "alternative", "instead of") or ENUMERATED
+ *                    "versus", "alternative", "instead of"), ENUMERATED
  *                    ("three options: A, B and C", a short-list, repeated
- *                    "Option A … Option B" labels).
+ *                    "Option A … Option B" labels), or LISTED as parallel
+ *                    actions under a choice lead ("should we A, B, and C?" —
+ *                    ROADMAP 2.162a).
  *   - `quantities` — any magnitude signal (digits, currency, number words).
  *   - `timeframe`  — a horizon marker ("this year", "by Q3", "by March",
  *                    "within…"/"in six months"/"over the next two years",
@@ -73,6 +75,65 @@ export const CLARIFY_V2_DIMENSION_PRIORITY: readonly ClarifyDimension[] = [
   'timeframe',
   'quantities',
 ];
+
+/**
+ * CHOICE-SET NOUNS — the ONE vocabulary every `options` enumeration arm shares
+ * (ROADMAP 2.162a Slice A).
+ *
+ * Until 2.162a there were TWO hand-maintained noun lists in this file and they
+ * had already drifted apart: the counted arm carried
+ * `routes|paths|proposals|bids|quotes`, the colon/enumeration arm did not. The
+ * user-visible consequence, measured on the deployed tip: `"There are four
+ * ROUTES: …"` scored options-SATISFIED while `"There are four WAYS: …"` — the
+ * same sentence, one noun changed — scored MISSING and the intake asked for
+ * alternatives the brief had just named. That is CLAUDE.md trap 12 (the
+ * hand-maintained mirror) inside a single file, so the fix is to DERIVE both
+ * arms from one constant rather than to sync two lists.
+ *
+ * The 2.162a additions (`approaches|ways|directions|scenarios|plans|courses of
+ * action`) are all choice-set nouns that carry decision framing; none can fire
+ * adjectivally the way bare `target` did in the round-2 goal calibration.
+ * Plural-only on purpose: a singular "our plan"/"the approach" names ONE thing
+ * and is not evidence of alternatives.
+ */
+const CHOICE_SET_NOUNS =
+  'options|alternatives|choices|candidates|contenders|routes|paths|proposals|bids|quotes|approaches|ways|directions|scenarios|plans|courses of action';
+
+/**
+ * Count tokens. A COUNT in front of a choice-set noun ("three options", "four
+ * ways") is self-evidencing: it states that ≥2 alternatives exist. Shared by
+ * the counted arm and the counted-consideration arm so the two cannot drift.
+ */
+const COUNT_TOKENS = 'two|three|four|five|six|seven|eight|nine|ten|\\d+';
+
+/**
+ * A MODAL CHOICE LEAD — "should we …", "we could …", "do we …". The frame that
+ * marks what follows as a decision under consideration rather than a
+ * description. Used only by the serial-list arm, which is worthless without it.
+ */
+const CHOICE_LEAD =
+  '(?:(?:should|shall|could|can|do|would|will|might|must)\\s+(?:we|i|you|they)|(?:we|i|you|they)\\s+(?:could|can|might|may|should|would|will|must))';
+
+/**
+ * Base-form ACTION verbs that can head an alternative in a business decision.
+ *
+ * This is the ITEM-LEVEL ANCHOR that makes the serial-list arm safe, and it is
+ * the whole reason that arm can ship. Ordinary English serial grammar ("A, B,
+ * and C") is used for lots of things that are NOT alternatives — a geography
+ * list ("launch in France, Spain, and Italy"), a shopping list ("buy laptops,
+ * monitors, and desks"), a set of facts. Requiring BOTH the first item and the
+ * item after the terminating `and`/`or` to be a base-form action verb is what
+ * separates "three things we could DO" from "three things we could do it TO".
+ * Both negatives above are measured, not hypothesised (2.162a adjudication §8).
+ *
+ * Deliberately CLOSED, and it fails in the SAFE direction: an unlisted verb
+ * scores options-MISSING, which costs one tap-able question with a
+ * default-forward escape — never a silent false "satisfied". So this list is
+ * not the trap-12 mirror class (there is no other source of truth it must be
+ * kept in sync with); it is a precision floor that can only under-credit.
+ */
+const CHOICE_ACTION_VERBS =
+  'abandon|acquire|adopt|automate|begin|bring|build|buy|cancel|centralise|centralize|close|commission|consolidate|continue|contract|cut|defer|delay|develop|divest|do|double|drop|end|enter|exit|expand|extend|finance|fire|focus|fund|go|grow|halt|hire|hold|insource|integrate|invest|keep|launch|lease|licence|license|merge|migrate|modernise|modernize|move|offer|open|outsource|partner|patch|pause|pilot|pivot|procure|promote|prototype|raise|rebuild|recruit|reduce|refactor|rehire|reinvest|relaunch|renegotiate|renew|rent|replace|restructure|retain|rewrite|run|scale|sell|ship|spend|split|sponsor|standardise|standardize|start|stay|stop|subcontract|switch|take|test|train|trial|upgrade|use|wait';
 
 /**
  * Per-dimension detector batteries. A dimension is SATISFIED when any
@@ -139,16 +200,42 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     // twice on live journeys (HANDOVER 18 Jul; ROADMAP 2.103, 28 Jul).
     //
     // PRECISION over recall is preserved by requiring the option-family
-    // NOUN: a bare comma list ("we sell in France, Spain and Italy") is not
-    // evidence of alternatives and still scores MISSING. `alternatives` is
-    // already covered by the bare-word arm above; it is listed here only so
-    // the enumeration shapes read as one rule.
-    /\b(?:options|alternatives|choices|candidates|contenders)\s*(?:are|were|would be|include|:|—|–)\s*\S/i,
-    // A COUNTED option set — "three options", "two candidates", "4 routes".
-    // The count itself is the evidence that ≥2 alternatives exist. Restricted
-    // to choice-set nouns; deliberately excludes generic entity nouns
-    // ("three vendors", "two teams") which carry no decision framing.
-    /\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:options|alternatives|choices|candidates|contenders|routes|paths|proposals|bids|quotes)\b/i,
+    // NOUN: an UNANCHORED comma list ("we sell in France, Spain and Italy") is
+    // not evidence of alternatives and still scores MISSING (see the
+    // serial-list arm at the bottom for the anchored case that IS credited).
+    // `alternatives` is already covered by the bare-word arm above; it is
+    // listed here only so the enumeration shapes read as one rule.
+    //
+    // ROADMAP 2.162a: the noun set is now DERIVED from CHOICE_SET_NOUNS, which
+    // this arm and the counted arm below share — they had drifted apart (see
+    // that constant). The widening is paid for by a new precision guard: the
+    // marker must introduce a LIST, i.e. a comma or an `and`/`or` joining a
+    // second item must follow inside the same sentence. Measured, both ways:
+    // without the guard, adding `plans` to the set makes "Our plans are
+    // ambitious." score options-SATISFIED on a brief with no alternatives at
+    // all — a false satisfied, which this file's philosophy ranks as the worse
+    // error. With it, "Our choices are limited." stops firing too, which is
+    // the same defect the guard exists to stop, one noun earlier.
+    new RegExp(
+      `\\b(?:${CHOICE_SET_NOUNS})\\s*(?:are|were|would be|include|:|—|–)\\s*\\S[^.!?;]{0,160}?(?:,|\\band\\b|\\bor\\b)`,
+      'i',
+    ),
+    // A COUNTED option set — "three options", "two candidates", "4 routes",
+    // "four ways". The count itself is the evidence that ≥2 alternatives
+    // exist. Restricted to choice-set nouns; deliberately excludes generic
+    // entity nouns ("three vendors", "two teams") which carry no decision
+    // framing. Same CHOICE_SET_NOUNS as the arm above, by construction.
+    new RegExp(`\\b(?:${COUNT_TOKENS})\\s+(?:${CHOICE_SET_NOUNS})\\b`, 'i'),
+    // A COUNTED set under active consideration — "four things we are
+    // considering", "three items on the table". The count carries the ≥2
+    // evidence exactly as above; the consideration verb (or "on the table")
+    // carries the decision framing that a bare "four things" lacks. Without
+    // the count this would fire on any brief that mentions considering
+    // anything, so the count is not decoration (ROADMAP 2.162a Slice A).
+    new RegExp(
+      `\\b(?:${COUNT_TOKENS})\\s+(?:things|items|ideas)\\s+(?:(?:we|i)\\s+(?:are\\s+|'re\\s+)?(?:considering|weighing|evaluating|looking at)|(?:we|i)\\s+(?:could|can|might)\\s+do|on the table)\\b`,
+      'i',
+    ),
     // A short-list is a set of alternatives by definition.
     /\bshort[- ]?list(?:s|ed)?\b/i,
     // Repeated explicit option LABELS ("Option A … Option B", "Option 1 …
@@ -165,7 +252,38 @@ export const CLARIFY_V2_DIMENSION_DETECTORS: Readonly<
     // \w) because alternatives routinely end in %, £, digits or ).
     // "X or not" is excluded: it restates the yes/no framing, it does not
     // name a second alternative (round-2 calibration, direction B).
-    /\S\s+or\s+(?!not\b)\w/i,
+    //
+    // ROADMAP 2.162a: `and/or` is now accepted. The original pattern required
+    // WHITESPACE immediately before `or`, so the very common "X, Y, and/or Z"
+    // — where `or` is preceded by a slash — scored MISSING. That was a
+    // whitespace accident, not a decision: `and/or` is a disjunction marker by
+    // definition, and the "or not" exclusion still applies through it.
+    /\S\s+(?:and\/)?or\s+(?!not\b)\w/i,
+    // A SERIAL LIST of parallel actions under a choice lead — ordinary English
+    // "A, B, and C" grammar, which is how people actually name alternatives
+    // and which NOTHING in the battery above credits: every other arm needs a
+    // joining `or` / `versus` / `weighing … against` or an option-family noun.
+    // The measured consequence (2.162a adjudication, executed against the
+    // deployed rubric): "Should we rebuild billing in-house, buy Vendor A, and
+    // stay put?" names three alternatives and scored options-MISSING, so the
+    // intake asked "What alternatives are you weighing this against?" — while
+    // the same sentence with `and` → `or` scored SATISFIED. A one-word flip.
+    //
+    // THREE anchors keep this precise, and each one is load-bearing:
+    //   1. CHOICE_LEAD  — a modal frame ("should we", "we could"), so a
+    //      descriptive sentence cannot fire.
+    //   2. TWO commas   — ≥3 items. "A, and B" is not a serial list.
+    //   3. CHOICE_ACTION_VERBS at BOTH ends — the first item and the item
+    //      after the terminating `and`/`or` must be base-form actions. This is
+    //      what rejects the two demonstrated over-credit shapes: "Should we
+    //      launch in France, Spain, and Italy this year?" (a geography list —
+    //      `Italy` is not an action) and a brief whose bullets are facts.
+    // The span is bounded and cannot cross a sentence boundary ([^.!?;]), so
+    // an unrelated later clause cannot supply the terminator.
+    new RegExp(
+      `\\b${CHOICE_LEAD}\\s+(?:${CHOICE_ACTION_VERBS})\\b[^.!?;]{0,120}?,[^.!?;]{0,120}?,\\s*(?:and|or)\\s+(?:${CHOICE_ACTION_VERBS})\\b`,
+      'i',
+    ),
   ],
   quantities: [
     // Digits, EXCEPT a bare calendar year (1900–2099): "this 2026" is a
