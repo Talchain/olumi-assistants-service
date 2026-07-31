@@ -16,7 +16,7 @@ import { loadManifestPrompts } from './manifest.js';
 import { discoverPacks } from './packs.js';
 import { loadPromotionReports } from './reports.js';
 import { loadGrandfatherBaseline } from './baseline.js';
-import { computePromotionGate, DEFAULT_MAX_REPORT_AGE_DAYS } from './gate.js';
+import { computePromotionGate, DEFAULT_MAX_REPORT_AGE_DAYS, DEFAULT_MAX_FUTURE_SKEW_DAYS } from './gate.js';
 import { applyGrandfather } from './grandfather.js';
 import { renderGateResult } from './render.js';
 
@@ -29,6 +29,7 @@ async function main(): Promise<number> {
   const gate = computePromotionGate(manifest, packs, reports, {
     now: new Date(),
     maxReportAgeDays: DEFAULT_MAX_REPORT_AGE_DAYS,
+    maxFutureSkewDays: DEFAULT_MAX_FUTURE_SKEW_DAYS,
   });
   const result = applyGrandfather(gate, baseline);
 

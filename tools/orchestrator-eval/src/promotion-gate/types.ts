@@ -20,7 +20,51 @@
  * `src/prompts/loader.ts:33`), NEVER a version POINTER. Trap 12c: on this
  * platform a pointer read 120 while turns were served 119. A hash cannot lie
  * about which bytes it measured.
+ *
+ * ⚠ THREAT MODEL — WHAT THIS GATE DOES AND DOES NOT EXCLUDE (adversarial
+ * review of #769, finding A4; stated so no reader mistakes the gate for
+ * tamper-proof)
+ * ---------------------------------------------------------------------------
+ * The threat this gate exists to kill is **DRIFT**: an unevaluated (or
+ * stale-evaluated) prompt promotion landing green because nothing in CI could
+ * tell "passed" from "never ran". Against drift it is structural — the promoted
+ * hash, the canonical export, and the report identity are one value, re-derived
+ * at every run.
+ *
+ * It is NOT a defence against a maintainer who FORGES a committed report. A
+ * promotion report is self-authored JSON: its `promptSha16` is a claim about
+ * which bytes were scored, and its `dims` are claims about what the scorer saw.
+ * The gate binds that claim three ways (report hash === manifest served hash
+ * === sha256 of the canonical export at the pack's declared path), so a report
+ * cannot be pointed at the WRONG prompt — but nothing here can prove the dims
+ * were produced by actually running the eval. Excluding forgery would require
+ * re-running the eval inside CI against the live model: cost + nondeterminism,
+ * REJECTED in adjudication. Forgery is insider action, and it is caught by
+ * review of the diff (a fabricated report is a visible, attributable commit),
+ * not by this check.
+ *
+ * A second, deliberately cheap hardening was considered and found REDUNDANT:
+ * "have the report carry the canonical-file hash it scored and assert equality
+ * with the manifest". That field would be a TWIN of `promptSha16` with exactly
+ * the same self-declared property — trap 12. The equality it would add is
+ * already enforced, from a source the report cannot author: `gate.ts` hashes
+ * the canonical file on disk itself.
  */
+
+/**
+ * THE SINGLE SOURCE for "how many independent samples a promotion verdict may
+ * rest on". n<3 cannot certify: two runs that fail DIFFERENT rules is a
+ * compliance RATE nobody has estimated, not a score (the ab-verdict discipline).
+ *
+ * ⚠ It lives HERE, once, on purpose. Before the #769 amendments this number
+ * existed only inside the report BUILDER (`decision-review/promotion-report.ts`)
+ * and the gate's floor delegated it back to the report's own untrusted
+ * `verdict` field — so a committed report with `sampleSize: 1` and
+ * `verdict: 'PASS'` cleared the floor. Both the builder and `passesFloor` now
+ * derive from this constant; a twin literal in either is a hand-maintained
+ * mirror (trap 12) and a test fails on one.
+ */
+export const MIN_CERTIFYING_SAMPLE_SIZE = 3;
 
 /** A dimension's status inside a promotion report. Mirrors the pack's own
  * three-state model (`../types.ts` DimensionStatus) — NA is not a pass. */
@@ -97,8 +141,9 @@ export type GateBlockKind =
   | 'NO_REPORT' // has a pack, no committed report for the promoted hash at all
   | 'HASH_MISMATCH' // reports exist for the task, none for the PROMOTED hash (stale report)
   | 'EXPIRED' // hash-matched report is older than the freshness window
+  | 'FUTURE_DATED' // report claims to have been generated in the future — it can never expire
   | 'EVAL_FAILED' // hash-matched, in-date report does not clear the fail-closed floor
-  | 'MANIFEST_EXPORT_SKEW'; // canonical export hash != manifest served hash (git skew)
+  | 'MANIFEST_EXPORT_SKEW'; // canonical export hash != manifest served hash, or the pack scores a different file
 
 export interface GateRow {
   readonly task: string;

@@ -17,6 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # FULL history: the promotion-gate SHRINK GUARD below derives its
+          # reference from `git merge-base HEAD <base>` and reads the gate's
+          # files out of the object store at that commit. A shallow checkout has
+          # no merge-base, and the guard REFUSES to pass on history it cannot
+          # read (a guard that silently no-ops on a shallow clone is the
+          # silent-escape it exists to prevent).
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -129,6 +137,21 @@ jobs:
         # here — closing that hole is the runtime seam in src/routes/admin.prompts.ts
         # (sequenced separately). See tools/orchestrator-eval/src/promotion-gate.
         run: pnpm eval:promotion-gate
+
+      - name: Promotion-gate shrink guard
+        # REQUIRED (Harness H2, review amendment A3). The gate above answers
+        # "may this promotion land?". It structurally cannot answer "is the gate
+        # still gating what it gated yesterday?" — and BOTH ways of switching it
+        # off were silent, proven against the unamended gate:
+        #   · delete a task's promotion-pack.ts marker (or its manifest row) and
+        #     a GATED-PASS becomes UNGATED / disappears, exit 0;
+        #   · hand-add a promotion-gate-baseline.json entry and a real BLOCK
+        #     (exit 1) becomes a tolerated GRANDFATHERED row, exit 0.
+        # This step derives both sets from GIT at the merge-base (never a
+        # hand-pinned list, trap 12) and FAILS unless the shrink/widen is
+        # recorded in promotion-gate-acknowledgments.json in the SAME diff.
+        # Needs the full history fetched above.
+        run: pnpm eval:promotion-gate:shrink-guard
 
       - name: Run required test subset
         # Deterministic, in-process suite (see vitest.required.config.ts).

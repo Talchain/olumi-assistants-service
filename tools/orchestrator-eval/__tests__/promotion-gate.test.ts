@@ -10,15 +10,24 @@
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** `tools/orchestrator-eval/src` — for the single-source (no-twin) source read. */
+const SRC_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
 import { computePromotionGate, passesFloor, type GateOptions } from '../src/promotion-gate/gate.js';
+import {
+  buildDecisionReviewPromotionReport,
+  type LiveCaptureReport,
+} from '../src/decision-review/promotion-report.js';
 import { applyGrandfather } from '../src/promotion-gate/grandfather.js';
 import { loadManifestPrompts, promptHash16 } from '../src/promotion-gate/manifest.js';
 import { discoverPacks } from '../src/promotion-gate/packs.js';
 import { loadPromotionReports, parsePromotionReport } from '../src/promotion-gate/reports.js';
+import { MIN_CERTIFYING_SAMPLE_SIZE } from '../src/promotion-gate/types.js';
 import type {
   GrandfatherEntry,
   ManifestPromptEntry,
@@ -31,7 +40,11 @@ afterAll(() => {
   for (const d of tmpDirs) rmSync(d, { recursive: true, force: true });
 });
 
-const OPTS: GateOptions = { now: new Date('2026-07-31T00:00:00Z'), maxReportAgeDays: 90 };
+const OPTS: GateOptions = {
+  now: new Date('2026-07-31T00:00:00Z'),
+  maxReportAgeDays: 90,
+  maxFutureSkewDays: 1,
+};
 
 /** A temp canonical prompt file OUTSIDE the repo, with its manifest hash. */
 function tmpPrompt(text = 'BANNED in every output string, no exceptions:\n- "x"\n- Internal vocabulary: foo\nTranslate: "y"\n</TERMINOLOGY>'): {
@@ -332,6 +345,128 @@ describe('grandfather ratchet', () => {
 });
 
 // ============================================================================
+// AMENDMENTS (adversarial review of #769, adjudicated) — A1 / A2 / A5
+//
+// Each block below is a control the review proved the UNAMENDED gate fails.
+// They are the RED-first evidence for the amendments: every one of them was
+// shown failing against the pre-amendment gate before a line was changed.
+// ============================================================================
+
+describe('A1 — the floor RE-DERIVES the sample-size minimum (n<3 cannot certify)', () => {
+  it('CONTROL 4 — n=2: a hash-matched, in-date, clean-dim report CLAIMING PASS on 2 samples is BLOCKED', () => {
+    const s = scenario();
+    const thin = report(s.task, s.hash, { sampleSize: 2 }); // verdict PASS, dims clean
+    const g = computePromotionGate([s.entry], [s.pack], [thin], OPTS);
+    expect(g.rows[0].decision).toBe('BLOCK');
+    expect(g.rows[0].blockKind).toBe('EVAL_FAILED');
+    expect(g.rows[0].reason).toMatch(/sample/i);
+  });
+
+  it('CONTROL 4b — n=1 and n=0 are equally refused by the floor', () => {
+    expect(passesFloor(report('t', 'h', { sampleSize: 1 })).ok).toBe(false);
+    expect(passesFloor(report('t', 'h', { sampleSize: 0 })).ok).toBe(false);
+  });
+
+  it('the threshold is DERIVED from the shared constant, not a literal (the boundary moves with it)', () => {
+    expect(passesFloor(report('t', 'h', { sampleSize: MIN_CERTIFYING_SAMPLE_SIZE - 1 })).ok).toBe(false);
+    expect(passesFloor(report('t', 'h', { sampleSize: MIN_CERTIFYING_SAMPLE_SIZE })).ok).toBe(true);
+  });
+
+  it('SINGLE SOURCE — the report builder and the gate floor share ONE constant (no twin; trap 12)', () => {
+    const gateSrc = readFileSync(join(SRC_ROOT, 'promotion-gate', 'gate.ts'), 'utf-8');
+    const builderSrc = readFileSync(join(SRC_ROOT, 'decision-review', 'promotion-report.ts'), 'utf-8');
+    // Both must reference the shared constant …
+    expect(gateSrc).toContain('MIN_CERTIFYING_SAMPLE_SIZE');
+    expect(builderSrc).toContain('MIN_CERTIFYING_SAMPLE_SIZE');
+    // … and NEITHER may carry a hardcoded sample-size threshold beside it. A twin
+    // literal is exactly the hand-maintained mirror that drifts silently.
+    const TWIN = /(?:sampleSize|scoredCaptures|samples)\s*(?:<|>=|<=|>)\s*\d/;
+    expect(gateSrc).not.toMatch(TWIN);
+    expect(builderSrc).not.toMatch(TWIN);
+  });
+
+  it('the report BUILDER derives its own n-threshold from the SAME constant', () => {
+    const dims = [{ name: 'safety', status: 'pass' }];
+    const capture = (n: number): LiveCaptureReport => ({
+      servedHash: 'aaaaaaaaaaaaaaaa',
+      reports: Array.from({ length: n }, (_, i) => ({
+        fixtureId: `f${i}`,
+        scores: [{ candidate: 'served', dimensions: dims }],
+      })),
+    });
+    const build = (n: number) =>
+      buildDecisionReviewPromotionReport(capture(n), {
+        candidateLabel: 'served',
+        promptSha16: 'aaaaaaaaaaaaaaaa',
+        generatedAt: '2026-07-30T00:00:00.000Z',
+      });
+    expect(build(MIN_CERTIFYING_SAMPLE_SIZE - 1).verdict).toBe('BLOCK');
+    expect(build(MIN_CERTIFYING_SAMPLE_SIZE).verdict).toBe('PASS');
+  });
+});
+
+describe('A2 — the floor requires at least one REQUIRED dimension MEASURED', () => {
+  it('CONTROL 5 — a report whose ONLY dim is a non-required pass does NOT certify', () => {
+    const r = report('t', 'h', {
+      verdict: 'PASS',
+      dims: [{ name: 'conditional_only', status: 'pass', required: false }],
+    });
+    expect(passesFloor(r).ok).toBe(false);
+    expect(passesFloor(r).reason).toMatch(/required/i);
+  });
+
+  it('CONTROL 5b — at the gate, the only-non-required-pass report is BLOCKED (EVAL_FAILED)', () => {
+    const s = scenario();
+    const r = report(s.task, s.hash, {
+      dims: [{ name: 'conditional_only', status: 'pass', required: false }],
+    });
+    const g = computePromotionGate([s.entry], [s.pack], [r], OPTS);
+    expect(g.rows[0].decision).toBe('BLOCK');
+    expect(g.rows[0].blockKind).toBe('EVAL_FAILED');
+  });
+
+  it('a required dim measured alongside conditional passes still certifies (not an always-block)', () => {
+    const r = report('t', 'h', {
+      dims: [
+        { name: 'safety', status: 'pass', required: true },
+        { name: 'conditional_only', status: 'pass', required: false },
+      ],
+    });
+    expect(passesFloor(r).ok).toBe(true);
+  });
+});
+
+describe('A5 — future-dated reports and the canonical-path binding', () => {
+  it('CONTROL 6 — a POST-DATED report (generatedAt in the future) is BLOCKED, never "fresh"', () => {
+    const s = scenario();
+    const postdated = report(s.task, s.hash, { generatedAt: '2027-01-01T00:00:00.000Z' }); // 5 months ahead
+    const g = computePromotionGate([s.entry], [s.pack], [postdated], OPTS);
+    expect(g.rows[0].decision).toBe('BLOCK');
+    expect(g.rows[0].blockKind).toBe('FUTURE_DATED');
+  });
+
+  it('a report inside the small clock-skew tolerance is still accepted (not an always-block)', () => {
+    const s = scenario();
+    const slightlyAhead = report(s.task, s.hash, {
+      generatedAt: new Date(OPTS.now.getTime() + 60 * 60 * 1000).toISOString(), // +1h
+    });
+    const g = computePromotionGate([s.entry], [s.pack], [slightlyAhead], OPTS);
+    expect(g.rows[0].decision).toBe('GATED_PASS');
+  });
+
+  it('CONTROL 7 — the skew guard asserts the pack scores the manifest\'s OWN canonical file', () => {
+    const s = scenario();
+    const other = tmpPrompt(); // a DIFFERENT file that happens to hash the same? no — different path
+    const packElsewhere: PackDescriptor = { ...s.pack, canonicalPromptPath: other.path };
+    const entrySameHash: ManifestPromptEntry = { ...s.entry, servedHash: other.hash };
+    const g = computePromotionGate([entrySameHash], [packElsewhere], [report(s.task, other.hash)], OPTS);
+    expect(g.rows[0].decision).toBe('BLOCK');
+    expect(g.rows[0].blockKind).toBe('MANIFEST_EXPORT_SKEW');
+    expect(g.rows[0].reason).toMatch(/canonical file/i);
+  });
+});
+
+// ============================================================================
 // Integration on the REAL committed state — the green is EARNED, not vacuous
 // ============================================================================
 
@@ -343,6 +478,7 @@ describe('real committed state', () => {
     const gate = computePromotionGate(manifest, packs, reports, {
       now: new Date('2026-07-31T00:00:00Z'),
       maxReportAgeDays: 90,
+      maxFutureSkewDays: 1,
     });
 
     // decision_review must be a BLOCK before grandfathering — this is the

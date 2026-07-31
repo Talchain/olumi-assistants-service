@@ -22,6 +22,7 @@
  */
 
 import { promptHash16 } from '../promotion-gate/manifest.js';
+import { MIN_CERTIFYING_SAMPLE_SIZE } from '../promotion-gate/types.js';
 import type { PromotionReport, PromotionReportDim, PromotionReportDimStatus } from '../promotion-gate/types.js';
 
 /**
@@ -116,7 +117,11 @@ export function buildDecisionReviewPromotionReport(
 
   const anyFail = dims.some((d) => d.status === 'fail');
   const requiredNa = dims.some((d) => d.required && d.status === 'not_applicable');
-  const verdict: 'PASS' | 'BLOCK' = anyFail || requiredNa || scoredCaptures < 3 ? 'BLOCK' : 'PASS';
+  // The n-threshold is the SHARED constant the gate's floor re-derives from —
+  // one source, no twin (trap 12). A literal here would drift the moment the
+  // gate's minimum moved, and the drift would read as green.
+  const tooFewSamples = scoredCaptures < MIN_CERTIFYING_SAMPLE_SIZE;
+  const verdict: 'PASS' | 'BLOCK' = anyFail || requiredNa || tooFewSamples ? 'BLOCK' : 'PASS';
 
   return {
     schemaVersion: 1,
@@ -133,7 +138,9 @@ export function buildDecisionReviewPromotionReport(
       block_reasons: [
         anyFail ? 'observed failures: r1 no_internal_vocabulary, r3 no_dashes (both breach the served prompt own banned list)' : null,
         requiredNa ? 'required dimension unmeasured on response-only captures (tone_alignment)' : null,
-        scoredCaptures < 3 ? `n=${scoredCaptures} < 3: a promotion verdict needs ≥3 paired reruns (ab-verdict); this is a compliance rate, not a score` : null,
+        tooFewSamples
+          ? `n=${scoredCaptures} < ${MIN_CERTIFYING_SAMPLE_SIZE}: a promotion verdict needs ≥${MIN_CERTIFYING_SAMPLE_SIZE} paired reruns (ab-verdict); this is a compliance rate, not a score`
+          : null,
       ].filter((x): x is string => x !== null),
       note: 'PRE-GATE promotion — grandfathered at this hash. A rewrite must ship a PASS report at the new hash; that makes this report and its grandfather entry stale (the ratchet forces removal).',
     },
