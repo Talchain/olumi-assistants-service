@@ -216,6 +216,30 @@ describe('what_would_flip — validator', () => {
       expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
     }
   });
+
+  // The comment above claims BOTH 'edge' and 'constraint' stay rejected, and
+  // so does validation-registry.ts:214 ("'edge' and 'constraint' stay rejected
+  // for the same reason as above") — but only 'edge' was pinned. Half a claim
+  // asserted in prose is exactly the shape a later widening slips through
+  // (2.229 fix 2 widened this handler once already). Pinned now.
+  it('still rejects a constraint-kind proposal with ENTITY_KIND_MISMATCH', () => {
+    const result = validateToolCall(
+      buildProposal({
+        entity: {
+          id: 'con_1',
+          kind: 'constraint',
+          resolution_status: 'resolved',
+          resolution_method: 'kind_inference',
+        },
+      }),
+      undefined,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
+    }
+  });
 });
 
 describe('what_would_flip — precondition (analysis fact)', () => {

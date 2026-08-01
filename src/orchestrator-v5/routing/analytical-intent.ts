@@ -232,9 +232,6 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   //     ambiguous words. "Are these results still valid?" is a real
   //     staleness question and keeps classifying.
   { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)\s+(?:result|results|analysis|outcome|outcomes)\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|valid|fresh|current)\b/i },
-  // (b) subject ABSENT → only the unambiguous staleness vocabulary. "Is this
-  //     stale?" still classifies; "Is that valid input for the model?" and
-  //     "what is the current value?" no longer do.
   // (b) subject ABSENT. The unambiguous staleness words are always accepted;
   //     `valid|fresh|current` are accepted ONLY behind an explicit `still`.
   //
