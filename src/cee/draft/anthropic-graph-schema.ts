@@ -610,7 +610,8 @@ for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
 // converter, PLoT frame forwarding, CEE's frame stamp #786 and baseline
 // extraction #787) shipped and STILL produced no goal probability on staging,
 // because on the live draft path THE MODEL minted `goal_threshold` itself. The
-// enricher's redirect — the only code that stamps `goal_threshold_frame` and
+// enricher's redirect — the only code that stamps the threshold FRAME (see
+// `CEE_GOAL_THRESHOLD_FRAME`, utils/goal-threshold-cap.ts) and that
 // extracts the goal node's `observed_state` baseline — is gated on
 // `goal_threshold === undefined` (factor-extraction/enricher.ts:652). A
 // model-authored value closes that gate, so the frame was never stamped, ISL
@@ -621,7 +622,8 @@ for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
 // The machinery was correct and UNREACHED — so the fix is not more machinery,
 // it is removing the model's ability to reach past it.
 //
-// ATTESTATION BY CONSTRUCTION. `goal_threshold_frame` is a CODE CONSTANT set on
+// ATTESTATION BY CONSTRUCTION. The frame (`CEE_GOAL_THRESHOLD_FRAME`) is a
+// CODE CONSTANT set on
 // the same branch that computes `raw / cap` (enricher.ts:733) — it is true by
 // construction there and is never derived from a model. A threshold the model
 // wrote carries no such attestation and cannot be given one after the fact,
@@ -656,6 +658,15 @@ for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
 // regardless of structured-outputs posture. NEITHER layer is redundant: the
 // grammar makes it unemittable when sent, the strip makes it unpersistable
 // always. Do not remove one on the grounds that the other covers it.
+//
+// ⚠ NOTE FOR A FUTURE EDITOR: the frame field's literal identifier is
+// deliberately NOT spelled out anywhere in this file, only its constant name.
+// `goal-threshold-frame-stamp.test.ts` scans this file's WHOLE TEXT for that
+// identifier and REDs on any occurrence — a coarse guard on purpose, because
+// "the token must not appear in an LLM output surface at all" is stronger than
+// any comment-aware variant, and the field it protects is the one the model
+// must never be able to guess at. Spelling it out here, even in prose, breaks
+// that gate. Do not "helpfully" restore it.
 //
 // The base object KEEPS the quad — it is what CEE TOLERATES at ingress (a
 // stored graph, a repair response, or a prompt-only draft may legitimately

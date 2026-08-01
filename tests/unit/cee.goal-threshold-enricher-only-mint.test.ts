@@ -292,14 +292,18 @@ describe('2.281 B — the draft ingress strip', () => {
     for (const m of graphSrc.matchAll(/^\s{2}(goal_[a-z_]+):\s*(?:z\.|Goal)/gm)) {
       declared.add(m[1]);
     }
-    expect(declared.size, 'the scan must find the goal fields, or it proves nothing').toBeGreaterThan(0);
-    for (const field of declared) {
-      expect(
-        CEE_MINTED_GOAL_FIELDS as readonly string[],
-        `schemas/graph.ts declares '${field}' but CEE_MINTED_GOAL_FIELDS does not list it — ` +
-          `a model could author it and CEE would persist it unattested`,
-      ).toContain(field);
-    }
+    // SET EQUALITY, both directions — not "every found field is listed".
+    // A one-directional check passes vacuously if the scan under-matches (the
+    // pattern assumes the file's 2-space field indentation); asserting equality
+    // means a regex that silently stops finding fields REDs here instead of
+    // quietly certifying a list it never really checked. Trap 13, applied to
+    // this test's own control rather than only to the product.
+    expect(
+      [...declared].sort(),
+      'the scan must recover EXACTLY the CEE-minted field set — if these diverge, either a new ' +
+        'goal_* field was added without deciding whether a model may author it, or this scan ' +
+        'has stopped seeing the declarations it claims to check',
+    ).toEqual([...CEE_MINTED_GOAL_FIELDS].sort());
   });
 });
 
