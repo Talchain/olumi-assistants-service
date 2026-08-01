@@ -51,6 +51,49 @@ describe('readFlipClaimPosture — the witnessed attested-no-flip turns', () => 
     }
   });
 
+  it('the flip_risk_category tally is DERIVED, never hand-asserted (it was wrong once)', () => {
+    // The PR body and two docstrings said "11 of 19 isolated". Adversarial
+    // review recounted: 10. An arithmetic slip in a number the fixture makes
+    // derivable — so derive it here and let the fixture be the authority.
+    const counts: Record<string, number> = {};
+    for (const [, run] of NO_FLIP_RUNS) {
+      for (const f of run.factor_sensitivity as Record<string, unknown>[]) {
+        const c = String(f.flip_risk_category);
+        counts[c] = (counts[c] ?? 0) + 1;
+      }
+    }
+    expect(counts).toEqual({ isolated: 10, correlated: 8, negligible: 1 });
+    expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(19);
+    // …and the fixture's own recorded tally agrees with the rows it ships.
+    expect((NO_FLIP._provenance as Record<string, unknown>).flip_risk_category_counts).toEqual(counts);
+  });
+
+  it('⚠ the flip evidence attests SINGLE-FACTOR invariance ONLY — not run-level stability', () => {
+    // The amendment-A2 pin. Copy derived from these rows may claim only that no
+    // single factor, moved alone, changes the winner. The SAME payload refutes a
+    // run-level absolute: near-ties and high-switch-probability fragile edges are
+    // present on these very turns. A future author reading `structurally_invariant`
+    // as "nothing about this result can move" is the defect this test exists for.
+    let nearTies = 0;
+    let maxSwitch = 0;
+    for (const [, run] of NO_FLIP_RUNS) {
+      const rob = run.robustness as Record<string, unknown>;
+      if (rob.near_tie_is_tie === true) nearTies += 1;
+      for (const e of (run.fragile_edges as Record<string, unknown>[] | undefined) ?? []) {
+        const sp = e.switch_probability;
+        if (typeof sp === 'number' && sp > maxSwitch) maxSwitch = sp;
+      }
+    }
+    // Every row still attests no single-factor flip …
+    for (const [, run] of NO_FLIP_RUNS) {
+      for (const r of run.flip_thresholds as Record<string, unknown>[]) {
+        expect(r.no_flip_in_range).toBe(true);
+      }
+    }
+    // … while the run-level picture is emphatically NOT invariant.
+    expect(nearTies + maxSwitch).toBeGreaterThan(0);
+  });
+
   it('and carried isolated/correlated flip_risk_category marginals on the same factors', () => {
     // The false-flip mechanism: the marginal says "isolated", the flip evidence
     // for that SAME factor_id says structurally_invariant.

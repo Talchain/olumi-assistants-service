@@ -28,9 +28,7 @@ import {
   type AdviceGateInput,
 } from '../post-analysis-advice-gate.js';
 
-/** Asserts the result COULD change — the claim contradicted by the evidence. */
-const FLIPPABILITY_CLAIM_REGEX =
-  /\b(?:could|can|would|might|may)\s+(?:\w+\s+){0,3}?(?:change\s+which\s+option\s+leads|shift\s+it|flip)/i;
+import { assertsFlippability } from '../../__tests__/support/flip-claim-matcher.support.js';
 
 const FRAGILE_ANALYSIS: AdviceGateAnalysis = {
   status: 'success' as const,
@@ -69,11 +67,11 @@ function run(
 describe('positive control — the matcher can SEE the shipped claims', () => {
   // Trap 13: prove the presence before asserting any absence.
   it('explain_results emits a flippability claim with no flip evidence', () => {
-    expect(run('Explain the results.', FRAGILE_ANALYSIS)).toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(run('Explain the results.', FRAGILE_ANALYSIS))).toBe(true);
   });
 
   it('improvement emits a flippability claim with no flip evidence', () => {
-    expect(run('How can I improve this?', FRAGILE_ANALYSIS)).toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(run('How can I improve this?', FRAGILE_ANALYSIS))).toBe(true);
   });
 });
 
@@ -81,21 +79,15 @@ describe('RED-first — attested-no-flip suppresses the flippability claim', () 
   const attested = { flipClaimPosture: 'attested_no_flip' as const };
 
   it('explain_results — fragile band, no flip claim', () => {
-    expect(run('Explain the results.', FRAGILE_ANALYSIS, attested)).not.toMatch(
-      FLIPPABILITY_CLAIM_REGEX,
-    );
+    expect(assertsFlippability(run('Explain the results.', FRAGILE_ANALYSIS, attested))).toBe(false);
   });
 
   it('improvement — fragile band, no flip claim', () => {
-    expect(run('How can I improve this?', FRAGILE_ANALYSIS, attested)).not.toMatch(
-      FLIPPABILITY_CLAIM_REGEX,
-    );
+    expect(assertsFlippability(run('How can I improve this?', FRAGILE_ANALYSIS, attested))).toBe(false);
   });
 
   it('improvement — NEAR-TIE, no flip claim', () => {
-    expect(run('How can I improve this?', NEAR_TIE_ANALYSIS, attested)).not.toMatch(
-      FLIPPABILITY_CLAIM_REGEX,
-    );
+    expect(assertsFlippability(run('How can I improve this?', NEAR_TIE_ANALYSIS, attested))).toBe(false);
   });
 
   it('the fragility CAVEAT itself survives — this is a re-aim, not a suppression', () => {
@@ -119,5 +111,56 @@ describe('POSITIVE CONTROL — permitted posture is byte-identical', () => {
   ])('improvement, %s → unchanged', (_label, extra) => {
     const baseline = run('How can I improve this?', FRAGILE_ANALYSIS);
     expect(run('How can I improve this?', FRAGILE_ANALYSIS, extra)).toBe(baseline);
+  });
+});
+
+describe('A3 — the FOURTH surface: no answer may deny and assert flippability at once', () => {
+  /**
+   * Adversarial review found this in the file the PR already fixed.
+   * `composeExplainResults` had `noFlip` bound and unused in its driver beat,
+   * and `composeMeaning` never received the posture at all — so merging the
+   * first draft would have shipped, in ONE answer:
+   *
+   *   "…though nothing we varied changed which option leads."
+   *   "The order could shift with movement on “Risk”."
+   *
+   * A self-contradiction inside a fix for self-contradiction. The negation-aware
+   * matcher is what makes this assertable: the honest half contains the claim's
+   * own words, so a plain regex could not tell the two apart.
+   */
+  const attested = { flipClaimPosture: 'attested_no_flip' as const };
+
+  it.each([
+    ['explain_results', 'Explain the results.'],
+    ['meaning', 'What does this mean?'],
+    ['improvement', 'How can I improve this?'],
+    ['advice', 'What should I do?'],
+  ])('%s — near-tie + attested-no-flip makes NO flippability claim anywhere', (_label, message) => {
+    const text = run(message, NEAR_TIE_ANALYSIS, attested);
+    expect(assertsFlippability(text)).toBe(false);
+  });
+
+  it.each([
+    ['explain_results', 'Explain the results.'],
+    ['meaning', 'What does this mean?'],
+    ['improvement', 'How can I improve this?'],
+    ['advice', 'What should I do?'],
+  ])('POSITIVE CONTROL — %s DOES claim it without the posture', (_label, message) => {
+    expect(assertsFlippability(run(message, NEAR_TIE_ANALYSIS))).toBe(true);
+  });
+
+  it('the specific witnessed contradiction cannot recur in one answer', () => {
+    const text = run('Explain the results.', NEAR_TIE_ANALYSIS, attested);
+    expect(text).not.toMatch(/the order could shift with movement on/i);
+    // and the honest denial is what replaced it
+    expect(text).toMatch(/no single factor we tested would change the order on its own/i);
+  });
+
+  it('composeMeaning and composeAdvice are byte-identical without the posture', () => {
+    for (const message of ['What does this mean?', 'What should I do?']) {
+      expect(run(message, NEAR_TIE_ANALYSIS, { flipClaimPosture: 'permitted' as const })).toBe(
+        run(message, NEAR_TIE_ANALYSIS),
+      );
+    }
   });
 });

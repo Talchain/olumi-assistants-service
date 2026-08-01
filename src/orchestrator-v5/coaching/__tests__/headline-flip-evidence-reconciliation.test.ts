@@ -38,7 +38,7 @@ const NO_FLIP = loadFixture('witness-2267-attested-no-flip.json');
 const REAL_FLIP = loadFixture('witness-2265-runA.flip-threshold-winner.json');
 const NO_FLIP_RUNS = Object.entries(NO_FLIP.runs as Record<string, Record<string, unknown>>);
 
-const FLIPPABILITY_CLAIM_REGEX = /\b(?:could|can|would|might|may)\s+flip\b/i;
+import { assertsFlippability } from '../../__tests__/support/flip-claim-matcher.support.js';
 
 /** Option field that lets the headline resolve a winner (Case E floor). */
 const RESULTS = [
@@ -70,13 +70,13 @@ describe('positive control — the matcher can SEE the shipped claim', () => {
   it('the current sentence is emitted, and matches, when there is no flip evidence', () => {
     const out = headline(enrichmentFor(NO_FLIP_RUNS[0]![1], false));
     expect(out).toContain('not yet robust');
-    expect(out).toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(out)).toBe(true);
   });
 });
 
 describe('RED-first — attested-no-flip turns lose the flippability reason', () => {
   it.each(NO_FLIP_RUNS)('run %s — no flippability claim', (_name, run) => {
-    expect(headline(enrichmentFor(run, true))).not.toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(headline(enrichmentFor(run, true)))).toBe(false);
   });
 
   it.each(NO_FLIP_RUNS)('run %s — the not-robust VERDICT is preserved', (_name, run) => {
@@ -91,8 +91,8 @@ describe('RED-first — attested-no-flip turns lose the flippability reason', ()
     const run = NO_FLIP_RUNS[0]![1];
     const withEvidence = headline(enrichmentFor(run, true));
     const withoutEvidence = headline(enrichmentFor(run, false));
-    expect(withoutEvidence).toMatch(FLIPPABILITY_CLAIM_REGEX);
-    expect(withEvidence).not.toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(withoutEvidence)).toBe(true);
+    expect(assertsFlippability(withEvidence)).toBe(false);
     expect(withEvidence).not.toBe(withoutEvidence);
   });
 
@@ -120,7 +120,7 @@ describe('POSITIVE CONTROL — a real flip keeps the flippability reason', () =>
       robustness: { is_robust: false, level: 'very_low' },
       flip_thresholds: REAL_FLIP.flip_thresholds,
     });
-    expect(out).toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(out)).toBe(true);
   });
 });
 

@@ -115,8 +115,19 @@ const NOT_ROBUST_SENTENCE =
  * enrichment object this function already receives whole. It was never read.
  * On the four witnessed staging turns (`witness-2267-raw/`, 2026-08-01)
  * `is_robust` was `false` on every one, so this sentence shipped on every one,
- * while 19 of 19 flip rows came back `structurally_invariant` — ISL's
- * closed-form proof that no factor can move the winner at all.
+ * while 19 of 19 flip rows came back `structurally_invariant`.
+ *
+ * ⚠ SCOPE OF WHAT THE EVIDENCE ACTUALLY ATTESTS — the amendment that adversarial
+ * review forced, and it is this PR's own defect class turned on its own fix.
+ * `flip_thresholds[]` is a PER-FACTOR value sweep: each row attests that THAT
+ * factor, moved alone across its tested range, does not change the winner. It
+ * does NOT attest that the ranking is invariant to everything. The first draft
+ * of this sentence said "the ranking held across everything we varied" — a
+ * RUN-LEVEL absolute the same payload refutes: `near_tie.is_tie` is true on 3 of
+ * the 4 witnessed turns and `fragile_edges[].switch_probability` reaches 0.663
+ * with named alternative winners. A reader holding the enrichment could have
+ * falsified the sentence from the object it was derived from. Single-factor
+ * scope is the only claim the evidence carries; say exactly that and no more.
  *
  * ⚠ WHY THE VERDICT SURVIVES AND ONLY THE REASON CHANGES. "Not yet robust" is
  * TRUE on those turns: the robustness Monte Carlo really did report an unstable
@@ -135,7 +146,7 @@ const NOT_ROBUST_SENTENCE =
  * locked template instead (the failure mode the constraint-gap disclosure hit).
  */
 const NOT_ROBUST_NO_FLIP_SENTENCE =
-  ' The result is not yet robust — the ranking held across everything we varied, but the margin is not settled.';
+  ' The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.';
 
 /**
  * Every robustness-honesty sentence this module may emit. The grammar

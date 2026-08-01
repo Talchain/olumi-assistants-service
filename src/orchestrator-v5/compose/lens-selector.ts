@@ -490,8 +490,11 @@ interface EvaluatorHit {
  *
  * Measured consequence (`witness-2267-onscreen-flip.md`, four staging turns,
  * 2026-08-01): 19 of 19 flip rows came back `structurally_invariant` — ISL's
- * closed-form proof that no factor can move the winner at all — while 11 of 19
- * factors carried `flip_risk_category: 'isolated'`. Every one of those turns
+ * closed-form proof that no factor can move the winner at all — while 10 of 19
+ * factors carried `flip_risk_category: 'isolated'` (8 correlated, 1 negligible).
+ * ⚠ That tally read "11" until adversarial review recounted it: an arithmetic
+ * slip in a hand-asserted number that the fixture makes derivable. Derive it.
+ * It is asserted mechanically in `__tests__/flip-claim-posture.test.ts`. Every one of those turns
  * selected `FLIP_RISK_ISOLATED` and told the user "a small change to it alone
  * could flip the outcome" about a factor that had just been proved unable to
  * flip anything.
@@ -667,7 +670,7 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
   SENSITIVITY_ISOLATED_NO_FLIP:
     'This factor moves the result more than any other. The analysis swept its whole tested range and the ranking never changed, so what is still open is the size of the gap, not the order. Pressure-testing this factor tells you how much of the margin rests on it.',
   SENSITIVITY_CORRELATED_NO_FLIP:
-    'This factor moves the result alongside others rather than on its own. The analysis swept the tested range and the ranking never changed, so what is still open is the size of the gap, not the order. Pressure-testing this factor tells you how much of the margin rests on it.',
+    'This factor moves the result alongside others rather than on its own. The analysis swept each factor in turn across its tested range and the order never changed on any of them, so what is still open is the size of the gap, not the order. Pressure-testing this factor tells you how much of the margin rests on it.',
   DOMINANT_DRIVER_NO_FLIP:
     'One factor is doing most of the work in this result. The analysis swept its tested range without the ranking changing, so a sensitivity check here tells you how much of the margin it carries rather than whether the order would hold.',
 };
@@ -719,6 +722,24 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   // 1.195 enable gate.
   WHATIF_EXPLORE_DRIVER: 'option_comparison',
 };
+
+/**
+ * ROADMAP 2.278 amendment — the rationale codes that YIELD the head slot under
+ * the 2.211-① correlated-only rule.
+ *
+ * ⚠ THIS WAS A ONE-STRING MIRROR AND IT BROKE ON THE FIRST NEW CODE. The yield
+ * test matched the literal `'FLIP_RISK_CORRELATED'`, so the moment 2.278 added
+ * `SENSITIVITY_CORRELATED_NO_FLIP` — the SAME weakest-door claim, merely with
+ * the flip language removed — that code silently stopped yielding and would
+ * have preempted every stronger-fit lens below it, re-creating exactly the
+ * monotony 2.211-① was ratified to kill. Caught in adversarial review, not by
+ * a test. A set, named for the PROPERTY it encodes (a correlated-only door),
+ * so the next counterpart is added here rather than discovered in a walk.
+ */
+const CORRELATED_YIELD_CODES: ReadonlySet<LensRationaleCode> = new Set([
+  'FLIP_RISK_CORRELATED',
+  'SENSITIVITY_CORRELATED_NO_FLIP',
+]);
 
 function buildSelection(
   lens: LensId,
@@ -825,7 +846,7 @@ export function selectLens(
   let yieldedLens: LensId | undefined;
   if (
     eligibleHead.lens === 'sensitivity_flip_risk' &&
-    eligibleHead.hit.code === 'FLIP_RISK_CORRELATED' &&
+    CORRELATED_YIELD_CODES.has(eligibleHead.hit.code) &&
     eligible.length > 1
   ) {
     slotOrder = [...eligible.slice(1), eligibleHead];

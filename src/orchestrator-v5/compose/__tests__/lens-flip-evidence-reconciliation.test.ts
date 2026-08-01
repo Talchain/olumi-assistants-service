@@ -7,7 +7,7 @@
  * `flip_thresholds` rows came back `structurally_invariant` / `no_flip_in_range:
  * true` — ISL's closed-form proof that no factor can move the winner at all.
  * On those same turns `factor_sensitivity[].flip_risk_category` read `isolated`
- * for 11 of 19 factors, so rule 1a fired and the user was shown
+ * for 10 of 19 factors, so rule 1a fired and the user was shown
  *
  *     "Strengthen your model: pressure-test the key driver"
  *     "…a small change to it alone could flip the outcome."
@@ -55,28 +55,20 @@ function factFrom(enrichment: Record<string, unknown>): RunAnalysisHandlerFact {
   } as unknown as RunAnalysisHandlerFact;
 }
 
-/**
- * Vocabulary that ASSERTS the result could flip. Any of these in a lens body or
- * title, on a turn where the producer attested no flip, is a false claim to the
- * user — which is the whole subject of this file.
- */
-const FLIPPABILITY_CLAIM_REGEX =
-  /\b(?:could|can|would|might|may)\s+(?:\w+\s+){0,3}?(?:flip|tip)\b|\bflip\s+the\s+(?:outcome|result|decision)\b|\btip\s+which\s+option\s+leads\b|\bbefore\s+the\s+leading\s+option\s+changes\b|\bwhat\s+would\s+flip\b/i;
+import { assertsFlippability } from '../../__tests__/support/flip-claim-matcher.support.js';
 
-describe('FLIPPABILITY_CLAIM_REGEX — positive control (the matcher can SEE the defect)', () => {
+describe('matcher positive control (the matcher can SEE the defect)', () => {
   // Trap 13: an absence assertion is vacuous unless it can first prove a presence.
   it.each([
     ['the shipped ISOLATED body', BODY_BY_RATIONALE.FLIP_RISK_ISOLATED],
     ['the shipped CORRELATED body', BODY_BY_RATIONALE.FLIP_RISK_CORRELATED],
     ['the shipped DOMINANT_DRIVER body', BODY_BY_RATIONALE.DOMINANT_DRIVER],
   ])('matches %s', (_label, copy) => {
-    expect(copy).toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(copy)).toBe(true);
   });
 
   it('does NOT match neutral prose', () => {
-    expect('One factor shapes this result more than the others.').not.toMatch(
-      FLIPPABILITY_CLAIM_REGEX,
-    );
+    expect(assertsFlippability('One factor shapes this result more than the others.')).toBe(false);
   });
 });
 
@@ -105,7 +97,7 @@ describe('RED-first — no flippability claim on an attested-no-flip turn', () =
         confidence_tier: 'fair',
       }),
     );
-    expect(sel!.body).not.toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(sel!.body)).toBe(false);
   });
 
   it.each(NO_FLIP_RUNS)('run %s — TITLE makes no flippability claim', (_name, run) => {
@@ -116,7 +108,7 @@ describe('RED-first — no flippability claim on an attested-no-flip turn', () =
         confidence_tier: 'fair',
       }),
     );
-    expect(sel!.title).not.toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(sel!.title)).toBe(false);
   });
 
   it.each(NO_FLIP_RUNS)('run %s — rationale is a no-flip code', (_name, run) => {
@@ -142,8 +134,8 @@ describe('RED-first — no flippability claim on an attested-no-flip turn', () =
 
     expect(withoutEvidence!.rationaleCode).toBe('FLIP_RISK_ISOLATED');
     expect(withEvidence!.rationaleCode).not.toBe(withoutEvidence!.rationaleCode);
-    expect(withoutEvidence!.body).toMatch(FLIPPABILITY_CLAIM_REGEX);
-    expect(withEvidence!.body).not.toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(withoutEvidence!.body)).toBe(true);
+    expect(assertsFlippability(withEvidence!.body)).toBe(false);
   });
 });
 
@@ -163,7 +155,7 @@ describe('POSITIVE CONTROL — a run with a REAL flip keeps its honest flip copy
   });
 
   it('keeps the flip-language body — a TRUE claim is never suppressed', () => {
-    expect(selectLens(realFlipFact)!.body).toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(selectLens(realFlipFact)!.body)).toBe(true);
     expect(selectLens(realFlipFact)!.body).toBe(BODY_BY_RATIONALE.FLIP_RISK_ISOLATED);
   });
 
@@ -219,7 +211,7 @@ describe('the CORRELATED and DOMINANT_DRIVER doors are gated too (complete famil
       }),
     )!;
     expect(sel.rationaleCode).toBe('SENSITIVITY_CORRELATED_NO_FLIP');
-    expect(sel.body).not.toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(sel.body)).toBe(false);
   });
 
   it('DOMINANT_DRIVER → no flippability claim (its copy presupposes the leader can change)', () => {
@@ -233,6 +225,61 @@ describe('the CORRELATED and DOMINANT_DRIVER doors are gated too (complete famil
       }),
     )!;
     expect(sel.rationaleCode).toBe('DOMINANT_DRIVER_NO_FLIP');
-    expect(sel.body).not.toMatch(FLIPPABILITY_CLAIM_REGEX);
+    expect(assertsFlippability(sel.body)).toBe(false);
+  });
+});
+
+describe('the 2.211-① CORRELATED YIELD must apply to the no-flip counterpart too', () => {
+  /**
+   * ⚠ Found in adversarial review, not by a test. The yield condition
+   * string-matched the literal `'FLIP_RISK_CORRELATED'`, so the moment 2.278
+   * introduced `SENSITIVITY_CORRELATED_NO_FLIP` — the same weakest-door claim
+   * with the flip language removed — that code silently stopped yielding and
+   * would have preempted every stronger-fit lens below it, re-creating the
+   * monotony 2.211-① was ratified to kill. A one-string mirror that broke on
+   * the first new code.
+   */
+  const attested = [
+    { factor_id: 'fac_a', factor_label: 'A', flip_value: null, flip_reason: 'structurally_invariant' },
+    { factor_id: 'fac_b', factor_label: 'B', flip_value: null, flip_reason: 'structurally_invariant' },
+  ];
+
+  // Correlated flip-risk AND a pre-mortem trigger (needs_work) on one turn:
+  // the correlated door must step aside for the stronger-fit lens.
+  const correlatedPlusPreMortem = {
+    confidence_tier: 'needs_work',
+    factor_sensitivity: [
+      { factor_id: 'fac_a', influence_score: 0.5, influence_rank: 1, flip_risk_category: 'correlated' },
+      { factor_id: 'fac_b', influence_score: 0.4, influence_rank: 2 },
+    ],
+  };
+
+  it('CONTROL — the flip-language correlated code yields (pre-existing behaviour)', () => {
+    const sel = selectLens(factFrom(correlatedPlusPreMortem))!;
+    expect(sel.lens).toBe('pre_mortem');
+    expect(sel.displacementCause).toBe('correlated_yield');
+    expect(sel.displacedLens).toBe('sensitivity_flip_risk');
+  });
+
+  it('the NO-FLIP correlated code yields identically', () => {
+    const sel = selectLens(factFrom({ ...correlatedPlusPreMortem, flip_thresholds: attested }))!;
+    expect(sel.lens).toBe('pre_mortem');
+    expect(sel.displacementCause).toBe('correlated_yield');
+    expect(sel.displacedLens).toBe('sensitivity_flip_risk');
+  });
+
+  it('an ISOLATED no-flip hit still never yields (only the correlated door does)', () => {
+    const sel = selectLens(
+      factFrom({
+        confidence_tier: 'needs_work',
+        factor_sensitivity: [
+          { factor_id: 'fac_a', influence_score: 0.5, influence_rank: 1, flip_risk_category: 'isolated' },
+        ],
+        flip_thresholds: attested,
+      }),
+    )!;
+    expect(sel.lens).toBe('sensitivity_flip_risk');
+    expect(sel.rationaleCode).toBe('SENSITIVITY_ISOLATED_NO_FLIP');
+    expect(sel.displacementCause).toBeUndefined();
   });
 });

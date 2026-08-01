@@ -1449,6 +1449,7 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
         input.topDriverLabel,
         input.analysis,
         input.rawRobustness,
+        input.flipClaimPosture,
       );
     case 'improvement':
       return composeImprovement(
@@ -1464,6 +1465,7 @@ function composeForClass(cls: AdviceClass, input: ComposeInput): string {
         input.topDriverLabel,
         input.analysis,
         input.rawRobustness,
+        input.flipClaimPosture,
       );
     case 'readiness':
       return composeReadiness(input.analysisReady);
@@ -1589,7 +1591,13 @@ function composeAdvice(
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
 ): string {
+  // A3 ruling: GATED, not consciously left. "it could change the result" is the
+  // same claim class as the rest of this family, and leaving one composer
+  // un-gated after a review flagged the family is the partial-sweep error the
+  // family exists to close.
+  const noFlip = flipClaimPosture === 'attested_no_flip';
   // Readability sectioning: opener + margin form the lead paragraph; the
   // closing actionable sentence is lifted into a `What to check next`
   // bullet so the scannable next-step lands on its own line. The phrase
@@ -1613,7 +1621,9 @@ function composeAdvice(
         : '';
   const lead = `${opener}${marginClause}`;
   const nextStep = topDriverLabel
-    ? `The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`
+    ? noFlip
+      ? `The biggest thing to examine next is ${topDriverLabel}, because it carries more of the margin than anything else.`
+      : `The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`
     : "Let me know which factor you'd like to look at next.";
   return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }
@@ -1652,14 +1662,14 @@ function composeImprovement(
     // is weak) but "could shift it" is a flippability claim. On an
     // attested-no-flip run the instability is in the MARGIN, not the ranking.
     robustness = noFlip
-      ? ' The picture appears fragile, so the size of the gap is sensitive to small adjustments — though nothing we varied changed the ranking.'
+      ? ' The picture appears fragile, so the size of the gap is sensitive to small adjustments — though no single factor we tested would change the order on its own.'
       : ' The picture appears fragile, so even small adjustments could shift it.';
   } else if (verdict.margin_category === 'near_tie') {
     robustness =
       verdict.stability_category === 'stable'
         ? " The result is effectively tied, and each option's own score is individually stable, so this is a genuine dead heat rather than noise in the estimates."
         : noFlip
-          ? ' The result is effectively tied, so the ranking rests on a fine margin — though nothing we varied changed which option leads.'
+          ? ' The result is effectively tied, so the order rests on a fine margin — though no single factor we tested would change which option leads on its own.'
           : ' The result is effectively tied, so smaller adjustments could change which option leads.';
   } else if (
     stabilityPhrase !== null
@@ -1681,7 +1691,11 @@ function composeMeaning(
   topDriverLabel: string | null,
   analysis: AdviceGateAnalysis,
   rawRobustness: RawRobustnessSignals | null | undefined,
+  flipClaimPosture?: FlipClaimPosture | undefined,
 ): string {
+  // A3: the posture was never threaded here, so "The order could shift with
+  // movement on X" shipped un-gated beside the gated fragility caveat.
+  const noFlip = flipClaimPosture === 'attested_no_flip';
   // Vocabulary aligns with the workstream brief — "currently favours"
   // opener and "appears to be driven by" attribution avoid the
   // winner/leader-adjacent framing the previous wording carried.
@@ -1711,7 +1725,11 @@ function composeMeaning(
   if (closeness !== null) {
     sentences.push(closeness);
     if (topDriverLabel) {
-      sentences.push(`The order could shift with movement on ${quoteLabel(topDriverLabel)}.`);
+      sentences.push(
+        noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(topDriverLabel)} moves the margin most.`
+          : `The order could shift with movement on ${quoteLabel(topDriverLabel)}.`,
+      );
     }
   } else {
     const marginSentence =
@@ -1966,16 +1984,25 @@ function composeExplainResults(
   }
 
   // 3. Why it leads — drivers (quoted). Near-tie softens "driven by" to "could shift".
+  // ROADMAP 2.278 amendment A3 — this beat is the FOURTH unconsulted surface,
+  // and it is in the same function as the fragility caveat above: shipped
+  // together, un-gated, one answer said "no single factor would change which
+  // option leads" and the next sentence said "the order could shift with
+  // movement on X". `noFlip` was already bound here and simply not used.
   if (driverA && driverB) {
     sentences.push(
       nearTie
-        ? `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, or on ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`
+        ? noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)} and ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)} move the margin most.`
+          : `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, or on ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`
         : `The result appears to be driven by ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}, and ${quoteLabel(driverB.factor_label)}${driverDirectionFragment(driverB)}.`,
     );
   } else if (driverA) {
     sentences.push(
       nearTie
-        ? `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`
+        ? noFlip
+          ? `No single factor we tested would change the order on its own, but ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)} moves the margin most.`
+          : `The order could shift with movement on ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`
         : `The result appears to be driven by ${quoteLabel(driverA.factor_label)}${driverDirectionFragment(driverA)}.`,
     );
   }
@@ -2016,7 +2043,7 @@ function composeExplainResults(
     // same evidence, different voice.
     sentences.push(
       noFlip
-        ? 'The picture appears fragile, so the size of the gap is sensitive to the strongest factor — though nothing we varied changed which option leads.'
+        ? 'The picture appears fragile, so the size of the gap is sensitive to the strongest factor — though no single factor we tested would change which option leads on its own.'
         : 'The picture appears fragile, so even small adjustments to the strongest factor could change which option leads.',
     );
   } else if (nearTie) {
