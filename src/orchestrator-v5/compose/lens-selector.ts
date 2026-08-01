@@ -97,6 +97,10 @@
 
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
+import {
+  readFlipClaimPosture,
+  type FlipClaimPosture,
+} from '../context/flip-threshold-rows.js';
 import { bandConfidence, type ConfidenceBand } from './confidence-bands.js';
 
 // ============================================================================
@@ -127,6 +131,13 @@ export type LensRationaleCode =
   | 'FLIP_RISK_ISOLATED' // a factor can flip the result ON ITS OWN (PLoT flip_risk_category 'isolated')
   | 'FLIP_RISK_CORRELATED' // a factor can tip the result only in COMBINATION with others ('correlated')
   | 'DOMINANT_DRIVER' // one factor carries a majority share of total influence
+  // sensitivity_flip_risk — ROADMAP 2.278 attested-no-flip counterparts. Same
+  // lens, same subject factor, same live action; the flippability CLAIM is
+  // dropped because this run's own flip evidence contradicts it. See
+  // `evaluateSensitivityFlipRisk` for the remap and why it is not a suppression.
+  | 'SENSITIVITY_ISOLATED_NO_FLIP'
+  | 'SENSITIVITY_CORRELATED_NO_FLIP'
+  | 'DOMINANT_DRIVER_NO_FLIP'
   // pre_mortem
   | 'CONFIDENCE_NEEDS_WORK' // overall analysis is usable but not solid
   | 'TOP_FACTOR_LOW_CONFIDENCE' // the #1-influence factor is least certain
@@ -371,6 +382,13 @@ interface AnalysisSignals {
   /** Finite win_probability values across option_comparison entries. */
   readonly optionWinProbabilities: readonly number[];
   readonly confidenceTier: 'strong' | 'fair' | 'needs_work' | null;
+  /**
+   * ROADMAP 2.278 — this run's own answer to "may copy claim the result could
+   * flip?", derived from `enrichment.flip_thresholds[]`. Read here rather than
+   * threaded from the caller so the selector stays a pure, total function of
+   * `fact.result.enrichment` (the property `lens-history.ts` replays on).
+   */
+  readonly flipClaimPosture: FlipClaimPosture;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -435,7 +453,12 @@ function readAnalysisSignals(fact: RunAnalysisHandlerFact): AnalysisSignals | nu
   const confidenceTier =
     tier === 'strong' || tier === 'fair' || tier === 'needs_work' ? tier : null;
 
-  return { factors, optionWinProbabilities, confidenceTier };
+  return {
+    factors,
+    optionWinProbabilities,
+    confidenceTier,
+    flipClaimPosture: readFlipClaimPosture(enrichment),
+  };
 }
 
 // ============================================================================
@@ -452,8 +475,44 @@ interface EvaluatorHit {
   readonly subjectFactorId: string | null;
 }
 
-/** Rule 1 — sensitivity / flip-risk (highest-priority lens). */
+/**
+ * Rule 1 — sensitivity / flip-risk (highest-priority lens).
+ *
+ * ⚠ ROADMAP 2.278 — THIS RULE'S EVIDENCE AND THIS RULE'S COPY CAME FROM
+ * DIFFERENT PLACES, AND THEY CONTRADICTED EACH OTHER ON LIVE TURNS.
+ *
+ * Doors 1a and 1b both key off ROBUSTNESS MARGINALS —
+ * `factor_sensitivity[].flip_risk_category` and `influence_score` — which are
+ * non-zero on very nearly every run. The copy they select, however, makes a
+ * claim about FLIPPING. The evidence for flipping is `enrichment.flip_thresholds[]`,
+ * which sits on the SAME enrichment object this evaluator already reads and was
+ * never consulted.
+ *
+ * Measured consequence (`witness-2267-onscreen-flip.md`, four staging turns,
+ * 2026-08-01): 19 of 19 flip rows came back `structurally_invariant` — ISL's
+ * closed-form proof that no factor can move the winner at all — while 10 of 19
+ * factors carried `flip_risk_category: 'isolated'` (8 correlated, 1 negligible).
+ * ⚠ That tally read "11" until adversarial review recounted it: an arithmetic
+ * slip in a hand-asserted number that the fixture makes derivable. Derive it.
+ * It is asserted mechanically in `__tests__/flip-claim-posture.test.ts`. Every one of those turns
+ * selected `FLIP_RISK_ISOLATED` and told the user "a small change to it alone
+ * could flip the outcome" about a factor that had just been proved unable to
+ * flip anything.
+ *
+ * The remap below is NOT a suppression and must not be turned into one. The
+ * factor is still the dominant driver, the lens is still the most useful one,
+ * and `what_would_flip` is still a live action that answers honestly on these
+ * turns ("no single factor reached a tipping point"). What changes is the
+ * CLAIM: from "this could flip the result" to "this carries the margin". A
+ * `permitted` posture — including every run with no flip evidence at all —
+ * leaves the original rationale codes and copy byte-identical.
+ */
 function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | null {
+  // The run's own answer to "may we claim this could flip?". `attested_no_flip`
+  // ONLY on a positive producer attestation across every usable row; every
+  // uncertain state is `permitted` (see `readFlipClaimPosture`).
+  const noFlip = signals.flipClaimPosture === 'attested_no_flip';
+
   // 1a — an explicit PLoT flip-risk flag on any factor. `isolated` (this factor
   // can flip the result on its own) is the strongest single-factor signal and
   // takes precedence; `correlated` (flips only in combination with others) is a
@@ -461,12 +520,22 @@ function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | n
   const isolated = signals.factors.find(
     (f) => f.flipRiskCategory === FLIP_RISK_ISOLATED_CATEGORY,
   );
-  if (isolated) return { code: 'FLIP_RISK_ISOLATED', subjectFactorId: isolated.factorId };
+  if (isolated) {
+    return {
+      code: noFlip ? 'SENSITIVITY_ISOLATED_NO_FLIP' : 'FLIP_RISK_ISOLATED',
+      subjectFactorId: isolated.factorId,
+    };
+  }
 
   const correlated = signals.factors.find(
     (f) => f.flipRiskCategory === FLIP_RISK_CORRELATED_CATEGORY,
   );
-  if (correlated) return { code: 'FLIP_RISK_CORRELATED', subjectFactorId: correlated.factorId };
+  if (correlated) {
+    return {
+      code: noFlip ? 'SENSITIVITY_CORRELATED_NO_FLIP' : 'FLIP_RISK_CORRELATED',
+      subjectFactorId: correlated.factorId,
+    };
+  }
 
   // 1b — one factor carries a STRICT majority share of total positive influence.
   // Behaviour-identical to the prior `Math.max`/`reduce` trigger; additionally
@@ -480,7 +549,13 @@ function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | n
     let top = scored[0]!;
     for (const f of scored) if (f.influenceScore > top.influenceScore) top = f;
     if (total > 0 && top.influenceScore / total > DOMINANCE_SHARE_MIN) {
-      return { code: 'DOMINANT_DRIVER', subjectFactorId: top.factorId };
+      // DOMINANT_DRIVER's copy ends "…how far it can move before the leading
+      // option changes", which presupposes the leading option CAN change. On an
+      // attested-no-flip run it cannot, so this door is remapped too.
+      return {
+        code: noFlip ? 'DOMINANT_DRIVER_NO_FLIP' : 'DOMINANT_DRIVER',
+        subjectFactorId: top.factorId,
+      };
     }
   }
   return null;
@@ -582,6 +657,40 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'There is a factor where learning more would change the decision the most. Gathering evidence there first, rather than everywhere, is the fastest way to firm up the choice.',
   WHATIF_EXPLORE_DRIVER:
     'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the leading option changes as it moves — shows how much the choice hangs on it.',
+
+  // ── ROADMAP 2.278 — the attested-no-flip counterparts ──────────────────────
+  // What is TRUE on these turns and what is NOT, because the copy turns on it:
+  // the robustness Monte Carlo reports the result is not stable (`is_robust:
+  // false`, `level: very_low` on all four witnessed turns) while ISL's
+  // closed-form flip evaluation proves no factor can move the WINNER at all.
+  // Those are not in conflict — they are two different questions. WHICH option
+  // leads is settled; HOW FAR ahead it is, is not. So the honest lens keeps
+  // pointing at the same driver and re-aims the claim from the ranking to the
+  // margin. No flip verb appears in any of these three.
+  SENSITIVITY_ISOLATED_NO_FLIP:
+    'This factor moves the result more than any other. The analysis swept its whole tested range and the ranking never changed, so what is still open is the size of the gap, not the order. Pressure-testing this factor tells you how much of the margin rests on it.',
+  SENSITIVITY_CORRELATED_NO_FLIP:
+    'This factor moves the result alongside others rather than on its own. The analysis swept each factor in turn across its tested range and the order never changed on any of them, so what is still open is the size of the gap, not the order. Pressure-testing this factor tells you how much of the margin rests on it.',
+  DOMINANT_DRIVER_NO_FLIP:
+    'One factor is doing most of the work in this result. The analysis swept its tested range without the ranking changing, so a sensitivity check here tells you how much of the margin it carries rather than whether the order would hold.',
+};
+
+/**
+ * ROADMAP 2.278 — per-RATIONALE title override, applied over
+ * {@link TITLE_BY_LENS}. Sparse by design: a rationale absent from this map
+ * takes its lens's shared title, so the default path is byte-identical to
+ * pre-2.278 behaviour and only the attested-no-flip rationales differ.
+ *
+ * Why the shared title needed replacing at all: "pressure-test the key driver"
+ * is not itself a false claim on an attested-no-flip turn — you can pressure-test
+ * a result whose ranking is settled — but it is the headline of a card whose
+ * whole body used to be about flipping, and read beside a `fragile` verdict it
+ * invites the same inference. These titles say what the card now actually does.
+ */
+const TITLE_OVERRIDE_BY_RATIONALE: Partial<Readonly<Record<LensRationaleCode, string>>> = {
+  SENSITIVITY_ISOLATED_NO_FLIP: 'Strengthen your model: size up the key driver',
+  SENSITIVITY_CORRELATED_NO_FLIP: 'Strengthen your model: size up the key driver',
+  DOMINANT_DRIVER_NO_FLIP: 'Strengthen your model: size up the key driver',
 };
 
 /**
@@ -601,6 +710,11 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   TOP_FACTOR_LOW_CONFIDENCE: 'factor_sensitivity',
   WIN_PROB_MODERATE: 'option_comparison',
   MATERIAL_EVPI: 'factor_sensitivity',
+  // 2.278 counterparts ground in the same field as the rationales they replace:
+  // the claim is still about factor sensitivity, only narrowed to the margin.
+  SENSITIVITY_ISOLATED_NO_FLIP: 'factor_sensitivity',
+  SENSITIVITY_CORRELATED_NO_FLIP: 'factor_sensitivity',
+  DOMINANT_DRIVER_NO_FLIP: 'factor_sensitivity',
   // The what-if claim is about the OUTCOME (option win probability) → grounds in
   // option_comparison, which is deliberately NOT allow-listed, so the σ cage
   // DENIES surfacing its value: the counterfactual outcome number stays omitted
@@ -608,6 +722,24 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   // 1.195 enable gate.
   WHATIF_EXPLORE_DRIVER: 'option_comparison',
 };
+
+/**
+ * ROADMAP 2.278 amendment — the rationale codes that YIELD the head slot under
+ * the 2.211-① correlated-only rule.
+ *
+ * ⚠ THIS WAS A ONE-STRING MIRROR AND IT BROKE ON THE FIRST NEW CODE. The yield
+ * test matched the literal `'FLIP_RISK_CORRELATED'`, so the moment 2.278 added
+ * `SENSITIVITY_CORRELATED_NO_FLIP` — the SAME weakest-door claim, merely with
+ * the flip language removed — that code silently stopped yielding and would
+ * have preempted every stronger-fit lens below it, re-creating exactly the
+ * monotony 2.211-① was ratified to kill. Caught in adversarial review, not by
+ * a test. A set, named for the PROPERTY it encodes (a correlated-only door),
+ * so the next counterpart is added here rather than discovered in a walk.
+ */
+const CORRELATED_YIELD_CODES: ReadonlySet<LensRationaleCode> = new Set([
+  'FLIP_RISK_CORRELATED',
+  'SENSITIVITY_CORRELATED_NO_FLIP',
+]);
 
 function buildSelection(
   lens: LensId,
@@ -618,7 +750,7 @@ function buildSelection(
   return {
     lens,
     rationaleCode: hit.code,
-    title: TITLE_BY_LENS[lens],
+    title: TITLE_OVERRIDE_BY_RATIONALE[hit.code] ?? TITLE_BY_LENS[lens],
     body: BODY_BY_RATIONALE[hit.code],
     groundingField: GROUNDING_FIELD_BY_RATIONALE[hit.code],
     // Wave-4 δ2: expose the focus subject when the lens points at a single
@@ -714,7 +846,7 @@ export function selectLens(
   let yieldedLens: LensId | undefined;
   if (
     eligibleHead.lens === 'sensitivity_flip_risk' &&
-    eligibleHead.hit.code === 'FLIP_RISK_CORRELATED' &&
+    CORRELATED_YIELD_CODES.has(eligibleHead.hit.code) &&
     eligible.length > 1
   ) {
     slotOrder = [...eligible.slice(1), eligibleHead];
