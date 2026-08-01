@@ -378,6 +378,18 @@ describe('ROADMAP 2.229 fix 4 — imperative re-run pre-route', () => {
     ['How long did the rerun take?', 'question about a past run'],
     ['Explain the rerun to me.', 'question about a past run'],
     ['Was the rerun better?', 'question about a past run'],
+    // ⚠ SECOND REVIEW PASS — the ATTRIBUTIVE-MODIFIER class. The object-group
+    // repair never required `re-?run` to be in VERB position, so "the re-run
+    // analysis" (determiner + modifier + noun) still matched, on the very words
+    // proving it is not an instruction. All five measured here with real
+    // dispatch, `invocations=1`, and all five are NEW relative to `staging` —
+    // the pre-route does not exist there — so leaving them would have turned an
+    // intermittent LLM misroute into a DETERMINISTIC destruction for this shape.
+    ['What did the re-run analysis show?', 'attributive modifier: "the re-run analysis"'],
+    ['Tell me about the rerun model.', 'attributive modifier: "the rerun model"'],
+    ['Summarise the re-run analysis for me.', 'attributive modifier, imperative host verb'],
+    ['Was the re-run analysis different?', 'attributive modifier, interrogative host'],
+    ['The rerun scenario looked odd, why?', 'attributive modifier at sentence start'],
   ];
   for (const [message, why] of MUST_NEVER_EXECUTE) {
     it(`NEVER executes an analysis for "${message}" (${why})`, async () => {

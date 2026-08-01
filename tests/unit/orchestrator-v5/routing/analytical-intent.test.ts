@@ -398,6 +398,31 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
     });
   }
 
+  // ⚠ SECOND REVIEW PASS — the object-group repair closed the measured CORPUS,
+  // not the CLASS. It required an object but never required `re-?run` to be in
+  // VERB position, so the ATTRIBUTIVE-MODIFIER reading survived: "the re-run
+  // analysis" is determiner + modifier + noun, and "analysis" is itself in the
+  // object list — the pattern matched on the very words proving it is not an
+  // instruction. All five measured at PATH level with real dispatch
+  // (`invocations=1`) before the leading lookbehind existed, and all five are
+  // NEW relative to `staging` (this pre-route does not exist there).
+  //
+  // The lesson worth keeping: closing every sentence a reviewer hands you is
+  // not the same as closing the class they came from. The first repair passed
+  // its own corpus completely and left a live path.
+  const ATTRIBUTIVE_MODIFIER_NOT_A_VERB = [
+    'What did the re-run analysis show?',
+    'Tell me about the rerun model.',
+    'Summarise the re-run analysis for me.',
+    'Was the re-run analysis different?',
+    'The rerun scenario looked odd, why?',
+  ];
+  for (const msg of ATTRIBUTIVE_MODIFIER_NOT_A_VERB) {
+    it(`NEVER executes when "re-run" is an ADJECTIVE, not a verb: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
   // BOTH DIRECTIONS. Every genuine instruction must survive both repairs —
   // a veto that silences the feature is not a fix.
   const STILL_INSTRUCTIONS = [

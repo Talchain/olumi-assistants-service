@@ -442,6 +442,17 @@ export function classifyAnalyticalIntent(
  * act on an ambiguous sentence costs a clarification; acting on a refusal
  * destroys the user's computed result. `stop` / `avoid` / `without` are included
  * for the same reason — they are cheap to honour and expensive to miss.
+ *
+ * ⚠ KNOWN, ACCEPTED OVER-REACH — this is a bare word-PRESENCE test, not a
+ * scoped one. A negator ANYWHERE in the sentence vetoes it, so a genuine
+ * instruction that merely CONTAINS one is declined too: `"Re-run the analysis
+ * without the outlier."` is not recognised and falls through to the LLM router,
+ * exactly as it did before this pre-route existed. That is the SAFE direction
+ * and it is deliberate — a declined instruction costs the user a clarification;
+ * an honoured refusal destroys their computed result. Scoping it properly needs
+ * clause structure, which is the same problem that made the doctrine guard's
+ * negation scope unshippable (#780, 9 false negatives). Do not attempt it with
+ * a wider regex.
  */
 const RERUN_NEGATION_VETO_PATTERNS: readonly RegExp[] = [
   /\b(?:do\s+not|don['’]?t|never|no\s+need\s+to|rather\s+not|stop|avoid|without)\b/i,
@@ -478,7 +489,29 @@ const IMPERATIVE_RERUN_PATTERNS: readonly RegExp[] = [
   // real compute, writes a new fact and `graph_hash_at_run`, and REPLACES
   // the user's existing result. A question ABOUT a past run was answered by
   // destroying it. Never restore the `?`.
-  /\bre-?run\b\s+(?:the|this|that|my|our)?\s*(?:analysis|analyses|model|numbers|scenario|it|this|that)\b/i,
+  //
+  // ⚠ THE LEADING LOOKBEHIND IS THE SECOND HALF, AND IT IS NOT OPTIONAL.
+  // Requiring an object closed the MEASURED CORPUS, not the CLASS: it never
+  // required `re-?run` to be in VERB position, so the ATTRIBUTIVE-MODIFIER
+  // reading survived. "the re-run analysis" parses as determiner + modifier +
+  // noun, and "analysis" is itself in the object list — so the pattern matched
+  // on the very words that prove it is NOT an instruction. Measured at path
+  // level with real dispatch (invocations=1) before this lookbehind existed:
+  //   "What did the re-run analysis show?"    "Tell me about the rerun model."
+  //   "Summarise the re-run analysis for me." "Was the re-run analysis different?"
+  //   "The rerun scenario looked odd, why?"
+  // Same defect class as the original blocker, and NEW relative to `staging`
+  // (this pre-route does not exist there), so leaving it would have converted
+  // an intermittent LLM misroute into a deterministic destruction for this
+  // shape.
+  //
+  // WHAT IS ACTUALLY CLOSED, stated precisely so the next reader does not
+  // inherit an overclaim: `re-?run` must carry an object AND must not be
+  // preceded by a determiner or possessive. Between them those two structural
+  // requirements cover the verb-less noun reading ("in the re-run") and the
+  // attributive reading ("the re-run analysis"). This is NOT a proof that no
+  // nominal reading survives. Treat a new counterexample as expected.
+  /(?<!\b(?:the|a|an|that|this|these|those|its|their)\s)\bre-?run\b\s+(?:the|this|that|my|our)?\s*(?:analysis|analyses|model|numbers|scenario|it|this|that)\b/i,
   // "run the analysis again", "run the numbers once more"
   /\brun\s+(?:the\s+|this\s+|that\s+|my\s+|our\s+)?(?:analysis|analyses|model|numbers|scenario)\s+(?:again|once\s+more|one\s+more\s+time|a\s+second\s+time)\b/i,
   // "run it again", "run this again"
