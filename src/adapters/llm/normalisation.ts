@@ -347,11 +347,20 @@ export function normaliseDraftResponse(raw: unknown): unknown {
         //     correct, prompt-instructed threshold destroyed. Requiring the
         //     raw/cap convention to hold means we only touch quads that are
         //     using the normalisation this fix is about.
-        // Together the gates imply the drafted threshold is >= 1.0 — i.e.
-        // the repair fires only on the "kills probability spread" state and
-        // nothing else. Tolerance mirrors the established convention for
-        // this same cross-check (SCALE_CONSISTENCY_TOLERANCE,
-        // system-events/factor-value-edit.ts:82, relative, magnitude-scaled).
+        // Together the gates imply the drafted threshold is >= 1 - 1e-6 —
+        // i.e. the repair fires only on the "kills probability spread" state
+        // and nothing else. NOT >= 1.0 exactly: gate (1) gives r = raw/cap
+        // >= 1, so the tolerance below is 1e-6*r and gate (2) admits any
+        // threshold down to r*(1 - 1e-6), whose infimum over r >= 1 is
+        // 0.999999. That band is still the degenerate state (a threshold of
+        // 0.9999991 asks for the ceiling of the scale just as 1.0 does, and
+        // every case in it has cap <= raw), so the CONSEQUENCE is unchanged
+        // — but the bound is the stated one, and a later reader must not
+        // build on a strict >= 1.0 that does not hold.
+        // Tolerance mirrors the established convention for this same
+        // cross-check (SCALE_CONSISTENCY_TOLERANCE, relative,
+        // magnitude-scaled — src/orchestrator-v5/system-events/
+        // factor-value-edit.ts:82).
         //
         // Repairs the DENOMINATOR only — `goal_threshold_raw` and
         // `goal_threshold_unit` (what the user actually asked for) are
