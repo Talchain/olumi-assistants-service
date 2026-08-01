@@ -31,7 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
-import { score as scoreDraftGraph } from "../src/scorer.js";
+import { score as scoreDraftGraph, DRAFT_RUBRIC_VERSION } from "../src/scorer.js";
 import { getProvider } from "../src/providers/index.js";
 import { extractJSON } from "../src/json-extractor.js";
 import type {
@@ -669,11 +669,16 @@ async function main(): Promise<void> {
       console.log(`  [raw] FAILED: ${rawResponse.failure_code ?? rawResponse.status} — ${rawResponse.error_message ?? ""}`);
       failedBriefs.push({ brief_id: brief.id, phase: "raw", error: rawResponse.error_message ?? rawResponse.status });
       rawScoreResult = {
+        rubric_version: DRAFT_RUBRIC_VERSION,
         structural_valid: false,
         violation_codes: ["NO_GRAPH"],
         param_quality: null,
         option_diff: null,
         completeness: null,
+        constraint_retention: null,
+        ratio_encoding: null,
+        external_factor_presence: null,
+        coaching_quality: null,
         overall_score: null,
         node_count: 0,
         edge_count: 0,
@@ -702,11 +707,16 @@ async function main(): Promise<void> {
       console.log(`  [pipeline] FAILED: ${stagingResult.status} — ${stagingResult.error ?? ""}`);
       failedBriefs.push({ brief_id: brief.id, phase: "pipeline", error: stagingResult.error ?? stagingResult.status });
       pipelineScoreResult = {
+        rubric_version: DRAFT_RUBRIC_VERSION,
         structural_valid: false,
         violation_codes: ["NO_GRAPH"],
         param_quality: null,
         option_diff: null,
         completeness: null,
+        constraint_retention: null,
+        ratio_encoding: null,
+        external_factor_presence: null,
+        coaching_quality: null,
         overall_score: null,
         node_count: 0,
         edge_count: 0,
@@ -877,7 +887,15 @@ function generateReport(
   md += `**Pipeline model:** ${sampleMeta?.model_id ?? "unavailable"} (via staging)\n`;
   md += `**Prompt hash (pipeline):** ${sampleMeta?.prompt_hash ?? "unavailable"}\n`;
   md += `**Staging endpoint:** ${ceeBaseUrl}\n`;
+  md += `**Rubric version:** \`${DRAFT_RUBRIC_VERSION}\`\n`;
   md += `**Briefs evaluated:** ${results.length} (${validResults.length} successful)\n\n`;
+
+  md += `> **⚠ Rubric comparability:** both arms are scored with rubric\n`;
+  md += `> \`${DRAFT_RUBRIC_VERSION}\`, which scores ONLY fields the model is permitted to\n`;
+  md += `> emit. Under the previous rubric this benchmark was structurally biased: the\n`;
+  md += `> pipeline arm carries the enricher-minted \`goal_threshold\` quad that the raw arm\n`;
+  md += `> cannot produce post-#789, so the pipeline scored higher for a field the model was\n`;
+  md += `> forbidden to write. **Deltas from earlier runs are not comparable with these.**\n\n`;
 
   md += `> **⚠ Important:** The unified pipeline does not support injecting a pre-parsed graph.\n`;
   md += `> Stage 1 (Parse) always calls the LLM. Therefore, the raw LLM call and the staging\n`;

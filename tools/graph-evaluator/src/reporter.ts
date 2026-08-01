@@ -7,6 +7,13 @@
 
 import { stringify } from "csv-stringify/sync";
 import type { ScoredResult, RunConfig, ModelConfig, Brief, ReportFiles } from "./types.js";
+import { DRAFT_RUBRIC_VERSION } from "./scorer.js";
+
+/** Banner carried by every generated report — see README § Rubric changelog. */
+const RUBRIC_COMPARABILITY_WARNING =
+  `⚠ Scores are comparable ONLY within rubric version \`${DRAFT_RUBRIC_VERSION}\`. ` +
+  `Runs produced under a different rubric version are a DIFFERENT MEASURE — ` +
+  `do not plot, average, or regression-check them as one series.`;
 
 const ANALYSIS_PACK_CHAR_LIMIT = 30_000;
 
@@ -21,6 +28,9 @@ function generateScoresCsv(results: ScoredResult[], config: RunConfig): string {
     model_id: r.model.id,
     brief_id: r.brief.id,
     target_mode: r.model.target_mode ?? "",
+    // Which rubric produced the numbers in this row. Rows with different
+    // rubric_version values are DIFFERENT MEASURES — never aggregate across.
+    rubric_version: r.score.rubric_version,
     structural_valid: r.score.structural_valid,
     // Legacy dimensions (backward-compatible columns)
     param_quality: r.score.param_quality?.toFixed(4) ?? "",
@@ -90,9 +100,12 @@ function generateSummaryMd(
   lines.push(`| Timestamp | ${ts} |`);
   lines.push(`| Prompt | \`${config.prompt_file}\` |`);
   lines.push(`| Prompt hash | \`${promptHash}\` |`);
+  lines.push(`| Rubric version | \`${DRAFT_RUBRIC_VERSION}\` |`);
   lines.push(`| Models | ${models.length} |`);
   lines.push(`| Briefs | ${briefs.length} |`);
   lines.push(`| Total combinations | ${results.length} |`);
+  lines.push("");
+  lines.push(RUBRIC_COMPARABILITY_WARNING);
   lines.push("");
 
   // ── Ranking table ──────────────────────────────────────────────────────────
@@ -314,6 +327,8 @@ function generateAnalysisPackMd(
 
   add(`# Graph Evaluator — Analysis Pack\n\n`);
   add(`Run: \`${config.run_id}\` | Prompt: \`${config.prompt_file}\` (${promptHash})\n\n`);
+  add(`Rubric: \`${DRAFT_RUBRIC_VERSION}\`\n\n`);
+  add(`${RUBRIC_COMPARABILITY_WARNING}\n\n`);
 
   // ── 1. Scores table ────────────────────────────────────────────────────────
   add(`## Scores Table\n\n`);

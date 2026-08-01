@@ -204,6 +204,12 @@ export interface LLMResponse {
 // =============================================================================
 
 export interface ScoreResult {
+  /**
+   * Which SCORING RUBRIC produced these numbers — see DRAFT_RUBRIC_VERSION in
+   * scorer.ts. ⚠ Scores carrying different rubric versions are DIFFERENT
+   * MEASURES; never compare them as one series.
+   */
+  rubric_version: string;
   structural_valid: boolean;
   violation_codes: string[];
   /** Legacy dimensions (preserved for backward compatibility) */
