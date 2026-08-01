@@ -456,10 +456,32 @@ export function classifyAnalyticalIntent(
  */
 const RERUN_NEGATION_VETO_PATTERNS: readonly RegExp[] = [
   /\b(?:do\s+not|don['’]?t|never|no\s+need\s+to|rather\s+not|stop|avoid|without)\b/i,
-  // ⚠ ADDED with the matrix-verb allowlist. "Nobody wants to re-run the
-  // analysis." is the ONE shape the allowlist cannot reach, because `wants to`
-  // IS genuinely instruction-shaped — the refusal lives in the SUBJECT, not the
-  // verb. It belongs here rather than in the grammar rule: this list is about
+  //
+  // ⚠ THIS LIST HAS DIVERGED FROM ITS SIBLING IN THIS SAME FILE.
+  // `NEGATED_EDIT_PATTERNS` (below) expresses the same concept — the user is
+  // REFUSING — and carries four contracted negators this list does not:
+  // `won't` · `shouldn't` · `wouldn't` · `doesn't`. Two hand-maintained lists
+  // of one idea, one fuller than the other, is the mirror defect this estate
+  // keeps paying for.
+  //
+  // ⚠⚠ AND `didn't` IS ABSENT FROM BOTH — including from the first draft of
+  // this very note, which claimed it was present in the sibling. A note written
+  // to record a hand-maintained-mirror defect drifted at birth. Corrected
+  // against the bytes; if you extend either list, extend both and re-check this
+  // sentence rather than trusting it.
+  //
+  // NOT load-bearing for the re-run pre-route: the contracted refusals it
+  // misses ("We didn't want to re-run the analysis.") are declined by POSITION
+  // — there is no `to` left context at all — not by polarity. Verified: under a
+  // mutant that restores `to`, all five go RED with this veto untouched.
+  // Unifying the two lists changes the vague-edit clarifier's behaviour, so it
+  // belongs in its own lane, not here.
+  // ⚠ ADDED alongside the matrix-verb allowlist, which has SINCE BEEN DELETED —
+  // this entry outlived it deliberately. "Nobody wants to re-run the analysis."
+  // was the one shape that allowlist could not reach, because `wants to` IS
+  // genuinely instruction-shaped: the refusal lives in the SUBJECT, not the
+  // verb. It stays because it is about refusal, not about grammar, and refusal
+  // is what this list is for. It belongs here rather than in the grammar rule: this list is about
   // explicit refusal, and "nobody wants to" is a refusal however well-formed
   // the verb phrase is. Same accepted over-reach as the rest of this list — a
   // message merely CONTAINING one of these declines, in the safe direction.
@@ -560,11 +582,25 @@ const VERB_POSITION_LEFT_CONTEXTS: readonly RegExp[] = [
   // a fixed-width left-context regex can see. A third list would arrive with a
   // seventh round for the same reason the first six did.
   //
-  // COST OF OMITTING IT, measured and accepted: four polite forms
-  // ("I want you to re-run the analysis.", "I need you to…", "I'd like you
-  // to…", "I am going to…") fall through to the LLM router. That is EXACTLY
-  // what staging does today — zero regression — whereas every `to` entry tried
-  // so far turned a refusal into a destroyed analysis.
+  // COST OF OMITTING IT — SEVEN forms, measured, not four. This is the number
+  // to weigh if you are here to re-add `to`, so it is stated in full:
+  //
+  //   "I want you to re-run the analysis."   "I need you to re-run the analysis."
+  //   "I'd like you to re-run the analysis." "I am going to re-run the analysis."
+  //   "Try to re-run the analysis."          "Ask them to re-run the analysis."
+  //   "Tell it to re-run the analysis."
+  //
+  // All fall through to the LLM router — EXACTLY what staging does today, zero
+  // regression — whereas every `to` entry tried so far turned a refusal into a
+  // destroyed analysis.
+  //
+  // ⚠ AND THE USABILITY COST IS SMALLER THAN SEVEN. Only the first three are a
+  // genuine loss. "I am going to re-run the analysis." is the user announcing
+  // their OWN intent, and "Ask them to re-run…" instructs a THIRD PARTY — the
+  // deleted entry fired WRONGLY on both, so losing them is a small correctness
+  // GAIN. For scale, the pre-existing decline set already contains commoner
+  // phrasings than any of the seven ("Just re-run the analysis.", "You should
+  // re-run the analysis.").
   //
   // The real fix is not a better pattern: it is to change the PAYOFF, so the
   // deterministic route lands on a CONFIRMATION rather than a dispatch. A false
@@ -765,6 +801,13 @@ const VAGUE_EDIT_PATTERNS: readonly RegExp[] = [
  * positive patterns recognise is paired with a negated rejection.
  */
 const NEGATED_EDIT_PATTERNS: readonly RegExp[] = [
+  // ⚠ SIBLING-LIST DIVERGENCE, recorded at BOTH sites. This list carries four
+  // contracted negators that `RERUN_NEGATION_VETO_PATTERNS` (above) does not —
+  // `won't` · `shouldn't` · `wouldn't` · `doesn't` — while both express "the
+  // user is refusing". `didn't` is absent from BOTH. If you extend either list,
+  // extend both; see the fuller note on the veto list for why this one is not
+  // load-bearing for the re-run pre-route.
+  //
   // "don't change", "I don't want to change", "won't update",
   // "can't change", "shouldn't update", "please don't change", etc.
   /\b(?:don['']?t|dont|do\s+not|doesn['']?t|does\s+not|won['']?t|wont|will\s+not|can['']?t|cant|cannot|shouldn['']?t|should\s+not|wouldn['']?t|would\s+not|never|please\s+don['']?t)\b[^.?!\n]{0,40}\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune|make|do)\b/i,

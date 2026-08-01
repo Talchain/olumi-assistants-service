@@ -536,10 +536,16 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
   // `never`, not bare `not to`, `no reason to`, `pointless`, `too early`,
   // `forgot to`, `nobody`.
   //
-  // Closed by narrowing `to` to a MATRIX-VERB allowlist — a verb of wanting,
-  // asking or intending marks what follows as a directive; a verb of deciding,
-  // forgetting or evaluating does not. Deleting `to` was not an option: see
-  // the load-bearing pins below.
+  // ⚠ HISTORY, NOT THE SHIPPED MECHANISM — read this before trusting the
+  // paragraph above. These eight were first closed by NARROWING `to` to a
+  // matrix-verb allowlist, on the reasoning that deleting `to` was not an
+  // option because it carried the polite "I want you to…" forms.
+  //
+  // That narrowing then opened TWENTY-TWO other shapes (pinned below), and the
+  // `to` context was DELETED OUTRIGHT. So these eight are now closed by
+  // POSITION — there is no `to` left context at all — not by any judgement
+  // about which verb governs the infinitive. The polite forms that argument was
+  // protecting are the documented declines further down.
   const INFINITIVE_UNDER_A_NON_DIRECTIVE = [
     'We decided not to re-run the analysis.',
     'There is no reason to re-run the analysis.',
@@ -548,9 +554,10 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
     'It is too early to re-run the analysis.',
     'Whether to re-run the analysis is unclear.',
     'The decision to re-run the analysis was wrong.',
-    // The one the matrix-verb allowlist CANNOT reach — `wants to` is genuinely
-    // instruction-shaped, so the refusal lives in the SUBJECT. Closed via the
-    // negation veto instead, which is where refusal belongs.
+    // The one the (since-deleted) matrix-verb allowlist could not reach —
+    // `wants to` is genuinely instruction-shaped, so the refusal lives in the
+    // SUBJECT. Closed via the negation veto, which is where refusal belongs,
+    // and that veto entry outlived the allowlist deliberately.
     'Nobody wants to re-run the analysis.',
   ];
   for (const msg of INFINITIVE_UNDER_A_NON_DIRECTIVE) {
@@ -623,14 +630,20 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
     });
   }
 
-  // ⚠ THE MIRROR DEFECT, NAMED. The contracted negators above
-  // (didn't/won't/shouldn't/wouldn't/doesn't) are ABSENT from
-  // `RERUN_NEGATION_VETO_PATTERNS` while being PRESENT in
-  // `NEGATED_EDIT_PATTERNS` — the sibling list IN THE SAME FILE, expressing the
-  // same concept, one complete and one not. They are not needed for the pins
-  // above (deleting the `to` entry closes those by position, not by polarity),
-  // but the divergence is the hand-maintained-mirror defect at its purest and
-  // is recorded here so the next person to touch either list sees both.
+  // ⚠ THE MIRROR DEFECT — and this note is now correct, which it was not.
+  //
+  // FOUR contracted negators (`won't` · `shouldn't` · `wouldn't` · `doesn't`)
+  // are absent from `RERUN_NEGATION_VETO_PATTERNS` while present in
+  // `NEGATED_EDIT_PATTERNS` — the sibling list IN THE SAME source file,
+  // expressing the same concept, one fuller than the other.
+  //
+  // ⚠⚠ `didn't` IS ABSENT FROM BOTH. The first draft of this note named it
+  // among the five "present in the sibling" — so a note written to record a
+  // hand-maintained-mirror defect had itself drifted at birth, and was caught
+  // only by a byte check of the two regexes. Verified with a probe, not read.
+  //
+  // The canonical statement now lives at BOTH source sites; this is the
+  // test-side pointer, not the record.
   it('the two negation lists in this file have diverged — recorded, not silently tolerated', () => {
     // Deliberately a documentation pin, not a behaviour assertion: unifying
     // them is a change with its own blast radius (NEGATED_EDIT_PATTERNS gates
@@ -693,7 +706,9 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
     'Re-run the full analysis.',
     'Re-run the updated model.',
     'Re-run the baseline scenario.',
-    // Infinitives under a non-directive matrix verb, now that `to` is narrowed.
+    // Infinitives generally, now that the `to` left context is DELETED (not
+    // narrowed — an earlier revision narrowed it, and that is what opened the
+    // 22).
     'It would be sensible to re-run the analysis.',
     'The plan is to re-run the analysis.',
   ];
