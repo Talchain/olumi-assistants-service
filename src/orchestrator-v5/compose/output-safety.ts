@@ -360,6 +360,15 @@ function sanitiseBlock(block: Block, collect: (s: string) => string): Block {
         ...(block.action_label !== undefined
           ? { action_label: collect(block.action_label) }
           : {}),
+        // ROADMAP 2.225 — `action_prompt` is USER-FACING TWICE OVER: it is
+        // rendered on the pill's card and then submitted verbatim as the
+        // user's own message. Without this line it rides through on the
+        // spread above unscrubbed, so a leaked entity id or raw decimal would
+        // not merely be displayed — it would be echoed back into the
+        // conversation as something the user appears to have written.
+        ...(block.action_prompt !== undefined
+          ? { action_prompt: collect(block.action_prompt) }
+          : {}),
       };
 
     case 'evidence':
