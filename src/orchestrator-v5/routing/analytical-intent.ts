@@ -468,6 +468,66 @@ const RERUN_INTERROGATIVE_VETO_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
+ * ⭐ VERB-POSITION ALLOWLIST — the left contexts in which the token that
+ * follows is genuinely a VERB rather than a noun or a modifier.
+ *
+ * This is the inversion of the blocklist that failed twice. The property that
+ * matters is not "which words could precede a noun" — that set is all of
+ * English and cannot be enumerated — but "which left contexts license an
+ * imperative", which is a small, closed, checkable list.
+ *
+ * FAILS SAFE BY CONSTRUCTION. An unrecognised left context DECLINES, so the
+ * turn falls through to the LLM router exactly as it did before this pre-route
+ * existed. Every gap in this list therefore costs a clarification, never a
+ * destroyed result — which is the correct direction for a route whose action
+ * REPLACES the user's computed analysis.
+ *
+ * Applied to EVERY imperative pattern, not just the `re-?run` one. The
+ * "<verb> … again" patterns look immune because `again` is adverbial, but
+ * `\brun\b` matches inside "re-run", so "The re-run analysis again showed X."
+ * would have matched pattern 2 on exactly the nominal reading this exists to
+ * exclude. Uniform application closes that without a second special case.
+ *
+ * Each entry is anchored to the END of the left context with `$`.
+ *
+ * ⚠ KNOWN DECLINES — measured, and disclosed rather than discovered later. All
+ * of these are genuine instructions that this list does NOT recognise, so they
+ * fall through to the LLM router:
+ *
+ *   "Start / Kick off / Trigger / Perform / Repeat the re-run analysis."
+ *   "Go ahead with the re-run analysis."   "I want the re-run analysis."
+ *   "…was odd, SO re-run the model."       (connective absent from the list)
+ *
+ * The first seven are also genuinely AMBIGUOUS — "the re-run analysis" there is
+ * determiner + modifier + noun, the very construction this list exists to
+ * refuse — so declining them is arguably the correct parse and not merely the
+ * safe one. Widening the list to catch them would re-admit the nominal reading
+ * they share with "Review the previous re-run analysis.", which must keep
+ * declining. Not worth trading a destroyed result for a saved clarification.
+ */
+const VERB_POSITION_LEFT_CONTEXTS: readonly RegExp[] = [
+  /^\s*$/,                                          // start of the message
+  /[.!?;\n]\s*$/,                                   // start of a new sentence
+  /,\s*$/,                                          // after a comma
+  /\band\s+$/i,                                     // "…, and re-run the model."
+  /\bthen\s+$/i,                                    // "…, then re-run the model."
+  /\bplease\s+$/i,                                  // "Please re-run the analysis."
+  /\bto\s+$/i,                                      // "I want you to re-run it."
+  /\b(?:can|could|would|will)\s+you\s+(?:please\s+)?$/i, // "Could you re-run …?"
+  /\blet['’]?s\s+$/i,                               // "Let's re-run this."
+  /\bnow\s+$/i,                                     // "Now re-run the analysis."
+];
+
+/** Is the match at `matchStart` in a licensed VERB position? */
+function isVerbPosition(message: string, matchStart: number): boolean {
+  const left = message.slice(0, matchStart);
+  for (const re of VERB_POSITION_LEFT_CONTEXTS) {
+    if (re.test(left)) return true;
+  }
+  return false;
+}
+
+/**
  * The imperative shapes themselves. Each is anchored on re-run vocabulary
  * PLUS an explicit repetition marker or the `re-` prefix, so an ordinary
  * graph edit that happens to contain "again" ("Set the marketing budget to
@@ -490,28 +550,44 @@ const IMPERATIVE_RERUN_PATTERNS: readonly RegExp[] = [
   // the user's existing result. A question ABOUT a past run was answered by
   // destroying it. Never restore the `?`.
   //
-  // ⚠ THE LEADING LOOKBEHIND IS THE SECOND HALF, AND IT IS NOT OPTIONAL.
-  // Requiring an object closed the MEASURED CORPUS, not the CLASS: it never
-  // required `re-?run` to be in VERB position, so the ATTRIBUTIVE-MODIFIER
-  // reading survived. "the re-run analysis" parses as determiner + modifier +
-  // noun, and "analysis" is itself in the object list — so the pattern matched
-  // on the very words that prove it is NOT an instruction. Measured at path
-  // level with real dispatch (invocations=1) before this lookbehind existed:
-  //   "What did the re-run analysis show?"    "Tell me about the rerun model."
-  //   "Summarise the re-run analysis for me." "Was the re-run analysis different?"
-  //   "The rerun scenario looked odd, why?"
-  // Same defect class as the original blocker, and NEW relative to `staging`
-  // (this pre-route does not exist there), so leaving it would have converted
-  // an intermittent LLM misroute into a deterministic destruction for this
-  // shape.
+  // ⚠ VERB POSITION IS ENFORCED SEPARATELY, BY AN ALLOWLIST. See
+  // `VERB_POSITION_LEFT_CONTEXTS` below. Requiring an object closed the
+  // measured CORPUS twice and the CLASS neither time:
   //
-  // WHAT IS ACTUALLY CLOSED, stated precisely so the next reader does not
-  // inherit an overclaim: `re-?run` must carry an object AND must not be
-  // preceded by a determiner or possessive. Between them those two structural
-  // requirements cover the verb-less noun reading ("in the re-run") and the
-  // attributive reading ("the re-run analysis"). This is NOT a proof that no
-  // nominal reading survives. Treat a new counterexample as expected.
-  /(?<!\b(?:the|a|an|that|this|these|those|its|their)\s)\bre-?run\b\s+(?:the|this|that|my|our)?\s*(?:analysis|analyses|model|numbers|scenario|it|this|that)\b/i,
+  //   round 2 — the object group was OPTIONAL, so this was a bare
+  //             `/\brerun\b/i`: "What changed in the re-run?" executed.
+  //   round 3 — object required, plus a lookbehind BLOCKLIST of nine tokens
+  //             (`the|a|an|that|this|these|those|its|their`). Twenty of
+  //             twenty-one ordinary sentences walked straight through it:
+  //             `your/our/my/his/her` (absent from the list — and `my`/`our`
+  //             appear in this very regex's own object group), possessive-'s
+  //             ("Paul's rerun analysis"), `the`+adjective ("The failed
+  //             re-run analysis"), `the` + TWO spaces (`\s` is one char),
+  //             `every/each/which/some/any/both/two`, and the bare plural
+  //             ("Rerun analyses showed…").
+  //
+  // A blocklist of "things that could precede a noun" is a hand-maintained
+  // mirror of ENGLISH (CLAUDE.md trap 12) and it drifted at birth. It is
+  // replaced by a POSITIVE allowlist of left contexts in which a following
+  // token is genuinely a verb, which fails SAFE by construction: an
+  // unrecognised left context declines and the turn falls through to the LLM
+  // router — the behaviour before this pre-route existed.
+  //
+  // The one shape an allowlist cannot reach on its own is the SENTENCE-INITIAL
+  // bare plural ("Rerun analyses showed a different leader."), whose left
+  // context is legitimately string-start. That is closed structurally instead,
+  // in the object group below: a PLURAL object requires a determiner, because
+  // "Re-run the analyses" is an instruction and "Rerun analyses" is a heading.
+  //
+  // WHAT IS ACTUALLY CLAIMED, stated so nobody inherits a third overclaim: the
+  // token must carry an object AND sit in one of the ten left contexts on the
+  // allowlist. This is NOT a proof that no nominal reading survives — it is a
+  // change of DEFAULT. Under the blocklist an unlisted context EXECUTED; under
+  // the allowlist an unlisted context DECLINES. So a new counterexample is
+  // still expected, but it now costs a fallen-through turn instead of a
+  // destroyed analysis. Treat a new counterexample as expected; treat a new
+  // EXECUTION as a serious defect.
+  /\bre-?run\b\s+(?:(?:the|this|that|my|our)\s+(?:analyses|numbers)|(?:the|this|that|my|our)?\s*(?:analysis|model|scenario|it|this|that))\b/i,
   // "run the analysis again", "run the numbers once more"
   /\brun\s+(?:the\s+|this\s+|that\s+|my\s+|our\s+)?(?:analysis|analyses|model|numbers|scenario)\s+(?:again|once\s+more|one\s+more\s+time|a\s+second\s+time)\b/i,
   // "run it again", "run this again"
@@ -536,8 +612,29 @@ export function looksLikeImperativeRerun(message: string): boolean {
   for (const re of RERUN_INTERROGATIVE_VETO_PATTERNS) {
     if (re.test(trimmed)) return false;
   }
+  // Every OCCURRENCE is checked, not merely the first: one message can carry a
+  // nominal use AND a real instruction — "The re-run analysis was odd. Re-run
+  // the model." and "Check the re-run analysis, then re-run the model." both
+  // dispatch (verified), and stopping at the first match would decline them
+  // because the first occurrence is the nominal one.
+  //
+  // ⚠ The connective must itself be on the allowlist. "…was odd, SO re-run the
+  // model." DECLINES, because `so` is not listed. That is a real gap, and it is
+  // in the safe direction (fall through to the LLM). Listed among the declines
+  // documented on the allowlist above rather than papered over here.
   for (const re of IMPERATIVE_RERUN_PATTERNS) {
-    if (re.test(trimmed)) return true;
+    const scanner = new RegExp(
+      re.source,
+      re.flags.includes('g') ? re.flags : `${re.flags}g`,
+    );
+    let m: RegExpExecArray | null;
+    while ((m = scanner.exec(trimmed)) !== null) {
+      if (m[0].length === 0) {
+        scanner.lastIndex += 1;
+        continue;
+      }
+      if (isVerbPosition(trimmed, m.index)) return true;
+    }
   }
   return false;
 }

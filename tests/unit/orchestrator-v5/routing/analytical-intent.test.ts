@@ -423,6 +423,93 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
     });
   }
 
+  // ⚠ THIRD REVIEW PASS — the blocklist was replaced by a VERB-POSITION
+  // ALLOWLIST. Round 3 required an object and added a lookbehind blocklist of
+  // nine tokens; TWENTY-ONE ordinary sentences walked through it at path level
+  // with real dispatch (`inv=1, routed=true`). A blocklist of "things that
+  // could precede a noun" is a hand-maintained mirror of ENGLISH (trap 12) and
+  // it drifted at birth — `your/our/my/his/her` were absent, and `my`/`our`
+  // appear in that same regex's own object group.
+  //
+  // These twenty-one are pinned against the INVERTED form. The property that
+  // makes the inversion right is not that this list is longer: it is that an
+  // unrecognised left context now DECLINES instead of EXECUTING.
+  const NOMINAL_NOT_A_VERB = [
+    // possessives the blocklist omitted — the first blocked sentence of round 3
+    // with a single word changed
+    'What did your re-run analysis show?',
+    'What did our re-run analysis show?',
+    'What did my re-run analysis show?',
+    'What did his re-run analysis show?',
+    'What did her re-run analysis show?',
+    // possessive-'s
+    "Paul's rerun analysis looked wrong.",
+    // determiner + ADJECTIVE (the blocklist matched only determiner + token)
+    'The failed re-run analysis was misleading.',
+    'The last re-run analysis was better.',
+    'Review the previous re-run analysis.',
+    // determiner + TWO spaces — the blocklist's `\s` matches exactly one char
+    'In the  re-run analysis, capacity was higher.',
+    // determiners and quantifiers absent from the blocklist
+    'Which re-run analysis was better?',
+    'Every re-run analysis told the same story.',
+    'Each re-run analysis differed slightly.',
+    'Some re-run analysis must have failed.',
+    'Any re-run analysis would show this.',
+    'Both re-run analyses agreed.',
+    'Compare the two re-run analyses.',
+    'Look at these re-run analyses.',
+    // BARE PLURAL at sentence start — the one shape a left-context allowlist
+    // cannot reach, since its left context legitimately IS string-start. Closed
+    // structurally instead: a plural object requires a determiner.
+    'Rerun analyses showed a different leader.',
+    // possessive inside a prepositional phrase
+    'In your re-run analysis, capacity was higher.',
+    'Our rerun model was stale.',
+  ];
+  for (const msg of NOMINAL_NOT_A_VERB) {
+    it(`NEVER executes on a NOMINAL use: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // The all-occurrence scan: one message can carry a nominal use AND a real
+  // instruction. Stopping at the first match would decline these, because the
+  // first occurrence is the nominal one.
+  const NOMINAL_THEN_INSTRUCTION = [
+    'The re-run analysis was odd. Re-run the model.',
+    'Check the re-run analysis, then re-run the model.',
+  ];
+  for (const msg of NOMINAL_THEN_INSTRUCTION) {
+    it(`still fires when a real instruction FOLLOWS a nominal use: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(true);
+    });
+  }
+
+  // ⚠ DOCUMENTED DECLINES — genuine instructions this allowlist does NOT
+  // recognise. Pinned as CURRENT behaviour and as an ACCEPTED cost, never as
+  // desired behaviour: each falls through to the LLM router, which is the
+  // pre-PR path, so the cost is a clarification and never a destroyed result.
+  // The first five are also genuinely AMBIGUOUS — "the re-run analysis" there
+  // is determiner + modifier + noun, the very construction the allowlist exists
+  // to refuse. If one of these starts firing, that is a WIDENING to review, not
+  // a fix to celebrate.
+  const KNOWN_DECLINES_FAILING_SAFE = [
+    'Start the re-run analysis.',
+    'Kick off the re-run analysis.',
+    'Trigger the re-run analysis.',
+    'Perform the re-run analysis.',
+    'Repeat the re-run analysis.',
+    'Go ahead with the re-run analysis.',
+    'I want the re-run analysis.',
+    'The re-run analysis was odd, so re-run the model.',
+  ];
+  for (const msg of KNOWN_DECLINES_FAILING_SAFE) {
+    it(`KNOWN DECLINE (accepted cost, fails safe to the LLM): "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
   // BOTH DIRECTIONS. Every genuine instruction must survive both repairs —
   // a veto that silences the feature is not a fix.
   const STILL_INSTRUCTIONS = [

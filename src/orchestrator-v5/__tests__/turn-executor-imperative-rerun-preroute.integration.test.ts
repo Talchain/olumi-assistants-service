@@ -390,6 +390,17 @@ describe('ROADMAP 2.229 fix 4 — imperative re-run pre-route', () => {
     ['Summarise the re-run analysis for me.', 'attributive modifier, imperative host verb'],
     ['Was the re-run analysis different?', 'attributive modifier, interrogative host'],
     ['The rerun scenario looked odd, why?', 'attributive modifier at sentence start'],
+    // ⚠ THIRD REVIEW PASS — the lookbehind BLOCKLIST let 21 ordinary sentences
+    // through at this exact seam. Replaced by a verb-position ALLOWLIST; the
+    // full 21 are pinned at unit level, and the representative span is pinned
+    // HERE, at the seam where the destruction would actually happen.
+    ['What did your re-run analysis show?', 'possessive the blocklist omitted'],
+    ["Paul's rerun analysis looked wrong.", "possessive-'s"],
+    ['The failed re-run analysis was misleading.', 'determiner + adjective'],
+    ['In the  re-run analysis, capacity was higher.', 'determiner + TWO spaces'],
+    ['Which re-run analysis was better?', 'determiner absent from the blocklist'],
+    ['Compare the two re-run analyses.', 'quantifier + plural'],
+    ['Rerun analyses showed a different leader.', 'bare plural at sentence start'],
   ];
   for (const [message, why] of MUST_NEVER_EXECUTE) {
     it(`NEVER executes an analysis for "${message}" (${why})`, async () => {
