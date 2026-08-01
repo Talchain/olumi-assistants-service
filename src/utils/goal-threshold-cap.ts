@@ -31,9 +31,17 @@
  *      verbatim, so the forbidden state was reachable through the very
  *      module written to forbid it. `goal_threshold_cap` is an
  *      LLM-WRITABLE draft field (cee/draft/anthropic-graph-schema.ts:299)
- *      and the draft prompt tells the model "goal_threshold_cap MUST be
- *      >= goal_threshold_raw" (prompts/defaults-v19.ts:183), so an equal
- *      cap is not a corner case — it is what the prompt permits. Measured
+ *      and the LIVE draft prompt tells the model "goal_threshold_cap:
+ *      reference maximum (must be >= goal_threshold_raw)"
+ *      (prompts/defaults-v187.ts:294 — v187 is the live default;
+ *      defaults.ts:2231 marks v19 deprecated/superseded), so an equal cap
+ *      is not a corner case — it is what the prompt permits. Worse, the
+ *      prompt REGRESSED here: deprecated v19 carried a mitigating line
+ *      (":184 …prefer a headroom cap above the target (not cap = target,
+ *      which forces goal_threshold = 1.0 and eliminates probability
+ *      spread)") and v187 has NO equivalent sentence at all. Restoring it
+ *      to v187 is rowed separately — but this guard must hold whatever
+ *      any prompt version says, which is why it lives in code. Measured
  *      cost on the deployed ISL build (diagnosis §5): at the resulting
  *      `goal_threshold = 1.0` the options returned probability_of_goal
  *      0.021 and exactly 0.0 while the leader won 95% of scenarios;

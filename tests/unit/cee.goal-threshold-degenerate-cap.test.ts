@@ -163,6 +163,141 @@ describe('2.239 fix B — an LLM-authored degenerate quad is repaired at draft i
     expect(goal.goal_threshold as number).toBeLessThanOrEqual(1);
   });
 
+  // ── F1 (review): the repair must NOT touch a sound PERCENTAGE cap ──────
+  // `resolveGoalThresholdCap` evaluates its '%' rule (raw 0-100 → cap 100)
+  // BEFORE the existing-cap rule. Calling it unconditionally therefore
+  // rewrote strictly-greater, entirely sound percentage caps — silently, on
+  // NON-degenerate graphs, in the over-optimistic direction, and about to
+  // become user-visible via PLoT #299. That is the same class of defect this
+  // whole PR exists to fix, reintroduced by the fix. The `cap <= raw` gate
+  // confines the repair to denominators that cannot be sound.
+  // Nothing pinned this before: the only sound-passthrough case used '£', and
+  // every '%' fixture in the repo happens to use cap 100.
+  it('F1: a SOUND percentage cap (cap 20 > raw 5) is NOT rewritten to 100 — 5x error', () => {
+    const goal = goalOf(
+      normaliseDraftResponse(
+        draftWith({
+          id: 'goal_conv',
+          kind: 'goal',
+          label: 'Reach 5% Conversion',
+          goal_threshold: 0.25,
+          goal_threshold_raw: 5,
+          goal_threshold_unit: '%',
+          goal_threshold_cap: 20,
+        }),
+      ),
+    );
+
+    expect(goal.goal_threshold_cap).toBe(20);
+    expect(goal.goal_threshold).toBe(0.25);
+  });
+
+  it('F1: a SOUND percentage cap (cap 1000 > raw 80) is NOT rewritten to 100 — 10x error', () => {
+    const goal = goalOf(
+      normaliseDraftResponse(
+        draftWith({
+          id: 'goal_nps',
+          kind: 'goal',
+          label: 'Reach 80% Adoption',
+          goal_threshold: 0.08,
+          goal_threshold_raw: 80,
+          goal_threshold_unit: '%',
+          goal_threshold_cap: 1000,
+        }),
+      ),
+    );
+
+    expect(goal.goal_threshold_cap).toBe(1000);
+    expect(goal.goal_threshold).toBe(0.08);
+  });
+
+  // ── F2 (review): thresholds the LIVE prompt instructs must survive ─────
+  // v187's MODEL UNIT TYPES table (defaults-v187.ts:296-303) declares that
+  // `goal_threshold` is NOT `raw / cap` for two of its four rows. A model
+  // following the prompt exactly, and choosing the minimum cap the prompt
+  // permits (`cap = raw`, which :294 explicitly allows), would otherwise have
+  // a CORRECT, prompt-instructed threshold overwritten with 0.8. The
+  // convention gate — the drafted threshold must actually equal raw/cap —
+  // keeps the repair to quads that use the normalisation this fix is about.
+  it('F2: v187 "Ratio that can exceed 100%" (NRR 110% → 1.10, raw 110) is left alone', () => {
+    const goal = goalOf(
+      normaliseDraftResponse(
+        draftWith({
+          id: 'goal_nrr',
+          kind: 'goal',
+          label: 'Reach 110% Net Revenue Retention',
+          goal_threshold: 1.1,
+          goal_threshold_raw: 110,
+          goal_threshold_unit: '%',
+          goal_threshold_cap: 110,
+        }),
+      ),
+    );
+
+    expect(goal.goal_threshold_cap).toBe(110);
+    expect(goal.goal_threshold).toBe(1.1);
+  });
+
+  it('F2: v187 "Small count (0-10)" (3 hires → 3, raw 3) is left alone', () => {
+    const goal = goalOf(
+      normaliseDraftResponse(
+        draftWith({
+          id: 'goal_hires',
+          kind: 'goal',
+          label: 'Make 3 Senior Hires',
+          goal_threshold: 3,
+          goal_threshold_raw: 3,
+          goal_threshold_unit: 'count',
+          goal_threshold_cap: 3,
+        }),
+      ),
+    );
+
+    expect(goal.goal_threshold_cap).toBe(3);
+    expect(goal.goal_threshold).toBe(3);
+  });
+
+  // ── F3 (review): never MINT a threshold that did not exist ─────────────
+  // Writing one here would also close the factor-extraction enricher's
+  // redirect branch, which is gated on `goal_threshold === undefined`
+  // (enricher.ts:649) — a behaviour change well outside this fix's claim.
+  it('F3: a raw+cap pair with NO drafted threshold is left alone (never mints one)', () => {
+    const goal = goalOf(
+      normaliseDraftResponse(
+        draftWith({
+          id: 'goal_cust',
+          kind: 'goal',
+          label: 'Reach 800 Customers',
+          goal_threshold_raw: 800,
+          goal_threshold_unit: 'customers',
+          goal_threshold_cap: 800,
+        }),
+      ),
+    );
+
+    expect(goal.goal_threshold).toBeUndefined();
+    expect(goal.goal_threshold_cap).toBe(800);
+  });
+
+  it('a threshold that merely DISAGREES with a sound raw/cap pair is left alone (declared out of scope)', () => {
+    const goal = goalOf(
+      normaliseDraftResponse(
+        draftWith({
+          id: 'goal_odd',
+          kind: 'goal',
+          label: 'Reach £20k MRR',
+          goal_threshold: 0.5, // != 20000/25000
+          goal_threshold_raw: 20000,
+          goal_threshold_unit: '£',
+          goal_threshold_cap: 25000,
+        }),
+      ),
+    );
+
+    expect(goal.goal_threshold_cap).toBe(25000);
+    expect(goal.goal_threshold).toBe(0.5);
+  });
+
   it('a SOUND model-supplied quad is passed through byte-identically (no gratuitous rewrite)', () => {
     const goal = goalOf(
       normaliseDraftResponse(

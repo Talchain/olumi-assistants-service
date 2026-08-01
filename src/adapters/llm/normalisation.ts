@@ -285,55 +285,99 @@ export function normaliseDraftResponse(raw: unknown): unknown {
 
         // ── ROADMAP 2.239: degenerate model-supplied cap ────────────────
         // `goal_threshold_cap` is an LLM-WRITABLE draft field
-        // (cee/draft/anthropic-graph-schema.ts:299) and the draft prompt
-        // sanctions `cap >= raw` verbatim ("goal_threshold_cap MUST be >=
-        // goal_threshold_raw", prompts/defaults-v19.ts:183). A model that
+        // (cee/draft/anthropic-graph-schema.ts:299) and the LIVE draft
+        // prompt sanctions `cap >= raw` verbatim ("goal_threshold_cap:
+        // reference maximum (must be >= goal_threshold_raw)",
+        // prompts/defaults-v187.ts:294 — v187 is the live default;
+        // defaults.ts:2231 marks v19 deprecated/superseded). A model that
         // takes the `=` produces `goal_threshold = raw/cap = 1.0` — the
         // state utils/goal-threshold-cap.ts's own doctrine forbids, because
         // ISL then scores P(sample >= the ceiling of the scale). Measured
         // on the deployed build: 0.021 and exactly 0.0 across two options
         // whose leader won 95% of scenarios (diagnosis §5 Finding B).
         //
-        // WHY HERE. This is the ONLY seam that sees a model-authored
-        // threshold quad before it is persisted: `normaliseDraftResponse`
-        // is the single ingress for every LLM-drafted graph (anthropic.ts
-        // :1801/:2624, openai.ts :747/:1215). The two resolver-bearing
-        // paths — add_constraint's goal-join and the factor-extraction
-        // enricher — are fixed by the `>` change in
-        // resolveGoalThresholdCap, but NEITHER runs on a quad the model
-        // wrote itself: the enricher's branch is gated on
-        // `goal_threshold === undefined` (enricher.ts:649), and nothing
-        // anywhere recomputes goal_threshold from raw/cap for a goal node
-        // (every raw/cap recomputation site in src/ is a FACTOR site).
-        // Stage 4b (threshold-sweep) only DELETES — its own contract
-        // declares `allowedModifications.node: []` — and it does not fire
-        // on the live shape anyway (raw present, label carries digits).
-        // So without this block the fix would be provably partial while
-        // looking complete.
+        // ⚠ AND v187 IS STRICTLY WORSE THAN ITS PREDECESSOR HERE. v19
+        // carried a mitigating line — ":184 …prefer a headroom cap above
+        // the target (not cap = target, which forces goal_threshold = 1.0
+        // and eliminates probability spread)" — and **v187 has no such
+        // sentence anywhere**; :294 is a bare `>=`. The prompt got weaker
+        // while the code kept the same hole. Restoring that sentence to
+        // v187 is rowed separately; this guard must hold regardless of
+        // what any prompt version says, which is the reason it lives here
+        // and not only in the prompt.
         //
-        // Delegates to the SAME doctrine as the other two paths rather
-        // than re-deriving one, so all three agree by construction. `unit`
-        // and `existingUnit` are deliberately the node's OWN
-        // goal_threshold_unit for both arguments: the cap and the raw
-        // target are two numbers on one node under one declared unit, so
-        // there is no second unit to be incompatible with, and passing it
-        // twice is what lets rule 2 ('%' → 100) be reached for percentage
-        // goals. Repairs the DENOMINATOR only — `goal_threshold_raw` and
+        // WHY HERE. This is the only seam that sees a model-authored
+        // threshold quad before it is persisted, for every REAL provider:
+        // `normaliseDraftResponse` is called by anthropic.ts :1801/:2624
+        // and openai.ts :747/:1215. (NOT literally every drafted graph —
+        // `FixturesAdapter.draftGraph`, router.ts:298-316, returns
+        // `fixtureGraph` WITHOUT normalising, so `LLM_PROVIDER=fixtures`
+        // never reaches this code. Zero blast radius, but it means no
+        // fixtures-backed end-to-end test can exercise it — the coverage
+        // below is unit-level against this function by necessity.)
+        // The three resolver-bearing paths — add_constraint's two sites and
+        // the factor-extraction enricher — are fixed by the `>` change in
+        // resolveGoalThresholdCap, but NONE runs on a quad the model wrote
+        // itself: the enricher's branch is gated on `goal_threshold ===
+        // undefined` (enricher.ts:649), and nothing anywhere recomputes
+        // goal_threshold from raw/cap for a goal node (every raw/cap
+        // recomputation site in src/ is a FACTOR site). Stage 4b
+        // (threshold-sweep) only DELETES — its contract declares
+        // `allowedModifications.node: []` — and does not fire on the live
+        // shape anyway (raw present, label carries digits). So without this
+        // block the fix would be provably partial while looking complete.
+        //
+        // ── THE TWO GATES, and why each is load-bearing ─────────────────
+        // (1) `gtCap <= gtRaw`. WITHOUT THIS THE REPAIR IS ITSELF A DEFECT
+        //     OF THE CLASS IT FIXES. `resolveGoalThresholdCap` evaluates
+        //     its '%' rule (raw 0-100 → cap 100) BEFORE the existing-cap
+        //     rule, so calling it unconditionally rewrites SOUND, strictly
+        //     -greater percentage caps: {raw 5, '%', cap 20, th 0.25} would
+        //     become th 0.05 (5x), {raw 80, '%', cap 1000, th 0.08} would
+        //     become th 0.8 (10x) — silently, on non-degenerate graphs, in
+        //     the OVER-OPTIMISTIC direction. This gate confines the repair
+        //     to caps that are equal to or below the target, i.e. exactly
+        //     the ones that cannot be a sound denominator.
+        // (2) the drafted threshold must actually BE `raw / cap`. v187's
+        //     MODEL UNIT TYPES table (:296-303) declares `goal_threshold`
+        //     is NOT raw/cap for two of its four rows — "NRR 110% → 1.10,
+        //     raw 110" and "3 hires → 3, raw 3". A model following the
+        //     prompt exactly, with the minimum cap the prompt permits
+        //     (cap = raw), would otherwise be rewritten to 0.8 and have a
+        //     correct, prompt-instructed threshold destroyed. Requiring the
+        //     raw/cap convention to hold means we only touch quads that are
+        //     using the normalisation this fix is about.
+        // Together the gates imply the drafted threshold is >= 1.0 — i.e.
+        // the repair fires only on the "kills probability spread" state and
+        // nothing else. Tolerance mirrors the established convention for
+        // this same cross-check (SCALE_CONSISTENCY_TOLERANCE,
+        // system-events/factor-value-edit.ts:82, relative, magnitude-scaled).
+        //
+        // Repairs the DENOMINATOR only — `goal_threshold_raw` and
         // `goal_threshold_unit` (what the user actually asked for) are
-        // never rewritten.
+        // never rewritten. `unit`/`existingUnit` are deliberately the
+        // node's OWN goal_threshold_unit for both arguments: cap and raw
+        // are two numbers on one node under one declared unit, so there is
+        // no second unit to be incompatible with.
         //
-        // Scope, stated so it is not mistaken for more: this fires only
-        // when a positive finite raw AND a positive finite cap are both
-        // present and the doctrine returns a DIFFERENT cap. A drafted
-        // `goal_threshold` that merely disagrees with an otherwise-sound
-        // raw/cap pair is a different defect and is left alone; so is a
-        // missing cap (the enricher/Stage 4b own that) and a non-positive
-        // cap or raw.
+        // DELIBERATELY NOT REPAIRED (each would be a different defect):
+        // a threshold that disagrees with an otherwise-sound raw/cap pair;
+        // a missing cap or a missing threshold (so this never MINTS a
+        // threshold, and never closes the enricher's `goal_threshold ===
+        // undefined` redirect branch); a non-positive or non-finite value.
         const gtRaw = node.goal_threshold_raw;
         const gtCap = node.goal_threshold_cap;
-        if (
+        const gtVal = node.goal_threshold;
+        const usesRawOverCapConvention =
           typeof gtRaw === 'number' && Number.isFinite(gtRaw) && gtRaw > 0 &&
-          typeof gtCap === 'number' && Number.isFinite(gtCap) && gtCap > 0
+          typeof gtCap === 'number' && Number.isFinite(gtCap) && gtCap > 0 &&
+          typeof gtVal === 'number' && Number.isFinite(gtVal) &&
+          Math.abs(gtVal - gtRaw / gtCap) <=
+            1e-6 * Math.max(1, Math.abs(gtRaw / gtCap));
+        if (
+          usesRawOverCapConvention &&
+          // gate (1) — only a degenerate or undercutting denominator
+          (gtCap as number) <= (gtRaw as number)
         ) {
           const soundCap = resolveGoalThresholdCap(
             gtCap,
