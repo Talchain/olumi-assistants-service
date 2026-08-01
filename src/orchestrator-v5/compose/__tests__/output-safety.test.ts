@@ -673,6 +673,46 @@ describe('sanitiseOlumiResponseForEgress', () => {
     }
   });
 
+  it('Phase 3 — coaching scrubs action_prompt (it is submitted AS the user’s turn)', () => {
+    // ROADMAP 2.225. `action_prompt` is user-facing twice: rendered on the
+    // card, then dispatched VERBATIM as the user's next message. An
+    // unscrubbed entity id here is not merely displayed — it is echoed back
+    // into the conversation as something the user appears to have written.
+    // Without the explicit arm in `output-safety.ts` the field rides through
+    // on the object spread untouched, and this assertion is what catches it.
+    const out = sanitiseOlumiResponseForEgress(
+      emptyResponse({
+        blocks: [
+          {
+            block_id: '550e8400-e29b-41d4-a716-446655440002',
+            signal_id: 'coach:assumption:1:gh',
+            created_at: '2026-05-16T15:00:00.000Z',
+            source_handler: 'decision_review_enricher',
+            graph_hash_at_generation: 'gh_test',
+            freshness: 'fresh',
+            type: 'coaching',
+            coaching_kind: 'assumption_check',
+            title: 'Check fac_delivery_cost',
+            body: 'Verify fac_delivery_cost stays bounded.',
+            source: 'decision_review',
+            target_refs: [],
+            priority_rank: 101,
+            action_intent: 'confirm_factor',
+            action_label: 'Confirm fac_delivery_cost',
+            action_prompt: 'Help me pressure-test fac_delivery_cost before I rely on it.',
+          },
+        ],
+      }),
+      { graph: makeGraph(), requestId: 'req-c2', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
+    );
+    const block = out.blocks[0]!;
+    if (block.type === 'coaching') {
+      expect(block.action_prompt).toBe(
+        'Help me pressure-test Delivery Cost before I rely on it.',
+      );
+    }
+  });
+
   it('Phase 3 — evidence scrubs factor_label / evidence_gap / suggested_technique / impact_if_gathered / action_label; leaves factor_ref + target_refs IDs', () => {
     const out = sanitiseOlumiResponseForEgress(
       emptyResponse({
