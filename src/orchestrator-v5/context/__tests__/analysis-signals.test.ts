@@ -62,6 +62,48 @@ describe('deriveTippingPointsFromTopLevel', () => {
     expect(deriveTippingPointsFromTopLevel({})).toEqual([]);
     expect(deriveTippingPointsFromTopLevel({ flip_thresholds: 'nope' })).toEqual([]);
   });
+
+  // ROADMAP 2.228 F1 review amendment 5 — the attested-no-flip vocabulary is
+  // OPEN, and PLoT #300 adds a second token to it.
+  it("RED-FIRST: a 'structurally_invariant' row is RETAINED as an attested no-flip, not dropped as ambiguous", () => {
+    const out = deriveTippingPointsFromTopLevel({
+      flip_thresholds: [
+        {
+          factor_id: 'f_inv',
+          factor_label: 'Structurally Invariant Factor',
+          current_value: 4,
+          flip_value: null,
+          // ISL proved this factor cannot move the winner AT ALL. That is
+          // producer-owned certainty — strictly stronger than
+          // `no_effect_within_bounds`, not weaker. Matching the old token by
+          // exact string dropped it here as if the producer had said nothing.
+          flip_reason: 'structurally_invariant',
+        },
+      ],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      factor_id: 'f_inv',
+      factor_label: 'Structurally Invariant Factor',
+      flip_value: null,
+      no_flip_within_bounds: true,
+    });
+  });
+
+  it('an UNRECOGNISED flip_reason is still dropped — the predicate is a list, not a truthiness check', () => {
+    const out = deriveTippingPointsFromTopLevel({
+      flip_thresholds: [
+        {
+          factor_id: 'f_x',
+          factor_label: 'Timed Out Factor',
+          current_value: 4,
+          flip_value: null,
+          flip_reason: 'max_iterations',
+        },
+      ],
+    });
+    expect(out).toEqual([]);
+  });
 });
 
 describe('deriveEvidenceGapsFromEnrichment', () => {

@@ -26,6 +26,14 @@ import {
   flipThresholdCardBody,
   readFlipThresholdCardRow,
 } from '../compose/flip-threshold-card-row.js';
+// ROADMAP 2.228 F1 — `readRowValueScale` used to be a private copy here. It is
+// now owned by the shared top-level-row module so this path and the
+// decision_review enricher resolve `value_scale` identically by construction.
+import {
+  readRowValueScale,
+  MODEL_SCALE_SUSPECT_ABS,
+  isAttestedNoFlipReason,
+} from './flip-threshold-rows.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 
 /** Cap for evidence-gap signals carried into the projection. */
@@ -298,8 +306,13 @@ export const FLIP_DISPLAY_MAX_CHARS = 40;
  * The normalised-scale band. A raw flip/current value with |v| <= 1 could be an
  * uninverted model-scale number, so an absent `value_scale` is not enough to
  * license it.
+ *
+ * ROADMAP 2.228 F1 — the constant now lives in `./flip-threshold-rows.ts`
+ * alongside the other predicate that uses it, so the display LICENCE and the
+ * prompt-INPUT gate cannot drift to different bands. Re-exported here so this
+ * module's existing consumers keep their import stable.
  */
-export const MODEL_SCALE_SUSPECT_ABS = 1;
+export { MODEL_SCALE_SUSPECT_ABS };
 
 /** One factor's display-licensed current/flip pair. */
 export interface FlipDisplayLicence {
@@ -312,22 +325,6 @@ function readLicensedDisplay(value: unknown): string | null {
   const trimmed = value.trim();
   if (trimmed.length === 0 || trimmed.length > FLIP_DISPLAY_MAX_CHARS) return null;
   return trimmed;
-}
-
-/**
- * Resolve PLoT's `value_scale` from a top-level flip row. Mirrors
- * `../compose/flip-proposal.ts:readValueScale` — the contract permits the signal
- * at the row top level, and the current PLoT build nests it under
- * `margin_sensitivity`. Top level wins. Null when neither is a string.
- */
-function readRowValueScale(row: Record<string, unknown>): string | null {
-  if (typeof row.value_scale === 'string') return row.value_scale;
-  const ms = row.margin_sensitivity;
-  if (ms !== null && typeof ms === 'object' && !Array.isArray(ms)) {
-    const nested = (ms as Record<string, unknown>).value_scale;
-    if (typeof nested === 'string') return nested;
-  }
-  return null;
 }
 
 /**
@@ -435,8 +432,12 @@ export function deriveTippingPointsFromTopLevel(
         : typeof entry.flip_threshold === 'number' && Number.isFinite(entry.flip_threshold)
           ? entry.flip_threshold
           : null;
-    const noFlip =
-      flipValue === null && entry.flip_reason === 'no_effect_within_bounds';
+    // ROADMAP 2.228 F1 (review amendment 5) — the attested-no-flip vocabulary
+    // is OPEN and owned by one predicate. Matching the token inline here meant
+    // a `structurally_invariant` row (PLoT #300) would have failed BOTH tests
+    // below and been dropped as ambiguous — a producer-attested fact lost from
+    // the coach context, silently.
+    const noFlip = flipValue === null && isAttestedNoFlipReason(entry.flip_reason);
 
     // Keep only rows that assert something: a real flip pair, or an explicit
     // producer-attested no-flip. Ambiguous rows (flip null, no reason) are

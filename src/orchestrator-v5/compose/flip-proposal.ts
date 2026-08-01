@@ -39,6 +39,10 @@ import { emitProposedChange } from './proposed-change.js';
 import type { SuggestedAction } from './types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { formatFactorValue, formatFactorValueApprox } from './format-factor-value.js';
+// ROADMAP 2.228 F1 (review amendment 5) — the ONE owner of the open
+// attested-no-flip `flip_reason` vocabulary, shared with the coach-context and
+// decision_review projections.
+import { isAttestedNoFlipReason } from '../context/flip-threshold-rows.js';
 
 /** One entry read defensively from `enrichment.flip_thresholds[]`. */
 export interface FlipEntry {
@@ -457,7 +461,14 @@ export function summariseFlipEntries(entries: readonly FlipEntry[]): FlipSummary
   if (hasConcrete) {
     return { overall_status: 'concrete', entries, margin_supports_flip };
   }
-  const allNoEffect = entries.every((e) => e.flip_reason === 'no_effect_within_bounds');
+  // ROADMAP 2.228 F1 (review amendment 5) — one owned predicate for the OPEN
+  // attested-no-flip vocabulary. Matching the single token inline meant ONE
+  // `structurally_invariant` row (PLoT #300) demoted this verdict from
+  // `no_practical_flip` to `insufficient_data`, which swaps the user-facing
+  // copy from a producer-attested certainty ("no single factor on its own
+  // reached a tipping point") to uncertainty ("did not isolate … not clear")
+  // at explanation-fallback.ts:544/:585 and compose-option-targeted-flip.ts:260.
+  const allNoEffect = entries.every((e) => isAttestedNoFlipReason(e.flip_reason));
   return {
     overall_status: allNoEffect ? 'no_practical_flip' : 'insufficient_data',
     entries,

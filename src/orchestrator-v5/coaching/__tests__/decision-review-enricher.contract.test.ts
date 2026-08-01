@@ -268,6 +268,30 @@ describe('decision-review-enricher — Tier 3 contract', () => {
     expect(userMessage).not.toContain('evidence_gaps_dropped_count');
     expect(userMessage).not.toContain('model_critiques_dropped_count');
     expect(userMessage).not.toContain('model_critiques_capped_count');
+
+    // ROADMAP 2.228 F1 — the hand-list above is a MIRROR of DecisionReviewMeta
+    // and had already drifted behind it (`margin`, `robustness_level` were
+    // never listed). It is kept for readability, but the binding assertion is
+    // now DERIVED from the object under test, so a `_meta` key added later
+    // cannot be silently omitted from this guard.
+    //
+    // Two keys are named as deliberate exceptions because the user message
+    // legitimately renders a field of the SAME NAME from a different source
+    // (decision_context.margin; the robustness block) — so a substring match
+    // on them proves nothing either way. Each is asserted to actually be
+    // present, so an exception can never quietly become a free pass.
+    const RENDERED_ELSEWHERE_BY_DESIGN = new Set(['margin', 'robustness_level']);
+    for (const key of Object.keys(input._meta ?? {})) {
+      if (RENDERED_ELSEWHERE_BY_DESIGN.has(key)) continue;
+      expect(userMessage, `_meta key "${key}" leaked into the user message`).not.toContain(key);
+    }
+    for (const key of RENDERED_ELSEWHERE_BY_DESIGN) {
+      expect(
+        Object.keys(input._meta ?? {}),
+        `"${key}" is excepted but is no longer a _meta key — drop the exception`,
+      ).toContain(key);
+    }
+
     // Sanity: the user message *is* still populated — proves we didn't accidentally
     // strip everything in the assertion above.
     expect(userMessage).toContain('Engage Offshore Partner');
