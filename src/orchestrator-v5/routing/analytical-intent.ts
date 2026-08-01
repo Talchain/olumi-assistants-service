@@ -235,7 +235,24 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   // (b) subject ABSENT → only the unambiguous staleness vocabulary. "Is this
   //     stale?" still classifies; "Is that valid input for the model?" and
   //     "what is the current value?" no longer do.
-  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated)\b/i },
+  // (b) subject ABSENT. The unambiguous staleness words are always accepted;
+  //     `valid|fresh|current` are accepted ONLY behind an explicit `still`.
+  //
+  //     ⚠ AS FIRST SHIPPED THIS BRANCH OMITTED `valid|fresh|current`
+  //     ENTIRELY, and that killed the MOST IDIOMATIC staleness phrasing
+  //     there is: "Is this still current?", "Is this still valid?",
+  //     "Are these still valid?" all became `null`. That is not a
+  //     cosmetic loss — `cls === null` makes BOTH `tryStaleRerunGuard`
+  //     and `tryNoAnalysisGuard` decline, so on a STALE analysis the
+  //     canonical question lost its deterministic stale answer AND its
+  //     re-run chip. The original 7 controls all carried a subject noun
+  //     or an unambiguous staleness word, so the shape was untested in
+  //     both directions; the diagnosis shared the blind spot.
+  //
+  //     `still` is what carries the staleness sense when the subject is
+  //     elided: "is this still current?" asks about currency over time;
+  //     "what is the current value?" does not, and stays out.
+  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)\s+(?:(?:still\s+)?(?:stale|out\s*of\s*date|outdated)|still\s+(?:valid|fresh|current))\b/i },
   { cls: 'rerun_question', pattern: /\bdoes\s+(?:this|the\s+(?:analysis|result))\s+need\s+(?:a\s+)?(?:re-?run|rerun|refresh)\b/i },
   { cls: 'rerun_question', pattern: /\bis\s+(?:the\s+)?(?:analysis|result)\s+out\s*of\s*date\b/i },
 
@@ -410,6 +427,26 @@ export function classifyAnalyticalIntent(
  * the analysis?" is a polite instruction and must NOT be vetoed, whereas "Can
  * we re-run?" is the user asking whether it is possible.
  */
+/**
+ * ⚠ NEGATION VETO — checked FIRST, and required SEPARATELY from the object-group
+ * repair above. "Do not re-run **the analysis**" carries a valid object and
+ * survives that repair intact, so without this veto the most explicit possible
+ * refusal — the user telling the product NOT to do the thing — executed it.
+ *
+ * Measured before this existed, every one routing to a real `run_analysis`
+ * dispatch with `llm_calls_used: 0`:
+ *   "Do not re-run the analysis."        "Don't re-run it."
+ *   "Never re-run this automatically."   "I do not want to re-run anything."
+ *
+ * The asymmetry that makes this a veto rather than a scored signal: refusing to
+ * act on an ambiguous sentence costs a clarification; acting on a refusal
+ * destroys the user's computed result. `stop` / `avoid` / `without` are included
+ * for the same reason — they are cheap to honour and expensive to miss.
+ */
+const RERUN_NEGATION_VETO_PATTERNS: readonly RegExp[] = [
+  /\b(?:do\s+not|don['’]?t|never|no\s+need\s+to|rather\s+not|stop|avoid|without)\b/i,
+];
+
 const RERUN_INTERROGATIVE_VETO_PATTERNS: readonly RegExp[] = [
   /\b(?:do|did|does|should|must|would|will|can|could|need)\s+(?:i|we)\b/i,
   /\bis\s+(?:it|there)\b/i,
@@ -426,8 +463,22 @@ const RERUN_INTERROGATIVE_VETO_PATTERNS: readonly RegExp[] = [
  * 200 again.") matches none of them.
  */
 const IMPERATIVE_RERUN_PATTERNS: readonly RegExp[] = [
-  // "re-run the analysis", "rerun it", "re-run this", "re-run"
-  /\bre-?run\b(?:\s+(?:the|this|that|my|our)?\s*(?:analysis|analyses|model|numbers|scenario|it|this|that))?/i,
+  // "re-run the analysis", "rerun it", "re-run this".
+  //
+  // ⚠ THE OBJECT GROUP IS REQUIRED, AND THAT IS THE WHOLE PATTERN.
+  // As first shipped the group carried a trailing `?`, which made this
+  // regex equivalent to a bare `/\bre-?run\b/i` — ANY occurrence of the
+  // token, anywhere, in any grammatical role. Measured consequence, in the
+  // integration harness, all executing a real analysis with 0 LLM calls:
+  //   "What changed in the re-run?"          → EXECUTED a re-run
+  //   "Show me the re-run results."          → EXECUTED a re-run
+  //   "How long did the rerun take?"         → EXECUTED a re-run
+  //   "Was the rerun better?"                → EXECUTED a re-run
+  // `run_analysis` is not a no-op: it forwards the graph to PLoT→ISL for
+  // real compute, writes a new fact and `graph_hash_at_run`, and REPLACES
+  // the user's existing result. A question ABOUT a past run was answered by
+  // destroying it. Never restore the `?`.
+  /\bre-?run\b\s+(?:the|this|that|my|our)?\s*(?:analysis|analyses|model|numbers|scenario|it|this|that)\b/i,
   // "run the analysis again", "run the numbers once more"
   /\brun\s+(?:the\s+|this\s+|that\s+|my\s+|our\s+)?(?:analysis|analyses|model|numbers|scenario)\s+(?:again|once\s+more|one\s+more\s+time|a\s+second\s+time)\b/i,
   // "run it again", "run this again"
@@ -445,6 +496,10 @@ const IMPERATIVE_RERUN_PATTERNS: readonly RegExp[] = [
 export function looksLikeImperativeRerun(message: string): boolean {
   const trimmed = message.trim();
   if (trimmed.length === 0) return false;
+  // Negation first: an explicit refusal outranks every other reading.
+  for (const re of RERUN_NEGATION_VETO_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
   for (const re of RERUN_INTERROGATIVE_VETO_PATTERNS) {
     if (re.test(trimmed)) return false;
   }

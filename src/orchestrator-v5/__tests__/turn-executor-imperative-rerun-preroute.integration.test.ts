@@ -358,6 +358,46 @@ describe('ROADMAP 2.229 fix 4 — imperative re-run pre-route', () => {
     expect(runAnalysisInvocations.length).toBe(0);
   });
 
+  // -------------------------------------------------------------------------
+  // ⚠ #779 REVIEW BLOCKER, at the PATH level. The unit controls prove the
+  // recogniser declines; these prove the TURN does not execute. That distinction
+  // matters because `run_analysis` is not a no-op — it forwards the graph to
+  // PLoT→ISL for real compute, writes a new fact and `graph_hash_at_run`, and
+  // REPLACES the user's existing result. A unit-level `false` with a wired
+  // pre-route that still dispatched would be exactly the guarantee-theatre this
+  // estate keeps paying for.
+  // -------------------------------------------------------------------------
+  const MUST_NEVER_EXECUTE: ReadonlyArray<readonly [string, string]> = [
+    ['Do not re-run the analysis.', 'the user explicitly REFUSING — the strongest possible signal'],
+    ["Don't re-run it.", 'contracted refusal'],
+    ['Never re-run this automatically.', 'standing refusal'],
+    ['I do not want to re-run anything.', 'refusal, first person'],
+    ['What changed in the re-run?', 'canonical what_changed question the run-comparison gate serves'],
+    ['Why did the rerun give a different answer?', 'question about a past run'],
+    ['Show me the re-run results.', 'a request to SEE, not to compute'],
+    ['How long did the rerun take?', 'question about a past run'],
+    ['Explain the rerun to me.', 'question about a past run'],
+    ['Was the rerun better?', 'question about a past run'],
+  ];
+  for (const [message, why] of MUST_NEVER_EXECUTE) {
+    it(`NEVER executes an analysis for "${message}" (${why})`, async () => {
+      const adapter = recordingRoutingAdapter();
+      await runTurnExecutor(mkPayload(message), `req-2229-blocker-${randomUUID()}`, {
+        routingAdapter: adapter,
+        graphState: READY_GRAPH as never,
+        ...stubRegistries(),
+      });
+      expect(
+        runAnalysisInvocations.length,
+        'this sentence must never reach the run_analysis handler — it would ' +
+          'destroy the user\'s existing result',
+      ).toBe(0);
+      for (const e of preRouteEvents()) {
+        expect(e.data.outcome).not.toBe('routed');
+      }
+    });
+  }
+
   it('FALL-THROUGH CONTRACT: no option node in the graph → the turn behaves exactly as before', async () => {
     // The `run_analysis` precondition is "at least one option node exists".
     // With none, synthesising a proposal would produce a PRECONDITION_UNMET

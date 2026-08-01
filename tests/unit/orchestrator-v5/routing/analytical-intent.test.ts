@@ -243,6 +243,29 @@ describe('classifyAnalyticalIntent — staleness pattern subject requirement (2.
     });
   }
 
+  // ⚠ ADDED AFTER REVIEW OF #779. The first version of this fix required the
+  // SUBJECT NOUN whenever the terminal was `valid|fresh|current`, which also
+  // killed the subject-LESS form — the most idiomatic staleness phrasing there
+  // is. All six measured as `null` (they were `rerun_question` on base), and
+  // `cls === null` makes BOTH `tryStaleRerunGuard` and `tryNoAnalysisGuard`
+  // decline, so on a stale analysis the canonical question lost its
+  // deterministic stale answer AND its re-run chip. The original 7 controls all
+  // carried a subject noun or an unambiguous staleness word, so this shape was
+  // untested in BOTH directions — the diagnosis shared the blind spot.
+  const SUBJECT_LESS_STALENESS = [
+    'Is this still current?',
+    'Is this still valid?',
+    'Are these still valid?',
+    'Are these still current?',
+    'Is that still valid?',
+    'Is this still fresh?',
+  ];
+  for (const msg of SUBJECT_LESS_STALENESS) {
+    it(`classifies the subject-less staleness form "${msg}"`, () => {
+      expect(classifyAnalyticalIntent(msg)).toBe('rerun_question');
+    });
+  }
+
   const MEASURED_FALSE_POSITIVES = [
     'What is the current value of Weekly Parcel Volume?',
     'Is that valid input for the model?',
@@ -319,6 +342,76 @@ describe('looksLikeImperativeRerun (2.229 fix 4)', () => {
   for (const msg of NOT_IMPERATIVES) {
     it(`does NOT treat "${msg}" as a re-run instruction`, () => {
       expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+});
+
+
+// ---------------------------------------------------------------------------
+// ⚠ #779 REVIEW BLOCKER — the imperative recogniser was `\brerun\b` in disguise.
+//
+// `IMPERATIVE_RERUN_PATTERNS[0]` shipped with its object group OPTIONAL, making
+// it equivalent to a bare token match. Because the pre-route sits AHEAD of every
+// guard and ahead of the router, ten ordinary sentences dispatched a REAL
+// `run_analysis` — PLoT→ISL compute, a new fact, a new `graph_hash_at_run`, and
+// the user's existing result REPLACED. Measured in the integration harness:
+// `handler_invocations=1 · preroute=["routed"] · llm_called=0` on all ten.
+//
+// Four of them are the user explicitly REFUSING. The PR's own thesis inverted:
+// it set out to stop recognition being punished by a canned string, and instead
+// punished recognition with an unrequested execution — deterministically, where
+// the defect it replaced was intermittent.
+//
+// Two independent repairs, BOTH required:
+//   1. the object group is now REQUIRED (clears the six question/reference
+//      shapes, which carry no object);
+//   2. a NEGATION VETO ahead of the imperative patterns — necessary on its own,
+//      because "Do not re-run THE ANALYSIS" carries a valid object and survives
+//      repair 1 untouched.
+// ---------------------------------------------------------------------------
+describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
+  const EXPLICIT_REFUSALS = [
+    'Do not re-run the analysis.',
+    "Don't re-run it.",
+    'Never re-run this automatically.',
+    'I do not want to re-run anything.',
+  ];
+  for (const msg of EXPLICIT_REFUSALS) {
+    it(`NEVER executes on an explicit refusal: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  const QUESTIONS_ABOUT_A_PAST_RUN = [
+    // Canonical `what_changed` question the run-comparison gate exists to
+    // serve — the pre-route was stealing it and destroying the comparison.
+    'What changed in the re-run?',
+    'Why did the rerun give a different answer?',
+    'Show me the re-run results.',
+    'How long did the rerun take?',
+    'Explain the rerun to me.',
+    'Was the rerun better?',
+  ];
+  for (const msg of QUESTIONS_ABOUT_A_PAST_RUN) {
+    it(`NEVER executes on a question ABOUT a past run: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // BOTH DIRECTIONS. Every genuine instruction must survive both repairs —
+  // a veto that silences the feature is not a fix.
+  const STILL_INSTRUCTIONS = [
+    'Please run the analysis again on this same model.',
+    'Run the analysis again.',
+    'Re-run the analysis.',
+    'Rerun the analysis please.',
+    'Run it again.',
+    'Can you re-run the analysis?',
+    "Let's re-run this.",
+  ];
+  for (const msg of STILL_INSTRUCTIONS) {
+    it(`still recognises the instruction: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(true);
     });
   }
 });
