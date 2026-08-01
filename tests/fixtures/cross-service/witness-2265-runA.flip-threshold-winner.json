@@ -1,0 +1,292 @@
+{
+  "_provenance": {
+    "source": "LIVE WIRE CAPTURE. POST https://cee-staging.onrender.com/orchestrate/v2/turn, HTTP 200, 39,103 B, 2026-08-01T14:29:35Z. CEE build 76e6bc7 / staging, ISL 35149dd1, PLoT 9beb4229. scenario 67d8f474-170c-4cef-be35-d33c40a46bf0, graph_hash c23213d8c15befa8.",
+    "captured": "PHASE0-EVIDENCE-2026-07-28/witness-2265-raw/runA-67d8f474-turn.json — 'run A' of the ROADMAP 2.265 targeted-flip witness (witness-2265-targeted-flip.md).",
+    "why": "The FIRST real factor-flip value in the programme's measured history, and the turn that exhibited defect D-2: enrichment.flip_thresholds[3] attests alternative_winner_label 'Expand Existing Bristol Site' (opt_bristol), while the shipped review_card body named 'the Status Quo'. Every array below is byte-verbatim from that capture; nothing is hand-assembled.",
+    "slices": [
+      "blocks[0].enrichment.flip_thresholds",
+      "blocks[0].enrichment.decision_review.flip_thresholds",
+      "blocks[0].enrichment.option_comparison[].{option_id,option_label,win_probability}",
+      "blocks[0].enrichment.decision_review.flip_thresholds[0].narrative (the D-2 sentence)",
+      "result.leading_option_id"
+    ],
+    "shipped_card_body": "If Leeds Site Activation effectiveness increases from 0 to 66%, the leading option changes between Leeds and the Status Quo."
+  },
+  "leading_option_id": "opt_leeds",
+  "flip_thresholds": [
+    {
+      "factor_id": "fac_bristol_expansion",
+      "factor_label": "Bristol Site Expansion",
+      "current_value": 0,
+      "flip_value": null,
+      "direction": "none",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "no_effect_within_bounds",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true
+    },
+    {
+      "factor_id": "fac_capex",
+      "factor_label": "Capital Expenditure",
+      "current_value": 0,
+      "flip_value": null,
+      "direction": "none",
+      "unit": "£",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "structurally_invariant",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true,
+      "value_scale": "display",
+      "current_display": "0 £"
+    },
+    {
+      "factor_id": "fac_demand_growth",
+      "factor_label": "Demand Growth Rate",
+      "current_value": 0,
+      "flip_value": null,
+      "direction": "none",
+      "alternative_winner_id": null,
+      "alternative_winner_label": null,
+      "flip_reason": "structurally_invariant",
+      "iterations_used": 0,
+      "probes_used": 0,
+      "no_flip_in_range": true
+    },
+    {
+      "factor_id": "fac_leeds_site",
+      "factor_label": "Leeds Site Activation",
+      "current_value": 0,
+      "flip_value": 0.663645,
+      "direction": "increase",
+      "alternative_winner_id": "opt_bristol",
+      "alternative_winner_label": "Expand Existing Bristol Site",
+      "flip_reason": "found",
+      "iterations_used": 0,
+      "probes_used": 0
+    }
+  ],
+  "decision_review_flip_thresholds": [
+    {
+      "factor_id": "fac_leeds_site",
+      "factor_label": "Leeds Site Activation",
+      "current_display": "0",
+      "flip_display": "66%",
+      "narrative": "If Leeds Site Activation effectiveness increases from 0 to 66%, the leading option changes between Leeds and the Status Quo."
+    }
+  ],
+  "options": [
+    {
+      "option_id": "opt_bristol",
+      "option_label": "Expand Existing Bristol Site",
+      "win_probability": 0.128
+    },
+    {
+      "option_id": "opt_leeds",
+      "option_label": "Open Second Warehouse in Leeds",
+      "win_probability": 0.53475
+    },
+    {
+      "option_id": "opt_phased",
+      "option_label": "Phased Bristol Expansion with Leeds Option",
+      "win_probability": 0.13425
+    },
+    {
+      "option_id": "opt_status_quo",
+      "option_label": "Continue at Current Capacity (Status Quo)",
+      "win_probability": 0.203
+    }
+  ],
+  "controls": {
+    "runB": {
+      "_provenance": "LIVE WIRE CAPTURE, same witness, same CEE build 76e6bc7. runB-66251a40-turn.json, 39,004 B. NEGATIVE CONTROL: this card named NO option, so the guard must leave its narrative byte-identical.",
+      "leading_option_id": "opt_status_quo",
+      "flip_thresholds": [
+        {
+          "factor_id": "fac_capital_invest",
+          "factor_label": "Capital Investment Committed",
+          "current_value": 0,
+          "flip_value": null,
+          "direction": "none",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "structurally_invariant",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true
+        },
+        {
+          "factor_id": "fac_launch_timing",
+          "factor_label": "Launch Timing Urgency",
+          "current_value": 0,
+          "flip_value": null,
+          "direction": "none",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "structurally_invariant",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true
+        },
+        {
+          "factor_id": "fac_local_demand",
+          "factor_label": "Leeds Local Demand",
+          "current_value": 0,
+          "flip_value": null,
+          "direction": "none",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "structurally_invariant",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true
+        },
+        {
+          "factor_id": "fac_op_readiness",
+          "factor_label": "Operational Readiness Level",
+          "current_value": 0.5,
+          "flip_value": 0.772182,
+          "direction": "increase",
+          "alternative_winner_id": "opt_hybrid_pop_up_then_full_site",
+          "alternative_winner_label": "Hybrid Pop-Up Then Full Site",
+          "flip_reason": "found",
+          "iterations_used": 0,
+          "probes_used": 0
+        }
+      ],
+      "decision_review_flip_thresholds": [
+        {
+          "factor_id": "fac_op_readiness",
+          "factor_label": "Operational Readiness Level",
+          "current_display": "50%",
+          "flip_display": "77%",
+          "narrative": "If Operational Readiness Level increases from 50% to 77%, the leading option would change."
+        }
+      ],
+      "options": [
+        {
+          "option_id": "opt_delay",
+          "option_label": "Delay Six Months",
+          "win_probability": 0.19914999999999997
+        },
+        {
+          "option_id": "opt_open_now",
+          "option_label": "Open Leeds Location Next Quarter",
+          "win_probability": 0.1119
+        },
+        {
+          "option_id": "opt_popup",
+          "option_label": "Run Pop-Up Pilot First",
+          "win_probability": 0.24414999999999998
+        },
+        {
+          "option_id": "opt_status_quo",
+          "option_label": "Stay at Current Site (Status Quo)",
+          "win_probability": 0.43739999999999996
+        },
+        {
+          "option_id": "opt_hybrid_pop_up_then_full_site",
+          "option_label": "Hybrid Pop-Up Then Full Site",
+          "win_probability": 0.0074
+        }
+      ]
+    },
+    "runC": {
+      "_provenance": "LIVE WIRE CAPTURE, same witness, same CEE build 76e6bc7. runC-022c983e-turn.json, 25,648 B. NEGATIVE CONTROL: this card named NO option, so the guard must leave its narrative byte-identical.",
+      "leading_option_id": "opt_buy",
+      "flip_thresholds": [
+        {
+          "factor_id": "fac_build_indicator",
+          "factor_label": "In-House Build Approach",
+          "current_value": 0,
+          "flip_value": null,
+          "direction": "none",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "no_effect_within_bounds",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true
+        },
+        {
+          "factor_id": "fac_buy_indicator",
+          "factor_label": "Vendor Platform Approach",
+          "current_value": 0,
+          "flip_value": 0.65,
+          "direction": "increase",
+          "alternative_winner_id": "opt_build",
+          "alternative_winner_label": "Build In-House",
+          "flip_reason": "found",
+          "iterations_used": 0,
+          "probes_used": 0
+        },
+        {
+          "factor_id": "fac_capex",
+          "factor_label": "Capital Expenditure",
+          "current_value": 0,
+          "flip_value": null,
+          "direction": "none",
+          "unit": "£",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "structurally_invariant",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true,
+          "value_scale": "display",
+          "current_display": "0 £"
+        },
+        {
+          "factor_id": "fac_time_to_live",
+          "factor_label": "Implementation Timeline",
+          "current_value": 0,
+          "flip_value": null,
+          "direction": "none",
+          "unit": "months",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null,
+          "flip_reason": "structurally_invariant",
+          "iterations_used": 0,
+          "probes_used": 0,
+          "no_flip_in_range": true,
+          "value_scale": "display",
+          "current_display": "0 months"
+        }
+      ],
+      "decision_review_flip_thresholds": [
+        {
+          "factor_id": "fac_buy_indicator",
+          "factor_label": "Vendor Platform Approach",
+          "current_display": "0",
+          "flip_display": "65%",
+          "narrative": "If the effectiveness of the Vendor Platform Approach improves from 0 to 65%, the ordering among your options could change significantly."
+        }
+      ],
+      "options": [
+        {
+          "option_id": "opt_build",
+          "option_label": "Build In-House",
+          "win_probability": 0.198125
+        },
+        {
+          "option_id": "opt_buy",
+          "option_label": "Buy Vendor Platform",
+          "win_probability": 0.416125
+        },
+        {
+          "option_id": "opt_hybrid",
+          "option_label": "Buy Core Platform, Build Custom Layer",
+          "win_probability": 0.028125
+        },
+        {
+          "option_id": "opt_status_quo",
+          "option_label": "Defer Replacement (Status Quo)",
+          "win_probability": 0.357625
+        }
+      ]
+    }
+  }
+}

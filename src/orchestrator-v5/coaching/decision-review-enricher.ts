@@ -1410,7 +1410,8 @@ function readFlipThresholdData(
   graphNodeUnits: Map<string, string>,
 ): FlipThresholdDerivation {
   const project = (
-    row: Pick<TopLevelFlipRow, 'factor_id' | 'factor_label' | 'current_value' | 'flip_value' | 'direction' | 'unit'>,
+    row: Pick<TopLevelFlipRow, 'factor_id' | 'factor_label' | 'current_value' | 'flip_value' | 'direction' | 'unit'> &
+      Partial<Pick<TopLevelFlipRow, 'alternative_winner_id' | 'alternative_winner_label'>>,
   ): Record<string, unknown> => {
     const out: Record<string, unknown> = {
       factor_id: row.factor_id,
@@ -1420,6 +1421,22 @@ function readFlipThresholdData(
       direction: row.direction,
     };
     if (row.unit !== null) out.unit = row.unit;
+    // ROADMAP 2.267 (D-2) — WHICH option takes over. Omitted-when-null, exactly
+    // like `unit`: an absent key is the honest encoding of "the producer named
+    // none", and it is what makes the card's option guard able to distinguish
+    // "no attested winner" from "a winner we forgot to forward".
+    //
+    // ⚠ The `Partial<>` half of the parameter type is load-bearing: the LEGACY
+    // branch below projects `FactorFlipEntry` rows (`results[].factor_sensitivity[]`),
+    // a shape that carries no winner at all. Widening the `Pick<>` instead would
+    // not typecheck, and silently dropping the legacy branch to make it fit is
+    // how the reader this function replaced went dead.
+    if (typeof row.alternative_winner_id === 'string' && row.alternative_winner_id.length > 0) {
+      out.alternative_winner_id = row.alternative_winner_id;
+    }
+    if (typeof row.alternative_winner_label === 'string' && row.alternative_winner_label.length > 0) {
+      out.alternative_winner_label = row.alternative_winner_label;
+    }
     return out;
   };
 

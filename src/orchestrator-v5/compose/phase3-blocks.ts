@@ -101,8 +101,15 @@ import {
 } from './claim-safety-cage.js';
 import {
   flipThresholdCardBody,
+  flipThresholdFallbackBody,
   readFlipThresholdCardRow,
 } from './flip-threshold-card-row.js';
+// ROADMAP 2.267 (D-2) — the ONE owner of the top-level `enrichment.flip_thresholds[]`
+// parse. The option guard below needs the row's ATTESTED alternative winner, and it
+// reads it through the same module the decision_review prompt projection reads, so
+// the guard and the prompt can never disagree about what the producer said. That
+// module imports nothing, so this edge cannot create a compose ⇄ context cycle.
+import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
@@ -667,6 +674,26 @@ export function readDecisionReview(
 }
 
 /**
+ * ROADMAP 2.267 — factor_id → the option id the PRODUCER attests would take
+ * over once that factor crosses its flip value.
+ *
+ * Read through {@link readTopLevelFlipRows}, the single owner of this parse, so
+ * the card guard and the decision_review prompt projection can never disagree
+ * about what PLoT said. Rows with no attested identity contribute no entry —
+ * a MISS therefore means "nothing attested", which is the state in which the
+ * card may name no option at all.
+ */
+function readAttestedFlipWinners(fact: RunAnalysisHandlerFact): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  const enrichment = readRecord((fact.result as Record<string, unknown>).enrichment);
+  if (enrichment === null) return out;
+  for (const row of readTopLevelFlipRows(enrichment)) {
+    if (row.alternative_winner_id !== null) out.set(row.factor_id, row.alternative_winner_id);
+  }
+  return out;
+}
+
+/**
  * Build all Phase 3 ReviewCardBlocks from a fresh `decision_review`
  * enrichment. Returns `[]` when no enrichment is present. Each emitted
  * block is `BlockSchema`-validated; failures DROP the block.
@@ -699,8 +726,22 @@ export function buildReviewCardBlocks(
   const preMortem = buildPreMortemCard(dr, lookup, ctx);
   if (preMortem !== null) blocks.push(preMortem);
 
-  // flip_threshold (rank 3) — one per entry; within-kind sub-rank by order
-  blocks.push(...buildFlipThresholdCards(dr, lookup, ctx));
+  // flip_threshold (rank 3) — one per entry; within-kind sub-rank by order.
+  // ROADMAP 2.267 — the card's option guard needs the two things THIS FACT
+  // attests about option identity: which option the flip row itself says would
+  // take over, and which option is leading. Both read from the fact, never from
+  // the LLM's output.
+  blocks.push(
+    ...buildFlipThresholdCards(
+      dr,
+      lookup,
+      ctx,
+      readAttestedFlipWinners(fact),
+      typeof fact.result.leading_option_id === 'string' && fact.result.leading_option_id.length > 0
+        ? fact.result.leading_option_id
+        : null,
+    ),
+  );
 
   // bias (rank 4) — one per finding
   blocks.push(...buildBiasCards(dr, lookup, ctx));
@@ -1800,12 +1841,107 @@ function buildPreMortemCard(
   });
 }
 
+/**
+ * ROADMAP 2.267 (D-2) — the smallest phrase that can stand for an option's
+ * identity in prose. A single shared token cannot: the estate's own
+ * "Equity Offered to CTO" vs bare "CTO" lesson (see {@link containsWholePhrase})
+ * is the same over-match, and the witnessed narrative names the FACTOR
+ * "Leeds Site Activation" in a graph that also has an option
+ * "Open Second Warehouse in Leeds" — a one-token rule would read that as naming
+ * the option.
+ */
+const OPTION_ALIAS_MIN_TOKENS = 2;
+
+/**
+ * ROADMAP 2.267 (D-2) — per-option, the phrases that IDENTIFY it in free text.
+ *
+ * ⚠ WHY WHOLE-LABEL MATCHING IS NOT ENOUGH, and why this exists rather than
+ * reusing {@link resolveProseEntityRefs} unchanged. On the witnessed turn the
+ * card read *"…the leading option changes between Leeds and the Status Quo"* and
+ * the option's canonical label is **"Continue at Current Capacity (Status Quo)"**.
+ * A whole-label scan returns ZERO hits on that sentence. A guard built on it
+ * would pass the exact card it was written to stop — guarantee theatre, in the
+ * house style. Measured, not assumed: the fixture in
+ * `__tests__/flip-threshold-option-naming-guard.test.ts` pins both readings.
+ *
+ * So an option is also identified by any CONTIGUOUS RUN of ≥
+ * {@link OPTION_ALIAS_MIN_TOKENS} tokens of its label — how people actually
+ * shorten a name.
+ *
+ * ⚠ AND THE OVER-MATCH RAIL IS DERIVED FROM THE GRAPH, NOT HAND-LISTED
+ * (CLAUDE.md trap 12). A candidate phrase is DISCARDED when it also occurs in
+ * any other node's label, because then it does not distinguish this option from
+ * that node. That single rule pays for itself three times on the witness data:
+ * it kills `"leeds"` (also in the factor "Leeds Site Activation" — the false
+ * positive that would otherwise fire on every run-A narrative), it kills
+ * `"bristol"` (in two options at once), and on run C it kills
+ * `"vendor platform"` (inside the factor label "Vendor Platform Approach", which
+ * the narrative names legitimately). No stop-word list is maintained anywhere;
+ * add a node to the graph and the rails move with it.
+ *
+ * The shipped {@link LEVER_LABEL_MIN_LEN} / {@link GENERIC_LEVER_TOKENS} rails
+ * still apply on top, so a one-word option called "Cost" never matches.
+ */
+function buildOptionIdentityNeedles(lookup: GraphNodeLookup): Map<string, readonly string[]> {
+  const options: { readonly id: string; readonly norm: string }[] = [];
+  const otherLabelNorms: string[] = [];
+  for (const ref of lookup.values()) {
+    const norm = normaliseForPhraseMatch(ref.label);
+    if (norm.length === 0) continue;
+    if (ref.kind === 'option') options.push({ id: ref.id, norm });
+    else otherLabelNorms.push(norm);
+  }
+
+  const out = new Map<string, readonly string[]>();
+  for (const option of options) {
+    const tokens = option.norm.split(' ').filter((t) => t.length > 0);
+    const candidates = new Set<string>([option.norm]);
+    for (let i = 0; i < tokens.length; i++) {
+      for (let j = i + OPTION_ALIAS_MIN_TOKENS; j <= tokens.length; j++) {
+        candidates.add(tokens.slice(i, j).join(' '));
+      }
+    }
+    const needles: string[] = [];
+    for (const needle of candidates) {
+      if (needle.length < LEVER_LABEL_MIN_LEN) continue;
+      if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
+      // Derived distinctiveness — see the ⚠ above.
+      if (options.some((o) => o.id !== option.id && containsWholePhrase(o.norm, needle))) continue;
+      if (otherLabelNorms.some((n) => containsWholePhrase(n, needle))) continue;
+      needles.push(needle);
+    }
+    out.set(option.id, needles);
+  }
+  return out;
+}
+
+/** Which options does this prose NAME? Ids, in lookup order; `[]` when none. */
+function optionsNamedInProse(
+  prose: string,
+  needlesByOptionId: ReadonlyMap<string, readonly string[]>,
+): readonly string[] {
+  const hay = normaliseForPhraseMatch(prose);
+  if (hay.length === 0) return [];
+  const named: string[] = [];
+  for (const [optionId, needles] of needlesByOptionId) {
+    if (needles.some((needle) => containsWholePhrase(hay, needle))) named.push(optionId);
+  }
+  return named;
+}
+
 function buildFlipThresholdCards(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
+  attestedWinnerIdByFactorId: ReadonlyMap<string, string>,
+  leadingOptionId: string | null,
 ): readonly ReviewCardBlock[] {
   if (!Array.isArray(dr.flip_thresholds)) return [];
+  // Derived once per fact, and only when there is a card to guard.
+  const optionNeedles =
+    dr.flip_thresholds.length > 0
+      ? buildOptionIdentityNeedles(lookup)
+      : new Map<string, readonly string[]>();
   const out: ReviewCardBlock[] = [];
   let idx = 0;
   for (const raw of dr.flip_thresholds) {
@@ -1833,6 +1969,54 @@ function buildFlipThresholdCards(
       continue;
     }
     idx++;
+    // ────────────────────────────────────────────────────────────────────────
+    // ROADMAP 2.267 — THE OPTION GUARD (defect D-2).
+    //
+    // The lookup gate above fail-closes on an LLM-invented FACTOR. There was no
+    // equivalent for the OPTION, and on 2026-08-01 that cost us a false card:
+    // the row attested `opt_bristol` / "Expand Existing Bristol Site" and the
+    // shipped body said the leader changes to *"the Status Quo"* — an option
+    // whose slope in that factor is zero, so it cannot take over at any value
+    // (`witness-2265-targeted-flip.md` §4, §13). The Analysis tab renders the
+    // CORRECT winner from the same field on the same turn, so the two surfaces
+    // contradicted each other.
+    //
+    // WHAT MAY BE NAMED: only an option this fact ATTESTS — the row's own
+    // alternative winner, or the run's `leading_option_id`. Anything else is
+    // the model asserting an identity nothing gave it.
+    //
+    // WHY A BODY SWAP AND NOT A DROP. Dropping is what the factor gate does,
+    // but a factor miss makes the whole card unanchored, whereas here the
+    // factor, the direction and the two display values are all attested and
+    // correct — only the NAME is invented. Dropping would delete the dock's
+    // only flip surface to remove one clause. The fallback keeps the honest
+    // card and loses the clause.
+    //
+    // MONOTONE BY CONSTRUCTION: this branch can only REMOVE a name that the
+    // pre-2.267 code shipped verbatim. It never introduces prose that names an
+    // option, so it cannot widen what the claim-safety cage permits — the cage
+    // stays the sole authority on WHETHER a leader may be named; this guard
+    // only answers WHICH.
+    // ────────────────────────────────────────────────────────────────────────
+    const attestedWinnerId = attestedWinnerIdByFactorId.get(factorId) ?? null;
+    const unattestedNamedOptions = optionsNamedInProse(narrative, optionNeedles).filter(
+      (optionId) => optionId !== attestedWinnerId && optionId !== leadingOptionId,
+    );
+    const namesUnattestedOption = unattestedNamedOptions.length > 0;
+    if (namesUnattestedOption) {
+      log.warn(
+        {
+          event: 'v5.phase3.flip_option_naming_withheld',
+          block_type: 'review_card',
+          block_kind: 'flip_threshold',
+          // Structural only — no prose, no labels, no graph ids.
+          unattested_named_option_count: unattestedNamedOptions.length,
+          attested_winner_present: attestedWinnerId !== null,
+          fallback_carries_displays: row.current_display !== null && row.flip_display !== null,
+        },
+        'V5 Phase 3 flip card named an option this run does not attest; body replaced with the non-naming form',
+      );
+    }
     const candidate = {
       ...commonMetadata('review:flip', factorId, ctx),
       type: 'review_card' as const,
@@ -1841,7 +2025,9 @@ function buildFlipThresholdCards(
       // Amendment A1(b) / exit 4 — the emitted body is now produced by the
       // SHARED function the display licence checks the digits against, so the
       // licence can never believe digits survived a cut they did not.
-      body: flipThresholdCardBody(narrative),
+      body: namesUnattestedOption
+        ? flipThresholdFallbackBody(ref.label, row.current_display, row.flip_display)
+        : flipThresholdCardBody(narrative),
       ...reviewCardSignals('flip_threshold', 'warning'),
       target_refs: [ref] as readonly TargetRef[],
       priority_rank: 30 + idx,

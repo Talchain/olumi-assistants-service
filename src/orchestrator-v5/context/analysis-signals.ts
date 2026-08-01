@@ -23,6 +23,7 @@
  */
 
 import {
+  FLIP_DISPLAY_MAX_CHARS,
   flipThresholdCardBody,
   readFlipThresholdCardRow,
 } from '../compose/flip-threshold-card-row.js';
@@ -299,8 +300,15 @@ function readFactorId(entry: Record<string, unknown>): string | null {
 /**
  * Bound on a producer-authored display string. A string of arbitrary length must
  * not be able to move the display-analysis char budget.
+ *
+ * ROADMAP 2.267 — the constant and the reader that applies it now live in
+ * `../compose/flip-threshold-card-row.ts`, alongside the row predicate they
+ * belong to, because the fallback card body has to emit the SAME bounded
+ * strings this licence checks for. Re-exported here so this module's existing
+ * consumers keep their import stable (same pattern as
+ * {@link MODEL_SCALE_SUSPECT_ABS}).
  */
-export const FLIP_DISPLAY_MAX_CHARS = 40;
+export { FLIP_DISPLAY_MAX_CHARS };
 
 /**
  * The normalised-scale band. A raw flip/current value with |v| <= 1 could be an
@@ -318,13 +326,6 @@ export { MODEL_SCALE_SUSPECT_ABS };
 export interface FlipDisplayLicence {
   readonly current_display: string;
   readonly flip_display: string;
-}
-
-function readLicensedDisplay(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (trimmed.length === 0 || trimmed.length > FLIP_DISPLAY_MAX_CHARS) return null;
-  return trimmed;
 }
 
 /**
@@ -379,12 +380,24 @@ export function deriveFlipDisplayLicences(
     const row = readFlipThresholdCardRow(item);
     if (row === null || out.has(row.factor_id)) continue;
 
-    const record = item as Record<string, unknown>;
-    const currentDisplay = readLicensedDisplay(record.current_display);
-    const flipDisplay = readLicensedDisplay(record.flip_display);
+    // The bounded display strings, read by the SAME predicate the card reads
+    // them with (2.267 — they moved onto the shared row so the fallback body
+    // and this licence can never quote different strings).
+    const { current_display: currentDisplay, flip_display: flipDisplay } = row;
     if (currentDisplay === null || flipDisplay === null) continue;
 
     // Exit 4 — the digits must survive into the body the user actually reads.
+    //
+    // ⚠ 2.267 RESIDUAL, stated rather than papered over: the card may now emit
+    // `flipThresholdFallbackBody` instead of this string, when the option-naming
+    // guard refuses the LLM's narrative. This function cannot see that guard (it
+    // needs the canonical graph — the same reason exit 2 is a residual). It stays
+    // SOUND anyway, and by construction rather than by luck: the fallback body is
+    // built FROM `current_display` / `flip_display`, so whenever this check
+    // passes on the narrative the digits are on the user's screen in EITHER
+    // branch. The only reachable divergence is under-licensing (narrative lacked
+    // the digits, fallback carries them), which withholds a licence we could have
+    // granted — the safe direction.
     const body = flipThresholdCardBody(row.narrative);
     if (!body.includes(currentDisplay) || !body.includes(flipDisplay)) continue;
 
