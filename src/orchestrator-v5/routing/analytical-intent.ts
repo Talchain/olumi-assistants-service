@@ -214,7 +214,45 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   // ── rerun_question (most specific — anchored on rerun/stale vocabulary) ─
   { cls: 'rerun_question', pattern: /\bdo\s+(?:i|we)\s+need\s+to\s+(?:re-?run|rerun|run\s+again)\b/i },
   { cls: 'rerun_question', pattern: /\bshould\s+(?:i|we)\s+(?:re-?run|rerun|run\s+again)\b/i },
-  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)(?:\s+(?:result|results|analysis|outcome|outcomes))?\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|valid|fresh|current)\b/i },
+  // ROADMAP 2.229 fix 1 — SPLIT IN TWO so the SUBJECT group is REQUIRED
+  // whenever the terminal word is one of the three that carry no staleness
+  // sense on their own: `valid` / `fresh` / `current`.
+  //
+  // This was ONE pattern with the subject group OPTIONAL:
+  //   /\b(?:is|are)\s+(?:this|these|the|that|those)
+  //     (?:\s+(?:result|results|analysis|outcome|outcomes))?
+  //     \s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|valid|fresh|current)\b/i
+  // which made "…and what IS THE CURRENT value?" read as "is this still
+  // current?" — and `rerun_question` is FIRST in precedence, so it beat the
+  // flip intent that dominated the rest of that sentence. Measured collision
+  // surface (diagnosis 2.229 §4): 3 false positives, 4 true positives.
+  // Both halves are pinned in `analytical-intent.test.ts`.
+  //
+  // (a) subject PRESENT → the full terminal set, including the three
+  //     ambiguous words. "Are these results still valid?" is a real
+  //     staleness question and keeps classifying.
+  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)\s+(?:result|results|analysis|outcome|outcomes)\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|valid|fresh|current)\b/i },
+  // (b) subject ABSENT → only the unambiguous staleness vocabulary. "Is this
+  //     stale?" still classifies; "Is that valid input for the model?" and
+  //     "what is the current value?" no longer do.
+  // (b) subject ABSENT. The unambiguous staleness words are always accepted;
+  //     `valid|fresh|current` are accepted ONLY behind an explicit `still`.
+  //
+  //     ⚠ AS FIRST SHIPPED THIS BRANCH OMITTED `valid|fresh|current`
+  //     ENTIRELY, and that killed the MOST IDIOMATIC staleness phrasing
+  //     there is: "Is this still current?", "Is this still valid?",
+  //     "Are these still valid?" all became `null`. That is not a
+  //     cosmetic loss — `cls === null` makes BOTH `tryStaleRerunGuard`
+  //     and `tryNoAnalysisGuard` decline, so on a STALE analysis the
+  //     canonical question lost its deterministic stale answer AND its
+  //     re-run chip. The original 7 controls all carried a subject noun
+  //     or an unambiguous staleness word, so the shape was untested in
+  //     both directions; the diagnosis shared the blind spot.
+  //
+  //     `still` is what carries the staleness sense when the subject is
+  //     elided: "is this still current?" asks about currency over time;
+  //     "what is the current value?" does not, and stays out.
+  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)\s+(?:(?:still\s+)?(?:stale|out\s*of\s*date|outdated)|still\s+(?:valid|fresh|current))\b/i },
   { cls: 'rerun_question', pattern: /\bdoes\s+(?:this|the\s+(?:analysis|result))\s+need\s+(?:a\s+)?(?:re-?run|rerun|refresh)\b/i },
   { cls: 'rerun_question', pattern: /\bis\s+(?:the\s+)?(?:analysis|result)\s+out\s*of\s*date\b/i },
 
@@ -348,6 +386,39 @@ export function classifyAnalyticalIntent(
   }
   return null;
 }
+
+/**
+ * ⚠ ROADMAP 2.229 fix 4 — THE IMPERATIVE RE-RUN RECOGNISER USED TO LIVE HERE,
+ * and it was REMOVED FROM THIS PR DELIBERATELY. It is not abandoned; it is
+ * split out so three confirmed fixes are not held hostage to one hard
+ * sub-problem.
+ *
+ * Why it came out. `looksLikeImperativeRerun` fed a deterministic pre-route
+ * that dispatched a real `run_analysis` — PLoT→ISL compute, a new fact, a new
+ * `graph_hash_at_run`, and the user's existing result REPLACED. Deciding
+ * "is this token a VERB or a NOUN" turned out to need five review rounds, and
+ * the round that ended it found eight NON-INSTRUCTION readings still
+ * executing, the worst being a user explicitly declining:
+ *
+ *   "We decided not to re-run the analysis."   "There is no reason to re-run…"
+ *   "It is pointless to re-run the analysis."  "I forgot to re-run the analysis."
+ *   "Whether to re-run the analysis is unclear."
+ *
+ * Cause: the verb-position allowlist licensed ANY infinitival `to`, so every
+ * subordinate clause and nominalisation under a refusal read as a command.
+ *
+ * WITHOUT the pre-route, "run the analysis again" goes to the LLM router —
+ * intermittent, occasionally misrouting. That is exactly what `staging` does
+ * today, and the diagnosis measured that path handling post-analysis questions
+ * well. An intermittent misroute is strictly better than a deterministic
+ * destruction, and it is a state this product has already lived with.
+ *
+ * The fix continues in its own PR, starting from a matrix-verb allowlist on
+ * the `to` context (`want|need|like|ask|tell|going|try … to$`). Note for
+ * whoever picks it up: `to` is LOAD-BEARING — it carries "I want you to re-run
+ * it." and "I need you to re-run the analysis." — so it cannot simply be
+ * deleted.
+ */
 
 /**
  * Positive vague-edit signal. True when the message is shaped like an

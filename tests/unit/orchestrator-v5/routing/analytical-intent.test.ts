@@ -214,3 +214,76 @@ describe('hasMutationSignal', () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// ROADMAP 2.229 fix 1 — the staleness pattern must require its SUBJECT group
+// when the terminal word is one of the three that do not, on their own, carry
+// a staleness sense: `valid` / `fresh` / `current`.
+//
+// Diagnosed defect (PHASE0-EVIDENCE-2026-07-28/diagnosis-2229-canned-coach.md
+// §4): the optional `(?:result|results|analysis|outcome|outcomes)` group meant
+// "…and what IS THE CURRENT value?" read as "is this still current?" — a
+// staleness question — and `rerun_question` is FIRST in precedence, so it beat
+// the flip intent that dominated the rest of the sentence.
+//
+// All SEVEN controls the diagnosis measured are pinned here: 4 true positives
+// (must keep classifying) and 3 false positives (must stop classifying).
+// ---------------------------------------------------------------------------
+describe('classifyAnalyticalIntent — staleness pattern subject requirement (2.229 fix 1)', () => {
+  const TRUE_POSITIVES = [
+    'Is the analysis out of date?',
+    'Is this result still stale?',
+    'Are these results still valid?',
+    'Is this analysis still current?',
+  ];
+  for (const msg of TRUE_POSITIVES) {
+    it(`still classifies the genuine staleness question "${msg}"`, () => {
+      expect(classifyAnalyticalIntent(msg)).toBe('rerun_question');
+    });
+  }
+
+  // ⚠ ADDED AFTER REVIEW OF #779. The first version of this fix required the
+  // SUBJECT NOUN whenever the terminal was `valid|fresh|current`, which also
+  // killed the subject-LESS form — the most idiomatic staleness phrasing there
+  // is. All six measured as `null` (they were `rerun_question` on base), and
+  // `cls === null` makes BOTH `tryStaleRerunGuard` and `tryNoAnalysisGuard`
+  // decline, so on a stale analysis the canonical question lost its
+  // deterministic stale answer AND its re-run chip. The original 7 controls all
+  // carried a subject noun or an unambiguous staleness word, so this shape was
+  // untested in BOTH directions — the diagnosis shared the blind spot.
+  const SUBJECT_LESS_STALENESS = [
+    'Is this still current?',
+    'Is this still valid?',
+    'Are these still valid?',
+    'Are these still current?',
+    'Is that still valid?',
+    'Is this still fresh?',
+  ];
+  for (const msg of SUBJECT_LESS_STALENESS) {
+    it(`classifies the subject-less staleness form "${msg}"`, () => {
+      expect(classifyAnalyticalIntent(msg)).toBe('rerun_question');
+    });
+  }
+
+  const MEASURED_FALSE_POSITIVES = [
+    'What is the current value of Weekly Parcel Volume?',
+    'Is that valid input for the model?',
+    'Is the fresh estimate better?',
+  ];
+  for (const msg of MEASURED_FALSE_POSITIVES) {
+    it(`no longer misreads "${msg}" as a staleness question`, () => {
+      expect(classifyAnalyticalIntent(msg)).not.toBe('rerun_question');
+    });
+  }
+
+  it('the walk Q1 sentence falls through the classifier entirely (mutation control from the diagnosis)', () => {
+    // With `:217` suppressed the diagnosis measured Q1 → null: no other
+    // pattern re-captures it, so it reaches the LLM router — the route Q3/Q4
+    // took and came back with grounded coaching.
+    expect(
+      classifyAnalyticalIntent(
+        'Looking at the flip point on screen: at exactly what value does the answer change, and what is the current value? Please give me the precise numbers, not a range.',
+      ),
+    ).toBeNull();
+  });
+});

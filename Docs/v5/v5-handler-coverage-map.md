@@ -167,7 +167,7 @@ chip-click-dispatch.ts:143-146`.
    `tryShortConfirmResume` `:1094` → proposal ordinal/label `:1721` → `tryProposalDismissal` `:1926` →
    `tryClarificationResume` `:1999` → `tryDeterministicValueUpdate`/deictic `:2338` →
    `tryStateQueryGuard` `:2898` → `tryStaleRerunGuard` `:3004` → `tryPostAnalysisAdviceGate` `:3077` →
-   `tryFreshAnalysisFollowupGuard` `:3242` → `tryNoAnalysisGuard` `:3327`.
+   ~~`tryFreshAnalysisFollowupGuard` `:3242`~~ **RETIRED 2026-08-01 (ROADMAP 2.229)** → `tryNoAnalysisGuard` `:3327`.
 3. **`routeWithToolUse`** (`prompt-run`) — runs only if still `undefined` at `:3401`, invoked at `:3424`
    (`source-verified`).
 4. **post-compose** `containsMutationLanguage` (`:4617`) — detection-only telemetry, never blocks
@@ -206,7 +206,7 @@ archived `Docs/v5/olumi-v5-routing-prompt-v6.txt` is **not** the runtime file (`
 | `compose/recoverable-handler-response.ts`, `handler-failure-responses.ts`, `validation-failure-responses.ts`, `unsupported-action-response.ts`, `edit-clarify-response.ts` | error/recovery/clarify copy | `composer-owned` deterministic |
 | `handlers/edit-graph-dispatch.ts` (`decideNoOpRecovery`) + V4 `handleEditGraph` | edit copy | `handler-owned` + V4 (`hybrid`) |
 | `handlers/edit-rejection-text.ts` | edit rejection copy | `handler-owned` deterministic |
-| `routing/fresh-analysis-followup-guard.ts` | recap constant | `composer-owned` deterministic |
+| ~~`routing/fresh-analysis-followup-guard.ts`~~ **DELETED 2026-08-01 (ROADMAP 2.229)** | ~~recap constant~~ | ~~`composer-owned` deterministic~~ |
 
 ---
 
@@ -256,10 +256,10 @@ contract must cover all 14, not just the ContextPack.
 | 10 | `post-analysis-advice-gate` 7 composers | own (`AdviceGateAnalysis` + optional decisionReview/rawRobustness) | deterministic | top_drivers, fragile_edges, win-prob, robustness, margin; `evidence_gap` splices decision_review | `post-analysis-advice-gate.ts:1083-1486` (`source-verified`) |
 | 11 | `analysis-result-headline` | own (raw enrichment) | deterministic | factor_sensitivity, fragile_edges, robustness, results | `analysis-result-headline.ts:138-263` (`source-verified`) |
 | 12 | `post-analysis-wrapper` chips | own (`enrichment.review_cards`) | deterministic | review_cards | `post-analysis-wrapper.ts:165-451` (`source-verified` agent) |
-| 13 | `fresh-analysis-followup-guard` recap | own (constant) | deterministic | none | `fresh-analysis-followup-guard.ts:172-277` (`source-verified` agent) |
+| 13 | ~~`fresh-analysis-followup-guard` recap~~ **RETIRED 2026-08-01 (ROADMAP 2.229, founder ruling)** — module deleted; the count below is now 13, not 14 | ~~own (constant)~~ | ~~deterministic~~ | none | ~~`fresh-analysis-followup-guard.ts:172-277`~~ |
 | 14 | `handler-failure-responses` | own (failure cause) | deterministic | none | `handler-failure-responses.ts:60-325` (`source-verified` agent) |
 
-**Count: 14. LLM surfaces: 2 (#1/3/5 share the routing call; #9 separate). ContextPack readers: 1
+**Count: ~~14~~ 13 as of 2026-08-01 (ROADMAP 2.229 retired row 13). LLM surfaces: 2 (#1/3/5 share the routing call; #9 separate). ContextPack readers: 1
 (the routing prompt).** No shared explanation-prompt builder exists — explanation `answer_text` is
 centralised in the routing call by design.
 

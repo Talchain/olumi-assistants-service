@@ -67,7 +67,7 @@ Public routes (no auth required) are defined at `src/plugins/auth.ts:44-59`:
 | `/assist/v1/sensitivity-coach` | POST | API Key/HMAC | `src/routes/assist.v1.sensitivity-coach.ts:86` | V1 sensitivity coaching | PLoT/UI |
 | `/assist/v1/team-perspectives` | POST | API Key/HMAC | `src/routes/assist.v1.team-perspectives.ts:85` | V1 team perspectives | PLoT/UI |
 | `/assist/v1/graph-readiness` | POST | API Key/HMAC | `src/routes/assist.v1.graph-readiness.ts:308` | V1 graph readiness assessment | PLoT/UI |
-| `/assist/v1/key-insight` | POST | API Key/HMAC | `src/routes/assist.v1.key-insight.ts:80` | V1 key insight extraction | PLoT/UI |
+| `/assist/v1/key-insight` | POST | API Key/HMAC | `src/routes/assist.v1.key-insight.ts:80` | V1 key insight extraction | ~~PLoT/UI~~ ⚠ **CORRECTED 2026-08-01 (#778 review): the "UI" half of this cell is DISPROVEN at the bytes — no UI caller for `/assist/v1/key-insight` exists. The original text is struck rather than deleted (estate convention) because it was cited as evidence of a live consumer.** |
 | `/assist/v1/elicit-belief` | POST | API Key/HMAC | `src/routes/assist.v1.elicit-belief.ts:78` | V1 belief elicitation | PLoT/UI |
 | `/assist/v1/suggest-utility-weights` | POST | API Key/HMAC | `src/routes/assist.v1.suggest-utility-weights.ts:79` | V1 suggest utility weights | PLoT/UI |
 | `/assist/v1/elicit-risk-tolerance` | POST | API Key/HMAC | `src/routes/assist.v1.elicit-risk-tolerance.ts:80` | V1 risk tolerance elicitation | PLoT/UI |

@@ -342,10 +342,6 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   clarifyGuardedText: { stance: 'structural', why: 'Clarify question, entity-guarded.' },
   'noAnalysisOutcome.assistant_text': { stance: 'structural', why: 'Fires only when NO analysis exists — there is no leader to name.' },
   'staleOutcome.assistant_text': { stance: 'structural', why: 'Stale-rerun recovery; suppresses cached insights by construction.' },
-  'freshFollowupOutcome.assistant_text': {
-    stance: 'structural',
-    why: "RE-DERIVED at the bytes from 'ungated' (ROADMAP 1.233 lane). The prior entry said it 'composes from the analysis projection'; it does not. `tryFreshAnalysisFollowupGuard`'s input type is `{message, readiness}` — no analysis reaches it — and its matched branch returns `assistant_text: RECAP_TEXT`, a module constant with ZERO interpolation (fresh-analysis-followup-guard.ts:172, :274). Structural by construction, not by inspection.",
-  },
   'stateQueryOutcome.assistant_text': {
     stance: 'structural',
     why: "RE-DERIVED at the bytes from 'ungated' (ROADMAP 1.233 lane), and structural in the STRONGEST sense: the analysis projection is out of reach BY TYPE. `TryStateQueryGuardInput.contextPack` is `Pick<ContextPack, 'recent_changes'>` (state-query-guard.ts:267-270), so the guard cannot read `analysis` / `display_analysis` at all. Its two outputs are `NO_RECENT_CHANGES_TEXT` (constant, :354) and `composeRecentChangeAnswer` = `${head.summary}${tail}` (:337), where `head.summary` is a persisted MUTATION receipt (factor / constraint labels and values). A receipt may name an entity; it makes no comparison between options, which is the same standard the sibling add-risk echo entry is held to.",
@@ -825,7 +821,12 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // used `assistant_text:` and was therefore always keyable — it was
     // unregistered for a different reason (nobody had derived its stance), and
     // conflating the two exclusions is what this count prevents.
-    expect(compared, 'the re-key comparison compared nothing').toBe(36);
+    // ⚠ ROADMAP 2.229: 36 -> 35. The fresh-analysis follow-up guard was
+    // retired by founder ruling and its compose site
+    // (`freshFollowupOutcome.assistant_text`) deleted from turn-executor.ts
+    // along with the guard block. These counts are DERIVED from source on
+    // every run, so they move with a real deletion — which is the point.
+    expect(compared, 'the re-key comparison compared nothing').toBe(35);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -976,8 +977,14 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // turn already said. A finaliser hook mutates `response.assistant_text`
     // directly and is not a compose site at all — which is why the count
     // returns to its pre-PR value even though the behaviour is strictly wider.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(37);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(33);
+    // ⚠ ROADMAP 2.229: 37 -> 36 sites, 33 -> 32 keys. One compose site removed
+    // with the retired fresh-analysis follow-up guard (see the note on the
+    // re-key count above). Unlike the 2.104 round trip recorded below, this is
+    // a straight deletion: the site is gone and nothing replaced it — a
+    // recognised post-analysis question now reaches `routeWithToolUse`, and
+    // the router's own compose site is already registered.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(36);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(32);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/edit-clarify-response.ts',
       'handlers/chip-click-dispatch.ts',
@@ -1033,13 +1040,12 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // Same shape as the gated-site evidence check: one required source fragment
     // per claim, chosen so that removing the property makes THIS test red.
     const STRUCTURAL_EVIDENCE: ReadonlyArray<readonly [string, string, string]> = [
-      [
-        'freshFollowupOutcome.assistant_text',
-        '../routing/fresh-analysis-followup-guard.ts',
-        // The matched branch returns the constant — no template literal, no
-        // interpolation. An interpolated variant would not contain this.
-        'assistant_text: RECAP_TEXT,',
-      ],
+      // ⚠ ROADMAP 2.229 — the `freshFollowupOutcome.assistant_text` row was
+      // REMOVED from this list together with its compose site: the
+      // fresh-analysis follow-up guard was retired by founder ruling and its
+      // module deleted, so there is no longer a site to classify. The register
+      // above lost the row in the same change; the derived
+      // register-vs-source check is what keeps the two in step.
       [
         'stateQueryOutcome.assistant_text',
         '../routing/state-query-guard.ts',
@@ -1063,14 +1069,22 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
   it('POSITIVE CONTROL: the structural evidence check can FAIL', () => {
     // Rule 2 — prove the `toContain` above discriminates rather than passing on
     // any file it is handed.
-    const guardSource = readFileSync(resolve(HERE, '../routing/fresh-analysis-followup-guard.ts'), 'utf8');
-    expect(guardSource).toContain('assistant_text: RECAP_TEXT,');
-    // The drift this pin exists to catch: RECAP_TEXT gaining an interpolation.
-    const drifted = guardSource.replace(
-      'assistant_text: RECAP_TEXT,',
-      'assistant_text: `${RECAP_TEXT} ${leadingLabel}`,',
-    );
-    expect(drifted).not.toContain('assistant_text: RECAP_TEXT,');
+    //
+    // ⚠ ROADMAP 2.229 — RE-ANCHORED. This control used to read the
+    // fresh-analysis follow-up guard and mutate `assistant_text: RECAP_TEXT,`.
+    // That guard was retired and its module DELETED, so the control would have
+    // thrown on a missing file (or, worse, been quietly deleted along with it,
+    // leaving the remaining structural claim with no proof that its check can
+    // discriminate). It is re-anchored on the OTHER structural-by-derivation
+    // site — the state-query guard's `Pick`-narrowed input type — which is the
+    // stronger of the two claims and is still live.
+    const guardSource = readFileSync(resolve(HERE, '../routing/state-query-guard.ts'), 'utf8');
+    const PIN = "readonly contextPack: Pick<ContextPack, 'recent_changes'>;";
+    expect(guardSource).toContain(PIN);
+    // The drift this pin exists to catch: the input type widening to the whole
+    // ContextPack, which would put the analysis projection back in reach.
+    const drifted = guardSource.replace(PIN, 'readonly contextPack: ContextPack;');
+    expect(drifted).not.toContain(PIN);
   });
 
   it('every GATED_BY_INPUT site is backed by a real input gate at the assembly seam', () => {

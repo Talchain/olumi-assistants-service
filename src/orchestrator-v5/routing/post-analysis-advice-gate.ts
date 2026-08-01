@@ -290,11 +290,14 @@ export type AdviceGateUnmatchedReason =
   | 'data_unavailable_for_class';
 
 /**
- * Action chip emitted alongside a matched advice-gate response. Shape
- * mirrors `FreshAnalysisFollowupSuggestedAction` in
- * `fresh-analysis-followup-guard.ts` exactly so the turn-executor's
- * `composeDirectAnswerResponse` call site consumes both surfaces with
- * identical spread semantics. `action_type` is constrained to chips
+ * Action chip emitted alongside a matched advice-gate response.
+ *
+ * ⚠ ROADMAP 2.229 — this doc comment used to say the shape "mirrors
+ * `FreshAnalysisFollowupSuggestedAction` in `fresh-analysis-followup-guard.ts`
+ * exactly". That guard was retired by founder ruling and its module deleted,
+ * so there is no longer a sibling to mirror: this declaration is now the sole
+ * definition of the shape, consumed by the turn-executor's
+ * `composeDirectAnswerResponse` call site. `action_type` is constrained to chips
  * whose handlers run deterministically via `dispatchDeterministicChipClick`
  * (no LLM call); no new action types are introduced here.
  */

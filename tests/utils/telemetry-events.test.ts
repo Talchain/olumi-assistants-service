@@ -636,7 +636,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
         V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
         V5ClarifyV2Deflected: "v5.clarify_v2.deflected",
-        V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
         V5ProcessMetaIntakeGuard: "v5.process_meta_intake_guard",
         V5ReadinessIntakeArm: "v5.readiness_intake",
         V5TypedChipMutationRoute: "v5.typed_chip_mutation_route",
@@ -1410,7 +1409,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5ClarifyV2QuestionsEmitted,
         TelemetryEvents.V5ClarifyV2Proceeded,
         TelemetryEvents.V5ClarifyV2Deflected,
-        TelemetryEvents.V5FreshAnalysisFollowupGuard,
         // META-DECISION-DIAGNOSIS-2026-07-20 (#575) — round-1 process-meta
         // intake guard. Diagnostic-only, same rationale as the sibling
         // frame-stage guards: the structured log is the operational signal;
@@ -2080,7 +2078,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.clarify_v2.questions_emitted",
         "v5.clarify_v2.proceeded",
         "v5.clarify_v2.deflected",
-        "v5.fresh_analysis_followup_guard",
         "v5.phase3.block_lifecycle",
         "v5.phase3.lifecycle_index_mismatch",
         "v5.post_analysis_advice_gate",

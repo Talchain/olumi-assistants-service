@@ -55,8 +55,13 @@ import type { GraphPatchBlockData } from '../../../orchestrator/types.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
-// The two scenario-wide explanation handlers this lane widens. what_would_flip
-// is deliberately excluded (kept at ['goal', 'option']).
+// The two scenario-wide explanation handlers this lane widened.
+// ⚠ ROADMAP 2.229 fix 2 — the line here used to read "what_would_flip is
+// deliberately excluded (kept at ['goal', 'option'])". That exclusion was the
+// remaining half of the P0 and has now been closed: what_would_flip accepts
+// 'node' too. This constant still names only the two explain handlers because
+// the per-handler cases below are written about THEM; what_would_flip's own
+// kind coverage lives in tools/handlers/__tests__/what-would-flip.test.ts.
 const EXPLAIN_HANDLERS = ['explain_results', 'explain_from_structure'] as const;
 
 // Representative graph: goal + 2 options + one of each node class that
@@ -240,19 +245,42 @@ describe('chip routeability — genuine ambiguity still fails safely (authority 
       }
     });
 
-    it(`${handlerId}: what_would_flip still REFUSES a resolved 'node' — repair does not widen a narrower handler`, () => {
-      // The control for the two amendments above: what_would_flip accepts only
-      // ['goal','option'], so a factor id is refused no matter how it is
-      // labelled. If repair had widened the admit-set rather than merely
-      // relabelling, this would now pass.
+    it(`${handlerId}: a NARROWER handler still REFUSES a resolved kind it does not accept — repair does not widen the admit-set`, () => {
+      // The control for the two amendments above. It used to be carried by
+      // what_would_flip (then ['goal','option'], so a factor id was refused
+      // however it was labelled) — ROADMAP 2.229 fix 2 widened that handler to
+      // accept 'node', which would have left this control passing VACUOUSLY on
+      // a handler that now admits the very kind it was asserting was refused.
+      //
+      // Re-anchored on `set_factor_value`, which accepts ONLY ['node']: a goal
+      // id is refused no matter how the proposal labels it. If repair had
+      // widened the admit-set rather than merely relabelling, the 'node' case
+      // below (goal id proposed as 'node', repaired to 'goal') would pass.
       for (const proposed of ['node', 'goal', 'option'] as const) {
+        const result = validateToolCall(
+          mkProposal('set_factor_value', { id: 'goal_1', kind: proposed }),
+          LOOKUP,
+          HANDLER_VALIDATION_REGISTRY,
+        );
+        expect(result.valid, `set_factor_value must refuse goal_1 proposed as '${proposed}'`).toBe(false);
+        if (!result.valid) expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
+      }
+    });
+
+    // ROADMAP 2.229 fix 2 — the positive counterpart, in the same place the
+    // old control sat, so the widening is visible where the exclusion was:
+    // what_would_flip now serves a factor target instead of dead-ending.
+    it(`${handlerId}: (sibling pin) what_would_flip now ROUTES a resolved factor target`, () => {
+      for (const proposed of ['node'] as const) {
         const result = validateToolCall(
           mkProposal('what_would_flip', { id: 'fac_churn', kind: proposed }),
           LOOKUP,
           HANDLER_VALIDATION_REGISTRY,
         );
-        expect(result.valid).toBe(false);
-        if (!result.valid) expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
+        expect(result.valid).toBe(true);
+        if (result.valid) {
+          expect(result.proposal.entity.id).toBe('fac_churn');
+        }
       }
     });
 

@@ -138,7 +138,6 @@ import {
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
-import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
 import {
   collectOptionGuardLabels,
   impliesOptionInterventionEdit,
@@ -6123,109 +6122,37 @@ export async function runTurnExecutor(
         }
       }
 
-      // V5 fresh-analysis follow-up guard — catch-net AFTER
-      // `tryPostAnalysisAdviceGate`. The advice gate keeps first refusal
-      // and produces its richer synthesis whenever its per-class data
-      // requirements hold. After the grounded-fresh-analysis workstream
-      // broadened the advice gate's pattern set to own the brief's
-      // canonical phrasings ("what drove", "why is X ahead/leading/...",
-      // "what would need to change..."), this guard's primary role is
-      // the `data_unavailable_for_class` fall-through plus any residual
-      // classifier-only phrasing the advice gate's stricter per-class
-      // patterns do not cover. It still intercepts cases that would
-      // otherwise reach the LLM router (~11s) and misroute to
-      // `edit_graph`.
+      // ⚠ ROADMAP 2.229 — THE FRESH-ANALYSIS FOLLOW-UP GUARD USED TO SIT HERE,
+      // and it is deliberately GONE. Founder ruling: retire it.
       //
-      // Matched response is a deterministic direct_answer that points
-      // at the analysis surface and offers an existing chip
-      // (`action_type: 'explain_results'` or `'what_would_flip'`). The
-      // chip, when clicked, dispatches the real explanation handler via
-      // `dispatchDeterministicChipClick` with no LLM call. The fresh
-      // path of `tryPostAnalysisAdviceGate` is NOT modified — PR #184
-      // preserved it bit-for-bit and this guard preserves that
-      // guarantee.
-      // F2 CHANGE A — like the advice gate above, this fresh-analysis catch-net
-      // keys on a message regex and would intercept a FORCED analytical pill's
-      // copy with a deterministic recap (its chip used to re-dispatch the
-      // deterministic explanation handler — the very path F2 removed). Skip it
-      // for a forced pill so the click reaches the coach with conversation sight.
-      if (
-        routingResult === undefined &&
-        contextReadiness !== null &&
-        options.chipClickForcedIntent === undefined
-      ) {
-        const freshFollowupOutcome = tryFreshAnalysisFollowupGuard({
-          message: payload.message,
-          readiness: contextReadiness,
-        });
-        emit(TelemetryEvents.V5FreshAnalysisFollowupGuard, {
-          request_id: requestId,
-          scenario_id: context.session_id,
-          matched: freshFollowupOutcome.matched,
-          unmatched_reason: freshFollowupOutcome.matched
-            ? null
-            : freshFollowupOutcome.reason,
-          intent_class: freshFollowupOutcome.matched
-            ? freshFollowupOutcome.intent_class
-            : null,
-          analysis_freshness: contextReadiness.latest_analysis_freshness,
-          selected_path: freshFollowupOutcome.matched
-            ? 'fresh_analysis_followup'
-            : null,
-          selected_action_type: freshFollowupOutcome.matched
-            ? freshFollowupOutcome.selected_action_type
-            : null,
-        });
-        if (freshFollowupOutcome.matched) {
-          const freshFollowupResponse = composeAnswer({
-            answerKind: 'functional',
-            assistant_text: freshFollowupOutcome.assistant_text,
-            stage: context.stage,
-            suggested_actions: [...freshFollowupOutcome.suggested_actions],
-          });
-          sonnetTextForLog = freshFollowupResponse.assistant_text;
-          resolvedTurnClass = 'direct_answer';
-          intentClass = 'converse';
-          responseTypeForObs = 'direct_answer';
-          llmCallsUsed = 0;
-          stagesCompleted.push('orient');
-          stagesCompleted.push('compose');
-          try {
-            const committed = await commitTurn(freshFollowupResponse, {
-              scenario_id: context.session_id,
-              turn_id: context.request_id,
-              turn_class: 'direct_answer',
-              handler_id: null,
-              request_hash: computeRequestHash(payload),
-              llm_calls_used: 0,
-              duration_ms: Date.now() - startedAt,
-              handler_facts: [],
-            });
-            commitPerformed = committed.performed;
-            stagesCompleted.push('commit');
-            response = committed.response;
-          } catch (error) {
-            log.error(
-              {
-                event: 'v5.state_commit_failed',
-                request_id: requestId,
-                session_id: context.session_id,
-                path: 'fresh_analysis_followup_guard',
-                err: serialiseError(error),
-              },
-              'V5 TurnExecutor commit failure on fresh-analysis follow-up guard',
-            );
-            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
-            response = buildFailureResponse(
-              'STATE_COMMIT_FAILED',
-              context.stage,
-              { phase: 'commit' },
-              recoveryCtx(),
-            );
-          }
-          return finalizeRun();
-        }
-      }
+      // What it did: on a fresh analysis, any message `classifyAnalyticalIntent`
+      // recognised was answered with `RECAP_TEXT` — a module-level string
+      // constant with ZERO inputs — committed as `turn_class: 'direct_answer'`,
+      // `llm_calls_used: 0`, `blocks = {}`. Its stated premise was that reaching
+      // the LLM router costs "~11s and misroutes to `edit_graph`".
+      //
+      // That premise was FALSIFIED on the build it was running on. Two of four
+      // post-analysis questions in a live walk fell through this guard, reached
+      // `routeWithToolUse`, and returned 47 KB of grounded discursive coaching
+      // with the full Phase-3 block estate — one routing call each, 10.0 s and
+      // 14.9 s, routed correctly (diagnosis 2.229 §3, §6).
+      //
+      // The inversion it created: a question the regex RECOGNISED got a
+      // zero-input string; one it FAILED to recognise got grounded coaching.
+      // Recognition was punished. This file already treated the constant as the
+      // wrong answer — the `chipClickForcedIntent === undefined` condition on
+      // this block existed so a FORCED analytical pill would "reach the coach
+      // with conversation sight". The same sentence typed instead of clicked
+      // got the constant. Retiring the guard makes the two paths agree, and
+      // makes that bypass condition moot: it is removed with the block.
+      //
+      // Cost accepted by the ruling: a recognised post-analysis question now
+      // costs a routed turn (measured 11.5-16.3 s) instead of a deterministic
+      // ~1.4 s reply. That is the trade the ruling made.
+      //
+      // Control: `__tests__/turn-executor-post-analysis-free-text-reaches-coach
+      // .integration.test.ts` pins the inverse guarantee AND asserts the guard
+      // module stays deleted, so a re-introduction is RED rather than silent.
 
       // V5 Context Management v1 — no-analysis sibling guard.
       //
