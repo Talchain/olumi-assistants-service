@@ -61,6 +61,7 @@ import {
   ANTHROPIC_OPTIONAL_PARAM_LIMIT,
   DRAFT_SOFT_EDGE_CAP,
   DRAFT_SOFT_NODE_CAP,
+  ENRICHER_OWNED_GOAL_KEYS,
   RUNAWAY_PRONE_NODE_DATA_KEYS,
   buildDraftGraphSchema,
   countOptionalParams,
@@ -400,12 +401,28 @@ describe("v12 — buildDraftGraphSchema() (structure-only: topology_plan + coach
     // deleted: the property the test exists to protect is "the sent grammar
     // never spends MORE of the 24-slot budget than the base", and that is now
     // asserted directly and derived, not mirrored against a literal.
+    // ⚠ SECOND FLIP, DISCLOSED (v15, 2026-08-01, ROADMAP 2.281). The sent
+    // grammar additionally drops the enricher-owned goal-threshold quad, all
+    // four of which are optional on `nodes.items`, so the delta grows from 1 to
+    // 5. Still DERIVED from the two exported key lists rather than a literal —
+    // the property under protection is unchanged ("the sent grammar never
+    // spends MORE of the 24-slot budget than the base"), and the arithmetic
+    // stays visible so the next cut cannot land silently.
     const baseOptional = countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
-    expect(countOptionalParams(v12)).toBe(baseOptional - RUNAWAY_PRONE_NODE_DATA_KEYS.length);
+    expect(countOptionalParams(v12)).toBe(
+      baseOptional - RUNAWAY_PRONE_NODE_DATA_KEYS.length - ENRICHER_OWNED_GOAL_KEYS.length,
+    );
     expect(countOptionalParams(v12)).toBeLessThanOrEqual(baseOptional);
     expect(countOptionalParams(v12)).toBeLessThanOrEqual(ANTHROPIC_OPTIONAL_PARAM_LIMIT);
-    // Union budget untouched (all three were plain strings, not unions).
-    expect(countUnionParams(v12)).toBe(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
+    // ⚠ UNION BUDGET NOW FALLS TOO (v15). Three of the four goal keys are
+    // `nullable(...)` = `anyOf`, so the sent grammar sheds exactly three union
+    // slots. Derived from the same list, not a literal: `goal_threshold_cap` is
+    // a plain `{type:"number"}` and contributes none.
+    const goalUnionKeysRemoved = 3;
+    expect(countUnionParams(v12)).toBe(
+      countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA) - goalUnionKeysRemoved,
+    );
+    expect(countUnionParams(v12)).toBeLessThan(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
     // Grammar-size budget strictly improves vs the base (3 fewer string props).
     expect(JSON.stringify(v12).length).toBeLessThan(
       JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA).length,

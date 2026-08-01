@@ -169,6 +169,97 @@ export function parseStringifiedAuxFields(obj: Record<string, unknown>): void {
 }
 
 /**
+ * Every field of the goal-threshold contract CEE mints for itself (ROADMAP
+ * 2.281). The quad the draft grammar used to declare, PLUS the attestation
+ * fields — `goal_threshold_frame` is the whole point of the exercise, and
+ * `goal_baseline*` are only sound when divided by the SAME cap on the SAME
+ * branch that produced the threshold (enricher.ts:699-719).
+ *
+ * DERIVED-BY-INTENT, not mirrored: this list is the fields no model may author,
+ * and the pinning test asserts it covers every `goal_*` field the node schema
+ * declares, so a new goal field added to `schemas/graph.ts` REDs rather than
+ * quietly becoming model-writable.
+ */
+export const CEE_MINTED_GOAL_FIELDS = [
+  'goal_threshold',
+  'goal_threshold_raw',
+  'goal_threshold_unit',
+  'goal_threshold_cap',
+  'goal_threshold_frame',
+  'goal_baseline',
+  'goal_baseline_raw',
+] as const;
+
+/** What a strip actually removed — returned so the caller can log it, never silent. */
+export interface GoalThresholdStripResult {
+  /** Node ids that carried at least one CEE-minted goal field. */
+  nodeIds: string[];
+  /** Field names actually removed, deduped, for telemetry. */
+  fields: string[];
+}
+
+/**
+ * Remove any model-authored goal-threshold contract from a DRAFT response.
+ *
+ * ── WHY THIS EXISTS ALONGSIDE THE GRAMMAR CUT (ROADMAP 2.281) ──────────────
+ * `buildDraftGraphSchema()` (cee/draft/anthropic-graph-schema.ts, v15) makes the
+ * quad UNEMITTABLE — but only when the grammar is actually sent. Structured
+ * outputs is conditional on `CEE_ANTHROPIC_STRUCTURED_OUTPUTS` (config default
+ * FALSE), a model allowlist, thinking being off, and no `so_reject` fallback
+ * having fired (anthropic.ts:792-798). On the prompt-only path there is NO
+ * GRAMMAR AT ALL, so the grammar cut alone would be inert on exactly the path
+ * the 2026-08-01 live witness measured. This strip is the layer that does not
+ * depend on that posture: it holds for every REAL provider draft call
+ * (anthropic.ts:1801, openai.ts:747).
+ *
+ * Neither layer is redundant. The grammar stops the tokens being generated (and
+ * so also saves the output tokens); this stops the value being persisted. The
+ * claim "the enricher is the only mint" is true because of BOTH.
+ *
+ * ── WHY THIS IS SAFE TO DO UNCONDITIONALLY *ON A DRAFT RESPONSE* ───────────
+ * A draft response is a from-scratch graph: `draftGraph` receives a brief, docs
+ * and an optional attachment — never an existing graph — and Stage 1 (Parse)
+ * runs BEFORE Stage 3 (Enrich) in the unified pipeline. So at this seam no
+ * legitimate, attested threshold can exist yet: anything present was written by
+ * the model. Deleting it cannot destroy a CEE-minted value because none has been
+ * minted.
+ *
+ * ⚠ AND WHY IT IS NOT WIRED INTO `normaliseDraftResponse` ITSELF. That function
+ * is SHARED with the repair_graph path (anthropic.ts:2624, openai.ts:1215),
+ * which runs at Stage 4 — i.e. AFTER Stage 3 has enriched. A strip there would
+ * delete a threshold the enricher had already minted and attested, turning this
+ * fix into the very defect it closes. The two seams are deliberately separate;
+ * do not "simplify" this by folding it into the normaliser.
+ *
+ * Mutates in place (the file's established style) and reports what it removed.
+ */
+export function stripModelAuthoredGoalThreshold(raw: unknown): GoalThresholdStripResult {
+  const result: GoalThresholdStripResult = { nodeIds: [], fields: [] };
+  if (!raw || typeof raw !== 'object') return result;
+  const nodes = (raw as Record<string, unknown>).nodes;
+  if (!Array.isArray(nodes)) return result;
+
+  const seenFields = new Set<string>();
+  for (const node of nodes as any[]) {
+    if (!node || typeof node !== 'object') continue;
+    let touched = false;
+    for (const field of CEE_MINTED_GOAL_FIELDS) {
+      // `in`, not a truthiness check: an explicit `null` (the shape the old
+      // nullable grammar taught) is still a model-authored key, and 0 is a
+      // legitimate threshold value that a truthiness test would skip.
+      if (field in node && node[field] !== undefined) {
+        delete node[field];
+        touched = true;
+        seenFields.add(field);
+      }
+    }
+    if (touched) result.nodeIds.push(String(node.id ?? '<unidentified>'));
+  }
+  result.fields = [...seenFields];
+  return result;
+}
+
+/**
  * Normalise all node kinds in a draft response before Zod validation.
  * Also coerces string numbers to actual numbers for belief/weight.
  */

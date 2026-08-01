@@ -603,6 +603,92 @@ for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
   }
 }
 
+// ── ENRICHER-OWNED GOAL-THRESHOLD KEYS (v15 — 2026-08-01, ROADMAP 2.281) ──
+// The goal-threshold quad is MINTED BY CEE, never by the model.
+//
+// WHY THIS EXISTS. The whole goal-frame train (schemas 0.31.0, ISL's level→delta
+// converter, PLoT frame forwarding, CEE's frame stamp #786 and baseline
+// extraction #787) shipped and STILL produced no goal probability on staging,
+// because on the live draft path THE MODEL minted `goal_threshold` itself. The
+// enricher's redirect — the only code that stamps `goal_threshold_frame` and
+// extracts the goal node's `observed_state` baseline — is gated on
+// `goal_threshold === undefined` (factor-extraction/enricher.ts:652). A
+// model-authored value closes that gate, so the frame was never stamped, ISL
+// refused with GOAL_THRESHOLD_FRAME_UNSPECIFIED on every run, and the stated
+// current level was filed as a separate factor node (`fac_current_revenue`).
+// Measured live 2026-08-01 across three briefs, all three runs:
+// PHASE0-EVIDENCE-2026-07-28/witness-2258-goal-probability-live.md §5.1, §7.1.
+// The machinery was correct and UNREACHED — so the fix is not more machinery,
+// it is removing the model's ability to reach past it.
+//
+// ATTESTATION BY CONSTRUCTION. `goal_threshold_frame` is a CODE CONSTANT set on
+// the same branch that computes `raw / cap` (enricher.ts:733) — it is true by
+// construction there and is never derived from a model. A threshold the model
+// wrote carries no such attestation and cannot be given one after the fact,
+// because nothing downstream knows what frame the model meant. So the model
+// must be unable to write one.
+//
+// WHY ALL FOUR KEYS, not just `goal_threshold`. The enricher writes the quad as
+// a unit (enricher.ts:724-727) AND READS two of them as inputs to the cap
+// resolver (`goal_threshold_cap`, `goal_threshold_unit` at :680-685). Excising
+// only the gate field would leave the mint reachable but its DENOMINATOR
+// model-authored — a half-attested contract, which is worse than either
+// extreme because it reads as attested. The quad is one contract; it is minted
+// as one or not at all.
+//
+// MECHANISM — REMOVAL IS "CANNOT EMIT", NOT "DISCOURAGED", *WHEN THE GRAMMAR IS
+// SENT*. `nodes.items` carries `additionalProperties: false` (:315), so a key
+// absent from `properties` is ungrammatical rather than merely not-required —
+// the same lever v11/v12 used for the aux keys and v13 used for
+// `data.display_value`. Under Anthropic structured outputs the grammar is
+// compiled into constrained decoding, so the token sequence for the key cannot
+// be produced.
+//
+// ⚠ THE SCOPE LIMIT OF THAT CLAIM, STATED BECAUSE IT IS LOAD-BEARING. The
+// grammar is only sent when `structuredOutputsEnabled` (adapters/llm/
+// anthropic.ts:795): the flag `CEE_ANTHROPIC_STRUCTURED_OUTPUTS` (config
+// default FALSE), a model-allowlist hit, and thinking disabled — plus a
+// documented `so_reject` rebuild that RETRIES prompt-only after a 400. On the
+// prompt-only path THERE IS NO GRAMMAR AT ALL, so this excision alone would be
+// inert exactly where the witness measured the defect. That is why it is paired
+// with an ingress strip at the draft seam (`stripModelAuthoredGoalThreshold`,
+// adapters/llm/normalisation.ts), which holds on every real-provider draft path
+// regardless of structured-outputs posture. NEITHER layer is redundant: the
+// grammar makes it unemittable when sent, the strip makes it unpersistable
+// always. Do not remove one on the grounds that the other covers it.
+//
+// The base object KEEPS the quad — it is what CEE TOLERATES at ingress (a
+// stored graph, a repair response, or a prompt-only draft may legitimately
+// carry the fields), exactly as v12/v13 keep their removed keys on the base.
+//
+// Anchor assertion (trap-15: a tool that cannot fail is theatre). The builder
+// removes keys BY NAME from a NESTED object; a rename would make it a silent
+// no-op that leaks the field straight back into the grammar.
+export const ENRICHER_OWNED_GOAL_KEYS = [
+  'goal_threshold',
+  'goal_threshold_raw',
+  'goal_threshold_unit',
+  'goal_threshold_cap',
+] as const;
+
+/** The node-item object schema (`nodes.items`) — where the goal quad is declared. */
+function nodeItemsObjectOf(schema: {
+  properties: Record<string, unknown>;
+}): { properties: Record<string, unknown>; required?: string[] } | undefined {
+  const nodes = schema.properties.nodes as { items?: Record<string, unknown> } | undefined;
+  return nodes?.items as { properties: Record<string, unknown>; required?: string[] } | undefined;
+}
+
+for (const key of ENRICHER_OWNED_GOAL_KEYS) {
+  if (!(key in (nodeItemsObjectOf(ANTHROPIC_DRAFT_GRAPH_SCHEMA)?.properties ?? {}))) {
+    throw new Error(
+      `[anthropic-graph-schema] ANCHOR MISSING: '${key}' is not a property of ` +
+      `ANTHROPIC_DRAFT_GRAPH_SCHEMA's nodes.items object. buildDraftGraphSchema() would ` +
+      `silently return an unchanged grammar (${key} would leak back in). Update the v15 builder.`
+    );
+  }
+}
+
 /**
  * The draft-graph JSON schema actually sent to Anthropic.
  *
@@ -620,6 +706,11 @@ for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
  * carries `additionalProperties: false`, removing the key makes it
  * UNEMITTABLE, not merely unrequired — which is the whole point: an optional
  * field the model still chooses to write can still loop inside it.
+ * v15 (2026-08-01, ROADMAP 2.281): ALSO drops the enricher-owned goal-threshold
+ * quad from `nodes.items` — see ENRICHER_OWNED_GOAL_KEYS above. Same lever, same
+ * reason: `additionalProperties: false` turns removal into cannot-emit, so the
+ * enricher's `goal_threshold === undefined` redirect always runs on a
+ * goal-bearing brief and the frame is stamped by the code that earns it.
  */
 export function buildDraftGraphSchema(): DraftGraphSchemaObject {
   const deferred = new Set<string>(DEFERRED_AUX_KEYS);
@@ -665,16 +756,34 @@ export function buildDraftGraphSchema(): DraftGraphSchemaObject {
       ? { required: dataObject.required.filter((k) => !dropped.has(k)) }
       : {}),
   };
+  // v15 — the goal-quad cut. Applied to the SAME cloned node-item properties as
+  // the v13 data cut, so the two edits compose in one copy-on-write rather than
+  // one silently rebuilding over the other.
+  const goalOwned = new Set<string>(ENRICHER_OWNED_GOAL_KEYS);
+  const nodeItemProps = Object.fromEntries(
+    Object.entries({
+      ...itemProps,
+      data: { ...dataProp, anyOf: [clonedDataObject, ...dataProp.anyOf.slice(1)] },
+    }).filter(([k]) => !goalOwned.has(k)),
+  );
+
   built.properties = {
     ...built.properties,
     nodes: {
       ...nodes,
       items: {
         ...nodeItems,
-        properties: {
-          ...itemProps,
-          data: { ...dataProp, anyOf: [clonedDataObject, ...dataProp.anyOf.slice(1)] },
-        },
+        properties: nodeItemProps,
+        // The quad is optional on the base object, so `required` cannot contain
+        // it today — filtered anyway so a future promotion to required cannot
+        // leave a dangling name that makes the sent grammar unsatisfiable.
+        ...(Array.isArray((nodeItems as { required?: string[] }).required)
+          ? {
+            required: (nodeItems as { required: string[] }).required.filter(
+              (k) => !goalOwned.has(k),
+            ),
+          }
+          : {}),
       },
     },
   };
@@ -694,12 +803,26 @@ export function buildDraftGraphSchema(): DraftGraphSchemaObject {
 // the `for`, so the whole grammar was rebuilt once PER KEY — harmless at
 // length 1, pointless work the moment the list grows.
 {
-  const builtData = nodeDataObjectOf(buildDraftGraphSchema());
+  const builtSchema = buildDraftGraphSchema();
+  const builtData = nodeDataObjectOf(builtSchema);
   for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
     if (builtData && key in builtData.properties) {
       throw new Error(
         `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
         `draft grammar after buildDraftGraphSchema(). The runaway-prone field cut did not land.`
+      );
+    }
+  }
+  // v15 (2.281) — the same post-condition for the goal quad. A silent no-op here
+  // would hand the model back its ability to mint an unattested threshold, which
+  // is the entire defect this cut exists to close.
+  const builtItems = nodeItemsObjectOf(builtSchema);
+  for (const key of ENRICHER_OWNED_GOAL_KEYS) {
+    if (builtItems && key in builtItems.properties) {
+      throw new Error(
+        `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
+        `draft grammar after buildDraftGraphSchema(). The enricher-owned goal-threshold cut ` +
+        `did not land, so the model can still mint an unattested threshold.`
       );
     }
   }

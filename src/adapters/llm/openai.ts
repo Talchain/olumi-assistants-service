@@ -11,7 +11,7 @@ import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, 
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAuthoredGoalThreshold } from "./normalisation.js";
 import { contentDigest } from "../../utils/redaction.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
@@ -744,6 +744,20 @@ export class OpenAIAdapter implements LLMAdapter {
           .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
           .filter(Boolean)
         : [];
+      // ROADMAP 2.281 — the goal-threshold contract is CEE-minted. DRAFT ONLY:
+      // the repair_graph site (:1215) deliberately does NOT strip, because it
+      // runs after Stage 3 has enriched and the threshold there IS attested.
+      // OpenAI never sends the Anthropic draft grammar at all, so for this
+      // provider the strip is the ONLY layer — which is precisely why it exists
+      // separately from the grammar cut.
+      const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
+      if (strippedGoal.nodeIds.length > 0) {
+        log.info({
+          event: "cee.draft.model_authored_goal_threshold_stripped",
+          node_ids: strippedGoal.nodeIds,
+          fields: strippedGoal.fields,
+        }, "Discarded a model-authored goal-threshold contract from the draft — the enricher is the only mint (2.281)");
+      }
       const normalised = normaliseDraftResponse(rawJson);
 
       // Pipeline checkpoint: post_adapter_normalisation (after normaliseDraftResponse)
