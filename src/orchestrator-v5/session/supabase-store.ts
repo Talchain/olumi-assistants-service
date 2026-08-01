@@ -369,6 +369,30 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
+   * ROADMAP 2.236 — was this turn ADMITTED on this scenario? One indexed read
+   * on the fence table's UNIQUE (scenario_id, turn_id) key. Same error
+   * discipline as `scenarioExists`: throws on a FAILED read (the caller fails
+   * open), clean no-row is the honest `false` that refuses the Stop.
+   *
+   * Direct table read rather than a new RPC, for the same reason
+   * `wasLatestScenarioTurnStopped` is one: `v5_turn_fence` is service_role-only
+   * with RLS on and this client IS the service role; the RPCs exist for
+   * write-path atomicity, which a single read does not need. No migration.
+   */
+  async turnFenceRowExists(scenarioId: string, turnId: string): Promise<boolean> {
+    const { data, error } = await this.client
+      .from('v5_turn_fence')
+      .select('generation')
+      .eq('scenario_id', scenarioId)
+      .eq('turn_id', turnId)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`v5_turn_fence existence read failed: ${errMsg(error)}`);
+    }
+    return data !== null;
+  }
+
+  /**
    * V5 TURN FENCE / ROADMAP 2.171 — post-explicit-Stop state read.
    *
    * One indexed select on the fence table this store already owns (the

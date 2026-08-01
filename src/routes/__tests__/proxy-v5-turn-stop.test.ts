@@ -34,15 +34,28 @@ const mockConfig = {
 vi.mock("../../config/index.js", () => ({ config: mockConfig }));
 
 vi.mock("../../utils/telemetry.js", () => ({
-  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   emit: vi.fn(),
   TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
 const markTurnStopped = vi.fn();
+// ROADMAP 2.236 — this suite pins the UI-COPY CONTRACT (the three terminal
+// notices), not authorization, so the double answers the permissive
+// authorization inputs: a GUEST scenario (`user_id: null` — ownership is
+// carved out by design, and it is what 100% of staging's recorded Stops run
+// on) and an ADMITTED turn. Authorization is pinned by
+// turn-stop-authorization.test.ts. `storeHasMethod` still removes ONLY
+// `markTurnStopped`, which is the branch these tests are about.
+const ensureScenarioExists = vi.fn(async () => ({ user_id: null }));
+const turnFenceRowExists = vi.fn(async () => true);
 let storeHasMethod = true;
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
-  getSessionStore: () => (storeHasMethod ? { markTurnStopped } : {}),
+  getSessionStore: () => ({
+    ensureScenarioExists,
+    turnFenceRowExists,
+    ...(storeHasMethod ? { markTurnStopped } : {}),
+  }),
 }));
 
 const { proxyV5TurnRoute } = await import("../proxy-v5-turn.js");

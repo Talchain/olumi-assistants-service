@@ -521,11 +521,27 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   //   can never confirm a Stop on it. Both exist; ONE handler
   //   (`recordExplicitTurnStop`) serves them.
   //
-  // Auth posture is INHERITED from POST /proxy/v5/turn above, unchanged: origin
-  // allowlist, no caller identity, guest scenarios addressable by anyone
-  // holding the UUID. That is not widened here — a caller who can stop a turn
-  // on a scenario is already a caller who can APPEND turns to it, which is
-  // strictly more power.
+  // ⚠⚠ THIS BLOCK USED TO SAY the Stop rung widened nothing, "because a caller
+  //   who can stop a turn on a scenario is already a caller who can APPEND
+  //   turns to it, which is strictly more power". THAT WAS FALSE, it was the
+  //   sentence that made the hole look reviewed, and it survived a review and a
+  //   deploy. Appending is gated by the turn route's scenario-ownership
+  //   pre-flight (it refuses an anonymous caller on an OWNED scenario);
+  //   stopping was gated by NOTHING but this origin allowlist. On an owned
+  //   scenario the Stop rung therefore granted MORE authority than the turn
+  //   rung — the exact inverse — and an invented `turn_id` could supersede a
+  //   stranger's in-flight turn into losing its graph write. Codex audit C
+  //   finding C-1; fixed under ROADMAP 2.236.
+  //
+  // Auth posture NOW: this rung is still PUBLIC at the plugin (the `/proxy/v5/turn`
+  // prefix rule in src/plugins/auth.ts covers every subpath), and origin +
+  // per-IP rate limit remain INGRESS concerns only — neither is authority.
+  // Authorization lives in the shared handler, where Stop runs the SAME
+  // verified-identity + scenario-ownership pre-flight as turn admission and
+  // additionally requires the turn to have been admitted. Guest (unowned)
+  // scenarios stay addressable by anyone holding the UUID, exactly as on a
+  // turn — the two rungs now grant the same thing, which is the property that
+  // was missing. See src/routes/turn-stop.ts.
   // ══════════════════════════════════════════════════════════════════════════
   app.post("/proxy/v5/turn/stop", {
     // 2.174 fix a — the PUBLIC rung is rate-limited per IP with the repo's
@@ -563,7 +579,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
       reply.header(k, v);
     }
 
-    const result = await recordExplicitTurnStop(request.body, requestId);
+    const result = await recordExplicitTurnStop(request, requestId);
     return reply.code(result.status).send(result.body);
   });
 }

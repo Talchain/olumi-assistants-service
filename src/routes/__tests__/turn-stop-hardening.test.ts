@@ -26,6 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { FastifyRequest } from "fastify";
 import Fastify, { type FastifyInstance } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 
@@ -44,25 +45,39 @@ const mockConfig = {
 vi.mock("../../config/index.js", () => ({ config: mockConfig }));
 
 vi.mock("../../utils/telemetry.js", () => ({
-  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   emit: vi.fn(),
   TelemetryEvents: new Proxy({}, { get: (_t, prop) => String(prop) }),
 }));
 
 const markTurnStopped = vi.fn();
 const scenarioExists = vi.fn();
+// ROADMAP 2.236 — the shared ownership pre-flight reads `ensureScenarioExists`
+// and the admission check reads `turnFenceRowExists`. Both are on the double so
+// THIS suite keeps testing what it is about (scenario existence + the rate
+// limit) rather than tripping over authorization. Their defaults are the
+// permissive ones — a GUEST scenario and an ADMITTED turn — which is what makes
+// every assertion below still measure the 2.174 behaviour it was written for.
+// Authorization itself is pinned by turn-stop-authorization.test.ts.
+const ensureScenarioExists = vi.fn();
+const turnFenceRowExists = vi.fn();
 let storeHasExistenceCheck = true;
 vi.mock("../../orchestrator-v5/session/index.js", () => ({
   getSessionStore: () =>
     storeHasExistenceCheck
-      ? { markTurnStopped, scenarioExists }
-      : { markTurnStopped },
+      ? { markTurnStopped, scenarioExists, ensureScenarioExists, turnFenceRowExists }
+      : { markTurnStopped, ensureScenarioExists, turnFenceRowExists },
 }));
 
 const { recordExplicitTurnStop } = await import("../turn-stop.js");
 const { proxyV5TurnRoute, TURN_STOP_RATE_LIMIT_MAX } = await import(
   "../proxy-v5-turn.js"
 );
+
+/** 2.236 — the handler takes the REQUEST now (identity lives in the headers). */
+function req(body: unknown, headers: Record<string, string> = {}): FastifyRequest {
+  return { body, headers } as unknown as FastifyRequest;
+}
 
 beforeEach(() => {
   markTurnStopped.mockReset();
@@ -73,6 +88,10 @@ beforeEach(() => {
   });
   scenarioExists.mockReset();
   scenarioExists.mockResolvedValue(true);
+  ensureScenarioExists.mockReset();
+  ensureScenarioExists.mockResolvedValue({ user_id: null });
+  turnFenceRowExists.mockReset();
+  turnFenceRowExists.mockResolvedValue(true);
   storeHasExistenceCheck = true;
 });
 
@@ -83,7 +102,7 @@ describe("recordExplicitTurnStop — the scenario must exist", () => {
   it("an UNKNOWN scenario id is refused with a typed 404 and writes NOTHING", async () => {
     scenarioExists.mockResolvedValue(false);
     const reply = await recordExplicitTurnStop(
-      { scenario_id: SCENARIO, turn_id: TURN },
+      req({ scenario_id: SCENARIO, turn_id: TURN }),
       "req-unknown-scenario",
     );
     expect(reply.status).toBe(404);
@@ -101,7 +120,7 @@ describe("recordExplicitTurnStop — the scenario must exist", () => {
   // route answered 502 — an untyped failure — while a mocked store upserted).
   it("a NON-UUID scenario id cannot exist: refused without touching the store at all", async () => {
     const reply = await recordExplicitTurnStop(
-      { scenario_id: "not-a-uuid-at-all", turn_id: TURN },
+      req({ scenario_id: "not-a-uuid-at-all", turn_id: TURN }),
       "req-non-uuid",
     );
     expect(reply.status).toBe(404);
@@ -115,7 +134,7 @@ describe("recordExplicitTurnStop — the scenario must exist", () => {
   // THE CONTROL — the P0 protection, unweakened.
   it("an existing scenario records the Stop exactly as before", async () => {
     const reply = await recordExplicitTurnStop(
-      { scenario_id: SCENARIO, turn_id: TURN },
+      req({ scenario_id: SCENARIO, turn_id: TURN }),
       "req-existing",
     );
     expect(reply.status).toBe(200);
@@ -132,7 +151,7 @@ describe("recordExplicitTurnStop — the scenario must exist", () => {
   it("an existence read that THROWS fails OPEN: the Stop is still recorded", async () => {
     scenarioExists.mockRejectedValue(new Error("scenarios table unreachable"));
     const reply = await recordExplicitTurnStop(
-      { scenario_id: SCENARIO, turn_id: TURN },
+      req({ scenario_id: SCENARIO, turn_id: TURN }),
       "req-read-blip",
     );
     expect(reply.status).toBe(200);
@@ -143,7 +162,7 @@ describe("recordExplicitTurnStop — the scenario must exist", () => {
   it("a store without scenarioExists skips the check (fail-open) and records", async () => {
     storeHasExistenceCheck = false;
     const reply = await recordExplicitTurnStop(
-      { scenario_id: SCENARIO, turn_id: TURN },
+      req({ scenario_id: SCENARIO, turn_id: TURN }),
       "req-no-method",
     );
     expect(reply.status).toBe(200);
