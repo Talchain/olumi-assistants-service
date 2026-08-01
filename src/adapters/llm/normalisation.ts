@@ -7,6 +7,7 @@
 
 import { emit, TelemetryEvents, log } from "../../utils/telemetry.js";
 import { contentDigest } from "../../utils/redaction.js";
+import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
 
 // ============================================================================
 // Types
@@ -280,6 +281,85 @@ export function normaliseDraftResponse(raw: unknown): unknown {
           (node.goal_threshold_raw === null || node.goal_threshold_raw === undefined)
         ) {
           node.goal_threshold_cap = undefined;
+        }
+
+        // ── ROADMAP 2.239: degenerate model-supplied cap ────────────────
+        // `goal_threshold_cap` is an LLM-WRITABLE draft field
+        // (cee/draft/anthropic-graph-schema.ts:299) and the draft prompt
+        // sanctions `cap >= raw` verbatim ("goal_threshold_cap MUST be >=
+        // goal_threshold_raw", prompts/defaults-v19.ts:183). A model that
+        // takes the `=` produces `goal_threshold = raw/cap = 1.0` — the
+        // state utils/goal-threshold-cap.ts's own doctrine forbids, because
+        // ISL then scores P(sample >= the ceiling of the scale). Measured
+        // on the deployed build: 0.021 and exactly 0.0 across two options
+        // whose leader won 95% of scenarios (diagnosis §5 Finding B).
+        //
+        // WHY HERE. This is the ONLY seam that sees a model-authored
+        // threshold quad before it is persisted: `normaliseDraftResponse`
+        // is the single ingress for every LLM-drafted graph (anthropic.ts
+        // :1801/:2624, openai.ts :747/:1215). The two resolver-bearing
+        // paths — add_constraint's goal-join and the factor-extraction
+        // enricher — are fixed by the `>` change in
+        // resolveGoalThresholdCap, but NEITHER runs on a quad the model
+        // wrote itself: the enricher's branch is gated on
+        // `goal_threshold === undefined` (enricher.ts:649), and nothing
+        // anywhere recomputes goal_threshold from raw/cap for a goal node
+        // (every raw/cap recomputation site in src/ is a FACTOR site).
+        // Stage 4b (threshold-sweep) only DELETES — its own contract
+        // declares `allowedModifications.node: []` — and it does not fire
+        // on the live shape anyway (raw present, label carries digits).
+        // So without this block the fix would be provably partial while
+        // looking complete.
+        //
+        // Delegates to the SAME doctrine as the other two paths rather
+        // than re-deriving one, so all three agree by construction. `unit`
+        // and `existingUnit` are deliberately the node's OWN
+        // goal_threshold_unit for both arguments: the cap and the raw
+        // target are two numbers on one node under one declared unit, so
+        // there is no second unit to be incompatible with, and passing it
+        // twice is what lets rule 2 ('%' → 100) be reached for percentage
+        // goals. Repairs the DENOMINATOR only — `goal_threshold_raw` and
+        // `goal_threshold_unit` (what the user actually asked for) are
+        // never rewritten.
+        //
+        // Scope, stated so it is not mistaken for more: this fires only
+        // when a positive finite raw AND a positive finite cap are both
+        // present and the doctrine returns a DIFFERENT cap. A drafted
+        // `goal_threshold` that merely disagrees with an otherwise-sound
+        // raw/cap pair is a different defect and is left alone; so is a
+        // missing cap (the enricher/Stage 4b own that) and a non-positive
+        // cap or raw.
+        const gtRaw = node.goal_threshold_raw;
+        const gtCap = node.goal_threshold_cap;
+        if (
+          typeof gtRaw === 'number' && Number.isFinite(gtRaw) && gtRaw > 0 &&
+          typeof gtCap === 'number' && Number.isFinite(gtCap) && gtCap > 0
+        ) {
+          const soundCap = resolveGoalThresholdCap(
+            gtCap,
+            gtRaw,
+            node.goal_threshold_unit,
+            node.goal_threshold_unit,
+          );
+          if (soundCap !== null && soundCap !== gtCap) {
+            const before = { cap: gtCap, threshold: node.goal_threshold };
+            node.goal_threshold_cap = soundCap;
+            node.goal_threshold = gtRaw / soundCap;
+            log.info(
+              {
+                node_id: node.id,
+                goal_threshold_raw: gtRaw,
+                goal_threshold_unit: node.goal_threshold_unit,
+                cap_before: before.cap,
+                cap_after: soundCap,
+                threshold_before: before.threshold,
+                threshold_after: node.goal_threshold,
+                reason: gtCap === gtRaw ? 'cap_equals_raw' : 'cap_undercuts_raw',
+                event: 'cee.normalisation.goal_threshold_cap_repaired',
+              },
+              'Repaired a degenerate model-supplied goal_threshold_cap',
+            );
+          }
         }
       }
 
