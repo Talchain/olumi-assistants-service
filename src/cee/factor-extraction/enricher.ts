@@ -683,12 +683,39 @@ export async function enrichGraphWithFactorsAsync(
           factor.unit,
           currentGoalNode.goal_threshold_unit,
         );
+        // ROADMAP 2.273 — the user-stated CURRENT LEVEL, carried by the same
+        // extraction match that produced the target (so the two numbers are
+        // provably about the same metric) and reconstructed into the SAME raw
+        // convention as the target above.
+        const rawBaseline =
+          factor.baseline === undefined
+            ? undefined
+            : factor.unit === "%"
+              ? factor.baseline * 100
+              : factor.baseline;
+
+        let normalizedBaseline: number | undefined;
+
         if (resolvedCap !== null) {
           cap = resolvedCap;
           rawValue = rawForResolver;
           normalizedValue = rawForResolver / resolvedCap;
+          // THE SHARED DENOMINATOR. Divided by the very same `resolvedCap` on
+          // the same branch, so threshold and baseline cannot drift onto
+          // different scales — ISL's `threshold − baseline + intercept` is
+          // only meaningful when both operands were scored against one cap,
+          // and a mismatch there yields a confident WRONG probability rather
+          // than an error.
+          normalizedBaseline =
+            rawBaseline === undefined ? undefined : rawBaseline / resolvedCap;
         } else {
           rawValue = rawForResolver;
+          // No sound denominator exists, so the target itself is registered
+          // un-normalised. Carrying a normalised baseline beside an
+          // un-normalised threshold would be exactly the cross-scale
+          // subtraction guarded against above — so the baseline is omitted
+          // too, and ISL keeps refusing honestly.
+          normalizedBaseline = undefined;
         }
 
         // Update goal node with threshold fields
@@ -704,6 +731,12 @@ export async function enrichGraphWithFactorsAsync(
           // here by construction and is never derived from `factor`, from the
           // brief, or from anything a model wrote.
           goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+          // Only ever present when the brief STATED a current level. No
+          // inference, no default, no derivation from the target.
+          ...(normalizedBaseline !== undefined && {
+            goal_baseline: normalizedBaseline,
+            goal_baseline_raw: rawBaseline,
+          }),
         };
 
         goalThresholdsSet++;

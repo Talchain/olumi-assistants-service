@@ -56,3 +56,109 @@ const REDUCTION_BY_FRAMING_RE = new RegExp(
 export function hasReductionByFraming(text: string): boolean {
   return REDUCTION_BY_FRAMING_RE.test(text);
 }
+
+/* ===========================================================================
+ * INCREASE-side framing (ROADMAP 2.273 prerequisite).
+ *
+ * This module's verb vocabulary was decrease-ONLY, which left "grow revenue BY
+ * 2M" invisible to every backstop above: it encoded naively as `{operator:
+ * '>=', value: +2_000_000}` and the goal-threshold mint then attested that
+ * number as `goal_threshold_frame: 'level'` — an ABSOLUTE level — when the
+ * user stated a CHANGE. Until 2.273 that was inert, because a goal node
+ * carried no `observed_state.baseline` and ISL refused to convert a 'level'
+ * threshold at all. Populating the baseline (2.273) turns the same
+ * misencoding into a live FABRICATION: ISL returns a confident
+ * `probability_of_goal` for "P(revenue >= 2M)" when the user asked
+ * "P(revenue >= 6M)". Hence this ships before/with the extraction.
+ *
+ * WHY THIS DETECTOR IS SHARPER THAN THE REDUCTION ONE ABOVE. The reduction
+ * scan can be coarse because reduction-verb + "by" is unambiguous and a false
+ * positive only costs a clarifying round-trip. An increase verb is NOT
+ * unambiguous: "increase conversion TO 5% BY December" is a LEVEL statement
+ * whose "by" introduces a DATE, and blocking it would be a product
+ * regression — a false positive here would refuse the very registrations the
+ * goal-threshold stamp exists to serve. So this requires all three of:
+ *   1. an unambiguous increase verb,
+ *   2. "by" followed by a NUMBER (never "by December"),
+ *   3. NO intervening "to <number>" level statement between verb and "by",
+ * and it RETURNS THE STATED DELTA rather than a boolean, so the caller can
+ * refuse only when the persisted value provably IS that delta.
+ * ========================================================================= */
+
+/**
+ * Closed set of unambiguous INCREASE verbs (all inflections).
+ *
+ * Deliberately excludes "improve"/"change"/"adjust"/"optimise" — the same
+ * exclusion the reduction list makes, for the same reason and with a concrete
+ * counter-example: "improve churn BY 10%" means churn goes DOWN, so treating
+ * "improve" as an increase verb would invert the very sign this module exists
+ * to protect.
+ */
+export const INCREASE_VERB_PATTERN =
+  '(?:increase|increases|increasing|increased|grow|grows|growing|grew|grown|' +
+  'raise|raises|raising|raised|boost|boosts|boosting|boosted|' +
+  'lift|lifts|lifting|lifted|expand|expands|expanding|expanded|' +
+  'rise|rises|rising|rose|risen)';
+
+/** Multipliers accepted after a stated delta ("by 2M", "by 2 million"). */
+const DELTA_MULTIPLIERS: Readonly<Record<string, number>> = {
+  k: 1e3,
+  m: 1e6,
+  bn: 1e9,
+  b: 1e9,
+  t: 1e12,
+  million: 1e6,
+  billion: 1e9,
+  trillion: 1e12,
+};
+
+/**
+ * `<increase verb> … by <number>`, with the span between verb and "by"
+ * TEMPERED so it cannot cross a `to <number>` level statement. The `{0,80}`
+ * bound is lazy so the NEAREST qualifying "by" wins, and `[^.?!\n]` keeps the
+ * scan inside one sentence (same containment rule as the reduction scan).
+ */
+const INCREASE_BY_DELTA_RE = new RegExp(
+  `\\b${INCREASE_VERB_PATTERN}\\b` +
+    `(?:(?!\\bto\\s+[£$€]?\\d)[^.?!\\n]){0,80}?` +
+    `\\bby\\s+[£$€]?(?<amount>\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
+    // Longest-first, and the trailing `\b` stops a bare `t`/`m` from eating the
+    // first letter of the following word ("by 2 THIS quarter" → 2e12).
+    `\\s*(?<multiplier>million|billion|trillion|bn|k|m|b|t)?\\b`,
+  'i',
+);
+
+/**
+ * The DELTA amount stated by an increase-verb "by" framing, or `null` when the
+ * text carries no such framing.
+ *
+ * EXTRACTION ONLY — this never infers, defaults, or rounds. `null` means "no
+ * stated delta was found", which callers must treat as "no fingerprint", never
+ * as zero. Percentages return the RAW PERCENT NUMBER (10 for "by 10%"),
+ * matching the "value stored in USER UNITS" convention `add_constraint` uses
+ * for `goal_threshold_raw`, so a caller can compare it directly against a
+ * resolved constraint value without re-scaling.
+ */
+/**
+ * Relative-tolerance equality for comparing a resolved constraint value
+ * against a stated delta. Both sides originate as decimal literals in user
+ * units, so exact `===` holds for every realistic input — the tolerance only
+ * guards the float round-trip on values like `2.5e6` and must stay far tighter
+ * than any meaningful difference between a delta and a level.
+ */
+export function valuesMatch(a: number, b: number): boolean {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+}
+
+export function extractIncreaseByDelta(text: string): number | null {
+  const match = INCREASE_BY_DELTA_RE.exec(text);
+  if (!match?.groups) return null;
+
+  const amount = Number.parseFloat(match.groups.amount.replace(/,/g, ''));
+  if (!Number.isFinite(amount)) return null;
+
+  const multiplierKey = match.groups.multiplier?.toLowerCase();
+  const multiplier = multiplierKey ? (DELTA_MULTIPLIERS[multiplierKey] ?? 1) : 1;
+  return amount * multiplier;
+}

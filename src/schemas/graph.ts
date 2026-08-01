@@ -317,6 +317,26 @@ export const Node = z.object({
    * `.passthrough()` to smuggle an unknown key across.
    */
   goal_threshold_frame: GoalThresholdFrame.optional(),
+  /**
+   * The goal metric's CURRENT LEVEL as stated by the user (ROADMAP 2.273),
+   * normalised against `goal_threshold_cap` — the SAME denominator
+   * `goal_threshold` uses.
+   *
+   * ⚠ THE SHARED DENOMINATOR IS THE WHOLE CONTRACT. ISL computes
+   * `delta_threshold = goal_threshold − baseline + intercept`. Subtracting a
+   * baseline scored against a different cap than the threshold does not fail —
+   * it silently returns a WRONG probability, which is the one outcome the
+   * whole 2.258/2.273 train exists to prevent. Both numbers are therefore
+   * divided by `goal_threshold_cap` at the same mint site, never separately.
+   *
+   * EXTRACTION ONLY. Present only when the user STATED a current level in the
+   * same breath as the target. Never inferred, never defaulted from the
+   * target, never derived. Absent means absent: ISL then refuses with
+   * `missing_goal_baseline` and renders no probability, which is honest.
+   */
+  goal_baseline: z.number().nullable().optional(),
+  /** The stated current level in RAW user units, for display and round-trip. */
+  goal_baseline_raw: z.number().nullable().optional(),
 }).passthrough();
 
 // Structured provenance for production trust and traceability

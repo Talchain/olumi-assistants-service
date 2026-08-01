@@ -127,6 +127,180 @@ const PATTERNS = {
     /between\s+(?<min>\d+(?:\.\d+)?)\s+(?:and|to)\s+(?<max>\d+(?:\.\d+)?)/gi,
 };
 
+/* ===========================================================================
+ * GOAL-TARGET-WITH-BASELINE (ROADMAP 2.273)
+ *
+ * THE GAP THESE CLOSE. The from-to extractors above DO capture a `baseline`
+ * ("from 85% to 95%" → baseline 0.85), but they are MUTUALLY EXCLUSIVE with
+ * the goal redirect: a brief phrased as a target ("from 4000000 to a TARGET of
+ * 6000000") is captured by `contextualNumber`, which yields the goal-redirect-
+ * eligible label "Target" and NO baseline, while the from-to patterns don't
+ * match at all (no currency symbol, no "%", and `changePattern` needs digits
+ * immediately after the verb). So the one factor that reaches the goal-
+ * threshold mint has never carried a current level, ISL's
+ * `delta_threshold = level − baseline + intercept` has no `B`, and it refuses
+ * with `missing_goal_baseline`. That absence was pinned deliberately by
+ * `goal-baseline-absent-characterisation.test.ts`.
+ *
+ * THE SAFETY PROPERTY, and why these are single combined patterns rather than
+ * two independent scans: BOTH numbers come from ONE regex match, so the
+ * current level and the target are about the SAME METRIC by construction. A
+ * separate "find any 'currently at N'" scan could pair a baseline from one
+ * metric with a target from another and hand ISL two numbers from different
+ * scales — arithmetic garbage wearing a confident probability. If no single
+ * match states both, NO baseline is produced and ISL keeps refusing honestly.
+ *
+ * EXTRACTION ONLY. Nothing here infers, defaults, or derives a baseline from a
+ * target. A brief that never states its current level yields no baseline —
+ * that absence is a coaching moment (elicit the level), never a value to
+ * invent.
+ * ========================================================================= */
+
+/** Goal/target synonyms that make an extracted label goal-redirect-eligible. */
+const GOAL_WORD = '(?:target|goal|objective|threshold)';
+
+/**
+ * Connectors that may sit between a goal word and its number — "target IS
+ * 800", "target OF 800", "raise the target TO 800", "target: 800". Optional,
+ * so a bare "target 800" also matches.
+ */
+const GOAL_CONNECTOR = '\\s*(?:is|of|to|at|:)?\\s*';
+
+/**
+ * A signed-free amount with optional currency prefix, thousands separators,
+ * magnitude suffix and percent sign, captured under a caller-chosen prefix so
+ * two amounts can coexist in one pattern without named-group collisions.
+ */
+function amountPattern(prefix: string): string {
+  return (
+    `(?<${prefix}Cur>[£$€])?(?<${prefix}>\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
+    // ⚠ THE TRAILING `\\b` IS LOAD-BEARING, and its absence produced a silent
+    // 1e12 error in development: without it the `t` alternative matched the
+    // "t" of "6000000 THIS year", scaling a 6,000,000 target to 6e18 and a
+    // 4,000,000 baseline to 5.3e-13 once divided by the resulting cap. Both
+    // numbers stayed internally consistent, so nothing failed — it simply
+    // produced a confident wrong probability, the exact failure mode this
+    // whole train exists to prevent. Alternatives are ordered LONGEST-FIRST so
+    // "million" cannot be consumed as a bare "m".
+    `\\s*(?<${prefix}Mult>million|billion|trillion|bn|k|m|b|t)?\\b\\s*(?<${prefix}Pct>%)?`
+  );
+}
+
+/**
+ * The three brief shapes that state a current level AND a target together.
+ * Order is priority order; the first match for a given (label, value, unit)
+ * wins and later extractors dedup against it.
+ */
+const GOAL_BASELINE_PATTERNS: ReadonlyArray<RegExp> = [
+  // "from 4000000 to a target of 6000000", "from 85% to a target of 95%"
+  new RegExp(
+    `\\bfrom\\s+${amountPattern('from')}\\s+to\\s+(?:a|an|the)?\\s*` +
+      `${GOAL_WORD}\\s*(?:of|is|:)?\\s*${amountPattern('to')}`,
+    'i',
+  ),
+  // "target is 800 customers, currently at 500"
+  new RegExp(
+    `\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountPattern('to')}` +
+      `[^.?!\\n]{0,40}?\\bcurrently\\s*(?:at|around|about)?\\s*${amountPattern('from')}`,
+    'i',
+  ),
+  // "currently at 500, target 800"
+  new RegExp(
+    `\\bcurrently\\s*(?:at|around|about)?\\s*${amountPattern('from')}` +
+      `[^.?!\\n]{0,40}?\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountPattern('to')}`,
+    'i',
+  ),
+];
+
+const GOAL_BASELINE_MULTIPLIERS: Readonly<Record<string, number>> = {
+  k: 1e3,
+  m: 1e6,
+  bn: 1e9,
+  b: 1e9,
+  t: 1e12,
+  million: 1e6,
+  billion: 1e9,
+  trillion: 1e12,
+};
+
+/**
+ * Resolve one captured amount to a raw magnitude in USER units, plus the unit
+ * signals it carried. Percent scaling is applied by the caller, which needs to
+ * see BOTH sides before deciding the pair's unit.
+ */
+function resolveAmount(
+  groups: Record<string, string | undefined>,
+  prefix: string,
+): { readonly raw: number; readonly isPercent: boolean; readonly currency?: string } | null {
+  const digits = groups[prefix];
+  if (digits === undefined) return null;
+  const parsed = Number.parseFloat(digits.replace(/,/g, ''));
+  if (!Number.isFinite(parsed)) return null;
+  const multKey = groups[`${prefix}Mult`]?.toLowerCase();
+  const mult = multKey ? (GOAL_BASELINE_MULTIPLIERS[multKey] ?? 1) : 1;
+  return {
+    raw: parsed * mult,
+    isPercent: groups[`${prefix}Pct`] === '%',
+    currency: groups[`${prefix}Cur`],
+  };
+}
+
+/**
+ * The label forced onto a goal-target-with-baseline extraction.
+ *
+ * Chosen to be byte-identical to what `contextualNumber` produces for the same
+ * phrase ("target of 6000000" → "Target"), so the dedup key collides and the
+ * later, baseline-LESS extraction is dropped instead of double-injecting a
+ * second target factor. It must also satisfy `isTargetGoalLabel` (enricher.ts)
+ * or the factor would never reach the goal-threshold mint at all.
+ */
+const GOAL_TARGET_LABEL = "Target";
+
+/** A goal target and its user-stated current level, from ONE regex match. */
+export interface GoalTargetWithBaseline {
+  /** Target in the file's normalised convention ('%' pre-divided to 0-1). */
+  readonly value: number;
+  /** Current level, same convention and same metric as `value`. */
+  readonly baseline: number;
+  readonly unit?: string;
+  readonly matchedText: string;
+}
+
+/**
+ * Extract a goal target TOGETHER WITH the current level stated alongside it,
+ * or `null` when the text states no such pair (ROADMAP 2.273).
+ *
+ * Shared by both goal-threshold registration paths so they cannot drift: the
+ * draft path (`extractFactors` → enricher redirect) and the chat path
+ * (`add_constraint`). Returns `null` far more often than not — that is the
+ * design. A brief that never states its current level yields no baseline, ISL
+ * refuses with `missing_goal_baseline`, and the user is asked rather than
+ * guessed at.
+ */
+export function extractGoalTargetWithBaseline(text: string): GoalTargetWithBaseline | null {
+  for (const pattern of GOAL_BASELINE_PATTERNS) {
+    const m = pattern.exec(text);
+    if (!m?.groups) continue;
+
+    const to = resolveAmount(m.groups, "to");
+    const from = resolveAmount(m.groups, "from");
+    if (!to || !from) continue;
+
+    // The pair shares ONE unit — same metric by construction — so a '%' or
+    // currency signal on either side settles both. Percent values are
+    // pre-divided into a 0-1 fraction, matching every other extractor in this
+    // file; callers that need the RAW percent number reconstruct it.
+    const isPercent = to.isPercent || from.isPercent;
+    return {
+      value: isPercent ? to.raw / 100 : to.raw,
+      baseline: isPercent ? from.raw / 100 : from.raw,
+      unit: isPercent ? "%" : (to.currency ?? from.currency),
+      matchedText: m[0],
+    };
+  }
+  return null;
+}
+
 /**
  * Infer a label from the surrounding context of a match
  */
@@ -308,6 +482,43 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // ============================================================================
   // EXPLICIT EXTRACTIONS (highest confidence)
   // ============================================================================
+
+  // ---------------------------------------------------------------------------
+  // GOAL TARGET *WITH* ITS CURRENT LEVEL (ROADMAP 2.273) — runs FIRST among the
+  // explicit extractors, deliberately.
+  //
+  // The label is forced to "Target" rather than inferred from context. Two
+  // reasons, both load-bearing:
+  //   1. `isTargetGoalLabel` (enricher.ts) is what routes a factor to the goal
+  //      node's threshold mint. `inferLabel` would return "Revenue" for
+  //      "Grow revenue from 4000000 to a target of 6000000", which does NOT
+  //      redirect — the baseline would ride on a plain factor and never reach
+  //      the goal.
+  //   2. It makes the dedup key byte-identical to the one `contextualNumber`
+  //      produces for the same phrase ("target of 6000000" → label "Target"),
+  //      so that later, baseline-less extraction is DROPPED by the existing
+  //      dedup rather than double-injecting a second target factor. This block
+  //      must therefore stay ahead of `contextualNumber` below.
+  //
+  // First match wins and the scan stops: a brief states one goal target, and
+  // pairing a second target with the first baseline is exactly the cross-metric
+  // mixing these combined patterns exist to prevent.
+  const goalPair = extractGoalTargetWithBaseline(brief);
+  if (goalPair) {
+    const key = dedupKey(GOAL_TARGET_LABEL, goalPair.value, goalPair.unit);
+    if (!seenFactors.has(key)) {
+      seenFactors.add(key);
+      factors.push({
+        label: GOAL_TARGET_LABEL,
+        value: goalPair.value,
+        baseline: goalPair.baseline,
+        unit: goalPair.unit,
+        confidence: 0.95,
+        matchedText: goalPair.matchedText,
+        extractionType: "explicit",
+      });
+    }
+  }
 
   // Extract currency from-to patterns (highest priority for explicit)
   const currencyFromToRegex = new RegExp(PATTERNS.currencyFromTo.source, "gi");
