@@ -32,11 +32,23 @@ interface Repair {
   action: string;
 }
 
+/**
+ * The goal-threshold field group, deleted ATOMICALLY at both strip sites below.
+ *
+ * ⚠ ANY FIELD THAT DESCRIBES THE THRESHOLD BELONGS IN HERE, NOT BESIDE IT.
+ * `goal_threshold_frame` (ROADMAP 2.258) was added to the node contract without
+ * joining this group, which left a sweep-fired goal carrying a frame that
+ * described a number the sweep had just removed — breaking the invariant the
+ * rest of the frame work asserts, that the frame never travels without its
+ * threshold. That is CLAUDE.md trap 12 in miniature: a hand-maintained group is
+ * exactly the thing a later field gets added NEXT TO instead of INTO.
+ */
 const THRESHOLD_FIELDS = [
   "goal_threshold",
   "goal_threshold_raw",
   "goal_threshold_unit",
   "goal_threshold_cap",
+  "goal_threshold_frame",
 ] as const;
 
 /**
