@@ -151,6 +151,13 @@ const TITLE_MAX = 80;
 export const WARNING_SIGNS_MAX = 3;
 const BODY_MAX = 300;
 const ACTION_LABEL_MAX = 40;
+/**
+ * Contract max for `action_prompt` (`PHASE3_ACTION_PROMPT_MAX`, schemas
+ * 0.31.0). Equal to `BODY_MAX` by derivation, not by definition — the contract
+ * declares them as separate named constants, so they are kept separate here
+ * too rather than aliased.
+ */
+const ACTION_PROMPT_MAX = 300;
 const TECHNIQUE_MAX = 300;
 
 // Round-4 review: defence-in-depth prose guard. Each Phase 3 block carries
@@ -828,6 +835,16 @@ export function buildCoachingBlocks(
         ...guidanceSignalsForCoachingKind('assumption_check'),
         action_intent: 'confirm_factor' as ActionIntentLiteral,
         action_label: truncate('Confirm this assumption', ACTION_LABEL_MAX),
+        // ROADMAP 2.225 — PRODUCER-AUTHORED, dispatched VERBATIM as the user's
+        // next turn (UI #554). A hardcoded literal like every label above: the
+        // contract forbids the consumer composing one, and forbids falling
+        // back to `action_intent`/`action_label`, so the pill is dark until
+        // this string exists. Imperative and self-contained, because the user
+        // sees it become their own message.
+        action_prompt: truncate(
+          'Help me pressure-test this assumption before I rely on it.',
+          ACTION_PROMPT_MAX,
+        ),
       };
       const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
         block_type: 'coaching',
@@ -836,6 +853,7 @@ export function buildCoachingBlocks(
           { name: 'title', value: candidate.title },
           { name: 'body', value: candidate.body },
           { name: 'action_label', value: candidate.action_label },
+          { name: 'action_prompt', value: candidate.action_prompt },
         ],
       });
       if (block !== null) blocks.push(block);
@@ -873,6 +891,14 @@ export function buildCoachingBlocks(
         ...guidanceSignalsForCoachingKind('calibration_prompt'),
         action_intent: 'start_guided_chat' as ActionIntentLiteral,
         action_label: truncate('Try this prompt', ACTION_LABEL_MAX),
+        // ROADMAP 2.225 — the ONE producer whose prompt is not a fixed
+        // literal, deliberately: the card's whole proposition is "Try THIS
+        // prompt", and the calibration question IS the prompt. Dispatching a
+        // generic stand-in would send something the user never saw, while the
+        // question they DID see sat one line above it. Still
+        // producer-authored (the model wrote it, this producer chose it), and
+        // still verbatim — no templating, no interpolation.
+        action_prompt: truncate(question, ACTION_PROMPT_MAX),
       };
       const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
         block_type: 'coaching',
@@ -881,6 +907,7 @@ export function buildCoachingBlocks(
           { name: 'title', value: candidate.title },
           { name: 'body', value: candidate.body },
           { name: 'action_label', value: candidate.action_label },
+          { name: 'action_prompt', value: candidate.action_prompt },
         ],
       });
       if (block !== null) blocks.push(block);
@@ -1056,6 +1083,11 @@ export function buildStaleRerunCoachingBlock(
     ...guidanceSignalsForCoachingKind('orientation'),
     action_intent: 'rerun_analysis' as ActionIntentLiteral,
     action_label: truncate('Re-run analysis', ACTION_LABEL_MAX),
+    // ROADMAP 2.225 — producer-authored, dispatched verbatim (UI #554).
+    action_prompt: truncate(
+      'Re-run the analysis so the insights match my current decision graph.',
+      ACTION_PROMPT_MAX,
+    ),
   };
   return validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
     block_type: 'coaching',
@@ -1064,6 +1096,7 @@ export function buildStaleRerunCoachingBlock(
       { name: 'title', value: candidate.title },
       { name: 'body', value: candidate.body },
       { name: 'action_label', value: candidate.action_label },
+      { name: 'action_prompt', value: candidate.action_prompt },
     ],
   });
 }

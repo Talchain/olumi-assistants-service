@@ -238,6 +238,57 @@ export function transformNodeToV3(
       ...(node.data.factor_type !== undefined && { factor_type: node.data.factor_type }),
       ...(node.data.uncertainty_drivers !== undefined && { uncertainty_drivers: node.data.uncertainty_drivers }),
     };
+  } else if (node.kind === "goal" && node.goal_baseline != null) {
+    // ROADMAP 2.273 — THE GOAL LIMB of this gate. The branch above builds
+    // `observed_state` only from `data`, which a goal node never carries, so
+    // before this a goal reached the wire with a threshold and a frame but no
+    // `observed_state` AT ALL — ISL's stronger refusal limb
+    // (`observed_state_present=False`, `missing_goal_baseline`), pinned by the
+    // 2.258 characterisation test this PR retires.
+    //
+    // ⚠ `value` IS REQUIRED, and it is NOT a second measurement. ISL's
+    // `ObservedState.value` is a required Pydantic field
+    // (`robustness_v2.py:171`, `Field(...)`) and so is `ObservedStateV3.value`
+    // here, so a baseline-only observed_state cannot reach ISL — it would be
+    // rejected before the conversion it exists to enable. Both fields
+    // therefore carry the SAME single extracted number: the goal metric's
+    // current observed level. That is exactly what each field is documented to
+    // mean (`value` = "current observed value"; `baseline` = "reference for
+    // change-from-baseline"), and at draft time — before any option is
+    // applied — they genuinely coincide. Nothing is invented to fill `value`.
+    //
+    // KNOWN, ACCEPTED CONSEQUENCES — both disclosed rather than discovered
+    // later (adversarial review, PR #787):
+    //
+    // 1. NON-ROOT goal (the normal case): ISL emits
+    //    `GOAL_OBSERVED_VALUE_UNUSED` (robustness_analyzer_v2.py:2735-2754)
+    //    telling us `value` is not used as a base under doctrine B. Correct
+    //    and harmless — `baseline`, the field the conversion actually reads,
+    //    is the one we are here to deliver. Ruled non-blocking (info
+    //    severity, no wrong number); ISL-side suppression is rowed as 2.279.
+    //
+    // 2. ROOT goal (a goal with no parents): ISL DOES consult
+    //    `observed_state.value` as the node's base (:1158-1166, :2686), so
+    //    stamping it shifts that goal's sample base from 0.0 to B. The shift
+    //    is UNIFORM ACROSS OPTIONS — it moves every option's samples by the
+    //    same constant — so comparative verdicts (which option leads, by how
+    //    much) are unchanged. Goal PROBABILITY is unaffected for a different
+    //    reason: a root goal is refused outright at :3182 (`root_goal`,
+    //    "takes its base from observed_state.value, so its samples are not in
+    //    the non-root change-from-origin frame"), so no probability is
+    //    rendered either way. What DOES change is the absolute level of a root
+    //    goal's reported samples and `GOAL_NODE_ROOT_STATIC.base_value` —
+    //    arguably more correct (0.0 was a placeholder for "no observed
+    //    value"), but a change, and named here so it is not mistaken for a
+    //    regression.
+    v3Node.observed_state = {
+      value: node.goal_baseline,
+      baseline: node.goal_baseline,
+      ...(node.goal_threshold_unit != null && { unit: node.goal_threshold_unit }),
+      source: "brief_extraction",
+      ...(node.goal_baseline_raw != null && { raw_value: node.goal_baseline_raw }),
+      ...(node.goal_threshold_cap != null && { cap: node.goal_threshold_cap }),
+    };
   } else if (isFactorData(node.data)) {
     // Controllable factors without value: preserve factor_type and uncertainty_drivers
     // directly on the node. Required by PLoT's graph validator —

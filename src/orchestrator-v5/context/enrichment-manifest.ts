@@ -261,16 +261,28 @@ const R_CEE_PANEL =
  * quietly false for the other two, and nothing could fail, because a rationale
  * is prose that no test compares against the keep-list.
  *
- * Membership derived at CEE `cf10c553` against the COMPLETE
- * `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` (compose.ts:491-538, 12 entries, whole
- * list reviewed — not a grep for the three names):
+ * Membership RE-DERIVED at CEE `125bffa8` against the COMPLETE
+ * `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` (compose.ts:548-649 — declaration at
+ * 548, elements 549-648, closing bracket 649 — 17 entries, whole list
+ * reviewed, not a grep for the three names):
  *   option_comparison, factor_sensitivity, results, robustness,
  *   decision_review, option_comparison_status, conditional_probabilities,
  *   edge_e_values, inference_warnings, confidence_tier, flip_thresholds,
- *   decision_brief.
+ *   decision_brief, factor_evppi, decision_evpi, p_win_sensitivity,
+ *   correlation_model, critiques.
  *
- * That 12 is a DATED derivation, not the current count: the keep-list is 16 as
- * of V7-C slice 1b. The four VOI keys are also transported, but they do NOT
+ * ⚠ THE PRIOR TEXT HERE WAS STALE IN BOTH ITS NUMBERS AND ITS LOCATION, and
+ * said so about itself without ever being fixed: it cited
+ * "compose.ts:491-538, 12 entries" and then conceded in the next sentence
+ * that "the keep-list is 16 as of V7-C slice 1b" — a comment carrying two
+ * different counts, neither of them current, and a line range off by ~57
+ * lines. That is CLAUDE.md trap 12 in its purest form: a hand-maintained
+ * mirror that drifts silently because no test compares prose against the
+ * list. Re-derive at your own tip before relying on this; do not trust the
+ * numbers above simply because they are more recent than the ones they
+ * replaced.
+ *
+ * The four VOI keys are also transported, but they do NOT
  * take this rationale — they carry {@link R_VOI_NOT_COACH_NARRATED}, because
  * "transported to the UI" and "deliberately withheld from the coach on a claim
  * boundary" are different reasons, and collapsing them is the exact mistake

@@ -136,10 +136,26 @@ const SIGNAL_CODE_BY_CARD_KIND: Readonly<Record<CardKind, GuidanceSignalCode>> =
 };
 
 /**
- * coaching_kind → signal_code. Exhaustive over the schema union. `widening`
- * and `strengthen` are mapped for taxonomy-completeness (and to reuse their
- * legacy twins) but have no live V5 emitter today — the four emitted kinds are
- * orientation / bias_signal / assumption_check / calibration_prompt.
+ * coaching_kind → signal_code. Exhaustive over the schema union.
+ *
+ * ⚠ CORRECTED (PR #787 review): this said `widening` AND `strengthen` "have no
+ * live V5 emitter today — the four emitted kinds are orientation /
+ * bias_signal / assumption_check / calibration_prompt". `strengthen` HAS a
+ * live emitter and had one when that sentence was written:
+ * `compose.ts:1030` (`buildLensSurface`) →
+ * `phase3-blocks.ts:1320` (`buildLensSuggestionCoachingBlock`) stamps
+ * `coaching_kind: 'strengthen'` on every lens suggestion. FIVE kinds emit:
+ * orientation, bias_signal, assumption_check, calibration_prompt, strengthen.
+ * Only `widening` is mapped purely for taxonomy-completeness.
+ *
+ * A SEPARATE CENSUS, easily conflated with the one above: of those five, only
+ * THREE carry on-card ACTION fields — assumption_check, calibration_prompt and
+ * the stale-rerun orientation block. `bias_signal`
+ * (`handlers/draft-bias-signal-blocks.ts`) and `strengthen`
+ * (`phase3-blocks.ts:1317-1329`, and see `lens-selector.ts:89`) emit no
+ * `action_intent`/`action_label`/`action_prompt` at all, so they render no
+ * chip. "Emits a block" and "emits an action" are different questions; this
+ * comment previously answered neither correctly.
  */
 const SIGNAL_CODE_BY_COACHING_KIND: Readonly<Record<CoachingKind, GuidanceSignalCode>> = {
   orientation: GUIDANCE_SIGNAL_CODES.STALE_ANALYSIS,

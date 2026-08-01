@@ -184,8 +184,12 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'action_label',
       // schemas 0.31.0 (ROADMAP 2.225): the producer-authored turn text a chip
       // dispatches VERBATIM. Bounded at 300 (PHASE3_ACTION_PROMPT_MAX). CEE is
-      // the declared PRODUCER; this pin is contract-acceptance only — nothing
-      // in this PR emits one.
+      // the declared PRODUCER, and as of this PR it IS one: `assumption_check`,
+      // `calibration_prompt` and the stale-rerun `orientation` block each
+      // author a prompt (phase3-blocks.ts), pinned in
+      // `compose/__tests__/phase3-action-prompt.test.ts`. The lens/`strengthen`
+      // producer deliberately still emits none — it has no action fields at
+      // all under the no-inert-chips rule.
       'action_prompt',
       'block_id',
       'body',

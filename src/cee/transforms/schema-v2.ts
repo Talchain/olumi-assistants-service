@@ -119,6 +119,16 @@ export interface V1Node {
    * extended a member, which is the drift trap 12 exists to forbid.
    */
   goal_threshold_frame?: z.infer<typeof GoalThresholdFrame>;
+  /**
+   * The goal metric's user-stated CURRENT LEVEL (ROADMAP 2.273), normalised
+   * against `goal_threshold_cap` — the same denominator as `goal_threshold`.
+   * Declared here for the same reason as the frame above: `transformNodeToV3`
+   * has to name the field to carry it across, because the transform rebuilds
+   * each node field-by-field and drops anything it does not name.
+   */
+  goal_baseline?: number;
+  /** The stated current level in raw user units. */
+  goal_baseline_raw?: number;
 }
 
 export interface V1Edge {
