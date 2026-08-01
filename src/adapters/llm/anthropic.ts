@@ -15,7 +15,7 @@ import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, 
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAuthoredGoalThreshold } from "./normalisation.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
 import {
@@ -1798,6 +1798,20 @@ export async function draftGraphWithAnthropic(
         .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
         .filter(Boolean)
       : [];
+    // ROADMAP 2.281 — the goal-threshold contract is CEE-minted. Runs BEFORE
+    // normalisation so the degenerate-cap repair below it can never "repair" a
+    // quad that is about to be deleted. DRAFT ONLY: the repair_graph call site
+    // (:2624) deliberately does NOT strip — it runs after Stage 3 has enriched,
+    // where a threshold IS attested and must survive.
+    const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
+    if (strippedGoal.nodeIds.length > 0) {
+      log.info({
+        event: "cee.draft.model_authored_goal_threshold_stripped",
+        node_ids: strippedGoal.nodeIds,
+        fields: strippedGoal.fields,
+        structured_outputs_enabled: structuredOutputsEnabled,
+      }, "Discarded a model-authored goal-threshold contract from the draft — the enricher is the only mint (2.281)");
+    }
     const normalised = normaliseDraftResponse(rawJson);
 
     // Pipeline checkpoint: post_adapter_normalisation (after normaliseDraftResponse)

@@ -69,6 +69,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ANTHROPIC_DRAFT_GRAPH_SCHEMA,
+  ENRICHER_OWNED_GOAL_KEYS,
   buildDraftGraphSchema,
   countOptionalParams,
   RUNAWAY_PRONE_NODE_DATA_KEYS,
@@ -160,8 +161,12 @@ describe("draft grammar — runaway-prone free-text fields are unemittable", () 
     const baseOptional = countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
     const sentOptional = countOptionalParams(buildDraftGraphSchema());
     // The deferred TOP-LEVEL aux keys are all `required`, so they contribute 0
-    // optional params; the whole delta is the node-data keys removed here.
-    expect(baseOptional - sentOptional).toBe(RUNAWAY_PRONE_NODE_DATA_KEYS.length);
+    // optional params. The delta is the node-data keys removed here PLUS the
+    // enricher-owned goal quad removed by v15 (ROADMAP 2.281) — both derived
+    // from their exported lists so this stays arithmetic, not a claim.
+    expect(baseOptional - sentOptional).toBe(
+      RUNAWAY_PRONE_NODE_DATA_KEYS.length + ENRICHER_OWNED_GOAL_KEYS.length,
+    );
   });
 
   it("the deterministic replacement exists and produces a bounded display string", () => {
