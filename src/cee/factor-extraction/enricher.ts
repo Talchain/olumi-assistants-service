@@ -22,7 +22,10 @@ import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { synthesiseDisplayValue } from "./display-value.js";
-import { resolveGoalThresholdCap } from "../../utils/goal-threshold-cap.js";
+import {
+  CEE_GOAL_THRESHOLD_FRAME,
+  resolveGoalThresholdCap,
+} from "../../utils/goal-threshold-cap.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -695,6 +698,12 @@ export async function enrichGraphWithFactorsAsync(
           goal_threshold_raw: rawValue,
           goal_threshold_unit: factor.unit ?? "count",
           goal_threshold_cap: cap,
+          // ROADMAP 2.258 — attest the FRAME beside the number. A CODE
+          // CONSTANT: the arithmetic three lines up is `raw / cap`, an
+          // absolute LEVEL on the metric's own scale, so `'level'` is true
+          // here by construction and is never derived from `factor`, from the
+          // brief, or from anything a model wrote.
+          goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
         };
 
         goalThresholdsSet++;

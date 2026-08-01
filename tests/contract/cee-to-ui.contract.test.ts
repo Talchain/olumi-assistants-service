@@ -208,8 +208,8 @@ describe("CEE→UI: keep-list membership pins", () => {
     expect(CEE_UI_ENRICHMENT_KEEP_LIST).toContain("decision_brief");
   });
 
-  it("keep-list is exactly the CEE compose.ts P0B list (16 keys)", () => {
-    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(16);
+  it("keep-list is exactly the CEE compose.ts P0B list (17 keys)", () => {
+    expect(CEE_UI_ENRICHMENT_KEEP_LIST).toHaveLength(17);
   });
 });
 
@@ -535,6 +535,18 @@ const WITHHELD_RULING_BY_TRANSPORT_KEY: ReadonlyMap<string, WithheldRuling> =
     ["decision_evpi", "pass_through"],
     ["p_win_sensitivity", "pass_through"],
     ["correlation_model", "pass_through"],
+    // schemas 0.31.0 — `critiques`. `projected`, and this ruling had to be
+    // DERIVED rather than inherited from the VOI family beside it: the 0.30.0
+    // entries are `pass_through` precisely BECAUSE no field of those shapes
+    // names an option. A critique does — `affected_option_ids` is raw option
+    // identity, and S-bucket copy resolves an option LABEL into its prose. So
+    // the withheld turn must change the row, not forward it.
+    //
+    // Projected rather than DROPPED, deliberately: the claim being withheld is
+    // "which option leads". "This option changes nothing yet" is a different
+    // claim and is the most useful thing still true on such a turn — the same
+    // anti-over-suppression ruling that keeps per-option win_probability.
+    ["critiques", "projected"],
   ]);
 
 describe("CEE→UI: every transport key has an explicit withheld ruling", () => {
@@ -550,6 +562,18 @@ describe("CEE→UI: every transport key has an explicit withheld ruling", () => 
   }
   probe.decision_brief = { headline: "X currently leads", brief_id: "keep-me" };
   probe.robustness = { leading_option_id: "opt_a", fragile_edges: [] };
+  // `critiques` is an ARRAY of rows, not a blob — the generic `{ probe_marker }`
+  // above cannot exercise it. Carries BOTH an option-identity member (removed)
+  // and an innocent one (kept), so it comes back changed-but-present.
+  probe.critiques = [
+    {
+      code: "EMPTY_INTERVENTIONS",
+      severity: "warning",
+      user_message: "Option 'Bravo' does not change anything yet.",
+      affected_option_ids: ["opt_b"],
+      affected_node_ids: ["n1"],
+    },
+  ];
 
   const projectedProbe = projectTransportEnrichmentForWithheldClaim(probe) ?? {};
 

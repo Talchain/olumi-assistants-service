@@ -47,7 +47,10 @@ import type { AddConstraintHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GoalConstraintSchema, type GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { resolveGoalThresholdCap } from '../../../utils/goal-threshold-cap.js';
+import {
+  CEE_GOAL_THRESHOLD_FRAME,
+  resolveGoalThresholdCap,
+} from '../../../utils/goal-threshold-cap.js';
 import { hasReductionByFraming } from '../../../utils/reduction-framing.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
@@ -604,6 +607,11 @@ export function createAddConstraintHandler(): HandlerFn {
             if (cap !== null) {
               goalNode.goal_threshold_cap = cap;
               goalNode.goal_threshold = params.value / cap; // model units (0–1)
+              // ROADMAP 2.258 — attest the FRAME beside the number, on the
+              // same branch that mints it so the two can never diverge. A CODE
+              // CONSTANT: the line above divides a user-units target by a cap,
+              // which is an absolute LEVEL by construction.
+              goalNode.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
             }
           }
         }

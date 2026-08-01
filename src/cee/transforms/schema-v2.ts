@@ -105,6 +105,13 @@ export interface V1Node {
   goal_threshold_unit?: string;
   /** Normalisation denominator */
   goal_threshold_cap?: number;
+  /**
+   * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
+   * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`. Declared here
+   * so `transformNodeToV3` can carry it across; without it the V1→V3 copy does
+   * not typecheck and the frame would have to travel as an untyped rider.
+   */
+  goal_threshold_frame?: 'level' | 'delta';
 }
 
 export interface V1Edge {

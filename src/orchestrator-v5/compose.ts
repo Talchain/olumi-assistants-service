@@ -54,6 +54,8 @@ import {
   // free; a local literal here would silently keep cloning it.
   WITHHELD_DROPPED_ENRICHMENT_BLOBS,
 } from './compose/withheld-claim-projection.js';
+import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
+import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
@@ -622,6 +624,28 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   'decision_evpi',
   'p_win_sensitivity',
   'correlation_model',
+  // schemas 0.31.0 (critiques transport, M3 step 1) — the model's own critiques
+  // of the run. The producer has been real at BOTH ends for months: PLoT emits
+  // populated rows (preflight warnings, normalisation info, ISL structured 422
+  // blockers, temporal/constraint filters) and CEE already buckets them with
+  // Paul-approved display copy dated 2026-04-30. The death was this one key's
+  // absence from THIS list — the strip loop dropped it silently, so a
+  // fully-built pipeline ended one hop before the browser.
+  //
+  // ⚠ TRANSPORT IS LICENSED HERE; SANITISATION IS NOT WAIVED, and unlike every
+  // other entry on this list `critiques` is NOT shipped verbatim. The keep-list
+  // licenses the KEY, not the ROW: `message` is internal/debug wording (it
+  // carries raw node ids on the staging capture) and `user_message` is its
+  // display-safe twin, so the row is PROJECTED per-critique by
+  // `projectCritiquesForTransport` — D-bucket dropped, `message` withheld,
+  // `user_message` shipped, `affected_option_ids` gated on the withheld-claim
+  // check. Forwarding the row verbatim would leak internal wording and
+  // leading-option identity in one step.
+  //
+  // The projection runs HERE rather than leaning on the response-finaliser's
+  // backstop because that backstop is bypassed wholesale when
+  // CEE_TURN_DEBUG_ENABLED is on — this seam is debug-independent.
+  'critiques',
 ] as const;
 
 // POST-P0 COACHING-CONTRACT FOLLOW-UP (do not silently drop from the product
@@ -824,9 +848,32 @@ export function toSafeTransportEnrichment(
     // keep-list member is a dropped blob yielded `undefined` before (build it,
     // then drop it, then collapse) and yields `undefined` now (never build it).
     if (willProjectForWithheldClaim && WITHHELD_DROPPED_ENRICHMENT_BLOBS.includes(key)) continue;
+    if (src[key] === undefined) continue;
+    // `critiques` is the one keep-list entry that is PROJECTED rather than
+    // forwarded (schemas 0.31.0). The projection is unconditional — it runs on
+    // every turn, withheld or not, because its first duty (drop D-bucket rows,
+    // withhold internal `message` wording) is a SANITISATION duty that has
+    // nothing to do with claim safety. The second duty — gating option
+    // identity — reads the same withheld fact the caller already derived.
+    if (key === 'critiques') {
+      // ⚠ NOTE WHAT IS *NOT* READ HERE: `willProjectForWithheldClaim`. That
+      // boolean answers "will the withheld projection run next?", and its own
+      // docstring above is a warning about giving a parameter a second meaning
+      // a caller could violate. Claim-gating therefore lives where the rest of
+      // the withheld policy lives — `projectTransportEnrichmentForWithheldClaim`
+      // — and this seam performs only the UNCONDITIONAL sanitisation duty.
+      const projected = projectCritiquesForTransport(
+        src[key],
+        // The label resolver needs only the enrichment: `option_comparison`
+        // carries the id→label map the S-bucket copy resolves against.
+        { graph: null, analysisReady: null, enrichment: src as LabelResolverContext['enrichment'] },
+      );
+      if (projected !== undefined && projected.length > 0) out[key] = projected;
+      continue;
+    }
     // Shallow keep-list at the top level PLUS a deep strip of internal/debug
     // carriers inside each kept field, so the keep-list is not merely shallow.
-    if (src[key] !== undefined) out[key] = stripInternalKeysDeep(src[key]);
+    out[key] = stripInternalKeysDeep(src[key]);
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

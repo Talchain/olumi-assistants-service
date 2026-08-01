@@ -207,6 +207,16 @@ export function transformNodeToV3(
     ...(node.goal_threshold_raw != null && { goal_threshold_raw: node.goal_threshold_raw }),
     ...(node.goal_threshold_unit != null && { goal_threshold_unit: node.goal_threshold_unit }),
     ...(node.goal_threshold_cap != null && { goal_threshold_cap: node.goal_threshold_cap }),
+    // ROADMAP 2.258 — the frame rides across the V1→V3 transform with its
+    // threshold. This copy is REQUIRED, not decorative: the transform rebuilds
+    // the node field-by-field, so a `goal_threshold_frame` minted on the V1
+    // draft graph is dropped here unless it is named. Carried only when the
+    // threshold itself is present, so the frame can never travel without the
+    // number it describes.
+    ...(node.goal_threshold != null &&
+      node.goal_threshold_frame != null && {
+        goal_threshold_frame: node.goal_threshold_frame,
+      }),
   };
 
   // Transform data to observed_state (only if it's FactorData with value defined)
