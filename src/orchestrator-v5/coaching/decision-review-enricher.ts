@@ -47,6 +47,14 @@ import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
 import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels.js';
+// ROADMAP 2.228 F1 — the SINGLE owner of the parse for PLoT's live top-level
+// `enrichment.flip_thresholds[]` shape, shared with the coach context path so
+// the two surfaces cannot drift into disagreeing about the same rows.
+import {
+  readTopLevelFlipRows,
+  flipRowAttestsNonDisplayScale,
+  type TopLevelFlipRow,
+} from '../context/flip-threshold-rows.js';
 // M1 (Codex r2 pre-merge review): the option-result source precedence is now
 // single-sourced so all four winner-derivation surfaces agree current-first.
 // `readResultsArraySources` is re-exported below (as the shared reader) so this
@@ -743,7 +751,8 @@ function buildInvokeInput(
   const labelMap = buildNodeLabelMap(graph);
   const unitMap = buildNodeUnitMap(graph);
 
-  const flipThresholdData = readFlipThresholdData(enrichment, labelMap, unitMap);
+  const flipDerivation = readFlipThresholdData(enrichment, labelMap, unitMap);
+  const flipThresholdData = flipDerivation.rows;
   const islResults = readIslResults(enrichment, labelMap);
   const dcResult = normaliseDeterministicCoachingFromM1(enrichment);
   const deterministicCoaching = dcResult.value;
@@ -756,6 +765,9 @@ function buildInvokeInput(
   const meta: DecisionReviewMeta = {
     input_shape_version: 'v5-normalised',
     flip_threshold_count: flipThresholdData?.length ?? 0,
+    flip_threshold_source: flipDerivation.source,
+    flip_no_effect_count: flipDerivation.noEffectCount,
+    flip_scale_refused_count: flipDerivation.scaleRefusedCount,
     factor_sensitivity_count: countArray(islResults.factor_sensitivity),
     fragile_edge_count: countArray(islResults.fragile_edges),
     model_critique_count: dcResult.model_critique_count,
@@ -1302,42 +1314,119 @@ function normaliseFactorSensitivity(
   return out;
 }
 
+/** What {@link readFlipThresholdData} found, and where it found it. */
+interface FlipThresholdDerivation {
+  readonly rows: ReadonlyArray<Record<string, unknown>> | undefined;
+  readonly source: 'top_level' | 'nested_legacy' | 'none';
+  readonly noEffectCount: number;
+  readonly scaleRefusedCount: number;
+}
+
 /**
- * Derive flip_threshold_data from per-result factor_sensitivity entries.
- * PLoT does not ship a top-level `flip_threshold_data` field; the data
- * exists nested in `results[].factor_sensitivity[].flip_threshold`. This
- * delegates to {@link collectFactorFlipEntries} (shared with
- * analysis-compact.ts) for the read + filter + dedupe step, then projects
- * to the prompt's input shape.
+ * Derive `flip_threshold_data` — the decision_review prompt's flip input.
  *
- * Direction is value-delta-driven (`flip_value > current_value` →
- * `'increase'`) — never elasticity-sign-driven. See FactorFlipEntry doc.
+ * ⚠ ROADMAP 2.228 F1 — THIS FUNCTION USED TO READ A SHAPE NOBODY EMITS.
+ * It delegated exclusively to {@link collectFactorFlipEntries}, which walks
+ * `results[].factor_sensitivity[].flip_threshold | flip_value`. Those keys
+ * have zero occurrences in the producer, and `analysis-signals.ts`'s own
+ * header had already recorded why: *"the per-option derivation inside
+ * `compactAnalysis` is structurally empty on staging, where `results[]` never
+ * carries `factor_sensitivity`"*. The result was silent and total —
+ * `flip_threshold_data` was `undefined` on every live turn,
+ * `enrichment.decision_review.flip_thresholds` came back present-and-empty,
+ * and no flip card ever fired. The LIVE shape is the TOP-LEVEL
+ * `enrichment.flip_thresholds[]` array the coach path has been reading all
+ * along.
+ *
+ * PRECEDENCE — the top-level array is AUTHORITATIVE WHEN PRESENT, including
+ * when it is present and empty, or present and yields no forwardable row.
+ * There is no "fall back if it produced nothing": a producer that shipped the
+ * array has already answered the question, and re-answering it from a dead
+ * shape is how a stale number outlives the run that produced it. The legacy
+ * branch is reached ONLY when the key is absent entirely, and its use is
+ * recorded on `_meta.flip_threshold_source` so its real-world frequency is a
+ * measurement rather than an assumption.
+ *
+ * FILTER-VS-FORWARD, decided explicitly: rows the producer attested as having
+ * no flip in range (`flip_value: null`, `flip_reason:
+ * 'no_effect_within_bounds'`) are FILTERED OUT, not forwarded.
+ *   - Both live prompt sources already instruct the model to ignore them
+ *     ("Only emit flip_thresholds for entries where flip_value is non-null",
+ *     `src/prompts/defaults.ts` v11 and `Prompts/canonical/decision_review.txt`),
+ *     so forwarding buys no honest sentence today — it would only consume the
+ *     15-entry section budget.
+ *   - Worse, it would inflate `_meta.flip_threshold_count`, turning the one
+ *     signal that answers *"did this run have usable flip data?"* into a
+ *     false positive on exactly the runs (all three live staging rows are
+ *     `no_effect_within_bounds`) where the answer is no.
+ *   - Teaching the prompt to SAY "no tipping point found in range" is a
+ *     genuine improvement, but it is a prompt change: served from prompt
+ *     admin, version-pinned, drift-gated, and subject to the multi-instance
+ *     cache TTL. It does not belong inside a data-path fix, and shipping the
+ *     data without the prompt would be a capability nobody can observe.
+ * The count is preserved on `_meta.flip_no_effect_count` so that follow-up
+ * lane has its evidence without re-deriving it.
+ *
+ * SCALE — a row that positively attests a non-display `value_scale` is
+ * REFUSED and counted. The prompt is told these values are user units and
+ * quotes them with the unit appended, so an uninverted model-scale `0.8625`
+ * becomes the string `"0.8625 GBP"` while the chip path renders `£34,500`
+ * from the same factor: two numbers, one factor. This layer holds no `cap`
+ * and cannot invert, so it fails closed. An ABSENT `value_scale` is admitted
+ * — absence is pre-contract data, not a claim, and refusing it would delete
+ * the prompt's documented unitless-probability case.
+ *
+ * Direction is value-delta-driven (`flip_value >= current_value` →
+ * `'increase'`) on both branches — never elasticity-sign-driven, and never
+ * copied from the row's own `direction` string.
  */
 function readFlipThresholdData(
   enrichment: Record<string, unknown>,
   graphNodeLabels: Map<string, string>,
   graphNodeUnits: Map<string, string>,
-): ReadonlyArray<Record<string, unknown>> | undefined {
+): FlipThresholdDerivation {
+  const project = (
+    row: Pick<TopLevelFlipRow, 'factor_id' | 'factor_label' | 'current_value' | 'flip_value' | 'direction' | 'unit'>,
+  ): Record<string, unknown> => {
+    const out: Record<string, unknown> = {
+      factor_id: row.factor_id,
+      factor_label: row.factor_label,
+      current_value: row.current_value,
+      flip_value: row.flip_value,
+      direction: row.direction,
+    };
+    if (row.unit !== null) out.unit = row.unit;
+    return out;
+  };
+
+  if (Array.isArray(enrichment.flip_thresholds)) {
+    const rows = readTopLevelFlipRows(enrichment, graphNodeLabels, graphNodeUnits);
+    const noEffectCount = rows.filter((r) => r.kind === 'attested_no_flip').length;
+    const pairs = rows.filter((r) => r.kind === 'flip_pair');
+    const kept = pairs.filter((r) => !flipRowAttestsNonDisplayScale(r));
+    return {
+      rows: kept.length > 0 ? kept.map(project) : undefined,
+      source: 'top_level',
+      noEffectCount,
+      scaleRefusedCount: pairs.length - kept.length,
+    };
+  }
+
+  // Legacy branch — reached only when PLoT shipped no `flip_thresholds` key
+  // at all. `collectFactorFlipEntries` is still the shared reader for this
+  // shape (analysis-compact.ts's V4 compact path is its other consumer), so
+  // nothing here re-implements the parse.
   const entries = collectFactorFlipEntries(
     enrichment as V2RunResponseEnvelope,
     graphNodeLabels,
     graphNodeUnits,
   );
-  if (entries.length === 0) return undefined;
-
-  return entries.map((entry) => {
-    const out: Record<string, unknown> = {
-      factor_id: entry.factor_id,
-      factor_label: entry.factor_label,
-      current_value: entry.current_value,
-      flip_value: entry.flip_value,
-      direction: entry.direction,
-    };
-    if (entry.unit !== null) {
-      out.unit = entry.unit;
-    }
-    return out;
-  });
+  return {
+    rows: entries.length > 0 ? entries.map(project) : undefined,
+    source: entries.length > 0 ? 'nested_legacy' : 'none',
+    noEffectCount: 0,
+    scaleRefusedCount: 0,
+  };
 }
 
 // ============================================================================

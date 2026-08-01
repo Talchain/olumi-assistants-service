@@ -26,6 +26,10 @@ import {
   flipThresholdCardBody,
   readFlipThresholdCardRow,
 } from '../compose/flip-threshold-card-row.js';
+// ROADMAP 2.228 F1 — `readRowValueScale` used to be a private copy here. It is
+// now owned by the shared top-level-row module so this path and the
+// decision_review enricher resolve `value_scale` identically by construction.
+import { readRowValueScale } from './flip-threshold-rows.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 
 /** Cap for evidence-gap signals carried into the projection. */
@@ -312,22 +316,6 @@ function readLicensedDisplay(value: unknown): string | null {
   const trimmed = value.trim();
   if (trimmed.length === 0 || trimmed.length > FLIP_DISPLAY_MAX_CHARS) return null;
   return trimmed;
-}
-
-/**
- * Resolve PLoT's `value_scale` from a top-level flip row. Mirrors
- * `../compose/flip-proposal.ts:readValueScale` — the contract permits the signal
- * at the row top level, and the current PLoT build nests it under
- * `margin_sensitivity`. Top level wins. Null when neither is a string.
- */
-function readRowValueScale(row: Record<string, unknown>): string | null {
-  if (typeof row.value_scale === 'string') return row.value_scale;
-  const ms = row.margin_sensitivity;
-  if (ms !== null && typeof ms === 'object' && !Array.isArray(ms)) {
-    const nested = (ms as Record<string, unknown>).value_scale;
-    if (typeof nested === 'string') return nested;
-  }
-  return null;
 }
 
 /**

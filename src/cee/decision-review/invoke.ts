@@ -48,6 +48,38 @@ export interface DecisionReviewMeta {
   readonly input_shape_version: 'v5-normalised';
   /** Number of populated entries on flip_threshold_data after derivation. */
   readonly flip_threshold_count: number;
+  /**
+   * ROADMAP 2.228 F1 — WHICH enrichment shape the flip rows came from.
+   *   `top_level`     — PLoT's live `enrichment.flip_thresholds[]`.
+   *   `nested_legacy` — the historical `results[].factor_sensitivity[]
+   *                     .flip_threshold` shape, used ONLY when the top-level
+   *                     key is absent entirely.
+   *   `none`          — neither shape yielded a row.
+   * Recorded rather than inferred so the legacy branch's real-world frequency
+   * is a measurement, not an assumption — it is the evidence a later lane
+   * needs before deleting that branch. Internal observability only; never
+   * reaches the user message.
+   */
+  readonly flip_threshold_source: 'top_level' | 'nested_legacy' | 'none';
+  /**
+   * ROADMAP 2.228 F1 — top-level rows the producer explicitly attested as
+   * having NO flip inside the tested range (`flip_value: null` with
+   * `flip_reason: 'no_effect_within_bounds'`). These are deliberately NOT
+   * forwarded to the prompt (see `readFlipThresholdData` in
+   * decision-review-enricher.ts for the filter-vs-forward decision), so this
+   * count is the only place the distinction between "the producer found
+   * nothing" and "the producer said nothing" survives.
+   */
+  readonly flip_no_effect_count: number;
+  /**
+   * ROADMAP 2.228 F1 — flip PAIRS refused because the row positively attested
+   * a non-display `value_scale` (`'model'`, or an unrecognised token). Such a
+   * value cannot be quoted with its unit without producing the two-numbers
+   * defect ("0.8625 GBP" from the prompt vs "£34,500" from the chip path), and
+   * this layer holds no `cap` with which to invert it. Fail-closed, counted
+   * loudly.
+   */
+  readonly flip_scale_refused_count: number;
   /** Number of populated entries on isl_results.factor_sensitivity. */
   readonly factor_sensitivity_count: number;
   /** Number of populated entries on isl_results.fragile_edges. */
