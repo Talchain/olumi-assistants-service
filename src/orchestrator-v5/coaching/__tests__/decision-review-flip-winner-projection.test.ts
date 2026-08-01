@@ -27,6 +27,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildInvokeInputForTests } from '../decision-review-enricher.js';
+import { buildDecisionReviewUserMessage } from '../../../cee/decision-review/invoke.js';
+import { buildSlices } from '../../../cee/decision-review/decompose.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
@@ -131,6 +133,24 @@ describe('2.267 D-2 part 1 — the flip winner reaches the decision_review promp
     const row = input.flip_threshold_data![0] as Record<string, unknown>;
     expect(row.alternative_winner_id).toBe('opt_bristol');
     expect('alternative_winner_label' in row).toBe(false);
+  });
+
+  it('the winner reaches the PROMPT BYTES, on both the monolith and the decomposed path', () => {
+    // The projection is only the first hop. Two further rebuilds sit between it
+    // and the model — `buildDecisionReviewUserMessage`'s FLIP_THRESHOLD_DATA
+    // section and `buildSlices`' R4 slice — and BOTH are spreads today. Assert
+    // the bytes, not the object: the whole defect was a rebuild that dropped a
+    // key, and a third one would reproduce D-2 with this test file still green.
+    const input = project();
+    const userMessage = buildDecisionReviewUserMessage(input, null);
+    expect(userMessage).toContain('<FLIP_THRESHOLD_DATA>');
+    expect(userMessage).toContain('"alternative_winner_id": "opt_bristol"');
+    expect(userMessage).toContain('"alternative_winner_label": "Expand Existing Bristol Site"');
+
+    const { ctx } = buildSlices(input);
+    expect(JSON.stringify(ctx.reviewInput.flip_threshold_data)).toContain(
+      '"alternative_winner_label":"Expand Existing Bristol Site"',
+    );
   });
 
   it('attested no-flip rows are still filtered out, winner fields or not (2.228 F1 unchanged)', () => {
