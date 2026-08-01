@@ -55,29 +55,47 @@ export interface DecisionReviewMeta {
    *                     .flip_threshold` shape, used ONLY when the top-level
    *                     key is absent entirely.
    *   `none`          — neither shape yielded a row.
-   * Recorded rather than inferred so the legacy branch's real-world frequency
-   * is a measurement, not an assumption — it is the evidence a later lane
-   * needs before deleting that branch. Internal observability only; never
-   * reaches the user message.
+   *
+   * ⚠ THIS IS A TRIPWIRE, NOT A SAMPLE. An earlier revision of this comment
+   * called it evidence of the legacy branch's "real-world frequency"; that
+   * framing is WITHDRAWN. PLoT's Tier-B always-emit contract ships
+   * `flip_thresholds` as an array unconditionally, so the legacy branch is
+   * reachable only for an envelope the contract forbids and this field should
+   * read `'top_level'` on 100% of live turns. A single `'nested_legacy'` is a
+   * contract violation to investigate, never a data point to average.
+   *
+   * (That contract is a cross-repo claim, sourced from the #784 adversarial
+   * review at PLoT tip `29703ee` and NOT re-derived in this repo — which is
+   * precisely why the label exists: it is the thing that would refute it.)
+   *
+   * Internal observability only; never reaches the user message.
    */
   readonly flip_threshold_source: 'top_level' | 'nested_legacy' | 'none';
   /**
-   * ROADMAP 2.228 F1 — top-level rows the producer explicitly attested as
-   * having NO flip inside the tested range (`flip_value: null` with
-   * `flip_reason: 'no_effect_within_bounds'`). These are deliberately NOT
-   * forwarded to the prompt (see `readFlipThresholdData` in
+   * ROADMAP 2.228 F1 — top-level rows the producer explicitly ATTESTED as
+   * having no flip (`flip_value: null` plus a reason that satisfies
+   * `isAttestedNoFlipReason`, which owns that vocabulary — the tokens are
+   * deliberately NOT enumerated here, because a second copy of an open list is
+   * the mirror this predicate was created to remove). These are deliberately
+   * NOT forwarded to the prompt (see `readFlipThresholdData` in
    * decision-review-enricher.ts for the filter-vs-forward decision), so this
    * count is the only place the distinction between "the producer found
    * nothing" and "the producer said nothing" survives.
    */
   readonly flip_no_effect_count: number;
   /**
-   * ROADMAP 2.228 F1 — flip PAIRS refused because the row positively attested
-   * a non-display `value_scale` (`'model'`, or an unrecognised token). Such a
-   * value cannot be quoted with its unit without producing the two-numbers
-   * defect ("0.8625 GBP" from the prompt vs "£34,500" from the chip path), and
-   * this layer holds no `cap` with which to invert it. Fail-closed, counted
-   * loudly.
+   * ROADMAP 2.228 F1 — flip PAIRS refused by
+   * `flipRowScaleUnsafeForPromptUnits`, which owns the full rule and its
+   * evidence. Not restated here: the predicate refuses on TWO grounds (a
+   * positively-attested non-display `value_scale`, AND an absent scale on a
+   * row that carries a unit with a value inside the normalised band), and an
+   * enumeration here would go stale the moment that rule is refined — as this
+   * comment already did once.
+   *
+   * The hazard in one line: such a value cannot be quoted with its unit
+   * without producing the two-numbers defect ("0.8625 GBP" from the prompt vs
+   * "£34,500" from the chip path), and this layer holds no `cap` with which to
+   * invert it. Fail-closed, counted loudly.
    */
   readonly flip_scale_refused_count: number;
   /** Number of populated entries on isl_results.factor_sensitivity. */
