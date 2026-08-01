@@ -74,11 +74,42 @@ export function truncateCardProse(s: string, max: number): string {
   return `${s.slice(0, max - 1).trimEnd()}…`;
 }
 
+/**
+ * Bound on a producer-authored display string. A string of arbitrary length
+ * must not be able to move the display-analysis char budget.
+ *
+ * ROADMAP 2.267 — MOVED HERE from `../context/analysis-signals.ts`, which
+ * re-exports it so its consumers keep their import stable. It moved because
+ * the display strings now have TWO readers: the licence (which asks whether the
+ * user saw the digits) and {@link flipThresholdFallbackBody} (which PUTS them
+ * on the card when the narrative is withheld). Two readers of one shape is
+ * exactly the condition this module exists to serve.
+ */
+export const FLIP_DISPLAY_MAX_CHARS = 40;
+
 /** A `decision_review.flip_thresholds[]` row that PASSES the card's row-shape gate. */
 export interface FlipThresholdCardRow {
   readonly factor_id: string;
   readonly factor_label: string;
   readonly narrative: string;
+  /**
+   * The producer's display strings, bounded and trimmed — or null when the row
+   * carries none that is usable.
+   *
+   * ⚠ THESE ARE NOT PART OF EXIT 1. A row with no usable display string still
+   * PASSES the row-shape gate and still produces a card, exactly as before;
+   * these fields only tell a consumer what it may quote. Making them required
+   * would silently narrow the card gate and delete cards that ship today.
+   */
+  readonly current_display: string | null;
+  readonly flip_display: string | null;
+}
+
+function readLicensedDisplay(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > FLIP_DISPLAY_MAX_CHARS) return null;
+  return trimmed;
 }
 
 /**
@@ -96,7 +127,57 @@ export function readFlipThresholdCardRow(raw: unknown): FlipThresholdCardRow | n
   const factorLabel = typeof entry.factor_label === 'string' ? entry.factor_label.trim() : '';
   const narrative = typeof entry.narrative === 'string' ? entry.narrative.trim() : '';
   if (factorId.length === 0 || factorLabel.length === 0 || narrative.length === 0) return null;
-  return { factor_id: factorId, factor_label: factorLabel, narrative };
+  return {
+    factor_id: factorId,
+    factor_label: factorLabel,
+    narrative,
+    current_display: readLicensedDisplay(entry.current_display),
+    flip_display: readLicensedDisplay(entry.flip_display),
+  };
+}
+
+/**
+ * ROADMAP 2.267 (D-2) — the NON-NAMING card body, used when the option-naming
+ * guard refuses the LLM's narrative.
+ *
+ * WHY THIS EXISTS. The witnessed defect (`witness-2265-targeted-flip.md` §4)
+ * is a card that named `the Status Quo` while the row it was built from
+ * attested `opt_bristol`. The card must not ship that sentence — but dropping
+ * the card deletes the only dock surface a flip has, so the remedy is to keep
+ * the card and lose the NAME, which is the one part of the sentence that was
+ * never attested.
+ *
+ * ⚠ THE DIGITS ARE DELIBERATELY PRESERVED, AND THAT IS A CORRECTNESS
+ * REQUIREMENT, NOT A NICETY. The coach's display LICENCE
+ * (`../context/analysis-signals.ts:deriveFlipDisplayLicences`) grants the coach
+ * permission to speak these digits on the strength of "the card put them on the
+ * user's screen", and it models the card body as
+ * {@link flipThresholdCardBody}`(narrative)` — it cannot see this guard (it has
+ * no graph). A digit-free fallback would therefore leave the licence GRANTED
+ * while the digits vanished from the screen: the coach would quote a number the
+ * user never saw. Building the fallback out of the row's OWN display strings
+ * keeps the licence's conclusion true in both branches by construction.
+ *
+ * When either display string is absent the licence is never granted in the
+ * first place (that function `continue`s on a null display), so the
+ * display-free sentence below cannot strand a licence either.
+ *
+ * The prose is not invented vocabulary: every clause below is byte-present in a
+ * card that shipped on the live wire on 2026-08-01 — run B's card reads
+ * *"If Operational Readiness Level increases from 50% to 77%, the leading
+ * option would change."* So it is already proven to survive the forbidden-phrase
+ * guard and the terminology rewrite.
+ */
+export function flipThresholdFallbackBody(
+  factorLabel: string,
+  currentDisplay: string | null,
+  flipDisplay: string | null,
+): string {
+  const body =
+    currentDisplay !== null && flipDisplay !== null
+      ? `If ${factorLabel} moves from ${currentDisplay} to ${flipDisplay}, the leading option would change.`
+      : `If ${factorLabel} moves far enough, the leading option would change.`;
+  return truncateCardProse(body, FLIP_THRESHOLD_CARD_BODY_MAX);
 }
 
 /**

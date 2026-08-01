@@ -59,6 +59,40 @@ export interface TopLevelFlipRow {
   readonly value_scale: string | null;
   readonly flip_reason: string | null;
   readonly kind: 'flip_pair' | 'attested_no_flip' | 'unusable';
+  /**
+   * ROADMAP 2.267 — WHICH option PLoT attests would lead once the factor
+   * crosses `flip_value`. The IDENTITY, trimmed, or null when the row names
+   * none (every `attested_no_flip` row ships it as null).
+   *
+   * This field existed on the wire for the whole of this module's life and was
+   * not read: the decision_review prompt projection is a field-by-field
+   * rebuild, and D-2 (`witness-2265-targeted-flip.md` §4) is what that costs —
+   * the model was asked which option takes over and given no field that says
+   * so, so on run A it filled the gap from the `fragile_edges` winner channel
+   * and named an option the row contradicts.
+   */
+  readonly alternative_winner_id: string | null;
+  /**
+   * The SAFE DISPLAY NAME for {@link alternative_winner_id} — null when there is
+   * nothing we may print, which is NOT the same as "no winner".
+   *
+   * Two ways it is null even though an identity exists:
+   *   - no label on the row at all;
+   *   - the label ECHOES the id. PLoT's `resolveLabel` returns
+   *     `option?.label ?? optionId`, so `label === id` is the producer saying
+   *     *"I could not resolve this"*, and printing it would leak an internal
+   *     token into user prose.
+   * And an identity-free row is never nameable: a label alone does not
+   * establish which option the producer meant.
+   *
+   * ⚠ This is the rule `../compose/flip-proposal.ts:resolveAlternativeWinner`
+   * already encodes for the CHIP path's sibling shape (`FlipEntry`). That is a
+   * second statement of one rule and it is deliberate for exactly the reason
+   * this file's header gives for `readValueScale`'s third copy: flip-proposal
+   * reads rows it selects itself, and consolidating it is a separate change
+   * with its own blast radius. If you are touching either, take both.
+   */
+  readonly alternative_winner_label: string | null;
 }
 
 /**
@@ -138,6 +172,25 @@ function readLabel(entry: Record<string, unknown>): string | null {
     if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate;
   }
   return null;
+}
+
+/**
+ * Resolve the row's attested alternative winner: the identity, plus a display
+ * name only when one is safe to print. See {@link
+ * TopLevelFlipRow.alternative_winner_label} for the two null cases and why the
+ * id — never the label — is the identity.
+ */
+function readAlternativeWinner(entry: Record<string, unknown>): {
+  id: string | null;
+  label: string | null;
+} {
+  const id = typeof entry.alternative_winner_id === 'string' ? entry.alternative_winner_id.trim() : '';
+  if (id.length === 0) return { id: null, label: null };
+  const rawLabel =
+    typeof entry.alternative_winner_label === 'string'
+      ? entry.alternative_winner_label.trim()
+      : '';
+  return { id, label: rawLabel.length > 0 && rawLabel !== id ? rawLabel : null };
 }
 
 /**
@@ -293,6 +346,8 @@ export function readTopLevelFlipRows(
         ? entry.unit
         : graphNodeUnits?.get(factorId) ?? null;
 
+    const winner = readAlternativeWinner(entry);
+
     out.push({
       factor_id: factorId,
       factor_label: readLabel(entry) ?? graphNodeLabels?.get(factorId) ?? factorId,
@@ -303,6 +358,8 @@ export function readTopLevelFlipRows(
       value_scale: readRowValueScale(entry),
       flip_reason: flipReason,
       kind,
+      alternative_winner_id: winner.id,
+      alternative_winner_label: winner.label,
     });
   }
 
