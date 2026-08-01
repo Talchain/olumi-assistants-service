@@ -232,10 +232,6 @@ export const TelemetryEvents = {
   CeeTeamPerspectivesSucceeded: "cee.team_perspectives.succeeded",
   CeeTeamPerspectivesFailed: "cee.team_perspectives.failed",
 
-  CeeKeyInsightRequested: "cee.key_insight.requested",
-  CeeKeyInsightSucceeded: "cee.key_insight.succeeded",
-  CeeKeyInsightFailed: "cee.key_insight.failed",
-
   CeeElicitBeliefRequested: "cee.elicit_belief.requested",
   CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
   CeeElicitBeliefFailed: "cee.elicit_belief.failed",
@@ -251,10 +247,6 @@ export const TelemetryEvents = {
   CeeEdgeFunctionRequested: "cee.edge_function.requested",
   CeeEdgeFunctionCompleted: "cee.edge_function.completed",
   CeeEdgeFunctionFailed: "cee.edge_function.failed",
-
-  CeeGenerateRecommendationRequested: "cee.generate_recommendation.requested",
-  CeeGenerateRecommendationCompleted: "cee.generate_recommendation.completed",
-  CeeGenerateRecommendationFailed: "cee.generate_recommendation.failed",
 
   CeeNarrateConditionsRequested: "cee.narrate_conditions.requested",
   CeeNarrateConditionsCompleted: "cee.narrate_conditions.completed",
@@ -3208,26 +3200,6 @@ export function emit(event: string, data: Event) {
           break;
         }
 
-        case TelemetryEvents.CeeKeyInsightRequested: {
-          datadogClient.increment("cee.key_insight.requested", 1);
-          break;
-        }
-
-        case TelemetryEvents.CeeKeyInsightSucceeded: {
-          datadogClient.increment("cee.key_insight.succeeded", 1);
-          break;
-        }
-
-        case TelemetryEvents.CeeKeyInsightFailed: {
-          datadogClient.increment("cee.key_insight.failed", 1, {
-            error_code: String((eventData.error_code as string) || "unknown"),
-            http_status: String(
-              (eventData.http_status as number | string | undefined) || "unknown",
-            ),
-          });
-          break;
-        }
-
         case TelemetryEvents.CeeElicitBeliefRequested: {
           datadogClient.increment("cee.elicit_belief.requested", 1);
           break;
@@ -3317,30 +3289,6 @@ export function emit(event: string, data: Event) {
         }
 
         // Phase 4: Recommendation Narratives metrics
-        case TelemetryEvents.CeeGenerateRecommendationRequested: {
-          datadogClient.increment("cee.generate_recommendation.requested", 1);
-          break;
-        }
-
-        case TelemetryEvents.CeeGenerateRecommendationCompleted: {
-          datadogClient.increment("cee.generate_recommendation.completed", 1);
-          const latencyMs = eventData.latency_ms;
-          if (typeof latencyMs === "number" && Number.isFinite(latencyMs)) {
-            datadogClient.histogram("cee.generate_recommendation.latency_ms", latencyMs);
-          }
-          break;
-        }
-
-        case TelemetryEvents.CeeGenerateRecommendationFailed: {
-          datadogClient.increment("cee.generate_recommendation.failed", 1, {
-            error_code: String((eventData.error_code as string) || "unknown"),
-            http_status: String(
-              (eventData.http_status as number | string | undefined) || "unknown",
-            ),
-          });
-          break;
-        }
-
         case TelemetryEvents.CeeNarrateConditionsRequested: {
           datadogClient.increment("cee.narrate_conditions.requested", 1);
           break;

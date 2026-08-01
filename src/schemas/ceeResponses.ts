@@ -453,43 +453,11 @@ export const CEEGraphReadinessResponseV1Schema = z
 
 export type CEEGraphReadinessResponseV1T = z.infer<typeof CEEGraphReadinessResponseV1Schema>;
 
-// Headline structured data for flexible UI rendering
-export const CEEHeadlineStructuredV1Schema = z.object({
-  goal_text: z.string().nullable(),
-  action: z.string(),
-  outcome_type: z.enum(["positive", "negative", "neutral"]),
-  likelihood: z.number().min(0).max(1),
-  vs_baseline: z.number().nullable(),
-  vs_baseline_direction: z.enum(["better", "worse", "same"]).nullable(),
-  ranking_confidence: z.enum(["low", "medium", "high"]),
-  is_close_race: z.boolean(),
-});
-
-export type CEEHeadlineStructuredV1T = z.infer<typeof CEEHeadlineStructuredV1Schema>;
-
-// Key Insight Response schema
-export const CEEKeyInsightResponseV1Schema = z
-  .object({
-    headline: z.string(),
-    headline_structured: CEEHeadlineStructuredV1Schema.optional(),
-    primary_driver: z.string(),
-    confidence_statement: z.string(),
-    caveat: z.string().optional(),
-    evidence: z.array(z.string()).optional(),
-    next_steps: z.array(z.string()).optional(),
-    // Recommendation status based on identifiability
-    // actionable = causal effects confirmed, proceed with confidence
-    // exploratory = treat as scenario analysis, gather more data
-    recommendation_status: z.enum(["actionable", "exploratory"]).optional(),
-    // Identifiability acknowledgement for transparency
-    identifiability_note: z.string().optional(),
-    quality: CEEQualityMetaSchema,
-    trace: CEETraceMetaSchema,
-    provenance: z.literal("cee"),
-  })
-  .passthrough();
-
-export type CEEKeyInsightResponseV1T = z.infer<typeof CEEKeyInsightResponseV1Schema>;
+// ROADMAP 2.213: the key-insight response schemas
+// (`CEEHeadlineStructuredV1Schema`, `CEEKeyInsightResponseV1Schema`) were
+// deleted with the `/assist/v1/key-insight` route they typed. The headline
+// schema had exactly one consumer — the key-insight response — so it went
+// with it.
 
 // Belief Elicitation Response schema
 export const CEEElicitBeliefOptionSchema = z.object({
@@ -641,23 +609,8 @@ export type CEEEdgeFunctionSuggestionResponseV1T = z.infer<
   typeof CEEEdgeFunctionSuggestionResponseV1Schema
 >;
 
-// Generate Recommendation Response schema
-export const CEEGenerateRecommendationResponseV1Schema = z
-  .object({
-    headline: z.string(),
-    recommendation_narrative: z.string(),
-    confidence_statement: z.string(),
-    alternatives_summary: z.string().optional(),
-    caveat: z.string().optional(),
-    trace: CEETraceMetaSchema,
-    quality: CEEQualityMetaSchema,
-    provenance: z.literal("cee"),
-  })
-  .passthrough();
-
-export type CEEGenerateRecommendationResponseV1T = z.infer<
-  typeof CEEGenerateRecommendationResponseV1Schema
->;
+// ROADMAP 2.213: `CEEGenerateRecommendationResponseV1Schema` was deleted with
+// the `/assist/v1/generate-recommendation` route it typed.
 
 // Narrate Conditions Response schema
 export const CEEConditionSummaryV1Schema = z.object({

@@ -77,6 +77,12 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   CEE_GRAPH_READINESS_RATE_LIMIT_RPM: "read",
 
   // --- coach: medium coaching / analysis engines ---
+  // RESERVED — no src reference yet, deliberately. The drift test reads this
+  // marker (it is machine-read, not decoration: see the reverse assertion in
+  // tests/unit/cee.rate-buckets.drift.test.ts) and exempts this entry from the
+  // "every registry entry is referenced" check. The marker is self-policing:
+  // once this env var IS wired, the test FAILS until the marker is removed, so
+  // it cannot silently outlive its reason.
   // Reserved for the orchestrator-turn per-scenario bucket (deferred — see
   // parallel-briefs/RATE-BUCKETS-2026-07-24.md): the turn path needs to gate
   // only expensive LLM turns, not cheap chip/system-event turns, and its test
@@ -92,7 +98,6 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   CEE_EXPLAIN_POLICY_RATE_LIMIT_RPM: "coach",
   CEE_EXPLAIN_TRADEOFF_RATE_LIMIT_RPM: "coach",
   CEE_EDGE_FUNCTION_RATE_LIMIT_RPM: "coach",
-  CEE_KEY_INSIGHT_RATE_LIMIT_RPM: "coach",
   CEE_RISK_TOLERANCE_RATE_LIMIT_RPM: "coach",
   CEE_UTILITY_WEIGHT_RATE_LIMIT_RPM: "coach",
   CEE_ELICIT_PREFERENCES_RATE_LIMIT_RPM: "coach",
@@ -100,7 +105,6 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   CEE_ELICIT_BELIEF_RATE_LIMIT_RPM: "coach",
   CEE_REVIEW_RATE_LIMIT_RPM: "coach",
   CEE_NARRATE_CONDITIONS_RATE_LIMIT_RPM: "coach",
-  CEE_GENERATE_RECOMMENDATION_RATE_LIMIT_RPM: "coach",
   CEE_ISL_SYNTHESIS_RATE_LIMIT_RPM: "coach",
   CEE_DECISION_REVIEW_RATE_LIMIT_RPM: "coach",
 };
@@ -291,7 +295,7 @@ export interface CeeFeatureRateLimiter {
 /**
  * Get or create a rate limiter for a CEE feature.
  *
- * @param feature - Feature name (e.g., "generate_recommendation")
+ * @param feature - Feature name (e.g., "narrate_conditions")
  * @param envVarName - Environment variable for RPM config (optional)
  */
 export function getCeeFeatureRateLimiter(

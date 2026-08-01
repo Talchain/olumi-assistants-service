@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DOCTRINE_FATAL_PATTERNS,
   FORBIDDEN_USER_FACING_PHRASES,
   findForbiddenPhraseHit,
   findSuccessClaimHit,
@@ -17,6 +18,7 @@ import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
   applyEgressForbiddenPhraseGuard,
 } from '../forbidden-user-facing-phrases.js';
+import { applyTerminologyRewrite } from '../terminology-rewrite.js';
 import { RUN_ANALYSIS_LOCKED_TEMPLATES } from '../../coaching/analysis-result-headline.js';
 import { composeEditClarifyResponse } from '../edit-clarify-response.js';
 
@@ -675,5 +677,169 @@ describe('applyEgressForbiddenPhraseGuard — proportionate remedies (RC4)', () 
     expect(applyEgressForbiddenPhraseGuard(rewritten.text).rewritten).toBe(false);
     const replaced = applyEgressForbiddenPhraseGuard('Nothing changed.');
     expect(applyEgressForbiddenPhraseGuard(replaced.text).rewritten).toBe(false);
+  });
+});
+
+// ============================================================================
+// ROADMAP 2.213 — the no-recommendations doctrine at the wire seam.
+//
+// Doctrine, gap history, and the false-positive sweep: see
+// `DOCTRINE_FATAL_PATTERNS` in `../forbidden-user-facing-phrases.ts`.
+// Adjudication is in the PR body.
+// ============================================================================
+
+describe('FORBIDDEN_USER_FACING_PHRASES — no-recommendations doctrine (2.213)', () => {
+  const positiveCases: ReadonlyArray<readonly [string, string]> = [
+    // The 12 key-insight strings that were live and uncaught (verbatim shapes).
+    ['Increase price to £59 is the clear best choice.', 'key-insight: clear best choice'],
+    ['Increase price to £59 appears to be the better choice.', 'key-insight: better choice'],
+    ['Increase price to £59 is advisable at this time.', 'key-insight: advisable'],
+    ['Increase price to £59 is your best path to £20k MRR.', 'key-insight: best path'],
+    ['Increase price to £59 remains your safest path to £20k MRR.', 'key-insight: safest path'],
+    ['Increase price to £59 gives you the best chance of £20k MRR.', 'key-insight: best chance'],
+    // The generate-recommendation strings.
+    ['Hire a tech lead is your best bet for the quarter.', 'narrative: your best bet'],
+    // No copula — the headline shape. Pattern 1 is the ONLY pattern that
+    // catches this; without this case pattern 1 is shadowed by the
+    // copula-anchored crowning pattern and could be deleted unnoticed.
+    ['Your best bet: Hire a tech lead.', 'narrative: your best bet, headline/colon shape'],
+    ['Hire a tech lead looks like the better choice here.', 'narrative: looks like the better choice'],
+    ['Hire a tech lead is the way to go.', 'narrative: the way to go'],
+    ['Hire a tech lead is advisable compared to Hire two juniors.', 'narrative: advisable'],
+    // The explicit choice directive (the coaching copy-quality gate has
+    // policed this since PR #171; the WIRE guard did not).
+    ['You should choose Option A.', 'directive: you should choose'],
+    ['I would go with Option A.', 'directive: I would go with'],
+    ['You should pick the partnership route.', 'directive: you should pick'],
+    // Frame variants the deterministic templates could regress into.
+    ['Option A is clearly the best option.', 'adverb between copula and superlative'],
+    ['Option A remains the best choice across 87% of scenarios.', 'remains the best choice'],
+    ['Option A is the optimal route for this goal.', 'optimal route'],
+  ];
+
+  for (const [text, label] of positiveCases) {
+    it(`flags ${label}`, () => {
+      expect(findForbiddenPhraseHit(text)).not.toBeNull();
+    });
+  }
+});
+
+describe('FORBIDDEN_USER_FACING_PHRASES — 2.213 does NOT false-positive', () => {
+  const negativeCases: ReadonlyArray<readonly [string, string]> = [
+    // ⭐ PINNED NEGATIVE CONTROL. `src/cee/decision-review/templates.ts`
+    // recommends a METHOD, not a choice — explicitly acceptable under the
+    // ruling (manifest §3.2c). If a future tightening of the doctrine set
+    // trips this, the tightening is wrong.
+    [
+      'We recommend 3 validation strategies to strengthen confidence in this decision.',
+      'PINNED CONTROL: method coaching, not choice advice',
+    ],
+    // NOTE: the sibling string at `decision-review/templates.ts` — "No
+    // specific validation strategies are recommended at this time." — is NOT
+    // listed here: it is already caught by the PRE-EXISTING `\brecommended\b`
+    // noun ban (verified RED against unmodified `staging`), so it says nothing
+    // about the 2.213 patterns. Recorded in the PR body as a residual for the
+    // decision-review route, which is not wired to this guard.
+    ['We suggest 3 validation strategies to pressure-test the key driver.', 'method coaching, alternate verb'],
+    // De-recommendation and hedging must survive — these are the sentences
+    // the doctrine WANTS the product to be able to say.
+    ['The status quo is not always the safest choice.', 'negated superlative (pre-decision-checks.ts)'],
+    ['Option A is not the best option on cost.', 'explicit negation'],
+    ['Have you considered what would make Option B the better choice?', 'consider-the-opposite coaching (router.ts)'],
+    ['If Churn Rate exceeds 8%, the optimal choice shifts from Raise price to Maintain price.', 'tipping-point DATA (isl-synthesis.ts)'],
+    ['Hire A could become the better choice if demand softens.', 'conditional flip reading'],
+    // Ordinary English that shares vocabulary with the banned frames.
+    ['Proceed with caution: two assumptions are doing most of the work.', 'proceed with caution'],
+    ['The analysis engine could not proceed with the current scenario.', 'proceed with (handler-failure-responses.ts)'],
+    ['Should I go with Hire One Tech Lead or Hire Two Mid-Level Developers?', "the USER's own question, quoted back"],
+    ['Proceed with acquisition leads at 62% on your numbers.', 'an option LABEL beginning "Proceed with"'],
+    ['There is no single best path here; it depends on what you weight.', 'no-single-best coaching'],
+    // The approved neutral register must stay sayable.
+    ['Hire a tech lead leads by 30 percentage points on your numbers.', 'approved leads-by-N register'],
+    ['Hire a tech lead performs best, with a probability of 72%.', 'approved performs-best register'],
+    ['Gathering evidence on Churn Rate first is the fastest way to firm up the choice.', 'lens-suggestion coaching (the clean model)'],
+  ];
+
+  for (const [text, label] of negativeCases) {
+    it(`does NOT flag ${label}`, () => {
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    });
+  }
+});
+
+describe('2.213 remedy class — a choice directive has no safe rewrite', () => {
+  // The RC4 rewrite-first machinery converts a rewritable LEXICON offence
+  // ("recommendation" → "leading option") in place. A choice directive is not
+  // a vocabulary problem: swapping a noun leaves the product still telling the
+  // user what to pick. So the doctrine set is deliberately FATAL-class — no
+  // TERMINOLOGY_RULES entry — and takes the whole-response fallback.
+  //
+  // ⚠ THIS SUITE IS DERIVED, NOT HAND-LISTED (trap 12). It iterates the
+  // exported DOCTRINE_FATAL_PATTERNS rather than a fixed array of exemplar
+  // strings, because the fatal class is defined by an ABSENCE — no
+  // TERMINOLOGY_RULES entry matches these frames — and an absence cannot be
+  // asserted against a hand-maintained mirror without the mirror going stale
+  // silently. Two drift directions are now RED rather than green:
+  //   · a SEVENTH doctrine pattern added with no exemplar → the coverage
+  //     assertion below fails (no exemplar matches it);
+  //   · a TERMINOLOGY_RULES entry added that happens to match one of these
+  //     frames → that pattern's remedy silently becomes the content-preserving
+  //     'terminology_rewrite', and the per-pattern assertions fail.
+  // The exemplars remain hand-written (a regex cannot generate its own prose),
+  // but they are no longer the SPINE of the test — the exported set is, and
+  // every member of it must be covered.
+  const exemplars = [
+    'Increase price to £59 is the clear best choice.',
+    'Hire a tech lead is your best bet.',
+    'Your best bet: Hire a tech lead.',
+    'Hire a tech lead is the way to go.',
+    'Increase price to £59 is advisable at this time.',
+    'You should choose Option A.',
+    'Increase price to £59 gives you the best chance of £20k MRR.',
+  ];
+
+  // Positive control on the derivation itself: if the export is ever emptied
+  // or tree-shaken to nothing, every `for` below would vacuously pass.
+  it('the doctrine set is non-empty and every member is a RegExp', () => {
+    expect(DOCTRINE_FATAL_PATTERNS.length).toBeGreaterThan(0);
+    for (const p of DOCTRINE_FATAL_PATTERNS) expect(p).toBeInstanceOf(RegExp);
+  });
+
+  it('every doctrine pattern is also live in the flat guard list', () => {
+    for (const p of DOCTRINE_FATAL_PATTERNS) {
+      expect(FORBIDDEN_USER_FACING_PHRASES.some((f) => f.source === p.source)).toBe(true);
+    }
+  });
+
+  for (const [i, pattern] of DOCTRINE_FATAL_PATTERNS.entries()) {
+    describe(`doctrine pattern ${i + 1}: ${pattern.source.slice(0, 60)}…`, () => {
+      const covering = exemplars.filter((t) => pattern.test(t));
+
+      it('has at least one exemplar (a new pattern must arrive with one)', () => {
+        expect(covering.length).toBeGreaterThan(0);
+      });
+
+      for (const text of covering) {
+        it(`is DETECTED and has no safe rewrite: ${text}`, () => {
+          // 1. It hits.
+          expect(findForbiddenPhraseHit(text)).not.toBeNull();
+          // 2. No terminology rewrite applies — this is the ABSENCE the fatal
+          //    class rests on, asserted directly rather than inferred.
+          expect(applyTerminologyRewrite(text).applied).toEqual([]);
+          // 3. The remedy is therefore the whole-response fallback.
+          const guarded = applyEgressForbiddenPhraseGuard(text);
+          expect(guarded.rewritten).toBe(true);
+          expect(guarded.remedy).toBe('fallback_replacement');
+          expect(guarded.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+        });
+      }
+    });
+  }
+
+  it('the neutral fallback itself trips none of the doctrine patterns', () => {
+    expect(findForbiddenPhraseHit(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT)).toBeNull();
+    for (const p of DOCTRINE_FATAL_PATTERNS) {
+      expect(p.test(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT)).toBe(false);
+    }
   });
 });

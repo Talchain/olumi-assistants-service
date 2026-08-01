@@ -139,70 +139,6 @@ export const CEETeamPerspectivesInput = z
 
 export type CEETeamPerspectivesInputT = z.infer<typeof CEETeamPerspectivesInput>;
 
-// Key Insight - ranked actions from PLoT inference
-export const RankedActionSchema = z.object({
-  node_id: z.string(),
-  label: z.string(),
-  expected_utility: z.number(),
-  dominant: z.boolean().optional(),
-  // Outcome quality affects headline phrasing (negative = risk-minimizing language)
-  outcome_quality: z.enum(["positive", "neutral", "negative", "mixed"]).optional(),
-  // Primary outcome label for context
-  primary_outcome: z.string().optional(),
-});
-
-// Key Insight - drivers from PLoT inference
-export const DriverSchema = z.object({
-  node_id: z.string(),
-  label: z.string(),
-  impact_pct: z.number().min(0).max(100).optional(),
-  direction: z.enum(["positive", "negative", "neutral"]).optional(),
-  // Node kind helps distinguish external factors from controllable actions
-  kind: z.string().optional(),
-});
-
-// Goal info for multi-goal scenarios
-export const GoalInfoSchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  type: z.enum(["binary", "continuous", "compound"]),
-  is_primary: z.boolean(),
-});
-
-// Identifiability status from ISL causal analysis
-export const IdentifiabilitySchema = z.object({
-  // Whether causal effects are identifiable from the model structure
-  identifiable: z.boolean(),
-  // Method used for identification (e.g., "backdoor", "frontdoor", "instrumental")
-  method: z.string().nullable().optional(),
-  // Variables in the adjustment set for causal identification
-  adjustment_set: z.array(z.string()).nullable().optional(),
-  // Human-readable explanation of identifiability status
-  explanation: z.string().nullable().optional(),
-});
-
-export const CEEKeyInsightInput = z
-  .object({
-    graph: Graph,
-    ranked_actions: z.array(RankedActionSchema).min(1),
-    top_drivers: z.array(DriverSchema).optional(),
-    context_id: z.string().optional(),
-    // Goal-anchored headline fields (optional for backward compatibility)
-    goal_text: z.string().nullable().optional(),
-    goal_type: z.enum(["binary", "continuous", "compound"]).nullable().optional(),
-    goal_id: z.string().nullable().optional(),
-    // Multi-goal support
-    goals: z.array(GoalInfoSchema).optional(),
-    primary_goal_id: z.string().optional(),
-    // Identifiability from ISL - optional for backward compatibility
-    // If not provided, treated as NOT identifiable (fail-honest): confident
-    // causal language requires an explicit positive signal
-    identifiability: IdentifiabilitySchema.optional(),
-  })
-  .strict();
-
-export type CEEKeyInsightInputT = z.infer<typeof CEEKeyInsightInput>;
-
 // Belief Elicitation - convert natural language to probability
 export const CEEElicitBeliefInput = z
   .object({
@@ -273,26 +209,6 @@ export const CEEEdgeFunctionSuggestionInput = z
   .strict();
 
 export type CEEEdgeFunctionSuggestionInputT = z.infer<typeof CEEEdgeFunctionSuggestionInput>;
-
-// Generate Recommendation - ranked actions for narrative generation
-export const CEERankedActionSchema = z.object({
-  node_id: z.string().min(1),
-  label: z.string().min(1),
-  score: z.number().min(0).max(100),
-  rank: z.number().int().min(1),
-});
-
-export const CEEGenerateRecommendationInput = z
-  .object({
-    ranked_actions: z.array(CEERankedActionSchema).min(1),
-    goal_label: z.string().optional(),
-    context: z.string().optional(),
-    tone: z.enum(["formal", "conversational"]).default("formal"),
-    context_id: z.string().optional(),
-  })
-  .strict();
-
-export type CEEGenerateRecommendationInputT = z.infer<typeof CEEGenerateRecommendationInput>;
 
 // Narrate Conditions - conditional logic for recommendations
 export const CEEConditionBranchSchema = z.object({
