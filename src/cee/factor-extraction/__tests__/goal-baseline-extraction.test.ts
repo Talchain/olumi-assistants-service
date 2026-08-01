@@ -210,3 +210,91 @@ describe('ROADMAP 2.273 — the extractor REFUSES rather than inventing a baseli
     expect(goalV3.observed_state).toBeUndefined();
   });
 });
+
+describe('ROADMAP 2.273 — CROSS-METRIC BINDING is refused (adversarial review, #787)', () => {
+  // THE DEFECT THIS CLOSES, found in adversarial review of the first cut.
+  //
+  // Patterns 2/3 bridged the target and the current level with a bare
+  // `[^.?!\n]{0,40}?` window. `[^.?!\n]` excludes SENTENCE terminators but
+  // happily admits `,` and `;` — so the window crossed CLAUSE boundaries and
+  // bound a number belonging to an entirely different metric.
+  //
+  // Neither shape errors. Both mint a threshold and a baseline that are
+  // individually plausible and comfortably inside ISL's |1.5| domain guard, so
+  // ISL converts them and returns a CONFIDENT WRONG PROBABILITY — precisely
+  // the failure mode the shared-denominator work exists to prevent, arriving
+  // through the other door.
+  //
+  // The fix replaces the open window with a CLOSED CONNECTIVE GRAMMAR (at most
+  // one unit noun, then a connective drawn from a closed set, then an optional
+  // determiner). A closed ALLOW-list fails CLOSED on an unanticipated
+  // connective — a block-list of bad connectives would fail OPEN, which is the
+  // hand-maintained-mirror trap (CLAUDE.md #12) in its most dangerous
+  // direction.
+
+  it('S10 — refuses a concessive clause introducing a DIFFERENT metric', () => {
+    // "though headcount is currently at 50" is about headcount, not revenue.
+    // Before the fix this bound baseline=50 to an 800k revenue target: on the
+    // wire threshold 0.8, baseline 0.00005 — both in-domain, silently wrong.
+    expect(
+      extractGoalTargetWithBaseline(
+        'Our target is 800k revenue, though headcount is currently at 50',
+      ),
+    ).toBeNull();
+  });
+
+  it('S11 — refuses across a SEMICOLON clause break', () => {
+    // "Marketing is currently 200k" is marketing spend; the target is revenue.
+    expect(
+      extractGoalTargetWithBaseline('Marketing is currently 200k; our revenue target is 800k'),
+    ).toBeNull();
+  });
+
+  it('POSITIVE CONTROLS — every documented shape still extracts after the tightening', () => {
+    // Without these, the blocking fix could "pass" by refusing everything —
+    // a cross-metric guard that extracts nothing is not a fix, it is a
+    // regression wearing a safety rationale.
+    const MUST_STILL_EXTRACT: ReadonlyArray<readonly [string, number, number]> = [
+      ['Grow revenue from 4000000 to a target of 6000000 this year.', 6_000_000, 4_000_000],
+      ['Grow revenue from 4M to a target of 6M this year.', 6_000_000, 4_000_000],
+      ['Improve retention from 85% to a target of 95%.', 0.95, 0.85],
+      ['Increase revenue from £4000000 to a target of £6000000.', 6_000_000, 4_000_000],
+      // The shape the review named explicitly as must-preserve — a comma plus
+      // a unit noun is the ONE inter-clause bridge the grammar allows.
+      ['Our target is 800 customers, currently at 500.', 800, 500],
+      ['Currently at 500 customers, target 800.', 800, 500],
+      ['Raise the revenue target to 6000000, currently at 4000000.', 6_000_000, 4_000_000],
+      ['Our goal is 95%, currently around 85%.', 0.95, 0.85],
+      ['Target: 800, currently 500.', 800, 500],
+      ['We are currently at 500 and our objective is 800.', 800, 500],
+    ];
+
+    for (const [brief, target, baseline] of MUST_STILL_EXTRACT) {
+      const r = extractGoalTargetWithBaseline(brief);
+      expect(r, `regressed — no longer extracts: ${brief}`).not.toBeNull();
+      expect(r!.value, brief).toBe(target);
+      expect(r!.baseline, brief).toBe(baseline);
+    }
+  });
+
+  it('refuses a MIXED percent pair rather than stamping a garbage scale', () => {
+    // Amendment 1. Previously `isPercent = to || from` scaled BOTH sides by
+    // 100 whenever EITHER carried a '%', so "from 85 to a target of 95%" wrote
+    // baseline 0.85 from a number the user never expressed as a percentage.
+    // Only ISL's magnitude guard stood between that and a wrong answer, and a
+    // magnitude guard cannot see a UNIT error that lands in range. Refuse at
+    // the source instead.
+    expect(extractGoalTargetWithBaseline('Improve retention from 85 to a target of 95%.')).toBeNull();
+    expect(extractGoalTargetWithBaseline('Our target is 95%, currently at 85.')).toBeNull();
+  });
+
+  it('"increase revenue from 4M by 2M" — the both-stated shape yields NO baseline', () => {
+    // Amendment 2. A "from X by Y" message states a current level AND a
+    // delta. The goal patterns require a TARGET word bound to the second
+    // amount, which "by 2M" is not, so no pair is extracted and no baseline is
+    // minted. The delta is separately caught by the increase-by backstop when
+    // it is naively persisted as a level. Pinned so a future loosening of the
+    // patterns cannot start pairing a baseline with a DELTA.
+    expect(extractGoalTargetWithBaseline('Increase revenue from 4M by 2M.')).toBeNull();
+  });
+});

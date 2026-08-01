@@ -257,11 +257,30 @@ export function transformNodeToV3(
     // change-from-baseline"), and at draft time — before any option is
     // applied — they genuinely coincide. Nothing is invented to fill `value`.
     //
-    // KNOWN, ACCEPTED CONSEQUENCE: for a NON-ROOT goal ISL emits
-    // `GOAL_OBSERVED_VALUE_UNUSED` (robustness_analyzer_v2.py:2735-2754)
-    // telling us `value` is not used as a base under doctrine B. That warning
-    // is correct and harmless — `baseline`, the field the conversion actually
-    // reads, is the one we are here to deliver.
+    // KNOWN, ACCEPTED CONSEQUENCES — both disclosed rather than discovered
+    // later (adversarial review, PR #787):
+    //
+    // 1. NON-ROOT goal (the normal case): ISL emits
+    //    `GOAL_OBSERVED_VALUE_UNUSED` (robustness_analyzer_v2.py:2735-2754)
+    //    telling us `value` is not used as a base under doctrine B. Correct
+    //    and harmless — `baseline`, the field the conversion actually reads,
+    //    is the one we are here to deliver. Ruled non-blocking (info
+    //    severity, no wrong number); ISL-side suppression is rowed as 2.279.
+    //
+    // 2. ROOT goal (a goal with no parents): ISL DOES consult
+    //    `observed_state.value` as the node's base (:1158-1166, :2686), so
+    //    stamping it shifts that goal's sample base from 0.0 to B. The shift
+    //    is UNIFORM ACROSS OPTIONS — it moves every option's samples by the
+    //    same constant — so comparative verdicts (which option leads, by how
+    //    much) are unchanged. Goal PROBABILITY is unaffected for a different
+    //    reason: a root goal is refused outright at :3182 (`root_goal`,
+    //    "takes its base from observed_state.value, so its samples are not in
+    //    the non-root change-from-origin frame"), so no probability is
+    //    rendered either way. What DOES change is the absolute level of a root
+    //    goal's reported samples and `GOAL_NODE_ROOT_STATIC.base_value` —
+    //    arguably more correct (0.0 was a placeholder for "no observed
+    //    value"), but a change, and named here so it is not mistaken for a
+    //    regression.
     v3Node.observed_state = {
       value: node.goal_baseline,
       baseline: node.goal_baseline,

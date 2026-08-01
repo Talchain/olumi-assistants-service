@@ -122,6 +122,31 @@ describe('add_constraint — goal baseline (ROADMAP 2.273, chat path)', () => {
     expect(goal.observed_state?.baseline).toBeUndefined();
   });
 
+  it('writes NO baseline for a CROSS-METRIC clause, even though the TARGET side matches', async () => {
+    // Adversarial review, PR #787. This is the case the handler's own
+    // `valuesMatch` gate could never catch: it compares only the TARGET side,
+    // and here the target (800k) IS the value being persisted — so the gate
+    // passes. The baseline, however, is headcount. The protection has to live
+    // in the extractor's clause grammar, and this test proves the chat path
+    // inherits it rather than relying on a guard that structurally cannot see
+    // the problem.
+    const goal = await goalNodeAfter(
+      'Our target is 800k revenue, though headcount is currently at 50',
+      800_000,
+    );
+    expect(goal.goal_threshold).toBeDefined();
+    expect(goal.observed_state?.baseline).toBeUndefined();
+  });
+
+  it('writes NO baseline across a SEMICOLON clause break (chat path)', async () => {
+    const goal = await goalNodeAfter(
+      'Marketing is currently 200k; our revenue target is 800k',
+      800_000,
+    );
+    expect(goal.goal_threshold).toBeDefined();
+    expect(goal.observed_state?.baseline).toBeUndefined();
+  });
+
   it('writes NO baseline when the stated target is NOT the value being persisted', async () => {
     // THE CROSS-METRIC GATE. The message states a customer-count target with
     // its own current level, but the constraint being stamped is a revenue

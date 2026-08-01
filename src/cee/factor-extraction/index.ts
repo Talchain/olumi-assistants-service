@@ -187,12 +187,51 @@ function amountPattern(prefix: string): string {
 }
 
 /**
+ * The ONLY bridge permitted between a goal target and its current level when
+ * the two sit in separate clauses (patterns 2 and 3).
+ *
+ * ⚠ THIS REPLACED AN OPEN `[^.?!\n]{0,40}?` WINDOW THAT FABRICATED BASELINES
+ * (adversarial review, PR #787). `[^.?!\n]` excludes sentence TERMINATORS but
+ * admits `,` and `;`, so the window crossed CLAUSE boundaries and bound a
+ * number from an entirely different metric to the goal target:
+ *
+ *   "Our target is 800k revenue, though headcount is currently at 50"
+ *        → baseline 50 (HEADCOUNT) against an 800k REVENUE target
+ *   "Marketing is currently 200k; our revenue target is 800k"
+ *        → marketing SPEND became the revenue baseline
+ *
+ * Neither errors. Both produce operands comfortably inside ISL's |1.5| domain
+ * guard (threshold 0.8, baseline 0.00005), so ISL converts them and returns a
+ * CONFIDENT WRONG PROBABILITY. A magnitude guard cannot catch a provenance
+ * error that lands in range — only refusing to form the pair can.
+ *
+ * THE GRAMMAR IS A CLOSED ALLOW-LIST, and the direction matters: an allow-list
+ * fails CLOSED on an unanticipated connective (no baseline → ISL refuses
+ * honestly), whereas a block-list of "bad" connectives fails OPEN — the
+ * hand-maintained mirror (CLAUDE.md trap 12) in its most dangerous form, where
+ * every connective nobody thought of becomes a silent fabrication.
+ *
+ * Permitted, in order: at most ONE unit noun attached to the first amount
+ * ("800 CUSTOMERS, currently…"), then a connective from the closed set
+ * {`,`, ` and`, `, and`}, then an optional determiner ("…and OUR objective").
+ * Anything else — a second subject, a concessive ("though"), a semicolon, a
+ * colon — does not match, and no baseline is minted.
+ */
+const CLAUSE_BRIDGE =
+  '(?:\\s+[A-Za-z][A-Za-z-]{0,19})?' + // at most ONE unit noun
+  '(?:,|\\s+and|,\\s+and)' + // closed connective set
+  '(?:\\s+(?:our|the|my|its))?' + // optional determiner
+  '\\s*';
+
+/**
  * The three brief shapes that state a current level AND a target together.
  * Order is priority order; the first match for a given (label, value, unit)
  * wins and later extractors dedup against it.
  */
 const GOAL_BASELINE_PATTERNS: ReadonlyArray<RegExp> = [
-  // "from 4000000 to a target of 6000000", "from 85% to a target of 95%"
+  // "from 4000000 to a target of 6000000", "from 85% to a target of 95%".
+  // No bridge needed: both amounts are inside ONE "from … to … target"
+  // construction, so they cannot belong to different clauses.
   new RegExp(
     `\\bfrom\\s+${amountPattern('from')}\\s+to\\s+(?:a|an|the)?\\s*` +
       `${GOAL_WORD}\\s*(?:of|is|:)?\\s*${amountPattern('to')}`,
@@ -201,13 +240,13 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<RegExp> = [
   // "target is 800 customers, currently at 500"
   new RegExp(
     `\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountPattern('to')}` +
-      `[^.?!\\n]{0,40}?\\bcurrently\\s*(?:at|around|about)?\\s*${amountPattern('from')}`,
+      `${CLAUSE_BRIDGE}\\bcurrently\\s*(?:at|around|about)?\\s*${amountPattern('from')}`,
     'i',
   ),
   // "currently at 500, target 800"
   new RegExp(
     `\\bcurrently\\s*(?:at|around|about)?\\s*${amountPattern('from')}` +
-      `[^.?!\\n]{0,40}?\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountPattern('to')}`,
+      `${CLAUSE_BRIDGE}\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountPattern('to')}`,
     'i',
   ),
 ];
@@ -286,11 +325,26 @@ export function extractGoalTargetWithBaseline(text: string): GoalTargetWithBasel
     const from = resolveAmount(m.groups, "from");
     if (!to || !from) continue;
 
-    // The pair shares ONE unit — same metric by construction — so a '%' or
-    // currency signal on either side settles both. Percent values are
-    // pre-divided into a 0-1 fraction, matching every other extractor in this
-    // file; callers that need the RAW percent number reconstruct it.
-    const isPercent = to.isPercent || from.isPercent;
+    // A MIXED percent pair is refused, not reconciled (adversarial review, PR
+    // #787). This previously read `to.isPercent || from.isPercent`, which
+    // scaled BOTH sides by 100 whenever EITHER carried a '%': "from 85 to a
+    // target of 95%" wrote baseline 0.85 from a number the user never
+    // expressed as a percentage. The result lands squarely inside ISL's |1.5|
+    // domain guard, and a MAGNITUDE guard is structurally incapable of
+    // catching a UNIT error that lands in range. If the two amounts disagree
+    // about being percentages they are not reliably the same quantity, so no
+    // pair is formed and ISL keeps refusing honestly.
+    if (to.isPercent !== from.isPercent) return null;
+
+    // Both sides now agree. Percent values are pre-divided into a 0-1
+    // fraction, matching every other extractor in this file; callers that need
+    // the RAW percent number reconstruct it.
+    //
+    // NOTE a CURRENCY mismatch ("from $4M to a target of £6M") is deliberately
+    // NOT refused here: currency is a display unit, both amounts are still the
+    // same metric and the same scale, and the cap arithmetic is unaffected.
+    // Only the displayed symbol is ambiguous.
+    const isPercent = to.isPercent;
     return {
       value: isPercent ? to.raw / 100 : to.raw,
       baseline: isPercent ? from.raw / 100 : from.raw,
