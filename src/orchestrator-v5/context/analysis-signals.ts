@@ -29,7 +29,11 @@ import {
 // ROADMAP 2.228 F1 — `readRowValueScale` used to be a private copy here. It is
 // now owned by the shared top-level-row module so this path and the
 // decision_review enricher resolve `value_scale` identically by construction.
-import { readRowValueScale, MODEL_SCALE_SUSPECT_ABS } from './flip-threshold-rows.js';
+import {
+  readRowValueScale,
+  MODEL_SCALE_SUSPECT_ABS,
+  isAttestedNoFlipReason,
+} from './flip-threshold-rows.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 
 /** Cap for evidence-gap signals carried into the projection. */
@@ -428,8 +432,12 @@ export function deriveTippingPointsFromTopLevel(
         : typeof entry.flip_threshold === 'number' && Number.isFinite(entry.flip_threshold)
           ? entry.flip_threshold
           : null;
-    const noFlip =
-      flipValue === null && entry.flip_reason === 'no_effect_within_bounds';
+    // ROADMAP 2.228 F1 (review amendment 5) — the attested-no-flip vocabulary
+    // is OPEN and owned by one predicate. Matching the token inline here meant
+    // a `structurally_invariant` row (PLoT #300) would have failed BOTH tests
+    // below and been dropped as ambiguous — a producer-attested fact lost from
+    // the coach context, silently.
+    const noFlip = flipValue === null && isAttestedNoFlipReason(entry.flip_reason);
 
     // Keep only rows that assert something: a real flip pair, or an explicit
     // producer-attested no-flip. Ambiguous rows (flip null, no reason) are

@@ -423,6 +423,25 @@ describe('2.228 F1 — unusable rows are dropped without being counted as no-fli
     expect(input._meta?.flip_threshold_count).toBe(0);
   });
 
+  // ROADMAP 2.228 F1 review amendment 5 — the second attested-no-flip token.
+  it("RED-FIRST: a 'structurally_invariant' row is classified as attested no-flip (filtered + counted)", () => {
+    const input = build(
+      baseEnrichment([
+        {
+          factor_id: 'fac_budget',
+          factor_label: 'Hiring Budget',
+          current_value: 100,
+          flip_value: null,
+          flip_reason: 'structurally_invariant',
+        },
+      ]),
+    );
+    expect(input.flip_threshold_data).toBeUndefined();
+    expect(input._meta?.flip_no_effect_count).toBe(1);
+    expect(input._meta?.flip_threshold_count).toBe(0);
+    expect(input._meta?.flip_threshold_source).toBe('top_level');
+  });
+
   it('RED-FIRST: rows without a true factor_id are dropped (a label is never promoted to an id)', () => {
     const input = build(
       baseEnrichment([

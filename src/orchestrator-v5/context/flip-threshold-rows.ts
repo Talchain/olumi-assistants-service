@@ -39,11 +39,11 @@
  *   `flip_pair`        — finite `current_value` AND finite flip value. A real
  *                        tipping point; `direction` is populated.
  *   `attested_no_flip` — flip value null AND the producer explicitly said why
- *                        (`flip_reason: 'no_effect_within_bounds'`). This is
- *                        producer-owned truth ("hard to flip via this
- *                        factor"), NOT "unknown". `direction` is null: there
- *                        is no flip value to move toward, so any direction
- *                        would be invented.
+ *                        ({@link isAttestedNoFlipReason} owns the token list).
+ *                        This is producer-owned truth ("this factor cannot
+ *                        flip the result"), NOT "unknown". `direction` is
+ *                        null: there is no flip value to move toward, so any
+ *                        direction would be invented.
  *   `unusable`         — everything else (flip null with no reason, malformed
  *                        numerics). Asserts nothing, so it is projected as
  *                        nothing.
@@ -59,6 +59,56 @@ export interface TopLevelFlipRow {
   readonly value_scale: string | null;
   readonly flip_reason: string | null;
   readonly kind: 'flip_pair' | 'attested_no_flip' | 'unusable';
+}
+
+/**
+ * The `flip_reason` tokens by which the PRODUCER attests that no flip exists —
+ * as distinct from saying nothing, or from failing to find one.
+ *
+ *   `no_effect_within_bounds`  — the probe swept the factor's range and the
+ *                                winner never changed.
+ *   `structurally_invariant`   — ISL's closed-form evaluation proved the
+ *                                factor cannot move the winner at all
+ *                                (PLoT #300 / ISL #117, F3 mapping).
+ *
+ * Both are producer-owned CERTAINTY. Neither is "unknown", and the difference
+ * between them is a matter of how the producer established it, never of how
+ * confident it is.
+ *
+ * ⚠ (a) THIS IS A HAND-MAINTAINED MIRROR, BY NECESSITY. ISL declares
+ * `flip_reason` as an OPEN string with no enum (`z.string()`; see also
+ * `src/orchestrator/deterministic/types.ts:319`, `flip_reason?: string`), so
+ * there is no contract to derive this list from. A token added upstream
+ * without adding it here degrades silently — which is exactly what
+ * `structurally_invariant` was about to do at three separate sites.
+ *
+ * ⚠ (b) THE STRUCTURAL FIX IS QUEUED: a producer-emitted `no_flip_in_range`
+ * BOOLEAN in schemas 0.31.0. When it lands, this predicate keys on the boolean
+ * and the token list becomes a legacy fallback for pre-0.31.0 envelopes. Do
+ * not grow the list further in the meantime without asking whether 0.31.0 is
+ * closer than the next token.
+ *
+ * ⚠ (c) ANY SITE THAT STRING-MATCHES `flip_reason` OUTSIDE THIS PREDICATE IS A
+ * DEFECT. Before this predicate existed there were three independent copies of
+ * the same match (this module, `./analysis-signals.ts`,
+ * `../compose/flip-proposal.ts`) and they would have diverged the day the new
+ * token shipped: the coach path would have DROPPED the row as ambiguous, and
+ * `summariseFlipEntries` would have demoted `no_practical_flip` →
+ * `insufficient_data`, turning an attested certainty into user-facing
+ * uncertainty. Three mirrors, one owned list.
+ */
+const ATTESTED_NO_FLIP_REASONS: ReadonlySet<string> = new Set([
+  'no_effect_within_bounds',
+  'structurally_invariant',
+]);
+
+/**
+ * Did the producer ATTEST that this row has no flip, rather than merely fail
+ * to report one? See {@link ATTESTED_NO_FLIP_REASONS} for the list and the
+ * three warnings that go with it.
+ */
+export function isAttestedNoFlipReason(reason: unknown): boolean {
+  return typeof reason === 'string' && ATTESTED_NO_FLIP_REASONS.has(reason);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -234,7 +284,7 @@ export function readTopLevelFlipRows(
     const kind: TopLevelFlipRow['kind'] =
       direction !== null
         ? 'flip_pair'
-        : flipValue === null && flipReason === 'no_effect_within_bounds'
+        : flipValue === null && isAttestedNoFlipReason(flipReason)
           ? 'attested_no_flip'
           : 'unusable';
 
