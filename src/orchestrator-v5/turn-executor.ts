@@ -321,7 +321,10 @@ import {
 } from './compose/flip-proposal.js';
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
-import { pickLatestFlipSummary } from './coaching/pick-flip-summary.js';
+import {
+  pickLatestFlipClaimPosture,
+  pickLatestFlipSummary,
+} from './coaching/pick-flip-summary.js';
 import { pickLatestLeadingOptionId } from './coaching/pick-leading-option-id.js';
 import {
   composeExplainResultsFallback,
@@ -6041,6 +6044,11 @@ export async function runTurnExecutor(
           // signal is available — composer falls back to margin_pp +
           // projected robustness_band.
           rawRobustness: pickLatestRawRobustness(context.prior_facts),
+          // ROADMAP 2.278 — the same fact's flip evidence, so the gate's
+          // fragility copy cannot claim the result could change when the
+          // producer attested it cannot. Same canonical selector as the two
+          // lines above; undefined ⇒ pre-2.278 copy, byte-identical.
+          flipClaimPosture: pickLatestFlipClaimPosture(context.prior_facts),
           // AI Harness capability 1 — UNCONDITIONAL since 2026-07-20 (O-7
           // wave 2: CEE_POST_ANALYSIS_LOOP_ENABLED deleted, live-true on
           // staging). Thread the already-derived canonical analysis state +

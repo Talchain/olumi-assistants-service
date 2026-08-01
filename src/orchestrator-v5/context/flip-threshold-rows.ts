@@ -365,3 +365,87 @@ export function readTopLevelFlipRows(
 
   return out;
 }
+
+// ============================================================================
+// ROADMAP 2.278 — the flip-claim posture gate
+// ============================================================================
+
+/**
+ * The run's OWN answer to: *may user-facing copy claim this result could flip?*
+ *
+ *   `attested_no_flip` — every usable flip row on this run is an
+ *                        {@link TopLevelFlipRow.kind} `attested_no_flip`. The
+ *                        producer has POSITIVELY ATTESTED that nothing flips in
+ *                        range. Copy must not claim flippability.
+ *   `permitted`        — anything else: a real flip exists, no flip evidence was
+ *                        produced at all, or the evidence is not conclusive.
+ *                        Callers keep their pre-existing behaviour.
+ *
+ * ⚠ WHY THIS EXISTS — the defect it closes (witnessed on staging, 2026-08-01,
+ * `PHASE0-EVIDENCE-2026-07-28/witness-2267-onscreen-flip.md` + `witness-2267-raw/`).
+ * On four consecutive analysis turns, **19 of 19** `flip_thresholds` rows came
+ * back `flip_reason: "structurally_invariant"` / `no_flip_in_range: true` — ISL's
+ * closed-form proof that no factor can move the winner at all — while CEE's
+ * user-facing copy simultaneously told the user "small changes could flip it"
+ * and offered a card titled "pressure-test the key driver". The copy was keyed
+ * off ROBUSTNESS MARGINALS (`robustness.is_robust`, `factor_sensitivity[].flip_risk_category`),
+ * which are non-zero on nearly every run, and never consulted the FLIP EVIDENCE
+ * sitting one key away on the same enrichment object.
+ *
+ * ⚠ THE FIX IS NOT NEW — IT IS AN UNFINISHED ONE. `../tools/handlers/explanation-fallback.ts`
+ * already closed exactly this contradiction for the two deterministic fallback
+ * composers (see its `flippabilityClaimAllowed` ladder, and the header note
+ * naming staging build `cef69b0`: *"the band said fragile and the composer
+ * claimed small adjustments could shift which option leads, while the flip
+ * analysis had found NO single-factor tipping point within bounds"*). That
+ * repair was applied at ONE site and the sibling surfaces were never swept.
+ * This function exists so the rule has a single owner and the next surface
+ * imports it rather than restating it — the hand-maintained-mirror class.
+ *
+ * ⚠ DIRECTION OF CONSERVATISM, stated so it is not "tightened" by accident:
+ * every uncertain state returns `permitted`. This function only ever fires on a
+ * POSITIVE producer attestation, so it can suppress a true claim only if the
+ * producer lied, and it silently permits a false claim whenever evidence is
+ * missing. That asymmetry is deliberate — it makes adoption backward-compatible
+ * at every call site (absent flip evidence ⇒ byte-identical prior behaviour) and
+ * keeps the blast radius of a wrong answer to "we said nothing extra".
+ *
+ * ⚠ A SECOND CLASSIFIER OVER THE SAME ROWS ALREADY EXISTS —
+ * `summariseFlipEntries` in `../compose/flip-proposal.ts` (`overall_status`
+ * `'no_practical_flip'`). It is NOT re-implemented here and it is NOT imported
+ * here: importing it would drag `compose/proposed-change.ts` → `tools/registry.ts`
+ * into what is otherwise a zero-import leaf module. Both are built on the ONE
+ * owned predicate {@link isAttestedNoFlipReason}, and the drift between them is
+ * pinned by a control that drives both over the same fixtures and fails loud on
+ * disagreement (`__tests__/flip-claim-posture.test.ts`, "agrees with
+ * summariseFlipEntries"). Two readers, one predicate, one pin — never two lists.
+ */
+export type FlipClaimPosture = 'attested_no_flip' | 'permitted';
+
+/**
+ * Derive the {@link FlipClaimPosture} for one analysis run, from the raw
+ * enrichment object (the byte-for-byte PLoT response stored on the
+ * `run_analysis` fact as `fact.result.enrichment`).
+ *
+ * Pure; never throws; never mutates. `permitted` for a malformed, absent or
+ * empty `flip_thresholds` — see the conservatism note on {@link FlipClaimPosture}.
+ */
+export function readFlipClaimPosture(enrichment: unknown): FlipClaimPosture {
+  const record = asRecord(enrichment);
+  if (record === null) return 'permitted';
+
+  const rows = readTopLevelFlipRows(record);
+  if (rows.length === 0) return 'permitted';
+
+  let attested = 0;
+  for (const row of rows) {
+    // A single real tipping point is enough to permit the claim outright.
+    if (row.kind === 'flip_pair') return 'permitted';
+    if (row.kind === 'attested_no_flip') attested += 1;
+  }
+
+  // EVERY row must carry the attestation. A mix of attested and `unusable`
+  // rows means the producer did not establish the absence across the board,
+  // so the strong claim "nothing flips" is not ours to make either.
+  return attested === rows.length ? 'attested_no_flip' : 'permitted';
+}

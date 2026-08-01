@@ -60,6 +60,9 @@ import { nearTieReasonByMargin } from './robustness-honesty.js';
 // source of truth, shared with the projection layer). Distinct from the
 // one-argument `sanitiseLabel` in src/utils/label-sanitiser.ts.
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
+// ROADMAP 2.278: the run's own answer to "may this copy claim the result could
+// flip?" — the single owner of that rule (see `readFlipClaimPosture`).
+import { readFlipClaimPosture } from '../context/flip-threshold-rows.js';
 // D-ask-1 (2.11 P0-1): scaffold-disclosure grammar + budget. The suffix copy
 // and this allowlist must accept each other or the disclosure is silently
 // replaced by the locked-template fallback — the drift pin lives in
@@ -101,6 +104,50 @@ export const MAX_HEADLINE_CHARS = 220;
  */
 const NOT_ROBUST_SENTENCE =
   ' The result is not yet robust — small changes could flip it.';
+
+/**
+ * ROADMAP 2.278 — the same VERDICT, an honest REASON, for a run whose own flip
+ * evidence attests that nothing flips in range.
+ *
+ * ⚠ THE DEFECT. `isNotRobust` reads `robustness.is_robust` / `.level` — the
+ * robustness MARGINALS — and the sentence it selects asserts FLIPPABILITY. The
+ * evidence for flippability is `enrichment.flip_thresholds[]`, on the same
+ * enrichment object this function already receives whole. It was never read.
+ * On the four witnessed staging turns (`witness-2267-raw/`, 2026-08-01)
+ * `is_robust` was `false` on every one, so this sentence shipped on every one,
+ * while 19 of 19 flip rows came back `structurally_invariant` — ISL's
+ * closed-form proof that no factor can move the winner at all.
+ *
+ * ⚠ WHY THE VERDICT SURVIVES AND ONLY THE REASON CHANGES. "Not yet robust" is
+ * TRUE on those turns: the robustness Monte Carlo really did report an unstable
+ * result (`level: very_low`). What is false is the explanation attached to it.
+ * Robustness and flip-invariance answer different questions — how big is the
+ * lead, versus who holds it — and the witnessed turns are precisely the case
+ * where the answers differ. Dropping the sentence entirely would suppress a
+ * true caveat; keeping it as written asserts something the engine disproved.
+ * So the caveat stays and is re-aimed at the margin.
+ *
+ * ⚠ NO NUMBERS, NO LABELS — same constraints as its sibling, because it shares
+ * the egress grammar and the length budget below, both of which are DERIVED
+ * from {@link NOT_ROBUST_SENTENCES} rather than restated. A new variant added
+ * to that array is automatically admitted by the grammar and budgeted for; one
+ * added anywhere else is silently rejected at egress and the user receives the
+ * locked template instead (the failure mode the constraint-gap disclosure hit).
+ */
+const NOT_ROBUST_NO_FLIP_SENTENCE =
+  ' The result is not yet robust — the ranking held across everything we varied, but the margin is not settled.';
+
+/**
+ * Every robustness-honesty sentence this module may emit. The grammar
+ * (`NOT_ROBUST_RE_SRC`) and the length budget (`MAX_ASSISTANT_TEXT_CHARS`) are
+ * both derived from this array — add here, nowhere else.
+ */
+const NOT_ROBUST_SENTENCES: readonly string[] = [
+  NOT_ROBUST_SENTENCE,
+  NOT_ROBUST_NO_FLIP_SENTENCE,
+];
+
+const NOT_ROBUST_SENTENCE_MAX_CHARS = Math.max(...NOT_ROBUST_SENTENCES.map((s) => s.length));
 
 /**
  * Elimination floor: an option with a finite win_probability strictly below
@@ -150,7 +197,8 @@ export const REDUCED_SAMPLES_SUFFIX =
  */
 export const MAX_ASSISTANT_TEXT_CHARS =
   MAX_HEADLINE_CHARS +
-  NOT_ROBUST_SENTENCE.length +
+  // 2.278: derived over EVERY robustness-honesty variant, not just the first.
+  NOT_ROBUST_SENTENCE_MAX_CHARS +
   ELIMINATED_SENTENCE_MAX_CHARS +
   REDUCED_SAMPLES_SUFFIX.length +
   // D-ask-1 (2.11 P0-1): the scaffold disclosure suffix rides AFTER every
@@ -1504,7 +1552,15 @@ function buildNarrationTail(
   winner: ResolvedWinner,
 ): string {
   let tail = '';
-  if (isNotRobust(enrichment)) tail += NOT_ROBUST_SENTENCE;
+  if (isNotRobust(enrichment)) {
+    // 2.278: the run's OWN flip evidence picks the REASON. `permitted` — which
+    // includes every run carrying no flip evidence at all — keeps the original
+    // sentence byte-identical.
+    tail +=
+      readFlipClaimPosture(enrichment) === 'attested_no_flip'
+        ? NOT_ROBUST_NO_FLIP_SENTENCE
+        : NOT_ROBUST_SENTENCE;
+  }
   if (winner.eliminatedCount >= ELIMINATED_MIN_COUNT) {
     tail += eliminatedSentence(winner.eliminatedCount);
   }
@@ -1632,7 +1688,10 @@ const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_S
 // optional seam-item-3 reduced-samples disclosure, then the optional status
 // suffix — in exactly that order, mirroring buildNarrationTail +
 // reducedSamplesSuffix + statusSuffix composition in computeHeadline.
-const NOT_ROBUST_RE_SRC = escapeForRegex(NOT_ROBUST_SENTENCE);
+// 2.278: an alternation over EVERY variant in NOT_ROBUST_SENTENCES, derived —
+// a variant emitted but absent from the grammar is rejected at egress and the
+// user silently receives the locked template instead.
+const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
 const ELIMINATED_RE_SRC =
   ' \\d{1,3} options are effectively eliminated \\(each has less than a 1% chance of winning\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
