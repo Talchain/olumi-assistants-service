@@ -52,7 +52,7 @@ import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels
 // the two surfaces cannot drift into disagreeing about the same rows.
 import {
   readTopLevelFlipRows,
-  flipRowAttestsNonDisplayScale,
+  flipRowScaleUnsafeForPromptUnits,
   type TopLevelFlipRow,
 } from '../context/flip-threshold-rows.js';
 // M1 (Codex r2 pre-merge review): the option-result source precedence is now
@@ -1343,9 +1343,31 @@ interface FlipThresholdDerivation {
  * There is no "fall back if it produced nothing": a producer that shipped the
  * array has already answered the question, and re-answering it from a dead
  * shape is how a stale number outlives the run that produced it. The legacy
- * branch is reached ONLY when the key is absent entirely, and its use is
- * recorded on `_meta.flip_threshold_source` so its real-world frequency is a
- * measurement rather than an assumption.
+ * branch is reached ONLY when the key is absent entirely.
+ *
+ * ⚠ AND THAT MAKES THE LEGACY BRANCH DEAD BY CONSTRUCTION, not merely rare.
+ * PLoT's Tier-B always-emit contract emits `flip_thresholds: flipThresholds ??
+ * []` unconditionally (`isl-to-ui.contract.ts:300`, `run.ts:3594`), so the key
+ * is always an array on the wire and this branch is reachable only for an
+ * envelope the contract forbids. `_meta.flip_threshold_source` will therefore
+ * read `'top_level'` on 100% of live turns.
+ *
+ * (Cross-repo claim, sourced from the #784 adversarial review at PLoT tip
+ * `29703ee` — not re-derived here. If it is wrong, the label is the thing that
+ * tells you: a single `'nested_legacy'` in telemetry refutes it.)
+ *
+ * The branch is kept anyway — it costs nothing, and deleting a reader on the
+ * strength of a claim about another repo is how the original defect happened.
+ * But do NOT read the label as a frequency measurement that might come back
+ * non-zero: it is a tripwire on an envelope that should not exist.
+ *
+ * ⚠ ASYMMETRY, stated because it is invisible at the call site: the legacy
+ * branch applies NEITHER scale gate. Its rows come from
+ * `results[].factor_sensitivity[]`, which carries no `value_scale` and no
+ * `cap`, so there is nothing to gate on — the filter and the refusal below
+ * exist only on the top-level branch. A row reaching the prompt through the
+ * legacy branch is therefore LESS checked, not more. Acceptable only because
+ * the branch is unreachable; if it ever fires, that is the first thing to fix.
  *
  * FILTER-VS-FORWARD, decided explicitly: rows the producer attested as having
  * no flip in range (`flip_value: null`, `flip_reason:
@@ -1367,14 +1389,16 @@ interface FlipThresholdDerivation {
  * The count is preserved on `_meta.flip_no_effect_count` so that follow-up
  * lane has its evidence without re-deriving it.
  *
- * SCALE — a row that positively attests a non-display `value_scale` is
- * REFUSED and counted. The prompt is told these values are user units and
- * quotes them with the unit appended, so an uninverted model-scale `0.8625`
- * becomes the string `"0.8625 GBP"` while the chip path renders `£34,500`
- * from the same factor: two numbers, one factor. This layer holds no `cap`
- * and cannot invert, so it fails closed. An ABSENT `value_scale` is admitted
- * — absence is pre-contract data, not a claim, and refusing it would delete
- * the prompt's documented unitless-probability case.
+ * SCALE — see {@link flipRowScaleUnsafeForPromptUnits} for the full rule and
+ * its evidence. In short: a row is REFUSED and counted when it positively
+ * attests a non-display `value_scale`, OR when it carries no scale but DOES
+ * carry a unit with a value inside the normalised band. The prompt is told
+ * these values are user units and quotes them with the unit appended, so an
+ * uninverted `0.8625` becomes the string `"0.8625 GBP"` while the chip path
+ * renders `£34,500` from the same factor: two numbers, one factor. This layer
+ * holds no `cap` and cannot invert, so it fails closed. A UNITLESS row with an
+ * absent scale is still admitted — that is the prompt's documented
+ * probability-like case, which is gated on the unit being absent.
  *
  * Direction is value-delta-driven (`flip_value >= current_value` →
  * `'increase'`) on both branches — never elasticity-sign-driven, and never
@@ -1403,7 +1427,7 @@ function readFlipThresholdData(
     const rows = readTopLevelFlipRows(enrichment, graphNodeLabels, graphNodeUnits);
     const noEffectCount = rows.filter((r) => r.kind === 'attested_no_flip').length;
     const pairs = rows.filter((r) => r.kind === 'flip_pair');
-    const kept = pairs.filter((r) => !flipRowAttestsNonDisplayScale(r));
+    const kept = pairs.filter((r) => !flipRowScaleUnsafeForPromptUnits(r));
     return {
       rows: kept.length > 0 ? kept.map(project) : undefined,
       source: 'top_level',

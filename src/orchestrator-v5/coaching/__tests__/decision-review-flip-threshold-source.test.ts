@@ -233,12 +233,122 @@ describe('2.228 F1 — a positively-attested non-display scale is refused', () =
     expect(input._meta?.flip_scale_refused_count).toBe(1);
   });
 
-  it('RED-FIRST: an ABSENT value_scale is admitted (absence is not a claim)', () => {
+  it('RED-FIRST: an ABSENT value_scale with OUT-OF-BAND values is admitted', () => {
     const input = build(
       baseEnrichment([{ factor_id: 'fac_budget', current_value: 100, flip_value: 140 }]),
     );
     expect(input.flip_threshold_data).toHaveLength(1);
     expect(input._meta?.flip_scale_refused_count).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // #784 review amendment 2 — the disclosed residual, closed.
+  // -------------------------------------------------------------------------
+
+  it('RED-FIRST (hazard): absent scale + a UNIT + an in-band value is REFUSED — the live "0.3 engineers" row', () => {
+    // The exact shape of row 0 of the committed staging capture, given the
+    // flip value the F3 mapping will supply. Absent `value_scale` is the
+    // ORDINARY PLoT emission (only `source === 'explicit_cap'` is stamped
+    // 'display'), so without this gate the prompt quotes "0.3 engineers".
+    const input = build(
+      baseEnrichment([
+        {
+          factor_id: 'fac_eng_capacity',
+          factor_label: 'Engineering Capacity',
+          current_value: 0.3,
+          flip_value: 0.55,
+          unit: 'engineers',
+        },
+      ]),
+    );
+    expect(input.flip_threshold_data).toBeUndefined();
+    expect(input._meta?.flip_scale_refused_count).toBe(1);
+    expect(input._meta?.flip_threshold_count).toBe(0);
+  });
+
+  it('RED-FIRST (hazard): EITHER value in band is enough — an out-of-band flip does not rescue an in-band current', () => {
+    // Requiring BOTH values in band would leave the hazard open whenever the
+    // flip landed above 1: "0.3 engineers" would still reach the prompt.
+    const input = build(
+      baseEnrichment([
+        {
+          factor_id: 'fac_eng_capacity',
+          factor_label: 'Engineering Capacity',
+          current_value: 0.3,
+          flip_value: 4,
+          unit: 'engineers',
+        },
+      ]),
+    );
+    expect(input.flip_threshold_data).toBeUndefined();
+    expect(input._meta?.flip_scale_refused_count).toBe(1);
+  });
+
+  it('the gate does NOT delete the prompt\'s probability case: UNITLESS in-band rows stay admitted', () => {
+    // `Prompts/canonical/decision_review.txt:416` — case 2 is gated on "The
+    // value carries no unit". fac_seniority has no unit on the row and none on
+    // its graph node, so this pair must survive.
+    const input = build(
+      baseEnrichment([
+        {
+          factor_id: 'fac_seniority',
+          factor_label: 'Engineering Seniority',
+          current_value: 0.35,
+          flip_value: 0.62,
+        },
+      ]),
+    );
+    expect(input.flip_threshold_data).toHaveLength(1);
+    expect(input.flip_threshold_data![0]).toMatchObject({
+      factor_id: 'fac_seniority',
+      current_value: 0.35,
+      flip_value: 0.62,
+    });
+    expect(input.flip_threshold_data![0]).not.toHaveProperty('unit');
+    expect(input._meta?.flip_scale_refused_count).toBe(0);
+  });
+
+  it('an explicit value_scale:"display" beats the band heuristic — a stamped row is never second-guessed', () => {
+    const input = build(
+      baseEnrichment([
+        {
+          factor_id: 'fac_eng_capacity',
+          factor_label: 'Engineering Capacity',
+          current_value: 0.3,
+          flip_value: 0.55,
+          unit: 'engineers',
+          value_scale: 'display',
+        },
+      ]),
+    );
+    expect(input.flip_threshold_data).toHaveLength(1);
+    expect(input._meta?.flip_scale_refused_count).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // #784 review amendment 3 — pin the NESTED value_scale lookup.
+  // -------------------------------------------------------------------------
+
+  it('RED-FIRST (M7 pin): a NESTED margin_sensitivity.value_scale:"normalised" refuses the row', () => {
+    // The nested location is the one the PLoT build that introduced the signal
+    // actually emits, and it was previously unpinned in the refusal direction:
+    // deleting the `margin_sensitivity` lookup from `readRowValueScale` passed
+    // the entire required suite. This row is deliberately UNITLESS and
+    // OUT-OF-BAND so that neither the unit rule nor the band rule can catch it
+    // — the nested lookup is the only thing standing between it and the prompt.
+    const input = build(
+      baseEnrichment([
+        {
+          factor_id: 'fac_live',
+          factor_label: 'Live Factor',
+          current_value: 3,
+          flip_value: 9,
+          margin_sensitivity: { movement: 'weakened', value_scale: 'normalised' },
+        },
+      ]),
+    );
+    expect(input.flip_threshold_data).toBeUndefined();
+    expect(input._meta?.flip_scale_refused_count).toBe(1);
   });
 });
 

@@ -111,25 +111,71 @@ export function readRowValueScale(row: Record<string, unknown>): string | null {
 }
 
 /**
- * Does this row carry a POSITIVE attestation that its numbers are NOT on the
- * user-facing display scale?
+ * The normalised-scale band. A raw flip/current value with `|v| <= 1` could be
+ * an uninverted model-scale number, so an absent `value_scale` is not by
+ * itself enough to license quoting it as a user-unit value.
  *
- * `true` only for a non-empty `value_scale` token that is not `display` —
- * i.e. `'model'` (normalised `[0, 1]`) or an unrecognised token. An ABSENT
- * `value_scale` returns `false`: absence is pre-contract data, not a claim,
- * and refusing it would delete the legitimate unitless probability-like case.
- *
- * Deliberately NARROWER than `flipRowScaleIsDisplaySafe` in
- * `./analysis-signals.ts`, which additionally refuses an absent scale whose
- * values sit inside the normalised band. That predicate governs whether CEE
- * may REUSE a producer-authored display STRING; this one governs whether a
- * row may be handed to a prompt at all. The two questions have different
- * answers and are kept as two named predicates rather than one overloaded
- * one.
+ * Owned here so the two predicates that use it —
+ * `../context/analysis-signals.ts:flipRowScaleIsDisplaySafe` (the display
+ * LICENCE) and {@link flipRowScaleUnsafeForPromptUnits} (the prompt INPUT
+ * gate) — cannot drift to different bands. `analysis-signals.ts` re-exports it
+ * so its existing consumers keep their import stable.
  */
-export function flipRowAttestsNonDisplayScale(row: TopLevelFlipRow): boolean {
+export const MODEL_SCALE_SUSPECT_ABS = 1;
+
+/**
+ * Is this row unsafe to hand to the decision_review prompt as a USER-UNIT
+ * value? Fail-closed in both branches.
+ *
+ * 1. A non-empty `value_scale` token that is not `display` — `'model'`
+ *    (normalised `[0, 1]`) or anything unrecognised — is a POSITIVE
+ *    attestation that the numbers are not user-scale. Refused.
+ *
+ * 2. An ABSENT `value_scale` is refused ONLY when the row also CARRIES A UNIT
+ *    and either value sits inside the normalised band.
+ *
+ * ⚠ Branch 2 exists because absence is the ORDINARY emission, not an edge
+ * case. At PLoT tip `29703ee` the denormaliser stamps `'display'` only for
+ * `source === 'explicit_cap'` (`flip-threshold-denormaliser.ts:177/:241`);
+ * every other range source ships the row with NO scale at all. So "absent
+ * means pre-contract data, treat it as unclaimed" — the reasoning the first
+ * cut of this function used — would admit the ordinary case. Concretely: the
+ * committed staging capture's first row is `current_value: 0.3, unit:
+ * 'engineers'`, and the moment the F3 mapping gives it a flip value the
+ * prompt would quote it verbatim as `"0.3 engineers"`.
+ *
+ * The UNIT condition is what makes branch 2 free rather than a trade-off. The
+ * prompt's second display case is explicitly gated on the absence of a unit —
+ * *"The value carries no unit and lies between 0 and 1. It is
+ * probability-like…"* (`Prompts/canonical/decision_review.txt:416`,
+ * `src/prompts/defaults.ts:1421`) — so refusing only UNIT-BEARING in-band rows
+ * cannot delete the probability-like case it was written to protect. A
+ * unitless `0.35 → 0.62` pair is still admitted.
+ *
+ * EITHER value in band is enough to refuse, mirroring
+ * `flipRowScaleIsDisplaySafe`'s "safe only when BOTH are out of band". A pair
+ * is quoted as two numbers, so one uninverted value is one wrong number on the
+ * screen — requiring both to be in band would leave exactly the hazard above
+ * open whenever the flip value happened to land above 1.
+ *
+ * Still deliberately NARROWER than `flipRowScaleIsDisplaySafe`, which refuses
+ * an absent in-band scale even with no unit. That predicate governs whether
+ * CEE may REUSE a producer-authored display STRING; this one governs whether a
+ * row may reach the prompt at all. Two questions, two named predicates.
+ */
+export function flipRowScaleUnsafeForPromptUnits(row: TopLevelFlipRow): boolean {
   const scale = row.value_scale === null ? '' : row.value_scale.trim().toLowerCase();
-  return scale.length > 0 && scale !== 'display';
+  if (scale.length > 0) return scale !== 'display';
+
+  // Absent scale. Unitless rows are the prompt's percentage case — admitted.
+  if (row.unit === null) return false;
+  // Not a pair: classification already refuses it; nothing to judge here.
+  if (row.current_value === null || row.flip_value === null) return false;
+
+  const bothOutOfBand =
+    Math.abs(row.current_value) > MODEL_SCALE_SUSPECT_ABS &&
+    Math.abs(row.flip_value) > MODEL_SCALE_SUSPECT_ABS;
+  return !bothOutOfBand;
 }
 
 /**

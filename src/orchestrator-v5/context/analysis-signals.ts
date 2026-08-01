@@ -29,7 +29,7 @@ import {
 // ROADMAP 2.228 F1 — `readRowValueScale` used to be a private copy here. It is
 // now owned by the shared top-level-row module so this path and the
 // decision_review enricher resolve `value_scale` identically by construction.
-import { readRowValueScale } from './flip-threshold-rows.js';
+import { readRowValueScale, MODEL_SCALE_SUSPECT_ABS } from './flip-threshold-rows.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 
 /** Cap for evidence-gap signals carried into the projection. */
@@ -302,8 +302,13 @@ export const FLIP_DISPLAY_MAX_CHARS = 40;
  * The normalised-scale band. A raw flip/current value with |v| <= 1 could be an
  * uninverted model-scale number, so an absent `value_scale` is not enough to
  * license it.
+ *
+ * ROADMAP 2.228 F1 — the constant now lives in `./flip-threshold-rows.ts`
+ * alongside the other predicate that uses it, so the display LICENCE and the
+ * prompt-INPUT gate cannot drift to different bands. Re-exported here so this
+ * module's existing consumers keep their import stable.
  */
-export const MODEL_SCALE_SUSPECT_ABS = 1;
+export { MODEL_SCALE_SUSPECT_ABS };
 
 /** One factor's display-licensed current/flip pair. */
 export interface FlipDisplayLicence {
