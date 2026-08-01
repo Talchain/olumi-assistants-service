@@ -41,7 +41,8 @@ import { describe, expect, it } from 'vitest';
 import { enrichGraphWithFactorsAsync } from '../enricher.js';
 import { extractFactors } from '../index.js';
 import { transformNodeToV3 } from '../../transforms/schema-v3.js';
-import type { GraphT, NodeT } from '../../../schemas/graph.js';
+import type { GraphT } from '../../../schemas/graph.js';
+import type { V1Node } from '../../transforms/schema-v2.js';
 
 const BRIEFS_STATING_A_CURRENT_LEVEL = [
   'Grow revenue from 4000000 to a target of 6000000 this year.',
@@ -80,7 +81,7 @@ describe('ROADMAP 2.258 — goal baseline is ABSENT (characterisation, not appro
     for (const brief of BRIEFS_STATING_A_CURRENT_LEVEL) {
       const out = await enrichGraphWithFactorsAsync(freshGraph(), brief);
       const goalV1 = out.graph.nodes.find((n) => n.kind === 'goal');
-      const goalV3 = transformNodeToV3(goalV1 as NodeT) as Record<string, unknown>;
+      const goalV3 = transformNodeToV3(goalV1 as unknown as V1Node) as Record<string, unknown>;
 
       // The half this PR delivers.
       expect(goalV3.goal_threshold).toBeDefined();
@@ -102,7 +103,7 @@ describe('ROADMAP 2.258 — goal baseline is ABSENT (characterisation, not appro
     );
     const factorV1 = out.graph.nodes.find((n) => n.kind === 'factor');
     expect(factorV1, 'no factor node was enriched').toBeDefined();
-    const factorV3 = transformNodeToV3(factorV1 as NodeT) as Record<string, unknown>;
+    const factorV3 = transformNodeToV3(factorV1 as unknown as V1Node) as Record<string, unknown>;
     expect(factorV3.observed_state).toBeDefined();
     // ...and note it still has no `baseline` — the gap is not goal-specific.
     expect((factorV3.observed_state as Record<string, unknown>).value).toBeDefined();

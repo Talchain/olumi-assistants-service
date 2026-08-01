@@ -27,7 +27,7 @@ import { describe, expect, it } from 'vitest';
 
 import { NodeV3, GraphV3 } from '../cee-v3.js';
 import { transformNodeToV3 } from '../../cee/transforms/schema-v3.js';
-import type { NodeT } from '../graph.js';
+import type { V1Node } from '../../cee/transforms/schema-v2.js';
 import { CEE_GOAL_THRESHOLD_FRAME } from '../../utils/goal-threshold-cap.js';
 
 const goalNodeV3 = () => ({
@@ -84,7 +84,7 @@ describe('ROADMAP 2.258 — the frame survives NodeV3 (the unknown-field strip)'
 });
 
 describe('ROADMAP 2.258 — the frame survives the V1→V3 transform', () => {
-  const v1GoalNode = (extra: Record<string, unknown> = {}): NodeT =>
+  const v1GoalNode = (extra: Record<string, unknown> = {}): V1Node =>
     ({
       id: 'g1',
       kind: 'goal',
@@ -94,7 +94,7 @@ describe('ROADMAP 2.258 — the frame survives the V1→V3 transform', () => {
       goal_threshold_unit: 'customers',
       goal_threshold_cap: 1000,
       ...extra,
-    }) as unknown as NodeT;
+    }) as unknown as V1Node;
 
   it('POSITIVE CONTROL — the transform really does drop an unnamed V1 field', () => {
     const out = transformNodeToV3(
@@ -118,7 +118,7 @@ describe('ROADMAP 2.258 — the frame survives the V1→V3 transform', () => {
       kind: 'goal',
       label: 'Qualitative goal',
       goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
-    } as unknown as NodeT) as Record<string, unknown>;
+    } as unknown as V1Node) as Record<string, unknown>;
     expect(out).not.toHaveProperty('goal_threshold_frame');
   });
 });
