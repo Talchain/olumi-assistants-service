@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   classifyAnalyticalIntent,
   hasMutationSignal,
+  looksLikeImperativeRerun,
   looksLikeVagueEdit,
 } from '../../../../src/orchestrator-v5/routing/analytical-intent.js';
 
@@ -286,4 +287,436 @@ describe('classifyAnalyticalIntent — staleness pattern subject requirement (2.
       ),
     ).toBeNull();
   });
+});
+
+// ---------------------------------------------------------------------------
+// ROADMAP 2.229 fix 4 — imperative re-run recognition.
+//
+// Every `rerun_question` pattern is INTERROGATIVE, so a direct instruction
+// ("run the analysis again") matched nothing, fell through every guard, and
+// was classified by the LLM — nondeterministically between `run_analysis` and
+// a mutation handler (diagnosis §8, anomaly 4). `looksLikeImperativeRerun` is
+// the deterministic recogniser the pre-route keys on.
+//
+// It is DELIBERATELY not an INTENT_PATTERNS entry: `rerun_question` means "the
+// user is ASKING whether a re-run is needed", and answering is the right
+// treatment for that. This predicate means "the user INSTRUCTED a re-run".
+// ---------------------------------------------------------------------------
+describe('looksLikeImperativeRerun (2.229 fix 4)', () => {
+  const IMPERATIVES = [
+    'Please run the analysis again on this same model.',
+    'Run the analysis again.',
+    'Re-run the analysis.',
+    'Rerun the analysis please.',
+    'Run it again.',
+    'Can you re-run the analysis?',
+    'Could you run the analysis one more time?',
+    "Let's re-run this.",
+    'Analyse it again.',
+    'Analyze the model again.',
+    'Run the numbers again.',
+  ];
+  for (const msg of IMPERATIVES) {
+    it(`recognises the instruction "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(true);
+    });
+  }
+
+  const NOT_IMPERATIVES = [
+    // Questions ABOUT re-running — these must keep reaching the answer paths.
+    'Do I need to re-run the analysis?',
+    'Should we re-run analysis?',
+    'Does this need a rerun?',
+    'Is this analysis still current?',
+    'Is it worth re-running the analysis?',
+    // NEGATIVE CONTROL from the brief: a graph edit that happens to contain
+    // "again" must not trip the re-run route.
+    'Set the marketing budget to 200 again.',
+    'Add a new risk factor again.',
+    'Change the demand factor to 0.5 again.',
+    // Ordinary post-analysis coaching questions.
+    'What drove this result?',
+    'Walk me through the analysis.',
+    '',
+  ];
+  for (const msg of NOT_IMPERATIVES) {
+    it(`does NOT treat "${msg}" as a re-run instruction`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+});
+
+
+// ---------------------------------------------------------------------------
+// ⚠ #779 REVIEW BLOCKER — the imperative recogniser was `\brerun\b` in disguise.
+//
+// `IMPERATIVE_RERUN_PATTERNS[0]` shipped with its object group OPTIONAL, making
+// it equivalent to a bare token match. Because the pre-route sits AHEAD of every
+// guard and ahead of the router, ten ordinary sentences dispatched a REAL
+// `run_analysis` — PLoT→ISL compute, a new fact, a new `graph_hash_at_run`, and
+// the user's existing result REPLACED. Measured in the integration harness:
+// `handler_invocations=1 · preroute=["routed"] · llm_called=0` on all ten.
+//
+// Four of them are the user explicitly REFUSING. The PR's own thesis inverted:
+// it set out to stop recognition being punished by a canned string, and instead
+// punished recognition with an unrequested execution — deterministically, where
+// the defect it replaced was intermittent.
+//
+// Two independent repairs, BOTH required:
+//   1. the object group is now REQUIRED (clears the six question/reference
+//      shapes, which carry no object);
+//   2. a NEGATION VETO ahead of the imperative patterns — necessary on its own,
+//      because "Do not re-run THE ANALYSIS" carries a valid object and survives
+//      repair 1 untouched.
+// ---------------------------------------------------------------------------
+describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
+  const EXPLICIT_REFUSALS = [
+    'Do not re-run the analysis.',
+    "Don't re-run it.",
+    'Never re-run this automatically.',
+    'I do not want to re-run anything.',
+  ];
+  for (const msg of EXPLICIT_REFUSALS) {
+    it(`NEVER executes on an explicit refusal: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  const QUESTIONS_ABOUT_A_PAST_RUN = [
+    // Canonical `what_changed` question the run-comparison gate exists to
+    // serve — the pre-route was stealing it and destroying the comparison.
+    'What changed in the re-run?',
+    'Why did the rerun give a different answer?',
+    'Show me the re-run results.',
+    'How long did the rerun take?',
+    'Explain the rerun to me.',
+    'Was the rerun better?',
+  ];
+  for (const msg of QUESTIONS_ABOUT_A_PAST_RUN) {
+    it(`NEVER executes on a question ABOUT a past run: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // ⚠ SECOND REVIEW PASS — the object-group repair closed the measured CORPUS,
+  // not the CLASS. It required an object but never required `re-?run` to be in
+  // VERB position, so the ATTRIBUTIVE-MODIFIER reading survived: "the re-run
+  // analysis" is determiner + modifier + noun, and "analysis" is itself in the
+  // object list — the pattern matched on the very words proving it is not an
+  // instruction. All five measured at PATH level with real dispatch
+  // (`invocations=1`) before the leading lookbehind existed, and all five are
+  // NEW relative to `staging` (this pre-route does not exist there).
+  //
+  // The lesson worth keeping: closing every sentence a reviewer hands you is
+  // not the same as closing the class they came from. The first repair passed
+  // its own corpus completely and left a live path.
+  const ATTRIBUTIVE_MODIFIER_NOT_A_VERB = [
+    'What did the re-run analysis show?',
+    'Tell me about the rerun model.',
+    'Summarise the re-run analysis for me.',
+    'Was the re-run analysis different?',
+    'The rerun scenario looked odd, why?',
+  ];
+  for (const msg of ATTRIBUTIVE_MODIFIER_NOT_A_VERB) {
+    it(`NEVER executes when "re-run" is an ADJECTIVE, not a verb: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // ⚠ THIRD REVIEW PASS — the blocklist was replaced by a VERB-POSITION
+  // ALLOWLIST. Round 3 required an object and added a lookbehind blocklist of
+  // nine tokens; TWENTY of the twenty-one ordinary sentences below walked
+  // through it at path level with real dispatch (`inv=1, routed=true`). The
+  // twenty-first — "Look at these re-run analyses." — was already blocked
+  // there, but only because `these` happened to be one of the nine listed
+  // tokens: coverage by accident, which is the argument against the blocklist
+  // rather than a point in its favour. A blocklist of "things that
+  // could precede a noun" is a hand-maintained mirror of ENGLISH (trap 12) and
+  // it drifted at birth — `your/our/my/his/her` were absent, and `my`/`our`
+  // appear in that same regex's own object group.
+  //
+  // These twenty-one are pinned against the INVERTED form. The property that
+  // makes the inversion right is not that this list is longer: it is that an
+  // unrecognised left context now DECLINES instead of EXECUTING.
+  const NOMINAL_NOT_A_VERB = [
+    // possessives the blocklist omitted — the first blocked sentence of round 3
+    // with a single word changed
+    'What did your re-run analysis show?',
+    'What did our re-run analysis show?',
+    'What did my re-run analysis show?',
+    'What did his re-run analysis show?',
+    'What did her re-run analysis show?',
+    // possessive-'s
+    "Paul's rerun analysis looked wrong.",
+    // determiner + ADJECTIVE (the blocklist matched only determiner + token)
+    'The failed re-run analysis was misleading.',
+    'The last re-run analysis was better.',
+    'Review the previous re-run analysis.',
+    // determiner + TWO spaces — the blocklist's `\s` matches exactly one char
+    'In the  re-run analysis, capacity was higher.',
+    // determiners and quantifiers absent from the blocklist
+    'Which re-run analysis was better?',
+    'Every re-run analysis told the same story.',
+    'Each re-run analysis differed slightly.',
+    'Some re-run analysis must have failed.',
+    'Any re-run analysis would show this.',
+    'Both re-run analyses agreed.',
+    'Compare the two re-run analyses.',
+    'Look at these re-run analyses.',
+    // BARE PLURAL at sentence start — the one shape a left-context allowlist
+    // cannot reach, since its left context legitimately IS string-start. Closed
+    // structurally instead: a plural object requires a determiner.
+    'Rerun analyses showed a different leader.',
+    // possessive inside a prepositional phrase
+    'In your re-run analysis, capacity was higher.',
+    'Our rerun model was stale.',
+  ];
+  for (const msg of NOMINAL_NOT_A_VERB) {
+    it(`NEVER executes on a NOMINAL use: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // ⚠ FOURTH REVIEW PASS — the structural rule was ONE INFLECTION too narrow,
+  // and the pin that introduced it CONTRADICTED ITSELF: it required a
+  // determiner for the PLURAL ("Rerun analyses showed a different leader." →
+  // declined, pinned above) while the SINGULAR — one letter different — still
+  // EXECUTED at path level. My own stated rationale ("Re-run the analyses" is
+  // an instruction, "Rerun analyses" is a heading) applies verbatim to the
+  // singular; I simply did not carry it across.
+  //
+  // Every sentence below has a LICENSED left context — sentence start, a comma,
+  // `and`, `now` — and a bare noun after it. That is precisely the gap a
+  // left-context allowlist cannot see, and it is why the object rule and the
+  // position rule are BOTH needed: neither one alone closes the class.
+  //
+  // Remedy: every bare NOUN object now requires a determiner; only PRONOUN
+  // objects ("Re-run it." / "Re-run this.") may stand alone, because those have
+  // no nominal reading to be confused with. A strict TIGHTENING, so every
+  // must-decline pin above stays green by construction.
+  const BARE_NOUN_NOMINALS = [
+    'Rerun analysis showed a different leader.',
+    'Rerun model was stale.',
+    'Rerun scenario was slower.',
+    'Results were mixed. Rerun analysis disagreed.',
+    'As noted, rerun analysis was inconclusive.',
+    'Compared to rerun analysis, capacity was higher.',
+    'According to rerun analysis, capacity was higher.',
+    'Right now rerun analysis is queued.',
+    'We looked at it; rerun analysis was fine.',
+    'Both the baseline and rerun analysis showed the same leader.',
+    'The first pass and rerun analysis disagreed.',
+    'Please note, rerun analysis is pending.',
+    'Now rerun model looks different.',
+    'And rerun analysis confirmed it.',
+  ];
+  for (const msg of BARE_NOUN_NOMINALS) {
+    it(`NEVER executes on a bare-noun NOMINAL in a licensed position: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // The exemption that keeps the rule honest: a PRONOUN object is a complete
+  // instruction and must still dispatch. If these ever go red the tightening
+  // has over-reached.
+  for (const msg of ['Re-run it.', 'Re-run this.', 'Re-run that.']) {
+    it(`still fires on a PRONOUN object: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(true);
+    });
+  }
+
+  // ⚠ FIFTH REVIEW PASS — the blocker that split this fix onto its own branch.
+  // `VERB_POSITION_LEFT_CONTEXTS` carried a bare `/\bto\s+$/i`, which licensed
+  // ANY infinitival `to`. Every subordinate clause and nominalisation under a
+  // refusal therefore read as a command, and all eight below EXECUTED a real
+  // `run_analysis` at path level — the worst being a user explicitly DECLINING
+  // one and losing their computed result for it.
+  //
+  // The negation veto did not save them: it catches `do not` / `don't` /
+  // `never`, not bare `not to`, `no reason to`, `pointless`, `too early`,
+  // `forgot to`, `nobody`.
+  //
+  // Closed by narrowing `to` to a MATRIX-VERB allowlist — a verb of wanting,
+  // asking or intending marks what follows as a directive; a verb of deciding,
+  // forgetting or evaluating does not. Deleting `to` was not an option: see
+  // the load-bearing pins below.
+  const INFINITIVE_UNDER_A_NON_DIRECTIVE = [
+    'We decided not to re-run the analysis.',
+    'There is no reason to re-run the analysis.',
+    'It is pointless to re-run the analysis.',
+    'I forgot to re-run the analysis.',
+    'It is too early to re-run the analysis.',
+    'Whether to re-run the analysis is unclear.',
+    'The decision to re-run the analysis was wrong.',
+    // The one the matrix-verb allowlist CANNOT reach — `wants to` is genuinely
+    // instruction-shaped, so the refusal lives in the SUBJECT. Closed via the
+    // negation veto instead, which is where refusal belongs.
+    'Nobody wants to re-run the analysis.',
+  ];
+  for (const msg of INFINITIVE_UNDER_A_NON_DIRECTIVE) {
+    it(`NEVER executes on an infinitive under a NON-directive verb: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // ⚠ SIXTH REVIEW PASS — THE `to` ENTRY IS GONE, AND THESE SEVEN ARE THE
+  // MEASURED, ACCEPTED COST. They were pinned as must-FIRE one round ago, under
+  // the matrix-verb allowlist. That allowlist closed 8 shapes and opened 22 —
+  // reported speech, non-first-person questions, `need`/`ask` as NOUNS,
+  // conditionals, and six explicit REFUSALS including "We didn't want to re-run
+  // the analysis." So the entry was deleted outright rather than narrowed a
+  // third time.
+  //
+  // These now fall through to the LLM router, which is EXACTLY what `staging`
+  // does today: zero regression against the deployed baseline. Pinned as
+  // declines so the cost is visible and so a future `to` entry has to argue
+  // with a test rather than slip in.
+  //
+  // ⚠ IF ONE OF THESE STARTS FIRING, that is a `to` entry being reintroduced —
+  // review it against the 22-sentence corpus above before accepting it.
+  const POLITE_FORMS_LOST_WITH_THE_to_ENTRY = [
+    'I want you to re-run the analysis.',
+    'I need you to re-run the analysis.',
+    "I'd like you to re-run the analysis.",
+    'I am going to re-run the analysis.',
+    'Try to re-run the analysis.',
+    'Ask them to re-run the analysis.',
+    'Tell it to re-run the analysis.',
+  ];
+  for (const msg of POLITE_FORMS_LOST_WITH_THE_to_ENTRY) {
+    it(`ACCEPTED COST — declines, falls through to the LLM as staging does: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // ⚠ THE 22 THE MATRIX-VERB ALLOWLIST OPENED. Every one measured EXECUTING a
+  // real `run_analysis` at path level before the `to` entry was deleted, and
+  // every one is NEW relative to `staging`, where no recogniser exists. Six are
+  // the user explicitly REFUSING.
+  const MATRIX_VERB_FINDINGS: ReadonlyArray<readonly [string, string]> = [
+    ["We didn't want to re-run the analysis.", 'explicit refusal, contracted'],
+    ["We won't need to re-run the analysis.", 'explicit refusal, contracted'],
+    ["You shouldn't need to re-run the analysis.", 'explicit refusal, contracted'],
+    ["I wouldn't want to re-run the analysis now.", 'explicit refusal, contracted'],
+    ["He doesn't want to re-run the analysis.", 'explicit refusal, contracted'],
+    ['I was going to re-run the analysis but changed my mind.', 'refusal by retraction'],
+    ['She said she wanted to re-run the analysis.', 'reported speech'],
+    ['He told me to re-run the analysis.', 'reported speech'],
+    ['They asked me to re-run the analysis.', 'reported speech'],
+    ['The team said they need to re-run the analysis.', 'reported speech'],
+    ['She told me to re-run the analysis.', 'reported speech'],
+    ['He said he was going to re-run the analysis.', 'reported speech'],
+    ['They were going to re-run the analysis.', 'reported speech, past'],
+    ['Do they want to re-run the analysis?', 'question, non-first-person subject'],
+    ['Does he need to re-run the analysis?', 'question, non-first-person subject'],
+    ['Did she ask to re-run the analysis?', 'question, non-first-person subject'],
+    ['Would you want to re-run the analysis?', 'question, non-first-person subject'],
+    ['The need to re-run the analysis is unclear.', '`need` as a NOUN'],
+    ['There was no ask to re-run the analysis.', '`ask` as a NOUN'],
+    ['Our need to re-run the analysis has passed.', '`need` as a NOUN'],
+    ['If you need to re-run the analysis, tell me.', 'conditional'],
+    ['If they want to re-run the analysis, it will take time.', 'conditional'],
+  ];
+  for (const [msg, why] of MATRIX_VERB_FINDINGS) {
+    it(`NEVER executes — ${why}: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // ⚠ THE MIRROR DEFECT, NAMED. The contracted negators above
+  // (didn't/won't/shouldn't/wouldn't/doesn't) are ABSENT from
+  // `RERUN_NEGATION_VETO_PATTERNS` while being PRESENT in
+  // `NEGATED_EDIT_PATTERNS` — the sibling list IN THE SAME FILE, expressing the
+  // same concept, one complete and one not. They are not needed for the pins
+  // above (deleting the `to` entry closes those by position, not by polarity),
+  // but the divergence is the hand-maintained-mirror defect at its purest and
+  // is recorded here so the next person to touch either list sees both.
+  it('the two negation lists in this file have diverged — recorded, not silently tolerated', () => {
+    // Deliberately a documentation pin, not a behaviour assertion: unifying
+    // them is a change with its own blast radius (NEGATED_EDIT_PATTERNS gates
+    // the vague-edit clarifier) and belongs in its own lane.
+    expect(looksLikeImperativeRerun("We didn't want to re-run the analysis.")).toBe(false);
+  });
+
+  // The all-occurrence scan: one message can carry a nominal use AND a real
+  // instruction. Stopping at the first match would decline these, because the
+  // first occurrence is the nominal one.
+  const NOMINAL_THEN_INSTRUCTION = [
+    'The re-run analysis was odd. Re-run the model.',
+    'Check the re-run analysis, then re-run the model.',
+  ];
+  for (const msg of NOMINAL_THEN_INSTRUCTION) {
+    it(`still fires when a real instruction FOLLOWS a nominal use: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(true);
+    });
+  }
+
+  // ⚠ DOCUMENTED DECLINES — genuine instructions this allowlist does NOT
+  // recognise. Pinned as CURRENT behaviour and as an ACCEPTED cost, never as
+  // desired behaviour: each falls through to the LLM router, which is the
+  // pre-PR path, so the cost is a clarification and never a destroyed result.
+  // The first five are also genuinely AMBIGUOUS — "the re-run analysis" there
+  // is determiner + modifier + noun, the very construction the allowlist exists
+  // to refuse. If one of these starts firing, that is a WIDENING to review, not
+  // a fix to celebrate.
+  const KNOWN_DECLINES_FAILING_SAFE = [
+    'Start the re-run analysis.',
+    'Kick off the re-run analysis.',
+    'Trigger the re-run analysis.',
+    'Perform the re-run analysis.',
+    'Repeat the re-run analysis.',
+    'Go ahead with the re-run analysis.',
+    'I want the re-run analysis.',
+    'The re-run analysis was odd, so re-run the model.',
+    // ⚠ FOURTH REVIEW PASS — the block above previously read as the COMPLETE
+    // measured decline set. It was not. Any sentence-initial discourse marker
+    // or modal absent from the allowlist also declines, and two of these are
+    // common phrasings a real user would type.
+    'Just re-run the analysis.',
+    'You should re-run the analysis.',
+    'So re-run the analysis.',
+    'Also re-run the analysis.',
+    'First re-run the analysis.',
+    'Next re-run the analysis.',
+    'Finally re-run the analysis.',
+    'OK re-run the analysis.',
+    'Yes re-run the analysis.',
+    'Instead re-run the analysis.',
+    'Maybe re-run the analysis.',
+    'Actually re-run the analysis.',
+    'Here is what I need: re-run the analysis.',
+    // ⚠ AN ADJECTIVE BETWEEN DETERMINER AND NOUN also declines — the object
+    // rule matches determiner + noun with nothing between. Safe direction, and
+    // previously undisclosed. These are natural phrasings and the most likely
+    // source of a "why didn't it re-run?" report.
+    'Re-run the whole analysis.',
+    'Re-run the full analysis.',
+    'Re-run the updated model.',
+    'Re-run the baseline scenario.',
+    // Infinitives under a non-directive matrix verb, now that `to` is narrowed.
+    'It would be sensible to re-run the analysis.',
+    'The plan is to re-run the analysis.',
+  ];
+  for (const msg of KNOWN_DECLINES_FAILING_SAFE) {
+    it(`KNOWN DECLINE (accepted cost, fails safe to the LLM): "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // BOTH DIRECTIONS. Every genuine instruction must survive both repairs —
+  // a veto that silences the feature is not a fix.
+  const STILL_INSTRUCTIONS = [
+    'Please run the analysis again on this same model.',
+    'Run the analysis again.',
+    'Re-run the analysis.',
+    'Rerun the analysis please.',
+    'Run it again.',
+    'Can you re-run the analysis?',
+    "Let's re-run this.",
+  ];
+  for (const msg of STILL_INSTRUCTIONS) {
+    it(`still recognises the instruction: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(true);
+    });
+  }
 });
