@@ -231,6 +231,15 @@ describe("recordExplicitTurnStop — the turn must have been ADMITTED", () => {
     expect(markTurnStopped).toHaveBeenCalledWith(SCENARIO, TURN);
   });
 
+  // ⚠ THIS TEST IS ABOUT DOUBLES, NOT ABOUT PRODUCTION, AND ON ITS OWN IT
+  //   WOULD BLESS THE DEFECT'S RETURN. Dozens of hand-rolled doubles across the
+  //   repo do not implement `turnFenceRowExists`, so the handler fails OPEN when
+  //   the method is absent — but on the PRODUCTION store that same absence would
+  //   restore the graph-destruction defect under a fully green suite. The thing
+  //   that makes this assertion safe is the prototype pin in
+  //   `session/__tests__/turn-fence-guards.test.ts` ("SupabaseSessionStore has
+  //   claimTurnFence and markTurnStopped"), which REDs if the method ever leaves
+  //   the class. Do not read this test without that one.
   it("a store without turnFenceRowExists skips the check (fail-open) and records", async () => {
     storeMethods.turnFenceRowExists = false;
     const reply = await recordExplicitTurnStop(
@@ -364,7 +373,9 @@ describe("recordExplicitTurnStop — the OWNER's Stop is unchanged", () => {
   });
 
   // A caller who PRESENTED a token asked to be verified; a bad one is a 401
-  // about the TOKEN. It leaks no scenario state, so it is surfaced as itself.
+  // about the TOKEN. It is surfaced as itself ONLY because it is reached before
+  // any read of server state — see the next test, which is what makes that true
+  // rather than merely claimed.
   it("with the JWT flag ON, a present-but-INVALID token is refused 401 before the scenario is read", async () => {
     mockConfig.auth.requireUserJwt = true;
     verifySupabaseUserJwt.mockResolvedValue({ ok: false, reason: "invalid_token" });
@@ -376,7 +387,40 @@ describe("recordExplicitTurnStop — the OWNER's Stop is unchanged", () => {
       "req-jwt-bad",
     );
     expect(reply.status).toBe(401);
+    // ⭐ THE ORDERING, ASSERTED RATHER THAN NAMED. The test above was called
+    //   "before the scenario is read" for a whole revision without checking it,
+    //   and it was FALSE: `scenarioExists` ran first, so with a deliberately
+    //   junk token an EXISTING scenario answered 401 and an ABSENT one answered
+    //   404 — the refusal status was a free scenario-existence oracle for any
+    //   caller, requiring no valid credential at all. A title is not a pin.
+    expect(scenarioExists).not.toHaveBeenCalled();
+    expect(ensureScenarioExists).not.toHaveBeenCalled();
+    expect(turnFenceRowExists).not.toHaveBeenCalled();
     expect(markTurnStopped).not.toHaveBeenCalled();
+  });
+
+  // THE ORACLE ITSELF, pinned as an equivalence rather than as an ordering:
+  // a bad token must get the SAME answer whether the scenario exists or not.
+  it("with the JWT flag ON, a junk token answers IDENTICALLY for an existing and an absent scenario", async () => {
+    mockConfig.auth.requireUserJwt = true;
+    verifySupabaseUserJwt.mockResolvedValue({ ok: false, reason: "invalid_token" });
+    const headers = { authorization: "Bearer head.payload.sig" };
+
+    scenarioExists.mockResolvedValue(true);
+    const onExisting = await recordExplicitTurnStop(
+      req({ scenario_id: SCENARIO, turn_id: TURN }, headers),
+      "req-oracle",
+    );
+
+    scenarioExists.mockResolvedValue(false);
+    const onAbsent = await recordExplicitTurnStop(
+      req({ scenario_id: SCENARIO, turn_id: TURN }, headers),
+      "req-oracle",
+    );
+
+    // Pre-hoist these were 401 and 404 respectively.
+    expect(onExisting.status).toBe(onAbsent.status);
+    expect(onExisting.body).toStrictEqual(onAbsent.body);
   });
 });
 

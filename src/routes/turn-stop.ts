@@ -177,6 +177,31 @@ export async function recordExplicitTurnStop(
   requestId: string,
 ): Promise<TurnStopReply> {
   const body = req.body;
+
+  // ── 2.236 STEP 0, AND IT IS FIRST FOR A REASON ──────────────────────────
+  // `runPreFlight` resolves identity BEFORE body validation so that an
+  // unauthenticated caller learns nothing about the request it sent or the
+  // state of the service. This rung must match that ordering EXACTLY, because
+  // ordering is the whole of the alignment claim between the two rungs.
+  //
+  // ⚠ AN EARLIER REVISION OF THIS FIX PUT THIS CALL AFTER THE SCENARIO-EXISTENCE
+  //   READ, and wrote a comment claiming identity ran "strictly before anything
+  //   that reads the scenario". It did not, and the comment made the gap look
+  //   reviewed — the exact defect shape this whole PR exists to correct, in the
+  //   correction. Measured on the un-hoisted code with the JWT flag on and a
+  //   junk token: an EXISTING scenario answered 401 while an ABSENT one
+  //   answered 404, so the refusal status was a free scenario-existence oracle
+  //   for any caller willing to present a deliberately bad token. Hoisted here,
+  //   both answer 401 and `scenarioExists` is never reached.
+  //
+  // Hoisting is free: this call reads only `req.headers`, writes nothing, and
+  // touches no store — so the "existence before the ownership upsert" ordering
+  // that keeps a Stop from CREATING a scenario is untouched.
+  const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
+  if (!resolved.ok) {
+    return { status: resolved.status, body: resolved.error };
+  }
+
   // R-12/R-8: the SAME parse as the ingress claim (`readIngressTurnIdentity`)
   // — the tombstone this records and the claim the turn made key one
   // `v5_turn_fence` row, so the two identities must be read by ONE function
@@ -270,17 +295,10 @@ export async function recordExplicitTurnStop(
 
     // ── 2.236 step 3: THE SAME PRE-FLIGHT THE TURN ROUTE RUNS ──────────────
     // Two calls, both into route-v2-preflight.ts, both shared verbatim with
-    // `runPreFlight`. Nothing about ownership is decided in this file.
+    // `runPreFlight`. Nothing about ownership is decided in this file. Step 0
+    // (`resolveVerifiedIdentityOrRefuse`) already ran at the top of the handler,
+    // before ANY read of server state — see the ordering note there.
     //
-    // Order matches the turn route's: identity strictly before anything that
-    // reads the scenario, so a caller whose TOKEN is bad learns nothing about
-    // the scenario. That 401 is about the caller's token only and leaks no
-    // scenario state, so it is safe to surface as itself.
-    const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
-    if (!resolved.ok) {
-      return { status: resolved.status, body: resolved.error };
-    }
-
     // The caller-supplied `user_id`, read by the SAME parser the turn route
     // uses — not a hand-rolled `body.user_id` read, which would drift the day
     // the extension contract moves. With `CEE_REQUIRE_USER_JWT` on, the
