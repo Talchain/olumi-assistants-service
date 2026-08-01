@@ -173,15 +173,28 @@ describe('2.267 D-2 — the guard suppresses a NAME, not the surface', () => {
   });
 
   it('run C: the FACTOR label may be named even when an option label overlaps it', () => {
-    // Live shape that a token-level guard would have broken: the narrative names
-    // the factor "Vendor Platform Approach" while an option is called "Buy Vendor
-    // Platform". The derived-distinctiveness rail must not read that as naming
-    // the option.
+    // Live shape the derived-distinctiveness rail exists for: the narrative names
+    // the FACTOR "Vendor Platform Approach" while an option is called "Buy Vendor
+    // Platform", and the two share the phrase "vendor platform".
+    //
+    // ⚠ `leading_option_id` IS DELIBERATELY MOVED OFF `opt_buy` HERE. On the real
+    // run C, opt_buy WAS the leader, so it is a permitted name and this case
+    // passes whether or not the rail exists — a control that tests nothing
+    // (verified: the rail-removal mutant left the whole file green until this
+    // line was added). Moving the leader to opt_build makes the rail the ONLY
+    // thing standing between this honest card and suppression.
     const run = WITNESS.controls.runC;
     expect(run.options.map((o) => o.option_label)).toContain('Buy Vendor Platform');
-    const card = onlyFlipCard(factFor(run));
+    expect(run.leading_option_id).toBe('opt_buy');
+    const card = onlyFlipCard(factFor(run, { leading_option_id: 'opt_build' }));
     expect(card.body).toBe(run.decision_review_flip_thresholds[0]!.narrative);
     expect(card.body).toContain('Vendor Platform Approach');
+  });
+
+  it('run C, unmodified: the live turn is unaffected too', () => {
+    const run = WITNESS.controls.runC;
+    const card = onlyFlipCard(factFor(run));
+    expect(card.body).toBe(run.decision_review_flip_thresholds[0]!.narrative);
   });
 
   it('naming the ATTESTED winner is permitted, in full', () => {

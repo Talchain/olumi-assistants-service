@@ -1871,13 +1871,22 @@ const OPTION_ALIAS_MIN_TOKENS = 2;
  * ⚠ AND THE OVER-MATCH RAIL IS DERIVED FROM THE GRAPH, NOT HAND-LISTED
  * (CLAUDE.md trap 12). A candidate phrase is DISCARDED when it also occurs in
  * any other node's label, because then it does not distinguish this option from
- * that node. That single rule pays for itself three times on the witness data:
- * it kills `"leeds"` (also in the factor "Leeds Site Activation" — the false
- * positive that would otherwise fire on every run-A narrative), it kills
- * `"bristol"` (in two options at once), and on run C it kills
- * `"vendor platform"` (inside the factor label "Vendor Platform Approach", which
- * the narrative names legitimately). No stop-word list is maintained anywhere;
- * add a node to the graph and the rails move with it.
+ * that node. No stop-word list is maintained anywhere; add a node to the graph
+ * and the rail moves with it.
+ *
+ * WHICH RAIL DOES WHAT, stated exactly rather than impressively — the two are
+ * easy to conflate and only one of them is load-bearing per case:
+ *   - a BARE token shared with a factor (`"leeds"`, also in the factor "Leeds
+ *     Site Activation") never becomes a candidate at all, because a single
+ *     token is below {@link OPTION_ALIAS_MIN_TOKENS}. The distinctiveness rail
+ *     is not what saves that case.
+ *   - a MULTI-token phrase shared with another node is what the rail is for.
+ *     Its witnessed instance is run C: the option "Buy Vendor Platform" and the
+ *     factor "Vendor Platform Approach" share `"vendor platform"`, and the
+ *     narrative names the FACTOR. Without the rail that card is suppressed on
+ *     any turn where that option is not already permitted — which is why the
+ *     test for it deliberately moves `leading_option_id` off it, or it would
+ *     pass while testing nothing.
  *
  * The shipped {@link LEVER_LABEL_MIN_LEN} / {@link GENERIC_LEVER_TOKENS} rails
  * still apply on top, so a one-word option called "Cost" never matches.
