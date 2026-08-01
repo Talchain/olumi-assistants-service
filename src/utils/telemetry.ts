@@ -779,6 +779,26 @@ export const TelemetryEvents = {
   // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
   // Redacted: corrected_count + node IDs only, no observed magnitudes.
   V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+  // ROADMAP 2.229 fix 4 — deterministic IMPERATIVE RE-RUN pre-route.
+  //
+  // Fires once per turn whose message reads as an instruction to re-run
+  // ("run the analysis again"), BEFORE the guard stack and before routing.
+  // Every `rerun_question` classifier pattern is interrogative, so an
+  // instruction used to match nothing, fall through every guard, and be
+  // classified by the LLM — nondeterministically between `run_analysis` and a
+  // mutation handler. This event is how the pre-route's decision is
+  // observable, including its DECLINES: `fell_through` with a reason is what
+  // distinguishes "the sentence did not read as a re-run" from "it did, but
+  // the graph or the registry could not support one", which are different
+  // operational problems and would otherwise look identical (silence).
+  //
+  // Payload — structural only, no user text, no labels, no graph content:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - outcome: 'routed' | 'fell_through'
+  //   - reason: 'mutation_signal' | 'no_option_target' | 'handler_unavailable'
+  //     | null
+  V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
   // D-ask-1 (ROADMAP 2.11 P0-1) — run_analysis scaffolded DISCLOSED
   // placeholder interventions for unconfigured options so the analysis
   // completed instead of 422-blocking. Redacted: option ids + per-option
