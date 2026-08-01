@@ -401,6 +401,17 @@ describe('ROADMAP 2.229 fix 4 — imperative re-run pre-route', () => {
     ['Which re-run analysis was better?', 'determiner absent from the blocklist'],
     ['Compare the two re-run analyses.', 'quantifier + plural'],
     ['Rerun analyses showed a different leader.', 'bare plural at sentence start'],
+    // ⚠ FOURTH REVIEW PASS — the plural rule was one inflection wide: the
+    // SINGULAR, one letter different, still executed here with `invocations=1`.
+    // Each of these has a LICENSED left context and a bare noun after it — the
+    // gap a left-context allowlist structurally cannot see.
+    ['Rerun analysis showed a different leader.', 'bare SINGULAR at sentence start'],
+    ['Rerun model was stale.', 'bare singular, different noun'],
+    ['Results were mixed. Rerun analysis disagreed.', 'licensed context: sentence start'],
+    ['As noted, rerun analysis was inconclusive.', 'licensed context: comma'],
+    ['According to rerun analysis, capacity was higher.', 'licensed context: "to"'],
+    ['Right now rerun analysis is queued.', 'licensed context: "now"'],
+    ['Both the baseline and rerun analysis showed the same leader.', 'licensed context: "and"'],
   ];
   for (const [message, why] of MUST_NEVER_EXECUTE) {
     it(`NEVER executes an analysis for "${message}" (${why})`, async () => {

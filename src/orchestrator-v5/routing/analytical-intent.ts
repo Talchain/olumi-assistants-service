@@ -498,6 +498,21 @@ const RERUN_INTERROGATIVE_VETO_PATTERNS: readonly RegExp[] = [
  *   "Go ahead with the re-run analysis."   "I want the re-run analysis."
  *   "…was odd, SO re-run the model."       (connective absent from the list)
  *
+ * ⚠ AND THE DECLINE SET IS WIDER THAN THOSE EIGHT — stated because the list
+ * above previously read as the complete measured set, which it was not. Any
+ * sentence-initial discourse marker or modal that is not on the allowlist also
+ * declines, including several common phrasings:
+ *   "So / Also / First / Next / Finally / OK / Yes / Just / Instead / Maybe /
+ *    Actually re-run the analysis."
+ *   "You should re-run the analysis."
+ *   "Here is what I need: re-run the analysis."
+ * All fail SAFE (fall through to the LLM router) and all are IDENTICAL to
+ * `staging`, where this pre-route does not exist — so there is no user-visible
+ * loss against the deployed baseline. `Just re-run the analysis.` and `You
+ * should re-run the analysis.` are the two most likely to be typed; if live
+ * telemetry shows the pre-route declining often, widen the allowlist THERE
+ * first, and never by relaxing the object rule.
+ *
  * The first seven are also genuinely AMBIGUOUS — "the re-run analysis" there is
  * determiner + modifier + noun, the very construction this list exists to
  * refuse — so declining them is arguably the correct parse and not merely the
@@ -573,11 +588,34 @@ const IMPERATIVE_RERUN_PATTERNS: readonly RegExp[] = [
   // unrecognised left context declines and the turn falls through to the LLM
   // router — the behaviour before this pre-route existed.
   //
-  // The one shape an allowlist cannot reach on its own is the SENTENCE-INITIAL
-  // bare plural ("Rerun analyses showed a different leader."), whose left
-  // context is legitimately string-start. That is closed structurally instead,
-  // in the object group below: a PLURAL object requires a determiner, because
-  // "Re-run the analyses" is an instruction and "Rerun analyses" is a heading.
+  // The shapes an allowlist cannot reach on its own are the ones whose left
+  // context legitimately IS a licensed position — a sentence start, a comma, an
+  // `and`, a `now` — while the words after it are a noun phrase, not a command.
+  // Those are closed structurally instead, in the object group below: EVERY
+  // BARE NOUN OBJECT REQUIRES A DETERMINER; only PRONOUN objects (it / this /
+  // that) may stand alone.
+  //
+  // ⚠ THE RULE WAS ONE INFLECTION TOO NARROW WHEN FIRST WRITTEN, and the pin
+  // that introduced it contradicted itself: it required a determiner for the
+  // PLURAL ("Rerun analyses showed a different leader." → declined) while the
+  // SINGULAR, one letter different, still EXECUTED ("Rerun analysis showed a
+  // different leader." → invocations=1 at path level). The rationale given for
+  // the plural rule — "Re-run the analyses" is an instruction, "Rerun analyses"
+  // is a heading — applies verbatim to the singular; it was simply not carried
+  // across. Fifteen nominal readings were measured still reaching the handler,
+  // among them:
+  //   "Rerun analysis showed a different leader."  "Rerun model was stale."
+  //   "As noted, rerun analysis was inconclusive."
+  //   "According to rerun analysis, capacity was higher."
+  //   "Right now rerun analysis is queued."
+  //   "Both the baseline and rerun analysis showed the same leader."
+  // Each has a LICENSED left context (sentence start, comma, `and`, `now`) and
+  // a bare noun after it, which is exactly the gap a left-context rule cannot
+  // see. Requiring the determiner is a strict TIGHTENING, so every must-decline
+  // pin stays green by construction; measured cost to the must-fire set: zero.
+  //
+  // Pronouns are deliberately exempt: "Re-run it." / "Re-run this." are
+  // complete instructions and have no nominal reading to confuse them with.
   //
   // WHAT IS ACTUALLY CLAIMED, stated so nobody inherits a third overclaim: the
   // token must carry an object AND sit in one of the ten left contexts on the
@@ -587,7 +625,7 @@ const IMPERATIVE_RERUN_PATTERNS: readonly RegExp[] = [
   // still expected, but it now costs a fallen-through turn instead of a
   // destroyed analysis. Treat a new counterexample as expected; treat a new
   // EXECUTION as a serious defect.
-  /\bre-?run\b\s+(?:(?:the|this|that|my|our)\s+(?:analyses|numbers)|(?:the|this|that|my|our)?\s*(?:analysis|model|scenario|it|this|that))\b/i,
+  /\bre-?run\b\s+(?:(?:the|this|that|my|our)\s+(?:analysis|analyses|model|scenario|numbers)|(?:it|this|that))\b/i,
   // "run the analysis again", "run the numbers once more"
   /\brun\s+(?:the\s+|this\s+|that\s+|my\s+|our\s+)?(?:analysis|analyses|model|numbers|scenario)\s+(?:again|once\s+more|one\s+more\s+time|a\s+second\s+time)\b/i,
   // "run it again", "run this again"

@@ -425,8 +425,12 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
 
   // ⚠ THIRD REVIEW PASS — the blocklist was replaced by a VERB-POSITION
   // ALLOWLIST. Round 3 required an object and added a lookbehind blocklist of
-  // nine tokens; TWENTY-ONE ordinary sentences walked through it at path level
-  // with real dispatch (`inv=1, routed=true`). A blocklist of "things that
+  // nine tokens; TWENTY of the twenty-one ordinary sentences below walked
+  // through it at path level with real dispatch (`inv=1, routed=true`). The
+  // twenty-first — "Look at these re-run analyses." — was already blocked
+  // there, but only because `these` happened to be one of the nine listed
+  // tokens: coverage by accident, which is the argument against the blocklist
+  // rather than a point in its favour. A blocklist of "things that
   // could precede a noun" is a hand-maintained mirror of ENGLISH (trap 12) and
   // it drifted at birth — `your/our/my/his/her` were absent, and `my`/`our`
   // appear in that same regex's own object group.
@@ -473,6 +477,54 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
     });
   }
 
+  // ⚠ FOURTH REVIEW PASS — the structural rule was ONE INFLECTION too narrow,
+  // and the pin that introduced it CONTRADICTED ITSELF: it required a
+  // determiner for the PLURAL ("Rerun analyses showed a different leader." →
+  // declined, pinned above) while the SINGULAR — one letter different — still
+  // EXECUTED at path level. My own stated rationale ("Re-run the analyses" is
+  // an instruction, "Rerun analyses" is a heading) applies verbatim to the
+  // singular; I simply did not carry it across.
+  //
+  // Every sentence below has a LICENSED left context — sentence start, a comma,
+  // `and`, `now` — and a bare noun after it. That is precisely the gap a
+  // left-context allowlist cannot see, and it is why the object rule and the
+  // position rule are BOTH needed: neither one alone closes the class.
+  //
+  // Remedy: every bare NOUN object now requires a determiner; only PRONOUN
+  // objects ("Re-run it." / "Re-run this.") may stand alone, because those have
+  // no nominal reading to be confused with. A strict TIGHTENING, so every
+  // must-decline pin above stays green by construction.
+  const BARE_NOUN_NOMINALS = [
+    'Rerun analysis showed a different leader.',
+    'Rerun model was stale.',
+    'Rerun scenario was slower.',
+    'Results were mixed. Rerun analysis disagreed.',
+    'As noted, rerun analysis was inconclusive.',
+    'Compared to rerun analysis, capacity was higher.',
+    'According to rerun analysis, capacity was higher.',
+    'Right now rerun analysis is queued.',
+    'We looked at it; rerun analysis was fine.',
+    'Both the baseline and rerun analysis showed the same leader.',
+    'The first pass and rerun analysis disagreed.',
+    'Please note, rerun analysis is pending.',
+    'Now rerun model looks different.',
+    'And rerun analysis confirmed it.',
+  ];
+  for (const msg of BARE_NOUN_NOMINALS) {
+    it(`NEVER executes on a bare-noun NOMINAL in a licensed position: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
+    });
+  }
+
+  // The exemption that keeps the rule honest: a PRONOUN object is a complete
+  // instruction and must still dispatch. If these ever go red the tightening
+  // has over-reached.
+  for (const msg of ['Re-run it.', 'Re-run this.', 'Re-run that.']) {
+    it(`still fires on a PRONOUN object: "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(true);
+    });
+  }
+
   // The all-occurrence scan: one message can carry a nominal use AND a real
   // instruction. Stopping at the first match would decline these, because the
   // first occurrence is the nominal one.
@@ -503,6 +555,23 @@ describe('looksLikeImperativeRerun — #779 review blocker corpus', () => {
     'Go ahead with the re-run analysis.',
     'I want the re-run analysis.',
     'The re-run analysis was odd, so re-run the model.',
+    // ⚠ FOURTH REVIEW PASS — the block above previously read as the COMPLETE
+    // measured decline set. It was not. Any sentence-initial discourse marker
+    // or modal absent from the allowlist also declines, and two of these are
+    // common phrasings a real user would type.
+    'Just re-run the analysis.',
+    'You should re-run the analysis.',
+    'So re-run the analysis.',
+    'Also re-run the analysis.',
+    'First re-run the analysis.',
+    'Next re-run the analysis.',
+    'Finally re-run the analysis.',
+    'OK re-run the analysis.',
+    'Yes re-run the analysis.',
+    'Instead re-run the analysis.',
+    'Maybe re-run the analysis.',
+    'Actually re-run the analysis.',
+    'Here is what I need: re-run the analysis.',
   ];
   for (const msg of KNOWN_DECLINES_FAILING_SAFE) {
     it(`KNOWN DECLINE (accepted cost, fails safe to the LLM): "${msg}"`, () => {
