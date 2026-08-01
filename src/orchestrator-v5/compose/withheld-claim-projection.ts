@@ -204,6 +204,7 @@
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { readMayNameLeadingOptionFromResult } from '../../orchestrator/context/constraint-feasibility.js';
+import { S_BUCKET_REPLACEMENTS } from './sanitise-enrichment.js';
 import {
   keyDesignatesLeadingOption,
   textAssertsLeadingOption,
@@ -731,6 +732,15 @@ export function projectTransportEnrichmentForWithheldClaim(
       if (robustness !== undefined) out[key] = robustness;
       continue;
     }
+    // schemas 0.31.0 — `critiques` carries OPTION IDENTITY in
+    // `affected_option_ids` and in the S-bucket display copy, so unlike the
+    // 0.30.0 VOI family it is NOT trivially leading-option-inert and cannot
+    // pass through a withheld turn unchanged.
+    if (key === 'critiques') {
+      const critiques = projectCritiquesForWithheldClaim(value);
+      if (critiques !== undefined) out[key] = critiques;
+      continue;
+    }
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
@@ -803,4 +813,47 @@ function projectDecisionBriefForWithheldClaim(brief: unknown): Record<string, un
     out[key] = value;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Remove option identity from already-transport-projected `critiques[]`.
+ *
+ * Runs AFTER `projectCritiquesForTransport`, which has already dropped the
+ * D-bucket, withheld `message`, and rendered `user_message`. The only thing
+ * left to do on a withheld turn is stop the rows DESIGNATING an option:
+ *
+ *   1. `affected_option_ids` is dropped — it is raw option identity.
+ *   2. S-bucket `user_message` is RE-RENDERED from the approved catalogue with
+ *      no option ids supplied, so `resolveLabelOrFallback` yields the generic
+ *      phrase. No withheld-specific copy is invented: the fallback wording is
+ *      the same reviewed string the catalogue already uses when an id cannot be
+ *      resolved. U-bucket copy is producer prose and is left alone here — the
+ *      leading-option egress guard scans it (`ENRICHMENT_CLAIM_BLOBS`).
+ *
+ * The rows THEMSELVES are kept. The claim being withheld is "which option
+ * leads"; "this option changes nothing yet" is a different claim, and dropping
+ * it would suppress the most useful thing still true — the same
+ * anti-over-suppression ruling that keeps per-option win_probability.
+ */
+export function projectCritiquesForWithheldClaim(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((row) => {
+    if (row == null || typeof row !== 'object') return row;
+    const src = row as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(src)) {
+      if (k === 'affected_option_ids') continue;
+      out[k] = v;
+    }
+    const code = typeof src.code === 'string' ? src.code : undefined;
+    const replacement = code ? S_BUCKET_REPLACEMENTS[code] : undefined;
+    if (replacement !== undefined) {
+      // Empty context + no option ids ⇒ the catalogue's generic fallback.
+      out.user_message = replacement(
+        { graph: null, analysisReady: null, enrichment: null },
+        { affected_option_ids: undefined, affected_node_ids: undefined },
+      );
+    }
+    return out;
+  });
 }

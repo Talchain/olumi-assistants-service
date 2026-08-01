@@ -208,6 +208,14 @@
                           },
                           "source": {
                             "type": "string"
+                          },
+                          "declared_scale": {
+                            "type": "string",
+                            "enum": [
+                              "unit_interval",
+                              "ratio",
+                              "raw_count"
+                            ]
                           }
                         },
                         "required": [
@@ -239,6 +247,13 @@
                       },
                       "goal_threshold": {
                         "type": "number"
+                      },
+                      "goal_threshold_frame": {
+                        "type": "string",
+                        "enum": [
+                          "level",
+                          "delta"
+                        ]
                       }
                     },
                     "required": [

@@ -24,6 +24,7 @@
  * @see src/schemas/assist.ts              — route I/O schemas
  */
 import { z } from "zod";
+import { GoalThresholdFrame } from "@talchain/schemas";
 
 export const ProvenanceSource = z.enum([
   "document", "metric", "hypothesis", "engine", "synthetic",
@@ -309,6 +310,13 @@ export const Node = z.object({
   goal_threshold_unit: z.string().nullable().optional(),
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().nullable().optional(),
+  /**
+   * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
+   * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`. Typed here so
+   * the draft-path mint site is contextually typed rather than relying on
+   * `.passthrough()` to smuggle an unknown key across.
+   */
+  goal_threshold_frame: GoalThresholdFrame.optional(),
 }).passthrough();
 
 // Structured provenance for production trust and traceability

@@ -7,59 +7,87 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.30.0.tgz`
+### `talchain-schemas-0.31.0.tgz`
 
-> **✔ PUBLISHED TARBALL — the released `@talchain/schemas@0.30.0`, pulled from
-> GitHub Packages via `npm pack @talchain/schemas@0.30.0`.** olumi-schemas PR #29
-> merged as `f5815a34`, tagged `v0.30.0`, and the Publish Package run
-> (`30445606038`) completed `success` with `Publish to GitHub Packages` green.
-> **Vendored from the registry, never from a local `npm pack` of the branch** —
-> npm repacks on publish, so a branch pack has different bytes and a different
-> hash — the 0.29.0 vendor commit learned that the hard way (it first shipped a
-> 254,301-byte branch pack, sha `2e866b89…`, against a 254,609-byte release, and
-> had to re-vendor; see this file at the previous commit).
-> Content verified at the bytes rather than assumed: the published
-> `dist/boundary/enrichment.js` carries all four VOI keys on
-> `CEE_UI_ENRICHMENT_KEEP_LIST`.
+> **✔ PUBLISHED REGISTRY ARTIFACT — the released `@talchain/schemas@0.31.0`
+> from GitHub Packages (`npm.pkg.github.com`), tag `v0.31.0` = commit
+> `1454f6324f0f2d5c031b198e37d961ca807ab3d5`.** Vendored from the registry,
+> never from a local `npm pack` of the branch — npm repacks on publish, so a
+> branch pack has different bytes and a different hash; the 0.29.0 vendor commit
+> learned that the hard way.
 
-0.29.0 → 0.30.0 is a single-release step (no skew inherited: CEE was current).
+**Registry identity — DERIVED here, not inherited.** PLoT vendored 0.31.0 first
+(#301) and its README asks the next consumer to confirm the same bytes. Rather
+than take that on trust, all three agreements were re-measured against the
+registry's own metadata during this re-vendor:
 
-**What CEE adopts here — exactly one thing:**
+| # | check | result |
+|---|-------|--------|
+| 1 | registry `dist.shasum` vs `shasum -a 1` of these bytes | `bfd68db40b2e38af22e91a4b151b094ac8b31449` — **identical** |
+| 2 | registry `dist.integrity` vs `openssl dgst -sha512 -binary … \| base64` | `sha512-hdsteWcP15vi…` — **identical** |
+| 3 | that same string vs this repo's `pnpm-lock.yaml` `integrity` | **identical** (so every install re-verifies the registry bytes) |
 
-- **The VOI family on `CEE_UI_ENRICHMENT_KEEP_LIST` (0.30.0)** — `factor_evppi`,
-  `decision_evpi`, `p_win_sensitivity`, `correlation_model`. CEE mirrors the same
-  four onto `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` (`src/orchestrator-v5/compose.ts`)
-  in this PR; the cross-repo drift bolt (`tests/contract/cee-to-ui.contract.test.ts`)
-  is DERIVED from the vendored constant, so it REDs on the re-vendor alone and
-  goes green only once compose.ts matches — that is the RED-first entry point.
-- The new exported `EnrichmentFactorEvppiEntrySchema` is typed but **not read by
-  CEE**: this repo transports the rows, it does not interpret them. The reader is
-  the UI (V7-C slice 1c), and the claim cage lives there.
+Registry `dist-tags.latest` was `0.31.0` at vendor time, and the tarball's own
+`package/package.json` reads `@talchain/schemas 0.31.0`. **Byte-identity with
+PLoT is now established:** sha256 `a9efa0fd…`, 290,759 bytes — the same git blob
+PLoT carries at `staging`. CEE is the SECOND consumer on 0.31.0; DGAI is still
+on 0.30.0.
 
-**Everything else in 0.30.0 is UNADOPTED**, which is the whole release — 0.30.0
-is a keep-list + one entry schema, nothing more.
+**What CEE adopts here:**
 
-⚠ **SEQUENCING — THERE ISN'T ANY, AND THAT IS DERIVED, NOT ASSUMED.** Unlike the
-0.29.0 `factor_value_edit` train (a `.strict()` union member, where a
-below-pin consumer rejects the WHOLE turn), this change adds only ENRICHMENT
-keys. `AnalysisResultBlockSchema.enrichment` is `z.record(z.string(),
-z.unknown())` and the typed envelope is `.passthrough()` throughout, so an
-additive enrichment key parses at every pinned validator including the UI's
-current one. There is no outage window, no forced landing order, and no flag:
-CEE and the UI can land in either order, and rollback is a revert.
+- **`goal_threshold_frame` (ROADMAP 2.258) — the reason for this bump.** CEE
+  stamps `'level'` as a CODE CONSTANT (`CEE_GOAL_THRESHOLD_FRAME`,
+  `src/utils/goal-threshold-cap.ts`) at both registration paths. ⚠ Adopting it
+  required declaring the field in **`src/schemas/cee-v3.ts`** and carrying it in
+  **`transformNodeToV3`**: `NodeV3` is a plain `z.object` ("declared fields only
+  — unknown fields stripped") and the transform rebuilds nodes field-by-field,
+  so an undeclared frame is deleted SILENTLY one hop before the PLoT payload.
+  Pinned end-to-end with positive controls in
+  `src/schemas/__tests__/goal-threshold-frame-wire-survival.test.ts`.
+- **`critiques` on `CEE_UI_ENRICHMENT_KEEP_LIST`** — mirrored onto
+  `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` (`src/orchestrator-v5/compose.ts`); the
+  cross-repo drift bolt is DERIVED from the vendored constant, so it REDs on the
+  re-vendor alone and goes green only once compose.ts matches — that is the
+  RED-first entry point. Transport is licensed, sanitisation is not waived: the
+  row is PROJECTED per-critique, never forwarded verbatim.
+- **`EnrichmentCritiqueSchema`** — typed; CEE transports the rows, and now
+  projects them.
 
-**Checksum verification:** `vendor/talchain-schemas-0.30.0.tgz.sha256` holds the
-canonical sha256 hash
-(`cd3746369b26da20e079c8d8ec323294edcc46a32df6830b657aed2cd465a0cc`, 265,222
-bytes). The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies the
-tarball bytes against this manifest on every push.
+**UNADOPTED in this bump** (typed and accepted, nothing emits one):
+`action_prompt` on `CoachingBlockSchema` (2.225 — pinned in the egress
+wire-surface test as contract-acceptance only), `declared_scale` /
+`DECLARED_SCALE_BOUNDS` (2.193), `no_flip_in_range` (2.228).
+
+⚠ **`direction` WENT REQUIRED → OPTIONAL ON FLIP ROWS, AND THAT ARMS A LATENT
+FIXTURE TRAP.** Nothing in this bump breaks today, and no fixture was recaptured
+here. But a FUTURE recapture of a PLoT envelope containing an attested no-flip
+row (one that OMITS `direction` rather than sending the `'none'` placeholder)
+would have failed against 0.30.0's required `z.string()`. The failure is
+schema-mediated via `AnalysisEnrichmentSchema.safeParse`, not a literal
+assertion, so it surfaces as an opaque parse error rather than a readable diff.
+Re-vendoring BEFORE any recapture — as this PR does — is what defuses it.
+
+⚠ **SEQUENCING — the goal-probability train has a HARD deploy order, and the
+earlier cars are already landed.** schemas 0.31.0 → ISL converter deploy-verified
+on staging (`29cb4e27`) → PLoT re-lands forwarding (#301, `7133bba1`) → **CEE's
+stamp, this PR, is the last car.** CEE's stamp may land at any time: an
+older-pinned PLoT strips the unknown key, which degrades to dark-but-honest (no
+frame → no probability), never to a wrong number. The enrichment half is
+additive-only (`enrichment` is `z.record(z.string(), z.unknown())` and the typed
+envelope is `.passthrough()`), so there is no outage window and no forced landing
+order against the UI.
+
+**Checksum verification:** `vendor/talchain-schemas-0.31.0.tgz.sha256` holds the
+canonical sha256 (`a9efa0fdb390faed86e53867024141cd86813b5d33379c2d21cb213b612de1ad`,
+290,759 bytes). The pre-push hook (`scripts/validate-tarball-sha.sh`) verifies
+the tarball bytes against this manifest on every push.
 
 **Rollback path:** revert the whole PR. Git history restores
-`vendor/talchain-schemas-0.29.0.tgz`, its `.sha256`, the `package.json` `file:`
+`vendor/talchain-schemas-0.30.0.tgz`, its `.sha256`, the `package.json` `file:`
 reference and this README. Re-run `pnpm install` after the revert. Unlike the
-0.29.0 vendor commit, this one **could** be reverted alone — no CEE source
-imports anything new from 0.30.0; the compose.ts keep-list entries are plain
-string literals. Reverting here does NOT unpublish 0.30.0; the release stands.
+0.29.0 vendor commit this one could NOT be reverted alone — `src/schemas/cee-v3.ts`
+and `src/schemas/graph.ts` now import `GoalThresholdFrame` from the package, so
+the source changes must revert with it. Reverting does NOT unpublish 0.31.0.
 
 Earlier vendored versions (0.3.0 at A0, 0.4.0 at A1, 0.5.0/0.5.1 at
 B+C, 0.6.0 at D, 0.7.0 at E, 0.8.1 at F, 0.9.1 at G, 0.10.0 at H,
@@ -73,7 +101,8 @@ draft-goal-constraints wave, 0.19.0 at the wave-2 producer fields,
 graph-identity-handshake + batched direct_graph_edit wave, 0.23.0 at
 the `graph_state` ingress / wave-2 graph write-identity boundary,
 0.25.0 at the typed `constraint_verdict` wave, 0.29.0 at the
-value-carrying `factor_value_edit` inspector event) are removed on each
+value-carrying `factor_value_edit` inspector event, 0.30.0 at the VOI
+keep-list family) are removed on each
 bump — only the currently-pinned version lives in `vendor/`.
 
 **How to update:**

@@ -11,6 +11,8 @@
  * - Response: Add schema_version: "2.2"
  */
 
+import type { z } from "zod";
+import { GoalThresholdFrame } from "@talchain/schemas";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import {
   ensureEffectDirection,
@@ -105,6 +107,18 @@ export interface V1Node {
   goal_threshold_unit?: string;
   /** Normalisation denominator */
   goal_threshold_cap?: number;
+  /**
+   * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
+   * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`. Declared here
+   * so `transformNodeToV3` can carry it across; without it the V1→V3 copy does
+   * not typecheck and the frame would have to travel as an untyped rider.
+   *
+   * DERIVED from the contract enum, never restated. A hand-written
+   * `'level' | 'delta'` here would be a second copy of a vocabulary this repo
+   * does not own — it would keep compiling after the package renamed or
+   * extended a member, which is the drift trap 12 exists to forbid.
+   */
+  goal_threshold_frame?: z.infer<typeof GoalThresholdFrame>;
 }
 
 export interface V1Edge {

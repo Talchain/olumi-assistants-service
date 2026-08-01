@@ -1,3 +1,7 @@
+import type { z } from 'zod';
+
+import { GoalThresholdFrame } from '@talchain/schemas';
+
 /**
  * Shared goal-threshold cap-resolution doctrine (ROADMAP 1.18,
  * analysis-credibility hygiene batch, PR "cap-doctrine unification").
@@ -110,3 +114,31 @@ export function resolveGoalThresholdCap(
   if (raw > 0) return raw * 1.25;
   return null;
 }
+
+
+/**
+ * The FRAME every CEE-minted `goal_threshold` is stated in (ROADMAP 2.258,
+ * @talchain/schemas 0.31.0 `goal_threshold_frame`).
+ *
+ * ⚠ A CODE CONSTANT, AND THAT IS THE WHOLE POINT. It is NEVER derived from LLM
+ * output, from config, from an env var, or from the user's phrasing. It lives
+ * beside `resolveGoalThresholdCap` because it is a property of THAT
+ * ARITHMETIC: every CEE registration path mints `goal_threshold = raw / cap`,
+ * an absolute LEVEL on the metric's own scale. `'level'` is therefore true by
+ * construction of every path this module serves, and cannot be made false by
+ * anything a model writes.
+ *
+ * WHY IT HAD TO EXIST. ISL's goal samples are CHANGES FROM BASELINE; CEE mints
+ * LEVELS; nobody converted. The engine answered "P(change >= X)" for a user who
+ * asked "P(level >= X)" — a STRUCTURAL ZERO in nine of ten live instances,
+ * every one `status: computed`, on decisions whose options separate cleanly.
+ * No value guard could ever have caught it: `0.8` is a perfectly sensible
+ * VALUE and the defect lived in its FRAME. Attesting the frame on the wire
+ * makes the mismatch fail LOUD (ISL fails closed and renders no probability)
+ * instead of silently computing the wrong question.
+ *
+ * ONE CONSTANT CHANGES if that is ever ruled otherwise. Typed against the
+ * schema's own enum so a rename or removal in a later contract release is a
+ * typecheck failure here rather than an invalid value on the wire.
+ */
+export const CEE_GOAL_THRESHOLD_FRAME: z.infer<typeof GoalThresholdFrame> = 'level';

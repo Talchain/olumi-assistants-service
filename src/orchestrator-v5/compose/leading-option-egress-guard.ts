@@ -678,6 +678,14 @@ const ENRICHMENT_CLAIM_BLOBS: readonly string[] = [
   'decision_review',
   'decision_brief',
   'robustness',
+  // schemas 0.31.0 — `critiques` joined the transport keep-list, and it is the
+  // FOURTH instance of the same defect: a blob that reaches the wire carrying
+  // free prose. `projectCritiquesForTransport` renders `user_message` from
+  // approved S-bucket copy or from producer `user_message`, and the U-bucket
+  // half is PRODUCER PROSE this repo does not author — so a leader name can
+  // ride it. The per-row projection stops the STRUCTURED designation
+  // (`affected_option_ids`); this scan is what stops the PROSE one.
+  'critiques',
 ];
 
 /**
