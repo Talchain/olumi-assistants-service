@@ -93,6 +93,24 @@ describe('the PRODUCTION store implements the optional fence methods', () => {
     // (doubles fail toward the ordinary copy), but production MUST implement
     // it — removing it would silently retire a Paul-ratified behaviour.
     expect(typeof proto.wasLatestScenarioTurnStopped).toBe('function');
+    // ⭐ ROADMAP 2.236 — THE METHOD THAT CLOSES C-1, AND THE ONE THIS GUARD
+    //   MOST NEEDS TO COVER. `recordExplicitTurnStop` gates the tombstone
+    //   upsert behind `typeof store.turnFenceRowExists === 'function'` and
+    //   fail-OPEN when it is absent, so on the production store its absence
+    //   would not degrade politely: it would RESTORE the graph-destruction
+    //   defect — a caller-invented `turn_id` allocating a fresh BIGSERIAL
+    //   generation and superseding a live turn into losing its graph write.
+    //
+    //   ⚠ AND `turn-stop-authorization.test.ts` ASSERTS 200 FOR "a store
+    //     without turnFenceRowExists", because dozens of hand-rolled doubles
+    //     across the repo do not implement it. That assertion is correct about
+    //     DOUBLES and would BLESS the method's deletion from PRODUCTION —
+    //     green suite, defect back. `createMockSessionStore`'s
+    //     `Required<SessionStore>` annotation constrains the double, not this
+    //     class. THIS LINE is the only thing standing between a deletion and a
+    //     silent regression, which is precisely the concern in this file's
+    //     header, applied to the newest optional method.
+    expect(typeof proto.turnFenceRowExists).toBe('function');
   });
 });
 

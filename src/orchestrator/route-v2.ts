@@ -2197,7 +2197,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const requestId =
       (typeof req.headers['x-request-id'] === 'string' ? req.headers['x-request-id'] : null) ??
       randomUUID();
-    const result = await recordExplicitTurnStop(req.body, requestId);
+    const result = await recordExplicitTurnStop(req, requestId);
     return reply.code(result.status).send(result.body as never);
   });
 

@@ -242,6 +242,29 @@ export interface SessionStore {
    */
   scenarioExists?(scenarioId: string): Promise<boolean>;
   /**
+   * ROADMAP 2.236 (Stop-route authorization; Codex audit C finding C-1) — does
+   * a `v5_turn_fence` row ALREADY exist for this (scenario, turn) pair? In
+   * other words: was this turn ADMITTED on this scenario?
+   *
+   * Read by `recordExplicitTurnStop` immediately before the tombstone upsert,
+   * and it is the check that removes the defect's actual damage. The Stop RPC
+   * UPSERTS, and `generation` is a `BIGSERIAL`: a caller-INVENTED `turn_id`
+   * therefore INSERTS a fresh row with a HIGHER generation than every in-flight
+   * turn on that scenario, so a legitimate graph-bearing turn admitted at
+   * generation G reaches its commit, reads max = G+1, raises `OLTF2` and LOSES
+   * ITS GRAPH WRITE. When the row already exists the RPC takes its
+   * `ON CONFLICT DO UPDATE` branch, which does not touch `generation`, so the
+   * scenario's max generation is unchanged and no in-flight turn is superseded.
+   *
+   * MUST resolve `false` only on a CLEAN no-row read, and MAY throw on a FAILED
+   * read — the caller distinguishes them: a clean `false` is a fact and refuses
+   * the Stop; a throw is an unknown and fails OPEN, exactly as
+   * {@link scenarioExists} does, because a DB blip must not cost a legitimate
+   * user their Stop (the P0 protection outranks the hardening). Optional for
+   * the same reason as {@link claimTurnFence}.
+   */
+  turnFenceRowExists?(scenarioId: string, turnId: string): Promise<boolean>;
+  /**
    * V5 TURN FENCE / ROADMAP 2.171 — is the scenario in the POST-EXPLICIT-STOP
    * state? True iff the NEWEST `v5_turn_fence` row for the scenario, excluding
    * `excludeTurnId` (the turn asking), carries a Stop tombstone. Any later
