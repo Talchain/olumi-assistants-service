@@ -699,9 +699,13 @@ describe('FORBIDDEN_USER_FACING_PHRASES — no-recommendations doctrine (2.213)'
     ['Increase price to £59 gives you the best chance of £20k MRR.', 'key-insight: best chance'],
     // The generate-recommendation strings.
     ['Hire a tech lead is your best bet for the quarter.', 'narrative: your best bet'],
-    // No copula — the headline shape. Pattern 1 is the ONLY pattern that
-    // catches this; without this case pattern 1 is shadowed by the
-    // copula-anchored crowning pattern and could be deleted unnoticed.
+    // No copula — the headline shape. Pattern 2 is the ONLY pattern that
+    // catches this; without this case pattern 2 is shadowed by the
+    // copula-anchored crowning pattern (pattern 1) and could be deleted
+    // unnoticed. (Corrected 2026-08-01, #778 review rider F4: this comment
+    // said "Pattern 1" twice — that is the copula-anchored crowning pattern,
+    // precisely the one that structurally CANNOT match a copula-less
+    // headline.)
     ['Your best bet: Hire a tech lead.', 'narrative: your best bet, headline/colon shape'],
     ['Hire a tech lead looks like the better choice here.', 'narrative: looks like the better choice'],
     ['Hire a tech lead is the way to go.', 'narrative: the way to go'],
