@@ -138,7 +138,6 @@ import {
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
 import { tryNoAnalysisGuard } from './routing/no-analysis-guard.js';
-import { tryFreshAnalysisFollowupGuard } from './routing/fresh-analysis-followup-guard.js';
 import {
   collectOptionGuardLabels,
   impliesOptionInterventionEdit,
@@ -353,6 +352,10 @@ import {
 } from './routing/graph-lookup-adapter.js';
 import { resolveRelativeFactorDelta } from './routing/resolve-relative-factor-delta.js';
 import { HANDLER_VALIDATION_REGISTRY } from './routing/validation-registry.js';
+import {
+  hasMutationSignal,
+  looksLikeImperativeRerun,
+} from './routing/analytical-intent.js';
 import { validateExplanationAnswer } from './routing/validator-explanation.js';
 import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
 import {
@@ -5493,6 +5496,136 @@ export async function runTurnExecutor(
         return finalizeRun();
       }
 
+      // ────────────────────────────────────────────────────────────────────
+      // ROADMAP 2.229 fix 4 — deterministic IMPERATIVE RE-RUN pre-route
+      // ────────────────────────────────────────────────────────────────────
+      //
+      // THE DEFECT. Every `rerun_question` pattern in analytical-intent.ts is
+      // INTERROGATIVE — "do I need to re-run", "should I re-run", "is this
+      // still stale", "does this need a re-run", "is the analysis out of
+      // date". There is no imperative form. So a direct instruction ("Please
+      // run the analysis again on this same model.") classified as `null`,
+      // carried no mutation signal, fell through all seven guards, and was
+      // classified by the LLM — which is nondeterministic between
+      // `run_analysis` and a mutation handler. That is the intermittency the
+      // live walk recorded: sometimes honoured, sometimes read as an edit
+      // (diagnosis 2.229 §8, anomaly 4).
+      //
+      // WHY A PRE-ROUTE, NOT A CLASSIFIER PATTERN. Two reasons, and the second
+      // is the load-bearing one:
+      //   1. The diagnosis's ORDERING HAZARD: an imperative added to
+      //      `INTENT_PATTERNS` would have been claimed by the fresh-analysis
+      //      follow-up guard and answered with its frozen recap — converting
+      //      an intermittent misroute into a CONSISTENT refusal to re-run.
+      //      That guard is retired in this same change, so the hazard is gone.
+      //   2. A classifier pattern would still leave the turn falling through
+      //      to the same nondeterministic routing call. It would RECOGNISE the
+      //      sentence without changing where it goes. Only a pre-route makes
+      //      the route deterministic, which is the actual fix.
+      //
+      // SCOPE. Placed AFTER the deterministic value-update and typed-chip
+      // pre-routes (both gated on `routingResult === undefined`, so they keep
+      // precedence) and BEFORE the guard stack, so an instruction is executed
+      // rather than answered by a guard designed for questions.
+      //
+      // FALL-THROUGH CONTRACT (#634). A proposal is synthesised only when it
+      // can be executed safely: no mutation signal, an option node present
+      // (the `run_analysis` precondition is "at least one option exists" —
+      // synthesising without one would produce a PRECONDITION_UNMET rejection,
+      // i.e. a WORSE outcome than today), and `run_analysis` executable in the
+      // ACTIVE registries. Otherwise `routingResult` stays undefined and the
+      // turn behaves exactly as it does now. The decline is emitted with a
+      // reason so "did not read as a re-run" and "read as one but could not be
+      // served" are distinguishable in ops rather than both being silence.
+      if (
+        routingResult === undefined &&
+        looksLikeImperativeRerun(payload.message) &&
+        !hasMutationSignal(payload.message)
+      ) {
+        // Target entity: any option node. The registry declares
+        // `accepted_entity_kinds: ['option','goal']` for run_analysis and
+        // documents why — "the target of run_analysis is the scenario as a
+        // whole … the handler is intrinsic to the scenario so either is a
+        // valid addressable target". An OPTION is chosen (not the goal)
+        // because the precondition tests for option presence, so picking one
+        // makes the proposal and the precondition agree by construction.
+        const rerunTargetNode = (graphStateForTurn?.nodes ?? []).find(
+          (n): n is typeof n & { id: string } =>
+            typeof n === 'object' &&
+            n !== null &&
+            (n as { kind?: unknown }).kind === 'option' &&
+            typeof (n as { id?: unknown }).id === 'string' &&
+            ((n as { id: string }).id).length > 0,
+        );
+        const rerunValidationRegistry =
+          options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
+        const rerunHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
+        const rerunHandlerExecutable =
+          rerunValidationRegistry.run_analysis !== undefined &&
+          resolveHandler(rerunHandlerRegistry, 'run_analysis') !== null;
+
+        if (rerunTargetNode !== undefined && rerunHandlerExecutable) {
+          const rerunLabel = (rerunTargetNode as { label?: unknown }).label;
+          const rerunProposal: ProposalAction = {
+            handler_id: 'run_analysis',
+            entity: {
+              id: rerunTargetNode.id,
+              kind: 'option',
+              ...(typeof rerunLabel === 'string' && rerunLabel.length > 0
+                ? { label: rerunLabel }
+                : {}),
+              resolution_status: 'resolved',
+              // `context_inference`, not `label_match`: the target was not
+              // named by the user and was not matched against their text — it
+              // was inferred from the scenario, which is exactly what this
+              // method means. Declaring `label_match` would invite the
+              // validator's Dice label-suspicion check to reason about a
+              // comparison that never happened.
+              resolution_method: 'context_inference',
+            },
+            parameters: [],
+            cited_context_fields: ['graph.options'],
+          };
+          // Same synthesis shape as the deterministic value-update and
+          // typed-chip pre-routes: a properly typed zero-token
+          // RoutingToolCallResult so the unchanged STEP 2-7 lifecycle
+          // (validate → execute → commit) owns the turn.
+          const rerunUsage: UsageMetrics = { input_tokens: 0, output_tokens: 0 };
+          const synthesisedRerunRouting: RoutingToolCallResult = {
+            type: 'tool_call',
+            proposal: { intent_class: 'execute', action: rerunProposal },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: rerunUsage,
+              model: 'deterministic-imperative-rerun',
+              latencyMs: 0,
+            },
+            llmCallCount: 0,
+            droppedActions: [],
+          };
+          routingResult = synthesisedRerunRouting;
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+          emit(TelemetryEvents.V5RunAnalysisImperativePreRoute, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            outcome: 'routed',
+            reason: null,
+          });
+        } else {
+          emit(TelemetryEvents.V5RunAnalysisImperativePreRoute, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            outcome: 'fell_through',
+            reason:
+              rerunTargetNode === undefined ? 'no_option_target' : 'handler_unavailable',
+          });
+        }
+      }
+
       // V5 P0.2 — run-comparison gate (result-sense "what changed?").
       //
       // Runs BEFORE the state-query guard so the result-comparison sense
@@ -6123,109 +6256,37 @@ export async function runTurnExecutor(
         }
       }
 
-      // V5 fresh-analysis follow-up guard — catch-net AFTER
-      // `tryPostAnalysisAdviceGate`. The advice gate keeps first refusal
-      // and produces its richer synthesis whenever its per-class data
-      // requirements hold. After the grounded-fresh-analysis workstream
-      // broadened the advice gate's pattern set to own the brief's
-      // canonical phrasings ("what drove", "why is X ahead/leading/...",
-      // "what would need to change..."), this guard's primary role is
-      // the `data_unavailable_for_class` fall-through plus any residual
-      // classifier-only phrasing the advice gate's stricter per-class
-      // patterns do not cover. It still intercepts cases that would
-      // otherwise reach the LLM router (~11s) and misroute to
-      // `edit_graph`.
+      // ⚠ ROADMAP 2.229 — THE FRESH-ANALYSIS FOLLOW-UP GUARD USED TO SIT HERE,
+      // and it is deliberately GONE. Founder ruling: retire it.
       //
-      // Matched response is a deterministic direct_answer that points
-      // at the analysis surface and offers an existing chip
-      // (`action_type: 'explain_results'` or `'what_would_flip'`). The
-      // chip, when clicked, dispatches the real explanation handler via
-      // `dispatchDeterministicChipClick` with no LLM call. The fresh
-      // path of `tryPostAnalysisAdviceGate` is NOT modified — PR #184
-      // preserved it bit-for-bit and this guard preserves that
-      // guarantee.
-      // F2 CHANGE A — like the advice gate above, this fresh-analysis catch-net
-      // keys on a message regex and would intercept a FORCED analytical pill's
-      // copy with a deterministic recap (its chip used to re-dispatch the
-      // deterministic explanation handler — the very path F2 removed). Skip it
-      // for a forced pill so the click reaches the coach with conversation sight.
-      if (
-        routingResult === undefined &&
-        contextReadiness !== null &&
-        options.chipClickForcedIntent === undefined
-      ) {
-        const freshFollowupOutcome = tryFreshAnalysisFollowupGuard({
-          message: payload.message,
-          readiness: contextReadiness,
-        });
-        emit(TelemetryEvents.V5FreshAnalysisFollowupGuard, {
-          request_id: requestId,
-          scenario_id: context.session_id,
-          matched: freshFollowupOutcome.matched,
-          unmatched_reason: freshFollowupOutcome.matched
-            ? null
-            : freshFollowupOutcome.reason,
-          intent_class: freshFollowupOutcome.matched
-            ? freshFollowupOutcome.intent_class
-            : null,
-          analysis_freshness: contextReadiness.latest_analysis_freshness,
-          selected_path: freshFollowupOutcome.matched
-            ? 'fresh_analysis_followup'
-            : null,
-          selected_action_type: freshFollowupOutcome.matched
-            ? freshFollowupOutcome.selected_action_type
-            : null,
-        });
-        if (freshFollowupOutcome.matched) {
-          const freshFollowupResponse = composeAnswer({
-            answerKind: 'functional',
-            assistant_text: freshFollowupOutcome.assistant_text,
-            stage: context.stage,
-            suggested_actions: [...freshFollowupOutcome.suggested_actions],
-          });
-          sonnetTextForLog = freshFollowupResponse.assistant_text;
-          resolvedTurnClass = 'direct_answer';
-          intentClass = 'converse';
-          responseTypeForObs = 'direct_answer';
-          llmCallsUsed = 0;
-          stagesCompleted.push('orient');
-          stagesCompleted.push('compose');
-          try {
-            const committed = await commitTurn(freshFollowupResponse, {
-              scenario_id: context.session_id,
-              turn_id: context.request_id,
-              turn_class: 'direct_answer',
-              handler_id: null,
-              request_hash: computeRequestHash(payload),
-              llm_calls_used: 0,
-              duration_ms: Date.now() - startedAt,
-              handler_facts: [],
-            });
-            commitPerformed = committed.performed;
-            stagesCompleted.push('commit');
-            response = committed.response;
-          } catch (error) {
-            log.error(
-              {
-                event: 'v5.state_commit_failed',
-                request_id: requestId,
-                session_id: context.session_id,
-                path: 'fresh_analysis_followup_guard',
-                err: serialiseError(error),
-              },
-              'V5 TurnExecutor commit failure on fresh-analysis follow-up guard',
-            );
-            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
-            response = buildFailureResponse(
-              'STATE_COMMIT_FAILED',
-              context.stage,
-              { phase: 'commit' },
-              recoveryCtx(),
-            );
-          }
-          return finalizeRun();
-        }
-      }
+      // What it did: on a fresh analysis, any message `classifyAnalyticalIntent`
+      // recognised was answered with `RECAP_TEXT` — a module-level string
+      // constant with ZERO inputs — committed as `turn_class: 'direct_answer'`,
+      // `llm_calls_used: 0`, `blocks = {}`. Its stated premise was that reaching
+      // the LLM router costs "~11s and misroutes to `edit_graph`".
+      //
+      // That premise was FALSIFIED on the build it was running on. Two of four
+      // post-analysis questions in a live walk fell through this guard, reached
+      // `routeWithToolUse`, and returned 47 KB of grounded discursive coaching
+      // with the full Phase-3 block estate — one routing call each, 10.0 s and
+      // 14.9 s, routed correctly (diagnosis 2.229 §3, §6).
+      //
+      // The inversion it created: a question the regex RECOGNISED got a
+      // zero-input string; one it FAILED to recognise got grounded coaching.
+      // Recognition was punished. This file already treated the constant as the
+      // wrong answer — the `chipClickForcedIntent === undefined` condition on
+      // this block existed so a FORCED analytical pill would "reach the coach
+      // with conversation sight". The same sentence typed instead of clicked
+      // got the constant. Retiring the guard makes the two paths agree, and
+      // makes that bypass condition moot: it is removed with the block.
+      //
+      // Cost accepted by the ruling: a recognised post-analysis question now
+      // costs a routed turn (measured 11.5-16.3 s) instead of a deterministic
+      // ~1.4 s reply. That is the trade the ruling made.
+      //
+      // Control: `__tests__/turn-executor-post-analysis-free-text-reaches-coach
+      // .integration.test.ts` pins the inverse guarantee AND asserts the guard
+      // module stays deleted, so a re-introduction is RED rather than silent.
 
       // V5 Context Management v1 — no-analysis sibling guard.
       //

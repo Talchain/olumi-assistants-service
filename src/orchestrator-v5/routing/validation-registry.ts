@@ -192,7 +192,27 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   // no-op handler accepting 'edge' would have ZERO existence validation.
   // Edge/link explanation is a separate follow-up that needs an
   // edge-existence-check design first. 'constraint' stays rejected too.
-  // what_would_flip keeps ['goal', 'option'] — out of scope for this lane.
+  // ⚠ ROADMAP 2.229 fix 2 — THE LINE ABOVE USED TO READ "what_would_flip keeps
+  // ['goal', 'option'] — out of scope for this lane." That deferral closed the
+  // P0 for the two handlers where factor questions are LEAST likely and left it
+  // open on the one handler whose entire subject matter is factors. Live cost,
+  // measured on the deployed build: "How far would Market Receptivity to
+  // Channel have to move before the other option wins?" — the canonical flip
+  // question — was routed correctly by the LLM, refused by this validator with
+  // ENTITY_KIND_MISMATCH, and answered with "I wasn't sure what you meant by
+  // Market Receptivity to Channel. Did you mean one of these?" offering the
+  // goal and the three options. The user asked about a factor and was offered
+  // four things that are not factors.
+  //
+  // `'node'` is now accepted here on EXACTLY the reasoning that justified it
+  // for the two explainers: what_would_flip does not consume the proposal
+  // entity either. Its only target-aware branch keys on
+  // `invocation.flipTargetOption` (what-would-flip.ts:159-166), which
+  // turn-executor.ts:7249-7259 resolves from the MESSAGE TEXT via
+  // `resolveTargetOptionFromMessage` — never from the proposal. A factor
+  // target leaves `flipTargetOption` null and the handler takes its existing,
+  // untouched scenario-wide branch. 'edge' and 'constraint' stay rejected for
+  // the same reason as above.
   explain_from_structure: {
     handler_id: 'explain_from_structure',
     accepted_entity_kinds: ['goal', 'option', 'node'],
@@ -205,7 +225,7 @@ export const HANDLER_VALIDATION_REGISTRY: HandlerValidationRegistry = {
   },
   what_would_flip: {
     handler_id: 'what_would_flip',
-    accepted_entity_kinds: ['goal', 'option'],
+    accepted_entity_kinds: ['goal', 'option', 'node'],
     confirmation_template: noopHandlerConfirmationTemplate,
   },
   // V5 D1 mutation handlers. Each accepts the wire `'node'` entity kind

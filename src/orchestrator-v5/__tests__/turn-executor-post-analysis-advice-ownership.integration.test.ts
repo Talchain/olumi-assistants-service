@@ -289,6 +289,11 @@ function passthroughRoutingAdapter() {
 type Event = { event: string; data: Record<string, unknown> };
 let events: Event[] = [];
 
+// ⚠ ROADMAP 2.229 — the RETIRED recap constant, kept here on purpose. The
+// guard that emitted it is deleted; these `not.toContain` assertions therefore
+// now pin something stronger than "the advice gate won the race": they pin that
+// this copy has left the product. If a future change re-introduces it on ANY
+// path reaching these turns, this suite goes red.
 const FRESH_FOLLOWUP_RECAP = "Here's the latest analysis recap.";
 
 // ---------------------------------------------------------------------------
@@ -347,14 +352,13 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
         expectedClass === 'what_would_flip_free_text' ? 0 : 1;
       expect(adviceEvent!.data.suggested_action_count).toBe(expectedChipCount);
 
-      // Fresh-followup catch-net MUST NOT report matched=true for the same
-      // turn — proves dispatch order (advice gate first refusal).
-      const freshEvent = events.find(
-        (e) => e.event === 'v5.fresh_analysis_followup_guard',
-      );
-      if (freshEvent !== undefined) {
-        expect(freshEvent.data.matched).toBe(false);
-      }
+      // ⚠ ROADMAP 2.229 — this used to be a conditional check that the
+      // fresh-followup catch-net had not ALSO claimed the turn. That guard is
+      // retired and its module deleted, so the check is now the stronger,
+      // unconditional one: the event cannot fire at all. Left in place rather
+      // than removed, because it is what makes a re-introduction of the guard
+      // RED on the advice gate's own suite too.
+      expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
 
       // Response shape: direct_answer, zero LLM calls, no recap copy.
       expect(result.telemetry.turn_class).toBe('direct_answer');
@@ -428,15 +432,9 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
         expect(adviceEvent.data.unmatched_reason).toBe('mutation_signal');
       }
 
-      // The fresh-followup catch-net must also reject mutation phrasings
-      // per PR #187's hasIndependentMutationSignal — so it never lies
-      // about ownership here.
-      const freshEvent = events.find(
-        (e) => e.event === 'v5.fresh_analysis_followup_guard',
-      );
-      if (freshEvent !== undefined) {
-        expect(freshEvent.data.matched).toBe(false);
-      }
+      // ⚠ ROADMAP 2.229 — as above: the catch-net is retired, so its event
+      // cannot fire. Asserted unconditionally.
+      expect(events.some((e) => e.event === 'v5.fresh_analysis_followup_guard')).toBe(false);
 
       // The fresh-followup recap copy must NOT ship — proving neither
       // analytical guard captured the turn.

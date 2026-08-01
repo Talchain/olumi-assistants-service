@@ -214,7 +214,28 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   // ── rerun_question (most specific — anchored on rerun/stale vocabulary) ─
   { cls: 'rerun_question', pattern: /\bdo\s+(?:i|we)\s+need\s+to\s+(?:re-?run|rerun|run\s+again)\b/i },
   { cls: 'rerun_question', pattern: /\bshould\s+(?:i|we)\s+(?:re-?run|rerun|run\s+again)\b/i },
-  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)(?:\s+(?:result|results|analysis|outcome|outcomes))?\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|valid|fresh|current)\b/i },
+  // ROADMAP 2.229 fix 1 — SPLIT IN TWO so the SUBJECT group is REQUIRED
+  // whenever the terminal word is one of the three that carry no staleness
+  // sense on their own: `valid` / `fresh` / `current`.
+  //
+  // This was ONE pattern with the subject group OPTIONAL:
+  //   /\b(?:is|are)\s+(?:this|these|the|that|those)
+  //     (?:\s+(?:result|results|analysis|outcome|outcomes))?
+  //     \s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|valid|fresh|current)\b/i
+  // which made "…and what IS THE CURRENT value?" read as "is this still
+  // current?" — and `rerun_question` is FIRST in precedence, so it beat the
+  // flip intent that dominated the rest of that sentence. Measured collision
+  // surface (diagnosis 2.229 §4): 3 false positives, 4 true positives.
+  // Both halves are pinned in `analytical-intent.test.ts`.
+  //
+  // (a) subject PRESENT → the full terminal set, including the three
+  //     ambiguous words. "Are these results still valid?" is a real
+  //     staleness question and keeps classifying.
+  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)\s+(?:result|results|analysis|outcome|outcomes)\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated|valid|fresh|current)\b/i },
+  // (b) subject ABSENT → only the unambiguous staleness vocabulary. "Is this
+  //     stale?" still classifies; "Is that valid input for the model?" and
+  //     "what is the current value?" no longer do.
+  { cls: 'rerun_question', pattern: /\b(?:is|are)\s+(?:this|these|the|that|those)\s+(?:still\s+)?(?:stale|out\s*of\s*date|outdated)\b/i },
   { cls: 'rerun_question', pattern: /\bdoes\s+(?:this|the\s+(?:analysis|result))\s+need\s+(?:a\s+)?(?:re-?run|rerun|refresh)\b/i },
   { cls: 'rerun_question', pattern: /\bis\s+(?:the\s+)?(?:analysis|result)\s+out\s*of\s*date\b/i },
 
@@ -347,6 +368,90 @@ export function classifyAnalyticalIntent(
     if (entry.pattern.test(trimmed)) return entry.cls;
   }
   return null;
+}
+
+/**
+ * ROADMAP 2.229 fix 4 — imperative re-run recognition.
+ *
+ * Every `rerun_question` pattern above is INTERROGATIVE ("do I need to
+ * re-run", "should we re-run", "is this still stale", "does this need a
+ * re-run", "is the analysis out of date"). There was NO imperative form, so a
+ * direct instruction — "Please run the analysis again on this same model." —
+ * matched nothing, fell through every deterministic guard, and was classified
+ * by the LLM, which is nondeterministic between `run_analysis` and a mutation
+ * handler. That is the intermittency the walk recorded (diagnosis 2.229 §8,
+ * anomaly 4): sometimes honoured, sometimes read as an edit.
+ *
+ * This is DELIBERATELY a separate predicate rather than another
+ * `INTENT_PATTERNS` entry:
+ *
+ *   - `rerun_question` means "the user is ASKING whether a re-run is needed",
+ *     and an ANSWER is the right treatment. Folding an instruction into that
+ *     class would route an instruction to an answer.
+ *   - the diagnosis's ORDERING HAZARD (§8) was precisely that: an imperative
+ *     added to the classifier would have been claimed by the fresh-analysis
+ *     follow-up guard and answered with its frozen recap — converting an
+ *     intermittent misroute into a CONSISTENT refusal to re-run. Keeping the
+ *     recogniser out of the classifier means that hazard cannot recur even if
+ *     a future guard re-appears.
+ *
+ * Consumed by the deterministic `run_analysis` pre-route in turn-executor.ts,
+ * which additionally requires no mutation signal and a graph with at least one
+ * option node before it synthesises a proposal.
+ */
+
+/**
+ * Questions ABOUT re-running. Checked FIRST and veto the imperative reading —
+ * "Do I need to re-run the analysis?" contains the substring "re-run the
+ * analysis" but is a question, and executing an analysis in reply to a
+ * question is a worse failure than the one being fixed.
+ *
+ * Deliberately keyed on a FIRST-PERSON or state-query subject: "Can you re-run
+ * the analysis?" is a polite instruction and must NOT be vetoed, whereas "Can
+ * we re-run?" is the user asking whether it is possible.
+ */
+const RERUN_INTERROGATIVE_VETO_PATTERNS: readonly RegExp[] = [
+  /\b(?:do|did|does|should|must|would|will|can|could|need)\s+(?:i|we)\b/i,
+  /\bis\s+(?:it|there)\b/i,
+  /\b(?:is|are|does|do)\s+(?:this|these|that|those|the)\b/i,
+  /\bworth\s+(?:re-?running|rerunning|running|analysing|analyzing)\b/i,
+  /\bhow\s+often\b/i,
+  /\bwhen\s+(?:should|do|does|would|will)\b/i,
+];
+
+/**
+ * The imperative shapes themselves. Each is anchored on re-run vocabulary
+ * PLUS an explicit repetition marker or the `re-` prefix, so an ordinary
+ * graph edit that happens to contain "again" ("Set the marketing budget to
+ * 200 again.") matches none of them.
+ */
+const IMPERATIVE_RERUN_PATTERNS: readonly RegExp[] = [
+  // "re-run the analysis", "rerun it", "re-run this", "re-run"
+  /\bre-?run\b(?:\s+(?:the|this|that|my|our)?\s*(?:analysis|analyses|model|numbers|scenario|it|this|that))?/i,
+  // "run the analysis again", "run the numbers once more"
+  /\brun\s+(?:the\s+|this\s+|that\s+|my\s+|our\s+)?(?:analysis|analyses|model|numbers|scenario)\s+(?:again|once\s+more|one\s+more\s+time|a\s+second\s+time)\b/i,
+  // "run it again", "run this again"
+  /\brun\s+(?:it|this|that)\s+(?:again|once\s+more|one\s+more\s+time)\b/i,
+  // "analyse it again", "analyze the model again", "re-analyse this"
+  /\bre-?analy[sz]e\b/i,
+  /\banaly[sz]e\s+(?:it|this|that|the\s+(?:model|scenario|decision|graph|numbers))\s+(?:again|once\s+more|one\s+more\s+time)\b/i,
+  /\banaly[sz]e\s+(?:again|once\s+more)\b/i,
+];
+
+/**
+ * True when the message INSTRUCTS a re-run of the analysis (as opposed to
+ * asking whether one is needed). See the block comment above.
+ */
+export function looksLikeImperativeRerun(message: string): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  for (const re of RERUN_INTERROGATIVE_VETO_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  for (const re of IMPERATIVE_RERUN_PATTERNS) {
+    if (re.test(trimmed)) return true;
+  }
+  return false;
 }
 
 /**

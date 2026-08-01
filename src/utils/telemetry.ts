@@ -779,6 +779,26 @@ export const TelemetryEvents = {
   // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
   // Redacted: corrected_count + node IDs only, no observed magnitudes.
   V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+  // ROADMAP 2.229 fix 4 — deterministic IMPERATIVE RE-RUN pre-route.
+  //
+  // Fires once per turn whose message reads as an instruction to re-run
+  // ("run the analysis again"), BEFORE the guard stack and before routing.
+  // Every `rerun_question` classifier pattern is interrogative, so an
+  // instruction used to match nothing, fall through every guard, and be
+  // classified by the LLM — nondeterministically between `run_analysis` and a
+  // mutation handler. This event is how the pre-route's decision is
+  // observable, including its DECLINES: `fell_through` with a reason is what
+  // distinguishes "the sentence did not read as a re-run" from "it did, but
+  // the graph or the registry could not support one", which are different
+  // operational problems and would otherwise look identical (silence).
+  //
+  // Payload — structural only, no user text, no labels, no graph content:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - outcome: 'routed' | 'fell_through'
+  //   - reason: 'mutation_signal' | 'no_option_target' | 'handler_unavailable'
+  //     | null
+  V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
   // D-ask-1 (ROADMAP 2.11 P0-1) — run_analysis scaffolded DISCLOSED
   // placeholder interventions for unconfigured options so the analysis
   // completed instead of 422-blocking. Redacted: option ids + per-option
@@ -1895,25 +1915,14 @@ export const TelemetryEvents = {
   //     message strings are not emitted.
   V5PostAnalysisAdviceGate: "v5.post_analysis_advice_gate",
 
-  // V5 fresh-analysis follow-up guard — catch-net for analytical questions
-  // the post-analysis advice gate could not synthesise (data_unavailable_for_class
-  // fall-through OR pattern gap between the 9-class advice taxonomy and
-  // analytical-intent.ts). Fires once per turn, AFTER the advice gate and
-  // BEFORE the LLM router. Records whether the new guard intercepted the
-  // turn and which existing handler the chip points at.
-  //
-  // Payload:
-  //   - request_id: string
-  //   - scenario_id: string
-  //   - matched: boolean
-  //   - unmatched_reason: 'not_fresh' | 'no_analysis_fact' | 'empty_message'
-  //     | 'mutation_signal' | 'no_analytical_signal' | null
-  //   - intent_class: 'explain' | 'what_drove' | 'what_would_flip'
-  //     | 'rerun_question' | null
-  //   - analysis_freshness: 'fresh' | 'stale' | 'unknown' | 'none' | null
-  //   - selected_path: 'fresh_analysis_followup' | null
-  //   - selected_action_type: 'explain_results' | 'what_would_flip' | null
-  V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
+  // ⚠ ROADMAP 2.229 — `V5FreshAnalysisFollowupGuard`
+  // ("v5.fresh_analysis_followup_guard") was REMOVED here together with the
+  // guard it observed (founder ruling: retire the fresh-analysis follow-up
+  // guard, whose matched branch answered every recognised post-analysis
+  // question with a zero-input string constant). The name is recorded in this
+  // comment on purpose: it appears in historical logs and in
+  // `acceptance-evidence/`, and a reader finding it there needs to know it is
+  // retired rather than missing.
 
 
   // V5 P0 stabilisation — bounded routing-failure fallback.

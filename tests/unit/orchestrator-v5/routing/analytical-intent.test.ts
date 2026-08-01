@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   classifyAnalyticalIntent,
   hasMutationSignal,
+  looksLikeImperativeRerun,
   looksLikeVagueEdit,
 } from '../../../../src/orchestrator-v5/routing/analytical-intent.js';
 
@@ -211,6 +212,113 @@ describe('hasMutationSignal', () => {
   for (const msg of negatives) {
     it(`does not flag "${msg}"`, () => {
       expect(hasMutationSignal(msg)).toBe(false);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ROADMAP 2.229 fix 1 — the staleness pattern must require its SUBJECT group
+// when the terminal word is one of the three that do not, on their own, carry
+// a staleness sense: `valid` / `fresh` / `current`.
+//
+// Diagnosed defect (PHASE0-EVIDENCE-2026-07-28/diagnosis-2229-canned-coach.md
+// §4): the optional `(?:result|results|analysis|outcome|outcomes)` group meant
+// "…and what IS THE CURRENT value?" read as "is this still current?" — a
+// staleness question — and `rerun_question` is FIRST in precedence, so it beat
+// the flip intent that dominated the rest of the sentence.
+//
+// All SEVEN controls the diagnosis measured are pinned here: 4 true positives
+// (must keep classifying) and 3 false positives (must stop classifying).
+// ---------------------------------------------------------------------------
+describe('classifyAnalyticalIntent — staleness pattern subject requirement (2.229 fix 1)', () => {
+  const TRUE_POSITIVES = [
+    'Is the analysis out of date?',
+    'Is this result still stale?',
+    'Are these results still valid?',
+    'Is this analysis still current?',
+  ];
+  for (const msg of TRUE_POSITIVES) {
+    it(`still classifies the genuine staleness question "${msg}"`, () => {
+      expect(classifyAnalyticalIntent(msg)).toBe('rerun_question');
+    });
+  }
+
+  const MEASURED_FALSE_POSITIVES = [
+    'What is the current value of Weekly Parcel Volume?',
+    'Is that valid input for the model?',
+    'Is the fresh estimate better?',
+  ];
+  for (const msg of MEASURED_FALSE_POSITIVES) {
+    it(`no longer misreads "${msg}" as a staleness question`, () => {
+      expect(classifyAnalyticalIntent(msg)).not.toBe('rerun_question');
+    });
+  }
+
+  it('the walk Q1 sentence falls through the classifier entirely (mutation control from the diagnosis)', () => {
+    // With `:217` suppressed the diagnosis measured Q1 → null: no other
+    // pattern re-captures it, so it reaches the LLM router — the route Q3/Q4
+    // took and came back with grounded coaching.
+    expect(
+      classifyAnalyticalIntent(
+        'Looking at the flip point on screen: at exactly what value does the answer change, and what is the current value? Please give me the precise numbers, not a range.',
+      ),
+    ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ROADMAP 2.229 fix 4 — imperative re-run recognition.
+//
+// Every `rerun_question` pattern is INTERROGATIVE, so a direct instruction
+// ("run the analysis again") matched nothing, fell through every guard, and
+// was classified by the LLM — nondeterministically between `run_analysis` and
+// a mutation handler (diagnosis §8, anomaly 4). `looksLikeImperativeRerun` is
+// the deterministic recogniser the pre-route keys on.
+//
+// It is DELIBERATELY not an INTENT_PATTERNS entry: `rerun_question` means "the
+// user is ASKING whether a re-run is needed", and answering is the right
+// treatment for that. This predicate means "the user INSTRUCTED a re-run".
+// ---------------------------------------------------------------------------
+describe('looksLikeImperativeRerun (2.229 fix 4)', () => {
+  const IMPERATIVES = [
+    'Please run the analysis again on this same model.',
+    'Run the analysis again.',
+    'Re-run the analysis.',
+    'Rerun the analysis please.',
+    'Run it again.',
+    'Can you re-run the analysis?',
+    'Could you run the analysis one more time?',
+    "Let's re-run this.",
+    'Analyse it again.',
+    'Analyze the model again.',
+    'Run the numbers again.',
+  ];
+  for (const msg of IMPERATIVES) {
+    it(`recognises the instruction "${msg}"`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(true);
+    });
+  }
+
+  const NOT_IMPERATIVES = [
+    // Questions ABOUT re-running — these must keep reaching the answer paths.
+    'Do I need to re-run the analysis?',
+    'Should we re-run analysis?',
+    'Does this need a rerun?',
+    'Is this analysis still current?',
+    'Is it worth re-running the analysis?',
+    // NEGATIVE CONTROL from the brief: a graph edit that happens to contain
+    // "again" must not trip the re-run route.
+    'Set the marketing budget to 200 again.',
+    'Add a new risk factor again.',
+    'Change the demand factor to 0.5 again.',
+    // Ordinary post-analysis coaching questions.
+    'What drove this result?',
+    'Walk me through the analysis.',
+    '',
+  ];
+  for (const msg of NOT_IMPERATIVES) {
+    it(`does NOT treat "${msg}" as a re-run instruction`, () => {
+      expect(looksLikeImperativeRerun(msg)).toBe(false);
     });
   }
 });

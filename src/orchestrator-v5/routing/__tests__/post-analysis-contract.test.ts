@@ -297,10 +297,13 @@ describe('post-analysis contract — row 6: evidence_gap no-anchor honesty', () 
       freshness: 'fresh',
     });
     // evidence_gap requires EITHER analysisReady OR top_drivers; with
-    // neither, it falls through to data_unavailable_for_class so the
-    // caller (turn-executor) reaches the fresh-analysis-followup-guard
-    // which emits the honest recap. The honesty contract is preserved
-    // here by the gate refusing to invent advice.
+    // neither, it falls through to data_unavailable_for_class.
+    // ⚠ ROADMAP 2.229 — the sentence here used to continue "...so the caller
+    // (turn-executor) reaches the fresh-analysis-followup-guard which emits
+    // the honest recap". That guard is RETIRED (founder ruling) and its
+    // module deleted; the caller now reaches `routeWithToolUse`. The property
+    // THIS test asserts is unchanged and is about the gate alone: it refuses
+    // to invent advice it has no data for.
     expect(out.matched).toBe(false);
     if (!out.matched) {
       expect(out.reason).toBe('data_unavailable_for_class');
