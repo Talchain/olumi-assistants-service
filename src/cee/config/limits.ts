@@ -77,6 +77,12 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   CEE_GRAPH_READINESS_RATE_LIMIT_RPM: "read",
 
   // --- coach: medium coaching / analysis engines ---
+  // RESERVED — no src reference yet, deliberately. The drift test reads this
+  // marker (it is machine-read, not decoration: see the reverse assertion in
+  // tests/unit/cee.rate-buckets.drift.test.ts) and exempts this entry from the
+  // "every registry entry is referenced" check. The marker is self-policing:
+  // once this env var IS wired, the test FAILS until the marker is removed, so
+  // it cannot silently outlive its reason.
   // Reserved for the orchestrator-turn per-scenario bucket (deferred — see
   // parallel-briefs/RATE-BUCKETS-2026-07-24.md): the turn path needs to gate
   // only expensive LLM turns, not cheap chip/system-event turns, and its test
