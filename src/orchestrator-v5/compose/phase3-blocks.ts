@@ -1953,6 +1953,15 @@ function buildFlipThresholdCards(
       : new Map<string, readonly string[]>();
   const out: ReviewCardBlock[] = [];
   let idx = 0;
+  /**
+   * How many bodies this fact swapped. Counted separately from the per-card
+   * warning so the OVER-MATCH RATE is measurable before anyone tunes the
+   * matcher: the per-card line says a phrase matched, this says how often, and
+   * `card_count` gives it a denominator. Tuning the matcher on a guess about
+   * its own hit rate is how a fix becomes an outage — the reasoning
+   * `leading-option-egress-guard.ts` already applies to its observe-only mode.
+   */
+  let swappedCount = 0;
   for (const raw of dr.flip_thresholds) {
     // Amendment A1 — the row-shape gate now lives in ONE place, shared with the
     // ContextPack display licence (./flip-threshold-card-row.ts). The licence
@@ -2013,17 +2022,27 @@ function buildFlipThresholdCards(
     );
     const namesUnattestedOption = unattestedNamedOptions.length > 0;
     if (namesUnattestedOption) {
+      swappedCount++;
       log.warn(
         {
           event: 'v5.phase3.flip_option_naming_withheld',
           block_type: 'review_card',
           block_kind: 'flip_threshold',
           // Structural only — no prose, no labels, no graph ids.
-          unattested_named_option_count: unattestedNamedOptions.length,
+          matched_option_count: unattestedNamedOptions.length,
           attested_winner_present: attestedWinnerId !== null,
           fallback_carries_displays: row.current_display !== null && row.flip_display !== null,
         },
-        'V5 Phase 3 flip card named an option this run does not attest; body replaced with the non-naming form',
+        // ⚠ THIS MESSAGE DESCRIBES THE MECHANISM, NOT A VERDICT, AND THE
+        // DIFFERENCE IS THE WHOLE POINT. Its first wording said the card "named
+        // an option this run does not attest" — a claim the guard cannot
+        // support. Adversarial review demonstrated the over-match directly: the
+        // innocent aside *"relative to the status quo."* false-swaps 2 of the 3
+        // live witness captures. A swap therefore means A PHRASE MATCHED, which
+        // is sometimes a real wrong name and sometimes an aside. Writing the verdict
+        // into the log would teach every future reader to stop looking — the
+        // known-red-registry defect (CLAUDE.md trap 7b) planted at the source.
+        'V5 Phase 3 flip card matched an option-identifying phrase it cannot attest; body replaced with the non-naming form',
       );
     }
     const candidate = {
@@ -2053,6 +2072,16 @@ function buildFlipThresholdCards(
       ],
     });
     if (block !== null) out.push(block);
+  }
+  if (swappedCount > 0) {
+    log.info(
+      {
+        event: 'v5.phase3.flip_option_naming_swap_count',
+        swapped_count: swappedCount,
+        card_count: out.length,
+      },
+      'V5 Phase 3 flip cards with a swapped body on this fact',
+    );
   }
   return out;
 }

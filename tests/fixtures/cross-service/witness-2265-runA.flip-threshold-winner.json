@@ -1,16 +1,17 @@
 {
   "_provenance": {
-    "source": "LIVE WIRE CAPTURE. POST https://cee-staging.onrender.com/orchestrate/v2/turn, HTTP 200, 39,103 B, 2026-08-01T14:29:35Z. CEE build 76e6bc7 / staging, ISL 35149dd1, PLoT 9beb4229. scenario 67d8f474-170c-4cef-be35-d33c40a46bf0, graph_hash c23213d8c15befa8.",
+    "source": "LIVE WIRE CAPTURE. POST https://cee-staging.onrender.com/orchestrate/v2/turn, HTTP 200, 2026-08-01T14:29:35Z. CEE build 76e6bc7 / staging, ISL 35149dd1, PLoT 9beb4229. scenario 67d8f474-170c-4cef-be35-d33c40a46bf0, graph_hash c23213d8c15befa8.",
     "captured": "PHASE0-EVIDENCE-2026-07-28/witness-2265-raw/runA-67d8f474-turn.json — 'run A' of the ROADMAP 2.265 targeted-flip witness (witness-2265-targeted-flip.md).",
     "why": "The FIRST real factor-flip value in the programme's measured history, and the turn that exhibited defect D-2: enrichment.flip_thresholds[3] attests alternative_winner_label 'Expand Existing Bristol Site' (opt_bristol), while the shipped review_card body named 'the Status Quo'. Every array below is byte-verbatim from that capture; nothing is hand-assembled.",
     "slices": [
       "blocks[0].enrichment.flip_thresholds",
       "blocks[0].enrichment.decision_review.flip_thresholds",
       "blocks[0].enrichment.option_comparison[].{option_id,option_label,win_probability}",
-      "blocks[0].enrichment.decision_review.flip_thresholds[0].narrative (the D-2 sentence)",
-      "result.leading_option_id"
+      "blocks[0].leading_option_id  (NOT result.leading_option_id — that path does not exist on the wire shape)"
     ],
-    "shipped_card_body": "If Leeds Site Activation effectiveness increases from 0 to 66%, the leading option changes between Leeds and the Status Quo."
+    "shipped_card_body": "If Leeds Site Activation effectiveness increases from 0 to 66%, the leading option changes between Leeds and the Status Quo.",
+    "sizes": "Two different numbers exist and the witness .md reports only the first: the HTTP RESPONSE sizes are 39,103 / 39,004 / 25,648 B (runs A/B/C); the CAPTURE FILES on disk are 39,133 / 39,028 / 25,663 B. Neither is wrong; they measure different things. Stated because a reader checking `ls` against the .md would otherwise read the mismatch as hand-assembly.",
+    "completeness": "~34 of the values below appear in the RAW CAPTURES but NOT in witness-2265-targeted-flip.md (all four option labels + win probabilities per run, the non-flipping rows' full field sets, runs B/C option sets). A reader checking only the .md cannot reproduce this fixture and should not read that as invention: the authority is PHASE0-EVIDENCE-2026-07-28/witness-2265-raw/*.json, which is committed."
   },
   "leading_option_id": "opt_leeds",
   "flip_thresholds": [

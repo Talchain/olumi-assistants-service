@@ -138,16 +138,35 @@ describe('2.267 D-2 part 1 — the flip winner reaches the decision_review promp
   it('the winner reaches the PROMPT BYTES, on both the monolith and the decomposed path', () => {
     // The projection is only the first hop. Two further rebuilds sit between it
     // and the model — `buildDecisionReviewUserMessage`'s FLIP_THRESHOLD_DATA
-    // section and `buildSlices`' R4 slice — and BOTH are spreads today. Assert
-    // the bytes, not the object: the whole defect was a rebuild that dropped a
-    // key, and a third one would reproduce D-2 with this test file still green.
+    // section and `buildSlices`' R3 FRAGILITY slice — and BOTH are spreads
+    // today. Assert the bytes, not the object: the whole defect was a rebuild
+    // that dropped a key, and a third one would reproduce D-2 with this test
+    // file still green.
     const input = project();
     const userMessage = buildDecisionReviewUserMessage(input, null);
     expect(userMessage).toContain('<FLIP_THRESHOLD_DATA>');
     expect(userMessage).toContain('"alternative_winner_id": "opt_bristol"');
     expect(userMessage).toContain('"alternative_winner_label": "Expand Existing Bristol Site"');
 
-    const { ctx } = buildSlices(input);
+    // ⚠ THE DECOMPOSED PATH'S PROMPT IS `slices.r3`, AND NOTHING ELSE.
+    // `block('FLIP_THRESHOLD_DATA', flipData)` (decompose.ts:263) lands in R3
+    // FRAGILITY, which is what `invokeOneSlice(DECOMPOSE_R3_FRAGILITY_PROMPT,
+    // slices.r3, …)` (:887) sends to the model.
+    //
+    // The first cut of this test asserted `ctx.reviewInput` instead. That object
+    // is typed `ReviewInputForGrounding` (:166) and has exactly one consumer —
+    // `performShapeCheck(out, ctx.reviewInput)` (:781), the grounding VALIDATOR.
+    // It never reaches a model. So the "both paths" guarantee this test claims
+    // did not exist for the decomposed path at all: adversarial review's mutant
+    // that field-listed the R3 block left the whole suite green. Caught in
+    // review; recorded here because the wrong object read exactly like the right
+    // one, which is how the original D-2 rebuild survived too.
+    const { slices, ctx } = buildSlices(input);
+    expect(slices.r3).toContain('<FLIP_THRESHOLD_DATA>');
+    expect(slices.r3).toContain('"alternative_winner_id": "opt_bristol"');
+    expect(slices.r3).toContain('"alternative_winner_label": "Expand Existing Bristol Site"');
+    // The grounding validator's copy too — a weaker claim, kept because a
+    // number the validator cannot see becomes an UNGROUNDED_NUMBER fatal.
     expect(JSON.stringify(ctx.reviewInput.flip_threshold_data)).toContain(
       '"alternative_winner_label":"Expand Existing Bristol Site"',
     );
