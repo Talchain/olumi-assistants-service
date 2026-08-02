@@ -75,17 +75,23 @@ describe('the refusal is a typed conflict, not an internal error', () => {
     expect(INTERNAL_TO_WIRE.STATE_COMMIT_FAILED).not.toBe(wire);
   });
 
-  it('the executor catches TurnFenceRejectedError BEFORE the generic fallback', () => {
-    const fenceAt = EXECUTOR.indexOf('error instanceof TurnFenceRejectedError');
-    const staleAt = EXECUTOR.indexOf('error instanceof GraphStaleWriteError');
+  it('the executor catches TurnFenceRejectedError BEFORE the generic fallback (the A2 STEP-7 branch)', () => {
+    // 2.301 hoist: the first `instanceof TurnFenceRejectedError` in the file
+    // is now the commitTurn CAPTURE seam, so the A2 branch is anchored by its
+    // amendment marker rather than by first occurrence — the exact
+    // wrong-pair-measurement hazard the note below already recorded once.
+    const a2At = EXECUTOR.indexOf('AMENDMENT A2');
+    expect(a2At, 'the A2 amendment marker must exist').toBeGreaterThan(-1);
+    const fenceAt = EXECUTOR.indexOf('error instanceof TurnFenceRejectedError', a2At);
+    const staleAt = EXECUTOR.indexOf('error instanceof GraphStaleWriteError', a2At);
     expect(fenceAt, 'the fence branch must exist').toBeGreaterThan(-1);
     expect(staleAt, 'the CAS branch must still exist').toBeGreaterThan(-1);
     // The COMMIT catch's own fallback — the first STATE_COMMIT_FAILED after the
-    // CAS branch. Deliberately not `indexOf` from 0: this file has 24 of them and
-    // the first belongs to an entirely different catch block, which is exactly the
-    // false comparison my first version of this assertion made (it "failed" by
-    // measuring the wrong pair, and the fix is a narrower search, not a looser
-    // assertion).
+    // CAS branch. Deliberately not `indexOf` from 0: this file has dozens of
+    // them and the first belongs to an entirely different catch block, which is
+    // exactly the false comparison my first version of this assertion made (it
+    // "failed" by measuring the wrong pair, and the fix is a narrower search,
+    // not a looser assertion).
     const flattenAt = EXECUTOR.indexOf('INTERNAL_TO_WIRE.STATE_COMMIT_FAILED', staleAt);
     expect(flattenAt, 'the commit catch keeps its generic fallback').toBeGreaterThan(-1);
     // Ordering is the load-bearing part: a branch AFTER the generic fallback is
@@ -94,10 +100,11 @@ describe('the refusal is a typed conflict, not an internal error', () => {
     expect(fenceAt).toBeLessThan(flattenAt);
   });
 
-  it('the branch carries the machine-readable verdict and a per-verdict remedy', () => {
+  it('the A2 branch carries the machine-readable verdict and a per-verdict remedy', () => {
+    const a2At = EXECUTOR.indexOf('AMENDMENT A2');
     const branch = EXECUTOR.slice(
-      EXECUTOR.indexOf('error instanceof TurnFenceRejectedError'),
-      EXECUTOR.indexOf('error instanceof GraphStaleWriteError'),
+      EXECUTOR.indexOf('error instanceof TurnFenceRejectedError', a2At),
+      EXECUTOR.indexOf('error instanceof GraphStaleWriteError', a2At),
     );
     expect(branch).toContain("'GRAPH_WRITE_CONFLICT'");
     expect(branch).toContain('fence_verdict: error.verdict');
@@ -106,6 +113,33 @@ describe('the refusal is a typed conflict, not an internal error', () => {
     expect(branch).toContain("'start_new_draft'"); // stopped
     expect(branch).toContain("'refresh_and_reconfirm'"); // superseded
     expect(branch).toContain("'retry_later'"); // unclaimed / unavailable
+  });
+
+  // ── ROADMAP 2.301 — the HOISTED mapping seams (source-text defence in
+  //    depth; the BEHAVIOURAL guarantee is
+  //    tests/integration/turn-fence-hoisted-conflict-mapping.test.ts, which
+  //    REDs `expected 500 to be 409` on a non-A2 path when either seam is
+  //    neutered) ──────────────────────────────────────────────────────────
+  it('commitTurn captures typed conflicts for the finalise remap (the hoist capture seam)', () => {
+    const captureAt = EXECUTOR.indexOf('lastCommitConflictError = error');
+    expect(captureAt, 'the capture assignment must exist').toBeGreaterThan(-1);
+    // Reset-per-attempt is what stops a retried commit inheriting a stale
+    // conflict — the capture without the reset would be a latent mismap.
+    expect(EXECUTOR).toContain('lastCommitConflictError = null');
+  });
+
+  it('finalizeRun remaps ONLY the STATE_COMMIT_FAILED flattening, with per-verdict remedies (the hoist remap seam)', () => {
+    const remapAt = EXECUTOR.indexOf(
+      'failureType === INTERNAL_TO_WIRE.STATE_COMMIT_FAILED &&',
+    );
+    expect(remapAt, 'the remap guard must exist').toBeGreaterThan(-1);
+    const remapBlock = EXECUTOR.slice(remapAt, remapAt + 3000);
+    expect(remapBlock).toContain('lastCommitConflictError !== null');
+    expect(remapBlock).toContain("'GRAPH_WRITE_CONFLICT'");
+    expect(remapBlock).toContain('fence_verdict: conflict.verdict');
+    expect(remapBlock).toContain("'start_new_draft'"); // stopped
+    expect(remapBlock).toContain("'refresh_and_reconfirm'"); // superseded
+    expect(remapBlock).toContain("'retry_later'"); // unclaimed / unavailable
   });
 
   it('route-v2 forwards fence_verdict onto the 409 envelope (via the A-2 derived manifest)', () => {
