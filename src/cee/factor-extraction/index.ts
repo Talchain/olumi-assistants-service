@@ -82,6 +82,100 @@ function parseMultiplier(multiplier: string | undefined): number {
   return MULTIPLIER_MAP[multiplier.trim()] ?? 1;
 }
 
+/* ===========================================================================
+ * THE MAGNITUDE ALPHABET — ONE list, TWO consumers (ROADMAP 2.303)
+ *
+ * WHY IT LIVES HERE, above everything that uses it. `contextualNumber` was
+ * MULTIPLIER-BLIND: it captured the digits of "target is 800k" and dropped the
+ * suffix, so the goal card — the first card a tester reads — displayed `800`
+ * against a label saying £800k (journey re-walk 2026-08-02 §5 / N7, live).
+ * The paired extractor `extractGoalTargetWithBaseline` has understood the
+ * alphabet since #787; the repair is to REUSE that alphabet, never to write a
+ * second copy of it beside the first. Two same-purpose lists that can drift is
+ * this estate's dominant defect class (CLAUDE.md trap 12) and the reason a
+ * hand-copied literal here would be a worse outcome than the bug it fixed.
+ *
+ * DERIVED, NOT DECLARED TWICE. The regex alternation is COMPUTED from the map
+ * keys rather than spelled out beside them, so a key added to the map is
+ * matchable on both paths the instant it lands, with nothing to remember.
+ *
+ * ORDERING IS THE SAFETY PROPERTY, and it is now guaranteed by construction.
+ * Alternation is first-match-wins, so a shorter key that PREFIXES a longer one
+ * ("b" before "bn", "m" before "million") would swallow it. Sorting
+ * longest-first cannot get that wrong for any key, present or future — where a
+ * hand-ordered list could, silently, the next time someone appends to it.
+ * ========================================================================= */
+
+/**
+ * Every magnitude suffix this module recognises, and what it multiplies by.
+ * Matched case-INSENSITIVELY (both patterns carry the `i` flag), so `K`, `M`,
+ * `BN` and `Million` all resolve through their lower-cased key.
+ *
+ * Exported for the drift guard, which derives its whole manifest from this map
+ * so it cannot go stale as the map grows.
+ */
+export const MAGNITUDE_MULTIPLIERS: Readonly<Record<string, number>> = {
+  k: 1e3,
+  m: 1e6,
+  bn: 1e9,
+  b: 1e9,
+  t: 1e12,
+  million: 1e6,
+  billion: 1e9,
+  trillion: 1e12,
+};
+
+/**
+ * The alternation branch for the alphabet above, longest-first.
+ *
+ * The tie-break is lexicographic so the string is a pure function of the KEY
+ * SET — insertion order cannot change it, and neither can a re-format.
+ */
+export const MAGNITUDE_ALTERNATION: string = Object.keys(MAGNITUDE_MULTIPLIERS)
+  .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
+  .join("|");
+
+/**
+ * The digit grammar shared by every amount this module reads: optional
+ * thousands separators, optional decimals. Separators are stripped before
+ * parsing (`parseAmountDigits`) — `parseFloat("800,000")` is 800, which is the
+ * same silent 1,000× loss as the dropped suffix, arriving through the comma.
+ */
+const AMOUNT_DIGITS = "\\d+(?:,\\d{3})*(?:\\.\\d+)?";
+
+/**
+ * The magnitude-suffix fragment, under a caller-chosen group name.
+ *
+ * ⚠ THE `\\s*` SITS INSIDE THE OPTIONAL GROUP, not before it. Spelled
+ * `\\s*(?<g>ALT)?\\b`, the `\\s*` consumes the separating space of
+ * "target is 800 customers" EVEN WHEN NO SUFFIX FOLLOWS, and every
+ * `matchedText` in the corpus gains a trailing byte. Spelled
+ * `(?:\\s*(?<g>ALT)\\b)?` the space is consumed only when a suffix is actually
+ * there, and byte-parity holds.
+ *
+ * ⚠ THE INNER `\\b` IS LOAD-BEARING, and its absence produced a silent 1e12
+ * error in development (#787): without it the `t` alternative matches the "t"
+ * of "6000000 THIS year", scaling a 6,000,000 target to 6e18. With it, the `t`
+ * branch fails, the whole group matches empty WITHOUT consuming the space, and
+ * the amount reads correctly.
+ */
+function magnitudeSuffixPattern(group: string): string {
+  return `(?:\\s*(?<${group}>${MAGNITUDE_ALTERNATION})\\b)?`;
+}
+
+/** Parse a captured digit string, separators and all, to a finite number or null. */
+function parseAmountDigits(digits: string | undefined): number | null {
+  if (digits === undefined) return null;
+  const parsed = Number.parseFloat(digits.replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Resolve a captured magnitude suffix to its multiplier; absent suffix ⇒ 1. */
+function resolveMagnitude(suffix: string | undefined): number {
+  if (!suffix) return 1;
+  return MAGNITUDE_MULTIPLIERS[suffix.toLowerCase()] ?? 1;
+}
+
 // Regex patterns for quantitative language
 const PATTERNS = {
   // Currency with multiplier: $1 million, £2.5m, €500k, $1B, $1.5 billion
@@ -106,9 +200,22 @@ const PATTERNS = {
   changePattern:
     /(?<direction>increas|decreas|rais|lower|grow|drop|fall|rise)(?:e|ing|ed)?\s+(?:from\s+)?(?<from>\d+(?:\.\d+)?)\s*(?:%|[£$€])?\s+(?:to\s+)?(?:maybe\s+)?(?<to>\d+(?:\.\d+)?)/gi,
 
-  // Plain numbers with context: "price of 49", "rate of 3.5"
-  contextualNumber:
-    /(?<context>price|cost|rate|revenue|budget|margin|churn|conversion|growth|target|threshold|limit)\s+(?:of|is|at|was|be)?\s*(?:[£$€])?(?<amount>\d+(?:\.\d+)?)\s*(?:%)?/gi,
+  // Plain numbers with context: "price of 49", "rate of 3.5", "target is 800k"
+  //
+  // ROADMAP 2.303 — this pattern used to end at `(?<amount>\d+(?:\.\d+)?)`,
+  // which read the digits of "target is 800k" and threw the magnitude away.
+  // It now shares the module's ONE amount grammar: separators, then the ONE
+  // magnitude alphabet, then any REMAINING letters riding on the number —
+  // captured, not ignored, so the extractor can refuse by name instead of
+  // emitting bare digits for a magnitude it cannot read.
+  contextualNumber: new RegExp(
+    "(?<context>price|cost|rate|revenue|budget|margin|churn|conversion|growth|target|threshold|limit)" +
+      "\\s+(?:of|is|at|was|be)?\\s*(?:[£$€])?" +
+      `(?<amount>${AMOUNT_DIGITS})` +
+      magnitudeSuffixPattern("mult") +
+      "(?<unknownSuffix>[A-Za-z]+)?\\b\\s*(?:%)?",
+    "gi",
+  ),
 
   // Approximate values: "around £60", "roughly 50", "approximately $100"
   approximateValue:
@@ -126,6 +233,23 @@ const PATTERNS = {
   genericRange:
     /between\s+(?<min>\d+(?:\.\d+)?)\s+(?:and|to)\s+(?<max>\d+(?:\.\d+)?)/gi,
 };
+
+/* ---------------------------------------------------------------------------
+ * DRIFT-GUARD SURFACE (ROADMAP 2.303).
+ *
+ * `PATTERNS` and `amountPattern` are module-private and stay that way; these
+ * two aliases exist ONLY so the drift guard can assert, structurally, that
+ * BOTH magnitude-bearing patterns are built from the ONE derived alternation.
+ * Without them the guard could only test behaviour, and a hand-copied literal
+ * that happens to be byte-correct on the day it is written would pass — which
+ * is precisely the mirror that later drifts (CLAUDE.md trap 12).
+ * ------------------------------------------------------------------------- */
+export const PATTERNS_FOR_DRIFT_GUARD: { readonly contextualNumber: RegExp } = {
+  contextualNumber: PATTERNS.contextualNumber,
+};
+export function amountPatternForDriftGuard(prefix: string): string {
+  return amountPattern(prefix);
+}
 
 /* ===========================================================================
  * GOAL-TARGET-WITH-BASELINE (ROADMAP 2.273)
@@ -173,16 +297,24 @@ const GOAL_CONNECTOR = '\\s*(?:is|of|to|at|:)?\\s*';
  */
 function amountPattern(prefix: string): string {
   return (
-    `(?<${prefix}Cur>[£$€])?(?<${prefix}>\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
-    // ⚠ THE TRAILING `\\b` IS LOAD-BEARING, and its absence produced a silent
-    // 1e12 error in development: without it the `t` alternative matched the
-    // "t" of "6000000 THIS year", scaling a 6,000,000 target to 6e18 and a
-    // 4,000,000 baseline to 5.3e-13 once divided by the resulting cap. Both
-    // numbers stayed internally consistent, so nothing failed — it simply
-    // produced a confident wrong probability, the exact failure mode this
-    // whole train exists to prevent. Alternatives are ordered LONGEST-FIRST so
-    // "million" cannot be consumed as a bare "m".
-    `\\s*(?<${prefix}Mult>million|billion|trillion|bn|k|m|b|t)?\\b\\s*(?<${prefix}Pct>%)?`
+    `(?<${prefix}Cur>[£$€])?(?<${prefix}>${AMOUNT_DIGITS})` +
+    // ⚠ BOTH `\\b`s ARE LOAD-BEARING, and the absence of the inner one
+    // produced a silent 1e12 error in development: without it the `t`
+    // alternative matched the "t" of "6000000 THIS year", scaling a 6,000,000
+    // target to 6e18 and a 4,000,000 baseline to 5.3e-13 once divided by the
+    // resulting cap. Both numbers stayed internally consistent, so nothing
+    // failed — it simply produced a confident wrong probability, the exact
+    // failure mode this whole train exists to prevent.
+    //
+    // The OUTER `\\b` closes the amount at a word boundary when NO suffix
+    // matched, which is what keeps "800kg" from parsing as 800 with a "kg"
+    // metric noun. ROADMAP 2.303 moved the alternation's own `\\s*` inside the
+    // optional group (see `magnitudeSuffixPattern`), so this boundary must be
+    // spelled here rather than relied on from the group's tail.
+    //
+    // Alternatives are ordered LONGEST-FIRST — derived, not hand-ordered — so
+    // "million" cannot be consumed as a bare "m" nor "bn" as a bare "b".
+    `${magnitudeSuffixPattern(`${prefix}Mult`)}\\b\\s*(?<${prefix}Pct>%)?`
   );
 }
 
@@ -419,17 +551,6 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<RegExp> = [
   ),
 ];
 
-const GOAL_BASELINE_MULTIPLIERS: Readonly<Record<string, number>> = {
-  k: 1e3,
-  m: 1e6,
-  bn: 1e9,
-  b: 1e9,
-  t: 1e12,
-  million: 1e6,
-  billion: 1e9,
-  trillion: 1e12,
-};
-
 /**
  * Resolve one captured amount to a raw magnitude in USER units, plus the unit
  * signals it carried. Percent scaling is applied by the caller, which needs to
@@ -439,14 +560,10 @@ function resolveAmount(
   groups: Record<string, string | undefined>,
   prefix: string,
 ): { readonly raw: number; readonly isPercent: boolean; readonly currency?: string } | null {
-  const digits = groups[prefix];
-  if (digits === undefined) return null;
-  const parsed = Number.parseFloat(digits.replace(/,/g, ''));
-  if (!Number.isFinite(parsed)) return null;
-  const multKey = groups[`${prefix}Mult`]?.toLowerCase();
-  const mult = multKey ? (GOAL_BASELINE_MULTIPLIERS[multKey] ?? 1) : 1;
+  const parsed = parseAmountDigits(groups[prefix]);
+  if (parsed === null) return null;
   return {
-    raw: parsed * mult,
+    raw: parsed * resolveMagnitude(groups[`${prefix}Mult`]),
     isPercent: groups[`${prefix}Pct`] === '%',
     currency: groups[`${prefix}Cur`],
   };
@@ -870,11 +987,36 @@ export function extractFactors(brief: string): ExtractedFactor[] {
     }
   }
 
-  // Extract contextual numbers: "price is £59"
+  // Extract contextual numbers: "price is £59", "target is 800k"
   const contextualRegex = new RegExp(PATTERNS.contextualNumber.source, "gi");
   while ((match = contextualRegex.exec(brief)) !== null) {
     const context = match.groups?.context || "";
-    const amount = parseFloat(match.groups?.amount || "0");
+
+    // ROADMAP 2.303 — A SUFFIX THIS MODULE CANNOT READ IS A MAGNITUDE IT DOES
+    // NOT KNOW, so the mint is REFUSED BY NAME rather than emitting the bare
+    // digits. "budget of 500kg" is not 500, and "revenue of 400000USD" is not
+    // reliably 400000; publishing either as the user's stated number is the
+    // same class of untruth as the dropped multiplier this change fixes, only
+    // quieter. A withheld factor asks the user; a confident wrong magnitude
+    // does not. (Only letters ATTACHED to the digits refuse — "target is 800
+    // customers" is a metric noun beside a whole number and still extracts.)
+    const unknownSuffix = match.groups?.unknownSuffix;
+    if (unknownSuffix) {
+      log.info(
+        {
+          event: "cee.factor_extraction.contextual_number_refused",
+          reason: "unrecognised_magnitude_suffix",
+          context,
+          suffix: unknownSuffix,
+        },
+        `Contextual number refused: unrecognised magnitude suffix "${unknownSuffix}"`,
+      );
+      continue;
+    }
+
+    const digits = parseAmountDigits(match.groups?.amount);
+    if (digits === null) continue;
+    const amount = digits * resolveMagnitude(match.groups?.mult);
     const isPercent = match[0].includes("%");
     const hasCurrency = /[£$€]/.test(match[0]);
     const unit = isPercent ? "%" : hasCurrency ? match[0].match(/[£$€]/)?.[0] : undefined;
