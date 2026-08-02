@@ -37,6 +37,12 @@ export async function runStageEnrich(ctx: StageContext): Promise<void> {
   ctx.enrichmentResult = enrichmentResult;
   const enrichedGraph = enrichmentResult.graph;
 
+  // ROADMAP 2.281 — carry the mint ATTESTATION forward to Stage 4b. The sweep's
+  // "possibly model-inferred" heuristic cannot tell a model's invention from a
+  // user's stated target by looking at the number, so it reads this record of
+  // what actually happened instead. Derived at the mint site; never re-inferred.
+  ctx.enricherMintedGoalIds = new Set(enrichmentResult.goalThresholdsMinted ?? []);
+
   log.info({
     stage: "2_factor_enrichment",
     node_count: enrichedGraph.nodes.length,

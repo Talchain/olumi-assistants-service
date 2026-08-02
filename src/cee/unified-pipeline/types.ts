@@ -197,6 +197,19 @@ export interface StageContext {
   // ── Stage 3 (Enrich) outputs ───────────────────────────────────────────
   enrichmentResult: any;
   hadCycles: boolean;
+  /**
+   * ROADMAP 2.281 — ids of goal nodes whose `goal_threshold` the ENRICHER
+   * minted this run, recorded at the mint site and consumed by Stage 4b.
+   *
+   * This is an ATTESTATION, not a heuristic: Stage 4b's "round raw + digit-free
+   * label ⇒ possibly model-inferred" rule cannot distinguish a fabricated
+   * number from a user-stated one by inspecting the number, and post-#789 the
+   * enricher is the only draft mint — so without this record the sweep could
+   * only ever delete targets the user actually supplied.
+   *
+   * Absent/empty ⇒ Stage 4b behaves exactly as it did before.
+   */
+  enricherMintedGoalIds?: Set<string>;
   enrichmentTrace?: {
     called_count: number;
     extraction_mode: string;

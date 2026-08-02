@@ -487,98 +487,57 @@ export function enrichGraphWithFactors(
  * Extended enrichment result with LLM metadata
  */
 export interface EnrichmentResultAsync extends EnrichmentResult {
-  /** Extraction mode used */
-  extractionMode: "llm-first" | "regex-only" | "v4_complete_skip";
+  /**
+   * Extraction mode used.
+   *
+   * ROADMAP 2.281 — `v4_complete_skip` means what it says and ONLY what it
+   * says: nothing was written. When the factor-side skip fires but the
+   * goal-target redirect still mints a threshold, the mode is
+   * `v4_factor_skip_goal_minted`, because a run that changed the graph must
+   * not report itself as a complete skip. (The re-witness found the wire
+   * carrying no `goal_threshold` at all while the trace claimed a clean
+   * "complete skip" — the label was true about factors and silent about the
+   * thing that actually mattered.)
+   */
+  extractionMode:
+    | "llm-first"
+    | "regex-only"
+    | "v4_complete_skip"
+    | "v4_factor_skip_goal_minted";
   /** Whether LLM extraction succeeded (if LLM mode used) */
   llmSuccess?: boolean;
   /** Any warnings from extraction */
   warnings: string[];
+  /**
+   * ATTESTATION (ROADMAP 2.281): the ids of goal nodes whose `goal_threshold`
+   * THIS run minted, derived at the mint site itself — never a hand list, never
+   * re-inferred by a later stage from the shape of the data.
+   *
+   * Stage 4b (threshold-sweep) consumes it. Its "possibly model-inferred"
+   * heuristic — round raw + digit-free label ⇒ strip — cannot distinguish a
+   * model's invention from a user's stated target, and post-#789 the enricher
+   * is the ONLY draft mint, so on a digit-free goal label that heuristic could
+   * only ever delete a number the USER supplied. This list is what lets the
+   * sweep tell the two apart from the RECORD of what happened, rather than by
+   * guessing from the number's appearance.
+   */
+  goalThresholdsMinted: string[];
 }
 
 /**
- * Enrich a graph with extracted factors from the brief (async version).
+ * Confidence-filter + dedupe the raw extraction into the list the enricher
+ * will actually consume.
  *
- * When CEE_LLM_FIRST_EXTRACTION_ENABLED=true, uses LLM-first extraction
- * with market context, glossary expansion, and regex validation/fallback.
- *
- * This is the preferred method for callers that can handle async operations.
+ * HOISTED (ROADMAP 2.281) so the full path and the factor-skip path qualify
+ * candidates through ONE implementation. Two copies of this logic would be
+ * exactly the `generateGraphHash` twins defect: they would agree on the day
+ * they were written and drift silently thereafter, and the drift would show
+ * up as a goal threshold that appears on one draft shape and not another.
  */
-export async function enrichGraphWithFactorsAsync(
-  graph: GraphT,
-  brief: string,
-  options: { minConfidence?: number; maxFactors?: number; collector?: CorrectionCollector; modelOverride?: string } = {}
-): Promise<EnrichmentResultAsync> {
-  const { minConfidence = 0.6, maxFactors = 10, collector, modelOverride } = options;
-
-  // Early exit: skip extraction when LLM provides complete V4 intervention data
-  const optionNodes = graph.nodes.filter(n => n.kind === "option");
-  if (optionNodes.length > 0) {
-    const factorNodes = graph.nodes.filter(n => n.kind === "factor");
-    const factorMap = new Map(factorNodes.map(n => [n.id, n]));
-    const allOptionsHaveInterventions = optionNodes.every(n => {
-      if (!n.data || !('interventions' in n.data)) return false;
-      const interventions = (n.data as { interventions: Record<string, number> }).interventions;
-      const entries = Object.entries(interventions);
-      // Must have at least one intervention, all targets must reference existing factors
-      // with quantitative data (value defined) — otherwise enrichment may need to fill gaps
-      return entries.length > 0 && entries.every(([factorId]) => {
-        const factor = factorMap.get(factorId);
-        return factor?.data && 'value' in factor.data;
-      });
-    });
-
-    if (allOptionsHaveInterventions) {
-      log.info(
-        { optionCount: optionNodes.length, event: "cee.factor_enrichment.v4_complete_skip" },
-        "Skipping factor enrichment: all options have complete V4 interventions"
-      );
-      return {
-        graph,
-        factorsAdded: 0,
-        factorsEnhanced: 0,
-        factorsSkipped: 0,
-        extractionMode: "v4_complete_skip",
-        warnings: [],
-      };
-    }
-  }
-
-  // Check feature flag for LLM-first extraction
-  let useLLMFirst = false;
-  try {
-    useLLMFirst = config.cee.llmFirstExtractionEnabled;
-  } catch {
-    // Config validation failed, default to regex
-  }
-
-  let extracted: ExtractedFactor[];
-  let extractionMode: "llm-first" | "regex-only" = "regex-only";
-  let llmSuccess: boolean | undefined;
-  let warnings: string[] = [];
-
-  if (useLLMFirst) {
-    // Use orchestrated extraction (LLM-first with regex fallback)
-    const result = await extractFactorsOrchestrated(brief, { modelOverride });
-    extracted = result.factors;
-    extractionMode = result.mode;
-    llmSuccess = result.llmSuccess;
-    warnings = result.warnings;
-
-    log.debug(
-      {
-        mode: result.mode,
-        llmSuccess: result.llmSuccess,
-        factorCount: extracted.length,
-        mergeStats: result.mergeStats,
-      },
-      "Orchestrated factor extraction complete"
-    );
-  } else {
-    // Use regex-only extraction
-    extracted = extractFactors(brief);
-  }
-
-  // Filter by confidence
+function qualifyExtractedFactors(
+  extracted: ExtractedFactor[],
+  minConfidence: number,
+): ExtractedFactor[] {
   const confidenceFiltered = extracted.filter((f) => f.confidence >= minConfidence);
 
   // Dedupe extracted factors against each other before injection
@@ -619,6 +578,311 @@ export async function enrichGraphWithFactorsAsync(
     }
   }
 
+  return qualified;
+}
+
+/**
+ * THE ONE mint of `goal_threshold` on the draft path.
+ *
+ * Mutates `enrichedGraph.nodes[goalNodeIndex]` in place (the caller owns the
+ * clone) and returns whether it minted. Returns `false` — writing nothing —
+ * when the goal node already carries a threshold, which is the pre-existing
+ * "first writer wins" rule.
+ *
+ * ROADMAP 2.281 — extracted verbatim from the enrichment loop so the
+ * factor-skip path can reach it. Every line of arithmetic and every stamped
+ * field below is unchanged from the in-loop version; only its address moved.
+ */
+function applyGoalTargetRedirect(
+  enrichedGraph: GraphT,
+  goalNodeIndex: number,
+  factor: ExtractedFactor,
+  collector?: CorrectionCollector,
+): boolean {
+  const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
+  if (currentGoalNode.goal_threshold !== undefined) return false;
+
+  // Full delegation to the SAME cap doctrine as the chat-path
+  // add_constraint handler (cap-doctrine unification, ROADMAP 1.18):
+  // an existing compatible cap wins, '%' always normalises against
+  // 100, else 25% headroom above the raw target. Deliberately NOT
+  // computeNormalisationCap (order-of-magnitude) — that diverged
+  // from the chat path and scored the same target up to ~5x
+  // differently depending on registration path.
+  //
+  // Regex extraction (cee/factor-extraction/index.ts) pre-divides
+  // percentages into a 0-1 fraction before this code runs, whereas
+  // resolveGoalThresholdCap's '%' branch — and the chat path's own
+  // convention — expects the RAW PERCENT NUMBER (15 for "15%"), the
+  // same "value stored in USER UNITS" convention add-constraint.ts
+  // uses for goal_threshold_raw. Reconstruct it here so BOTH paths
+  // register an IDENTICAL contract (raw/unit/cap/threshold), not
+  // just a coincidentally-equal goal_threshold: without this a 15%
+  // target registered via the draft path persisted
+  // goal_threshold_raw=0.15 (fraction, wrong display units) and no
+  // cap, while the chat path persisted raw=15/cap=100 — a
+  // draft-vs-chat parity break in the DISPLAY contract even though
+  // the scored 0.15 threshold happened to coincide.
+  const rawForResolver = factor.unit === "%" ? factor.value * 100 : factor.value;
+
+  let normalizedValue = factor.value;
+  let rawValue: number | undefined;
+  let cap: number | undefined;
+
+  const resolvedCap = resolveGoalThresholdCap(
+    currentGoalNode.goal_threshold_cap,
+    rawForResolver,
+    factor.unit,
+    currentGoalNode.goal_threshold_unit,
+  );
+  // ROADMAP 2.273 — the user-stated CURRENT LEVEL, carried by the same
+  // extraction match that produced the target (so the two numbers are
+  // provably about the same metric) and reconstructed into the SAME raw
+  // convention as the target above.
+  const rawBaseline =
+    factor.baseline === undefined
+      ? undefined
+      : factor.unit === "%"
+        ? factor.baseline * 100
+        : factor.baseline;
+
+  let normalizedBaseline: number | undefined;
+
+  if (resolvedCap !== null) {
+    cap = resolvedCap;
+    rawValue = rawForResolver;
+    normalizedValue = rawForResolver / resolvedCap;
+    // THE SHARED DENOMINATOR. Divided by the very same `resolvedCap` on
+    // the same branch, so threshold and baseline cannot drift onto
+    // different scales — ISL's `threshold − baseline + intercept` is
+    // only meaningful when both operands were scored against one cap,
+    // and a mismatch there yields a confident WRONG probability rather
+    // than an error.
+    normalizedBaseline =
+      rawBaseline === undefined ? undefined : rawBaseline / resolvedCap;
+  } else {
+    rawValue = rawForResolver;
+    // No sound denominator exists, so the target itself is registered
+    // un-normalised. Carrying a normalised baseline beside an
+    // un-normalised threshold would be exactly the cross-scale
+    // subtraction guarded against above — so the baseline is omitted
+    // too, and ISL keeps refusing honestly.
+    normalizedBaseline = undefined;
+  }
+
+  // Update goal node with threshold fields
+  enrichedGraph.nodes[goalNodeIndex] = {
+    ...currentGoalNode,
+    goal_threshold: normalizedValue,
+    goal_threshold_raw: rawValue,
+    goal_threshold_unit: factor.unit ?? "count",
+    goal_threshold_cap: cap,
+    // ROADMAP 2.258 — attest the FRAME beside the number. A CODE
+    // CONSTANT: the arithmetic three lines up is `raw / cap`, an
+    // absolute LEVEL on the metric's own scale, so `'level'` is true
+    // here by construction and is never derived from `factor`, from the
+    // brief, or from anything a model wrote.
+    goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
+    // Only ever present when the brief STATED a current level. No
+    // inference, no default, no derivation from the target.
+    ...(normalizedBaseline !== undefined && {
+      goal_baseline: normalizedBaseline,
+      goal_baseline_raw: rawBaseline,
+    }),
+  };
+
+  log.info(
+    {
+      goalNodeId: currentGoalNode.id,
+      goal_threshold: normalizedValue,
+      goal_threshold_raw: rawValue,
+      goal_threshold_cap: cap,
+      originalLabel: factor.label,
+      wasNormalized: cap !== undefined,
+      event: "cee.factor_enrichment.goal_threshold_set",
+    },
+    `Redirected target quantity to goal_threshold on "${currentGoalNode.id}"`
+  );
+
+  // Record correction for goal threshold set (Stage 11: Factor Enrichment)
+  if (collector) {
+    collector.addByStage(
+      11, // Stage 11: Factor Enrichment
+      "node_modified",
+      { node_id: currentGoalNode.id, kind: "goal" },
+      `Set goal_threshold from extracted target quantity`,
+      { id: currentGoalNode.id },
+      {
+        id: currentGoalNode.id,
+        goal_threshold: normalizedValue,
+        goal_threshold_raw: rawValue,
+        goal_threshold_cap: cap,
+      }
+    );
+  }
+
+  return true;
+}
+
+/**
+ * The goal-target redirect, run WITHOUT the factor side.
+ *
+ * ROADMAP 2.281 — the repair. `allOptionsHaveInterventions` is a sound reason
+ * to stop re-extracting FACTORS (the model already supplied them); it was
+ * never a reason to skip the GOAL TARGET, which is a number the USER stated
+ * and which no amount of model-supplied intervention data can substitute for.
+ * Because the skip fires on every well-formed draft, the mint at
+ * `applyGoalTargetRedirect` was unreachable in production: the re-witness
+ * measured `goal_threshold` ×0 on the wire across three scenario classes,
+ * with ISL never asked.
+ *
+ * DELIBERATELY REGEX-ONLY (`extractFactors`, never `extractFactorsOrchestrated`):
+ *   1. #789's doctrine is that no model authors a threshold. The goal target is
+ *      a user-stated number and is read deterministically.
+ *   2. The skip exists partly to avoid the LLM extraction pass on complete
+ *      drafts. Reintroducing that call here would change the cost profile of
+ *      every well-formed draft, which this repair has no mandate to do.
+ */
+function mintGoalTargetOnly(
+  graph: GraphT,
+  brief: string,
+  minConfidence: number,
+  collector?: CorrectionCollector,
+): { graph: GraphT; mintedGoalId: string | undefined } {
+  const goalNodeIndex = graph.nodes.findIndex((n) => n.kind === "goal");
+  if (goalNodeIndex < 0) return { graph, mintedGoalId: undefined };
+
+  const target = qualifyExtractedFactors(extractFactors(brief), minConfidence).find((f) =>
+    isTargetGoalLabel(f.label),
+  );
+  if (!target) return { graph, mintedGoalId: undefined };
+
+  // Clone before writing — the skip path returns the caller's own graph object
+  // when nothing is minted, and must not mutate it when something is.
+  const enrichedGraph: GraphT = {
+    ...graph,
+    nodes: [...graph.nodes],
+    edges: [...graph.edges],
+  };
+
+  const minted = applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector);
+  return minted
+    ? { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id }
+    : { graph, mintedGoalId: undefined };
+}
+
+/**
+ * Enrich a graph with extracted factors from the brief (async version).
+ *
+ * When CEE_LLM_FIRST_EXTRACTION_ENABLED=true, uses LLM-first extraction
+ * with market context, glossary expansion, and regex validation/fallback.
+ *
+ * This is the preferred method for callers that can handle async operations.
+ */
+export async function enrichGraphWithFactorsAsync(
+  graph: GraphT,
+  brief: string,
+  options: { minConfidence?: number; maxFactors?: number; collector?: CorrectionCollector; modelOverride?: string } = {}
+): Promise<EnrichmentResultAsync> {
+  const { minConfidence = 0.6, maxFactors = 10, collector, modelOverride } = options;
+
+  // Early exit: skip extraction when LLM provides complete V4 intervention data
+  const optionNodes = graph.nodes.filter(n => n.kind === "option");
+  if (optionNodes.length > 0) {
+    const factorNodes = graph.nodes.filter(n => n.kind === "factor");
+    const factorMap = new Map(factorNodes.map(n => [n.id, n]));
+    const allOptionsHaveInterventions = optionNodes.every(n => {
+      if (!n.data || !('interventions' in n.data)) return false;
+      const interventions = (n.data as { interventions: Record<string, number> }).interventions;
+      const entries = Object.entries(interventions);
+      // Must have at least one intervention, all targets must reference existing factors
+      // with quantitative data (value defined) — otherwise enrichment may need to fill gaps
+      return entries.length > 0 && entries.every(([factorId]) => {
+        const factor = factorMap.get(factorId);
+        return factor?.data && 'value' in factor.data;
+      });
+    });
+
+    if (allOptionsHaveInterventions) {
+      // The FACTOR side is genuinely complete — this log line is unchanged, so
+      // the existing Render/telemetry signature for the factor skip still reads
+      // exactly as it did.
+      log.info(
+        { optionCount: optionNodes.length, event: "cee.factor_enrichment.v4_complete_skip" },
+        "Skipping factor enrichment: all options have complete V4 interventions"
+      );
+
+      // ROADMAP 2.281 — but the GOAL TARGET is never covered by option
+      // interventions, so it must still be minted. This is the half of the
+      // early exit that was silently swallowing the user's stated target on
+      // every well-formed draft.
+      const goalOnly = mintGoalTargetOnly(graph, brief, minConfidence, collector);
+      const minted = goalOnly.mintedGoalId !== undefined;
+
+      if (minted) {
+        emit(TelemetryEvents.FactorExtractionComplete, {
+          factors_added: 0,
+          factors_enhanced: 0,
+          factors_skipped: 0,
+          goal_thresholds_set: 1,
+          total_extracted: 0,
+          extraction_mode: "v4_factor_skip_goal_minted",
+        });
+      }
+
+      return {
+        graph: goalOnly.graph,
+        factorsAdded: 0,
+        factorsEnhanced: 0,
+        factorsSkipped: 0,
+        // Honest naming: only claim a COMPLETE skip when the run really did
+        // write nothing.
+        extractionMode: minted ? "v4_factor_skip_goal_minted" : "v4_complete_skip",
+        warnings: [],
+        goalThresholdsMinted: goalOnly.mintedGoalId ? [goalOnly.mintedGoalId] : [],
+      };
+    }
+  }
+
+  // Check feature flag for LLM-first extraction
+  let useLLMFirst = false;
+  try {
+    useLLMFirst = config.cee.llmFirstExtractionEnabled;
+  } catch {
+    // Config validation failed, default to regex
+  }
+
+  let extracted: ExtractedFactor[];
+  let extractionMode: "llm-first" | "regex-only" = "regex-only";
+  let llmSuccess: boolean | undefined;
+  let warnings: string[] = [];
+
+  if (useLLMFirst) {
+    // Use orchestrated extraction (LLM-first with regex fallback)
+    const result = await extractFactorsOrchestrated(brief, { modelOverride });
+    extracted = result.factors;
+    extractionMode = result.mode;
+    llmSuccess = result.llmSuccess;
+    warnings = result.warnings;
+
+    log.debug(
+      {
+        mode: result.mode,
+        llmSuccess: result.llmSuccess,
+        factorCount: extracted.length,
+        mergeStats: result.mergeStats,
+      },
+      "Orchestrated factor extraction complete"
+    );
+  } else {
+    // Use regex-only extraction
+    extracted = extractFactors(brief);
+  }
+
+  // Filter by confidence, then dedupe — ONE implementation, shared with the
+  // factor-skip path's goal-target selection (ROADMAP 2.281).
+  const qualified = qualifyExtractedFactors(extracted, minConfidence);
+
   // Get existing factor labels (case-insensitive)
   const existingFactors = graph.nodes.filter((n) => n.kind === "factor");
   const existingLabels = new Set(
@@ -633,6 +897,7 @@ export async function enrichGraphWithFactorsAsync(
   let factorsEnhanced = 0;
   let factorsSkipped = 0;
   let goalThresholdsSet = 0;
+  const goalThresholdsMinted: string[] = [];
 
   // Deep clone the graph to avoid mutation
   const enrichedGraph: GraphT = {
@@ -647,132 +912,15 @@ export async function enrichGraphWithFactorsAsync(
     // Step 1: Check if this is a target/goal quantity that should be goal_threshold
     // Redirect to goal node instead of injecting as a factor
     if (isTargetGoalLabel(factor.label) && goalNode && goalNodeIndex >= 0) {
-      // Only set goal_threshold if not already set
-      const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
-      if (currentGoalNode.goal_threshold === undefined) {
-        // Full delegation to the SAME cap doctrine as the chat-path
-        // add_constraint handler (cap-doctrine unification, ROADMAP 1.18):
-        // an existing compatible cap wins, '%' always normalises against
-        // 100, else 25% headroom above the raw target. Deliberately NOT
-        // computeNormalisationCap (order-of-magnitude) — that diverged
-        // from the chat path and scored the same target up to ~5x
-        // differently depending on registration path.
-        //
-        // Regex extraction (cee/factor-extraction/index.ts) pre-divides
-        // percentages into a 0-1 fraction before this code runs, whereas
-        // resolveGoalThresholdCap's '%' branch — and the chat path's own
-        // convention — expects the RAW PERCENT NUMBER (15 for "15%"), the
-        // same "value stored in USER UNITS" convention add-constraint.ts
-        // uses for goal_threshold_raw. Reconstruct it here so BOTH paths
-        // register an IDENTICAL contract (raw/unit/cap/threshold), not
-        // just a coincidentally-equal goal_threshold: without this a 15%
-        // target registered via the draft path persisted
-        // goal_threshold_raw=0.15 (fraction, wrong display units) and no
-        // cap, while the chat path persisted raw=15/cap=100 — a
-        // draft-vs-chat parity break in the DISPLAY contract even though
-        // the scored 0.15 threshold happened to coincide.
-        const rawForResolver = factor.unit === "%" ? factor.value * 100 : factor.value;
-
-        let normalizedValue = factor.value;
-        let rawValue: number | undefined;
-        let cap: number | undefined;
-
-        const resolvedCap = resolveGoalThresholdCap(
-          currentGoalNode.goal_threshold_cap,
-          rawForResolver,
-          factor.unit,
-          currentGoalNode.goal_threshold_unit,
-        );
-        // ROADMAP 2.273 — the user-stated CURRENT LEVEL, carried by the same
-        // extraction match that produced the target (so the two numbers are
-        // provably about the same metric) and reconstructed into the SAME raw
-        // convention as the target above.
-        const rawBaseline =
-          factor.baseline === undefined
-            ? undefined
-            : factor.unit === "%"
-              ? factor.baseline * 100
-              : factor.baseline;
-
-        let normalizedBaseline: number | undefined;
-
-        if (resolvedCap !== null) {
-          cap = resolvedCap;
-          rawValue = rawForResolver;
-          normalizedValue = rawForResolver / resolvedCap;
-          // THE SHARED DENOMINATOR. Divided by the very same `resolvedCap` on
-          // the same branch, so threshold and baseline cannot drift onto
-          // different scales — ISL's `threshold − baseline + intercept` is
-          // only meaningful when both operands were scored against one cap,
-          // and a mismatch there yields a confident WRONG probability rather
-          // than an error.
-          normalizedBaseline =
-            rawBaseline === undefined ? undefined : rawBaseline / resolvedCap;
-        } else {
-          rawValue = rawForResolver;
-          // No sound denominator exists, so the target itself is registered
-          // un-normalised. Carrying a normalised baseline beside an
-          // un-normalised threshold would be exactly the cross-scale
-          // subtraction guarded against above — so the baseline is omitted
-          // too, and ISL keeps refusing honestly.
-          normalizedBaseline = undefined;
-        }
-
-        // Update goal node with threshold fields
-        enrichedGraph.nodes[goalNodeIndex] = {
-          ...currentGoalNode,
-          goal_threshold: normalizedValue,
-          goal_threshold_raw: rawValue,
-          goal_threshold_unit: factor.unit ?? "count",
-          goal_threshold_cap: cap,
-          // ROADMAP 2.258 — attest the FRAME beside the number. A CODE
-          // CONSTANT: the arithmetic three lines up is `raw / cap`, an
-          // absolute LEVEL on the metric's own scale, so `'level'` is true
-          // here by construction and is never derived from `factor`, from the
-          // brief, or from anything a model wrote.
-          goal_threshold_frame: CEE_GOAL_THRESHOLD_FRAME,
-          // Only ever present when the brief STATED a current level. No
-          // inference, no default, no derivation from the target.
-          ...(normalizedBaseline !== undefined && {
-            goal_baseline: normalizedBaseline,
-            goal_baseline_raw: rawBaseline,
-          }),
-        };
-
+      if (applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, factor, collector)) {
         goalThresholdsSet++;
-        log.info(
-          {
-            goalNodeId: goalNode.id,
-            goal_threshold: normalizedValue,
-            goal_threshold_raw: rawValue,
-            goal_threshold_cap: cap,
-            originalLabel: factor.label,
-            wasNormalized: cap !== undefined,
-            event: "cee.factor_enrichment.goal_threshold_set",
-          },
-          `Redirected target quantity to goal_threshold on "${goalNode.id}"`
-        );
-
-        // Record correction for goal threshold set (Stage 11: Factor Enrichment)
-        if (collector) {
-          collector.addByStage(
-            11, // Stage 11: Factor Enrichment
-            "node_modified",
-            { node_id: goalNode.id, kind: "goal" },
-            `Set goal_threshold from extracted target quantity`,
-            { id: goalNode.id },
-            {
-              id: goalNode.id,
-              goal_threshold: normalizedValue,
-              goal_threshold_raw: rawValue,
-              goal_threshold_cap: cap,
-            }
-          );
-        }
-
+        goalThresholdsMinted.push(goalNode.id);
         continue; // Don't inject as factor
       }
+      // goal_threshold was ALREADY set — fall through and treat this factor
+      // like any other (unchanged pre-2.281 behaviour).
     }
+
 
     // Check if a similar factor already exists
     const existingNode = existingFactors.find(
@@ -1029,5 +1177,6 @@ export async function enrichGraphWithFactorsAsync(
     extractionMode,
     llmSuccess,
     warnings,
+    goalThresholdsMinted,
   };
 }
