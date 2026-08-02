@@ -375,6 +375,45 @@ describe('ROADMAP 2.287 — CROSS-METRIC NOUN pairs are refused (Codex A4)', () 
     expect(r!.baseline).toBe(500);
   });
 
+  it('PRESERVED — irregular plural classes fold to one stem (#795 review amendment 1)', () => {
+    // The first cut stripped only a final "s", so natural singular↔plural
+    // SAME-noun pairs refused: property/properties, company/companies,
+    // branch/branches, match/matches — the exact class the fold exists for,
+    // measured extracting at base and refusing at the unamended head. The
+    // stemmer now folds -ies→-y and -(ch|sh|x|z|ss)es→-es-stripped. Anything
+    // it still misses (irregulars like person/people, and bare -ses plurals
+    // like bus/buses) stays a REFUSAL — the safe direction.
+    const PAIRS: ReadonlyArray<readonly [string, number, number]> = [
+      ['Currently at 1 property, and our target is 50 properties.', 50, 1],
+      ['Currently at 1 company, and our target is 5 companies.', 5, 1],
+      ['Currently at 1 branch, and our target is 10 branches.', 10, 1],
+      ['Currently at 1 match, and our target is 10 matches.', 10, 1],
+    ];
+    for (const [brief, target, baseline] of PAIRS) {
+      const r = extractGoalTargetWithBaseline(brief);
+      expect(r, `regressed — no longer extracts: ${brief}`).not.toBeNull();
+      expect(r!.value, brief).toBe(target);
+      expect(r!.baseline, brief).toBe(baseline);
+    }
+  });
+
+  it('PRESERVED — "annual", "quarterly", "exactly" are stopwords, not metric nouns (#795 review amendment 2)', () => {
+    // The stopword list carried "annually"/"monthly" but not these forms, so a
+    // currency level against "6M annual" refused via the cross-signal rule —
+    // measured extracting at base, refusing at the unamended head.
+    const SHAPES: ReadonlyArray<readonly [string, number, number]> = [
+      ['Currently at £4M, and our target is 6M annual.', 6_000_000, 4_000_000],
+      ['Currently at £4M, and our target is 6M quarterly.', 6_000_000, 4_000_000],
+      ['Currently at £4M, and our target is 6M exactly.', 6_000_000, 4_000_000],
+    ];
+    for (const [brief, target, baseline] of SHAPES) {
+      const r = extractGoalTargetWithBaseline(brief);
+      expect(r, `regressed — no longer extracts: ${brief}`).not.toBeNull();
+      expect(r!.value, brief).toBe(target);
+      expect(r!.baseline, brief).toBe(baseline);
+    }
+  });
+
   it('PRESERVED — trailing FUNCTION/TIME words are not metric nouns', () => {
     // "this year", "within a year" must not manufacture a noun mismatch.
     const a = extractGoalTargetWithBaseline('Currently at 500 customers, target 800 this year.');

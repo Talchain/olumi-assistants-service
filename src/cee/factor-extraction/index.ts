@@ -295,13 +295,16 @@ const METRIC_NOUN_STOPWORDS = new Set<string>([
   "now", "today", "tomorrow", "yesterday", "currently", "presently", "soon",
   "already", "still", "again", "then", "than", "when", "while",
   "annually", "monthly", "weekly", "daily", "yearly",
+  "annual", "quarterly", // #795 review amendment 2 — the -ly/-al forms were
+  // missing while "annually"/"monthly" were present, so "6M annual" against a
+  // currency level refused via the cross-signal rule
   "year", "years", "yr", "yrs", "month", "months", "week", "weeks",
   "day", "days", "quarter", "quarters",
   // quantity/degree qualifiers (they qualify the number, they do not name a metric)
   "most", "more", "less", "least", "only", "just", "each", "every", "all",
   "some", "next", "last", "first", "total", "overall", "combined",
   "minimum", "maximum", "min", "max",
-  "roughly", "approximately", "ideally", "hopefully", "maybe", "perhaps",
+  "roughly", "approximately", "exactly", "ideally", "hopefully", "maybe", "perhaps",
   "if", "so", "as",
 ]);
 
@@ -317,8 +320,27 @@ const CURRENCY_WORDS: Readonly<Record<string, string>> = {
   euro: "€", euros: "€", eur: "€",
 };
 
-/** Singular/plural of one noun is one metric: customers ≡ customer. */
+/**
+ * Singular/plural of one noun is one metric: customers ≡ customer,
+ * properties ≡ property, branches ≡ branch (#795 review amendment 1 — the
+ * first cut stripped only a final "s", so property/properties and
+ * branch/branches SAME-noun pairs refused).
+ *
+ * Folds, in order: `-ies`→`-y`, then `-es` after a sibilant (ch/sh/x/z/ss),
+ * then a plain final `-s`. Bare `-ses` is deliberately NOT folded: stripping
+ * it would break silent-e plurals that the plain rule already handles
+ * ("houses"→"house"), at the price of bus/buses staying a refusal. Anything
+ * the fold still misses — irregulars like person/people included — REFUSES,
+ * which is the safe direction: a missed fold withholds a baseline, it never
+ * fabricates a pair.
+ */
 function stemMetricNoun(lower: string): string {
+  if (lower.length > 4 && lower.endsWith("ies")) {
+    return lower.slice(0, -3) + "y";
+  }
+  if (lower.length > 4 && /(?:ch|sh|x|z|ss)es$/.test(lower)) {
+    return lower.slice(0, -2);
+  }
   return lower.length > 3 && lower.endsWith("s") && !lower.endsWith("ss")
     ? lower.slice(0, -1)
     : lower;
