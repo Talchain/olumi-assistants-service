@@ -34,6 +34,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { enrichGraphWithFactorsAsync } from '../../src/cee/factor-extraction/enricher.js';
+import { transformGraphToV3 } from '../../src/cee/transforms/schema-v3.js';
+import type { GraphT } from '../../src/schemas/graph.js';
 import { buildAnalysisReadyPayload } from '../../src/cee/transforms/analysis-ready.js';
 import { computeStructuralReadiness } from '../../src/orchestrator/tools/analysis-ready-helper.js';
 import { extractAnalysisReady } from '../../src/orchestrator/tools/draft-graph.js';
@@ -269,5 +272,111 @@ describe('ROADMAP 2.315(a) — analysis_ready carries the attested raw goal trio
       });
       expect(parsed.success).toBe(false);
     });
+  });
+});
+
+/**
+ * PRESERVATION — the live goal-probability train must be unchanged.
+ *
+ * The trio is ADDITIVE to a display payload, so nothing about the mint or the
+ * ISL request should move. This block proves that behaviourally rather than by
+ * inspection, using BOTH worked-brief forms recorded in
+ * PHASE0-EVIDENCE-2026-07-28/witness-2258-goal-probability-THIRD.md:
+ *
+ *   digit-string form (witness RUN 2) and prose form (witness RUN 3)
+ *
+ * The witness recorded, for both, a mint of
+ * `goal_threshold 0.8 · raw 6000000 · cap 7500000 · frame "level"`.
+ * Those figures were measured on staging BEFORE this change; re-asserting them
+ * here is therefore a genuine before/after comparison, not a restatement.
+ *
+ * Extraction runs `regex-only` (no LLM, no network), so this is deterministic.
+ *
+ * It also closes the loop the whole change exists for: the trio that reaches
+ * the UI is asserted to be the SAME attested numbers the graph was scored
+ * against — the anti-fabrication property. A payload that carried a plausible
+ * but re-derived target would pass a presence check and fail this one.
+ */
+describe('ROADMAP 2.315(a) — preservation of the goal-probability train', () => {
+  // Verbatim from the witness.
+  const DIGIT_STRING_FORM = 'Grow revenue to a target of 6000000 this year.';
+  const PROSE_FORM =
+    'We want to grow our annual revenue. We are currently at £4,000,000 and our target is £6,000,000 within a year.';
+
+  // The witness-recorded mint, shared by both forms.
+  const WITNESS_MINT = { threshold: 0.8, raw: 6000000, cap: 7500000 } as const;
+
+  function bareGraph(): GraphT {
+    return {
+      version: '1',
+      default_seed: 17,
+      nodes: [
+        { id: 'g1', kind: 'goal', label: 'Revenue Goal' },
+        { id: 'd1', kind: 'decision', label: 'Pricing decision' },
+      ],
+      edges: [],
+      meta: { roots: [], leaves: [], suggested_positions: {}, source: 'test' },
+    } as unknown as GraphT;
+  }
+
+  async function mintFrom(brief: string) {
+    const enriched = await enrichGraphWithFactorsAsync(bareGraph(), brief);
+    const goal = enriched.graph.nodes.find((n) => n.kind === 'goal') as Record<string, unknown>;
+    return { enriched: enriched.graph, goal };
+  }
+
+  it('digit-string form mints the witness values, unchanged', async () => {
+    const { goal } = await mintFrom(DIGIT_STRING_FORM);
+    expect(goal.goal_threshold).toBe(WITNESS_MINT.threshold);
+    expect(goal.goal_threshold_raw).toBe(WITNESS_MINT.raw);
+    expect(goal.goal_threshold_cap).toBe(WITNESS_MINT.cap);
+    expect(goal.goal_threshold_frame).toBe('level');
+    // The witness recorded "count" for this form — the brief states a bare
+    // number with no currency marker. That placeholder unit is the SEPARATE
+    // unit-vocabulary defect (ROADMAP 2.315(c)); pinned here so this change
+    // is not mistaken for having fixed it.
+    expect(goal.goal_threshold_unit).toBe('count');
+  });
+
+  it('prose form mints the witness values, unchanged', async () => {
+    const { goal } = await mintFrom(PROSE_FORM);
+    expect(goal.goal_threshold).toBe(WITNESS_MINT.threshold);
+    expect(goal.goal_threshold_raw).toBe(WITNESS_MINT.raw);
+    expect(goal.goal_threshold_cap).toBe(WITNESS_MINT.cap);
+    expect(goal.goal_threshold_frame).toBe('level');
+    expect(goal.goal_threshold_unit).toBe('£');
+  });
+
+  it('both forms produce IDENTICAL goal mints on every scored number', async () => {
+    const digit = (await mintFrom(DIGIT_STRING_FORM)).goal;
+    const prose = (await mintFrom(PROSE_FORM)).goal;
+
+    // The numbers ISL is scored against are identical across both forms.
+    // (The display UNIT differs — "count" vs "£" — which is exactly the
+    // 2.315(c) defect and is asserted per-form above rather than here.)
+    expect(digit.goal_threshold).toBe(prose.goal_threshold);
+    expect(digit.goal_threshold_raw).toBe(prose.goal_threshold_raw);
+    expect(digit.goal_threshold_cap).toBe(prose.goal_threshold_cap);
+    expect(digit.goal_threshold_frame).toBe(prose.goal_threshold_frame);
+  });
+
+  it('the trio on analysis_ready IS the attested mint — end to end, no second derivation', async () => {
+    for (const brief of [DIGIT_STRING_FORM, PROSE_FORM]) {
+      const { enriched, goal } = await mintFrom(brief);
+
+      // Real chain: enricher mint -> V3 transform -> analysis_ready builder.
+      const v3 = transformGraphToV3(enriched as never).graph;
+      const payload = buildAnalysisReadyPayload([], 'g1', v3) as unknown as Record<string, unknown>;
+
+      // What the UI will see == what the graph was scored against.
+      expect(payload.goal_threshold).toBe(goal.goal_threshold);
+      expect(payload.goal_threshold_raw).toBe(goal.goal_threshold_raw);
+      expect(payload.goal_threshold_unit).toBe(goal.goal_threshold_unit);
+      expect(payload.goal_threshold_cap).toBe(goal.goal_threshold_cap);
+
+      // And it is the witness's own number, not merely self-consistent.
+      expect(payload.goal_threshold_raw).toBe(WITNESS_MINT.raw);
+      expect(payload.goal_threshold_cap).toBe(WITNESS_MINT.cap);
+    }
   });
 });
