@@ -47,6 +47,7 @@ import {
   MAGNITUDE_MULTIPLIERS,
   MAGNITUDE_ALTERNATION,
   PATTERNS_FOR_DRIFT_GUARD,
+  PATTERN_NAMES_FOR_DRIFT_GUARD,
   amountPatternForDriftGuard,
 } from "../index.js";
 
@@ -117,13 +118,54 @@ describe("ROADMAP 2.316 — currencyWithMultiplier honours the ONE magnitude alp
     }
   });
 
-  it("RED 3 — an unreadable suffix REFUSES rather than emitting the bare digits", () => {
-    // #797's rule, applied to this path. Pristine emitted 5 for all three.
-    // "$5kg" is not 5 dollars; publishing it as the user's stated figure is
-    // the same untruth as the dropped multiplier above, only quieter.
-    for (const shape of ["$5kg", "$5KILO", "$5x", "£5zz"]) {
+  it("RED 3 — a MAGNITUDE-SHAPED suffix REFUSES rather than emitting the bare digits", () => {
+    // #797's rule, applied to this path. Pristine emitted 5 for all of these.
+    // "$5kg" is not 5 dollars, and "$5mARR" is not 5 dollars of ARR — it is
+    // five MILLION; publishing the bare digits is the same untruth as the
+    // dropped multiplier above, only quieter.
+    //
+    // Every shape here BEGINS with a key from the alphabet, which is the whole
+    // rule: that is the only case where the module cannot tell a magnitude
+    // from the head of an unrelated word.
+    for (const shape of ["$5kg", "$5KILO", "$5bnUSD", "$5mARR", "$5kilobytes"]) {
       const brief = `We raised ${shape} last year.`;
       expect(allValues(brief), `bare digits leaked from: ${brief}`).not.toContain(5);
+    }
+  });
+
+  it("RED 3b — a suffix that is NOT magnitude-shaped must NOT be refused", () => {
+    // ⚠ ADDED IN REVIEW, AND IT CAUGHT A LIVE REGRESSION IN THIS PR'S OWN
+    // FIRST CUT. The refusal predicate was "any attached alphabetic run", which
+    // is far wider than the defect it was written for: all eight shapes below
+    // extracted at base `7f57602` and returned NO FACTOR AT ALL after the first
+    // cut. `pcm` / `pa` / `ph` / `ea` / `s` / `USD` / `EUR` are per-month,
+    // per-annum, per-hour, each, plural and currency-code trailers — none of
+    // them touches the magnitude, so none of them can be a mis-read one.
+    //
+    // The measured base values are pinned, not just "something extracts": a
+    // guard that admitted the shape but changed its number would be the same
+    // class of defect wearing a passing test.
+    //
+    // No corpus in this repo carried any of these shapes, which is exactly why
+    // the whole suite stayed green through the regression — the one-eyed-corpus
+    // blindness that also let mutant M7 survive.
+    const cases: ReadonlyArray<readonly [string, number, string]> = [
+      ["£49pcm", 49, "£"],
+      ["$100pa", 100, "$"],
+      ["£20ph", 20, "£"],
+      ["£49ea", 49, "£"],
+      ["$50s", 50, "$"],
+      ["$5USD", 5, "$"],
+      ["€500EUR", 500, "€"],
+      ["$5x", 5, "$"],
+    ];
+    for (const [shape, value, unit] of cases) {
+      const brief = `We raised ${shape} last year.`;
+      const factors = extractFactors(brief);
+      expect(factors.length, `destroyed a good extraction: ${brief}`).toBeGreaterThan(0);
+      expect(factors[0]!.value, shape).toBe(value);
+      expect(factors[0]!.unit, shape).toBe(unit);
+      expect(factors[0]!.extractionType, shape).toBe("inferred");
     }
   });
 
@@ -173,47 +215,6 @@ describe("ROADMAP 2.316 — the pre-2.316 behaviour of this path is byte-identic
       expect(f!.matchedText, brief).toBe(matchedText);
       expect(f!.confidence, brief).toBe(confidence);
     }
-  });
-
-  it("PRESERVED — the COMPLETE factor list, including the un-multiplied companion", () => {
-    // ADDED BECAUSE A MUTANT SURVIVED (M7). The refusal above is scoped to
-    // suffixes the module CANNOT read; widening it to refuse every attached
-    // suffix would also silence the `currency` fallback's second, un-multiplied
-    // factor — the `£5` that has always accompanied `£5m`. That is a SHRINK of
-    // the byte-identical set with no behavioural alarm anywhere: every
-    // remaining assertion in this file looks only at the explicit factor, so
-    // the suite stayed fully GREEN under the mutation.
-    //
-    // Pinning the WHOLE array is what makes the scope of the refusal
-    // measurable rather than asserted. These four arrays are the pristine
-    // 7f57602 output verbatim for the first three shapes; `$5bn` is the
-    // targeted change, and is pinned to prove it lands in exactly the shape
-    // `£5m` already had rather than in some new one.
-    //
-    // ⚠ This does NOT endorse the companion factor. A brief saying "$5m"
-    // yielding a `5` alongside its `5000000` is a pre-existing oddity of the
-    // `currency` fallback, unchanged by 2.316 and out of its scope; it is
-    // pinned here as PRISTINE BEHAVIOUR, not as desired behaviour.
-    const shape = (b: string) =>
-      extractFactors(b).map((f) => [f.value, f.unit, f.matchedText, f.extractionType, f.confidence]);
-
-    expect(shape("We raised £5m last year.")).toEqual([
-      [5_000_000, "£", "£5m", "explicit", 0.85],
-      [5, "£", "£5", "inferred", 0.6],
-    ]);
-    expect(shape("We raised $5 million last year.")).toEqual([
-      [5_000_000, "$", "$5 million", "explicit", 0.85],
-      [5, "$", "$5", "inferred", 0.6],
-    ]);
-    expect(shape("We raised €5K last year.")).toEqual([
-      [5_000, "€", "€5K", "explicit", 0.85],
-      [5, "€", "€5", "inferred", 0.6],
-    ]);
-    // The targeted change, landing in the SAME shape as the line above it.
-    expect(shape("We raised $5bn last year.")).toEqual([
-      [5_000_000_000, "$", "$5bn", "explicit", 0.85],
-      [5, "$", "$5", "inferred", 0.6],
-    ]);
   });
 
   it("PRESERVED — #797's contextualNumber behaviour is unchanged in BOTH directions", () => {
@@ -304,3 +305,157 @@ describe("ROADMAP 2.316 — ONE alphabet, THREE consumers (drift guard)", () => 
 function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
+
+/* ===========================================================================
+ * ARRAY-SHRINK COVERAGE — DERIVED PER EXTRACTOR (ROADMAP 2.316, review)
+ *
+ * WHY THIS REPLACED A FOUR-BRIEF LITERAL PIN. The first answer to mutant M7
+ * pinned the complete factor array for four briefs. It closed M7 exactly and
+ * only: `extractFactors` has TWELVE `factors.push` sites, and a pin covering
+ * one of them leaves the other eleven able to vanish in silence. Two mutants
+ * proved the hole, both GREEN on the full 24k-test suite:
+ *
+ *   M8 — `continue` at the top of the `approximateValue` loop deletes that
+ *        extractor outright. "roughly 50 customers" goes 1 factor → 0, and it
+ *        is USER-VISIBLE: through `enrichGraphWithFactorsAsync` the factor node
+ *        disappears from the graph. The only coverage that touched it did
+ *        `.find(f => f.value === 60)` then asserted `inferred` and
+ *        `confidence <= 0.75` — which the CURRENCY FALLBACK's 0.60/inferred
+ *        factor also satisfies. The test passed on a different factor than the
+ *        one it was written for.
+ *
+ *   M9 — the same site as M7, but a brief outside the four: widen the refusal
+ *        for decimals only and `$2.5m` loses its companion. `$2.5m` IS in the
+ *        byte-identical table above — but that test uses
+ *        `.find(x => x.extractionType === "explicit")`, so it never looks at
+ *        the companion.
+ *
+ * A LITERAL TABLE IS THE DRIFT CLASS THIS PR EXISTS TO CLOSE, ONE LAYER UP.
+ * So the coverage assertion is DERIVED: the brief table is keyed by extractor,
+ * and its key set is checked against `PATTERN_NAMES_FOR_DRIFT_GUARD` (read from
+ * `PATTERNS` itself). Add an extractor without a canonical brief and this REDs
+ * by construction, naming the extractor it has no coverage for — nobody has to
+ * remember.
+ * ========================================================================= */
+
+/** [label, value, unit, extractionType, confidence, baseline] — the WHOLE factor. */
+type FactorShape = readonly [string, number, string | null, string, number, number | null];
+
+function completeShape(brief: string): FactorShape[] {
+  return extractFactors(brief).map(
+    (f) =>
+      [f.label, f.value, f.unit ?? null, f.extractionType, f.confidence, f.baseline ?? null] as const,
+  ) as FactorShape[];
+}
+
+/**
+ * The ONE extractor in `extractFactors` that is not driven by a `PATTERNS`
+ * entry — `extractGoalTargetWithBaseline`, the 12th push site. Named
+ * explicitly so the completeness assertion below stays exact in both
+ * directions rather than being loosened to "at least".
+ */
+const NON_PATTERN_EXTRACTORS = ["goalTargetWithBaseline"] as const;
+
+const CANONICAL_COVERAGE: Readonly<
+  Record<string, ReadonlyArray<readonly [string, readonly FactorShape[]]>>
+> = {
+  currencyWithMultiplier: [
+    // Decimal — M9's shape. The companion is the second entry, and pinning it
+    // is what makes the refusal's scope measurable rather than asserted.
+    ["We raised $2.5m last year.", [
+      ["Value", 2_500_000, "$", "explicit", 0.85, null],
+      ["Value", 2.5, "$", "inferred", 0.6, null],
+    ]],
+    // M7's shapes, carried forward. Pristine 7f57602 output verbatim for the
+    // first three; `$5bn` is the targeted change, pinned to prove it lands in
+    // exactly the shape `£5m` already had rather than in some new one.
+    ["We raised £5m last year.", [
+      ["Value", 5_000_000, "£", "explicit", 0.85, null],
+      ["Value", 5, "£", "inferred", 0.6, null],
+    ]],
+    ["We raised $5 million last year.", [
+      ["Value", 5_000_000, "$", "explicit", 0.85, null],
+      ["Value", 5, "$", "inferred", 0.6, null],
+    ]],
+    ["We raised €5K last year.", [
+      ["Value", 5_000, "€", "explicit", 0.85, null],
+      ["Value", 5, "€", "inferred", 0.6, null],
+    ]],
+    ["We raised $5bn last year.", [
+      ["Value", 5_000_000_000, "$", "explicit", 0.85, null],
+      ["Value", 5, "$", "inferred", 0.6, null],
+    ]],
+  ],
+  currency: [["We raised $100 last year.", [["Value", 100, "$", "inferred", 0.6, null]]]],
+  percentage: [["We measured 12% overall.", [["Rate", 0.12, "%", "inferred", 0.6, null]]]],
+  currencyFromTo: [["Move from £49 to £59.", [
+    ["Value", 54, "£", "range", 0.8, null],
+    ["Value", 59, "£", "explicit", 0.95, 49],
+    ["Value", 49, "£", "inferred", 0.6, null],
+  ]]],
+  percentFromTo: [["Move from 3% to 5%.", [
+    ["Rate", 0.04, "%", "range", 0.8, null],
+    ["Rate", 0.05, "%", "explicit", 0.9, 0.03],
+    ["Rate", 0.03, "%", "inferred", 0.6, null],
+  ]]],
+  changePattern: [["We will increase from 10 to 20.", [
+    ["Factor", 20, null, "explicit", 0.85, 10],
+  ]]],
+  contextualNumber: [["Our target is 800k.", [["Target", 800_000, null, "explicit", 0.9, null]]]],
+  // M8's shape. Confidence 0.7 is what distinguishes it from the currency
+  // fallback's 0.6 — the collision that let the old coverage pass on the
+  // wrong factor.
+  approximateValue: [["roughly 50 customers", [["Factor", 50, null, "inferred", 0.7, null]]]],
+  currencyRange: [["Pricing between £50-70.", [
+    ["Value", 60, "£", "range", 0.8, null],
+    ["Value", 50, "£", "inferred", 0.6, null],
+  ]]],
+  percentRange: [["Uplift between 5-10%.", [
+    ["Rate", 0.07500000000000001, "%", "range", 0.8, null],
+    ["Rate", 0.1, "%", "inferred", 0.6, null],
+  ]]],
+  genericRange: [["Headcount between 50 and 70.", [
+    ["Headcount", 60, null, "range", 0.8, null],
+  ]]],
+  goalTargetWithBaseline: [["Our target is 800 customers, currently at 500.", [
+    ["Target", 800, null, "explicit", 0.95, 500],
+  ]]],
+};
+
+describe("ROADMAP 2.316 — no extractor can vanish in silence (derived coverage)", () => {
+  it("the coverage table names EVERY extractor — derived, so it cannot go stale", () => {
+    // The anti-mirror assertion. `PATTERN_NAMES_FOR_DRIFT_GUARD` is read from
+    // `PATTERNS` itself, so adding a pattern without a canonical brief REDs
+    // here and names it, rather than silently leaving a 13th push site
+    // uncovered the way the first cut left eleven.
+    expect(Object.keys(CANONICAL_COVERAGE).sort()).toEqual(
+      [...PATTERN_NAMES_FOR_DRIFT_GUARD, ...NON_PATTERN_EXTRACTORS].sort(),
+    );
+  });
+
+  it("every extractor still contributes its canonical factors, COMPLETE arrays pinned", () => {
+    for (const [extractor, briefs] of Object.entries(CANONICAL_COVERAGE)) {
+      for (const [brief, expected] of briefs) {
+        expect(
+          completeShape(brief),
+          `${extractor} — the complete factor array changed for: ${brief}`,
+        ).toEqual(expected.map((e) => [...e]));
+      }
+    }
+  });
+
+  it("each canonical brief actually EXERCISES its extractor (non-vacuity)", () => {
+    // A coverage table whose briefs all happen to be served by one extractor
+    // would pass while proving nothing — trap 13's shape. Every entry must
+    // yield at least one factor, and no entry may be empty.
+    for (const [extractor, briefs] of Object.entries(CANONICAL_COVERAGE)) {
+      for (const [brief, expected] of briefs) {
+        expect(expected.length, `${extractor}: empty expectation for ${brief}`).toBeGreaterThan(0);
+        expect(
+          extractFactors(brief).length,
+          `${extractor}: canonical brief extracts nothing — ${brief}`,
+        ).toBeGreaterThan(0);
+      }
+    }
+  });
+});

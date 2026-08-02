@@ -131,13 +131,33 @@ export const MAGNITUDE_MULTIPLIERS: Readonly<Record<string, number>> = {
 };
 
 /**
+ * Escape a key for literal use inside a regex alternation (ROADMAP 2.316).
+ *
+ * Every key today is plain `[a-z]`, so this is a no-op at present — which is
+ * exactly why it is easy to forget and worth spelling out. The alternation is
+ * DERIVED from the map, so the day someone adds a key carrying `.`, `+`, `?`
+ * or `(`, that character would silently become a REGEX OPERATOR rather than a
+ * literal: a key like `"m+"` would turn the branch into "one or more m", and
+ * the pattern would start matching text nobody wrote. Deriving a pattern from
+ * data means the data must be escaped on the way in.
+ */
+function escapeRegExpLiteral(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
  * The alternation branch for the alphabet above, longest-first.
  *
  * The tie-break is lexicographic so the string is a pure function of the KEY
  * SET — insertion order cannot change it, and neither can a re-format.
+ *
+ * ⚠ Sorted by the RAW key length, then escaped. Escaping first would let a
+ * key's backslashes inflate its measured length and corrupt the longest-first
+ * ordering that stops "bn" being consumed as a bare "b".
  */
 export const MAGNITUDE_ALTERNATION: string = Object.keys(MAGNITUDE_MULTIPLIERS)
   .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
+  .map(escapeRegExpLiteral)
   .join("|");
 
 /**
@@ -157,10 +177,38 @@ export const MAGNITUDE_ALTERNATION: string = Object.keys(MAGNITUDE_MULTIPLIERS)
  * both sides are the same key set read through the same case rule. A future
  * mixed-case key (`"Bn"`) would have matched the regex and then resolved to
  * `?? 1` under a direct index; here it resolves correctly.
+ *
+ * ⚠ AND IT FAILS LOUD ON A CASE-FOLD COLLISION. `new Map(entries)` keeps the
+ * LAST entry for a duplicate key, so adding `Bn` beside an existing `bn` would
+ * silently produce an 8-entry lookup for a 9-key alphabet: the alternation
+ * would still offer both branches, the regex would still match both, and one
+ * of them would resolve through `?? 1` — the exact 1e9× defect this row exists
+ * to close, re-entering through the fix for it. A silent shrink is the estate's
+ * dominant failure mode (CLAUDE.md trap 12); this one shrinks at MODULE LOAD,
+ * where a throw is the loudest and cheapest possible alarm, and where every
+ * test in the suite trips it on the first import.
  */
-const MAGNITUDE_BY_FOLDED_KEY: ReadonlyMap<string, number> = new Map(
-  Object.entries(MAGNITUDE_MULTIPLIERS).map(([key, value]) => [key.toLowerCase(), value]),
-);
+const MAGNITUDE_BY_FOLDED_KEY: ReadonlyMap<string, number> = (() => {
+  const folded = new Map<string, number>();
+  for (const [key, value] of Object.entries(MAGNITUDE_MULTIPLIERS)) {
+    const lower = key.toLowerCase();
+    const existing = folded.get(lower);
+    if (existing !== undefined && existing !== value) {
+      throw new Error(
+        `MAGNITUDE_MULTIPLIERS: case-fold collision on '${lower}' — keys that differ only ` +
+          `by case must not carry different multipliers (${existing} vs ${value}).`,
+      );
+    }
+    folded.set(lower, value);
+  }
+  if (folded.size !== Object.keys(MAGNITUDE_MULTIPLIERS).length) {
+    throw new Error(
+      `MAGNITUDE_MULTIPLIERS: ${Object.keys(MAGNITUDE_MULTIPLIERS).length} keys case-folded to ` +
+        `${folded.size} lookup entries — a duplicate key was silently dropped.`,
+    );
+  }
+  return folded;
+})();
 
 /**
  * The digit grammar shared by every amount this module reads: optional
@@ -238,6 +286,49 @@ function resolveMagnitude(suffix: string | undefined): number {
  */
 function isKnownMagnitude(suffix: string): boolean {
   return MAGNITUDE_BY_FOLDED_KEY.has(suffix.toLowerCase());
+}
+
+/**
+ * Does this attached suffix look like it is MODIFYING THE MAGNITUDE of the
+ * number it rides on? (ROADMAP 2.316, narrowed in review)
+ *
+ * ⚠ THIS PREDICATE WAS ONCE "ANY ATTACHED LETTERS AT ALL", AND THAT WAS A LIVE
+ * REGRESSION. Measured on the first cut of this PR against base: `£49pcm`,
+ * `$100pa`, `£20ph`, `£49ea`, `$50s`, `$5USD` and `€500EUR` all extracted at
+ * base and returned NO FACTOR after it. None of those trailers touches the
+ * magnitude — they are per-month / per-annum / per-hour / each / plural /
+ * currency-code tags sitting beside a number that is exactly what it says.
+ * Refusing them destroyed good extractions to defend against a defect they do
+ * not carry, and no corpus in the repo held these shapes, so the whole suite
+ * stayed green — the same one-eyed-corpus blindness that let mutant M7 survive.
+ *
+ * THE RULE ACTUALLY IMPLEMENTED, stated so the comment cannot describe a
+ * narrower one than the code: refuse when the attached run BEGINS WITH a key
+ * from the alphabet but is not exactly one of them. That is the only case where
+ * the module genuinely cannot tell what it is looking at — "$5mARR" may be five
+ * million ARR or five m-somethings, and both readings are 1,000,000× apart. A
+ * run that begins with no magnitude key at all ("pcm", "USD") cannot be a
+ * mis-read magnitude, so it is left alone and the amount extracts.
+ *
+ * DERIVED FROM THE MAP, not from a list of "unit-ish" words — a hand-written
+ * allow-list of suffixes to tolerate would be a fourth mirror to drift
+ * (CLAUDE.md trap 12), and would fail closed on every unit nobody thought of.
+ *
+ * ⚠ DISCLOSED IMPRECISION: `$5tonnes` refuses, because `t` IS the trillion key
+ * and "$5t" legitimately means five trillion. That ambiguity is real and lives
+ * in the alphabet, not in this predicate; refusing an ambiguous magnitude is
+ * the doctrine, and the alternative is publishing a number that may be 1e12×
+ * wrong. Base extracted 5 for it.
+ */
+function isMagnitudeShapedSuffix(suffix: string): boolean {
+  // A run that IS a key exactly was already read correctly by
+  // `currencyWithMultiplier`; its companion factor is pristine behaviour.
+  if (isKnownMagnitude(suffix)) return false;
+  const folded = suffix.toLowerCase();
+  for (const key of MAGNITUDE_BY_FOLDED_KEY.keys()) {
+    if (folded.startsWith(key)) return true;
+  }
+  return false;
 }
 
 // Regex patterns for quantitative language
@@ -330,6 +421,23 @@ export const PATTERNS_FOR_DRIFT_GUARD: {
   contextualNumber: PATTERNS.contextualNumber,
   currencyWithMultiplier: PATTERNS.currencyWithMultiplier,
 };
+
+/**
+ * The NAMES of every pattern `extractFactors` runs (ROADMAP 2.316, review).
+ *
+ * WHY A NAME LIST IS EXPORTED AND NOT JUST THE PATTERNS. The coverage guard in
+ * `currency-multiplier-magnitude.test.ts` pins the COMPLETE factor array for a
+ * canonical brief per extractor, so that deleting or over-narrowing any
+ * extractor REDs. That table is only as good as its completeness — and a table
+ * of briefs a human must remember to extend is precisely the hand-maintained
+ * mirror this module's whole history is about (CLAUDE.md trap 12).
+ *
+ * Exporting the name list lets the guard assert its own coverage DERIVED from
+ * the pattern set: add a pattern without a canonical brief and the guard REDs
+ * immediately, naming the pattern it has no coverage for. The mirror is made to
+ * fail loud instead of being trusted to stay in sync.
+ */
+export const PATTERN_NAMES_FOR_DRIFT_GUARD: readonly string[] = Object.keys(PATTERNS);
 export function amountPatternForDriftGuard(prefix: string): string {
   return amountPattern(prefix);
 }
@@ -1166,25 +1274,29 @@ export function extractFactors(brief: string): ExtractedFactor[] {
     // alphabet), so the amount fell through to here and was published as 5.
     // #797 established the rule on `contextualNumber` — "budget of 500kg"
     // yields NO factor rather than 500 — and this path now matches it: a
-    // suffix the module cannot read is a magnitude it does not know, and a
-    // refusal asks the user where a confident wrong number does not.
+    // suffix that looks like a magnitude the module cannot read is a magnitude
+    // it does not know, and a refusal asks the user where a confident wrong
+    // number does not.
     //
-    // Scoped to letters ATTACHED to the digits, exactly as #797 scoped it:
-    // "$5 kg" is a whole number beside a metric noun and still extracts, the
-    // same way "target is 800 customers" does. Letters that ARE a known
-    // magnitude are not refused — `currencyWithMultiplier` has already read
-    // them correctly, and this rule's job is the suffixes it could not.
+    // TWO SCOPES, both narrow, and the comment states the rule the code runs:
+    //   1. Only letters ATTACHED to the digits, exactly as #797 scoped it —
+    //      "$5 kg" is a whole number beside a metric noun and still extracts,
+    //      the same way "target is 800 customers" does.
+    //   2. Only runs that BEGIN with a magnitude key (`isMagnitudeShapedSuffix`).
+    //      A per-month or currency-code trailer — "£49pcm", "$5USD" — cannot be
+    //      a mis-read magnitude and must not be destroyed to defend against one.
+    //      Refusing those was a live regression in this PR's first cut.
     const attachedSuffix = brief
       .slice(match.index + match[0].length)
       .match(/^[A-Za-z]+/)?.[0];
-    if (attachedSuffix && !isKnownMagnitude(attachedSuffix)) {
+    if (attachedSuffix && isMagnitudeShapedSuffix(attachedSuffix)) {
       log.info(
         {
           event: "cee.factor_extraction.currency_amount_refused",
-          reason: "unrecognised_magnitude_suffix",
+          reason: "ambiguous_magnitude_suffix",
           suffix: attachedSuffix,
         },
-        `Currency amount refused: unrecognised magnitude suffix "${attachedSuffix}"`,
+        `Currency amount refused: suffix "${attachedSuffix}" begins with a magnitude key but is not one`,
       );
       continue;
     }
