@@ -45,7 +45,7 @@
         {
           "id": "chip_prompt_set_option_values",
           "label": "Set values for options",
-          "message": "Help me set up the options for this decision so the analysis can run."
+          "message": "Help me configure the options for this decision so the analysis can run."
         }
       ],
       "insights": [],

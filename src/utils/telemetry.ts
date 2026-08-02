@@ -1829,6 +1829,28 @@ export const TelemetryEvents = {
   // ('chip_prefix' | 'configure_vocab' | 'intervention_vocab').
   V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
 
+  // ROADMAP 2.308 / S1 — the configure-option gate ATTEMPTED a persisted-graph
+  // read for its option-label anchor. Until 2.308 the labels came only from
+  // `extensions.graphState`, which the UI never sends, so the label anchor
+  // (and with it triggers `effect_vocab` / `option_value_set`) was dead code
+  // in production. Emitted on EVERY read attempt — i.e. whenever the detector
+  // reported a label anchor would decide the verdict — so the event count IS
+  // the added-read frequency, with no silent omissions (review #796: emitting
+  // only on a labels-bearing result made a failed or option-less read
+  // invisible and under-counted the very thing this measures). Payload:
+  // request_id, scenario_id, outcome ('labels' | 'empty' | 'failed'), matched
+  // (whether the labels flipped the verdict; always false unless
+  // outcome === 'labels').
+  //
+  // ⚠ Read `matched: true` as THE S1 counter, not the sibling
+  // `configure_option_intent_routed`. That one is gated on
+  // `!positiveEditRegexHit`, and the turns S1 rescues (remedies #6/#7 in the
+  // diagnosis) DO carry a positive edit verb — their edit-lane door was closed
+  // by the VALUE-UPDATE gate, not by a missing verb — so it stays silent for
+  // exactly the class of turn this fix changes.
+  V5EditGraphConfigureOptionLabelsLoaded:
+    "v5.edit_graph.configure_option_labels_loaded",
+
   // Structural-restructure routing (LATENCY-RECAPTURE finding 3; probe
   // 69a2f44f). Emitted when the structural-restructure intent gate is the
   // DECIDING factor sending a turn to the edit lane (no positive edit verb

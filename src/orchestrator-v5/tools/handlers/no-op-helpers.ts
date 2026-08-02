@@ -45,6 +45,35 @@ export function resolveOptionCount(invocation: HandlerInvocation): number {
 }
 
 /**
+ * Select the options that are blocking readiness, for `buildAnalysisAbsentTemplate`.
+ *
+ * Derived from the SAME `analysisReady.options` the readiness verdict itself
+ * is rolled up from (`computeStructuralReadiness`), so the copy cannot name a
+ * different set of options than the gate blocked on. Options with no usable
+ * label are dropped rather than rendered as an id — an id in user prose is the
+ * internal-field leak the 2.308 diagnosis rowed twice (§5b, §11.2).
+ */
+export function resolveBlockedOptionLabels(invocation: HandlerInvocation): string[] {
+  const options = invocation.analysisReady?.options;
+  if (!Array.isArray(options)) return [];
+  const labels: string[] = [];
+  for (const option of options) {
+    if (option.status === 'ready') continue;
+    const label = option.label;
+    if (typeof label !== 'string' || label.trim().length === 0) continue;
+    labels.push(label.trim());
+  }
+  return labels;
+}
+
+/** Render a label list as `"A"`, `"A" and "B"`, `"A", "B" and "C"`. */
+function renderQuotedLabelList(labels: readonly string[]): string {
+  const quoted = labels.map((label) => `"${label}"`);
+  if (quoted.length === 1) return quoted[0]!;
+  return `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]!}`;
+}
+
+/**
  * Decide the precondition-fail template wording based on structural
  * readiness. The earlier single-string template said "ready to analyse"
  * unconditionally — wrong when readiness is `needs_user_input`,
@@ -52,33 +81,76 @@ export function resolveOptionCount(invocation: HandlerInvocation): number {
  * the run_analysis CTA. Branch the copy so the user gets accurate
  * direction.
  *
+ * ⚠ ROADMAP 2.308 / S3 — the needs-setup branch used to CONTRADICT ITSELF BY
+ * CONSTRUCTION. The head clause `Your model has ${n} ${optionsLabel} set up `
+ * was emitted unconditionally and the tail then denied it, producing (live, at
+ * `a5a3e22`, for the tester's real state):
+ *
+ *   "Your model has 6 options set up but the options still need to be set up
+ *    before analysis can run."
+ *
+ * "This is not an LLM hallucination — it is deterministic concatenation." It
+ * also named no option and no missing thing, so it was unactionable. The fix
+ * is structural, not a reword: the "set up" head clause is now confined to the
+ * branch that can truthfully make it, and each blocking status states what it
+ * actually means.
+ *
  * Statuses recognised:
  *   - `ready` → "and is ready to analyse" (run-analysis chip will follow).
- *   - `needs_user_input` / `needs_user_mapping` / `needs_encoding`
- *     → "but option values still need to be set up before analysis can
- *        run" (set-values chip will follow per chip-generator's existing
- *        readiness fallback).
+ *     Unchanged, byte for byte.
+ *   - `needs_user_input` → the roll-up for FEWER THAN TWO options
+ *     (`analysis-ready-helper.ts`: `options.length < 2`). Says exactly that;
+ *     it is not an effect-values problem and never was.
+ *   - `needs_user_mapping` / `needs_encoding` → the option(s) have no effect
+ *     values. Names them when the caller knows them, in the same words the
+ *     UI's own blocked reason uses ("has no effect values yet"), and never an
+ *     internal field name.
  *   - undefined / unknown literal → fall back to the neutral "ready to
  *     analyse" wording. The chip generator's own readiness gate prevents
  *     a misleading executable chip in that case.
+ *
+ * `blockedOptionLabels` is optional so the two-argument callers that cannot
+ * reach the option list (the coaching postcheck) keep compiling and still get
+ * non-contradicting copy.
  */
 export function buildAnalysisAbsentTemplate(
   optionCount: number,
   readinessStatus: string | undefined,
+  blockedOptionLabels: readonly string[] = [],
 ): string {
   const optionsLabel = optionCount === 1 ? 'option' : 'options';
-  const NEEDS_SETUP_STATUSES = new Set([
-    'needs_user_input',
-    'needs_user_mapping',
-    'needs_encoding',
-  ]);
-  const tail = NEEDS_SETUP_STATUSES.has(readinessStatus ?? '')
-    ? `but the options still need to be set up before analysis can run.`
-    : `and is ready to analyse. Would you like me to run the analysis?`;
+  const head = `No analysis has been run on your model yet. `;
+
+  if (readinessStatus === 'needs_user_input') {
+    return (
+      head +
+      `Your model has ${optionCount} ${optionsLabel}, and analysis needs at ` +
+      `least two to compare.`
+    );
+  }
+
+  if (readinessStatus === 'needs_user_mapping' || readinessStatus === 'needs_encoding') {
+    if (blockedOptionLabels.length > 0) {
+      const named = renderQuotedLabelList(blockedOptionLabels);
+      const verb = blockedOptionLabels.length === 1 ? 'has' : 'have';
+      const pronoun = blockedOptionLabels.length === 1 ? 'it' : 'they';
+      return (
+        head +
+        `${named} ${verb} no effect values yet. Tell me what ${pronoun} ` +
+        `change and the analysis can run.`
+      );
+    }
+    return (
+      head +
+      `Some of your ${optionsLabel} have no effect values yet. Tell me what ` +
+      `they change and the analysis can run.`
+    );
+  }
+
   return (
-    `No analysis has been run on your model yet. ` +
+    head +
     `Your model has ${optionCount} ${optionsLabel} set up ` +
-    tail
+    `and is ready to analyse. Would you like me to run the analysis?`
   );
 }
 
@@ -188,10 +260,11 @@ export function buildPreconditionAssistantText(
   verdict: Exclude<ExplanationPreconditionVerdict, 'execute'>,
   optionCount: number,
   readinessStatus: string | undefined,
+  blockedOptionLabels: readonly string[] = [],
 ): string {
   switch (verdict) {
     case 'missing':
-      return buildAnalysisAbsentTemplate(optionCount, readinessStatus)
+      return buildAnalysisAbsentTemplate(optionCount, readinessStatus, blockedOptionLabels)
     case 'stale':
       return buildAnalysisStaleTemplate()
     case 'unconfirmed':
