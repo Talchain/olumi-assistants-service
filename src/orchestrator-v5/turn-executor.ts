@@ -915,6 +915,25 @@ export async function runTurnExecutor(
   // legitimately-null expected (proven-absent first write) — never a stale null
   // from `context.persistedGraph` (which stays null on a degraded read).
   let resolvedCanonicalGraphForCommit: { readonly graph: unknown | null } | undefined;
+  // ── ROADMAP 2.301 secondary fix — HOISTED conflict capture ─────────────
+  // The diagnosis (diagnosis-commit-path-2026-08-03.md §4) measured the
+  // walk's 500-vs-409 split: 23 commit catch sites, and exactly ONE (the
+  // STEP-7 Amendment A2 branch) mapped `TurnFenceRejectedError` /
+  // `GraphStaleWriteError` onto the typed 409 envelope — every other site
+  // flattened the same refusal to STATE_COMMIT_FAILED → INTERNAL_ERROR →
+  // HTTP 500 ("you stopped this turn" as a server error, the exact
+  // flattening A2's comment forbids). Rather than 23 hand-edits, the
+  // mapping is hoisted onto the two seams every commit already crosses:
+  // `commitTurn` (the single closure ALL executor commits funnel through)
+  // records a thrown typed conflict here, and `finalizeRun` (the single
+  // funnel every path returns through) remaps a STATE_COMMIT_FAILED
+  // outcome whose most recent commit attempt was that conflict onto the
+  // SAME envelope A2 builds. Reset at every commit attempt, so a retried
+  // commit can never inherit a stale conflict; sites that already map
+  // (A2) are untouched because the remap fires only on the flattening.
+  // Pinned RED-first by tests/integration/turn-fence-hoisted-conflict-
+  // mapping.test.ts (pre-hoist: `expected 500 to be 409` on a non-A2 path).
+  let lastCommitConflictError: TurnFenceRejectedError | GraphStaleWriteError | null = null;
   const commitTurn = async (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
@@ -1003,42 +1022,58 @@ export async function runTurnExecutor(
         expectedGraphCasHashes = computeExpectedGraphCasHashes(expectedBaseGraph);
       }
     }
-    const result = await commitDirectAnswer(
-      resp,
-      {
-        // Injected BEFORE ...meta so a call site could still override; no
-        // current call site does (the wrapper's server-read derivation is
-        // the single trusted source on this path).
-        ...(expectedGraphCasHashes ?? {}),
-        // V5 Signature Loop — carry forward the prior turn's pendings by default
-        // so a non-consuming turn does not wipe a live proposal (behaviour #2).
-        // Placed BEFORE `...meta` so a call site can still override it; the
-        // apply / dismissal sites additionally set `consumedPendingRefs` (via
-        // meta) to exclude the proposal they just consumed / rejected, so it
-        // can never carry forward and reappear as a zombie.
-        priorPendingActions: context.most_recent_pending_actions ?? [],
-        ...meta,
-        coaching_state: context.coaching_state,
-        userMessage: userMessageForTurn,
-        // Lane 28 — brief pipeline seam 1: a call site's explicit briefText
-        // (the main happy path re-passes `context.scenarioBriefText`) wins;
-        // otherwise seed from this turn's payload when it passed the
-        // decision-brief shape gate (undefined on non-qualifying turns —
-        // the RPC then leaves brief_text untouched).
-        briefText: meta.briefText ?? briefSeedForTurn,
-        // V5 Conversation Context Reliability: scrub the durable assistant text
-        // against `effectiveTurnGraph` — the SAME graph this turn reasoned over
-        // and the SAME graph surfaced to the route egress sanitiser (below) —
-        // so the stored copy resolves entity-id labels (e.g. `goal_revenue` →
-        // "Revenue") identically to the wire copy and the two cannot diverge,
-        // even when the request graphState is stale relative to, or absent
-        // alongside, the persisted graph. (Earlier this used
-        // `context.persistedGraph`, which could differ from the request graph
-        // the wire egress used.)
-        contentGraph: effectiveTurnGraph,
-      },
-      store,
-    );
+    // 2.301 hoist — this attempt owns the capture slot (see the declaration
+    // above): clear any previous attempt's conflict, then record a typed
+    // conflict thrown by THIS append before rethrowing to the call site's
+    // own catch ladder.
+    lastCommitConflictError = null;
+    let result: Awaited<ReturnType<typeof commitDirectAnswer>>;
+    try {
+      result = await commitDirectAnswer(
+        resp,
+        {
+          // Injected BEFORE ...meta so a call site could still override; no
+          // current call site does (the wrapper's server-read derivation is
+          // the single trusted source on this path).
+          ...(expectedGraphCasHashes ?? {}),
+          // V5 Signature Loop — carry forward the prior turn's pendings by default
+          // so a non-consuming turn does not wipe a live proposal (behaviour #2).
+          // Placed BEFORE `...meta` so a call site can still override it; the
+          // apply / dismissal sites additionally set `consumedPendingRefs` (via
+          // meta) to exclude the proposal they just consumed / rejected, so it
+          // can never carry forward and reappear as a zombie.
+          priorPendingActions: context.most_recent_pending_actions ?? [],
+          ...meta,
+          coaching_state: context.coaching_state,
+          userMessage: userMessageForTurn,
+          // Lane 28 — brief pipeline seam 1: a call site's explicit briefText
+          // (the main happy path re-passes `context.scenarioBriefText`) wins;
+          // otherwise seed from this turn's payload when it passed the
+          // decision-brief shape gate (undefined on non-qualifying turns —
+          // the RPC then leaves brief_text untouched).
+          briefText: meta.briefText ?? briefSeedForTurn,
+          // V5 Conversation Context Reliability: scrub the durable assistant text
+          // against `effectiveTurnGraph` — the SAME graph this turn reasoned over
+          // and the SAME graph surfaced to the route egress sanitiser (below) —
+          // so the stored copy resolves entity-id labels (e.g. `goal_revenue` →
+          // "Revenue") identically to the wire copy and the two cannot diverge,
+          // even when the request graphState is stale relative to, or absent
+          // alongside, the persisted graph. (Earlier this used
+          // `context.persistedGraph`, which could differ from the request graph
+          // the wire egress used.)
+          contentGraph: effectiveTurnGraph,
+        },
+        store,
+      );
+    } catch (error) {
+      if (
+        error instanceof TurnFenceRejectedError ||
+        error instanceof GraphStaleWriteError
+      ) {
+        lastCommitConflictError = error;
+      }
+      throw error;
+    }
     pendingLifecycleForRun = result.pendingLifecycle;
     return result;
   };
@@ -10284,6 +10319,78 @@ export async function runTurnExecutor(
   }
 
   function finalizeRun(): TurnExecutorRunResult {
+    // ── ROADMAP 2.301 secondary fix — HOISTED conflict remap ─────────────
+    // Runs FIRST, before the egress guards below, so the remapped envelope
+    // is subject to them exactly as the A2 branch's envelope is. Fires ONLY
+    // when a commit catch site flattened a typed conflict to
+    // STATE_COMMIT_FAILED (the walk's 500 arm): `lastCommitConflictError`
+    // is set by the `commitTurn` seam for the MOST RECENT commit attempt
+    // and cleared at every attempt's start, and A2-mapped paths arrive here
+    // with failureType already GRAPH_WRITE_CONFLICT, so this is a no-op for
+    // them. The envelopes below are byte-for-byte the STEP-7 A2 shapes —
+    // one authority for the per-verdict recovery actions would be better
+    // still, but the two sites are pinned against each other by
+    // tests/integration/turn-fence-hoisted-conflict-mapping.test.ts and
+    // tests/integration/orchestrate-v2-fail-closed.test.ts.
+    if (
+      failureType === INTERNAL_TO_WIRE.STATE_COMMIT_FAILED &&
+      lastCommitConflictError !== null
+    ) {
+      const conflict = lastCommitConflictError;
+      if (conflict instanceof TurnFenceRejectedError) {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            fence_verdict: conflict.verdict,
+            generation: conflict.generation,
+            max_generation: conflict.maxGeneration,
+            hoisted_from_flattened_commit_catch: true,
+          },
+          'V5 TurnExecutor — turn fence refused the graph write (typed 409-class via the hoisted finalise remap; nothing clobbered)',
+        );
+        failureType = INTERNAL_TO_WIRE.GRAPH_WRITE_CONFLICT;
+        response = buildFailureResponse(
+          'GRAPH_WRITE_CONFLICT',
+          context.stage,
+          {
+            phase: 'commit',
+            fence_verdict: conflict.verdict,
+            conflict_category: `turn_fence_${conflict.verdict}`,
+            recovery_action:
+              conflict.verdict === 'stopped'
+                ? 'start_new_draft'
+                : conflict.verdict === 'superseded'
+                  ? 'refresh_and_reconfirm'
+                  : 'retry_later',
+          } satisfies GraphConflictFailureDetails,
+          recoveryCtx(),
+        );
+      } else {
+        log.warn(
+          {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            conflict_category: conflict.conflict_category,
+            err: serialiseError(conflict),
+            hoisted_from_flattened_commit_catch: true,
+          },
+          'V5 TurnExecutor — graph CAS conflict on commit (typed 409-class via the hoisted finalise remap; nothing clobbered)',
+        );
+        failureType = INTERNAL_TO_WIRE.GRAPH_WRITE_CONFLICT;
+        response = buildFailureResponse(
+          'GRAPH_WRITE_CONFLICT',
+          context.stage,
+          {
+            phase: 'commit',
+            recovery_action: 'refresh_and_reconfirm',
+            conflict_category: conflict.conflict_category,
+            expected_base_graph_hash: conflict.expected_base_graph_hash ?? null,
+          } satisfies GraphConflictFailureDetails,
+          recoveryCtx(),
+        );
+      }
+    }
     // V5 finaliser contract: surface `analysisReadyForTurn` on the run
     // result so route-v2.ts can stamp it via `finaliseV5Response`. The
     // per-turn emission-rate telemetry that previously lived here moved to

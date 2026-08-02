@@ -2,12 +2,28 @@
 -- V5 TURN FENCE — append_turn_atomic_v4 (the fence check INSIDE the append
 -- transaction). ROADMAP 2.174 fix c; Codex round-2 P1, adjudicated real.
 --
--- ⚠️  AUTHORED AS CODE — NOT EXECUTED. The fence-hardening lane REHEARSED
---     this migration (forward + rollback + behavioural parity with the test
---     fake) against an ephemeral local Postgres; evidence in
---     PHASE0-EVIDENCE-2026-07-28/fence-hardening-build.md. Execution against
---     staging is sequenced by the orchestrator; the runbook is at
---     Docs/v5/runbooks/turn-fence-atomic-append-migration.md.
+-- ✅  EXECUTED ON STAGING 2026-07-30 (this header said "NOT EXECUTED" until
+--     2026-08-02 — nine days stale; corrected per the #794 adversarial
+--     review's honesty ritual, CLAUDE.md trap 2's lesson that a file's
+--     description of its own status is a hand-maintained mirror). Evidence:
+--     PHASE0-EVIDENCE-2026-07-28/fence-migration-execution.md (8/8
+--     structural + 7/7 behavioural); the ledger row was backfilled the same
+--     day (migration-ledger-reconciliation.md). Rehearsal evidence:
+--     fence-hardening-build.md.
+--
+-- ⚠️⚠️ DEFECTIVE AND SUPERSEDED — ROADMAP 2.301. The fence gate below keys
+--     its row lookup on `turn_id = p_turn_id` (the commit's WRITE identity,
+--     which turn-executor commits populate with the server request_id),
+--     while the fence row was claimed under the browser's payload.turn_id.
+--     Executing this file killed every graph-bearing edit/confirm commit on
+--     staging from 31 Jul 22:17Z (proof:
+--     PHASE0-EVIDENCE-2026-07-28/diagnosis-commit-path-2026-08-03.md). The
+--     corrected definition is 20260802120000_v5_turn_fence_atomic_append_
+--     generation_key.sql (generation-keyed lookup, signature unchanged).
+--     NEVER re-execute this file; its ledger row must EXIST precisely so
+--     replay tooling never re-applies it (see the generation-key runbook's
+--     A1 section). The SQL below is preserved byte-for-byte as the executed
+--     historical artefact.
 --
 -- ⚠️  DEPLOY ORDER IS FREE — THE CODE FEATURE-DETECTS (stated and pinned).
 --     Unlike 20260731120000 (migration-first, fail-closed), the application
@@ -19,7 +35,7 @@
 --     in either order. Pinned by turn-fence-atomic-append.test.ts.
 --
 -- Date authored: 2026-07-30
--- Date executed: (pending — orchestrator-sequenced)
+-- Date executed: 2026-07-30 (staging; header falsely read "(pending)" until 2026-08-02)
 --
 -- ── WHY ──────────────────────────────────────────────────────────────
 -- The fence (20260731120000) is a pre-write CHECK, not a lock: the commit

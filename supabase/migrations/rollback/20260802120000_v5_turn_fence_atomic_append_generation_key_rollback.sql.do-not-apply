@@ -1,0 +1,35 @@
+-- ============================================================
+-- ROLLBACK for 20260802120000_v5_turn_fence_atomic_append_generation_key.sql
+-- ⚠️  DO NOT APPLY unless Paul / the orchestrator has decided to roll back.
+--
+-- Effect: drops append_turn_atomic_v4 ENTIRELY. This rollback deliberately
+-- does NOT restore the previous (20260731130000) function body — that body
+-- is the ROADMAP 2.301 outage: its fence gate looked the row up by the
+-- commit's write identity (`p_turn_id`, the server request_id on every
+-- turn-executor commit) instead of the admitted claim identity, so every
+-- graph-bearing edit/confirm commit was refused OLTF3/unclaimed. Restoring
+-- it would restore the outage.
+--
+-- With v4 absent the application FEATURE-DETECTS (PGRST202) and falls back
+-- to the pre-v4 evaluate-then-append two-step on the next graph write per
+-- instance. The two-step evaluates the fence via the ALS handle — the
+-- CORRECT identity — so commits WORK after this rollback; the cost is only
+-- the documented ~one-RPC evaluate→append window (the fence becomes a
+-- check, not a lock). No data changes in either direction: v4 writes the
+-- same rows v2/v3 write, and the fence table is untouched. A CEE restart is
+-- NOT required (the fallback is per-call), but restarting removes the one
+-- WARN-per-instance discovery cost.
+--
+-- Ledger: remove BOTH this migration's row AND (if it was inserted at
+-- execution time) keep the 20260731130000 row honest — after this DROP,
+-- neither v4 definition is live, so `20260802120000` must not remain
+-- recorded as applied:
+--   DELETE FROM supabase_migrations.schema_migrations
+--    WHERE version = '20260802120000';
+-- in the SAME transaction as the DROP.
+-- ============================================================
+
+DROP FUNCTION IF EXISTS public.append_turn_atomic_v4(
+  uuid, text, text, text, text, boolean, integer, integer, jsonb,
+  jsonb, text, jsonb, jsonb, text, text, text, text, boolean, bigint
+);

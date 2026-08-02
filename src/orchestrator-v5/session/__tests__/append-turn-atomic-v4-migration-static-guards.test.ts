@@ -45,10 +45,19 @@ const code = sql
 const codeOneline = code.replace(/\s+/g, ' ');
 
 describe('append_turn_atomic_v4 migration — execution posture', () => {
-  it('header declares AUTHORED-not-executed, orchestrator-sequenced, with a pending execution date', () => {
-    expect(sql).toMatch(/AUTHORED AS CODE — NOT EXECUTED/);
-    expect(sql).toMatch(/orchestrator/i);
-    expect(sql).toMatch(/Date executed:\s*\(pending/);
+  // #794 adversarial review (A3): this guard used to ENFORCE the stale
+  // "AUTHORED AS CODE — NOT EXECUTED / Date executed: (pending" text nine
+  // days after the migration was executed on staging (2026-07-30) — a
+  // static guard pinning a hand-maintained mirror to its FALSE state. It
+  // now pins the truth: executed, defective (ROADMAP 2.301), superseded by
+  // 20260802120000, and never to be re-executed.
+  it('header states the TRUTH: executed 2026-07-30, defective, superseded by the generation-key migration', () => {
+    expect(sql).toMatch(/EXECUTED ON STAGING 2026-07-30/);
+    expect(sql).toMatch(/Date executed:\s*2026-07-30/);
+    expect(sql).not.toMatch(/Date executed:\s*\(pending/);
+    expect(sql).toMatch(/DEFECTIVE AND SUPERSEDED/);
+    expect(sql).toMatch(/20260802120000/);
+    expect(sql).toMatch(/NEVER re-execute this file/);
   });
 
   it('header states the FEATURE-DETECT posture: deploy order is free, PGRST202 falls back to the two-step', () => {
