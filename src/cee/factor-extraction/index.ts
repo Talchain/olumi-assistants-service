@@ -24,6 +24,14 @@ import type { ResolvedContext, SupportedDomain } from "../../context/index.js";
 import { resolveContext } from "../../context/index.js";
 import { extractFactorsLLM } from "./llm-extractor.js";
 import { mergeFactors, type MergeResult } from "./merge.js";
+import {
+  AMOUNT_DIGITS,
+  isMagnitudeShapedSuffix,
+  magnitudeSuffixPattern,
+  parseAmountDigits,
+  requiredMagnitudeSuffixPattern,
+  resolveMagnitude,
+} from "../../utils/magnitude-alphabet.js";
 
 export interface ExtractedFactor {
   /** Human-readable label for the factor */
@@ -57,279 +65,28 @@ const _CURRENCY_MAP: Record<string, string> = {
 };
 
 /* ===========================================================================
- * ROADMAP 2.316 — THE THIRD LIST USED TO LIVE HERE, AND IT IS DELETED.
+ * ROADMAP 2.322 — THE ALPHABET NO LONGER LIVES HERE, AND THAT IS THE POINT.
  *
- * `MULTIPLIER_MAP` + `parseMultiplier` were `currencyWithMultiplier`'s private
- * magnitude alphabet: a second hand-spelled key set beside a second
- * hand-spelled regex alternation, both of them a copy of what 2.303 had
- * already unified below. Both halves of the copy were wrong, in different
- * directions, and neither could be seen from the other:
+ * #797 and #799 folded three magnitude lists onto one another INSIDE this
+ * file. Both times a further copy survived, and the reason was structural
+ * rather than careless: the unified list sat behind a 1,500-line extraction
+ * module, so `context/resolver.ts`, `utils/reduction-framing.ts` and
+ * `cee/compound-goal/extractor.ts` could not reach it without importing the
+ * world — and each of them therefore wrote its own. A shared list nobody can
+ * import is a shared list that gets copied.
  *
- *   - the ALTERNATION omitted `bn`, so `$5bn` failed the pattern outright,
- *     fell through to the bare `currency` rule and extracted 5 — a
- *     1,000,000,000× error published as the user's stated figure;
+ * The alphabet now lives in `src/utils/magnitude-alphabet.ts`, a leaf with no
+ * imports of its own, so every consumer in the service can index the SAME
+ * object. This module is now one consumer among several rather than the owner,
+ * and the drift guard below proves its patterns are still built from that one
+ * alternation.
  *
- *   - the LOOKUP was case-SENSITIVE while its own regex carried `i`, so
- *     `$5MILLION` matched, missed `MULTIPLIER_MAP`, took the `?? 1` fallback
- *     and extracted 5 — as an `explicit` factor at confidence 0.85, i.e. wearing
- *     the confidence of a successful extraction.
- *
- * It is deleted rather than corrected, because correcting it would have left a
- * third list to drift again. There is now ONE alphabet and THREE consumers of
- * it, and the drift guard asserts that structurally.
+ * The two symbols are RE-EXPORTED because the drift guard imports them from
+ * here, and because a consumer that already reaches this module should not be
+ * made to learn a second import path to get the same object.
  * ========================================================================= */
 
-/* ===========================================================================
- * THE MAGNITUDE ALPHABET — ONE list, THREE consumers (ROADMAP 2.303, 2.316)
- *
- * WHY IT LIVES HERE, above everything that uses it. `contextualNumber` was
- * MULTIPLIER-BLIND: it captured the digits of "target is 800k" and dropped the
- * suffix, so the goal card — the first card a tester reads — displayed `800`
- * against a label saying £800k (journey re-walk 2026-08-02 §5 / N7, live).
- * The paired extractor `extractGoalTargetWithBaseline` has understood the
- * alphabet since #787; the repair is to REUSE that alphabet, never to write a
- * second copy of it beside the first. Two same-purpose lists that can drift is
- * this estate's dominant defect class (CLAUDE.md trap 12) and the reason a
- * hand-copied literal here would be a worse outcome than the bug it fixed.
- *
- * ⚠ AND THAT IS NOT HYPOTHETICAL — IT IS WHAT 2.316 FOUND. 2.303 unified TWO
- * consumers and left the third (`currencyWithMultiplier`) out of scope, still
- * carrying its own copy. The copy was already wrong when it was written: no
- * `bn`, and a case-sensitive lookup under a case-insensitive regex. The list
- * that "reads correct on the day it is written" had never been correct at all,
- * and nothing behavioural could see it because every test exercised the keys
- * the copy happened to have. The third consumer is now folded on too.
- *
- * DERIVED, NOT DECLARED TWICE. The regex alternation is COMPUTED from the map
- * keys rather than spelled out beside them, so a key added to the map is
- * matchable on both paths the instant it lands, with nothing to remember.
- *
- * ORDERING IS THE SAFETY PROPERTY, and it is now guaranteed by construction.
- * Alternation is first-match-wins, so a shorter key that PREFIXES a longer one
- * ("b" before "bn", "m" before "million") would swallow it. Sorting
- * longest-first cannot get that wrong for any key, present or future — where a
- * hand-ordered list could, silently, the next time someone appends to it.
- * ========================================================================= */
-
-/**
- * Every magnitude suffix this module recognises, and what it multiplies by.
- * Matched case-INSENSITIVELY (both patterns carry the `i` flag), so `K`, `M`,
- * `BN` and `Million` all resolve through their lower-cased key.
- *
- * Exported for the drift guard, which derives its whole manifest from this map
- * so it cannot go stale as the map grows.
- */
-export const MAGNITUDE_MULTIPLIERS: Readonly<Record<string, number>> = {
-  k: 1e3,
-  m: 1e6,
-  bn: 1e9,
-  b: 1e9,
-  t: 1e12,
-  million: 1e6,
-  billion: 1e9,
-  trillion: 1e12,
-};
-
-/**
- * Escape a key for literal use inside a regex alternation (ROADMAP 2.316).
- *
- * Every key today is plain `[a-z]`, so this is a no-op at present — which is
- * exactly why it is easy to forget and worth spelling out. The alternation is
- * DERIVED from the map, so the day someone adds a key carrying `.`, `+`, `?`
- * or `(`, that character would silently become a REGEX OPERATOR rather than a
- * literal: a key like `"m+"` would turn the branch into "one or more m", and
- * the pattern would start matching text nobody wrote. Deriving a pattern from
- * data means the data must be escaped on the way in.
- */
-function escapeRegExpLiteral(literal: string): string {
-  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * The alternation branch for the alphabet above, longest-first.
- *
- * The tie-break is lexicographic so the string is a pure function of the KEY
- * SET — insertion order cannot change it, and neither can a re-format.
- *
- * ⚠ Sorted by the RAW key length, then escaped. Escaping first would let a
- * key's backslashes inflate its measured length and corrupt the longest-first
- * ordering that stops "bn" being consumed as a bare "b".
- */
-export const MAGNITUDE_ALTERNATION: string = Object.keys(MAGNITUDE_MULTIPLIERS)
-  .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
-  .map(escapeRegExpLiteral)
-  .join("|");
-
-/**
- * The SAME alphabet, keyed for lookup — case-folded (ROADMAP 2.316).
- *
- * WHY THIS EXISTS RATHER THAN INDEXING `MAGNITUDE_MULTIPLIERS` DIRECTLY. Every
- * pattern that reads a magnitude carries the `i` flag, so the regex will match
- * ANY casing of ANY key. The lookup must therefore admit any casing of any key
- * too, or the two disagree — and a lookup that disagrees with its own regex
- * does not fail loudly, it takes the `?? 1` branch and publishes a number that
- * is 1,000× to 1,000,000,000× wrong at full confidence. That is exactly how
- * `$5MILLION` extracted as 5 before this change.
- *
- * Deriving the lookup from the alternation's own source object makes the two
- * agree BY CONSTRUCTION, for keys that do not exist yet: whatever casing the
- * regex admits, `resolveMagnitude` case-folds to a key that is present, because
- * both sides are the same key set read through the same case rule. A future
- * mixed-case key (`"Bn"`) would have matched the regex and then resolved to
- * `?? 1` under a direct index; here it resolves correctly.
- *
- * ⚠ AND IT FAILS LOUD ON A CASE-FOLD COLLISION. `new Map(entries)` keeps the
- * LAST entry for a duplicate key, so adding `Bn` beside an existing `bn` would
- * silently produce an 8-entry lookup for a 9-key alphabet: the alternation
- * would still offer both branches, the regex would still match both, and one
- * of them would resolve through `?? 1` — the exact 1e9× defect this row exists
- * to close, re-entering through the fix for it. A silent shrink is the estate's
- * dominant failure mode (CLAUDE.md trap 12); this one shrinks at MODULE LOAD,
- * where a throw is the loudest and cheapest possible alarm, and where every
- * test in the suite trips it on the first import.
- */
-const MAGNITUDE_BY_FOLDED_KEY: ReadonlyMap<string, number> = (() => {
-  const folded = new Map<string, number>();
-  for (const [key, value] of Object.entries(MAGNITUDE_MULTIPLIERS)) {
-    const lower = key.toLowerCase();
-    const existing = folded.get(lower);
-    if (existing !== undefined && existing !== value) {
-      throw new Error(
-        `MAGNITUDE_MULTIPLIERS: case-fold collision on '${lower}' — keys that differ only ` +
-          `by case must not carry different multipliers (${existing} vs ${value}).`,
-      );
-    }
-    folded.set(lower, value);
-  }
-  if (folded.size !== Object.keys(MAGNITUDE_MULTIPLIERS).length) {
-    throw new Error(
-      `MAGNITUDE_MULTIPLIERS: ${Object.keys(MAGNITUDE_MULTIPLIERS).length} keys case-folded to ` +
-        `${folded.size} lookup entries — a duplicate key was silently dropped.`,
-    );
-  }
-  return folded;
-})();
-
-/**
- * The digit grammar shared by every amount this module reads: optional
- * thousands separators, optional decimals. Separators are stripped before
- * parsing (`parseAmountDigits`) — `parseFloat("800,000")` is 800, which is the
- * same silent 1,000× loss as the dropped suffix, arriving through the comma.
- */
-const AMOUNT_DIGITS = "\\d+(?:,\\d{3})*(?:\\.\\d+)?";
-
-/**
- * The magnitude-suffix fragment, under a caller-chosen group name.
- *
- * ⚠ THE `\\s*` SITS INSIDE THE OPTIONAL GROUP, not before it. Spelled
- * `\\s*(?<g>ALT)?\\b`, the `\\s*` consumes the separating space of
- * "target is 800 customers" EVEN WHEN NO SUFFIX FOLLOWS, and every
- * `matchedText` in the corpus gains a trailing byte. Spelled
- * `(?:\\s*(?<g>ALT)\\b)?` the space is consumed only when a suffix is actually
- * there, and byte-parity holds.
- *
- * ⚠ THE INNER `\\b` IS LOAD-BEARING, and its absence produced a silent 1e12
- * error in development (#787): without it the `t` alternative matches the "t"
- * of "6000000 THIS year", scaling a 6,000,000 target to 6e18. With it, the `t`
- * branch fails, the whole group matches empty WITHOUT consuming the space, and
- * the amount reads correctly.
- */
-function magnitudeSuffixPattern(group: string): string {
-  return `(?:\\s*${magnitudeSuffixFragment(group)})?`;
-}
-
-/**
- * The magnitude suffix REQUIRED, not optional (ROADMAP 2.316).
- *
- * `currencyWithMultiplier` exists to match amounts that DO carry a magnitude —
- * "$5m", not "$100" — and it must keep that meaning after the fold. Spelling it
- * with the optional `magnitudeSuffixPattern` would make it match every bare
- * currency amount in the corpus and promote each one from the `currency`
- * rule's `inferred` / 0.60 to `explicit` / 0.85. That is an EXPANSION of the
- * extraction surface, not a magnitude repair, so the optionality is the ONE
- * thing that differs between the two spellings — and both are built from the
- * same fragment below, so neither can drift from the alphabet.
- */
-function requiredMagnitudeSuffixPattern(group: string): string {
-  return `\\s*${magnitudeSuffixFragment(group)}`;
-}
-
-/**
- * The alphabet itself, under a caller-chosen group name, with the load-bearing
- * `\b` that closes it. Sole source of the alternation for every pattern that
- * reads a magnitude — the optional and required spellings above differ only in
- * their wrapper, so there is nowhere for a fourth copy to hide.
- */
-function magnitudeSuffixFragment(group: string): string {
-  return `(?<${group}>${MAGNITUDE_ALTERNATION})\\b`;
-}
-
-/** Parse a captured digit string, separators and all, to a finite number or null. */
-function parseAmountDigits(digits: string | undefined): number | null {
-  if (digits === undefined) return null;
-  const parsed = Number.parseFloat(digits.replace(/,/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/** Resolve a captured magnitude suffix to its multiplier; absent suffix ⇒ 1. */
-function resolveMagnitude(suffix: string | undefined): number {
-  if (!suffix) return 1;
-  return MAGNITUDE_BY_FOLDED_KEY.get(suffix.toLowerCase()) ?? 1;
-}
-
-/**
- * Is this string a magnitude the module can read? (ROADMAP 2.316)
- *
- * Used by the `currency` fallback to tell "letters this module UNDERSTANDS,
- * already read by `currencyWithMultiplier`" from "letters this module CANNOT
- * read", which must refuse rather than emit the bare digits.
- */
-function isKnownMagnitude(suffix: string): boolean {
-  return MAGNITUDE_BY_FOLDED_KEY.has(suffix.toLowerCase());
-}
-
-/**
- * Does this attached suffix look like it is MODIFYING THE MAGNITUDE of the
- * number it rides on? (ROADMAP 2.316, narrowed in review)
- *
- * ⚠ THIS PREDICATE WAS ONCE "ANY ATTACHED LETTERS AT ALL", AND THAT WAS A LIVE
- * REGRESSION. Measured on the first cut of this PR against base: `£49pcm`,
- * `$100pa`, `£20ph`, `£49ea`, `$50s`, `$5USD` and `€500EUR` all extracted at
- * base and returned NO FACTOR after it. None of those trailers touches the
- * magnitude — they are per-month / per-annum / per-hour / each / plural /
- * currency-code tags sitting beside a number that is exactly what it says.
- * Refusing them destroyed good extractions to defend against a defect they do
- * not carry, and no corpus in the repo held these shapes, so the whole suite
- * stayed green — the same one-eyed-corpus blindness that let mutant M7 survive.
- *
- * THE RULE ACTUALLY IMPLEMENTED, stated so the comment cannot describe a
- * narrower one than the code: refuse when the attached run BEGINS WITH a key
- * from the alphabet but is not exactly one of them. That is the only case where
- * the module genuinely cannot tell what it is looking at — "$5mARR" may be five
- * million ARR or five m-somethings, and both readings are 1,000,000× apart. A
- * run that begins with no magnitude key at all ("pcm", "USD") cannot be a
- * mis-read magnitude, so it is left alone and the amount extracts.
- *
- * DERIVED FROM THE MAP, not from a list of "unit-ish" words — a hand-written
- * allow-list of suffixes to tolerate would be a fourth mirror to drift
- * (CLAUDE.md trap 12), and would fail closed on every unit nobody thought of.
- *
- * ⚠ DISCLOSED IMPRECISION: `$5tonnes` refuses, because `t` IS the trillion key
- * and "$5t" legitimately means five trillion. That ambiguity is real and lives
- * in the alphabet, not in this predicate; refusing an ambiguous magnitude is
- * the doctrine, and the alternative is publishing a number that may be 1e12×
- * wrong. Base extracted 5 for it.
- */
-function isMagnitudeShapedSuffix(suffix: string): boolean {
-  // A run that IS a key exactly was already read correctly by
-  // `currencyWithMultiplier`; its companion factor is pristine behaviour.
-  if (isKnownMagnitude(suffix)) return false;
-  const folded = suffix.toLowerCase();
-  for (const key of MAGNITUDE_BY_FOLDED_KEY.keys()) {
-    if (folded.startsWith(key)) return true;
-  }
-  return false;
-}
+export { MAGNITUDE_MULTIPLIERS, MAGNITUDE_ALTERNATION } from "../../utils/magnitude-alphabet.js";
 
 // Regex patterns for quantitative language
 const PATTERNS = {

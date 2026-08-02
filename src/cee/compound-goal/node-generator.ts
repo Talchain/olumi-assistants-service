@@ -9,6 +9,8 @@
  * - ASCII operators only: >= and <=
  */
 
+import { MAGNITUDE_DISPLAY_LADDER } from "../../utils/magnitude-alphabet.js";
+
 import type { ExtractedGoalConstraint } from "./extractor.js";
 import type { NodeT, EdgeT } from "../../schemas/graph.js";
 
@@ -245,15 +247,21 @@ function formatValueForDisplay(value: number, unit?: string): string {
 
   // Handle currencies
   if (unit && ["£", "$", "€"].includes(unit)) {
-    // Format with thousands separators
-    if (value >= 1000000000) {
-      return `${unit}${(value / 1000000000).toFixed(1)}B`;
-    }
-    if (value >= 1000000) {
-      return `${unit}${(value / 1000000).toFixed(1)}M`;
-    }
-    if (value >= 1000) {
-      return `${unit}${(value / 1000).toFixed(0)}k`;
+    // ⚠ THREE HAND-WRITTEN RUNGS, STOPPING AT 1e9 (ROADMAP 2.322). A constraint
+    // the extractor now reads as five TRILLION printed as "£5000.0B". The rungs
+    // are DERIVED from the shared alphabet so parse and print agree on which
+    // magnitudes exist, and a future rung reaches this label for free.
+    //
+    // CASING IS PRESERVED PER RUNG, not unified: this site printed `B`/`M` but
+    // a lower-case `k`, and those exact strings are what the graph labels
+    // already carry. Normalising them would be a user-visible label change
+    // riding along inside a magnitude fix, so the historical casing is applied
+    // on top of the derived suffix — ugly, disclosed, and behaviour-preserving.
+    for (const [multiplier, suffix] of MAGNITUDE_DISPLAY_LADDER) {
+      if (value < multiplier) continue;
+      const cased = multiplier >= 1e6 ? suffix.toUpperCase() : suffix;
+      const decimals = multiplier >= 1e6 ? 1 : 0;
+      return `${unit}${(value / multiplier).toFixed(decimals)}${cased}`;
     }
     return `${unit}${value.toLocaleString()}`;
   }

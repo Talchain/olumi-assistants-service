@@ -21,6 +21,12 @@ import {
   HallucinationValidationResult,
 } from "./types.js";
 import { log } from "../utils/telemetry.js";
+import {
+  AMOUNT_DIGITS,
+  parseAmountDigits,
+  requiredMagnitudeSuffixPattern,
+  resolveMagnitude,
+} from "../utils/magnitude-alphabet.js";
 
 // ============================================================================
 // Module-level state
@@ -340,22 +346,28 @@ export function formatContextForPrompt(context: ResolvedContext): string {
 export function extractNumericValues(text: string): number[] {
   const values: number[] = [];
 
-  const multipliers: Record<string, number> = {
-    k: 1000,
-    K: 1000,
-    m: 1000000,
-    M: 1000000,
-    b: 1000000000,
-    B: 1000000000,
-  };
-
-  // Extract currency with multipliers: $1M, $500K, $1.5B
-  const currencyPattern = /\$?([\d,.]+)\s*([KMBkmb])\b/g;
+  // Extract currency with magnitudes: $1M, $500K, $1.5bn, "$5 million".
+  //
+  // ⚠ THIS SITE CARRIED ITS OWN SIX-KEY LIST AND A `[KMBkmb]\b` CLASS, AND THE
+  // `\b` MADE HALF THE ALPHABET INVISIBLE (ROADMAP 2.322). Measured at
+  // `497a14e`: `$5bn` → `[]` (the `b` branch matched, then `\b` failed between
+  // "b" and "n", so the whole match was discarded), `$5MILLION` → `[]`, and
+  // `$5 million` → `[5]` — a BARE FIVE standing in for five million.
+  //
+  // The corpus this builds is what `validateAgainstBrief` checks LLM-cited
+  // numbers against, so a magnitude missing here is a correctly-cited figure
+  // reported as a hallucination — and, in the other direction, a bare `5` in
+  // the corpus that would VALIDATE a wrong number if a caller ever fed it one.
+  // Both directions close by indexing the one alphabet.
+  const currencyPattern = new RegExp(
+    `\\$?(${AMOUNT_DIGITS})${requiredMagnitudeSuffixPattern("mult")}`,
+    "gi",
+  );
   let match;
   while ((match = currencyPattern.exec(text)) !== null) {
-    const base = parseFloat(match[1].replace(/,/g, ""));
-    const multiplier = multipliers[match[2]] || 1;
-    values.push(base * multiplier);
+    const base = parseAmountDigits(match[1]);
+    if (base === null) continue;
+    values.push(base * resolveMagnitude(match.groups?.mult));
   }
 
   // Extract percentages - emit BOTH raw value AND decimal representation
