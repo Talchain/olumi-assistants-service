@@ -380,3 +380,159 @@ describe('ROADMAP 2.315(a) — preservation of the goal-probability train', () =
     }
   });
 });
+
+/**
+ * ATOMICITY — the trio is emitted as a UNIT, or not at all.
+ *
+ * Found by adversarial review of this PR, and it is a defect THIS PR would
+ * otherwise make live. The three fields were emitted independently, so a goal
+ * node carrying `goal_threshold` + `goal_threshold_cap` but NO
+ * `goal_threshold_raw` would put a cap on the wire without a raw value.
+ *
+ * That shape is reachable, not theoretical:
+ *   - all four fields are independently `.optional()` on the LLM-writable
+ *     draft node (src/adapters/llm/shared-schemas.ts:64-67), and
+ *   - normalisation.ts:370-375 clears an ORPHAN CAP only when it is EXACTLY 0,
+ *     so a non-zero cap with no raw survives to the graph.
+ *
+ * The consumer harm, at the bytes (UI store.ts:4006-4008, tip cb957c8c):
+ *
+ *     if (ceeRaw != null)            -> use raw            (representation 'raw')
+ *     else if (ceeNorm && hasCap)    -> ceeNorm * ceeCap   (representation 'raw')
+ *
+ * A cap without a raw drives the SECOND branch: the UI multiplies the
+ * normalised value by the cap and tags the product `'raw'` — a consumer-side
+ * RE-DERIVATION of an attested value, presented as authoritative. That is
+ * exactly what this payload's own contract note forbids, and it can disagree
+ * with the real attested raw (the fixture above: 0.75 x 1200000 = 900000, not
+ * 800000). Before this PR the branch was unreachable dead code, because CEE
+ * never sent a cap at all.
+ *
+ * A partial trio is therefore never emitted. Emitting nothing is strictly no
+ * worse than the pre-PR baseline (which emitted nothing always), whereas
+ * emitting a partial trio is worse than both.
+ */
+describe('ROADMAP 2.315(a) — the trio is atomic (all three, or none)', () => {
+  function goalWith(fields: Record<string, unknown>): GraphV3T {
+    return {
+      nodes: [
+        { id: 'goal_1', kind: 'goal', label: 'Goal', ...fields },
+        { id: 'fac_spend', kind: 'factor', label: 'Spend', category: 'controllable', observed_state: { value: 10 } },
+        { id: 'opt_1', kind: 'option', label: 'Option A' },
+        { id: 'opt_2', kind: 'option', label: 'Do nothing' },
+      ] as unknown as NodeV3T[],
+      edges: [
+        { from: 'opt_1', to: 'fac_spend' },
+        { from: 'opt_2', to: 'fac_spend' },
+        { from: 'fac_spend', to: 'goal_1' },
+      ],
+    } as unknown as GraphV3T;
+  }
+
+  const build = (graph: GraphV3T) =>
+    buildAnalysisReadyPayload(
+      [option('opt_1', 'Option A'), option('opt_2', 'Do nothing')],
+      'goal_1',
+      graph,
+    ) as unknown as Record<string, unknown>;
+
+  it('THE DEFECT: cap without raw must NOT reach the wire (builder)', () => {
+    const payload = build(goalWith({
+      goal_threshold: ATTESTED.goal_threshold,
+      goal_threshold_cap: ATTESTED.goal_threshold_cap,
+      goal_threshold_unit: ATTESTED.goal_threshold_unit,
+      // goal_threshold_raw deliberately absent — the reachable shape
+    }));
+
+    // The cap is what arms the UI's `ceeNorm * ceeCap` re-derivation.
+    expect(payload.goal_threshold_cap).toBeUndefined();
+    expect(payload.goal_threshold_raw).toBeUndefined();
+    expect(payload.goal_threshold_unit).toBeUndefined();
+
+    // The normalised threshold still rides — it is honest on its own, and is
+    // what PLoT needs. Suppressing the trio must not suppress this.
+    expect(payload.goal_threshold).toBe(ATTESTED.goal_threshold);
+  });
+
+  it('the UI re-derivation branch cannot be armed by any payload we emit', () => {
+    // Restates the consumer condition directly: `ceeRaw == null && ceeNorm && hasCap`.
+    for (const partial of [
+      { goal_threshold: 0.75, goal_threshold_cap: 1200000, goal_threshold_unit: '£' },
+      { goal_threshold: 0.75, goal_threshold_cap: 1200000 },
+    ]) {
+      const p = build(goalWith(partial));
+      const armed =
+        p.goal_threshold_raw == null &&
+        typeof p.goal_threshold === 'number' &&
+        typeof p.goal_threshold_cap === 'number' &&
+        Number.isFinite(p.goal_threshold_cap as number) &&
+        (p.goal_threshold_cap as number) > 0;
+      expect(armed).toBe(false);
+    }
+  });
+
+  it('raw without cap is also suppressed — all three, or none', () => {
+    const payload = build(goalWith({
+      goal_threshold: ATTESTED.goal_threshold,
+      goal_threshold_raw: ATTESTED.goal_threshold_raw,
+      goal_threshold_unit: ATTESTED.goal_threshold_unit,
+    }));
+    expect(payload.goal_threshold_raw).toBeUndefined();
+    expect(payload.goal_threshold_cap).toBeUndefined();
+    expect(payload.goal_threshold_unit).toBeUndefined();
+    expect(payload.goal_threshold).toBe(ATTESTED.goal_threshold);
+  });
+
+  it('missing unit suppresses the trio too', () => {
+    const payload = build(goalWith({
+      goal_threshold: ATTESTED.goal_threshold,
+      goal_threshold_raw: ATTESTED.goal_threshold_raw,
+      goal_threshold_cap: ATTESTED.goal_threshold_cap,
+    }));
+    expect(payload.goal_threshold_raw).toBeUndefined();
+    expect(payload.goal_threshold_cap).toBeUndefined();
+  });
+
+  it('the complete trio is still emitted in full (atomicity must not suppress the good path)', () => {
+    const payload = build(goalWith({
+      goal_threshold: ATTESTED.goal_threshold,
+      goal_threshold_raw: ATTESTED.goal_threshold_raw,
+      goal_threshold_unit: ATTESTED.goal_threshold_unit,
+      goal_threshold_cap: ATTESTED.goal_threshold_cap,
+    }));
+    expect(payload.goal_threshold_raw).toBe(ATTESTED.goal_threshold_raw);
+    expect(payload.goal_threshold_unit).toBe(ATTESTED.goal_threshold_unit);
+    expect(payload.goal_threshold_cap).toBe(ATTESTED.goal_threshold_cap);
+  });
+
+  it('helper (hop 2) is atomic on the same shape', () => {
+    const p = computeStructuralReadiness(goalWith({
+      goal_threshold: ATTESTED.goal_threshold,
+      goal_threshold_cap: ATTESTED.goal_threshold_cap,
+      goal_threshold_unit: ATTESTED.goal_threshold_unit,
+    })) as unknown as Record<string, unknown>;
+    expect(p.goal_threshold_cap).toBeUndefined();
+    expect(p.goal_threshold_raw).toBeUndefined();
+    expect(p.goal_threshold).toBe(ATTESTED.goal_threshold);
+  });
+
+  it('draft-graph re-projection (hop 3) is atomic on the same shape', () => {
+    const extracted = extractAnalysisReady({
+      analysis_ready: {
+        goal_node_id: 'goal_1',
+        status: 'ready',
+        options: [
+          { option_id: 'opt_1', label: 'Option A', status: 'ready', interventions: { fac_spend: 20 } },
+          { option_id: 'opt_2', label: 'Do nothing', status: 'ready', interventions: { fac_spend: 10 } },
+        ],
+        goal_threshold: ATTESTED.goal_threshold,
+        goal_threshold_cap: ATTESTED.goal_threshold_cap,
+        goal_threshold_unit: ATTESTED.goal_threshold_unit,
+      },
+    } as Record<string, unknown>) as unknown as Record<string, unknown>;
+
+    expect(extracted.goal_threshold_cap).toBeUndefined();
+    expect(extracted.goal_threshold_raw).toBeUndefined();
+    expect(extracted.goal_threshold).toBe(ATTESTED.goal_threshold);
+  });
+});

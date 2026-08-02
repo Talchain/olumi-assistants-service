@@ -27,6 +27,7 @@ import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
 import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
 import { readIsBaseline } from "../baseline-identity.js";
+import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 
 // ============================================================================
 // Types
@@ -725,13 +726,10 @@ export function buildAnalysisReadyPayload(
     // ROADMAP 2.315(a) — carry the RAW goal target beside the normalised one.
     // `goal_threshold` alone left consumers unable to recover the user's own
     // figure: a £800,000 target surfaced as "reaching ≥ 0.8 count".
-    // These are the enricher's ATTESTED values, carried verbatim — the cap in
-    // particular must be the one the graph was scored against, not a fresh
-    // re-resolution. Each is independently optional (a qualitative goal has
-    // no numeric target); absence stays absence.
-    ...(goalNode?.goal_threshold_raw != null && { goal_threshold_raw: goalNode.goal_threshold_raw }),
-    ...(goalNode?.goal_threshold_unit != null && { goal_threshold_unit: goalNode.goal_threshold_unit }),
-    ...(goalNode?.goal_threshold_cap != null && { goal_threshold_cap: goalNode.goal_threshold_cap }),
+    // ATOMIC — all three or none. A cap without a raw arms a consumer-side
+    // re-derivation (see utils/goal-threshold-trio.ts). Carried verbatim from
+    // the enricher's attested mint; never recomputed here.
+    ...pickGoalThresholdTrio(goalNode),
   };
 
   // Add user_questions when status is needs_user_mapping
