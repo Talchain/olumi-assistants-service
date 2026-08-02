@@ -191,6 +191,24 @@ describe("ROADMAP 2.303 — ONE magnitude alphabet, derived not copied (drift gu
     expect(amountPatternForDriftGuard("to")).toContain(MAGNITUDE_ALTERNATION);
   });
 
+  it("PRESERVED — the paired extractor still closes its amount at a word boundary", () => {
+    // ADDED BECAUSE A MUTANT SURVIVED. 2.303 moved the alternation's `\s*`
+    // inside the optional group, which meant `amountPattern` had to spell its
+    // closing `\b` itself rather than inherit one from the group's tail.
+    // Deleting that `\b` REDs NOTHING otherwise — and it silently LOOSENS the
+    // paired extractor: "800kg"/"500kg" and "800USD"/"500USD" start pairing,
+    // with the amount read as a bare 800 and the attached unit swallowed as a
+    // metric noun. That is an EXPANSION of the extraction surface (#787's
+    // comment names it as out of mandate) and, for the USD case, a currency
+    // signal silently stripped. Measured on the mutant, not assumed.
+    expect(extractGoalTargetWithBaseline("Our target is 800kg, currently at 500kg.")).toBeNull();
+    expect(extractGoalTargetWithBaseline("Our target is 800USD, currently at 500USD.")).toBeNull();
+    // …and the control: a metric noun SEPARATED from the amount still pairs.
+    expect(
+      extractGoalTargetWithBaseline("Our target is 800 customers, currently at 500.")?.value,
+    ).toBe(800);
+  });
+
   it("every key in the map resolves IDENTICALLY on both paths", () => {
     // Derived from the map itself — the manifest cannot go stale.
     for (const [key, multiplier] of Object.entries(MAGNITUDE_MULTIPLIERS)) {
