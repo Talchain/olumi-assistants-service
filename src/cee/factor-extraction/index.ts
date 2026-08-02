@@ -56,34 +56,31 @@ const _CURRENCY_MAP: Record<string, string> = {
   "€": "EUR",
 };
 
-// Multiplier values for k, m, b, million, billion, etc.
-const MULTIPLIER_MAP: Record<string, number> = {
-  "k": 1_000,
-  "K": 1_000,
-  "m": 1_000_000,
-  "M": 1_000_000,
-  "million": 1_000_000,
-  "Million": 1_000_000,
-  "b": 1_000_000_000,
-  "B": 1_000_000_000,
-  "billion": 1_000_000_000,
-  "Billion": 1_000_000_000,
-  "t": 1_000_000_000_000,
-  "T": 1_000_000_000_000,
-  "trillion": 1_000_000_000_000,
-  "Trillion": 1_000_000_000_000,
-};
-
-/**
- * Parse a multiplier string (k, m, million, etc.) to its numeric value
- */
-function parseMultiplier(multiplier: string | undefined): number {
-  if (!multiplier) return 1;
-  return MULTIPLIER_MAP[multiplier.trim()] ?? 1;
-}
+/* ===========================================================================
+ * ROADMAP 2.316 — THE THIRD LIST USED TO LIVE HERE, AND IT IS DELETED.
+ *
+ * `MULTIPLIER_MAP` + `parseMultiplier` were `currencyWithMultiplier`'s private
+ * magnitude alphabet: a second hand-spelled key set beside a second
+ * hand-spelled regex alternation, both of them a copy of what 2.303 had
+ * already unified below. Both halves of the copy were wrong, in different
+ * directions, and neither could be seen from the other:
+ *
+ *   - the ALTERNATION omitted `bn`, so `$5bn` failed the pattern outright,
+ *     fell through to the bare `currency` rule and extracted 5 — a
+ *     1,000,000,000× error published as the user's stated figure;
+ *
+ *   - the LOOKUP was case-SENSITIVE while its own regex carried `i`, so
+ *     `$5MILLION` matched, missed `MULTIPLIER_MAP`, took the `?? 1` fallback
+ *     and extracted 5 — as an `explicit` factor at confidence 0.85, i.e. wearing
+ *     the confidence of a successful extraction.
+ *
+ * It is deleted rather than corrected, because correcting it would have left a
+ * third list to drift again. There is now ONE alphabet and THREE consumers of
+ * it, and the drift guard asserts that structurally.
+ * ========================================================================= */
 
 /* ===========================================================================
- * THE MAGNITUDE ALPHABET — ONE list, TWO consumers (ROADMAP 2.303)
+ * THE MAGNITUDE ALPHABET — ONE list, THREE consumers (ROADMAP 2.303, 2.316)
  *
  * WHY IT LIVES HERE, above everything that uses it. `contextualNumber` was
  * MULTIPLIER-BLIND: it captured the digits of "target is 800k" and dropped the
@@ -94,6 +91,14 @@ function parseMultiplier(multiplier: string | undefined): number {
  * second copy of it beside the first. Two same-purpose lists that can drift is
  * this estate's dominant defect class (CLAUDE.md trap 12) and the reason a
  * hand-copied literal here would be a worse outcome than the bug it fixed.
+ *
+ * ⚠ AND THAT IS NOT HYPOTHETICAL — IT IS WHAT 2.316 FOUND. 2.303 unified TWO
+ * consumers and left the third (`currencyWithMultiplier`) out of scope, still
+ * carrying its own copy. The copy was already wrong when it was written: no
+ * `bn`, and a case-sensitive lookup under a case-insensitive regex. The list
+ * that "reads correct on the day it is written" had never been correct at all,
+ * and nothing behavioural could see it because every test exercised the keys
+ * the copy happened to have. The third consumer is now folded on too.
  *
  * DERIVED, NOT DECLARED TWICE. The regex alternation is COMPUTED from the map
  * keys rather than spelled out beside them, so a key added to the map is
@@ -136,6 +141,28 @@ export const MAGNITUDE_ALTERNATION: string = Object.keys(MAGNITUDE_MULTIPLIERS)
   .join("|");
 
 /**
+ * The SAME alphabet, keyed for lookup — case-folded (ROADMAP 2.316).
+ *
+ * WHY THIS EXISTS RATHER THAN INDEXING `MAGNITUDE_MULTIPLIERS` DIRECTLY. Every
+ * pattern that reads a magnitude carries the `i` flag, so the regex will match
+ * ANY casing of ANY key. The lookup must therefore admit any casing of any key
+ * too, or the two disagree — and a lookup that disagrees with its own regex
+ * does not fail loudly, it takes the `?? 1` branch and publishes a number that
+ * is 1,000× to 1,000,000,000× wrong at full confidence. That is exactly how
+ * `$5MILLION` extracted as 5 before this change.
+ *
+ * Deriving the lookup from the alternation's own source object makes the two
+ * agree BY CONSTRUCTION, for keys that do not exist yet: whatever casing the
+ * regex admits, `resolveMagnitude` case-folds to a key that is present, because
+ * both sides are the same key set read through the same case rule. A future
+ * mixed-case key (`"Bn"`) would have matched the regex and then resolved to
+ * `?? 1` under a direct index; here it resolves correctly.
+ */
+const MAGNITUDE_BY_FOLDED_KEY: ReadonlyMap<string, number> = new Map(
+  Object.entries(MAGNITUDE_MULTIPLIERS).map(([key, value]) => [key.toLowerCase(), value]),
+);
+
+/**
  * The digit grammar shared by every amount this module reads: optional
  * thousands separators, optional decimals. Separators are stripped before
  * parsing (`parseAmountDigits`) — `parseFloat("800,000")` is 800, which is the
@@ -160,7 +187,33 @@ const AMOUNT_DIGITS = "\\d+(?:,\\d{3})*(?:\\.\\d+)?";
  * the amount reads correctly.
  */
 function magnitudeSuffixPattern(group: string): string {
-  return `(?:\\s*(?<${group}>${MAGNITUDE_ALTERNATION})\\b)?`;
+  return `(?:\\s*${magnitudeSuffixFragment(group)})?`;
+}
+
+/**
+ * The magnitude suffix REQUIRED, not optional (ROADMAP 2.316).
+ *
+ * `currencyWithMultiplier` exists to match amounts that DO carry a magnitude —
+ * "$5m", not "$100" — and it must keep that meaning after the fold. Spelling it
+ * with the optional `magnitudeSuffixPattern` would make it match every bare
+ * currency amount in the corpus and promote each one from the `currency`
+ * rule's `inferred` / 0.60 to `explicit` / 0.85. That is an EXPANSION of the
+ * extraction surface, not a magnitude repair, so the optionality is the ONE
+ * thing that differs between the two spellings — and both are built from the
+ * same fragment below, so neither can drift from the alphabet.
+ */
+function requiredMagnitudeSuffixPattern(group: string): string {
+  return `\\s*${magnitudeSuffixFragment(group)}`;
+}
+
+/**
+ * The alphabet itself, under a caller-chosen group name, with the load-bearing
+ * `\b` that closes it. Sole source of the alternation for every pattern that
+ * reads a magnitude — the optional and required spellings above differ only in
+ * their wrapper, so there is nowhere for a fourth copy to hide.
+ */
+function magnitudeSuffixFragment(group: string): string {
+  return `(?<${group}>${MAGNITUDE_ALTERNATION})\\b`;
 }
 
 /** Parse a captured digit string, separators and all, to a finite number or null. */
@@ -173,14 +226,35 @@ function parseAmountDigits(digits: string | undefined): number | null {
 /** Resolve a captured magnitude suffix to its multiplier; absent suffix ⇒ 1. */
 function resolveMagnitude(suffix: string | undefined): number {
   if (!suffix) return 1;
-  return MAGNITUDE_MULTIPLIERS[suffix.toLowerCase()] ?? 1;
+  return MAGNITUDE_BY_FOLDED_KEY.get(suffix.toLowerCase()) ?? 1;
+}
+
+/**
+ * Is this string a magnitude the module can read? (ROADMAP 2.316)
+ *
+ * Used by the `currency` fallback to tell "letters this module UNDERSTANDS,
+ * already read by `currencyWithMultiplier`" from "letters this module CANNOT
+ * read", which must refuse rather than emit the bare digits.
+ */
+function isKnownMagnitude(suffix: string): boolean {
+  return MAGNITUDE_BY_FOLDED_KEY.has(suffix.toLowerCase());
 }
 
 // Regex patterns for quantitative language
 const PATTERNS = {
   // Currency with multiplier: $1 million, £2.5m, €500k, $1B, $1.5 billion
-  currencyWithMultiplier:
-    /(?<currency>[£$€])(?<amount>\d+(?:\.\d+)?)\s*(?<multiplier>k|m|b|t|million|billion|trillion)\b/gi,
+  //
+  // ROADMAP 2.316 — the alternation used to be spelled out here as
+  // `k|m|b|t|million|billion|trillion`: a THIRD hand-written copy of the
+  // alphabet, missing `bn`, so `$5bn` matched nothing and extracted 5. It now
+  // shares the ONE alternation, in its REQUIRED spelling (this pattern means
+  // "an amount that carries a magnitude"; making the suffix optional would
+  // swallow every bare `$100` and promote it to explicit/0.85).
+  currencyWithMultiplier: new RegExp(
+    "(?<currency>[£$€])(?<amount>\\d+(?:\\.\\d+)?)" +
+      requiredMagnitudeSuffixPattern("multiplier"),
+    "gi",
+  ),
 
   // Currency with optional decimals: £49, $100.50, €50
   currency: /(?<currency>[£$€])(?<amount>\d+(?:\.\d+)?)/g,
@@ -238,14 +312,23 @@ const PATTERNS = {
  * DRIFT-GUARD SURFACE (ROADMAP 2.303).
  *
  * `PATTERNS` and `amountPattern` are module-private and stay that way; these
- * two aliases exist ONLY so the drift guard can assert, structurally, that
- * BOTH magnitude-bearing patterns are built from the ONE derived alternation.
+ * aliases exist ONLY so the drift guard can assert, structurally, that ALL
+ * THREE magnitude-bearing patterns are built from the ONE derived alternation.
  * Without them the guard could only test behaviour, and a hand-copied literal
  * that happens to be byte-correct on the day it is written would pass — which
  * is precisely the mirror that later drifts (CLAUDE.md trap 12).
+ *
+ * ROADMAP 2.316 added `currencyWithMultiplier` to this surface. It is the
+ * proof that the behavioural half alone was not enough: the third list passed
+ * every behavioural test in the suite for as long as it existed, because the
+ * tests only ever exercised the keys the copy happened to contain.
  * ------------------------------------------------------------------------- */
-export const PATTERNS_FOR_DRIFT_GUARD: { readonly contextualNumber: RegExp } = {
+export const PATTERNS_FOR_DRIFT_GUARD: {
+  readonly contextualNumber: RegExp;
+  readonly currencyWithMultiplier: RegExp;
+} = {
   contextualNumber: PATTERNS.contextualNumber,
+  currencyWithMultiplier: PATTERNS.currencyWithMultiplier,
 };
 export function amountPatternForDriftGuard(prefix: string): string {
   return amountPattern(prefix);
@@ -1045,7 +1128,13 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   while ((match = currencyMultiplierRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency || "";
     const baseAmount = parseFloat(match.groups?.amount || "0");
-    const multiplier = parseMultiplier(match.groups?.multiplier);
+    // ROADMAP 2.316 — the SAME resolver the other two magnitude paths use.
+    // The private `parseMultiplier` it replaced indexed a case-SENSITIVE map
+    // under a case-INSENSITIVE regex, so `$5MILLION` matched and then resolved
+    // to 1. `resolveMagnitude` case-folds, and folds against the same key set
+    // the alternation is derived from, so the pattern and the lookup cannot
+    // disagree about what a magnitude is.
+    const multiplier = resolveMagnitude(match.groups?.multiplier);
     const amount = baseAmount * multiplier;
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, amount, currency);
@@ -1072,6 +1161,34 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract standalone currency values (inferred from context)
   const currencyRegex = new RegExp(PATTERNS.currency.source, "gi");
   while ((match = currencyRegex.exec(brief)) !== null) {
+    // ROADMAP 2.316 — THIS IS WHERE AN UNREADABLE MAGNITUDE LEAKED AS BARE
+    // DIGITS. `currencyWithMultiplier` cannot match "$5kg" (no `kg` in the
+    // alphabet), so the amount fell through to here and was published as 5.
+    // #797 established the rule on `contextualNumber` — "budget of 500kg"
+    // yields NO factor rather than 500 — and this path now matches it: a
+    // suffix the module cannot read is a magnitude it does not know, and a
+    // refusal asks the user where a confident wrong number does not.
+    //
+    // Scoped to letters ATTACHED to the digits, exactly as #797 scoped it:
+    // "$5 kg" is a whole number beside a metric noun and still extracts, the
+    // same way "target is 800 customers" does. Letters that ARE a known
+    // magnitude are not refused — `currencyWithMultiplier` has already read
+    // them correctly, and this rule's job is the suffixes it could not.
+    const attachedSuffix = brief
+      .slice(match.index + match[0].length)
+      .match(/^[A-Za-z]+/)?.[0];
+    if (attachedSuffix && !isKnownMagnitude(attachedSuffix)) {
+      log.info(
+        {
+          event: "cee.factor_extraction.currency_amount_refused",
+          reason: "unrecognised_magnitude_suffix",
+          suffix: attachedSuffix,
+        },
+        `Currency amount refused: unrecognised magnitude suffix "${attachedSuffix}"`,
+      );
+      continue;
+    }
+
     const currency = match.groups?.currency || "";
     const amount = parseFloat(match.groups?.amount || "0");
     const label = inferLabel(brief, match.index, match[0]);
