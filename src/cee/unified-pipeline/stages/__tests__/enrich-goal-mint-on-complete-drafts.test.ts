@@ -601,6 +601,33 @@ describe('ROADMAP 2.294 — model-authored data on a goal node must not shadow t
     expect(parsed.observed_state?.baseline).toBe(0.5333333333333333);
   });
 
+  it('ZERO BASELINE — goal_baseline: 0 is a real level and must still take the goal limb', () => {
+    // #792 fast-follow (reviewer should-fix): a truthiness mutant on the limb's
+    // guard — `&& node.goal_baseline` instead of `&& node.goal_baseline != null`
+    // — SURVIVED all 18 tests in this file, because every fixture used a
+    // nonzero baseline. And 0 is REACHABLE, not hypothetical: a stated current
+    // level of 0 mints goal_baseline = 0 ÷ cap = 0 (the enricher guards
+    // `!== undefined`, enricher.ts:689), and ISL's refusal check is `is None`,
+    // so a 0 survives every downstream hop and converts fine. Under the mutant
+    // the witnessed-shape variant below silently falls back to the data branch
+    // and the baseline dies at the projection again — the exact 2.294 defect,
+    // resurrected for the one honest value JavaScript calls false.
+    const node = witnessedGoalNode();
+    node.goal_baseline = 0;
+    node.goal_baseline_raw = 0;
+
+    const parsed = NodeV3.parse(transformNodeToV3(node));
+
+    expect(parsed.observed_state).toEqual({
+      value: 0,
+      baseline: 0,
+      unit: 'count',
+      source: 'brief_extraction',
+      raw_value: 0,
+      cap: 7_500_000,
+    });
+  });
+
   it('PRESERVED (a) — a NON-GOAL factor node with identical data is byte-unchanged', () => {
     // The generic factor-data path must not move. Same data payload as the
     // witnessed goal, on a factor node: the data branch still owns it.
