@@ -10372,6 +10372,7 @@ export async function runTurnExecutor(
             request_id: requestId,
             scenario_id: context.session_id,
             conflict_category: conflict.conflict_category,
+            err: serialiseError(conflict),
             hoisted_from_flattened_commit_catch: true,
           },
           'V5 TurnExecutor — graph CAS conflict on commit (typed 409-class via the hoisted finalise remap; nothing clobbered)',

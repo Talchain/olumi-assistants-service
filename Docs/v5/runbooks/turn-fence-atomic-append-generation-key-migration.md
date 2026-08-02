@@ -49,6 +49,15 @@ scenario via the deployed UI → expect HTTP 200 and the edit persisted; CEE
 logs show `v5.turn_fence.evaluated` with `reason: null` (pre-v4 channel) and
 no `graph_write_refused` for that turn.
 
+**⚠ REPLAY-TOOLING FREEZE between (i) and (ii)** (adversarial-review A1):
+after (i), the defective FILE `20260731130000_v5_turn_fence_atomic_append.sql`
+is still on disk with NO ledger row. Any ledger-driven replay in that window —
+`supabase db push` (with or without `--include-all`), a catch-up script, any
+tool that applies unrecorded migration files — would **re-execute the
+defective migration and silently reinstall the outage** (and close the
+PGRST202 fallback that step (i) just opened). Run NO migration tooling
+against staging between (i) and (ii).
+
 ## Step (ii) — the real fix: execute the corrected migration (after its rehearsal passes)
 
 **Pre-condition:** run the rehearsal harness locally and see 28/28:
@@ -79,10 +88,30 @@ SELECT prosrc LIKE '%turn_id = p_turn_id%' AS defective
 **Execute** `supabase/migrations/20260802120000_v5_turn_fence_atomic_append_generation_key.sql`
 verbatim, **plus the ledger row, in ONE transaction** (the
 `scripts/wave0-apply-migration.mjs` apply-plus-record pattern; `statements`
-carries the file's full text). If step (i) ran first, ALSO re-insert the
-`20260731130000` row? **No — do not.** The corrected file supersedes it;
-recording only `20260802120000` keeps the ledger truthful about which
-definition is live.
+carries the file's full text).
+
+**If step (i) ran first, ALSO re-insert the `20260731130000` ledger row in
+the SAME transaction** (adversarial-review A1 — an earlier revision of this
+runbook said the opposite and was wrong). The ledger's job is
+**replay-prevention over the files on disk**, not an inventory of which
+function body is live: the defective file remains in `supabase/migrations/`,
+and a future ledger-driven replay applies exactly the files WITHOUT ledger
+rows — so an absent `20260731130000` row means the replay would re-execute
+the defective `CREATE OR REPLACE` **over** the corrected function (and skip
+the corrected file, which IS recorded), silently reinstalling the outage.
+Recording it as applied is also simply true — it was executed on staging
+2026-07-30; step (i) rolled its EFFECT back, but the corrected migration
+re-establishes v4, and the row is what keeps the dead file dead:
+
+```sql
+INSERT INTO supabase_migrations.schema_migrations (version, name, statements)
+VALUES ('20260731130000', 'v5_turn_fence_atomic_append',
+        ARRAY[<full text of supabase/migrations/20260731130000_v5_turn_fence_atomic_append.sql>]);
+```
+
+End state after (ii): BOTH rows present, corrected body live — byte-identical
+ledger posture to "never rolled back, then corrected", and no unrecorded
+migration file exists for any replay to pick up.
 
 **Post-flight:**
 
@@ -109,6 +138,22 @@ signature is unchanged, so the next commit simply succeeds.
 scenario → HTTP 200; CEE logs show `v5.turn_fence.evaluated` with
 `reason: "atomic_append"`, verdict `current`, and no
 `atomic_rpc_unavailable` WARNs.
+
+**Post-execution honesty ritual (adversarial-review A3 — do this in the same
+sitting as the execution, it is one small PR):** the predecessor migration's
+header said "NOT EXECUTED" for nine days after it was executed, and its
+static guard ENFORCED the stale text. Do not recreate that state:
+
+1. In `supabase/migrations/20260802120000_v5_turn_fence_atomic_append_generation_key.sql`,
+   replace the `⚠️ AUTHORED AS CODE — NOT EXECUTED` block with an
+   `✅ EXECUTED ON STAGING <date>` block and set
+   `Date executed: <date>` (comments only — never touch the executable SQL).
+2. In `src/orchestrator-v5/session/__tests__/append-turn-atomic-v4-generation-key-migration-static-guards.test.ts`,
+   flip the `execution posture` pin
+   (`header declares AUTHORED-not-executed with a pending, Paul-gated execution date`)
+   to enforce the executed truth — mirror the corrected pin in
+   `append-turn-atomic-v4-migration-static-guards.test.ts`, which shows the
+   shape. The second posture pin (the harness reference) stays valid as-is.
 
 ## Rollback of step (ii)
 

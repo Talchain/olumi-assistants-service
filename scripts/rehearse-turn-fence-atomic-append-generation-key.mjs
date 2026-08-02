@@ -222,13 +222,22 @@ async function scenarioGraph(scenarioId) {
   return rows[0]?.graph ?? null;
 }
 
-// ── Bootstrap: roles + the three tables at (minimally faithful) staging
-//    shapes. Only the columns v4 touches, with the constraints v4 relies on
-//    (v5_conversation_turns UNIQUE (scenario_id, turn_id) for the
-//    idempotency branch; scenarios guest-nullable user_id per 20260422000000;
-//    graph_identity_hash per 20260717120000). The REAL fence migration
-//    (20260731120000) is applied verbatim afterwards — the objects under
-//    test are never hand-mocked. ──────────────────────────────────────────
+// ── Bootstrap: roles + the three tables at their REAL staging constraint
+//    shapes (adversarial-review A2: an over-permissive bootstrap let a
+//    control "pass" a call the real schema would 23514-refuse — trap 13).
+//    Faithful pieces, each derived from the repo's own migrations:
+//      · v5_conversation_turns: UNIQUE (scenario_id, turn_id) (idempotency
+//        branch), request_hash NOT NULL, turn_class_valid CHECK and
+//        handler_id_biconditional CHECK — all per 20260417160000 (:30-37,
+//        :168-184);
+//      · scenarios: guest-nullable user_id per 20260422000000,
+//        graph_identity_hash per 20260717120000, and the
+//        scenarios_updated_at BEFORE-UPDATE trigger per 20260226010000
+//        (the update_updated_at() function body predates this repo's
+//        migrations on staging; the standard NEW.updated_at = now() shape
+//        is used here).
+//    The REAL fence migrations are applied verbatim afterwards — the
+//    objects under test are never hand-mocked. ──────────────────────────
 async function bootstrap() {
   await sql.unsafe(`
     DO $$ BEGIN
@@ -246,6 +255,19 @@ async function bootstrap() {
       updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE OR REPLACE FUNCTION update_updated_at() RETURNS TRIGGER AS $fn$
+    BEGIN
+      NEW.updated_at = now();
+      RETURN NEW;
+    END;
+    $fn$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS scenarios_updated_at ON public.scenarios;
+    CREATE TRIGGER scenarios_updated_at
+      BEFORE UPDATE ON public.scenarios
+      FOR EACH ROW
+      EXECUTE FUNCTION update_updated_at();
+
     CREATE TABLE IF NOT EXISTS public.v5_conversation_turns (
       id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       scenario_id      UUID NOT NULL,
@@ -253,7 +275,7 @@ async function bootstrap() {
       turn_id          TEXT NOT NULL,
       turn_class       TEXT NOT NULL,
       handler_id       TEXT,
-      request_hash     TEXT,
+      request_hash     TEXT NOT NULL,
       response_emitted BOOLEAN NOT NULL DEFAULT TRUE,
       llm_calls_used   INTEGER NOT NULL DEFAULT 0,
       duration_ms      INTEGER NOT NULL DEFAULT 0,
@@ -262,7 +284,11 @@ async function bootstrap() {
       user_message     TEXT,
       assistant_message TEXT,
       created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-      CONSTRAINT v5_conversation_turns_scenario_turn_key UNIQUE (scenario_id, turn_id)
+      CONSTRAINT v5_conversation_turns_scenario_turn_key UNIQUE (scenario_id, turn_id),
+      CONSTRAINT v5_conversation_turns_turn_class_valid
+        CHECK (turn_class IN ('direct_answer', 'clarify', 'handler', 'unhandled')),
+      CONSTRAINT v5_conversation_turns_handler_id_biconditional
+        CHECK ((turn_class = 'handler') = (handler_id IS NOT NULL))
     );
 
     CREATE TABLE IF NOT EXISTS public.v5_handler_facts (
@@ -438,7 +464,11 @@ async function main() {
   }
 
   console.log('\n── Phase 4: unchanged behaviours');
-  // (f) matched identity (draft / run_analysis shape) still commits
+  // (f) matched identity — the REAL draft-dispatcher shape (A2 review fix:
+  // the earlier control used turn_class 'draft', which the real
+  // turn_class_valid CHECK 23514-refuses; the actual draft commit is
+  // turn_class 'direct_answer' + handler_id NULL with payload.turn_id as
+  // the write identity — draft-graph-dispatch.ts:696).
   {
     const s = await newScenario();
     const g = await claim(s, 'bt-draft');
@@ -446,9 +476,13 @@ async function main() {
       scenarioId: s,
       turnId: 'bt-draft',
       fenceGeneration: g,
-      turnClass: 'draft',
+      turnClass: 'direct_answer',
     });
-    record('matched-identity (draft-shape) commit unchanged', res.ok === true);
+    record(
+      'matched-identity (real draft-dispatcher shape) commit unchanged',
+      res.ok === true,
+      res.ok ? '' : `${res.code}: ${res.message}`,
+    );
   }
   // (g) NULL generation skips the gate
   {
