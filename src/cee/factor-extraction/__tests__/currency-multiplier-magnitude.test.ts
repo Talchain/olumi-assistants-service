@@ -175,6 +175,47 @@ describe("ROADMAP 2.316 — the pre-2.316 behaviour of this path is byte-identic
     }
   });
 
+  it("PRESERVED — the COMPLETE factor list, including the un-multiplied companion", () => {
+    // ADDED BECAUSE A MUTANT SURVIVED (M7). The refusal above is scoped to
+    // suffixes the module CANNOT read; widening it to refuse every attached
+    // suffix would also silence the `currency` fallback's second, un-multiplied
+    // factor — the `£5` that has always accompanied `£5m`. That is a SHRINK of
+    // the byte-identical set with no behavioural alarm anywhere: every
+    // remaining assertion in this file looks only at the explicit factor, so
+    // the suite stayed fully GREEN under the mutation.
+    //
+    // Pinning the WHOLE array is what makes the scope of the refusal
+    // measurable rather than asserted. These four arrays are the pristine
+    // 7f57602 output verbatim for the first three shapes; `$5bn` is the
+    // targeted change, and is pinned to prove it lands in exactly the shape
+    // `£5m` already had rather than in some new one.
+    //
+    // ⚠ This does NOT endorse the companion factor. A brief saying "$5m"
+    // yielding a `5` alongside its `5000000` is a pre-existing oddity of the
+    // `currency` fallback, unchanged by 2.316 and out of its scope; it is
+    // pinned here as PRISTINE BEHAVIOUR, not as desired behaviour.
+    const shape = (b: string) =>
+      extractFactors(b).map((f) => [f.value, f.unit, f.matchedText, f.extractionType, f.confidence]);
+
+    expect(shape("We raised £5m last year.")).toEqual([
+      [5_000_000, "£", "£5m", "explicit", 0.85],
+      [5, "£", "£5", "inferred", 0.6],
+    ]);
+    expect(shape("We raised $5 million last year.")).toEqual([
+      [5_000_000, "$", "$5 million", "explicit", 0.85],
+      [5, "$", "$5", "inferred", 0.6],
+    ]);
+    expect(shape("We raised €5K last year.")).toEqual([
+      [5_000, "€", "€5K", "explicit", 0.85],
+      [5, "€", "€5", "inferred", 0.6],
+    ]);
+    // The targeted change, landing in the SAME shape as the line above it.
+    expect(shape("We raised $5bn last year.")).toEqual([
+      [5_000_000_000, "$", "$5bn", "explicit", 0.85],
+      [5, "$", "$5", "inferred", 0.6],
+    ]);
+  });
+
   it("PRESERVED — #797's contextualNumber behaviour is unchanged in BOTH directions", () => {
     const target = (b: string) => extractFactors(b).find((f) => f.label === "Target");
     expect(target("target is 800k")!.value).toBe(800_000);
