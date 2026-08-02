@@ -544,28 +544,76 @@ function qualifyExtractedFactors(
   // Same value + same unit = duplicate, or matching labels (e.g., "Churn" vs "Churn Rate")
   const qualified: ExtractedFactor[] = [];
   for (const factor of confidenceFiltered) {
-    const isDuplicate = qualified.some((existing) => {
+    // Indices of every already-qualified factor this one collides with as
+    // "the same quantity" (unit-compatible + value within 10%, or matching
+    // labels). The predicate is byte-identical to the pre-2.299 `.some`.
+    const collidingIdx: number[] = [];
+    for (let i = 0; i < qualified.length; i++) {
+      const existing = qualified[i];
+
       // Check unit compatibility first
-      if (!unitsCompatible(existing.unit, factor.unit)) return false;
+      if (!unitsCompatible(existing.unit, factor.unit)) continue;
 
       // Check value within 10% tolerance
+      let isDuplicate = false;
       if (existing.value !== undefined && factor.value !== undefined) {
         const tolerance = Math.abs(existing.value * 0.1);
         if (Math.abs(existing.value - factor.value) <= tolerance) {
-          return true;
+          isDuplicate = true;
         }
       }
 
       // Check label similarity (e.g., "Churn" vs "Churn Rate")
-      if (labelsMatch(existing.label, factor.label)) {
-        return true;
+      if (!isDuplicate && labelsMatch(existing.label, factor.label)) {
+        isDuplicate = true;
       }
 
-      return false;
+      if (isDuplicate) collidingIdx.push(i);
+    }
+
+    if (collidingIdx.length === 0) {
+      qualified.push(factor);
+      continue;
+    }
+
+    // ROADMAP 2.299 — the collision is decided by ROLE, then CONFIDENCE, and
+    // only on a full tie by push order. The pre-2.299 rule was push order
+    // ALONE ("first wins"), which let `genericRange` — an earlier, LOWER
+    // confidence, generic extraction — swallow the user's stated Target when
+    // a range midpoint landed within 10% of it (#791's collision brief: the
+    // user said "our target is 6000000", the product rendered "Target: Not
+    // set"). Only a goal/target-labelled factor can reach the goal-threshold
+    // mint, so at equal value the Target IS the more truthful reading of the
+    // quantity; among equals, the extractor's own confidence ranks them.
+    // The challenger must beat EVERY collider — losing to any one of them
+    // means an incumbent already covers this quantity better.
+    const supersedes = collidingIdx.every((i) => {
+      const incumbent = qualified[i];
+      const challengerIsTarget = isTargetGoalLabel(factor.label);
+      const incumbentIsTarget = isTargetGoalLabel(incumbent.label);
+      if (challengerIsTarget !== incumbentIsTarget) return challengerIsTarget;
+      return factor.confidence > incumbent.confidence;
     });
 
-    if (!isDuplicate) {
-      qualified.push(factor);
+    if (supersedes) {
+      // Replace the first collider IN PLACE (list position — and therefore
+      // everything downstream that is order-sensitive — is preserved), and
+      // drop any further colliders: the quantity has one survivor.
+      const superseded = qualified[collidingIdx[0]];
+      qualified[collidingIdx[0]] = factor;
+      for (let j = collidingIdx.length - 1; j >= 1; j--) {
+        qualified.splice(collidingIdx[j], 1);
+      }
+      log.debug(
+        {
+          keptLabel: factor.label,
+          keptValue: factor.value,
+          supersededLabel: superseded.label,
+          supersededValue: superseded.value,
+          event: "cee.factor_extraction.dedupe_superseded",
+        },
+        `Extracted factor "${factor.label}" superseded colliding "${superseded.label}"`
+      );
     } else {
       log.debug(
         {
