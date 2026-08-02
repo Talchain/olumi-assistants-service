@@ -44,12 +44,29 @@ import { generateConstraintNodes } from "../../cee/compound-goal/node-generator.
 /* ===========================================================================
  * PART A — THE GAP IN THE CANONICAL LIST ITSELF.
  *
- * Every guard #799 shipped is DERIVED FROM the map, which makes them exact
- * about whether the consumers agree with the list and structurally incapable
- * of noticing that the LIST IS INCOMPLETE. `thousand` was absent, so
- * "$5 thousand" extracted as 5 — a 1,000× under-read at full confidence, on
- * the same card, in the same file, that #799's comment block describes as
- * unified. These are the RED-first signatures for that.
+ * `thousand` was absent from `MAGNITUDE_MULTIPLIERS`, so "$5 thousand"
+ * extracted as 5 — a 1,000× under-read at full confidence, on the same card,
+ * in the same file, that #799's comment block describes as unified. These are
+ * the RED-first signatures for that.
+ *
+ * ⚠ WHY IT SURVIVED — THE MEASURED ANSWER, replacing an overstated one this
+ * lane wrote and review caught within hours. The first version of this header
+ * said "every guard #799 shipped is DERIVED FROM the map, which makes them
+ * structurally incapable of noticing that the LIST IS INCOMPLETE." That
+ * generalised from the guards this lane had read. Deleting the key `million`
+ * from the map at base, in a throwaway worktree, measured the opposite: the one
+ * genuinely derived per-key guard stayed GREEN, but 6 HARDCODED CORPUS
+ * assertions went RED across both of #799's guard files. `thousand` survived
+ * because no corpus happened to SPELL it — not because everything was derived.
+ *
+ *   A derived guard proves AGREEMENT and can never prove COMPLETENESS — and the
+ *   only thing that CAN catch a short list is a hand-written corpus, i.e.
+ *   exactly the mirror derivation was introduced to abolish. Trap 12 has a
+ *   second face.
+ *
+ * Which is why PART A is written as EXPLICIT, HAND-SPELLED cases for the two
+ * added keys, and not only as another walk over the map: a map-walk cannot see
+ * a key that is not in the map, and that is precisely the defect being closed.
  * ========================================================================= */
 
 describe("ROADMAP 2.322 — the canonical alphabet was itself incomplete", () => {
@@ -75,10 +92,15 @@ describe("ROADMAP 2.322 — the canonical alphabet was itself incomplete", () =>
   });
 
   it("the completeness gap is closed in BOTH directions — every key round-trips", () => {
-    // Derived, so it covers keys that do not exist yet. This is the assertion
-    // that would have caught `thousand` had it existed in #799: it walks the
-    // map, but it asserts on the CONSUMER, so a key present in the map and
-    // unreachable through extraction REDs.
+    // Derived, so it covers keys that do not exist yet: it walks the map, but
+    // it asserts on the CONSUMER, so a key present in the map and unreachable
+    // through extraction REDs.
+    //
+    // ⚠ IT WOULD NOT HAVE CAUGHT `thousand`, and an earlier version of this
+    // comment claimed it would. A map-walk is blind to a key the map does not
+    // contain — measured, by deleting `million` at base and watching this
+    // assertion's derived sibling stay GREEN. Completeness is the corpus's job
+    // (PART A); this assertion's job is agreement.
     for (const [key, multiplier] of Object.entries(MAGNITUDE_MULTIPLIERS)) {
       const factors = extractFactors(`We raised $4${key} last year.`);
       const explicit = factors.find((f) => f.extractionType === "explicit");

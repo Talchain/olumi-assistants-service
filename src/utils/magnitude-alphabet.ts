@@ -24,9 +24,32 @@
  * NOT `thousand` — so `"$5 thousand"` extracted as **5** while `"$5 million"`
  * extracted as 5,000,000. The list that #799 had just finished unifying, and
  * whose comment block says the drift guard "asserts that structurally", was
- * missing a key the whole time: every guard was derived FROM the map, so a key
- * ABSENT from the map is invisible to all of them. A derived guard proves the
- * consumers agree with the list — it can never prove the list is complete.
+ * missing a key the whole time.
+ *
+ * ⚠⚠ AND THE FIRST EXPLANATION OF *WHY* — WRITTEN IN THIS BLOCK, AND WRONG —
+ * WAS CAUGHT IN REVIEW WITHIN HOURS. It said "every guard #799 shipped is
+ * DERIVED FROM the map, so a key absent from the map is invisible to all of
+ * them." That generalised from the guards this lane happened to read. MEASURED
+ * at base, in a throwaway worktree, by deleting the key `million` from the map:
+ * the one genuinely derived per-key guard stayed **GREEN** (its blindness is
+ * real), but **6 HARDCODED CORPUS ASSERTIONS went RED across both of #799's
+ * guard files**. #799 shipped substantial hand-written corpora alongside its
+ * derived guards, and those corpora are the ONLY things in this estate with any
+ * power to notice a short list. `thousand` survived not because everything was
+ * derived, but because **no corpus happened to spell it**.
+ *
+ * THE MEASURED LESSON, which is sharper than the one it replaces:
+ *
+ *   A derived guard proves AGREEMENT and can never prove COMPLETENESS — and the
+ *   only thing that CAN catch a short list is a hand-written corpus, i.e.
+ *   exactly the mirror derivation was introduced to abolish. Trap 12 has a
+ *   second face.
+ *
+ * So the two kinds of guard are not redundant and neither supersedes the other:
+ * derivation stops the consumers drifting from the list, a corpus is what
+ * notices the list is short, and dropping either one leaves a whole defect
+ * class unobserved. Keep both, and know which is doing which job.
+ *
  * `thousand` and `mn` are added here, both measured against sibling lists that
  * already carried them (`cee/extraction/numeric-parser.ts` had both).
  *
