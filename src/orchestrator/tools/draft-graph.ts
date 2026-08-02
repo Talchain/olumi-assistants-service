@@ -19,6 +19,7 @@ import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
+import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import type { CurrencySignal } from "../../cee/signals/currency-signal.js";
 
 /**
@@ -875,6 +876,12 @@ export function extractAnalysisReady(
     blockers: Array.isArray(ar.blockers) ? ar.blockers : undefined,
     model_adjustments: Array.isArray(ar.model_adjustments) ? ar.model_adjustments : undefined,
     goal_threshold: typeof ar.goal_threshold === 'number' ? ar.goal_threshold : undefined,
+    // ROADMAP 2.315(a) — the raw target trio. This function is a NAMED-FIELD
+    // RE-PROJECTION (it rebuilds the payload key by key rather than spreading),
+    // so an additive field carried at the builder would be silently dropped
+    // here on the draft path alone unless it is also named. RAW-ANCHORED via
+    // the shared rule; carried verbatim, never re-derived.
+    ...pickGoalThresholdTrio(ar),
     bias_findings: Array.isArray(ar.bias_findings)
       ? ar.bias_findings as NonNullable<GraphPatchBlockData['analysis_ready']>['bias_findings']
       : [],

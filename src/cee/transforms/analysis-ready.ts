@@ -27,6 +27,7 @@ import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { computeAnalysisReadyStatusWithReason } from "./option-status.js";
 import { synthesiseDisplayValue } from "../factor-extraction/display-value.js";
 import { readIsBaseline } from "../baseline-identity.js";
+import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 
 // ============================================================================
 // Types
@@ -722,6 +723,14 @@ export function buildAnalysisReadyPayload(
     status: payloadStatus,
     bias_findings: [],
     ...(goalNode?.goal_threshold != null && { goal_threshold: goalNode.goal_threshold }),
+    // ROADMAP 2.315(a) — carry the RAW goal target beside the normalised one.
+    // `goal_threshold` alone left consumers unable to recover the user's own
+    // figure: a £800,000 target surfaced as "reaching ≥ 0.8 count".
+    // RAW-ANCHORED: raw may ride alone, cap and unit only alongside it, so a
+    // cap can never arm the consumer's `norm × cap` re-derivation (see
+    // utils/goal-threshold-trio.ts). Carried verbatim from the enricher's
+    // attested mint; never recomputed here.
+    ...pickGoalThresholdTrio(goalNode),
   };
 
   // Add user_questions when status is needs_user_mapping
