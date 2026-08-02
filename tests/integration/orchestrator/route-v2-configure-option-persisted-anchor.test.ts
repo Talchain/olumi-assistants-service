@@ -192,6 +192,7 @@ describe('POST /orchestrate/v2/turn — 2.308 S1 configure-option persisted labe
     // consulted, and it came from the PERSISTED graph.
     expect(emittedNames()).toContain('v5.edit_graph.configure_option_labels_loaded');
     expect(findEvent('v5.edit_graph.configure_option_labels_loaded')).toMatchObject({
+      outcome: 'labels',
       matched: true,
     });
     // …and the turn actually dispatched to the one lane that writes option
@@ -221,6 +222,7 @@ describe('POST /orchestrate/v2/turn — 2.308 S1 configure-option persisted labe
 
     expect(res.statusCode).toBe(200);
     expect(findEvent('v5.edit_graph.configure_option_labels_loaded')).toMatchObject({
+      outcome: 'labels',
       matched: true,
     });
     expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
@@ -268,6 +270,7 @@ describe('POST /orchestrate/v2/turn — 2.308 S1 configure-option persisted labe
     // detector cannot rule it out without the labels) …
     expect(emittedNames()).toContain('v5.edit_graph.configure_option_labels_loaded');
     expect(findEvent('v5.edit_graph.configure_option_labels_loaded')).toMatchObject({
+      outcome: 'labels',
       matched: false,
     });
     // … but the verdict is unchanged: it stays off the edit lane, so
@@ -291,5 +294,12 @@ describe('POST /orchestrate/v2/turn — 2.308 S1 configure-option persisted labe
     expect(dispatchEditGraphMock).not.toHaveBeenCalled();
     // The memo cached the rejection, so the turn did not retry the read.
     expect(loadGraphMock).toHaveBeenCalledTimes(1);
+    // …and the FAILED read is still metered. Emitting only on a
+    // labels-bearing result would have made this round-trip invisible
+    // (review #796).
+    expect(findEvent('v5.edit_graph.configure_option_labels_loaded')).toMatchObject({
+      outcome: 'failed',
+      matched: false,
+    });
   });
 });

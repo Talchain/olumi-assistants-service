@@ -76,10 +76,23 @@ export const CONFIGURE_OPTION_GENERIC_CHIP: ConfigureOptionChip = Object.freeze(
  * (trap 12). The chip's `id` and `label` are unchanged: this is a routing fix,
  * not a UI-surface change.
  */
+export const SET_OPTION_VALUES_CHIP_LABEL = 'Set values for options';
+
+/**
+ * The load-bearing half. Every producer of a "Set values for options" chip
+ * MUST build from this — `handlers/draft-graph-dispatch.ts` (post-draft) and
+ * all four sites in `compose/chip-generator.ts` (the readiness floor at
+ * `needs_encoding` — i.e. the 2.308 blocked state itself — and the three
+ * analyse/decide-stage fallbacks). The first cut of 2.308 converted only the
+ * post-draft producer, which left the chip a blocked tester actually sees
+ * still carrying the doubly-blocked literal.
+ */
+export const SET_OPTION_VALUES_CHIP_MESSAGE = `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}the options for this decision so the analysis can run.`;
+
 export const SET_OPTION_VALUES_CHIP: ConfigureOptionChip = Object.freeze({
   id: 'chip_prompt_set_option_values',
-  label: 'Set values for options',
-  message: `${CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX}the options for this decision so the analysis can run.`,
+  label: SET_OPTION_VALUES_CHIP_LABEL,
+  message: SET_OPTION_VALUES_CHIP_MESSAGE,
 });
 
 /**

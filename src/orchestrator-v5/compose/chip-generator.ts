@@ -56,6 +56,17 @@ import { buildScaffoldConfigureChip } from '../coaching/scaffold-disclosure.js';
 import type { GraphPatchBlockData } from '../../orchestrator/types.js';
 import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
 import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
+// ROADMAP 2.308 / S2(b) — the "Set values for options" chip copy is DERIVED,
+// never re-typed. All four sites below (the readiness floor, which fires on
+// `needs_encoding` — the 2.308 blocked state — plus the three stage
+// fallbacks) previously carried a hand-typed literal that was blocked twice:
+// NO_MATCH at `detectConfigureOptionIntent` AND a hit on
+// EDIT_GRAPH_NEGATIVE_REGEX's "set up". `configure-option-product-copy-routes.test.ts`
+// pins `generateChips` OUTPUT, not just the constant.
+import {
+  SET_OPTION_VALUES_CHIP_LABEL,
+  SET_OPTION_VALUES_CHIP_MESSAGE,
+} from '../configure-option-chip-text.js';
 
 type AnalysisReadyPayload = NonNullable<GraphPatchBlockData['analysis_ready']>;
 
@@ -438,8 +449,8 @@ function applyChipFloor(input: ChipGeneratorInput): readonly SuggestedAction[] {
     return [
       promptChip(
         'floor_set_option_values',
-        'Set values for options',
-        'Help me set up the options for this decision so the analysis can run.',
+        SET_OPTION_VALUES_CHIP_LABEL,
+        SET_OPTION_VALUES_CHIP_MESSAGE,
       ),
     ];
   }
@@ -791,8 +802,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
     return cap([
       promptChip(
         'set_option_values',
-        'Set values for options',
-        'Help me set up the options for this decision so the analysis can run.',
+        SET_OPTION_VALUES_CHIP_LABEL,
+        SET_OPTION_VALUES_CHIP_MESSAGE,
       ),
     ]);
   }
@@ -825,8 +836,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
       return cap([
         promptChip(
           'set_option_values',
-          'Set values for options',
-          'Help me set up the options for this decision so the analysis can run.',
+          SET_OPTION_VALUES_CHIP_LABEL,
+          SET_OPTION_VALUES_CHIP_MESSAGE,
         ),
       ]);
     }
@@ -843,8 +854,8 @@ function generateChipsRaw(input: ChipGeneratorInput): readonly SuggestedAction[]
       return cap([
         promptChip(
           'set_option_values',
-          'Set values for options',
-          'Help me set up the options for this decision so the analysis can run.',
+          SET_OPTION_VALUES_CHIP_LABEL,
+          SET_OPTION_VALUES_CHIP_MESSAGE,
         ),
       ]);
     }

@@ -127,6 +127,7 @@ describe('resolveConfigureOptionIntent — persisted label anchor', () => {
       expect(loadPersistedOptionLabels).toHaveBeenCalledTimes(1);
       expect(resolution.detection.matched, `${name} must claim the edit lane`).toBe(true);
       expect(resolution.optionLabelSource).toBe('persisted');
+      expect(resolution.persistedRead).toBe('labels');
     });
   }
 
@@ -179,6 +180,7 @@ describe('resolveConfigureOptionIntent — persisted label anchor', () => {
     expect(loadPersistedOptionLabels).not.toHaveBeenCalled();
     expect(resolution.detection).toEqual({ matched: true, trigger: 'effect_vocab' });
     expect(resolution.optionLabelSource).toBe('request');
+    expect(resolution.persistedRead).toBe('not_attempted');
   });
 
   it('does NOT read the persisted graph for a conversational turn', async () => {
@@ -211,6 +213,58 @@ describe('resolveConfigureOptionIntent — persisted label anchor', () => {
     });
     expect(resolution.detection.matched).toBe(false);
     expect(resolution.optionLabelSource).toBe('request');
+    // Review correction (#796): an option-less graph is a read that HAPPENED.
+    // Reporting it as `request`/not-attempted made the route's read-frequency
+    // meter under-count the reads it exists to measure.
+    expect(resolution.persistedRead).toBe('empty');
+  });
+
+  it('reports a FAILED read distinctly, so the meter cannot silently under-count', async () => {
+    const resolution = await resolveConfigureOptionIntent({
+      message: REMEDY_6,
+      requestOptionLabels: [],
+      loadPersistedOptionLabels: async () => {
+        throw new Error('supabase down');
+      },
+    });
+    expect(resolution.detection.matched).toBe(false);
+    expect(resolution.optionLabelSource).toBe('request');
+    expect(resolution.persistedRead).toBe('failed');
+  });
+
+  it('every persistedRead value other than not_attempted means a round-trip happened', async () => {
+    // Derived exhaustiveness: the three "a read happened" outcomes are the
+    // ones the meter must see, and `not_attempted` is the only free verdict.
+    const outcomes = await Promise.all([
+      resolveConfigureOptionIntent({
+        message: REMEDY_6,
+        requestOptionLabels: [],
+        loadPersistedOptionLabels: async () => [...SCENARIO_2308_OPTION_LABELS],
+      }),
+      resolveConfigureOptionIntent({
+        message: REMEDY_6,
+        requestOptionLabels: [],
+        loadPersistedOptionLabels: async () => [],
+      }),
+      resolveConfigureOptionIntent({
+        message: REMEDY_6,
+        requestOptionLabels: [],
+        loadPersistedOptionLabels: async () => {
+          throw new Error('boom');
+        },
+      }),
+      resolveConfigureOptionIntent({
+        message: 'Thanks, that makes sense.',
+        requestOptionLabels: [],
+        loadPersistedOptionLabels: async () => [...SCENARIO_2308_OPTION_LABELS],
+      }),
+    ]);
+    expect(outcomes.map((r) => r.persistedRead)).toEqual([
+      'labels',
+      'empty',
+      'failed',
+      'not_attempted',
+    ]);
   });
 });
 

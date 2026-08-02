@@ -40,6 +40,8 @@ import {
   CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE,
   SET_OPTION_VALUES_CHIP,
 } from '../../configure-option-chip-text.js';
+import { generateChips, type ChipGeneratorInput } from '../../compose/chip-generator.js';
+import type { HandlerValidationRegistry } from '../validator.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
   EDIT_GRAPH_POSITIVE_REGEX,
@@ -152,5 +154,109 @@ describe('2.308 S2(b) — the "Set values for options" chip routes to its own wr
     // pass the two assertions above today and drift silently tomorrow.
     expect(SET_OPTION_VALUES_CHIP.message).not.toBe(PRISTINE_SET_OPTION_VALUES_MESSAGE);
     expect(SET_OPTION_VALUES_CHIP.message.startsWith('Help me configure ')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (b, continued) — the OUTPUT of the real chip producer, not the constant.
+//
+// Review correction (#796): the first cut of 2.308 converted only
+// `handlers/draft-graph-dispatch.ts` and asserted the shared CONSTANT. Four
+// hand-typed copies survived in `compose/chip-generator.ts`, one of them the
+// readiness FLOOR that fires on exactly `needs_encoding` — the 2.308 blocked
+// state — and `generateChips` is what the turn-executor calls on ordinary
+// turns. So the first affordance a blocked tester saw was still the
+// doubly-blocked literal, and "cannot drift back" was false while any
+// hand-typed copy remained. Asserting a constant cannot catch that; asserting
+// the PRODUCER'S OUTPUT can.
+// ---------------------------------------------------------------------------
+
+const CHIP_REGISTRY: HandlerValidationRegistry = {
+  run_analysis: {
+    handler_id: 'run_analysis',
+    accepted_entity_kinds: ['option'],
+    confirmation_template: 'ok',
+  },
+};
+
+function chipInput(overrides: Partial<ChipGeneratorInput>): ChipGeneratorInput {
+  return {
+    stage: 'analyse',
+    validationRegistry: CHIP_REGISTRY,
+    ...overrides,
+  } as ChipGeneratorInput;
+}
+
+/** `analysis_ready` shaped as `computeStructuralReadiness` emits it. */
+function readiness(status: string): ChipGeneratorInput['analysisReady'] {
+  return {
+    options: [
+      {
+        option_id: 'opt_retention',
+        label: 'Launch Customer Retention Programme',
+        status: 'needs_encoding',
+        interventions: {},
+      },
+    ],
+    goal_node_id: 'goal_arr',
+    status,
+  } as unknown as ChipGeneratorInput['analysisReady'];
+}
+
+describe('2.308 S2(b) — every "Set values for options" chip generateChips MINTS routes', () => {
+  const cases: readonly (readonly [string, ChipGeneratorInput])[] = [
+    // The readiness floor — the 2.308 blocked state itself.
+    ['analyse stage, needs_encoding', chipInput({ analysisReady: readiness('needs_encoding'), graphOptionCount: 1 })],
+    ['analyse stage, needs_user_mapping', chipInput({ analysisReady: readiness('needs_user_mapping'), graphOptionCount: 1 })],
+    ['analyse stage, needs_user_input', chipInput({ analysisReady: readiness('needs_user_input'), graphOptionCount: 1 })],
+    ['analyse stage, no options at all', chipInput({ analysisReady: readiness('needs_user_input'), graphOptionCount: 0 })],
+    ['decide stage, readiness not ready', chipInput({ stage: 'decide', analysisReady: readiness('needs_encoding'), graphOptionCount: 1 })],
+  ];
+
+  /**
+   * Positive control (trap 13): the sweep below asserts an ABSENCE (no chip
+   * carries a blocked message). It is vacuous unless the inputs provably
+   * PRODUCE the chip under test. At least one case must mint it.
+   */
+  it('positive control — at least one input actually mints a set-option-values chip', () => {
+    const minted = cases.filter(([, input]) =>
+      generateChips(input).some((chip) => chip.message === SET_OPTION_VALUES_CHIP.message),
+    );
+    expect(minted.length, 'no input minted the chip — the sweep below would test nothing').toBeGreaterThan(0);
+  });
+
+  for (const [name, input] of cases) {
+    it(`${name}: no minted chip carries the doubly-blocked message`, () => {
+      for (const chip of generateChips(input)) {
+        expect(chip.message, `chip ${chip.id} still carries the pristine literal`).not.toBe(
+          PRISTINE_SET_OPTION_VALUES_MESSAGE,
+        );
+      }
+    });
+
+    it(`${name}: every minted "Set values for options" chip routes AND survives the negative gate`, () => {
+      const setValueChips = generateChips(input).filter(
+        (chip) => chip.label === SET_OPTION_VALUES_CHIP.label,
+      );
+      for (const chip of setValueChips) {
+        expect(
+          detectConfigureOptionIntent(chip.message, []),
+          `chip ${chip.id} does not route deterministically: '${chip.message}'`,
+        ).toEqual({ matched: true, trigger: 'chip_prefix' });
+        expect(
+          EDIT_GRAPH_NEGATIVE_REGEX.test(chip.message),
+          `chip ${chip.id} is blocked by EDIT_GRAPH_NEGATIVE_REGEX: '${chip.message}'`,
+        ).toBe(false);
+      }
+    });
+  }
+
+  it('the floor chip specifically — the first affordance a blocked tester sees', () => {
+    const chips = generateChips(
+      chipInput({ analysisReady: readiness('needs_encoding'), graphOptionCount: 1 }),
+    );
+    const floor = chips.find((chip) => chip.label === SET_OPTION_VALUES_CHIP.label);
+    expect(floor, 'no set-option-values chip on the needs_encoding turn').toBeDefined();
+    expect(floor!.message).toBe(SET_OPTION_VALUES_CHIP.message);
   });
 });

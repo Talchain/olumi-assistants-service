@@ -1829,14 +1829,18 @@ export const TelemetryEvents = {
   // ('chip_prefix' | 'configure_vocab' | 'intervention_vocab').
   V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
 
-  // ROADMAP 2.308 / S1 — the configure-option gate consulted the PERSISTED
-  // graph for its option-label anchor. Until 2.308 the labels came only from
+  // ROADMAP 2.308 / S1 — the configure-option gate ATTEMPTED a persisted-graph
+  // read for its option-label anchor. Until 2.308 the labels came only from
   // `extensions.graphState`, which the UI never sends, so the label anchor
   // (and with it triggers `effect_vocab` / `option_value_set`) was dead code
-  // in production. Emitted only when the persisted read actually happened —
-  // i.e. the detector reported a label anchor would decide the verdict — so
-  // this is also the meter for the read's frequency. Payload: request_id,
-  // scenario_id, matched (whether the labels flipped the verdict).
+  // in production. Emitted on EVERY read attempt — i.e. whenever the detector
+  // reported a label anchor would decide the verdict — so the event count IS
+  // the added-read frequency, with no silent omissions (review #796: emitting
+  // only on a labels-bearing result made a failed or option-less read
+  // invisible and under-counted the very thing this measures). Payload:
+  // request_id, scenario_id, outcome ('labels' | 'empty' | 'failed'), matched
+  // (whether the labels flipped the verdict; always false unless
+  // outcome === 'labels').
   //
   // ⚠ Read `matched: true` as THE S1 counter, not the sibling
   // `configure_option_intent_routed`. That one is gated on

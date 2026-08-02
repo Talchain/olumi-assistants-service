@@ -296,9 +296,22 @@ export function projectOptionLabels(nodes: unknown): string[] {
 /** Where the option labels that decided the verdict came from. */
 export type ConfigureOptionLabelSource = 'request' | 'persisted';
 
+/**
+ * What the persisted read did — reported for EVERY outcome, including the
+ * ones that produced no labels.
+ *
+ * Review correction (#796): the first cut reported only `optionLabelSource`,
+ * so a read that FAILED or returned an option-less graph was indistinguishable
+ * from a read never taken. The route's read-frequency meter was therefore
+ * under-counting the exact thing it claimed to measure. `not_attempted` is the
+ * only value that means "no Supabase round-trip happened".
+ */
+export type ConfigureOptionPersistedRead = 'not_attempted' | 'labels' | 'empty' | 'failed';
+
 export interface ConfigureOptionIntentResolution {
   readonly detection: ConfigureOptionIntentDetection;
   readonly optionLabelSource: ConfigureOptionLabelSource;
+  readonly persistedRead: ConfigureOptionPersistedRead;
 }
 
 /**
@@ -325,21 +338,26 @@ export async function resolveConfigureOptionIntent(params: {
 }): Promise<ConfigureOptionIntentResolution> {
   const fromRequest = detectConfigureOptionIntent(params.message, params.requestOptionLabels);
   if (fromRequest.matched || !fromRequest.labelAnchorWouldDecide) {
-    return { detection: fromRequest, optionLabelSource: 'request' };
+    return {
+      detection: fromRequest,
+      optionLabelSource: 'request',
+      persistedRead: 'not_attempted',
+    };
   }
 
   let persistedLabels: readonly string[] = [];
   try {
     persistedLabels = await params.loadPersistedOptionLabels();
   } catch {
-    return { detection: fromRequest, optionLabelSource: 'request' };
+    return { detection: fromRequest, optionLabelSource: 'request', persistedRead: 'failed' };
   }
   if (persistedLabels.length === 0) {
-    return { detection: fromRequest, optionLabelSource: 'request' };
+    return { detection: fromRequest, optionLabelSource: 'request', persistedRead: 'empty' };
   }
 
   return {
     detection: detectConfigureOptionIntent(params.message, persistedLabels),
     optionLabelSource: 'persisted',
+    persistedRead: 'labels',
   };
 }

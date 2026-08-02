@@ -3834,10 +3834,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       },
     });
     const configureOptionDetection = configureOptionResolution.detection;
-    if (configureOptionResolution.optionLabelSource === 'persisted') {
+    // Emitted on EVERY read ATTEMPT, not only the ones that yielded labels —
+    // otherwise a failed or option-less read is invisible and this counter
+    // under-reports the read frequency it exists to measure (review #796).
+    if (configureOptionResolution.persistedRead !== 'not_attempted') {
       emit(TelemetryEvents.V5EditGraphConfigureOptionLabelsLoaded, {
         request_id: requestId,
         scenario_id: ingress.scenario_id,
+        outcome: configureOptionResolution.persistedRead,
         matched: configureOptionDetection.matched,
       });
     }
