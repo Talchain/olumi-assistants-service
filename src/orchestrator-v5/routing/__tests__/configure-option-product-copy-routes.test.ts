@@ -204,13 +204,49 @@ function readiness(status: string): ChipGeneratorInput['analysisReady'] {
 }
 
 describe('2.308 S2(b) — every "Set values for options" chip generateChips MINTS routes', () => {
-  const cases: readonly (readonly [string, ChipGeneratorInput])[] = [
+  /**
+ * A no-op `explain_results` fact — the handler that emits
+ * `buildAnalysisAbsentTemplate` (S3). Its `facts_absent` branch is one of the
+ * four chip-generator sites, and the M8 sweep proved the other four inputs do
+ * NOT reach it: an unREDed mutant is an incomplete sweep, not a safe site.
+ */
+function noopExplainResultsFact(): NonNullable<ChipGeneratorInput['handlerFacts']>[number] {
+  return {
+    fact_type: 'explain_results',
+    fact_version: 1,
+    noop: true,
+    result: { precondition_unmet: true, option_count: 2 },
+  } as NonNullable<ChipGeneratorInput['handlerFacts']>[number];
+}
+
+const cases: readonly (readonly [string, ChipGeneratorInput])[] = [
     // The readiness floor — the 2.308 blocked state itself.
     ['analyse stage, needs_encoding', chipInput({ analysisReady: readiness('needs_encoding'), graphOptionCount: 1 })],
     ['analyse stage, needs_user_mapping', chipInput({ analysisReady: readiness('needs_user_mapping'), graphOptionCount: 1 })],
     ['analyse stage, needs_user_input', chipInput({ analysisReady: readiness('needs_user_input'), graphOptionCount: 1 })],
     ['analyse stage, no options at all', chipInput({ analysisReady: readiness('needs_user_input'), graphOptionCount: 0 })],
     ['decide stage, readiness not ready', chipInput({ stage: 'decide', analysisReady: readiness('needs_encoding'), graphOptionCount: 1 })],
+    // The facts_absent branch — the chip paired with the S3 copy, i.e. the
+    // "no analysis has been run" turn on a blocked graph.
+    [
+      'facts_absent after a no-op explain_results, readiness not ready',
+      chipInput({
+        stage: 'analyse',
+        handlerFacts: [noopExplainResultsFact()],
+        analysis: null,
+        analysisReady: readiness('needs_encoding'),
+        graphOptionCount: 1,
+      }),
+    ],
+    [
+      'facts_absent at decide stage, readiness unknown',
+      chipInput({
+        stage: 'decide',
+        handlerFacts: [noopExplainResultsFact()],
+        analysis: null,
+        graphOptionCount: 1,
+      }),
+    ],
   ];
 
   /**
