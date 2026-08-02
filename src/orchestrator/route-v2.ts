@@ -204,7 +204,10 @@ import {
 import { findExactProposalCopyMatchIndexes } from '../orchestrator-v5/routing/proposal-ordinal-select.js';
 import { resolveProposalRenderCopy } from '../orchestrator-v5/compose/proposed-change.js';
 import { isStateQueryQuestionShape } from '../orchestrator-v5/routing/state-query-guard.js';
-import { detectConfigureOptionIntent } from '../orchestrator-v5/routing/configure-option-intent.js';
+import {
+  projectOptionLabels,
+  resolveConfigureOptionIntent,
+} from '../orchestrator-v5/routing/configure-option-intent.js';
 import { detectStructuralRestructureIntent } from '../orchestrator-v5/routing/structural-restructure-intent.js';
 import { classifyAnalyticalIntent } from '../orchestrator-v5/routing/analytical-intent.js';
 import { tryChipSimplifyIntercept } from '../orchestrator-v5/routing/chip-simplify-intercept.js';
@@ -219,6 +222,10 @@ import {
 } from '../orchestrator-v5/routing/process-meta-intake.js';
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
+import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from './routing/edit-graph-intent-regex.js';
 
 // ───────────────────────────────────────────────────────────────────
 // Chip-click resume-intent detector
@@ -1895,31 +1902,10 @@ function isPriorAnalysisFreshFromRequest(
 // both now derive from the single export). Imported above alongside
 // DRAFT_GRAPH_MIN_BRIEF_LENGTH.
 
-/** Positive edit-intent regex for edit_graph dispatch. */
-const EDIT_GRAPH_POSITIVE_REGEX =
-  /\b(change|update|edit|modify|remove|delete|add|adjust|set|reduce|increase|decrease|tweak|raise|lower)\b/i;
-
-/**
- * Negative guard for edit_graph dispatch. If a message contains any of
- * these phrases it is a meta-question or conversational/figurative use of
- * an edit verb, NOT an edit command, and must NOT dispatch even if a
- * positive edit-verb also appears. Mutating the graph on a meta-question
- * is the worst failure mode.
- *
- * Pattern groups:
- *   1. Meta-question markers: "explain", "compare", "what would", "flip",
- *      "why", "how does", "tell me", "show me", "describe".
- *   2. Phrasal verbs that turn an edit verb into a non-mutation: "set up",
- *      "set aside" (procedural framing / deprioritisation, not delete).
- *   3. Figurative / idiomatic uses of edit verbs: "add context",
- *      "remove doubt", "change my mind", "reduce complexity",
- *      "delete this thread", "update our approach", "modify thinking".
- *      These were exposed when the frame-stage gate was removed —
- *      conversational discourse at frame stage previously fell through
- *      to Sonnet only because the stage gate blocked dispatch entirely.
- */
-const EDIT_GRAPH_NEGATIVE_REGEX =
-  /\b(?:explain|compare|what would|flip|why|how does|tell me|show me|describe|set up|set aside|add (?:some |any |more )?(?:context|information|detail|details|background)|remove (?:any |the )?(?:doubt|confusion|uncertainty|ambiguity)|change (?:my |our |their )?mind|reduce (?:complexity|scope|noise|clutter)|delete (?:this |the )?(?:thread|conversation|chat|message)|update (?:my |our |their |the )?(?:approach|thinking|understanding|view|perspective)|modify (?:my |our |their )?(?:view|mind|thinking|approach))\b/i;
+// The two edit-intent regexes now live in
+// `src/orchestrator/routing/edit-graph-intent-regex.ts` (ROADMAP 2.308 / S2)
+// so the product's own chip and prompt copy can be tested against the gates it
+// must pass without importing this module. Imported at the top of the file.
 
 // Value-update negative gate (P0 fix, 2026-05) lives in
 // `src/orchestrator/routing/value-update-gate.ts` as a dedicated module
@@ -3767,6 +3753,43 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // proposal), and lets an edit-verb-bearing state-query fall through to the
     // recent-changes-grounded state-query guard.
     // ────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────
+    // ROADMAP 2.308 / S1 — ONE persisted-graph read per turn, shared.
+    //
+    // Two sites now need `scenarios.graph`: the configure-option label anchor
+    // (immediately below) and the edit-lane graphState reload (~340 lines
+    // down). Memoised here so the pair costs ONE Supabase round-trip, not two
+    // — the diagnosis's explicit instruction was "re-use the loaded value …
+    // one read per turn, not two".
+    //
+    // The memo caches the FAILURE as well as the value, deliberately: the
+    // label-anchor caller swallows errors (a labels read must never fail a
+    // turn that would otherwise succeed), while the edit-lane reload below
+    // re-throws the SAME error and produces the SAME typed recovery it
+    // produced before this change. Caching the rejection is what keeps those
+    // two policies from becoming two reads with two different outcomes.
+    // ────────────────────────────────────────────────────────────────
+    let persistedGraphMemo:
+      | { readonly ok: true; readonly value: unknown }
+      | { readonly ok: false; readonly error: unknown }
+      | null = null;
+    const loadPersistedGraphOnce = async (): Promise<unknown> => {
+      if (persistedGraphMemo === null) {
+        try {
+          persistedGraphMemo = {
+            ok: true,
+            // `loadPersistedGraphStrict` (vs the swallowing
+            // `loadPersistedGraph`) lets the edit-lane consumer distinguish
+            // `session_store_failed` from `no_persisted_graph`.
+            value: await loadPersistedGraphStrict(ingress.scenario_id),
+          };
+        } catch (err) {
+          persistedGraphMemo = { ok: false, error: err };
+        }
+      }
+      if (!persistedGraphMemo.ok) throw persistedGraphMemo.error;
+      return persistedGraphMemo.value;
+    };
     const analyticalQuestionDetected = isAnalyticalQuestion(ingress.message);
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
@@ -3788,12 +3811,36 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // state queries never dispatch. Deliberately NOT gated on the
     // value-update phrasing (an option-intervention "set …" must not go to
     // set_factor_value, whose misroute guard can only refuse-to-clarify).
-    const configureOptionDetection = detectConfigureOptionIntent(
-      ingress.message,
-      (extensions.graphState?.nodes ?? [])
-        .filter((n) => n.kind === 'option' && typeof n.label === 'string')
-        .map((n) => n.label as string),
-    );
+    //
+    // ⭐ ROADMAP 2.308 / S1 — THE LABEL ANCHOR IS NOW REACHABLE.
+    // Until this change the label list came solely from `extensions.graphState`,
+    // which is NULL ON EVERY LIVE TURN (the platform invariant: the UI sends a
+    // turn, never a graph — verified at the bytes across all eight captured
+    // request bodies in the 2.308 diagnosis). The persisted graph that carries
+    // the labels was loaded ~340 lines below, INSIDE `if (editIntentDetected)`,
+    // and `editIntentDetected` is computed FROM this detection: circular, so
+    // triggers 4 (`effect_vocab`) and 5 (`option_value_set`) — which sit below
+    // the detector's mandatory anchor guard — were DEAD CODE in production.
+    // `resolveConfigureOptionIntent` takes the persisted read ONLY when the
+    // detector itself reports a label anchor would decide the verdict, and
+    // shares that read with the edit-lane reload below (`loadPersistedGraphOnce`)
+    // so the edit lane pays no extra round-trip.
+    const configureOptionResolution = await resolveConfigureOptionIntent({
+      message: ingress.message,
+      requestOptionLabels: projectOptionLabels(extensions.graphState?.nodes),
+      loadPersistedOptionLabels: async () => {
+        const persisted = await loadPersistedGraphOnce();
+        return projectOptionLabels((persisted as { nodes?: unknown } | null)?.nodes);
+      },
+    });
+    const configureOptionDetection = configureOptionResolution.detection;
+    if (configureOptionResolution.optionLabelSource === 'persisted') {
+      emit(TelemetryEvents.V5EditGraphConfigureOptionLabelsLoaded, {
+        request_id: requestId,
+        scenario_id: ingress.scenario_id,
+        matched: configureOptionDetection.matched,
+      });
+    }
     // State-query suppressor (behaviour #3): a question containing an edit verb
     // ("what did you just change?", "what did that update do?") must NOT edit.
     const stateQuerySuppressed = isStateQueryQuestionShape(ingress.message);
@@ -4125,7 +4172,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // telemetry. Both export from build-turn-context.ts so the
           // `getSessionStore` import surface stays bounded to the
           // three sites the state-write-invariant check allows.
-          persisted = await loadPersistedGraphStrict(ingress.scenario_id);
+          // ROADMAP 2.308 / S1: via the turn-scoped memo, so a turn whose
+          // configure-option label anchor already read the graph does not
+          // read it twice. Identical semantics — the memo re-throws the
+          // original error.
+          persisted = await loadPersistedGraphOnce();
         } catch (err) {
           // Session-store / Supabase failure. Distinct from
           // "no_persisted_graph" so dashboards can separate

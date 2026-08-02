@@ -604,6 +604,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
         V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
         V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
+        V5EditGraphConfigureOptionLabelsLoaded:
+          "v5.edit_graph.configure_option_labels_loaded",
         V5EditGraphStructuralRestructureRouted:
           "v5.edit_graph.structural_restructure_intent_routed",
         V5ContinuationGuardApplied: "v5.continuation.guard_applied",
@@ -1526,6 +1528,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // no Datadog metric mapping until a canvas-directive dashboard exists.
         TelemetryEvents.V5UiDirectiveEmitted,
         TelemetryEvents.V5UiDirectiveSuppressed,
+        // ROADMAP 2.308 / S1 — configure-option persisted-label read meter:
+        // content-free structured log (request_id + scenario_id + whether the
+        // labels flipped the verdict). Diagnostic-only; it exists to measure
+        // how often the added Supabase read is taken, and there is no Datadog
+        // metric mapping until a dashboard consumes it.
+        TelemetryEvents.V5EditGraphConfigureOptionLabelsLoaded,
       ];
 
       for (const event of allEvents) {
@@ -2056,6 +2064,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.proposal_confirm_resolved",
         "v5.edit_graph.state_query_suppressed",
         "v5.edit_graph.configure_option_intent_routed",
+        "v5.edit_graph.configure_option_labels_loaded",
         "v5.edit_graph.structural_restructure_intent_routed",
         "v5.edit_graph.applied_graph_synthesized_locally",
         "v5.edit_graph.false_success_rewritten",

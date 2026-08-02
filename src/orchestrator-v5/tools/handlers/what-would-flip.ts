@@ -54,6 +54,7 @@ import type {
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import {
   buildPreconditionAssistantText,
+  resolveBlockedOptionLabels,
   decideExplanationPrecondition,
   resolveOptionCount,
 } from './no-op-helpers.js';
@@ -87,6 +88,8 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
         verdict,
         optionCount,
         invocation.analysisReady?.status,
+        // ROADMAP 2.308 / S3 — name the option(s) actually blocking readiness.
+        resolveBlockedOptionLabels(invocation),
       );
       const fact: WhatWouldFlipHandlerFact = {
         fact_type: 'what_would_flip',

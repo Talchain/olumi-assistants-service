@@ -1,0 +1,156 @@
+/**
+ * ROADMAP 2.308 / S2 — the product must not suggest phrasings its own gate
+ * rejects.
+ *
+ * Diagnosis `PHASE0-EVIDENCE-2026-07-28/diagnosis-2308-addoption-deadend.md`
+ * §7 rows 1 and 3, at deployed CEE `a5a3e22`:
+ *
+ *   (a) The edit lane asked "what value?" and offered two formats —
+ *       'Set Customer Retention Investment to £40,000' and
+ *       'Set retention investment to 0.8'. BOTH are NO_MATCH against
+ *       `detectConfigureOptionIntent` (§2c rows 2 and 2b). "The assistant
+ *       suggests phrasings that cannot return to the lane that suggested
+ *       them: a closed loop, minted by the product's own copy."
+ *       Note WHY neither can simply be made to match: they name a FACTOR and
+ *       carry no option reference at all, so matching them would reroute every
+ *       plain "set X to N" off `set_factor_value` into the edit LLM — the
+ *       blast radius the diagnosis explicitly refused (§9 S1, "Do NOT instead
+ *       delete the `if (!anchored) return NO_MATCH` line"). The fix is to make
+ *       the assistant advise the ANCHORED format instead — the shape that was
+ *       live-proven end-to-end as probe P1 (§5).
+ *
+ *   (b) The product's own readiness chip `chip_prompt_set_option_values`
+ *       ("Set values for options") carried the message
+ *       'Help me set up the options for this decision so the analysis can run.'
+ *       — which the configure gate cannot see. Measured in this lane, it was
+ *       blocked TWICE over: NO_MATCH at `detectConfigureOptionIntent`, AND a
+ *       hit on `EDIT_GRAPH_NEGATIVE_REGEX` via the phrasal verb "set up", so
+ *       even a matching detector would not have dispatched it. This is the
+ *       ROADMAP-2.11 defect surviving in the sibling chip the 2.11 fix missed.
+ *
+ * Both fixes DERIVE from `configure-option-chip-text.ts` — the module that
+ * exists precisely so chip copy and route cannot drift apart (trap 12).
+ */
+
+import { describe, it, expect } from 'vitest';
+
+import { detectConfigureOptionIntent } from '../configure-option-intent.js';
+import {
+  buildConfigureOptionAdvisedFormat,
+  CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE,
+  SET_OPTION_VALUES_CHIP,
+} from '../../configure-option-chip-text.js';
+import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from '../../../orchestrator/routing/edit-graph-intent-regex.js';
+import { EDIT_GRAPH_PROMPT_V6 } from '../../../prompts/edit-graph-v6.js';
+
+// ---------------------------------------------------------------------------
+// Historical pins — the pristine copy, kept permanently as the defect fixture.
+//
+// Trap 12b: a control pinned to "whatever ships now" decays into a tautology
+// the first time "now" changes. These two literals are the a5a3e22a bytes and
+// must never be re-derived from the shipped constants.
+// ---------------------------------------------------------------------------
+
+/** Diagnosis §7 row 1 — the edit lane's two suggested formats, verbatim. */
+const PRISTINE_SUGGESTED_FORMATS = [
+  'Set Customer Retention Investment to £40,000',
+  'Set retention investment to 0.8',
+] as const;
+
+/** Diagnosis §7 row 3 — the readiness chip message at a5a3e22a, verbatim. */
+const PRISTINE_SET_OPTION_VALUES_MESSAGE =
+  'Help me set up the options for this decision so the analysis can run.';
+
+describe('2.308 S2 — the pristine copy is pinned as the defect', () => {
+  for (const format of PRISTINE_SUGGESTED_FORMATS) {
+    it(`the assistant's pristine suggested format is NO_MATCH: '${format}'`, () => {
+      expect(detectConfigureOptionIntent(format, []).matched).toBe(false);
+    });
+  }
+
+  it('the pristine readiness-chip message is NO_MATCH against the configure gate', () => {
+    expect(detectConfigureOptionIntent(PRISTINE_SET_OPTION_VALUES_MESSAGE, []).matched).toBe(false);
+  });
+
+  it('the pristine readiness-chip message is ALSO blocked by EDIT_GRAPH_NEGATIVE_REGEX ("set up")', () => {
+    expect(EDIT_GRAPH_NEGATIVE_REGEX.test(PRISTINE_SET_OPTION_VALUES_MESSAGE)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (a) The advised format the assistant is now told to suggest.
+// ---------------------------------------------------------------------------
+
+describe('2.308 S2(a) — the advised configure format routes deterministically', () => {
+  it('the instantiated advised format matches the gate with EMPTY labels', () => {
+    // Verbatim probe P1 (§5), which succeeded live end-to-end: the analysis
+    // ran one turn later (§6c).
+    const advised = buildConfigureOptionAdvisedFormat(
+      'Launch Customer Retention Programme',
+      'Customer Retention Investment',
+      '1',
+    );
+    expect(advised).toBe(
+      "Set the Launch Customer Retention Programme option's effect on Customer Retention Investment to 1",
+    );
+    expect(detectConfigureOptionIntent(advised, [])).toEqual({
+      matched: true,
+      trigger: 'effect_vocab',
+    });
+  });
+
+  it('the advised format survives the route-level negative gates', () => {
+    const advised = buildConfigureOptionAdvisedFormat('Option A', 'Factor B', '0.7');
+    expect(EDIT_GRAPH_NEGATIVE_REGEX.test(advised)).toBe(false);
+    // Not required for dispatch (the configure gate is sufficient), but a
+    // positive-verb hit means the turn reaches the edit lane on BOTH doors.
+    expect(EDIT_GRAPH_POSITIVE_REGEX.test(advised)).toBe(true);
+  });
+
+  it('a qualitative (no-digit) advised value still routes via effect_vocab', () => {
+    const advised = buildConfigureOptionAdvisedFormat('Option A', 'Factor B', 'high');
+    expect(detectConfigureOptionIntent(advised, [])).toEqual({
+      matched: true,
+      trigger: 'effect_vocab',
+    });
+  });
+
+  it('the edit_graph prompt ADVISES that exact template (positive control)', () => {
+    // Derived, not mirrored: if the constant changes, the prompt must carry
+    // the new text or this fails loudly. If the prompt stops advising a
+    // format at all, this fails too.
+    expect(EDIT_GRAPH_PROMPT_V6).toContain(CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (b) The readiness chip.
+// ---------------------------------------------------------------------------
+
+describe('2.308 S2(b) — the "Set values for options" chip routes to its own write path', () => {
+  it('matches the configure gate via the shared chip prefix', () => {
+    expect(detectConfigureOptionIntent(SET_OPTION_VALUES_CHIP.message, [])).toEqual({
+      matched: true,
+      trigger: 'chip_prefix',
+    });
+  });
+
+  it('is not blocked by EDIT_GRAPH_NEGATIVE_REGEX', () => {
+    expect(EDIT_GRAPH_NEGATIVE_REGEX.test(SET_OPTION_VALUES_CHIP.message)).toBe(false);
+  });
+
+  it('keeps its shipped id and label (the chip surface is unchanged)', () => {
+    expect(SET_OPTION_VALUES_CHIP.id).toBe('chip_prompt_set_option_values');
+    expect(SET_OPTION_VALUES_CHIP.label).toBe('Set values for options');
+  });
+
+  it('the message is DERIVED from the shared prefix, not re-typed', () => {
+    // Mutation surface: retyping the prefix in draft-graph-dispatch would
+    // pass the two assertions above today and drift silently tomorrow.
+    expect(SET_OPTION_VALUES_CHIP.message).not.toBe(PRISTINE_SET_OPTION_VALUES_MESSAGE);
+    expect(SET_OPTION_VALUES_CHIP.message.startsWith('Help me configure ')).toBe(true);
+  });
+});

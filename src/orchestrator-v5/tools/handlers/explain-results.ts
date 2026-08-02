@@ -66,6 +66,7 @@ import type {
 import { HandlerResultInvalidError } from '../handler-errors.js';
 import {
   buildPreconditionAssistantText,
+  resolveBlockedOptionLabels,
   decideExplanationPrecondition,
   resolveOptionCount,
 } from './no-op-helpers.js';
@@ -114,6 +115,8 @@ export function createExplainResultsHandler(): HandlerFn {
         verdict,
         optionCount,
         invocation.analysisReady?.status,
+        // ROADMAP 2.308 / S3 — name the option(s) actually blocking readiness.
+        resolveBlockedOptionLabels(invocation),
       );
       const fact: ExplainResultsHandlerFact = {
         fact_type: 'explain_results',
