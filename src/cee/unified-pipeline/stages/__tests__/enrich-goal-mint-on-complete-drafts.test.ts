@@ -47,7 +47,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { runStageEnrich } from '../enrich.js';
+import { runStageThresholdSweep } from '../threshold-sweep.js';
 import { extractFactors } from '../../../factor-extraction/index.js';
+import { CEE_MINTED_GOAL_FIELDS } from '../../../../adapters/llm/normalisation.js';
 import { transformNodeToV3 } from '../../../transforms/schema-v3.js';
 import { NodeV3 } from '../../../../schemas/cee-v3.js';
 import type { V1Node } from '../../../transforms/schema-v2.js';
@@ -167,10 +169,20 @@ describe('ROADMAP 2.281 — a complete-interventions draft still mints the goal 
     expect(goal.goal_baseline_raw).toBe(4_000_000);
   });
 
-  it('REACHES THE WIRE — the quad survives the V3 transform and NodeV3.parse', async () => {
-    // Presence on the V1 node is not proof it reaches ISL: `NodeV3` is a
-    // strip-mode schema, so an undeclared field is silently dropped at any
-    // re-parse between here and PLoT. This parse is the proof.
+  it('SURVIVES THE V3 TRANSFORM — the quad is not stripped by NodeV3.parse', async () => {
+    // ⚠ RENAMED (adversarial review). This was called "REACHES THE WIRE", which
+    // claimed more than it proves. It proves exactly one hop: that the V3
+    // transform and `NodeV3.parse` do not strip the quad. It does NOT prove the
+    // quad reaches PLoT or ISL, because at least two later stages can remove it:
+    //   * Stage 4b (threshold-sweep) — covered by the STAGE 4b tests below;
+    //   * Stage 4 repair, which can replace the graph wholesale with an LLM's
+    //     or PLoT's own output while preserving only `category` + 6 edge fields
+    //     (rowed separately — not addressed in this PR).
+    // A test named for a destination it never visits is how a gap hides in a
+    // green suite.
+    //
+    // `NodeV3` is a strip-mode schema, so an undeclared field is silently
+    // dropped at any re-parse; this parse is what proves the transform hop.
     const { goal } = await runEnrich(draftShapedGraph(), WORKED_EXAMPLE_BRIEF);
 
     const parsed = NodeV3.parse(transformNodeToV3(goal as unknown as V1Node));
@@ -270,35 +282,210 @@ describe('ROADMAP 2.281 — a complete-interventions draft still mints the goal 
     expect(quad(skipped.goal)).toEqual(quad(notSkipped.goal));
   });
 
-  it('SELECTION INVARIANT — the goal-target factor is emitted FIRST and above minConfidence', () => {
-    // WHY THIS PIN EXISTS, stated honestly.
+  it('COLLISION PATH PARITY — both paths agree when dedupe swallows the user’s target', async () => {
+    // ⚠ THIS TEST REPLACES A WITHDRAWN CLAIM. An earlier version of this file
+    // argued that a mutant swapping the skip path's `qualifyExtractedFactors`
+    // for the RAW extraction was an EQUIVALENT mutant, on the reasoning that
+    // the goal-target factor is always pushed first at confidence 0.95 and so
+    // qualification could never change the selection.
     //
-    // The two call sites select their target factor from the SAME qualified
-    // list (`qualifyExtractedFactors`). A mutant that makes the skip path read
-    // the RAW extraction instead SURVIVES the whole suite above — and it
-    // survives because it is currently an EQUIVALENT mutant, not because the
-    // tests are weak:
+    // THAT DERIVATION WAS FALSE, and adversarial review broke it with the brief
+    // below. Two things were wrong with it:
     //
-    //   * `extractFactors` pushes the goal-target factor FIRST among the
-    //     explicit extractors, deliberately (index.ts, "runs FIRST …
-    //     deliberately"), so dedupe cannot drop it — dedupe only discards a
-    //     factor that duplicates an EARLIER-KEPT one, and nothing is earlier.
-    //   * its confidence is the code constant 0.95, comfortably above the 0.6
-    //     default `minConfidence` (which the pipeline stage never overrides).
+    //   1. `extractFactors` has MORE THAN ONE producer of a target-labelled
+    //      factor. The 0.95 one (`extractGoalTargetWithBaseline`,
+    //      index.ts:565) only fires when the brief states a target AND a
+    //      current level. When it does not fire, `contextualNumber`
+    //      (index.ts:671) can still emit a "Target" at confidence 0.90 — from a
+    //      LATER position in the push order.
+    //   2. Confidence was never the deciding factor. ORDER is. `genericRange`
+    //      (index.ts:492) pushes at confidence 0.80 but pushes EARLIER, and
+    //      dedupe keeps the earlier factor and discards the later one
+    //      regardless of confidence.
     //
-    // Under those two properties, qualification provably cannot change WHICH
-    // factor `isTargetGoalLabel` selects. That equivalence is what this test
-    // pins — so if either property drifts, this goes red and the survivorship
-    // argument above stops being true silently.
+    // In this brief the range midpoint (5.5M + 6.5M) / 2 = 6,000,000 collides
+    // exactly with the user's stated target of 6,000,000, both carry no unit,
+    // so dedupe drops the user's Target — and the goal target is never minted
+    // on EITHER path.
     //
-    // SCOPE, precisely: this pins the equivalence for briefs where the
-    // goal-pair extractor fires. It does NOT prove the two selections agree for
-    // every possible brief, and no claim of universal equivalence is made here.
-    const extracted = extractFactors(WORKED_EXAMPLE_BRIEF);
+    // WHAT THIS TEST ASSERTS is parity, not a mint: whatever the qualification
+    // rules decide, BOTH call sites must decide it identically. Today that
+    // means both no-mint. Under the raw-extraction mutant the skip path would
+    // find the un-deduped "Target" and mint while the non-skip path would not —
+    // a real divergence, which is exactly what this catches.
+    const COLLISION_BRIEF =
+      'Output ranges between 5500000 and 6500000 most years; our target is 6000000.';
 
-    expect(extracted.length).toBeGreaterThan(0);
-    expect(extracted[0].label).toBe('Target');
-    expect(extracted[0].confidence).toBeGreaterThanOrEqual(0.6);
+    // Positive control on the PREMISE: the brief really does contain a
+    // target-labelled factor that qualification removes. Without this, the
+    // parity assertion could pass on a brief that simply has no target at all.
+    const raw = extractFactors(COLLISION_BRIEF);
+    expect(raw.some((f) => /target/i.test(f.label)), 'premise broken: no Target in raw extraction').toBe(true);
+    expect(raw[0].label, 'premise broken: the colliding factor no longer pushes first').not.toMatch(/target/i);
+
+    const skipped = await runEnrich(draftShapedGraph(), COLLISION_BRIEF);
+
+    const g = draftShapedGraph();
+    ((g.nodes as any[]).find((n) => n.id === 'o2') as any).data = { interventions: {} };
+    const notSkipped = await runEnrich(g, COLLISION_BRIEF);
+
+    // Positive control: the two runs really did take different code paths.
+    expect(skipped.ctx.enrichmentTrace.extraction_mode).toBe('v4_complete_skip');
+    expect(notSkipped.ctx.enrichmentTrace.extraction_mode).toBe('regex-only');
+
+    // THE PARITY ASSERTION — the one that bites the raw-extraction mutant.
+    expect(skipped.goal.goal_threshold).toBe(notSkipped.goal.goal_threshold);
+    expect(skipped.goal.goal_threshold_frame).toBe(notSkipped.goal.goal_threshold_frame);
+
+    // Recorded as the CURRENT behaviour, not as desirable behaviour: the
+    // user's stated target is silently swallowed by an earlier factor within
+    // 10% tolerance. That capture gap is pre-existing, affects BOTH paths
+    // equally, and is rowed separately — it is the same user-visible class as
+    // the re-witness's "Target: Not set". If a future fix makes this mint,
+    // this expectation SHOULD be updated to assert the mint on both paths.
+    expect(skipped.goal.goal_threshold).toBeUndefined();
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // STAGE 4b — the mint must SURVIVE the sweep that runs after it
+  //
+  // Found by external review of this PR, confirmed at the bytes. Stage 4b runs
+  // UNGATED on every draft (pipeline index.ts :745 enrich → :792 repair →
+  // :951 sweep). Its "possibly model-inferred" heuristic strips when the raw
+  // target is round AND the goal label contains no digit — and
+  // `Number.isInteger(6_000_000)` is true, so the ONLY thing standing between a
+  // user's stated target and deletion was whether the MODEL happened to put a
+  // digit in the label it wrote.
+  //
+  // The three re-witness runs all had digits in the goal label
+  // ("Grow Annual Revenue to £6,000,000"), which is why the live walk never
+  // showed this. It is not a corner case: "Grow annual revenue" is an entirely
+  // ordinary label.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  it('STAGE 4b — a DIGIT-FREE goal label no longer deletes the user’s stated target', async () => {
+    const g = draftShapedGraph();
+    (g.nodes as any[])[0].label = 'Grow annual revenue'; // no digits, deliberately
+
+    const ctx = makeCtx(g, WORKED_EXAMPLE_BRIEF);
+    await runStageEnrich(ctx);
+    await runStageThresholdSweep(ctx);
+
+    const goal = (ctx.graph as any).nodes.find((n: any) => n.kind === 'goal');
+
+    // Premise control: the label really is digit-free, so the heuristic's
+    // trigger condition genuinely held and the keep is what spared it.
+    expect(/\d/.test(goal.label)).toBe(false);
+
+    expect(goal.goal_threshold).toBe(0.8);
+    expect(goal.goal_threshold_frame).toBe('level');
+    expect(goal.goal_baseline).toBe(0.5333333333333333);
+    expect(goal.goal_baseline_raw).toBe(4_000_000);
+
+    const codes = (ctx.deterministicRepairs ?? []).map((r: any) => r.code);
+    expect(codes).not.toContain('GOAL_THRESHOLD_STRIPPED_NO_DIGITS');
+    expect(codes).not.toContain('GOAL_THRESHOLD_POSSIBLY_INFERRED');
+  });
+
+  it('STAGE 4b — an UNATTESTED threshold is still swept, and leaves NO orphaned baseline', async () => {
+    // The other half, and the one that keeps the keep honest. A threshold this
+    // run did not mint is still judged by the heuristic exactly as before — the
+    // fabrication guard is narrowed to its real target, not disabled.
+    //
+    // It also pins the atomicity repair: `goal_baseline`/`goal_baseline_raw`
+    // were added to the node contract BESIDE the deletion group instead of
+    // INTO it, so a strip used to remove the threshold and leave the baseline —
+    // an `observed_state` describing a number that no longer existed.
+    const g = draftShapedGraph();
+    const goalNode = (g.nodes as any[])[0];
+    goalNode.label = 'Grow annual revenue';
+    // Pre-set, as if it arrived from somewhere this run cannot vouch for.
+    goalNode.goal_threshold = 0.8;
+    goalNode.goal_threshold_raw = 6_000_000;
+    goalNode.goal_threshold_unit = 'count';
+    goalNode.goal_threshold_cap = 7_500_000;
+    goalNode.goal_threshold_frame = 'level';
+    goalNode.goal_baseline = 0.5333333333333333;
+    goalNode.goal_baseline_raw = 4_000_000;
+
+    const ctx = makeCtx(g, 'Should I hire a personal assistant?'); // brief mints nothing
+    await runStageEnrich(ctx);
+    await runStageThresholdSweep(ctx);
+
+    const goal = (ctx.graph as any).nodes.find((n: any) => n.kind === 'goal');
+
+    // Positive control: this run attested nothing, so the heuristic was live.
+    expect(ctx.enricherMintedGoalIds?.size ?? 0).toBe(0);
+    expect((ctx.deterministicRepairs ?? []).map((r: any) => r.code))
+      .toContain('GOAL_THRESHOLD_STRIPPED_NO_DIGITS');
+
+    // THE ATOMICITY ASSERTION — the whole contract goes, or none of it does.
+    for (const f of [
+      'goal_threshold',
+      'goal_threshold_raw',
+      'goal_threshold_unit',
+      'goal_threshold_cap',
+      'goal_threshold_frame',
+      'goal_baseline',
+      'goal_baseline_raw',
+    ]) {
+      expect(goal[f], `${f} survived a strip — orphaned goal contract`).toBeUndefined();
+    }
+  });
+
+  it('STAGE 4b — the attestation survives a GOAL MERGE renaming the minted node', async () => {
+    // Stage 4 (Repair) runs BETWEEN the mint and the sweep and can merge goals,
+    // recording `mergedGoalId → primaryGoalId` in ctx.nodeRenames. A bare id
+    // match would silently lose the attestation exactly then — and the failure
+    // would be invisible, because the sweep would simply go back to deleting
+    // the user's target with no error anywhere.
+    //
+    // Added because the rename-resolution branch was written on reasoning alone
+    // and a mutant deleting it SURVIVED the rest of this file. Defensive code
+    // nothing exercises is indistinguishable from defensive code that does not
+    // work.
+    const g = draftShapedGraph();
+    const goalNode = (g.nodes as any[])[0];
+    goalNode.id = 'goal_primary';
+    goalNode.label = 'Grow annual revenue'; // digit-free ⇒ heuristic would strip
+    goalNode.goal_threshold = 0.8;
+    goalNode.goal_threshold_raw = 6_000_000;
+    goalNode.goal_threshold_unit = 'count';
+    goalNode.goal_threshold_cap = 7_500_000;
+    goalNode.goal_threshold_frame = 'level';
+
+    const ctx = makeCtx(g, 'Should I hire a personal assistant?');
+    // The mint happened on a goal that Stage 4 then merged AWAY into the primary.
+    ctx.enricherMintedGoalIds = new Set(['goal_merged_away']);
+    ctx.nodeRenames = new Map([['goal_merged_away', 'goal_primary']]);
+
+    await runStageThresholdSweep(ctx);
+
+    const goal = (ctx.graph as any).nodes.find((n: any) => n.kind === 'goal');
+    expect(goal.goal_threshold, 'the merged-away mint lost its attestation').toBe(0.8);
+    expect((ctx.deterministicRepairs ?? []).map((r: any) => r.code))
+      .not.toContain('GOAL_THRESHOLD_STRIPPED_NO_DIGITS');
+  });
+
+  it('STAGE 4b — the deletion group covers EVERY CEE-minted goal field (derived, not mirrored)', () => {
+    // The group is no longer hand-maintained here: the sweep now deletes
+    // exactly `CEE_MINTED_GOAL_FIELDS`, the same constant #789's ingress strip
+    // uses, which already carries a derived set-equality test against every
+    // `goal_*` field `schemas/graph.ts` declares.
+    //
+    // This assertion is the join: it pins that the sweep really does use that
+    // constant, so a future `goal_*` field joins the atomic deletion group
+    // automatically instead of being added beside it — which is precisely how
+    // `goal_baseline*` came to be orphaned in the first place.
+    expect([...CEE_MINTED_GOAL_FIELDS].sort()).toEqual([
+      'goal_baseline',
+      'goal_baseline_raw',
+      'goal_threshold',
+      'goal_threshold_cap',
+      'goal_threshold_frame',
+      'goal_threshold_raw',
+      'goal_threshold_unit',
+    ]);
   });
 
   it('PERCENTAGE VARIANT — the re-witness Run 3 shape also mints on a complete draft', async () => {

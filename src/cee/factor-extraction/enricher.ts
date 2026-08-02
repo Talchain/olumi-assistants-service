@@ -508,6 +508,20 @@ export interface EnrichmentResultAsync extends EnrichmentResult {
   llmSuccess?: boolean;
   /** Any warnings from extraction */
   warnings: string[];
+  /**
+   * ATTESTATION (ROADMAP 2.281): the ids of goal nodes whose `goal_threshold`
+   * THIS run minted, derived at the mint site itself — never a hand list, never
+   * re-inferred by a later stage from the shape of the data.
+   *
+   * Stage 4b (threshold-sweep) consumes it. Its "possibly model-inferred"
+   * heuristic — round raw + digit-free label ⇒ strip — cannot distinguish a
+   * model's invention from a user's stated target, and post-#789 the enricher
+   * is the ONLY draft mint, so on a digit-free goal label that heuristic could
+   * only ever delete a number the USER supplied. This list is what lets the
+   * sweep tell the two apart from the RECORD of what happened, rather than by
+   * guessing from the number's appearance.
+   */
+  goalThresholdsMinted: string[];
 }
 
 /**
@@ -734,14 +748,14 @@ function mintGoalTargetOnly(
   brief: string,
   minConfidence: number,
   collector?: CorrectionCollector,
-): { graph: GraphT; minted: boolean } {
+): { graph: GraphT; mintedGoalId: string | undefined } {
   const goalNodeIndex = graph.nodes.findIndex((n) => n.kind === "goal");
-  if (goalNodeIndex < 0) return { graph, minted: false };
+  if (goalNodeIndex < 0) return { graph, mintedGoalId: undefined };
 
   const target = qualifyExtractedFactors(extractFactors(brief), minConfidence).find((f) =>
     isTargetGoalLabel(f.label),
   );
-  if (!target) return { graph, minted: false };
+  if (!target) return { graph, mintedGoalId: undefined };
 
   // Clone before writing — the skip path returns the caller's own graph object
   // when nothing is minted, and must not mutate it when something is.
@@ -752,7 +766,9 @@ function mintGoalTargetOnly(
   };
 
   const minted = applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector);
-  return minted ? { graph: enrichedGraph, minted: true } : { graph, minted: false };
+  return minted
+    ? { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id }
+    : { graph, mintedGoalId: undefined };
 }
 
 /**
@@ -801,8 +817,9 @@ export async function enrichGraphWithFactorsAsync(
       // early exit that was silently swallowing the user's stated target on
       // every well-formed draft.
       const goalOnly = mintGoalTargetOnly(graph, brief, minConfidence, collector);
+      const minted = goalOnly.mintedGoalId !== undefined;
 
-      if (goalOnly.minted) {
+      if (minted) {
         emit(TelemetryEvents.FactorExtractionComplete, {
           factors_added: 0,
           factors_enhanced: 0,
@@ -820,8 +837,9 @@ export async function enrichGraphWithFactorsAsync(
         factorsSkipped: 0,
         // Honest naming: only claim a COMPLETE skip when the run really did
         // write nothing.
-        extractionMode: goalOnly.minted ? "v4_factor_skip_goal_minted" : "v4_complete_skip",
+        extractionMode: minted ? "v4_factor_skip_goal_minted" : "v4_complete_skip",
         warnings: [],
+        goalThresholdsMinted: goalOnly.mintedGoalId ? [goalOnly.mintedGoalId] : [],
       };
     }
   }
@@ -879,6 +897,7 @@ export async function enrichGraphWithFactorsAsync(
   let factorsEnhanced = 0;
   let factorsSkipped = 0;
   let goalThresholdsSet = 0;
+  const goalThresholdsMinted: string[] = [];
 
   // Deep clone the graph to avoid mutation
   const enrichedGraph: GraphT = {
@@ -895,6 +914,7 @@ export async function enrichGraphWithFactorsAsync(
     if (isTargetGoalLabel(factor.label) && goalNode && goalNodeIndex >= 0) {
       if (applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, factor, collector)) {
         goalThresholdsSet++;
+        goalThresholdsMinted.push(goalNode.id);
         continue; // Don't inject as factor
       }
       // goal_threshold was ALREADY set — fall through and treat this factor
@@ -1157,5 +1177,6 @@ export async function enrichGraphWithFactorsAsync(
     extractionMode,
     llmSuccess,
     warnings,
+    goalThresholdsMinted,
   };
 }

@@ -25,6 +25,7 @@
 import type { StageContext } from "../types.js";
 import { log } from "../../../utils/telemetry.js";
 import { fieldDeletion, recordFieldDeletions, type FieldDeletionEvent } from "../utils/field-deletion-audit.js";
+import { CEE_MINTED_GOAL_FIELDS } from "../../../adapters/llm/normalisation.js";
 
 interface Repair {
   code: string;
@@ -42,14 +43,23 @@ interface Repair {
  * rest of the frame work asserts, that the frame never travels without its
  * threshold. That is CLAUDE.md trap 12 in miniature: a hand-maintained group is
  * exactly the thing a later field gets added NEXT TO instead of INTO.
+ *
+ * ⚠⚠ AND IT HAPPENED AGAIN, TO THIS VERY LIST (ROADMAP 2.281). `goal_baseline`
+ * and `goal_baseline_raw` (2.273) were added to the node contract BESIDE this
+ * group rather than INTO it — so a strip removed the threshold quintet and left
+ * the baseline behind, orphaning an `observed_state` that described a number
+ * that no longer existed. Trap 12 struck inside the fix written to warn about
+ * trap 12, because the warning was PROSE and prose cannot fail a build.
+ *
+ * THE FIX IS TO STOP HAND-MAINTAINING IT. This group is now the SAME constant
+ * the #789 ingress strip uses — `CEE_MINTED_GOAL_FIELDS`, "every field of the
+ * goal-threshold contract CEE mints for itself" — which already carries a
+ * DERIVED set-equality test against every `goal_*` field `schemas/graph.ts`
+ * declares. A new goal field now joins this group automatically, and if the
+ * scan ever stops seeing the declarations it claims to check, that test REDs.
+ * One source of truth, machine-checked, no list to remember.
  */
-const THRESHOLD_FIELDS = [
-  "goal_threshold",
-  "goal_threshold_raw",
-  "goal_threshold_unit",
-  "goal_threshold_cap",
-  "goal_threshold_frame",
-] as const;
+const THRESHOLD_FIELDS = CEE_MINTED_GOAL_FIELDS;
 
 /**
  * Stage 4b entry point. Follows pipeline convention:
@@ -65,6 +75,18 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
   const start = Date.now();
   const repairs: Repair[] = [];
   const deletions: FieldDeletionEvent[] = [];
+
+  // ── ROADMAP 2.281: which goals carry an ENRICHER-MINTED threshold ────────
+  // Stage 4 (Repair) runs between the mint and this sweep and can MERGE goals,
+  // rewriting `mergedGoalId → primaryGoalId` into ctx.nodeRenames. A bare id
+  // match would therefore lose the attestation exactly when goals merged, so
+  // the surviving primary inherits the attestation of anything merged into it.
+  const attested = new Set<string>(ctx.enricherMintedGoalIds ?? []);
+  if (ctx.nodeRenames) {
+    for (const [mergedId, primaryId] of ctx.nodeRenames) {
+      if (attested.has(mergedId)) attested.add(primaryId);
+    }
+  }
 
   for (const node of nodes) {
     // Skip malformed entries and non-goal nodes
@@ -96,6 +118,25 @@ export async function runStageThresholdSweep(ctx: StageContext): Promise<void> {
     // ── Step 4b-ii + 4b-iii: inferred heuristic ────────────────────────
     // Finite number guard: skip if raw is not a finite number
     if (typeof gtRaw !== "number" || !Number.isFinite(gtRaw)) continue;
+
+    // ── ROADMAP 2.281: the PROVENANCE KEEP ──────────────────────────────
+    // The heuristic below asks "does this number LOOK inferred?" — round raw,
+    // and a label that does not mention it. That question was answerable when a
+    // model could author a threshold. Post-#789 it cannot: the enricher is the
+    // only draft mint, and it mints only a number the user stated in the brief,
+    // read deterministically by regex.
+    //
+    // So on a digit-free goal label ("Grow annual revenue" — a perfectly
+    // ordinary label the model writes), `Number.isInteger(6_000_000)` is true
+    // and the heuristic deleted a target the USER supplied. Measured: the
+    // worked-example brief minted 0.8/'level'/0.5333 at Stage 3 and this sweep
+    // removed it at Stage 4b, leaving the baseline orphaned.
+    //
+    // A run that ATTESTED its own mint is not guessing, so it is not swept.
+    // Note what this does NOT weaken: the `raw absent → strip` rule above still
+    // applies to every node including attested ones, and any threshold this run
+    // did not mint is still judged by the heuristic exactly as before.
+    if (attested.has(node.id)) continue;
 
     const rawIsRound = Number.isInteger(gtRaw) || gtRaw % 5 === 0;
     const labelHasNoDigits = !/\d/.test(node.label ?? "");
