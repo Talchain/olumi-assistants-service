@@ -722,7 +722,39 @@ describe("Validation: needs_user_input requires blockers", () => {
 // ============================================================================
 
 describe("Goal threshold fields in analysis_ready", () => {
-  it("includes goal_threshold but excludes display metadata from analysis_ready; goal node keeps all four", () => {
+  /**
+   * ⚠ THIS TEST WAS DELIBERATELY REVERSED — ROADMAP 2.315(a), and the reversal
+   * is the point of the change, not a side effect. Read before "restoring" it.
+   *
+   * Commit b4cfbfd4 (19 Feb 2026, "remove display metadata fields from
+   * analysis_ready payload") removed exactly these three fields, on two stated
+   * premises:
+   *
+   *   1. "only goal_threshold (normalised 0-1) is needed by PLoT"
+   *   2. "Display metadata stays on the goal node in the graph response for
+   *      UI consumption"
+   *
+   * PREMISE 1 STILL HOLDS and is undisturbed: `analysis_ready` never reaches
+   * the PLoT client (`src/orchestrator/plot-client.ts` contains zero
+   * occurrences of `analysis_ready` or `goal_threshold`; the /v2/run request is
+   * built from the graph, options and goal_node_id). Adding fields here cannot
+   * change what ISL is asked.
+   *
+   * PREMISE 2 IS FALSE, and a user-visible defect is the proof. On the analyse
+   * path the UI sends a turn and CEE reloads its OWN persisted graph — the UI
+   * does not reliably hold the enriched goal node, so "the UI reads it from the
+   * graph" does not hold when it matters. The observable consequence: a goal
+   * target of £800,000 rendered on Inspector v2 as "Success means reaching
+   * >= 0.8 count" — the normalised value with a placeholder unit, because the
+   * raw value, unit and cap never left CEE. The UI's own store sync
+   * (canvas/store.ts:3997-4012 at UI tip cb957c8c) reads all three FROM THIS
+   * PAYLOAD, raw-first.
+   *
+   * So the trio is carried again — verbatim from the goal node's attested mint,
+   * never re-derived. See tests/unit/analysis-ready-goal-threshold-raw-trio.test.ts
+   * for the full four-hop guard and the carry-vs-recompute mutants.
+   */
+  it("carries goal_threshold AND the display trio on analysis_ready; goal node keeps all four", () => {
     const graph = createV3Graph(
       [
         { id: "goal_mid_market", kind: "goal", label: "Mid-market expansion" },
@@ -750,13 +782,15 @@ describe("Goal threshold fields in analysis_ready", () => {
 
     const payload = buildAnalysisReadyPayload([option], "goal_mid_market", graph);
 
-    // analysis_ready: only goal_threshold (PLoT needs it), NOT display metadata
+    // analysis_ready: the normalised threshold PLoT needs, AND the display
+    // trio the UI cannot otherwise obtain. Carried verbatim from the node.
     expect(payload.goal_threshold).toBe(0.2);
-    expect(payload).not.toHaveProperty("goal_threshold_raw");
-    expect(payload).not.toHaveProperty("goal_threshold_unit");
-    expect(payload).not.toHaveProperty("goal_threshold_cap");
+    expect(payload).toHaveProperty("goal_threshold_raw", 200);
+    expect(payload).toHaveProperty("goal_threshold_unit", "customers");
+    expect(payload).toHaveProperty("goal_threshold_cap", 1000);
 
-    // Goal node in graph still carries all four fields (UI reads display metadata here)
+    // Goal node in the graph is unchanged — still carries all four fields.
+    // The payload now MIRRORS them; it does not move or consume them.
     const gn = graph.nodes.find((n) => n.id === "goal_mid_market")!;
     expect((gn as any).goal_threshold).toBe(0.2);
     expect((gn as any).goal_threshold_raw).toBe(200);
