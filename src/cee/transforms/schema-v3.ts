@@ -219,32 +219,27 @@ export function transformNodeToV3(
       }),
   };
 
-  // Transform data to observed_state (only if it's FactorData with value defined)
-  // OptionData (with interventions) is handled separately in options extraction
-  if (isFactorData(node.data) && node.data.value !== undefined) {
-    // Map extractionType to V3 source format
-    const source: "brief_extraction" | "cee_inference" =
-      node.data.extractionType === "inferred" ? "cee_inference" : "brief_extraction";
-
-    v3Node.observed_state = {
-      value: node.data.value,
-      baseline: node.data.baseline,
-      unit: node.data.unit,
-      source,
-      // Pass through factor metadata fields
-      ...(node.data.raw_value !== undefined && { raw_value: node.data.raw_value }),
-      ...(node.data.cap !== undefined && { cap: node.data.cap }),
-      ...(node.data.extractionType !== undefined && { extractionType: node.data.extractionType }),
-      ...(node.data.factor_type !== undefined && { factor_type: node.data.factor_type }),
-      ...(node.data.uncertainty_drivers !== undefined && { uncertainty_drivers: node.data.uncertainty_drivers }),
-    };
-  } else if (node.kind === "goal" && node.goal_baseline != null) {
-    // ROADMAP 2.273 — THE GOAL LIMB of this gate. The branch above builds
-    // `observed_state` only from `data`, which a goal node never carries, so
-    // before this a goal reached the wire with a threshold and a frame but no
-    // `observed_state` AT ALL — ISL's stronger refusal limb
+  // Transform data to observed_state.
+  // OptionData (with interventions) is handled separately in options extraction.
+  //
+  // ⚠ ORDER IS LOAD-BEARING (ROADMAP 2.294): the goal limb is checked FIRST.
+  // This gate originally led with the factor-data branch, on the 2.273
+  // assumption that a goal node never carries `data` — FALSE on live drafts.
+  // The third 2.258 witness (witness-2258-goal-probability-THIRD.md §3.2, CEE
+  // 33c10e52) caught the model authoring `data.value = 0.667` on the goal, so
+  // the data branch shadowed the goal limb — the ONLY projection of
+  // `goal_baseline` into `observed_state.baseline` — the minted 0.5333…
+  // baseline died here, and ISL refused with `missing_goal_baseline`. A
+  // baseline-bearing goal must take the goal limb regardless of model-authored
+  // `data`. (Stripping `data` off goal nodes generally is NOT this gate's job —
+  // that belongs to the 2.286 server-owned attestation object.)
+  if (node.kind === "goal" && node.goal_baseline != null) {
+    // ROADMAP 2.273 — THE GOAL LIMB of this gate. The factor-data branch below
+    // builds `observed_state` only from `data`; before this limb existed a
+    // goal without factor-shaped data reached the wire with a threshold and a
+    // frame but no `observed_state` AT ALL — ISL's stronger refusal limb
     // (`observed_state_present=False`, `missing_goal_baseline`), pinned by the
-    // 2.258 characterisation test this PR retires.
+    // 2.258 characterisation test that PR retired.
     //
     // ⚠ `value` IS REQUIRED, and it is NOT a second measurement. ISL's
     // `ObservedState.value` is a required Pydantic field
@@ -288,6 +283,23 @@ export function transformNodeToV3(
       source: "brief_extraction",
       ...(node.goal_baseline_raw != null && { raw_value: node.goal_baseline_raw }),
       ...(node.goal_threshold_cap != null && { cap: node.goal_threshold_cap }),
+    };
+  } else if (isFactorData(node.data) && node.data.value !== undefined) {
+    // Map extractionType to V3 source format
+    const source: "brief_extraction" | "cee_inference" =
+      node.data.extractionType === "inferred" ? "cee_inference" : "brief_extraction";
+
+    v3Node.observed_state = {
+      value: node.data.value,
+      baseline: node.data.baseline,
+      unit: node.data.unit,
+      source,
+      // Pass through factor metadata fields
+      ...(node.data.raw_value !== undefined && { raw_value: node.data.raw_value }),
+      ...(node.data.cap !== undefined && { cap: node.data.cap }),
+      ...(node.data.extractionType !== undefined && { extractionType: node.data.extractionType }),
+      ...(node.data.factor_type !== undefined && { factor_type: node.data.factor_type }),
+      ...(node.data.uncertainty_drivers !== undefined && { uncertainty_drivers: node.data.uncertainty_drivers }),
     };
   } else if (isFactorData(node.data)) {
     // Controllable factors without value: preserve factor_type and uncertainty_drivers

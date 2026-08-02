@@ -503,3 +503,172 @@ describe('ROADMAP 2.281 — a complete-interventions draft still mints the goal 
     expect(goal.goal_baseline).toBe(0.85);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROADMAP 2.294 — the goal limb must not be SHADOWED by model-authored `data`
+//
+// Proven live by the THIRD 2.258 witness (witness-2258-goal-probability-THIRD.md
+// §3.2, quartet CEE 33c10e52): on a real draft the model gave the GOAL node
+// `data.value = 0.667` (≈ 4M/6M, model-authored), so `transformNodeToV3`'s
+// FIRST branch — `isFactorData(node.data) && node.data.value !== undefined` —
+// won, emitted `observed_state = {value: 0.667}` with NO baseline key, and the
+// enricher-minted `goal_baseline = 0.5333…` died at the projection. The 2.273
+// goal limb — the ONLY place `goal_baseline` becomes `observed_state.baseline`
+// and reaches the wire — sat unreachable behind it as an `else if`, its comment
+// still claiming "`data`, which a goal node never carries". ISL then refused
+// with `missing_goal_baseline` phrasing; every upstream link (mint, quintet,
+// Stage-4b keep, store) had already been proven working.
+//
+// The tests in this file above never caught it because `draftShapedGraph()`'s
+// goal carries no `data` — the shape production actually produces is precisely
+// the shape the suite never fed the transform. The shape IS the assertion,
+// again.
+//
+// The fix branches on NODE KIND FIRST: a goal node carrying `goal_baseline`
+// takes the goal limb regardless of model-authored `data`. Per #787's
+// value-required design the limb writes `value = baseline = goal_baseline`.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('ROADMAP 2.294 — model-authored data on a goal node must not shadow the goal limb', () => {
+  /**
+   * The EXACT witnessed shape — third witness Run 1, `draft_graph.nodes[5]`
+   * (goal `goal_revenue`) at CEE `33c10e52`: full threshold quintet + the
+   * minted baseline pair + the model-authored `data` that made the data
+   * branch win on the live wire.
+   */
+  function witnessedGoalNode(): V1Node {
+    return {
+      id: 'goal_revenue',
+      kind: 'goal',
+      label: 'Grow Annual Revenue to £6 Million',
+      goal_threshold: 0.8,
+      goal_threshold_raw: 6_000_000,
+      goal_threshold_unit: 'count',
+      goal_threshold_cap: 7_500_000,
+      goal_threshold_frame: 'level',
+      goal_baseline: 0.5333333333333333,
+      goal_baseline_raw: 4_000_000,
+      data: { value: 0.667, factor_type: 'revenue', extractionType: 'explicit' },
+    };
+  }
+
+  it('THE WITNESSED SHAPE — a baseline-bearing goal WITH model-authored data takes the goal limb', () => {
+    // Pristine signature (the live defect): observed_state = {value: 0.667,
+    // source, extractionType, factor_type} with NO baseline key — the data
+    // branch won. Post-fix: the goal limb's designed shape, value = baseline =
+    // goal_baseline (#787: ISL requires `value`; nothing is invented to fill it).
+    const parsed = NodeV3.parse(transformNodeToV3(witnessedGoalNode()));
+
+    expect(parsed.observed_state).toEqual({
+      value: 0.5333333333333333,
+      baseline: 0.5333333333333333,
+      unit: 'count',
+      source: 'brief_extraction',
+      raw_value: 4_000_000,
+      cap: 7_500_000,
+    });
+    // Named separately so a mutant that keeps the limb but drops only the
+    // baseline key cannot hide inside a single object-equality diff:
+    expect(parsed.observed_state?.baseline).toBe(0.5333333333333333);
+    expect(parsed.observed_state?.value).toBe(0.5333333333333333);
+  });
+
+  it('END-TO-END — real enrich stage on the witnessed draft shape, then the real transform', async () => {
+    // The composition the live wire actually runs: the enricher mints the
+    // baseline pair onto a goal that ALREADY carries model-authored data
+    // (exactly Run 1's draft), then the V3 transform projects it. On pristine
+    // 33c10e52 the projection emits {value: 0.667, no baseline} and the mint
+    // dies here — this is the last broken link in the goal-probability train.
+    const g = draftShapedGraph();
+    const goalNode = (g.nodes as any[])[0];
+    goalNode.data = { value: 0.667, factor_type: 'revenue', extractionType: 'explicit' };
+
+    const ctx = makeCtx(g, WORKED_EXAMPLE_BRIEF);
+    await runStageEnrich(ctx);
+    await runStageThresholdSweep(ctx);
+    const goal = (ctx.graph as any).nodes.find((n: any) => n.kind === 'goal');
+
+    // POSITIVE CONTROLS on the shadowing premise — the goal genuinely carries
+    // BOTH the model-authored data AND the minted baseline after enrich+sweep.
+    // If a future stage strips goal data upstream (the rowed 2.286 attestation
+    // object), these controls fail and say the test has gone vacuous, rather
+    // than letting it pass by no longer testing the collision at all.
+    expect(goal.data?.value).toBe(0.667);
+    expect(goal.goal_baseline).toBe(0.5333333333333333);
+
+    const parsed = NodeV3.parse(transformNodeToV3(goal as unknown as V1Node));
+    expect(parsed.observed_state?.value).toBe(0.5333333333333333);
+    expect(parsed.observed_state?.baseline).toBe(0.5333333333333333);
+  });
+
+  it('PRESERVED (a) — a NON-GOAL factor node with identical data is byte-unchanged', () => {
+    // The generic factor-data path must not move. Same data payload as the
+    // witnessed goal, on a factor node: the data branch still owns it.
+    const factor: V1Node = {
+      id: 'f_revenue',
+      kind: 'factor',
+      label: 'Annual Revenue',
+      category: 'observable',
+      data: {
+        value: 0.667,
+        baseline: 0.5,
+        unit: 'count',
+        raw_value: 4_000_000,
+        cap: 6_000_000,
+        factor_type: 'revenue',
+        extractionType: 'explicit',
+        uncertainty_drivers: ['market volatility'],
+      },
+    };
+
+    const parsed = NodeV3.parse(transformNodeToV3(factor));
+
+    expect(parsed.observed_state).toEqual({
+      value: 0.667,
+      baseline: 0.5,
+      unit: 'count',
+      source: 'brief_extraction',
+      raw_value: 4_000_000,
+      cap: 6_000_000,
+      factor_type: 'revenue',
+      extractionType: 'explicit',
+      uncertainty_drivers: ['market volatility'],
+    });
+  });
+
+  it('PRESERVED (b) — a goal WITHOUT goal_baseline but WITH factor-shaped data keeps the data branch', () => {
+    // No baseline was minted, so the goal limb has nothing to deliver and the
+    // node keeps today's behaviour — the data branch, no new refusal invented.
+    const node = witnessedGoalNode();
+    delete node.goal_baseline;
+    delete node.goal_baseline_raw;
+
+    const parsed = NodeV3.parse(transformNodeToV3(node));
+
+    expect(parsed.observed_state).toEqual({
+      value: 0.667,
+      source: 'brief_extraction',
+      extractionType: 'explicit',
+      factor_type: 'revenue',
+    });
+    expect(parsed.observed_state?.baseline).toBeUndefined();
+  });
+
+  it('PRESERVED (c) — a goal with goal_baseline and NO data still takes the goal limb', () => {
+    // Today's only-working case (the shape the SURVIVES-THE-V3-TRANSFORM test
+    // above feeds) must stay working, asserted here at the full designed shape.
+    const node = witnessedGoalNode();
+    delete node.data;
+
+    const parsed = NodeV3.parse(transformNodeToV3(node));
+
+    expect(parsed.observed_state).toEqual({
+      value: 0.5333333333333333,
+      baseline: 0.5333333333333333,
+      unit: 'count',
+      source: 'brief_extraction',
+      raw_value: 4_000_000,
+      cap: 7_500_000,
+    });
+  });
+});
