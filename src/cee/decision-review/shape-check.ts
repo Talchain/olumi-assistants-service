@@ -85,7 +85,12 @@ const LABEL_NUMBER_PATTERN = /(-?\d+(?:\.\d+)?)/g;
 // Regex to extract compound number expressions like "£200k", "$1.5m", "3bn" from labels.
 // Captures: (number)(multiplier suffix). Supports "bn" as a two-letter billion suffix.
 const COMPOUND_NUMBER_PATTERN = /(-?\d+(?:\.\d+)?)\s*(bn|[kmb])\b/gi;
-const MULTIPLIER_MAP: Record<string, number> = { k: 1_000, m: 1_000_000, b: 1_000_000_000, bn: 1_000_000_000 };
+// ⚠ EXPORTED SOLELY SO THE CANONICAL ALPHABET'S UNION GUARD CAN READ IT
+// (ROADMAP 2.330). See the note on `MULTIPLIERS` in
+// `src/cee/extraction/numeric-parser.ts`: a sibling magnitude list that cannot
+// be imported is a sibling that cannot be compared, and an uncomparable
+// sibling is exactly where a key goes missing.
+export const MULTIPLIER_MAP: Record<string, number> = { k: 1_000, m: 1_000_000, b: 1_000_000_000, bn: 1_000_000_000 };
 
 /**
  * Extract numeric tokens from a label string (e.g. winner.label, option_label).

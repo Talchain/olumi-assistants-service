@@ -38,6 +38,28 @@ export const CURRENCY_SYMBOL_SOURCE = String.raw`£|\$|€`;
 const CURRENCY_SYMBOL = CURRENCY_SYMBOL_SOURCE;
 const CURRENCY_CODE = String.raw`GBP|USD|EUR`;
 const CURRENCY_COLLOQUIAL = String.raw`grand|quid`;
+/**
+ * The colloquial tokens that also carry a MAGNITUDE, and what they multiply by
+ * (ROADMAP 2.330).
+ *
+ * `CURRENCY_COLLOQUIAL` above admits exactly `grand|quid`. Both imply GBP (see
+ * `normaliseCurrencyUnit`), but only `grand` is also a magnitude: "five grand"
+ * is 5,000, "five quid" is 5. That fact used to live as an inline ternary in
+ * rule P8 — the only statement of `grand` → ×1000 anywhere in `src/`, and
+ * therefore invisible to the canonical alphabet's union guard, which is how
+ * `$50 grand` extracted as 50 on the goal-card path while this rule read the
+ * same words as 50,000.
+ *
+ * A token absent from this map carries no magnitude and multiplies by 1. That
+ * is a real statement about `quid`, not a silent fallback: the regex admits no
+ * third token, and `COLLOQUIAL_MAGNITUDE_TOKENS_ARE_KNOWN` in the union guard
+ * REDs if `CURRENCY_COLLOQUIAL` ever grows one this map has not ruled on.
+ */
+export const COLLOQUIAL_MAGNITUDE_MULTIPLIERS: Readonly<Record<string, number>> = {
+  grand: 1_000,
+};
+/** The colloquial currency tokens P8 admits, as data — see the map above. */
+export const CURRENCY_COLLOQUIAL_SOURCE = CURRENCY_COLLOQUIAL;
 const TIME_UNIT = String.raw`months?|weeks?|days?|years?|hours?|minutes?`;
 const METRIC_UNIT = String.raw`kg|km|miles?`;
 // Suffix tokens MUST be followed by a non-letter (word boundary via
@@ -732,7 +754,7 @@ const rule_P8: PatternRule = {
       const num = parseNum(m[1]);
       const colloquial = m[2].toLowerCase();
       if (!Number.isFinite(num)) continue;
-      const value = colloquial === 'grand' ? num * 1000 : num;
+      const value = num * (COLLOQUIAL_MAGNITUDE_MULTIPLIERS[colloquial] ?? 1);
       const unit = 'GBP';
       out.push(
         emit(

@@ -52,8 +52,16 @@ const CURRENCY_MAP: Record<string, string> = {
 
 /**
  * Multiplier suffixes.
+ *
+ * ⚠ EXPORTED SOLELY SO THE CANONICAL ALPHABET'S UNION GUARD CAN READ IT
+ * (ROADMAP 2.330). This is one of the sibling magnitude vocabularies that
+ * `src/utils/magnitude-alphabet.ts` must be a SUPERSET of. A derived guard can
+ * only compare lists it can import, so a private sibling is a sibling that
+ * cannot be checked — which is how `grand` stayed out of the canonical list
+ * while two other modules resolved it to ×1000. Nothing outside the union
+ * guard should index this: new consumers take the canonical alphabet.
  */
-const MULTIPLIERS: Record<string, number> = {
+export const MULTIPLIERS: Record<string, number> = {
   k: 1_000,
   K: 1_000,
   m: 1_000_000,

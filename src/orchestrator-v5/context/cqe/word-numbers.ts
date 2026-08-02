@@ -60,7 +60,15 @@ const FRACTION_FOLLOW =
 // the intact word compound to the same value, so the guard keeps the correct
 // answer while removing the whole partial-fragment hazard class uniformly
 // rather than enumerating which magnitudes are safe (a mirror we won't keep).
-const MAGNITUDE_ALT = 'hundred|thousand|million|billion|trillion|grand';
+// ⚠ EXPORTED SOLELY SO THE CANONICAL ALPHABET'S UNION GUARD CAN READ IT
+// (ROADMAP 2.330). This is a magnitude VOCABULARY, not a value lookup — it
+// answers "is this token a magnitude word?" for compound detection, never "how
+// many thousands is it?". It is still a sibling list of magnitude words, and it
+// is the only place in `src/` that spells `grand` and `hundred` as magnitudes,
+// so the union guard reads it and the canonical alphabet must account for every
+// token in it — either by carrying the key, or by excluding it EXPLICITLY with
+// a stated reason.
+export const MAGNITUDE_ALT = 'hundred|thousand|million|billion|trillion|grand';
 const TENS_ALT = 'twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety';
 // "point" is the spoken decimal separator ("one point five" = 1.5). A
 // word-number on EITHER side of it is a decimal fragment, never a standalone

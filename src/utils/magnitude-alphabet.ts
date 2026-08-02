@@ -53,6 +53,34 @@
  * `thousand` and `mn` are added here, both measured against sibling lists that
  * already carried them (`cee/extraction/numeric-parser.ts` had both).
  *
+ * ⚠⚠⚠ AND IT HAPPENED A THIRD TIME, TO THE REPAIR ITSELF (ROADMAP 2.330).
+ * `grand` was missing. MEASURED at `9a0541b4`:
+ * `extractFactors("Budget of £250 grand for the rebuild.")` returned **250 at
+ * confidence 0.90** — a 1,000x under-read, labelled "Budget", on the goal-card
+ * path — while `orchestrator-v5/context/cqe/rules.ts` read the same two words
+ * as 250,000 and `cqe/word-numbers.ts` listed `grand` among its magnitude
+ * words. TWO MODULES IN THIS REPO ALREADY KNEW. The canonical list did not, and
+ * every guard shipped by 2.322 stayed green, because the corpora it added
+ * spelled `thousand` (the key it was fixing) and nothing else new.
+ *
+ * That is the same shape as `thousand`'s own survival, one repair later, and it
+ * says something the earlier entries only implied: FIXING THE KEY IS NOT
+ * FIXING THE CLASS. So 2.330 ships the comparison that was never made —
+ * `magnitude-alphabet.union.test.ts` asserts this list is a SUPERSET of every
+ * sibling magnitude vocabulary in `src/`, importing each one rather than
+ * describing it, and REDs on the next key a sibling knows and this list does
+ * not. Its Part D scans `src/` from disk so a NEW sibling cannot arrive
+ * quietly. Beside it, `magnitude-alphabet.corpus.test.ts` is the hand-written
+ * half that no derivation can supply — the only thing able to notice a key
+ * that NO sibling spells either.
+ *
+ * ⚠ `hundred` is deliberately NOT here, and the exclusion is tested rather than
+ * implicit — see `DELIBERATE_EXCLUSIONS` in the union guard. It is a
+ * compound-detection word in `word-numbers`, never a multiplier, and admitting
+ * it would make "£5 hundred thousand" commit 500 instead of 5: still 1,000x
+ * short, but confident and no longer visibly incomplete. Multi-word compounds
+ * need a parser, not an alphabet entry.
+ *
  * ORDERING IS THE SAFETY PROPERTY, and it is guaranteed by construction.
  * Alternation is first-match-wins, so a shorter key that PREFIXES a longer one
  * ("b" before "bn", "m" before "million") would swallow it. Sorting
@@ -77,6 +105,7 @@ export const MAGNITUDE_MULTIPLIERS: Readonly<Record<string, number>> = {
   b: 1e9,
   t: 1e12,
   mn: 1e6,
+  grand: 1e3,
   thousand: 1e3,
   million: 1e6,
   billion: 1e9,
