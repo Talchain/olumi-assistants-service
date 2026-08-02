@@ -187,6 +187,35 @@ function amountPattern(prefix: string): string {
 }
 
 /**
+ * An amount plus its OPTIONAL trailing metric word, CAPTURED — "800k REVENUE",
+ * "50 EMPLOYEES", "£6,000,000 WITHIN…" (function words are filtered later by
+ * `resolveTrailingMetric`, never here: filtering inside the regex would change
+ * what the patterns match, and this wrapper must keep the matchable language
+ * of the pre-2.287 grammar byte-identical — the one noun the old CLAUSE_BRIDGE
+ * allowance skipped is now captured at the same position instead).
+ *
+ * Used by the clause-bridge patterns (2 and 3) on BOTH amounts. Pattern 1 does
+ * not use it: "from X to a target of Y" is one construction about one metric
+ * by design, and widening it to swallow nouns would let "from 50 employees to
+ * a target of 800k" start matching — an EXPANSION of the extraction surface
+ * this repair has no mandate to make.
+ *
+ * ⚠ The `\\s*` (not `\\s+`) before the word is load-bearing: `amountPattern`
+ * ends with a greedy `\\s*` that has usually consumed the separating space
+ * already, and at END-OF-PATTERN position nothing later forces the engine to
+ * backtrack into it — so a `\\s+` group here would silently NEVER capture the
+ * final amount's noun, and probe "Currently at 50 employees, and our target is
+ * 800k revenue" would sail through unseen. (Mid-pattern the two spellings are
+ * equivalent, because the following connective forces the backtrack.)
+ */
+function amountWithMetricPattern(prefix: string): string {
+  return (
+    amountPattern(prefix) +
+    `(?:\\s*(?<${prefix}Metric>[A-Za-z][A-Za-z-]{0,19})\\b)?`
+  );
+}
+
+/**
  * The ONLY bridge permitted between a goal target and its current level when
  * the two sit in separate clauses (patterns 2 and 3).
  *
@@ -211,17 +240,133 @@ function amountPattern(prefix: string): string {
  * hand-maintained mirror (CLAUDE.md trap 12) in its most dangerous form, where
  * every connective nobody thought of becomes a silent fabrication.
  *
- * Permitted, in order: at most ONE unit noun attached to the first amount
- * ("800 CUSTOMERS, currently…"), then a connective from the closed set
- * {`,`, ` and`, `, and`}, then an optional determiner ("…and OUR objective").
- * Anything else — a second subject, a concessive ("though"), a semicolon, a
- * colon — does not match, and no baseline is minted.
+ * Permitted, in order: a connective from the closed set {`,`, ` and`, `, and`},
+ * then an optional determiner ("…and OUR objective"). Anything else — a second
+ * subject, a concessive ("though"), a semicolon, a colon — does not match, and
+ * no baseline is minted.
+ *
+ * ROADMAP 2.287 — the "at most ONE unit noun" allowance that used to open this
+ * bridge ("800 CUSTOMERS, currently…") has MOVED into the amount itself
+ * (`amountWithMetricPattern`), where it is CAPTURED rather than skipped. #787
+ * closed the window but left the noun unread, so "800k REVENUE, and currently
+ * at 50 EMPLOYEES" still paired revenue with headcount — the nouns disagreed
+ * and nothing was looking. The matchable language is unchanged (same noun
+ * shape, same position); the difference is that the pair-former now SEES both
+ * nouns and refuses the pair when they name different metrics.
  */
 const CLAUSE_BRIDGE =
-  '(?:\\s+[A-Za-z][A-Za-z-]{0,19})?' + // at most ONE unit noun
   '(?:,|\\s+and|,\\s+and)' + // closed connective set
   '(?:\\s+(?:our|the|my|its))?' + // optional determiner
   '\\s*';
+
+/* ===========================================================================
+ * METRIC-PHRASE COMPATIBILITY (ROADMAP 2.287 + 2.288)
+ *
+ * WHY: `amountPattern` captured the amount but never the metric NOUN beside
+ * it, and the pair-former compared nothing — so a target and a "current level"
+ * from two different metrics (revenue vs employees; $ vs £) were fused into
+ * one (target, baseline) pair. Both operands normalise into ISL's domain, so
+ * the result is a CONFIDENT WRONG PROBABILITY, which is strictly worse than a
+ * refusal. These helpers give the pair-former eyes: each amount's trailing
+ * word is captured, classified, and the pair is REFUSED (with a named reason)
+ * when the two amounts carry explicit metric/unit phrases that disagree.
+ * ========================================================================= */
+
+/**
+ * Function/time words that may legitimately trail an amount without naming a
+ * metric — "800 THIS year", "£6,000,000 WITHIN a year", "500 CURRENTLY". A
+ * closed set, and the failure direction is the safe one: an unlisted function
+ * word gets treated as a metric noun, which can only cause a REFUSAL (the
+ * baseline is withheld and ISL refuses honestly), never a fabricated pair.
+ * Keep actual metric nouns (revenue, customers, employees…) OUT of this list.
+ */
+const METRIC_NOUN_STOPWORDS = new Set<string>([
+  // determiners / conjunctions / pronouns
+  "a", "an", "and", "or", "but", "the", "this", "that", "these", "those",
+  "our", "my", "your", "their", "its", "his", "her", "we", "it",
+  // auxiliaries / verbs
+  "is", "are", "was", "were", "be", "been", "being",
+  "will", "would", "can", "could", "should", "may", "might", "must",
+  // prepositions
+  "in", "on", "at", "by", "for", "of", "to", "from", "per", "with", "within",
+  "without", "over", "under", "across", "into", "through", "during", "before",
+  "after", "between", "around", "about", "above", "below", "up", "down", "out", "off",
+  // temporal
+  "now", "today", "tomorrow", "yesterday", "currently", "presently", "soon",
+  "already", "still", "again", "then", "than", "when", "while",
+  "annually", "monthly", "weekly", "daily", "yearly",
+  "year", "years", "yr", "yrs", "month", "months", "week", "weeks",
+  "day", "days", "quarter", "quarters",
+  // quantity/degree qualifiers (they qualify the number, they do not name a metric)
+  "most", "more", "less", "least", "only", "just", "each", "every", "all",
+  "some", "next", "last", "first", "total", "overall", "combined",
+  "minimum", "maximum", "min", "max",
+  "roughly", "approximately", "ideally", "hopefully", "maybe", "perhaps",
+  "if", "so", "as",
+]);
+
+/**
+ * Currency WORDS fold into the same three-symbol alphabet the amount pattern
+ * accepts (`[£$€]`) — "4M dollars" is the same explicit signal as "$4M".
+ * Derived from that alphabet, not an open list: a currency this file cannot
+ * capture as a symbol is not one it can compare.
+ */
+const CURRENCY_WORDS: Readonly<Record<string, string>> = {
+  dollar: "$", dollars: "$", usd: "$",
+  pound: "£", pounds: "£", gbp: "£",
+  euro: "€", euros: "€", eur: "€",
+};
+
+/** Singular/plural of one noun is one metric: customers ≡ customer. */
+function stemMetricNoun(lower: string): string {
+  return lower.length > 3 && lower.endsWith("s") && !lower.endsWith("ss")
+    ? lower.slice(0, -1)
+    : lower;
+}
+
+/** The classified metric signal a captured trailing word carries, if any. */
+interface TrailingMetric {
+  /** Folded currency symbol when the word IS a currency ("dollars" → "$"). */
+  readonly currency?: string;
+  /** Stemmed metric noun ("employees" → "employee"); never a stopword. */
+  readonly noun?: string;
+}
+
+function resolveTrailingMetric(
+  groups: Record<string, string | undefined>,
+  prefix: string,
+): TrailingMetric {
+  const word = groups[`${prefix}Metric`];
+  if (!word) return {};
+  const lower = word.toLowerCase();
+  if (METRIC_NOUN_STOPWORDS.has(lower)) return {};
+  const currency = CURRENCY_WORDS[lower];
+  if (currency) return { currency };
+  return { noun: stemMetricNoun(lower) };
+}
+
+/** The named refusal reasons for a goal (target, baseline) pair. */
+type GoalPairRefusalReason =
+  | "mixed_percent_pair"
+  | "currency_mismatch"
+  | "metric_noun_mismatch"
+  | "currency_vs_metric_noun";
+
+/**
+ * Refuse the pair, BY NAME. Refusal is honest: no baseline is minted, ISL
+ * refuses with `missing_goal_baseline`, and the user is asked for the level —
+ * instead of being served arithmetic across two different metrics.
+ */
+function refuseGoalPair(
+  reason: GoalPairRefusalReason,
+  detail: Record<string, string | undefined>,
+): null {
+  log.info(
+    { event: "cee.factor_extraction.goal_pair_refused", reason, ...detail },
+    `Goal target/baseline pair refused: ${reason}`,
+  );
+  return null;
+}
 
 /**
  * The three brief shapes that state a current level AND a target together.
@@ -237,16 +382,17 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<RegExp> = [
       `${GOAL_WORD}\\s*(?:of|is|:)?\\s*${amountPattern('to')}`,
     'i',
   ),
-  // "target is 800 customers, currently at 500"
+  // "target is 800 customers, currently at 500" — both amounts capture their
+  // trailing metric word (2.287), so cross-metric pairs can be REFUSED.
   new RegExp(
-    `\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountPattern('to')}` +
-      `${CLAUSE_BRIDGE}\\bcurrently\\s*(?:at|around|about)?\\s*${amountPattern('from')}`,
+    `\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountWithMetricPattern('to')}` +
+      `${CLAUSE_BRIDGE}\\bcurrently\\s*(?:at|around|about)?\\s*${amountWithMetricPattern('from')}`,
     'i',
   ),
   // "currently at 500, target 800"
   new RegExp(
-    `\\bcurrently\\s*(?:at|around|about)?\\s*${amountPattern('from')}` +
-      `${CLAUSE_BRIDGE}\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountPattern('to')}`,
+    `\\bcurrently\\s*(?:at|around|about)?\\s*${amountWithMetricPattern('from')}` +
+      `${CLAUSE_BRIDGE}\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountWithMetricPattern('to')}`,
     'i',
   ),
 ];
@@ -334,16 +480,65 @@ export function extractGoalTargetWithBaseline(text: string): GoalTargetWithBasel
     // catching a UNIT error that lands in range. If the two amounts disagree
     // about being percentages they are not reliably the same quantity, so no
     // pair is formed and ISL keeps refusing honestly.
-    if (to.isPercent !== from.isPercent) return null;
+    if (to.isPercent !== from.isPercent) {
+      return refuseGoalPair("mixed_percent_pair", {});
+    }
+
+    // ROADMAP 2.288 — a MIXED CURRENCY pair is refused, not reconciled. This
+    // used to carry a NOTE calling currency "a display unit" and forming the
+    // pair anyway: "from $4M to a target of £6M" subtracted dollars from
+    // pounds under one cap. That note was wrong at its premise — two explicit,
+    // DIFFERENT currencies are not one scale, there is no FX conversion in
+    // this codebase, and inventing a rate would be fabrication with extra
+    // steps. Currency words fold in first, so "4M dollars" vs "£6M" refuses
+    // identically. Same-currency and no-currency pairs are untouched.
+    const toMetric = resolveTrailingMetric(m.groups, "to");
+    const fromMetric = resolveTrailingMetric(m.groups, "from");
+    const toCurrency = to.currency ?? toMetric.currency;
+    const fromCurrency = from.currency ?? fromMetric.currency;
+    if (toCurrency && fromCurrency && toCurrency !== fromCurrency) {
+      return refuseGoalPair("currency_mismatch", {
+        target_currency: toCurrency,
+        baseline_currency: fromCurrency,
+      });
+    }
+
+    // ROADMAP 2.287 — CROSS-METRIC NOUNS are refused. When BOTH amounts carry
+    // an explicit metric noun and the nouns name different metrics ("800k
+    // REVENUE" vs "50 EMPLOYEES"), the two numbers are provably not the same
+    // quantity — pairing them hands ISL arithmetic garbage that normalises
+    // in-range and comes back as a confident wrong probability. Strictly
+    // stemmed equality, no synonym fuzz: "sales" vs "revenue" also refuses,
+    // because guessing they are one metric is still guessing. A noun on ONE
+    // side only ("800 customers, currently at 500") keeps extracting — that is
+    // #787's pinned table and the single-construction trust it encodes.
+    if (toMetric.noun && fromMetric.noun) {
+      if (toMetric.noun !== fromMetric.noun) {
+        return refuseGoalPair("metric_noun_mismatch", {
+          target_metric: toMetric.noun,
+          baseline_metric: fromMetric.noun,
+        });
+      }
+    } else if (toCurrency && !fromCurrency && fromMetric.noun) {
+      // Cross-signal: an explicit CURRENCY target against an explicit
+      // non-currency noun level ("$800k" vs "50 employees") is the same
+      // cross-metric class wearing a symbol instead of a word.
+      return refuseGoalPair("currency_vs_metric_noun", {
+        target_currency: toCurrency,
+        baseline_metric: fromMetric.noun,
+      });
+    } else if (fromCurrency && !toCurrency && toMetric.noun) {
+      return refuseGoalPair("currency_vs_metric_noun", {
+        baseline_currency: fromCurrency,
+        target_metric: toMetric.noun,
+      });
+    }
 
     // Both sides now agree. Percent values are pre-divided into a 0-1
     // fraction, matching every other extractor in this file; callers that need
-    // the RAW percent number reconstruct it.
-    //
-    // NOTE a CURRENCY mismatch ("from $4M to a target of £6M") is deliberately
-    // NOT refused here: currency is a display unit, both amounts are still the
-    // same metric and the same scale, and the cap arithmetic is unaffected.
-    // Only the displayed symbol is ambiguous.
+    // the RAW percent number reconstruct it. The emitted `unit` still comes
+    // from the SYMBOL captures only (not folded currency words) — byte-parity
+    // with the pre-2.288 output for every pair that still forms.
     const isPercent = to.isPercent;
     return {
       value: isPercent ? to.raw / 100 : to.raw,

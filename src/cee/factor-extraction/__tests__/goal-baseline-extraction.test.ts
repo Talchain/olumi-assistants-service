@@ -298,3 +298,153 @@ describe('ROADMAP 2.273 — CROSS-METRIC BINDING is refused (adversarial review,
     expect(extractGoalTargetWithBaseline('Increase revenue from 4M by 2M.')).toBeNull();
   });
 });
+
+describe('ROADMAP 2.287 — CROSS-METRIC NOUN pairs are refused (Codex A4)', () => {
+  // THE GAP #787 LEFT OPEN, proven by executable regex probes (Codex A4). #787
+  // closed the open 40-char WINDOW (S10/S11 above), but the closed grammar it
+  // installed still permits ONE unit noun beside the first amount and captures
+  // NO noun at all beside the second — so the two probes below each bind a
+  // HEADCOUNT number as the baseline of a REVENUE target. Normalisation then
+  // puts both operands comfortably inside ISL's |1.5| domain guard (threshold
+  // 0.8, baseline 0.0000625) and ISL returns a CONFIDENT WRONG PROBABILITY.
+  //
+  // THE FIX extends #787's own discipline one step: the metric noun attached
+  // to EACH amount is now CAPTURED, and when both amounts carry explicit
+  // metric phrases that disagree — noun vs noun, currency vs currency, or
+  // currency vs count-noun — the pair is REFUSED with a named reason. Refusal
+  // is honest: ISL keeps saying `missing_goal_baseline` and the user is asked
+  // for the level rather than served arithmetic across two different metrics.
+  //
+  // A trailing word is only treated as a metric noun when it is NOT in the
+  // closed function/time-word stopword set. That set fails CLOSED: an
+  // unlisted function word can only cause a REFUSAL (a missing baseline),
+  // never a fabricated pair — the safe direction of the trap-12 rule.
+
+  it('A4 PROBE 1 (verbatim) — "Our target is 800k revenue, and currently at 50 employees"', () => {
+    // Pristine tip binds baseline 50 (EMPLOYEES) to an 800,000 REVENUE target.
+    expect(
+      extractGoalTargetWithBaseline('Our target is 800k revenue, and currently at 50 employees'),
+    ).toBeNull();
+  });
+
+  it('A4 PROBE 2 (verbatim) — "Currently at 50 employees, and our target is 800k revenue"', () => {
+    // Same defect through pattern 3: the noun after the SECOND amount was
+    // never captured, so nothing could disagree.
+    expect(
+      extractGoalTargetWithBaseline('Currently at 50 employees, and our target is 800k revenue'),
+    ).toBeNull();
+  });
+
+  it('refuses a CURRENCY target against a bare COUNT-NOUN level (cross-signal)', () => {
+    // "$800k" vs "50 employees": money on one side, an explicit non-currency
+    // metric noun on the other. Same fabrication class as the probes.
+    expect(
+      extractGoalTargetWithBaseline('Our target is $800k, and currently at 50 employees'),
+    ).toBeNull();
+    expect(
+      extractGoalTargetWithBaseline('Currently at 50 employees, and our target is $800k'),
+    ).toBeNull();
+  });
+
+  it('END-TO-END — the probe brief leaves NO baseline on the goal node', async () => {
+    // The wire-level consequence of probe 1. On the pristine tip this mints
+    // goal_baseline 0.0000625 (= 50 / 800,000×1.25) — in-domain, confidently
+    // wrong. Post-fix the baseline is absent and ISL refuses honestly.
+    const goalV3 = await goalV3For('Our target is 800k revenue, and currently at 50 employees');
+    expect(goalV3.goal_baseline).toBeUndefined();
+    expect(goalV3.observed_state).toBeUndefined();
+  });
+
+  it('PRESERVED — the SAME metric noun on both amounts still extracts', () => {
+    const a = extractGoalTargetWithBaseline('Our target is 800 customers, currently at 500 customers.');
+    expect(a).not.toBeNull();
+    expect(a!.value).toBe(800);
+    expect(a!.baseline).toBe(500);
+
+    const b = extractGoalTargetWithBaseline(
+      'Currently at 500 customers, and our target is 800 customers this year.',
+    );
+    expect(b).not.toBeNull();
+    expect(b!.value).toBe(800);
+    expect(b!.baseline).toBe(500);
+  });
+
+  it('PRESERVED — singular/plural of one noun is the same metric', () => {
+    const r = extractGoalTargetWithBaseline('Our target is 800 customers, currently at 500 customer.');
+    expect(r).not.toBeNull();
+    expect(r!.baseline).toBe(500);
+  });
+
+  it('PRESERVED — trailing FUNCTION/TIME words are not metric nouns', () => {
+    // "this year", "within a year" must not manufacture a noun mismatch.
+    const a = extractGoalTargetWithBaseline('Currently at 500 customers, target 800 this year.');
+    expect(a).not.toBeNull();
+    expect(a!.value).toBe(800);
+    expect(a!.baseline).toBe(500);
+  });
+
+  it('PRESERVED — the witness-2258-THIRD prose briefs still extract, byte-identically', () => {
+    // Run 3 (the first honest goal probability of the programme) and Run 4
+    // (its reproduction), verbatim from the witness file. These are the live
+    // proven shapes of the goal-probability train; regressing them would kill
+    // the payoff the train exists for.
+    const run3 = extractGoalTargetWithBaseline(
+      'We want to grow our annual revenue. We are currently at £4,000,000 and our target is £6,000,000 within a year.',
+    );
+    expect(run3?.value).toBe(6_000_000);
+    expect(run3?.baseline).toBe(4_000_000);
+    expect(run3?.unit).toBe('£');
+
+    const run4 = extractGoalTargetWithBaseline(
+      "Improve our company's financial performance. Revenue is currently at £4,000,000, and our target is £6,000,000 within a year.",
+    );
+    expect(run4?.value).toBe(6_000_000);
+    expect(run4?.baseline).toBe(4_000_000);
+    expect(run4?.unit).toBe('£');
+  });
+});
+
+describe('ROADMAP 2.288 — MIXED-CURRENCY pairs are refused (Codex A5)', () => {
+  // The pristine code carried a NOTE calling a currency mismatch "display
+  // only" and formed the pair anyway: "$4M → £6M" subtracted dollars from
+  // pounds under one cap. There is no FX conversion in this codebase, so the
+  // only honest treatments are refuse or convert — and convert would be
+  // inventing a rate. Refuse, with a named reason.
+
+  it('refuses "$4M → £6M" in the from-to-target construction', () => {
+    expect(
+      extractGoalTargetWithBaseline('Grow revenue from $4M to a target of £6M this year.'),
+    ).toBeNull();
+  });
+
+  it('refuses mixed currencies across the clause-bridge shapes (both directions)', () => {
+    expect(extractGoalTargetWithBaseline('Our target is $6M, currently at £4M.')).toBeNull();
+    expect(extractGoalTargetWithBaseline('Currently at £4M, and our target is $6M.')).toBeNull();
+  });
+
+  it('refuses a mixed CURRENCY-WORD against a symbol', () => {
+    // "dollars" is the same explicit signal as "$"; a closed 3-currency word
+    // set folds it into the symbol alphabet the amount pattern accepts.
+    expect(
+      extractGoalTargetWithBaseline('Currently at 4M dollars, and our target is £6M.'),
+    ).toBeNull();
+  });
+
+  it('PRESERVED — same currency on both amounts extracts, byte-identically', () => {
+    const r = extractGoalTargetWithBaseline('Grow revenue from $4M to a target of $6M this year.');
+    expect(r?.value).toBe(6_000_000);
+    expect(r?.baseline).toBe(4_000_000);
+    expect(r?.unit).toBe('$');
+
+    const w = extractGoalTargetWithBaseline('Currently at 4M dollars, and our target is $6M.');
+    expect(w?.value).toBe(6_000_000);
+    expect(w?.baseline).toBe(4_000_000);
+  });
+
+  it('PRESERVED — a currency on ONE side only still extracts (no-currency side inherits)', () => {
+    const r = extractGoalTargetWithBaseline('Grow revenue from 4M to a target of £6M this year.');
+    expect(r?.value).toBe(6_000_000);
+    expect(r?.baseline).toBe(4_000_000);
+    expect(r?.unit).toBe('£');
+  });
+});

@@ -282,7 +282,7 @@ describe('ROADMAP 2.281 — a complete-interventions draft still mints the goal 
     expect(quad(skipped.goal)).toEqual(quad(notSkipped.goal));
   });
 
-  it('COLLISION PATH PARITY — both paths agree when dedupe swallows the user’s target', async () => {
+  it('COLLISION PATH PARITY — both paths mint the user’s Target through the collision (2.299)', async () => {
     // ⚠ THIS TEST REPLACES A WITHDRAWN CLAIM. An earlier version of this file
     // argued that a mutant swapping the skip path's `qualifyExtractedFactors`
     // for the RAW extraction was an EQUIVALENT mutant, on the reasoning that
@@ -293,32 +293,33 @@ describe('ROADMAP 2.281 — a complete-interventions draft still mints the goal 
     // below. Two things were wrong with it:
     //
     //   1. `extractFactors` has MORE THAN ONE producer of a target-labelled
-    //      factor. The 0.95 one (`extractGoalTargetWithBaseline`,
-    //      index.ts:565) only fires when the brief states a target AND a
-    //      current level. When it does not fire, `contextualNumber`
-    //      (index.ts:671) can still emit a "Target" at confidence 0.90 — from a
-    //      LATER position in the push order.
-    //   2. Confidence was never the deciding factor. ORDER is. `genericRange`
-    //      (index.ts:492) pushes at confidence 0.80 but pushes EARLIER, and
-    //      dedupe keeps the earlier factor and discards the later one
-    //      regardless of confidence.
+    //      factor. The 0.95 one (`extractGoalTargetWithBaseline`) only fires
+    //      when the brief states a target AND a current level. When it does
+    //      not fire, `contextualNumber` can still emit a "Target" at
+    //      confidence 0.90 — from a LATER position in the push order.
+    //   2. Confidence was never the deciding factor. ORDER was. `genericRange`
+    //      pushes at confidence 0.80 but pushes EARLIER, and dedupe kept the
+    //      earlier factor and discarded the later one regardless of
+    //      confidence.
     //
     // In this brief the range midpoint (5.5M + 6.5M) / 2 = 6,000,000 collides
-    // exactly with the user's stated target of 6,000,000, both carry no unit,
-    // so dedupe drops the user's Target — and the goal target is never minted
-    // on EITHER path.
+    // exactly with the user's stated target of 6,000,000, both carry no unit —
+    // so on the pre-2.299 tip dedupe dropped the user's Target and the goal
+    // target was never minted on EITHER path. This test then pinned the
+    // both-paths-no-mint as CURRENT-not-desirable, with the instruction to
+    // flip the expectation when the dedupe repair landed.
     //
-    // WHAT THIS TEST ASSERTS is parity, not a mint: whatever the qualification
-    // rules decide, BOTH call sites must decide it identically. Today that
-    // means both no-mint. Under the raw-extraction mutant the skip path would
-    // find the un-deduped "Target" and mint while the non-skip path would not —
-    // a real divergence, which is exactly what this catches.
+    // ROADMAP 2.299 LANDED — flipped per that instruction: dedupe now prefers
+    // role/confidence at equal value, the user's Target survives the
+    // collision, and BOTH call sites mint the identical contract. The parity
+    // half is unchanged and still bites the raw-extraction mutant (under it
+    // the two paths would select different factors and diverge).
     const COLLISION_BRIEF =
       'Output ranges between 5500000 and 6500000 most years; our target is 6000000.';
 
-    // Positive control on the PREMISE: the brief really does contain a
-    // target-labelled factor that qualification removes. Without this, the
-    // parity assertion could pass on a brief that simply has no target at all.
+    // Positive control on the PREMISE: the raw extraction still pushes the
+    // colliding generic factor FIRST, so the survival below is the preference
+    // logic working, not the collision having quietly disappeared.
     const raw = extractFactors(COLLISION_BRIEF);
     expect(raw.some((f) => /target/i.test(f.label)), 'premise broken: no Target in raw extraction').toBe(true);
     expect(raw[0].label, 'premise broken: the colliding factor no longer pushes first').not.toMatch(/target/i);
@@ -329,21 +330,31 @@ describe('ROADMAP 2.281 — a complete-interventions draft still mints the goal 
     ((g.nodes as any[]).find((n) => n.id === 'o2') as any).data = { interventions: {} };
     const notSkipped = await runEnrich(g, COLLISION_BRIEF);
 
-    // Positive control: the two runs really did take different code paths.
-    expect(skipped.ctx.enrichmentTrace.extraction_mode).toBe('v4_complete_skip');
+    // Positive control: the two runs really did take different code paths —
+    // and the skip path, having minted, must say so (2.281 trace honesty).
+    expect(skipped.ctx.enrichmentTrace.extraction_mode).toBe('v4_factor_skip_goal_minted');
     expect(notSkipped.ctx.enrichmentTrace.extraction_mode).toBe('regex-only');
 
     // THE PARITY ASSERTION — the one that bites the raw-extraction mutant.
-    expect(skipped.goal.goal_threshold).toBe(notSkipped.goal.goal_threshold);
-    expect(skipped.goal.goal_threshold_frame).toBe(notSkipped.goal.goal_threshold_frame);
+    const quad = (n: any) => ({
+      goal_threshold: n.goal_threshold,
+      goal_threshold_raw: n.goal_threshold_raw,
+      goal_threshold_unit: n.goal_threshold_unit,
+      goal_threshold_cap: n.goal_threshold_cap,
+      goal_threshold_frame: n.goal_threshold_frame,
+      goal_baseline: n.goal_baseline,
+      goal_baseline_raw: n.goal_baseline_raw,
+    });
+    expect(quad(skipped.goal)).toEqual(quad(notSkipped.goal));
 
-    // Recorded as the CURRENT behaviour, not as desirable behaviour: the
-    // user's stated target is silently swallowed by an earlier factor within
-    // 10% tolerance. That capture gap is pre-existing, affects BOTH paths
-    // equally, and is rowed separately — it is the same user-visible class as
-    // the re-witness's "Target: Not set". If a future fix makes this mint,
-    // this expectation SHOULD be updated to assert the mint on both paths.
-    expect(skipped.goal.goal_threshold).toBeUndefined();
+    // THE MINT — the user's stated target, at the shared cap doctrine:
+    // 6,000,000 → cap 7,500,000 → threshold 0.8, frame 'level'. A range
+    // statement is not a stated current level, so no baseline is invented.
+    expect(skipped.goal.goal_threshold).toBe(0.8);
+    expect(skipped.goal.goal_threshold_raw).toBe(6_000_000);
+    expect(skipped.goal.goal_threshold_cap).toBe(7_500_000);
+    expect(skipped.goal.goal_threshold_frame).toBe('level');
+    expect(skipped.goal.goal_baseline).toBeUndefined();
   });
 
   // ═══════════════════════════════════════════════════════════════════════
