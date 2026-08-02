@@ -1,16 +1,19 @@
 /**
- * ROADMAP 2.315(a) — the ATOMIC raw goal-target trio for `analysis_ready`.
+ * ROADMAP 2.315(a) — the raw goal-target fields for `analysis_ready`.
  *
- * `goal_threshold` on the wire is NORMALISED (raw / cap). The trio below is
- * the raw target as the user stated it, carried so a consumer can render the
+ * THE RULE, IN ONE SENTENCE: `goal_threshold_raw` is the ANCHOR — it may ride
+ * alone, and `goal_threshold_unit` / `goal_threshold_cap` ride ONLY alongside
+ * it, so a cap can never reach the wire without the raw value it belongs to.
+ *
+ * `goal_threshold` on the wire is NORMALISED (raw / cap). These fields are the
+ * raw target as the user stated it, carried so a consumer can render the
  * user's own figure instead of "reaching >= 0.8 count".
  *
- * ⚠ WHY THIS IS ONE FUNCTION AND NOT THREE INLINE SPREADS.
- *
- * The three fields must reach the wire TOGETHER OR NOT AT ALL. Emitted
- * independently, a goal node carrying `goal_threshold` + `goal_threshold_cap`
- * but no `goal_threshold_raw` puts a CAP ON THE WIRE WITHOUT A RAW VALUE, and
- * the UI then does this (canvas/store.ts:4006-4008, tip cb957c8c):
+ * ⚠ WHY THE ANCHOR EXISTS — a cap without a raw is an ACTIVE DEFECT, not
+ * merely incomplete data. Emitted independently, a goal node carrying
+ * `goal_threshold` + `goal_threshold_cap` but no `goal_threshold_raw` puts a
+ * cap on the wire alone, and the UI then does this
+ * (canvas/store.ts:4006-4008, tip cb957c8c):
  *
  *     if (ceeRaw != null)         -> use raw           (representation 'raw')
  *     else if (ceeNorm && hasCap) -> ceeNorm * ceeCap  (representation 'raw')
@@ -27,21 +30,31 @@
  * clears an ORPHAN CAP only when it is EXACTLY 0 — a non-zero cap with no raw
  * survives to the graph.
  *
- * Suppressing an incomplete trio is strictly no worse than the pre-2.315(a)
- * baseline, which emitted none of these fields ever; emitting a partial trio
- * is worse than both. `goal_threshold` itself is never suppressed — it is
- * honest on its own and PLoT needs it.
+ * ⚠ WHY THE ANCHOR IS RAW-ONLY AND NOT ALL-THREE-OR-NONE. An earlier revision
+ * required all three. That closed the same defect, but it also suppressed the
+ * case where we hold the TRUE NUMBER and merely lack a unit label — and
+ * suppressing it makes the surface fall back to rendering the normalised
+ * `0.8`. A unitless "800000" is honest and useful; "0.8" is neither. The
+ * anchor is therefore exactly as strict as it needs to be (cap-without-raw is
+ * unrepresentable) and no stricter: we never trade away a correct number to
+ * satisfy a symmetry the defect does not require.
+ *
+ * `goal_threshold` itself is never suppressed by any of this — it is honest
+ * alone, and PLoT needs it.
  *
  * Values are CARRIED VERBATIM. Nothing here recomputes: `raw = threshold x cap`
  * and the 25%-headroom cap doctrine are each defensible but can disagree with
  * the cap the graph was actually scored against.
  */
 
-/** The trio, complete — the only shape allowed onto the wire. */
+/**
+ * What may reach the wire: the raw target, optionally accompanied by its unit
+ * and the cap it was normalised against. Never a cap or unit on their own.
+ */
 export interface GoalThresholdTrio {
   goal_threshold_raw: number;
-  goal_threshold_unit: string;
-  goal_threshold_cap: number;
+  goal_threshold_unit?: string;
+  goal_threshold_cap?: number;
 }
 
 /** A source of goal-threshold fields: a graph node, or an upstream payload. */
@@ -52,8 +65,9 @@ export interface GoalThresholdTrioSource {
 }
 
 /**
- * Return the complete trio, or an empty object when ANY member is missing or
- * mistyped. Spread the result directly into a payload literal:
+ * Return the raw target plus whichever companions are present and well-typed,
+ * or an empty object when there is no usable raw value. Spread the result
+ * directly into a payload literal:
  *
  *     ...pickGoalThresholdTrio(goalNode)
  *
@@ -66,17 +80,22 @@ export function pickGoalThresholdTrio(
 ): GoalThresholdTrio | Record<string, never> {
   if (!source) return {};
 
+  // THE ANCHOR. No usable raw value ⇒ nothing rides, so `goal_threshold_cap`
+  // can never appear alone and arm the consumer's `norm × cap` re-derivation.
   const raw = source.goal_threshold_raw;
-  const unit = source.goal_threshold_unit;
-  const cap = source.goal_threshold_cap;
-
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return {};
-  if (typeof unit !== 'string' || unit === '') return {};
-  if (typeof cap !== 'number' || !Number.isFinite(cap)) return {};
 
-  return {
-    goal_threshold_raw: raw,
-    goal_threshold_unit: unit,
-    goal_threshold_cap: cap,
-  };
+  const out: GoalThresholdTrio = { goal_threshold_raw: raw };
+
+  const unit = source.goal_threshold_unit;
+  if (typeof unit === 'string' && unit !== '') {
+    out.goal_threshold_unit = unit;
+  }
+
+  const cap = source.goal_threshold_cap;
+  if (typeof cap === 'number' && Number.isFinite(cap)) {
+    out.goal_threshold_cap = cap;
+  }
+
+  return out;
 }

@@ -879,8 +879,8 @@ export function extractAnalysisReady(
     // ROADMAP 2.315(a) — the raw target trio. This function is a NAMED-FIELD
     // RE-PROJECTION (it rebuilds the payload key by key rather than spreading),
     // so an additive field carried at the builder would be silently dropped
-    // here on the draft path alone unless it is also named. ATOMIC (all three
-    // or none) via the shared rule; carried verbatim, never re-derived.
+    // here on the draft path alone unless it is also named. RAW-ANCHORED via
+    // the shared rule; carried verbatim, never re-derived.
     ...pickGoalThresholdTrio(ar),
     bias_findings: Array.isArray(ar.bias_findings)
       ? ar.bias_findings as NonNullable<GraphPatchBlockData['analysis_ready']>['bias_findings']

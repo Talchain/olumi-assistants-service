@@ -382,7 +382,8 @@ describe('ROADMAP 2.315(a) — preservation of the goal-probability train', () =
 });
 
 /**
- * ATOMICITY — the trio is emitted as a UNIT, or not at all.
+ * THE RAW ANCHOR — `goal_threshold_raw` may ride alone; `goal_threshold_unit`
+ * and `goal_threshold_cap` ride ONLY alongside it.
  *
  * Found by adversarial review of this PR, and it is a defect THIS PR would
  * otherwise make live. The three fields were emitted independently, so a goal
@@ -408,11 +409,15 @@ describe('ROADMAP 2.315(a) — preservation of the goal-probability train', () =
  * 800000). Before this PR the branch was unreachable dead code, because CEE
  * never sent a cap at all.
  *
- * A partial trio is therefore never emitted. Emitting nothing is strictly no
- * worse than the pre-PR baseline (which emitted nothing always), whereas
- * emitting a partial trio is worse than both.
+ * A cap therefore never rides without its raw. The anchor is deliberately NOT
+ * "all three or none": an earlier revision required all three, which closed
+ * the same defect but ALSO suppressed the case where we hold the true number
+ * and merely lack a unit label — and suppressing that makes the surface fall
+ * back to rendering the normalised `0.8`. A unitless "800000" is honest and
+ * useful; "0.8" is neither. So the rule is exactly as strict as the defect
+ * requires and no stricter.
  */
-describe('ROADMAP 2.315(a) — the trio is atomic (all three, or none)', () => {
+describe('ROADMAP 2.315(a) — raw is the anchor (cap and unit ride only with raw)', () => {
   function goalWith(fields: Record<string, unknown>): GraphV3T {
     return {
       nodes: [
@@ -471,29 +476,69 @@ describe('ROADMAP 2.315(a) — the trio is atomic (all three, or none)', () => {
     }
   });
 
-  it('raw without cap is also suppressed — all three, or none', () => {
+  it('raw WITHOUT cap still rides — the anchor is raw, not the full trio', () => {
     const payload = build(goalWith({
       goal_threshold: ATTESTED.goal_threshold,
       goal_threshold_raw: ATTESTED.goal_threshold_raw,
       goal_threshold_unit: ATTESTED.goal_threshold_unit,
     }));
-    expect(payload.goal_threshold_raw).toBeUndefined();
+    // The true number survives. Suppressing it here would make the surface
+    // fall back to the normalised 0.8 — strictly worse than a capless raw.
+    expect(payload.goal_threshold_raw).toBe(ATTESTED.goal_threshold_raw);
+    expect(payload.goal_threshold_unit).toBe(ATTESTED.goal_threshold_unit);
     expect(payload.goal_threshold_cap).toBeUndefined();
-    expect(payload.goal_threshold_unit).toBeUndefined();
     expect(payload.goal_threshold).toBe(ATTESTED.goal_threshold);
   });
 
-  it('missing unit suppresses the trio too', () => {
+  it('raw WITHOUT unit still rides — a unitless true number beats a normalised one', () => {
     const payload = build(goalWith({
       goal_threshold: ATTESTED.goal_threshold,
       goal_threshold_raw: ATTESTED.goal_threshold_raw,
       goal_threshold_cap: ATTESTED.goal_threshold_cap,
     }));
-    expect(payload.goal_threshold_raw).toBeUndefined();
+    expect(payload.goal_threshold_raw).toBe(ATTESTED.goal_threshold_raw);
+    expect(payload.goal_threshold_cap).toBe(ATTESTED.goal_threshold_cap);
+    expect(payload.goal_threshold_unit).toBeUndefined();
+  });
+
+  it('raw alone rides, with neither companion', () => {
+    const payload = build(goalWith({
+      goal_threshold: ATTESTED.goal_threshold,
+      goal_threshold_raw: ATTESTED.goal_threshold_raw,
+    }));
+    expect(payload.goal_threshold_raw).toBe(ATTESTED.goal_threshold_raw);
+    expect(payload.goal_threshold_unit).toBeUndefined();
     expect(payload.goal_threshold_cap).toBeUndefined();
   });
 
-  it('the complete trio is still emitted in full (atomicity must not suppress the good path)', () => {
+  it('malformed companions are dropped, but never take the raw anchor down with them', () => {
+    // A non-finite cap would serialise to null and cannot be used; an empty
+    // unit is what normalisation.ts already strips. Neither may suppress raw.
+    const payload = build(goalWith({
+      goal_threshold: ATTESTED.goal_threshold,
+      goal_threshold_raw: ATTESTED.goal_threshold_raw,
+      goal_threshold_unit: '',
+      goal_threshold_cap: Number.NaN,
+    }));
+    expect(payload.goal_threshold_raw).toBe(ATTESTED.goal_threshold_raw);
+    expect(payload.goal_threshold_unit).toBeUndefined();
+    expect(payload.goal_threshold_cap).toBeUndefined();
+  });
+
+  it('a non-finite RAW suppresses everything — there is no anchor to hang on', () => {
+    const payload = build(goalWith({
+      goal_threshold: ATTESTED.goal_threshold,
+      goal_threshold_raw: Number.POSITIVE_INFINITY,
+      goal_threshold_unit: ATTESTED.goal_threshold_unit,
+      goal_threshold_cap: ATTESTED.goal_threshold_cap,
+    }));
+    expect(payload.goal_threshold_raw).toBeUndefined();
+    expect(payload.goal_threshold_unit).toBeUndefined();
+    expect(payload.goal_threshold_cap).toBeUndefined();
+    expect(payload.goal_threshold).toBe(ATTESTED.goal_threshold);
+  });
+
+  it('the complete trio is still emitted in full (the anchor must not suppress the good path)', () => {
     const payload = build(goalWith({
       goal_threshold: ATTESTED.goal_threshold,
       goal_threshold_raw: ATTESTED.goal_threshold_raw,
@@ -505,7 +550,7 @@ describe('ROADMAP 2.315(a) — the trio is atomic (all three, or none)', () => {
     expect(payload.goal_threshold_cap).toBe(ATTESTED.goal_threshold_cap);
   });
 
-  it('helper (hop 2) is atomic on the same shape', () => {
+  it('helper (hop 2) honours the raw anchor on the same shape', () => {
     const p = computeStructuralReadiness(goalWith({
       goal_threshold: ATTESTED.goal_threshold,
       goal_threshold_cap: ATTESTED.goal_threshold_cap,
@@ -516,7 +561,7 @@ describe('ROADMAP 2.315(a) — the trio is atomic (all three, or none)', () => {
     expect(p.goal_threshold).toBe(ATTESTED.goal_threshold);
   });
 
-  it('draft-graph re-projection (hop 3) is atomic on the same shape', () => {
+  it('draft-graph re-projection (hop 3) honours the raw anchor on the same shape', () => {
     const extracted = extractAnalysisReady({
       analysis_ready: {
         goal_node_id: 'goal_1',

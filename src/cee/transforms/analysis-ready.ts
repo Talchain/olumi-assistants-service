@@ -726,9 +726,10 @@ export function buildAnalysisReadyPayload(
     // ROADMAP 2.315(a) — carry the RAW goal target beside the normalised one.
     // `goal_threshold` alone left consumers unable to recover the user's own
     // figure: a £800,000 target surfaced as "reaching ≥ 0.8 count".
-    // ATOMIC — all three or none. A cap without a raw arms a consumer-side
-    // re-derivation (see utils/goal-threshold-trio.ts). Carried verbatim from
-    // the enricher's attested mint; never recomputed here.
+    // RAW-ANCHORED: raw may ride alone, cap and unit only alongside it, so a
+    // cap can never arm the consumer's `norm × cap` re-derivation (see
+    // utils/goal-threshold-trio.ts). Carried verbatim from the enricher's
+    // attested mint; never recomputed here.
     ...pickGoalThresholdTrio(goalNode),
   };
 
