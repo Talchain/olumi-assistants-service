@@ -20,12 +20,50 @@
  * populated violation_codes and per-dimension diagnostics where calculable.
  */
 
-import type { LLMResponse, ParsedGraph, GraphEdge, Brief, ScoreResult } from "./types.js";
+import type {
+  LLMResponse,
+  ParsedGraph,
+  GraphEdge,
+  GraphNode,
+  GoalConstraint,
+  Brief,
+  ScoreResult,
+} from "./types.js";
 import {
   validateStructural,
   buildNodeMap,
   buildInterventionSignature,
 } from "./validator.js";
+
+// =============================================================================
+// Rubric version
+// =============================================================================
+
+/**
+ * Identifier for the SCORING RUBRIC — distinct from the tool version in cli.ts.
+ * Stamped onto every ScoreResult and emitted as a column in scores.csv.
+ *
+ * ⚠ SCORES CARRYING DIFFERENT RUBRIC VERSIONS ARE DIFFERENT MEASURES. Never
+ * plot, average, or regression-check them as one series. See the Rubric
+ * changelog in README.md.
+ *
+ * `draft-graph-rubric-2.0.0` (2026-08-02, ROADMAP 2.285a) — the rubric scores
+ * ONLY fields the model is PERMITTED to emit. PR #789 cut the goal-threshold
+ * quad from the sent grammar and added an ingress strip, so the model can no
+ * longer author `goal_threshold*`; the enricher mints it after extraction.
+ * Rubric 1 rewarded that quad, which post-#789 made a sub-dimension unearnable
+ * on every numeric-target brief and gave enricher output a score advantage no
+ * model draft could close.
+ *
+ * ⚠ Rubric 2 is NOT a bug-fix that restores the old numbers. It asks partly
+ * different questions (see scoreNumericTargetCapture). Old and new scores are
+ * DIFFERENT MEASURES.
+ *
+ * `draft-graph-rubric-1` — everything before this commit. Results predating
+ * this constant carry NO rubric_version column; treat an absent column as
+ * rubric 1 and do not compare it with rubric 2.
+ */
+export const DRAFT_RUBRIC_VERSION = "draft-graph-rubric-2.0.0";
 
 // =============================================================================
 // Generic factor label blocklist
@@ -293,23 +331,91 @@ function scoreCurrencyPreservation(graph: ParsedGraph, briefBody: string): numbe
     normalised.add("€"); normalised.add("eur");
   }
 
+  // ⚠ RUBRIC 2: `goal_threshold_unit` is DELIBERATELY NOT CONSULTED. Rubric 1
+  // preferred it ahead of every other channel, but post-#789 the model cannot
+  // emit it — so that preference rewarded a field only the enricher can mint,
+  // handing pipeline output a currency score no model draft could match.
+  // Model-permitted channels only, in preference order:
+  //   goal-node data.unit → goal_constraints[].unit → any node's data.unit.
   const goalNode = graph.nodes.find((n) => n.kind === "goal");
-  const goalUnit = goalNode?.goal_threshold_unit?.toLowerCase() ?? goalNode?.data?.unit?.toLowerCase();
+  const goalUnit = goalNode?.data?.unit?.toLowerCase();
   if (goalUnit && normalised.has(goalUnit)) return 1.0;
 
-  let hasAnyUnit = false;
-  let hasMatchingUnit = false;
-  for (const node of graph.nodes) {
-    const unit = node.data?.unit?.toLowerCase();
-    if (unit) {
-      hasAnyUnit = true;
-      if (normalised.has(unit)) { hasMatchingUnit = true; break; }
-    }
+  let hasAnyUnit = Boolean(goalUnit);
+
+  for (const gc of graph.goal_constraints ?? []) {
+    const unit = gc.unit?.toLowerCase();
+    if (!unit) continue;
+    hasAnyUnit = true;
+    if (normalised.has(unit)) return 1.0;
   }
 
-  if (hasMatchingUnit) return 1.0;
-  if (hasAnyUnit) return 0.5;
-  return 0.0;
+  for (const node of graph.nodes) {
+    const unit = node.data?.unit?.toLowerCase();
+    if (!unit) continue;
+    hasAnyUnit = true;
+    if (normalised.has(unit)) return 1.0;
+  }
+
+  return hasAnyUnit ? 0.5 : 0.0;
+}
+
+// =============================================================================
+// Numeric-target capture (completeness sub-dimension)
+// =============================================================================
+
+/** Operators the sent grammar permits on a goal_constraints[] entry. */
+const CONSTRAINT_OPERATORS = new Set([">=", "<="]);
+
+/** A constraint the model actually filled in: finite value + a legal operator. */
+function isWellFormedNumericConstraint(gc: GoalConstraint): boolean {
+  return (
+    gc.value != null &&
+    Number.isFinite(gc.value) &&
+    gc.operator != null &&
+    CONSTRAINT_OPERATORS.has(gc.operator)
+  );
+}
+
+/**
+ * Did the model capture the brief's numeric target in machine-readable form?
+ *
+ * ⚠ RUBRIC 2 re-points this sub-dimension, and it is a CHANGE OF QUESTION —
+ * not the same question relocated. Say so plainly:
+ *
+ *   rubric 1 asked — "did the model set the goal node's threshold?"
+ *   rubric 2 asks  — "did the model record the brief's numeric target as a
+ *                     machine-readable constraint?"
+ *
+ * Rubric 1's question is UNANSWERABLE post-#789: the quad is cut from the sent
+ * grammar and stripped at ingress, so no model can score. Worse, the capability
+ * it named is no longer the model's at all — the enricher derives the threshold
+ * from BRIEF TEXT by regex (src/cee/factor-extraction/enricher.ts:649-740,
+ * value from extractGoalTargetWithBaseline), not from anything the model wrote.
+ * Scoring it would therefore measure CEE's extractor, not the draft.
+ *
+ * `goal_constraints[]` is what remains: REQUIRED in the sent grammar
+ * (src/cee/draft/anthropic-graph-schema.ts — `required: [... "goal_constraints" ...]`,
+ * items requiring node_id/constraint_id/operator/value/label), not stripped at
+ * ingress, and genuinely consumed downstream (parse.ts → compound-goals →
+ * package.ts, forwarded to PLoT). ⚠ It does NOT become the goal threshold —
+ * nothing maps a constraint into the quad — so this sub-dimension must not be
+ * read as a proxy for threshold extraction.
+ *
+ *   1.0 — a well-formed numeric constraint attached to the GOAL node
+ *         (the model identified the target AND whose threshold it is)
+ *   0.5 — a well-formed numeric constraint attached to some other node
+ *         (target retained, misattached)
+ *   0.0 — no well-formed numeric constraint at all
+ */
+function scoreNumericTargetCapture(
+  graph: ParsedGraph,
+  goalNode: GraphNode | undefined
+): number {
+  const constraints = (graph.goal_constraints ?? []).filter(isWellFormedNumericConstraint);
+  if (constraints.length === 0) return 0.0;
+  if (goalNode && constraints.some((gc) => gc.node_id === goalNode.id)) return 1.0;
+  return 0.5;
 }
 
 // =============================================================================
@@ -333,11 +439,13 @@ function scoreCompleteness(graph: ParsedGraph, brief: Brief): number {
     (graph.coaching?.summary?.trim().length ?? 0) > 0;
   if (hasCoaching) score += 0.15;
 
-  // 0.20: Goal threshold extracted when brief has numeric target
+  // 0.20: Numeric target captured when the brief carries one.
+  // ⚠ RUBRIC 2 — was "goal node has goal_threshold set" (rubric 1); the model
+  // is forbidden that field post-#789. See scoreNumericTargetCapture().
   if (!brief.meta.has_numeric_target) {
     score += 0.20; // Not required — full marks
   } else {
-    if (goalNode?.goal_threshold != null) score += 0.20;
+    score += scoreNumericTargetCapture(graph, goalNode) * 0.20;
   }
 
   // 0.20: Factor label specificity (not in generic blocklist)
@@ -361,7 +469,8 @@ function scoreCompleteness(graph: ParsedGraph, brief: Brief): number {
   // >20 nodes = 0 points for readability
 
   // 0.10: Currency preservation — when brief mentions currency, graph should
-  // preserve it in node unit metadata (goal_threshold_unit, data.unit).
+  // preserve it in model-permitted unit metadata (node data.unit,
+  // goal_constraints[].unit). NOT goal_threshold_unit — see rubric 2 note below.
   const currencyScore = scoreCurrencyPreservation(graph, brief.body);
   if (currencyScore === null) {
     score += 0.10; // Not applicable — full marks for this sub-dimension
@@ -463,10 +572,15 @@ function scoreRatioEncoding(graph: ParsedGraph, brief: Brief): number {
       const val = node.data?.value;
       if (val != null && val < expectedMin) return 0.0;
 
-      // Check goal threshold
-      if (node.kind === "goal" && node.goal_threshold != null) {
-        if (node.goal_threshold < expectedMin) return 0.0;
-      }
+      // ⚠ RUBRIC 2 — the `goal_threshold` arm that stood here is REMOVED.
+      // Confirmed at the bytes before removal: it was presence-gated
+      // (`node.goal_threshold != null`), so ABSENCE never hard-zeroed a draft
+      // and rubric 1 did not mis-penalise post-#789 model output here. But the
+      // model cannot emit the field at all, so on a model draft the arm was
+      // simply DEAD, and on enriched/pipeline output it hard-zeroed the whole
+      // dimension for an encoding decision the model never made. Ratio encoding
+      // is still scored on model-permitted channels: node data.value above and
+      // goal_constraints[].value below.
     }
 
     // Check goal_constraints
@@ -587,6 +701,7 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
   // No parsed graph — all scores null
   if (response.status !== "success" || !response.parsed_graph) {
     return {
+      rubric_version: DRAFT_RUBRIC_VERSION,
       structural_valid: false,
       violation_codes: ["NO_GRAPH"],
       param_quality: null,
@@ -623,6 +738,7 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
   // All per-dimension scores are still returned for diagnostics.
   if (!valid) {
     return {
+      rubric_version: DRAFT_RUBRIC_VERSION,
       structural_valid: false,
       violation_codes: violations,
       param_quality: paramQuality,
@@ -649,6 +765,7 @@ export function score(response: LLMResponse, brief: Brief): ScoreResult {
     ratioEncoding * 0.05;
 
   return {
+    rubric_version: DRAFT_RUBRIC_VERSION,
     structural_valid: true,
     violation_codes: [],
     param_quality: paramQuality,

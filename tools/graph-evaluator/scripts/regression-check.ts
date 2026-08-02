@@ -224,9 +224,16 @@ async function main(): Promise<void> {
   let passCount = 0;
 
   for (const modelId of manifest.models) {
-    const briefIds = Object.keys(manifest.briefs ?? {});
-    // If manifest doesn't have briefs, scan fixture IDs
-    const idsToCheck = briefIds.length > 0 ? briefIds : allFixtures.map((f: { id: string }) => f.id);
+    // `manifest.briefs` never existed. The manifest is written by exactly one
+    // producer — capture-golden-responses.ts, whose own GoldenManifest
+    // interface is field-for-field identical to the one above and has no
+    // `briefs` — and the only manifest on disk
+    // (golden-responses/edit-graph/manifest.json) has no such key. So the
+    // guarded branch `briefIds.length > 0 ? briefIds : ...` could never take
+    // its first arm: this always scanned fixture IDs. Removing the dead arm is
+    // behaviour-preserving and drops the TS2339 that `scripts/` being outside
+    // the typecheck include had hidden.
+    const idsToCheck = allFixtures.map((f: { id: string }) => f.id);
 
     for (const briefId of idsToCheck) {
       const goldenPath = join(goldenDir, modelId, `${briefId}.json`);

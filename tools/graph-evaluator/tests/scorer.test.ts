@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { score } from "../src/scorer.js";
+import { score, DRAFT_RUBRIC_VERSION } from "../src/scorer.js";
 import { validateStructural, hasCycle, bfsForward, bfsReverse, buildAdjacencyLists } from "../src/validator.js";
-import type { ParsedGraph, GraphNode, GraphEdge, LLMResponse, Brief } from "../src/types.js";
+import type {
+  ParsedGraph,
+  GraphNode,
+  GraphEdge,
+  GoalConstraint,
+  LLMResponse,
+  Brief,
+} from "../src/types.js";
 
 // =============================================================================
 // Fixture builders
@@ -92,6 +99,27 @@ function makeResponse(graph: ParsedGraph): LLMResponse {
     status: "success",
     parsed_graph: graph,
     latency_ms: 1000,
+  };
+}
+
+/**
+ * A goal_constraints[] entry shaped like the sent grammar's required fields
+ * (node_id, constraint_id, operator, value, label). This is the model's
+ * remaining channel for a numeric target post-#789.
+ */
+function makeConstraint(
+  nodeId: string,
+  operator: string,
+  value: number,
+  opts: Partial<GoalConstraint> = {}
+): GoalConstraint {
+  return {
+    constraint_id: `c_${nodeId}`,
+    node_id: nodeId,
+    operator,
+    value,
+    label: `${nodeId} ${operator} ${value}`,
+    ...opts,
   };
 }
 
@@ -496,15 +524,23 @@ describe("scorer — completeness", () => {
     expect(withCoaching.completeness! - noCoaching.completeness!).toBeCloseTo(0.15, 1);
   });
 
-  it("awards goal threshold point when has_numeric_target and threshold present", () => {
+  // ⚠ RUBRIC 2 (ROADMAP 2.285a) — this test previously set
+  // `goalNode.goal_threshold = 0.8`, a field the model is FORBIDDEN to emit
+  // post-#789. It also asserted only `> without - 0.01`, which is satisfied by
+  // ANY value including "no credit awarded" — the assertion could not fail.
+  // Both defects are fixed: model-permitted channel, exact delta.
+  it("awards the full numeric-target point for a well-formed constraint on the goal node", () => {
     const graph = minimalValidGraph();
     const goalNode = graph.nodes.find((n) => n.kind === "goal")!;
-    goalNode.goal_threshold = 0.8;
+    graph.goal_constraints = [makeConstraint(goalNode.id, ">=", 20000)];
 
-    const result = score(makeResponse(graph), makeBrief({ has_numeric_target: true }));
-    const withoutResult = score(makeResponse(minimalValidGraph()), makeBrief({ has_numeric_target: true }));
+    const withTarget = score(makeResponse(graph), makeBrief({ has_numeric_target: true }));
+    const withoutTarget = score(
+      makeResponse(minimalValidGraph()),
+      makeBrief({ has_numeric_target: true })
+    );
 
-    expect(result.completeness!).toBeGreaterThan(withoutResult.completeness! - 0.01);
+    expect(withTarget.completeness! - withoutTarget.completeness!).toBeCloseTo(0.20, 5);
   });
 
   it("does not require goal threshold when has_numeric_target=false", () => {
@@ -569,10 +605,13 @@ describe("scorer — completeness", () => {
 // =============================================================================
 
 describe("scorer — currency preservation", () => {
+  // ⚠ RUBRIC 2 — was `goalNode.goal_threshold_unit = "£"`, a field the model
+  // cannot emit post-#789. Uses the goal node's `data.unit` instead, which the
+  // sent grammar still permits (nodes.items.data.unit, free text by design).
   it("awards 0.10 when brief has £ and goal node has matching unit", () => {
     const graph = minimalValidGraph();
     const goalNode = graph.nodes.find((n) => n.kind === "goal")!;
-    goalNode.goal_threshold_unit = "£";
+    goalNode.data = { ...goalNode.data, unit: "£" };
 
     const brief = makeBrief();
     brief.body = "Budget is £50,000 for expansion.";
@@ -619,9 +658,10 @@ describe("scorer — currency preservation", () => {
     const result = score(makeResponse(graph), brief);
 
     // Compare with graph that has matching unit
+    // ⚠ RUBRIC 2 — was `goalNode.goal_threshold_unit = "€"` (forbidden field).
     const graphMatch = minimalValidGraph();
     const goalNode = graphMatch.nodes.find((n) => n.kind === "goal")!;
-    goalNode.goal_threshold_unit = "€";
+    goalNode.data = { ...goalNode.data, unit: "€" };
 
     const resultMatch = score(makeResponse(graphMatch), brief);
 
@@ -765,5 +805,180 @@ describe("scorer — overall_score", () => {
     );
     const result = score(makeResponse(graph), makeBrief());
     expect(result.overall_score).toBeNull();
+  });
+});
+
+// =============================================================================
+// RUBRIC 2 (ROADMAP 2.285a) — the rubric scores only model-permitted fields
+//
+// PR #789 cut the goal-threshold quad from the sent grammar and added an
+// ingress strip, so a post-#789 draft NEVER carries goal_threshold*. Every test
+// below is written against that shape.
+// =============================================================================
+
+/** A draft shaped the way the model can actually emit post-#789: no quad. */
+function postCutDraft(): ParsedGraph {
+  const graph = minimalValidGraph();
+  for (const n of graph.nodes) {
+    delete n.goal_threshold;
+    delete n.goal_threshold_raw;
+    delete n.goal_threshold_unit;
+    delete n.goal_threshold_cap;
+  }
+  return graph;
+}
+
+describe("rubric 2 — numeric-target capture (completeness sub-dimension)", () => {
+  it("a post-#789 draft that records the target on the goal node earns the full 0.20", () => {
+    const graph = postCutDraft();
+    const goalNode = graph.nodes.find((n) => n.kind === "goal")!;
+    graph.goal_constraints = [makeConstraint(goalNode.id, ">=", 20000)];
+
+    const captured = score(makeResponse(graph), makeBrief({ has_numeric_target: true }));
+    const notCaptured = score(makeResponse(postCutDraft()), makeBrief({ has_numeric_target: true }));
+
+    // Under rubric 1 this delta was 0.00 — the quad was the only channel and
+    // the model is forbidden it, so a perfect draft was docked 0.20 of
+    // completeness (0.04 overall) on EVERY numeric-target brief.
+    expect(captured.completeness! - notCaptured.completeness!).toBeCloseTo(0.20, 5);
+  });
+
+  it("a target recorded on a non-goal node earns half credit", () => {
+    const graph = postCutDraft();
+    graph.goal_constraints = [makeConstraint("fac_ctrl", "<=", 0.04)];
+
+    const misattached = score(makeResponse(graph), makeBrief({ has_numeric_target: true }));
+    const notCaptured = score(makeResponse(postCutDraft()), makeBrief({ has_numeric_target: true }));
+
+    expect(misattached.completeness! - notCaptured.completeness!).toBeCloseTo(0.10, 5);
+  });
+
+  it("POSITIVE CONTROL: the sub-dimension is not vacuous — omitting the target costs 0.20", () => {
+    // Proves the new sub-dimension can still score ZERO. Without this, a rubric
+    // that awarded 0.20 unconditionally would pass every other test here.
+    const required = score(makeResponse(postCutDraft()), makeBrief({ has_numeric_target: true }));
+    const notRequired = score(makeResponse(postCutDraft()), makeBrief({ has_numeric_target: false }));
+
+    expect(notRequired.completeness! - required.completeness!).toBeCloseTo(0.20, 5);
+  });
+
+  it("a malformed constraint (no operator, or a non-finite value) earns nothing", () => {
+    const goalId = postCutDraft().nodes.find((n) => n.kind === "goal")!.id;
+
+    const noOperator = postCutDraft();
+    noOperator.goal_constraints = [{ constraint_id: "c1", node_id: goalId, value: 20000, label: "target" }];
+
+    const badOperator = postCutDraft();
+    badOperator.goal_constraints = [makeConstraint(goalId, "==", 20000)];
+
+    const nanValue = postCutDraft();
+    nanValue.goal_constraints = [makeConstraint(goalId, ">=", Number.NaN)];
+
+    const baseline = score(makeResponse(postCutDraft()), makeBrief({ has_numeric_target: true }));
+    for (const graph of [noOperator, badOperator, nanValue]) {
+      const result = score(makeResponse(graph), makeBrief({ has_numeric_target: true }));
+      expect(result.completeness!).toBeCloseTo(baseline.completeness!, 5);
+    }
+  });
+
+  it("has_numeric_target=false still awards the full 0.20 regardless of constraints", () => {
+    const withConstraints = postCutDraft();
+    withConstraints.goal_constraints = [makeConstraint("goal1", ">=", 1)];
+
+    const a = score(makeResponse(withConstraints), makeBrief({ has_numeric_target: false }));
+    const b = score(makeResponse(postCutDraft()), makeBrief({ has_numeric_target: false }));
+
+    expect(a.completeness!).toBeCloseTo(b.completeness!, 5);
+  });
+});
+
+describe("rubric 2 — currency preservation uses model-permitted channels only", () => {
+  const gbpBrief = (): Brief => {
+    const brief = makeBrief();
+    brief.body = "We need to reach £20k MRR within 12 months.";
+    return brief;
+  };
+
+  it("goal_constraints[].unit is a permitted currency channel and earns full marks", () => {
+    const graph = postCutDraft();
+    graph.goal_constraints = [makeConstraint("goal1", ">=", 20000, { unit: "£" })];
+
+    const withUnit = score(makeResponse(graph), gbpBrief());
+    const withoutUnit = score(makeResponse(postCutDraft()), gbpBrief());
+
+    // 0.10 sub-dimension: 1.0 (matched) vs 0.0 (no unit anywhere).
+    expect(withUnit.completeness! - withoutUnit.completeness!).toBeCloseTo(0.10, 5);
+  });
+
+  it("goal_threshold_unit earns NOTHING — it is enricher-only, so scoring it biased the parity benchmark", () => {
+    // Enriched/pipeline output carries the quad; a raw model draft cannot.
+    // Rubric 1 preferred goal_threshold_unit ahead of every other channel, so
+    // the pipeline arm banked 0.10 of completeness the raw arm could not.
+    const enrichedShaped = postCutDraft();
+    enrichedShaped.nodes.find((n) => n.kind === "goal")!.goal_threshold_unit = "£";
+
+    const enriched = score(makeResponse(enrichedShaped), gbpBrief());
+    const modelDraft = score(makeResponse(postCutDraft()), gbpBrief());
+
+    expect(enriched.completeness!).toBeCloseTo(modelDraft.completeness!, 5);
+  });
+});
+
+describe("rubric 2 — ratio encoding", () => {
+  const ratioBrief = (): Brief =>
+    makeBrief({ ratio_metrics: [{ keyword: "goal1", expected_min: 1.0 }] });
+
+  it("CONFIRMS scorer.ts:467-468 was presence-gated: an absent quad never hard-zeroed", () => {
+    // The claim carried into this lane's brief, checked at the bytes before the
+    // arm was removed. A post-#789 draft (no quad) scores a clean 1.0.
+    const result = score(makeResponse(postCutDraft()), ratioBrief());
+    expect(result.ratio_encoding).toBe(1.0);
+  });
+
+  it("an enricher-minted goal_threshold below expected_min no longer hard-zeroes the dimension", () => {
+    // Rubric 1 returned 0.0 here — penalising a normalisation the model never
+    // performed and cannot influence.
+    const graph = postCutDraft();
+    graph.nodes.find((n) => n.kind === "goal")!.goal_threshold = 0.5;
+
+    expect(score(makeResponse(graph), ratioBrief()).ratio_encoding).toBe(1.0);
+  });
+
+  it("POSITIVE CONTROL: model-permitted channels still hard-zero a bad ratio encoding", () => {
+    // Without this, "ratio encoding is always 1.0" would satisfy the two tests
+    // above — the absence assertions must be able to see a presence.
+    const viaNodeValue = postCutDraft();
+    viaNodeValue.nodes.find((n) => n.id === "goal1")!.data = { value: 0.4 };
+    expect(score(makeResponse(viaNodeValue), ratioBrief()).ratio_encoding).toBe(0.0);
+
+    const viaConstraint = postCutDraft();
+    viaConstraint.goal_constraints = [makeConstraint("goal1", ">=", 0.4)];
+    expect(score(makeResponse(viaConstraint), ratioBrief()).ratio_encoding).toBe(0.0);
+  });
+});
+
+describe("rubric 2 — rubric version is stamped on every result", () => {
+  it("stamps a valid result", () => {
+    expect(score(makeResponse(postCutDraft()), makeBrief()).rubric_version).toBe(DRAFT_RUBRIC_VERSION);
+  });
+
+  it("stamps a structurally invalid result", () => {
+    const graph = postCutDraft();
+    graph.nodes = graph.nodes.filter((n) => n.kind !== "goal");
+    expect(score(makeResponse(graph), makeBrief()).rubric_version).toBe(DRAFT_RUBRIC_VERSION);
+  });
+
+  it("stamps a no-graph result", () => {
+    const response: LLMResponse = {
+      model_id: "test-model",
+      brief_id: "test-brief",
+      status: "parse_failed",
+      latency_ms: 10,
+    };
+    expect(score(response, makeBrief()).rubric_version).toBe(DRAFT_RUBRIC_VERSION);
+  });
+
+  it("names a rubric, not the tool version", () => {
+    expect(DRAFT_RUBRIC_VERSION).toMatch(/^draft-graph-rubric-\d+\.\d+\.\d+$/);
   });
 });

@@ -80,13 +80,26 @@ export interface CausalClaim {
   stated_strength?: string;
 }
 
-export interface ParsedGraph {
+/**
+ * ⚠ Declared as a TYPE ALIAS, not an interface, and that is load-bearing.
+ *
+ * TypeScript gives an object-literal type alias an IMPLICIT INDEX SIGNATURE;
+ * an interface never gets one. `PromptTypeAdapter.score()` takes
+ * `Record<string, unknown> | null`, so while this was an interface, every
+ * caller passing a parsed graph into an adapter was a type error
+ * (scripts/regression-check.ts:261,275 — TS2345). Those errors went unseen for
+ * as long as `scripts/` sat outside this package's typecheck include.
+ *
+ * Nothing extends or declaration-merges ParsedGraph (verified repo-wide), so
+ * the alias is a safe, cast-free fix at the root rather than at the call sites.
+ */
+export type ParsedGraph = {
   nodes: GraphNode[];
   edges: GraphEdge[];
   coaching?: CoachingData;
   goal_constraints?: GoalConstraint[];
   causal_claims?: CausalClaim[];
-}
+};
 
 // =============================================================================
 // Model configuration
@@ -204,6 +217,12 @@ export interface LLMResponse {
 // =============================================================================
 
 export interface ScoreResult {
+  /**
+   * Which SCORING RUBRIC produced these numbers — see DRAFT_RUBRIC_VERSION in
+   * scorer.ts. ⚠ Scores carrying different rubric versions are DIFFERENT
+   * MEASURES; never compare them as one series.
+   */
+  rubric_version: string;
   structural_valid: boolean;
   violation_codes: string[];
   /** Legacy dimensions (preserved for backward compatibility) */
