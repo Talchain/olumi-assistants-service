@@ -200,10 +200,10 @@ function amountPattern(prefix: string): string {
  * a target of 800k" start matching — an EXPANSION of the extraction surface
  * this repair has no mandate to make.
  *
- * ⚠ The `\\s*` (not `\\s+`) before the word is load-bearing: `amountPattern`
- * ends with a greedy `\\s*` that has usually consumed the separating space
+ * ⚠ The `\s*` (not `\s+`) before the word is load-bearing: `amountPattern`
+ * ends with a greedy `\s*` that has usually consumed the separating space
  * already, and at END-OF-PATTERN position nothing later forces the engine to
- * backtrack into it — so a `\\s+` group here would silently NEVER capture the
+ * backtrack into it — so a `\s+` group here would silently NEVER capture the
  * final amount's noun, and probe "Currently at 50 employees, and our target is
  * 800k revenue" would sail through unseen. (Mid-pattern the two spellings are
  * equivalent, because the following connective forces the backtrack.)
