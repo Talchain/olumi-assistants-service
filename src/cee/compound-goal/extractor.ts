@@ -20,6 +20,12 @@ import type { GoalConstraintT } from "../../schemas/assist.js";
 import { extractDeadline } from "./deadline-extractor.js";
 import { mapQualitativeToProxy } from "./qualitative-proxy.js";
 import { fuzzyMatchNodeId } from "../../validators/structural-reconciliation.js";
+import {
+  MAGNITUDE_AMBIGUOUS_TRAILER_GUARD,
+  MAGNITUDE_SUFFIX_ANON,
+  requiredMagnitudeSuffixPattern,
+  resolveMagnitude,
+} from "../../utils/magnitude-alphabet.js";
 import { REDUCTION_VERB_PATTERN } from "../../utils/reduction-framing.js";
 
 // ============================================================================
@@ -73,33 +79,56 @@ export interface CompoundGoalExtractionResult {
 // Pattern Definitions
 // ============================================================================
 
+/* ===========================================================================
+ * THE AMOUNT TOKEN — ONE fragment, EIGHTEEN patterns (ROADMAP 2.322)
+ *
+ * ⚠ EVERY PATTERN BELOW USED TO SPELL ITS OWN `[kKmMbB]?`, AND THAT CLASS WAS
+ * THE REAL CEILING ON THIS EXTRACTOR. Folding `parseValueWithUnit` onto the
+ * shared alphabet was not enough and the derived guard said so immediately:
+ * the parser could read "t" and "million", but the CAPTURE never handed it
+ * either, because the token grammar stopped at a single character from a
+ * five-letter class. "keep costs under $4t" produced a constraint of FOUR.
+ *
+ * A pattern's alphabet and its parser's alphabet are two lists that must
+ * agree, which is the same drift pair one layer down — so both are now derived
+ * from the one map. `MAGNITUDE_SUFFIX_ANON` is the un-named spelling: several
+ * of these patterns carry TWO amounts ("between X and Y"), and a duplicated
+ * capture-group name is a hard `SyntaxError`.
+ * ========================================================================= */
+
+/** A currency-or-bare amount with an optional magnitude suffix and optional `%`. */
+const AMT = String.raw`[£$€]?\d+(?:,\d{3})*(?:\.\d+)?${MAGNITUDE_SUFFIX_ANON}${MAGNITUDE_AMBIGUOUS_TRAILER_GUARD}%?`;
+
+/** The same token where a trailing `%` is not admissible ("within £4bn budget"). */
+const AMT_NO_PCT = String.raw`[£$€]?\d+(?:,\d{3})*(?:\.\d+)?${MAGNITUDE_SUFFIX_ANON}${MAGNITUDE_AMBIGUOUS_TRAILER_GUARD}`;
+
 /** Goal verbs that identify primary goals */
 const GOAL_VERB_PATTERNS = [
-  /\b(achieve|reach|grow|maximise|maximize|increase|improve|boost|raise)\s+(\w+(?:\s+\w+){0,3})\s+(?:to|by)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
-  /\b(grow|increase|boost)\s+(\w+(?:\s+\w+){0,3})\s+(?:from\s+[£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?\s+)?to\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  new RegExp(String.raw`\b(achieve|reach|grow|maximise|maximize|increase|improve|boost|raise)\s+(\w+(?:\s+\w+){0,3})\s+(?:to|by)\s+(${AMT})`, "gi"),
+  new RegExp(String.raw`\b(grow|increase|boost)\s+(\w+(?:\s+\w+){0,3})\s+(?:from\s+${AMT}\s+)?to\s+(${AMT})`, "gi"),
 ];
 
 /** Extended value pattern fragment — captures numeric value with optional composite unit suffix */
-const _VAL = `[£$€]?\\d+(?:,\\d{3})*(?:\\.\\d+)?[kKmMbB]?%?(?:\\s*(?:\\/\\s*(?:month|year|quarter|week|day|hr|hour))|\\s+(?:hours?|months?|days?|weeks?|years?|percent))?`;
+const _VAL = `${AMT}(?:\\s*(?:\\/\\s*(?:month|year|quarter|week|day|hr|hour))|\\s+(?:hours?|months?|days?|weeks?|years?|percent))?`;
 
 /** Upper bound constraint patterns (operator: <=) */
 const UPPER_BOUND_PATTERNS = [
   // "while keeping X under/below Y"
-  /while\s+(?:keeping|maintaining)\s+(\w+(?:\s+\w+){0,3})\s+(?:under|below|at most)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  new RegExp(String.raw`while\s+(?:keeping|maintaining)\s+(\w+(?:\s+\w+){0,3})\s+(?:under|below|at most)\s+(${AMT})`, "gi"),
   // "without exceeding Y"
-  /without\s+exceeding\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s*(\w+(?:\s+\w+){0,2})?/gi,
+  new RegExp(String.raw`without\s+exceeding\s+(${AMT})\s*(\w+(?:\s+\w+){0,2})?`, "gi"),
   // "keep Y under Z"
-  /keep\s+(\w+(?:\s+\w+){0,3})\s+(?:under|below|at most)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  new RegExp(String.raw`keep\s+(\w+(?:\s+\w+){0,3})\s+(?:under|below|at most)\s+(${AMT})`, "gi"),
   // "X must not exceed Y"
-  /(\w+(?:\s+\w+){0,3})\s+(?:must not|cannot|should not)\s+exceed\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  new RegExp(String.raw`(\w+(?:\s+\w+){0,3})\s+(?:must not|cannot|should not)\s+exceed\s+(${AMT})`, "gi"),
   // "no more than Y X"
-  /no\s+more\s+than\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s+(\w+(?:\s+\w+){0,2})/gi,
+  new RegExp(String.raw`no\s+more\s+than\s+(${AMT})\s+(\w+(?:\s+\w+){0,2})`, "gi"),
   // "at most Y X"
-  /at\s+most\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s+(\w+(?:\s+\w+){0,2})/gi,
+  new RegExp(String.raw`at\s+most\s+(${AMT})\s+(\w+(?:\s+\w+){0,2})`, "gi"),
   // "within Y budget" - note: targetName defaults to "budget"
-  /within\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?)\s*(budget|limit|cap)/gi,
+  new RegExp(String.raw`within\s+(${AMT_NO_PCT})\s*(budget|limit|cap)`, "gi"),
   // "X under Y" (simple form)
-  /(\w+(?:\s+\w+){0,2})\s+(?:under|below)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  new RegExp(String.raw`(\w+(?:\s+\w+){0,2})\s+(?:under|below)\s+(${AMT})`, "gi"),
   // Subject-optional: "under/below Y [unit]" (bare phrase — subject defaults to "unspecified")
   new RegExp(`(?:^|\\s)(?:under|below)\\s+(${_VAL})`, "gi"),
 ];
@@ -107,23 +136,34 @@ const UPPER_BOUND_PATTERNS = [
 /** Lower bound constraint patterns (operator: >=) */
 const LOWER_BOUND_PATTERNS = [
   // "while ensuring X stays above/at least Y"
-  /while\s+ensuring\s+(\w+(?:\s+\w+){0,3})\s+(?:stays?\s+)?(?:above|at least)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  new RegExp(String.raw`while\s+ensuring\s+(\w+(?:\s+\w+){0,3})\s+(?:stays?\s+)?(?:above|at least)\s+(${AMT})`, "gi"),
   // "maintain at least Y"
-  /maintain\s+(?:at\s+least\s+)?([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s*(\w+(?:\s+\w+){0,2})?/gi,
+  new RegExp(String.raw`maintain\s+(?:at\s+least\s+)?(${AMT})\s*(\w+(?:\s+\w+){0,2})?`, "gi"),
   // "X must be at least Y"
-  /(\w+(?:\s+\w+){0,3})\s+(?:must be|should be)\s+(?:at least|above|over)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  new RegExp(String.raw`(\w+(?:\s+\w+){0,3})\s+(?:must be|should be)\s+(?:at least|above|over)\s+(${AMT})`, "gi"),
   // "no less than Y"
-  /no\s+less\s+than\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s+(\w+(?:\s+\w+){0,2})/gi,
+  new RegExp(String.raw`no\s+less\s+than\s+(${AMT})\s+(\w+(?:\s+\w+){0,2})`, "gi"),
   // "minimum of Y X"
-  /minimum\s+(?:of\s+)?([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s*(\w+(?:\s+\w+){0,2})?/gi,
+  new RegExp(String.raw`minimum\s+(?:of\s+)?(${AMT})\s*(\w+(?:\s+\w+){0,2})?`, "gi"),
   // "X above Y" (simple form)
-  /(\w+(?:\s+\w+){0,2})\s+(?:above|over)\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi,
+  new RegExp(String.raw`(\w+(?:\s+\w+){0,2})\s+(?:above|over)\s+(${AMT})`, "gi"),
   // Subject-optional: "above/over Y [unit]" (bare phrase — subject defaults to "unspecified")
   new RegExp(`(?:^|\\s)(?:above|over)\\s+(${_VAL})`, "gi"),
 ];
 
 /** "Between X and Y" pattern (generates two constraints) */
-const BETWEEN_PATTERN = /(\w+(?:\s+\w+){0,3})\s+between\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)\s+and\s+([£$€]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)/gi;
+/**
+ * A magnitude suffix sitting at the END of an already-cleaned amount token,
+ * with optional separating space ("5m", "5 million"). DERIVED from the shared
+ * alphabet — longest-first, `\b`-closed — so it reads every spelling the
+ * parsers elsewhere in the service read, and gains any future rung for free.
+ */
+const MAGNITUDE_SUFFIX_TAIL_RE = new RegExp(
+  `${requiredMagnitudeSuffixPattern("mult")}$`,
+  "i",
+);
+
+const BETWEEN_PATTERN = new RegExp(String.raw`(\w+(?:\s+\w+){0,3})\s+between\s+(${AMT})\s+and\s+(${AMT})`, "gi");
 
 /**
  * Reduction ("by") constraint patterns — CHANGE framing, flipped to
@@ -189,18 +229,31 @@ function parseValue(valueStr: string): { value: number; unit: string } {
     return { value: num / 100, unit }; // Convert to decimal
   }
 
-  // Handle suffixes
+  // Handle magnitude suffixes (ROADMAP 2.322).
+  //
+  // ⚠ THIS WAS A SINGLE-CHARACTER `slice(-1)` CHAIN OVER k/m/b, AND IT WAS
+  // WRONG IN TWO DIRECTIONS AT ONCE — both measured at `497a14e`, not reasoned:
+  //
+  //   - IT COULD NOT SEE A WORD FORM. "$5 million" reached here as "5 million",
+  //     whose last character is "n" — no branch matched, `parseFloat("5 million")`
+  //     returned 5, and a five-million-pound constraint was persisted as £5. The
+  //     same for "$5 billion", "$5 trillion" and every cased variant.
+  //   - IT COULD NOT SEE THE TRILLION RUNG OR `bn`. "$5t" kept its "t" and read
+  //     5; "$5bn" matched the `b` branch only because "n" had already been
+  //     stripped as a non-digit elsewhere — i.e. correct by accident, not by
+  //     rule.
+  //
+  // (The claim that this site turned "5bn" into 5 was REFUTED on measurement —
+  // it read 5e9. The real defects are the word forms and the missing rung, and
+  // this comment says so rather than repeating the convenient version.)
+  //
+  // The alphabet is now the shared one, so every spelling the rest of the
+  // service can parse is a spelling this extractor can parse.
+  const suffixMatch = cleaned.match(MAGNITUDE_SUFFIX_TAIL_RE);
   let multiplier = 1;
-  const lastChar = cleaned.slice(-1).toLowerCase();
-  if (lastChar === "k") {
-    multiplier = 1000;
-    cleaned = cleaned.slice(0, -1);
-  } else if (lastChar === "m") {
-    multiplier = 1000000;
-    cleaned = cleaned.slice(0, -1);
-  } else if (lastChar === "b") {
-    multiplier = 1000000000;
-    cleaned = cleaned.slice(0, -1);
+  if (suffixMatch?.groups?.mult) {
+    multiplier = resolveMagnitude(suffixMatch.groups.mult);
+    cleaned = cleaned.slice(0, suffixMatch.index);
   }
 
   const num = parseFloat(cleaned.replace(/,/g, "")) * multiplier;

@@ -17,6 +17,8 @@
  * meaningful string they return `undefined` so callers can omit the field.
  */
 
+import { MAGNITUDE_DISPLAY_LADDER } from "../../utils/magnitude-alphabet.js";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -79,22 +81,39 @@ function isCurrencyUnit(unit: string | undefined): boolean {
 // ============================================================================
 
 /**
- * Format a currency amount with `k` / `m` shorthand.
- * - 1,000 → "1k"    - 1,500 → "1.5k"
- * - 1,000,000 → "1m" - 1,250,000 → "1.25m"
+ * Format a currency amount with magnitude shorthand.
+ * - 1,000 → "1k"      - 1,500 → "1.5k"
+ * - 1,000,000 → "1m"  - 1,250,000 → "1.25m"
+ * - 5,000,000,000 → "5b"   - 5e12 → "5t"
  * - < 1,000 → integer or 1 d.p.
  * Handles negative values: -500000 → "-500k".
+ *
+ * ⚠ THE LADDER USED TO BE TWO HAND-WRITTEN RUNGS AND IT STOPPED AT 1e6
+ * (ROADMAP 2.322), so a value the parsers happily read as five TRILLION came
+ * back out as `"$5000000m"`. Not untruthful — the digits were right — but a
+ * formatter that cannot spell a magnitude its own parser accepts is the same
+ * list-drift defect wearing a cosmetic mask, and the rung added to the
+ * alphabet would never have reached it.
+ *
+ * The rungs are now DERIVED from the shared alphabet (descending, each with
+ * the shortest key that spells its multiplier), so parse and print cannot
+ * disagree about which magnitudes exist.
+ *
+ * PRECISION IS PRESERVED PER RUNG, deliberately and not incidentally: the
+ * pre-2.322 code showed 2 d.p. above a million and 1 d.p. below it, and those
+ * two spellings are pinned in the suite. The rule generalises as "the
+ * thousands rung shows 1 d.p., every larger rung shows 2" rather than being
+ * flattened to one precision, because flattening would have been a silent
+ * display change smuggled in under a magnitude repair.
  */
 function formatCurrencyAmount(amount: number): string {
   const sign = amount < 0 ? "-" : "";
   const abs = Math.abs(amount);
-  if (abs >= 1_000_000) {
-    const m = abs / 1_000_000;
-    return `${sign}${m % 1 === 0 ? `${m}m` : `${parseFloat(m.toFixed(2))}m`}`;
-  }
-  if (abs >= 1_000) {
-    const k = abs / 1_000;
-    return `${sign}${k % 1 === 0 ? `${k}k` : `${parseFloat(k.toFixed(1))}k`}`;
+  for (const [multiplier, suffix] of MAGNITUDE_DISPLAY_LADDER) {
+    if (abs < multiplier) continue;
+    const scaled = abs / multiplier;
+    const decimals = multiplier === 1e3 ? 1 : 2;
+    return `${sign}${scaled % 1 === 0 ? `${scaled}${suffix}` : `${parseFloat(scaled.toFixed(decimals))}${suffix}`}`;
   }
   // Sub-thousand: show as integer or 1 d.p. if non-integer
   return abs % 1 === 0 ? `${sign}${abs}` : `${sign}${parseFloat(abs.toFixed(1))}`;

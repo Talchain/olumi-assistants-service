@@ -29,6 +29,12 @@
  * guessing a fix) key off this one list so they cannot drift apart.
  */
 
+import {
+  AMOUNT_DIGITS,
+  magnitudeSuffixPattern,
+  resolveMagnitude,
+} from './magnitude-alphabet.js';
+
 /** Closed set of unambiguous decrease verbs (all inflections). */
 export const REDUCTION_VERB_PATTERN =
   '(?:reduce|reduces|reducing|reduced|decrease|decreases|decreasing|decreased|' +
@@ -100,17 +106,6 @@ export const INCREASE_VERB_PATTERN =
   'lift|lifts|lifting|lifted|expand|expands|expanding|expanded|' +
   'rise|rises|rising|rose|risen)';
 
-/** Multipliers accepted after a stated delta ("by 2M", "by 2 million"). */
-const DELTA_MULTIPLIERS: Readonly<Record<string, number>> = {
-  k: 1e3,
-  m: 1e6,
-  bn: 1e9,
-  b: 1e9,
-  t: 1e12,
-  million: 1e6,
-  billion: 1e9,
-  trillion: 1e12,
-};
 
 /**
  * `<increase verb> … by <number>`, with the span between verb and "by"
@@ -121,10 +116,23 @@ const DELTA_MULTIPLIERS: Readonly<Record<string, number>> = {
 const INCREASE_BY_DELTA_RE = new RegExp(
   `\\b${INCREASE_VERB_PATTERN}\\b` +
     `(?:(?!\\bto\\s+[£$€]?\\d)[^.?!\\n]){0,80}?` +
-    `\\bby\\s+[£$€]?(?<amount>\\d+(?:,\\d{3})*(?:\\.\\d+)?)` +
-    // Longest-first, and the trailing `\b` stops a bare `t`/`m` from eating the
-    // first letter of the following word ("by 2 THIS quarter" → 2e12).
-    `\\s*(?<multiplier>million|billion|trillion|bn|k|m|b|t)?\\b`,
+    `\\bby\\s+[£$€]?(?<amount>${AMOUNT_DIGITS})` +
+    // ROADMAP 2.322 — this used to spell the alphabet out as
+    // `million|billion|trillion|bn|k|m|b|t`: a byte-for-byte COPY of the map
+    // that sat ten lines above it, plus a hand-ordered longest-first sort that
+    // a future append could silently get wrong. Both are now DERIVED from the
+    // one alphabet, which also supplies the trailing `\b` that stops a bare
+    // `t`/`m` eating the first letter of the following word ("by 2 THIS
+    // quarter" → 2e12).
+    // ⚠ THE TRAILING `\b` IS LOAD-BEARING AND IS *NOT* PART OF THE SHARED
+    // FRAGMENT. It is what makes an ATTACHED trailer refuse: with it,
+    // "by 5mARR" fails to match at all and this returns null ("no stated
+    // delta"), which is the conservative answer for a run that may be five
+    // million or may be five. Dropping it — measured on the first cut of this
+    // change — turned "by 5mARR" into 5, a silent 1e6× under-read on a value
+    // used as an EQUALITY fingerprint by the add_constraint backstop. The
+    // alphabet is derived; this boundary is this call site's own semantics.
+    `${magnitudeSuffixPattern('multiplier')}\\b`,
   'i',
 );
 
@@ -158,7 +166,5 @@ export function extractIncreaseByDelta(text: string): number | null {
   const amount = Number.parseFloat(match.groups.amount.replace(/,/g, ''));
   if (!Number.isFinite(amount)) return null;
 
-  const multiplierKey = match.groups.multiplier?.toLowerCase();
-  const multiplier = multiplierKey ? (DELTA_MULTIPLIERS[multiplierKey] ?? 1) : 1;
-  return amount * multiplier;
+  return amount * resolveMagnitude(match.groups.multiplier);
 }

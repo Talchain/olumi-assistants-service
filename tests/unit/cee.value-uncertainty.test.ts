@@ -493,34 +493,32 @@ describe("Backward Compatibility", () => {
 
 describe("Factor Extraction with Confidence and Type", () => {
   it("extracts explicit currency from-to with high confidence", () => {
-    const factors = extractFactors("The price will increase from £49 to £59");
-
-    const priceFactor = factors.find((f) => f.value === 59);
-    expect(priceFactor).toBeDefined();
-    expect(priceFactor!.extractionType).toBe("explicit");
-    expect(priceFactor!.confidence).toBeGreaterThanOrEqual(0.90);
-    expect(priceFactor!.baseline).toBe(49);
+    expect(completeShape("The price will increase from £49 to £59")).toEqual([
+      ["Price", 54, "£", "range", 0.8, null],
+      ["Price", 59, "£", "explicit", 0.95, 49],
+      ["Price", 49, "£", "inferred", 0.6, null],
+    ]);
   });
 
   it("extracts approximate values as inferred", () => {
-    const factors = extractFactors("We expect around £60 in revenue");
-
-    const factor = factors.find((f) => f.value === 60);
-    expect(factor).toBeDefined();
-    expect(factor!.extractionType).toBe("inferred");
-    expect(factor!.confidence).toBeLessThanOrEqual(0.75);
+    // M8's own shape. The confidence 0.70 is what distinguishes the
+    // `approximateValue` extractor from the currency fallback's 0.60 — the
+    // collision the previous `.find` + `<= 0.75` assertion could not see.
+    expect(completeShape("We expect around £60 in revenue")).toEqual([
+      ["Value", 60, "£", "inferred", 0.7, null],
+    ]);
   });
 
   it("extracts range with bounds", () => {
-    const factors = extractFactors("The cost is between £50-70");
-
-    // Should extract midpoint with range info
-    const factor = factors.find((f) => f.rangeMin !== undefined);
-    expect(factor).toBeDefined();
-    expect(factor!.extractionType).toBe("range");
-    expect(factor!.rangeMin).toBe(50);
-    expect(factor!.rangeMax).toBe(70);
-    expect(factor!.value).toBe(60); // Midpoint
+    expect(completeShape("The cost is between £50-70")).toEqual([
+      ["Cost", 60, "£", "range", 0.8, null], // midpoint
+      ["Cost", 50, "£", "inferred", 0.6, null],
+    ]);
+    const ranged = extractFactors("The cost is between £50-70").find(
+      (f) => f.rangeMin !== undefined,
+    );
+    expect(ranged!.rangeMin).toBe(50);
+    expect(ranged!.rangeMax).toBe(70);
   });
 
   it("extracts contextual numbers as explicit", () => {
@@ -533,12 +531,10 @@ describe("Factor Extraction with Confidence and Type", () => {
   });
 
   it("extracts standalone currency as inferred", () => {
-    const factors = extractFactors("We budgeted £100");
-
-    // Standalone currency without context words is inferred
-    const factor = factors.find((f) => f.value === 100);
-    expect(factor).toBeDefined();
-    expect(factor!.extractionType).toBe("inferred");
+    // Standalone currency without context words is inferred.
+    expect(completeShape("We budgeted £100")).toEqual([
+      ["Budget", 100, "£", "inferred", 0.6, null],
+    ]);
   });
 });
 
@@ -621,6 +617,35 @@ describe("Edge Cases", () => {
 
 import { enrichGraphWithFactors } from "../../src/cee/factor-extraction/enricher.js";
 import type { GraphT, FactorDataT } from "../../src/schemas/graph.js";
+
+/**
+ * ROADMAP 2.324 — the COMPLETE factor array, as `[label, value, unit,
+ * extractionType, confidence, baseline]`.
+ *
+ * WHY THE ASSERTIONS BELOW WERE CONVERTED. Four of them read a single factor
+ * out of the array with a VALUE predicate and then checked a loose bound on it
+ * — `.find(f => f.value === 60)` followed by `confidence <= 0.75`. That is the
+ * exact shape mutant M8 walked through: delete the `approximateValue` extractor
+ * outright and the CURRENCY FALLBACK produces a factor with the same value, the
+ * same `inferred` type and a confidence of 0.60 that satisfies the same bound.
+ * The test passes — on a different factor than the one it was written for —
+ * while a user-visible factor node has vanished from the graph. 23,832 tests
+ * agreed with it.
+ *
+ * A complete-array pin cannot do that: the surviving factor differs in
+ * confidence (0.6 vs 0.7), so the array differs, so it REDs.
+ */
+function completeShape(brief: string): unknown[][] {
+  return extractFactors(brief).map((f) => [
+    f.label,
+    f.value,
+    f.unit ?? null,
+    f.extractionType,
+    f.confidence,
+    f.baseline ?? null,
+  ]);
+}
+
 
 describe("End-to-End Integration: Enrichment → V2 Transform", () => {
   it("enriched factors include value_std in v2 output", () => {
