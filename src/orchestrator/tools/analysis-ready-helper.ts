@@ -310,5 +310,11 @@ export function computeStructuralReadiness(
     goal_node_id: goalNode.id,
     status: payloadStatus,
     ...(goalNode.goal_threshold != null && { goal_threshold: goalNode.goal_threshold }),
+    // ROADMAP 2.315(a) — the raw target trio, carried verbatim from the goal
+    // node's attested mint (mirrors src/cee/transforms/analysis-ready.ts, whose
+    // status logic this function already mirrors). Never re-derived.
+    ...(goalNode.goal_threshold_raw != null && { goal_threshold_raw: goalNode.goal_threshold_raw }),
+    ...(goalNode.goal_threshold_unit != null && { goal_threshold_unit: goalNode.goal_threshold_unit }),
+    ...(goalNode.goal_threshold_cap != null && { goal_threshold_cap: goalNode.goal_threshold_cap }),
   };
 }

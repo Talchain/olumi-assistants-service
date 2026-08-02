@@ -722,6 +722,16 @@ export function buildAnalysisReadyPayload(
     status: payloadStatus,
     bias_findings: [],
     ...(goalNode?.goal_threshold != null && { goal_threshold: goalNode.goal_threshold }),
+    // ROADMAP 2.315(a) — carry the RAW goal target beside the normalised one.
+    // `goal_threshold` alone left consumers unable to recover the user's own
+    // figure: a £800,000 target surfaced as "reaching ≥ 0.8 count".
+    // These are the enricher's ATTESTED values, carried verbatim — the cap in
+    // particular must be the one the graph was scored against, not a fresh
+    // re-resolution. Each is independently optional (a qualitative goal has
+    // no numeric target); absence stays absence.
+    ...(goalNode?.goal_threshold_raw != null && { goal_threshold_raw: goalNode.goal_threshold_raw }),
+    ...(goalNode?.goal_threshold_unit != null && { goal_threshold_unit: goalNode.goal_threshold_unit }),
+    ...(goalNode?.goal_threshold_cap != null && { goal_threshold_cap: goalNode.goal_threshold_cap }),
   };
 
   // Add user_questions when status is needs_user_mapping

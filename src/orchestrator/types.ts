@@ -592,6 +592,16 @@ export interface GraphPatchBlockData {
     blockers?: unknown[];
     model_adjustments?: unknown[];
     goal_threshold?: number;
+    /**
+     * ROADMAP 2.315(a) — the RAW goal target as the user stated it, alongside
+     * the normalised `goal_threshold` above. Carried VERBATIM from the values
+     * the enricher attested on the goal node; never re-derived downstream
+     * (see the contract note on `AnalysisReadyPayload` in
+     * src/schemas/analysis-ready.ts for why re-derivation is unsafe).
+     */
+    goal_threshold_raw?: number;
+    goal_threshold_unit?: string;
+    goal_threshold_cap?: number;
     bias_findings?: Array<{
       id: string;
       category: string;
