@@ -284,6 +284,69 @@ describe("ROADMAP 2.316 — ONE alphabet, THREE consumers (drift guard)", () => 
     }
   });
 
+  it("keys are UNIQUE under case-folding — a collision silently drops one", () => {
+    // ADDED BECAUSE A MUTANT SURVIVED (M11), and the reason is worth stating:
+    // a collision whose two keys carry the SAME value is behaviourally
+    // harmless (`Bn` + `bn` both resolve to 1e9), so NOTHING observable REDs —
+    // measured, not assumed. The invariant is still broken, and the day the
+    // values differ (`Bn: 1e6` beside `bn: 1e9`) the lookup keeps the LAST
+    // entry and `$5bn` silently resolves to 5e6: the exact 1e3× class this row
+    // exists to close, re-entering through its own fix.
+    //
+    // So the invariant is pinned DIRECTLY rather than through behaviour. The
+    // module also throws at load; this test is what makes the harmless-today
+    // case RED, and it is derived from the exported map so it cannot go stale.
+    const keys = Object.keys(MAGNITUDE_MULTIPLIERS);
+    const folded = new Set(keys.map((k) => k.toLowerCase()));
+    expect(
+      folded.size,
+      `case-fold collision: ${keys.length} keys collapse to ${folded.size} lookup entries`,
+    ).toBe(keys.length);
+  });
+
+  it("the alternation carries every key LITERALLY — no key acts as a regex operator", () => {
+    // ADDED BECAUSE A MUTANT SURVIVED (M12). `MAGNITUDE_ALTERNATION` is DERIVED
+    // from data, and derived-from-data means the data must be escaped on the
+    // way in: an unescaped `b|z` key would inject a bare `z` ALTERNATIVE (so
+    // "4z" resolves as a magnitude), `m.n` would match "mXn", and `m+` would
+    // match "mmm". All three measured on the compiled pattern, not reasoned.
+    //
+    // The corruption set is DERIVED from the keys themselves — no hand-written
+    // list of metacharacters to drift. Escaping is a no-op while every key is
+    // plain [a-z], which is exactly why the omission would be invisible until
+    // the day it was not.
+    const alternation = new RegExp(`^(?:${MAGNITUDE_ALTERNATION})$`, "i");
+    const keys = Object.keys(MAGNITUDE_MULTIPLIERS).map((k) => k.toLowerCase());
+    const keySet = new Set(keys);
+    const SENTINEL = "§"; // in no key, and not a regex metacharacter
+
+    for (const key of keys) {
+      // 1. Literal round-trip. Catches a key whose own metacharacters stop it
+      //    matching itself — "(m)" compiles to a GROUP around m, and "b|z"
+      //    splits into two branches, so neither matches its own literal.
+      expect(alternation.test(key), `key does not match itself literally: '${key}'`).toBe(true);
+
+      for (let i = 0; i < key.length; i++) {
+        // 2. Substitution. Catches wildcards — unescaped "m.n" matches "m§n".
+        const substituted = key.slice(0, i) + SENTINEL + key.slice(i + 1);
+        if (!keySet.has(substituted)) {
+          expect(
+            alternation.test(substituted),
+            `alternation matches a NON-KEY '${substituted}' — an unescaped metacharacter in '${key}'`,
+          ).toBe(false);
+        }
+        // 3. Repetition. Catches quantifiers — unescaped "m+"/"m*" match "mm".
+        const doubled = key.slice(0, i) + key[i]! + key.slice(i);
+        if (!keySet.has(doubled)) {
+          expect(
+            alternation.test(doubled),
+            `alternation matches a NON-KEY '${doubled}' — an unescaped quantifier in '${key}'`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
+
   it("the alphabet resolves under EVERY casing, because the lookup is derived by case-folding", () => {
     // The property that makes "the regex and the lookup cannot disagree"
     // structural rather than incidental. The `i` flag admits any casing of a
