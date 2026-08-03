@@ -342,6 +342,28 @@ describe("THE UPSERT FENCE — a read must never create the row, pin (1)", () =>
     await app.close();
   });
 
+  it("refuses rather than upserting when the store CANNOT check existence", async () => {
+    // `scenarioExists` is OPTIONAL on the SessionStore interface. If it is
+    // absent and this route shrugged (`assume it exists`), the next thing it
+    // does is the ownership pre-flight — which UPSERTS. "I could not check"
+    // would silently become "create it and read it", and the route's whole
+    // never-creates invariant would hold only for stores of the right shape.
+    const storeRef = store as { scenarioExists?: unknown };
+    const saved = storeRef.scenarioExists;
+    delete storeRef.scenarioExists;
+    try {
+      const app = await buildApp();
+      const res = await read(app, SCENARIO, { user_id: OWNER });
+
+      expect(res.statusCode).toBeGreaterThanOrEqual(500);
+      expect(ensureScenarioExists).not.toHaveBeenCalled();
+      expect(loadGraphAndBriefText).not.toHaveBeenCalled();
+      await app.close();
+    } finally {
+      storeRef.scenarioExists = saved;
+    }
+  });
+
   it("POSITIVE CONTROL — the upsert IS reached on an existing scenario", async () => {
     // Trap 13: proves the spy can SEE the call it asserts the absence of
     // above. Without this, `not.toHaveBeenCalled()` would pass on a route that

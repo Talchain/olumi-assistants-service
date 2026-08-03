@@ -238,12 +238,32 @@ export default async function route(app: FastifyInstance) {
       // worst case is a spurious tombstone. Here the worst case is serving or
       // fabricating someone's decision graph, so a thrown read fails CLOSED
       // and says 503 — it never degrades into 404 or into an empty graph.
+      //
+      // ⚠ A MISSING `scenarioExists` FAILS CLOSED, and this is the one place
+      //   this route deliberately diverges from turn-stop.ts's structural
+      //   probe. `scenarioExists` is OPTIONAL on the SessionStore interface.
+      //   turn-stop can skip it when absent, because skipping only costs it a
+      //   hardening check. Skipping it HERE would fall straight through to the
+      //   ownership pre-flight — the call that UPSERTS — so "I could not check
+      //   whether this scenario exists" would become "create it and read it".
+      //   Defaulting to `true` (assume it exists) is exactly the dangerous
+      //   direction, and it would make the invariant this route advertises
+      //   ("a read never creates the row it reads") conditional on a store
+      //   shape rather than structural. An unverifiable precondition is
+      //   refused, not assumed.
       let exists: boolean;
       try {
-        exists =
-          typeof store.scenarioExists === "function"
-            ? await store.scenarioExists(scenarioId)
-            : true;
+        if (typeof store.scenarioExists !== "function") {
+          log.error(
+            {
+              event: "v5.scenario_graph.existence_check_unavailable",
+              request_id: requestId,
+            },
+            "Scenario graph read — store cannot check scenario existence; refusing rather than risking a create-on-read",
+          );
+          return unavailable();
+        }
+        exists = await store.scenarioExists(scenarioId);
       } catch (err) {
         log.warn(
           {
