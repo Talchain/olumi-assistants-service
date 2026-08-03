@@ -167,7 +167,13 @@ const CONNECTIVE_TOKENS: ReadonlySet<string> = new Set([
 const VALUE_TOKEN_RE =
   /(\d[\d,]*(?:\.\d+)?|\.\d+)(?:\s*(k|m|bn?|thousand|million|billion)\b)?\s*([%£$€]|[a-z][a-z]*)?/gi;
 
-const SUFFIX_FACTOR: ReadonlyMap<string, number> = new Map([
+/**
+ * ⚠ EXPORTED SOLELY SO THE CANONICAL ALPHABET'S UNION GUARD CAN READ IT
+ * (ROADMAP 2.330, amended in review). This is a genuine seven-key MAGNITUDE
+ * VALUE LOOKUP — it multiplies — and the union guard was blind to it because
+ * it was private. See `src/utils/__tests__/magnitude-alphabet.union.test.ts`.
+ */
+export const SUFFIX_FACTOR: ReadonlyMap<string, number> = new Map([
   ['k', 1e3], ['thousand', 1e3],
   ['m', 1e6], ['million', 1e6],
   ['b', 1e9], ['bn', 1e9], ['billion', 1e9],

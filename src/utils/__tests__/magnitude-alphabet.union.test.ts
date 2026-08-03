@@ -33,6 +33,27 @@
  * get to be trusted. `PART D` scans `src/` from disk and REDs when any file
  * outside the reviewed manifest declares a magnitude word, which is what makes
  * a NEW sibling arriving loud instead of silent.
+ *
+ * ⚠⚠ AND PART D'S MANIFEST HAS ALREADY BEEN WRONG — TWICE, IN THE FIRST CUT OF
+ * THIS FILE, CAUGHT BY ADVERSARIAL REVIEW RATHER THAN BY ANYTHING HERE.
+ * `compromise-backstop.ts` was recorded as treating `grand` as "a UNIT token
+ * for span extension, not a multiplier" while its code does
+ * `value = value * 1000`; `value-unit-resolution.ts` was recorded as carrying
+ * "no multiplier" on the strength of its `['grand','currency']` unit-KIND row,
+ * three lines from a seven-key `SUFFIX_FACTOR` map that multiplies. Both were
+ * therefore EXCUSED from the comparison by a sentence about them.
+ *
+ * That is CLAUDE.md trap 7b — a false one-line label on a known site, which
+ * teaches every later reader to stop looking — occurring INSIDE the trap-12d
+ * guard written to abolish exactly this. The escape hatch is the hazard: a
+ * manifest that can say "not a magnitude list" is a manifest that can be wrong
+ * about it, and being wrong there is silent by construction.
+ *
+ * THE RULE THAT FOLLOWS, and the reason both are now in SIBLING_VALUE_LOOKUPS
+ * rather than merely re-described: prefer COMPARING a site to CLASSIFYING it.
+ * A comparison that runs is worth more than a sentence that is true today —
+ * and if a site is genuinely not comparable, the manifest entry must quote the
+ * code, not summarise it.
  */
 
 import { describe, it, expect } from "vitest";
@@ -53,8 +74,19 @@ import {
 } from "../../orchestrator-v5/context/cqe/rules.js";
 import { MAGNITUDE_ALT as WORD_NUMBER_MAGNITUDE_ALT } from "../../orchestrator-v5/context/cqe/word-numbers.js";
 import { ANCHORING_MAGNITUDE_ALT } from "../../cee/validation/pre-decision-checks.js";
+import { BACKSTOP_MAGNITUDE_MULTIPLIERS } from "../../orchestrator-v5/context/cqe/compromise-backstop.js";
+import { SUFFIX_FACTOR as VALUE_UNIT_SUFFIX_FACTOR } from "../../orchestrator-v5/routing/value-unit-resolution.js";
 
 const SRC_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+
+/**
+ * Budget for Part D's disk scan of `src/`.
+ *
+ * ~2 s idle for ~1,400 files, but the parallel workers routinely saturate the
+ * box and it has been measured past vitest's 5,000 ms default. This is sized
+ * to be unreachable by load and still catch a genuine hang.
+ */
+const SCAN_TIMEOUT_MS = 60_000;
 
 /* ===========================================================================
  * THE SIBLINGS, and what kind of statement each one makes.
@@ -69,24 +101,38 @@ const SRC_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 interface SiblingValueLookup {
   readonly module: string;
   readonly symbol: string;
-  readonly entries: Readonly<Record<string, number>>;
+  /** `[key, multiplier]` pairs — plain objects and Maps normalise to the same shape. */
+  readonly entries: ReadonlyArray<readonly [string, number]>;
 }
 
 const SIBLING_VALUE_LOOKUPS: readonly SiblingValueLookup[] = [
   {
     module: "src/cee/extraction/numeric-parser.ts",
     symbol: "MULTIPLIERS",
-    entries: NUMERIC_PARSER_MULTIPLIERS,
+    entries: Object.entries(NUMERIC_PARSER_MULTIPLIERS),
   },
   {
     module: "src/cee/decision-review/shape-check.ts",
     symbol: "MULTIPLIER_MAP",
-    entries: SHAPE_CHECK_MULTIPLIERS,
+    entries: Object.entries(SHAPE_CHECK_MULTIPLIERS),
   },
   {
     module: "src/orchestrator-v5/context/cqe/rules.ts",
     symbol: "COLLOQUIAL_MAGNITUDE_MULTIPLIERS",
-    entries: COLLOQUIAL_MAGNITUDE_MULTIPLIERS,
+    entries: Object.entries(COLLOQUIAL_MAGNITUDE_MULTIPLIERS),
+  },
+  // ⚠ THE TWO BELOW WERE ADDED IN REVIEW, and both were sitting in the
+  // REVIEWED manifest under a FALSE description that told this guard they
+  // carried no multiplier. Both do. See the amendment note in Part D.
+  {
+    module: "src/orchestrator-v5/context/cqe/compromise-backstop.ts",
+    symbol: "BACKSTOP_MAGNITUDE_MULTIPLIERS",
+    entries: Object.entries(BACKSTOP_MAGNITUDE_MULTIPLIERS),
+  },
+  {
+    module: "src/orchestrator-v5/routing/value-unit-resolution.ts",
+    symbol: "SUFFIX_FACTOR",
+    entries: [...VALUE_UNIT_SUFFIX_FACTOR],
   },
 ];
 
@@ -176,7 +222,7 @@ function alternationTokens(source: string, label: string): string[] {
 describe("ROADMAP 2.330 — the canonical alphabet is a SUPERSET of every sibling", () => {
   for (const sibling of SIBLING_VALUE_LOOKUPS) {
     it(`${sibling.module} :: ${sibling.symbol} — every key is canonical`, () => {
-      for (const key of Object.keys(sibling.entries)) {
+      for (const [key] of sibling.entries) {
         if (key.toLowerCase() in DELIBERATE_EXCLUSIONS) continue;
         expect(
           isKnownMagnitude(key),
@@ -189,7 +235,7 @@ describe("ROADMAP 2.330 — the canonical alphabet is a SUPERSET of every siblin
     });
 
     it(`${sibling.module} :: ${sibling.symbol} — every multiplier AGREES`, () => {
-      for (const [key, multiplier] of Object.entries(sibling.entries)) {
+      for (const [key, multiplier] of sibling.entries) {
         if (key.toLowerCase() in DELIBERATE_EXCLUSIONS) continue;
         if (!isKnownMagnitude(key)) continue; // key presence is Part A's first `it`
         expect(
@@ -283,7 +329,7 @@ describe("ROADMAP 2.330 — every deliberate exclusion is still true in both dir
   it("an excluded key is genuinely SPELLED by some sibling", () => {
     const spelledBySiblings = new Set<string>();
     for (const sibling of SIBLING_VALUE_LOOKUPS) {
-      for (const key of Object.keys(sibling.entries)) spelledBySiblings.add(key.toLowerCase());
+      for (const [key] of sibling.entries) spelledBySiblings.add(key.toLowerCase());
     }
     for (const sibling of SIBLING_VOCABULARIES) {
       for (const token of alternationTokens(sibling.source, `${sibling.module}::${sibling.symbol}`)) {
@@ -333,10 +379,22 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     "cee/decision-review/shape-check.ts": "sibling value lookup — compared in Part A",
     "orchestrator-v5/context/cqe/rules.ts": "sibling value lookup + vocabulary — compared in Parts A/B",
     "orchestrator-v5/context/cqe/word-numbers.ts": "sibling vocabulary — compared in Part A",
+    // ⚠⚠ THESE TWO ENTRIES WERE FALSE IN THE FIRST CUT, AND WERE CAUGHT IN
+    // ADVERSARIAL REVIEW, NOT BY THIS GUARD. Both files are value-bearing
+    // magnitude siblings; both were described here as carrying no multiplier,
+    // which is exactly the "pre-blessed false label" of CLAUDE.md trap 7b —
+    // a registry entry that teaches the checker to stop looking, landing
+    // inside the trap-12d guard built to stop that class. Both are now in
+    // SIBLING_VALUE_LOOKUPS and compared per key and per value forever.
     "orchestrator-v5/context/cqe/compromise-backstop.ts":
-      "TRAILING_UNIT_RE lists `grand` as a UNIT token for span extension, not as a multiplier",
+      "sibling VALUE lookup (`BACKSTOP_MAGNITUDE_MULTIPLIERS`) — compared in Part A. " +
+      "It DOES multiply: `if (isGrand) value = value * 1000`. The previous entry here claimed " +
+      "`grand` was only a span-extension unit token; that was false at the bytes.",
     "orchestrator-v5/routing/value-unit-resolution.ts":
-      "maps `grand` to the unit KIND 'currency'; carries no multiplier",
+      "sibling VALUE lookup (`SUFFIX_FACTOR`, 7 keys: k/thousand/m/million/b/bn/billion) — " +
+      "compared in Part A. The previous entry here said 'carries no multiplier', which was true " +
+      "of `grand` alone and false of the file — the `['grand','currency']` unit-KIND row sits " +
+      "beside a real multiplier map that this guard could not see.",
     "cee/factor-extraction/display-value.ts": "formats from MAGNITUDE_DISPLAY_LADDER; comment mentions 'thousand'",
     "cee/validation/pre-decision-checks.ts": "sibling vocabulary (recognition-only) — compared in Part A",
 
@@ -378,10 +436,23 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     return out;
   }
 
-  it("every src/ file spelling a magnitude word has been reviewed and classified", () => {
+  /**
+   * The disk scan, done ONCE and shared by both tests below.
+   *
+   * ⚠ IT ALSO CARRIES AN EXPLICIT TIMEOUT, and that is a fix for a REAL
+   * FLAKE, not defensive padding. As first written this scan ran inside each
+   * test under vitest's default 5,000 ms budget; reading ~1,400 files takes
+   * ~2 s idle but exceeds 5 s when the parallel workers are saturated, so the
+   * guard RED-ed on 2 of 5 consecutive runs with `Test timed out in 5000ms` —
+   * nothing to do with what it asserts. A guard that fails at random is worse
+   * than no guard: it is CLAUDE.md trap 7's broken alarm, and the next lane to
+   * meet it would rightly have disabled it. Caching the pass and stating a
+   * real budget keeps the assertion identical and the alarm trustworthy.
+   */
+  let scanCache: { files: string[]; unreviewed: string[] } | null = null;
+  function scanSrc(): { files: string[]; unreviewed: string[] } {
+    if (scanCache !== null) return scanCache;
     const files = walk(SRC_ROOT);
-    expect(files.length, "the src/ walk found no TypeScript files — the scan is not running").toBeGreaterThan(100);
-
     const unreviewed: string[] = [];
     for (const file of files) {
       const rel = relative(SRC_ROOT, file);
@@ -391,6 +462,13 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       // has at least one (`edit-graph-referee-gate.ts`).
       if (MAGNITUDE_WORD.test(readFileSync(file, "utf8"))) unreviewed.push(rel);
     }
+    scanCache = { files, unreviewed };
+    return scanCache;
+  }
+
+  it("every src/ file spelling a magnitude word has been reviewed and classified", () => {
+    const { files, unreviewed } = scanSrc();
+    expect(files.length, "the src/ walk found no TypeScript files — the scan is not running").toBeGreaterThan(100);
 
     expect(
       unreviewed,
@@ -402,14 +480,14 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
         `Do not delete this assertion: it is the only thing standing between this estate and a ` +
         `fifth hand-written magnitude list.`,
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it("the REVIEWED manifest has no stale entries", () => {
-    const files = new Set(walk(SRC_ROOT).map((file) => relative(SRC_ROOT, file)));
+    const files = new Set(scanSrc().files.map((file) => relative(SRC_ROOT, file)));
     for (const rel of Object.keys(REVIEWED)) {
       expect(files.has(rel), `REVIEWED lists ${rel}, which no longer exists in src/`).toBe(true);
     }
-  });
+  }, SCAN_TIMEOUT_MS);
 });
 
 /* ===========================================================================
@@ -420,9 +498,11 @@ describe("ROADMAP 2.330 — this guard can actually see a short list", () => {
   it("the union it checks is non-empty and spans every sibling", () => {
     const union = new Set<string>();
     for (const sibling of SIBLING_VALUE_LOOKUPS) {
-      const keys = Object.keys(sibling.entries);
-      expect(keys.length, `${sibling.module}::${sibling.symbol} contributed NO keys`).toBeGreaterThan(0);
-      for (const key of keys) union.add(key.toLowerCase());
+      expect(
+        sibling.entries.length,
+        `${sibling.module}::${sibling.symbol} contributed NO keys`,
+      ).toBeGreaterThan(0);
+      for (const [key] of sibling.entries) union.add(key.toLowerCase());
     }
     for (const sibling of SIBLING_VOCABULARIES) {
       const tokens = alternationTokens(sibling.source, `${sibling.module}::${sibling.symbol}`);
