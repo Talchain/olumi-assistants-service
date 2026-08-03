@@ -500,27 +500,42 @@ describe("RATE LIMITING — CodeQL js/missing-rate-limiting, and it was right", 
     await app.close();
   });
 
-  it("buckets on the CLIENT, so one exhausted caller cannot throttle another", async () => {
-    // THE POINT OF THE INVERSION. Through /bff/cee/* every visitor carries the
-    // SAME injected assist key. If the bucket keyed on that key id, the first
-    // heavy user would 429 everyone else in the product. Distinct client
-    // addresses must therefore hold distinct budgets.
-    const app = await buildApp();
+  it("buckets on the CLIENT even when both callers share ONE assist key", async () => {
+    // THE POINT OF THE INVERSION, and it only bites with the auth plugin
+    // MOUNTED. Through /bff/cee/* every visitor carries the SAME injected
+    // assist key, so this is the real deployed shape: one key id, many
+    // clients. If the bucket keyed on the key id, the first heavy visitor
+    // would 429 everyone else in the product.
+    //
+    // ⚠ A bare app would NOT pin this: with no auth plugin `getRequestKeyId`
+    //   returns null, a keyId-first bucket would fall through to the ip
+    //   anyway, and the test would pass against the very defect it targets.
+    const { authPlugin } = await import("../../plugins/auth.js");
+    (mockConfig.value as { auth: Record<string, unknown> }).auth.assistApiKey =
+      "test-assist-key";
 
-    let last = await read(app, SCENARIO);
+    const app = Fastify();
+    await app.register(authPlugin);
+    await scenarioGraphRoute(app);
+    await app.ready();
+
+    const call = (remoteAddress: string) =>
+      app.inject({
+        method: "POST",
+        url: `/assist/v1/scenarios/${SCENARIO}/graph`,
+        headers: { "x-olumi-assist-key": "test-assist-key" },
+        payload: {},
+        remoteAddress,
+      });
+
+    let last = await call("198.51.100.10");
     for (let i = 0; i < rpm + 1 && last.statusCode === 200; i += 1) {
-      last = await read(app, SCENARIO);
+      last = await call("198.51.100.10");
     }
     expect(last.statusCode).toBe(429);
 
-    // A different client address, same everything else.
-    const other = await app.inject({
-      method: "POST",
-      url: `/assist/v1/scenarios/${SCENARIO}/graph`,
-      payload: {},
-      remoteAddress: "203.0.113.77",
-    });
-    expect(other.statusCode).toBe(200);
+    // Same key, different client. Must still have its own budget.
+    expect((await call("203.0.113.77")).statusCode).toBe(200);
     await app.close();
   });
 });
