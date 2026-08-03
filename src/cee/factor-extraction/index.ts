@@ -486,10 +486,16 @@ const METRIC_NOUN_STOPWORDS = new Set<string>([
   // temporal
   "now", "today", "tomorrow", "yesterday", "currently", "presently", "soon",
   "already", "still", "again", "then", "than", "when", "while",
-  "annually", "monthly", "weekly", "daily", "yearly",
-  "annual", "quarterly", // #795 review amendment 2 — the -ly/-al forms were
-  // missing while "annually"/"monthly" were present, so "6M annual" against a
-  // currency level refused via the cross-signal rule
+  // ⚠ ROADMAP 2.353 (review A4) — THE -ly FORMS ARE NO LONGER LISTED HERE.
+  // "annually", "monthly", "weekly", "daily", "yearly", "quarterly" were
+  // hand-added entries, and #795 amendment 2 had ALREADY had to add two of them
+  // after "6M annual" refused. That is trap 12 caught in the act: the list was
+  // short, twice, and the next adverb was always going to be missing. MEASURED
+  // at c356531d, still short — "Increase revenue from £4M to 6M EVENTUALLY"
+  // refused via currency_vs_metric_noun with target_metric "eventually", losing
+  // the 6M entirely; likewise "ultimately", "sustainably", "profitably". They
+  // are now recognised by MORPHOLOGY in `isAdverbShaped`, derived not listed.
+  "annual", // carries no -ly, so the derived rule does not cover it
   "year", "years", "yr", "yrs", "month", "months", "week", "weeks",
   "day", "days", "quarter", "quarters",
   // quantity/degree qualifiers (they qualify the number, they do not name a metric)
@@ -546,6 +552,30 @@ interface TrailingMetric {
   readonly noun?: string;
 }
 
+/**
+ * Is this trailing token an ADVERB rather than a metric noun? (ROADMAP 2.353,
+ * review A4.)
+ *
+ * DERIVED FROM MORPHOLOGY, not from a list. `-ly` is English's adverb suffix,
+ * and an adverb trailing an amount qualifies the statement ("6M EVENTUALLY",
+ * "6M ANNUALLY", "6M SUSTAINABLY") rather than naming what is measured. The
+ * stopword set had to hand-add "annually"/"monthly" once and "quarterly" again
+ * a release later; each addition was a confession that the list cannot keep up.
+ *
+ * ⚠ DISCLOSED IMPRECISION, in the house style: a few genuine NOUNS end in `-ly`
+ * — "supply", "assembly", "anomaly" — and this rule reads them as adverbs. The
+ * consequence is bounded and one-directional: such a noun stops contributing to
+ * a cross-metric REFUSAL, so a pair naming "supply" on one side and a currency
+ * on the other now extracts where it previously refused. It cannot invent a
+ * number, change a magnitude, or pair across clauses. Pinned BOTH ways in
+ * goal-natural-language-targets.test.ts so the cost stays visible.
+ *
+ * The `length > 3` floor keeps "ly" and "fly" out of the rule.
+ */
+function isAdverbShaped(lower: string): boolean {
+  return lower.length > 3 && lower.endsWith("ly");
+}
+
 function resolveTrailingMetric(
   groups: Record<string, string | undefined>,
   prefix: string,
@@ -554,6 +584,7 @@ function resolveTrailingMetric(
   if (!word) return {};
   const lower = word.toLowerCase();
   if (METRIC_NOUN_STOPWORDS.has(lower)) return {};
+  if (isAdverbShaped(lower)) return {};
   const currency = CURRENCY_WORDS[lower];
   if (currency) return { currency };
   return { noun: stemMetricNoun(lower) };
@@ -564,7 +595,8 @@ type GoalPairRefusalReason =
   | "mixed_percent_pair"
   | "currency_mismatch"
   | "metric_noun_mismatch"
-  | "currency_vs_metric_noun";
+  | "currency_vs_metric_noun"
+  | "direction_unsupported";
 
 /**
  * What the goal grammar concluded about a brief: it stated a pair, it stated
@@ -581,7 +613,23 @@ type GoalPairRefusalReason =
  * overrides is the guarantee-theatre this estate is named for.
  */
 type GoalPairResolution =
-  | { readonly kind: "pair"; readonly pair: GoalTargetWithBaseline }
+  | {
+      readonly kind: "pair";
+      readonly pair: GoalTargetWithBaseline;
+      /**
+       * Half-open [start, end) of the matched construction in the brief.
+       *
+       * ⚠ REPLACES A VALUE COMPARISON (review A3, trap 19 in source). The
+       * goal-word suppression used to bind by VALUE EQUALITY, so any OTHER
+       * goal-word number that happened to share the target's value was
+       * collateral: MEASURED, "…to £6 million within 12 months. Alert threshold
+       * is 6 million." lost the alert threshold entirely. An assertion — or a
+       * suppression — must bind to its object by IDENTITY, and here identity is
+       * position: only a match that OVERLAPS the construction the goal grammar
+       * resolved is the same statement.
+       */
+      readonly span: readonly [number, number];
+    }
   | {
       readonly kind: "refused";
       readonly reason: GoalPairRefusalReason;
@@ -591,6 +639,8 @@ type GoalPairResolution =
        * to that one number instead of to the whole brief — see the note there.
        */
       readonly targetValue: number;
+      /** Half-open [start, end) of the refused construction — see `span`. */
+      readonly span: readonly [number, number];
     };
 
 /**
@@ -602,12 +652,13 @@ function refuseGoalPair(
   reason: GoalPairRefusalReason,
   detail: Record<string, string | undefined>,
   targetValue: number,
+  span: readonly [number, number],
 ): GoalPairResolution {
   log.info(
     { event: "cee.factor_extraction.goal_pair_refused", reason, ...detail },
     `Goal target/baseline pair refused: ${reason}`,
   );
-  return { kind: "refused", reason, targetValue };
+  return { kind: "refused", reason, targetValue, span };
 }
 
 /* ===========================================================================
@@ -667,6 +718,77 @@ const NOW_QUALIFIER =
   'currently|presently|today|now)';
 
 /**
+ * THE GOAL ANCHOR (ROADMAP 2.353, review A1 — a CONFIRMED blocker).
+ *
+ * ⚠ THE FIRST CUT OF PATTERN 4 WAS TOO BROAD, AND THE BREADTH WAS INVISIBLE TO
+ * EVERY TEST IT SHIPPED WITH. Its gate was "a direction verb plus a metric
+ * phrase", which is the shape of a LEVER as much as of a goal. MEASURED at
+ * `c356531d`, on a graph whose goal is "Grow annual revenue":
+ *
+ *   "We could increase the price from £49 to £59"   -> goal_threshold 0.8,
+ *        raw 59, unit £, cap 73.75 stamped on the REVENUE goal
+ *   "increasing ad spend from £200k to £300k"        -> raw 300,000
+ *   "Drop the price from £49 to £39"                 -> raw 39, baseline 49,
+ *        i.e. goal_baseline 1.005 — a baseline ABOVE its own cap
+ *   "Lower the cost from £200 to £150"               -> raw 150, baseline 1.067
+ *
+ * At pristine every one of these minted NOTHING. An honest absence was replaced
+ * by a confident wrong number, which is the trade this whole file exists to
+ * refuse. Worse, `exec` returns the FIRST match, so a lever sentence STOLE the
+ * pair from a genuine goal later in the same brief.
+ *
+ * WHAT ACTUALLY DISTINGUISHES A GOAL FROM A LEVER, given both are "verb +
+ * metric + from + to": the goal names itself, either by a GOAL WORD ("raise the
+ * TARGET from…") or by a HORIZON ("…to £6 million WITHIN 12 MONTHS"). A lever
+ * sentence has neither — it describes a move, not a commitment. So pattern 4
+ * now requires one of the two, and the failure direction is the honest one: an
+ * unanchored from-to yields no pair, ISL is not asked, and the user is not
+ * served a number they did not commit to.
+ *
+ * ⚠ AND THIS RETRACTS THIS LANE'S OWN EARLIER SCOPING CALL. The first commit
+ * argued "THE HORIZON NEEDS NO GRAMMAR" because it sits after the final amount
+ * and nothing has to consume it. That was true about MATCHING and wrong about
+ * MEANING: the horizon is not decoration, it is half of what makes the sentence
+ * a goal. It needed grammar for exactly the reason the note dismissed it.
+ *
+ * The spellings below are a closed hand-written set, like NOW_QUALIFIER, and
+ * the same justification applies: an unlisted horizon means NO pair, never a
+ * fabricated one.
+ */
+const HORIZON =
+  '(?:' +
+  'within\\s+(?:the\\s+)?(?:next\\s+)?(?:\\d+|a|an|one|two|three|four|six|nine|twelve)\\s*' +
+  '(?:day|week|month|quarter|year)s?' +
+  '|over\\s+the\\s+next\\s+(?:\\d+|a|one|two|three|four|six|nine|twelve)\\s*' +
+  '(?:day|week|month|quarter|year)s?' +
+  '|in\\s+(?:the\\s+)?(?:next\\s+)?(?:\\d+|a|an|one|two|three|four|six|nine|twelve)\\s*' +
+  '(?:day|week|month|quarter|year)s?' +
+  '|by\\s+(?:the\\s+end\\s+of\\s+)?(?:this|next|the)?\\s*' +
+  '(?:year|quarter|month|week|h[12]|q[1-4]|\\d{4})(?:[-\\s]end)?' +
+  '|(?:this|next)\\s+(?:year|quarter|month|week)' +
+  '|year[-\\s]end' +
+  // VAGUE horizons. "Increase revenue from £4M to 6M EVENTUALLY" commits to a
+  // target over time without naming a date, which is still a commitment and
+  // still not a lever — review A4's pinned brief. They earn their place in the
+  // anchor for the same reason the dated forms do: a lever sentence does not
+  // carry them.
+  '|eventually|ultimately|over\\s+time|in\\s+due\\s+course|in\\s+the\\s+long\\s+run' +
+  '|long[-\\s]term' +
+  ')';
+
+/**
+ * Optionality markers that turn a from-to into a PROPOSAL rather than a
+ * commitment — "we COULD increase the price from £49 to £59".
+ *
+ * A second, independent guard: the anchor above already excludes every lever in
+ * the measured set, but a lever CAN carry a horizon ("we could increase the
+ * price from £49 to £59 this year") and would otherwise sail through. Deliberately
+ * NOT including "should", "must", "need to" or "aim to" — those state intent,
+ * and "we should increase revenue from £4M to £6M within 12 months" is a goal.
+ */
+const OPTIONALITY_MODAL = '(?:could|might|may|can|perhaps|maybe)';
+
+/**
  * The metric a goal verb names before its `from` — "increase ANNUAL REVENUE
  * from …", "raise THE TARGET from …", "grow REVENUE from …".
  *
@@ -688,15 +810,27 @@ const NOW_QUALIFIER =
  * numbers from different clauses.
  */
 const GOAL_METRIC_PHRASE =
+  '(?<metricPhrase>' +
   '(?:\\s+(?:the|our|my|its|their|a|an))?' + // optional determiner
-  '(?:\\s+[A-Za-z][A-Za-z-]{0,19}){1,3}'; // 1-3 plain words, no punctuation
+  '(?:\\s+[A-Za-z][A-Za-z-]{0,19}){1,3}' + // 1-3 plain words, no punctuation
+  ')'
 
 /**
  * The four brief shapes that state a current level AND a target together.
  * Order is priority order; the first match for a given (label, value, unit)
  * wins and later extractors dedup against it.
  */
-const GOAL_BASELINE_PATTERNS: ReadonlyArray<RegExp> = [
+interface GoalBaselinePattern {
+  readonly pattern: RegExp;
+  /**
+   * When true the scan considers EVERY match in the brief and skips those that
+   * carry no goal anchor, so a lever sentence cannot consume the one `exec`
+   * result and hide a genuine goal behind it (review A1, measured).
+   */
+  readonly goalAnchored: boolean;
+}
+
+const GOAL_BASELINE_PATTERNS: ReadonlyArray<GoalBaselinePattern> = [
   // "from 4000000 to a target of 6000000", "from 85% to a target of 95%".
   // No bridge needed: both amounts are inside ONE "from … to … target"
   // construction, so they cannot belong to different clauses.
@@ -723,50 +857,70 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<RegExp> = [
   // pair FORMS. That is 800k against 50 employees, in range, wearing a
   // confident probability. Pinned in goal-natural-language-targets.test.ts so a
   // later "symmetry" tidy-up cannot land it quietly.
-  new RegExp(
-    `\\bfrom\\s+${amountPattern('from')}\\s+to\\s+(?:a|an|the)?\\s*` +
-      `${GOAL_WORD}\\s*(?:of|is|:)?\\s*${amountPattern('to')}${trailingMetricLookahead('to')}`,
-    'i',
-  ),
+  {
+    goalAnchored: false,
+    pattern: new RegExp(
+      `\\bfrom\\s+${amountPattern('from')}\\s+to\\s+(?:a|an|the)?\\s*` +
+        `${GOAL_WORD}\\s*(?:of|is|:)?\\s*${amountPattern('to')}${trailingMetricLookahead('to')}`,
+      'i',
+    ),
+  },
   // "target is 800 customers, currently at 500" — both amounts capture their
   // trailing metric word (2.287), so cross-metric pairs can be REFUSED.
-  new RegExp(
-    `\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountWithMetricPattern('to')}` +
-      `${CLAUSE_BRIDGE}\\bcurrently\\s*(?:at|around|about)?\\s*${amountWithMetricPattern('from')}`,
-    'i',
-  ),
+  {
+    goalAnchored: false,
+    pattern: new RegExp(
+      `\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountWithMetricPattern('to')}` +
+        `${CLAUSE_BRIDGE}\\bcurrently\\s*(?:at|around|about)?\\s*${amountWithMetricPattern('from')}`,
+      'i',
+    ),
+  },
   // "currently at 500, target 800"
-  new RegExp(
-    `\\bcurrently\\s*(?:at|around|about)?\\s*${amountWithMetricPattern('from')}` +
-      `${CLAUSE_BRIDGE}\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountWithMetricPattern('to')}`,
-    'i',
-  ),
+  {
+    goalAnchored: false,
+    pattern: new RegExp(
+      `\\bcurrently\\s*(?:at|around|about)?\\s*${amountWithMetricPattern('from')}` +
+        `${CLAUSE_BRIDGE}\\b${GOAL_WORD}${GOAL_CONNECTOR}${amountWithMetricPattern('to')}`,
+      'i',
+    ),
+  },
   // ROADMAP 2.353 — "Increase annual revenue from £4 million today to £6
   // million within 12 months"; "Raise the target from £600,000 to £800,000".
   //
   // Last in priority so patterns 1-3 keep theirs: where both match, the more
   // specific construction wins, and a REFUSAL from an earlier pattern is
-  // terminal (`refuseGoalPair` returns out of the loop), so widening the
+  // terminal (`refuseGoalPair` returns out of the scan), so widening the
   // grammar can never route around a refusal that already fired.
   //
-  // BOTH amounts carry `amountWithMetricPattern`, so the cross-metric and
+  // BOTH amounts carry the trailing-metric capture, so the cross-metric and
   // cross-currency refusals apply to this shape exactly as they do to patterns
-  // 2 and 3 — the widening arrives with the guards already attached rather than
-  // after them.
+  // 2 and 3 — the widening arrives with the guards already attached.
   //
-  // THE HORIZON NEEDS NO GRAMMAR. "…to £6 million WITHIN 12 MONTHS" ends the
-  // pattern at the target; nothing has to consume what follows, so no time
-  // grammar is introduced here and the deadline seam (2.349 / gap 5) is not
-  // touched. The goal word after `to` stays OPTIONAL because pattern 1 cannot
-  // reach the qualifier form ("from £4M today to a target of £6M"), which this
-  // pattern must therefore handle itself.
-  new RegExp(
-    `\\b(?:${GOAL_DIRECTION_VERB_STEMS})(?:e|es|ing|ed)?\\b${GOAL_METRIC_PHRASE}` +
-      `\\s+from\\s+${amountWithMetricPattern('from')}(?:\\s+${NOW_QUALIFIER})?` +
-      `\\s+to\\s+(?:a|an|the)?\\s*(?:${GOAL_WORD}\\s*(?:of|is|:)?\\s*)?` +
-      `${amountPattern('to')}${trailingMetricLookahead('to')}`,
-    'i',
-  ),
+  // THE GOAL ANCHOR (review A1) is `goalAnchored: true` below plus the two
+  // optional captures this pattern exposes for it: `goalWord` after `to`,
+  // `metricPhrase` before `from` (case B's goal word lives THERE — "raise the
+  // TARGET from…" — so the anchor must read both positions), and `horizon`
+  // after the target. `resolveGoalPair` requires at least one.
+  {
+    goalAnchored: true,
+    pattern: new RegExp(
+      `\\b(?<!\\b${OPTIONALITY_MODAL}\\s)(?:${GOAL_DIRECTION_VERB_STEMS})(?:e|es|ing|ed)?\\b` +
+        `${GOAL_METRIC_PHRASE}` +
+        `\\s+from\\s+${amountWithMetricPattern('from')}(?:\\s+${NOW_QUALIFIER})?` +
+        `\\s+to\\s+(?:a|an|the)?\\s*(?:(?<goalWord>${GOAL_WORD})\\s*(?:of|is|:)?\\s*)?` +
+        `${amountPattern('to')}${trailingMetricLookahead('to')}` +
+        // An optional MANNER adverb may sit between the target and its horizon
+        // ("…to 6M SUSTAINABLY within 12 months"). The negative lookahead stops
+        // this slot swallowing a token that is itself a horizon — without it,
+        // "…to 6M eventually" is consumed here and the anchor never sees it,
+        // which is precisely how review A4's brief kept failing after the -ly
+        // rule landed. Derived from the same `-ly` morphology as
+        // `isAdverbShaped`, so the two cannot disagree about what an adverb is.
+        `(?:\\s*(?!${HORIZON}\\b)[A-Za-z]{2,}ly\\b)?` +
+        `(?:\\s*(?<horizon>${HORIZON}))?`,
+      'gi',
+    ),
+  },
 ];
 
 /**
@@ -789,9 +943,9 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<RegExp> = [
 export const GOAL_BASELINE_PATTERN_SOURCES_FOR_DRIFT_GUARD: Readonly<Record<string, string>> =
   Object.freeze(
     Object.fromEntries(
-      GOAL_BASELINE_PATTERNS.map((pattern, index) => [
+      GOAL_BASELINE_PATTERNS.map((entry, index) => [
         `goalBaseline${index + 1}`,
-        pattern.source,
+        entry.pattern.source,
       ]),
     ),
   );
@@ -868,13 +1022,123 @@ export function extractGoalTargetWithBaseline(text: string): GoalTargetWithBasel
  * unchanged signature.
  */
 function resolveGoalPair(text: string): GoalPairResolution | null {
-  for (const pattern of GOAL_BASELINE_PATTERNS) {
-    const m = pattern.exec(text);
-    if (!m?.groups) continue;
+  for (const entry of GOAL_BASELINE_PATTERNS) {
+    for (const m of goalPatternMatches(entry, text)) {
+      const resolved = resolveOneGoalMatch(m);
+      if (resolved !== undefined) return resolved;
+    }
+  }
+  return null;
+}
 
-    const to = resolveAmount(m.groups, "to");
-    const from = resolveAmount(m.groups, "from");
-    if (!to || !from) continue;
+/**
+ * The matches a pattern offers the resolver.
+ *
+ * An UNANCHORED pattern offers its first match only — byte-identical to the
+ * single `exec` this replaced. An ANCHORED pattern offers every match, minus
+ * those carrying no goal anchor, because `exec`'s first-match rule is exactly
+ * how a lever sentence stole the pair from a genuine goal later in the brief
+ * (review A1, measured: "We could increase the price from £49 to £59. Increase
+ * annual revenue from £4 million today to £6 million within 12 months." yielded
+ * 59/49).
+ */
+function* goalPatternMatches(
+  entry: GoalBaselinePattern,
+  text: string,
+): Generator<RegExpExecArray> {
+  if (!entry.goalAnchored) {
+    const m = entry.pattern.exec(text);
+    if (m?.groups) yield m;
+    return;
+  }
+  const scanner = new RegExp(entry.pattern.source, entry.pattern.flags);
+  scanner.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = scanner.exec(text)) !== null) {
+    if (m[0] === "") {
+      scanner.lastIndex += 1;
+      continue;
+    }
+    if (!m.groups) continue;
+    if (!isGoalAnchored(m.groups)) {
+      log.debug(
+        {
+          event: "cee.factor_extraction.goal_pair_unanchored",
+          matched: m[0],
+        },
+        "From-to construction skipped: names no target and states no horizon",
+      );
+      continue;
+    }
+    yield m;
+  }
+}
+
+/**
+ * Does this match NAME ITSELF a goal? (review A1.)
+ *
+ * Either an explicit goal word — after `to` ("…to a TARGET of 6M") or inside
+ * the metric phrase ("raise the TARGET from…", which is where case B carries
+ * it) — or a HORIZON after the target. A lever sentence has neither.
+ */
+function isGoalAnchored(groups: Record<string, string | undefined>): boolean {
+  if (groups.goalWord !== undefined) return true;
+  if (groups.horizon !== undefined) return true;
+  return new RegExp(`\\b${GOAL_WORD}\\b`, "i").test(groups.metricPhrase ?? "");
+}
+
+/**
+ * Resolve ONE match to a pair or a named refusal. `undefined` means "this match
+ * carried no readable amounts" — the scan moves on; `null` is never returned
+ * here (the caller owns the exhausted case).
+ */
+function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined {
+  const groups = m.groups;
+  if (!groups) return undefined;
+  const span: readonly [number, number] = [m.index, m.index + m[0].length];
+  {
+    const to = resolveAmount(groups, "to");
+    const from = resolveAmount(groups, "from");
+    if (!to || !from) return undefined;
+
+    // ⚠ ROADMAP 2.353 (review A2) — A DECREASE IS REFUSED, NOT MINTED, AND THE
+    // REASON IS THE SEAM RATHER THAN THE SENTENCE.
+    //
+    // ISL scores P(level >= threshold) and the goal contract carries NO
+    // DIRECTION FIELD — `goal_threshold_frame` is the code constant 'level'.
+    // So a threshold BELOW its baseline enters a >= seam that INVERTS the
+    // question, and what comes back is not a smaller probability, it is the
+    // wrong one, wearing the same confident badge. MEASURED at `c356531d`:
+    //
+    //   "Decrease annual costs from £4 million today to £3 million within 12
+    //    months"    -> goal_threshold 0.8, goal_baseline 1.0667 — a baseline
+    //                  ABOVE its own cap, which no consumer expects
+    //   "Our target is 3%, currently at 5%."  -> 0.03 minted under 0.05, and
+    //                  this one is PRE-EXISTING: pattern 2 has always done it,
+    //                  so the refusal is placed HERE, at the shared resolution
+    //                  point, rather than on pattern 4 alone. Fixing only the
+    //                  shape this lane added would have left the identical
+    //                  wrong probability reachable through the older grammar.
+    //   "…to 0 within 12 months"              -> threshold 0, cap undefined,
+    //                  i.e. an UN-NORMALISED zero beside a normalised world
+    //
+    // Refusing is not a limitation dressed up as a principle: no direction bit
+    // exists to carry, so minting one silently is the only alternative, and
+    // that is fabrication. Real decrease support is rowed as 2.367 and runs the
+    // whole way through the contract and ISL. Equality is deliberately NOT
+    // refused — threshold == baseline is a meaningful "hold the line".
+    if (to.raw !== 0 || from.raw !== 0) {
+      const target = to.isPercent ? to.raw / 100 : to.raw;
+      const level = from.isPercent ? from.raw / 100 : from.raw;
+      if (target < level) {
+        return refuseGoalPair(
+          "direction_unsupported",
+          { target: String(target), baseline: String(level) },
+          normaliseTargetValue(to),
+          span,
+        );
+      }
+    }
 
     // A MIXED percent pair is refused, not reconciled (adversarial review, PR
     // #787). This previously read `to.isPercent || from.isPercent`, which
@@ -886,7 +1150,7 @@ function resolveGoalPair(text: string): GoalPairResolution | null {
     // about being percentages they are not reliably the same quantity, so no
     // pair is formed and ISL keeps refusing honestly.
     if (to.isPercent !== from.isPercent) {
-      return refuseGoalPair("mixed_percent_pair", {}, normaliseTargetValue(to));
+      return refuseGoalPair("mixed_percent_pair", {}, normaliseTargetValue(to), span);
     }
 
     // ROADMAP 2.288 — a MIXED CURRENCY pair is refused, not reconciled. This
@@ -897,8 +1161,8 @@ function resolveGoalPair(text: string): GoalPairResolution | null {
     // this codebase, and inventing a rate would be fabrication with extra
     // steps. Currency words fold in first, so "4M dollars" vs "£6M" refuses
     // identically. Same-currency and no-currency pairs are untouched.
-    const toMetric = resolveTrailingMetric(m.groups, "to");
-    const fromMetric = resolveTrailingMetric(m.groups, "from");
+    const toMetric = resolveTrailingMetric(groups, "to");
+    const fromMetric = resolveTrailingMetric(groups, "from");
     const toCurrency = to.currency ?? toMetric.currency;
     const fromCurrency = from.currency ?? fromMetric.currency;
     if (toCurrency && fromCurrency && toCurrency !== fromCurrency) {
@@ -906,6 +1170,7 @@ function resolveGoalPair(text: string): GoalPairResolution | null {
         "currency_mismatch",
         { target_currency: toCurrency, baseline_currency: fromCurrency },
         normaliseTargetValue(to),
+        span,
       );
     }
 
@@ -924,6 +1189,7 @@ function resolveGoalPair(text: string): GoalPairResolution | null {
           "metric_noun_mismatch",
           { target_metric: toMetric.noun, baseline_metric: fromMetric.noun },
           normaliseTargetValue(to),
+          span,
         );
       }
     } else if (toCurrency && !fromCurrency && fromMetric.noun) {
@@ -934,12 +1200,14 @@ function resolveGoalPair(text: string): GoalPairResolution | null {
         "currency_vs_metric_noun",
         { target_currency: toCurrency, baseline_metric: fromMetric.noun },
         normaliseTargetValue(to),
+        span,
       );
     } else if (fromCurrency && !toCurrency && toMetric.noun) {
       return refuseGoalPair(
         "currency_vs_metric_noun",
         { baseline_currency: fromCurrency, target_metric: toMetric.noun },
         normaliseTargetValue(to),
+        span,
       );
     }
 
@@ -967,6 +1235,7 @@ function resolveGoalPair(text: string): GoalPairResolution | null {
     const isPercent = to.isPercent;
     return {
       kind: "pair",
+      span,
       pair: {
         value: isPercent ? to.raw / 100 : to.raw,
         baseline: isPercent ? from.raw / 100 : from.raw,
@@ -977,7 +1246,6 @@ function resolveGoalPair(text: string): GoalPairResolution | null {
       },
     };
   }
-  return null;
 }
 
 /**
@@ -1327,49 +1595,48 @@ export function extractFactors(brief: string): ExtractedFactor[] {
     const normalizedValue = isPercent ? amount / 100 : amount;
     const label = context.charAt(0).toUpperCase() + context.slice(1);
 
-    // ROADMAP 2.353 — the goal grammar has already spoken about THIS NUMBER, so
-    // this rule does not get to answer the same question again with less
+    // ROADMAP 2.353 — the goal grammar has already spoken about THIS
+    // STATEMENT, so this rule does not get to answer it again with less
     // information.
     //
     // ON A REFUSAL that is the whole point: the pair was refused because its two
-    // amounts disagree about currency, percent-ness or metric, and minting the
-    // target ALONE from the same sentence republishes the number the refusal
-    // just withheld — stripped of the very signal that condemned it. MEASURED
-    // before this existed: "Grow revenue from £4M to a target of 6M dollars"
-    // refused the pair and still reached the wire with goal_threshold 0.8.
+    // amounts disagree about currency, percent-ness, metric or direction, and
+    // minting the target ALONE from the same sentence republishes the number the
+    // refusal just withheld — stripped of the very signal that condemned it.
+    // MEASURED before this existed: "Grow revenue from £4M to a target of 6M
+    // dollars" refused the pair and still reached the wire with 0.8.
     // ON A FORMED PAIR it is the pre-existing "drop the baseline-less
     // duplicate" intent, stated as a rule rather than left to a key collision.
     //
-    // ⚠ SCOPED TO THE VALUE, AND THE FIRST CUT WAS NOT — it suppressed EVERY
-    // goal-word number in the brief, so "…to a target of 6M pounds. Our
-    // threshold is 500." silently lost the 500 as well. That over-reach was
-    // found by the control half of its own disclosure test, which is the only
-    // reason it is not in this commit: an absence assertion that cannot see a
-    // presence proves nothing (CLAUDE.md trap 13), and here the presence it
-    // could not see was the defect. The resolution now carries the target it
-    // resolved, and only a goal-word number EQUAL to it is dropped.
+    // ⚠ BOUND BY SPAN, NOT BY VALUE (review A3, CLAUDE.md trap 19 in source).
+    // Two earlier cuts were both wrong in the same direction. The first
+    // suppressed every goal-word number in the brief. The second compared
+    // VALUES — and a different statement that merely shares the target's number
+    // satisfied it, so "…to £6 million within 12 months. Alert threshold is 6
+    // million." silently lost the alert threshold. A value predicate is exactly
+    // what trap 19 forbids: bind to the object by identity, and here identity is
+    // POSITION. Only a match that OVERLAPS the resolved construction is the
+    // same statement.
     //
     // Restricted further to contexts `isTargetGoalLabel` would route to the goal
     // mint; "price", "revenue", "budget" and friends are ordinary factors, are
     // not what the goal grammar was reasoning about, and keep extracting.
-    if (
-      goalResolution &&
-      new RegExp(`^${GOAL_WORD}$`, "i").test(context) &&
-      normalizedValue ===
-        (goalResolution.kind === "pair"
-          ? goalResolution.pair.value
-          : goalResolution.targetValue)
-    ) {
-      log.debug(
-        {
-          event: "cee.factor_extraction.goal_word_suppressed",
-          resolution: goalResolution.kind,
-          context,
-          value: normalizedValue,
-        },
-        "Goal-word contextual number suppressed: the goal grammar already resolved this number",
-      );
-      continue;
+    if (goalResolution && new RegExp(`^${GOAL_WORD}$`, "i").test(context)) {
+      const [goalStart, goalEnd] = goalResolution.span;
+      const start = match.index;
+      const end = start + match[0].length;
+      if (start < goalEnd && goalStart < end) {
+        log.debug(
+          {
+            event: "cee.factor_extraction.goal_word_suppressed",
+            resolution: goalResolution.kind,
+            context,
+            span: `${start}-${end}`,
+          },
+          "Goal-word contextual number suppressed: inside the construction the goal grammar resolved",
+        );
+        continue;
+      }
     }
     const key = dedupKey(label, normalizedValue, unit);
 

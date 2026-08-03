@@ -355,7 +355,10 @@ describe('ROADMAP 2.353 — a mixed-currency goal refuses honestly (#795 residua
     ['symbol baseline, WORD target (reversed currencies)', 'Grow revenue from $4M to a target of 6M pounds'],
     ['WORD baseline, symbol target', 'Grow revenue from 4M dollars to a target of £6M'],
     ['WORD on both sides, disagreeing', 'Grow revenue from 4M dollars to a target of 6M pounds'],
-    ['the from-to goal-verb shape, mixed', 'Increase annual revenue from £4 million today to 6 million dollars'],
+    [
+      'the from-to goal-verb shape, mixed',
+      'Increase annual revenue from £4 million today to 6 million dollars within 12 months',
+    ],
   ];
 
   it.each(MIXED)('refuses: %s', (_name, brief) => {
@@ -433,7 +436,9 @@ describe('ROADMAP 2.353 — the new grammar stays closed', () => {
     // The from-to goal shape captures BOTH trailing nouns, so a target and a
     // level from two different metrics are refused rather than subtracted.
     expect(
-      extractGoalTargetWithBaseline('Increase our headcount from 50 employees to 800000 revenue'),
+      extractGoalTargetWithBaseline(
+        'Increase our headcount from 50 employees to 800000 revenue within 12 months',
+      ),
     ).toBeNull();
     expect(
       extractGoalTargetWithBaseline('Grow revenue from 50 employees to a target of 800000 customers'),
@@ -442,7 +447,9 @@ describe('ROADMAP 2.353 — the new grammar stays closed', () => {
 
   it('REFUSES a mixed percent pair in the from-to goal shape', () => {
     expect(
-      extractGoalTargetWithBaseline('Increase annual retention from 85 today to 95%'),
+      extractGoalTargetWithBaseline(
+        'Increase annual retention from 85 today to 95% within 12 months',
+      ),
     ).toBeNull();
   });
 
@@ -533,5 +540,266 @@ describe('ROADMAP 2.353 — the goal-baseline patterns share the ONE alphabet', 
       expect(r!.value, key).toBe(6 * multiplier);
       expect(r!.baseline, key).toBe(4 * multiplier);
     }
+  });
+});
+
+/* =========================================================================
+ * A1 — THE GOAL ANCHOR: A LEVER IS NOT A GOAL
+ * ======================================================================= */
+
+describe('ROADMAP 2.353 — pattern 4 mints only for a sentence that names a goal', () => {
+  /**
+   * MEASURED at `c356531d` (the first cut of this row), on a graph whose goal
+   * is "Grow annual revenue" — every one of these stamped a threshold on it,
+   * where PRISTINE `210c0ff` minted nothing:
+   *
+   *   "We could increase the price from £49 to £59"  -> raw 59 / £ / cap 73.75
+   *   "increasing ad spend from £200k to £300k"      -> raw 300,000
+   *   "Drop the price from £49 to £39"               -> raw 39, goal_baseline
+   *                                                     1.005 (ABOVE its cap)
+   *   "Lower the cost from £200 to £150"             -> raw 150, baseline 1.067
+   *
+   * An honest absence replaced by a confident wrong number. The anchor restores
+   * pristine parity for all four.
+   */
+  const LEVERS: ReadonlyArray<readonly [string, string]> = [
+    ['modal proposal', 'We could increase the price from £49 to £59'],
+    ['gerund option', 'increasing ad spend from £200k to £300k'],
+    ['imperative', 'Drop the price from £49 to £39'],
+    ['imperative, decrease', 'Lower the cost from £200 to £150'],
+  ];
+
+  it.each(LEVERS)('forms no goal pair: %s', (_n, brief) => {
+    expect(extractGoalTargetWithBaseline(brief), brief).toBeNull();
+  });
+
+  it.each(LEVERS)('mints nothing on the wire (pristine parity): %s', async (_n, brief) => {
+    const { contract } = await runToWire(brief);
+    expect(contract, brief).toEqual({
+      goal_threshold: undefined,
+      goal_threshold_raw: undefined,
+      goal_threshold_unit: undefined,
+      goal_threshold_cap: undefined,
+      goal_threshold_frame: undefined,
+      goal_baseline: undefined,
+      goal_baseline_raw: undefined,
+    });
+  });
+
+  it.each(LEVERS)('emits no goal-labelled factor: %s', (_n, brief) => {
+    const factors = extractFactors(brief);
+    expect(factors.filter((f) => /^(?:target|goal|objective|threshold)$/i.test(f.label))).toHaveLength(0);
+  });
+
+  it('a LEVER sentence cannot steal the pair from a genuine goal that follows', async () => {
+    // `exec` returns the FIRST match, so before the anchor the price lever won
+    // and the revenue goal was never seen. The anchored scan skips unanchored
+    // matches and keeps looking.
+    const brief =
+      'We could increase the price from £49 to £59. ' +
+      'Increase annual revenue from £4 million today to £6 million within 12 months.';
+    const pair = extractGoalTargetWithBaseline(brief);
+    expect(pair?.value, 'the lever stole the pair').toBe(6_000_000);
+    expect(pair?.baseline).toBe(4_000_000);
+
+    const { contract } = await runToWire(brief);
+    expect(contract.goal_threshold_raw).toBe(6_000_000);
+    expect(contract.goal_baseline_raw).toBe(4_000_000);
+  });
+
+  it('a lever carrying a HORIZON is still excluded, by the modal guard', () => {
+    // The anchor alone would admit this one; the optionality-modal guard is the
+    // second, independent mechanism and this is the case that needs it.
+    expect(
+      extractGoalTargetWithBaseline('We could increase the price from £49 to £59 this year'),
+    ).toBeNull();
+  });
+
+  it('an ANCHOR is what admits the goal — each kind, on its own', () => {
+    // The three anchors, each exercised alone, so none of them is carried by
+    // another. Same sentence shape as the levers above.
+    const byHorizon = extractGoalTargetWithBaseline(
+      'Increase annual revenue from £4 million to £6 million within 12 months',
+    );
+    expect(byHorizon?.value, 'horizon anchor').toBe(6_000_000);
+
+    const byGoalWordAfterTo = extractGoalTargetWithBaseline(
+      'Increase annual revenue from £4 million to a target of £6 million',
+    );
+    expect(byGoalWordAfterTo?.value, 'goal word after "to"').toBe(6_000_000);
+
+    const byGoalWordInPhrase = extractGoalTargetWithBaseline(
+      'Raise the target from £600,000 to £800,000',
+    );
+    expect(byGoalWordInPhrase?.value, 'goal word in the metric phrase').toBe(800_000);
+  });
+});
+
+/* =========================================================================
+ * A2 — A DECREASE IS REFUSED, BECAUSE THE SEAM INVERTS IT
+ * ======================================================================= */
+
+describe('ROADMAP 2.353 — decrease pairs are refused, not minted', () => {
+  /**
+   * ISL scores P(level >= threshold) and the goal contract carries NO direction
+   * field — `goal_threshold_frame` is the code constant 'level'. A threshold
+   * below its baseline therefore enters a >= seam that INVERTS the question,
+   * and returns the wrong probability wearing the same confident badge.
+   *
+   * MEASURED at `c356531d`, before this refusal:
+   *   "Decrease annual costs from £4 million today to £3 million within 12
+   *    months"                -> threshold 0.8, goal_baseline 1.0667 (a
+   *                              baseline ABOVE its own cap)
+   *   "…to 0 within 12 months" -> threshold 0, cap undefined — an UN-NORMALISED
+   *                              zero beside a normalised world
+   *   "Our target is 3%, currently at 5%." -> 0.03 under 0.05, and this one is
+   *                              PRE-EXISTING pattern-2 behaviour, which is why
+   *                              the refusal sits at the shared resolution point
+   *                              rather than on pattern 4 alone.
+   */
+  const DECREASES: ReadonlyArray<readonly [string, string]> = [
+    ['decrease verb, currency', 'Decrease annual costs from £4 million today to £3 million within 12 months'],
+    ['decrease to zero', 'Decrease annual waste from £4 million today to 0 within 12 months'],
+    ['drop verb, percent', 'Drop annual churn from 5% to 3% within 12 months'],
+    ['from-to-target shape', 'Grow revenue from 6000000 to a target of 4000000'],
+    ['pattern 2 (PRE-EXISTING, not introduced here)', 'Our target is 3%, currently at 5%.'],
+    ['pattern 3 (PRE-EXISTING, not introduced here)', 'Currently at 500 customers, target 300.'],
+  ];
+
+  it.each(DECREASES)('refuses: %s', (_n, brief) => {
+    expect(extractGoalTargetWithBaseline(brief), brief).toBeNull();
+  });
+
+  it.each(DECREASES)('mints nothing on the wire: %s', async (_n, brief) => {
+    const { contract } = await runToWire(brief);
+    expect(contract, brief).toEqual({
+      goal_threshold: undefined,
+      goal_threshold_raw: undefined,
+      goal_threshold_unit: undefined,
+      goal_threshold_cap: undefined,
+      goal_threshold_frame: undefined,
+      goal_baseline: undefined,
+      goal_baseline_raw: undefined,
+    });
+  });
+
+  it('POSITIVE CONTROL — the same shapes INCREASING still extract', () => {
+    // Trap 13: the refusals above must be the direction talking, not the shape
+    // having stopped matching altogether.
+    const up: ReadonlyArray<readonly [string, number, number]> = [
+      ['Increase annual costs from £3 million today to £4 million within 12 months', 4_000_000, 3_000_000],
+      ['Grow revenue from 4000000 to a target of 6000000', 6_000_000, 4_000_000],
+      ['Our target is 5%, currently at 3%.', 0.05, 0.03],
+      ['Currently at 300 customers, target 500.', 500, 300],
+    ];
+    for (const [brief, value, baseline] of up) {
+      const r = extractGoalTargetWithBaseline(brief);
+      expect(r, `expected a pair for: ${brief}`).not.toBeNull();
+      expect(r!.value, brief).toBe(value);
+      expect(r!.baseline, brief).toBe(baseline);
+    }
+  });
+
+  it('EQUALITY is not refused — "hold the line" is a meaningful goal', () => {
+    const r = extractGoalTargetWithBaseline('Currently at 500 customers, target 500.');
+    expect(r?.value).toBe(500);
+    expect(r?.baseline).toBe(500);
+  });
+});
+
+/* =========================================================================
+ * A3 — THE SUPPRESSION BINDS BY SPAN, NOT BY VALUE (trap 19)
+ * ======================================================================= */
+
+describe('ROADMAP 2.353 — a same-valued goal-word factor elsewhere survives', () => {
+  it('an "Alert threshold is 6 million" beside a 6M target is NOT collateral', () => {
+    // MEASURED at `c356531d`: the suppression compared VALUES, so a different
+    // statement that merely shared the target's number satisfied it and
+    // vanished. Trap 19 — bind by identity (here, position), never by a value
+    // predicate another object can satisfy.
+    const brief =
+      'Increase annual revenue from £4 million today to £6 million within 12 months. ' +
+      'Alert threshold is 6 million.';
+    const factors = extractFactors(brief);
+
+    const targets = factors.filter((f) => /^target$/i.test(f.label));
+    expect(targets).toHaveLength(1);
+    expect(targets[0].value).toBe(6_000_000);
+    expect(targets[0].baseline).toBe(4_000_000);
+
+    const thresholds = factors.filter((f) => /^threshold$/i.test(f.label));
+    expect(thresholds, 'the alert threshold was suppressed as collateral').toHaveLength(1);
+    expect(thresholds[0].value).toBe(6_000_000);
+  });
+
+  it('the duplicate INSIDE the resolved construction is still dropped', () => {
+    // The control for the above: span-overlap must still suppress the
+    // baseline-less duplicate the pair itself produced.
+    const factors = extractFactors('Grow revenue from 4000000 to a target of 6000000 this year.');
+    const targets = factors.filter((f) => /^target$/i.test(f.label));
+    expect(targets).toHaveLength(1);
+    expect(targets[0].baseline).toBe(4_000_000);
+  });
+});
+
+/* =========================================================================
+ * A4 — A TRAILING ADVERB IS NOT A METRIC NOUN
+ * ======================================================================= */
+
+describe('ROADMAP 2.353 — trailing adverbs do not manufacture a mismatch', () => {
+  it('extracts through a trailing adverb, by MORPHOLOGY not by a list', () => {
+    // MEASURED at `c356531d`: "eventually" was read as a metric noun, so a £
+    // baseline against a noun-bearing target refused via currency_vs_metric_noun
+    // and the 6M was lost entirely. The stopword list had already been patched
+    // twice for -ly forms; it is now a derived rule.
+    const cases: ReadonlyArray<readonly [string, number, number]> = [
+      ['Increase revenue from £4M to 6M eventually', 6_000_000, 4_000_000],
+      ['Increase revenue from £4M to 6M ultimately', 6_000_000, 4_000_000],
+      ['Increase annual revenue from £4 million to 6M sustainably within 12 months', 6_000_000, 4_000_000],
+      ['Increase annual revenue from £4 million to £6 million profitably by year end', 6_000_000, 4_000_000],
+    ];
+    for (const [brief, value, baseline] of cases) {
+      const r = extractGoalTargetWithBaseline(brief);
+      expect(r, `regressed — no pair for: ${brief}`).not.toBeNull();
+      expect(r!.value, brief).toBe(value);
+      expect(r!.baseline, brief).toBe(baseline);
+      expect(r!.unit, brief).toBe('£');
+    }
+  });
+
+  it('PRESERVED — the -ly forms the old hand-list carried still behave', () => {
+    // "annually"/"quarterly" were hand-added stopwords; the derived rule must
+    // cover exactly what they covered.
+    for (const brief of [
+      'Currently at £4M, and our target is 6M annually.',
+      'Currently at £4M, and our target is 6M quarterly.',
+      'Currently at £4M, and our target is 6M monthly.',
+    ]) {
+      const r = extractGoalTargetWithBaseline(brief);
+      expect(r?.value, brief).toBe(6_000_000);
+      expect(r?.baseline, brief).toBe(4_000_000);
+    }
+  });
+
+  it('DISCLOSED IMPRECISION — an -ly NOUN reads as an adverb', () => {
+    // "supply" ends in -ly and is a genuine noun. The derived rule reads it as
+    // an adverb, so it stops contributing to a cross-metric refusal and this
+    // pair now EXTRACTS where it previously refused. Bounded and
+    // one-directional: it cannot invent a number or pair across clauses. Pinned
+    // so the cost is visible rather than discovered.
+    const r = extractGoalTargetWithBaseline(
+      'Increase the supply from $50 to 800 supply within 12 months',
+    );
+    expect(r?.value, 'the disclosed imprecision changed — re-read the note').toBe(800);
+    expect(r?.baseline).toBe(50);
+
+    // The CONTROL: a non-"-ly" noun on the same shape still refuses, so the
+    // cross-metric guard as a whole is intact.
+    expect(
+      extractGoalTargetWithBaseline(
+        'Increase the supply from $50 to 800 widgets within 12 months',
+      ),
+      'the cross-signal refusal itself regressed',
+    ).toBeNull();
   });
 });
