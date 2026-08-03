@@ -2714,16 +2714,27 @@ export async function dispatchEditGraph(
   // specific about why it is blocked.
   //
   // Why the pre-edit graph is the honest source here, not a guess: no mutation
-  // applied ⇒ the graph is UNCHANGED ⇒ `parsedGraph` IS what is persisted, and
+  // happened ⇒ the graph is UNCHANGED ⇒ `parsedGraph` IS what is persisted, and
   // it is the same base the edit itself ran against. The guard this branch
   // inherits exists to stop readiness being stamped from an *unpersisted*
   // `appliedGraph`; that hazard is absent by construction when nothing was
   // applied. Gated on `graphStrictlyCanonical` so a structural-fallback graph
   // (non-canonical ingress) never stamps readiness — same posture as the
   // deterministic add_risk path.
+  //
+  // ⚠ SCOPE, deliberately narrow — keyed on `successfulAppliedMutation`, NOT on
+  // the `effective` predicate. The two differ exactly on the WITHHELD paths: a
+  // GM-live hold and a part-accounting substitution block are turns where a
+  // mutation DID succeed and was deliberately held back pending confirmation.
+  // Those keep their existing "no analysis_ready" contract (pinned by
+  // `edit-graph-dispatch-graph-management-modes.test.ts` and
+  // `edit-graph-dispatch-part-accounting.test.ts`) — they are a held-proposal
+  // lifecycle with its own receipt copy, not the failed-remedy dead end the
+  // walk measured. This branch covers only the genuine non-apply outcomes the
+  // walk actually witnessed: rejected, no-op, zero-ops.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? computeStructuralReadiness(editResult.appliedGraph!)
-    : graphStrictlyCanonical
+    : !successfulAppliedMutation && graphStrictlyCanonical
       ? computeStructuralReadiness(parsedGraph)
       : undefined;
 

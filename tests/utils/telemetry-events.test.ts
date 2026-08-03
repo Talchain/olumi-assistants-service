@@ -2068,6 +2068,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.applied_graph_missing_with_operations",
         "v5.edit_graph.proposal_confirm_resolved",
         "v5.edit_graph.state_query_suppressed",
+        "v5.edit_graph.configure_option_clarify_intercept",
         "v5.edit_graph.configure_option_intent_routed",
         "v5.edit_graph.configure_option_labels_loaded",
         "v5.edit_graph.structural_restructure_intent_routed",

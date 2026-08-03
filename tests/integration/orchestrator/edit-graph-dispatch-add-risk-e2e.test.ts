@@ -156,7 +156,27 @@ describe('dispatchEditGraph e2e — bare add_risk clarification path', () => {
     expect(metadata.graph).toBeUndefined();
 
     expect(result.graph).toBeNull();
-    expect(result.analysisReady).toBeUndefined();
+
+    // ⚠ L16 — this assertion was `expect(result.analysisReady).toBeUndefined()`.
+    // It is now the opposite, and deliberately so. A deterministic
+    // clarification is a NON-APPLY turn, and dropping `analysis_ready` on
+    // non-apply turns is the defect the 3 Aug walk measured: the run gate's
+    // copy degraded from the specific reason to the generic "Olumi is not able
+    // to run this yet" on exactly the turns that shipped no block. A user who
+    // asks a clarifying question must not be punished by losing the specific
+    // reason their run is blocked.
+    //
+    // The claim this case actually exists to make — "does not mutate or
+    // persist the graph" — is untouched and still asserted above and below:
+    // `result.graph` is null, `metadata.graph` is undefined, `llm_calls_used`
+    // is 0, and `PRICING_GRAPH` is unmutated. Readiness here is derived from
+    // the UNCHANGED pre-edit graph, which is why it is safe: it reports the
+    // model as it stands, and cannot report the un-added risk as added.
+    expect(result.analysisReady).toBeDefined();
+    expect(result.analysisReady!.goal_node_id).toBe('goal_growth');
+    // The mutation that did NOT happen is absent from the readiness view too —
+    // no option gained an intervention, nothing became `ready`.
+    expect(result.analysisReady!.options.every((o) => o.status === 'needs_encoding')).toBe(true);
     expect(PRICING_GRAPH).toEqual(originalGraph);
     expect(() => OlumiResponseSchema.parse(result.response)).not.toThrow();
   });
