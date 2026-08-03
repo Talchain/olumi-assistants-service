@@ -51,6 +51,7 @@ import { describe, expect, it } from 'vitest';
 
 import { enrichGraphWithFactorsAsync } from '../enricher.js';
 import {
+  DURATION_NUMBER_WORDS,
   GOAL_BASELINE_PATTERN_SOURCES_FOR_DRIFT_GUARD,
   PROPOSAL_FRAME_MARKERS,
   extractFactors,
@@ -1089,5 +1090,441 @@ describe('ROADMAP 2.371(b) — the guard reads ONE CLAUSE, not the brief', () =>
     const r = extractGoalTargetWithBaseline('We could grow revenue from £4M to a target of £6M');
     expect(r?.value, 'pattern 1 behaviour moved — that is not this slice').toBe(6_000_000);
     expect(r?.baseline).toBe(4_000_000);
+  });
+});
+
+/* =========================================================================
+ * THE HORIZON ANCHOR READS ORDINARY DEADLINES
+ * (2.353 family — found by Codex on 4 Aug, live, on BOTH briefs it wrote)
+ *
+ * The horizon is not decoration: since #807/#809 it is a GOAL ANCHOR, and a
+ * from-to sentence carrying no anchor mints NOTHING. So a gap in the horizon
+ * vocabulary is not a lost date — it is a LOST TARGET, and the user is then
+ * asked to supply a number their brief already contained. Codex hit exactly
+ * that, twice out of two:
+ *
+ *   "Grow MRR from £180k to £250k by 31 Dec 2026"     -> null at `a6f52ac6`
+ *   "Grow ARR from £4.2m to £6m by 30 June 2027"      -> null at `a6f52ac6`
+ *
+ * Two classes were missing, and both are measured RED at `a6f52ac6` in the
+ * evidence file (PHASE0-EVIDENCE-2026-07-28/l59-horizon-dates.md):
+ *
+ *   1. CALENDAR DATES. The `by` branch took a broad period, an H/Q, or a bare
+ *      four-digit year, and nothing else.
+ *   2. FIVE OF THE TWELVE NUMBER WORDS. Three branches each hand-typed
+ *      `one|two|three|four|six|nine|twelve` — three copies of one list, all
+ *      three short of five/seven/eight/ten/eleven (trap 12).
+ *
+ * ⚠ THE DIRECTION OF THIS WIDENING, stated because widening a goal grammar is
+ * how the 2.353 family's worst defects arrived: the anchor asks whether a
+ * sentence NAMES a goal. `isProposalFramed` (#809), the direction refusal and
+ * the comparability refusals are all DOWNSTREAM and untouched by this slice. A
+ * wider anchor therefore admits more GOALS; it cannot admit a lever that those
+ * guards would otherwise have caught. The negative control at the foot of this
+ * block is what holds that claim to account, and it is paired with a positive
+ * control so it cannot pass by the date simply going unrecognised (trap 13).
+ * ======================================================================= */
+
+/** Hand-computed from the cap doctrine: no '%' and no existing cap ⇒ raw × 1.25. */
+const HORIZON_FAMILY: ReadonlyArray<{
+  readonly name: string;
+  readonly brief: string;
+  readonly target: number;
+  readonly baseline: number;
+  readonly unit: string;
+  readonly cap: number;
+  readonly threshold: number;
+  readonly normalisedBaseline: number;
+}> = [
+  {
+    // ⭐ CODEX'S FIRST LIVE BRIEF, VERBATIM.
+    name: 'CODEX-1 · "by 31 Dec 2026" — abbreviated month, day first',
+    brief: 'Grow MRR from £180k to £250k by 31 Dec 2026',
+    target: 250_000,
+    baseline: 180_000,
+    unit: '£',
+    cap: 312_500, //             250_000 × 1.25
+    threshold: 0.8, //           250_000 ÷ 312_500
+    normalisedBaseline: 0.576, // 180_000 ÷ 312_500
+  },
+  {
+    // ⭐ CODEX'S SECOND LIVE BRIEF, VERBATIM.
+    name: 'CODEX-2 · "by 30 June 2027" — full month, day first',
+    brief: 'Grow ARR from £4.2m to £6m by 30 June 2027',
+    target: 6_000_000,
+    baseline: 4_200_000,
+    unit: '£',
+    cap: 7_500_000, //            6_000_000 × 1.25
+    threshold: 0.8,
+    normalisedBaseline: 0.56, //  4_200_000 ÷ 7_500_000
+  },
+  {
+    name: 'DATE · "by 31 December 2026" — full month spelled out',
+    brief: 'Increase annual revenue from £4 million to £6 million by 31 December 2026',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'DATE · "by 31/12/2026" — all-numeric, slashes',
+    brief: 'Increase annual revenue from £4 million to £6 million by 31/12/2026',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'DATE · "by December 2026" — month and year, no day',
+    brief: 'Increase annual revenue from £4 million to £6 million by December 2026',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'DATE · "by Dec 31, 2026" — month first, comma',
+    brief: 'Increase annual revenue from £4 million to £6 million by Dec 31, 2026',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'DATE · "by 31st March 2027" — ordinal suffix',
+    brief: 'Increase annual revenue from £4 million to £6 million by 31st March 2027',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    // ⚠ DISCLOSED: this ONE entry was already GREEN at `a6f52ac6`, because
+    // "2026-12-31" satisfied the bare `\d{4}` alternative on its first four
+    // characters and left "-12-31" trailing. It is in the corpus as a
+    // REGRESSION PIN, not as part of the RED set — the evidence file records
+    // which entries were red and which were not, so the RED-first claim for
+    // this block is not inflated by it.
+    name: 'DATE · "by 2026-12-31" — ISO (already anchored at base, pinned anyway)',
+    brief: 'Increase annual revenue from £4 million to £6 million by 2026-12-31',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'WORD · "within five months" — the smallest missing number word',
+    brief: 'Increase annual revenue from £4 million to £6 million within five months',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'WORD · "in eleven months"',
+    brief: 'Increase annual revenue from £4 million to £6 million in eleven months',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'WORD · "within seven weeks" — a different unit',
+    brief: 'Increase annual revenue from £4 million to £6 million within seven weeks',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'WORD · "over the next ten years" — the third branch',
+    brief: 'Increase annual revenue from £4 million to £6 million over the next ten years',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+  {
+    name: 'WORD · "within eight quarters"',
+    brief: 'Increase annual revenue from £4 million to £6 million within eight quarters',
+    target: 6_000_000,
+    baseline: 4_000_000,
+    unit: '£',
+    cap: 7_500_000,
+    threshold: 0.8,
+    normalisedBaseline: 0.5333333333333333,
+  },
+];
+
+describe('2.353 family — a dated or spelled deadline anchors the goal', () => {
+  it.each(HORIZON_FAMILY)('EXTRACTION · $name', ({ brief, target, baseline, unit }) => {
+    const pair = extractGoalTargetWithBaseline(brief);
+    expect(pair, `no (target, baseline) pair formed for: ${brief}`).not.toBeNull();
+    expect(pair!.value, brief).toBe(target);
+    expect(pair!.baseline, brief).toBe(baseline);
+    expect(pair!.unit, brief).toBe(unit);
+  });
+
+  it.each(HORIZON_FAMILY)('LABEL ROUTING · $name', ({ brief, target, baseline, unit }) => {
+    const factors = extractFactors(brief);
+    const targets = factors.filter((f) => /^target$/i.test(f.label));
+    expect(targets, `expected exactly one "Target" factor for: ${brief}`).toHaveLength(1);
+    expect(targets[0].value, brief).toBe(target);
+    expect(targets[0].baseline, brief).toBe(baseline);
+    expect(targets[0].unit, brief).toBe(unit);
+    expect(targets[0].confidence, brief).toBe(0.95);
+    expect(targets[0].extractionType, brief).toBe('explicit');
+  });
+
+  it.each(HORIZON_FAMILY)(
+    'END TO END · $name',
+    async ({ brief, target, baseline, unit, cap, threshold, normalisedBaseline }) => {
+      const { contract, v3, sweepStrips } = await runToWire(brief);
+
+      // The whole contract BY IDENTITY, exactly as the 2.353 FAMILY above does.
+      // Extraction alone is not the fix: a mint that Stage 4b sweeps back off
+      // is still a user with no target, and only this can see that.
+      expect(contract, brief).toEqual({
+        goal_threshold: threshold,
+        goal_threshold_raw: target,
+        goal_threshold_unit: unit,
+        goal_threshold_cap: cap,
+        goal_threshold_frame: 'level',
+        goal_baseline: normalisedBaseline,
+        goal_baseline_raw: baseline,
+      });
+      expect(sweepStrips, `Stage 4b stripped the mint for: ${brief}`).toBe(0);
+
+      expect(v3.goal_threshold, brief).toBe(threshold);
+      expect(v3.goal_threshold_raw, brief).toBe(target);
+      expect(v3.goal_threshold_unit, brief).toBe(unit);
+      expect(v3.goal_threshold_cap, brief).toBe(cap);
+      expect(v3.goal_threshold_frame, brief).toBe('level');
+      expect(v3.observed_state, brief).toMatchObject({
+        baseline: normalisedBaseline,
+        raw_value: baseline,
+        cap,
+        unit,
+        source: 'brief_extraction',
+      });
+    },
+  );
+});
+
+describe('2.353 family — the spelled-duration map is ONE list, and it is complete', () => {
+  /**
+   * THE DERIVED HALF (12d, first face). It iterates the canonical map, so a
+   * word added tomorrow is exercised in all three duration branches the instant
+   * it lands — and, as 12d says in as many words, it is structurally blind to
+   * the map being SHORT. That blindness is why the two tests below it exist.
+   */
+  it('EVERY word in the map anchors a goal, in all three duration branches', () => {
+    expect(Object.keys(DURATION_NUMBER_WORDS).length, 'the map is empty').toBeGreaterThan(0);
+    for (const word of Object.keys(DURATION_NUMBER_WORDS)) {
+      for (const frame of [
+        `within ${word} months`,
+        `in ${word} months`,
+        `over the next ${word} months`,
+      ]) {
+        const brief = `Increase annual revenue from £4 million to £6 million ${frame}`;
+        const r = extractGoalTargetWithBaseline(brief);
+        expect(r, `the number word '${word}' does not anchor: ${brief}`).not.toBeNull();
+        expect(r!.value, brief).toBe(6_000_000);
+        expect(r!.baseline, brief).toBe(4_000_000);
+      }
+    }
+  });
+
+  /**
+   * ⭐ THE COMPLETENESS HALF, AND IT IS THE ONE 12d SAYS A DERIVATION CANNOT
+   * SUPPLY.
+   *
+   * Iterating the keys can only ever ask about words the map ALREADY HAS —
+   * delete `five` and the test above stays green, exactly as deleting
+   * `million` left the magnitude alphabet's per-key guard green. What makes
+   * this map different is that its VALUES carry the completeness contract: a
+   * spelled-number list is complete iff its values are the contiguous run
+   * 1…12. That is checkable without a second copy of the words, so it is not a
+   * hand-maintained mirror — and it REDs on a deleted key where the derived
+   * guard above cannot.
+   *
+   * It is still not the whole answer: it would not notice the RANGE being
+   * wrong (a map of 1…6 is internally consistent). `HORIZON_FAMILY` is the
+   * third check, and it spells five/seven/eight/ten/eleven by hand.
+   */
+  it('the values are the contiguous run 1…12 — a deleted word is a HOLE, not a shorter list', () => {
+    const values = Object.values(DURATION_NUMBER_WORDS).slice().sort((a, b) => a - b);
+    expect(values, 'the spelled-number map is no longer 1…12 — a word was lost or the range moved').toEqual(
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    );
+  });
+
+  it('every word maps to its own number — no two words share a value', () => {
+    expect(new Set(Object.values(DURATION_NUMBER_WORDS)).size).toBe(
+      Object.keys(DURATION_NUMBER_WORDS).length,
+    );
+  });
+
+  it('PRESERVED — the digit and article forms the branches already took still work', () => {
+    // The three branches were rewritten onto one shared count slot. Everything
+    // they accepted before must still be accepted, or this "de-duplication"
+    // quietly cost a capability.
+    //
+    // ⚠ "an" is NOT exercised here, and the reason is a finding rather than an
+    // omission: the pristine `within` and `in` branches both listed it, but the
+    // unit set is day/week/month/quarter/year and none of those is
+    // vowel-initial, so no sentence can reach it. It is carried forward
+    // verbatim in `DURATION_COUNT` rather than dropped, because removing dead
+    // vocabulary is a separate decision from fixing a live gap.
+    for (const frame of [
+      'within 12 months',
+      'within the next 6 months',
+      'in a month',
+      'within a quarter',
+      'over the next 3 years',
+      'by year end',
+      'by the end of this quarter',
+      'by Q4',
+      'by H2',
+      'by 2026',
+      'this year',
+      'eventually',
+    ]) {
+      const brief = `Increase annual revenue from £4 million to £6 million ${frame}`;
+      expect(extractGoalTargetWithBaseline(brief)?.value, brief).toBe(6_000_000);
+    }
+  });
+});
+
+describe('2.353 family — a wider horizon does not widen the LEVER class', () => {
+  /**
+   * ⭐ THE NEGATIVE CONTROL AND ITS TRAP-13 PARTNER, WHICH ONLY MEAN ANYTHING
+   * TOGETHER.
+   *
+   * The negative control on its own is worthless here: at `a6f52ac6` the
+   * modal-framed sentence returned null because the DATE WAS NOT A HORIZON, and
+   * a control that passes for the wrong reason is the shape this programme
+   * keeps finding. So the same sentence is asserted twice — once framed as a
+   * proposal (must mint nothing, and that must be `isProposalFramed` talking)
+   * and once unframed (must anchor, proving the date is genuinely live).
+   */
+  it('a LEVER with a calendar date mints NOTHING — the proposal guard still fires', async () => {
+    const brief = 'We could raise the price from £49 to £59 by 31 Dec 2026';
+    expect(extractGoalTargetWithBaseline(brief), brief).toBeNull();
+
+    const { contract } = await runToWire(brief);
+    expect(contract, brief).toEqual({
+      goal_threshold: undefined,
+      goal_threshold_raw: undefined,
+      goal_threshold_unit: undefined,
+      goal_threshold_cap: undefined,
+      goal_threshold_frame: undefined,
+      goal_baseline: undefined,
+      goal_baseline_raw: undefined,
+    });
+
+    const factors = extractFactors(brief);
+    expect(
+      factors.filter((f) => /^(?:target|goal|objective|threshold)$/i.test(f.label)),
+    ).toHaveLength(0);
+  });
+
+  it('every proposal-framed marker still disarms a DATED sentence', () => {
+    // The derived guard, re-run on the new horizon class: the anchor widened,
+    // so every marker must still hold against it. Blind to the marker list
+    // being short — `LEVER_CORPUS` above is that half — but not blind to the
+    // date having routed around the guard entirely.
+    for (const marker of PROPOSAL_FRAME_MARKERS) {
+      expect(
+        extractGoalTargetWithBaseline(
+          `Right now ${marker} we increase annual revenue from £4 million to £6 million by 31 Dec 2026`,
+        ),
+        `the marker '${marker}' stopped disarming once the horizon was a date`,
+      ).toBeNull();
+    }
+  });
+
+  it('POSITIVE CONTROL — the same date DOES anchor once the modal is removed', () => {
+    // ⚠ Trap 13, and it is load-bearing: without this, the two assertions above
+    // would pass unchanged on a build where the calendar-date alternative was
+    // deleted. It also DISCLOSES a pre-existing cost rather than hiding it —
+    // see the next test.
+    const r = extractGoalTargetWithBaseline('Raise the price from £49 to £59 by 31 Dec 2026');
+    expect(r?.value, 'the calendar date is not anchoring — the controls above prove nothing').toBe(59);
+    expect(r?.baseline).toBe(49);
+  });
+
+  it('DISCLOSED, PRE-EXISTING — a bare-imperative lever with ANY horizon already pairs', () => {
+    // MEASURED at `a6f52ac6`, BEFORE this slice: an imperative lever carrying an
+    // ALREADY-ACCEPTED horizon forms a pair. The horizon anchor admits it and
+    // no modal is present for `isProposalFramed` to catch.
+    //
+    //   "Raise the price from £49 to £59 this year"        -> 59 / 49  (at base)
+    //   "Raise the price from £49 to £59 by 2026"          -> 59 / 49  (at base)
+    //   "increasing ad spend from £200k to £300k this year" -> 300k / 200k (at base)
+    //
+    // This slice extends that EXISTING class to dated deadlines; it does not
+    // create it, and it is out of scope here (fixing it means telling a lever
+    // metric from a goal metric, which needs the GRAPH — the residual already
+    // rowed at 2.371's "decided-lever statements still pair"). Pinned so the
+    // cost is visible rather than discovered, and so the next lane cannot
+    // mistake it for something this one introduced.
+    for (const [brief, value, baseline] of [
+      ['Raise the price from £49 to £59 this year', 59, 49],
+      ['Raise the price from £49 to £59 by 2026', 59, 49],
+      ['increasing ad spend from £200k to £300k this year', 300_000, 200_000],
+    ] as ReadonlyArray<readonly [string, number, number]>) {
+      const r = extractGoalTargetWithBaseline(brief);
+      expect(r?.value, `PRE-EXISTING behaviour moved — re-read the note: ${brief}`).toBe(value);
+      expect(r?.baseline, brief).toBe(baseline);
+    }
+  });
+
+  it('a date does not make a DECREASE mintable — the direction refusal is upstream-independent', () => {
+    expect(
+      extractGoalTargetWithBaseline(
+        'Decrease annual costs from £4 million to £3 million by 31 Dec 2026',
+      ),
+    ).toBeNull();
+  });
+
+  it('a date does not reconcile a MIXED percent pair', () => {
+    expect(
+      extractGoalTargetWithBaseline(
+        'Increase annual retention from 85 today to 95% by 31 Dec 2026',
+      ),
+    ).toBeNull();
+  });
+
+  it('a bare year without a month is NOT a date — a two-digit year cannot pass as one', () => {
+    // The date shapes are bounded to FOUR-digit years on purpose. "12/26" is a
+    // price, a ratio or a reference — not a deadline — and admitting it would
+    // turn arbitrary slashed numbers into goal anchors.
+    expect(
+      extractGoalTargetWithBaseline(
+        'Increase annual revenue from £4 million to £6 million by 12/26',
+      ),
+      'a two-digit year was accepted as a calendar date',
+    ).toBeNull();
   });
 });

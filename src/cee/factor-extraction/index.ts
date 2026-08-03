@@ -718,6 +718,130 @@ const NOW_QUALIFIER =
   'currently|presently|today|now)';
 
 /**
+ * SPELLED DURATIONS — ONE MAP, AND ITS VALUES ARE WHAT MAKE IT CHECKABLE.
+ *
+ * The three spelled-duration branches of `HORIZON` each carried their own
+ * hand-typed alternation — `one|two|three|four|six|nine|twelve` — and all three
+ * were SHORT THE SAME FIVE WORDS: five, seven, eight, ten, eleven. "Increase
+ * annual revenue from £4 million to £6 million within FIVE months" carried no
+ * anchor, so it minted nothing at all (measured at `a6f52ac6`). Three copies of
+ * one list, drifting together, is CLAUDE.md trap 12 in its plainest form.
+ *
+ * ⚠ AND DERIVING THE ALTERNATION FROM A MAP IS ONLY HALF THE ANSWER (trap 12d).
+ * A guard that iterates this map proves every key it HAS resolves; it is
+ * structurally blind to the map being SHORT — which is exactly how `thousand`
+ * went missing from the magnitude alphabet under a green derived guard.
+ *
+ * So the values are not decoration. They make the list's COMPLETENESS an
+ * assertable property rather than a matter of counting by eye: the spec pins
+ * that the values are exactly the contiguous run 1…12, which REDs on a deleted
+ * key where iterating the keys never could. That is the completeness half 12d
+ * says a derivation can never supply, obtained here without a second copy of
+ * the list — and the hand-written corpus beside it is the third check, the one
+ * that would notice the RANGE itself is wrong.
+ *
+ * Twelve is the ceiling because the units are day/week/month/quarter/year: a
+ * horizon beyond "twelve months" is spoken in the next unit up ("two years"),
+ * and the digit branch (`\d+`) covers anything a user writes numerically.
+ */
+export const DURATION_NUMBER_WORDS: Readonly<Record<string, number>> = Object.freeze({
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+});
+
+/**
+ * The alternation the grammar reads, DERIVED from the map above so a word added
+ * there is live in all three branches the instant it lands.
+ *
+ * Sorted LONGEST-FIRST: regex alternation is first-match, not longest-match, so
+ * a word that prefixes another would otherwise shadow it. Nothing in the
+ * current set collides, and the sort means nothing added later can.
+ */
+const DURATION_NUMBER_WORD_ALTERNATION = Object.keys(DURATION_NUMBER_WORDS)
+  .sort((a, b) => b.length - a.length || a.localeCompare(b))
+  .join('|');
+
+/**
+ * The count slot every spelled-duration branch shares: "12", "a", "an",
+ * "eleven".
+ *
+ * ⚠ TWO SMALL DELIBERATE CHANGES, both disclosed because "de-duplication"
+ * is where capability quietly leaks:
+ *
+ *   · `over the next` gains "an", which the other two branches already had.
+ *     Unreachable in practice (below), and unifying the three was the point.
+ *   · "an" is DEAD VOCABULARY in all three branches and is preserved anyway.
+ *     `DURATION_UNIT` is day/week/month/quarter/year, none of them
+ *     vowel-initial, so no sentence can reach it. Deleting dead vocabulary is
+ *     a separate decision from closing a live gap, and this slice is the
+ *     latter. Pinned as a finding in the spec rather than silently tidied.
+ */
+const DURATION_COUNT = `(?:\\d+|an?|${DURATION_NUMBER_WORD_ALTERNATION})`;
+
+/** The unit slot every spelled-duration branch shares. */
+const DURATION_UNIT = '(?:day|week|month|quarter|year)s?';
+
+/**
+ * Month spellings, abbreviations included. Closed and case-insensitive (the
+ * pattern compiles with `i`), so only the lower-case forms are spelled.
+ */
+const MONTH_NAME =
+  '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|' +
+  'aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+
+/**
+ * AN ORDINARY CALENDAR DATE, AS A BOUNDED SET OF SHAPES — NOT A DATE PARSER.
+ *
+ * ⚠ THIS IS THE DEFECT CODEX HIT LIVE, IN BOTH BRIEFS IT TRIED:
+ *
+ *   "Grow MRR from £180k to £250k by 31 Dec 2026"   -> no pair, no target
+ *   "Grow ARR from £4.2m to £6m by 30 June 2027"    -> no pair, no target
+ *
+ * The `by` branch accepted a broad period ("by year end"), a half or a quarter,
+ * or a BARE FOUR-DIGIT YEAR — and nothing else. A calendar date is the single
+ * most ordinary way a person writes a deadline, and because the horizon is a
+ * GOAL ANCHOR (#807/#809) rather than decoration, a brief that carried one was
+ * not merely losing its date: it was losing its TARGET, and being asked to
+ * supply the number it had already typed.
+ *
+ * ⚠ WHAT THIS DELIBERATELY IS NOT: a general date parser, a locale library, or
+ * a validity check. Nothing downstream READS the horizon — `isGoalAnchored`
+ * only asks whether one is PRESENT — so parsing it would be machinery with no
+ * consumer, and rejecting "31 Feb 2026" would cost a user their target over a
+ * typo the anchor does not depend on. The shapes below are the ones people
+ * write, bounded to four-digit years so a bare "12/26" cannot pass as one.
+ *
+ * ORDER MATTERS: the full forms precede the month-year form, and the whole set
+ * precedes the bare `\d{4}` alternative in the `by` branch, so "2026-12-31"
+ * matches as a date rather than leaving "-12-31" trailing behind a bare year.
+ */
+const CALENDAR_DATE =
+  '(?:' +
+  // ISO, the form a machine writes: 2026-12-31
+  '\\d{4}-\\d{2}-\\d{2}' +
+  // All-numeric, day first or month first — the shape is identical either way
+  // and nothing reads the parts, so no locale question arises: 31/12/2026
+  '|\\d{1,2}[/-]\\d{1,2}[/-]\\d{4}' +
+  // Day month year: "31 Dec 2026", "31st December 2026", "30 June 2027"
+  `|\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH_NAME}\\.?,?\\s+\\d{4}` +
+  // Month day year: "Dec 31, 2026", "December 31 2026"
+  `|${MONTH_NAME}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+\\d{4}` +
+  // Month year, LAST of the three so it cannot steal a day-bearing form:
+  // "June 2027", "Dec 2026"
+  `|${MONTH_NAME}\\.?\\s+\\d{4}` +
+  ')';
+
+/**
  * THE GOAL ANCHOR (ROADMAP 2.353, review A1 — a CONFIRMED blocker).
  *
  * ⚠ THE FIRST CUT OF PATTERN 4 WAS TOO BROAD, AND THE BREADTH WAS INVISIBLE TO
@@ -754,17 +878,26 @@ const NOW_QUALIFIER =
  * The spellings below are a closed hand-written set, like NOW_QUALIFIER, and
  * the same justification applies: an unlisted horizon means NO pair, never a
  * fabricated one.
+ *
+ * ⚠ AND "NEVER A FABRICATED ONE" IS WHY THIS SET BEING SHORT WAS STILL
+ * EXPENSIVE. The failure direction is safe but it is not free: an unlisted
+ * horizon costs the user the target THEY TYPED, and CEE then asks them for it.
+ * Two whole classes were missing at `a6f52ac6` — ordinary calendar dates, and
+ * five of the twelve number words — and Codex hit the first of them on both of
+ * the two briefs it wrote. Widening HERE is the safe direction of widening:
+ * `isProposalFramed` and the direction/comparability refusals are downstream
+ * and untouched, so a wider anchor admits more GOALS without admitting a single
+ * lever the guards would otherwise have caught.
  */
 const HORIZON =
   '(?:' +
-  'within\\s+(?:the\\s+)?(?:next\\s+)?(?:\\d+|a|an|one|two|three|four|six|nine|twelve)\\s*' +
-  '(?:day|week|month|quarter|year)s?' +
-  '|over\\s+the\\s+next\\s+(?:\\d+|a|one|two|three|four|six|nine|twelve)\\s*' +
-  '(?:day|week|month|quarter|year)s?' +
-  '|in\\s+(?:the\\s+)?(?:next\\s+)?(?:\\d+|a|an|one|two|three|four|six|nine|twelve)\\s*' +
-  '(?:day|week|month|quarter|year)s?' +
+  `within\\s+(?:the\\s+)?(?:next\\s+)?${DURATION_COUNT}\\s*${DURATION_UNIT}` +
+  `|over\\s+the\\s+next\\s+${DURATION_COUNT}\\s*${DURATION_UNIT}` +
+  `|in\\s+(?:the\\s+)?(?:next\\s+)?${DURATION_COUNT}\\s*${DURATION_UNIT}` +
+  // A dated deadline. `CALENDAR_DATE` precedes the bare-year alternative so a
+  // full date is read whole rather than truncated to its year.
   '|by\\s+(?:the\\s+end\\s+of\\s+)?(?:this|next|the)?\\s*' +
-  '(?:year|quarter|month|week|h[12]|q[1-4]|\\d{4})(?:[-\\s]end)?' +
+  `(?:${CALENDAR_DATE}|year|quarter|month|week|h[12]|q[1-4]|\\d{4})(?:[-\\s]end)?` +
   '|(?:this|next)\\s+(?:year|quarter|month|week)' +
   '|year[-\\s]end' +
   // VAGUE horizons. "Increase revenue from £4M to 6M EVENTUALLY" commits to a
