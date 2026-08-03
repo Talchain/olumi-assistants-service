@@ -14,6 +14,13 @@ import { applyAndValidateMutation } from '../tools/handlers/d1-shared/apply-grap
 import { D1HandlerError } from '../tools/handlers/d1-shared/errors.js';
 import { GraphV3, type GraphV3T, type NodeV3T, type EdgeV3T } from '../../schemas/cee-v3.js';
 import {
+  EDGE_REQUIRED_NESTED_FIELDS,
+  NODE_REQUIRED_NESTED_FIELDS,
+  describeNonObjectWrite,
+  isPlainObjectWrite,
+  mergeRequiredNestedWrite,
+} from '../../schemas/required-nested-merge.js';
+import {
   CANDIDATE_BUILD_FAILED,
   ENTITY_NOT_FOUND,
   GRAPH_INVARIANT_VIOLATED,
@@ -230,17 +237,35 @@ const FORBIDDEN_PATH_SEGMENTS: ReadonlySet<string> = new Set([
 /**
  * Set `value` at the (possibly nested) `field` path on `target`. Intermediate
  * segments that are absent or non-object are replaced with fresh objects —
- * mirroring the edit pipeline's leaf-path write semantics. A type-invalid
- * result (e.g. an object grafted over a typed scalar) is caught by the
- * post-mutation GraphV3 re-validation in `applyAndValidateMutation`, so this
- * setter never needs schema knowledge. Undeclared NodeV3/EdgeV3 spellings
- * (e.g. `data/*`) are STRIPPED by that re-validation — readiness-neutral for
- * the referee's R6 parity check; the live edit pipeline owns the real write.
+ * mirroring the edit pipeline's leaf-path write semantics. Undeclared
+ * NodeV3/EdgeV3 spellings (e.g. `data/*`) are STRIPPED by the post-mutation
+ * re-validation — readiness-neutral for the referee's R6 parity check; the
+ * live edit pipeline owns the real write.
+ *
+ * ⚠ ROADMAP 2.380 — THIS SETTER DOES NEED ONE PIECE OF SCHEMA KNOWLEDGE, AND
+ * ITS ABSENCE WAS A LIVE DEAD END. Its docstring used to say *"this setter
+ * never needs schema knowledge"* because post-mutation re-validation catches a
+ * type-invalid result. That reasoning holds for a result that is WRONG; it
+ * fails for a result that is INCOMPLETE. A whole-object write onto a REQUIRED
+ * nested field (`{strength:{mean:0.8}}` — the shape the producer projects from
+ * the model's own op) REPLACED the object and dropped the required `std`, so
+ * every edge-strength edit failed `GraphV3.parse` and the live gate discarded
+ * it: 0 of 15 live edits (L52 diagnosis, 2026-08-04). "Re-validation will
+ * catch it" turned a producer-side partial write into a user-visible refusal
+ * of a change the LIVE APPLIER had already computed correctly.
+ *
+ * `requiredNestedFields` is DERIVED from the canonical schema (see
+ * `schemas/required-nested-merge.ts`) and is the SAME set the live applier
+ * uses, so the two writers agree by construction rather than by two people
+ * remembering the same rule. Note the dotted spelling (`strength.mean`) was
+ * never broken — the segment walk descends into the existing object — so the
+ * merge is needed only for the terminal whole-object write.
  */
 function setTunableFieldPath(
   target: Record<string, unknown>,
   field: string,
   value: unknown,
+  requiredNestedFields: ReadonlySet<string>,
 ): void {
   const segments = field.split(/[/.]/).filter((s) => s.length > 0);
   if (segments.length === 0) {
@@ -260,7 +285,32 @@ function setTunableFieldPath(
     }
     cursor = cursor[seg] as Record<string, unknown>;
   }
-  cursor[segments[segments.length - 1]!] = value;
+  const leaf = segments[segments.length - 1]!;
+
+  // Terminal WHOLE-OBJECT write onto a required nested field: merge, never
+  // replace. Scope is root-level fields of the entity — deliberately the same
+  // scope the live applier operates on (the keys of `op.value`).
+  if (segments.length === 1 && requiredNestedFields.has(leaf)) {
+    if (!isPlainObjectWrite(value)) {
+      // A non-object write onto a required nested object is INCOHERENT: the
+      // operation claims to update the field but cannot. Refuse it here, with
+      // the producer named as the fault. Letting it through to the generic
+      // post-mutation parse produced GRAPH_INVARIANT_VIOLATED — "the candidate
+      // graph failed schema validation" — which blamed the graph and sent
+      // every reader to the wrong file. The live applier refuses the same
+      // shapes (patch-applier.ts, INVALID_OPERATION); this is the referee's
+      // matching refusal, mapped by `toBlocker` to CANDIDATE_BUILD_FAILED
+      // (a producer fault) rather than a graph-invariant violation.
+      throw new D1HandlerError(
+        'PARAMETER_INVALID',
+        `Field '${leaf}' requires an object write; got ${describeNonObjectWrite(value)}.`,
+      );
+    }
+    cursor[leaf] = mergeRequiredNestedWrite(cursor[leaf], value);
+    return;
+  }
+
+  cursor[leaf] = value;
 }
 
 /**
@@ -281,7 +331,12 @@ export function buildUpdateNodeFieldCandidate(
       if (!node) {
         throw new D1HandlerError('ENTITY_NOT_FOUND', `Node ${payload.node_id} not found in graph.`);
       }
-      setTunableFieldPath(node as Record<string, unknown>, payload.field, payload.to);
+      setTunableFieldPath(
+        node as Record<string, unknown>,
+        payload.field,
+        payload.to,
+        NODE_REQUIRED_NESTED_FIELDS,
+      );
       return { before: null, after: { node_id: payload.node_id } };
     });
     return { candidate: exposeCandidate(mutatedGraph) };
@@ -310,7 +365,12 @@ export function buildUpdateEdgeFieldCandidate(
           `Edge ${payload.from_node} -> ${payload.to_node} not found in graph.`,
         );
       }
-      setTunableFieldPath(edge as Record<string, unknown>, payload.field, payload.to);
+      setTunableFieldPath(
+        edge as Record<string, unknown>,
+        payload.field,
+        payload.to,
+        EDGE_REQUIRED_NESTED_FIELDS,
+      );
       return { before: null, after: { from: payload.from_node, to: payload.to_node } };
     });
     return { candidate: exposeCandidate(mutatedGraph) };
