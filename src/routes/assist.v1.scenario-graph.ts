@@ -31,12 +31,27 @@
  * POST, so this also matches the family it joins.
  *
  * ── THE UI REACHES THIS AS `/bff/cee/scenarios/:id/graph` ───────────────────
- * DERIVED from the UI's `netlify.toml`, not assumed:
- *     from = "/bff/cee/*"  →  to = ".../assist/v1/:splat"
- *     headers = { X-Olumi-Assist-Key = "${ASSIST_API_KEY}" }
- * So the browser posts `/bff/cee/scenarios/<uuid>/graph`, the edge rewrites it
- * onto `/assist/v1/scenarios/<uuid>/graph` and injects the assist key
- * server-side. The key never reaches the browser.
+ * DERIVED from the UI's `cee-proxy` EDGE FUNCTION on its `staging` branch
+ * (`netlify/edge-functions/cee-proxy.ts`, ROADMAP 2.317):
+ *     config.path = "/bff/cee/*"      → target https://cee-staging.onrender.com
+ *     pathname.replace(/^\/bff\/cee/, "/assist/v1")
+ *     methods GET/HEAD/POST/OPTIONS   → POST is allowed
+ *     injects X-Olumi-Assist-Key, forwards `authorization` (the user's
+ *     Supabase token, which is what this route's identity step will read once
+ *     CEE_REQUIRE_USER_JWT is on)
+ * The rewrite is a PREFIX replace, so the multi-segment
+ * `/bff/cee/scenarios/<uuid>/graph` lands on
+ * `/assist/v1/scenarios/<uuid>/graph`. The key never reaches the browser.
+ *
+ * ⚠ DO NOT RE-DERIVE THIS FROM `netlify.toml` ON THE UI'S `main` BRANCH — that
+ *   is where this note first went wrong. `main` still carries the SUPERSEDED
+ *   `[[redirects]]` pair, which (a) never executed at all (Netlify processes
+ *   `public/_redirects` first, and its SPA catch-all `/* /index.html 200` won
+ *   every time, so `/bff/cee/*` answered SPA HTML) and (b) named
+ *   `olumi-assistants-service.onrender.com` — measured 3 Aug at
+ *   `/v1/status`: version 1.11.1, uptime 9,936,008s (≈115 days), against CEE
+ *   staging's 1.12.0. Wrong twice over. The edge function on `staging` is the
+ *   live seam and it targets `cee-staging`, which is where this route deploys.
  *
  * ⚠ AND THAT IS EXACTLY WHY THE ASSIST KEY IS NOT AN AUTHORIZATION BOUNDARY
  *   HERE. The edge injects it for ANY visitor, so "holds a valid assist key"
