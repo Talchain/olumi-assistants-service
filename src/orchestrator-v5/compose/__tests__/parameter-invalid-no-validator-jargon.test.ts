@@ -134,8 +134,26 @@ describe('ROADMAP 2.380 FIX 3 — exact rendered copy for the live `strength` fa
     expect(response.assistant_text).toBe(
       "I couldn't use that as the strength of that link. Strength runs from minus one to plus one, " +
         'where the sign sets the direction and the size sets how much it matters. ' +
-        "Try 'strong', 'moderate' or 'weak', or a number in that range.",
+        'Try a number in that range, like 0.7.',
     );
+  });
+
+  it('recommends ONLY an input the system can currently accept — no word suggestions until 2.384', () => {
+    // Reviewer note (b). The recovery copy must not send the user down the
+    // adjective→number path, which does not exist yet (ROADMAP 2.384): a user
+    // who took that advice would re-fail immediately, so the fix would have
+    // MANUFACTURED the dead-end loop it exists to remove.
+    // Restore the word suggestions with 2.384, and delete this guard then.
+    const { response } = composeFor(LIVE_FAILURE);
+    for (const word of ['strong', 'moderate', 'weak', 'slight']) {
+      expect(
+        response.assistant_text.toLowerCase(),
+        `recovery copy suggests '${word}', which the edge-strength path cannot resolve until 2.384`,
+      ).not.toContain(`'${word}'`);
+    }
+    // ...and it still gives a usable numeric example, so the refusal stays
+    // recoverable in one step rather than merely being vaguer.
+    expect(response.assistant_text).toContain('0.7');
   });
 
   it('the chip no longer names the internal parameter', () => {

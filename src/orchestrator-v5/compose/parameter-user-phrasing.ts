@@ -78,9 +78,27 @@ export const PARAMETER_USER_PHRASING: Readonly<Record<string, ParameterPhrasing>
   Object.freeze({
     strength: {
       problem: "I couldn't use that as the strength of that link.",
+      // ⚠ NUMERIC-ONLY, DELIBERATELY. DO NOT SUGGEST WORDS HERE UNTIL 2.384 LANDS.
+      //
+      // An earlier draft advised "try 'strong', 'moderate' or 'weak'". Those are
+      // the words the product SHOWS, so they read as the natural thing to
+      // recommend — but the adjective→number path DOES NOT EXIST YET (ROADMAP
+      // 2.384: there is no inverse of `bandFromMagnitude`, and CEE's band table
+      // and the UI's `getStrengthLabel` do not even agree on the boundaries or
+      // on the lowest band's name). A user who followed that advice would fail
+      // again on the very next turn.
+      //
+      // That is the point: recovery copy must only recommend an input the
+      // system can CURRENTLY accept. Recommending one it cannot would have
+      // MANUFACTURED a dead-end loop out of a refusal that is otherwise
+      // recoverable in a single step — turning this fix into the very defect
+      // class it was written to remove.
+      //
+      // Restore the word suggestions as part of 2.384, once the band vocabulary
+      // is unified and the words actually resolve.
       guidance:
         'Strength runs from minus one to plus one, where the sign sets the direction and the ' +
-        "size sets how much it matters. Try 'strong', 'moderate' or 'weak', or a number in that range.",
+        'size sets how much it matters. Try a number in that range, like 0.7.',
       // See `echo_actual` — the number here is the routing model's, not the user's.
       echo_actual: false,
       chip_message: 'Use a different strength for that link.',
