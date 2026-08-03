@@ -96,6 +96,20 @@ export const EDGE_REQUIRED_NESTED_FIELDS: ReadonlySet<string> =
 export const NODE_REQUIRED_NESTED_FIELDS: ReadonlySet<string> =
   requiredNestedObjectFields(NodeV3);
 
+/**
+ * Read a dynamically-named field off a typed entity.
+ *
+ * Exists so callers iterating a DERIVED field set do not each need their own
+ * double-cast through `unknown` — a pattern the forbidden-boundary ratchet
+ * (`scripts/check-forbidden-boundary-patterns.sh`) blocks the growth of, and
+ * rightly: three copies of it would have been three places where an unchecked
+ * shape assumption hides. One single assertion, here, next to the merge it
+ * feeds. Callers write back via `Object.assign`, which needs no assertion.
+ */
+export function readNestedField(target: object, field: string): unknown {
+  return (target as Record<string, unknown>)[field];
+}
+
 /** A plain (non-null, non-array) object — the only coherent shape for a
  *  partial write onto a nested object field. */
 export function isPlainObjectWrite(value: unknown): value is Record<string, unknown> {

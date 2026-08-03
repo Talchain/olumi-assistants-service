@@ -15,6 +15,7 @@ import {
   describeNonObjectWrite,
   isPlainObjectWrite,
   mergeRequiredNestedWrite,
+  readNestedField,
   requiredNestedMemberNames,
 } from "../schemas/required-nested-merge.js";
 import type { PatchOperation } from "./types.js";
@@ -159,10 +160,9 @@ function applyUpdateNode(graph: GraphV3T, op: PatchOperation): void {
         `update_node "${nodeId}" requires ${field} to be an object with ${members}; got ${describeNonObjectWrite(incoming)}`,
       );
     }
-    (node as unknown as Record<string, unknown>)[field] = mergeRequiredNestedWrite(
-      (node as unknown as Record<string, unknown>)[field],
-      incoming,
-    );
+    Object.assign(node, {
+      [field]: mergeRequiredNestedWrite(readNestedField(node, field), incoming),
+    });
   }
 }
 
@@ -248,10 +248,9 @@ function applyUpdateEdge(graph: GraphV3T, op: PatchOperation): void {
     }
     // Explicit `undefined` members are a no-op, never a wipe — see
     // `mergeRequiredNestedWrite`.
-    (edge as unknown as Record<string, unknown>)[field] = mergeRequiredNestedWrite(
-      (edge as unknown as Record<string, unknown>)[field],
-      incoming,
-    );
+    Object.assign(edge, {
+      [field]: mergeRequiredNestedWrite(readNestedField(edge, field), incoming),
+    });
   }
 }
 
