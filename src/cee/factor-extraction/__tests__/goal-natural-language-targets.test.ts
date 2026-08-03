@@ -1036,14 +1036,33 @@ describe('ROADMAP 2.371(b) — the guard reads ONE CLAUSE, not the brief', () =>
   });
 
   it('a COMMA does not end the clause — the frame governs the whole sentence', () => {
-    // Deliberately NOT a boundary: "Revenue is flat, so we could increase the
-    // price from £49 to £59 this year" is one proposal, and admitting the comma
-    // would let the marker fall out of scope and mint the lever.
+    // Deliberately NOT a boundary, unlike `.` `;` `\n`: a comma separates parts
+    // of ONE statement, and admitting it would let the marker fall out of scope
+    // and mint the lever.
+    //
+    // ⚠ THE FIRST TWO BRIEFS ARE HERE BECAUSE THIS LANE'S OWN MUTANT BATTERY
+    // CAUGHT THE ORIGINAL PIN NOT BINDING. It read "Revenue is flat, so we
+    // could increase the price…", where `could` sits AFTER the comma — so the
+    // comma rule made no difference to it and the mutant that adds `,` to the
+    // boundary set left the whole file 207/207 GREEN. A pin for a rule must put
+    // the rule's subject on the far side of the thing it governs. Both briefs
+    // below carry their marker BEFORE the comma, and both minted 59/49 at
+    // `7bdf30ff`.
+    for (const brief of [
+      'We could, if the board agrees, increase the price from £49 to £59 this year',
+      'One option, which the team likes, is to increase the price from £49 to £59 this year',
+      'Revenue is flat, so we could increase the price from £49 to £59 this year',
+    ]) {
+      expect(extractGoalTargetWithBaseline(brief), brief).toBeNull();
+    }
+
+    // The control, so the rule is not proven by refusing everything with a
+    // comma in it: an unframed sentence carrying a comma still mints.
     expect(
       extractGoalTargetWithBaseline(
-        'Revenue is flat, so we could increase the price from £49 to £59 this year',
-      ),
-    ).toBeNull();
+        'Revenue is flat, and we will increase annual revenue from £4 million to £6 million within 12 months',
+      )?.value,
+    ).toBe(6_000_000);
   });
 
   it('DISCLOSED COST — a DECIDED statement about a lever metric still forms a pair', () => {
