@@ -1251,8 +1251,27 @@ const ConfigSchema = z.object({
     // BriefSignals context header (appended to user message after compliance reminder)
     briefSignalsHeaderEnabled: booleanString.default(false), // CEE_BRIEF_SIGNALS_HEADER_ENABLED
     // Cross-turn entity memory (tracks per-factor interaction state for Zone 2)
-    // Two-pass graph parameter validation pipeline (CEE_VALIDATION_PIPELINE_ENABLED)
-    validationPipelineEnabled: booleanString.default(false),
+    // Two-pass graph parameter validation pipeline — the contested-edge
+    // capability (CEE_VALIDATION_PIPELINE_ENABLED).
+    //
+    // DEFAULT ON since 2026-08-03 (ROADMAP 2.146, L44 activation lane). The arc
+    // closed on 30 Jul — #764 sized the Pass-2 budget, the pre-check re-ran
+    // VIABLE (58% token headroom, 27.5% latency margin), and the capability was
+    // live-proven n=5 (0/5 degraded, GRAPH_READY inside the flag-OFF
+    // distribution 5/5, model tab rendering contested cards that match the wire,
+    // neutral baseline 47.4% contested). But it was turned on by SETTING THE
+    // RENDER DASHBOARD VARIABLE, with the code default left at `false` — the
+    // env-var gate the no-env-gates doctrine forbids, and a capability that is
+    // dark in every environment that does not carry the var. This makes the
+    // shipped default the live one; the env var remains a kill-switch and still
+    // wins (pinned). Rollback = revert this line, not an env edit.
+    //
+    // Cost/behaviour, stated so the default is an informed one: Pass 2 is a
+    // second LLM review of the drafted graph's parameters (~2–7¢/draft) whose
+    // latency hides behind the coaching pass (the await was moved behind it in
+    // #758 — `cee/unified-pipeline/index.ts`), and whose failure path is
+    // fail-safe: a `failed_degraded` warning, never a blocked draft.
+    validationPipelineEnabled: booleanString.default(true),
     // Post-assembly Zod schema verification pipeline (CEE_VERIFICATION_PIPELINE_ENABLED)
     verificationPipelineEnabled: booleanString.default(true),
     // Coaching architecture kill switches
@@ -1343,31 +1362,28 @@ const ConfigSchema = z.object({
     isVitest: booleanString.default(false),
   }),
 
-  // Research (web search for evidence gathering)
+  // Research (web search for evidence gathering) — BLOCK DELETED 2026-08-03.
   //
-  // ⚠ THIS BLOCK IS A SPEC, NOT LIVE CONFIG. NOTHING READS IT.
-  // Its reader (`orchestrator/tools/research-topic.ts` + `research-client.ts`, 412 lines) was
-  // DELETED on 2026-07-22 in `f957d6d8` as collateral in the V1-belt sweep — it met that sweep's
-  // "zero live-V5 importers" bar because V5 never ported it, not because it was broken.
-  // Retained deliberately as the committed spec for the rebuild: see
-  // `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` §2.1 — Olumi programme docs, a sibling
-  // directory of this repo and NOT tracked in any repo as of 2026-07-25, so every fact this
-  // comment relies on is restated above rather than delegated to it.
-  // Derive, don't trust this note: `grep -rln "config\.research" --include="*.ts" src` → this file
-  // only (positive control `config.proxy` → 6 files). If that grep ever returns a second file,
-  // research has been reconnected and this comment is stale — delete it.
-  // The matching `RESEARCH_*` env vars were removed from the cee-staging Render dashboard on
-  // 2026-07-25; `RESEARCH_ENABLED=true` had been live-set against no reader.
-  research: z.object({
-    enabled: booleanString.default(false),                                 // RESEARCH_ENABLED — master switch
-    model: z.string().default('gpt-4o'),                                   // RESEARCH_MODEL — model for Responses API
-    webSearchToolType: z.string().default('web_search_preview'),           // RESEARCH_WEB_SEARCH_TOOL_TYPE — tool type (updatable without code change)
-    rateLimitPerScenario: z.coerce.number().int().min(1).default(5),       // RESEARCH_RATE_LIMIT — max calls per scenario per window
-    rateLimitWindowMs: z.coerce.number().int().min(1).default(1_800_000),  // RESEARCH_RATE_LIMIT_WINDOW_MS — 30 minutes
-    cacheTtlMs: z.coerce.number().int().min(0).default(1_800_000),         // RESEARCH_CACHE_TTL_MS — 30 minutes
-    cacheMaxSize: z.coerce.number().int().min(1).default(200),             // RESEARCH_CACHE_MAX_SIZE
-    timeoutMs: z.coerce.number().int().min(1000).default(15_000),          // RESEARCH_TIMEOUT_MS — 15 seconds
-  }).default({}),
+  // It sat here as "the committed spec for the rebuild" after its reader
+  // (`orchestrator/tools/research-topic.ts` + `research-client.ts`, 412 lines) was
+  // deleted on 2026-07-22 in `f957d6d8`. Re-derived at `210c0ff` with the note's own
+  // command: `rg -n '\.research\b' --glob '!**/node_modules/**' --glob '!**/*.md'
+  // --glob '!**/*.json'` returned EXACTLY ONE hit — the comment telling the reader to
+  // run that grep. Zero executable readers, in any file, at any hop.
+  //
+  // A parsed, validated, ZERO-READER config key is not a switch; it is a value that
+  // READS as one, and `RESEARCH_ENABLED=true` was in fact live-set on cee-staging
+  // against nothing (removed from the dashboard 2026-07-25). Keeping the spec in the
+  // Zod schema meant the next reader had to re-derive the absence to find that out.
+  //
+  // So the spec moves to prose and the plumbing goes. The eight `RESEARCH_*` variables
+  // are registered in DEAD_ENV_VARS below, which makes the removal LOUD: a stale
+  // dashboard entry is now reported by `checkDeadEnvVars()` instead of being silently
+  // parsed into a value nobody consults. The rebuild's design still lives in
+  // `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` §2.1 (Olumi programme docs,
+  // a sibling directory, untracked) and the deleted implementation is recoverable at
+  // `f957d6d8^` — reintroduce config only WITH a call site, the same rule already
+  // applied to the WS3/WS4/WS7 flags above.
 
   // Prompt Management
   prompts: z.object({
@@ -1749,18 +1765,7 @@ function parseConfig(): Config {
     testing: {
       isVitest: env.VITEST,
     },
-    // ⚠ SPEC, NOT LIVE CONFIG — the reader was deleted in `f957d6d8` (2026-07-22).
-    // See the `research:` schema block above, which carries the full note.
-    research: {
-      enabled: env.RESEARCH_ENABLED,
-      model: env.RESEARCH_MODEL,
-      webSearchToolType: env.RESEARCH_WEB_SEARCH_TOOL_TYPE,
-      rateLimitPerScenario: env.RESEARCH_RATE_LIMIT,
-      rateLimitWindowMs: env.RESEARCH_RATE_LIMIT_WINDOW_MS,
-      cacheTtlMs: env.RESEARCH_CACHE_TTL_MS,
-      cacheMaxSize: env.RESEARCH_CACHE_MAX_SIZE,
-      timeoutMs: env.RESEARCH_TIMEOUT_MS,
-    },
+    // `research:` deleted 2026-08-03 — see the note where the schema block stood.
     prompts: {
       enabled: env.PROMPTS_ENABLED,
       storeType: env.PROMPTS_STORE_TYPE,
@@ -2237,6 +2242,20 @@ const DEAD_ENV_VARS: string[] = [
   'CEE_CLARIFIER_STABILITY_THRESHOLD',
   'CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD',
   'CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS',
+  // Research artefact retired 2026-08-03 (L44 activation lane). The READER went on
+  // 2026-07-22 (`f957d6d8`); the config block that outlived it — with zero executable
+  // consumers anywhere in the tree — went with this entry. `RESEARCH_ENABLED` had been
+  // live-set `true` on cee-staging against nothing, which is why the whole family is
+  // listed rather than the master switch alone: a half-swept family is how a dead flag
+  // reads as live again. Removed from the Render dashboard 2026-07-25.
+  'RESEARCH_ENABLED',
+  'RESEARCH_MODEL',
+  'RESEARCH_WEB_SEARCH_TOOL_TYPE',
+  'RESEARCH_RATE_LIMIT',
+  'RESEARCH_RATE_LIMIT_WINDOW_MS',
+  'RESEARCH_CACHE_TTL_MS',
+  'RESEARCH_CACHE_MAX_SIZE',
+  'RESEARCH_TIMEOUT_MS',
 ];
 
 /**

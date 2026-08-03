@@ -917,9 +917,27 @@ export async function runUnifiedPipeline(
           "cee.validation_pipeline.failed",
         );
         ctx.pipelineOutcome.validation_status = 'failed_degraded';
+        // ⚠ THE CLASSIFICATION, NOT THE RAW MESSAGE — and this is a fix the
+        // 2.146 default-ON activation forced into the open (ROADMAP 2.146).
+        //
+        // Pass 2's own error text EMBEDS THE REQUEST ID
+        // (`cee.validation_pipeline.parse_error: Pass 2 response missing 'edges'
+        // array (request_id=<uuid>)`), so putting it here put a per-request
+        // value on the RESPONSE PAYLOAD. While the pipeline was dark that was
+        // invisible; the moment it ships ON it broke the staged-SSE↔buffered
+        // equivalence pin, whose volatility derivation correctly refused to
+        // classify a structural `_pipeline_outcome.*` path as ignorable rather
+        // than let the comparison go hollow. The alarm was right.
+        //
+        // Nothing is lost: the FULL raw message is logged immediately above with
+        // `error` + `error_type` + `request_id` as first-class fields, which is
+        // where an operator debugging a degradation actually looks. What the
+        // payload carries now is the stable reason class — comparable across
+        // requests, free of per-request identifiers, and already the vocabulary
+        // the budget design reasons in.
         ctx.pipelineOutcome.warnings.push({
           stage: 'validation_pipeline',
-          error: err instanceof Error ? err.message : String(err),
+          error: errorType,
           degraded: true,
         });
       }).finally(() => {
