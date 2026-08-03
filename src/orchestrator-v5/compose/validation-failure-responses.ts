@@ -568,10 +568,18 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
           {
             id: chipId('prompt', 'param-retry'),
             label: 'Try a different value',
-            // ROADMAP 2.380 — same product phrasing as the main branch; the
-            // chip's `message` becomes a USER TURN, so it must not carry the
-            // internal parameter name either.
-            message: phrasingForParameter(readString(details.parameter)).chip_message,
+            // ROADMAP 2.380 — DELIBERATELY LEFT ON THE RAW SPELLING. This chip
+            // has the same "internal parameter name in a user-visible string"
+            // smell as the main branch, and I did change it — until CI showed
+            // the change breaking `route-v2-factor-value-edit-scale-
+            // redeclaration.test.ts`, which pins THE REFUSAL SHAPE ON THE WIRE
+            // for the UI half. This branch is reached only when the error
+            // carries an `issue` but NO `constraint_description`, which the
+            // captured live defect does not (it rendered a constraint), so
+            // changing it buys nothing for ROADMAP 2.380 and spends a
+            // documented v2 wire contract to do it. Rowed separately rather
+            // than smuggled into an XS copy fix.
+            message: `Use a different value for ${parameter}.`,
           },
         ],
       },
