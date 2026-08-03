@@ -410,6 +410,24 @@ function plotEnvelope(opts: {
   };
 }
 
+/**
+ * ROADMAP 2.349 — the ratified set and the graph become SWAPPABLE, defaulting
+ * to the byte-identical values every test written before 2.349 measured.
+ *
+ * OPT-IN, and restored by the FILE-LEVEL `beforeEach` below (which runs before
+ * every describe's own hook), so no existing assertion changes what it
+ * observes: the gap-5 block at the end of this file swaps in the walk's own
+ * deadline constraint for the duration of its own tests and nothing else ever
+ * sees a different graph.
+ */
+let activeGraph: Record<string, unknown> = READY_GRAPH;
+let activeRatifiedConstraints: Array<Record<string, unknown>> = [RATIFIED_CONSTRAINT];
+
+beforeEach(() => {
+  activeGraph = READY_GRAPH;
+  activeRatifiedConstraints = [RATIFIED_CONSTRAINT];
+});
+
 /** Swapped per test, before the inject. */
 let plotResponse: Record<string, unknown> = plotEnvelope({});
 /**
@@ -470,8 +488,8 @@ vi.mock('../session/index.js', () => ({
     append: async () => ({ id: `row-${randomUUID()}` }),
     readRecent: async () => priorTurns,
     readFactsFor: async () => priorFacts,
-    loadGraph: async () => READY_GRAPH,
-    loadGraphAndBriefText: async () => ({ graph: READY_GRAPH, briefText: null }),
+    loadGraph: async () => activeGraph,
+    loadGraphAndBriefText: async () => ({ graph: activeGraph, briefText: null }),
     ensureScenarioExists: async (_id: string, userId: string | null) => ({ user_id: userId }),
     readMostRecentPendingActions: async () => [],
     storeDraftGraph: async () => undefined,
@@ -501,7 +519,7 @@ vi.mock('../tools/registry.js', async () => {
     validatePatch: async () => ({}),
   } as unknown as PLoTClient;
   const scenarioReader: ScenarioReader = async () => ({
-    graph: READY_GRAPH,
+    graph: activeGraph,
     options: [
       { id: 'opt_hire', option_id: 'opt_hire', label: 'Hire Marketing Manager', interventions: { fac_capacity: 1 } },
       { id: 'opt_hold', option_id: 'opt_hold', label: 'Hold', interventions: { fac_capacity: 0 } },
@@ -509,8 +527,8 @@ vi.mock('../tools/registry.js', async () => {
     goal_node_id: 'goal_growth',
     // The exact array the handler forwards to PLoT — the tightest statement of
     // "what we asked the engine to enforce".
-    goal_constraints: [RATIFIED_CONSTRAINT],
-    rawPersistedGraph: READY_GRAPH,
+    goal_constraints: activeRatifiedConstraints,
+    rawPersistedGraph: activeGraph,
   });
   return {
     ...actual,
@@ -590,7 +608,7 @@ async function runAnalysisTurn(app: FastifyInstance): Promise<WireTurn> {
       message: 'Run the analysis',
       turn_class: 'decide',
       source: 'composer',
-      graph_state: READY_GRAPH,
+      graph_state: activeGraph,
     },
   });
   const body = JSON.parse(res.body) as Record<string, any>;
@@ -1860,4 +1878,195 @@ describe('withhold paths: ORDINAL and POSITIONAL designation must not reach the 
       });
     });
   }
+});
+
+// ===========================================================================
+// ROADMAP 2.349 — GAP 5: the minted deadline that nulled a computable leader
+// ===========================================================================
+
+/**
+ * The walk's OWN minted constraint, transcribed member-for-member from the
+ * draft SSE COMPLETE payload at `journey-witness-2026-08-04b-raw/p3b/
+ * wire-run1-0-res.txt` (UI `b63f278d` · CEE `1ba181e` · staging):
+ *
+ *   {"constraint_id":"constraint_goal_arr_max","node_id":"goal_arr",
+ *    "operator":"<=","value":18,"label":"Delivery deadline","unit":"months",
+ *    "source_quote":"within 18 months","confidence":0.95,
+ *    "provenance":"inferred","deadline_metadata":{"deadline_date":
+ *    "2028-02-03","reference_date":"2026-08-03","assumed_reference_date":true}}
+ *
+ * `node_id` is relabelled onto this file's goal node (`goal_growth`); every
+ * other member is the capture's. The `provenance: "inferred"` is kept because
+ * it is the first of the three untruths — the copy said "a condition YOU set"
+ * about something no user ever ratified.
+ */
+const WALK_DEADLINE_CONSTRAINT = {
+  constraint_id: 'constraint_goal_arr_max',
+  node_id: 'goal_growth',
+  operator: '<=',
+  value: 18,
+  label: 'Delivery deadline',
+  unit: 'months',
+  source_quote: 'within 18 months',
+  confidence: 0.95,
+  provenance: 'inferred',
+  deadline_metadata: {
+    deadline_date: '2028-02-03',
+    reference_date: '2026-08-03',
+    assumed_reference_date: true,
+  },
+};
+
+/**
+ * PLoT's disclosure of the drop, in the shape `FilteredConstraintRecord`
+ * declares at the pinned deployed SHA `eb73c6a9`
+ * (`plot-lite-service/src/types/engine-v3.ts:348`), attached to `_meta` exactly
+ * as `routes/v2/run.ts:3808` attaches it — only when the list is non-empty.
+ */
+function withFilteredConstraints(
+  envelope: Record<string, unknown>,
+  records: ReadonlyArray<Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    ...envelope,
+    _meta: {
+      source_path: 'v3',
+      plot_build: 'eb73c6a',
+      request_id: 'fixture',
+      repairs_applied: [],
+      filtered_constraints: records,
+    },
+  };
+}
+
+const TEMPORAL_FILTER_RECORD = {
+  constraint_id: WALK_DEADLINE_CONSTRAINT.constraint_id,
+  node_id: WALK_DEADLINE_CONSTRAINT.node_id,
+  reason: 'temporal_deadline',
+};
+
+describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify();
+    await ceeOrchestratorRouteV2(app);
+    await app.ready();
+  });
+  afterAll(async () => app.close());
+  beforeEach(() => {
+    setTestSink(() => {});
+    routeWithToolUseMock.mockReset();
+    routeWithToolUseMock.mockResolvedValue(routedRunAnalysis());
+    priorTurns = [];
+    priorFacts = [];
+    // Opt in: the scenario's ONLY ratified constraint is the minted deadline,
+    // which is exactly the walk's state.
+    activeGraph = { ...READY_GRAPH, goal_constraints: [WALK_DEADLINE_CONSTRAINT] };
+    activeRatifiedConstraints = [WALK_DEADLINE_CONSTRAINT];
+    plotResponse = withFilteredConstraints(plotEnvelope({}), [TEMPORAL_FILTER_RECORD]);
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.clearAllMocks();
+  });
+
+  it('the leader is NAMED on the wire — `leading_option_id` is non-null', async () => {
+    // The whole defect in one assertion. On the four failing walk runs this
+    // field was `null` while `win_probabilities` showed a top-2 gap of 0.27,
+    // 0.30 and 0.33 — roughly 3× the tie threshold.
+    const turn = await runAnalysisTurn(app);
+    expect(turn.status).toBe(200);
+    const body = JSON.parse(turn.raw) as Record<string, any>;
+    const block = body.blocks.find((b: any) => b.type === 'analysis_result');
+    expect(block).toBeDefined();
+    expect(block.leading_option_id).toBe('opt_hire');
+    expect(block.leading_option_id).not.toBeNull();
+  });
+
+  it('and the three untruths are GONE from the bytes the user receives', async () => {
+    const turn = await runAnalysisTurn(app);
+    // CONTROL FIRST — the handler really composed a disclosure, so the
+    // assertions below are about CONTENT, not about an empty string.
+    expect(turn.blockSummary).toContain('Delivery deadline');
+
+    // untruth #2 — "was not checked", framing a deliberate, disclosed removal
+    // as an engine anomaly.
+    expect(turn.raw).not.toContain('was not checked');
+    expect(turn.raw).not.toContain('could not evaluate it against this model');
+    // untruth #3 — a repair step that can never change the outcome.
+    expect(turn.raw).not.toContain('Re-state that limit');
+    // and the withheld-leader consequence, which is simply false here.
+    expect(turn.raw).not.toContain('no option can be put forward yet');
+  });
+
+  it('the honest sentence SURVIVES the egress allowlist and reaches assistant_text', async () => {
+    // #703's failure mode: the correct copy composed, then was silently
+    // replaced by the locked literal at the wire. `blockSummary` bypasses the
+    // allowlist and `assistantText` does not, so asserting BOTH is what
+    // distinguishes "not composed" from "not survived".
+    const turn = await runAnalysisTurn(app);
+    expect(turn.blockSummary).toContain('This analysis does not test');
+    expect(turn.assistantText).toContain('This analysis does not test');
+    expect(turn.assistantText).toContain('Delivery deadline');
+    expect(turn.assistantText).toContain('stays recorded on your scenario');
+    expect(turn.assistantText).not.toBe(FALLBACK);
+  });
+
+  it('the egress guard still finds no leaked leader claim it should not', async () => {
+    // The 2.149 machinery is untouched; on a turn that legitimately names a
+    // leader there is nothing for the guard to withhold, and the response is
+    // simply a healthy one.
+    const turn = await runAnalysisTurn(app);
+    expect(turn.status).toBe(200);
+    expect(turn.assistantText.length).toBeGreaterThan(0);
+  });
+
+  it('IDENTITY-BOUND (trap 19): a filtered record for a DIFFERENT id still withholds', async () => {
+    // The other direction, and the one that proves the fix is not a blanket
+    // "any `_meta.filtered_constraints` names a leader". PLoT discloses a drop
+    // for a constraint this scenario never ratified; the walk's deadline is
+    // therefore still unscored-and-undisclosed, and the withhold must fire
+    // exactly as it did before 2.349.
+    plotResponse = withFilteredConstraints(plotEnvelope({}), [
+      { constraint_id: 'constraint_someone_elses', node_id: 'goal_growth', reason: 'temporal_deadline' },
+    ]);
+    const turn = await runAnalysisTurn(app);
+    const body = JSON.parse(turn.raw) as Record<string, any>;
+    const block = body.blocks.find((b: any) => b.type === 'analysis_result');
+    expect(block.leading_option_id).toBeNull();
+    expect(turn.assistantText).toContain('was not checked');
+  });
+
+  it('IDENTITY-BOUND (trap 19): with NO producer disclosure the withhold fires unchanged', async () => {
+    // The pre-2.349 wire, byte-for-byte: no `_meta`, nothing scored. This is
+    // the 2.149 withhold doing its job, and it must be indistinguishable from
+    // its behaviour before this change.
+    plotResponse = plotEnvelope({});
+    const turn = await runAnalysisTurn(app);
+    const body = JSON.parse(turn.raw) as Record<string, any>;
+    const block = body.blocks.find((b: any) => b.type === 'analysis_result');
+    expect(block.leading_option_id).toBeNull();
+    expect(turn.assistantText).toContain('was not checked');
+    expect(turn.assistantText).toContain('Re-state that limit');
+  });
+
+  it('MIXED: a second, genuinely unscored constraint still withholds AND both are disclosed', async () => {
+    // A removed constraint must not buy amnesty for a real one. The state
+    // voice fires for the budget; the 2.349 voice fires for the deadline; both
+    // survive the single allowlist slot.
+    activeRatifiedConstraints = [WALK_DEADLINE_CONSTRAINT, RATIFIED_CONSTRAINT];
+    activeGraph = {
+      ...READY_GRAPH,
+      goal_constraints: [WALK_DEADLINE_CONSTRAINT, RATIFIED_CONSTRAINT],
+    };
+    const turn = await runAnalysisTurn(app);
+    const body = JSON.parse(turn.raw) as Record<string, any>;
+    const block = body.blocks.find((b: any) => b.type === 'analysis_result');
+    expect(block.leading_option_id).toBeNull();
+    expect(turn.assistantText).toContain('Total three-year cost');
+    expect(turn.assistantText).toContain('was not checked');
+    expect(turn.assistantText).toContain('This analysis does not test');
+    expect(turn.assistantText).toContain('Delivery deadline');
+  });
 });

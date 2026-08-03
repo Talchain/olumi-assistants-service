@@ -71,6 +71,9 @@ function verdictOf(
     codes: [],
     constraints,
     leaderInfeasibility: null,
+    // 2.349: this file's fixtures exercise the STATE voices only; the
+    // out-of-scope voice has its own file (constraint-out-of-scope-disclosure).
+    outOfScopeConstraints: [],
   };
 }
 

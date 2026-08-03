@@ -254,6 +254,7 @@ describe('the run_analysis path stands the finaliser hook down BY IDENTITY, not 
           codes: [],
           constraints,
           leaderInfeasibility: null,
+          outOfScopeConstraints: [],
         });
         const fromTail = composeWithheldReasonTail(state, constraints);
         expect(fromTail!.text, `${state}/${constraints.length}`).toBe(fromRunAnalysis);
@@ -272,6 +273,7 @@ describe('the run_analysis path stands the finaliser hook down BY IDENTITY, not 
         codes: [],
         constraints: ONE,
         leaderInfeasibility: null,
+        outOfScopeConstraints: [],
       }),
     ).toBe('');
     expect(composeWithheldReasonTail('evaluated_infeasible', ONE)!.text.length).toBeGreaterThan(80);

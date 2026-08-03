@@ -326,6 +326,24 @@ export interface ConstraintVerdict {
    * fails open in all three).
    */
   readonly leaderInfeasibility: WinnerConstraintFeasibility | null;
+  /**
+   * ROADMAP 2.349 — the ratified constraints the PRODUCER DELIBERATELY REMOVED
+   * before computing, disclosed by it in `_meta.filtered_constraints`.
+   *
+   * These are NOT part of {@link constraints} and NOT part of the state
+   * derivation: they are excluded from the ratified set before any precedence
+   * step runs (see {@link deriveConstraintVerdict}). They are carried here so
+   * the disclosure can say the one thing that is TRUE about them — the
+   * analysis does not test them — instead of the one thing that is FALSE:
+   * "the engine could not evaluate your condition, re-state it in the same
+   * units". No restatement in any units can make an excluded dimension
+   * testable, so that repair step is structurally a no-op for this class.
+   *
+   * Carried on EVERY state, because a turn can have both an out-of-scope
+   * constraint and a genuinely unscored one, and neither disclosure may eat
+   * the other.
+   */
+  readonly outOfScopeConstraints: readonly RatifiedConstraint[];
 }
 
 function verdict(
@@ -334,6 +352,7 @@ function verdict(
     codes?: readonly string[];
     constraints?: readonly RatifiedConstraint[];
     leaderInfeasibility?: WinnerConstraintFeasibility | null;
+    outOfScopeConstraints?: readonly RatifiedConstraint[];
   } = {},
 ): ConstraintVerdict {
   return {
@@ -342,6 +361,7 @@ function verdict(
     codes: parts.codes ?? [],
     constraints: parts.constraints ?? [],
     leaderInfeasibility: parts.leaderInfeasibility ?? null,
+    outOfScopeConstraints: parts.outOfScopeConstraints ?? [],
   };
 }
 
@@ -413,6 +433,53 @@ function collectEvaluatedConstraintIds(
   return seen;
 }
 
+/**
+ * Collect every constraint id the PRODUCER DELIBERATELY REMOVED before
+ * computing, from its own disclosure channel `_meta.filtered_constraints[]`.
+ *
+ * ROADMAP 2.349. This channel is PLoT's machine-readable statement of "I threw
+ * this one away on purpose, and here is why" (`{constraint_id, node_id,
+ * reason}` — `plot-lite-service/src/types/engine-v3.ts` `CanonicalMeta`,
+ * populated at `routes/v2/run.ts` only when the list is non-empty). Until this
+ * function existed CEE had ZERO readers of it, so a constraint PLoT announced
+ * it had deleted was indistinguishable at the verdict from one the engine
+ * silently failed to score — and the second reading is what withheld the
+ * leading option on every brief carrying a time phrase.
+ *
+ * NO REASON ALLOWLIST, DELIBERATELY (CLAUDE.md trap 12). PLoT types `reason`
+ * as an open `string` and emits two values today (`temporal_deadline`,
+ * `temporal_against_normalised_goal`); a hand-listed set here would be a
+ * mirror that goes silently short the day a third is added, and the missing
+ * entry would fail in the WITHHOLDING direction — i.e. straight back into this
+ * defect. The semantics that matter are carried by PRESENCE in the channel,
+ * not by the reason text: a constraint the producer states it removed before
+ * computing cannot have been scored, and no user restatement can change that.
+ *
+ * IDENTITY-BOUND. Only ids are collected, and the caller matches them against
+ * the ratified ids exactly — a filtered record naming something we never
+ * ratified excludes nothing.
+ *
+ * Fails CLOSED (empty set) on every malformed shape, so a garbled `_meta`
+ * withholds exactly as it does today rather than silently naming a leader.
+ *
+ * Pure.
+ */
+function collectProducerFilteredConstraintIds(
+  envelope: Record<string, unknown>,
+): Set<string> {
+  const out = new Set<string>();
+  const meta = envelope._meta;
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return out;
+  const filtered = (meta as Record<string, unknown>).filtered_constraints;
+  if (!Array.isArray(filtered)) return out;
+  for (const entry of filtered) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const id = readString((entry as Record<string, unknown>).constraint_id);
+    if (id !== null) out.add(id);
+  }
+  return out;
+}
+
 /** Codes on the producer's warning channels that mean "not decision-grade". */
 function collectNotDecisionGradeCodes(
   envelope: Record<string, unknown>,
@@ -453,6 +520,14 @@ function collectNotDecisionGradeCodes(
  *
  * PRECEDENCE, most-certain evidence first. Exactly one state is returned:
  *
+ *   0. (2.349) Constraints the producer DISCLOSED IT REMOVED before computing
+ *      (`_meta.filtered_constraints`) are partitioned out of the ratified set
+ *      first, onto {@link ConstraintVerdict.outOfScopeConstraints}. Their
+ *      absence from the results is guaranteed by the producer's own decision
+ *      and is therefore not evidence about anything — it must not reach rules
+ *      1–3, all of which would read it as a reason to withhold. If nothing
+ *      survives the partition the answer is `not_applicable`, the same as for
+ *      a turn with no ratified constraints.
  *   1. (S1/S2) An explicit producer verdict — a not-decision-grade CODE, or
  *      `constraints_status: 'unavailable'` — condemns the whole constraint
  *      block, so every ratified constraint is `unevaluated`. This outranks the
@@ -502,10 +577,39 @@ export function deriveConstraintVerdict(
   const leaderRaw = deriveWinnerConstraintInfeasibility(envelope, leadingOptionId);
   const leader = leaderRaw.infeasible ? leaderRaw : null;
 
-  if (ratified.length === 0) {
+  // ROADMAP 2.349 — STEP 0, BEFORE EVERY PRECEDENCE RULE BELOW. Partition off
+  // the constraints the producer says it DELIBERATELY REMOVED before computing
+  // (`_meta.filtered_constraints`). They are not evidence about the engine's
+  // behaviour on the user's conditions: their absence from the results is
+  // GUARANTEED by the producer's own disclosed decision, not observed.
+  //
+  // It has to happen here rather than inside any single step, because the
+  // absence of a score for a removed constraint would otherwise be read as
+  // evidence by THREE different rules below (the block-level codes rule, the
+  // identity rule, and the unscored rule) — and every one of them would reach
+  // "withhold the leading option" from a fact that says nothing about the
+  // engine at all.
+  //
+  // `effective` is what the rest of this function reasons over; `outOfScope`
+  // rides on the verdict for the disclosure. When they partition to nothing,
+  // the answer is the SAME one a turn with no ratified constraints gets —
+  // `not_applicable`, "nothing to withhold for" — because after removing what
+  // the producer never looked at, there is nothing left to have an opinion
+  // about.
+  const producerFiltered = collectProducerFilteredConstraintIds(envelope);
+  const outOfScope: RatifiedConstraint[] = [];
+  const effective: RatifiedConstraint[] = [];
+  for (const c of ratified) {
+    (producerFiltered.has(c.constraint_id) ? outOfScope : effective).push(c);
+  }
+
+  if (effective.length === 0) {
     return leaderRaw.infeasible
-      ? verdict('evaluated_infeasible', { leaderInfeasibility: leaderRaw })
-      : verdict('not_applicable');
+      ? verdict('evaluated_infeasible', {
+          leaderInfeasibility: leaderRaw,
+          outOfScopeConstraints: outOfScope,
+        })
+      : verdict('not_applicable', { outOfScopeConstraints: outOfScope });
   }
 
   const codes = collectNotDecisionGradeCodes(envelope);
@@ -516,19 +620,21 @@ export function deriveConstraintVerdict(
   if (codes.length > 0 || statusUnavailable) {
     return verdict('unevaluated', {
       codes,
-      constraints: [...ratified],
+      constraints: [...effective],
       leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
     });
   }
 
   const evaluated = collectEvaluatedConstraintIds(envelope);
-  const unscored = ratified.filter((c) => !evaluated.has(c.constraint_id));
+  const unscored = effective.filter((c) => !evaluated.has(c.constraint_id));
 
   // 2. Evaluations exist; not one of them is an id we ratified.
-  if (evaluated.size > 0 && unscored.length === ratified.length) {
+  if (evaluated.size > 0 && unscored.length === effective.length) {
     return verdict('identity_unresolved', {
-      constraints: [...ratified],
+      constraints: [...effective],
       leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
     });
   }
 
@@ -538,13 +644,17 @@ export function deriveConstraintVerdict(
     return verdict('unevaluated', {
       constraints: unscored,
       leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
     });
   }
 
   // 4. Everything the user ratified was scored. The leader decides.
   return leaderRaw.infeasible
-    ? verdict('evaluated_infeasible', { leaderInfeasibility: leaderRaw })
-    : verdict('evaluated_feasible');
+    ? verdict('evaluated_infeasible', {
+        leaderInfeasibility: leaderRaw,
+        outOfScopeConstraints: outOfScope,
+      })
+    : verdict('evaluated_feasible', { outOfScopeConstraints: outOfScope });
 }
 
 // ===========================================================================

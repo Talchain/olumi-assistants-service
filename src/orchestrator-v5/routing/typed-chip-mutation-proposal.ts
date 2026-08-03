@@ -36,10 +36,21 @@
  * caller then falls through BENIGNLY to the existing text/LLM path (the
  * `#634` un-routed-intent fall-through stays green). It NEVER throws.
  *
- * NOT WIRED HERE — the run-canonical `goal_threshold` parameter. It is
- * write-only today with a server-side `goal_threshold_raw` fallback deriving
- * the same value, so carrying it would be theatre until that fallback is
- * retired (S2 §2f / R-4 positive-control rule). `goal_threshold` is a
+ * NOT WIRED HERE — the run-canonical `goal_threshold` parameter, and THE
+ * PRODUCER SIDE IS NOW GONE.
+ *
+ * ⚠ REFRESHED (rider owed from #568). This paragraph used to say the parameter
+ * was "write-only today", with a server-side `goal_threshold_raw` fallback
+ * deriving the same value, and that carrying it would be theatre "until that
+ * fallback is retired". That was a confession about a live-but-unread field.
+ * It is stale: **UI #568 ("Retire the write-only goal_threshold chip
+ * parameter", ROADMAP 2.109, merged 2026-08-03) DELETED THE PRODUCER**, so the
+ * UI no longer emits `goal_threshold` in `chip.parameters` at all — verified at
+ * the bytes on the merged PR, which ships
+ * `OutputsDock.goalThresholdChipParamRetired.spec.tsx` as its pin.
+ *
+ * The conclusion for THIS module is unchanged and now unconditional: there is
+ * nothing to wire, and no "until" left to wait for. `goal_threshold` is a
  * run_analysis concern, not one of these three mutation intents.
  */
 import { z } from 'zod';
