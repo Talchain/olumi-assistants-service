@@ -140,6 +140,20 @@ const MUST_READ_CORRECTLY: readonly CorrectCase[] = [
     value: 5_000_000,
     why: "`mn` for millions — absent from the canonical list until 2.322, when `$5mn` refused outright",
   },
+
+  // --- THE THOUSANDS SEPARATOR (ROADMAP 2.338). Flipped out of Part B, where
+  // --- it was pinned `⚠ KNOWN-WRONG` at 02f7a674 reading 800 for exactly the
+  // --- reason its note gave: `PATTERNS.currency` hand-spelled its own digit
+  // --- grammar beside the canonical `AMOUNT_DIGITS`, so the match stopped at
+  // --- "£800". The magnitude never had to be a SUFFIX to go missing — a comma
+  // --- lost it just as completely, and at 0.60 confidence nothing in the
+  // --- alphabet's own guards could see it.
+  {
+    brief: "We saved £800,000 last year.",
+    span: "£800,000",
+    value: 800_000,
+    why: "the ROADMAP 2.338 defect — a magnitude lost through the comma rather than through a suffix",
+  },
 ];
 
 describe("ROADMAP 2.330 — magnitude corpus: phrasings the service must read correctly", () => {
@@ -215,21 +229,6 @@ describe("ROADMAP 2.330 — magnitude corpus: what the service honestly cannot r
     expect(factor.value).toBe(49);
   });
 
-  it("⚠ KNOWN-WRONG — `£800,000` reads as 800 (thousands separator dropped)", () => {
-    // NOT a magnitude-alphabet defect and NOT fixed by ROADMAP 2.330. The
-    // canonical digit grammar `AMOUNT_DIGITS` handles separators and
-    // `parseAmountDigits` strips them, but `PATTERNS.currency` in
-    // cee/factor-extraction/index.ts hand-spells `\d+(?:\.\d+)?` instead — a
-    // FOURTH hand-written digit grammar beside the canonical one. The match
-    // therefore stops at "£800" and a 1,000x under-read is published at
-    // confidence 0.60, which is the same untruth as a dropped suffix arriving
-    // through the comma (the alphabet module's own comment predicts exactly
-    // this). Pinned here, RED-labelled, so the repair has a test to flip.
-    const factors = extractFactors("We saved £800,000 last year.");
-    const factor = factorAt(factors, "£800");
-    expect(factor.value, "if this now reads 800000, delete this case and add it to Part A").toBe(800);
-  });
-
   it("⚠ KNOWN-WRONG — `£5 hundred thousand` reads as 5 (multi-word compound)", () => {
     // `hundred` is a DELIBERATE EXCLUSION from the canonical alphabet — see the
     // reason in magnitude-alphabet.union.test.ts. Admitting it would commit 500
@@ -266,9 +265,15 @@ describe("ROADMAP 2.330 — the corpus can see the thing it is asserting", () =>
     // MAGNITUDE_MULTIPLIERS, the corpus inherits the alphabet's blind spot and
     // this whole file stops being the other half of trap 12d's pair.
     const spelled = MUST_READ_CORRECTLY.map((testCase) => testCase.brief.toLowerCase()).join(" ");
-    for (const phrase of ["grand", "thousand", "bn", "mn", "$3t", "800k"]) {
+    // `800,000` is here for a reason the others are not: it is a magnitude that
+    // NO alphabet entry spells. ROADMAP 2.338 — a comma dropped the same 1,000×
+    // a missing suffix key does, and every derived guard in this estate stayed
+    // green through it, because they are all derived from a list of SUFFIXES.
+    // A corpus is the only thing that can notice a magnitude arriving in a form
+    // the list does not model at all (CLAUDE.md trap 12d, one turn further).
+    for (const phrase of ["grand", "thousand", "bn", "mn", "$3t", "800k", "800,000"]) {
       expect(spelled, `the corpus no longer spells ${JSON.stringify(phrase)}`).toContain(phrase);
     }
-    expect(MUST_READ_CORRECTLY.length).toBeGreaterThanOrEqual(11);
+    expect(MUST_READ_CORRECTLY.length).toBeGreaterThanOrEqual(12);
   });
 });

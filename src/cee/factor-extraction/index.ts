@@ -88,6 +88,36 @@ const _CURRENCY_MAP: Record<string, string> = {
 
 export { MAGNITUDE_MULTIPLIERS, MAGNITUDE_ALTERNATION } from "../../utils/magnitude-alphabet.js";
 
+/* ===========================================================================
+ * ROADMAP 2.338 — AND THE *DIGIT* GRAMMAR IS SHARED NOW TOO.
+ *
+ * Everything above is about the magnitude ALPHABET — the list of suffixes. One
+ * layer below it sits the grammar for the digits themselves, and it had drifted
+ * exactly the same way, in the same object, unobserved by every guard the
+ * alphabet work shipped.
+ *
+ * MEASURED at `02f7a674`: TEN of the eleven patterns below hand-spelled
+ * `\d+(?:\.\d+)?` while this very file imported `AMOUNT_DIGITS` at line 28 and
+ * used it in exactly one of them. A hand-spelled digit grammar cannot match a
+ * thousands separator, so `"We saved £800,000 last year."` matched only `£800`
+ * and published **800** at confidence 0.60 — the identical 1,000× under-read
+ * the magnitude rows spent four PRs chasing, arriving through a comma instead
+ * of through a suffix, which is why none of their guards could see it.
+ *
+ * The other failure modes were worse than the one that got reported, and they
+ * are recorded in `__tests__/thousands-separator-digit-grammar.test.ts` with
+ * the pristine measurement beside each: `"increase from 10,000 to 20,000"`
+ * matched NOTHING (the numbers vanished in silence), and
+ * `"between 1,000-2,000%"` published **0** from the fragment `000%`.
+ *
+ * ⚠ THE REPAIR IS TWO-SIDED. Sharing `AMOUNT_DIGITS` makes the pattern MATCH
+ * the separator; the consumer must also STRIP it, because
+ * `parseFloat("800,000")` is 800 — the same loss through the other door. Every
+ * consumer in `extractFactors` now reads its captured amount with
+ * `parseAmountDigits`, and a structural guard bans raw `parseFloat` over a
+ * captured group from re-entering this file.
+ * ========================================================================= */
+
 // Regex patterns for quantitative language
 const PATTERNS = {
   // Currency with multiplier: $1 million, £2.5m, €500k, $1B, $1.5 billion
@@ -99,28 +129,34 @@ const PATTERNS = {
   // "an amount that carries a magnitude"; making the suffix optional would
   // swallow every bare `$100` and promote it to explicit/0.85).
   currencyWithMultiplier: new RegExp(
-    "(?<currency>[£$€])(?<amount>\\d+(?:\\.\\d+)?)" +
-      requiredMagnitudeSuffixPattern("multiplier"),
+    `(?<currency>[£$€])(?<amount>${AMOUNT_DIGITS})` + requiredMagnitudeSuffixPattern("multiplier"),
     "gi",
   ),
 
-  // Currency with optional decimals: £49, $100.50, €50
-  currency: /(?<currency>[£$€])(?<amount>\d+(?:\.\d+)?)/g,
+  // Currency with optional decimals: £49, $100.50, €50, £800,000
+  currency: new RegExp(`(?<currency>[£$€])(?<amount>${AMOUNT_DIGITS})`, "g"),
 
-  // Percentage: 5%, 3.5%, 10 percent
-  percentage: /(?<amount>\d+(?:\.\d+)?)\s*(?:%|percent)/gi,
+  // Percentage: 5%, 3.5%, 10 percent, 1,200%
+  percentage: new RegExp(`(?<amount>${AMOUNT_DIGITS})\\s*(?:%|percent)`, "gi"),
 
-  // From-to with currency: "from £49 to £59"
-  currencyFromTo:
-    /from\s+(?<currency1>[£$€])(?<from>\d+(?:\.\d+)?)\s+to\s+(?:[£$€])?(?<to>\d+(?:\.\d+)?)/gi,
+  // From-to with currency: "from £49 to £59", "from £49,000 to £59,000"
+  currencyFromTo: new RegExp(
+    `from\\s+(?<currency1>[£$€])(?<from>${AMOUNT_DIGITS})\\s+to\\s+(?:[£$€])?(?<to>${AMOUNT_DIGITS})`,
+    "gi",
+  ),
 
   // From-to with percentage: "from 3% to 5%"
-  percentFromTo:
-    /from\s+(?<from>\d+(?:\.\d+)?)\s*%?\s+to\s+(?:maybe\s+)?(?<to>\d+(?:\.\d+)?)\s*%/gi,
+  percentFromTo: new RegExp(
+    `from\\s+(?<from>${AMOUNT_DIGITS})\\s*%?\\s+to\\s+(?:maybe\\s+)?(?<to>${AMOUNT_DIGITS})\\s*%`,
+    "gi",
+  ),
 
   // Increase/decrease patterns: "increase from 10 to 20", "increasing by 5%"
-  changePattern:
-    /(?<direction>increas|decreas|rais|lower|grow|drop|fall|rise)(?:e|ing|ed)?\s+(?:from\s+)?(?<from>\d+(?:\.\d+)?)\s*(?:%|[£$€])?\s+(?:to\s+)?(?:maybe\s+)?(?<to>\d+(?:\.\d+)?)/gi,
+  changePattern: new RegExp(
+    "(?<direction>increas|decreas|rais|lower|grow|drop|fall|rise)(?:e|ing|ed)?\\s+(?:from\\s+)?" +
+      `(?<from>${AMOUNT_DIGITS})\\s*(?:%|[£$€])?\\s+(?:to\\s+)?(?:maybe\\s+)?(?<to>${AMOUNT_DIGITS})`,
+    "gi",
+  ),
 
   // Plain numbers with context: "price of 49", "rate of 3.5", "target is 800k"
   //
@@ -140,20 +176,30 @@ const PATTERNS = {
   ),
 
   // Approximate values: "around £60", "roughly 50", "approximately $100"
-  approximateValue:
-    /(?:around|roughly|approximately|about|circa|~)\s*(?<currency>[£$€])?(?<amount>\d+(?:\.\d+)?)\s*(?<unit>%)?/gi,
+  approximateValue: new RegExp(
+    "(?:around|roughly|approximately|about|circa|~)\\s*(?<currency>[£$€])?" +
+      `(?<amount>${AMOUNT_DIGITS})\\s*(?<unit>%)?`,
+    "gi",
+  ),
 
   // Range with currency: "between £50-70", "£50-£70", "50-70 dollars"
-  currencyRange:
-    /(?:between\s+)?(?<currency>[£$€])(?<min>\d+(?:\.\d+)?)\s*[-–—to]+\s*(?:[£$€])?(?<max>\d+(?:\.\d+)?)/gi,
+  currencyRange: new RegExp(
+    `(?:between\\s+)?(?<currency>[£$€])(?<min>${AMOUNT_DIGITS})\\s*[-–—to]+\\s*(?:[£$€])?` +
+      `(?<max>${AMOUNT_DIGITS})`,
+    "gi",
+  ),
 
   // Range with percentage: "between 5-10%", "5%-10%"
-  percentRange:
-    /(?:between\s+)?(?<min>\d+(?:\.\d+)?)\s*%?\s*[-–—to]+\s*(?<max>\d+(?:\.\d+)?)\s*%/gi,
+  percentRange: new RegExp(
+    `(?:between\\s+)?(?<min>${AMOUNT_DIGITS})\\s*%?\\s*[-–—to]+\\s*(?<max>${AMOUNT_DIGITS})\\s*%`,
+    "gi",
+  ),
 
   // Generic range: "between 50 and 70", "50 to 70"
-  genericRange:
-    /between\s+(?<min>\d+(?:\.\d+)?)\s+(?:and|to)\s+(?<max>\d+(?:\.\d+)?)/gi,
+  genericRange: new RegExp(
+    `between\\s+(?<min>${AMOUNT_DIGITS})\\s+(?:and|to)\\s+(?<max>${AMOUNT_DIGITS})`,
+    "gi",
+  ),
 };
 
 /* ---------------------------------------------------------------------------
@@ -198,6 +244,26 @@ export const PATTERN_NAMES_FOR_DRIFT_GUARD: readonly string[] = Object.keys(PATT
 export function amountPatternForDriftGuard(prefix: string): string {
   return amountPattern(prefix);
 }
+
+/**
+ * Every pattern's compiled SOURCE, keyed by name (ROADMAP 2.338).
+ *
+ * WHY THE SOURCES AND NOT JUST THE NAMES. 2.316's guard surface exposed the two
+ * patterns that read a MAGNITUDE, because that was the list under repair. The
+ * defect 2.338 closes is one layer down and sits in every pattern at once: the
+ * DIGIT grammar. `PATTERNS.currency` hand-spelled `\d+(?:\.\d+)?` beside the
+ * canonical `AMOUNT_DIGITS` imported at the top of this file, so `£800,000`
+ * matched only `£800` and published a 1,000× under-read at confidence 0.60 —
+ * and MEASURED at `02f7a674`, TEN of the eleven patterns carried the same
+ * hand-spelled copy. A guard naming two of them could never have seen that.
+ *
+ * DERIVED from `PATTERNS` itself, so a pattern added tomorrow is inside the
+ * guard the instant it lands: there is no list here for anyone to remember to
+ * extend, which is the whole of CLAUDE.md trap 12.
+ */
+export const PATTERN_SOURCES_FOR_DRIFT_GUARD: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(Object.entries(PATTERNS).map(([name, pattern]) => [name, pattern.source])),
+);
 
 /* ===========================================================================
  * GOAL-TARGET-WITH-BASELINE (ROADMAP 2.273)
@@ -711,8 +777,8 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   const currencyRangeRegex = new RegExp(PATTERNS.currencyRange.source, "gi");
   while ((match = currencyRangeRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency || "";
-    const min = parseFloat(match.groups?.min || "0");
-    const max = parseFloat(match.groups?.max || "0");
+    const min = (parseAmountDigits(match.groups?.min) ?? 0);
+    const max = (parseAmountDigits(match.groups?.max) ?? 0);
     const midpoint = (min + max) / 2;
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, midpoint, currency);
@@ -737,8 +803,8 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract percentage ranges: "between 5-10%", "5%-10%"
   const percentRangeRegex = new RegExp(PATTERNS.percentRange.source, "gi");
   while ((match = percentRangeRegex.exec(brief)) !== null) {
-    const min = parseFloat(match.groups?.min || "0") / 100;
-    const max = parseFloat(match.groups?.max || "0") / 100;
+    const min = (parseAmountDigits(match.groups?.min) ?? 0) / 100;
+    const max = (parseAmountDigits(match.groups?.max) ?? 0) / 100;
     const midpoint = (min + max) / 2;
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, midpoint, "%");
@@ -763,8 +829,8 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract generic ranges: "between 50 and 70"
   const genericRangeRegex = new RegExp(PATTERNS.genericRange.source, "gi");
   while ((match = genericRangeRegex.exec(brief)) !== null) {
-    const min = parseFloat(match.groups?.min || "0");
-    const max = parseFloat(match.groups?.max || "0");
+    const min = (parseAmountDigits(match.groups?.min) ?? 0);
+    const max = (parseAmountDigits(match.groups?.max) ?? 0);
     const midpoint = (min + max) / 2;
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, midpoint, undefined);
@@ -793,7 +859,7 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   const approximateRegex = new RegExp(PATTERNS.approximateValue.source, "gi");
   while ((match = approximateRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency;
-    const amount = parseFloat(match.groups?.amount || "0");
+    const amount = (parseAmountDigits(match.groups?.amount) ?? 0);
     const unitMatch = match.groups?.unit;
     const unit = unitMatch === "%" ? "%" : currency;
     const normalizedValue = unitMatch === "%" ? amount / 100 : amount;
@@ -860,8 +926,8 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   const currencyFromToRegex = new RegExp(PATTERNS.currencyFromTo.source, "gi");
   while ((match = currencyFromToRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency1 || "";
-    const from = parseFloat(match.groups?.from || "0");
-    const to = parseFloat(match.groups?.to || "0");
+    const from = (parseAmountDigits(match.groups?.from) ?? 0);
+    const to = (parseAmountDigits(match.groups?.to) ?? 0);
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, to, currency);
 
@@ -884,8 +950,8 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract percentage from-to patterns
   const percentFromToRegex = new RegExp(PATTERNS.percentFromTo.source, "gi");
   while ((match = percentFromToRegex.exec(brief)) !== null) {
-    const from = parseFloat(match.groups?.from || "0") / 100;
-    const to = parseFloat(match.groups?.to || "0") / 100;
+    const from = (parseAmountDigits(match.groups?.from) ?? 0) / 100;
+    const to = (parseAmountDigits(match.groups?.to) ?? 0) / 100;
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, to, "%");
 
@@ -908,8 +974,8 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract change patterns (increase/decrease)
   const changeRegex = new RegExp(PATTERNS.changePattern.source, "gi");
   while ((match = changeRegex.exec(brief)) !== null) {
-    const from = parseFloat(match.groups?.from || "0");
-    const to = parseFloat(match.groups?.to || "0");
+    const from = (parseAmountDigits(match.groups?.from) ?? 0);
+    const to = (parseAmountDigits(match.groups?.to) ?? 0);
     const isPercent = match[0].includes("%");
     const hasCurrency = /[£$€]/.test(match[0]);
     const unit = isPercent ? "%" : hasCurrency ? match[0].match(/[£$€]/)?.[0] : undefined;
@@ -992,7 +1058,7 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   const currencyMultiplierRegex = new RegExp(PATTERNS.currencyWithMultiplier.source, "gi");
   while ((match = currencyMultiplierRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency || "";
-    const baseAmount = parseFloat(match.groups?.amount || "0");
+    const baseAmount = (parseAmountDigits(match.groups?.amount) ?? 0);
     // ROADMAP 2.316 — the SAME resolver the other two magnitude paths use.
     // The private `parseMultiplier` it replaced indexed a case-SENSITIVE map
     // under a case-INSENSITIVE regex, so `$5MILLION` matched and then resolved
@@ -1059,7 +1125,7 @@ export function extractFactors(brief: string): ExtractedFactor[] {
     }
 
     const currency = match.groups?.currency || "";
-    const amount = parseFloat(match.groups?.amount || "0");
+    const amount = (parseAmountDigits(match.groups?.amount) ?? 0);
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, amount, currency);
 
@@ -1081,7 +1147,7 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract standalone percentages (inferred from context)
   const percentRegex = new RegExp(PATTERNS.percentage.source, "gi");
   while ((match = percentRegex.exec(brief)) !== null) {
-    const amount = parseFloat(match.groups?.amount || "0") / 100;
+    const amount = (parseAmountDigits(match.groups?.amount) ?? 0) / 100;
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, amount, "%");
 
