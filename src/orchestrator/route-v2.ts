@@ -1794,21 +1794,27 @@ export const EDIT_GRAPH_RECOVERY_TEXT =
   "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.";
 
 /**
- * ⚠ ROADMAP 2.388 — `'no_persisted_graph'` WAS REMOVED FROM THIS UNION, and
- * removing it is part of the fix rather than tidying after it.
+ * ⚠ ROADMAP 2.388 — `'no_persisted_graph'` IS NOW REACHABLE ONLY OFF THE FRAME
+ * STAGE, and that narrowing is the fix, not a side effect.
  *
  * "There is no graph yet" is not a failure to recover from — it is an empty
  * canvas, and this copy ("…I couldn't access the current graph. Please try
  * again in a moment.") told users to retry the one thing that could not work.
- * That branch now falls through to the frame-no-brief guard's coaching. Taking
- * the literal out of the type means re-introducing it is a COMPILE error
- * rather than a quiet regression under a green suite.
+ * At `stage: 'frame'` — which is what the UI sends on a first message, and
+ * where every MEASURED dead end arrived — that branch now falls through to the
+ * frame-no-brief guard's coaching instead.
  *
- * The two that remain are genuinely transient: the session store was
- * unreachable, or the stored graph could not be parsed. For those, "try again
- * in a moment" is honest advice.
+ * It stays in this union because the `analyse`-stage case is deliberately NOT
+ * changed: the frame guard cannot catch a turn there, so falling through would
+ * hand the turn to a broad TurnExecutor LLM call and break the edit-lane
+ * routing contract. See the SCOPE 2 note at the branch.
+ *
+ * The other two are genuinely transient: the session store was unreachable, or
+ * the stored graph could not be parsed. For those, "try again in a moment" is
+ * honest advice at every stage.
  */
 type EditGraphRecoveryReason =
+  | 'no_persisted_graph'
   | 'persisted_graph_invalid'
   | 'session_store_failed';
 
@@ -4307,8 +4313,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         }
         if (persisted == null) {
           // ══════════════════════════════════════════════════════════════
-          // ROADMAP 2.388 — THE MINUTE-ONE DEAD END. FALL THROUGH, DO NOT
-          // ERROR.
+          // ROADMAP 2.388 — THE MINUTE-ONE DEAD END. AT FRAME STAGE, FALL
+          // THROUGH INSTEAD OF ERRORING.
           // ══════════════════════════════════════════════════════════════
           // There is no graph because the user has not built one yet. That is
           // not a failure of anything — it is the empty canvas, and it is
@@ -4334,14 +4340,34 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // edit-verb list — the framing coaching PLUS a "Build the model"
           // chip. Shipped copy, shipped affordance, no new surface.
           //
-          // ⚠ SCOPE, deliberately narrow. `session_store_failed` (the catch
+          // ⚠ SCOPE 1, deliberately narrow. `session_store_failed` (the catch
           // above) and `persisted_graph_invalid` (below) KEEP the recovery
           // copy. Those are genuine transient / infrastructure failures where
           // "try again in a moment" is honest advice — which is the whole
           // reason `sendEditGraphRecovery` discriminates three reasons.
           //
+          // ⚠ SCOPE 2 — `stage === 'frame'` ONLY, and this is a DISCLOSED
+          // CARVE-OUT rather than an oversight. The fall-through's whole
+          // justification is that the frame guard is waiting to catch it; at
+          // `analyse` stage that guard does not fire (`isFrameNoBriefShape`
+          // requires `stage === 'frame'`), so the turn would reach
+          // `runTurnExecutor` instead — a broad LLM call, and a violation of
+          // the standing edit-lane routing contract that
+          // `tests/integration/orchestrator/route-v2-edit-graph-recovery.ts`
+          // asserts (exactly one of dispatch / clarification / typed recovery,
+          // never a fall-through to Sonnet). Every dead end L56 MEASURED
+          // arrived at `stage: 'frame'` — it is what the UI sends on a first
+          // message — so this scoping fixes 100% of the observed defect with
+          // ZERO blast radius on the analyse-stage contract. An analyse-stage
+          // turn with no persisted graph at all is a different (and much
+          // rarer) state; it keeps today's typed recovery, and whether that
+          // copy is right THERE is rowed separately rather than changed blind.
+          //
           // The counter moves with the behaviour rather than disappearing: a
           // class that stops erroring must not also stop being measurable.
+          if (ingress.stage !== 'frame') {
+            return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
+          }
           emit(TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough, {
             request_id: requestId,
             scenario_id: ingress.scenario_id,

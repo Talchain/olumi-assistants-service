@@ -183,7 +183,7 @@ const MEASURED_DEAD_ENDS: ReadonlyArray<
 let events: Array<{ name: string; data: Record<string, unknown> }> = [];
 let priorTraceFlag: string | undefined;
 
-function post(app: FastifyInstance, message: string) {
+function post(app: FastifyInstance, message: string, stage: 'frame' | 'analyse' = 'frame') {
   return app.inject({
     method: 'POST',
     url: '/orchestrate/v2/turn',
@@ -191,16 +191,16 @@ function post(app: FastifyInstance, message: string) {
       kind: 'message',
       turn_id: '23881111-2388-4388-8388-238823881111',
       scenario_id: SCENARIO_ID,
-      stage: 'frame',
-      turn_class: 'frame',
+      stage,
+      turn_class: stage === 'frame' ? 'frame' : 'propose',
       message,
       source: 'composer',
     },
   });
 }
 
-async function turn(app: FastifyInstance, message: string) {
-  const res = await post(app, message);
+async function turn(app: FastifyInstance, message: string, stage: 'frame' | 'analyse' = 'frame') {
+  const res = await post(app, message, stage);
   return { status: res.statusCode, body: JSON.parse(res.body) as Record<string, any> };
 }
 
@@ -335,6 +335,39 @@ describe('ROADMAP 2.388 — an edit verb with nothing to edit COACHES instead of
     expect(
       unavailable,
       'the dashboard must stop counting an error path that no longer errors',
+    ).toHaveLength(0);
+  });
+
+  // ── THE DISCLOSED CARVE-OUT, pinned so it is a decision and not a gap ────
+
+  it('SCOPE: at ANALYSE stage the typed recovery is UNCHANGED — the frame guard cannot catch it there', async () => {
+    // Not an oversight. `isFrameNoBriefShape` requires `stage === 'frame'`, so
+    // an analyse-stage fall-through would reach `runTurnExecutor` — a broad
+    // LLM call, and a breach of the standing edit-lane routing contract
+    // asserted in tests/integration/orchestrator/route-v2-edit-graph-recovery.
+    // Every dead end L56 measured arrived at `stage: 'frame'`, which is what
+    // the UI sends on a first message, so the narrow scoping fixes all of the
+    // observed defect and moves nothing else. Pinned here so that a later lane
+    // widening the scope has to come through this test deliberately.
+    const { status, body } = await turn(
+      app,
+      'Add opportunity cost of founder time as a risk',
+      'analyse',
+    );
+
+    expect(status).toBe(200);
+    expect(body.assistant_text).toBe(EDIT_GRAPH_RECOVERY_TEXT);
+    expect(exitPath(body)).toBe('edit_graph');
+    expect(
+      events.filter(
+        (e) =>
+          e.name === TelemetryEvents.V5EditGraphGraphStateUnavailable &&
+          e.data.reason === 'no_persisted_graph',
+      ),
+      'the reason still exists — it is reachable off the frame stage, and only there',
+    ).toHaveLength(1);
+    expect(
+      events.filter((e) => e.name === TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough),
     ).toHaveLength(0);
   });
 
