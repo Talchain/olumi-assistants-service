@@ -1425,15 +1425,39 @@ export const TelemetryEvents = {
   //    absent on request, persisted graph reload from `scenarios.graph`
   //    succeeded; dispatch proceeds against the reloaded graph.
   //  - V5EditGraphGraphStateUnavailable: edit intent detected, `graphState`
-  //    absent and persisted graph either missing or invalid. The route
+  //    absent and the persisted graph either UNREADABLE or invalid. The route
   //    returns a typed recovery response (`turn_class: direct_answer`)
   //    rather than silently falling through to TurnExecutor / Sonnet.
-  //    Carries `reason: 'no_persisted_graph' | 'persisted_graph_invalid' |
-  //    'session_store_failed'` so operators can distinguish the failure
-  //    modes in dashboards.
+  //    Carries `reason: 'persisted_graph_invalid' | 'session_store_failed'`
+  //    so operators can distinguish the failure modes in dashboards.
+  //    ⚠ ROADMAP 2.388 — `reason: 'no_persisted_graph'` NO LONGER APPEARS ON
+  //    THIS EVENT. Absence is not a failure: it is a first message on an empty
+  //    canvas, and it now falls through to the frame-no-brief guard's coaching.
+  //    Its counter moved to V5EditGraphNoPersistedGraphFallthrough below, so a
+  //    dashboard split by `reason` loses a series rather than silently
+  //    absorbing the traffic into the two that remain.
   V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
   V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
   V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
+
+  // ROADMAP 2.388 — THE MINUTE-ONE DEAD END, and its replacement counter.
+  //
+  // Edit intent was detected on a turn with no request `graphState` AND no
+  // persisted graph — i.e. an edit verb with nothing to edit, overwhelmingly a
+  // user's FIRST message ("Increase annual revenue from £4m to £6m…"). This
+  // used to return `EDIT_GRAPH_RECOVERY_TEXT` ("…I couldn't access the current
+  // graph. Please try again in a moment."), which was both wrong — nothing had
+  // failed — and unrecoverable, since retrying the same message re-enters the
+  // same branch (measured 3/3 and 10/10 on staging `672b634`).
+  //
+  // The turn now FALLS THROUGH to the frame-no-brief guard's coaching + "Build
+  // the model" chip. This event is what keeps the class observable: it is the
+  // rate at which users open with an edit-shaped sentence on an empty canvas,
+  // which is a routing-quality signal worth watching even though it is no
+  // longer an error. Payload: { request_id, scenario_id, message_length } —
+  // routing keys and a length only; NO message text (privacy contract R-004).
+  V5EditGraphNoPersistedGraphFallthrough:
+    "v5.edit_graph.no_persisted_graph_fallthrough",
 
   // V5 A4 corrective path — bare add-risk request clarified without an LLM
   // call or graph mutation. Payload: { request_id, scenario_id, latency_ms,

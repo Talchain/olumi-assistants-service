@@ -184,8 +184,29 @@ const ANALYSIS_TURN = {
 
 // ── Mutable fixture state, set per case ────────────────────────────────────
 let factsByTurnRowId: Record<string, Array<Record<string, unknown>>> = {};
-/** `null` ⇒ the scenario has no persisted graph (drives the recovery exit). */
+/**
+ * What `loadGraph` returns.
+ *
+ * ⚠ AMENDED BY ROADMAP 2.388. This used to be set to `null` to drive the
+ * edit-graph RECOVERY exit, because `no_persisted_graph` returned the typed
+ * recovery. It no longer does: absence is an empty canvas, not a failure, and
+ * that branch now falls through to the frame-no-brief guard. A `null` here
+ * would silently re-point the recovery arms at the CONVERSE exit — they would
+ * have kept passing while measuring a different exit, which is exactly what
+ * the BRANCH DISCRIMINATOR in that describe block exists to catch (and did).
+ *
+ * The recovery exit is now driven by `UNPARSEABLE_GRAPH`
+ * (`persisted_graph_invalid`), one of the two reasons that legitimately keep
+ * the "try again in a moment" copy.
+ */
 let persistedGraph: unknown = READY_GRAPH;
+
+/**
+ * A persisted graph that is PRESENT but fails `GraphStateIngressSchema` —
+ * `reason: 'persisted_graph_invalid'`, a genuine operational failure and
+ * therefore still a typed recovery after 2.388.
+ */
+const UNPARSEABLE_GRAPH = { nodes: 'not-an-array', edges: 42 };
 /** Make the windowed turn read throw, to exercise the DEGRADED path. */
 let turnReadFails = false;
 /** Make EVERY claim-safety-relevant read throw — a fully degraded store. */
@@ -504,14 +525,20 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
   });
 
   describe('the EDIT-GRAPH RECOVERY exit', () => {
-    // Edit intent, NO graph_state on the request, and no persisted graph ⇒
-    // `no_persisted_graph` recovery. "Add a risk …" is explicitly documented in
-    // vague-edit-guard.ts as a shape the vague guard must NOT claim, so this
-    // reaches the edit dispatch region rather than the intercept above.
+    // Edit intent, NO graph_state on the request, and a persisted graph that
+    // cannot be parsed ⇒ `persisted_graph_invalid` recovery. "Add a risk …" is
+    // explicitly documented in vague-edit-guard.ts as a shape the vague guard
+    // must NOT claim, so this reaches the edit dispatch region rather than the
+    // intercept above.
+    //
+    // ⚠ ROADMAP 2.388 re-pointed this from `null` (which used to mean
+    // `no_persisted_graph`) to an unparseable graph. `null` now falls through
+    // to the frame guard, so leaving it would have moved these three arms onto
+    // a different exit while two of them stayed green.
     const MESSAGE = 'Add a risk for coordination overhead';
 
     beforeEach(() => {
-      persistedGraph = null;
+      persistedGraph = UNPARSEABLE_GRAPH;
     });
 
     it('BRANCH DISCRIMINATOR: this turn really reaches the RECOVERY exit', async () => {
@@ -1278,7 +1305,8 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     });
 
     it('the EDIT-GRAPH RECOVERY copy is untouched, to the byte', async () => {
-      persistedGraph = null;
+      // 2.388: `persisted_graph_invalid`, not absence — see UNPARSEABLE_GRAPH.
+      persistedGraph = UNPARSEABLE_GRAPH;
       const { body } = await postTurn(app, 'Add a risk for coordination overhead', {
         withGraphState: false,
       });

@@ -514,6 +514,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
         V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
         V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
+        // ROADMAP 2.388 — the empty-canvas fall-through counter that replaces
+        // `graph_state_unavailable{reason:'no_persisted_graph'}` at frame stage.
+        V5EditGraphNoPersistedGraphFallthrough:
+          "v5.edit_graph.no_persisted_graph_fallthrough",
         V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
         V5ExplanationEvidence: "v5.explanation.evidence",
         // V5-LANE-B-STRUCTURAL-01 — "what to validate" beat mechanism record.
@@ -1305,6 +1309,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5EditGraphGraphStatePresent,
         TelemetryEvents.V5EditGraphGraphStateReloaded,
         TelemetryEvents.V5EditGraphGraphStateUnavailable,
+        // ROADMAP 2.388 — same family, same classification: an edit verb on an
+        // empty canvas at frame stage. Diagnostic-only (no Datadog metric in
+        // emit()); routing keys + message_length only, never message text.
+        TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough,
         // V5 Phase 1 brief persistence — diagnostic signal that the
         // user-supplied brief exceeded MAX_BRIEF_TEXT_LENGTH and was
         // truncated by normaliseBriefText. Operators can alert on a
@@ -1960,6 +1968,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.graph_state_present",
         "v5.edit_graph.graph_state_reloaded",
         "v5.edit_graph.graph_state_unavailable",
+        // ROADMAP 2.388 — empty-canvas fall-through (frame stage).
+        "v5.edit_graph.no_persisted_graph_fallthrough",
         // V5 alpha hardening Phase 2.5: primary lifecycle events.
         "v5.analysis_freshness.derived",
         "v5.analysis_freshness.fact_selected",

@@ -409,6 +409,11 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "comment only — 'one in a million' describing a float epsilon",
     "orchestrator-v5/context/cqe/pre-normalise.ts": "comment only — describes thousand-SEPARATOR stripping",
     "orchestrator-v5/routing/add-option-transaction.ts": "comment only — 'one hundred and forty' as a parse example",
+    "orchestrator-v5/routing/deterministic-value-update.ts":
+      "comment only — ROADMAP 2.389a's edge-phrasing gate documents its numeric lookahead with the " +
+      "example \"to £6 million\". The file spells NO magnitude list: its currency and suffix grammars " +
+      "are both imported from the canonical CQE sources (CURRENCY_SYMBOL_SOURCE / NUMERIC_SUFFIX_SOURCE " +
+      "in context/cqe/rules.ts), which is precisely the derivation this guard exists to protect.",
     "utils/telemetry.ts": "comments only — LLM pricing quoted as '$N per million tokens'",
 
     // --- A real vocabulary, deliberately NOT folded into the union (2.331).
