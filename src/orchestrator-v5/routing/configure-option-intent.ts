@@ -139,6 +139,28 @@ const EFFECT_ASSIGN_VERB = /\b(?:set|change|update|adjust|revise|configure)\b/;
 const VALUE_SET_PAYLOAD = /\b(?:set|change|update|adjust|revise)\b[^.?!]*\bto\b\s*(?:£|\$|€)?\s*\d/;
 
 /**
+ * ⭐ L16 — does this message carry something WRITABLE?
+ *
+ * A configure-option message can match the detector and still name no factor
+ * and no value ("Configure {option}", the chip's own "Help me configure
+ * {option}."). There is nothing to write, so the edit lane must invent an
+ * operation; on the 3 Aug walk that invention did not survive canonicalisation
+ * and the user got `OPERATION_DID_NOT_LAND` behind the generic copy "I wasn't
+ * able to make that change safely." — the product failing to execute its own
+ * chip.
+ *
+ * DERIVED, never mirrored (trap 12): this is the SAME `VALUE_SET_PAYLOAD`
+ * regex that already decides triggers 2b and 5, exported through one predicate
+ * rather than re-spelled at the call site. Widen that constant and the
+ * bare-configure intercept narrows in lockstep, automatically — the two can
+ * never disagree about what "carries a value" means.
+ */
+export function carriesConfigureOptionValuePayload(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  return VALUE_SET_PAYLOAD.test(message.toLowerCase().replace(/\s+/g, ' ').trim());
+}
+
+/**
  * Question-shape suppressor — mirrors the vague-edit guard's doctrine
  * (either signal alone suffices): configure INTENT is imperative, and
  * mutating the graph on a question ("what did you just configure on my

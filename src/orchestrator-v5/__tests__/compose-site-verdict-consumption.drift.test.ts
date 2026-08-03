@@ -54,10 +54,23 @@
  *   - `src/orchestrator-v5/handlers/chip-click-dispatch.ts` — 3 sites / 3 keys (NEW 2026-07-27)
  *   - `src/orchestrator-v5/compose/edit-clarify-response.ts`  —  1 site  /  1 key  (NEW 1.276)
  *   - `src/orchestrator-v5/routing/post-analysis-label-intercept.ts` — 1 / 1 (NEW 1.276)
+ *   - `src/orchestrator-v5/system-events/factor-value-edit.ts`  — 1 site / 1 key (NEW 1.346)
+ *   - `src/orchestrator-v5/compose/configure-option-clarify-response.ts` — 1 / 1 (NEW L16)
  *
- * 36 sites / 32 keys / 5 files, and `UNSCANNED_COMPOSE_FILES` is now EMPTY —
+ * 37 sites / 33 keys / 7 files, and `UNSCANNED_COMPOSE_FILES` is still EMPTY —
  * so `expect(ungated).toEqual([])` finally speaks for every production compose
  * site in `src/`, by derivation rather than by scope nobody had written down.
+ *
+ * ⚠ THIS LIST IS A HAND-MAINTAINED MIRROR AND IT HAD ALREADY DRIFTED — read it
+ * as commentary, never as the scope. Before L16 it read "36 sites / 32 keys /
+ * 5 files" and omitted `system-events/factor-value-edit.ts` entirely, which had
+ * been in `COMPOSE_SITE_REGISTER` since 1.346 (2026-07-28). The SITE total
+ * happened to stay right by coincidence — 2.229 deleted one site in the same
+ * window that 1.346 added one — so the only visible symptom was a file count
+ * nobody re-derived. That is trap #12 inside the file whose entire thesis is
+ * trap #12, and it is left recorded rather than quietly corrected. The
+ * authority is `derivedComposeFileDomain()` plus the count assertions below;
+ * if this prose and those disagree, this prose is wrong.
  *
  * The four scanned function names are unchanged: `composeAnswer`,
  * `composeToolCallResponse`, `composeClarifyResponse`,
@@ -130,6 +143,13 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
   ),
   // ROADMAP 1.346 — the value-carrying inspector edit's compose site.
   'system-events/factor-value-edit.ts': resolve(HERE, '../system-events/factor-value-edit.ts'),
+  // L16 / walk finding N16 — the bare configure-option deterministic remedy.
+  // Caught by `derivedComposeFileDomain()` on the commit that created the file,
+  // which is the mechanism working exactly as its header promises.
+  'compose/configure-option-clarify-response.ts': resolve(
+    HERE,
+    '../compose/configure-option-clarify-response.ts',
+  ),
 };
 
 /**
@@ -588,6 +608,45 @@ const FACTOR_VALUE_EDIT_SITES: Readonly<Record<string, RegisteredSite>> = {
   },
 };
 
+/**
+ * `src/orchestrator-v5/compose/configure-option-clarify-response.ts` — brought
+ * into scope by L16 (walk finding N16), on the commit that created the file.
+ * The derived domain test caught it on its first CI run; the file was NOT
+ * remembered by its author, which is precisely the case this register exists
+ * for.
+ */
+const CONFIGURE_OPTION_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
+  assistant_text: {
+    stance: 'structural',
+    why:
+      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same ' +
+      'shape as EDIT_CLARIFY_SITES). The value is built immediately above as a four-element ' +
+      "`.join(' ')`: two module string constants, one `buildConfigureOptionAdvisedFormat(...)` " +
+      'template from configure-option-chip-text.ts, and interpolations of exactly TWO kinds of ' +
+      'graph label — the OPTION being configured and the FACTOR(s) it is linked to. ' +
+      'IT CANNOT ASSERT A LEADER, and the derivation is about SELECTION, not just wording. ' +
+      'The option is chosen by `tryConfigureOptionClarify` on ONE criterion: ' +
+      "`computeStructuralReadiness(...).options[].status === 'needs_encoding'` — i.e. it is " +
+      'named because it is BLOCKED, never because it ranks. There is no analysis read on this ' +
+      'path at all: the module takes the persisted graph and nothing else, the factor names come ' +
+      'from `edge.from === optionId` walks over that same graph, and no probability, margin, ' +
+      'win-rate, ordering or comparative claim is available to the composer to interpolate even ' +
+      'if it wanted one. Zero LLM calls — the whole point of the intercept is that it replaces ' +
+      'an edit-lane LLM round-trip that was returning OPERATION_DID_NOT_LAND. ' +
+      'ONE PHRASE DESERVES ITS OWN NOTE rather than being waved through: the copy contains ' +
+      '"the analysis cannot compare it with the others". That is a statement about the ' +
+      'ANALYSIS BEING BLOCKED, not a comparative result — it names no other option, asserts no ' +
+      'ordering, and is emitted only on the `needs_encoding` branch where by construction no ' +
+      'comparison exists yet. It is weaker than the add-risk echo already registered ' +
+      'structural, which interpolates two labels with no kind restriction. ' +
+      'The route threads `mayNameLeadingOption` from `claimSafety.forExit()` on this exit (it ' +
+      'is NOT hardcoded true here), so even the inherited permission is the turn-entry read. ' +
+      'SCOPE NOTE so a later reader does not think it was missed: this composer emits ' +
+      '`suggested_actions: []` deliberately, so unlike EDIT_CLARIFY_SITES there is no chip ' +
+      'channel carrying labels out of this file at all.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
@@ -595,6 +654,7 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, Reg
   'compose/edit-clarify-response.ts': EDIT_CLARIFY_SITES,
   'routing/post-analysis-label-intercept.ts': POST_ANALYSIS_LABEL_INTERCEPT_SITES,
   'system-events/factor-value-edit.ts': FACTOR_VALUE_EDIT_SITES,
+  'compose/configure-option-clarify-response.ts': CONFIGURE_OPTION_CLARIFY_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -983,9 +1043,18 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // a straight deletion: the site is gone and nothing replaced it — a
     // recognised post-analysis question now reaches `routeWithToolUse`, and
     // the router's own compose site is already registered.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(36);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(32);
+    // ⚠ L16 (walk finding N16): 36 -> 37 sites, 32 -> 33 keys, 6 -> 7 files.
+    // One ADDED compose site — `compose/configure-option-clarify-response.ts`,
+    // the deterministic remedy for a bare "Configure {option}" turn. Registered
+    // `structural` with its derivation (see CONFIGURE_OPTION_CLARIFY_SITES).
+    // Worth recording HOW it got here: the author did not remember this file
+    // needed registering, and `derivedComposeFileDomain()` failed the build on
+    // the commit that created it. That is the whole argument for deriving the
+    // domain rather than listing it, observed working rather than asserted.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(37);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(33);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
+      'compose/configure-option-clarify-response.ts',
       'compose/edit-clarify-response.ts',
       'handlers/chip-click-dispatch.ts',
       'route-v2.ts',

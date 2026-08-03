@@ -2699,9 +2699,44 @@ export async function dispatchEditGraph(
   // withhold this turn's graph write AFTER this initial computation; when
   // it does, `analysisReady` is re-set to `undefined` alongside it so the
   // wire never stamps readiness derived from a graph that never persisted.
+  //
+  // ⭐ L16 / GATE-REASON INTEGRITY — the non-apply branch no longer drops the
+  // block. It used to resolve to `undefined`, and the 3 Aug walk measured what
+  // that costs: of seven remedy turns after an add-option closed the run gate,
+  // the ONLY two that shipped no `analysis_ready` were the two that took this
+  // branch (r5-01 OPERATION_DID_NOT_LAND, r5-03 a clarifying question) — and
+  // they are exactly the two on which the tester watched the gate copy degrade
+  // from the SPECIFIC reason ("'Launch Customer Retention Programme' has no
+  // effect values yet") to the GENERIC one ("Olumi is not able to run this yet.
+  // Ask in the chat and it will explain what is missing."). The specific copy
+  // is composed from `analysis_ready.options`; drop the block and generic is
+  // the only copy left. A failed remedy must never make the product LESS
+  // specific about why it is blocked.
+  //
+  // Why the pre-edit graph is the honest source here, not a guess: no mutation
+  // happened ⇒ the graph is UNCHANGED ⇒ `parsedGraph` IS what is persisted, and
+  // it is the same base the edit itself ran against. The guard this branch
+  // inherits exists to stop readiness being stamped from an *unpersisted*
+  // `appliedGraph`; that hazard is absent by construction when nothing was
+  // applied. Gated on `graphStrictlyCanonical` so a structural-fallback graph
+  // (non-canonical ingress) never stamps readiness — same posture as the
+  // deterministic add_risk path.
+  //
+  // ⚠ SCOPE, deliberately narrow — keyed on `successfulAppliedMutation`, NOT on
+  // the `effective` predicate. The two differ exactly on the WITHHELD paths: a
+  // GM-live hold and a part-accounting substitution block are turns where a
+  // mutation DID succeed and was deliberately held back pending confirmation.
+  // Those keep their existing "no analysis_ready" contract (pinned by
+  // `edit-graph-dispatch-graph-management-modes.test.ts` and
+  // `edit-graph-dispatch-part-accounting.test.ts`) — they are a held-proposal
+  // lifecycle with its own receipt copy, not the failed-remedy dead end the
+  // walk measured. This branch covers only the genuine non-apply outcomes the
+  // walk actually witnessed: rejected, no-op, zero-ops.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? computeStructuralReadiness(editResult.appliedGraph!)
-    : undefined;
+    : !successfulAppliedMutation && graphStrictlyCanonical
+      ? computeStructuralReadiness(parsedGraph)
+      : undefined;
 
   // V5 state-trust freshness derivation moved earlier in this function
   // (just after `successfulAppliedMutation` is computed) so the no-op
