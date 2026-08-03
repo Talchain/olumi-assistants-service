@@ -75,6 +75,10 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
 
   // --- read: cheap / deterministic / read-only ---
   CEE_GRAPH_READINESS_RATE_LIMIT_RPM: "read",
+  // Scenario-addressed graph read (ROADMAP 2.312): two indexed Supabase reads,
+  // no LLM, no writes — the same cost shape as graph-readiness, so the same
+  // tier. Its bucket is keyed on the CLIENT, not the key id; see the route.
+  CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM: "read",
 
   // --- coach: medium coaching / analysis engines ---
   // RESERVED — no src reference yet, deliberately. The drift test reads this

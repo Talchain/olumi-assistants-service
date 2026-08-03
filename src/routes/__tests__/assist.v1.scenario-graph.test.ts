@@ -101,6 +101,10 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
 
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
+import {
+  resetCeeFeatureRateLimiter,
+  getCeeFeatureRateLimiter,
+} from "../../cee/config/limits.js";
 
 /** A graph with no positional keys anywhere — the shape `scenarios.graph` holds today. */
 const GRAPH_NO_LAYOUT = {
@@ -147,6 +151,10 @@ async function read(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The feature limiter's buckets are MODULE-level and would otherwise carry
+  // across tests, so one suite's request volume could silently 429 another's
+  // and the failure would read as a product bug.
+  resetCeeFeatureRateLimiter("scenario_graph");
   // Default posture: the scenario exists, is UNOWNED (guest), and holds a graph.
   scenarioExists.mockResolvedValue(true);
   ensureScenarioExists.mockResolvedValue({ user_id: null });
@@ -448,6 +456,71 @@ describe("THE ASSIST-KEY GATE — the same one every other route uses", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json().graph).toEqual(GRAPH_NO_LAYOUT);
+    await app.close();
+  });
+});
+
+describe("RATE LIMITING — CodeQL js/missing-rate-limiting, and it was right", () => {
+  /**
+   * The route reads another user's decision graph, addressed by an id. A
+   * per-route limiter is what bounds how fast one host can walk that space.
+   * The bucket is keyed on the CLIENT, not the shared edge-injected key —
+   * pinned below, because getting that backwards turns the limiter into a
+   * product-wide shared-fate throttle rather than a control on the attacker.
+   */
+  const rpm = getCeeFeatureRateLimiter(
+    "scenario_graph",
+    "CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM",
+  ).rpm;
+
+  it("answers 429 once the caller exceeds its budget, and stops reading the store", async () => {
+    const app = await buildApp();
+
+    let last = await read(app, SCENARIO);
+    for (let i = 0; i < rpm + 1 && last.statusCode === 200; i += 1) {
+      last = await read(app, SCENARIO);
+    }
+
+    expect(last.statusCode).toBe(429);
+    expect(last.json().code).toBe("RATE_LIMITED");
+
+    // The refusal must be cheap: a throttled request does no store work.
+    const readsBefore = loadGraphAndBriefText.mock.calls.length;
+    await read(app, SCENARIO);
+    expect(loadGraphAndBriefText.mock.calls.length).toBe(readsBefore);
+    await app.close();
+  });
+
+  it("POSITIVE CONTROL — a caller within budget is NOT throttled", async () => {
+    // Without this, the 429 above could come from a limiter set to zero, and
+    // the route would be a brick wall that still 'passes' its rate-limit test.
+    const app = await buildApp();
+    expect((await read(app, SCENARIO)).statusCode).toBe(200);
+    expect((await read(app, SCENARIO)).statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("buckets on the CLIENT, so one exhausted caller cannot throttle another", async () => {
+    // THE POINT OF THE INVERSION. Through /bff/cee/* every visitor carries the
+    // SAME injected assist key. If the bucket keyed on that key id, the first
+    // heavy user would 429 everyone else in the product. Distinct client
+    // addresses must therefore hold distinct budgets.
+    const app = await buildApp();
+
+    let last = await read(app, SCENARIO);
+    for (let i = 0; i < rpm + 1 && last.statusCode === 200; i += 1) {
+      last = await read(app, SCENARIO);
+    }
+    expect(last.statusCode).toBe(429);
+
+    // A different client address, same everything else.
+    const other = await app.inject({
+      method: "POST",
+      url: `/assist/v1/scenarios/${SCENARIO}/graph`,
+      payload: {},
+      remoteAddress: "203.0.113.77",
+    });
+    expect(other.statusCode).toBe(200);
     await app.close();
   });
 });

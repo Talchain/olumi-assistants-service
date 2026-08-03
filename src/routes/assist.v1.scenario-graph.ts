@@ -92,6 +92,27 @@
  * accepted PoC posture, it is what the turn route already does, and it is what
  * makes PC5's guest tier work at all.
  *
+ * ── RATE LIMITING, AND WHY THE BUCKET IS KEYED ON THE CLIENT ───────────────
+ * The first cut of this route shipped with NO route-local limiter, arguing the
+ * global `@fastify/rate-limit` (`global: true`) and the auth plugin's per-key
+ * quota already covered it. Both of those are real and do apply — but CodeQL
+ * flagged `js/missing-rate-limiting` HIGH ("this route handler performs
+ * authorization, but is not rate-limited") and it was RIGHT to: every sibling
+ * `/assist/v1/*` route carries one, and this is the only route in the estate
+ * that returns another user's decision graph. A coarse global limiter is not
+ * the same control as a per-route one on a data-read endpoint.
+ *
+ * ⚠ THE BUCKET IS KEYED ON THE CLIENT (ip), NOT ON THE KEY ID — the inverse of
+ *   the sibling routes' `keyId || req.ip`, deliberately. Through the
+ *   `/bff/cee/*` edge EVERY visitor arrives carrying the SAME injected assist
+ *   key, so a keyId-first bucket is a single shared-fate bucket in which one
+ *   busy tab throttles every other user of the product. `req.ip` resolves from
+ *   `x-forwarded-for` in production (`trustProxy: nodeEnv === "production"`),
+ *   so it is per-visitor, which is also the granularity that actually limits
+ *   the threat here: one host enumerating many scenario ids. keyId is the
+ *   FALLBACK, for direct service-to-service callers that arrive without a
+ *   forwarded client address.
+ *
  * ── WHAT THIS ROUTE DOES NOT DO ────────────────────────────────────────────
  * · It does not write. Not the graph, not the row, not a turn.
  * · It does not MINT AN IDENTITY SCHEME. `graph_identity_hash` is
@@ -101,11 +122,6 @@
  * · It does not carry layout. `scenarios.graph` holds no positions (the UI
  *   merges those locally), and `layout_present` REPORTS that by measuring the
  *   returned bytes rather than promising it in prose.
- * · It adds no route-local rate limiter. The global `@fastify/rate-limit` and
- *   the auth plugin's per-key quota already cover it, and a per-key bucket
- *   here would be actively harmful: the edge injects ONE shared key for every
- *   visitor, so a per-key route bucket is a shared-fate limiter in which one
- *   busy tab throttles every other user.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -118,6 +134,8 @@ import {
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
+import { getCeeFeatureRateLimiter } from "../cee/config/limits.js";
+import { getRequestKeyId } from "../plugins/auth.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
 import { log } from "../utils/telemetry.js";
@@ -177,6 +195,16 @@ function detectLayout(graph: unknown): boolean {
 }
 
 export default async function route(app: FastifyInstance) {
+  // The SHARED limiter, not a 15th hand-rolled copy of the `pruneBuckets` /
+  // `checkRateLimit` pair that 17 route files already carry (trap 12: every
+  // copy is a place the tier policy can drift silently). The env var is
+  // registered in RATE_BUCKET_REGISTRY as tier `read`, which the drift test
+  // enforces in both directions.
+  const limiter = getCeeFeatureRateLimiter(
+    "scenario_graph",
+    "CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM",
+  );
+
   app.post<{ Params: { scenario_id: string } }>(
     "/assist/v1/scenarios/:scenario_id/graph",
     async (req, reply) => {
@@ -218,6 +246,30 @@ export default async function route(app: FastifyInstance) {
               requestId,
             ),
           );
+
+      // ── Rate limit, FIRST ────────────────────────────────────────────────
+      // Ahead of identity because a 429 is derived only from the caller's own
+      // request volume: it is the one refusal that carries no information about
+      // the scenario, so putting it first cannot become an oracle (the ordering
+      // hazard the identity step below exists to avoid) and it keeps a flood
+      // from reaching the store at all.
+      //
+      // keyId is the FALLBACK, not the primary — see the header: through the
+      // `/bff/cee/*` edge every visitor shares ONE injected assist key, so a
+      // keyId-first bucket would throttle the whole product on one busy tab.
+      const keyId = getRequestKeyId(req) ?? undefined;
+      const bucketKey = req.ip ? `ip::${req.ip}` : `key::${keyId ?? "unknown"}`;
+      const rate = limiter.tryConsume(bucketKey, keyId);
+      if (!rate.allowed) {
+        return reply.code(429).send(
+          buildErrorV1(
+            "RATE_LIMITED",
+            "Too many graph reads. Try again shortly.",
+            { retry_after_seconds: rate.retryAfterSeconds },
+            requestId,
+          ),
+        );
+      }
 
       // ── 0. Identity, from headers only, before ANY read of server state ──
       const resolved = await resolveVerifiedIdentityOrRefuse(req, requestId);
