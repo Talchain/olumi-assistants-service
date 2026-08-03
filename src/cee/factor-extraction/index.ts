@@ -776,17 +776,204 @@ const HORIZON =
   '|long[-\\s]term' +
   ')';
 
-/**
- * Optionality markers that turn a from-to into a PROPOSAL rather than a
- * commitment — "we COULD increase the price from £49 to £59".
+/* ---------------------------------------------------------------------------
+ * PROPOSAL FRAMING (ROADMAP 2.371(b)) — THE OPTIONALITY GUARD, WIDENED IN BOTH
+ * DIMENSIONS IT WAS SHORT IN.
  *
- * A second, independent guard: the anchor above already excludes every lever in
- * the measured set, but a lever CAN carry a horizon ("we could increase the
- * price from £49 to £59 this year") and would otherwise sail through. Deliberately
- * NOT including "should", "must", "need to" or "aim to" — those state intent,
- * and "we should increase revenue from £4M to £6M within 12 months" is a goal.
+ * #807 shipped `OPTIONALITY_MODAL = '(?:could|might|may|can|perhaps|maybe)'`,
+ * consumed as a LOOKBEHIND IMMEDIATELY BEFORE THE DIRECTION VERB. Both halves
+ * were too narrow, and the second was the bigger hole:
+ *
+ *   VOCABULARY — six spellings, all of them single modals.
+ *   POSITION   — the marker had to be the token touching the verb. So the
+ *                guard fired on "we COULD increase…" and missed "we could
+ *                CONSIDER increasing…", where the very same word sits one token
+ *                further left.
+ *
+ * MEASURED at `7bdf30ff`, on a graph whose goal is "Grow annual revenue" —
+ * 22 of 25 probed lever phrasings minted `{value: 59, baseline: 49, unit: '£'}`
+ * at confidence 0.95, i.e. a fabricated goal contract from a sentence proposing
+ * a PRICE MOVE. Among them, all six carrying a LISTED modal:
+ *
+ *   "We could consider increasing the price from £49 to £59 this year"
+ *   "We can also increase the price from £49 to £59 this year"
+ *   "We may want to increase the price from £49 to £59 this year"
+ *   "Perhaps we increase the price from £49 to £59 this year"
+ *   "Maybe we increase the price from £49 to £59 this year"
+ *   "We could raise it by 2.5x and increase the price from £49 to £59 this year"
+ *
+ * The three that DID refuse were exactly the three whose modal touched the
+ * verb. So the closed list was not the whole defect — the ADJACENCY was.
+ *
+ * THE FIX IS ONE MECHANISM, NOT TWO: the lookbehind is withdrawn from the
+ * pattern and replaced by a clause-scoped scan (`isProposalFramed`). Keeping
+ * both would be a hand-maintained mirror of the kind CLAUDE.md trap 12 is
+ * about — two places that must agree about what optionality is.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * THE CANONICAL SET. Every consumer derives from THIS array; nothing re-spells
+ * it (12d, first half). Its other half is `LEVER_CORPUS` in
+ * goal-natural-language-targets.test.ts — a hand-written corpus of real lever
+ * phrasings, which is the only thing that can notice this list is SHORT, and
+ * which no derivation can ever replace.
+ *
+ * ⚠ THE INCLUSION RULE, so a later addition is a judgement and not a reflex:
+ * a marker belongs here when it says the speaker is WEIGHING the move, and
+ * stays out when it says they have DECIDED on it. That is why the deontic and
+ * volitional forms are absent and stay absent — "will", "shall", "should",
+ * "must", "need to", "aim to", "plan to", "intend to", "want to", "going to",
+ * "committed to". "We should increase revenue from £4M to £6M within 12
+ * months" is a goal, and #807's note saying so is preserved deliberately; the
+ * pinned controls below it are what stop this list swallowing them.
+ *
+ * ⚠ AND THE INTERROGATIVE FORMS ARE PHRASES, NOT BARE MODALS, FOR EXACTLY THAT
+ * REASON. "Should we increase the price…?" is a proposal; "We should increase
+ * revenue…" is a commitment. The distinguishing signal is the subject-verb
+ * INVERSION, so `should we` / `shall we` are listed and bare `should` /
+ * `shall` are not.
+ *
+ * Failure direction, as everywhere else in this grammar: an over-broad marker
+ * costs a goal that is then honestly absent and re-askable; a missing one
+ * costs a FABRICATED number wearing a 0.95 badge. The two are not symmetric,
+ * and this list is sized accordingly.
  */
-const OPTIONALITY_MODAL = '(?:could|might|may|can|perhaps|maybe)';
+export const PROPOSAL_FRAME_MARKERS: readonly string[] = Object.freeze([
+  // (1) EPISTEMIC MODALS AND THEIR ADVERB SIBLINGS — the speaker is not
+  //     committing. The first six are #807's closed list, preserved verbatim;
+  //     the union assertion in the spec pins that they can never be lost.
+  'could',
+  'might',
+  'may',
+  'can',
+  'perhaps',
+  'maybe',
+  'would',
+  'possibly',
+  'potentially',
+  'conceivably',
+  'hypothetically',
+  // (2) DELIBERATION VERBS — naming the act of weighing an option.
+  'consider',
+  'considers',
+  'considering',
+  'considered',
+  'consideration',
+  'weigh',
+  'weighing',
+  'explore',
+  'exploring',
+  'evaluate',
+  'evaluating',
+  'assess',
+  'assessing',
+  'contemplate',
+  'contemplating',
+  'debate',
+  'debating',
+  'deliberating',
+  'mull',
+  'mulling',
+  'thinking of',
+  'thinking about',
+  'looking at',
+  'looking into',
+  'toying with',
+  'tempted',
+  'entertaining',
+  // (3) PROPOSAL NOUNS AND HYPOTHETICAL FRAMES — the sentence presents a
+  //     candidate rather than a plan.
+  'option',
+  'options',
+  'optionality',
+  'alternative',
+  'alternatives',
+  'proposal',
+  'proposals',
+  'proposed',
+  'proposes',
+  'proposition',
+  'scenario',
+  'scenarios',
+  'possibility',
+  'possibilities',
+  'suggestion',
+  'suggest',
+  'suggests',
+  'suggested',
+  'what if',
+  'suppose',
+  'supposing',
+  'if we',
+  'should we',
+  'shall we',
+  'could we',
+  'can we',
+  'may we',
+  'might we',
+  'were we to',
+]);
+
+/**
+ * The alternation the guard actually runs, DERIVED from the canonical array so
+ * the two cannot drift. Multi-word markers admit any run of whitespace, so a
+ * line break inside "thinking\nof" reads the same as a space.
+ */
+const PROPOSAL_FRAME_PATTERN = new RegExp(
+  `\\b(?:${PROPOSAL_FRAME_MARKERS.map((m) => m.replace(/ /g, '\\s+')).join('|')})\\b`,
+  'i',
+);
+
+/**
+ * The text a proposal marker has to appear in to disarm a match: the CLAUSE the
+ * construction sits in, from the last sentence boundary up to the direction
+ * verb.
+ *
+ * ⚠ CLAUSE-SCOPED, NOT BRIEF-SCOPED, AND THAT BOUND IS LOAD-BEARING. Scanning
+ * the whole preceding brief would re-create by a different route the exact
+ * defect review A1 removed: "We could increase the price from £49 to £59.
+ * Increase annual revenue from £4 million today to £6 million within 12
+ * months." must still yield 6M/4M, and it only does because the `could` is on
+ * the other side of a boundary. Pinned.
+ *
+ * ⚠ A NEWLINE IS A BOUNDARY, and that is not a stylistic choice. Briefs arrive
+ * as bulleted lists; a "we could…" on line 1 must not silently delete a goal on
+ * line 5.
+ *
+ * ⚠ A FULL STOP COUNTS ONLY WHEN IT ENDS A SENTENCE — followed by whitespace or
+ * by nothing. A decimal point does NOT, and the direction of that error is why
+ * the check exists: treating "2.5" as a boundary SHORTENS the scope, drops the
+ * marker, and mints the fabricated pair. Measured at `7bdf30ff`: "We could
+ * raise it by 2.5x and increase the price from £49 to £59 this year" → 59/49.
+ */
+function clauseBefore(text: string, index: number): string {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const ch = text[i];
+    if (ch === '\n' || ch === ';') return text.slice(i + 1, index);
+    if (ch === '.' || ch === '!' || ch === '?') {
+      const next = text[i + 1];
+      if (next === undefined || /\s/.test(next)) return text.slice(i + 1, index);
+    }
+  }
+  return text.slice(0, index);
+}
+
+/**
+ * Is this match framed as a PROPOSAL rather than a commitment? (ROADMAP
+ * 2.371(b).)
+ *
+ * ⚠ THE REMIT IS FRAMING, AND THE BOUNDARY IS DISCLOSED RATHER THAN IMPLIED.
+ * This guard reads how the sentence is put, not what its metric means, so a
+ * DECIDED statement about a lever metric — "We plan to increase the price from
+ * £49 to £59 this year" — is out of remit and still forms a pair. Separating a
+ * lever metric from a goal metric is a different capability (it needs the
+ * graph, not the sentence) and is REPORTED OUT OF THIS SLICE, not rowed by it —
+ * see this PR's residual list; pinned here as a known
+ * cost so it is visible rather than discovered.
+ */
+function isProposalFramed(text: string, matchIndex: number): boolean {
+  return PROPOSAL_FRAME_PATTERN.test(clauseBefore(text, matchIndex));
+}
 
 /**
  * The metric a goal verb names before its `from` — "increase ANNUAL REVENUE
@@ -901,10 +1088,16 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<GoalBaselinePattern> = [
   // `metricPhrase` before `from` (case B's goal word lives THERE — "raise the
   // TARGET from…" — so the anchor must read both positions), and `horizon`
   // after the target. `resolveGoalPair` requires at least one.
+  //
+  // ⚠ ROADMAP 2.371(b) — THE OPTIONALITY LOOKBEHIND THAT USED TO OPEN THIS
+  // PATTERN IS GONE ON PURPOSE. It could only see the ONE token touching the
+  // verb, so "we could CONSIDER increasing…" walked straight past it. Its
+  // replacement is `isProposalFramed`, applied in `goalPatternMatches` beside
+  // the anchor check, which reads the whole clause. One mechanism, not two.
   {
     goalAnchored: true,
     pattern: new RegExp(
-      `\\b(?<!\\b${OPTIONALITY_MODAL}\\s)(?:${GOAL_DIRECTION_VERB_STEMS})(?:e|es|ing|ed)?\\b` +
+      `\\b(?:${GOAL_DIRECTION_VERB_STEMS})(?:e|es|ing|ed)?\\b` +
         `${GOAL_METRIC_PHRASE}` +
         `\\s+from\\s+${amountWithMetricPattern('from')}(?:\\s+${NOW_QUALIFIER})?` +
         `\\s+to\\s+(?:a|an|the)?\\s*(?:(?<goalWord>${GOAL_WORD})\\s*(?:of|is|:)?\\s*)?` +
@@ -1070,6 +1263,21 @@ function* goalPatternMatches(
       );
       continue;
     }
+    // ROADMAP 2.371(b) — the second, independent guard. The anchor asks
+    // whether the sentence NAMES a goal; this asks whether it COMMITS to one.
+    // A lever can carry a horizon ("we could increase the price from £49 to
+    // £59 this year"), so the anchor alone lets it through, and 22 of 25
+    // probed lever phrasings did exactly that at `7bdf30ff`.
+    if (isProposalFramed(text, m.index)) {
+      log.debug(
+        {
+          event: "cee.factor_extraction.goal_pair_proposal_framed",
+          matched: m[0],
+        },
+        "From-to construction skipped: framed as an option under consideration, not a commitment",
+      );
+      continue;
+    }
     yield m;
   }
 }
@@ -1101,6 +1309,38 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
     const from = resolveAmount(groups, "from");
     if (!to || !from) return undefined;
 
+    // A MIXED percent pair is refused, not reconciled (adversarial review, PR
+    // #787). This previously read `to.isPercent || from.isPercent`, which
+    // scaled BOTH sides by 100 whenever EITHER carried a '%': "from 85 to a
+    // target of 95%" wrote baseline 0.85 from a number the user never
+    // expressed as a percentage. The result lands squarely inside ISL's |1.5|
+    // domain guard, and a MAGNITUDE guard is structurally incapable of
+    // catching a UNIT error that lands in range. If the two amounts disagree
+    // about being percentages they are not reliably the same quantity, so no
+    // pair is formed and ISL keeps refusing honestly.
+    //
+    // ⚠ ROADMAP 2.371(d) — THIS NOW RUNS BEFORE THE DIRECTION CHECK, AND THE
+    // ORDER IS THE WHOLE POINT. Comparability is a PRECONDITION of comparison:
+    // a percent target against a non-percent baseline gives `<` two operands
+    // that are not on one scale, so whatever it concludes is arithmetic on
+    // incommensurable numbers. MEASURED at `7bdf30ff`: "Increase annual
+    // retention from 85 today to 95% within 12 months" logged
+    // `direction_unsupported target="0.95" baseline="85"` — 0.95 was never
+    // below 85 in any sense the user expressed, and the reason named the wrong
+    // rule for the wrong reason.
+    //
+    // The refusal itself is unchanged in every observable way but the logged
+    // NAME: both branches return no pair, the same `targetValue` and the same
+    // span, and `GoalPairRefusalReason` has no reader outside this file (whole
+    // -repo manifest taken at `7bdf30ff`: `goal_pair_refused` and every reason
+    // string appear in `src/cee/factor-extraction/index.ts` and nowhere else).
+    // So this is an OBSERVABILITY fix with an empty behavioural delta — which
+    // is exactly why it is safe to make and worth making: a reason that names
+    // the wrong rule teaches the next reader the wrong thing.
+    if (to.isPercent !== from.isPercent) {
+      return refuseGoalPair("mixed_percent_pair", {}, normaliseTargetValue(to), span);
+    }
+
     // ⚠ ROADMAP 2.353 (review A2) — A DECREASE IS REFUSED, NOT MINTED, AND THE
     // REASON IS THE SEAM RATHER THAN THE SENTENCE.
     //
@@ -1127,6 +1367,9 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
     // that is fabrication. Real decrease support is rowed as 2.367 and runs the
     // whole way through the contract and ISL. Equality is deliberately NOT
     // refused — threshold == baseline is a meaningful "hold the line".
+    //
+    // ⚠ ROADMAP 2.371(d) — AND IT RUNS AFTER THE COMPARABILITY CHECK ABOVE, SO
+    // BOTH OPERANDS BELOW ARE ON ONE SCALE BY CONSTRUCTION.
     if (to.raw !== 0 || from.raw !== 0) {
       const target = to.isPercent ? to.raw / 100 : to.raw;
       const level = from.isPercent ? from.raw / 100 : from.raw;
@@ -1138,19 +1381,6 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
           span,
         );
       }
-    }
-
-    // A MIXED percent pair is refused, not reconciled (adversarial review, PR
-    // #787). This previously read `to.isPercent || from.isPercent`, which
-    // scaled BOTH sides by 100 whenever EITHER carried a '%': "from 85 to a
-    // target of 95%" wrote baseline 0.85 from a number the user never
-    // expressed as a percentage. The result lands squarely inside ISL's |1.5|
-    // domain guard, and a MAGNITUDE guard is structurally incapable of
-    // catching a UNIT error that lands in range. If the two amounts disagree
-    // about being percentages they are not reliably the same quantity, so no
-    // pair is formed and ISL keeps refusing honestly.
-    if (to.isPercent !== from.isPercent) {
-      return refuseGoalPair("mixed_percent_pair", {}, normaliseTargetValue(to), span);
     }
 
     // ROADMAP 2.288 — a MIXED CURRENCY pair is refused, not reconciled. This
