@@ -120,8 +120,25 @@
  * · It does not write. Not the graph, not the row, not a turn.
  * · It does not MINT AN IDENTITY SCHEME. `graph_identity_hash` is
  *   `computeGraphIdentityHash` — identity.v1, the single normaliser authority
- *   named by the CAS migration itself — so the UI's rebase detection compares
- *   the same value CEE's own compare-and-swap does.
+ *   named by the CAS migration itself.
+ *
+ *   ⚠ IT IS AN OPAQUE CEE-ISSUED TOKEN. Consumers STORE it and compare it
+ *     CEE-to-CEE, gated on `.projection_version`; they must NEVER recompute it
+ *     locally. There is no client-side way to reproduce this value and no
+ *     promise that there ever will be — the normalisation, the strip list and
+ *     the projection are CEE's, and they are versioned precisely so they can
+ *     move without a consumer noticing.
+ *
+ *   ⚠ AN EARLIER REVISION OF THIS COMMENT CLAIMED "the UI's rebase detection
+ *     compares the same value CEE's own compare-and-swap does". THAT WAS FALSE
+ *     and it was never measured — a claim about ANOTHER REPO'S live path,
+ *     asserted from this side of the seam (CLAUDE.md trap 16). Verified at the
+ *     bytes at UI tip `8d0f3a76` (`rg -a` over the whole repo, excluding
+ *     `.git`): `graph_identity_hash` appears in ZERO files and
+ *     `projection_version` in ZERO files. The UI's #561 detector is a
+ *     VALUE comparison and hashes nothing; no compatible projection exists
+ *     UI-side. The field is new surface for consumers to adopt, not a
+ *     rendezvous with something already there.
  * · It does not carry layout. `scenarios.graph` holds no positions (the UI
  *   merges those locally), and `layout_present` REPORTS that by measuring the
  *   returned bytes rather than promising it in prose.

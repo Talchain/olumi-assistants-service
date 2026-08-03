@@ -33,9 +33,18 @@
  *  4. THE IDENTITY HASH IS THE EXISTING ONE. `computeGraphIdentityHash`
  *     (identity.v1) is the single normaliser authority named by the CAS
  *     migration itself. This route MINTS NO NEW IDENTITY SCHEME — it exposes
- *     the one the write path already uses, so the UI's rebase detection and
- *     CEE's CAS compare the same value. `THE IDENTITY ANCHOR` pins that the
+ *     the one the write path already uses. `THE IDENTITY ANCHOR` pins that the
  *     route's value equals the authority's value on the same bytes.
+ *
+ *     ⚠ THE TOKEN IS OPAQUE TO CONSUMERS. They store it and compare it
+ *       CEE-to-CEE, gated on `.projection_version`, and must NEVER recompute
+ *       it locally. An earlier revision of this comment asserted "the UI's
+ *       rebase detection and CEE's CAS compare the same value" — FALSE, and
+ *       never measured (a claim about another repo's live path made from this
+ *       side of the seam, CLAUDE.md trap 16). At UI tip `8d0f3a76`, `rg -a`
+ *       over the whole repo finds `graph_identity_hash` in ZERO files and
+ *       `projection_version` in ZERO files; the #561 detector compares VALUES
+ *       and hashes nothing.
  *
  *  5. THE RESPONSE CARRIES NO LAYOUT, AND SAYS SO BY MEASUREMENT. `layout_present`
  *     is DERIVED from the bytes actually returned, not hardcoded `false` — a
