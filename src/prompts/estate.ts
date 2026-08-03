@@ -166,10 +166,16 @@ export interface GateDeclaration {
  */
 export const GATED_PMS_TASKS = {
   /** `src/cee/validation-pipeline/validate-graph.ts` -> `callValidateGraph()` */
+  // DEFAULT FLIPPED false → true on 2026-08-03 (ROADMAP 2.146 activation). The
+  // call site is unchanged; what changed is that the capability now ships ON, so
+  // `validate_graph` is LIVE at defaults and its env var is a kill-switch rather
+  // than an enable. It stays in this map — NOT promoted out of it — precisely so
+  // `gate_active` keeps being reported on `/status` and `/inventory`: a task with
+  // a live kill-switch is exactly the thing an operator needs to see the state of.
   validate_graph: {
     env: 'CEE_VALIDATION_PIPELINE_ENABLED',
     isActive: () => config.cee.validationPipelineEnabled === true,
-    defaultsTo: false,
+    defaultsTo: true,
   },
   /** `src/cee/dual-draft/m2-review.ts:108` — registered default is a
    *  fail-closed sentinel (`src/cee/dual-draft/prompt-sentinel.ts`). */
@@ -364,16 +370,40 @@ const ALL_GATE_ENVS: Readonly<Record<string, string>> = Object.freeze(
 );
 
 /**
- * The estate inputs AT DEFAULT GATE STATE — every gate assumed inactive.
+ * The gates that are INACTIVE at their shipped code default — DERIVED from each
+ * declaration's own `defaultsTo`, never assumed.
+ *
+ * ⚠ THIS USED TO BE `ALL_GATE_ENVS`, i.e. "every gate is off at default", and
+ * that assumption drifted the moment one wasn't (`CEE_VALIDATION_PIPELINE_ENABLED`
+ * shipped ON on 2026-08-03, ROADMAP 2.146). The assumption was invisible because
+ * it lived in a variable NAME rather than in a predicate — the same
+ * hand-maintained-mirror shape this whole module was built to remove, one level
+ * up from where it was removed. The gate-defaults suite caught it, loudly and
+ * with the right instruction in its message, which is the mechanism working.
+ *
+ * Deriving it means a future gate that ships ON needs no edit here.
+ */
+const GATE_ENVS_INACTIVE_AT_DEFAULT: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(GATED_PMS_TASKS)
+      .filter(([, g]) => g.defaultsTo === false)
+      .map(([task, g]) => [task, g.env]),
+  ),
+);
+
+/**
+ * The estate inputs AT DEFAULT GATE STATE — each gate at its OWN declared
+ * default (not "all off"; see `GATE_ENVS_INACTIVE_AT_DEFAULT`).
  *
  * This is the COMPILE-TIME anchor: it is what gives `LivePmsTask` its literal
  * union, which is what lets `CRITICAL_PMS_TASKS` be compile-checked as a
- * subset. It is NOT the runtime truth. For that, call `deriveLiveEstate()`.
+ * subset. It is NOT the runtime truth — a deployment can flip any gate either
+ * way. For that, call `deriveLiveEstate()`.
  */
 export const ESTATE_INPUTS: EstateInputs = Object.freeze({
   operationTaskIds: OPERATION_TASK_IDS,
   aliases: PMS_TASK_ALIAS,
-  gated: ALL_GATE_ENVS,
+  gated: GATE_ENVS_INACTIVE_AT_DEFAULT,
   retired: Object.keys(RETIRED_PMS_TASKS),
 });
 

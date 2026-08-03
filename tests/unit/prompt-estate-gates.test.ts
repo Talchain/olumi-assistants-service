@@ -81,85 +81,131 @@ afterEach(() => {
 // 1. The reviewer's constructed case
 // ---------------------------------------------------------------------------
 
-describe('the constructed drift case — both gate flags ON', () => {
-  const BOTH_ON = () => {
-    setEnv('CEE_VALIDATION_PIPELINE_ENABLED', 'true');
-    setEnv('CEE_V6_DUAL_DRAFT_ENABLED', 'true');
-  };
+// ⚠ AMENDED 2026-08-03 (ROADMAP 2.146 activation), AND THE AMENDMENT IS THE
+// INTERESTING PART. `CEE_VALIDATION_PIPELINE_ENABLED` now ships ON, so its gate
+// is a KILL-SWITCH, not an enable. The reviewer's constructed case was
+// "off-by-default gate flipped ON must reclassify to live" — pinning that to
+// `validate_graph` would now be pinning it to a gate that is ALREADY on, i.e.
+// asserting nothing (CLAUDE.md trap 12b: a control pinned to "current" decays
+// into a tautology the first time "current" changes).
+//
+// So the case is split, and BOTH directions are now covered where only one was:
+//   * `m2_graph_review` — still off-by-default, carries the ORIGINAL case
+//     verbatim (OFF → flipped ON → reclassifies live, totals rise);
+//   * `validate_graph` — carries the NEW inverse (ON at default → killed →
+//     reclassifies GATED, totals fall). A default-ON capability whose
+//     kill-switch silently failed to reclassify would be the same defect
+//     wearing the opposite sign, and nothing tested it before today.
+describe('the constructed drift case — an off-by-default gate flipped ON', () => {
+  const M2_ON = () => setEnv('CEE_V6_DUAL_DRAFT_ENABLED', 'true');
 
-  it('reports the gated PMS prompts as LIVE, not gated', () => {
+  it('reports the gated PMS prompt as LIVE, not gated', () => {
     // Baseline first, so this cannot pass by always answering "live".
-    expect(dispositionOf('validate_graph')).toBe('gated');
     expect(dispositionOf('m2_graph_review')).toBe('gated');
 
-    BOTH_ON();
+    M2_ON();
 
     expect(
-      dispositionOf('validate_graph'),
-      'with CEE_VALIDATION_PIPELINE_ENABLED=true this prompt serves on live draft turns',
+      dispositionOf('m2_graph_review'),
+      'with CEE_V6_DUAL_DRAFT_ENABLED=true this prompt serves on live draft turns',
     ).toBe('live');
-    expect(dispositionOf('m2_graph_review')).toBe('live');
   });
 
-  it('moves them into the derived live set', () => {
+  it('moves it into the derived live set', () => {
     const before = deriveLiveEstate().live;
-    expect(before).not.toContain('validate_graph');
     expect(before).not.toContain('m2_graph_review');
 
-    BOTH_ON();
+    M2_ON();
 
     const after = deriveLiveEstate().live;
-    expect(after).toContain('validate_graph');
     expect(after).toContain('m2_graph_review');
-    expect(after.length).toBe(before.length + 2);
+    expect(after.length).toBe(before.length + 1);
   });
 
   it('raises the inventory totals — the number a human reads', async () => {
     const before = await buildPromptEstateInventory();
     expect(before.totals.pms_live).toBe(LIVE_PMS_TASKS_AT_DEFAULT_GATES.length);
-    // DERIVED, not `0`: gates are heterogeneous — every PMS gate defaults off,
-    // but DRAFT_COMPLIANCE_REMINDER's defaults ON. Writing `0` here would have
-    // been a small mirror of exactly the kind this suite exists to kill (and
-    // it duly went red on the first run).
+    // DERIVED, not a literal: gates are heterogeneous — `m2_graph_review`
+    // defaults off, `validate_graph` and DRAFT_COMPLIANCE_REMINDER default ON.
+    // Writing a number here would have been a small mirror of exactly the kind
+    // this suite exists to kill (and it duly went red on the first run).
     expect(before.totals.gated_active).toBe(
       allGateDeclarations().filter((g) => g.gate.defaultsTo).length,
     );
 
-    BOTH_ON();
+    M2_ON();
 
     const after = await buildPromptEstateInventory();
     expect(
       after.totals.pms_live,
       'the endpoint claims to MEASURE rather than record; gate state is the fact it used to record',
-    ).toBe(before.totals.pms_live + 2);
-    expect(after.totals.live_llm_call_prompts).toBe(before.totals.live_llm_call_prompts + 2);
-    expect(after.totals.gated_active).toBeGreaterThanOrEqual(2);
-    expect(after.totals.gated_inactive).toBe(before.totals.gated_inactive - 2);
+    ).toBe(before.totals.pms_live + 1);
+    expect(after.totals.live_llm_call_prompts).toBe(before.totals.live_llm_call_prompts + 1);
+    expect(after.totals.gated_active).toBe(before.totals.gated_active + 1);
+    expect(after.totals.gated_inactive).toBe(before.totals.gated_inactive - 1);
   });
 
   it('flips gate_active on the per-row status', async () => {
     const before = await buildPromptEstateInventory();
-    const vBefore = before.pms.find((p) => p.key === 'validate_graph')!;
-    expect(vBefore.gate).toBe('CEE_VALIDATION_PIPELINE_ENABLED');
-    expect(vBefore.gate_active).toBe(false);
-    expect(vBefore.disposition).toBe('gated');
+    const mBefore = before.pms.find((p) => p.key === 'm2_graph_review')!;
+    expect(mBefore.gate).toBe('CEE_V6_DUAL_DRAFT_ENABLED');
+    expect(mBefore.gate_active).toBe(false);
+    expect(mBefore.disposition).toBe('gated');
 
-    BOTH_ON();
+    M2_ON();
 
     const after = await buildPromptEstateInventory();
-    const vAfter = after.pms.find((p) => p.key === 'validate_graph')!;
-    expect(vAfter.gate_active).toBe(true);
-    expect(vAfter.disposition).toBe('live');
+    const mAfter = after.pms.find((p) => p.key === 'm2_graph_review')!;
+    expect(mAfter.gate_active).toBe(true);
+    expect(mAfter.disposition).toBe('live');
+  });
+});
+
+describe('the INVERSE case — an on-by-default capability killed (ROADMAP 2.146)', () => {
+  const VALIDATION_OFF = () => setEnv('CEE_VALIDATION_PIPELINE_ENABLED', 'false');
+
+  it('validate_graph is LIVE at defaults, and the kill-switch reclassifies it to GATED', () => {
+    // Baseline first, so this cannot pass by always answering "gated".
+    expect(
+      dispositionOf('validate_graph'),
+      'CEE_VALIDATION_PIPELINE_ENABLED ships ON since 2026-08-03 — this prompt serves by default',
+    ).toBe('live');
+
+    VALIDATION_OFF();
+
+    expect(dispositionOf('validate_graph')).toBe('gated');
   });
 
-  it('keeps the gated prompts REPORTED either way (the invariant that held)', async () => {
+  it('removes it from the derived live set and lowers the totals', async () => {
+    const before = await buildPromptEstateInventory();
+    expect(deriveLiveEstate().live).toContain('validate_graph');
+
+    VALIDATION_OFF();
+
+    const after = await buildPromptEstateInventory();
+    expect(deriveLiveEstate().live).not.toContain('validate_graph');
+    expect(after.totals.pms_live).toBe(before.totals.pms_live - 1);
+    expect(after.totals.gated_active).toBe(before.totals.gated_active - 1);
+    expect(after.pms.find((p) => p.key === 'validate_graph')!.gate_active).toBe(false);
+  });
+
+  it('keeps the gated prompts REPORTED in EVERY gate state (the invariant that held)', async () => {
     // This is what the original design got right and must not regress: a gate
     // flip could never serve an UNMONITORED prompt. Only the label was wrong.
+    // Now swept across all four combinations rather than one, because with one
+    // gate default-ON and one default-OFF, "either way" is no longer one axis.
     expect(REPORTED_PMS_TASKS as readonly string[]).toContain('validate_graph');
-    BOTH_ON();
-    const inv = await buildPromptEstateInventory();
-    expect(inv.pms.map((p) => p.key)).toContain('validate_graph');
-    expect(inv.pms.map((p) => p.key)).toContain('m2_graph_review');
+    expect(REPORTED_PMS_TASKS as readonly string[]).toContain('m2_graph_review');
+    for (const validation of ['true', 'false']) {
+      for (const dualDraft of ['true', 'false']) {
+        setEnv('CEE_VALIDATION_PIPELINE_ENABLED', validation);
+        setEnv('CEE_V6_DUAL_DRAFT_ENABLED', dualDraft);
+        const inv = await buildPromptEstateInventory();
+        const keys = inv.pms.map((p) => p.key);
+        expect(keys, `validation=${validation} dualDraft=${dualDraft}`).toContain('validate_graph');
+        expect(keys, `validation=${validation} dualDraft=${dualDraft}`).toContain('m2_graph_review');
+      }
+    }
   });
 });
 
@@ -218,16 +264,37 @@ describe('gate defaults are asserted by measurement', () => {
     }
   });
 
-  it('every PMS gate defaults OFF (a default flip must reclassify loudly)', () => {
+  // ⚠ THIS ASSERTION WAS 'every PMS gate defaults OFF' UNTIL 2026-08-03, AND IT
+  // WAS A HIDDEN MIRROR. It read as a safety property but was really a census of
+  // which gates happened to exist — and it went RED, correctly, the moment
+  // `CEE_VALIDATION_PIPELINE_ENABLED` shipped ON (ROADMAP 2.146). The real
+  // property, which is what it was reaching for, is the one below: whatever a
+  // gate DECLARES it defaults to, the reported classification must AGREE at the
+  // shipped default. A capability that ships ON is then legitimate, and a
+  // capability that ships ON while still being labelled `gated` is caught.
+  it("every PMS gate's reported state agrees with its DECLARED default", () => {
     vi.unstubAllEnvs();
     _resetConfigCache();
     for (const [task, gate] of Object.entries(GATED_PMS_TASKS)) {
       expect(
-        gate.defaultsTo,
-        `'${task}' is classified GATED, which asserts its call site does not run by default`,
-      ).toBe(false);
-      expect(gateActiveOf(task)).toBe(false);
+        gateActiveOf(task),
+        `'${task}' declares defaultsTo=${gate.defaultsTo}, but the reported gate state disagrees ` +
+          'at the shipped default — the label and the code have drifted apart',
+      ).toBe(gate.defaultsTo);
+      expect(
+        dispositionOf(task),
+        `'${task}' defaults ${gate.defaultsTo ? 'ON' : 'OFF'}, so its disposition must say so`,
+      ).toBe(gate.defaultsTo ? 'live' : 'gated');
     }
+  });
+
+  it('POSITIVE CONTROL: the gate set spans BOTH defaults (neither branch above is vacuous)', () => {
+    // Without this, the assertion above could pass over a set that is uniformly
+    // one way and never exercise the other branch — which is exactly how the
+    // 'every PMS gate defaults OFF' version stayed green while meaning nothing.
+    const defaults = Object.values(GATED_PMS_TASKS).map((g) => g.defaultsTo);
+    expect(defaults).toContain(true);
+    expect(defaults).toContain(false);
   });
 
   it('a code constant whose gate defaults ON counts as live (DRAFT_COMPLIANCE_REMINDER)', () => {
@@ -241,10 +308,23 @@ describe('gate defaults are asserted by measurement', () => {
     expect(isCodeConstantLiveNow(p)).toBe(false);
   });
 
-  it('activeGateTasks() is empty at defaults and non-empty when flipped', () => {
-    expect(activeGateTasks()).toEqual([]);
-    setEnv('CEE_VALIDATION_PIPELINE_ENABLED', 'true');
-    expect(activeGateTasks()).toEqual(['validate_graph']);
+  it('activeGateTasks() at defaults is exactly the DERIVED default-ON set, and moves both ways', () => {
+    // DERIVED from the declarations, not a literal list — the literal `[]` this
+    // replaces was true only while every gate defaulted off, and became false
+    // on 2026-08-03 without anything about the mechanism changing.
+    const defaultOn = Object.entries(GATED_PMS_TASKS)
+      .filter(([, g]) => g.defaultsTo)
+      .map(([task]) => task)
+      .sort();
+    expect(activeGateTasks().sort()).toEqual(defaultOn);
+
+    // UP: flipping an off-by-default gate ON adds exactly it.
+    setEnv('CEE_V6_DUAL_DRAFT_ENABLED', 'true');
+    expect(activeGateTasks().sort()).toEqual([...defaultOn, 'm2_graph_review'].sort());
+
+    // DOWN: killing an on-by-default gate removes exactly it.
+    setEnv('CEE_VALIDATION_PIPELINE_ENABLED', 'false');
+    expect(activeGateTasks().sort()).toEqual(['m2_graph_review']);
   });
 });
 
@@ -301,8 +381,11 @@ describe('gated code constants', () => {
     // accident of which gates exist today.
     const declared = new Map(allGateDeclarations().map((g) => [g.gate.env, g.gate.defaultsTo]));
     for (const g of inv.gates) expect(g.active, `gate ${g.env}`).toBe(declared.get(g.env));
-    setEnv('CEE_VALIDATION_PIPELINE_ENABLED', 'true');
+    // Flip AWAY from the shipped default so the second read is a real change.
+    // Setting it to `true` — which it already is since 2026-08-03 — would have
+    // asserted nothing at all.
+    setEnv('CEE_VALIDATION_PIPELINE_ENABLED', 'false');
     const after = await buildPromptEstateInventory();
-    expect(after.gates.find((g) => g.owner === 'validate_graph')!.active).toBe(true);
+    expect(after.gates.find((g) => g.owner === 'validate_graph')!.active).toBe(false);
   });
 });

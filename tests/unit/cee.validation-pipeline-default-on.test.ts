@@ -162,4 +162,46 @@ describe("ROADMAP 2.146 — Pass 2 runs on the SHIPPED default (no env var prese
     expect(edge, "edge e1 missing from the packaged graph").toBeDefined();
     expect(edge[VALIDATION_EDGE_METADATA_KEY]).toStrictEqual(fakeMetadata);
   });
+
+  /**
+   * THE DEGRADATION WARNING CARRIES A STABLE CLASS, NOT THE RAW MESSAGE.
+   *
+   * Found by the activation, not by design review: Pass 2's own error text
+   * embeds the request id, so with the pipeline dark this was a per-request
+   * value sitting unnoticed on the response payload, and with it ON it broke the
+   * staged-SSE↔buffered equivalence pin outright (that suite's volatility
+   * derivation refuses to treat a structural `_pipeline_outcome.*` path as
+   * ignorable, so it red rather than going hollow — the alarm was right).
+   */
+  it("a degraded Pass 2 puts the CLASSIFICATION on the payload, with no per-request id", async () => {
+    const raw =
+      "cee.validation_pipeline.parse_error: Pass 2 response missing 'edges' array " +
+      "(request_id=aad05a8f-7310-47fd-b234-db87d0085b7e)";
+    (runValidationPipeline as any).mockImplementation(async () => {
+      throw new Error(raw);
+    });
+
+    await runUnifiedPipeline(baseInput as any, {}, mockRequest, { schemaVersion: "v3" } as any);
+
+    expect(packageCtx, "Stage 5 never ran").toBeDefined();
+    const outcome = packageCtx.pipelineOutcome;
+    expect(outcome.validation_status).toBe("failed_degraded");
+
+    // Bound by IDENTITY: the warning is found by its own `stage`, not by "the
+    // first warning" — other stages push warnings onto the same array.
+    const warning = outcome.warnings.find((w: any) => w.stage === "validation_pipeline");
+    expect(warning, "no validation_pipeline warning was recorded").toBeDefined();
+    expect(warning.degraded).toBe(true);
+
+    // The stable class that `classifyValidationFailure` derives — the exact
+    // vocabulary the budget design reasons in.
+    expect(warning.error).toBe("parse_error");
+
+    // And the load-bearing negative, stated as its own assertion so a future
+    // edit that reinstates the message cannot pass by coincidence: no uuid, and
+    // none of the raw text.
+    expect(warning.error).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    expect(warning.error).not.toContain("request_id");
+    expect(warning.error).not.toContain("missing 'edges' array");
+  });
 });
