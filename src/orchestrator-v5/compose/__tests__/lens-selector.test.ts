@@ -598,25 +598,42 @@ describe('selectLens — never suggests a lens whose executor is absent', () => 
 // Wave-3 λ — the what-if SUGGESTION enable-gate (ROADMAP 1.195) is fail-closed
 // ============================================================================
 
-describe('what-if suggestion enable-gate (ROADMAP 1.195) — cannot fire while any item is unmet', () => {
-  it('ships CLOSED — items 2/3/4 (ISL fidelity probe / owner-placement / target-semantics) are not cleared', () => {
-    expect(WHATIF_SUGGESTION_GATE_CLEARED).toBe(false);
+// ⚠ THIS SUITE INVERTED ON 2026-08-03 (L44 activation lane). It previously
+// asserted the gate ships CLOSED. `WHATIF_SUGGESTION_GATE_CLEARED` is now `true`
+// — see the constant's own comment for why a NUMBER-FREE offer is not what
+// ROADMAP 1.195 items 2/3/4 protect, and `whatif-lens-activation.test.ts` for the
+// behavioural witness that the capability fires. What survives unchanged, and is
+// the point of keeping this suite rather than deleting it: the TRANSPORT leg is
+// still ANDed, so the helper is still fail-closed on an unmet item.
+describe('what-if suggestion enable-gate (ROADMAP 1.195) — cleared, and still fail-closed on transport', () => {
+  it('the enable-gate constant is CLEARED (2026-08-03)', () => {
+    expect(WHATIF_SUGGESTION_GATE_CLEARED).toBe(true);
   });
 
-  it('is unavailable even when the ISL transport (item 1) IS configured — the gate blocks it', () => {
-    // Item 1 met (ISL_BASE_URL set / client non-null), but items 2/3/4 (the
-    // constant) are not → fail-closed. This is the load-bearing gate proof: on
-    // staging the transport IS up, yet the suggestion must stay dark.
-    expect(whatIfSuggestionExecutorAvailable(true)).toBe(false);
-    // Transport down too → also false (fail-closed on BOTH legs — ANY unmet item).
+  it('is available when the ISL transport (item 1) IS configured, and NOT otherwise', () => {
+    // Item 1 met (ISL_BASE_URL set / client non-null) ⇒ available.
+    expect(whatIfSuggestionExecutorAvailable(true)).toBe(true);
+    // Transport down ⇒ still false. The AND is intact: activating the constant
+    // did NOT collapse the helper into an unconditional true, and this is the
+    // assertion that would catch that.
     expect(whatIfSuggestionExecutorAvailable(false)).toBe(false);
   });
 
-  it('the selector never suggests what-if under the shipped gate, end-to-end', () => {
+  it('the selector suggests what-if end-to-end through the REAL gate helper with the transport up', () => {
     // A fact whose only candidate is what-if (rank-1 driver, no core trigger),
-    // wired through the REAL gate helper with the transport up: still nothing.
+    // wired through the REAL gate helper rather than a literal.
     const fact = makeFact(HEALTHY);
     const available = whatIfSuggestionExecutorAvailable(/* islTransportConfigured */ true);
-    expect(selectLens(fact, { executorAvailable: { what_if_counterfactual: available } })).toBeNull();
+    const selection = selectLens(fact, { executorAvailable: { what_if_counterfactual: available } });
+    expect(selection?.lens).toBe('what_if_counterfactual');
+    expect(selection?.rationaleCode).toBe('WHATIF_EXPLORE_DRIVER');
+  });
+
+  it('and stays dark end-to-end when the transport is absent', () => {
+    const fact = makeFact(HEALTHY);
+    const unavailable = whatIfSuggestionExecutorAvailable(/* islTransportConfigured */ false);
+    expect(
+      selectLens(fact, { executorAvailable: { what_if_counterfactual: unavailable } }),
+    ).toBeNull();
   });
 });

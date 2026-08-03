@@ -1280,11 +1280,12 @@ export function buildLensSuggestionCoachingBlock(
 
 /**
  * Wave-3 λ (ROADMAP 1.203): the what-if lens's executor availability —
- * the ROADMAP 1.195 enable-gate (items 2/3/4, a fail-closed code constant,
- * currently CLOSED) AND the ISL transport being configured (item 1:
- * `config.isl.baseUrl` set ≡ `createCounterfactualClient() !== null`). While the
- * gate ships closed this is always `false` regardless of transport, so the
- * proactive what-if suggestion CANNOT fire.
+ * the ROADMAP 1.195 enable-gate (a code constant, CLEARED 2026-08-03 — see
+ * `lens-selector.ts::WHATIF_SUGGESTION_GATE_CLEARED` for the derivation of why a
+ * number-free offer is not what items 2/3/4 protect) AND the ISL transport being
+ * configured (item 1: `config.isl.baseUrl` set ≡ `createCounterfactualClient() !== null`).
+ * The transport leg is now the LIVE one: with `ISL_BASE_URL` unset this is still
+ * `false` and the proactive what-if suggestion cannot fire.
  *
  * EXPORTED and shared (ROADMAP 2.211) because there are now THREE `selectLens`
  * call sites for one turn — the suggestion block, the `focus` ui_directive, and
@@ -1455,8 +1456,17 @@ export function buildLensSurface(
  *                           build-lane edit. (The EVPI lens's evidence is already
  *                           surfaced first-class by the EvidenceBlocks.)
  *
- *   what_if_counterfactual→ nothing: the lens itself is fail-closed
- *                           (WHATIF_SUGGESTION_GATE_CLEARED === false).
+ *   what_if_counterfactual→ nothing, and this is now LOAD-BEARING rather than
+ *                           incidental. Before 2026-08-03 the lens could not
+ *                           fire at all (WHATIF_SUGGESTION_GATE_CLEARED === false),
+ *                           so "no companion" cost nothing. The gate is now
+ *                           cleared and the empty return is what keeps the
+ *                           activated suggestion NUMBER-FREE: adding a companion
+ *                           here would put an executed counterfactual's values in
+ *                           front of a user while ROADMAP 1.195 items 2/3/4 (ISL
+ *                           model-fidelity probe · owner-placement ·
+ *                           target-semantics) are still open. Do not "finish the
+ *                           set" until those close.
  *
  * ── WITHHELD-VERDICT DISCIPLINE ────────────────────────────────────────────
  * Companions are appended by `rebuildPhase3BlocksFresh` on the PERMITTED arm

@@ -94,6 +94,7 @@
 | `CEE_CLARIFICATION_ENFORCED` | `false` | assist.v1.draft-graph.ts, assist.v1.draft-graph-stream.ts, unified-pipeline/stages/package.ts | Commented | |
 | `CEE_CLARIFIER_ENABLED` | — | (removed) | No | INERT since 2026-07-16 — Stage-4 clarifier retired (ROADMAP 1.94 Option A); safe to delete from deployment dashboards (now listed in `DEAD_ENV_VARS` alongside the other `CEE_CLARIFIER_*` settings) |
 | `CEE_ORCHESTRATOR_VALIDATION_ENABLED` | `false` | unified-pipeline/stages/repair/orchestrator-validation.ts, assist.draft-graph.ts | No | |
+| `CEE_VALIDATION_PIPELINE_ENABLED` | **`true`** | unified-pipeline/index.ts, prompts/estate.ts | No | **DEFAULT FLIPPED false → true 2026-08-03** (ROADMAP 2.146, contested edges). The two-pass parameter-validation capability was live-proven on 30 Jul (n=5, 0/5 degraded, 47.4% neutral-baseline contested rate) but turned on by SETTING THE RENDER VARIABLE — the code default stayed `false`, so it was dark anywhere the var was absent. Now shipped ON; the env var remains a kill-switch and still wins (pinned in `tests/unit/config.activation-defaults.test.ts`). Cost ~2–7¢/draft; latency hides behind the coaching pass (#758); failure path is `failed_degraded`, never a blocked draft. Rollback = code revert. |
 
 ## CEE Bias & Review
 
@@ -158,7 +159,7 @@
 | `VALIDATION_CACHE_ENABLED` | `false` | services/validateClientWithCache.ts | No | |
 | `PERF_METRICS_ENABLED` | `true` | plugins/performance-monitoring.ts | No | |
 | `SHARE_STORAGE_INMEMORY` | `false` | utils/share-storage.ts | No | |
-| `RESEARCH_ENABLED` | `false` | ⚠ **NOTHING — no reader** | No | `orchestrator/tools/research-topic.ts` was **deleted 2026-07-22 in `f957d6d8`**. The `config.research` block in `config/index.ts` survives as a **spec for the rebuild**, not as live config. Was live-set `true` on cee-staging against no reader; **removed from the Render dashboard 2026-07-25**, along with `RESEARCH_MODEL`. See `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` (programme docs, sibling dir — untracked) §2.1. |
+| ~~`RESEARCH_ENABLED`~~ | — | ⛔ **DELETED 2026-08-03** | No | The whole `RESEARCH_*` family (`_ENABLED`, `_MODEL`, `_WEB_SEARCH_TOOL_TYPE`, `_RATE_LIMIT`, `_RATE_LIMIT_WINDOW_MS`, `_CACHE_TTL_MS`, `_CACHE_MAX_SIZE`, `_TIMEOUT_MS`) is now in `DEAD_ENV_VARS` — setting any of them is REPORTED by `checkDeadEnvVars()`, not silently parsed. The reader (`orchestrator/tools/research-topic.ts`) went on 2026-07-22 in `f957d6d8`; the `config.research` block outlived it as "a spec for the rebuild" with **zero executable readers** (re-derived at `210c0ff`: one `\.research\b` hit in the tree, and it was the comment telling you to run that grep) and was removed. `RESEARCH_ENABLED=true` had been live-set on cee-staging against nothing; the vars left the Render dashboard 2026-07-25. Rebuild design: `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` §2.1; implementation recoverable at `f957d6d8^`. Reintroduce config only WITH a call site. |
 
 ---
 

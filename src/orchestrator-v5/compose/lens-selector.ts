@@ -333,28 +333,52 @@ function isLensExecutorAvailable(lens: LensId, options?: LensSelectorOptions): b
 }
 
 /**
- * The ROADMAP 1.195 four-item enable-gate for the what-if counterfactual
- * SUGGESTION, expressed as a fail-closed code constant (the no-env-gates
- * doctrine — activation is a reviewed code change, never a runtime bit).
- * Items 2/3/4 — the live ISL model-fidelity probe (A3), the owner-placement
- * ruling (CEE-2nd-interpreter vs PLoT proxy), and the target-semantics
- * confirmation (cap/baseline, not the flip tipping_point) — are programme
- * decisions that are NOT cleared, so this ships `false`. Item 1 (transport:
- * `ISL_BASE_URL` set / `createCounterfactualClient() !== null`) is ANDed in
- * separately at the call site via {@link whatIfSuggestionExecutorAvailable}.
- * While this is `false`, the selector can NEVER suggest the what-if lens,
- * however the transport is configured. Enabling it is a Paul/A1-gated code
- * change once all four items clear; rollback = revert.
+ * The ROADMAP 1.195 enable-gate for the what-if counterfactual SUGGESTION,
+ * expressed as a code constant (the no-env-gates doctrine — activation is a
+ * reviewed code change, never a runtime bit).
+ *
+ * ── CLEARED 2026-08-03 (L44 activation lane), AND THE ARGUMENT MATTERS ──────
+ * This shipped `false` pending items 2/3/4 — the live ISL model-fidelity probe,
+ * the owner-placement ruling (CEE-2nd-interpreter vs PLoT proxy) and the
+ * target-semantics confirmation (cap/baseline, not the flip `tipping_point`).
+ * All three are claims about the NUMBER an EXECUTED counterfactual returns.
+ * This constant does not gate an execution. It gates whether the coach ever
+ * OFFERS the lens, and the offer was derived at the bytes to be number-free:
+ *
+ *   - the suggestion is a prose-only `coaching` block with `target_refs: []`
+ *     (`phase3-blocks.ts::buildLensSurface`), rendered from the fixed
+ *     {@link TITLE_BY_LENS} / {@link BODY_BY_RATIONALE} pair — prose-guard-clean
+ *     by test, so no factor id, cap, baseline, tipping point or decimal can ride;
+ *   - its structured companion set is EMPTY BY CONSTRUCTION:
+ *     `buildLensCompanionBlocks` returns `[]` for `what_if_counterfactual`;
+ *   - {@link evaluateWhatIfCounterfactual} is a pure read of the already-computed
+ *     influence ranking — clearing this issues no ISL call.
+ *
+ * The what-if EXECUTOR (explicit `what_would_flip`) has been live and ungated on
+ * staging since #659, so the capability the offer points at is one the user can
+ * already reach. Items 2/3/4 therefore remain OPEN and remain binding on the
+ * EXECUTED-number surfaces (ROADMAP 1.350 M2/M3) — they are not closed by this
+ * change, and nothing here should be read as closing them.
+ *
+ * Item 1 (transport: `ISL_BASE_URL` set / `createCounterfactualClient() !== null`)
+ * is STILL ANDed in separately at the call site via
+ * {@link whatIfSuggestionExecutorAvailable} — the fail-closed leg is intact, and
+ * a test asserts it (activating this did not make the gate unconditional).
+ *
+ * Blast radius is bounded by position: `what_if_counterfactual` is LAST on the
+ * priority ladder in {@link selectLens}, so it can only occupy a slot no other
+ * lens claimed. Rollback = revert this constant.
  */
-export const WHATIF_SUGGESTION_GATE_CLEARED = false;
+export const WHATIF_SUGGESTION_GATE_CLEARED = true;
 
 /**
  * Whether the what-if counterfactual SUGGESTION may be offered: the ROADMAP 1.195
- * enable-gate (items 2/3/4, {@link WHATIF_SUGGESTION_GATE_CLEARED}) AND the ISL
- * transport being configured (item 1, `createCounterfactualClient() !== null`,
- * passed as `islTransportConfigured`). Fail-closed: ANY unmet item ⇒ `false`.
- * Pure + directly testable so the gate is a mutation witness (flip the constant
- * or drop the transport ⇒ this returns `false`).
+ * enable-gate ({@link WHATIF_SUGGESTION_GATE_CLEARED}, cleared 2026-08-03) AND the
+ * ISL transport being configured (item 1, `createCounterfactualClient() !== null`,
+ * passed as `islTransportConfigured`). Fail-closed: ANY unmet item ⇒ `false` —
+ * with the constant cleared the TRANSPORT leg is now the live one, and it is
+ * still ANDed, not folded away. Pure + directly testable so the gate is a
+ * mutation witness (revert the constant or drop the transport ⇒ `false`).
  */
 export function whatIfSuggestionExecutorAvailable(islTransportConfigured: boolean): boolean {
   return WHATIF_SUGGESTION_GATE_CLEARED && islTransportConfigured;
