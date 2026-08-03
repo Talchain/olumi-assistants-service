@@ -604,6 +604,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
         V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
         V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
+        V5ConfigureOptionClarifyIntercept:
+          "v5.edit_graph.configure_option_clarify_intercept",
         V5EditGraphConfigureOptionLabelsLoaded:
           "v5.edit_graph.configure_option_labels_loaded",
         V5EditGraphStructuralRestructureRouted:
@@ -1388,6 +1390,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ROADMAP 2.11 / P0-2 — deterministic configure-option routing gate.
         // Diagnostic-only, same posture as its route-suppressor siblings.
         TelemetryEvents.V5EditGraphConfigureOptionRouted,
+        // L16 / N16 — the bare-configure deterministic remedy intercept.
+        // Diagnostic-only, same posture as its configure-option sibling.
+        TelemetryEvents.V5ConfigureOptionClarifyIntercept,
         // Structural-restructure routing gate (LATENCY-RECAPTURE finding 3).
         // Diagnostic-only, same posture as its configure-option sibling.
         TelemetryEvents.V5EditGraphStructuralRestructureRouted,

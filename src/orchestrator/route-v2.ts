@@ -216,6 +216,9 @@ import {
   tryPostAnalysisLabelIntercept,
 } from '../orchestrator-v5/routing/post-analysis-label-intercept.js';
 import { tryVagueEditGuard } from '../orchestrator-v5/routing/vague-edit-guard.js';
+// L16 / N16 — deterministic remedy for a bare configure-option turn.
+import { tryConfigureOptionClarify } from '../orchestrator-v5/routing/configure-option-clarify.js';
+import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
 import {
   isProcessMetaIntake,
   composeProcessMetaIntakeResponse,
@@ -4113,6 +4116,92 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         turnId: ingress.turn_id,
       userMessage: ingress.message,
       });
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // ⭐ L16 / walk finding N16 — BARE configure-option is a first-class
+    // typed action, not a prompt for the edit LLM to guess at.
+    //
+    // "Configure {option}" and the configure chip's own message name NO factor
+    // and NO value. They route here correctly (2.11 / 2.308), and then the
+    // edit LLM has nothing to write, so it invents an operation. On the 3 Aug
+    // walk the invention did not survive canonicalisation: 200 /
+    // `OPERATION_DID_NOT_LAND` / "I wasn't able to make that change safely."
+    // — the product unable to execute the chip it had just offered, on the
+    // turn immediately after a successful add-option.
+    //
+    // Everything the user is missing is derivable server-side, so answer it
+    // deterministically: the blocked option by name, the factor it is linked
+    // to by name, and the one phrasing proven to reach the honest writer
+    // (`buildConfigureOptionAdvisedFormat` = probe P1). No LLM call, no
+    // invented value, no new vocabulary.
+    //
+    // Placed AFTER the Stage-4A intercepts (so chip-simplify / label / vague
+    // keep precedence) and BEFORE the edit dispatch. `configureOptionIntent`
+    // already carries the shared negative gates (meta-question, analytical,
+    // state-query); `bypassEditHandling` keeps confirmations and state
+    // queries out, exactly as its siblings above do.
+    //
+    // Strictly additive: `tryConfigureOptionClarify` declines — and the
+    // pre-existing route runs untouched — unless it can name a concrete next
+    // step. In particular a configure message that DOES carry a factor and a
+    // value (walk remedy #5, the path that worked) is declined on
+    // `value_payload_present` and goes to the edit lane as before.
+    if (configureOptionIntent && !bypassEditHandling) {
+      let persistedForClarify: unknown = null;
+      try {
+        // Memoised: the configure label anchor above already paid for this
+        // read on most of these turns, and the edit-lane reload below shares
+        // the same memo — so the remedy costs no extra round-trip.
+        persistedForClarify = await loadPersistedGraphOnce();
+      } catch {
+        // A labels/graph read must never fail a turn that would otherwise
+        // succeed (same policy as `resolveConfigureOptionIntent`). Declining
+        // here just leaves the pre-existing route in charge.
+        persistedForClarify = null;
+      }
+      const configureClarify = tryConfigureOptionClarify({
+        message: ingress.message,
+        detection: configureOptionDetection,
+        graph: persistedForClarify,
+      });
+      if (configureClarify.matched) {
+        emit(TelemetryEvents.V5ConfigureOptionClarifyIntercept, {
+          request_id: requestId,
+          scenario_id: ingress.scenario_id,
+          trigger: configureOptionDetection.trigger,
+          option_source: configureClarify.optionSource,
+          factor_count: configureClarify.factorLabels.length,
+        });
+        const response = composeConfigureOptionClarifyResponse({
+          optionLabel: configureClarify.optionLabel,
+          factorLabels: configureClarify.factorLabels,
+          stage: ingress.stage,
+        });
+        return sendFinalised200(reply, requestId, 'edit_graph', response, {
+          // ⭐ GATE-REASON INTEGRITY. On the walk, the turns that took the
+          // edit-lane non-apply path were the ONLY ones of seven to ship no
+          // `analysis_ready`, and they are exactly the turns on which the run
+          // gate's copy degraded from the specific reason ("'Launch Customer
+          // Retention Programme' has no effect values yet") to the generic
+          // one. Readiness is derived from the UNCHANGED persisted graph, so
+          // it is current truth, not a guess — and the remedy turn is not the
+          // turn the user loses their specific blocker.
+          analysisReady: configureClarify.readiness,
+          graph: null,
+          // T1 claim safety — INHERITED from the turn-entry read. Never a literal:
+          // the permission belongs to the fact this response DISPLAYS, not to
+          // whether this turn ran an analysis. See turn-claim-safety.ts.
+          ...(await claimSafety.forExit()),
+          // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: edit_graph intercept
+          // copy is functional and must ship plain.
+          answerKind: 'functional',
+          requestStartedAt: routeStartedAt,
+          scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id,
+          userMessage: ingress.message,
+        });
+      }
     }
 
     // Predicates, state-query suppression, and the proposal-confirmation

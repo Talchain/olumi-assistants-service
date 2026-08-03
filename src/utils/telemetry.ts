@@ -1829,6 +1829,17 @@ export const TelemetryEvents = {
   // ('chip_prefix' | 'configure_vocab' | 'intervention_vocab').
   V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
 
+  // L16 / walk finding N16 — a BARE configure-option turn ("Configure
+  // {option}", the configure chip's own message) was answered by the
+  // deterministic remedy instead of being sent to the edit LLM with nothing
+  // writable in it. On staging `9a0541b` that turn returned
+  // OPERATION_DID_NOT_LAND behind "I wasn't able to make that change safely."
+  // — the product unable to execute its own chip. This counter is the live
+  // meter for how often the remedy fires and how the option was identified.
+  // Payload: request_id, scenario_id, trigger, option_source
+  // ('named_in_message' | 'sole_unconfigured'), factor_count.
+  V5ConfigureOptionClarifyIntercept: "v5.edit_graph.configure_option_clarify_intercept",
+
   // ROADMAP 2.308 / S1 — the configure-option gate ATTEMPTED a persisted-graph
   // read for its option-label anchor. Until 2.308 the labels came only from
   // `extensions.graphState`, which the UI never sends, so the label anchor
