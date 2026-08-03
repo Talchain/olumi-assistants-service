@@ -165,6 +165,61 @@ const HYPOTHETICAL_PATTERNS: readonly RegExp[] = [
   /\bscenario\b/i,
 ];
 
+/**
+ * ⭐ ROADMAP 2.389a — EDGE-PHRASING NEGATIVE GATE, part 1 of 2.
+ *
+ * A noun that names a RELATIONSHIP rather than a quantity. Word-bounded, so a
+ * factor labelled "Linkage" or "Connectivity" is untouched.
+ *
+ * `strength` is deliberately ABSENT: a factor can legitimately be called
+ * "Brand Strength", and this list is one half of a conjunction — widening it
+ * with a word that appears in real factor labels would put the fast path at
+ * risk for no gain, since every measured edge sentence carries one of the
+ * nouns below anyway.
+ */
+const RELATIONSHIP_NOUN_PATTERN =
+  /\b(?:link|links|edge|edges|relationship|relationships|connection|connections|arrow|arrows|dependency|dependencies|influence|influences)\b/i;
+
+/**
+ * ⭐ EDGE-PHRASING NEGATIVE GATE, part 2 of 2 — the TWO-ENDPOINT shape.
+ *
+ * A connective (`to` / `and` / `on` / `between`) whose right-hand side opens
+ * with a WORD rather than a number, i.e. a second ENDPOINT rather than the
+ * value being set. This is what separates
+ *
+ *     "Make the link from Ad-Supported Model TO AD REVENUE 2"   ← two endpoints
+ *     "Set Broadband Connection Cost TO 40"                     ← one, then a value
+ *
+ * even though both carry a relationship noun. The negative lookahead spans an
+ * optional currency symbol so "to £6 million" reads as a value, not a label.
+ *
+ * ⚠ THIS IS A CONJUNCT, NEVER A GATE ON ITS OWN. `\bto\s+<word>` matches an
+ * enormous share of ordinary English ("Set the budget to about £300k"); it is
+ * only safe paired with the relationship noun above.
+ */
+const EDGE_ENDPOINT_JOIN_PATTERN = new RegExp(
+  String.raw`\b(?:to|and|on|between)\s+(?:the\s+)?(?!(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)?\s*\d)[a-z]`,
+  'i',
+);
+
+/**
+ * Does this sentence describe an EDGE between two named endpoints?
+ *
+ * Exported for the gate's own tests. A conjunction, not a phrase list: both
+ * the relationship noun AND the two-endpoint join must be present, which is
+ * what keeps ordinary factor updates on the deterministic fast path (see the
+ * preservation corpus in
+ * `__tests__/deterministic-value-update-edge-phrasing.test.ts`, drawn from
+ * this module's own existing tests).
+ */
+export function impliesEdgePhrasing(message: string): boolean {
+  return (
+    RELATIONSHIP_NOUN_PATTERN.test(message) && EDGE_ENDPOINT_JOIN_PATTERN.test(message)
+  );
+}
+
 /** Minimum bigramDice score to qualify as a fuzzy candidate. */
 const DICE_FLOOR = 0.4;
 
@@ -349,6 +404,39 @@ export type SkipReason =
    */
   | 'option_intervention_edit'
   /**
+   * ⭐ ROADMAP 2.389a — the message describes an EDGE, not a factor value.
+   *
+   * MEASURED live on staging `672b634`:
+   *   "Make the link from Ad-Supported Model to Ad Revenue 2"
+   *     → `set_factor_value`, `fac_ads_model` 0 → **2**, receipt "Applied".
+   * The user named a relationship; a factor was mutated, out of range, and
+   * the confirmation card was truthful in every field about an operation the
+   * user never requested. Of the routing defects surveyed on that build this
+   * was the only one that failed UNSAFE.
+   *
+   * ⚠ THE MECHANISM IS THE TYPE FILTER THAT WAS SUPPOSED TO PROTECT US.
+   * `factorNodeIds` narrows the candidate pool to factor-kind ids. An edge
+   * sentence names a factor at one end and a NON-factor (risk / outcome /
+   * goal) at the other, so the second endpoint is REMOVED FROM THE POOL and a
+   * two-label sentence collapses into a single substring match → score 1 →
+   * auto-select. The guard that stops non-factor nodes being mutated is
+   * exactly what makes an edge sentence look unambiguous.
+   *
+   * Skipping here hands the turn to the routing LLM, which was MEASURED
+   * getting this right (`adjust_edge_strength` proposed with the sign
+   * preserved; the out-of-range variant reaching the parameter-phrasing
+   * refusal — "Strength runs from minus one to plus one…" — with a "Try a
+   * different value" chip). This is one of the rare cases where the
+   * deterministic path is the LESS reliable one, because the sentence's
+   * grammar carries information the factor-label matcher cannot see.
+   *
+   * ⚠ THE GATE FAILS SAFE BY CONSTRUCTION, and the asymmetry is deliberate.
+   * Over-gating costs one LLM call on a path the LLM already handles.
+   * Under-gating mutates the wrong object and reports success. Where the
+   * predicate is uncertain it is written to gate.
+   */
+  | 'edge_phrasing_gate'
+  /**
    * S2-L3 — a typed-chip mutation pre-route already synthesised the proposal
    * from `chip.parameters` this turn, so the text parser is preempted (typed
    * ahead of every string/shape heuristic). The caller supplies this skip
@@ -466,6 +554,20 @@ export function tryDeterministicValueUpdate(
     if (pat.test(message)) {
       return { matched: false, skip_reason: 'hypothetical_gate' };
     }
+  }
+
+  // ⭐ ROADMAP 2.389a — negative gate: the message describes an EDGE.
+  //
+  // Must run BEFORE the candidate pool is built, for the same reason the
+  // option-intervention gate below does: once `factorNodeIds` has removed the
+  // non-factor endpoint, a two-endpoint sentence is INDISTINGUISHABLE from an
+  // unambiguous single-factor match — score 1, one candidate, auto-select.
+  // By the time the pool exists the evidence that would have stopped us is
+  // gone. See the `'edge_phrasing_gate'` SkipReason doc for the measured
+  // damage (`fac_ads_model` set to an out-of-range 2 under an "Applied"
+  // receipt) and for why the LLM is the better owner of this shape.
+  if (impliesEdgePhrasing(message)) {
+    return { matched: false, skip_reason: 'edge_phrasing_gate' };
   }
 
   // FIX 2 (Tier A #1, 2026-07-09) — negative gate: option-intervention

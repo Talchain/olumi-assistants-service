@@ -323,9 +323,16 @@ export function detectChipClickForcedIntent(
 // dashes (house style — this text bypasses no sanitise seam but must not
 // depend on one either).
 
-/** C3 — frame-guard offer chip (no action_type: text-replay chip). */
-const DRAFT_OFFER_CHIP_LABEL = 'Build the model';
-const DRAFT_OFFER_CHIP_MESSAGE = 'Yes, build the model from what I have shared.';
+/**
+ * C3 — frame-guard offer chip (no action_type: text-replay chip).
+ *
+ * EXPORTED so route-level tests can bind to the chip by IDENTITY rather than
+ * retyping the copy (CLAUDE.md trap 12 — a hand-copied constant is a mirror
+ * that drifts silently, and trap 19 — an assertion must name its object).
+ * `route-v2-no-persisted-graph-fallthrough.test.ts` is the current consumer.
+ */
+export const DRAFT_OFFER_CHIP_LABEL = 'Build the model';
+export const DRAFT_OFFER_CHIP_MESSAGE = 'Yes, build the model from what I have shared.';
 /**
  * C3 — appended to the frame-guard copy ONLY when a usable brief seed was
  * captured (so the offer is never made with nothing to build from). The
@@ -1786,8 +1793,22 @@ export function mapDraftGraphPipelineReason(
 export const EDIT_GRAPH_RECOVERY_TEXT =
   "I can see you want to update the model, but I couldn't access the current graph. Please try again in a moment.";
 
+/**
+ * ⚠ ROADMAP 2.388 — `'no_persisted_graph'` WAS REMOVED FROM THIS UNION, and
+ * removing it is part of the fix rather than tidying after it.
+ *
+ * "There is no graph yet" is not a failure to recover from — it is an empty
+ * canvas, and this copy ("…I couldn't access the current graph. Please try
+ * again in a moment.") told users to retry the one thing that could not work.
+ * That branch now falls through to the frame-no-brief guard's coaching. Taking
+ * the literal out of the type means re-introducing it is a COMPILE error
+ * rather than a quiet regression under a green suite.
+ *
+ * The two that remain are genuinely transient: the session store was
+ * unreachable, or the stored graph could not be parsed. For those, "try again
+ * in a moment" is honest advice.
+ */
 type EditGraphRecoveryReason =
-  | 'no_persisted_graph'
   | 'persisted_graph_invalid'
   | 'session_store_failed';
 
@@ -4285,29 +4306,79 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'session_store_failed', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
         }
         if (persisted == null) {
-          return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'no_persisted_graph', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
-        }
-        // Validate the reloaded graph through the same ingress schema the
-        // request body would have gone through. A persisted-but-invalid
-        // shape is a different operational signal than absence — write a
-        // distinct telemetry reason so it can be alerted on.
-        const parsed = GraphStateIngressSchema.safeParse(persisted);
-        if (!parsed.success) {
-          log.error(
+          // ══════════════════════════════════════════════════════════════
+          // ROADMAP 2.388 — THE MINUTE-ONE DEAD END. FALL THROUGH, DO NOT
+          // ERROR.
+          // ══════════════════════════════════════════════════════════════
+          // There is no graph because the user has not built one yet. That is
+          // not a failure of anything — it is the empty canvas, and it is
+          // overwhelmingly a FIRST message: an edit verb (`increase` / `add` /
+          // `raise` / `reduce`) in a sentence that happens to miss the
+          // decision-brief regex. `editIntentDetected` is decided from the
+          // message TEXT ALONE, before anything asks whether there is
+          // something to edit, so the shape is reachable on turn one.
+          //
+          // The previous behaviour returned EDIT_GRAPH_RECOVERY_TEXT — "I
+          // couldn't access the current graph. Please try again in a moment."
+          // — which is both untrue (nothing was inaccessible) and
+          // UNRECOVERABLE: the retry it invites re-enters this same branch.
+          // Measured on staging `672b634`: 3/3 on a repeated message here,
+          // 10/10 on the acceptance walk, with `llm_calls: []` and
+          // `suggested_actions: []` — no model ran and no affordance shipped.
+          //
+          // Falling through costs nothing extra: `effectiveGraphState` below
+          // is `resolvedGraphState ?? extensions.graphState`, and BOTH are
+          // null on this branch, so `isEditGraphShape` is already false. The
+          // turn therefore lands on `frame_no_brief_guard`, which is exactly
+          // what the SAME user gets today when their sentence misses the
+          // edit-verb list — the framing coaching PLUS a "Build the model"
+          // chip. Shipped copy, shipped affordance, no new surface.
+          //
+          // ⚠ SCOPE, deliberately narrow. `session_store_failed` (the catch
+          // above) and `persisted_graph_invalid` (below) KEEP the recovery
+          // copy. Those are genuine transient / infrastructure failures where
+          // "try again in a moment" is honest advice — which is the whole
+          // reason `sendEditGraphRecovery` discriminates three reasons.
+          //
+          // The counter moves with the behaviour rather than disappearing: a
+          // class that stops erroring must not also stop being measurable.
+          emit(TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            message_length: ingress.message.length,
+          });
+          log.info(
             {
               request_id: requestId,
               scenario_id: ingress.scenario_id,
-              issue_count: parsed.error.issues.length,
+              message_length: ingress.message.length,
             },
-            'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
+            'V5 edit intent on an empty canvas — falling through to the frame guard instead of the typed recovery',
           );
-          return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
+        } else {
+          // Validate the reloaded graph through the same ingress schema the
+          // request body would have gone through. A persisted-but-invalid
+          // shape is a different operational signal than absence — write a
+          // distinct telemetry reason so it can be alerted on. UNCHANGED by
+          // 2.388: this one really is a failure, and it really is retryable.
+          const parsed = GraphStateIngressSchema.safeParse(persisted);
+          if (!parsed.success) {
+            log.error(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                issue_count: parsed.error.issues.length,
+              },
+              'V5 edit_graph reloaded graph failed ingress validation — returning typed recovery',
+            );
+            return await sendEditGraphRecovery(reply, requestId, ingress.scenario_id, ingress.stage, 'persisted_graph_invalid', ingress.message, claimSafety, ingress.turn_id, routeStartedAt);
+          }
+          resolvedGraphState = parsed.data;
+          emit(TelemetryEvents.V5EditGraphGraphStateReloaded, {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+          });
         }
-        resolvedGraphState = parsed.data;
-        emit(TelemetryEvents.V5EditGraphGraphStateReloaded, {
-          request_id: requestId,
-          scenario_id: ingress.scenario_id,
-        });
       }
     }
     const effectiveGraphState = resolvedGraphState ?? extensions.graphState;
