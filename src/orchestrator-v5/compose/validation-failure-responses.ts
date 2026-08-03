@@ -31,6 +31,7 @@ import {
   sanitiseForUser,
   type EntityLike,
 } from './helpers.js';
+import { phrasingForParameter, renderParameterPhrasing } from './parameter-user-phrasing.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 
@@ -567,7 +568,10 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
           {
             id: chipId('prompt', 'param-retry'),
             label: 'Try a different value',
-            message: `Use a different value for ${parameter}.`,
+            // ROADMAP 2.380 — same product phrasing as the main branch; the
+            // chip's `message` becomes a USER TURN, so it must not carry the
+            // internal parameter name either.
+            message: phrasingForParameter(readString(details.parameter)).chip_message,
           },
         ],
       },
@@ -576,36 +580,60 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
     };
   }
 
-  const constraint = sanitiseForUser(details.constraint_description ?? 'a valid value');
+  // ROADMAP 2.380 (FIX 3) — THE VALIDATOR-JARGON LEAK, FIXED AT ITS SOURCE.
+  //
+  // This template used to render, verbatim to the user:
+  //     'strength' needs to be a number between -1 and 1. You gave 30.
+  // `strength` is a Zod field name; "a number between -1 and 1" is
+  // `describeSchema` reading `_def.checks`; and the retry chip put the field
+  // name in the user's own mouth ("Use a different value for strength."). None
+  // of that is vocabulary the product has ever shown. The repo already quoted
+  // this exact sentence as a known leak in a NEIGHBOURING file's copy contract
+  // (configure-option-clarify-response.ts:50) — the copy there was fixed and
+  // this emission site, the one that actually produces it, was not.
+  //
+  // Copy now comes from `parameter-user-phrasing.ts`, keyed by the parameter
+  // the registry declares, and says what the scale MEANS instead of printing
+  // its bounds. An undeclared parameter falls back to copy that echoes NOTHING
+  // from the error, so no future emission site can leak through this branch.
+  // Coverage is DERIVED over HANDLER_VALIDATION_REGISTRY, not hand-listed:
+  // a handler that adds a parameter without adding phrasing turns
+  // __tests__/parameter-invalid-no-validator-jargon.test.ts RED.
+  //
+  // The "You gave X." echo and its DISCRIMINATING scalar gate are deliberately
+  // KEPT as-is. That gate took several rounds of sentinel leaks ('unknown',
+  // '[complex value]') to get right and has its own positive controls; this
+  // fix replaces the jargon, it does not fold the echo away. What is new is
+  // that a parameter may opt OUT of the echo: on the edge-strength path the
+  // number is the ROUTING MODEL's proposal, not something the user typed, so
+  // "You gave 30." attributes to them a value they never gave, on a scale they
+  // have never been shown. See `echo_actual` in parameter-user-phrasing.ts.
   const actual = sanitiseForUser(details.actual_value);
   // V5 edit_graph P0 (task_99f83f0d) — kill the "You gave unknown." leak.
   // `sanitiseForUser` maps undefined/null/empty inputs to the internal
   // 'unknown' sentinel; rendering "You gave unknown." leaks a placeholder
   // that means nothing to the user. This covers PARAMETER_INVALID emission
   // sites that omit `actual_value` entirely (invalid_operator, graph
-  // predicates) — not just the `missing_value` branch above. When there is
-  // no real value to echo back, drop the clause and keep only the
-  // constraint guidance; genuine scalars still render "You gave X".
+  // predicates) — not just the `missing_value` branch above.
   //
   // Compound-value hardening: on a multi-effect edit `actual_value` is an
   // object, so `sanitiseForUser` returns the '[complex value]' sentinel and
-  // "You gave [complex value]." leaked — the 'unknown'-only check above let it
+  // "You gave [complex value]." leaked — the 'unknown'-only check let it
   // through. Gate the echo on the RAW input type instead: only a genuine
   // finite scalar (number / boolean / non-empty string) has a meaningful
   // single-value form. Typing the gate — not string-matching sanitiser
   // sentinels — means a future sentinel can't leak the same way. The residual
   // `!== 'unknown'` still catches a non-empty string that sanitises to empty.
   const showActual = isGenuineScalar(details.actual_value) && actual !== 'unknown';
+  const phrasing = phrasingForParameter(readString(details.parameter));
   return {
     body: {
-      assistant_text: showActual
-        ? `'${parameter}' needs to be ${constraint}. You gave ${actual}.`
-        : `'${parameter}' needs to be ${constraint}.`,
+      assistant_text: renderParameterPhrasing(phrasing, showActual ? actual : null),
       suggested_actions: [
         {
           id: chipId('prompt', 'param-retry'),
           label: 'Try a different value',
-          message: `Use a different value for ${parameter}.`,
+          message: phrasing.chip_message,
         },
       ],
     },

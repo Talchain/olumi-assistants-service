@@ -359,7 +359,15 @@ describe('composeValidationFailure — PARAMETER_INVALID', () => {
     });
     expect(template_id).toBe('parameter_invalid');
     expect(response.assistant_text).toContain('value');
-    expect(response.assistant_text).toContain('a number between 0 and 1');
+    // ROADMAP 2.380 (FIX 3) — this line used to assert
+    //   toContain('a number between 0 and 1')
+    // i.e. it PINNED the validator-jargon leak: `describeSchema`'s raw
+    // `_def.checks` reading, rendered verbatim to the user. The live form of
+    // the same defect was "'strength' needs to be a number between -1 and 1."
+    // The constraint description must now NOT reach the user; product copy
+    // replaces it. The value echo is unchanged and still asserted below.
+    expect(response.assistant_text).not.toContain('a number between 0 and 1');
+    expect(response.assistant_text).not.toContain("'value'");
     expect(response.assistant_text).toContain('1.5');
     expect(response.suggested_actions[0]?.label).toBe('Try a different value');
     assertStyle(response.assistant_text);
@@ -466,8 +474,16 @@ describe('composeValidationFailure — PARAMETER_INVALID non-scalar actual_value
     expect(response.assistant_text).not.toBe(
       "'value' needs to be a valid value. You gave [complex value].",
     );
-    // …and the first sentence (the constraint guidance) is kept verbatim.
-    expect(response.assistant_text).toBe("'value' needs to be a valid value.");
+    // …and the surrounding copy is kept verbatim.
+    // ROADMAP 2.380 (FIX 3): this used to assert the jargon sentence
+    //   "'value' needs to be a valid value."
+    // — the quoted internal field name plus `describeSchema`'s raw constraint.
+    // Product copy replaces it. What this test is FOR — that a non-scalar
+    // actual_value drops the echo rather than leaking a sentinel — is
+    // unchanged and still asserted above.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
     expect(response.suggested_actions[0]?.label).toBe('Try a different value');
     assertStyle(response.assistant_text);
   });
@@ -734,7 +750,14 @@ describe('composeValidationFailure — PARAMETER_INVALID remaining rejection rea
       details: { parameter: 'value' },
     });
     expect(template_id).toBe('parameter_invalid');
-    expect(response.assistant_text).toContain('needs to be a valid value');
+    // ROADMAP 2.380 (FIX 3) — was toContain('needs to be a valid value'), the
+    // jargon template. The point of this case is that the generic path still
+    // produces actionable copy when the error carries neither an issue nor a
+    // constraint description; that is what is asserted now.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
   });
 });
 
@@ -839,8 +862,13 @@ describe('composeValidationFailure — PARAMETER_INVALID undefined actual (task_
     expect(template_id).toBe('parameter_invalid');
     expect(response.assistant_text).not.toContain('You gave');
     expect(response.assistant_text).not.toContain('unknown');
-    // Constraint guidance is preserved.
-    expect(response.assistant_text).toContain('needs to be a valid value');
+    // Guidance is preserved — ROADMAP 2.380 (FIX 3) replaced the jargon
+    // template ("needs to be a valid value") with product copy. The property
+    // this test exists for, that an absent actual_value never renders
+    // "You gave unknown.", is asserted above and is unchanged.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
     assertStyle(response.assistant_text);
   });
 
