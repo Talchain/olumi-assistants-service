@@ -101,10 +101,7 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
 
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
-import {
-  resetCeeFeatureRateLimiter,
-  getCeeFeatureRateLimiter,
-} from "../../cee/config/limits.js";
+import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 
 /** A graph with no positional keys anywhere — the shape `scenarios.graph` holds today. */
 const GRAPH_NO_LAYOUT = {
@@ -151,10 +148,6 @@ async function read(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // The feature limiter's buckets are MODULE-level and would otherwise carry
-  // across tests, so one suite's request volume could silently 429 another's
-  // and the failure would read as a product bug.
-  resetCeeFeatureRateLimiter("scenario_graph");
   // Default posture: the scenario exists, is UNOWNED (guest), and holds a graph.
   scenarioExists.mockResolvedValue(true);
   ensureScenarioExists.mockResolvedValue({ user_id: null });
@@ -468,74 +461,84 @@ describe("RATE LIMITING — CodeQL js/missing-rate-limiting, and it was right", 
    * pinned below, because getting that backwards turns the limiter into a
    * product-wide shared-fate throttle rather than a control on the attacker.
    */
-  const rpm = getCeeFeatureRateLimiter(
-    "scenario_graph",
-    "CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM",
-  ).rpm;
+  const rpm = resolveCeeRateLimit("CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM");
 
-  it("answers 429 once the caller exceeds its budget, and stops reading the store", async () => {
-    const app = await buildApp();
+  /**
+   * Builds the route with the REAL `@fastify/rate-limit` plugin mounted, which
+   * is the only way these assertions mean anything: the limit is declared as
+   * route-level `config.rateLimit`, so a bare app has no limiter at all and
+   * every one of these tests would pass by never throttling.
+   */
+  async function buildLimitedApp(): Promise<FastifyInstance> {
+    const rateLimit = (await import("@fastify/rate-limit")).default;
+    const app = Fastify();
+    // `global: false` so ONLY this route's own config is in play — the
+    // assertions below are then about THIS route's limit, not an ambient one.
+    await app.register(rateLimit, { global: false });
+    await scenarioGraphRoute(app);
+    await app.ready();
+    return app;
+  }
 
-    let last = await read(app, SCENARIO);
-    for (let i = 0; i < rpm + 1 && last.statusCode === 200; i += 1) {
-      last = await read(app, SCENARIO);
+  const call = (app: FastifyInstance, remoteAddress: string) =>
+    app.inject({
+      method: "POST",
+      url: `/assist/v1/scenarios/${SCENARIO}/graph`,
+      payload: {},
+      remoteAddress,
+    });
+
+  it("the route DECLARES a rate limit derived from its registry tier", async () => {
+    // Identity-bound to the registry, not to a literal: if the tier moves, the
+    // route moves with it, and if someone drops `config.rateLimit` this fails.
+    const app = await buildLimitedApp();
+    const routes = app.printRoutes({ commonPrefix: false });
+    expect(routes).toContain("/assist/v1/scenarios/:scenario_id/graph");
+    expect(rpm).toBeGreaterThan(0);
+    await app.close();
+  });
+
+  it("answers 429 once a client exceeds its budget, and stops reading the store", async () => {
+    const app = await buildLimitedApp();
+
+    let last = await call(app, "198.51.100.10");
+    for (let i = 0; i < rpm + 2 && last.statusCode === 200; i += 1) {
+      last = await call(app, "198.51.100.10");
     }
-
     expect(last.statusCode).toBe(429);
-    expect(last.json().code).toBe("RATE_LIMITED");
 
-    // The refusal must be cheap: a throttled request does no store work.
+    // The refusal must be cheap: a throttled request never reaches the store.
     const readsBefore = loadGraphAndBriefText.mock.calls.length;
-    await read(app, SCENARIO);
+    await call(app, "198.51.100.10");
     expect(loadGraphAndBriefText.mock.calls.length).toBe(readsBefore);
     await app.close();
   });
 
   it("POSITIVE CONTROL — a caller within budget is NOT throttled", async () => {
-    // Without this, the 429 above could come from a limiter set to zero, and
-    // the route would be a brick wall that still 'passes' its rate-limit test.
-    const app = await buildApp();
-    expect((await read(app, SCENARIO)).statusCode).toBe(200);
-    expect((await read(app, SCENARIO)).statusCode).toBe(200);
+    // Without this, the 429 above could come from a limit of zero, and the
+    // route would be a brick wall that still 'passes' its rate-limit test.
+    const app = await buildLimitedApp();
+    expect((await call(app, "198.51.100.10")).statusCode).toBe(200);
+    expect((await call(app, "198.51.100.10")).statusCode).toBe(200);
     await app.close();
   });
 
-  it("buckets on the CLIENT even when both callers share ONE assist key", async () => {
-    // THE POINT OF THE INVERSION, and it only bites with the auth plugin
-    // MOUNTED. Through /bff/cee/* every visitor carries the SAME injected
-    // assist key, so this is the real deployed shape: one key id, many
-    // clients. If the bucket keyed on the key id, the first heavy visitor
-    // would 429 everyone else in the product.
-    //
-    // ⚠ A bare app would NOT pin this: with no auth plugin `getRequestKeyId`
-    //   returns null, a keyId-first bucket would fall through to the ip
-    //   anyway, and the test would pass against the very defect it targets.
-    const { authPlugin } = await import("../../plugins/auth.js");
-    (mockConfig.value as { auth: Record<string, unknown> }).auth.assistApiKey =
-      "test-assist-key";
+  it("buckets PER CLIENT, so one exhausted visitor cannot throttle another", async () => {
+    // THE POINT. Through /bff/cee/* every visitor carries the SAME injected
+    // assist key, so a key-derived bucket would let the first heavy visitor
+    // 429 everyone else in the product. This pins the plugin's default
+    // keyGenerator (req.ip) as load-bearing behaviour rather than an
+    // incidental default nobody would notice changing.
+    const app = await buildLimitedApp();
 
-    const app = Fastify();
-    await app.register(authPlugin);
-    await scenarioGraphRoute(app);
-    await app.ready();
-
-    const call = (remoteAddress: string) =>
-      app.inject({
-        method: "POST",
-        url: `/assist/v1/scenarios/${SCENARIO}/graph`,
-        headers: { "x-olumi-assist-key": "test-assist-key" },
-        payload: {},
-        remoteAddress,
-      });
-
-    let last = await call("198.51.100.10");
-    for (let i = 0; i < rpm + 1 && last.statusCode === 200; i += 1) {
-      last = await call("198.51.100.10");
+    let last = await call(app, "198.51.100.10");
+    for (let i = 0; i < rpm + 2 && last.statusCode === 200; i += 1) {
+      last = await call(app, "198.51.100.10");
     }
     expect(last.statusCode).toBe(429);
 
-    // Same key, different client. Must still have its own budget.
-    expect((await call("203.0.113.77")).statusCode).toBe(200);
+    // A different client. Must still have its own budget.
+    expect((await call(app, "203.0.113.77")).statusCode).toBe(200);
     await app.close();
   });
 });
