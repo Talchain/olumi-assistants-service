@@ -75,6 +75,9 @@ import type {
  */
 const MAX_NAMED_CONSTRAINTS = 3;
 
+/** Test-only re-export, so the budget spec asserts the value it was derived from. */
+export const MAX_NAMED_CONSTRAINTS_FOR_TEST = MAX_NAMED_CONSTRAINTS;
+
 /**
  * Longest label this disclosure will quote. `sanitiseLabel` imposes NO length
  * bound, so without this a single long user label could push the composed
@@ -86,11 +89,10 @@ const MAX_NAMED_CONSTRAINTS = 3;
 export const CONSTRAINT_GAP_LABEL_MAX_CHARS = 60;
 
 /**
- * The two disclosure voices this module can speak, keyed to the constraint
- * verdict states that have something to disclose.
+ * The three disclosure voices this module can speak.
  *
  * They are SEPARATE COPY, not one sentence with a variable, because they make
- * different statements and only one of them is ever true:
+ * different statements about different subjects:
  *
  *   unevaluated         "your condition was not checked" — a claim about the
  *                       ENGINE, assertable only when the producer said so or
@@ -100,11 +102,35 @@ export const CONSTRAINT_GAP_LABEL_MAX_CHARS = 60;
  *                       condition went unchecked (it may well have been
  *                       checked), and it must not certify constraint-safety
  *                       (we cannot tell which condition was checked).
+ *   out_of_scope        "this analysis does not test that" — a claim about the
+ *                       MODEL's declared scope (ROADMAP 2.349), assertable
+ *                       only when the producer itself disclosed that it
+ *                       removed the constraint before computing
+ *                       (`_meta.filtered_constraints`).
  *
- * Writing one and reusing it for the other is exactly the conflation that made
- * both earlier revisions of this fix state something false.
+ * Writing one and reusing it for another is exactly the conflation that made
+ * both earlier revisions of this fix state something false — and it is what
+ * gap 5 was: the `unevaluated` voice was spoken about a constraint PLoT had
+ * announced it deleted, so the user was told the engine failed to check a
+ * condition and was handed a units repair step that cannot ever apply.
+ *
+ * The FIRST TWO are STATE voices: at most one is ever true on a turn, chosen
+ * by the exhaustive switch in {@link buildConstraintDisclosureFromState}.
+ * `out_of_scope` is INDEPENDENT of the state and may accompany either of them
+ * (a turn can carry both a removed constraint and a genuinely unscored one) —
+ * see {@link buildConstraintDisclosure} for the composition order and
+ * {@link CONSTRAINT_GAP_DISCLOSURE_RE_SRC} for the grammar that admits it.
  */
-type DisclosureVoice = 'unevaluated' | 'identity_unresolved';
+type DisclosureVoice = 'unevaluated' | 'identity_unresolved' | 'out_of_scope';
+
+/**
+ * The STATE voices, in one place, so the grammar and the worst-case budget are
+ * both derived from the same tuple rather than each hand-listing them.
+ */
+const STATE_VOICES = ['unevaluated', 'identity_unresolved'] as const;
+
+/** Every voice, derived — the budget below must cover all of them. */
+const ALL_VOICES = [...STATE_VOICES, 'out_of_scope'] as const;
 
 /**
  * The repair step for the UNEVALUATED voice. Deterministic and constant — it
@@ -129,6 +155,25 @@ function unresolvedRepairStep(total: number): string {
     : ' Re-state the conditions and run the analysis again.';
 }
 
+/**
+ * The closer for the OUT_OF_SCOPE voice (ROADMAP 2.349). It is deliberately
+ * NOT a repair step, because there is no repair: the producer removed the
+ * constraint because the dimension it names is not modelled, and no
+ * restatement in any units, under any id, on any rerun can change that. The
+ * defect this replaces shipped {@link UNEVALUATED_REPAIR_STEP} for exactly
+ * this class — an instruction whose own docstring says it was written for the
+ * units mistake, handed to users who had made no units mistake, and which
+ * could never alter the outcome however faithfully they followed it.
+ *
+ * What it says instead is the true and useful thing: the condition is still
+ * recorded, so nothing the user stated has been thrown away by CEE.
+ */
+function outOfScopeCloser(total: number): string {
+  return total === 1
+    ? ' It stays recorded on your scenario.'
+    : ' They stay recorded on your scenario.';
+}
+
 function quoted(label: string): string {
   return `“${label}”`;
 }
@@ -144,6 +189,15 @@ function joinLabels(labels: readonly string[]): string {
 /** Constant lead-in for the identity voice; escaped into the grammar below. */
 const UNRESOLVED_LEAD_IN =
   'The analysis engine returned condition results that could not be matched to ';
+
+/**
+ * Constant lead-in for the OUT_OF_SCOPE voice (2.349); escaped into the
+ * grammar below. Note what it does NOT say: not "was not checked" (which
+ * frames a deliberate exclusion as an engine anomaly), and not "could not be
+ * evaluated" (which invites the units repair). It states the scope of the
+ * model, which is the only true statement available.
+ */
+const OUT_OF_SCOPE_LEAD_IN = 'This analysis does not test ';
 
 /**
  * The sentence that states WHAT the disclosure is about, optionally naming the
@@ -165,6 +219,14 @@ function subjectSentence(
     return total === 1
       ? `One of the conditions you set was not checked: ${joinLabels(named)}.`
       : `${total} of the conditions you set were not checked, including ${joinLabels(named)}.`;
+  }
+  if (voice === 'out_of_scope') {
+    const what =
+      total === 1 ? 'one of the conditions you set' : `${total} of the conditions you set`;
+    if (named.length === 0) return `${OUT_OF_SCOPE_LEAD_IN}${what}.`;
+    return total === 1
+      ? `${OUT_OF_SCOPE_LEAD_IN}${what}: ${joinLabels(named)}.`
+      : `${OUT_OF_SCOPE_LEAD_IN}${what}, including ${joinLabels(named)}.`;
   }
   const subject = total === 1 ? 'the condition you set' : `the ${total} conditions you set`;
   if (named.length === 0) return `${UNRESOLVED_LEAD_IN}${subject}.`;
@@ -190,13 +252,25 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
   if (voice === 'unevaluated') {
     return ` The analysis engine could not evaluate ${total === 1 ? 'it' : 'them'} against this model, so no option can be put forward yet.`;
   }
+  if (voice === 'out_of_scope') {
+    // NOT "so no option can be put forward" — that consequence is FALSE here.
+    // The comparison ran on every dimension the model does carry; the only
+    // true consequence is the narrower one, that this condition did not take
+    // part in it. Stating the withholding consequence here is precisely the
+    // untruth gap 5 put on screen.
+    return total === 1
+      ? ' It was not part of the comparison.'
+      : ' They were not part of the comparison.';
+  }
   return total === 1
     ? ' So it cannot be confirmed whether it was checked, and no option can be put forward yet.'
     : ' So it cannot be confirmed whether they were checked, and no option can be put forward yet.';
 }
 
 function repairStep(voice: DisclosureVoice, total: number): string {
-  return voice === 'unevaluated' ? UNEVALUATED_REPAIR_STEP : unresolvedRepairStep(total);
+  if (voice === 'unevaluated') return UNEVALUATED_REPAIR_STEP;
+  if (voice === 'out_of_scope') return outOfScopeCloser(total);
+  return unresolvedRepairStep(total);
 }
 
 function composeDisclosure(
@@ -222,7 +296,25 @@ function composeDisclosure(
  * same way the scaffold and reduced-samples disclosures do.
  */
 export function buildConstraintDisclosure(verdict: ConstraintVerdict): string {
-  return buildConstraintDisclosureFromState(verdict.state, verdict.constraints);
+  // STATE VOICE FIRST, OUT-OF-SCOPE SECOND, and both may be present.
+  //
+  // Order matters twice over. For the reader, the state voice is the more
+  // serious statement (a condition the engine was asked about and did not
+  // answer) and leads. For the machine, this is the order
+  // `CONSTRAINT_GAP_DISCLOSURE_RE_SRC` publishes, and the egress allowlist
+  // admits exactly one gap-disclosure slot — so composing them the other way
+  // round would fail the grammar and silently revert the whole summary to the
+  // locked template, which is the #703 failure this module exists to prevent.
+  const stateVoice = buildConstraintDisclosureFromState(verdict.state, verdict.constraints);
+  const outOfScope = buildVoice('out_of_scope', verdict.outOfScopeConstraints);
+  if (stateVoice.length === 0 || outOfScope.length === 0) return `${stateVoice}${outOfScope}`;
+  // COMBINED survival probe. Each half already proved it survives ALONE
+  // (`buildVoice`), but the allowlist sees the CONCATENATION, and only a check
+  // of the actual composed bytes can prove that shape passes. If it does not,
+  // keep the state voice — never let the additive 2.349 sentence cost the user
+  // the more serious disclosure.
+  const combined = `${stateVoice}${outOfScope}`;
+  return survivesEgress(combined) ? combined : stateVoice;
 }
 
 /**
@@ -350,10 +442,29 @@ const UNRESOLVED_RE_SRC =
   `(?:${escapeForRegex(unresolvedRepairStep(1))}|${escapeForRegex(unresolvedRepairStep(2))})`;
 
 /**
+ * Grammar branch for the OUT_OF_SCOPE voice (ROADMAP 2.349). Same construction
+ * as its siblings — every fixed sentence escaped from the very constant the
+ * builder emits, the label slot interpolated from
+ * {@link CONSTRAINT_GAP_LABEL_MAX_CHARS} — so a copy edit here breaks the
+ * probe and the tests loudly rather than silently reverting the user-facing
+ * message to the locked template.
+ */
+const OUT_OF_SCOPE_RE_SRC =
+  ' ' +
+  escapeForRegex(OUT_OF_SCOPE_LEAD_IN) +
+  '(?:' +
+  `one of the conditions you set(?:: ${JOINED_LABELS})?\\.` +
+  '|' +
+  `\\d{1,3} of the conditions you set(?:, including ${JOINED_LABELS})?\\.` +
+  ')' +
+  `(?:${escapeForRegex(consequenceSentence('out_of_scope', 1))}|${escapeForRegex(consequenceSentence('out_of_scope', 2))})` +
+  `(?:${escapeForRegex(outOfScopeCloser(1))}|${escapeForRegex(outOfScopeCloser(2))})`;
+
+/**
  * Grammar source for the disclosure suffix, consumed by the registry-side
  * egress allowlist (`isAllowedRunAnalysisAssistantText`) and by this module's
- * own build-time survival probe. One alternation over BOTH voices, each
- * mirroring the four shapes its builder can emit:
+ * own build-time survival probe. Each voice mirrors the four shapes its
+ * builder can emit:
  *   - singular count-only / singular naming one label
  *   - plural count-only / plural naming up to {@link MAX_NAMED_CONSTRAINTS}
  * The label slots interpolate {@link CONSTRAINT_GAP_LABEL_MAX_CHARS} rather
@@ -361,27 +472,57 @@ const UNRESOLVED_RE_SRC =
  * very constants the builder emits — so a copy edit that breaks the allowlist
  * breaks the probe and this module's tests loudly, instead of silently
  * reverting the user-facing message to the locked template.
+ *
+ * ⚠ NOT A FLAT ALTERNATION any more (ROADMAP 2.349). The out-of-scope voice is
+ * ADDITIVE — a turn may carry a state voice AND it — and the allowlist gives
+ * this module exactly ONE optional slot in `TAIL_PATTERN`, so the slot itself
+ * has to admit the pair. Hence the two branches:
+ *
+ *     (?: STATE_VOICE (?: OUT_OF_SCOPE )? )   — a state voice, optionally
+ *                                               followed by the 2.349 sentence
+ *     | OUT_OF_SCOPE                          — the 2.349 sentence alone
+ *
+ * The alternation is ordered so the longer, combined shape is tried first (JS
+ * alternation is leftmost-first, and `validation-registry.ts`'s unanchored
+ * salvage match would otherwise capture only the trailing half).
+ *
+ * IT STILL CANNOT MATCH THE EMPTY STRING — every branch requires at least one
+ * voice — which the anchored template branch of the allowlist depends on.
  */
-export const CONSTRAINT_GAP_DISCLOSURE_RE_SRC = `(?:${UNEVALUATED_RE_SRC})|(?:${UNRESOLVED_RE_SRC})`;
+export const CONSTRAINT_GAP_DISCLOSURE_RE_SRC =
+  `(?:(?:(?:${UNEVALUATED_RE_SRC})|(?:${UNRESOLVED_RE_SRC}))(?:${OUT_OF_SCOPE_RE_SRC})?)` +
+  `|(?:${OUT_OF_SCOPE_RE_SRC})`;
 
 /**
  * Egress budget the allowlist length cap is extended by — computed from the
- * worst-case builder output across BOTH voices (never hand-estimated), so an
- * honest disclosure cannot silently knock the summary back to the locked
- * template on length.
+ * worst-case builder output (never hand-estimated), so an honest disclosure
+ * cannot silently knock the summary back to the locked template on length.
  *
  * Worst case per voice: the plural, three-label form with every label at the
- * cap and a three-digit count.
+ * cap and a three-digit count. The budget is the worst STATE voice PLUS the
+ * out-of-scope voice, because 2.349 lets those two ride together — deriving it
+ * as a plain max over all three would under-budget the combined shape by the
+ * whole length of the second sentence, and the summary would revert to the
+ * locked template with no error anywhere.
  */
-export const CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS = Math.max(
-  ...(['unevaluated', 'identity_unresolved'] as const).map(
-    (voice) =>
-      composeDisclosure(
-        voice,
-        999,
-        Array.from({ length: MAX_NAMED_CONSTRAINTS }, () =>
-          'x'.repeat(CONSTRAINT_GAP_LABEL_MAX_CHARS),
-        ),
-      ).length,
-  ),
-);
+function worstCaseFor(voice: DisclosureVoice): number {
+  return composeDisclosure(
+    voice,
+    999,
+    Array.from({ length: MAX_NAMED_CONSTRAINTS }, () =>
+      'x'.repeat(CONSTRAINT_GAP_LABEL_MAX_CHARS),
+    ),
+  ).length;
+}
+
+export const CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS =
+  Math.max(...STATE_VOICES.map(worstCaseFor)) + worstCaseFor('out_of_scope');
+
+/**
+ * Derivation guard for the budget above (CLAUDE.md trap 12d, second face): the
+ * `Math.max` is over {@link STATE_VOICES}, and a fourth voice added to
+ * {@link ALL_VOICES} without a decision about how it composes would not be
+ * counted. This makes that a compile-time-visible, test-visible fact rather
+ * than a silent shortfall.
+ */
+export const DISCLOSURE_VOICES_FOR_BUDGET: readonly DisclosureVoice[] = ALL_VOICES;

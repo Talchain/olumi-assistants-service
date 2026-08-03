@@ -19,6 +19,60 @@ import {
 } from "../../../compound-goal/index.js";
 import { log } from "../../../../utils/telemetry.js";
 
+/**
+ * ROADMAP 2.349 (ROOT HALF) — a deadline is not a hard constraint, and
+ * `goal_constraints[]` is the one array that means "hard constraint".
+ *
+ * WHAT THIS CLOSES. `extractTemporalConstraints` mints a constraint from any
+ * time phrase in the brief ("…within 18 months" → `{operator:'<=', value:18,
+ * unit:'months', label:'Delivery deadline', provenance:'inferred'}`), and
+ * `remapConstraintTargets` step 0 then force-binds it to the GOAL node — a
+ * months-unit limit welded onto a node measured in £. From there it was
+ * persisted, forwarded to PLoT on every analysis run, deterministically
+ * deleted by PLoT (time is not a modelled dimension, so it cannot be), and
+ * finally read BACK by CEE's verdict as "a condition the user set that the
+ * engine did not check" — which withheld the leading option on EVERY run of
+ * EVERY brief containing a time phrase, unescapably, with three untruths in
+ * the copy. Diagnosis: `diagnosis-gap5-leader-null.md`.
+ *
+ * WHY THE FILTER LIVES HERE AND NOT IN THE EXTRACTOR. Two producers write this
+ * array — the regex extractor above and the LLM's own `goal_constraints[]`
+ * (`ctx.llmGoalConstraints`, whose schema declares `deadline_metadata`:
+ * `src/schemas/assist.ts`). Fixing only the regex path would leave the LLM
+ * path minting the identical unevaluable constraint, and the defect would
+ * return the first time the model emitted one. This is the single point BOTH
+ * sources pass through, so the rule is stated ONCE, over the merged set:
+ * a deadline-bearing entry never enters `goal_constraints[]`, whoever made it.
+ *
+ * WHAT IS NOT LOST. The extraction is untouched — `deadline_metadata` is still
+ * produced and still available to `generateConstraintNodes`; the time phrase
+ * is still in the brief and in the goal's own text; and the UI reads
+ * `goal_constraints` nowhere (audit-2262-model-tab.md: 0 occurrences). What is
+ * removed is only the entry's status as a WITHHOLD-TRIGGERING hard constraint
+ * — the one effect it had, and a purely destructive one.
+ *
+ * Detection is by `deadline_metadata` PRESENCE, which is the same signal
+ * PLoT's own DROP RULE 1 uses (`normalisation/constraint-filter.ts`). Same
+ * signal, same verdict, one hop earlier — so CEE stops asking the engine a
+ * question it has already published that it cannot answer.
+ *
+ * Pure. Exported for direct test.
+ */
+export function partitionTemporalNonBinding<T>(
+  constraints: readonly T[],
+): { binding: T[]; temporal: T[] } {
+  const binding: T[] = [];
+  const temporal: T[] = [];
+  for (const c of constraints) {
+    const meta =
+      c !== null && typeof c === "object"
+        ? (c as Record<string, unknown>).deadline_metadata
+        : undefined;
+    (meta !== undefined && meta !== null ? temporal : binding).push(c);
+  }
+  return { binding, temporal };
+}
+
 export function runCompoundGoals(ctx: StageContext): void {
   if (!ctx.graph) return;
 
@@ -126,7 +180,26 @@ export function runCompoundGoals(ctx: StageContext): void {
     merged.set(dedupeKey(c), c);
   }
 
-  ctx.goalConstraints = [...merged.values()];
+  // ROADMAP 2.349 — the single, source-agnostic gate. See
+  // `partitionTemporalNonBinding` for why it is here rather than in either
+  // producer, and for what it deliberately does NOT remove.
+  const { binding, temporal } = partitionTemporalNonBinding([...merged.values()]);
+
+  if (temporal.length > 0) {
+    // FAIL LOUD, not silent (CLAUDE.md trap 12): a drop that leaves no trace
+    // is how the original force-bind survived unexamined for months. Ids and
+    // counts only — no labels, no thresholds, no user text.
+    log.info({
+      event: "cee.compound_goal.temporal_not_binding",
+      request_id: ctx.requestId,
+      dropped_count: temporal.length,
+      dropped_constraint_ids: temporal.map((c: any) => c?.constraint_id ?? null),
+      dropped_node_ids: temporal.map((c: any) => c?.node_id ?? null),
+      reason: "temporal_not_a_hard_constraint",
+    }, `${temporal.length} temporal constraint(s) withheld from goal_constraints[] — a deadline is not evaluable on a static causal graph`);
+  }
+
+  ctx.goalConstraints = binding;
 
   log.info({
     event: "cee.compound_goal.integrated",
@@ -134,5 +207,6 @@ export function runCompoundGoals(ctx: StageContext): void {
     constraint_count: ctx.goalConstraints.length,
     from_regex: regexConstraints.length,
     from_llm: llmConstraints.length,
+    temporal_withheld: temporal.length,
   }, "Compound goal constraints emitted to goal_constraints[]");
 }
