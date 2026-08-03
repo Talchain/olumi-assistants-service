@@ -128,6 +128,25 @@ function generateChecks(graph: Graph, brief: string): PreDecisionCheck[] {
 }
 
 /**
+ * The magnitude words the anchoring nudge recognises (ROADMAP 2.330).
+ *
+ * ⚠ THIS IS A RECOGNITION-ONLY SURFACE, and the distinction matters. Nothing
+ * here multiplies: the alternation only decides whether the brief mentions a
+ * specific figure at all, so a token missing from it costs a NUDGE, never a
+ * wrong number. It is exported purely so the canonical alphabet's union guard
+ * (`src/utils/__tests__/magnitude-alphabet.union.test.ts`) can prove this list
+ * has not drifted below the alphabet — it is still a hand-spelled magnitude
+ * vocabulary, and those are what go quietly short.
+ *
+ * It is deliberately NOT derived from `MAGNITUDE_ALTERNATION`: widening the
+ * nudge's trigger is a product change (more briefs get an anchoring warning),
+ * not a magnitude repair, and ROADMAP 2.330 scopes the alphabet only. The union
+ * guard therefore checks this list is a SUBSET of the alphabet, which is the
+ * property that keeps it honest without changing what users see.
+ */
+export const ANCHORING_MAGNITUDE_ALT = "million|thousand|k|m|billion";
+
+/**
  * Generate framing nudges based on graph and brief analysis
  */
 function generateFramingNudges(graph: Graph, brief: string): FramingNudge[] {
@@ -135,7 +154,7 @@ function generateFramingNudges(graph: Graph, brief: string): FramingNudge[] {
   const briefLower = brief.toLowerCase();
 
   // Anchoring warning - Look for specific numbers that might anchor thinking
-  const hasSpecificNumbers = /\$\d+|\d+%|\d+\s*(million|thousand|k|m|billion)/i.test(brief);
+  const hasSpecificNumbers = new RegExp(`\\$\\d+|\\d+%|\\d+\\s*(${ANCHORING_MAGNITUDE_ALT})`, "i").test(brief);
   if (hasSpecificNumbers) {
     nudges.push({
       id: "nudge_anchoring",

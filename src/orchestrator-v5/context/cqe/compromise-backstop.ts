@@ -72,6 +72,24 @@ interface NumericToken {
 // or end-of-input, which is the only way it ever appears.
 const TRAILING_UNIT_RE = /^\s*(%|pp|percentage\s+points?|months?|weeks?|days?|years?|hours?|minutes?|kg|km|miles?|GBP|USD|EUR|grand|quid)(?![a-z0-9])/i;
 
+/**
+ * The trailing tokens this backstop treats as a MAGNITUDE, and what they
+ * multiply by (ROADMAP 2.330, added in review).
+ *
+ * ⚠ THIS FILE WAS MIS-CLASSIFIED IN THE FIRST CUT OF 2.330's UNION GUARD, and
+ * the mis-classification is the point. Its manifest entry read "`grand` is a
+ * UNIT token for span extension, not a multiplier" — but the code below does
+ * `value = value * 1000` under `isGrand`, so this is a genuine grand→x1000
+ * VALUE site, and the guard was told not to look at it. That is CLAUDE.md
+ * trap 7b landing inside the trap-12d guard written to prevent it: a one-line
+ * description of a site, believed instead of the site, teaching the checker to
+ * stop looking. The multiplier is data now, and the union guard imports it, so
+ * the classification cannot be asserted again without being checked.
+ */
+export const BACKSTOP_MAGNITUDE_MULTIPLIERS: Readonly<Record<string, number>> = {
+  grand: 1_000,
+};
+
 // Second half of the same defect. Fixing the `\b` above is necessary but not
 // sufficient, because for the COMMONEST spelling the unit never reaches the
 // trailing check at all: compromise hands "5%" back as a SINGLE token whose
@@ -111,7 +129,7 @@ export function compromiseBackstop(
     let valueOrigin: QuantityExtractionResult['value_origin'] = 'parsed_numeric';
     if (isPercent) value = value / 100;
     if (isGrand) {
-      value = value * 1000;
+      value = value * BACKSTOP_MAGNITUDE_MULTIPLIERS.grand;
       valueOrigin = 'suffix_expansion';
     }
     const endPos = typeof extendedEnd === 'number' ? extendedEnd : token.end;
