@@ -52,6 +52,7 @@ import { describe, expect, it } from 'vitest';
 import { enrichGraphWithFactorsAsync } from '../enricher.js';
 import {
   GOAL_BASELINE_PATTERN_SOURCES_FOR_DRIFT_GUARD,
+  PROPOSAL_FRAME_MARKERS,
   extractFactors,
   extractGoalTargetWithBaseline,
 } from '../index.js';
@@ -801,5 +802,292 @@ describe('ROADMAP 2.353 — trailing adverbs do not manufacture a mismatch', () 
       ),
       'the cross-signal refusal itself regressed',
     ).toBeNull();
+  });
+});
+
+/* =========================================================================
+ * ROADMAP 2.371(b) — THE OPTIONALITY GUARD, AND THE CORPUS THAT SIZES IT
+ *
+ * #807's guard was `(?:could|might|may|can|perhaps|maybe)` consumed as a
+ * LOOKBEHIND IMMEDIATELY BEFORE THE VERB. The re-review reported one escaping
+ * phrasing; MEASURED at `7bdf30ff` there were TWENTY-TWO of twenty-five, and
+ * six of them carried a LISTED modal — the adjacency was a bigger hole than
+ * the vocabulary. Every entry below minted `{value: 59, baseline: 49,
+ * unit: '£'}` at confidence 0.95 on a graph whose goal is "Grow annual
+ * revenue": a fabricated goal contract out of a sentence proposing a PRICE.
+ *
+ * ⚠ THIS CORPUS IS THE HALF NO DERIVATION CAN SUPPLY (CLAUDE.md 12d, second
+ * face). `PROPOSAL_FRAME_MARKERS` is a list, and a guard derived from a list
+ * proves its consumers AGREE with the list — never that the list is RIGHT.
+ * Only hand-written phrasings notice it is short. Deleting a marker from the
+ * canonical array must turn entries here RED; that is the proof obligation,
+ * and it is executed as a mutant, not asserted here.
+ * ======================================================================= */
+
+describe('ROADMAP 2.371(b) — a proposal is not a commitment', () => {
+  /**
+   * Hand-written, one phrasing per marker family, each a shape a person
+   * actually writes. The two flagged MEASURED-LISTED-MODAL entries are the
+   * ones that prove the defect was positional as well as lexical: their marker
+   * was already in #807's closed list and they minted anyway.
+   */
+  const LEVER_CORPUS: ReadonlyArray<readonly [string, string]> = [
+    // — the re-review's reported case, verbatim —
+    ['would consider', 'we would consider increasing the price from £49 to £59 this year'],
+    // — MEASURED-LISTED-MODAL: the marker was listed; only its POSITION saved it —
+    ['could consider (listed modal, non-adjacent)', 'We could consider increasing the price from £49 to £59 this year'],
+    ['can also (listed modal, non-adjacent)', 'We can also increase the price from £49 to £59 this year'],
+    ['may want to (listed modal, non-adjacent)', 'We may want to increase the price from £49 to £59 this year'],
+    ['perhaps, fronted (listed modal, non-adjacent)', 'Perhaps we increase the price from £49 to £59 this year'],
+    ['maybe, fronted (listed modal, non-adjacent)', 'Maybe we increase the price from £49 to £59 this year'],
+    ['could + a decimal in between', 'We could raise it by 2.5x and increase the price from £49 to £59 this year'],
+    // — epistemic modals and adverbs —
+    ['would', 'We would increase the price from £49 to £59 this year'],
+    ['possibly', 'We possibly increase the price from £49 to £59 this year'],
+    ['potentially', 'We potentially increase the price from £49 to £59 this year'],
+    // — deliberation verbs —
+    ['considering', 'We are considering increasing the price from £49 to £59 this year'],
+    ['thinking of', 'We are thinking of increasing the price from £49 to £59 this year'],
+    ['weighing', 'We are weighing increasing the price from £49 to £59 this year'],
+    ['exploring', 'We want to explore increasing the price from £49 to £59 this year'],
+    ['evaluating', 'We are evaluating increasing the price from £49 to £59 this year'],
+    ['contemplating', 'We are contemplating increasing the price from £49 to £59 this year'],
+    ['debating', 'We are debating increasing the price from £49 to £59 this year'],
+    ['mulling', 'We are mulling increasing the price from £49 to £59 this year'],
+    ['looking at', 'We are looking at increasing the price from £49 to £59 this year'],
+    ['toying with', 'We are toying with increasing the price from £49 to £59 this year'],
+    ['tempted', 'We are tempted to increase the price from £49 to £59 this year'],
+    // — proposal nouns and hypothetical frames —
+    ['option to', 'We have the option to increase the price from £49 to £59 this year'],
+    ['one option is', 'One option is to increase the price from £49 to £59 this year'],
+    ['an alternative', 'An alternative is to increase the price from £49 to £59 this year'],
+    ['the proposal', 'The proposal is to increase the price from £49 to £59 this year'],
+    ['in one scenario', 'In one scenario we increase the price from £49 to £59 this year'],
+    ['a possibility', 'A possibility is to increase the price from £49 to £59 this year'],
+    ['suggestion', 'My suggestion is to increase the price from £49 to £59 this year'],
+    ['what if', 'What if we increase the price from £49 to £59 this year?'],
+    ['suppose', 'Suppose we increase the price from £49 to £59 this year'],
+    ['if we', 'If we increase the price from £49 to £59 this year, revenue rises'],
+    ['should we (INVERTED — bare "should" is a commitment)', 'Should we increase the price from £49 to £59 this year?'],
+    ['could we (inverted)', 'Could we increase the price from £49 to £59 this year?'],
+  ];
+
+  it.each(LEVER_CORPUS)('forms no goal pair: %s', (_n, brief) => {
+    expect(extractGoalTargetWithBaseline(brief), brief).toBeNull();
+  });
+
+  it.each(LEVER_CORPUS)('mints NOTHING goal-labelled: %s', (_n, brief) => {
+    // Bound by IDENTITY to the labels `isTargetGoalLabel` routes to the mint —
+    // not by a count, and not by a value predicate some other factor could
+    // satisfy. The ordinary "Price" factor these sentences carry is expected
+    // and must survive; only the goal contract is forbidden.
+    const goalLabelled = extractFactors(brief).filter((f) =>
+      /^(?:target|goal|objective|threshold)$/i.test(f.label),
+    );
+    expect(goalLabelled.map((f) => `${f.label}=${f.value}`), brief).toEqual([]);
+  });
+
+  it.each(LEVER_CORPUS)('mints nothing on the wire (pristine parity): %s', async (_n, brief) => {
+    const { contract } = await runToWire(brief);
+    expect(contract, brief).toEqual({
+      goal_threshold: undefined,
+      goal_threshold_raw: undefined,
+      goal_threshold_unit: undefined,
+      goal_threshold_cap: undefined,
+      goal_threshold_frame: undefined,
+      goal_baseline: undefined,
+      goal_baseline_raw: undefined,
+    });
+  });
+
+  /**
+   * ⭐ THE POSITIVE CONTROL, and it is the load-bearing half of this describe
+   * (CLAUDE.md trap 13). Every assertion above is an ABSENCE, and a guard that
+   * refused EVERYTHING would satisfy all of them while destroying the
+   * capability #807 shipped. These are commitment phrasings on the SAME
+   * sentence shape: they must still mint, in full.
+   *
+   * ⚠ AND THEY ENCODE #807'S DELIBERATE EXCLUSIONS. Its note reads "Deliberately
+   * NOT including 'should', 'must', 'need to' or 'aim to' — those state intent".
+   * 2.371's brief proposed adding bare `should`; that would have broken
+   * `should` below, so it was NOT added and the interrogative phrase `should we`
+   * was added instead. The distinguishing signal is the subject-verb inversion,
+   * not the modal. This block is what makes that a measured decision rather
+   * than a preference.
+   */
+  const COMMITMENTS: ReadonlyArray<readonly [string, string, number, number]> = [
+    ['should', 'We should increase revenue from £4M to £6M within 12 months', 6_000_000, 4_000_000],
+    ['must', 'We must increase revenue from £4M to £6M within 12 months', 6_000_000, 4_000_000],
+    ['aim to', 'We aim to increase revenue from £4M to £6M within 12 months', 6_000_000, 4_000_000],
+    ['need to', 'We need to increase revenue from £4M to £6M within 12 months', 6_000_000, 4_000_000],
+    ['will', 'We will increase revenue from £4M to £6M within 12 months', 6_000_000, 4_000_000],
+    ['want to', 'We want to increase revenue from £4M to £6M within 12 months', 6_000_000, 4_000_000],
+    ['committed to', 'We are committed to increasing revenue from £4M to £6M within 12 months', 6_000_000, 4_000_000],
+    ['plan (goal-word anchored)', 'Our plan is to raise the target from £600,000 to £800,000', 800_000, 600_000],
+    ['bare, case A', 'Increase annual revenue from £4 million today to £6 million within 12 months', 6_000_000, 4_000_000],
+    ['bare, case B', 'Raise the target from £600,000 to £800,000', 800_000, 600_000],
+  ];
+
+  it.each(COMMITMENTS)('STILL MINTS — %s', (_n, brief, value, baseline) => {
+    const r = extractGoalTargetWithBaseline(brief);
+    expect(r, `the guard swallowed a commitment: ${brief}`).not.toBeNull();
+    expect(r!.value, brief).toBe(value);
+    expect(r!.baseline, brief).toBe(baseline);
+  });
+
+  /**
+   * The DERIVED half (12d, first face): every marker the canonical array
+   * carries is WIRED. It iterates the array itself, so a marker added tomorrow
+   * is exercised the instant it lands — and it is structurally blind to the
+   * array being short, which is what `LEVER_CORPUS` above is for. Neither
+   * supersedes the other.
+   */
+  it('every canonical marker actually disarms the grammar', () => {
+    expect(PROPOSAL_FRAME_MARKERS.length, 'the marker set is empty').toBeGreaterThan(0);
+    for (const marker of PROPOSAL_FRAME_MARKERS) {
+      const framed = `Right now ${marker} we increase annual revenue from £4 million to £6 million within 12 months`;
+      expect(
+        extractGoalTargetWithBaseline(framed),
+        `the marker '${marker}' is listed but does not disarm the grammar`,
+      ).toBeNull();
+    }
+    // The control for the frame itself: without a marker, the very same
+    // sentence mints. Without this the loop above could pass on a sentence
+    // that never extracted for an unrelated reason (trap 13).
+    const unframed = extractGoalTargetWithBaseline(
+      'Right now we increase annual revenue from £4 million to £6 million within 12 months',
+    );
+    expect(unframed?.value, 'the control frame does not extract — the loop above proves nothing').toBe(
+      6_000_000,
+    );
+  });
+
+  /**
+   * ⚠ A UNION ASSERTION PINNED TO A HISTORICAL ARTEFACT, NOT TO "WHATEVER IS
+   * CURRENT" (CLAUDE.md 12b). These six spellings are #807's shipped closed
+   * list, copied here by value and permanently. Deriving this from the live
+   * array would make it a tautology the moment the array changed — the exact
+   * way the prompt-drift controls hollowed themselves out. Its job is to make
+   * the guard a RATCHET: the set may only grow.
+   */
+  it('the canonical set can never shrink below what #807 shipped', () => {
+    for (const shipped of ['could', 'might', 'may', 'can', 'perhaps', 'maybe']) {
+      expect(
+        PROPOSAL_FRAME_MARKERS,
+        `#807's closed list lost '${shipped}' — the guard went backwards`,
+      ).toContain(shipped);
+    }
+  });
+});
+
+describe('ROADMAP 2.371(b) — the guard reads ONE CLAUSE, not the brief', () => {
+  /**
+   * ⚠ THE SCOPE BOUND IS LOAD-BEARING IN BOTH DIRECTIONS, and getting it wrong
+   * either way re-creates a measured defect:
+   *
+   *   TOO WIDE (brief-scoped) → a lever sentence's "could" deletes a genuine
+   *     goal later in the same brief, which is review A1's steal case arriving
+   *     by a different road.
+   *   TOO NARROW (token-adjacent) → #807's lookbehind, i.e. the defect this row
+   *     closes.
+   */
+  it('a lever sentence does not poison a genuine goal in the NEXT sentence', async () => {
+    const brief =
+      'We could consider increasing the price from £49 to £59 this year. ' +
+      'Increase annual revenue from £4 million today to £6 million within 12 months.';
+    const pair = extractGoalTargetWithBaseline(brief);
+    expect(pair?.value, 'the proposal frame leaked across the full stop').toBe(6_000_000);
+    expect(pair?.baseline).toBe(4_000_000);
+
+    const { contract } = await runToWire(brief);
+    expect(contract.goal_threshold_raw).toBe(6_000_000);
+    expect(contract.goal_baseline_raw).toBe(4_000_000);
+  });
+
+  it('a NEWLINE ends the clause — briefs arrive as bulleted lists', () => {
+    const r = extractGoalTargetWithBaseline(
+      'We could cut costs\nIncrease annual revenue from £4 million to £6 million within 12 months',
+    );
+    expect(r?.value, 'a "could" on an earlier LINE deleted a goal').toBe(6_000_000);
+  });
+
+  it('a SEMICOLON ends the clause', () => {
+    const r = extractGoalTargetWithBaseline(
+      'We could cut costs; increase annual revenue from £4 million to £6 million within 12 months',
+    );
+    expect(r?.value).toBe(6_000_000);
+  });
+
+  it('a DECIMAL POINT does not end the clause — and the error direction is fabrication', () => {
+    // Treating "2.5" as a sentence boundary would shorten the scope, drop the
+    // `could`, and mint 59/49. MEASURED at `7bdf30ff` (where the lookbehind
+    // could not see across "raise it by 2.5x and"): it minted exactly that.
+    expect(
+      extractGoalTargetWithBaseline(
+        'We could raise it by 2.5x and increase the price from £49 to £59 this year',
+      ),
+    ).toBeNull();
+
+    // The same shape with decimals INSIDE the amounts, so the scanner is
+    // exercised on the numbers it must not treat as boundaries either.
+    expect(
+      extractGoalTargetWithBaseline('We could increase the price from £49.00 to £59.50 this year'),
+    ).toBeNull();
+  });
+
+  it('a COMMA does not end the clause — the frame governs the whole sentence', () => {
+    // Deliberately NOT a boundary, unlike `.` `;` `\n`: a comma separates parts
+    // of ONE statement, and admitting it would let the marker fall out of scope
+    // and mint the lever.
+    //
+    // ⚠ THE FIRST TWO BRIEFS ARE HERE BECAUSE THIS LANE'S OWN MUTANT BATTERY
+    // CAUGHT THE ORIGINAL PIN NOT BINDING. It read "Revenue is flat, so we
+    // could increase the price…", where `could` sits AFTER the comma — so the
+    // comma rule made no difference to it and the mutant that adds `,` to the
+    // boundary set left the whole file 207/207 GREEN. A pin for a rule must put
+    // the rule's subject on the far side of the thing it governs. Both briefs
+    // below carry their marker BEFORE the comma, and both minted 59/49 at
+    // `7bdf30ff`.
+    for (const brief of [
+      'We could, if the board agrees, increase the price from £49 to £59 this year',
+      'One option, which the team likes, is to increase the price from £49 to £59 this year',
+      'Revenue is flat, so we could increase the price from £49 to £59 this year',
+    ]) {
+      expect(extractGoalTargetWithBaseline(brief), brief).toBeNull();
+    }
+
+    // The control, so the rule is not proven by refusing everything with a
+    // comma in it: an unframed sentence carrying a comma still mints.
+    expect(
+      extractGoalTargetWithBaseline(
+        'Revenue is flat, and we will increase annual revenue from £4 million to £6 million within 12 months',
+      )?.value,
+    ).toBe(6_000_000);
+  });
+
+  it('DISCLOSED COST — a DECIDED statement about a lever metric still forms a pair', () => {
+    // The guard's remit is FRAMING, not metric semantics. "We plan to increase
+    // the price…" is a commitment by every signal the sentence carries; telling
+    // a lever metric from a goal metric needs the GRAPH, not the sentence, and
+    // is REPORTED as a residual of this slice, not fixed by it. Pinned so the
+    // cost is visible rather than
+    // discovered, and so a later widening of the marker list to cover it is a
+    // decision someone has to make against this test.
+    const r = extractGoalTargetWithBaseline(
+      'We plan to increase the price from £49 to £59 this year',
+    );
+    expect(r?.value, 'the disclosed cost changed — re-read the note').toBe(59);
+    expect(r?.baseline).toBe(49);
+  });
+
+  it('DISCLOSED SCOPE — the guard is on the ANCHORED pattern, not on patterns 1-3', () => {
+    // Patterns 1-3 require an EXPLICIT goal word ("to a TARGET of £6M"), which
+    // is a far stronger signal than pattern 4's anchor, and #807 put the
+    // optionality guard on pattern 4 alone. MEASURED at `7bdf30ff` and
+    // unchanged here, so the slice's blast radius is stated rather than
+    // implied: a proposal-framed sentence that NAMES its target still pairs.
+    const r = extractGoalTargetWithBaseline('We could grow revenue from £4M to a target of £6M');
+    expect(r?.value, 'pattern 1 behaviour moved — that is not this slice').toBe(6_000_000);
+    expect(r?.baseline).toBe(4_000_000);
   });
 });
