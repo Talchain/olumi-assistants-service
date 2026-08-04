@@ -61,7 +61,6 @@ import {
   CARDINAL_AMOUNT_SOURCE,
   CARDINAL_WORD_VALUES,
   CARDINAL_SCALE_MULTIPLIERS,
-  parseCardinalAmount,
 } from "../../../utils/cardinal-words.js";
 import { MAGNITUDE_MULTIPLIERS } from "../../../utils/magnitude-alphabet.js";
 
