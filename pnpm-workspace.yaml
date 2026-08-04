@@ -1,46 +1,10 @@
 packages:
   - .
 
-# ---------------------------------------------------------------------------
-# Scoped audit suppression -- NOT a blanket mute.
-#
-# Every other advisory, at every severity, still fails `pnpm audit
-# --audit-level=high` in the ci.yml `security` job. Only the single GHSA listed
-# below is suppressed. Do NOT add `continue-on-error` to that job and do NOT
-# widen this list without the same evidence trail (D-58).
-#
-# GHSA-mh99-v99m-4gvg -- brace-expansion: OOM DoS via unbounded expansion.
-#
-#   Why it cannot be fixed (re-derived at the bytes 2026-07-25):
-#     The fix exists ONLY on the 5.x line (5.0.8, published 2026-07-23). There is
-#     no 1.x/2.x backport: the latest 1.1.16 and 2.1.2 (both 2026-07-08) predate
-#     it and contain no expansion-length guard. This tree keeps 1.1.16 (via
-#     minimatch@3.1.5) and 2.1.2 (via minimatch@5.1.9 and @9.0.9); those
-#     minimatch lines declare brace-expansion ^1 / ^2 and their LATEST releases
-#     still do -- only minimatch@10.x moved to brace-expansion@5.x.
-#     Forcing 5.0.8 across the tree is an API break, not a version bump: 1.x/2.x
-#     CJS is `module.exports = expandTop` (callable), 5.x is `exports.expand` on
-#     an ESM-first package, so every minimatch below 10.x would throw
-#     "expand is not a function" on first use.
-#     Blast radius if forced: eslint, @typescript-eslint/*, @redocly/openapi-core,
-#     @oclif/core, artillery, openapi-typescript, archiver, glob, filelist.
-#
-#   Why the residual exposure is nil:
-#     The one production path that reached the 5.x line (@sentry/node >
-#     @fastify/otel > minimatch@10.2.4) IS fixed -- it now resolves 5.0.8.
-#     The only other production root is `archiver`, whose single call site
-#     (src/routes/assist.evidence-pack.ts) uses archiver()/append()/pipe()/
-#     finalize() only. It never calls .glob() or .directory() -- the only
-#     archiver APIs that reach glob/readdir-glob, and therefore minimatch, and
-#     therefore brace-expansion. So the code is never invoked on that path.
-#     Every remaining path is dev tooling fed developer-authored glob patterns.
-#
-#   When to REMOVE this entry:
-#     As soon as a patched 1.x/2.x brace-expansion ships, or this tree stops
-#     resolving 1.1.16 / 2.1.2. The "Assert audit suppression is still
-#     necessary" step in ci.yml fails the build when that happens. Delete this
-#     entry then -- do not silence that step.
-# ---------------------------------------------------------------------------
-auditConfig:
-  ignoreGhsas:
-    - GHSA-mh99-v99m-4gvg
+# The scoped audit suppression that used to live here (auditConfig.ignoreGhsas:
+# GHSA-mh99-v99m-4gvg, brace-expansion OOM DoS) was REMOVED 2026-08-04, per its
+# own removal condition: patched 1.x/2.x lines now exist upstream (1.1.17 /
+# 2.1.3, superseded in this tree by 1.1.18 / 2.1.4 which also clear the newer
+# GHSA-rgw5-rvv9-x895), so the "no 1.x/2.x backport exists" premise is gone and
+# the tree no longer resolves 1.1.16 / 2.1.2. The audit now runs unsuppressed.
+# Do NOT re-add entries here without the D-58 evidence trail.
