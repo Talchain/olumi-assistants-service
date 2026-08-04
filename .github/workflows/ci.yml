@@ -367,32 +367,13 @@ jobs:
         # no token, so keep it working rather than removing it.
         run: pnpm audit --audit-level=high
 
-      # Derive, don't mirror. `pnpm-workspace.yaml` suppresses exactly one GHSA
-      # (GHSA-mh99-v99m-4gvg, brace-expansion OOM DoS) because the fix exists
-      # only on the 5.x line and minimatch@3/@5/@9 cannot leave 1.x/2.x without
-      # an API break -- the full reasoning lives next to the entry itself.
-      # That justification is a hand-maintained claim, and hand-maintained
-      # claims drift silently -- which is exactly how this job's "it's just a
-      # brace-expansion advisory" label came to hide a HIGH against the
-      # deployed HTTP router. So assert the premise still holds: if the
-      # unfixable 1.1.16 / 2.1.2 resolutions ever leave the lockfile, the
-      # suppression has outlived its reason and MUST be deleted rather than
-      # left to mute something new.
-      - name: Assert audit suppression is still necessary
-        run: |
-          missing=""
-          for v in 1.1.16 2.1.2; do
-            grep -qE "^  brace-expansion@${v}:" pnpm-lock.yaml || missing="$missing $v"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::brace-expansion$missing no longer resolved in pnpm-lock.yaml."
-            echo "The GHSA-mh99-v99m-4gvg entry in pnpm-workspace.yaml exists ONLY because"
-            echo "minimatch@3/@5/@9 pin brace-expansion 1.x/2.x, for which no patch exists."
-            echo "That premise no longer holds. DELETE the auditConfig.ignoreGhsas entry"
-            echo "and this step, then re-run the audit unsuppressed."
-            exit 1
-          fi
-          echo "OK: brace-expansion 1.1.16 and 2.1.2 still resolved; suppression still justified."
+      # The "Assert audit suppression is still necessary" step that used to
+      # follow was removed 2026-08-04 together with the suppression it guarded
+      # (pnpm-workspace.yaml auditConfig.ignoreGhsas: GHSA-mh99-v99m-4gvg),
+      # exactly as that step's own failure message directed: patched
+      # brace-expansion 1.x/2.x lines now exist (1.1.17/2.1.3; this tree
+      # resolves 1.1.18/2.1.4), the 1.1.16/2.1.2 resolutions left the lockfile,
+      # and the audit above now runs with an EMPTY ignore list.
 
   # Job C: Spec v04 compliance (already exists as separate workflow, keeping here for visibility)
   # See .github/workflows/spec-v04-audit.yml
