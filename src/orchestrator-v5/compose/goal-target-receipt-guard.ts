@@ -203,27 +203,89 @@ const VERB_FIRST_CLAIM_RE =
  * would need the entity-resolution altitude this pure detector deliberately
  * does not have.
  */
-const NON_GOAL_TARGET_NOUN =
-  '(?!\\s+(?:factor|node|option|outcome|risk|edge|variable|value|field|column|id)\\b)';
+/**
+ * ⚠ REVIEW ROUND 2 (F1) — THE OVER-FIRE DIRECTION IS THE DANGEROUS ONE, and
+ * the first cut of these arms got it wrong in three ways. A false POSITIVE here
+ * does not merely mangle a sentence: at the turn-executor STEP 7 call site a
+ * swap ALSO withholds `graphForCommit` and the handler facts, so over-firing on
+ * a truthful receipt DESTROYS AN APPLIED CHANGE. 13 constructed truthful /
+ * neutral shapes fired the round-1 arms, and one end-to-end truthful
+ * factor-add receipt came back `swap`/`unbacked_claim`. All 13 are pinned as
+ * must-NOT-fire in the corpus. The three gap classes and their fixes:
+ *
+ *  (1) Arm B had NO `already|currently` requirement — the marker was optional,
+ *      so ANY passive "targets are set" fired: "Sales targets are set by the
+ *      finance team each quarter.", "In most SaaS businesses, growth targets
+ *      are set annually." → `already|currently` is now MANDATORY on arm B,
+ *      matching arms A and C. The motivating live paraphrase ("your revenue
+ *      target is already registered") still fires.
+ *  (2) AGENTIVE PASSIVE — "…are already set BY the finance team" attributes
+ *      the setting to a third party, not to this model. A marker followed by
+ *      `by` is never a claim about our persisted state (`NOT_AGENTIVE`).
+ *  (3) The conditional screen lacked `if|would|could|suppose|imagine`, so
+ *      "If you had already set a target, the analysis would score your options
+ *      against it." fired arm C — that is the honest coaching for exactly the
+ *      UNREGISTERED state, i.e. the arm destroyed the very sentence the gate
+ *      exists to make possible.
+ *
+ * Two narrower shape fixes in the same pass:
+ *  - `set(?!\s+out\b)`: "your target is set out in the strategy brief" is a
+ *    phrasal verb meaning "described", not "registered".
+ *  - arm C's word gap tightened {0,4} → {0,2}: at 4 the gap crossed an OBJECT
+ *    boundary — "I have already recorded your feedback about the target" bound
+ *    `recorded` to `target` when its real object was `feedback`. Every in-class
+ *    shape needs ≤2 ("already recorded that target", "already set the success
+ *    target"). This is a BOUND, not an exception list.
+ *
+ * ⭐ AND THE NOUN BLOCKLIST IS GONE — REPLACED BY A DERIVED HEAD TEST.
+ * Round 1 screened `target <factor|node|option|value|…>` with a hand-listed
+ * blocklist. G9 ("The report already has a target section in place.") proved it
+ * short — and NOUNS ARE AN OPEN CLASS, so that list can never be finished
+ * (trap 12; widening it again would be the third exception 2.249 warns about).
+ * `TARGET_IS_PHRASE_HEAD` inverts it: instead of enumerating the open class of
+ * nouns that may FOLLOW `target`, require the token after `target` to come from
+ * the CLOSED classes that indicate `target` is the HEAD of its phrase —
+ * copula/auxiliary, preposition, conjunction/relativiser, the already/currently
+ * adverbs, a registration marker, or punctuation/end. "target section",
+ * "target factor", "target value" all fail it without being listed anywhere.
+ *
+ * Note the FAILURE DIRECTION, which is why this inversion is safe: a blocklist
+ * that is short OVER-fires (destroys a truthful applied change); an allowlist
+ * that is short UNDER-fires (a claim ships, and the rest of the honesty stack
+ * still sees it). Given F1, trading the dangerous direction for the benign one
+ * is the correct bias.
+ */
 const REGISTRATION_MARKER =
-  '(?:in\\s+place|set|saved|registered|recorded|captured|built\\s+in|locked\\s+in)';
+  '(?:in\\s+place|set(?!\\s+out\\b)|saved|registered|recorded|captured|built\\s+in|locked\\s+in)';
+/** (2) A marker followed by an agent ("set BY finance") is not our state. */
+const NOT_AGENTIVE = '(?!\\s+by\\b)';
+/** First words of REGISTRATION_MARKER — legal continuations after the noun. */
+const MARKER_HEAD_WORDS = 'in|set|saved|registered|recorded|captured|built|locked';
+/**
+ * Derived head test (replaces the noun blocklist). Closed-class continuations
+ * only: a following OPEN-class noun ("section", "factor", "value") fails.
+ */
+const TARGET_IS_PHRASE_HEAD =
+  `(?=\\s+(?:is|are|was|were|has|have|had|been|already|currently|still|now|` +
+  `${MARKER_HEAD_WORDS}|of|for|on|at|to|by|as|from|with|against|and|or|that|which|but|so)\\b` +
+  `|\\s*[,.;:!?)]|\\s*$)`;
 /** A. "already/currently <has|have|…> [≤4 words] target … <marker>". */
 const ALREADY_POSSESSES_TARGET_RE = new RegExp(
   `\\b(?:already|currently)\\s+(?:has|have|had|got|carries|contains|includes|holds)\\b` +
-    `(?:\\s+[\\w'’£$€%,.-]+){0,4}?\\s+targets?\\b${NON_GOAL_TARGET_NOUN}` +
-    `[^.?!\\n]*\\b${REGISTRATION_MARKER}\\b`,
+    `(?:\\s+[\\w'’£$€%,.-]+){0,4}?\\s+targets?\\b${TARGET_IS_PHRASE_HEAD}` +
+    `[^.?!\\n]*\\b${REGISTRATION_MARKER}\\b${NOT_AGENTIVE}`,
   'i',
 );
-/** B. "target <is|are|was|…> [already|currently] <marker>" — marker adjacent. */
+/** B. "target <is|are|…> <already|currently> <marker>" — both REQUIRED (F1.1). */
 const TARGET_COPULA_REGISTERED_RE = new RegExp(
-  `\\btargets?\\b${NON_GOAL_TARGET_NOUN}\\s+(?:is|are|was|were|has\\s+been|have\\s+been)\\s+` +
-    `(?:already\\s+|currently\\s+)?${REGISTRATION_MARKER}\\b`,
+  `\\btargets?\\b${TARGET_IS_PHRASE_HEAD}\\s+(?:is|are|was|were|has\\s+been|have\\s+been)\\s+` +
+    `(?:already|currently)\\s+${REGISTRATION_MARKER}\\b${NOT_AGENTIVE}`,
   'i',
 );
-/** C. "already/currently <set|recorded|…> [≤4 words] target". */
+/** C. "already/currently <set|recorded|…> [≤2 words] target" (gap tightened). */
 const ALREADY_REGISTERED_TARGET_RE = new RegExp(
   `\\b(?:already|currently)\\s+(?:set|saved|registered|recorded|captured|configured|added|applied)\\b` +
-    `(?:\\s+[\\w'’£$€%,.-]+){0,4}?\\s+targets?\\b${NON_GOAL_TARGET_NOUN}`,
+    `(?:\\s+[\\w'’£$€%,.-]+){0,2}?\\s+targets?\\b${TARGET_IS_PHRASE_HEAD}`,
   'i',
 );
 /**
@@ -231,9 +293,13 @@ const ALREADY_REGISTERED_TARGET_RE = new RegExp(
  * target is NOT set, or forward-looking/conditional coaching ("once a
  * success target is set…"), are not registration claims — swapping them
  * would itself be an honesty failure.
+ *
+ * F1.3 added `if|would|could|suppose|imagine`: without them the hypothetical
+ * "If you had already set a target, the analysis WOULD score your options
+ * against it." was swapped — the honest description of the unregistered state.
  */
 const NEGATION_CONDITIONAL_RE =
-  /\b(?:no|not|never|none|isn't|hasn't|haven't|wasn't|won't|can't|cannot|couldn't|yet\s+to|still\s+needs?|once|until|unless)\b/i;
+  /\b(?:no|not|never|none|isn't|hasn't|haven't|wasn't|won't|can't|cannot|couldn't|yet\s+to|still\s+needs?|once|until|unless|if|would|could|suppose|imagine)\b/i;
 
 /** Split into sentences; newline is always a boundary. */
 function sentencesOf(text: string): string[] {

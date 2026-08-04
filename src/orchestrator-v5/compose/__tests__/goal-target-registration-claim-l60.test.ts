@@ -191,6 +191,82 @@ describe('claimsGoalTargetRegistration — hand-written boundary corpus', () => 
   }
 });
 
+/**
+ * F1 OVER-FIRE CORPUS (review round 2) — the direction that DESTROYS WORK.
+ *
+ * Every shape below is truthful or neutral prose that a real turn could emit,
+ * and every one FIRED the round-1 arms. That is not a cosmetic miss: at the
+ * turn-executor STEP 7 call site a swap also withholds `graphForCommit` and the
+ * handler facts, so a false positive on a receipt DESTROYS AN APPLIED CHANGE
+ * (see the end-to-end pin in
+ * `__tests__/turn-executor-direct-answer-registration-claim.test.ts`).
+ *
+ * G1-G9 are the reviewer's shapes; G10-G13 are in-class siblings this lane
+ * added to motivate the agentive-passive screen specifically — mandatory
+ * `already|currently` alone does NOT kill them, because they carry it.
+ *
+ * Grouped by the gap class each one proves, so a future regression names its
+ * own cause rather than just "something over-fires".
+ */
+describe('claimsGoalTargetRegistration — F1 over-fire corpus (must NEVER fire)', () => {
+  const OVER_FIRE: ReadonlyArray<readonly [string, string, string]> = [
+    // (1) arm B had no already/currently requirement — any passive "targets are set".
+    ['G1', 'no-already passive', 'Sales targets are set by the finance team each quarter.'],
+    ['G2', 'no-already passive + real edit receipt', 'Stretch targets are set by leadership, so I have added Leadership buy-in as a factor.'],
+    ['G3', 'no-already passive, no agent', 'In most SaaS businesses, growth targets are set annually.'],
+    ['G4', 'no-already passive, past', 'The target was set by your CFO last year, before this model existed.'],
+    ['G5', 'no-already passive + real edit receipt', 'Growth targets are recorded in your tracker spreadsheet, and I have added a growth factor.'],
+    // (2) agentive passive — carries already/currently, so ONLY the `by` screen kills it.
+    ['G10', 'agentive passive', 'Sales targets are already set by the finance team each quarter.'],
+    ['G11', 'agentive passive', 'Budget targets have been recorded by procurement.'],
+    ['G12', 'agentive passive', 'The quarterly target is currently set by head office.'],
+    ['G13', 'agentive passive', 'Those targets were already captured by the previous consultant.'],
+    // (3) conditional — the honest coaching for the UNREGISTERED state.
+    ['G6', 'hypothetical', 'If you had already set a target, the analysis would score your options against it.'],
+    // (4) phrasal verb — "set out" means described, not registered.
+    ['G7', 'phrasal verb', 'Your target is set out in the strategy brief as a three-year ambition.'],
+    // (5) object gap — the verb's real object is "feedback", not "target".
+    ['G8', 'object boundary', 'I have already recorded your feedback about the target.'],
+    // (6) open-class noun after "target" — the blocklist could never be finished.
+    ['G9', 'target as modifier', 'The report already has a target section in place.'],
+    // G14/G15 were added by THIS lane after the round-2 mutant sweep, which
+    // found two guards that NO test distinguished — both mutants survived. The
+    // reviewer's own shapes could not isolate them because a different fix
+    // already blocked those sentences. Each of these carries `already`, so the
+    // named guard is the ONLY thing standing between it and a swap.
+    ['G14', 'phrasal verb WITH already (isolates set-out screen)', 'Your target is already set out in the strategy brief.'],
+    ['G15', 'already not adjacent to copula (isolates arm B adjacency)', "The target is the figure already recorded in last year's plan."],
+  ];
+
+  for (const [id, why, text] of OVER_FIRE) {
+    it(`${id} (${why}): ${text}`, () => {
+      expect(claimsGoalTargetRegistration(text)).toBe(false);
+    });
+  }
+});
+
+/**
+ * The derived head test replaced a hand-listed noun blocklist. These pin the
+ * MECHANISM, not the old list: none of these nouns is enumerated anywhere in
+ * the module, and each must still fail because it is an open-class noun rather
+ * than a closed-class continuation.
+ */
+describe('TARGET_IS_PHRASE_HEAD — derived, so unlisted nouns are screened too', () => {
+  const UNLISTED_NOUNS = ['section', 'spreadsheet', 'workshop', 'committee', 'paragraph', 'dashboard'];
+  for (const noun of UNLISTED_NOUNS) {
+    it(`"target ${noun}" is not a success target`, () => {
+      expect(
+        claimsGoalTargetRegistration(`The model already has a target ${noun} in place.`),
+      ).toBe(false);
+    });
+  }
+
+  it('but a target followed by a CLOSED-class continuation still fires', () => {
+    expect(claimsGoalTargetRegistration('The model already has that target in place.')).toBe(true);
+    expect(claimsGoalTargetRegistration('We already recorded that target.')).toBe(true);
+  });
+});
+
 describe('decideGoalTargetReceipt on the live turn shape (direct_answer, no handler, no graph write)', () => {
   it('RED-first: the live PRICING claim against the REAL persisted graph is an UNBACKED claim → swap', () => {
     expect(
