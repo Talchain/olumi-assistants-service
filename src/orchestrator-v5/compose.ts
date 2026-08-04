@@ -595,12 +595,18 @@ export const P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP = [
   //   - `flip_thresholds` — top-level array (distinct from the per-factor
   //     `results[].factor_sensitivity[].flip_threshold`); entries may carry an
   //     honest `flip_value: null`, which is preserved as-is.
-  //   - `edge_e_values` / `inference_warnings` — top-level science arrays. NOTE:
-  //     in the captured payload these are EMPTY at the top level; their populated
-  //     copies exist only inside stripped internal carriers (`_meta`,
-  //     `downstream_calls`) and are deliberately NOT rehydrated here. Recovering
-  //     the top-level keys makes transport ready; surfacing populated content is
-  //     an upstream PLoT/Track-S emission follow-up, not a CEE seam change.
+  //   - `edge_e_values` / `inference_warnings` — top-level science arrays.
+  //     ⚠ CORRECTED (lane 3, 2026-08-04; refuted 31 Jul, triage CORRECTION 2):
+  //     this comment used to claim both were "EMPTY at the top level" in the
+  //     captured payload, and that stale sentence produced at least one wrong
+  //     transport verdict. Measured over live persisted facts:
+  //     `edge_e_values` top-level non-empty in 773/773 non-noop run_analysis
+  //     facts; `inference_warnings` root-slot non-empty in 419/827 (robustness
+  //     slot 0/827) — see DGAI `readInferenceWarnings.ts` header +
+  //     PHASE0-EVIDENCE-2026-07-28/inference-warnings-derivation.md. The keys
+  //     are populated ON THIS WIRE today; the UI reads them (2.173 adopted).
+  //     Internal carriers (`_meta`, `downstream_calls`) are still stripped and
+  //     never rehydrated here.
   'edge_e_values',
   'inference_warnings',
   'confidence_tier',
