@@ -125,18 +125,30 @@ describe('ROADMAP 2.371(a) — each refusal pin reaches the rule it names', () =
     }
   });
 
-  it('KNOWN ABSENCE — a trailing metric noun hides the horizon anchor', () => {
-    // Same cross-metric brief, anchored the way #807 tried to anchor it. It
-    // still refuses — honestly, and in the safe direction — but via the ANCHOR,
-    // not via the cross-metric rule. Pinned so the gap is visible, and so the
-    // day someone widens the horizon this test tells them which pin to move.
+  it('the ABSENCE CLOSED (L67) — the horizon anchors past a trailing metric noun, and the refusal fires BY NAME', () => {
+    // This pin used to assert `goal_pair_unanchored`: the target's trailing
+    // noun ("revenue") was read by a zero-width lookahead, stood in front of
+    // the horizon slot, and the horizon never matched — the KNOWN ABSENCE the
+    // previous entry recorded, with the instruction that "the day someone
+    // widens the horizon this test tells them which pin to move". L67 is that
+    // day: the same mechanism was LOSING LIVE TARGETS on single-metric briefs
+    // ("…to 250 thousand pounds by the end of December 2026", the journey
+    // walk's verbatim goal), so pattern 4 now CONSUMES the trailing word
+    // (guarded so a horizon opener is never eaten). This cross-metric brief
+    // therefore anchors, reaches the pair-former, and refuses BY THE RULE THAT
+    // NAMES ITS DEFECT — which is what #807's comment wanted all along. Still
+    // null, still the safe direction; the reason is now diagnostic instead of
+    // incidental.
     events.length = 0;
     expect(
       extractGoalTargetWithBaseline(
         'Increase our headcount from 50 employees to 800000 revenue within 12 months',
       ),
     ).toBeNull();
-    expect(events.map((e) => e.event)).toEqual(['cee.factor_extraction.goal_pair_unanchored']);
+    expect(events.map((e) => e.event)).toEqual(['cee.factor_extraction.goal_pair_refused']);
+    expect(events[0].reason).toBe('metric_noun_mismatch');
+    expect(events[0].target_metric).toBe('revenue');
+    expect(events[0].baseline_metric).toBe('employee');
   });
 
   it('REFUSES a mixed-currency from-to, BY currency_mismatch', () => {
