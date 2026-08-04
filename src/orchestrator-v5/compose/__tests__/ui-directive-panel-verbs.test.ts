@@ -260,7 +260,7 @@ describe('panel rows respect the N=1 latch and ride the wire', () => {
       handlerFacts: [explainResultsFact()],
     });
     const sanitised = sanitiseOlumiResponseForEgress(OlumiResponseSchema.parse(env), {
-      graph: undefined,
+      graph: null,
       requestId: 'req-panel-verbs',
       exitPath: 'test',
       userMessage: null,
