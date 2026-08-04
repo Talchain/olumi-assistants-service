@@ -178,6 +178,60 @@ describe('2.473 closing bolt — real projection output vs vendored TransportedC
     expect(row).not.toHaveProperty('message');
   });
 
+  /**
+   * EGRESS PIN (Codex deep-review finding, added in-PR): the vendored schema
+   * deliberately does NOT prohibit `message` — the row is `.passthrough()`,
+   * a disclosed open namespace — so the ONLY thing keeping raw internal
+   * critique wording off the wire is this projection's withholding, and
+   * before this pin nothing went RED if someone re-added it. The pin is
+   * CONTENT-based (the sentinel must be absent from the ENTIRE serialised
+   * egress), so `message` text smuggled under ANY key — not just the
+   * `message` key itself — trips it.
+   */
+  it('EGRESS PIN — raw `message` text cannot survive projection (the schema will not catch it; only this seam does)', () => {
+    const INTERNAL_SENTINEL = 'INTERNAL_RAW_MESSAGE_SENTINEL_e5b1c2d3';
+    const rawWithSentinel = [
+      {
+        // U path: prose kept — but the display twin is present, so the
+        // sentinel-bearing `message` must play no part in the output.
+        id: 'crit_u_sent',
+        code: 'DEGENERATE_OUTCOMES',
+        severity: 'warning',
+        message: `internal diagnostic ${INTERNAL_SENTINEL} referencing node_x9`,
+        user_message: 'Readable copy for the user.',
+      },
+      {
+        // S path: copy replaced from the catalogue — the sentinel-bearing
+        // `message` must likewise vanish.
+        id: 'crit_s_sent',
+        code: 'EMPTY_INTERVENTIONS',
+        severity: 'warning',
+        message: `internal wording ${INTERNAL_SENTINEL} for opt_b`,
+        affected_option_ids: ['opt_b'],
+      },
+    ];
+
+    // POSITIVE CONTROL (trap 13): the sentinel IS visible pre-projection —
+    // an absence assertion is vacuous until it has seen a presence.
+    expect(JSON.stringify(rawWithSentinel)).toContain(INTERNAL_SENTINEL);
+
+    const out = projectCritiquesForTransport(
+      rawWithSentinel,
+      CTX,
+    ) as Array<Record<string, unknown>>;
+
+    // NON-VACUITY: both rows genuinely survive projection (an empty egress
+    // would make the absence below pass by testing nothing), bound by id.
+    expect(out).toHaveLength(2);
+    rowById(out, 'crit_u_sent');
+    rowById(out, 'crit_s_sent');
+
+    // THE PIN: the sentinel is absent from the ENTIRE egress payload…
+    expect(JSON.stringify(out)).not.toContain(INTERNAL_SENTINEL);
+    // …and the `message` key itself is absent from every row.
+    for (const row of out) expect(row).not.toHaveProperty('message');
+  });
+
   it('S row (by id) — replacement copy resolves the option LABEL and stays schema-valid', () => {
     const row = rowById(projectedRows(), 'crit_s_1');
     const parsed = TransportedCritiqueSchema.safeParse(row);
