@@ -7,7 +7,42 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.31.0.tgz`
+### `talchain-schemas-0.32.0.tgz`
+
+> **⚠ BRANCH-PACKED, PRE-PUBLISH — NOT (YET) THE REGISTRY ARTIFACT, and this
+> section says so on purpose.** This file's own 0.29.0 lesson ("npm repacks on
+> publish, so a branch pack has different bytes") is not being ignored — it is
+> being traded against a harder constraint: Lane 2 (P3 ui_directive panel
+> verbs) is a THREE-REPO TRAIN with a hard merge order (schemas → DGAI → CEE),
+> and no registry 0.32.0 existed when this leg was built. The tarball was
+> packed with `npm pack` from olumi-schemas branch
+> `lane2/ui-directive-panel-section-0.32.0` at `23f8e01b` (the 0.32.0
+> version-bump PR; full gate green, 40 files / 1402 tests).
+>
+> sha256 `472cd35d355c2292589a98f609e6ad478c9576dab179ea1ce27b06c87a5dd93a`
+> — **BYTE-IDENTICAL to DGAI's vendored copy by construction** (both legs copy
+> the same pack output), so the two consumers of the new verbs run identical
+> schema bytes, which is the property that actually protects the boundary.
+>
+> **FOR THE MERGING ORCHESTRATOR:** the schemas PR auto-publishes 0.32.0 on
+> merge. Before (or immediately after) merging THIS leg, optionally re-vendor
+> from the registry (`npm pack @talchain/schemas@0.32.0`), update BOTH
+> consumers' tarballs + sidecars together, and record the registry
+> shasum/integrity checks here the way the 0.31.0 section below does. If the
+> registry bytes differ (pack metadata), that is expected and worth one line
+> here — what must never happen is DGAI and CEE holding DIFFERENT bytes under
+> one version string.
+
+**What CEE adopts here (Lane 2, P3):** `ui_directive` verbs `open_panel` /
+`open_section` + optional strict `ui_target` (closed vocabularies: 5 OutputsDock
+tab ids / 5 ModelTabBody section ids), cross-field-enforced both directions at
+the BlockSchema union. Additive; every pre-0.32.0 payload parses
+byte-identically. CEE's emit ladder gains three deterministic rows (see
+`src/orchestrator-v5/compose/ui-directive.ts`); emission ships in the same PR
+as this re-vendor, and the UI leg merges FIRST, so no deployed consumer ever
+strict-rejects a served verb.
+
+### `talchain-schemas-0.31.0.tgz` (historical — no longer vendored)
 
 > **✔ PUBLISHED REGISTRY ARTIFACT — the released `@talchain/schemas@0.31.0`
 > from GitHub Packages (`npm.pkg.github.com`), tag `v0.31.0` = commit

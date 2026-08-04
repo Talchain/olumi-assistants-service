@@ -381,7 +381,15 @@ function buildBlocksFromFacts(
     fresh: OlumiResponse['blocks'],
   ): void => {
     if (uiDirectiveEmitted) return;
-    const directive = buildFocusInspectorDirective(fact, lookup, fresh, previousAnalysisLens);
+    // `persistedGraph` (closure) feeds ONLY §2.1 row 6's contested-edge
+    // derivation (Lane 2, P3); every other row ignores it.
+    const directive = buildFocusInspectorDirective(
+      fact,
+      lookup,
+      fresh,
+      previousAnalysisLens,
+      persistedGraph,
+    );
     if (directive !== null) {
       blocks.push(directive);
       uiDirectiveEmitted = true;
@@ -496,6 +504,21 @@ function buildBlocksFromFacts(
       // met) points the UI at the first flip factor with `focus`. Resolved from
       // the turn-start persisted graph; fail-closed on unmet precondition / no
       // flip factor / unresolved id. N=1 latch.
+      if (!uiDirectiveEmitted) {
+        tryEmitUiDirective(fact, buildGraphNodeLookupFromGraph(persistedGraph), EMPTY_FRESH_BLOCKS);
+      }
+    } else if (
+      fact.fact_type === 'explain_results' ||
+      fact.fact_type === 'explain_from_structure'
+    ) {
+      // Lane 2 (P3, schemas 0.32.0) §2.1 rows 5–6 — the PANEL gestures: an
+      // ANSWERED explain_results turn opens the results tab (`open_panel`);
+      // an explain_from_structure turn with ≥1 contested edge in the
+      // persisted graph opens the Model tab's relationships section
+      // (`open_section`). Both dispatch on `ui_target`, carry NO graph
+      // targets, and fail closed (precondition_unmet / no_contested_edges).
+      // N=1 latch unchanged — first-emit-wins across the turn's facts, so
+      // the wave-4 graph gestures can never be starved by these rows.
       if (!uiDirectiveEmitted) {
         tryEmitUiDirective(fact, buildGraphNodeLookupFromGraph(persistedGraph), EMPTY_FRESH_BLOCKS);
       }
