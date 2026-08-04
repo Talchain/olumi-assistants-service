@@ -130,6 +130,14 @@ describe("L67 — the parser fails closed", () => {
     ["thousand", "a scale with nothing to scale"],
     ["thousand thousand", "a scale word cannot open a group"],
     ["two half million", "'half' is outside the vocabulary — fractions refuse"],
+    // Review F1 — the poison-tail class, refused at the PARSER on the whole
+    // committed capture (the grammar consumes these tails on purpose; the
+    // parser is the refusal authority, so no regex backtrack can re-split).
+    ["two and a half", "mixed fraction — 2.5 must never commit as 2"],
+    ["two and a half million", "mixed fraction with scale — truth 2,500,000, never 2"],
+    ["twenty two and a half thousand", "mixed fraction mid-compound — never 22"],
+    ["two thirds", "direct fraction — never 2"],
+    ["three quarters", "direct fraction — never 3"],
     ["a hundred", "'a' is an article, not a count"],
     ["two point five million", "'point' decimals are not folded"],
     ["banana", "not a number at all"],

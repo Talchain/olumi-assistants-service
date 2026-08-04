@@ -121,10 +121,32 @@ const TOKEN_ALTERNATION = alternation([
  * "hundred", a scale word, or "and", so "from thousand to…" and a stray
  * article cannot open an amount — and continues with hundred/scale/small
  * tokens joined by whitespace, hyphens, or a bridging "and". The repetition
- * is greedy, so "two hundred and fifty thousand" is consumed whole; an
- * out-of-vocabulary continuation ("…and a half…") simply ends the phrase and
- * whatever it left unread makes the SURROUNDING pattern fail — no fragment is
- * ever committed as the amount (pinned in the goal corpus).
+ * is greedy, so "two hundred and fifty thousand" is consumed whole.
+ *
+ * ⚠ CORRECTED CLAIM (adversarial review F1, executed at `42fe683a`) — this
+ * comment used to say an out-of-vocabulary continuation "simply ends the
+ * phrase … no fragment is ever committed as the amount", AND THAT WAS FALSE
+ * AS A GENERAL CLAIM. It held for from-side truncation and for shapes the
+ * direction refusal happened to catch — the shapes the first cut's own pins
+ * sampled — and failed exactly where a goal word anchored and the fragment
+ * was ≥ the baseline: "from one to a target of two and a half million by
+ * December 2026" committed 2 (truth 2,500,000) at explicit/0.95, because
+ * nothing after the target is mandatory, so nothing made the surrounding
+ * pattern fail. The repair is `CARDINAL_FRACTION_CONTINUATION` below, which
+ * the embedding amount grammar appends INSIDE its capture: a fraction-shaped
+ * tail is consumed WITH the phrase and `parseCardinalAmount` then refuses the
+ * whole capture by vocabulary. The refusal fires after the regex has
+ * committed, so backtracking cannot re-split "twenty two and a half" into
+ * "twenty" + a passing guard — the mistake a positional lookahead guard would
+ * have made.
+ *
+ * WHAT IS ACTUALLY GUARANTEED, stated narrowly: a continuation in the
+ * FRACTION class (below) refuses the amount; an in-vocabulary "and" is a
+ * compound and parses whole; any OTHER continuation ("and celebrate the win")
+ * ends the phrase and the committed value is the complete compound the user
+ * spelled before it. The DIGIT grammar's twin behaviour ("2 and a half
+ * million" → 2) is pre-existing, out of this module's reach, and disclosed in
+ * the PR rather than silently matched.
  *
  * Case-insensitivity comes from the embedding pattern's `i` flag, exactly as
  * it does for the magnitude alternation.
@@ -132,6 +154,38 @@ const TOKEN_ALTERNATION = alternation([
 export const CARDINAL_AMOUNT_SOURCE =
   `(?:${SMALL_ALTERNATION})` +
   `(?:(?:\\s+and\\s+|[\\s-]+)(?:${TOKEN_ALTERNATION}))*`;
+
+/**
+ * The fraction words whose arrival after a cardinal phrase means the phrase
+ * was NOT the whole number ("two AND A HALF million", "two THIRDS"). One
+ * list; `word-numbers.ts` (CQE path) carries the same class in its
+ * FRACTION_FOLLOW for the same reason — folding a fraction's lead to a digit
+ * commits the whole part and drops the fraction. Unifying that sibling onto
+ * this export is CQE-path work, reported rather than smuggled in here.
+ */
+export const CARDINAL_FRACTION_WORDS: readonly string[] = Object.freeze([
+  "half",
+  "halves",
+  "quarter",
+  "quarters",
+  "third",
+  "thirds",
+]);
+
+/**
+ * The POISON TAIL (review F1): an optional fraction-shaped continuation —
+ * mixed form ("and a half") or direct form ("thirds") — meant to be appended
+ * INSIDE a words capture, immediately after `CARDINAL_AMOUNT_SOURCE`. When
+ * present it rides into the capture, `parseCardinalAmount` meets a token
+ * outside its vocabulary, and the amount refuses whole. Consuming rather than
+ * asserting is the load-bearing choice: the refusal is decided by the PARSER
+ * on the committed capture, so no backtracking split of the phrase can route
+ * around it, and a capture that fails one pattern cannot leak a shorter
+ * fragment into the next.
+ */
+export const CARDINAL_FRACTION_CONTINUATION =
+  `(?:\\s+and\\s+a\\s+(?:${alternation([...CARDINAL_FRACTION_WORDS])})\\b` +
+  `|[\\s-]+(?:${alternation([...CARDINAL_FRACTION_WORDS])})\\b)?`;
 
 /**
  * Fold a matched cardinal phrase to its number, or `null` for anything the

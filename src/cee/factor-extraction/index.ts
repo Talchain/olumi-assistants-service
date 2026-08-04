@@ -34,6 +34,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import {
   CARDINAL_AMOUNT_SOURCE,
+  CARDINAL_FRACTION_CONTINUATION,
   parseCardinalAmount,
 } from "../../utils/cardinal-words.js";
 
@@ -342,7 +343,13 @@ const GOAL_CONNECTOR = '\\s*(?:is|of|to|at|:)?\\s*';
 function amountPattern(prefix: string): string {
   return (
     `(?<${prefix}Cur>[£$€])?` +
-    `(?:(?<${prefix}Words>${CARDINAL_AMOUNT_SOURCE})` +
+    // ⚠ Review F1 — the FRACTION CONTINUATION rides INSIDE the capture: a
+    // phrase followed by "and a half" / "thirds" captures the tail too, and
+    // `parseCardinalAmount` refuses the whole thing by vocabulary. Without
+    // this, "from one to a target of two and a half million" legally captured
+    // "two", nothing after the target was mandatory enough to fail the match,
+    // and a fragment reached the wire at explicit/0.95 (measured, 42fe683a).
+    `(?:(?<${prefix}Words>${CARDINAL_AMOUNT_SOURCE}${CARDINAL_FRACTION_CONTINUATION})` +
     `|(?<${prefix}>${AMOUNT_DIGITS})` +
     // ⚠ BOTH `\\b`s ARE LOAD-BEARING, and the absence of the inner one
     // produced a silent 1e12 error in development: without it the `t`

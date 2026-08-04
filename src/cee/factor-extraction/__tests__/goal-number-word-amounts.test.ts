@@ -199,6 +199,72 @@ describe("L67 — unreadable word amounts refuse rather than mint a fragment", (
 });
 
 /* ===========================================================================
+ * F1 (adversarial review of this PR, EXECUTED at 42fe683a) — A FRACTION
+ * CONTINUATION MUST NOT LEAVE A FRAGMENT BEHIND AS THE TARGET.
+ *
+ * The first cut of the words branch claimed "no fragment is ever committed"
+ * and that claim was FALSE outside the shapes its own pins sampled: the
+ * grammar legally captured "two" out of "two and a half million", the
+ * surrounding pattern did NOT fail (the trailing-metric slot ate the "and",
+ * a goal word supplied the anchor, and the direction check passes whenever
+ * fragment ≥ baseline), so these five briefs minted a Target at explicit/
+ * 0.95 carrying 2 where the user wrote 2,500,000 — the wrong-number
+ * direction, reachable only through what this PR added. Measured at
+ * 42fe683a: {2,1}, {2,2}, {22,20}, {2,2}, {3,2}.
+ *
+ * The fix consumes a fraction-shaped continuation ("and a half", "thirds")
+ * INTO the words capture, where the parser refuses it by vocabulary — the
+ * refusal happens after the regex has committed, so backtracking can never
+ * re-split the phrase around the guard. The DIGIT twins of these briefs
+ * ("from 1 to a target of 2 and a half million") minted the same fragments
+ * at merge-base and still do — pre-existing, disclosed, not widened here.
+ * ========================================================================= */
+
+describe("L67/F1 — a fraction continuation refuses; no fragment is minted", () => {
+  const FRAGMENT_SHAPES: readonly string[] = [
+    "Grow signups from one to a target of two and a half million by December 2026.",
+    "Grow signups from two to a target of two and a half by Q3.",
+    "Grow signups from twenty to a target of twenty two and a half thousand units by June 2027.",
+    "Grow signups from two to a target of two and a half percent within 12 months.",
+    "Grow conversion from two thirds to a target of three thirds this year.",
+  ];
+  for (const brief of FRAGMENT_SHAPES) {
+    it(brief, () => {
+      expect(extractGoalTargetWithBaseline(brief), brief).toBeNull();
+      expect(
+        extractFactors(brief).filter((f) => f.label === "Target"),
+        `a fragment Target reached the factor stream: ${brief}`,
+      ).toHaveLength(0);
+    });
+  }
+
+  it("an in-vocabulary 'and' is a compound, not a continuation — the walk amounts keep parsing", () => {
+    // The over-refusal direction the fix must not take: "two hundred AND
+    // fifty thousand" carries the same word mid-compound and must be read
+    // whole. (The walk tests above pin this too; this pin sits beside the
+    // refusals so the boundary is stated in one place.)
+    const pair = extractGoalTargetWithBaseline(
+      "Our goal is to grow MRR from one hundred and eighty thousand pounds to two hundred and fifty thousand pounds by the end of December 2026.",
+    );
+    expect(pair).not.toBeNull();
+    expect(pair!.value).toBe(250_000);
+    expect(pair!.baseline).toBe(180_000);
+  });
+
+  it("a NON-fraction 'and <clause>' continuation still ends the phrase cleanly", () => {
+    // "two hundred and celebrate" is a clause join, not a number tail: 200 IS
+    // the stated target, and it must keep minting. The refusal class is
+    // fraction-shaped continuations only.
+    const pair = extractGoalTargetWithBaseline(
+      "Raise the target from one hundred to two hundred and celebrate the win",
+    );
+    expect(pair).not.toBeNull();
+    expect(pair!.value).toBe(200);
+    expect(pair!.baseline).toBe(100);
+  });
+});
+
+/* ===========================================================================
  * CONTROLS — byte-parity pins measured at pristine 959a953f. These passed
  * BEFORE this change and their matchedText must not move by a byte.
  * ========================================================================= */
