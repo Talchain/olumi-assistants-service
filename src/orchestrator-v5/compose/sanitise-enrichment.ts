@@ -61,6 +61,20 @@ export const CRITIQUE_BUCKETS: Readonly<Record<string, CritiqueBucket>> = {
   IDENTIFIABILITY_ISSUE: 'D',
   CONSTRAINT_NODE_DEFAULT_BASE: 'D',
   INTERNAL_ERROR: 'D',
+  // Lane 3 Car 3 (2026-08-04): three ISL codes that had NO entry and were
+  // being suppressed by the unknown→'D' fail-safe — i.e. by nobody's
+  // decision. Listed as EXPLICIT 'D' so the suppression is a recorded
+  // choice; each is a candidate for a conscious S-promotion, which needs
+  // Paul-approved copy (out of scope here; MARGINAL_SWITCH_TRUNCATED's
+  // promotion is the 2.410 follow-up — PLoT now merges it on success
+  // responses and ships its own user_message, so the moment it is promoted
+  // the display copy question is already answered at the PLoT layer).
+  // Completeness is now TESTED against a hand-written 34-code ISL corpus:
+  // __tests__/critique-buckets-completeness.test.ts (trap 12d — the header
+  // claim below this table stopped being an untested assertion).
+  GOAL_ANCESTOR_DATA_GAP: 'D',
+  STRUCTURAL_INFLUENCE_TRUNCATED: 'D',
+  MARGINAL_SWITCH_TRUNCATED: 'D',
   // ── Bucket U — plain English, surface as-is after ID resolution ──────
   NO_OPTIONS: 'U',
   INSUFFICIENT_OPTIONS: 'U',

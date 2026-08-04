@@ -65,7 +65,7 @@ describe('bucketFor — bucket classification', () => {
     }
   });
 
-  it('classification totals match the plan: D=19 explicit, U=3, S=10 (seam item 3 added SAMPLES_REDUCED_FOR_COMPLEXITY to S)', () => {
+  it('classification totals match the plan: D=22 explicit, U=3, S=10 (seam item 3 added SAMPLES_REDUCED_FOR_COMPLEXITY to S)', () => {
     const counts = { D: 0, U: 0, S: 0 };
     for (const b of Object.values(CRITIQUE_BUCKETS)) counts[b]++;
     expect(counts.U).toBe(3);
@@ -73,9 +73,14 @@ describe('bucketFor — bucket classification', () => {
     // (PLoT-authored degraded-success disclosure, #212/#209) was consciously
     // promoted to S per the CRITIQUE_BUCKETS honest-surfacing ruling.
     expect(counts.S).toBe(10);
-    // 19 explicit D entries; the captured uncoded leak hits the
+    // 19 original explicit D entries + 3 added by lane 3 Car 3 (2026-08-04:
+    // GOAL_ANCESTOR_DATA_GAP, STRUCTURAL_INFLUENCE_TRUNCATED,
+    // MARGINAL_SWITCH_TRUNCATED — previously suppressed by the fail-safe
+    // with no recorded decision). The captured uncoded leak still hits the
     // fail-safe default (no entry in the map → bucketFor returns 'D').
-    expect(counts.D).toBe(19);
+    // Completeness vs the ISL corpus is pinned separately in
+    // critique-buckets-completeness.test.ts.
+    expect(counts.D).toBe(22);
   });
 
   it('FAIL-SAFE — unknown codes default to D', () => {
