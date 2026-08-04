@@ -32,6 +32,10 @@ import {
   requiredMagnitudeSuffixPattern,
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
+import {
+  CARDINAL_AMOUNT_SOURCE,
+  parseCardinalAmount,
+} from "../../utils/cardinal-words.js";
 
 export interface ExtractedFactor {
   /** Human-readable label for the factor */
@@ -321,10 +325,25 @@ const GOAL_CONNECTOR = '\\s*(?:is|of|to|at|:)?\\s*';
  * A signed-free amount with optional currency prefix, thousands separators,
  * magnitude suffix and percent sign, captured under a caller-chosen prefix so
  * two amounts can coexist in one pattern without named-group collisions.
+ *
+ * ⚠ L67 — THE AMOUNT NOW READS NUMBER WORDS TOO, and the walk defect this
+ * closes is exactly #812's shape one slot over. #812 taught the HORIZON's
+ * count slot every duration word; the AMOUNT slot stayed digit-only, so
+ * "grow MRR from one hundred and eighty thousand pounds to two hundred and
+ * fifty thousand pounds by the end of December 2026" — the live walk brief,
+ * runT1b — matched NOTHING and the goal card read "Goal target missing". The
+ * words branch is `CARDINAL_AMOUNT_SOURCE`, shared from the leaf module
+ * beside the magnitude alphabet (one grammar, every consumer — trap 12), and
+ * `resolveAmount` folds it with `parseCardinalAmount`. The digit branch is
+ * byte-equivalent to what it replaced, so every digit brief matches
+ * identically; the branches cannot race because one opens with a digit and
+ * the other with a letter.
  */
 function amountPattern(prefix: string): string {
   return (
-    `(?<${prefix}Cur>[£$€])?(?<${prefix}>${AMOUNT_DIGITS})` +
+    `(?<${prefix}Cur>[£$€])?` +
+    `(?:(?<${prefix}Words>${CARDINAL_AMOUNT_SOURCE})` +
+    `|(?<${prefix}>${AMOUNT_DIGITS})` +
     // ⚠ BOTH `\\b`s ARE LOAD-BEARING, and the absence of the inner one
     // produced a silent 1e12 error in development: without it the `t`
     // alternative matched the "t" of "6000000 THIS year", scaling a 6,000,000
@@ -341,7 +360,7 @@ function amountPattern(prefix: string): string {
     //
     // Alternatives are ordered LONGEST-FIRST — derived, not hand-ordered — so
     // "million" cannot be consumed as a bare "m" nor "bn" as a bare "b".
-    `${magnitudeSuffixPattern(`${prefix}Mult`)}\\b\\s*(?<${prefix}Pct>%)?`
+    `${magnitudeSuffixPattern(`${prefix}Mult`)})\\b\\s*(?<${prefix}Pct>%)?`
   );
 }
 
@@ -1234,7 +1253,22 @@ const GOAL_BASELINE_PATTERNS: ReadonlyArray<GoalBaselinePattern> = [
         `${GOAL_METRIC_PHRASE}` +
         `\\s+from\\s+${amountWithMetricPattern('from')}(?:\\s+${NOW_QUALIFIER})?` +
         `\\s+to\\s+(?:a|an|the)?\\s*(?:(?<goalWord>${GOAL_WORD})\\s*(?:of|is|:)?\\s*)?` +
-        `${amountPattern('to')}${trailingMetricLookahead('to')}` +
+        `${amountPattern('to')}` +
+        // ⚠ L67 — THE TARGET'S TRAILING WORD IS CONSUMED HERE, NOT PEEKED AT,
+        // AND THE DIFFERENCE WAS A LIVE TARGET LOSS. The zero-width
+        // `trailingMetricLookahead` is right for pattern 1, whose target ENDS
+        // the pattern; here the HORIZON slot follows, so an unconsumed word
+        // ("…250 thousand POUNDS by the end of December 2026", or the digit
+        // form "…£250,000 REVENUE by 31 December 2026") sat in front of the
+        // horizon, the horizon never matched, and `isGoalAnchored` skipped the
+        // match as a lever — measured at 959a953f, both forms minted NOTHING.
+        // The `(?!HORIZON)` guard is the same one the adverb slot below uses:
+        // a token that OPENS a horizon ("by", "within", "this", "eventually")
+        // is never eaten, so every pinned horizon-anchored control keeps its
+        // exact bytes, while a genuine metric/currency word is consumed and
+        // still reaches `resolveTrailingMetric` for the cross-metric and
+        // cross-currency refusals.
+        `(?:\\s*(?!${HORIZON}\\b)(?<toMetric>[A-Za-z][A-Za-z-]{0,19})\\b)?` +
         // An optional MANNER adverb may sit between the target and its horizon
         // ("…to 6M SUSTAINABLY within 12 months"). The negative lookahead stops
         // this slot swallowing a token that is itself a horizon — without it,
@@ -1285,6 +1319,19 @@ function resolveAmount(
   groups: Record<string, string | undefined>,
   prefix: string,
 ): { readonly raw: number; readonly isPercent: boolean; readonly currency?: string } | null {
+  // L67 — the words branch resolves through the ONE cardinal parser. A phrase
+  // the parser cannot fold returns null and the whole match yields nothing:
+  // fail closed, never a fragment ("two and a half million" must not become 2).
+  const words = groups[`${prefix}Words`];
+  if (words !== undefined) {
+    const parsed = parseCardinalAmount(words);
+    if (parsed === null) return null;
+    return {
+      raw: parsed,
+      isPercent: groups[`${prefix}Pct`] === '%',
+      currency: groups[`${prefix}Cur`],
+    };
+  }
   const parsed = parseAmountDigits(groups[prefix]);
   if (parsed === null) return null;
   return {

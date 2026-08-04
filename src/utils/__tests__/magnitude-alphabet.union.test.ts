@@ -416,6 +416,21 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "in context/cqe/rules.ts), which is precisely the derivation this guard exists to protect.",
     "utils/telemetry.ts": "comments only — LLM pricing quoted as '$N per million tokens'",
 
+    // --- The compound-cardinal parser (L67). Its SCALE words are DERIVED from
+    // --- the canonical alphabet by import (word-shaped keys, ≥1000), so they
+    // --- cannot drift from it — the derivation is asserted in
+    // --- cardinal-words.test.ts. Its `hundred` is the compounder the
+    // --- DELIBERATE_EXCLUSIONS entry for `hundred` points at ("multi-word
+    // --- magnitude compounds need a parser, not an alphabet entry"): ×100
+    // --- WITHIN a spelled phrase, never a suffix multiplier on digits, so it
+    // --- belongs to the parser and stays out of the alphabet. The small
+    // --- cardinals (one…ninety) are a cardinal lexicon like propose-handoff's,
+    // --- value-bearing only inside spelled phrases.
+    "utils/cardinal-words.ts":
+      "compound-cardinal parser — scale words DERIVED from MAGNITUDE_MULTIPLIERS (asserted in " +
+      "its spec); `hundred` is the phrase compounder the alphabet's own exclusion note calls for, " +
+      "never a digit-suffix multiplier; magnitude words appear otherwise only in prose.",
+
     // --- A real vocabulary, deliberately NOT folded into the union (2.331).
     "orchestrator/tools/propose-handoff.ts":
       "WORD_NUMBER_TOKEN is an English CARDINAL lexicon (eleven…ninety, hundred, thousand, million) " +
