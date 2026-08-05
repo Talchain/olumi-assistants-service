@@ -10,11 +10,21 @@
  * agreeing with itself (trap 13b) at the wiring level rather than the logic
  * level. This file is the mutant that bites for that deletion.
  *
- * ## RED-first signature at pristine (CEE f4b4d879)
+ * ## RED-first at pristine (CEE f4b4d879) — MEASURED, and corrected
  *
- * `expected undefined to be 'general'` on `decision_quality_prompts[1]
- * .dsk_grounding` — at pristine the enricher passes the LLM output through
- * verbatim (F.6) and no verdict is attached to any entry.
+ * This file imports no new module, so it RUNS at pristine. Measured there:
+ * **1 of 3 cases fails**, with `AssertionError: expected undefined to be
+ * 'attested'` — the FIRST verdict assertion in the batch, not the `'general'`
+ * one an earlier version of this docblock recorded.
+ *
+ * The other two pass at pristine and are controls, not RED-first evidence:
+ * the `precondition:` case (asserts the harness has DSK on) and the
+ * fail-closed case (asserts nothing is marked when DSK is off — trivially
+ * true when nothing marks anything anywhere). Stated so nobody reads "2
+ * passed" as partial coverage of the feature.
+ *
+ * At pristine the enricher passes the LLM output through verbatim (F.6) and
+ * no verdict is attached to any entry.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

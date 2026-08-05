@@ -1,15 +1,30 @@
 /**
  * DSK grounding policy — ROADMAP 2.491 (closing the 2.456 omitted-id hole).
  *
- * ## RED-first signature at pristine (f4b4d879)
+ * ## RED-first at pristine (f4b4d879) — STATED HONESTLY, CORRECTED
  *
- * At pristine `applyDskGroundingPolicy` does not exist and NOTHING marks an
- * omitted-id prompt, so every assertion below that reads `dsk_grounding` fails
- * with `expected undefined to be 'general'` / `'resolved'` / `'attested'`. The
- * product-level statement of the same failure: an entry with no `dsk_claim_id`
+ * ⚠ This docblock previously claimed each assertion below fails with
+ * `expected undefined to be 'general'`. **That was false.** At pristine this
+ * file does not COLLECT at all — `Cannot find module '…/dsk-grounding-policy
+ * .js'`, **zero tests run**. A module-not-found is the weakest possible red:
+ * it shows the file is new, not that any assertion binds to behaviour.
+ *
+ * **The real RED-first control for this feature is the sibling file**
+ * `orchestrator-v5/coaching/__tests__/decision-review-enricher.dsk-grounding
+ * .test.ts`, which imports no new module and therefore runs at pristine: 1 of
+ * its 3 cases fails, with `expected undefined to be 'attested'`. The other two
+ * (a precondition check and the fail-closed control) pass at pristine, as
+ * controls should — they describe behaviour this change does not alter.
+ *
+ * The product-level statement of the defect: an entry with no `dsk_claim_id`
  * left the enricher carrying only `{question, principle, applies_because}` —
- * no verdict, no marker — and therefore reached the user indistinguishable
- * from an attested prompt except by the SILENCE of the grounding badge.
+ * no verdict, no marker — and reached the user indistinguishable from an
+ * attested prompt except by the SILENCE of the grounding badge.
+ *
+ * ## Coverage caveat, disclosed
+ *
+ * The named typecheck gate (`tsc -p tsconfig.build.json`) EXCLUDES test files,
+ * so this file is type-checked only by the non-required drift ratchet.
  *
  * ## The oracle (trap 13c — derived from the producer, not from our reading)
  *
@@ -35,11 +50,25 @@
 
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 
-vi.mock('../../../config/index.js', () => ({
-  config: { features: { dskEnabled: true, dskV0: false } },
-}));
+/**
+ * ⚠ `importOriginal`-SPREAD, NOT a replacement factory (trap 12).
+ *
+ * A bare `vi.mock(path, () => ({ config: {...} }))` REPLACES the module. The
+ * real `config/index.js` exports ~20 named symbols and `dsk-loader.ts:21`
+ * imports `config` from it — so a two-key replacement is one import away from
+ * a collection-time failure, which is exactly how 51 tests went dark in this
+ * repo once before. Spreading the original keeps every other export intact and
+ * overrides only the flags this suite needs.
+ */
+vi.mock('../../../config/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../config/index.js')>();
+  return {
+    ...actual,
+    config: { ...actual.config, features: { ...actual.config.features, dskEnabled: true, dskV0: false } },
+  };
+});
 
-import { loadDskBundle, getAllByType, _resetDskBundle } from '../../../orchestrator/dsk-loader.js';
+import { loadDskBundle, getAllByType, getClaimById, _resetDskBundle } from '../../../orchestrator/dsk-loader.js';
 import type { DSKClaim } from '../../../dsk/types.js';
 import {
   applyDskGroundingPolicy,
@@ -64,6 +93,29 @@ beforeAll(() => {
 });
 
 const verdict = (e: Record<string, unknown>): unknown => e[DSK_GROUNDING_KEY];
+const claimIdsInBundle = (): string[] => (getAllByType('claim') as DSKClaim[]).map((c) => c.id);
+
+/**
+ * The validator must agree with `getClaimById` — the function whose semantics
+ * the documented boundary is written in — for every id in the bundle AND for
+ * ids outside it. The policy uses a derived Set for O(1) lookup rather than
+ * calling `getClaimById` per entry; this pins that the optimisation did not
+ * change the boundary. A union assertion, per trap 12d.
+ */
+describe('the id validator agrees with getClaimById, in both directions', () => {
+  it('accepts exactly the ids getClaimById resolves', () => {
+    const probes = [...claimIdsInBundle(), 'DSK-T-999', 'DSK-B-999', '', 'DSK-T-002 ', 'dsk-t-002'];
+    for (const id of probes) {
+      const resolves = getClaimById(id) !== undefined;
+      const { stats } = applyDskGroundingPolicy([
+        { question: 'q', principle: 'An improvised heuristic', dsk_claim_id: id },
+      ]);
+      // `unverified` fires iff the id was present and did NOT resolve.
+      const treatedAsValid = stats.attested === 1;
+      expect(treatedAsValid, `disagreement on ${JSON.stringify(id)}`).toBe(resolves);
+    }
+  });
+});
 
 // ============================================================================
 // The stated policy, total over the input space — 2.456's asymmetry, closed
@@ -213,6 +265,54 @@ describe('resolve: exact bundle-title match only', () => {
     expect(prompts[0].dsk_claim_id).toBeUndefined();
     expect(prompts[0].dsk_protocol_id).toBeUndefined();
     expect(prompts[0].evidence_strength).toBeUndefined();
+  });
+
+  /**
+   * The reviewer's exact measured input. The earlier paraphrase test asserted
+   * these fields were `undefined` only because its fixture never SET them —
+   * a guard agreeing with itself (trap 13b). This one sets them.
+   */
+  it('strips ORPHANED credibility fields on the general arm', () => {
+    const orphaned = {
+      question: 'q',
+      principle: 'Some entirely made-up heuristic',
+      evidence_strength: 'strong',
+      dsk_protocol_id: 'DSK-P-002',
+    };
+    // Precondition: the fixture must genuinely carry them, or this is vacuous.
+    expect(orphaned.evidence_strength).toBe('strong');
+    expect(orphaned.dsk_protocol_id).toBe('DSK-P-002');
+    // …and must genuinely have no id and no title match.
+    expect('dsk_claim_id' in orphaned).toBe(false);
+    expect(techniqueClaims.map((c) => c.title)).not.toContain(orphaned.principle);
+
+    const { prompts } = applyDskGroundingPolicy([orphaned]);
+
+    expect(verdict(prompts[0])).toBe('general');
+    // An entry declared "genuinely unattested" must not ship credibility.
+    expect(prompts[0].evidence_strength).toBeUndefined();
+    expect(prompts[0].dsk_protocol_id).toBeUndefined();
+    expect(prompts[0].dsk_claim_id).toBeUndefined();
+  });
+
+  it('INVARIANT: protocol id and strength never appear without a resolving claim id', () => {
+    // Stated as a property over a mixed batch rather than per-case, so a new
+    // arm added later cannot quietly reintroduce an orphan.
+    const { prompts } = applyDskGroundingPolicy([
+      { question: 'a', principle: 'Outside view and reference class forecasting', dsk_claim_id: 'DSK-T-002' },
+      { question: 'b', principle: 'Pre-mortem and prospective hindsight' },
+      { question: 'c', principle: 'made up', evidence_strength: 'strong', dsk_protocol_id: 'DSK-P-002' },
+      { question: 'd', principle: 'made up', dsk_claim_id: 'DSK-T-999', evidence_strength: 'strong' },
+    ]);
+    for (const p of prompts) {
+      if (p.dsk_protocol_id !== undefined || p.evidence_strength !== undefined) {
+        expect(typeof p.dsk_claim_id).toBe('string');
+        expect(claimIdsInBundle()).toContain(p.dsk_claim_id);
+      }
+    }
+    // Positive control: at least one entry DID keep its provenance, so the
+    // loop above is not passing over an all-stripped batch.
+    expect(prompts.filter((p) => p.dsk_claim_id !== undefined)).toHaveLength(2);
   });
 
   it('does not resolve a BIAS claim title — wrong claim family for this field', () => {

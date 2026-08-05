@@ -297,7 +297,22 @@ export function applyDskGroundingPolicy(
     }
 
     // 3. General — genuinely unattested. No id is invented, ever.
+    //
+    // ORPHANED CREDIBILITY FIELDS ARE STRIPPED. A model that omits the id can
+    // still emit `evidence_strength: 'strong'` and a `dsk_protocol_id`, and
+    // those are credibility signals in their own right: an entry declared
+    // "genuinely unattested" that still ships `strong` + `DSK-P-002` is making
+    // exactly the claim the `general` verdict denies. `shape-check.ts`'s rules
+    // for these two fields are warning-only AND do not run on this path, so
+    // nothing else removes them.
+    //
+    // The invariant, stated: `dsk_protocol_id` and `evidence_strength` NEVER
+    // appear without a resolving `dsk_claim_id`. The UI's mapper already gates
+    // provenance on the id as a unit; this makes the wire agree with it rather
+    // than relying on every consumer to re-implement the gate.
     stats.general++;
+    delete e.dsk_protocol_id;
+    delete e.evidence_strength;
     e[DSK_GROUNDING_KEY] = 'general' satisfies DskGroundingState;
     return e;
   });
