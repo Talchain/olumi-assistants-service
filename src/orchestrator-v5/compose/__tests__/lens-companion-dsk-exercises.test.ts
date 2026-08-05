@@ -150,12 +150,16 @@ describe('buildLensCompanionBlocks — consider_opposite exercise', () => {
     expect(block.target_refs).toEqual([{ id: 'opt_a', label: 'Option A', kind: 'option' }]);
 
     // The emitted KEY SET is pinned exactly — a builder inventing any field
-    // (numeric or prose) REDs here.
+    // (numeric or prose) REDs here. `dsk_provenance` joined it at 0.37.0
+    // (ROADMAP 2.490 slice 2); its CONTENT is pinned against the bundle bytes
+    // by `dsk-protocol-provenance-wire.test.ts`, so this pin deliberately
+    // asserts presence only and does not duplicate that oracle.
     expect(Object.keys(block).sort()).toEqual(
       [
         'block_id',
         'counter_case',
         'created_at',
+        'dsk_provenance',
         'exercise_kind',
         'freshness',
         'graph_hash_at_generation',

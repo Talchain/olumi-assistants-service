@@ -94,6 +94,7 @@ import {
   type LensSelection,
   type LensSelectorOptions,
 } from './lens-selector.js';
+import { resolveDskProtocolProvenance } from './dsk-protocol-record.js';
 import { config } from '../../config/index.js';
 import {
   classifyClaimUsable,
@@ -1622,12 +1623,25 @@ function buildDskExerciseBlock(
   lookup: GraphNodeLookup,
 ): ExerciseBlock | null {
   const subject = subjectId !== null ? lookup.get(subjectId) : undefined;
+  // 0.37.0 / ROADMAP 2.490 slice 2 — the DSK attribution now reaches the USER,
+  // not only telemetry. The id comes from `LENS_DSK_PROVENANCE` (the same
+  // hand-written map `dsk-provenance-attestation.test.ts` attests against the
+  // bundle bytes); the TITLE and STRENGTH are read from the bundle record
+  // itself, never typed here. That asymmetry is the point: a title written in
+  // this file could drift from the science it names and nothing would notice —
+  // which is CEE #830's defect, where a badge printed prose that no record
+  // backed. Resolution is fail-closed, so an unverifiable bundle costs the
+  // badge and never the card.
+  const provenanceId = LENS_DSK_PROVENANCE[kind]?.protocolId;
+  const dskProvenance =
+    provenanceId !== undefined ? resolveDskProtocolProvenance(provenanceId) : null;
   const candidate = {
     ...commonMetadata(`exercise:${kind}`, '', ctx),
     type: 'exercise' as const,
     exercise_kind: kind,
     counter_case: counterCase,
     target_refs: subject !== undefined ? [subject] : ([] as readonly GraphNodeRef[]),
+    ...(dskProvenance !== null ? { dsk_provenance: dskProvenance } : {}),
   };
   return validateProseAndSchemaOrDrop(ExerciseBlockSchema, candidate, {
     block_type: 'exercise',
