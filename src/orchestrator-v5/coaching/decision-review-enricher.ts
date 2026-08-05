@@ -72,6 +72,7 @@ import {
 } from './scaffold-disclosure.js';
 
 import type { DecisionReviewOutput } from './types.js';
+import { applyDskGroundingPolicy } from '../../cee/decision-review/dsk-grounding-policy.js';
 
 export interface EnrichDecisionReviewInput {
   readonly handlerFacts: readonly HandlerFact[];
@@ -462,6 +463,41 @@ export async function enrichRunAnalysisWithDecisionReview(
       ...result.output,
       produced_at: new Date().toISOString(),
     };
+
+    // 2.491 — DSK grounding policy on `decision_quality_prompts[]`, applied at
+    // the SINGLE egress seam so both invoke paths (decomposed and monolithic)
+    // are covered by one rule rather than two drifting copies.
+    //
+    // Closes the 2.456 asymmetry: a PRESENT-but-unknown `dsk_claim_id` already
+    // hard-rejects in `shape-check.ts`, but an OMITTED id used to pass
+    // unvalidated and unmarked — so an unattested prompt reached the user
+    // indistinguishable from an attested one. Every entry now leaves here
+    // carrying an explicit `dsk_grounding` verdict (`attested` | `resolved` |
+    // `general`); see `dsk-grounding-policy.ts` for why omission is resolved
+    // rather than rejected, and why only an EXACT bundle-title match resolves.
+    //
+    // This is additive: `decision_quality_prompts` is untyped in
+    // `@talchain/schemas` (the `decision_review` subtree rides the enrichment
+    // passthrough), and the sanitiser below preserves structural subtrees
+    // byte-equal, so the new key reaches the wire beside `dsk_claim_id`.
+    if (Array.isArray((output as Record<string, unknown>).decision_quality_prompts)) {
+      const graded = applyDskGroundingPolicy(
+        (output as Record<string, unknown>).decision_quality_prompts as readonly unknown[],
+      );
+      (output as Record<string, unknown>).decision_quality_prompts = graded.prompts;
+      if (!graded.stats.skipped) {
+        log.info(
+          {
+            request_id: input.requestId,
+            scenario_id: input.scenarioId,
+            attested: graded.stats.attested,
+            resolved: graded.stats.resolved,
+            general: graded.stats.general,
+          },
+          'v5.decision_review.dsk_grounding',
+        );
+      }
+    }
     // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:
     // Run the parent-level enrichment through the sanitiser BEFORE
     // attaching decision_review. The sanitiser:
