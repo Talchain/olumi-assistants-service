@@ -128,6 +128,24 @@ describe('composer transport', () => {
     expect(outcome).toEqual({ status: 'unavailable', reason: 'no_tool_call' });
   });
 
+  it('a tool_use block with ANOTHER tool’s name is not read as this tool’s batch', async () => {
+    // Identity binding on the transport (trap 19): the block is bound by NAME,
+    // not by "there was a tool_use block". A model emitting `olumi_action` in
+    // the same response must not have its payload validated as a structural
+    // edit batch — the shapes are unrelated, and the failure mode is silent.
+    const spy = vi.fn().mockResolvedValue({
+      content: [
+        { type: 'tool_use' as const, id: 'tu_x', name: 'olumi_action', input: GROUNDED_PAYLOAD },
+      ],
+      stop_reason: 'tool_use' as const,
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'test-model',
+      latencyMs: 1,
+    });
+    const outcome = await composeStructuralEdit(baseInput(spy));
+    expect(outcome).toEqual({ status: 'unavailable', reason: 'no_tool_call' });
+  });
+
   it('an adapter with no tool support is UNAVAILABLE and makes no call', async () => {
     const outcome = await composeStructuralEdit({
       ...baseInput(undefined),
