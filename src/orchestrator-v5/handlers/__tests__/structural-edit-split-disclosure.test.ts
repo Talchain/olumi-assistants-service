@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildStructuralEditSplitDisclosure,
   STRUCTURAL_EDIT_RERUN_ACTION,
+  shouldEmitSplitDisclosure,
 } from '../structural-edit-split-disclosure.js';
 import { describeChangeset, type ChangesetOpLike } from '../describe-changeset.js';
 import {
@@ -292,5 +293,43 @@ describe('the re-run chip does not drift from the estate`s existing definitions'
     }
     // Zero origins checked would make every assertion above vacuous.
     expect(checked).toBe(ORIGINS.length);
+  });
+});
+
+/**
+ * ⭐⭐ THE GATE ITSELF, as an object a test can bind to.
+ *
+ * ⚠ WHY THIS BLOCK EXISTS: a mutant that made the gate ignore
+ * `pendingActionCount` SURVIVED the dispatch suite, because no dispatch fixture
+ * produces `governing:'held'` with zero pendings and one cannot be built there
+ * cheaply. Rather than assert that mutant equivalent — it is not; a hold that
+ * mints no pending has no confirm control — the condition was extracted from an
+ * inline boolean into this predicate, where every combination is reachable.
+ * That is also the shape of the original defect: an inline condition at a call
+ * site is invisible to every test.
+ */
+describe('⭐⭐ shouldEmitSplitDisclosure — the gate that stops a contradictory turn', () => {
+  it('a held turn WITH a pending may disclose', () => {
+    expect(shouldEmitSplitDisclosure({ governing: 'held', pendingActionCount: 1 })).toBe(true);
+  });
+
+  it('a held turn with NO pending may NOT — there is no confirm control to follow', () => {
+    expect(shouldEmitSplitDisclosure({ governing: 'held', pendingActionCount: 0 })).toBe(false);
+  });
+
+  it('every non-held verdict may NOT disclose, pendings or not', () => {
+    for (const governing of ['rejected', 'stale', 'clarify_required', 'proceed', null]) {
+      expect(
+        shouldEmitSplitDisclosure({ governing, pendingActionCount: 1 }),
+        `${governing} must not disclose`,
+      ).toBe(false);
+      expect(shouldEmitSplitDisclosure({ governing, pendingActionCount: 0 })).toBe(false);
+    }
+  });
+
+  it('`stale` in particular — the verdict an already-analysed scenario reaches', () => {
+    // Finding 1 makes this reachable on turn 1, and it was one of the two
+    // shapes that produced the contradictory turn.
+    expect(shouldEmitSplitDisclosure({ governing: 'stale', pendingActionCount: 0 })).toBe(false);
   });
 });

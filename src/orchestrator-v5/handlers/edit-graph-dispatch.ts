@@ -131,6 +131,7 @@ import {
 import { clampLabel, describeChangeset, type ChangesetOpLike } from './describe-changeset.js';
 import {
   buildStructuralEditSplitDisclosure,
+  shouldEmitSplitDisclosure,
   STRUCTURAL_EDIT_TOO_LARGE_TEXT,
   STRUCTURAL_EDIT_TOO_LARGE_ACTIONS,
 } from './structural-edit-split-disclosure.js';
@@ -2675,11 +2676,10 @@ export async function dispatchEditGraph(
   // engages only where the hold spine is live and structural batches always
   // hold, so a split that produced no pending is not an expected state — it is
   // emitted as telemetry rather than passed over in silence.
-  const splitTurnProposedSomething =
-    gmDecision !== null &&
-    gmDecision.governing === 'held' &&
-    gmDecision.pendingActions !== null &&
-    gmDecision.pendingActions.length > 0;
+  const splitTurnProposedSomething = shouldEmitSplitDisclosure({
+    governing: gmDecision?.governing ?? null,
+    pendingActionCount: gmDecision?.pendingActions?.length ?? 0,
+  });
   if (structuralEditSplit !== null && !splitTurnProposedSomething) {
     emit(TelemetryEvents.V5StructuralEditToolEntry, {
       request_id: requestId,

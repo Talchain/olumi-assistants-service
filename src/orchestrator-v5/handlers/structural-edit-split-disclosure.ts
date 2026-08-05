@@ -92,6 +92,33 @@ export interface StructuralEditSplitDisclosure {
   readonly action: StructuralEditNextStepAction;
 }
 
+/**
+ * ⭐⭐ MAY THIS TURN CARRY A SPLIT DISCLOSURE AT ALL?
+ *
+ * Extracted as a named predicate rather than left as an inline condition at the
+ * call site, for the reason the inline version failed: it was written as
+ * `structuralEditSplit !== null` with no reference to the verdict, twenty lines
+ * below a supersession notice that was correctly gated, and nothing could see
+ * the difference. An inline boolean is invisible to every test in this module;
+ * a predicate is an object a test can bind to.
+ *
+ * A disclosure describes what is HELD and what follows it. With no held
+ * proposal there is nothing for it to follow, and emitting one produces the
+ * measured defect: "I couldn't take that change forward, so the model is
+ * unchanged" immediately followed by "this is the first [of 3 steps]", with a
+ * chip for step 2 of a sequence that has no step 1.
+ *
+ * `pendingActionCount` is load-bearing separately from `governing`: a hold that
+ * minted no pending has no confirm control, so the user could not take step 1
+ * even though the verdict says it was offered.
+ */
+export function shouldEmitSplitDisclosure(input: {
+  readonly governing: string | null;
+  readonly pendingActionCount: number;
+}): boolean {
+  return input.governing === 'held' && input.pendingActionCount > 0;
+}
+
 /** Join items for prose: "a" / "a and b" / "a, b and c". Mirrors the joiner in
  *  `describe-changeset.ts`, whose own `joinItems` is module-private. */
 function joinItems(items: readonly string[]): string {
