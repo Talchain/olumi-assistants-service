@@ -18,7 +18,8 @@
  * graph handed to the commit is already in persisted form, and the advertised
  * hash is that graph's hash. RED before the projection is applied.
  */
-import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type MockedFunction, afterEach } from 'vitest';
+import { _resetConfigCache } from '../../../config/index.js';
 import type { FastifyRequest } from 'fastify';
 import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
 
@@ -145,6 +146,27 @@ const makePayload = () => ({
 });
 
 const STUB_REQUEST = {} as FastifyRequest;
+
+// ── ROADMAP 2.474 / A10 — the mode is now STATED, not inherited ──────────
+// `CEE_GRAPH_MANAGEMENT_MODE`'s repo default moved 'off' → 'live' (the referee
+// ships ON; a trust story hanging on a dashboard variable is one careless edit
+// from being untrue). This file pins PERSISTENCE mechanics — the merge base,
+// the projection, the advertised hash — on a turn that reaches the commit. It
+// was authored under the implicit 'off' default, and that premise is exactly
+// what it needs: 'off' is the mode in which the existing path proceeds
+// byte-identically, so the seam under test is reached unchanged. Stating it
+// here preserves the property this file was written to prove, and makes the
+// dependency visible instead of inherited. Live-mode ROUTING is covered by its
+// own files (edit-graph-dispatch-graph-management-modes.test.ts and the
+// referee-gate suites), which is where a live regression would surface.
+beforeEach(() => {
+  vi.stubEnv('CEE_GRAPH_MANAGEMENT_MODE', 'off');
+  _resetConfigCache();
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+  _resetConfigCache();
+});
 
 describe('dispatchEditGraph — §3.2: the advertised hash describes the PERSISTED graph', () => {
   beforeEach(() => {
