@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { EnrichmentFlipThresholdSchema } from "@talchain/schemas/boundary";
 import { buildCeeErrorResponse } from "../cee/validation/pipeline.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
@@ -48,7 +49,59 @@ function isRawOutputEnabled(): boolean {
 // Input Schema (Deterministic Data Package from PLoT)
 // ============================================================================
 
-const DecisionReviewInputSchema = z
+/**
+ * One `flip_threshold_data` row — DERIVED from the shared contract, never
+ * hand-copied. (ROADMAP 2.505)
+ *
+ * ⚠ WHY THIS IS NOT A LOCAL `z.object({...})` ANY MORE. It used to be, and the
+ * copy declared `direction: z.string()` — REQUIRED — untouched since this
+ * endpoint's first commit (`e8978011`, 2026-02-02). Meanwhile PLoT's ROADMAP
+ * 2.258 (deployed 2026-08-01) began deliberately OMITTING `direction` on an
+ * attested-no-flip row, because a direction for a flip that does not exist is a
+ * fabricated claim, and `@talchain/schemas` 0.31.0 relaxed
+ * `EnrichmentFlipThresholdSchema.direction` to optional precisely to permit it.
+ * The contract this repo already vendors therefore SAID THE PAYLOAD WAS VALID
+ * while the hand-rolled copy beside it returned HTTP 400 `CEE_VALIDATION_FAILED`
+ * in ~2 ms, before any LLM call — `fieldErrors: {flip_threshold_data:
+ * ["Required"]}`, measured on live staging 2026-08-05.
+ *
+ * That is the hand-maintained-mirror defect at a service boundary. Widening
+ * `direction` here would have been the right output at the wrong layer: the
+ * mirror would remain, and the NEXT field the contract relaxes breaks this
+ * route the same way. Deriving kills the class.
+ *
+ * ⚠ WHY `.partial().required(...)` RATHER THAN THE CONTRACT VERBATIM. This
+ * route is a LIGHTWEIGHT SHAPE CHECK (see the file header), not the contract's
+ * validator — PLoT owns strict validation. The contract additionally REQUIRES
+ * `flip_reason`, which this route neither reads nor needs; adopting that would
+ * hand a new 400 to any producer path that omits it. Re-requiring exactly the
+ * four fields the route required before this change (minus `direction`) makes
+ * the delta a pure RELAXATION, and yields the property that matters at a
+ * consumer seam and is asserted in the specs:
+ *
+ *     contract-accepted  ⟹  route-accepted
+ *
+ * The FIELD TYPES and the KEY SET are the contract's, so nothing about the
+ * shape is mirrored here — only this route's own requirement is stated, and it
+ * is proven to be a subset of the contract's.
+ *
+ * ⚠ ONE TIGHTENING, DELIBERATE AND UNREACHABLE. The contract types `factor_id`
+ * as `z.string().min(1)` where the local copy allowed `""`. PLoT's producer
+ * refuses any row whose `factor_id` is not a non-empty string
+ * (`factor-flip-values.ts`: `rejected_malformed++; continue;` at its deployed
+ * tip `e18e17c2`), so no row the live producer can emit is affected. Pinned by
+ * a named spec rather than left to be rediscovered.
+ */
+export const FlipThresholdRowSchema = EnrichmentFlipThresholdSchema
+  .partial()
+  .required({
+    factor_id: true,
+    factor_label: true,
+    current_value: true,
+    flip_value: true,
+  });
+
+export const DecisionReviewInputSchema = z
   .object({
     /** Raw decision brief text */
     brief: z.string(),
@@ -105,20 +158,11 @@ const DecisionReviewInputSchema = z
       .passthrough()
       .nullable(),
 
-    /** PLoT-computed flip threshold data (max 2) */
-    flip_threshold_data: z
-      .array(
-        z
-          .object({
-            factor_id: z.string(),
-            factor_label: z.string(),
-            current_value: z.number(),
-            flip_value: z.number().nullable(),
-            direction: z.string(),
-          })
-          .passthrough()
-      )
-      .optional(),
+    /**
+     * PLoT-computed flip threshold data (max 2). Row shape derived from
+     * `@talchain/schemas` — see `FlipThresholdRowSchema` above (ROADMAP 2.505).
+     */
+    flip_threshold_data: z.array(FlipThresholdRowSchema).optional(),
 
     /** Correlation ID for tracing */
     correlation_id: z.string().optional(),
