@@ -31,10 +31,13 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import {
   BODY_BY_RATIONALE,
   CONSIDER_OPPOSITE_MIN_SEPARATION,
+  LENS_DSK_PROVENANCE,
   PREMORTEM_WINPROB_MAX,
   TITLE_BY_LENS,
   selectLens,
+  type LensId,
 } from '../lens-selector.js';
+import { RAW_FRAGILE_LEVELS } from '../../coaching/robustness-honesty.js';
 import {
   FORBIDDEN_HEADLINE_VOCABULARY_REGEX,
   RAW_DECIMAL_REGEX,
@@ -530,5 +533,232 @@ describe('DSK lens copy — clean against the assistant-text defences', () => {
       expect(copy).not.toMatch(RAW_DECIMAL_REGEX);
       expect(copy).not.toMatch(ASSISTANT_TEXT_ID_REGEX);
     }
+  });
+});
+
+// ============================================================================
+// ROADMAP 2.490 — devils_advocacy REACHABILITY when BOTH DSK triggers fire.
+//
+// THE GAP THIS CLOSES: before 2.490 no spec in this file made TR-003 and
+// TR-005 fire on the SAME turn. `DECISIVE_ATTESTED` uses balanced factors (no
+// dominance ⇒ devils dark); `DOMINANT` omits robustness (⇒ consider_opposite
+// dark). So the ORDER between the two DSK lenses was never exercised, and the
+// whole suite passed identically with the ladder entries either way round —
+// verified by running it against both orders. The defect shipped through a
+// hole shaped exactly like the fixtures.
+//
+// THE LIVE SHAPE (`PHASE0-EVIDENCE-2026-07-28/walk-dsk-raw/sessionA`): leader
+// 0.8576, dominance share 0.5453, `robustness.level: 'high'`. Both triggers
+// true. Measured over all five captured sessions BEFORE this change,
+// devils_advocacy was selected ZERO times, on every `previousAnalysisLens`
+// state and every turn of a cycle walk.
+// ============================================================================
+
+/** sessionA's shape: a decisive leader AND a dominant driver AND an attested
+ *  non-fragile level — the turn on which TR-003 and TR-005 are both true. */
+const BOTH_TRIGGERS_FIRE: EnrichmentInput = {
+  confidence_tier: 'strong',
+  factor_sensitivity: [
+    { factor_id: 'fac_dom', influence_score: 0.8, influence_rank: 1, confidence: 0.9 },
+    { factor_id: 'fac_b', influence_score: 0.15, influence_rank: 2, confidence: 0.9 },
+    { factor_id: 'fac_c', influence_score: 0.05, influence_rank: 3, confidence: 0.9 },
+  ],
+  option_comparison: [{ win_probability: 0.86 }, { win_probability: 0.08 }],
+  robustness: { level: 'high' },
+};
+
+/**
+ * Walk N consecutive analysis turns on the SAME enrichment, feeding each
+ * selection back as `previousAnalysisLens` — the way the live path threads it.
+ * Returns the lens sequence. A single-turn probe cannot see this defect: the
+ * starvation is a property of the CYCLE, not of any one turn.
+ */
+function walkTurns(input: EnrichmentInput, turns = 6): (LensId | null)[] {
+  const fact = makeFact(input);
+  const seen: (LensId | null)[] = [];
+  let previous: LensId | null = null;
+  for (let t = 0; t < turns; t++) {
+    const selection = selectLens(fact, { previousAnalysisLens: previous });
+    const lens = selection === null ? null : selection.lens;
+    seen.push(lens);
+    previous = lens;
+  }
+  return seen;
+}
+
+/** BOTH_TRIGGERS_FIRE with the robustness attestation REMOVED. TR-003 requires
+ *  a PRESENT non-fragile level, so consider_opposite goes dark; TR-005 only
+ *  excludes an ATTESTED fragile level, so devils_advocacy may fire. One field
+ *  apart from BOTH_TRIGGERS_FIRE, and that one field decides which protocol
+ *  the user can ever be shown. */
+const DOMINANT_DECISIVE_UNATTESTED: EnrichmentInput = {
+  confidence_tier: 'strong',
+  factor_sensitivity: BOTH_TRIGGERS_FIRE.factor_sensitivity,
+  option_comparison: BOTH_TRIGGERS_FIRE.option_comparison,
+};
+
+describe('selectLens — devils_advocacy reachability (ROADMAP 2.490)', () => {
+  it('DEFECT — devils_advocacy is dark across a cycle when both DSK triggers fire', () => {
+    // The shipped state, pinned. With exactly two eligible lenses the 2.211
+    // no-repeat promotion is a fixed-order 2-cycle, so the lower DSK lens
+    // never takes a slot. Reordering the pair does NOT fix this — measured, it
+    // simply starves consider_opposite instead (see the ladder comment).
+    const walk = walkTurns(BOTH_TRIGGERS_FIRE, 8);
+    expect(walk).not.toContain('devils_advocacy');
+  });
+
+  it('POSITIVE CONTROL — the same walk DOES see consider_opposite', () => {
+    // Non-vacuity, half 1 (trap 13): an absence assertion is worthless unless
+    // the harness demonstrably observes SOMETHING in that slot.
+    const walk = walkTurns(BOTH_TRIGGERS_FIRE, 8);
+    expect(walk).toContain('consider_opposite');
+  });
+
+  it('POSITIVE CONTROL — the harness CAN observe devils_advocacy being selected', () => {
+    // Non-vacuity, half 2, and the load-bearing one: the absence above must be
+    // a property of the LADDER, not of a harness that could never see this
+    // lens at all. Same walk helper, same fixture, ONE field removed — the
+    // robustness attestation.
+    const walk = walkTurns(DOMINANT_DECISIVE_UNATTESTED, 8);
+    expect(walk).toContain('devils_advocacy');
+  });
+
+  it('the ONLY difference between those two walks is the robustness attestation', () => {
+    // Pins the anti-filter directly. The fixtures differ in exactly one field,
+    // and that field decides which DSK protocol is reachable at all:
+    //   attested non-fragile => consider_opposite forever, devils never
+    //   absent               => devils_advocacy
+    // And `robustness.level` is upstream-derived from the leader's win
+    // probability against 0.7 — the same 0.7 that is consider_opposite's own
+    // decisive floor (PREMORTEM_WINPROB_MAX). See the ladder comment.
+    const attested = walkTurns(BOTH_TRIGGERS_FIRE, 8);
+    const unattested = walkTurns(DOMINANT_DECISIVE_UNATTESTED, 8);
+    expect(attested).not.toContain('devils_advocacy');
+    expect(unattested).toContain('devils_advocacy');
+    expect(attested).toContain('consider_opposite');
+    expect(unattested).not.toContain('consider_opposite');
+  });
+
+  it('binds the devils_advocacy selection to the dominating factor BY ID', () => {
+    // Identity binding (trap 19): the exact factor id, never "a factor with a
+    // high score" — `fac_b` / `fac_c` must not be able to satisfy this.
+    const fact = makeFact(DOMINANT_DECISIVE_UNATTESTED);
+    let previous: LensId | null = null;
+    let devils: ReturnType<typeof selectLens> = null;
+    for (let t = 0; t < 8 && devils === null; t++) {
+      const selection = selectLens(fact, { previousAnalysisLens: previous });
+      previous = selection === null ? null : selection.lens;
+      if (selection !== null && selection.lens === 'devils_advocacy') devils = selection;
+    }
+    expect(devils).not.toBeNull();
+    expect(devils!.rationaleCode).toBe('DOMINANT_FACTOR_DISSENT');
+    expect(devils!.subjectRef).toEqual({ id: 'fac_dom', kind: 'factor' });
+    expect(LENS_DSK_PROVENANCE.devils_advocacy).toEqual({
+      protocolId: 'DSK-P-005',
+      triggerId: 'DSK-TR-005',
+    });
+  });
+
+  it('never runs devils_advocacy immediately after consider_opposite (DSK-P-005)', () => {
+    // The bundle's contraindication, verbatim: "Do not run immediately after a
+    // pre-mortem or disconfirmation exercise on the same decision." Any future
+    // fix must surface devils_advocacy WITHOUT producing the sequence its own
+    // protocol forbids — so this holds on both cycle shapes.
+    for (const shape of [BOTH_TRIGGERS_FIRE, DOMINANT_DECISIVE_UNATTESTED]) {
+      const walk = walkTurns(shape, 10);
+      for (let i = 1; i < walk.length; i++) {
+        if (walk[i] === 'devils_advocacy') expect(walk[i - 1]).not.toBe('consider_opposite');
+      }
+    }
+  });
+
+  it('ROOT — devils_advocacy firing IMPLIES sensitivity_flip_risk fires (subset)', () => {
+    // Both call the same dominance derivation, so devils can never be the
+    // eligible HEAD: it depends entirely on a displacement. Proven by turn 1
+    // (no previous lens ⇒ no displacement) on a shape where devils' own
+    // trigger is TRUE — the head is sensitivity, never devils.
+    const firstTurn = selectLens(makeFact(BOTH_TRIGGERS_FIRE));
+    expect(firstTurn).not.toBeNull();
+    expect(firstTurn!.lens).not.toBe('devils_advocacy');
+    // ...and devils' trigger really is satisfied on this fixture: it takes the
+    // slot as soon as the higher lenses are removed from contention.
+    const displaced = selectLens(makeFact(DOMINANT), {
+      previousAnalysisLens: 'sensitivity_flip_risk',
+    });
+    expect(displaced).not.toBeNull();
+  });
+
+  it('does NOT hand devils_advocacy a slot its own trigger did not earn', () => {
+    // Discriminating negative: same decisive leader, same attested level, but
+    // NO dominant driver. TR-005 false ⇒ devils dark, consider_opposite still
+    // surfaces. Without this, "devils appears" could be satisfied by a lens
+    // that simply always wins.
+    const walk = walkTurns(DECISIVE_ATTESTED, 8);
+    expect(walk).not.toContain('devils_advocacy');
+    expect(walk).toContain('consider_opposite');
+  });
+});
+
+// ============================================================================
+// ROADMAP 2.490 — the robustness LEVEL vocabulary, and why devils_advocacy's
+// fragility clause is not the independent test it reads as.
+//
+// TRAP 12d SHAPE, DELIBERATE: the corpus below is HAND-WRITTEN and cannot be
+// derived, because its source is a DIFFERENT REPO. Derivation would only prove
+// this file agrees with itself; what is needed here is the thing that notices
+// the list is SHORT. Pinned at the bytes so a reviewer can re-read it:
+//
+//   PLoT `src/integrations/isl/adapters/robustness-analysis.ts` @ 45e23f10
+//     mapLevelToLabel(level: 'high' | 'medium' | 'low' | 'very_low')
+//       high -> 'robust'   medium -> 'moderate'
+//       low  -> 'fragile'  very_low -> 'fragile'
+//
+// The EXPECTATIONS are taken from that producer mapping, not from this lane's
+// reading of what the words ought to mean (trap 13c — an oracle written from
+// the consumer's intuition scores perfectly and is still wrong).
+// ============================================================================
+
+/** The producer's CLOSED level set, with the producer's OWN fragility verdict. */
+const PRODUCER_LEVEL_IS_FRAGILE: ReadonlyArray<readonly [string, boolean]> = [
+  ['high', false],
+  ['medium', false],
+  ['low', true],
+  ['very_low', true],
+];
+
+describe('RAW_FRAGILE_LEVELS vs the producer level vocabulary (ROADMAP 2.490)', () => {
+  it('classifies every level the producer can emit, agreeing with PLoT label mapping', () => {
+    for (const [level, producerSaysFragile] of PRODUCER_LEVEL_IS_FRAGILE) {
+      expect(
+        RAW_FRAGILE_LEVELS.has(level),
+        `level '${level}': CEE fragility verdict must match PLoT mapLevelToLabel`,
+      ).toBe(producerSaysFragile);
+    }
+  });
+
+  it('UNION — every producer level PLoT calls fragile is present in RAW_FRAGILE_LEVELS', () => {
+    // Fails loud if a fragile level is added upstream and not mirrored here,
+    // rather than that level silently reading as non-fragile and firing a lens
+    // the bundle's negative condition forbids.
+    const producerFragile = PRODUCER_LEVEL_IS_FRAGILE.filter(([, f]) => f).map(([l]) => l);
+    expect(producerFragile.length).toBeGreaterThan(0);
+    for (const level of producerFragile) expect(RAW_FRAGILE_LEVELS.has(level)).toBe(true);
+  });
+
+  it('carries the legacy synonym `fragile` beyond the producer closed set', () => {
+    // `fragile` is NOT in ISL V2's closed set; it is a legacy/defensive
+    // synonym. Pinned so a "tidy-up" against the V2 enum cannot drop it.
+    expect(RAW_FRAGILE_LEVELS.has('fragile')).toBe(true);
+    const extras = [...RAW_FRAGILE_LEVELS].filter(
+      (l) => !PRODUCER_LEVEL_IS_FRAGILE.some(([p]) => p === l),
+    );
+    expect(extras).toEqual(['fragile']);
+  });
+
+  it('treats an UNRECOGNISED level as non-fragile — stated, not hidden', () => {
+    // The accepted cost of not shipping the lens dark (see evaluateConsiderOpposite).
+    // Pinned so the behaviour is a decision on the record, not a surprise.
+    expect(RAW_FRAGILE_LEVELS.has('unknown')).toBe(false);
+    expect(RAW_FRAGILE_LEVELS.has('insufficient_data')).toBe(false);
   });
 });
