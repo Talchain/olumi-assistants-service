@@ -7,7 +7,66 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.34.0.tgz`
+### `talchain-schemas-0.35.0.tgz`
+
+> **✔ SOURCE-PACKED FROM `main` AT THE MERGE SHA — NOT COMPARED AGAINST THE
+> REGISTRY BYTES** (same provenance class as the 0.33.0 entry below, and better
+> than the 0.34.0 entry it replaces, which was a PRE-PUBLISH BRANCH pack).
+> Packed with `npm pack` from a fresh blobless clone of olumi-schemas at **main
+> tip `6c88076ba1fcdc155af23c953a1ae57ebd699fec`** — the merge commit of PR #34,
+> "Option A schemas leg: 0.35.0 — classed field-parity table + tool op-batch
+> (2.474)" — after `npm ci && npm run build` (node 20.19.5 / npm 10.8.2).
+>
+> sha256 `bbca89c0fe4b33b10822cfbac826a224424343c86729016df2882f16b9f464b7`
+> — 337,967 bytes. **Proven byte-reproducible**: a second independent `npm pack`
+> of the same build produced the identical sha256.
+>
+> The registry-bytes comparison (ROADMAP 2.464) remains open and was NOT
+> performed here — this lane's token has no GitHub Packages read scope
+> (`gh api /orgs/Talchain/packages` → 404), so the honest statement is
+> "merged-main source pack, reproducible, unverified against the registry".
+>
+> ⚠ **DGAI IS STILL ON AN OLDER PIN.** The estate rule is that DGAI and CEE must
+> never hold DIFFERENT bytes under one version string — that rule is not
+> violated here (they hold different VERSIONS, which is the normal train state),
+> but when the UI leg adopts 0.35.0 it must vendor **these exact bytes**, not a
+> fresh pack of its own.
+
+**What CEE adopts here (ROADMAP 2.474, design-review amendment A6):** the
+**classed field-parity table** — `EDITABLE_FIELD_TABLE` (42 rows: 22 `grant` ·
+7 `invariant_coupled` · 7 `provenance_owned` · 5 `ai_only` · 1
+`deferred_derivation`) and its derivation accessors `aiEditableFieldRoots`,
+`aiEditableObservedSubkeys`, `provenanceOwnedSegments`,
+`requireEditableFieldTableRevision`.
+
+`src/orchestrator-v5/graph-management/field-safety.ts` now DERIVES
+`ALLOWED_NODE_FIELD_ROOTS`, `ALLOWED_EDGE_FIELD_ROOTS` and
+`ALLOWED_OBSERVED_SUBKEYS` from those accessors instead of carrying its own
+hand-reconciled lists (trap 12 — the lists had drifted from the inspector's
+setters), and takes the UNION of its own analysis-owned stamps with
+`provenanceOwnedSegments()` (ruling J2). It calls
+`requireEditableFieldTableRevision(1)` at module load, so a repo re-vendored
+BACKWARDS to a shorter table throws at import instead of silently enforcing a
+narrower allowlist.
+
+**The closing bolt ships in the same PR:**
+`src/orchestrator-v5/graph-management/__tests__/field-parity-derivation.test.ts`
+asserts the derived sets are set-equal to the accessors AND that the referee's
+actual screen honours the table row by row; the hand-written corpus in
+`field-safety-corpus.test.ts` is the half derivation cannot provide (12d).
+
+**Also in this commit, and NOT caused by it — ⚠ `staging` COULD NOT PASS ITS OWN
+PRE-PUSH GATE.** `talchain-schemas-0.33.0.tgz` was still present alongside
+0.34.0, so `scripts/validate-docs-consistency.sh` failed its pin/vendor
+tripwire. That script is **not** caller-less: `scripts/validate-prepush.sh:385`
+(`check_docs_consistency`) runs it and increments `FAILURES` on a non-zero exit.
+Measured with a control — pristine `staging` via `git archive`: check 11 FAIL,
+`FAILURES=1`; this head: check 11 OK, `FAILURES=0`. So every push from a clean
+`staging` had been reporting a failing pre-push check that nobody acted on —
+trap 7, a broken alarm, which is a worse finding than an unrun script. The stale
+tarball is removed here and the check is green again.
+
+### `talchain-schemas-0.34.0.tgz` (historical — no longer vendored)
 
 > **⚠ BRANCH-PACKED, PRE-PUBLISH — NOT (YET) THE REGISTRY ARTIFACT** (same
 > trade as the 0.32.0 section below, same three-repo-train reason: no registry
@@ -32,7 +91,7 @@ repo's system-event dispatch now persists instead of committing empty acks).
 Additive; every pre-0.34.0 payload parses byte-identically.
 
 
-### `talchain-schemas-0.33.0.tgz`
+### `talchain-schemas-0.33.0.tgz` (historical — no longer vendored)
 
 > **⚠ SOURCE-PACKED FROM MAIN AT THE MERGE SHA — NOT (YET) COMPARED AGAINST
 > THE REGISTRY BYTES.** Packed with `npm pack` from a fresh blobless clone of
