@@ -165,9 +165,10 @@
 import { textNamesLeadingOption } from './leading-option-egress-guard.js';
 import { buildConstraintDisclosureFromState } from '../coaching/constraint-gap-disclosure.js';
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
-import type {
-  ConstraintVerdictState,
-  RatifiedConstraint,
+import {
+  MAY_NAME_LEADING_OPTION,
+  type ConstraintVerdictState,
+  type RatifiedConstraint,
 } from '../../orchestrator/context/constraint-feasibility.js';
 
 /**
@@ -430,11 +431,32 @@ export function composeWithheldReasonTail(
  * settled: there is no reason to hold our own copy to a laxer bar than the
  * instrument that measures it.
  *
- * ⚠ DERIVED FROM THE STATE ENUM, NOT HAND-LISTED. Driving
- * `composeWithheldWhyAnswer` over every declared `ConstraintVerdictState` plus
- * `null` also proves the switch is TOTAL — a sixth state added to the contract
- * arrives here as a compile error and, failing that, as an unprobed voice this
- * loop would not silently skip.
+ * ⭐ DERIVED FROM THE CANONICAL STATE MAP, NOT HAND-LISTED — and it says so
+ * because it now IS so. ROADMAP 2.579.
+ *
+ * ⚠ THIS COMMENT USED TO CLAIM THE DERIVATION WHILE THE CODE BELOW HELD A PLAIN
+ * ARRAY LITERAL OF SIX HAND-TYPED VALUES, and it named a function
+ * (`composeWithheldWhyAnswer`) that does not exist anywhere in the repo. Both
+ * halves of its promise were false in the way that matters: the list is typed
+ * `ConstraintVerdictState | null`, so a SIXTH state is perfectly assignable and
+ * its ABSENCE is not a type error — meaning the loop DID silently skip a new
+ * state's voice, the exact opposite of what was written. CLAUDE.md trap 12 (the
+ * hand-maintained mirror) wearing trap 14's clothes (an honest label overwritten
+ * by a false one), in the same six lines. Its two siblings had already been
+ * converted and this one was missed:
+ * `withheld-explanation-answer.ts` and `withheld-leader-projection.ts` both
+ * drive `Object.keys(MAY_NAME_LEADING_OPTION)`, and the first one's own comment
+ * records this drift happening once before — "a hand-list would have left the
+ * two NEW voices ... unprobed".
+ *
+ * WHAT THE DERIVATION BUYS, precisely: driving every state DECLARED IN THE
+ * CANONICAL MAP proves the switch is TOTAL **over the states that actually
+ * exist**, so a new state arrives as a compile error at the switch and — failing
+ * that, e.g. a state reaching us across the schema boundary — as a LOUD,
+ * NAMED import failure rather than an unprobed voice. Note what it still cannot
+ * do (CLAUDE.md trap 12d): derivation proves the probe AGREES with the map, never
+ * that the map is COMPLETE. That is `MAY_NAME_LEADING_OPTION`'s own problem, and
+ * its `Record` key type is what guards it.
  */
 function assertTailCopyIsLeaderFree(): void {
   const one: readonly RatifiedConstraint[] = [
@@ -447,11 +469,7 @@ function assertTailCopyIsLeaderFree(): void {
   ];
   const states: ReadonlyArray<ConstraintVerdictState | null> = [
     null,
-    'not_applicable',
-    'evaluated_feasible',
-    'evaluated_infeasible',
-    'unevaluated',
-    'identity_unresolved',
+    ...(Object.keys(MAY_NAME_LEADING_OPTION) as ConstraintVerdictState[]),
   ];
 
   const probes: Array<readonly [string, string]> = [];
@@ -462,7 +480,32 @@ function assertTailCopyIsLeaderFree(): void {
       ['one-unlabelled', unlabelled],
       ['many', many],
     ] as const) {
-      const answer = composeWithheldReasonTail(state, constraints);
+      // ⚠ WIDENED TO INCLUDE `undefined` DELIBERATELY, and the widening is the
+      // whole guard. A declared state with NO `case` falls off the end of
+      // `composeWithheldReasonTail`'s switch and returns `undefined` — which is
+      // NOT `null`, so the `continue` below would not catch it and
+      // `answer.text` would throw a bare `TypeError` naming nothing. TypeScript
+      // makes this branch unreachable for the states it can see, which is
+      // exactly why it must be checked at RUNTIME: the states it cannot see —
+      // one arriving across the `@talchain/schemas` boundary, or added to the
+      // contract ahead of this switch — are the only ones that can get here.
+      const answer: WithheldReasonTail | null | undefined = composeWithheldReasonTail(
+        state,
+        constraints,
+      );
+      if (answer === undefined) {
+        throw new Error(
+          `withheld-reason-tail: the declared constraint verdict state ` +
+            `'${String(state)}' has no voice — composeWithheldReasonTail's switch ` +
+            `returned undefined for it. Every state in MAY_NAME_LEADING_OPTION must ` +
+            `either return null (a PERMITTING state, which needs no tail) or a ` +
+            `WithheldReasonTail. Add a case to composeWithheldReasonTail for ` +
+            `'${String(state)}'. Do not remove it from the probe: a voice that ships ` +
+            `unprobed is one textNamesLeadingOption never sees, and ` +
+            `projectExplanationAnswerForWithheldClaim would then replace the whole ` +
+            `answer on every withheld turn with no symptom but a telemetry rate.`,
+        );
+      }
       if (answer === null) continue;
       probes.push([`${state ?? 'null'}:${shape}`, answer.text]);
     }
