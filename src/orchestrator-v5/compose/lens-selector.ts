@@ -98,9 +98,11 @@
  * own trigger objects (see the evaluators + `LENS_DSK_PROVENANCE`); their
  * executors are the deterministic ExerciseBlock companions emitted the same
  * turn. An earlier revision of this header said "richer devil's advocacy" was
- * deferred for want of compute — the DSK trigger's actual condition (dominant
- * factor + non-fragile robustness) is computable from the enrichment we
- * already read, so the deferral no longer applied. Outside view REMAINS
+ * deferred for want of compute — the DSK trigger's actual observable (a
+ * dominant factor) is computable from the enrichment we already read, so the
+ * deferral no longer applied. (TR-005's declared `robustness != 'fragile'`
+ * clause is deliberately NOT implemented — ROADMAP 2.490; the reasoning lives
+ * on {@link evaluateDevilsAdvocacy} and nowhere else.) Outside view REMAINS
  * deferred, twice over: DSK-TR-002's signal is a conversation-text heuristic
  * the bundle itself labels "not production quality" (not a compose-time graph
  * fact), and its `reference_class` content must come from the user or real
@@ -549,10 +551,12 @@ interface AnalysisSignals {
    * DSK slice 1 — the RAW `enrichment.robustness` signals, through the shared
    * S4 normaliser (`readRawRobustnessSignals` — one normaliser, every caller;
    * `robustness-honesty.ts` owns the fragile truth table). `null` when the
-   * producer emitted no robustness object. Consulted by the DSK trigger rules:
+   * producer emitted no robustness object. Consulted by ONE DSK trigger rule:
    * TR-003 states a POSITIVE robustness condition (an absent attestation must
-   * NOT fire consider_opposite), TR-005 a NEGATIVE one (only shown-fragile
-   * suppresses devils_advocacy).
+   * NOT fire consider_opposite). TR-005's NEGATIVE clause was removed at
+   * ROADMAP 2.490 — see {@link evaluateDevilsAdvocacy} for the override and
+   * why the field it was implemented against does not measure the thing the
+   * clause exists to detect.
    */
   readonly rawRobustness: RawRobustnessSignals | null;
 }
@@ -869,30 +873,54 @@ function evaluateConsiderOpposite(signals: AnalysisSignals): EvaluatorHit | null
  * outcome variance AND robustness != 'fragile'". The computable analogue of
  * the variance-contribution clause is the platform's own dominance signal —
  * the SAME strict-majority influence-share derivation rule 1b uses
- * ({@link findDominantDriver}; one derivation, two callers). The robustness
- * clause is NEGATIVE in the DSK ("do not fire if the model already shows
- * fragile robustness — the analysis is already providing the challenge"), so
- * only an ATTESTED fragile level suppresses; an absent attestation may fire.
+ * ({@link findDominantDriver}; one derivation, two callers).
+ *
+ * ⚠ THE ROBUSTNESS CLAUSE IS DELIBERATELY NOT IMPLEMENTED — ROADMAP 2.490.
+ * Read this before "restoring" it. Until 2.490 this evaluator opened with
+ * `if (isRawFragile(signals.rawRobustness)) return null;`, and MEASURED over
+ * five live staging captures that clause selected the lens on ZERO of five:
+ * it admitted devils_advocacy EXACTLY where consider_opposite (which outranks
+ * it) also fired, and blocked it everywhere else — a perfect anti-filter.
+ * The cause is one hop upstream and invisible here: ISL sets
+ * `is_robust = recommendation_stability >= 0.7` (`robustness_analyzer_v2.py`
+ * @ 88275e5c, where `recommendation_stability` IS the winner's sample-win
+ * share) and PLoT bands that into `high|medium|low|very_low` (@ 45e23f10). So
+ * `robustness.level` is NOT an independent robustness measure — it is the
+ * LEADER'S WIN PROBABILITY compared against 0.7, which is
+ * {@link PREMORTEM_WINPROB_MAX}, consider_opposite's own decisive floor.
+ *
+ * The override is justified by the clause's OWN stated rationale: "do not fire
+ * if the model already shows fragile robustness — the analysis is already
+ * providing the challenge". On a fragile-banded run the field means "no option
+ * clearly wins", which says nothing about the dominant driver's weighting —
+ * and DSK-P-005 challenges the FACTOR ("I'll take the position that [dominant
+ * factor] matters much less than the model suggests"), not the option
+ * separation. The clause exists to suppress a redundant adversary; the field
+ * it was implemented against does not measure the thing it would be redundant
+ * with, so honouring it here is honouring a false label (trap 14).
+ * MEASURED AND REJECTED as substitutes: `robustness.fragile_edges` is
+ * non-empty on 5/5 live sessions (vacuous as a gate), and the
+ * `flip_thresholds` posture discriminates 3/2 but suppresses the lens on the
+ * one session that needs it. If a future slice gives CEE a genuine,
+ * win-probability-INDEPENDENT fragility signal, re-implement TR-005's clause
+ * against THAT — the override is a response to the available data, not a
+ * rejection of the science. Pinned by `lens-dsk-sequence-2490.test.ts`.
  *
  * Because the trigger condition is (deliberately) a subset of rule 1b's, this
- * lens can only win the head slot when a higher lens is displaced — which is
- * the designed surfacing path: dominance turn N → sensitivity pressure-test;
- * turn N+1 → the structured-dissent exercise via the no-repeat tie-break.
- * Same subject factor, different decision-science method — diversity IS
- * usefulness on consecutive turns (the 2.211 ruling).
- *
- * The robustness clause here is the same denylist-for-a-positive-condition
- * shape discussed on {@link evaluateConsiderOpposite}, but INVERTED and
- * therefore safe: TR-005's condition is negative ("robustness != 'fragile'"),
- * so a denylist is the faithful implementation, and an unrecognised level
- * falls through to "may fire" exactly as the DSK intends.
+ * lens can never win the head slot outright: it depends entirely on a
+ * displacement, which is why 2.490 also had to give it one (the SEQUENCE rule
+ * in {@link selectLens}). Same subject factor, different decision-science
+ * method — diversity IS usefulness on consecutive turns (the 2.211 ruling).
  *
  * DSK-P-005's "do not run immediately after a pre-mortem or disconfirmation"
  * contraindication is enforced at eligibility — see
  * {@link CONTRAINDICATED_IMMEDIATELY_AFTER}.
  */
 function evaluateDevilsAdvocacy(signals: AnalysisSignals): EvaluatorHit | null {
-  if (isRawFragile(signals.rawRobustness)) return null;
+  // ROADMAP 2.490 — NO robustness clause here, deliberately. The reasoning is
+  // stated ONCE, on this function's doc comment above; a second copy here is
+  // the drift surface this module refuses elsewhere. Do not re-add
+  // `isRawFragile(signals.rawRobustness)` without reading it.
   const dominant = findDominantDriver(signals);
   if (dominant === null) return null;
   return { code: 'DOMINANT_FACTOR_DISSENT', subjectFactorId: dominant.factorId };
@@ -1153,9 +1181,19 @@ export function selectLens(
     // exploration filler, and what_if keeps its documented "only occupies a
     // slot no other lens claimed" position.
     //
-    // ⚠⚠ ROADMAP 2.490 — devils_advocacy IS STRUCTURALLY DARK AT THIS ORDER,
+    // ⚠⚠ ROADMAP 2.490 — devils_advocacy WAS STRUCTURALLY DARK AT THIS ORDER,
     // AND REORDERING DOES NOT FIX IT. Both halves were MEASURED; read both
     // before touching these two entries, because the obvious fix is wrong.
+    // ⭐ FIXED — NOT BY REORDERING. The ladder ORDER below is UNCHANGED. What
+    // changed is (a) devils' anti-filter clause was removed (see
+    // {@link evaluateDevilsAdvocacy}) and (b) a displaced sensitivity head now
+    // hands its slot to devils as a SEQUENCE rather than to the next ladder
+    // entry (see the sequence rule further down this function). Each is INERT
+    // ALONE and load-bearing only TOGETHER — measured; do not judge either on
+    // its own. The record of the defect is kept below because it is what makes
+    // the two hunks legible, and because three plausible fixes are refuted in
+    // it. `lens-dsk-sequence-2490.test.ts` pins the fixed behaviour on the
+    // live captures themselves.
     //
     // THE DEFECT. Replaying the five live staging captures in
     // `PHASE0-EVIDENCE-2026-07-28/walk-dsk-raw/` (real `enrichment`, through
@@ -1222,11 +1260,26 @@ export function selectLens(
     // Deliberately NOT taken here: it needs a product ruling, not a lane's
     // preference.
     //
-    // The bundle does NOT adjudicate this. `data/dsk/v1.json` declares only
-    // RECIPROCAL deference — TR-003 "Do not fire if user has already run a
-    // pre-mortem or devil's advocate exercise on this decision this stage";
-    // TR-005 "...a pre-mortem or disconfirmation exercise this stage" — which
-    // presumes both are reachable, but names no priority between them.
+    // ⭐ THE RULING THAT RESOLVED IT (2.490, founder-programme). The two DSK
+    // lenses are NOT competitors for one slot — they are a SEQUENCE. Sensitivity
+    // states a FACT ("this one driver is carrying your recommendation"); devils
+    // is the exercise performed ABOUT that fact. That is why their triggers are
+    // NESTED rather than disjoint. Corroborated at the bundle bytes, not merely
+    // compatible: DSK-P-005's own step 1 is written as a sequel — "The analysis
+    // shows [dominant factor] is driving the recommendation heavily. Let's
+    // challenge that." — and its contraindications name pre-mortem and
+    // disconfirmation but NOT sensitivity. So the fix is a sequence rule on the
+    // displaced-head path, not a re-ranking of this ladder.
+    //
+    // The bundle does NOT adjudicate the PRIORITY between the two. `data/dsk/
+    // v1.json` declares only RECIPROCAL deference — TR-003 "Do not fire if user
+    // has already run a pre-mortem or devil's advocate exercise on this decision
+    // this stage"; TR-005 "...a pre-mortem or disconfirmation exercise this
+    // stage" — which presumes both are reachable, but names no priority between
+    // them. Because the bundle is silent, the sequence rule below must NOT
+    // silently invert the order shipped here: they separate onto their own
+    // declared observables instead (decisive leader ⇒ TR-003's disconfirmation;
+    // dominant driver without a decisive leader ⇒ TR-005's dissent).
     ['consider_opposite', evaluateConsiderOpposite(signals)],
     ['devils_advocacy', evaluateDevilsAdvocacy(signals)],
     ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
@@ -1282,10 +1335,49 @@ export function selectLens(
   //   (2) a NEXT lens exists that ALSO fired and ALSO has an available executor.
   // Condition (2) is what makes a single-trigger repeat correct rather than a
   // suppression: with nothing to move to, the head stands. The replacement is
-  // taken from the SAME ladder in the SAME order, so this is a tie-break within
-  // the locked priority, never a re-ranking of it. `next` is never equal to
-  // `head` (each lens appears once), so one displacement cannot cascade.
-  const runnerUp = slotOrder[1];
+  // taken from the SAME ladder — in the SAME order EXCEPT for the one 2.490
+  // sequence case immediately below, which is a named exception, not a
+  // re-ranking of the ladder itself. The replacement is never equal to `head`
+  // (each lens appears once), so one displacement cannot cascade.
+  // ── ROADMAP 2.490 — THE SEQUENCE RULE ───────────────────────────────────────
+  // A DISPLACED `sensitivity_flip_risk` head hands its slot to the EXERCISE
+  // ABOUT THE DRIVER IT JUST NAMED, rather than to the next ladder entry. This
+  // uses the 2.211 machinery in its intended direction (the fired lens defers,
+  // the sequel takes the slot) instead of re-ranking the locked ladder — see
+  // the ruling on the ladder above for why the pair is a sequence and not a
+  // competition, and {@link evaluateDevilsAdvocacy} for the other half of the
+  // fix (each is INERT ALONE).
+  //
+  // ⚠ TWO CLAUSES, BOTH LOAD-BEARING, BOTH MEASURED:
+  //
+  //   `head.lens === 'sensitivity_flip_risk'` — the sequel is a sequel to a
+  //   SPECIFIC fact. Without it, a turn on which the correlated yield has
+  //   already left devils_advocacy at the head would find devils in slotOrder
+  //   and hand the slot straight back to it: a no-repeat rule emitting a
+  //   repeat.
+  //
+  //   `!slotOrder.some(consider_opposite)` — THE SEQUEL MUST NOT DISPLACE THE
+  //   OTHER DSK EXERCISE. Without it, any shape with a NON-yielding sensitivity
+  //   head on which BOTH DSK triggers fire loses consider_opposite entirely —
+  //   measured, and it is the same STARVATION SWAP that refuted fix (2) above,
+  //   arriving by a different door. The bundle names no priority between the
+  //   two, so a tie-break here would be this file silently inverting the
+  //   shipped ladder; instead the two lenses separate onto their own declared
+  //   observables. No live capture contains that shape, which is exactly why it
+  //   is pinned by a test rather than trusted to the walk.
+  //
+  // ⚠ THIS IS A BEHAVIOUR CHANGE TO SHARED, LOCKED-ORDER MACHINERY, not a
+  // DSK-local tweak: a displaced sensitivity head that would previously have
+  // promoted `pre_mortem` or `evpi_evidence_priority` now promotes
+  // `devils_advocacy` whenever the latter is eligible, so a CORE lens loses
+  // that slot. Intended, ratified, and pinned as its own case in
+  // `lens-dsk-sequence-2490.test.ts`.
+  const sequel =
+    head.lens === 'sensitivity_flip_risk' &&
+    !slotOrder.some((e) => e.lens === 'consider_opposite')
+      ? slotOrder.find((e) => e.lens === 'devils_advocacy')
+      : undefined;
+  const runnerUp = sequel ?? slotOrder[1];
   if (
     options?.previousAnalysisLens != null &&
     options.previousAnalysisLens === head.lens &&

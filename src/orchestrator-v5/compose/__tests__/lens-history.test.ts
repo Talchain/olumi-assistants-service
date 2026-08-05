@@ -42,11 +42,22 @@ const GRAPH = {
 };
 
 /**
- * BOTH lenses trigger: rule 1a-i fires (`fac_a` is `isolated`) AND rule 2c fires
- * (max win_probability 0.62 ∈ [0.4, 0.7)). `fac_a` resolves in GRAPH, so the
- * flip-risk lens has a focusable subject and the pre-mortem lens (WIN_PROB_
- * MODERATE) deliberately has none — which is what makes the directive drift
- * observable.
+ * EXACTLY TWO lenses trigger: rule 1a-i fires (`fac_a` is `isolated`) AND rule
+ * 2c fires (max win_probability 0.62 ∈ [0.4, 0.7)). `fac_a` resolves in GRAPH,
+ * so the flip-risk lens has a focusable subject and the pre-mortem lens
+ * (WIN_PROB_MODERATE) deliberately has none — which is what makes the directive
+ * drift observable.
+ *
+ * ⚠ ROADMAP 2.490 — THE INFLUENCE SCORES ARE LOAD-BEARING AND WERE NOT, ONCE.
+ * This fixture shipped as `fac_a: 1.0` / `fac_b: 0.9`, a 0.526 share — an
+ * INCIDENTAL strict-majority dominance that the docstring above never declared
+ * and that no test here is about. Once 2.490 made `devils_advocacy` reachable
+ * from a displaced sensitivity head, that undeclared third lens took
+ * pre_mortem's slot and twelve tests in this file changed meaning. The scores
+ * are now equal, so there is NO dominant driver and the fixture triggers the
+ * two lenses it names. `precondition — exactly two lenses` below fails loud if
+ * that drifts again; the devils_advocacy promotion this file no longer sees is
+ * pinned on the live captures in `lens-dsk-sequence-2490.test.ts`.
  */
 function bothTriggerFact(computedAt: string): HandlerFact {
   return {
@@ -68,7 +79,7 @@ function bothTriggerFact(computedAt: string): HandlerFact {
         },
         factor_sensitivity: [
           { factor_id: 'fac_a', influence_score: 1.0, influence_rank: 1, confidence: 0.9, flip_risk_category: 'isolated' },
-          { factor_id: 'fac_b', influence_score: 0.9, influence_rank: 2, confidence: 0.9 },
+          { factor_id: 'fac_b', influence_score: 1.0, influence_rank: 2, confidence: 0.9 },
         ],
         option_comparison: [{ win_probability: 0.62 }, { win_probability: 0.38 }],
       },
@@ -128,6 +139,35 @@ const BASE_INPUT = {
 // ============================================================================
 
 describe('2.211 — derivePreviousAnalysisLens', () => {
+  it('PRECONDITION — the alternation fixture triggers EXACTLY the two lenses it names', () => {
+    // ⚠ ROADMAP 2.490. Every test in this file reads as an assertion about the
+    // REPLAY machinery, and each one silently assumes the fixture's eligible set
+    // is {sensitivity_flip_risk, pre_mortem}. It was {…, devils_advocacy} for a
+    // while without anyone declaring it, because a 1.0/0.9 influence split is a
+    // 0.526 strict majority. Assert the assumption rather than trusting the
+    // numbers to stay where they were put.
+    const fact = bothTriggerFact('2026-07-31T10:00:00.000Z') as RunAnalysisHandlerFact;
+
+    // No strict-majority driver ⇒ neither sensitivity rule 1b nor
+    // devils_advocacy's shared dominance derivation can fire.
+    const scores = (
+      (fact.result as unknown as { enrichment: { factor_sensitivity: { influence_score: number }[] } })
+        .enrichment.factor_sensitivity
+    ).map((f) => f.influence_score);
+    const total = scores.reduce((a, s) => a + s, 0);
+    expect(Math.max(...scores) / total).toBeLessThanOrEqual(0.5);
+
+    // …and the eligible set really is the pair, demonstrated by the cycle: each
+    // lens takes the slot when the other one held it last.
+    expect(selectLens(fact)!.lens).toBe('sensitivity_flip_risk');
+    expect(selectLens(fact, { previousAnalysisLens: 'sensitivity_flip_risk' })!.lens).toBe(
+      'pre_mortem',
+    );
+    expect(selectLens(fact, { previousAnalysisLens: 'pre_mortem' })!.lens).toBe(
+      'sensitivity_flip_risk',
+    );
+  });
+
   it('returns null when there are no prior facts at all', () => {
     expect(derivePreviousAnalysisLens([])).toBeNull();
   });
