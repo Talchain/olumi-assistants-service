@@ -61,6 +61,7 @@ vi.mock("../../orchestrator-v5/session/index.js", () => ({
 import registerRoute from "../assist.v1.scenario-graph-register.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
 import { computeExpectedGraphCasHashes } from "../../orchestrator-v5/context/graph-cas-conflict.js";
+import { projectGraphForPersistence } from "../../orchestrator-v5/persisted-graph-projection.js";
 import { GraphStaleWriteError } from "../../orchestrator-v5/session/store.js";
 import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../../config/graphCaps.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
@@ -212,6 +213,50 @@ describe("register — the atomic writer, and the trusted CAS base", () => {
     await app.close();
   });
 
+  it("stores the PROJECTED bytes, not the submitted ones — hash and storage describe the same graph", async () => {
+    // MEASURED, and the measurement is why this test exists. On the captured
+    // fixture `projectGraphForPersistence` is a byte-identical NO-OP (it returns
+    // the original reference — probed at these bytes), so a mutant that deletes
+    // the projection call SURVIVES against that graph. That is not equivalence,
+    // it is a hole in the oracle: the projection exists precisely for graphs it
+    // DOES move, and `commit.ts` was restructured because hashing before it
+    // advertises an identity for bytes we do not store.
+    //
+    // `reconcileTopLevelOptionsFromNodes` moves a graph whose top-level
+    // `options[]` is PRESENT but incomplete (an absent `options` is never
+    // invented — "update if present"). The captured graph has four option
+    // nodes, so seeding `options` with one of them makes the pass fire.
+    const partial = {
+      ...IMPORTED,
+      options: [{ id: "opt_beta", label: "Beta Garden" }],
+    };
+
+    // POSITIVE CONTROL (trap 13): the projection must actually MOVE this graph,
+    // or every assertion below passes by comparing a no-op to itself.
+    const projected = projectGraphForPersistence(partial, {});
+    expect(projected).not.toBe(partial);
+    expect((projected as { options: unknown[] }).options.length).toBeGreaterThan(
+      partial.options.length,
+    );
+
+    const app = await buildApp();
+    const res = await post(app, SCENARIO, { graph: partial });
+    expect(res.statusCode).toBe(200);
+
+    const stored = append.mock.calls[0][0].graph as { options: Array<{ id: string }> };
+    expect(stored.options.map((o) => o.id).sort()).toEqual(
+      ["opt_alpha", "opt_beta", "opt_gamma", "opt_status_quo"].sort(),
+    );
+    // And the ACK describes those same bytes.
+    expect(res.json().graph_identity_hash.value).toBe(
+      computeGraphIdentityHash(stored as never)?.value,
+    );
+    expect(res.json().graph_identity_hash.value).not.toBe(
+      computeGraphIdentityHash(partial as never)?.value,
+    );
+    await app.close();
+  });
+
   it("proceeds UNINSTRUMENTED (not 5xx) when the base read throws — a blip must not lock the user out", async () => {
     loadGraph.mockRejectedValueOnce(new Error("db blip"));
     const app = await buildApp();
@@ -278,6 +323,16 @@ describe("register — 2.467c, the kind/type pair", () => {
     expect(stored.nodes.every((n) => !("type" in n))).toBe(true);
     expect(stored.nodes.find((n) => n.id === "opt_alpha")?.kind).toBe("option");
     expect(res.json().kind_fields_normalised).toBe(14);
+    // The acknowledgement names the STORED bytes. Here that is discriminating:
+    // the submitted graph carries `type` on every node, the stored graph does
+    // not, so the two identities differ and a hash taken from the request would
+    // hand the client a token for a graph the server never stored.
+    expect(res.json().graph_identity_hash.value).toBe(
+      computeGraphIdentityHash(stored as never)?.value,
+    );
+    expect(res.json().graph_identity_hash.value).not.toBe(
+      computeGraphIdentityHash(agreeing as never)?.value,
+    );
     await app.close();
   });
 
