@@ -7,40 +7,54 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.32.0.tgz`
+### `talchain-schemas-0.33.0.tgz`
 
-> **⚠ BRANCH-PACKED, PRE-PUBLISH — NOT (YET) THE REGISTRY ARTIFACT, and this
-> section says so on purpose.** This file's own 0.29.0 lesson ("npm repacks on
-> publish, so a branch pack has different bytes") is not being ignored — it is
-> being traded against a harder constraint: Lane 2 (P3 ui_directive panel
-> verbs) is a THREE-REPO TRAIN with a hard merge order (schemas → DGAI → CEE),
-> and no registry 0.32.0 existed when this leg was built. The tarball was
-> packed with `npm pack` from olumi-schemas branch
-> `lane2/ui-directive-panel-section-0.32.0` at `23f8e01b` (the 0.32.0
-> version-bump PR; full gate green, 40 files / 1402 tests).
+> **⚠ SOURCE-PACKED FROM MAIN AT THE MERGE SHA — NOT (YET) COMPARED AGAINST
+> THE REGISTRY BYTES.** Packed with `npm pack` from a fresh blobless clone of
+> olumi-schemas at **main tip `4526cf58`** (the 0.33.0 merge commit, "Lane 3
+> Car 2: transported-critique seam typing (2.293)"; full repo gate green there,
+> 41 files / 1410 tests), after `npm ci && npm run build` (node 20.19.5 /
+> npm 10.8.2). The registry-bytes comparison (ROADMAP 2.464) remains open —
+> source-pack provenance is documented here instead: unlike the 0.32.0 entry
+> above this is not a pre-publish branch pack, it is the exact merged main
+> bytes, and the pack was proven byte-reproducible by packing twice and
+> comparing hashes.
 >
-> sha256 `472cd35d355c2292589a98f609e6ad478c9576dab179ea1ce27b06c87a5dd93a`
-> — **BYTE-IDENTICAL to DGAI's vendored copy by construction** (both legs copy
-> the same pack output), so the two consumers of the new verbs run identical
-> schema bytes, which is the property that actually protects the boundary.
->
-> **FOR THE MERGING ORCHESTRATOR:** the schemas PR auto-publishes 0.32.0 on
-> merge. Before (or immediately after) merging THIS leg, optionally re-vendor
-> from the registry (`npm pack @talchain/schemas@0.32.0`), update BOTH
-> consumers' tarballs + sidecars together, and record the registry
-> shasum/integrity checks here the way the 0.31.0 section below does. If the
-> registry bytes differ (pack metadata), that is expected and worth one line
-> here — what must never happen is DGAI and CEE holding DIFFERENT bytes under
-> one version string.
+> sha256 `d36f75aad9197a3d8721688891ad05da51ff270645d617e741922603867f9cb6`
+> — 296,658 bytes. A second independent `npm pack` of the same build produced
+> the identical sha256.
 
-**What CEE adopts here (Lane 2, P3):** `ui_directive` verbs `open_panel` /
-`open_section` + optional strict `ui_target` (closed vocabularies: 5 OutputsDock
-tab ids / 5 ModelTabBody section ids), cross-field-enforced both directions at
-the BlockSchema union. Additive; every pre-0.32.0 payload parses
-byte-identically. CEE's emit ladder gains three deterministic rows (see
-`src/orchestrator-v5/compose/ui-directive.ts`); emission ships in the same PR
-as this re-vendor, and the UI leg merges FIRST, so no deployed consumer ever
-strict-rejects a served verb.
+**What CEE adopts here (2.473):** `TransportedCritiqueSchema` /
+`TransportedCritique` — the CEE→UI transported-critique row, whose field set
+mirrors THIS repo's projection allow-list (`projectCritiquesForTransport`,
+`src/orchestrator-v5/compose/sanitise-enrichment.ts`): `user_message`
+REQUIRED, `message` deliberately NOT declared, severity optional, object
+passthrough. `AnalysisEnrichmentSchema.critiques` becomes a union (inbound
+`EnrichmentCritiqueSchema` first, then transported); the inbound schema is
+byte-for-byte unchanged. **Recorded design cost (Car 2 review): inbound
+validators now accept transported-shape rows — an accepted
+telemetry-discrimination loss.**
+
+**The closing bolt ships in the same PR:**
+`src/orchestrator-v5/compose/__tests__/critiques-transport-schema-bolt.test.ts`
+asserts `projectCritiquesForTransport`'s ACTUAL output parses under the
+vendored `TransportedCritiqueSchema` AND that every emitted key is declared in
+the schema's shape (the schema is passthrough, so parse alone cannot see an
+allow-list field the schema never heard of). This is the cross-repo assertion
+schemas-CI cannot make — its own `PROJECTED_ROW` fixture is a hand-mirror of
+this repo's projection and would drift silently without it.
+
+### `talchain-schemas-0.32.0.tgz` (historical — no longer vendored)
+
+> Branch-packed pre-publish from `lane2/ui-directive-panel-section-0.32.0` at
+> `23f8e01b` (no registry 0.32.0 existed when that leg was built; three-repo
+> train schemas → DGAI → CEE). sha256
+> `472cd35d355c2292589a98f609e6ad478c9576dab179ea1ce27b06c87a5dd93a`,
+> byte-identical to DGAI's vendored copy by construction. Adopted the
+> `ui_directive` verbs `open_panel` / `open_section` + strict `ui_target`
+> (emit ladder: `src/orchestrator-v5/compose/ui-directive.ts`). The
+> registry-bytes comparison flagged in that entry was never performed —
+> carried forward as ROADMAP 2.464.
 
 ### `talchain-schemas-0.31.0.tgz` (historical — no longer vendored)
 
