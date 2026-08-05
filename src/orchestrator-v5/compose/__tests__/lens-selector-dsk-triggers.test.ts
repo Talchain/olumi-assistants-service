@@ -371,6 +371,147 @@ describe('selectLens — devils_advocacy (DSK-TR-005 structured dissent)', () =>
 });
 
 // ============================================================================
+// DSK contraindications — "do not run IMMEDIATELY AFTER" (review F3)
+// ============================================================================
+
+/**
+ * ⚠ THE 2.211 NO-IMMEDIATE-REPEAT TIE-BREAK RUNS THE WRONG WAY FOR THESE TWO
+ * PROTOCOLS, AND SHIPPING WITHOUT THIS FILTER WOULD HAVE EMITTED THE EXACT
+ * SEQUENCE OUR OWN BUNDLED SCIENCE FORBIDS.
+ *
+ * Bundle bytes (`data/dsk/v1.json`, protocol `contraindications`):
+ *   DSK-P-003 — "Do not run immediately after the user has already run a
+ *                pre-mortem on the same decision"
+ *   DSK-P-005 — "Do not run immediately after a pre-mortem or disconfirmation
+ *                exercise on the same decision"
+ *
+ * 2.211 hands a repeated head's slot to the RUNNER-UP. With these lenses on the
+ * ladder, a `pre_mortem` turn followed by another `pre_mortem`-triggering turn
+ * promotes `consider_opposite` — i.e. the platform emits disconfirmation
+ * IMMEDIATELY AFTER a pre-mortem, precisely the contraindicated sequence. The
+ * diversity rule and the protocol's own science point in opposite directions,
+ * and the science wins.
+ *
+ * This needs NO new persistence: `previousAnalysisLens` is already threaded for
+ * 2.211, so "immediately after" is answerable today. The GENERAL cooldown class
+ * (a per-stage fired-ledger: "already run this exercise this stage", "already
+ * completed a structured risk assessment") is genuinely beyond what the current
+ * inputs can answer and stays slice-2 work.
+ */
+describe('selectLens — DSK "do not run immediately after" contraindications', () => {
+  /** Fires pre_mortem 2a AND consider_opposite (decisive + attested stable). */
+  const PREMORTEM_THEN_CONSIDER: EnrichmentInput = {
+    confidence_tier: 'needs_work',
+    factor_sensitivity: BALANCED_FACTORS,
+    option_comparison: [{ win_probability: 0.75 }, { win_probability: 0.25 }],
+    robustness: { level: 'high' },
+  };
+
+  it('the unfiltered ladder WOULD promote consider_opposite after a pre-mortem (premise control)', () => {
+    // Non-vacuity: both lenses genuinely trigger on this fact, and pre_mortem
+    // genuinely wins the slot when it is NOT the previous lens. Without this,
+    // the suppression test below could pass because nothing fired at all.
+    const fresh = selectLens(makeFact(PREMORTEM_THEN_CONSIDER), {
+      previousAnalysisLens: null,
+    });
+    expect(fresh).not.toBeNull();
+    expect(fresh!.lens).toBe('pre_mortem');
+    // And consider_opposite is a genuine runner-up on the same fact.
+    const withoutPreMortem = selectLens(
+      makeFact({ ...PREMORTEM_THEN_CONSIDER, confidence_tier: 'strong' }),
+    );
+    expect(withoutPreMortem).not.toBeNull();
+    expect(withoutPreMortem!.lens).toBe('consider_opposite');
+  });
+
+  it('DSK-P-003: consider_opposite does NOT run immediately after a pre-mortem', () => {
+    const selection = selectLens(makeFact(PREMORTEM_THEN_CONSIDER), {
+      previousAnalysisLens: 'pre_mortem',
+    });
+    // The contraindicated lens must not be selected AT ALL on this turn —
+    // not merely denied the head slot (a runner-up promotion would emit it).
+    expect(selection?.lens).not.toBe('consider_opposite');
+  });
+
+  /**
+   * ⚠ THESE TWO FIXTURES NEED A CORRELATED FLIP HIT, AND THE FIRST DRAFT OF
+   * THIS SPEC DID NOT HAVE ONE — SO BOTH TESTS PASSED VACUOUSLY (trap 13b: a
+   * guard agreeing with itself). devils_advocacy REQUIRES dominance, and
+   * dominance also fires sensitivity rule 1b, which outranks it — so on a plain
+   * dominance fact the selection is `sensitivity_flip_risk` and "not
+   * devils_advocacy" holds for a reason that has nothing to do with the filter.
+   * The 2.211-① correlated yield is what actually lets devils_advocacy reach
+   * the slot: correlated head yields to the end, the no-repeat tie-break then
+   * promotes the runner-up. Each test asserts that promotion happens WITHOUT
+   * the contraindicated predecessor (the premise control) before asserting it
+   * does not happen WITH it.
+   */
+  /**
+   * ONE base fact, three predecessors. The CURRENT turn need not fire the
+   * contraindicated predecessor's own lens — `previousAnalysisLens` describes
+   * the PREVIOUS analysis turn — so this fact is built to make
+   * devils_advocacy the natural head (correlated hit yields under 2.211-①,
+   * leaving dissent at the front), and each test varies only what ran before.
+   */
+  const DEVILS_IS_HEAD: EnrichmentInput = {
+    confidence_tier: 'strong',
+    factor_sensitivity: [
+      {
+        factor_id: 'fac_dom',
+        influence_score: 0.8,
+        influence_rank: 1,
+        confidence: 0.9,
+        flip_risk_category: 'correlated',
+      },
+      { factor_id: 'fac_b', influence_score: 0.2, influence_rank: 2, confidence: 0.9 },
+    ],
+    option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
+  };
+
+  it('premise control: devils_advocacy IS the selection on this fact after a neutral lens', () => {
+    const reachable = selectLens(makeFact(DEVILS_IS_HEAD), {
+      previousAnalysisLens: 'evpi_evidence_priority',
+    });
+    expect(reachable).not.toBeNull();
+    expect(reachable!.lens).toBe('devils_advocacy');
+  });
+
+  it('DSK-P-005: devils_advocacy does NOT run immediately after a pre-mortem', () => {
+    const selection = selectLens(makeFact(DEVILS_IS_HEAD), {
+      previousAnalysisLens: 'pre_mortem',
+    });
+    expect(selection?.lens).not.toBe('devils_advocacy');
+  });
+
+  it('DSK-P-005: devils_advocacy does NOT run immediately after disconfirmation', () => {
+    const selection = selectLens(makeFact(DEVILS_IS_HEAD), {
+      previousAnalysisLens: 'consider_opposite',
+    });
+    expect(selection?.lens).not.toBe('devils_advocacy');
+  });
+
+  it('DSK-P-003 is NOT suppressed after a devil\'s advocate turn (asymmetry is the bundle\'s, verbatim)', () => {
+    // DSK-P-003's contraindication names ONLY the pre-mortem; DSK-P-005's names
+    // pre-mortem AND disconfirmation. The map must not be "tidied" into a
+    // symmetric set — that would suppress a protocol its own science permits.
+    const selection = selectLens(
+      makeFact({ ...DECISIVE_ATTESTED, confidence_tier: 'strong' }),
+      { previousAnalysisLens: 'devils_advocacy' },
+    );
+    expect(selection).not.toBeNull();
+    expect(selection!.lens).toBe('consider_opposite');
+  });
+
+  it('an unrelated previous lens suppresses neither (the filter is targeted, not blanket)', () => {
+    const selection = selectLens(makeFact(DECISIVE_ATTESTED), {
+      previousAnalysisLens: 'evpi_evidence_priority',
+    });
+    expect(selection).not.toBeNull();
+    expect(selection!.lens).toBe('consider_opposite');
+  });
+});
+
+// ============================================================================
 // Copy bank — prose-guard-clean, like every other lens string
 // ============================================================================
 

@@ -215,6 +215,72 @@ describe('buildLensCompanionBlocks — devils_advocacy exercise', () => {
 // Copy bank — the exercise prose is deterministic and gate-clean
 // ============================================================================
 
+describe('DSK exercise copy — BOUND TO ITS KIND BY IDENTITY (review F1)', () => {
+  /**
+   * ⚠ WHY EXACT STRING LITERALS AND NOT A PREDICATE. The adversarial review of
+   * #820 SWAPPED the two copy constants — disconfirmation shipping the
+   * devil's-advocate text and vice versa — and 10,636 tests stayed GREEN. The
+   * earlier assertions here were `typeof === 'string'` / `length > 0`: the
+   * trap-19 shape, a value predicate the WRONG object also satisfies. This
+   * copy is the card's ONLY user-visible content, so the binding between a
+   * kind and its instruction is the product, not a detail.
+   *
+   * These literals are duplicated from the source ON PURPOSE — a spec that
+   * imported the constant and compared it to itself would agree with itself
+   * (trap 13b) and re-admit the swap. Editing the copy must be a two-file,
+   * deliberate act.
+   */
+  const EXPECTED_COPY_BY_KIND = {
+    consider_opposite:
+      'Take the opposite view for a moment: assume the option in front turns out to be the wrong choice. What would have to be true for that to happen? Write down the strongest argument against it, and note what evidence would confirm or rule out that argument.',
+    devils_advocacy:
+      'Argue against the factor this result leans on most: make the case that it is overstated, that it could move against you, or that something outside the model matters more. If the dissent uncovers a real weakness, adjust the model; if it does not, the result has earned more trust.',
+  } as const;
+
+  it('consider_opposite ships the DISCONFIRMATION instruction, verbatim', () => {
+    const block = buildLensCompanionBlocks(
+      considerOppositeFact(),
+      CTX,
+      selectionFor(considerOppositeFact(), null),
+      [],
+      LOOKUP,
+    )[0]!;
+    expect(block.exercise_kind).toBe('consider_opposite');
+    expect(block.counter_case).toBe(EXPECTED_COPY_BY_KIND.consider_opposite);
+  });
+
+  it("devils_advocacy ships the DEVIL'S-ADVOCATE instruction, verbatim", () => {
+    const block = buildLensCompanionBlocks(
+      devilsAdvocacyFact(),
+      CTX,
+      selectionFor(devilsAdvocacyFact(), 'sensitivity_flip_risk'),
+      [],
+      LOOKUP,
+    )[0]!;
+    expect(block.exercise_kind).toBe('devils_advocacy');
+    expect(block.counter_case).toBe(EXPECTED_COPY_BY_KIND.devils_advocacy);
+  });
+
+  it('neither kind can ship the other kind\'s instruction (the swap mutant)', () => {
+    const co = buildLensCompanionBlocks(
+      considerOppositeFact(),
+      CTX,
+      selectionFor(considerOppositeFact(), null),
+      [],
+      LOOKUP,
+    )[0]!;
+    const da = buildLensCompanionBlocks(
+      devilsAdvocacyFact(),
+      CTX,
+      selectionFor(devilsAdvocacyFact(), 'sensitivity_flip_risk'),
+      [],
+      LOOKUP,
+    )[0]!;
+    expect(co.counter_case).not.toBe(EXPECTED_COPY_BY_KIND.devils_advocacy);
+    expect(da.counter_case).not.toBe(EXPECTED_COPY_BY_KIND.consider_opposite);
+  });
+});
+
 describe('DSK exercise copy — clean against the assistant-text defences', () => {
   it('both counter_case copies pass the forbidden-vocabulary / decimal / id defences', () => {
     const co = buildLensCompanionBlocks(

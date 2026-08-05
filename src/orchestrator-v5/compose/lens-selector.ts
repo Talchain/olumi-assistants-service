@@ -326,6 +326,62 @@ export const LENS_DSK_PROVENANCE: Partial<
   devils_advocacy: { protocolId: 'DSK-P-005', triggerId: 'DSK-TR-005' },
 };
 
+/**
+ * ⚠ THE DSK "DO NOT RUN IMMEDIATELY AFTER" CONTRAINDICATIONS — AND WHY THE
+ * 2.211 DIVERSITY RULE POINTS THE WRONG WAY WITHOUT THEM.
+ *
+ * Verbatim from the bundle (`data/dsk/v1.json`, protocol `contraindications`):
+ *   DSK-P-003 (disconfirmation) — "Do not run immediately after the user has
+ *     already run a pre-mortem on the same decision"
+ *   DSK-P-005 (devil's advocate) — "Do not run immediately after a pre-mortem
+ *     or disconfirmation exercise on the same decision"
+ *
+ * 2.211's no-immediate-repeat hands a repeated head's slot to the RUNNER-UP.
+ * With these lenses on the ladder that promotion produces exactly the sequence
+ * the protocols forbid: measured before this filter, `pre_mortem` on turn N
+ * yielded `consider_opposite` on turn N+1 with `displacementCause: 'no_repeat'`.
+ * The diversity heuristic and the protocol's own science disagreed, and the
+ * science wins — a platform that ships a decision-science bundle must not emit
+ * the sequence that bundle contraindicates.
+ *
+ * NO NEW PERSISTENCE IS NEEDED for this case, which is why it is here and not
+ * deferred: `previousAnalysisLens` is already threaded for 2.211, so
+ * "immediately after" is answerable from inputs the selector already has. The
+ * filter removes the lens from the ELIGIBLE set (not merely from the head), so
+ * a runner-up promotion cannot re-introduce it.
+ *
+ * THE ASYMMETRY IS THE BUNDLE'S AND MUST NOT BE TIDIED: P-003 names only the
+ * pre-mortem; P-005 names the pre-mortem AND disconfirmation. Making these two
+ * sets symmetric would suppress a protocol its own science permits — pinned by
+ * a test.
+ *
+ * SCOPE, STATED HONESTLY (this note replaces an earlier one that framed the
+ * whole cooldown class as un-implementable — a false label the next slice would
+ * have inherited): what is NOT covered is the GENERAL cooldown class — "already
+ * fired for this decision in this stage", "user has already completed a
+ * structured risk assessment", "already run this exercise this stage". Those
+ * need a persisted per-stage fired-ledger the selector has no input for today,
+ * and they remain slice-2 work. What IS covered is precisely the
+ * immediately-after ordering, on the immediately-preceding ANALYSIS turn.
+ */
+const CONTRAINDICATED_IMMEDIATELY_AFTER: Partial<
+  Readonly<Record<LensId, ReadonlySet<LensId>>>
+> = {
+  consider_opposite: new Set<LensId>(['pre_mortem']),
+  devils_advocacy: new Set<LensId>(['pre_mortem', 'consider_opposite']),
+};
+
+/**
+ * Is `lens` contraindicated because of what ran on the immediately-preceding
+ * analysis turn? Absent history ⇒ never contraindicated (the fail-safe
+ * direction: an unavailable history can only cost the filter, never
+ * manufacture a suppression).
+ */
+function isContraindicatedAfter(lens: LensId, previous: LensId | null | undefined): boolean {
+  if (previous == null) return false;
+  return CONTRAINDICATED_IMMEDIATELY_AFTER[lens]?.has(previous) ?? false;
+}
+
 // ============================================================================
 // Executor availability + the extension-lens enable gate (wave-3 λ)
 // ============================================================================
@@ -738,11 +794,28 @@ function evaluateEvpiEvidencePriority(signals: AnalysisSignals): EvaluatorHit | 
  *   - ≥2 finite win probabilities are required: with a single option there is
  *     no alternative to argue for, and no separation is computable.
  *
- * DSK negative conditions NOT encoded here (disclosed divergence): the
- * per-stage fired-cooldown and "user already ran a pre-mortem / devil's
- * advocate this stage" ledgers — the platform's existing analogue is the
- * 2.211 no-immediate-repeat tie-break, which applies to this lens like every
- * other. A persistent fired-ledger is follow-up work, not silently claimed.
+ * ⚠ THE ROBUSTNESS CHECK IS A DENYLIST IMPLEMENTING A POSITIVE CONDITION, AND
+ * THAT MISMATCH IS DELIBERATE AND FORCED. DSK-TR-003 names an ALLOWLIST —
+ * "robustness = 'robust' or 'moderate'" — but those two tokens are not the
+ * vocabulary the live producer emits: real payloads carry `very_low` / `low` /
+ * `high` (the `RAW_FRAGILE_LEVELS` synonyms exist precisely because of that
+ * drift). A literal `['robust','moderate']` allowlist would therefore match
+ * NOTHING on the live path and ship this lens 100% dark — the guarantee-theatre
+ * outcome. So the implemented rule is: an ATTESTED level that is not a known
+ * fragile synonym. The consequence, stated rather than hidden: an unrecognised
+ * level (`unknown`, `insufficient_data`, or a producer typo) reads as
+ * non-fragile and CAN fire this lens. That is the accepted cost of not shipping
+ * dark, it is bounded (the lens offers a reflective exercise; it makes no claim
+ * about the robustness value itself), and the honest fix is a canonical
+ * robustness vocabulary shared by producer and bundle — slice-2 work, not a
+ * silent local allowlist.
+ *
+ * DSK negative conditions: the "do not run immediately after a pre-mortem"
+ * contraindication IS enforced — see {@link CONTRAINDICATED_IMMEDIATELY_AFTER},
+ * applied at eligibility in `selectLens`. The GENERAL per-stage fired-cooldown
+ * ("already fired this stage", "user already completed a structured risk
+ * assessment") is NOT: it needs a persisted ledger the selector has no input
+ * for, and is slice-2 work rather than a silent claim.
  */
 function evaluateConsiderOpposite(signals: AnalysisSignals): EvaluatorHit | null {
   const raw = signals.rawRobustness;
@@ -781,6 +854,16 @@ function evaluateConsiderOpposite(signals: AnalysisSignals): EvaluatorHit | null
  * turn N+1 → the structured-dissent exercise via the no-repeat tie-break.
  * Same subject factor, different decision-science method — diversity IS
  * usefulness on consecutive turns (the 2.211 ruling).
+ *
+ * The robustness clause here is the same denylist-for-a-positive-condition
+ * shape discussed on {@link evaluateConsiderOpposite}, but INVERTED and
+ * therefore safe: TR-005's condition is negative ("robustness != 'fragile'"),
+ * so a denylist is the faithful implementation, and an unrecognised level
+ * falls through to "may fire" exactly as the DSK intends.
+ *
+ * DSK-P-005's "do not run immediately after a pre-mortem or disconfirmation"
+ * contraindication is enforced at eligibility — see
+ * {@link CONTRAINDICATED_IMMEDIATELY_AFTER}.
  */
 function evaluateDevilsAdvocacy(signals: AnalysisSignals): EvaluatorHit | null {
   if (isRawFragile(signals.rawRobustness)) return null;
@@ -1026,7 +1109,14 @@ export function selectLens(
   ];
   const eligible: { lens: LensId; hit: EvaluatorHit }[] = [];
   for (const [lens, hit] of ladder) {
-    if (hit !== null && isLensExecutorAvailable(lens, options)) eligible.push({ lens, hit });
+    if (hit === null || !isLensExecutorAvailable(lens, options)) continue;
+    // DSK "do not run immediately after" — applied at ELIGIBILITY, before both
+    // tie-breaks, so neither the correlated yield nor the no-repeat promotion
+    // can hand the slot to a contraindicated protocol. See
+    // CONTRAINDICATED_IMMEDIATELY_AFTER for why the diversity rule alone
+    // produced the forbidden sequence.
+    if (isContraindicatedAfter(lens, options?.previousAnalysisLens)) continue;
+    eligible.push({ lens, hit });
   }
 
   // Load-bearing negative: no lens whose evidence fired has an available executor.
