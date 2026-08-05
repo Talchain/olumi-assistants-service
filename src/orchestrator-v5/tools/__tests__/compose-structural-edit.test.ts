@@ -106,8 +106,8 @@ describe('composer transport', () => {
   it('the rejection telemetry carries the CODE and never the reason prose (which quotes ids)', async () => {
     const spy = vi.fn().mockResolvedValue(toolUseResult(UNGROUNDED_PAYLOAD));
     await composeStructuralEdit(baseInput(spy));
-    const call = emitSpy.mock.calls.find(
-      ([name]) => name === telemetry.TelemetryEvents.V5StructuralEditToolComposed,
+    const call = (emitSpy.mock.calls as unknown[][]).find(
+      (args) => args[0] === telemetry.TelemetryEvents.V5StructuralEditToolComposed,
     );
     expect(call).toBeDefined();
     const payload = call![1] as Record<string, unknown>;

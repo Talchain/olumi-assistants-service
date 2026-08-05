@@ -28,6 +28,7 @@ import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
   CallOpts,
+  ToolDefinition,
 } from '../../adapters/llm/types.js';
 import type { EditPatchOperationLike } from '../graph-management/adapters/edit-graph-producer.js';
 
@@ -120,7 +121,7 @@ export async function composeStructuralEdit(
     return { status: 'unavailable', reason: 'no_tool_adapter' };
   }
 
-  const tool = buildProposeStructuralEditTool(input.grounding);
+  const tool: ToolDefinition = buildProposeStructuralEditTool(input.grounding);
 
   let result: ChatWithToolsResult;
   try {
@@ -129,7 +130,7 @@ export async function composeStructuralEdit(
       {
         system: COMPOSER_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: input.message }],
-        tools: [tool as unknown as ChatWithToolsArgs['tools'][number]],
+        tools: [tool],
         tool_choice: { type: 'auto' },
         temperature: 0,
         maxTokens: COMPOSER_MAX_TOKENS,
