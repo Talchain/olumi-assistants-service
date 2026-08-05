@@ -355,6 +355,20 @@ export const LENS_DSK_PROVENANCE: Partial<
  * sets symmetric would suppress a protocol its own science permits — pinned by
  * a test.
  *
+ * ⚠ ACCEPTED TRADE-OFF: THIS FILTER CAN CAUSE THE pre_mortem REPEAT THAT 2.211
+ * EXISTS TO PREVENT. When the only lens available to take a repeated
+ * `pre_mortem` head's slot is a contraindicated one, removing it leaves nothing
+ * to promote, so 2.211's condition (2) fails and the repeat stands — the user
+ * sees the pre-mortem lens twice running. That is the correct direction:
+ * DSK-P-001 carries NO immediately-after clause (its contraindications are
+ * "only one option / no meaningful alternatives" and "already identified
+ * fragile edges and wants to proceed" — verified at the bundle bytes), so a
+ * repeated pre-mortem is merely monotonous, whereas the promotion it replaces
+ * would have been a sequence the bundle explicitly forbids. Monotony is a UX
+ * cost; a contraindicated sequence is a science defect. Stated here because it
+ * is a real regression against 2.211's intent and must not be discovered as a
+ * surprise.
+ *
  * SCOPE, STATED HONESTLY (this note replaces an earlier one that framed the
  * whole cooldown class as un-implementable — a false label the next slice would
  * have inherited): what is NOT covered is the GENERAL cooldown class — "already
@@ -795,13 +809,25 @@ function evaluateEvpiEvidencePriority(signals: AnalysisSignals): EvaluatorHit | 
  *     no alternative to argue for, and no separation is computable.
  *
  * ⚠ THE ROBUSTNESS CHECK IS A DENYLIST IMPLEMENTING A POSITIVE CONDITION, AND
- * THAT MISMATCH IS DELIBERATE AND FORCED. DSK-TR-003 names an ALLOWLIST —
- * "robustness = 'robust' or 'moderate'" — but those two tokens are not the
- * vocabulary the live producer emits: real payloads carry `very_low` / `low` /
- * `high` (the `RAW_FRAGILE_LEVELS` synonyms exist precisely because of that
- * drift). A literal `['robust','moderate']` allowlist would therefore match
- * NOTHING on the live path and ship this lens 100% dark — the guarantee-theatre
- * outcome. So the implemented rule is: an ATTESTED level that is not a known
+ * THAT MISMATCH IS DELIBERATE. DSK-TR-003 names an ALLOWLIST — "robustness =
+ * 'robust' or 'moderate'" — but only half of that vocabulary is real. MEASURED
+ * over this repo's fixtures (`robustness.level` values only, excluding the
+ * distinct `robustness_band` / `robustness.score` / review-`severity` fields):
+ * `moderate` (48), `low`, `high` (9), `very_low`, `stable`, `fragile`, and the
+ * stray `mid` / `medium` — while **`robust` never appears as a level at all**.
+ * So a literal `['robust','moderate']` allowlist would NOT be dead: it would
+ * fire on the `moderate` turns, which are the most common single value here.
+ * What it would do is MISS most live non-fragile turns — `high` (the level on
+ * both live decision-review captures), `stable`, and the strays all sit outside
+ * it — while its `robust` limb matched nothing ever.
+ *
+ * ⚠ An earlier revision of this comment said a literal allowlist "would match
+ * NOTHING and ship this lens 100% dark". That was MEASURABLY FALSE (`moderate`
+ * fires today) and is corrected here at the bytes rather than inherited — an
+ * unverified correction is how the next false label lands (trap 7b). The
+ * architectural decision is unchanged; only the justification was wrong.
+ *
+ * So the implemented rule is: an ATTESTED level that is not a known
  * fragile synonym. The consequence, stated rather than hidden: an unrecognised
  * level (`unknown`, `insufficient_data`, or a producer typo) reads as
  * non-fragile and CAN fire this lens. That is the accepted cost of not shipping
