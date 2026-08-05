@@ -201,11 +201,19 @@ describe('the CORRELATED and DOMINANT_DRIVER doors are gated too (complete famil
   ];
 
   it('CORRELATED → no flippability claim', () => {
+    // Equal influence halves — deliberately NOT a strict-majority driver.
+    // The original 0.5/0.4 bank carried a 0.56 dominance share, which was
+    // inert when this was written but began firing the DSK devils_advocacy
+    // lens (slice 1) — making the correlated head YIELD under 2.211-① and
+    // this test measure the ladder instead of its declared subject, the
+    // correlated door's copy remap. The yield-to-devils interaction is
+    // pinned in lens-selector-dsk-triggers.test.ts; this fixture now
+    // isolates the remap.
     const sel = selectLens(
       factFrom({
         factor_sensitivity: [
           { factor_id: 'fac_a', influence_score: 0.5, influence_rank: 1, flip_risk_category: 'correlated' },
-          { factor_id: 'fac_b', influence_score: 0.4, influence_rank: 2 },
+          { factor_id: 'fac_b', influence_score: 0.5, influence_rank: 2 },
         ],
         flip_thresholds: attested,
       }),

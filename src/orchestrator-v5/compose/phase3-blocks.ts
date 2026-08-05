@@ -87,6 +87,7 @@ import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js
 import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
 import {
+  LENS_DSK_PROVENANCE,
   selectLens,
   whatIfSuggestionExecutorAvailable,
   type LensId,
@@ -1376,10 +1377,22 @@ export function buildLensSurface(
   // observability surface and rewrites its existing unit assertion
   // (`lens-suggestion-block.test.ts` drives this builder directly). That is a
   // reviewable behaviour change in its own right, not a drive-by. ROWED.
+  // DSK slice 1 — provenance rides TELEMETRY, not the wire: the ExerciseBlock
+  // schema at 0.32.0 is `.strict()` with no dsk field, so the protocol/trigger
+  // ids a DSK lens was derived from are stamped here (attested against the
+  // bundle bytes by `dsk-provenance-attestation.test.ts`). Keys are ABSENT for
+  // the non-DSK lenses — absence is the honest default, never an empty string.
+  const dskProvenance = LENS_DSK_PROVENANCE[selection.lens];
   emit(TelemetryEvents.V5LensSuggestionEmitted, {
     lens_id: selection.lens,
     rationale_code: selection.rationaleCode,
     graph_hash_at_generation: ctx.graph_hash_at_generation,
+    ...(dskProvenance !== undefined
+      ? {
+          dsk_protocol_id: dskProvenance.protocolId,
+          dsk_trigger_id: dskProvenance.triggerId,
+        }
+      : {}),
   });
 
   // ROADMAP 2.211 — the displaced/chosen PAIR, emitted only when the
@@ -1456,6 +1469,18 @@ export function buildLensSurface(
  *                           build-lane edit. (The EVPI lens's evidence is already
  *                           surfaced first-class by the EvidenceBlocks.)
  *
+ *   consider_opposite     → ExerciseBlock (DSK slice 1, deterministic): fixed
+ *                           instruction copy in `counter_case`, target_ref =
+ *                           the leading option via the shared lookup. No
+ *                           producer-content dependency, so no review-card
+ *                           coupling — the permission derivation that matters
+ *                           here is the SELECTION itself (deterministic) plus
+ *                           the permitted-arm positional gate.
+ *
+ *   devils_advocacy       → ExerciseBlock (DSK slice 1, deterministic): same
+ *                           shape, target_ref = the dominant factor the
+ *                           selection named (identity-threaded subjectRef).
+ *
  *   what_if_counterfactual→ nothing, and this is now LOAD-BEARING rather than
  *                           incidental. Before 2026-08-03 the lens could not
  *                           fire at all (WHATIF_SUGGESTION_GATE_CLEARED === false),
@@ -1486,6 +1511,7 @@ export function buildLensCompanionBlocks(
   ctx: BlockBuildCtx,
   selection: LensSelection,
   reviewCards: readonly ReviewCardBlock[],
+  lookup: GraphNodeLookup,
 ): readonly ExerciseBlock[] {
   // Compile-exhaustive over `LensId`: a NEW lens fails the build here until it
   // declares its companion (or declares that it has none). Fail-loud on drift,
@@ -1493,6 +1519,35 @@ export function buildLensCompanionBlocks(
   switch (selection.lens) {
     case 'pre_mortem': {
       const block = buildPreMortemExerciseBlock(fact, ctx, reviewCards);
+      return block === null ? [] : [block];
+    }
+    case 'consider_opposite': {
+      // Subject: the leading option the disconfirmation argues against —
+      // resolved through the shared lookup, fail-closed to [] on miss.
+      const leadingOptionId =
+        typeof fact.result.leading_option_id === 'string' &&
+        fact.result.leading_option_id.length > 0
+          ? fact.result.leading_option_id
+          : null;
+      const block = buildDskExerciseBlock(
+        'consider_opposite',
+        CONSIDER_OPPOSITE_COUNTER_CASE,
+        leadingOptionId,
+        ctx,
+        lookup,
+      );
+      return block === null ? [] : [block];
+    }
+    case 'devils_advocacy': {
+      // Subject: the dominant factor the selection named (identity-threaded
+      // from the SAME selectLens hit — never a re-derivation).
+      const block = buildDskExerciseBlock(
+        'devils_advocacy',
+        DEVILS_ADVOCACY_COUNTER_CASE,
+        selection.subjectRef?.id ?? null,
+        ctx,
+        lookup,
+      );
       return block === null ? [] : [block];
     }
     case 'sensitivity_flip_risk':
@@ -1512,6 +1567,73 @@ export function buildLensCompanionBlocks(
       return [];
     }
   }
+}
+
+// ============================================================================
+// DSK slice 1 — deterministic exercise companions (consider_opposite /
+// devils_advocacy)
+// ============================================================================
+
+/**
+ * Fixed exercise copy for the two DSK lenses. DETERMINISTIC BY DESIGN, and the
+ * difference from the pre_mortem companion is the point, not an economy:
+ * the decision_review completion carries NO disconfirmation / devil's-advocate
+ * object (`composeFragments` — `decompose.ts` — is the complete field set), so
+ * there is no producer prose to carry verbatim, and inventing case-specific
+ * prose here would be fabrication. What CAN be authored deterministically is
+ * the exercise INSTRUCTION itself — the same class of fixed, prose-guard-clean
+ * copy as `TITLE_BY_LENS` / `BODY_BY_RATIONALE`. The card's specificity comes
+ * from its `target_refs` (the leading option / the dominant factor, resolved
+ * by identity through the shared lookup), never from interpolated prose — no
+ * label, number, or id ever rides these strings.
+ *
+ * `counter_case` is the carrier for BOTH kinds: it is the contract's
+ * argue-the-other-side prose slot, the live UI renders it as the card body
+ * (`V5ExerciseBlock.tsx`, testid `v5-exercise-counter-case`, verified at DGAI
+ * staging `dae8908f`), and the UI drops a prose-less exercise — so the fixed
+ * instruction is also what keeps the card renderable.
+ */
+const CONSIDER_OPPOSITE_COUNTER_CASE =
+  'Take the opposite view for a moment: assume the option in front turns out to be the wrong choice. What would have to be true for that to happen? Write down the strongest argument against it, and note what evidence would confirm or rule out that argument.';
+
+const DEVILS_ADVOCACY_COUNTER_CASE =
+  'Argue against the factor this result leans on most: make the case that it is overstated, that it could move against you, or that something outside the model matters more. If the dissent uncovers a real weakness, adjust the model; if it does not, the result has earned more trust.';
+
+/**
+ * Build the deterministic ExerciseBlock companion for a DSK lens.
+ *
+ * - `subjectId` → `target_refs` through the shared {@link GraphNodeLookup},
+ *   FAIL-CLOSED: an unresolvable subject yields `target_refs: []` (the card
+ *   still renders on its prose), never a fabricated label (the same rule the
+ *   `focus` directive follows on lookup miss).
+ * - Routed through {@link validateProseAndSchemaOrDrop} like every Phase-3
+ *   block — the strict `ExerciseBlockSchema` parse plus the prose guard, so a
+ *   future edit to the copy banks above that introduces banned vocabulary, a
+ *   raw decimal, or an id-shaped token drops the block rather than shipping it.
+ * - At most ONE exercise per turn holds by construction (one lens per turn →
+ *   one companion) — which is also the UI pacing contract: `phase3Pacing.ts`
+ *   reserves exactly one default-expanded slot for the turn's exercise.
+ */
+function buildDskExerciseBlock(
+  kind: 'consider_opposite' | 'devils_advocacy',
+  counterCase: string,
+  subjectId: string | null,
+  ctx: BlockBuildCtx,
+  lookup: GraphNodeLookup,
+): ExerciseBlock | null {
+  const subject = subjectId !== null ? lookup.get(subjectId) : undefined;
+  const candidate = {
+    ...commonMetadata(`exercise:${kind}`, '', ctx),
+    type: 'exercise' as const,
+    exercise_kind: kind,
+    counter_case: counterCase,
+    target_refs: subject !== undefined ? [subject] : ([] as readonly GraphNodeRef[]),
+  };
+  return validateProseAndSchemaOrDrop(ExerciseBlockSchema, candidate, {
+    block_type: 'exercise',
+    kind,
+    prose: [{ name: 'counter_case', value: counterCase }],
+  });
 }
 
 /**
