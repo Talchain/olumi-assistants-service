@@ -262,15 +262,40 @@ describe('selectLens — consider_opposite (DSK-TR-003 disconfirmation)', () => 
 // ============================================================================
 
 describe('selectLens — devils_advocacy (DSK-TR-005 structured dissent)', () => {
-  it('is reachable via no-repeat displacement below pre_mortem when dominance holds', () => {
-    // Dominance fires rule 1b (sensitivity head) AND 2c (pre_mortem) AND
-    // devils_advocacy. Previous turn = sensitivity → head displaced to the
-    // runner-up, which is pre_mortem — devils_advocacy stays below it.
+  it('takes the displaced-sensitivity slot AHEAD of pre_mortem when dominance holds (2.490)', () => {
+    // ⚠ THIS ASSERTION WAS INVERTED AT ROADMAP 2.490, DELIBERATELY. It read
+    // `toBe('pre_mortem')` — devils_advocacy sat below pre_mortem on a
+    // displaced sensitivity head, which (with devils' trigger being a strict
+    // SUBSET of sensitivity rule 1b's) is what made the lens unreachable on
+    // every live capture. The 2.490 SEQUENCE rule gives the displaced
+    // sensitivity slot to the exercise about the driver it just named.
+    // This is a change to shared 2.211 promotion order, on the record here and
+    // evidenced against the live captures in `lens-dsk-sequence-2490.test.ts`.
     const displaced = selectLens(makeFact(DOMINANT), {
       previousAnalysisLens: 'sensitivity_flip_risk',
     });
     expect(displaced).not.toBeNull();
-    expect(displaced!.lens).toBe('pre_mortem');
+    expect(displaced!.lens).toBe('devils_advocacy');
+    expect(displaced!.displacedLens).toBe('sensitivity_flip_risk');
+    expect(displaced!.displacementCause).toBe('no_repeat');
+    // NON-VACUITY, AND EXACTLY WHAT IT DOES AND DOES NOT SHOW. It shows that
+    // pre_mortem's rule 2c trigger is genuinely live on this option_comparison
+    // (leader 0.55 ∈ [0.4, 0.7)) — so the lens devils displaced above is a real
+    // competitor and not a lens that never fired.
+    // ⚠ It does NOT show pre_mortem losing a DISPLACED slot: with BALANCED_
+    // FACTORS neither rule 1b nor devils fires, so sensitivity is not eligible
+    // at all and pre_mortem here is the HEAD, winning outright with no
+    // displacement. An earlier version of this comment called that "not an
+    // uncontested fallthrough", which is backwards — it IS one. The
+    // displaced-slot claim is proven on the live capture instead, in
+    // `lens-dsk-sequence-2490.test.ts` §5, where sensitivity IS the head and
+    // pre_mortem IS the runner-up it takes the slot from.
+    const withoutDominance = selectLens(
+      makeFact({ ...DOMINANT, factor_sensitivity: BALANCED_FACTORS }),
+      { previousAnalysisLens: 'sensitivity_flip_risk' },
+    );
+    expect(withoutDominance).not.toBeNull();
+    expect(withoutDominance!.lens).toBe('pre_mortem');
   });
 
   it('wins the slot when dominance holds and the higher lenses are silent', () => {
@@ -299,7 +324,17 @@ describe('selectLens — devils_advocacy (DSK-TR-005 structured dissent)', () =>
     expect(selection!.displacementCause).toBe('no_repeat');
   });
 
-  it('does NOT fire when robustness is ATTESTED fragile (the analysis already challenges)', () => {
+  it('FIRES on an ATTESTED fragile level — TR-005s robustness clause is overridden (2.490)', () => {
+    // ⚠ THIS ASSERTION WAS INVERTED AT ROADMAP 2.490, DELIBERATELY. It read
+    // `toBe('sensitivity_flip_risk')` — i.e. the lens was suppressed on a
+    // fragile level, per DSK-TR-005's declared "...AND robustness != 'fragile'".
+    // That clause is no longer implemented: in this platform `robustness.level`
+    // is the LEADER'S WIN PROBABILITY banded against 0.7, so it means "no option
+    // clearly wins" and says nothing about the dominant driver's weighting —
+    // which is the only thing DSK-P-005 challenges. The clause's declared
+    // purpose is not served by the field it was implemented against, and the
+    // measured effect was a perfect anti-filter (0 of 5 live sessions). Full
+    // reasoning: `evaluateDevilsAdvocacy`'s doc comment.
     const fact = makeFact({
       confidence_tier: 'strong',
       factor_sensitivity: [
@@ -309,11 +344,26 @@ describe('selectLens — devils_advocacy (DSK-TR-005 structured dissent)', () =>
       option_comparison: [{ win_probability: 0.85 }, { win_probability: 0.15 }],
       robustness: { level: 'very_low' },
     });
-    // With devils_advocacy suppressed and everything else silent, the
-    // displaced head has NO runner-up — the repeat stands (2.211 condition 2).
+    // PRECONDITION — the level really is one the shared truth table calls
+    // fragile, so this test cannot rot into a no-op if the vocabulary moves.
+    expect(RAW_FRAGILE_LEVELS.has('very_low')).toBe(true);
     const selection = selectLens(fact, { previousAnalysisLens: 'sensitivity_flip_risk' });
     expect(selection).not.toBeNull();
-    expect(selection!.lens).toBe('sensitivity_flip_risk');
+    expect(selection!.lens).toBe('devils_advocacy');
+    expect(selection!.subjectRef).toEqual({ id: 'fac_dom', kind: 'factor' });
+  });
+
+  it('the override is DEVILS-ONLY — consider_opposite still refuses a fragile level', () => {
+    // Discriminating control (trap 13b): the same fragile level, on the lens
+    // whose robustness condition is POSITIVE. If hunk 2 had disabled fragility
+    // globally rather than removing one clause from one evaluator, this would
+    // still emit consider_opposite.
+    const fragile = selectLens(
+      makeFact({ ...DECISIVE_ATTESTED, robustness: { level: 'very_low' } }),
+    );
+    expect(fragile?.lens).not.toBe('consider_opposite');
+    // …and the ONLY difference is the level: with the attested one it fires.
+    expect(selectLens(makeFact(DECISIVE_ATTESTED))!.lens).toBe('consider_opposite');
   });
 
   it('does NOT fire without a strict-majority driver (two equal halves)', () => {
@@ -552,6 +602,16 @@ describe('DSK lens copy — clean against the assistant-text defences', () => {
 // true. Measured over all five captured sessions BEFORE this change,
 // devils_advocacy was selected ZERO times, on every `previousAnalysisLens`
 // state and every turn of a cycle walk.
+//
+// ⚠ THE FIXTURES BELOW ARE HAND-BUILT, AND THAT IS THIS BLOCK'S LIMIT. They
+// approximate sessionA but omit `flip_risk_category`, which is the single field
+// deciding whether the 2.211-① correlated yield engages — i.e. exactly the
+// field whose absence made the slice-1 suite blind. The reachability FIX is
+// therefore measured against the VERBATIM captures in
+// `lens-dsk-sequence-2490.test.ts`; what this block still owns is the
+// both-triggers ORDER, which no capture happens to exercise on a non-yielding
+// head. Keep both: one notices the ladder inverting, the other notices the wire
+// moving.
 // ============================================================================
 
 /** sessionA's shape: a decisive leader AND a dominant driver AND an attested
@@ -598,18 +658,27 @@ const DOMINANT_DECISIVE_UNATTESTED: EnrichmentInput = {
 };
 
 describe('selectLens — devils_advocacy reachability (ROADMAP 2.490)', () => {
-  it('DEFECT — devils_advocacy is dark across a cycle when both DSK triggers fire', () => {
-    // The shipped state, pinned. With exactly two eligible lenses the 2.211
-    // no-repeat promotion is a fixed-order 2-cycle, so the lower DSK lens
-    // never takes a slot. Reordering the pair does NOT fix this — measured, it
-    // simply starves consider_opposite instead (see the ladder comment).
+  it('THE PARTITION — a DECISIVE leader gives the slot to consider_opposite, not devils', () => {
+    // ⚠ THIS TEST WAS NAMED "DEFECT — devils_advocacy is dark…" BEFORE 2.490.
+    // The behaviour is unchanged and the assertion is byte-identical; what
+    // changed is that it is no longer a defect. When BOTH DSK triggers fire,
+    // TR-003's own observable (a decisive leader) is present, and the shipped
+    // ladder ranks disconfirmation above dissent — the bundle names no priority
+    // between them, so the 2.490 sequence rule must NOT silently invert it. The
+    // sequence rule is therefore suppressed while consider_opposite is
+    // eligible; devils_advocacy is reached on the COMPLEMENTARY shape (dominant
+    // driver, no decisive leader) — see `lens-dsk-sequence-2490.test.ts`, which
+    // measures both halves on the live captures.
     const walk = walkTurns(BOTH_TRIGGERS_FIRE, 8);
     expect(walk).not.toContain('devils_advocacy');
   });
 
-  it('POSITIVE CONTROL — the same walk DOES see consider_opposite', () => {
+  it('POSITIVE CONTROL — the same walk DOES see consider_opposite (it must not starve)', () => {
     // Non-vacuity, half 1 (trap 13): an absence assertion is worthless unless
-    // the harness demonstrably observes SOMETHING in that slot.
+    // the harness demonstrably observes SOMETHING in that slot. ⚠ This control
+    // is also the one that REFUTED the first draft of the 2.490 sequence rule:
+    // an unconditional `slotOrder.find(devils_advocacy)` turns this red, by
+    // starving consider_opposite on exactly this shape. Do not weaken it.
     const walk = walkTurns(BOTH_TRIGGERS_FIRE, 8);
     expect(walk).toContain('consider_opposite');
   });
