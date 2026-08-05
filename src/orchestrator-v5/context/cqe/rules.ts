@@ -22,7 +22,16 @@ import {
 
 // ---- shared token fragments -------------------------------------------------
 
-const NUM = String.raw`(?:-|minus\s+)?\d+(?:\.\d+)?`;
+/**
+ * Exported as `CQE_NUMERIC_SOURCE` for the same reason as
+ * `CURRENCY_SYMBOL_SOURCE` / `NUMERIC_SUFFIX_SOURCE` below: a consumer
+ * outside CQE that needs to locate a numeric token in the user's message
+ * (the calibration threshold anchor, `routing/calibration-semantics.ts`)
+ * must share this grammar rather than re-implement it. Every previous
+ * local copy of a CQE fragment drifted (bare-`b` suffix, `¥` currency).
+ */
+export const CQE_NUMERIC_SOURCE = String.raw`(?:-|minus\s+)?\d+(?:\.\d+)?`;
+const NUM = CQE_NUMERIC_SOURCE;
 const APPROX = String.raw`roughly|about|approximately|around|nearly|circa`;
 const DIRECTION_UP_VERB = String.raw`increas(?:e|ing|es|ed)|rais(?:e|ing|es|ed)|grow(?:ing|s)?|grew|boost(?:ing|s|ed)?|add(?:ing|s|ed)?`;
 const DIRECTION_DOWN_VERB = String.raw`reduc(?:e|ing|es|ed)|cut(?:ting|s)?|lower(?:ing|s|ed)?|decreas(?:e|ing|es|ed)|drop(?:ping|s|ped)?|bring(?:ing|s)?(?:\s+(?:down|it\s+down))?`;
@@ -351,8 +360,31 @@ function scanAllExec(text: string, regex: RegExp): RegExpExecArray[] {
 
 // ---- P3 comparator_value ---------------------------------------------------
 
-const COMPARATOR_ATMOST = String.raw`at\s+most|no\s+more\s+than|up\s+to|under|less\s+than|maximum(?:\s+of)?|max(?:\s+of)?`;
-const COMPARATOR_ATLEAST = String.raw`at\s+least|no\s+less\s+than|over|more\s+than|minimum(?:\s+of)?|min(?:\s+of)?`;
+/**
+ * ⭐ EXPORTED (2026-08-05) so the calibration semantic layer can assert a
+ * UNION property against them rather than keeping a second hand-written
+ * copy — CLAUDE.md trap 12d: deriving a guard from a list moves the risk,
+ * so the routing-side threshold-marker list must be a SUPERSET of these,
+ * checked by an importable assertion.
+ *
+ * ⚠ MEASURED GAP, and it is the mechanism of the 5 Aug calibration defect:
+ * `below` and `above` are ABSENT here. `extractQuantities('...staying
+ * below 3%...')` therefore returns `comparator: null`, while the identical
+ * sentence with `under` returns `comparator: 'at_most'`. The threshold
+ * marker in the WITNESSED prompt was invisible to CQE, so `3%` arrived at
+ * routing indistinguishable from a plain value and was stored as one.
+ *
+ * The gap is deliberately NOT closed here. Adding words to this lexicon
+ * moves which rule claims the span (P3 vs P6/P6b), which changes
+ * `raw_text` and span offsets for every downstream consumer of a shape
+ * that has been stable for months. The calibration layer instead carries
+ * its own SUPERSET and this export makes the superset property provable.
+ * Closing the CQE gap itself is a separate, rowed change.
+ */
+export const COMPARATOR_ATMOST_SOURCE = String.raw`at\s+most|no\s+more\s+than|up\s+to|under|less\s+than|maximum(?:\s+of)?|max(?:\s+of)?`;
+export const COMPARATOR_ATLEAST_SOURCE = String.raw`at\s+least|no\s+less\s+than|over|more\s+than|minimum(?:\s+of)?|min(?:\s+of)?`;
+const COMPARATOR_ATMOST = COMPARATOR_ATMOST_SOURCE;
+const COMPARATOR_ATLEAST = COMPARATOR_ATLEAST_SOURCE;
 const P3_REGEX = new RegExp(
   `\\b(?<cmp>${COMPARATOR_ATMOST}|${COMPARATOR_ATLEAST})\\s+(?<currSym>${CURRENCY_SYMBOL})?(?<num>${NUM})(?:\\s*(?<suffix>${SUFFIX}))?(?:\\s*(?<unit>${UNIT}))?`,
   'gi',

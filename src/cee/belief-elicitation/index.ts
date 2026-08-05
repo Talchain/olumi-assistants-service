@@ -29,7 +29,20 @@ export interface ElicitBeliefOutput {
 
 // Qualitative probability mappings - comprehensive set
 // Values based on research on probability word interpretation
-const CERTAINTY_TERMS: Record<string, number> = {
+//
+// ⭐ EXPORTED 2026-08-05. This map already knew that "pretty likely" is
+// 0.70; the V5 routing path that MUTATES the graph did not use it (the
+// only caller of `elicitBelief` in all of `src/` was the standalone
+// `/assist/v1/elicit-belief` route). The 5 Aug simulated-user review
+// witnessed the consequence live: "pretty likely" was refused on two
+// percentage-scaled factors, and in another session the threshold in
+// "churn stays below 3% is pretty likely" was stored as the value.
+//
+// `routing/calibration-semantics.ts` now consumes THIS map, by import.
+// It is exported rather than copied so there is exactly one place where
+// a phrase's number lives (CLAUDE.md trap 12: the dominant defect is the
+// hand-maintained mirror).
+export const CERTAINTY_TERMS: Record<string, number> = {
   // Absolute certainty
   certain: 0.99,
   definitely: 0.95,

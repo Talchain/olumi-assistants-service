@@ -2187,6 +2187,24 @@ export const TelemetryEvents = {
   //     deliberately consumed by the resolution, not silently dropped.
   V5RelativeDeltaResolved: "v5.turn_executor.relative_delta_resolved",
 
+  // ⭐ V5CalibrationConsentWithheld — the user's message withheld consent to
+  // apply anything this turn ("show me the number before applying it", "do
+  // not change the graph until I confirm") and the action layer refused to
+  // mutate. Emitted at TWO layers, distinguished by `layer`:
+  //   - 'step2_gate'       — a mutating proposal was refused BEFORE validate
+  //                          / execute; the user got a deterministic preview.
+  //   - 'commit_backstop'  — a mutation reached the commit closure anyway and
+  //                          its graph write was stripped. This should be
+  //                          UNREACHABLE; a non-zero rate means a mutating
+  //                          route exists that the STEP 2 gate does not know
+  //                          about, and is a defect, not noise.
+  // Payload also carries `rule` (which consent phrasing matched) and, on the
+  // calibration path, `probability_value` / `threshold_value` /
+  // `matched_phrase` so the event proves WHICH number was offered — the
+  // witnessed defect stored the threshold (0.03) where the probability
+  // (0.70) belonged.
+  V5CalibrationConsentWithheld: "v5.turn_executor.calibration_consent_withheld",
+
   // PR #414 review — F3 fail-open fallback visibility. The STEP 7 commit
   // chokepoint re-projects the committed D1 graph (wire `analysis_ready` +
   // the egress label graph) through GraphV3; when that parse FAILS the turn

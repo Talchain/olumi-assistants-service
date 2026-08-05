@@ -358,6 +358,24 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   },
   'buildDeicticClarifyAssistantText(deicticDispatch.reason)': { stance: 'structural', why: 'Clarify template.' },
   'buildNonFactorKindRefusalText(': { stance: 'structural', why: 'Refusal template.' },
+  // ── THE CALIBRATION / WITHHELD-CONSENT SITES (2026-08-05) ───────────────
+  // Both are STRUCTURAL, and the reason is stronger than "it is a template":
+  // these two branches exist precisely so that NO model text reaches the
+  // user on them. Their `assistant_text` is built by pure functions in
+  // `routing/calibration-semantics.ts` / `routing/mutation-consent.ts` from
+  // a probability phrase, a threshold, and a factor label — none of which
+  // can carry an option ranking or a persisted verdict claim. The witnessed
+  // defect they close (5 Aug simulated-user review §2.1) INCLUDED routing
+  // deliberation leaking into the reply, so "the model composes none of
+  // this" is the point of the branch, not an incidental property of it.
+  withheldText: {
+    stance: 'structural',
+    why: 'Withheld-consent refusal. Deterministic copy from buildCalibrationPreviewText / buildConsentWithheldText; the turn returns BEFORE any handler runs, so there is no analysis claim in scope.',
+  },
+  'buildCalibrationPreviewText(calibrationOnly': {
+    stance: 'structural',
+    why: 'Calibration pre-route preview. Fires BEFORE routeWithToolUse — zero LLM calls — and states a phrase-to-percentage mapping plus "nothing has been changed". Names no option and reads no analysis.',
+  },
   'buildClarifyAssistantText(deterministicValueUpdate.candidates)': { stance: 'structural', why: 'Clarify template.' },
   clarifyGuardedText: { stance: 'structural', why: 'Clarify question, entity-guarded.' },
   'noAnalysisOutcome.assistant_text': { stance: 'structural', why: 'Fires only when NO analysis exists — there is no leader to name.' },
@@ -886,7 +904,13 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // (`freshFollowupOutcome.assistant_text`) deleted from turn-executor.ts
     // along with the guard block. These counts are DERIVED from source on
     // every run, so they move with a real deletion — which is the point.
-    expect(compared, 'the re-key comparison compared nothing').toBe(35);
+    // ⚠ CALIBRATION CONSENT (2026-08-05): 35 -> 37. TWO compose sites added
+    // in turn-executor.ts — the withheld-consent action-layer refusal and the
+    // calibration pre-route preview. Both use the explicit `assistant_text:`
+    // form, so both are keyable by the OLD regex and both belong in this
+    // count; a site that were NOT keyable would have to be excluded here and
+    // that difference is exactly what this number protects.
+    expect(compared, 'the re-key comparison compared nothing').toBe(37);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1051,8 +1075,15 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // needed registering, and `derivedComposeFileDomain()` failed the build on
     // the commit that created it. That is the whole argument for deriving the
     // domain rather than listing it, observed working rather than asserted.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(37);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(33);
+    // ⚠ CALIBRATION CONSENT (2026-08-05): 37 -> 39 sites, 33 -> 35 keys, files
+    // unchanged. Two ADDED compose sites, both in turn-executor.ts and both
+    // registered `structural` with their derivation (see the calibration /
+    // withheld-consent block in TURN_EXECUTOR_SITES). Worth recording HOW they
+    // got here, for the same reason the L16 note above does: the author did not
+    // remember this ledger existed, and `pnpm test:required` failed on the
+    // commit that created the sites. The guard found the omission, not a human.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(39);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(35);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/edit-clarify-response.ts',
