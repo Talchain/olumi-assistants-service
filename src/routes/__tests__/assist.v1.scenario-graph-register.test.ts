@@ -15,6 +15,8 @@
  * RPC lands, that Supabase is migrated, or that a later Run reads the new graph.
  * Those need a live witness.
  */
+import { readFileSync } from "node:fs";
+
 import Fastify, { type FastifyInstance } from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -67,12 +69,27 @@ import { GRAPH_MAX_EDGES, GRAPH_MAX_NODES } from "../../config/graphCaps.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 import { RATE_BUCKET_REGISTRY } from "../../cee/config/limits.js";
 
-import WALK_IMPORT_WIRE from "../../orchestrator-v5/graph-registration/__tests__/fixtures/walk-import-modified.wire.json" with { type: "json" };
+
 
 type WireNode = { id: string; kind?: unknown; type?: unknown; label?: string };
 type WireGraph = { nodes: WireNode[]; edges: Array<Record<string, unknown>> };
 
-const IMPORTED: WireGraph = WALK_IMPORT_WIRE as unknown as WireGraph;
+// Read the fixture via fs rather than a `with { type: 'json' }` import
+// attribute: the full tsconfig (module=Node16, the typecheck-drift ratchet's
+// config) rejects import attributes with TS2823, and this file must stay OUT
+// of the frozen error baseline. Copied from the precedent this repo already
+// wrote down at `orchestrator-v5/tools/handlers/__tests__/run-analysis-brief-to-plot.test.ts`.
+const WALK_IMPORT_WIRE = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../orchestrator-v5/graph-registration/__tests__/fixtures/walk-import-modified.wire.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as WireGraph;
+
+const IMPORTED: WireGraph = WALK_IMPORT_WIRE;
 
 /** The PRE-import server graph: the same model with `opt_alpha` still "Alpha Hall". */
 const SERVER_PRE_IMPORT: WireGraph = {
