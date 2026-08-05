@@ -994,6 +994,95 @@ describe('hand-written corpus: real and adversarial id/prose pairs', () => {
 });
 
 // ============================================================================
+// Trap 12d — THE COMPLETENESS HALF DERIVATION CANNOT SUPPLY: the whole
+// technique table, WRITTEN OUT BY HAND.
+//
+// ⚠ MEASURED HOLE THIS CLOSES — row 12d's `thousand` reproduced INSIDE a PR
+// that cites 12d. Before this block, hand-written `DSK-T-*` ids appeared for
+// T-001..T-004 only; T-005 and T-006 appeared NOWHERE in this file. Measured by
+// adversarial review, each with the bundle rehashed by the repo's own hasher:
+//
+//     delete DSK-T-001 (corpus spells it) .............. RED  ✓
+//     DSK-T-002 strong -> medium (corpus spells it) .... RED  ✓
+//     delete DSK-T-005 / DSK-T-006 ..................... 59 -> 57, GREEN
+//     RETITLE DSK-T-005 ................................ 59/59 GREEN
+//     DSK-T-006 strong -> weak ......................... 59/59 GREEN
+//
+// The last row decides it: THE EVIDENCE STRENGTH PRINTED TO A USER BESIDE A
+// SCIENTIFIC CLAIM COULD BE SILENTLY DOWNGRADED WITH EVERY TEST STILL GREEN —
+// on the trust surface whose entire thesis is that displayed provenance is
+// bound to the canonical record.
+//
+// Every other technique-claim guard in this file is DERIVED from the bundle and
+// therefore agrees with it BY CONSTRUCTION: derivation proves agreement and can
+// never prove completeness, so none of them can notice the bundle itself being
+// short, retitled or mis-strengthed. This table is written by hand for exactly
+// that reason, and it REDs on deletion, addition, retitle AND strength drift.
+//
+// Severity of the hole, honestly: fail-closed, maintenance-time only, needs a
+// deliberate bundle edit, unreachable from model output. It could never
+// FABRICATE a badge — it could silently LOSE or MISPRICE one.
+//
+// ⚠ If a row here fails, THE BUNDLE CHANGED. That is a CONTENT finding: go and
+// re-derive what users are being served. It is not a table to re-copy green.
+// ============================================================================
+
+describe('hand-written: the whole technique table, written out', () => {
+  /** id, title, evidence_strength, linked protocol id — literals, never read from the bundle. */
+  const TECHNIQUE_TABLE: ReadonlyArray<readonly [string, string, string, string]> = [
+    ['DSK-T-001', 'Pre-mortem and prospective hindsight', 'medium', 'DSK-P-001'],
+    ['DSK-T-002', 'Outside view and reference class forecasting', 'strong', 'DSK-P-002'],
+    ['DSK-T-003', 'Consider-the-opposite as a debiasing strategy', 'medium', 'DSK-P-003'],
+    ['DSK-T-004', 'Opportunity cost neglect', 'medium', 'DSK-P-004'],
+    ['DSK-T-005', "Structured dissent and devil's advocacy", 'medium', 'DSK-P-005'],
+    ['DSK-T-006', 'Implementation intentions for decision follow-through', 'strong', 'DSK-P-006'],
+  ];
+
+  it('the bundle carries EXACTLY these claims, titles and strengths — the union assertion', () => {
+    const actual = (getAllByType('claim') as DSKClaim[])
+      .filter((c) => c.id.startsWith('DSK-T-'))
+      .map((c) => [c.id, c.title, c.evidence_strength] as const)
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    const expected = TECHNIQUE_TABLE.map(([id, title, strength]) => [id, title, strength]).sort(
+      (a, b) => a[0].localeCompare(b[0]),
+    );
+    // One assertion, four drift classes: a DELETED claim shortens `actual`, an
+    // ADDED one lengthens it, a RETITLE changes [1], a STRENGTH change [2].
+    expect(actual).toEqual(expected);
+  });
+
+  it('every linked protocol is exactly the one written here', () => {
+    const protocols = getAllByType('protocol') as { id: string; linked_claim_id?: string }[];
+    for (const [id, , , protocolId] of TECHNIQUE_TABLE) {
+      expect(protocols.find((p) => p.linked_claim_id === id)?.id, `protocol for ${id}`).toBe(
+        protocolId,
+      );
+    }
+  });
+
+  it.each(TECHNIQUE_TABLE)(
+    '%s attests end-to-end from its hand-written tuple',
+    (id, title, strength, protocolId) => {
+      // Closes the loop: the table is not merely asserted about the bundle, it
+      // is proved to be what the POLICY honours and what reaches the wire.
+      const { prompts } = applyDskGroundingPolicy([
+        {
+          question: 'q',
+          principle: title,
+          dsk_claim_id: id,
+          evidence_strength: strength,
+          dsk_protocol_id: protocolId,
+        },
+      ]);
+      expect(verdict(prompts[0])).toBe('attested');
+      expect(prompts[0].dsk_claim_id).toBe(id);
+      expect(prompts[0].evidence_strength).toBe(strength);
+      expect(prompts[0].dsk_protocol_id).toBe(protocolId);
+    },
+  );
+});
+
+// ============================================================================
 // POSITIVE CONTROL (trap 13) — the harness can see BOTH states
 // ============================================================================
 
