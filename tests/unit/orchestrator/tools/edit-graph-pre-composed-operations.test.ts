@@ -178,6 +178,27 @@ describe('A1 — the pre-composed seam', () => {
     expect(JSON.stringify(batch)).toBe(before);
   });
 
+  it('REPAIR IS OFF — an INVALID pre-composed batch fails once, with zero repair attempts', async () => {
+    // The discriminating fixture for `totalAttempts = 1` on this path. A valid
+    // batch cannot tell the two apart (the composition branch is skipped on
+    // every iteration, so extra attempts are invisible); an INVALID one can,
+    // because the repair counter is on the diagnostics. Repairing here would be
+    // the pipeline arguing with a decision the grounding validator already made
+    // against the persisted graph — and it would burn the user's latency doing
+    // it, since no new composition can happen on this path anyway.
+    const { adapter, chat } = makeForbiddenAdapter();
+    const invalid: PatchOperation[] = [
+      // add_edge with no strength / exists_probability / effect_direction —
+      // rejected by AddEdgeValue in the canonical schema.
+      { op: 'add_edge', path: 'factor_1::goal_1', value: { from: 'factor_1', to: 'goal_1' } },
+    ];
+    const result = await handleEditGraph(makeContext(), 'raise the price factor', adapter, 'req', 'turn', {
+      preComposedOperations: invalid,
+    });
+    expect(chat).not.toHaveBeenCalled();
+    expect(result.diagnostics?.repair_attempts).toBe(0);
+  });
+
   it('an EMPTY pre-composed batch takes the honest no-op path — it never falls back to composing', async () => {
     const { adapter, chat } = makeForbiddenAdapter();
     const result = await handleEditGraph(makeContext(), 'raise the price factor', adapter, 'req', 'turn', {
