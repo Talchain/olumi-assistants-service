@@ -617,6 +617,76 @@
                     "target"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "edge_adjudication"
+                    },
+                    "from": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "to": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "edge_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "verdict": {
+                      "type": "string",
+                      "enum": [
+                        "accepted_pass1",
+                        "accepted_pass2",
+                        "overridden",
+                        "dismissed"
+                      ]
+                    },
+                    "resolved_strength_mean": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "from",
+                    "to",
+                    "verdict"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "prior_range_edit"
+                    },
+                    "target_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "range_min": {
+                      "type": "number"
+                    },
+                    "range_max": {
+                      "type": "number"
+                    },
+                    "distribution": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "target_id",
+                    "range_min",
+                    "range_max"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }

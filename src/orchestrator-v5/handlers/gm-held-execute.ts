@@ -43,6 +43,7 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import {
   canonicaliseValueOps,
+  stampUserEditProvenance,
   batchFullyLanded,
 } from '../../orchestrator/canonicalise-value-ops.js';
 import {
@@ -371,7 +372,14 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // and whose factor value is unchanged in the database to this day.
   //
   // Rollback is a code revert, not an env flip (no dark launches).
-  const opsToApply: PatchOperation[] = canonicaliseValueOps(operations, input.currentGraph).operations;
+  //
+  // 2.396(b): a held batch the user explicitly CONFIRMED is the strongest
+  // consent signal in the product — its value writes earn the USER stamp
+  // (observed_state.source + node provenance) exactly like the normal seam.
+  // Same single stamp function; see canonicalise-value-ops.ts.
+  const opsToApply: PatchOperation[] = stampUserEditProvenance(
+    canonicaliseValueOps(operations, input.currentGraph).operations,
+  );
 
   // ── 3. Apply through the existing apply path ──────────────────────────
   let mutatedGraph: PersistedGraphV3T;

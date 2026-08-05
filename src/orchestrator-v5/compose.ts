@@ -757,6 +757,20 @@ export const UNTRANSPORTED_VERDICT_CLASS_REGISTERED_REASONS = [
       'the field cannot land dark. Closes on the same 0.28 train, on the amended ' +
       'discriminated shape (measure_scope x constraint_origin x sampling_basis).',
   },
+  {
+    field: 'verdict',
+    rowed: 'ROADMAP 2.477',
+    reason:
+      'The edge_adjudication judgement receipt (schemas 0.34.0, P4 transport): ' +
+      'the contested-edge verdict a human settled, persisted as a typed turn ' +
+      'fact. DELIBERATELY carry-only at this stage — the UI already holds the ' +
+      'verdict locally (it authored it), so nothing is withheld from the user; ' +
+      'what does NOT yet exist is any DOWNSTREAM consequence (compute, coaching ' +
+      'context, cross-session surfacing). That consumption half is a design ' +
+      'decision (provenance-aware maths is Paul-gated) rowed at 2.477; when it ' +
+      'lands, transport rides the same train as its consumer rather than ' +
+      'shipping dark ahead of it.',
+  },
 ] as const;
 
 /**

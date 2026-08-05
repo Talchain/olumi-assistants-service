@@ -175,6 +175,14 @@ export const MUTATION_DISPATCH_SKIP: ReadonlyMap<HandlerFact['fact_type'], strin
     ['explain_from_structure', 'Read-only explanation — no state change.'],
     ['compare_options', 'Read-only comparison — no state change.'],
     ['what_would_flip', 'Read-only sensitivity answer — no state change.'],
+    // 0.34.0 — P4 transport judgement receipts. All three PERSIST a human
+    // judgement without touching the graph (carry the signal; compute
+    // consequence is a separate design decision), so there is no graph
+    // mutation to report in "what just changed". Surfacing them in coaching
+    // context is a deliberate FUTURE consumption decision, not a default.
+    ['feedback', 'Judgement receipt (thumbs rating) — no graph state change.'],
+    ['edge_adjudication', 'Judgement receipt (contested-edge verdict) — no graph state change.'],
+    ['prior_range_edit', 'Judgement receipt (user-set prior range) — no graph state change.'],
   ]);
 
 function summariseMutation(fact: HandlerFact): RecentMutation | null {

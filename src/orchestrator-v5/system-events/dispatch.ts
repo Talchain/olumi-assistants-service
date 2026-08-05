@@ -30,6 +30,7 @@ import type {
   SystemEventTurnPayload,
   SystemEventKindLiteral,
 } from '@talchain/schemas/boundary';
+import { HandlerFactSchema, type HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { log } from '../../utils/telemetry.js';
@@ -137,6 +138,16 @@ export type SystemEventHandling =
   | 'client_only'
   /** Silent acknowledgement, committed as a turn row. No graph write. */
   | 'ack_and_commit'
+  /**
+   * Silent acknowledgement committed WITH a typed handler fact — the event
+   * carries a human judgement the server must PERSIST, never a graph write
+   * (P4 transport, 2026-08-05: carry the signal; whether it feeds compute is
+   * a separate explicit design decision). Turn shape follows the edit_graph /
+   * DL-7 PR B precedent: `turn_class: 'direct_answer'`, `handler_id: null`,
+   * facts on the turn row — the prior-facts loader reads facts from ALL prior
+   * turns, so these are downstream-visible.
+   */
+  | 'fact_and_commit'
   /** Runs a real mutation and writes `scenarios.graph`. */
   | 'mutating';
 
@@ -149,7 +160,14 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   undo: 'client_only',
   redo: 'client_only',
   selection_change: 'client_only',
-  feedback: 'ack_and_commit',
+  // Reclassified 2026-08-05 (was 'ack_and_commit' — which committed an EMPTY
+  // ack and DISCARDED the rating after hashing it into request_hash; the UI
+  // has emitted the typed event since 0.22.0 and the server threw it away).
+  feedback: 'fact_and_commit',
+  // 0.34.0 — the two judgement kinds that previously terminated in the
+  // browser (no wire shape existed at all).
+  edge_adjudication: 'fact_and_commit',
+  prior_range_edit: 'fact_and_commit',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -165,6 +183,71 @@ const CLIENT_ONLY_EVENT_KINDS: ReadonlySet<SystemEventKindLiteral> = new Set<Sys
 );
 
 
+
+/**
+ * Build the typed judgement receipt for a `fact_and_commit` event kind.
+ *
+ * Returns `null` for kinds that are not fact-bearing (the caller then treats
+ * the event as a plain ack — which cannot happen for a kind the handling map
+ * declares 'fact_and_commit'; the null arm exists so this function is total).
+ *
+ * ⚠ R-004 (feedback): the fact records `comment_present`, NEVER the comment
+ * text — the user's free text may contain PII and a fact row is long-lived
+ * and widely read. The contract's `FeedbackResultSchema` is `.strict()`, so a
+ * future `comment` field is a deliberate reviewed widening, not a quiet leak.
+ *
+ * Provenance on the adjudication/prior facts is stamped HERE, server-side
+ * (`user_set`) — the wire deliberately carries no provenance field (the event
+ * kind is the provenance claim; a client constant would add nothing the
+ * server could trust).
+ */
+export function buildJudgementFact(
+  event: SystemEventTurnPayload['event'],
+): HandlerFact | null {
+  switch (event.kind) {
+    case 'feedback':
+      return {
+        fact_type: 'feedback',
+        fact_version: 1,
+        noop: false,
+        result: {
+          target_id: event.target.id,
+          target_kind: event.target.kind,
+          rating: event.rating,
+          comment_present: event.comment !== undefined && event.comment.length > 0,
+        },
+      };
+    case 'edge_adjudication':
+      return {
+        fact_type: 'edge_adjudication',
+        fact_version: 1,
+        noop: false,
+        result: {
+          from: event.from,
+          to: event.to,
+          edge_id: event.edge_id ?? null,
+          verdict: event.verdict,
+          resolved_strength_mean: event.resolved_strength_mean ?? null,
+          provenance: 'user_set',
+        },
+      };
+    case 'prior_range_edit':
+      return {
+        fact_type: 'prior_range_edit',
+        fact_version: 1,
+        noop: false,
+        result: {
+          target_id: event.target_id,
+          range_min: event.range_min,
+          range_max: event.range_max,
+          distribution: event.distribution ?? null,
+          provenance: 'user_set',
+        },
+      };
+    default:
+      return null;
+  }
+}
 
 function buildAcknowledgementResponse(
   payload: SystemEventTurnPayload,
@@ -219,6 +302,31 @@ export async function dispatchSystemEvent(
     return await dispatchFactorValueEdit(payload, payload.event, requestId, startedAt);
   }
 
+  // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
+  // Built + contract-validated BEFORE the commit. Fail-closed: a fact that
+  // does not parse against the contract is a code bug, and committing the ack
+  // WITHOUT it would silently reproduce the empty-ack defect this exists to
+  // close — so the commit is refused (route maps that to a typed 500, the
+  // client retries) rather than quietly degraded.
+  let judgementFacts: readonly HandlerFact[] = [];
+  if (SYSTEM_EVENT_HANDLING[payload.event.kind] === 'fact_and_commit') {
+    const fact = buildJudgementFact(payload.event);
+    const check = fact === null ? null : HandlerFactSchema.safeParse(fact);
+    if (fact === null || check === null || !check.success) {
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: payload.event.kind,
+          scenario_id: payload.scenario_id,
+          parse_error: check?.success === false ? check.error.message : 'no fact built',
+        },
+        'V5 system event — judgement fact failed its own contract; refusing the commit (fail closed)',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+    judgementFacts = [check.data];
+  }
+
   try {
     await commitDirectAnswer(response, {
       scenario_id: payload.scenario_id,
@@ -228,7 +336,7 @@ export async function dispatchSystemEvent(
       request_hash: computeRequestHash(payload),
       llm_calls_used: 0,
       duration_ms: Date.now() - startedAt,
-      handler_facts: [],
+      handler_facts: judgementFacts,
       // V5 Stage 2B-1b: system-event turns have no user turn / coaching context
       // (no buildTurnContext) — persist NULL explicitly. The most-recent read
       // filters non-null, so this never resets a prior coaching snapshot.
