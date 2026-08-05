@@ -70,27 +70,66 @@ function isRawOutputEnabled(): boolean {
  * mirror would remain, and the NEXT field the contract relaxes breaks this
  * route the same way. Deriving kills the class.
  *
- * ⚠ WHY `.partial().required(...)` RATHER THAN THE CONTRACT VERBATIM. This
- * route is a LIGHTWEIGHT SHAPE CHECK (see the file header), not the contract's
- * validator — PLoT owns strict validation. The contract additionally REQUIRES
- * `flip_reason`, which this route neither reads nor needs; adopting that would
- * hand a new 400 to any producer path that omits it. Re-requiring exactly the
- * four fields the route required before this change (minus `direction`) makes
- * the delta a pure RELAXATION, and yields the property that matters at a
- * consumer seam and is asserted in the specs:
+ * ⚠ WHY `.partial().required(...)` RATHER THAN THE CONTRACT VERBATIM. The
+ * contract additionally REQUIRES `flip_reason`. **PLoT's own producer interface
+ * declares that field OPTIONAL** — `flip_reason?: string`
+ * (`src/cee/validation/m1-review-types.ts:355` at deployed tip `e18e17c2`).
+ * Requiring at the consumer what the producer's declared semantics mark
+ * optional IS the 2.505 defect, one field over: it would re-arm the same trap
+ * this change exists to disarm. (The route also never reads the field, and is
+ * a LIGHTWEIGHT SHAPE CHECK per the file header — but those are the weaker
+ * arguments; the producer's declared optionality is the decisive one.)
+ *
+ * Re-requiring exactly the four fields the route required before this change,
+ * minus `direction`, yields the property that matters at a consumer seam:
  *
  *     contract-accepted  ⟹  route-accepted
  *
- * The FIELD TYPES and the KEY SET are the contract's, so nothing about the
- * shape is mirrored here — only this route's own requirement is stated, and it
- * is proven to be a subset of the contract's.
+ * That is a THEOREM about these two schema objects, not a corpus result. After
+ * unwrapping `ZodOptional`, every one of the 13 keys resolves to the SAME
+ * OBJECT INSTANCE as the contract's; the key sets are identical; `unknownKeys`
+ * and `catchall` are identical; and the route's required set is a strict subset
+ * of the contract's. `.partial()` erases nothing here — the contract is a plain
+ * `ZodObject` with no `.refine`/`.superRefine`/`.transform`/`.default`/`.catch`
+ * (unlike the sibling `EnrichmentEdgeEValueStabilitySchema` just below it,
+ * where `.partial()` would not even compile).
  *
- * ⚠ ONE TIGHTENING, DELIBERATE AND UNREACHABLE. The contract types `factor_id`
- * as `z.string().min(1)` where the local copy allowed `""`. PLoT's producer
- * refuses any row whose `factor_id` is not a non-empty string
- * (`factor-flip-values.ts`: `rejected_malformed++; continue;` at its deployed
- * tip `e18e17c2`), so no row the live producer can emit is affected. Pinned by
- * a named spec rather than left to be rediscovered.
+ * ⚠ THE DELTA VS THE OLD LOCAL COPY IS **NOT** A PURE RELAXATION — MEASURED,
+ * NOT ASSUMED. An earlier draft of this comment said it was. That was a wrong
+ * mirror of the change it describes, i.e. this PR's own defect class, so the
+ * measured numbers replace it. Against the OLD schema (zod 3.23.8 + this
+ * repo's vendored 0.34.0):
+ *
+ *   RELAXED  — `direction` may be absent (the fix), and `flip_reason` absence
+ *              stays accepted.
+ *   TIGHTENED — 13 discriminating inputs across 9 KEYS. The old row was
+ *              `.passthrough()` with only 5 declared keys, so the contract's
+ *              other 8 arrived as UNKNOWN keys: unvalidated, any type. Deriving
+ *              promotes them to typed optionals. Affected: `factor_id`
+ *              (`.min(1)`), plus `unit`, `flip_reason`, `no_flip_in_range`,
+ *              `iterations_used`, `probes_used`, `alternative_winner_id`,
+ *              `alternative_winner_label`, `margin_sensitivity`.
+ *
+ * Every one of the 9 agrees with PLoT's declared producer types
+ * (`m1-review-types.ts`), so no row the producer's own types permit is newly
+ * rejected. ONE RESIDUAL, DISCLOSED RATHER THAN ROUNDED TO ZERO: `unit` is read
+ * from `node?.observed_state?.unit` on JSON-sourced graph data, so its TS type
+ * is not a runtime guarantee. The exposure is bounded — the contract types
+ * `unit` identically, so a non-string unit was already contract-illegal — but
+ * it is low, not nil.
+ *
+ * ⚠ `factor_id` EMPTY-STRING REACHABILITY — NARROWER THAN IT FIRST LOOKED.
+ * The LIVE `preResolvedFlipData` path is guarded: `factor-flip-values.ts:215`
+ * refuses any row whose `factor_id` is not a non-empty string. But TWO OTHER
+ * PRODUCERS CARRY NO SUCH GUARD — `computeFlipThresholdData`
+ * (`src/coaching/flip-thresholds.ts`, which filters only on elasticity,
+ * `overriddenFactorIds`, and `getFactorCurrentValue(...) !== null`) and
+ * `resolveFlipValues` (`src/analysis/flip-thresholds.ts`), which spreads those
+ * candidates through. That fallback IS live-reachable: it runs whenever ISL
+ * emits no `factor_flip_values` block (`run.ts:7707`). An empty id would
+ * additionally need `getFactorCurrentValue('')` to be non-null, so it is
+ * PRACTICALLY unreachable — which is a different and weaker claim than
+ * "structurally impossible". Pinned by a named spec.
  */
 export const FlipThresholdRowSchema = EnrichmentFlipThresholdSchema
   .partial()

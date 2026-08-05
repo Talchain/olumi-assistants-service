@@ -327,10 +327,18 @@ describe("ROADMAP 2.505 — decision-review flip rows derive from @talchain/sche
     });
 
     it("rejects an empty `factor_id`, matching the contract's `.min(1)`", () => {
-      // Derived from the PRODUCER's declared semantics, not from taste:
-      // `factor-flip-values.ts` refuses any row whose factor_id is not a
-      // non-empty string (`rejected_malformed++; continue;`), so this
-      // tightening is UNREACHABLE for a row PLoT can emit.
+      // Derived from the PRODUCER's declared semantics, not from taste — and
+      // NARROWER than "unreachable", which is what this comment first claimed.
+      // Only the LIVE `preResolvedFlipData` path is guarded
+      // (`factor-flip-values.ts:215` refuses a factor_id that is not a
+      // non-empty string). TWO OTHER PRODUCERS ARE UNGUARDED:
+      // `computeFlipThresholdData` (`coaching/flip-thresholds.ts` — filters on
+      // elasticity, overriddenFactorIds, and getFactorCurrentValue !== null
+      // only) and `resolveFlipValues` (`analysis/flip-thresholds.ts`), which
+      // spreads those candidates. That fallback is live-reachable when ISL
+      // emits no `factor_flip_values` block (`run.ts:7707`). An empty id would
+      // also need `getFactorCurrentValue('')` non-null, so it is PRACTICALLY
+      // unreachable — not structurally impossible.
       expect(
         FlipThresholdRowSchema.safeParse({ ...ROW_REAL_FLIP, factor_id: "" }).success
       ).toBe(false);
