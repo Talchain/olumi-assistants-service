@@ -2282,6 +2282,20 @@ export const TelemetryEvents = {
   V6DualDraftM2Outcome: "v6.dual_draft.m2_outcome",
   V6DualDraftMergeReport: "v6.dual_draft.merge_report",
   V6DualDraftDegraded: "v6.dual_draft.degraded",
+
+  // ROADMAP 2.474 — the coach's `propose_structural_edit` tool composed a
+  // batch, and the GROUNDING VALIDATOR judged it. Emitted once per tool
+  // composition, on BOTH outcomes: an ungrounded batch is a real event, not a
+  // silent retry, and the rejection-code histogram is how we find out whether
+  // the grounding table is doing its job or the model is fighting it.
+  // REDACTED by construction: structural rejection code + counts only. The
+  // rejection REASON is not carried — it quotes node ids and labels.
+  V5StructuralEditToolComposed: "v5.structural_edit_tool.composed",
+  // The entry decision (A9): whether the tool engaged on a turn the rulebook
+  // did not claim, and if not, which gate stopped it. This is the counter that
+  // tells us whether the "four turns and nothing applies" dead-end is actually
+  // being rescued, rather than merely having a rescue path in the code.
+  V5StructuralEditToolEntry: "v5.structural_edit_tool.entry",
 } as const;
 
 /**

@@ -56,6 +56,7 @@ import type {
   DecisionStage,
   GraphPatchBlockData,
   GraphV3T,
+  PatchOperation,
   PendingClarificationState,
   SuggestedAction,
   V2RunResponseEnvelope,
@@ -106,6 +107,12 @@ import {
   evaluateEditGraphMutations,
   type EditGmDecision,
 } from './edit-graph-referee-gate.js';
+// ROADMAP 2.474 — the coach's structural editing tool: contract, entry
+// decision, transport. Three modules on purpose (see their headers): the
+// rules are provable without an LLM, the transport without a graph.
+import { decideStructuralEditEntry } from '../tools/structural-edit-entry.js';
+import { buildStructuralEditGrounding } from '../tools/propose-structural-edit.js';
+import { composeStructuralEdit } from '../tools/compose-structural-edit.js';
 import {
   accountEditParts,
   buildMultiPartRejectionClarify,
@@ -648,6 +655,131 @@ function mapStageToDecisionStage(stage: MessageTurnPayload['stage']): DecisionSt
     default:
       return 'frame';
   }
+}
+
+/**
+ * ROADMAP 2.474 — the coach's structural editing tool, engaged as the SECOND
+ * PATH when the rulebook did not claim the turn (A9).
+ *
+ * Returns a replacement `EditGraphResult` when the tool composed a grounded
+ * batch and the pipeline ran it; returns `null` in every other case, leaving
+ * the rulebook's own honest result (its clarify copy, its recovery chips)
+ * exactly as it was. `null` is the important half: the tool must be able to
+ * decline without degrading the answer the user would otherwise have got.
+ *
+ * A5(a) — GROUNDING COMES FROM THE STRICT PERSISTED READ, NEVER THE INGRESS
+ * ECHO. The dispatcher's `gmFrameBase` fallback (`strictBase ?? graphState`)
+ * is fine for the referee frame but is NOT a grounding source: showing the
+ * model a client-supplied graph and then applying against the server's is how
+ * a batch grounded in one world lands in another. This helper does its own
+ * strict read and then REQUIRES the two to agree on their node-id sets. They
+ * agree on every live turn today (route-v2 reloads `scenarios.graph` because
+ * the UI sends a turn, never a graph), so the check costs nothing in practice
+ * — and on the day they diverge, the tool declines instead of guessing.
+ */
+async function tryStructuralEditTool(input: {
+  readonly editResult: EditGraphResult;
+  readonly context: ConversationContext;
+  readonly adapter: ReturnType<typeof getAdapter>;
+  readonly payload: MessageTurnPayload;
+  readonly requestId: string;
+}): Promise<EditGraphResult | null> {
+  const { editResult, context, adapter, payload, requestId } = input;
+
+  const emitEntry = (decision: string): void => {
+    emit(TelemetryEvents.V5StructuralEditToolEntry, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      decision,
+    });
+  };
+
+  // Cheap gates first — never pay a Supabase read to discover the rulebook
+  // already claimed the turn.
+  const preGate = decideStructuralEditEntry({
+    message: payload.message,
+    rulebook: { wasRejected: editResult.wasRejected, operations: editResult.operations },
+    // Provisionally true; the real answer needs the strict read below, which
+    // is only worth doing once the cheap gates pass.
+    groundingAvailable: true,
+  });
+  if (!preGate.engage) {
+    emitEntry(preGate.reason);
+    return null;
+  }
+
+  let persisted: unknown = null;
+  try {
+    persisted = await loadPersistedGraphStrict(payload.scenario_id);
+  } catch (err) {
+    log.warn(
+      {
+        event: 'v5.structural_edit_tool.grounding_read_failed',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 propose_structural_edit — strict persisted read failed; the tool declines rather than grounding on the ingress echo',
+    );
+    emitEntry('no_grounding');
+    return null;
+  }
+
+  const grounding = buildStructuralEditGrounding(persisted);
+  if (grounding === null) {
+    emitEntry('no_grounding');
+    return null;
+  }
+
+  // The base the model is SHOWN must be the base the pipeline will APPLY to.
+  const contextNodeIds = new Set(
+    (context.graph?.nodes ?? [])
+      .map((n) => (n as { id?: unknown }).id)
+      .filter((id): id is string => typeof id === 'string'),
+  );
+  const agrees =
+    contextNodeIds.size === grounding.nodeIds.size &&
+    [...grounding.nodeIds].every((id) => contextNodeIds.has(id));
+  if (!agrees) {
+    log.warn(
+      {
+        event: 'v5.structural_edit_tool.base_divergence',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        persisted_node_count: grounding.nodeIds.size,
+        context_node_count: contextNodeIds.size,
+      },
+      'V5 propose_structural_edit — persisted graph and edit-context graph disagree; declining rather than grounding on one and applying to the other',
+    );
+    emitEntry('no_grounding');
+    return null;
+  }
+
+  const outcome = await composeStructuralEdit({
+    adapter,
+    grounding,
+    message: payload.message,
+    maxPatchOperations: config.cee.maxPatchOperations,
+    requestId,
+    scenarioId: payload.scenario_id,
+  });
+  if (outcome.status !== 'composed') {
+    // Rejected (ungrounded batch) or unavailable (no call, no tool block).
+    // Either way the rulebook's own answer stands — REJECT, NEVER REPAIR.
+    emitEntry(outcome.status === 'rejected' ? `rejected_${outcome.code}` : outcome.reason);
+    return null;
+  }
+  emitEntry('engaged');
+
+  // A1 — ONE entry seam. The grounded batch re-enters the SAME handler and
+  // runs the SAME downstream train (normalisation, Zod, PLoT gate, apply,
+  // receipts); the referee gate below in this dispatch then returns its ONE
+  // governing verdict over the whole batch, exactly as it does for the
+  // deterministic path. No second applier exists.
+  return await handleEditGraph(context, payload.message, adapter, requestId, payload.turn_id, {
+    preComposedOperations: outcome.operations as readonly PatchOperation[],
+  });
 }
 
 export interface DispatchEditGraphParams {
@@ -1660,6 +1792,24 @@ export async function dispatchEditGraph(
           requestId,
           payload.turn_id,
         );
+        // ── ROADMAP 2.474 — THE SECOND PATH (A9) ─────────────────────────
+        // The rulebook has now had the turn. If it CLAIMED the utterance
+        // (produced operations) we are done: one composer per turn, because
+        // two composers racing for the same commit is the parity defect in a
+        // different costume. If it did NOT — a refusal, or the measured
+        // "zero operations, no rejection" dead-end — the grounded structural
+        // edit tool gets the SAME turn, not the next one. That distinction is
+        // the whole fix: a second path on the following turn is the dead-end
+        // with an extra step, because the user has to notice the failure and
+        // rephrase before anything different can happen.
+        const toolOutcome = await tryStructuralEditTool({
+          editResult,
+          context,
+          adapter,
+          payload,
+          requestId,
+        });
+        if (toolOutcome !== null) editResult = toolOutcome;
       }
     }
   } catch (err) {

@@ -157,6 +157,27 @@ export interface EditGraphOpts {
   plotOpts?: PLoTClientRunOpts;
   /** Internal invocation context carried through orchestrator state. */
   invocationInput?: Record<string, unknown>;
+  /**
+   * ROADMAP 2.474 / AMENDMENT A1 — THE SINGLE ENTRY SEAM for an
+   * externally-composed batch (today: the coach's `propose_structural_edit`
+   * tool, after its grounding validator has accepted the batch WHOLE).
+   *
+   * When present, this handler SKIPS ITS OWN COMPOSITION — no edit_graph LLM
+   * call, no parse — and runs the batch down the IDENTICAL downstream train:
+   * field normalisation, structural-edge defaults, Zod validation, the PLoT
+   * semantic gate, apply, receipts. Everything after composition is shared
+   * byte-for-byte with the deterministic path, which is the whole point: a
+   * tool that reached the graph through its own applier would be a second
+   * referee↔applier agreement surface, i.e. 2.380's parity defect built on
+   * purpose. There is one applier, one gate, one commit.
+   *
+   * REPAIR IS DISABLED on this path. The composer's contract is
+   * reject-don't-repair: a batch that fails validation here is a batch the
+   * grounding validator already accepted, so a repair round would be the
+   * pipeline arguing with a decision that was already made against the
+   * persisted graph. It fails honestly instead.
+   */
+  preComposedOperations?: readonly PatchOperation[];
 }
 
 // ============================================================================
@@ -1673,6 +1694,9 @@ export async function handleEditGraph(
   const maxRetries = opts?.maxRetries ?? config.cee.maxRepairRetries;
   const plotClient = opts?.plotClient ?? null;
   const invocationInput = opts?.invocationInput ?? {};
+  // ROADMAP 2.474 / A1 — an externally-composed, already-grounded batch. Null
+  // on every deterministic turn, so that path is byte-identical to today.
+  const preComposedOperations = opts?.preComposedOperations ?? null;
   const baseGraphHash = computeGraphHash(context.graph);
   const groupedTargetLabels = readGroupedTargetLabels(invocationInput.grouped_target_labels);
   const groupedTargets = resolveExplicitGroupedTargets(context, groupedTargetLabels);
@@ -1685,7 +1709,19 @@ export async function handleEditGraph(
   const targetResolution = groupedTargets.length > 0
     ? buildResolutionResult('graph_local', 'high', groupedTargets)
     : resolveEditTarget(editDescription, context, intentCategory);
-  const resolutionMode = confirmationMode
+  // ROADMAP 2.474 / A1 — a PRE-COMPOSED batch has already resolved its targets
+  // by id against the persisted graph, and the grounding validator hard-rejected
+  // the whole batch unless every one of them existed. The deterministic
+  // target-resolution modes below (`clarify` when the TEXT is ambiguous,
+  // `propose_and_confirm` when it is uncertain) are judgements about a sentence
+  // this path is no longer reading a target out of, so they cannot apply: their
+  // question — "which entity did they mean?" — is already answered, by id.
+  // `auto_apply` here means only "stop asking the sentence"; it grants NO apply
+  // power, because the referee gate downstream still holds every structural op
+  // for an explicit confirm.
+  const resolutionMode = preComposedOperations !== null
+    ? 'auto_apply'
+    : confirmationMode
     ? 'auto_apply'
     : groupedTargets.length > 0
     ? 'auto_apply'
@@ -1788,7 +1824,12 @@ export async function handleEditGraph(
   // Constraints (keep X under/below Y, hard requirement) can't be expressed
   // as standard patch operations. Detect and construct goal_constraints update
   // deterministically instead of falling through to the edit_graph LLM.
-  const constraintMatch = detectConstraintIntent(editDescription, context.graph);
+  // Same reasoning as `resolutionMode` above: the constraint shortcut composes
+  // operations from the SENTENCE, so it must not pre-empt a batch that has
+  // already been composed and grounded.
+  const constraintMatch = preComposedOperations !== null
+    ? null
+    : detectConstraintIntent(editDescription, context.graph);
   if (constraintMatch) {
     branchTaken = 'apply';
     branchReason = 'constraint_shortcut';
@@ -1975,7 +2016,9 @@ export async function handleEditGraph(
   }
 
   // ---- Attempt loop: LLM call → validate → PLoT → repair ----
-  const totalAttempts = maxRetries + 1;
+  // ROADMAP 2.474 / A1: a pre-composed batch gets exactly ONE attempt — the
+  // composer's contract is reject-don't-repair (see `preComposedOperations`).
+  const totalAttempts = preComposedOperations !== null ? 1 : maxRetries + 1;
   let lastValidationResult: PatchValidationResult | undefined;
   let lastPlotErrors: string | undefined;
   let lastRawOps: unknown[] | undefined;
@@ -2017,6 +2060,23 @@ export async function handleEditGraph(
       ].join('\n');
     }
 
+    // ── ROADMAP 2.474 / A1 — COMPOSITION, or the pre-composed batch ───────
+    // A pre-composed batch replaces the LLM composition and NOTHING ELSE.
+    // Everything below this block — normalisation, the intent guard, Zod
+    // validation, the PLoT gate, apply, receipts — is the same code on both
+    // paths, so the tool cannot acquire a power the deterministic path
+    // doesn't have.
+    let llmResult: EditGraphLLMResult;
+    if (preComposedOperations !== null) {
+      llmResult = {
+        // Copied, never aliased: the caller's array must not be mutated by
+        // the normalisation steps below.
+        operations: preComposedOperations.map((op) => ({ ...op })),
+        removed_edges: [],
+        warnings: [],
+        coaching: null,
+      };
+    } else {
     // LLM call
     let chatResult;
     try {
@@ -2117,7 +2177,6 @@ export async function handleEditGraph(
     // target a single directional edge. No decomposition logic needed.
 
     // Parse operations from LLM response (v2 object or legacy array)
-    let llmResult: EditGraphLLMResult;
     try {
       llmResult = parseEditGraphResponse(chatResult.content);
     } catch (error) {
@@ -2148,6 +2207,7 @@ export async function handleEditGraph(
       lastValidationResult = { valid: false, operations: [], zodErrors: undefined, referentialErrors: [{ index: 0, op: 'unknown', path: '', message: error instanceof Error ? error.message : String(error) }] };
       continue;
     }
+    } // ── end of the LLM-composition branch (A1 seam) ──────────────────────
 
     // Handle empty operations (no-op: conflict, forbidden edge, already-satisfied)
     if (llmResult.operations.length === 0) {
@@ -2304,7 +2364,27 @@ export async function handleEditGraph(
     const rawOps: unknown[] = normalisedOps;
     lastRawOps = rawOps;
 
-    if (intentCategory !== 'structural' && hasStructuralOperations(normalisedOps)) {
+    // ROADMAP 2.474 / A1 — the narrow-intent guard is a guard on THIS
+    // handler's own composer: it catches the free-text edit prompt
+    // over-reaching into structure on a request that only asked for a value
+    // change. A pre-composed batch has no such failure mode to catch, and
+    // leaving the guard on would break the headline capability outright —
+    // "give each option its own driver" classifies as `parameter_update`
+    // ("change" + "option"), so every grounded restructure would fail the
+    // guard, and with repair disabled on this path (totalAttempts = 1) it
+    // would fail with no recourse.
+    //
+    // What replaces it here is STRONGER, not weaker: the batch was already
+    // proved against the persisted graph id-by-id by the grounding validator,
+    // and every structural op is HELD by the referee behind a confirm chip
+    // that NAMES each change. The user sees and consents to exactly the
+    // structure being added; the guard's job was to stop structure appearing
+    // unasked, and on this path nothing appears without a confirm.
+    if (
+      preComposedOperations === null &&
+      intentCategory !== 'structural' &&
+      hasStructuralOperations(normalisedOps)
+    ) {
       consecutiveNarrowStructuralFailures++;
       validationOutcome = 'intent_guard_failed';
       setViolationCodes(['intent_guard_structural_ops']);

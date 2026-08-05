@@ -387,7 +387,8 @@ export function assertGraphCasCapabilityValid(cap: GraphCasCapability): void {
  * - staging/local/test: the requested mode is honoured (staging is where
  *   shadow → live evidence is gathered).
  *
- * @param defaultValue - Code default ('off' for graphManagementMode).
+ * @param defaultValue - Code default ('live' for graphManagementMode since
+ *   ROADMAP 2.474 / amendment A10 — see the setting's note below).
  * @param settingName  - Env var name for logging/audit events.
  */
 function createEnvEnforcedGraphManagementMode(
@@ -676,17 +677,37 @@ const ConfigSchema = z.object({
     // CEE_GRAPH_MANAGEMENT_MODE — Graph Management referee live wiring
     // ('off' | 'shadow' | 'live'). Gates the edit_graph → CandidateMutation
     // Envelope → referee seam in edit-graph-dispatch.ts.
-    // 'off' (default): zero referee calls, byte-identical edit path.
+    // 'off': zero referee calls, byte-identical edit path.
     // 'shadow': the referee evaluates every envelope and emits redacted
     // v5.candidate_mutation.<verdict> telemetry; the existing path proceeds
-    // UNCHANGED (the A3 CAS-observe pattern). 'live' (staging-gated,
-    // auto-downgraded to 'shadow' in prod): verdicts route — would_apply
-    // proceeds through the existing apply path; held emits a real pending
-    // confirmation; stale/rejected/clarify_required emit recovery templates.
-    // GM never writes graph state itself in ANY mode — the single durable
-    // writer remains commitDirectAnswer.
+    // UNCHANGED (the A3 CAS-observe pattern). 'live': verdicts route —
+    // would_apply proceeds through the existing apply path; held emits a real
+    // pending confirmation; stale/rejected/clarify_required emit recovery
+    // templates. GM never writes graph state itself in ANY mode — the single
+    // durable writer remains commitDirectAnswer.
+    //
+    // ⭐ REPO DEFAULT IS 'live' since ROADMAP 2.474 (amendment A10). It was
+    // 'off', with staging setting 'live' through the Render dashboard — and
+    // that arrangement was a trust hazard, not a safety measure: EVERY hold
+    // the Graph Management design relies on exists only while the mode is
+    // 'live', the resume path re-reads the mode AT RESUME TIME, and an env
+    // reset therefore silently bypasses every consent hold (ARCH-REVIEW-2
+    // S2S3 R-7). A safety story that hangs on a dashboard variable is a
+    // safety story one careless edit away from being untrue. Under Paul's
+    // no-env-var-gates + no-dark-launches doctrine the capability ships ON and
+    // rollback is a code revert.
+    //
+    // The env var REMAINS as a kill-switch (set it to 'shadow' or 'off'), and
+    // the production lockdown above is UNCHANGED: in prod, 'live' still
+    // downgrades to 'shadow' with an [AUDIT] warning. Consequence of the new
+    // default, stated rather than discovered: an unconfigured PROD boot now
+    // resolves to 'shadow' (referee evaluates + emits telemetry, never
+    // blocks) where it previously resolved to 'off' (no referee calls at
+    // all). Shadow cannot change an outcome by construction — that is the
+    // whole point of the mode — so this is added observability, not a
+    // production behaviour change.
     graphManagementMode: createEnvEnforcedGraphManagementMode(
-      "off",
+      "live",
       "CEE_GRAPH_MANAGEMENT_MODE",
     ),
     // CEE_REASONING_CAPTURE_ENABLED — ROADMAP 1.42: capture Sonnet-5 extended

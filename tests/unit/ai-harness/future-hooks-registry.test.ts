@@ -353,11 +353,24 @@ describe('hook candidate-mutation-envelope-ratified (ISSUE-9026, owner: Track 4 
       'The edit dispatch no longer references graph-management — the lane-8 live wiring regressed',
     ).not.toEqual([]);
     const configSrc = readFileSync(join(REPO_ROOT, 'src/config/index.ts'), 'utf-8');
+    // ⚠ THIS HOOK USED TO REQUIRE default-'off' ("dark-by-default"). ROADMAP
+    // 2.474 / amendment A10 RETIRED that invariant by ruling: the referee is
+    // the machinery that HOLDS structural edits for a confirm, so keeping it
+    // dark by default meant the entire consent spine hung on a Render
+    // dashboard variable that one reset could clear (ARCH-REVIEW-2 S2S3 R-7).
+    // Doctrine: no env-var gates, no dark launches, rollback = code revert.
+    //
+    // What the hook enforces INSTEAD is the part that still matters and is
+    // still load-bearing: the mode remains ENV-ENFORCED — i.e. it goes through
+    // `createEnvEnforcedGraphManagementMode`, which is what carries the
+    // production lockdown ('live' → 'shadow' in prod) and the never-boot-fail
+    // fallback. A change that swapped this for a plain default would silently
+    // drop the prod lockdown, and THAT is the regression worth catching.
     expect(
-      /graphManagementMode:\s*createEnvEnforcedGraphManagementMode\(\s*"off"\s*,\s*"CEE_GRAPH_MANAGEMENT_MODE"\s*,?\s*\)/.test(
+      /graphManagementMode:\s*createEnvEnforcedGraphManagementMode\(\s*"(off|shadow|live)"\s*,\s*"CEE_GRAPH_MANAGEMENT_MODE"\s*,?\s*\)/.test(
         configSrc,
       ),
-      'CEE_GRAPH_MANAGEMENT_MODE must remain env-enforced default-off (dark-by-default invariant)',
+      'CEE_GRAPH_MANAGEMENT_MODE must stay env-enforced (the production lockdown + never-boot-fail fallback live in createEnvEnforcedGraphManagementMode)',
     ).toBe(true);
   });
 
