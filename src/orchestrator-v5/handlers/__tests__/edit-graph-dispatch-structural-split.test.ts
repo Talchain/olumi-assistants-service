@@ -48,6 +48,14 @@ import { commitDirectAnswer } from '../../commit.js';
 import { getAdapter } from '../../../adapters/llm/router.js';
 import { loadPersistedGraphStrict } from '../../build-turn-context.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import {
+  STRUCTURAL_EDIT_TOO_LARGE_TEXT,
+  STRUCTURAL_EDIT_TOO_LARGE_ACTIONS,
+} from '../structural-edit-split-disclosure.js';
+import {
+  FORBIDDEN_USER_FACING_PHRASES,
+  SUCCESS_CLAIM_PATTERNS,
+} from '../../compose/forbidden-user-facing-phrases.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -237,5 +245,93 @@ describe('⭐ POSITIVE CONTROL (trap 13) — a normal request submits the WHOLE 
     expect(opKeys(submitted[0]!)).toEqual(
       opKeys(PROBE_D_OPERATIONS as { op: string; path: string }[]),
     );
+  });
+});
+
+/**
+ * ⭐⭐ THE CLAIM/SUPPRESS PATH — the limb an external review found.
+ *
+ * "The tool can request splitting, but the failed operation can CLAIM THE TURN
+ * and SUPPRESS FALLBACK." Derived at the bytes and it is real, though not where
+ * the entry gate is: `rulebookClaimedTurn` correctly returns false for a
+ * rejection, so the tool DOES get the same turn. The suppression is one step
+ * later — on a cap rejection the tool returned `null`, which means "the
+ * rulebook's own answer stands", and the rulebook's answer is the copy that
+ * could not explain itself ("limit: 4 node ops, 8 edge ops"). The failed
+ * rulebook operation supplied the final text and the tool's honest reason never
+ * reached the user.
+ *
+ * Splitting removes the dominant instance. This pins the residue: when a
+ * request genuinely cannot be split, the turn is answered ACTIONABLY and the
+ * rulebook's dead-end copy is NOT what ships.
+ */
+describe('⭐⭐ a cap refusal is ACTIONABLE and does not fall back to the rulebook`s dead end', () => {
+  /** Over the pipeline operation cap (15) — the one guard that still refuses. */
+  const UNSPLITTABLE = Array.from({ length: 16 }, (_, i) => ({
+    op: 'add_node',
+    path: `fac_x${i}`,
+    value: { id: `fac_x${i}`, kind: 'factor', label: `X${i}` },
+  }));
+
+  const RULEBOOK_DEAD_END_COPY =
+    'I tried to make that change, but it would require 3 node operations and 12 edge operations';
+
+  beforeEach(() => {
+    (getAdapter as MockedFunction<typeof getAdapter>)
+      .mockReturnValue(adapterComposing(UNSPLITTABLE) as never);
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValueOnce({
+      blocks: [],
+      assistantText: RULEBOOK_DEAD_END_COPY,
+      latencyMs: 10,
+      appliedGraph: null,
+      wasRejected: true,
+    });
+  });
+
+  it('nothing is submitted to the applier — the refusal is a refusal', async () => {
+    await runTurn();
+    expect(preComposedCalls()).toHaveLength(0);
+  });
+
+  it('the rulebook`s limit-naming copy is NOT what the user is left with', async () => {
+    const result = await runTurn();
+    expect(result.response.assistant_text).not.toContain(RULEBOOK_DEAD_END_COPY);
+    expect(result.response.assistant_text).not.toContain('node operations');
+  });
+
+  it('the user is told what happened and given a smaller ask that will work', async () => {
+    const result = await runTurn();
+    const text = result.response.assistant_text ?? '';
+    expect(text).toContain('bigger change than I can put to you in one go');
+    expect(text).toContain('single option');
+    const labels = (result.response.suggested_actions ?? []).map((a) => a.label);
+    expect(labels).toContain('Do one option at a time');
+  });
+});
+
+describe('the honest refusal copy is swept by the estate`s own guards', () => {
+  const surfaces = [
+    STRUCTURAL_EDIT_TOO_LARGE_TEXT,
+    ...STRUCTURAL_EDIT_TOO_LARGE_ACTIONS.flatMap((a) => [a.label, a.prompt]),
+  ];
+
+  it('no denial-of-change phrase, no success claim, no em dash', () => {
+    for (const text of surfaces) {
+      for (const re of FORBIDDEN_USER_FACING_PHRASES) {
+        expect(re.test(text), `${re} matched: ${text}`).toBe(false);
+      }
+      for (const re of SUCCESS_CLAIM_PATTERNS) {
+        expect(re.test(text), `${re} matched: ${text}`).toBe(false);
+      }
+      expect(text).not.toContain('—');
+    }
+  });
+
+  it('names no cap, no operation token and no internal id', () => {
+    for (const text of surfaces) {
+      for (const token of ['add_node', 'add_edge', 'envelope', 'PROPOSAL_CAP', 'batch']) {
+        expect(text.toLowerCase()).not.toContain(token.toLowerCase());
+      }
+    }
   });
 });

@@ -37,6 +37,44 @@
 
 import type { ChangesetDescription } from './describe-changeset.js';
 
+/**
+ * ── THE HONEST REFUSAL, for a request no partition can rescue ──────────────
+ *
+ * Reached when the batch is over the pipeline's operation count, when a single
+ * operation is larger than one reviewable change, or when the partition would
+ * need more parts than may be offered. It replaces the rulebook's dead-end
+ * copy, which named a limit ("limit: 4 node ops, 8 edge ops") and no next step.
+ *
+ * Three properties, each deliberate:
+ *  · it says WHAT happened, in the user's terms, without a number they have no
+ *    way to act on;
+ *  · it names a SMALLER ASK that will work, rather than telling the user to
+ *    "break this into smaller steps" and leaving the decomposition to them;
+ *  · it never claims a change was made and never denies that changes exist —
+ *    both swept by the estate's own guards in the tests.
+ */
+export const STRUCTURAL_EDIT_TOO_LARGE_TEXT =
+  'That is a bigger change than I can put to you in one go, even in steps. ' +
+  'Ask me for one part of it and I will propose that: the changes for a ' +
+  'single option, for example, or just the new factors without the links.';
+
+export const STRUCTURAL_EDIT_TOO_LARGE_ACTIONS: readonly {
+  readonly label: string;
+  readonly prompt: string;
+  readonly role: 'facilitator' | 'challenger';
+}[] = [
+  {
+    role: 'facilitator',
+    label: 'Do one option at a time',
+    prompt: 'Make that change for one option first, then we can do the others.',
+  },
+  {
+    role: 'facilitator',
+    label: 'Just the new factors',
+    prompt: 'Add the new factors first, without linking them up yet.',
+  },
+];
+
 /** The chip that carries the next step. Shaped like the boundary `Action`. */
 export interface StructuralEditNextStepAction {
   readonly id: string;

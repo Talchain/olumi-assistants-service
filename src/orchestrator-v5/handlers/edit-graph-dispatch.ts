@@ -129,7 +129,11 @@ import {
   type PatchOperationLike,
 } from '../routing/edit-part-decomposition.js';
 import { clampLabel, describeChangeset, type ChangesetOpLike } from './describe-changeset.js';
-import { buildStructuralEditSplitDisclosure } from './structural-edit-split-disclosure.js';
+import {
+  buildStructuralEditSplitDisclosure,
+  STRUCTURAL_EDIT_TOO_LARGE_TEXT,
+  STRUCTURAL_EDIT_TOO_LARGE_ACTIONS,
+} from './structural-edit-split-disclosure.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import {
@@ -805,9 +809,42 @@ async function tryStructuralEditTool(input: {
     scenarioId: payload.scenario_id,
   });
   if (outcome.status !== 'composed') {
-    // Rejected (ungrounded batch) or unavailable (no call, no tool block).
-    // Either way the rulebook's own answer stands — REJECT, NEVER REPAIR.
     emitEntry(outcome.status === 'rejected' ? `rejected_${outcome.code}` : outcome.reason);
+
+    // ── ⚠ THE CLAIM/SUPPRESS PATH, AND WHY A CAP REFUSAL MUST NOT USE IT ────
+    //
+    // Returning `null` here means "the rulebook's own answer stands". For a
+    // GROUNDING failure that is right: the rulebook's clarify copy is a better
+    // answer than anything this path could say, and the tool's reason is
+    // model-facing prose that quotes ids.
+    //
+    // For a CAP refusal it is wrong, and it is the measured dead end. The
+    // sequence is: the rulebook composes an over-cap batch, its own budget
+    // check rejects it, and `buildRejectionResult` returns copy that names a
+    // limit and no next step ("limit: 4 node ops, 8 edge ops"). The tool then
+    // engages, reaches the same conclusion for the same reason, and returns
+    // null — so the FAILED RULEBOOK OPERATION supplies the final answer and
+    // the fallback is suppressed. The user sees a number they cannot act on.
+    // An external review reproduced this independently: zero usable proposals
+    // across models and sessions, with `BATCH_CAP_EXCEEDED` on the wire.
+    //
+    // Splitting removes the dominant instance (the envelope cap now
+    // partitions), but a genuinely unsplittable request still reaches here.
+    // When it does, the turn is answered HONESTLY AND ACTIONABLY rather than
+    // handed back to the copy that could not explain itself.
+    if (outcome.status === 'rejected' && outcome.code === 'BATCH_CAP_EXCEEDED') {
+      return {
+        editResult: {
+          blocks: [],
+          assistantText: STRUCTURAL_EDIT_TOO_LARGE_TEXT,
+          latencyMs: 0,
+          appliedGraph: null,
+          wasRejected: true,
+          suggestedActions: STRUCTURAL_EDIT_TOO_LARGE_ACTIONS.map((a) => ({ ...a })),
+        },
+        split: null,
+      };
+    }
     return null;
   }
   emitEntry(outcome.parts.length > 1 ? 'engaged_split' : 'engaged');
