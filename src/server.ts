@@ -27,6 +27,7 @@ import ceeTeamPerspectivesRouteV1 from "./routes/assist.v1.team-perspectives.js"
 import ceeDecisionReviewExampleRouteV1 from "./routes/assist.v1.decision-review-example.js";
 import ceeGraphReadinessRouteV1 from "./routes/assist.v1.graph-readiness.js";
 import ceeScenarioGraphRouteV1 from "./routes/assist.v1.scenario-graph.js";
+import ceeScenarioGraphRegisterRouteV1 from "./routes/assist.v1.scenario-graph-register.js";
 import ceeElicitBeliefRouteV1 from "./routes/assist.v1.elicit-belief.js";
 import ceeUtilityWeightRouteV1 from "./routes/assist.v1.suggest-utility-weights.js";
 import ceeRiskToleranceRouteV1 from "./routes/assist.v1.elicit-risk-tolerance.js";
@@ -1163,6 +1164,7 @@ if (env.CEE_DIAGNOSTICS_ENABLED === "true") {
   await ceeTeamPerspectivesRouteV1(app);
   await ceeGraphReadinessRouteV1(app);
   await ceeScenarioGraphRouteV1(app);
+  await ceeScenarioGraphRegisterRouteV1(app);
   await ceeElicitBeliefRouteV1(app);
   await ceeUtilityWeightRouteV1(app);
   await ceeRiskToleranceRouteV1(app);

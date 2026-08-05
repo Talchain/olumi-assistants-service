@@ -80,6 +80,15 @@ export const RATE_BUCKET_REGISTRY: Readonly<Record<string, RateBucketTier>> = {
   // tier. Its bucket is keyed on the CLIENT, not the key id; see the route.
   CEE_SCENARIO_GRAPH_RATE_LIMIT_RPM: "read",
 
+  // --- coach: the whole-graph WRITE seam ---
+  // Scenario-addressed graph REGISTRATION (ROADMAP 2.467): one ownership
+  // pre-flight, one base read, one atomic RPC that replaces `scenarios.graph`.
+  // No LLM — but deliberately NOT the `read` tier, because `read` fails OPEN on
+  // limiter error and a whole-graph replacement must not be waved through when
+  // the limiter is blind. `coach` fails CLOSED, which is the posture a write
+  // needs. Its bucket is keyed on the CLIENT, not the key id; see the route.
+  CEE_SCENARIO_GRAPH_REGISTER_RATE_LIMIT_RPM: "coach",
+
   // --- coach: medium coaching / analysis engines ---
   // RESERVED — no src reference yet, deliberately. The drift test reads this
   // marker (it is machine-read, not decoration: see the reverse assertion in
