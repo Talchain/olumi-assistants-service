@@ -63,7 +63,7 @@ import {
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
-import { canonicaliseValueOps, batchFullyLanded } from "../canonicalise-value-ops.js";
+import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance } from "../canonicalise-value-ops.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -2526,7 +2526,15 @@ export async function handleEditGraph(
     // `__tests__/persisted-false-success-2026-07-23.test.ts`.
     //
     // Rollback is a code revert, not an env flip (no dark launches).
-    const opsToApply: PatchOperation[] = canonicaliseValueOps(operations, context.graph).operations;
+    //
+    // 2.396(b): the canonicalised value ops then earn the USER stamp
+    // (observed_state.source + node provenance) — a chat-set value is the
+    // user's, and before this every one rendered as "Olumi estimate". Stamped
+    // INTO the op so the write survives apply → re-parse → the landed-op
+    // postcondition identically on both sides (see stampUserEditProvenance).
+    const opsToApply: PatchOperation[] = stampUserEditProvenance(
+      canonicaliseValueOps(operations, context.graph).operations,
+    );
 
     let candidateGraph: GraphV3T | undefined;
     try {

@@ -31,6 +31,7 @@ import { SetFactorValueHandlerFactSchema } from '@talchain/schemas/orchestrator'
 import type { SetFactorValueHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
+import { USER_EDIT_SOURCE } from '../../../orchestrator/canonicalise-value-ops.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { synthesiseDisplayValue } from '../../../cee/factor-extraction/display-value.js';
@@ -412,6 +413,12 @@ export function createSetFactorValueHandler(): HandlerFn {
         raw_value: normalised.raw_value,
         ...(after.unit !== undefined ? { unit: after.unit } : {}),
         ...(after.cap !== undefined ? { cap: after.cap } : {}),
+        // 2.396(b) — the pill-earning stamp. The provenance stamp below is
+        // CLOBBERED by the V3 response transform (schema-v3.ts recomputes
+        // node.provenance from extractionType), so `observed_state.source` is
+        // the carrier that actually reaches the UI's isReviewedByUser rungs.
+        // Overrides any producer stamp deliberately: this write IS the user's.
+        source: USER_EDIT_SOURCE,
       };
       node.observed_state = merged;
 

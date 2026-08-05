@@ -197,11 +197,14 @@ describe('R1 — a held mixed batch whose value op is data-spelled APPLIES on co
     expect((fac.observed_state as Record<string, unknown>).value).toBe(0.5);
 
     // …and the merge preserved the siblings a wholesale replace would wipe.
+    // (`source: 'user_override'` is the 2.396(b) user stamp — a confirmed
+    // value write is the user's; see gm-held-provenance-stamp.test.ts.)
     expect(fac.observed_state).toEqual({
       value: 0.5,
       unit: 'index',
       raw_value: 10,
       cap: 100,
+      source: 'user_override',
     });
 
     // …and the structural siblings landed in the SAME confirm (whole batch).
@@ -325,7 +328,7 @@ describe('R1 — blast radius: the currently-working cases are unchanged', () =>
     if (outcome.status !== 'executed') return;
     expect(
       nodeOf(outcome.mutatedGraph as Record<string, unknown>, 'fac_setup').observed_state,
-    ).toEqual({ value: 0.5 });
+    ).toEqual({ value: 0.5, source: 'user_override' }); // 2.396(b) user stamp
   });
 
   it('pure-structural hold: the canonicaliser is the identity', () => {

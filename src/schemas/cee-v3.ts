@@ -56,8 +56,36 @@ export const ObservedStateV3 = z.object({
   baseline: z.number().optional(),
   /** Unit of measurement (e.g., 'GBP', 'USD', 'percent', 'count', 'months') */
   unit: z.string().optional(),
-  /** How the value was determined */
-  source: z.enum(["brief_extraction", "cee_inference"]).optional(),
+  /** How the value was determined.
+   *
+   *  PRODUCER members: `brief_extraction` / `cee_inference` (CEE's own
+   *  extraction/inference writers).
+   *
+   *  USER-OWNED members (2.396(b), P4 transport 2026-08-05): the literals the
+   *  estate's user-edit writers actually stamp — CEE's own chat-edit seams
+   *  write `user_override` (stampUserEditProvenance / set_factor_value), and
+   *  the UI's edit surfaces write `user_override` / `user_confirmed` /
+   *  `user` (+ `user_assumption` / `user_edited` recognised forward-compat by
+   *  its REVIEWED_SOURCES predicate, DecisionGuideAI isReviewedByUser.ts —
+   *  the acknowledged cross-repo source of this list). Before this widening
+   *  the enum was structurally incapable of carrying ANY user stamp, so every
+   *  chat-set value rendered as "Olumi estimate", and a UI-stamped stored
+   *  graph FAILED this parse at every edit seam.
+   *
+   *  The pill-earning wire literal is `user_override` (witnessed runE2,
+   *  journey-witness-final-2026-08-04). The shared contract types this field
+   *  as a free string (`ObservedStateSchema.source: z.string()`), and ISL as
+   *  `Optional[str]` — this enum is the narrowest validator in the chain, so
+   *  it is the one that must name every legitimate writer. */
+  source: z.enum([
+    "brief_extraction",
+    "cee_inference",
+    "user_override",
+    "user_confirmed",
+    "user_assumption",
+    "user",
+    "user_edited",
+  ]).optional(),
   /** Raw value before normalization (preserves original extraction) */
   raw_value: z.number().optional(),
   /** Upper bound/cap for the value (e.g., "up to £500k" → cap is 500000) */

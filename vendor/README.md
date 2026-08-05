@@ -7,6 +7,31 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
+### `talchain-schemas-0.34.0.tgz`
+
+> **⚠ BRANCH-PACKED, PRE-PUBLISH — NOT (YET) THE REGISTRY ARTIFACT** (same
+> trade as the 0.32.0 section below, same three-repo-train reason: no registry
+> 0.34.0 exists until olumi-schemas PR #33 merges, and merge order is
+> schemas → CEE → UI). Packed with `npm pack` from olumi-schemas branch
+> `p4/transport-events-0.34` at `b883869` (the 0.34.0 version-bump PR; full
+> gate green, 43 files / 1446 tests).
+>
+> sha256 `c3db4b4e5e4458cbd11c9b924c7e529ccd0f405b2967844e30550aecf9acc559`
+> — must be BYTE-IDENTICAL to DGAI's vendored copy when the UI leg lands
+> (both legs copy the same pack output).
+>
+> **FOR THE MERGING ORCHESTRATOR:** the schemas PR auto-publishes 0.34.0 on
+> merge; optionally re-vendor from the registry afterwards and update BOTH
+> consumers' tarballs + sidecars together. What must never happen is DGAI and
+> CEE holding DIFFERENT bytes under one version string.
+
+**What CEE adopts here (P4 transport):** SystemEventSchema members
+`edge_adjudication` + `prior_range_edit`; HandlerFactSchema members
+`feedback` / `edge_adjudication` / `prior_range_edit` (the receipts this
+repo's system-event dispatch now persists instead of committing empty acks).
+Additive; every pre-0.34.0 payload parses byte-identically.
+
+
 ### `talchain-schemas-0.33.0.tgz`
 
 > **⚠ SOURCE-PACKED FROM MAIN AT THE MERGE SHA — NOT (YET) COMPARED AGAINST

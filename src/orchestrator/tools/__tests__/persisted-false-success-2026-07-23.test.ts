@@ -185,7 +185,12 @@ describe('persisted false success 2026-07-23 — "Change the monthly cashflow fa
 
     const observed = nodeOf(result.appliedGraph).observed_state as Record<string, unknown>;
     expect(observed.value).toBe(0.42);
-    expect(observed.source).toBe('cee_inference');
+    // 2.396(b) (2026-08-05): `source` is no longer a preserved sibling on a
+    // VALUE write — it is deliberately RE-STAMPED to the user literal, because
+    // this write is the user's ("Change the monthly cashflow factor to 0.42")
+    // and leaving the producer stamp was exactly the "Olumi estimate" mislabel.
+    // The remaining siblings the op never mentioned are still preserved.
+    expect(observed.source).toBe('user_override');
     expect(observed.factor_type).toBe('cost');
     expect(observed.extractionType).toBe('inferred');
     expect(observed.uncertainty_drivers).toEqual(['Not provided']);
@@ -207,7 +212,10 @@ describe('persisted false success 2026-07-23 — "Change the monthly cashflow fa
 
     const node = nodeOf(result.appliedGraph);
     expect(node.category).toBe('controllable');
-    expect(node.provenance).toBe('ai_inferred');
+    // 2.396(b) (2026-08-05): `provenance` is re-stamped `user_set` on a
+    // chat-set VALUE write (the set_factor_value precedent) — it is no longer
+    // a preserved sibling on this op shape. `category` / `label` still are.
+    expect(node.provenance).toBe('user_set');
     expect(node.label).toBe('Monthly Cash Flow Burden');
   });
 });
