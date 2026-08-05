@@ -169,6 +169,206 @@ describe('UNKNOWN ID ⇒ THE WHOLE BATCH IS REJECTED (cite-or-reject, applied to
   });
 });
 
+describe('THE ID CAN HIDE IN `value` — every entity reference is grounded, not just `path`', () => {
+  /**
+   * ⚠ MEASURED DEFECT, reproduced at three rungs before this guard existed
+   * (adversarial review of #823, and re-measured first-hand in this lane):
+   *
+   *   validator : 5/5 smuggle shapes returned ok:true
+   *   gate,live : {"governing":"proceed","blockApply":false} — no hold, no chip
+   *   end-to-end: update_node path='option_1'
+   *               value={interventions:{ghost_factor:{value:0.9}}}
+   *               -> wasRejected FALSE, and option_1.interventions became
+   *                  {"ghost_factor":…} — the REAL intervention on factor_1 was
+   *                  REPLACED, not merged.
+   *
+   * The validator read `path` and (for add_edge) `value.from`/`value.to`, and
+   * copied `value` through verbatim — while the tool advert declares `value` as
+   * `additionalProperties: true`. So the answer to "what would have to be true
+   * for these tests to pass while the property fails?" was: THE ID IS IN A
+   * FIELD THE VALIDATOR DOES NOT READ.
+   *
+   * This is the 2.461 fabrication class inside the tool built to kill it, and
+   * it sits on the headline scenario's most natural composition — "give each
+   * option its own driver" is naturally an option `update_node` carrying an
+   * `interventions` map KEYED BY FACTOR ID, which was the one key family
+   * nothing checked.
+   */
+  it('option interventions keyed by a GHOST factor id reject the batch', () => {
+    const result = validateProposedStructuralEdit(
+      {
+        operations: [
+          {
+            op: 'update_node',
+            path: 'o-a',
+            target_label: 'Plan A',
+            value: { interventions: { ghost_factor: { value: 0.9 } } },
+          },
+        ],
+      },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.code).toBe('UNKNOWN_ENTITY_ID');
+    expect(result.reason).toContain('ghost_factor');
+  });
+
+  it('the SAME op with a REAL factor id passes — the guard rejects the ghost, not the shape', () => {
+    // The discriminating half. Without it, a guard that simply banned
+    // `interventions` would pass every test above while destroying the
+    // capability (configuring an option IS writing an interventions map).
+    const result = validateProposedStructuralEdit(
+      {
+        operations: [
+          {
+            op: 'update_node',
+            path: 'o-a',
+            target_label: 'Plan A',
+            value: { interventions: { 'f-spend': { value: 0.9 } } },
+          },
+        ],
+      },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it.each([
+    ['observed_state.interventions', { observed_state: { interventions: { ghost_factor: { value: 0.9 } } } }],
+    ['data.interventions', { data: { interventions: { ghost_factor: { value: 0.9 } } } }],
+  ])('a ghost id nested under %s rejects too — the scan is by KEY NAME at any depth', (_n, value) => {
+    // Not a hand-listed set of paths: field-safety sanctions the intervention
+    // subtree at `interventions`, `observed_state/interventions` AND
+    // `data/interventions/<factor_id>`, so a path list would be a mirror of
+    // that list and would drift from it (trap 12).
+    const result = validateProposedStructuralEdit(
+      { operations: [{ op: 'update_node', path: 'f-spend', target_label: 'Marketing spend', value }] },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.code).toBe('UNKNOWN_ENTITY_ID');
+    expect(result.reason).toContain('ghost_factor');
+  });
+
+  it('an intervention keyed by a factor CREATED EARLIER IN THE BATCH is fine', () => {
+    const result = validateProposedStructuralEdit(
+      {
+        operations: [
+          { op: 'add_node', path: 'f-new', value: { id: 'f-new', kind: 'factor', label: 'New driver' } },
+          {
+            op: 'update_node',
+            path: 'o-a',
+            target_label: 'Plan A',
+            value: { interventions: { 'f-new': { value: 0.5 } } },
+          },
+        ],
+      },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('an intervention keyed by a factor the batch REMOVES is REMOVED_ID_REUSED, by name', () => {
+    const result = validateProposedStructuralEdit(
+      {
+        operations: [
+          { op: 'remove_node', path: 'f-reach', target_label: 'Audience reach' },
+          {
+            op: 'update_node',
+            path: 'o-a',
+            target_label: 'Plan A',
+            value: { interventions: { 'f-reach': { value: 0.5 } } },
+          },
+        ],
+      },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.code).toBe('REMOVED_ID_REUSED');
+  });
+
+  it('add_node whose `value.id` disagrees with `path` is an identity CONFLICT, named as one', () => {
+    // Two identity claims in one op. The producer treats `path` as
+    // authoritative and the applier may not; either way the model must be told
+    // precisely which field is wrong, or it will keep re-emitting the pair.
+    const result = validateProposedStructuralEdit(
+      {
+        operations: [
+          { op: 'add_node', path: 'f-new', value: { id: 'ghost_node', kind: 'factor', label: 'New' } },
+        ],
+      },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.code).toBe('VALUE_IDENTITY_CONFLICT');
+    expect(result.reason).toContain('ghost_node');
+  });
+
+  it('add_node whose `value.id` AGREES with `path` is accepted — restating identity is not an error', () => {
+    const result = validateProposedStructuralEdit(
+      {
+        operations: [
+          { op: 'add_node', path: 'f-new', value: { id: 'f-new', kind: 'factor', label: 'New' } },
+        ],
+      },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('update_edge rewriting `value.from`/`value.to` to ghosts is an identity CONFLICT', () => {
+    // Edge identity is not updatable — the producer skips from/to on
+    // update_edge, so these were inert downstream. Rejected anyway:
+    // narrower-never-wider, and an inert smuggle today is a live one the day
+    // the producer changes.
+    const result = validateProposedStructuralEdit(
+      {
+        operations: [
+          { op: 'update_edge', path: 'f-spend::g-profit', value: { from: 'ghost_a', to: 'ghost_b', exists_probability: 0.5 } },
+        ],
+      },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.code).toBe('VALUE_IDENTITY_CONFLICT');
+  });
+
+  it('update_node carrying an `id` that disagrees with `path` is an identity CONFLICT', () => {
+    const result = validateProposedStructuralEdit(
+      {
+        operations: [
+          { op: 'update_node', path: 'f-spend', target_label: 'Marketing spend', value: { id: 'g-profit', description: 'x' } },
+        ],
+      },
+      grounding(),
+      OPTS,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.code).toBe('VALUE_IDENTITY_CONFLICT');
+  });
+
+  it('the tool advert TELLS the model that ids inside `value` are checked', () => {
+    // A guard the model is not told about is a guard it will trip repeatedly,
+    // and every trip costs the user the whole batch.
+    const tool = buildProposeStructuralEditTool(grounding());
+    expect(tool.description).toContain('interventions');
+  });
+});
+
 describe('EXPLICIT CREATES are the only ungrounded ids allowed', () => {
   it('add_node introduces an id later ops may reference — the add-and-wire batch composes', () => {
     const result = validateProposedStructuralEdit(

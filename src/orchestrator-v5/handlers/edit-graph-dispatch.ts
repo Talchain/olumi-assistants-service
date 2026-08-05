@@ -110,7 +110,10 @@ import {
 // ROADMAP 2.474 — the coach's structural editing tool: contract, entry
 // decision, transport. Three modules on purpose (see their headers): the
 // rules are provable without an LLM, the transport without a graph.
-import { decideStructuralEditEntry } from '../tools/structural-edit-entry.js';
+import {
+  decideStructuralEditEntry,
+  holdSpineActiveForMode,
+} from '../tools/structural-edit-entry.js';
 import { buildStructuralEditGrounding } from '../tools/propose-structural-edit.js';
 import { composeStructuralEdit } from '../tools/compose-structural-edit.js';
 import {
@@ -695,10 +698,22 @@ async function tryStructuralEditTool(input: {
   };
 
   // Cheap gates first — never pay a Supabase read to discover the rulebook
-  // already claimed the turn.
+  // already claimed the turn, or that the hold spine is down.
   const preGate = decideStructuralEditEntry({
-    message: payload.message,
     rulebook: { wasRejected: editResult.wasRejected, operations: editResult.operations },
+    // ⚠ THE KILL SWITCH. Every hold this tool's safety story rests on exists
+    // only in 'live' — in 'shadow'/'off' the gate returns blockApply:false by
+    // construction, so engaging here would strip the hold and leave an
+    // LLM-composed structural batch AUTO-APPLYING. Turning the mode down must
+    // disable the capability, never de-fang its guard. (This also keeps the
+    // tool inert in production, where 'live' downgrades to 'shadow'.)
+    holdSpineActive: holdSpineActiveForMode(config.features.graphManagementMode),
+    // INHERITED, never recomputed: this function is reachable only through
+    // route-v2's `editIntentDetected` gate (dispatchEditGraph has exactly one
+    // call site, and that gate is its precondition). A second local judgement
+    // here could only ever subtract from it — and did, under-triggering on
+    // configure-option turns, which carry no edit verb at all.
+    editIntentDetectedByRulebook: true,
     // Provisionally true; the real answer needs the strict read below, which
     // is only worth doing once the cheap gates pass.
     groundingAvailable: true,

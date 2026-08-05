@@ -15,26 +15,66 @@
  * the NEXT turn is not a second path at all — it is the dead-end with an extra
  * step, because the user has to notice the failure and rephrase first.
  *
- * ── WHY THE PREDICATE IS SEPARATE FROM THE DISPATCHER ──────────────────────
- * The dispatcher is 3,000 lines with a commit region; this predicate is the
- * decision, and it is the thing that must be pinned by tests. Keeping it here,
- * pure, means the entry rule can be proved without standing up a turn.
+ * ── ⚠ "EDIT-SHAPED" IS INHERITED, NEVER RE-DERIVED ─────────────────────────
+ * This module used to answer "is this edit-shaped?" itself, from two of
+ * route-v2's regexes, and claimed to combine them "exactly as route-v2 combines
+ * them". THAT CLAIM WAS FALSE AT THE BYTES: route-v2 combines THREE detectors
+ * (`editVerbCandidate || configureOptionIntent || structuralRestructureIntent`)
+ * under four shared suppressors, with the negative regex ANDed onto all three.
+ * The divergence was not cosmetic — it UNDER-TRIGGERED on exactly the class
+ * this row exists to rescue: `configureOptionIntent` is an edit-verb-FREE
+ * candidate, so a configure-option turn reached dispatch, returned zero ops,
+ * and was then refused entry with `not_edit_shaped` by a predicate that could
+ * not see why it had been dispatched.
  *
- * ── EDIT-SHAPED: DERIVED, NOT RE-STATED (trap 12) ──────────────────────────
- * "Edit-shaped" reuses the product's OWN regexes — the same two constants
- * route-v2 gates dispatch on. A second copy of that judgement here would drift
- * from the rulebook's, and the two would disagree about which turns are edits.
- * Note the direction the negative regex matters in: it names META-questions
- * ("explain this", "compare options"). Those are NOT edit-shaped, so the tool
- * must not engage on them either — a second path that mutates the graph on a
- * meta-question is worse than the dead-end it replaces.
+ * The re-derivation was also structurally pointless: `dispatchEditGraph` has
+ * ONE call site, gated on route-v2's `editIntentDetected`, which is strictly
+ * stronger than anything this module could compute. So the second judgement
+ * could only ever SUBTRACT — a hand-maintained mirror of a decision that had
+ * already been made, in a module whose own header warns against mirrors.
+ *
+ * The answer is now an INPUT (`editIntentDetectedByRulebook`), supplied by the
+ * caller that already holds it. It stays an explicit field rather than an
+ * assumption because the second leg of this train (the V5 router path) enters
+ * from somewhere route-v2's gate does not cover, and must state its own answer
+ * deliberately rather than inherit this one by accident.
+ *
+ * ── ⚠ THE KILL SWITCH MUST NOT MAKE THINGS WORSE ───────────────────────────
+ * The tool's entire safety story is the referee's hold: structural ops are held
+ * for a confirm chip and nothing moves until the user says so. That routing
+ * exists ONLY while `CEE_GRAPH_MANAGEMENT_MODE` resolves to 'live' — in
+ * 'shadow' and 'off' the gate returns `blockApply: false` BY CONSTRUCTION.
+ *
+ * So without `holdSpineActive`, turning the mode DOWN would not have disabled
+ * this tool; it would have removed its hold and left it AUTO-APPLYING
+ * LLM-composed structural edits. A kill switch that makes the thing more
+ * dangerous is worse than no kill switch. The tool therefore engages only where
+ * the hold spine is live, which also makes the mode a real off-switch for the
+ * capability — and keeps it inert in production, where 'live' is downgraded to
+ * 'shadow' by the standing lockdown.
+ *
+ * This is not a new flag (doctrine: no env-var gates): it binds the tool to the
+ * EXISTING mode that carries its guarantee, and that mode's repo default is
+ * 'live', so the capability ships ON.
  */
 
-import {
-  EDIT_GRAPH_NEGATIVE_REGEX,
-  EDIT_GRAPH_POSITIVE_REGEX,
-} from '../../orchestrator/routing/edit-graph-intent-regex.js';
-import { detectStructuralRestructureIntent } from '../routing/structural-restructure-intent.js';
+/**
+ * Does the referee's hold routing exist under this mode?
+ *
+ * ONLY 'live' routes verdicts. 'shadow' evaluates and emits telemetry but
+ * returns `blockApply: false` by construction (the A3 CAS-observe pattern),
+ * and 'off' does not evaluate at all — so under either, a structural batch
+ * reaching the gate is APPLIED, not held.
+ *
+ * This lives here, next to the decision that consumes it, rather than as an
+ * inline `=== 'live'` at the dispatch call site: the call site should read a
+ * config value and pass it, not carry the judgement about what that value
+ * MEANS for this tool's safety. An inline comparison there is invisible to
+ * every test in this module and dies silently to a careless edit.
+ */
+export function holdSpineActiveForMode(mode: 'off' | 'shadow' | 'live'): boolean {
+  return mode === 'live';
+}
 
 /** The rulebook outcome the entry decision reads. */
 export interface RulebookOutcome {
@@ -64,37 +104,23 @@ export function rulebookClaimedTurn(outcome: RulebookOutcome): boolean {
   return (outcome.operations?.length ?? 0) > 0;
 }
 
-/**
- * Is this utterance edit-shaped? DERIVED from the rulebook's own two detectors,
- * combined exactly as route-v2 combines them for `editIntentDetected`: an edit
- * verb (vetoed by the meta-question regex), OR a structural-restructure intent.
- *
- * ⚠ CORRECTED PREMISE, measured at this tip. The design brief's headline
- * scenario — "give each option its own driver" — carries NO verb from
- * `EDIT_GRAPH_POSITIVE_REGEX` (no add/remove/change/update/set/…). Read as a
- * regex-only judgement, the tool's own entry gate would have refused the very
- * sentence it exists to serve. The rulebook already knew that, which is why
- * `detectStructuralRestructureIntent` exists as a SEPARATE edit-lane candidate;
- * deriving from both is what keeps the two judgements the same judgement rather
- * than two that agree by coincidence until one is edited.
- *
- * Note the asymmetry, which is the rulebook's and not an oversight here: the
- * negative regex vetoes the VERB branch only. The restructure detector carries
- * its own interrogative guard (a leading question word or a trailing question
- * mark is NO_MATCH), so a meta-question cannot enter through it either.
- */
-export function isEditShapedUtterance(message: string): boolean {
-  if (typeof message !== 'string' || message.trim().length === 0) return false;
-  if (detectStructuralRestructureIntent(message).matched) return true;
-  if (EDIT_GRAPH_NEGATIVE_REGEX.test(message)) return false;
-  return EDIT_GRAPH_POSITIVE_REGEX.test(message);
-}
-
 export interface StructuralEditEntryInput {
-  /** The user's raw message for this turn. */
-  readonly message: string;
   /** The rulebook's result, read through {@link rulebookClaimedTurn}. */
   readonly rulebook: RulebookOutcome;
+  /**
+   * The rulebook's OWN edit-intent verdict for this turn, inherited from the
+   * caller — never recomputed here (see the header). In the dispatch path this
+   * is route-v2's `editIntentDetected`, which is the precondition of the only
+   * call site.
+   */
+  readonly editIntentDetectedByRulebook: boolean;
+  /**
+   * True iff the referee's hold routing is live for this turn. False means the
+   * hold this tool's safety story depends on would not exist, so the tool must
+   * not run at all (see the header — a kill switch that removes the hold and
+   * leaves the tool applying is worse than none).
+   */
+  readonly holdSpineActive: boolean;
   /**
    * True when a grounding table could be built from the STRICT persisted graph
    * (A5a). False when it could not — and then the tool does NOT engage: an
@@ -115,6 +141,7 @@ export type StructuralEditEntryDecision =
   | {
       readonly engage: false;
       readonly reason:
+        | 'hold_spine_inactive'
         | 'rulebook_claimed'
         | 'not_edit_shaped'
         | 'no_grounding'
@@ -122,21 +149,26 @@ export type StructuralEditEntryDecision =
     };
 
 /**
- * The entry decision. Order is deliberate and is itself the contract:
- * re-entry, then the rulebook's claim, then shape, then grounding. A claimed
- * turn is never re-examined for shape (the rulebook already owns it), and an
- * unreadable model never reaches the model at all.
+ * The entry decision. Order is deliberate and is itself the contract: the
+ * safety gate, then re-entry, then the rulebook's claim, then intent, then
+ * grounding. The hold spine comes FIRST because it is the only one of these
+ * whose absence makes running the tool actively UNSAFE rather than merely
+ * pointless; a claimed turn is never re-examined for intent (the rulebook
+ * already owns it); and an unreadable model never reaches the model at all.
  */
 export function decideStructuralEditEntry(
   input: StructuralEditEntryInput,
 ): StructuralEditEntryDecision {
+  if (!input.holdSpineActive) {
+    return { engage: false, reason: 'hold_spine_inactive' };
+  }
   if (input.alreadyEngaged === true) {
     return { engage: false, reason: 'already_engaged' };
   }
   if (rulebookClaimedTurn(input.rulebook)) {
     return { engage: false, reason: 'rulebook_claimed' };
   }
-  if (!isEditShapedUtterance(input.message)) {
+  if (!input.editIntentDetectedByRulebook) {
     return { engage: false, reason: 'not_edit_shaped' };
   }
   if (!input.groundingAvailable) {

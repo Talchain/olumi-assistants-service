@@ -21,9 +21,20 @@
  *
  * ── THE GROUNDING CONTRACT (the 2.461 lesson; A5 hardened) ─────────────────
  * The model must be STRUCTURALLY INCAPABLE of editing a graph it merely
- * imagined. Every op must reference an id that exists in the PERSISTED graph,
- * or be an explicit create. An unknown id HARD-REJECTS THE WHOLE BATCH — the
- * `dsk_claim_id` cite-or-reject pattern applied to edits.
+ * imagined. Every ENTITY REFERENCE an op carries must resolve against the
+ * PERSISTED graph, or be an explicit create. An unresolvable one HARD-REJECTS
+ * THE WHOLE BATCH — the `dsk_claim_id` cite-or-reject pattern applied to edits.
+ *
+ * ⚠ "EVERY ENTITY REFERENCE" IS A CLAIM ABOUT A SPECIFIC SET, and it is stated
+ * here rather than left to be inferred, because an earlier version of this
+ * header made the unqualified claim while the code read `path` ALONE — and an
+ * id in `value` (an `interventions` map keyed by factor id) sailed through,
+ * governed `proceed` with no confirm chip, and replaced a real intervention on
+ * apply. The set is: the op's `path`; its identity restatements `value.id` /
+ * `value.from` / `value.to`; and every key of every `interventions` map at any
+ * depth of `value`. What this module does NOT do is judge whether a field may
+ * be written at all — that is field-safety's job downstream, and this header
+ * must never be read as covering it.
  *
  *   REJECT, NEVER REPAIR. On any failure this module returns NO operations at
  *   all — not a filtered subset. A partially-salvaged batch is a batch the
@@ -44,6 +55,10 @@
  *                               structural collision — pre-caught HERE with a
  *                               precise reason so the model cannot loop on
  *                               generic collision copy).
+ *   G7  VALUE_IDENTITY_CONFLICT — the op names its target twice (`path` and a
+ *                               `value.id`/`from`/`to`) and the two disagree.
+ *                               Two identity claims in one op; the model is
+ *                               told WHICH field is wrong.
  *   G6  LABEL_ID_MISMATCH     — A5c DUAL IDENTITY BINDING. Every op naming an
  *                               EXISTING node carries a `target_label` echo,
  *                               verified against the persisted label for that
@@ -249,6 +264,7 @@ export const STRUCTURAL_EDIT_REJECTION_CODES = [
   'CREATED_ID_COLLIDES',
   'REMOVED_ID_REUSED',
   'LABEL_ID_MISMATCH',
+  'VALUE_IDENTITY_CONFLICT',
 ] as const;
 
 export type StructuralEditRejectionCode = (typeof STRUCTURAL_EDIT_REJECTION_CODES)[number];
@@ -280,6 +296,110 @@ function reject(
   reason: string,
 ): StructuralEditRejection {
   return { ok: false, code, reason };
+}
+
+// ---------------------------------------------------------------------------
+// Entity references hiding inside `value` (the measured smuggle class).
+// ---------------------------------------------------------------------------
+
+/**
+ * ⚠ THE DEFECT THIS EXISTS FOR, measured at three rungs before the guard
+ * existed: the validator checked `path` and copied `value` through verbatim,
+ * so an id in a field it did not read reached the graph unchallenged —
+ * `update_node path='option_1' value={interventions:{ghost_factor:…}}` was
+ * accepted, governed `proceed` in live mode (no hold, NO CONFIRM CHIP), and
+ * REPLACED the option's real intervention map on apply. That is the 2.461
+ * fabrication class inside the tool built to kill it, sitting on the headline
+ * scenario's most natural composition: "give each option its own driver" is an
+ * option `update_node` carrying an `interventions` map KEYED BY FACTOR ID.
+ *
+ * The scan is BY KEY NAME AT ANY DEPTH, deliberately, and not a list of paths.
+ * field-safety sanctions the intervention subtree in three places
+ * (`interventions`, `observed_state/interventions`, `data/interventions/<id>`),
+ * so a path list here would be a mirror of that list and would drift from it
+ * the first time the field-parity table grants a fourth (trap 12). One rule
+ * about a key NAME covers all of them, and covers a nesting nobody has thought
+ * of yet.
+ *
+ * SCOPE, stated so the guarantee upstream is not read as wider than it is:
+ * this resolves ENTITY REFERENCES — intervention map keys, and the identity
+ * fields `id`/`from`/`to`. It does not and cannot validate opaque content in
+ * `value` (a label, a description, a number); WHICH fields may be written at
+ * all is field-safety's judgement downstream, not this module's.
+ */
+const INTERVENTION_KEY = 'interventions';
+
+/** Depth bound — a hostile/deep payload must not cost unbounded work. */
+const MAX_VALUE_SCAN_DEPTH = 12;
+
+/**
+ * Collect every factor id used as an INTERVENTION MAP KEY anywhere in `value`.
+ * Total: cycles and depth overruns stop the walk rather than throwing, and a
+ * truncated walk can only under-collect, which the caller treats as "nothing
+ * more to check" — so the failure mode is a missed rejection, never a
+ * fabricated one.
+ */
+export function collectInterventionTargetIds(value: unknown): string[] {
+  const found: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (node: unknown, depth: number): void => {
+    if (depth > MAX_VALUE_SCAN_DEPTH) return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
+    }
+    const record = asRecord(node);
+    if (record === null) return;
+    if (seen.has(record)) return;
+    seen.add(record);
+    for (const [key, child] of Object.entries(record)) {
+      if (key === INTERVENTION_KEY) {
+        const map = asRecord(child);
+        if (map !== null) {
+          for (const targetId of Object.keys(map)) {
+            if (targetId.length > 0) found.push(targetId);
+          }
+        }
+        // Keep walking: an intervention map's VALUES are payloads, and a
+        // nested `interventions` inside one is still an intervention map.
+      }
+      walk(child, depth + 1);
+    }
+  };
+  walk(value, 0);
+  return found;
+}
+
+/**
+ * The identity fields an op's `value` may restate. A restatement that AGREES
+ * with `path` is fine (models do it, and it is not an error); a restatement
+ * that DISAGREES is two identity claims in one operation, and the model must
+ * be told which field is wrong or it will re-emit the pair.
+ */
+function identityConflictIn(
+  kind: StructuralEditOp,
+  path: string,
+  value: Record<string, unknown> | null,
+): string | null {
+  if (value === null) return null;
+  const declared = (field: 'id' | 'from' | 'to'): string | null => readString(value[field]);
+  if (kind === 'add_node' || kind === 'update_node' || kind === 'remove_node') {
+    const id = declared('id');
+    if (id !== null && id !== path) return `\`value.id\` says '${id}' while \`path\` says '${path}'`;
+    return null;
+  }
+  // Edge ops: identity is the (from, to) pair carried by `path`.
+  const target = parseEdgeTargetPath(path);
+  const from = declared('from');
+  const to = declared('to');
+  if (target === null) return null; // unreadable path is SCHEMA_INVALID upstream
+  if (from !== null && from !== target.from) {
+    return `\`value.from\` says '${from}' while \`path\` says '${target.from}'`;
+  }
+  if (to !== null && to !== target.to) {
+    return `\`value.to\` says '${to}' while \`path\` says '${target.to}'`;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +572,38 @@ export function validateProposedStructuralEdit(
       createdEdgeKeys.add(edgeKeyOf(from, to));
     }
 
+    // ── THE ID CAN HIDE IN `value` ────────────────────────────────────────
+    // Runs AFTER the `path` checks (a bad target is the more fundamental
+    // problem and should be the reason the model is given) and BEFORE this op
+    // registers its own creates/removes, so an op cannot ground its own
+    // smuggled reference.
+    const valueRecord = asRecord(opRecord.value);
+    const conflict = identityConflictIn(kind, path, valueRecord);
+    if (conflict !== null) {
+      return reject(
+        'VALUE_IDENTITY_CONFLICT',
+        `${at} names its target twice and the two disagree: ${conflict}. ` +
+          'Name the target once, in `path`.',
+      );
+    }
+    for (const targetId of collectInterventionTargetIds(opRecord.value)) {
+      if (removedIds.has(targetId)) {
+        return reject(
+          'REMOVED_ID_REUSED',
+          `${at} sets an effect on '${targetId}', which an earlier operation in ` +
+            'this batch removes.',
+        );
+      }
+      if (!nodeExists(targetId)) {
+        return reject(
+          'UNKNOWN_ENTITY_ID',
+          `${at} sets an effect on '${targetId}', which is not a node in the model. ` +
+            'Every effect must be keyed by an id from the grounding table, or by one ' +
+            'this batch creates.',
+        );
+      }
+    }
+
     if (kind === 'remove_node') {
       removedIds.add(path);
     }
@@ -527,6 +679,12 @@ export function buildProposeStructuralEditTool(grounding: StructuralEditGroundin
       "node's exact label in `target_label`. If the label you echo does not " +
       'match the id you named, the batch is rejected — this is how a ' +
       'wrong-but-plausible target gets caught before it is applied.\n' +
+      '\n' +
+      'IDS INSIDE `value` ARE CHECKED THE SAME WAY. An `interventions` map is ' +
+      'keyed by the id of the factor each effect acts on, and every one of ' +
+      'those keys must be in the table above (or created earlier in the same ' +
+      'batch). Do not name a target once in `path` and differently in ' +
+      '`value.id`, `value.from` or `value.to` — name it once, in `path`.\n' +
       '\n' +
       'THE CURRENT MODEL:\n' +
       `${renderGroundingTable(grounding)}\n` +

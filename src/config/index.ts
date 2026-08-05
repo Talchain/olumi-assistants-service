@@ -699,13 +699,25 @@ const ConfigSchema = z.object({
     //
     // The env var REMAINS as a kill-switch (set it to 'shadow' or 'off'), and
     // the production lockdown above is UNCHANGED: in prod, 'live' still
-    // downgrades to 'shadow' with an [AUDIT] warning. Consequence of the new
-    // default, stated rather than discovered: an unconfigured PROD boot now
-    // resolves to 'shadow' (referee evaluates + emits telemetry, never
-    // blocks) where it previously resolved to 'off' (no referee calls at
-    // all). Shadow cannot change an outcome by construction — that is the
-    // whole point of the mode — so this is added observability, not a
-    // production behaviour change.
+    // downgrades to 'shadow' with an [AUDIT] warning.
+    //
+    // Consequence of the new default, stated rather than discovered: an
+    // unconfigured PROD boot now resolves to 'shadow' (the referee evaluates
+    // and emits telemetry, and by the mode's definition never blocks) where it
+    // previously resolved to 'off' (no referee calls at all). For the REFEREE
+    // that is added observability and nothing else.
+    //
+    // ⚠ AND THAT IS A CLAIM ABOUT THE REFEREE ALONE — it was once written here
+    // as if it settled the whole change, which it does not. This mode also
+    // governs whether the structural edit tool (ROADMAP 2.474) engages at all,
+    // because the tool's only safety guarantee is the hold this mode routes.
+    // The tool therefore requires 'live' explicitly
+    // (orchestrator-v5/tools/structural-edit-entry.ts, `holdSpineActive`), so
+    // in prod — and in any 'shadow'/'off' environment — it does not run.
+    // Turning the mode down disables the capability; it never strips the hold
+    // and leaves the capability applying. Without that binding, this comment
+    // would be describing a kill switch that makes the system MORE dangerous
+    // when it is used.
     graphManagementMode: createEnvEnforcedGraphManagementMode(
       "live",
       "CEE_GRAPH_MANAGEMENT_MODE",

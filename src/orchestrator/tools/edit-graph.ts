@@ -1716,9 +1716,20 @@ export async function handleEditGraph(
   // `propose_and_confirm` when it is uncertain) are judgements about a sentence
   // this path is no longer reading a target out of, so they cannot apply: their
   // question — "which entity did they mean?" — is already answered, by id.
-  // `auto_apply` here means only "stop asking the sentence"; it grants NO apply
-  // power, because the referee gate downstream still holds every structural op
-  // for an explicit confirm.
+  // `auto_apply` here means only "stop asking the sentence about which entity
+  // was meant". It is NOT an apply grant — but the reason it is not is
+  // CONDITIONAL, and saying so unconditionally would be false: what actually
+  // withholds apply power is the referee gate downstream holding every
+  // structural op for a confirm, and that routing exists only while
+  // `CEE_GRAPH_MANAGEMENT_MODE` resolves to 'live' (in 'shadow'/'off' the gate
+  // returns blockApply:false by construction).
+  //
+  // The condition is enforced where the tool ENGAGES, not here: the structural
+  // edit tool's entry decision requires `holdSpineActive` (see
+  // orchestrator-v5/tools/structural-edit-entry.ts), so a pre-composed batch
+  // cannot reach this line at all unless the hold is live. This comment
+  // therefore describes a guarantee that holds — and names the thing that makes
+  // it hold, so a future change that severs the two is visible from here.
   const resolutionMode = preComposedOperations !== null
     ? 'auto_apply'
     : confirmationMode

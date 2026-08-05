@@ -12,14 +12,21 @@ import { describe, expect, it } from 'vitest';
 
 import {
   decideStructuralEditEntry,
-  isEditShapedUtterance,
+  holdSpineActiveForMode,
   rulebookClaimedTurn,
+  type StructuralEditEntryInput,
 } from '../structural-edit-entry.js';
-import {
-  EDIT_GRAPH_NEGATIVE_REGEX,
-  EDIT_GRAPH_POSITIVE_REGEX,
-} from '../../../orchestrator/routing/edit-graph-intent-regex.js';
-import { detectStructuralRestructureIntent } from '../../routing/structural-restructure-intent.js';
+
+/** The engaging case, varied one field at a time. */
+function entry(over: Partial<StructuralEditEntryInput> = {}): StructuralEditEntryInput {
+  return {
+    rulebook: { wasRejected: false, operations: [] },
+    editIntentDetectedByRulebook: true,
+    holdSpineActive: true,
+    groundingAvailable: true,
+    ...over,
+  };
+}
 
 describe('A9 — what counts as the rulebook CLAIMING the utterance', () => {
   it('operations produced, not rejected ⇒ CLAIMED (the gate will apply or hold them)', () => {
@@ -44,128 +51,100 @@ describe('A9 — what counts as the rulebook CLAIMING the utterance', () => {
   });
 });
 
-describe('edit-shaped — DERIVED from the rulebook’s own regexes (trap 12)', () => {
-  it('an edit verb with no meta marker is edit-shaped', () => {
-    expect(isEditShapedUtterance('remove the churn factor')).toBe(true);
-    expect(isEditShapedUtterance('add a referral factor')).toBe(true);
+describe('⚠ the kill switch — a mode turned DOWN must disable the tool, not de-fang its guard', () => {
+  it.each([
+    ['live', true],
+    ['shadow', false],
+    ['off', false],
+  ] as const)('mode %s ⇒ holdSpineActive %s', (mode, expected) => {
+    // The whole closed set, not a sample: 'shadow' is the one that matters
+    // most, because it is what PRODUCTION resolves to (the standing lockdown
+    // downgrades 'live' there) and it is the mode that looks safest by name
+    // while routing no holds at all.
+    expect(holdSpineActiveForMode(mode)).toBe(expected);
   });
 
-  it('THE HEADLINE SENTENCE carries no edit verb at all — and is still edit-shaped', () => {
-    // Measured at this tip: "give each option its own driver" matches NOTHING
-    // in EDIT_GRAPH_POSITIVE_REGEX. A regex-only entry gate would have refused
-    // the exact sentence the tool exists to serve; the rulebook's separate
-    // structural-restructure detector is what claims it.
-    const headline = 'give each option its own driver';
-    expect(EDIT_GRAPH_POSITIVE_REGEX.test(headline)).toBe(false);
-    expect(detectStructuralRestructureIntent(headline).matched).toBe(true);
-    expect(isEditShapedUtterance(headline)).toBe(true);
+  it('stands DOWN when the hold spine is inactive', () => {
+    // In 'shadow'/'off' the gate returns blockApply:false BY CONSTRUCTION, so
+    // engaging would strip the hold and leave an LLM-composed structural batch
+    // auto-applying. That is strictly more dangerous than the tool being on.
+    expect(decideStructuralEditEntry(entry({ holdSpineActive: false }))).toEqual({
+      engage: false,
+      reason: 'hold_spine_inactive',
+    });
   });
 
-  it('a META-QUESTION is NOT edit-shaped, even carrying an edit verb', () => {
-    // Direction matters: a second path that mutates the graph on a
-    // meta-question is worse than the dead-end it replaces.
-    expect(isEditShapedUtterance('explain why I should add a risk')).toBe(false);
-    expect(isEditShapedUtterance('what would change if I remove churn?')).toBe(false);
-    expect(isEditShapedUtterance('compare the options and tell me what to update')).toBe(false);
-  });
-
-  it('a sentence with no edit verb at all is not edit-shaped', () => {
-    expect(isEditShapedUtterance('I am worried about the timeline')).toBe(false);
-    expect(isEditShapedUtterance('')).toBe(false);
-    expect(isEditShapedUtterance('   ')).toBe(false);
-  });
-
-  it('the judgement is the rulebook’s, not a second copy of it — both branches', () => {
-    // If these ever disagreed, the tool and the rulebook would disagree about
-    // which turns are edits. Asserted against the imported detectors, combined
-    // exactly as route-v2 combines them, over a corpus that exercises BOTH
-    // branches and both vetoes (12d: derivation proves agreement; the corpus is
-    // what would notice the combination itself being wrong).
-    const corpus = [
-      'update the marketing spend',
-      'remove the churn factor',
-      'give each option its own driver',
-      'split the shared factor into per-option links',
-      'explain why I should add a risk',
-      'what would change if I remove churn?',
-      'I am worried about the timeline',
-      'set up a meeting',
-    ];
-    for (const message of corpus) {
-      const rulebook =
-        detectStructuralRestructureIntent(message).matched ||
-        (EDIT_GRAPH_POSITIVE_REGEX.test(message) && !EDIT_GRAPH_NEGATIVE_REGEX.test(message));
-      expect({ message, shaped: isEditShapedUtterance(message) }).toEqual({
-        message,
-        shaped: rulebook,
-      });
-    }
+  it('the safety gate OUTRANKS every other reason — it is checked first', () => {
+    // Ordering is the contract. If a later gate could answer first, the
+    // decision's reason would depend on which failure happened to be evaluated
+    // sooner, and the kill switch would become a coincidence.
+    expect(
+      decideStructuralEditEntry(
+        entry({
+          holdSpineActive: false,
+          alreadyEngaged: true,
+          rulebook: { wasRejected: false, operations: [{ op: 'add_node' }] },
+          editIntentDetectedByRulebook: false,
+          groundingAvailable: false,
+        }),
+      ),
+    ).toEqual({ engage: false, reason: 'hold_spine_inactive' });
   });
 });
 
 describe('the entry decision', () => {
-  const editShaped = 'add a referral factor and link it to profit';
-
-  it('ENGAGES on the dead-end: edit-shaped, rulebook produced nothing, grounding available', () => {
-    expect(
-      decideStructuralEditEntry({
-        message: editShaped,
-        rulebook: { wasRejected: false, operations: [] },
-        groundingAvailable: true,
-      }),
-    ).toEqual({ engage: true });
+  it('ENGAGES on the dead-end: intent detected, rulebook produced nothing, grounding available', () => {
+    expect(decideStructuralEditEntry(entry())).toEqual({ engage: true });
   });
 
   it('stands DOWN when the rulebook claimed the turn — one composer per turn', () => {
     expect(
-      decideStructuralEditEntry({
-        message: editShaped,
-        rulebook: { wasRejected: false, operations: [{ op: 'add_node' }] },
-        groundingAvailable: true,
-      }),
+      decideStructuralEditEntry(
+        entry({ rulebook: { wasRejected: false, operations: [{ op: 'add_node' }] } }),
+      ),
     ).toEqual({ engage: false, reason: 'rulebook_claimed' });
   });
 
-  it('stands DOWN on a meta-question', () => {
+  it('stands DOWN when the rulebook did not detect edit intent', () => {
     expect(
-      decideStructuralEditEntry({
-        message: 'explain what would change if I add a driver',
-        rulebook: { wasRejected: false, operations: [] },
-        groundingAvailable: true,
-      }),
+      decideStructuralEditEntry(entry({ editIntentDetectedByRulebook: false })),
     ).toEqual({ engage: false, reason: 'not_edit_shaped' });
   });
 
   it('stands DOWN when the model cannot be read — A5(a): decline, never ground on nothing', () => {
-    expect(
-      decideStructuralEditEntry({
-        message: editShaped,
-        rulebook: { wasRejected: false, operations: [] },
-        groundingAvailable: false,
-      }),
-    ).toEqual({ engage: false, reason: 'no_grounding' });
+    expect(decideStructuralEditEntry(entry({ groundingAvailable: false }))).toEqual({
+      engage: false,
+      reason: 'no_grounding',
+    });
   });
 
   it('stands DOWN on re-entry — exactly one tool composition per turn, never a repair loop', () => {
-    expect(
-      decideStructuralEditEntry({
-        message: editShaped,
-        rulebook: { wasRejected: false, operations: [] },
-        groundingAvailable: true,
-        alreadyEngaged: true,
-      }),
-    ).toEqual({ engage: false, reason: 'already_engaged' });
+    expect(decideStructuralEditEntry(entry({ alreadyEngaged: true }))).toEqual({
+      engage: false,
+      reason: 'already_engaged',
+    });
   });
 
-  it('the claim check precedes the shape check — a claimed turn is never re-examined', () => {
-    // Ordering is the contract, not an accident: a rulebook that claimed a
-    // turn owns it regardless of how the sentence reads.
+  it('the claim check precedes the intent check — a claimed turn is never re-examined', () => {
     expect(
-      decideStructuralEditEntry({
-        message: 'explain the model',
-        rulebook: { wasRejected: false, operations: [{ op: 'update_node' }] },
-        groundingAvailable: true,
-      }),
+      decideStructuralEditEntry(
+        entry({
+          rulebook: { wasRejected: false, operations: [{ op: 'update_node' }] },
+          editIntentDetectedByRulebook: false,
+        }),
+      ),
     ).toEqual({ engage: false, reason: 'rulebook_claimed' });
+  });
+
+  it('EDIT INTENT IS INHERITED, NOT RE-DERIVED — an edit-verb-FREE utterance still engages', () => {
+    // The under-trigger this module used to have, pinned as a positive. A
+    // configure-option turn ("configure Plan A") carries NO verb from
+    // EDIT_GRAPH_POSITIVE_REGEX, yet route-v2 dispatches it as an edit-lane
+    // candidate in its own right. The old local re-derivation answered
+    // `not_edit_shaped` and refused entry on exactly the dead-end class 2.474
+    // exists to rescue.
+    expect(
+      decideStructuralEditEntry(entry({ editIntentDetectedByRulebook: true })),
+    ).toEqual({ engage: true });
   });
 });
