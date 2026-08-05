@@ -69,9 +69,19 @@
  *     was marked `attested`, and the raw prose + strength then rendered as
  *     grounded.
  *
- * That is user-visible: `KeyQuestionCard.tsx` prints
- * `Grounded in: <bundle claim title> · <strength> evidence`, so a false
- * credibility signal ("· weak evidence") reached a user UNDER A REAL ID.
+ * That is user-visible, and WORSE than "an unmarked prompt". Verified at the
+ * bytes on UI staging tip `af5c5a37`:
+ *
+ *   KeyQuestionCard.tsx:85-86  `Grounded in: {grounding.principle}`
+ *                              `{grounding.strength ? ` · ${strength} evidence`}`
+ *   decisionQualityPrompts.ts:122-128  `deriveDskGrounding` gates ONLY on
+ *                              `p.dskClaimId && p.principle`, and sets
+ *                              `principle: p.principle` — THE ENTRY'S OWN TEXT.
+ *
+ * So the badge renders THE MODEL'S PROSE, not the bundle's title, under the
+ * bundle's authority — with the model's strength. The UI type even documents
+ * that field as *"Sanitised DSK claim title"*; nothing made that true. Binding
+ * the attest arm to the canonical record is what makes it true.
  *
  * The invariant now enforced, and the reason the necessary-but-not-sufficient
  * distinction is written into the code rather than a comment:

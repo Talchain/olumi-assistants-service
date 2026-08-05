@@ -326,10 +326,16 @@ describe('the asymmetry is closed: no input is left unverdicted', () => {
 // id matched the `principle` shown beside it, nor that the companion
 // provenance equalled the bundle's values for that claim. So
 // `{dsk_claim_id:'DSK-T-002', dsk_protocol_id:'DSK-P-BOGUS',
-//   evidence_strength:'weak'}` was marked `attested`, and the UI
-// (`KeyQuestionCard.tsx:86`) renders `Grounded in: <claim title> ·
-// <strength> evidence` — i.e. "· weak evidence" under a real id for a claim
-// the bundle rates `strong`. A FALSE CREDIBILITY SIGNAL under a real id.
+//   evidence_strength:'weak'}` was marked `attested`.
+//
+// The UI then renders it — verified at the bytes on UI staging tip `af5c5a37`:
+// `KeyQuestionCard.tsx:85-86` prints `Grounded in: {grounding.principle}` plus
+// `` · ${strength} evidence ``, and `deriveDskGrounding`
+// (`decisionQualityPrompts.ts:122-128`) gates ONLY on `dskClaimId && principle`
+// and passes `principle: p.principle` — THE ENTRY'S OWN TEXT. So the badge
+// shows the MODEL'S PROSE under the bundle's authority, with the model's
+// strength: "· weak evidence" for a claim the bundle rates `strong`.
+// A FALSE CREDIBILITY SIGNAL under a real id.
 //
 // The invariant now enforced: COMPANIONS APPEAR ONLY WHEN THEY EQUAL THE
 // BUNDLE'S VALUES FOR THE RESOLVING CLAIM. "The id resolves" is necessary and
@@ -495,8 +501,9 @@ describe('attest: the citation must match the claim, not merely exist', () => {
 
   it('COMPANION MISMATCH: wrong STRENGTH beside canonical prose never reaches the wire', () => {
     // This is the user-visible string: KeyQuestionCard prints
-    // `Grounded in: <title> · ${strength} evidence`. A retained 'weak' here is
-    // a false credibility signal for a claim the bundle rates 'strong'.
+    // `Grounded in: {grounding.principle}` + `` · ${strength} evidence ``.
+    // A retained 'weak' here is a false credibility signal for a claim the
+    // bundle rates 'strong'.
     const { prompts, stats } = applyDskGroundingPolicy([
       { question: 'q', principle: 'Outside view and reference class forecasting', dsk_claim_id: 'DSK-T-002', evidence_strength: 'weak' },
     ]);
