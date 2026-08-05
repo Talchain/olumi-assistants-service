@@ -494,7 +494,14 @@ export async function enrichRunAnalysisWithDecisionReview(
             resolved: graded.stats.resolved,
             general: graded.stats.general,
             unverified: graded.stats.unverified,
-            non_technique_attested: graded.stats.nonTechniqueAttested,
+            // Why each rejection happened. `non_technique_attested` used to sit
+            // here and could not survive the fix that produced these: a
+            // non-technique id can no longer BE attested, so a field named for
+            // that state would be permanently zero — an alarm that cannot fire.
+            unverified_unknown_id: graded.stats.unverifiedByReason.unknownId,
+            unverified_non_technique_id: graded.stats.unverifiedByReason.nonTechniqueId,
+            unverified_principle_mismatch: graded.stats.unverifiedByReason.principleMismatch,
+            unverified_companion_mismatch: graded.stats.unverifiedByReason.companionMismatch,
           },
           'v5.decision_review.dsk_grounding',
         );
