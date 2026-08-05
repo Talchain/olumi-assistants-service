@@ -33,6 +33,9 @@ import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
 // stringified-payload schema (Lane 26 v8-aux-field trick applied to
 // value/old_value) — see GRAMMAR BUDGET (v2) in anthropic-edit-graph-schema.ts.
 import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
+// ROADMAP 2.474 / A3 — ONE definition of the complexity budget, shared with the
+// structural-edit batch splitter (see patch-budget-limits.ts for why).
+import { MAX_NODE_OPS, MAX_EDGE_OPS, OPTION_ADD_MAX_EDGE_OPS } from "./patch-budget-limits.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import { GraphV3, FactorCategoryV3 } from "../../schemas/cee-v3.js";
@@ -4611,11 +4614,10 @@ export function extractInterventionUpdates(
 // Patch Budget (cf-v11.1)
 // ============================================================================
 
-const MAX_NODE_OPS = 4;
-const MAX_EDGE_OPS = 8;
-/** Elevated edge budget for option-addition edits — adding an option naturally
- *  requires connecting to multiple factors, so the default 4-edge limit is too tight. */
-const OPTION_ADD_MAX_EDGE_OPS = 8;
+// ROADMAP 2.474 / A3 — the three budget numbers now live in a LEAF module
+// (`patch-budget-limits.ts`) so the structural-edit batch splitter can size a
+// part against the SAME numbers this function enforces, rather than mirroring
+// them (CLAUDE.md trap 12). They are imported at the top of this file.
 
 interface PatchBudgetResult {
   allowed: boolean;

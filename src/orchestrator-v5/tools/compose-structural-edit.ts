@@ -39,6 +39,7 @@ import {
   type StructuralEditGrounding,
   type StructuralEditRejectionCode,
 } from './propose-structural-edit.js';
+import type { StructuralEditPart } from './structural-edit-batch-split.js';
 
 /** The minimal adapter surface this path needs. */
 export interface StructuralEditComposerAdapter {
@@ -52,8 +53,16 @@ export interface StructuralEditComposerAdapter {
 export type StructuralEditComposeOutcome =
   | {
       readonly status: 'composed';
+      /** The WHOLE composed batch, in order — never a part, never truncated. */
       readonly operations: readonly EditPatchOperationLike[];
       readonly envelopeCount: number;
+      /**
+       * A3 — the batch partitioned into cap-legal parts. Length 1 on the
+       * ordinary path. Length > 1 means the caller must submit `parts[0]` and
+       * DISCLOSE the remainder; it must never submit a later part on this turn,
+       * and never drop one.
+       */
+      readonly parts: readonly StructuralEditPart[];
     }
   | {
       readonly status: 'rejected';
@@ -179,6 +188,10 @@ export async function composeStructuralEdit(
     rejection_code: validation.ok ? null : validation.code,
     operations_count: validation.ok ? validation.operations.length : 0,
     envelope_count: validation.ok ? validation.envelopeCount : 0,
+    // A3 — how many proposals this request became. 1 on the ordinary path;
+    // >1 is the split that replaced a dead turn, and it is the number to watch
+    // when asking whether the headline scenario is actually working.
+    part_count: validation.ok ? validation.parts.length : 0,
     grounded_node_count: input.grounding.nodes.length,
   });
 
@@ -189,5 +202,6 @@ export async function composeStructuralEdit(
     status: 'composed',
     operations: validation.operations,
     envelopeCount: validation.envelopeCount,
+    parts: validation.parts,
   };
 }

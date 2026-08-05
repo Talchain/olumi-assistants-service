@@ -128,7 +128,8 @@ import {
   type EditPartAccounting,
   type PatchOperationLike,
 } from '../routing/edit-part-decomposition.js';
-import { clampLabel } from './describe-changeset.js';
+import { clampLabel, describeChangeset, type ChangesetOpLike } from './describe-changeset.js';
+import { buildStructuralEditSplitDisclosure } from './structural-edit-split-disclosure.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import {
@@ -680,13 +681,37 @@ function mapStageToDecisionStage(stage: MessageTurnPayload['stage']): DecisionSt
  * the UI sends a turn, never a graph), so the check costs nothing in practice
  * — and on the day they diverge, the tool declines instead of guessing.
  */
+/**
+ * ROADMAP 2.474 / A3 — what the dispatcher needs to know about a SPLIT, carried
+ * back separately from the `EditGraphResult` (a V4 type this path has no
+ * business widening).
+ *
+ * ⚠ THIS IS NOT DISCLOSED-PARTIAL (A2). `submittedIndices` is the complete list
+ * of operations that reached `handleEditGraph`; every other index in
+ * `wholeBatch` was NEVER SUBMITTED — not applied, not rejected, not judged. The
+ * gate's one verdict governs the submitted part WHOLE, exactly as it does for a
+ * batch that did not split.
+ */
+interface StructuralEditSplitOutcome {
+  readonly wholeBatch: readonly PatchOperation[];
+  readonly submittedIndices: readonly number[];
+  readonly partCount: number;
+  readonly remainderDependsOnThisStep: boolean;
+}
+
+interface StructuralEditToolResult {
+  readonly editResult: EditGraphResult;
+  /** Present only when the batch was too large for one proposal. */
+  readonly split: StructuralEditSplitOutcome | null;
+}
+
 async function tryStructuralEditTool(input: {
   readonly editResult: EditGraphResult;
   readonly context: ConversationContext;
   readonly adapter: ReturnType<typeof getAdapter>;
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
-}): Promise<EditGraphResult | null> {
+}): Promise<StructuralEditToolResult | null> {
   const { editResult, context, adapter, payload, requestId } = input;
 
   const emitEntry = (decision: string): void => {
@@ -785,16 +810,51 @@ async function tryStructuralEditTool(input: {
     emitEntry(outcome.status === 'rejected' ? `rejected_${outcome.code}` : outcome.reason);
     return null;
   }
-  emitEntry('engaged');
+  emitEntry(outcome.parts.length > 1 ? 'engaged_split' : 'engaged');
+
+  // A3 — SUBMIT THE FIRST PART ONLY, and never a later one on this turn.
+  //
+  // `parts[0]` is the whole batch on the ordinary path. When the request was
+  // too large for one proposal, the later parts are not submitted at all: they
+  // are DISCLOSED by the caller and offered as a next step. Submitting a second
+  // part here would put two batches through one turn's single governing verdict
+  // and is precisely the disclosed-partial shape A2 forbids.
+  const firstPart = outcome.parts[0];
+  if (firstPart === undefined) {
+    // A composed outcome always carries at least one part; treat the
+    // impossible case as "the tool declined" rather than submitting nothing.
+    emitEntry('no_parts');
+    return null;
+  }
 
   // A1 — ONE entry seam. The grounded batch re-enters the SAME handler and
   // runs the SAME downstream train (normalisation, Zod, PLoT gate, apply,
   // receipts); the referee gate below in this dispatch then returns its ONE
   // governing verdict over the whole batch, exactly as it does for the
   // deterministic path. No second applier exists.
-  return await handleEditGraph(context, payload.message, adapter, requestId, payload.turn_id, {
-    preComposedOperations: outcome.operations as readonly PatchOperation[],
-  });
+  const editResultForPart = await handleEditGraph(
+    context,
+    payload.message,
+    adapter,
+    requestId,
+    payload.turn_id,
+    { preComposedOperations: firstPart.operations as readonly PatchOperation[] },
+  );
+
+  return {
+    editResult: editResultForPart,
+    split:
+      outcome.parts.length > 1
+        ? {
+            wholeBatch: outcome.operations as readonly PatchOperation[],
+            submittedIndices: firstPart.indices,
+            partCount: outcome.parts.length,
+            remainderDependsOnThisStep: outcome.parts
+              .slice(1)
+              .some((p) => p.dependsOnEarlierPart),
+          }
+        : null,
+  };
 }
 
 export interface DispatchEditGraphParams {
@@ -1437,6 +1497,9 @@ export async function dispatchEditGraph(
   const adapter = getAdapter('edit_graph');
 
   let editResult: EditGraphResult;
+  // ROADMAP 2.474 / A3 — set only when the structural edit tool split an
+  // over-cap request. Read once, in the response-assembly region below.
+  let structuralEditSplit: StructuralEditSplitOutcome | null = null;
   // Track the deterministic clarification path independently so
   // llm_calls_used records 0 when no adapter call was made.
   let deterministicAddRiskAttempted = false;
@@ -1824,7 +1887,12 @@ export async function dispatchEditGraph(
           payload,
           requestId,
         });
-        if (toolOutcome !== null) editResult = toolOutcome;
+        if (toolOutcome !== null) {
+          editResult = toolOutcome.editResult;
+          // A3 — carried to the response-assembly region below, where the hold
+          // copy has already been built and can be appended to.
+          structuralEditSplit = toolOutcome.split;
+        }
       }
     }
   } catch (err) {
@@ -2515,6 +2583,57 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph — Graph Management live gate blocked the apply path (mutation NOT persisted)',
     );
+  }
+
+  // ── ROADMAP 2.474 / A3 — DISCLOSE THE REMAINDER OF A SPLIT REQUEST ────────
+  //
+  // Appended AFTER the gate has written its hold copy (and after the
+  // supersession notice) so the user reads, in order: what is held, what
+  // supersedes what, and then that this is step 1 of N. Appended BEFORE the
+  // commit for the same reason the supersession notice is: stored copy must
+  // equal wire copy.
+  //
+  // ⚠ WHAT THIS IS NOT. It is not disclosed-partial. `submittedIndices` names
+  // every operation that reached the gate; the remainder reached NOTHING. The
+  // notice says the remaining work is still to come — never that part of a
+  // judged batch was dropped, because no part of a judged batch was dropped.
+  if (structuralEditSplit !== null) {
+    const wholeDescription = describeChangeset(
+      structuralEditSplit.wholeBatch as readonly ChangesetOpLike[],
+      gmFrameBase,
+    );
+    const disclosure =
+      wholeDescription === null
+        ? null
+        : buildStructuralEditSplitDisclosure({
+            wholeBatch: wholeDescription,
+            proposedIndices: structuralEditSplit.submittedIndices,
+            partCount: structuralEditSplit.partCount,
+            remainderDependsOnThisStep: structuralEditSplit.remainderDependsOnThisStep,
+          });
+    if (disclosure !== null) {
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, disclosure.notice),
+        suggested_actions: [
+          ...(response.suggested_actions ?? []),
+          {
+            id: disclosure.action.id,
+            label: disclosure.action.label,
+            message: disclosure.action.message,
+            detail: disclosure.action.detail,
+          },
+        ],
+      };
+      emit(TelemetryEvents.V5StructuralEditToolEntry, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        decision: 'split_disclosed',
+        part_count: structuralEditSplit.partCount,
+        submitted_operations: structuralEditSplit.submittedIndices.length,
+        total_operations: structuralEditSplit.wholeBatch.length,
+      });
+    }
   }
 
   // V5 H5 — false-success invariant (defence-in-depth).
