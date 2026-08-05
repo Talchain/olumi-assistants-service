@@ -40,12 +40,12 @@
  *
  * ## The policy — total over the input space, no case left free
  *
- * | `dsk_claim_id` | `principle`                        | verdict     |
- * |----------------|------------------------------------|-------------|
- * | present, resolves in bundle | (any)                 | `attested`  |
- * | present, does NOT resolve | (any)                   | **provenance STRIPPED**, then re-graded as if omitted (`resolved` or `general`) |
- * | omitted        | EXACT match of a bundle claim title | `resolved`  |
- * | omitted        | no exact match                      | `general`   |
+ * | `dsk_claim_id` | `principle` / companions            | verdict     |
+ * |----------------|-------------------------------------|-------------|
+ * | present, resolves to a `DSK-T-*` claim, `principle` EQUALS that claim's title, and any supplied `evidence_strength` / `dsk_protocol_id` EQUAL that claim's | `attested` |
+ * | present, but ANY of the above fails  | **provenance STRIPPED**, then re-graded as if omitted (`resolved` or `general`) |
+ * | omitted        | EXACT match of a bundle claim title  | `resolved`  |
+ * | omitted        | no exact match                       | `general`   |
  *
  * ⚠ The unknown-id row is enforced HERE, not delegated. An earlier version of
  * this file claimed `shape-check.ts` hard-rejects first; that is false on the
@@ -53,6 +53,48 @@
  * what the V5 enricher uses (its only two callers are a default-off flag arm in
  * `decompose.ts` and the standalone route). Claim ids were validated NOWHERE on
  * a live turn, so a fabricated id rendered a badge citing a nonexistent claim.
+ *
+ * ## ⚠⚠ "THE ID EXISTS" IS NECESSARY AND NOT SUFFICIENT (corroborated twice)
+ *
+ * The first version of this branch validated only that the id EXISTED. It never
+ * checked that the id corresponded to the sentence displayed beside it, nor
+ * that the companion provenance equalled the bundle's values for that claim.
+ * Measured independently by two reviewers on 2026-08-05:
+ *
+ *   - `{dsk_claim_id:'DSK-T-002', dsk_protocol_id:'DSK-P-BOGUS',
+ *      evidence_strength:'weak'}` was marked `attested`, RETAINING a protocol
+ *     id that exists nowhere in the bundle and a strength of `weak` for a claim
+ *     the bundle rates `strong`.
+ *   - Arbitrary model-authored principle prose paired with ANY real claim id
+ *     was marked `attested`, and the raw prose + strength then rendered as
+ *     grounded.
+ *
+ * That is user-visible: `KeyQuestionCard.tsx` prints
+ * `Grounded in: <bundle claim title> · <strength> evidence`, so a false
+ * credibility signal ("· weak evidence") reached a user UNDER A REAL ID.
+ *
+ * The invariant now enforced, and the reason the necessary-but-not-sufficient
+ * distinction is written into the code rather than a comment:
+ *
+ *   **COMPANIONS APPEAR ONLY WHEN THEY EQUAL THE BUNDLE'S VALUES FOR THE
+ *   RESOLVING CLAIM.** Everything displayed as provenance — id, strength,
+ *   protocol — is bound to the CANONICAL RECORD the id resolves to, and the
+ *   `principle` must be that record's own title. The old rule ("companions
+ *   require a resolving id") is satisfied EXACTLY by the `DSK-P-BOGUS` case.
+ *
+ * Additionally the id must be of the TECHNIQUE class (`DSK-T-*`). A real bias
+ * claim (`DSK-B-*`) is a genuine claim but not one this field was ever offered:
+ * `science-claims.ts` injects the TECHNIQUE table only, so a bias citation here
+ * cannot have come from the table the prompt showed the model.
+ *
+ * ⚠ MEASURED COST OF THE TIGHTENING: ZERO on real traffic. All 25 entries that
+ * carried a `dsk_claim_id` across the walk of 2026-08-05
+ * (`PHASE0-EVIDENCE-2026-07-28/walk-dsk-raw/`) are exactly two tuples —
+ * `DSK-T-002 / 'Outside view and reference class forecasting' / strong /
+ * DSK-P-002` (15×) and `DSK-T-003 / 'Consider-the-opposite as a debiasing
+ * strategy' / medium / DSK-P-003` (10×) — both bundle-canonical in every field.
+ * Every one still attests. The tightening removes fabrication surface, not
+ * observed attestations.
  *
  * `resolved` restores the citation the prompt already mandated, **from the same
  * table the prompt already gave the model** — an identity lookup, not a repair
@@ -108,17 +150,27 @@ export interface DskGroundingPolicyStats {
   resolved: number;
   general: number;
   /**
-   * Entries whose `dsk_claim_id` did NOT resolve in the bundle. The id and its
-   * companion provenance were stripped and the entry re-graded. Non-zero means
-   * the model fabricated a citation — alarm-worthy, not routine.
+   * Entries whose supplied provenance did not survive verification. The id and
+   * its companions were stripped and the entry re-graded. Non-zero means the
+   * model fabricated a citation — alarm-worthy, not routine. Exactly equal to
+   * the sum of `unverifiedByReason`.
    */
   unverified: number;
   /**
-   * Attested entries citing a non-`DSK-T-` claim. Off-contract (DQPs are
-   * offered the technique table only) but the claim is real, so it is counted
-   * and kept rather than stripped.
+   * Why each rejection happened. An operator needs to distinguish "the model
+   * invented an id" from "the model cited a real claim next to the wrong
+   * sentence" — they are different failure modes with different fixes.
    */
-  nonTechniqueAttested: number;
+  unverifiedByReason: {
+    /** `dsk_claim_id` is not a claim id in the bundle at all (incl. protocol ids). */
+    unknownId: number;
+    /** A real claim, but not `DSK-T-*` — the wrong family for this field. */
+    nonTechniqueId: number;
+    /** `principle` is missing, or is not this claim's own title. */
+    principleMismatch: number;
+    /** A supplied `evidence_strength` / `dsk_protocol_id` differs from the bundle's. */
+    companionMismatch: number;
+  };
   /** True when the bundle was unavailable/disabled and nothing was marked. */
   skipped: boolean;
 }
@@ -162,6 +214,26 @@ interface TitleIndexEntry {
  * falls through to `general` rather than resolving arbitrarily.
  */
 export function buildTechniqueTitleIndex(): Map<string, TitleIndexEntry> {
+  return buildTechniqueIndex().byTitle;
+}
+
+export interface TechniqueIndex {
+  /** normalised claim title → claim (ambiguous titles dropped). */
+  byTitle: Map<string, TitleIndexEntry>;
+  /**
+   * claim id → the SAME canonical record. This is what makes "the id resolves"
+   * into "the id resolves TO A RECORD", so everything displayed beside it can
+   * be bound to that record rather than trusted from the model.
+   *
+   * Ambiguous TITLES are dropped from `byTitle` only: an id is unique, so a
+   * citation that names the id unambiguously identifies the claim even when
+   * two claims happen to share a title.
+   */
+  byId: Map<string, TitleIndexEntry>;
+}
+
+/** Build both views of the technique claims in one pass over the bundle. */
+export function buildTechniqueIndex(): TechniqueIndex {
   const claims = (getAllByType('claim') as DSKClaim[]).filter((c) =>
     c.id.startsWith('DSK-T-'),
   );
@@ -172,20 +244,23 @@ export function buildTechniqueTitleIndex(): Map<string, TitleIndexEntry> {
     if (p.linked_claim_id) claimToProtocol.set(p.linked_claim_id, p.id);
   }
 
-  const index = new Map<string, TitleIndexEntry>();
+  const byTitle = new Map<string, TitleIndexEntry>();
+  const byId = new Map<string, TitleIndexEntry>();
   const ambiguous = new Set<string>();
   for (const c of claims) {
     if (typeof c.title !== 'string' || c.title.trim() === '') continue;
+    const entry: TitleIndexEntry = { claim: c, protocolId: claimToProtocol.get(c.id) };
+    byId.set(c.id, entry);
     const key = normaliseTitle(c.title);
-    if (index.has(key)) {
+    if (byTitle.has(key)) {
       ambiguous.add(key);
       continue;
     }
-    index.set(key, { claim: c, protocolId: claimToProtocol.get(c.id) });
+    byTitle.set(key, entry);
   }
-  for (const key of ambiguous) index.delete(key);
+  for (const key of ambiguous) byTitle.delete(key);
 
-  return index;
+  return { byTitle, byId };
 }
 
 // ============================================================================
@@ -194,6 +269,28 @@ export function buildTechniqueTitleIndex(): Map<string, TitleIndexEntry> {
 
 function nonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;
+}
+
+/**
+ * Overwrite an entry's provenance with the CANONICAL record's values — the
+ * single place where displayed provenance is decided, shared by the `attested`
+ * and `resolved` arms so the two cannot drift apart.
+ *
+ * "Copied exactly from it" (`Prompts/canonical/decision_review.txt`) is taken
+ * literally: nothing here is inferred from the entry. A field the canonical
+ * record does not have is DELETED rather than left standing — otherwise a
+ * technique claim with no linked protocol would let a model-supplied
+ * `dsk_protocol_id` survive beside a bundle-resolved claim id, which is the
+ * very shape the invariant forbids. (Unreachable at today's bundle: all six
+ * `DSK-T-*` claims carry a linked protocol and an evidence strength. It is
+ * written for the bundle we do not have yet — trap 12d.)
+ */
+function bindCanonicalProvenance(e: Record<string, unknown>, hit: TitleIndexEntry): void {
+  e.dsk_claim_id = hit.claim.id;
+  if (nonEmptyString(hit.claim.evidence_strength)) e.evidence_strength = hit.claim.evidence_strength;
+  else delete e.evidence_strength;
+  if (nonEmptyString(hit.protocolId)) e.dsk_protocol_id = hit.protocolId;
+  else delete e.dsk_protocol_id;
 }
 
 /**
@@ -213,7 +310,12 @@ export function applyDskGroundingPolicy(
     resolved: 0,
     general: 0,
     unverified: 0,
-    nonTechniqueAttested: 0,
+    unverifiedByReason: {
+      unknownId: 0,
+      nonTechniqueId: 0,
+      principleMismatch: 0,
+      companionMismatch: 0,
+    },
     skipped: false,
   };
 
@@ -227,19 +329,24 @@ export function applyDskGroundingPolicy(
 
   if (!enabled) return passthrough();
 
-  const index = buildTechniqueTitleIndex();
+  const index = buildTechniqueIndex();
   // No bundle (load failure) ⇒ we can neither attest nor honestly disclaim.
-  if (index.size === 0) return passthrough();
+  // Keyed on `byId`, which carries every titled technique claim: `byTitle` can
+  // legitimately shrink to zero on an all-ambiguous bundle without the bundle
+  // being absent.
+  if (index.byId.size === 0) return passthrough();
 
   // Every claim id in the loaded bundle. Derived, never mirrored. This is the
-  // set `getClaimById` searches, so validating against it enforces exactly the
-  // documented boundary — no wider, no narrower.
-  const claimIds = new Set((getAllByType('claim') as DSKClaim[]).map((c) => c.id));
+  // set `getClaimById` searches, and it is used ONLY to tell an id that is not
+  // a claim at all apart from one that is a claim of the wrong family — the
+  // two rejections have different operational meanings.
+  const allClaimIds = new Set((getAllByType('claim') as DSKClaim[]).map((c) => c.id));
 
   const out = prompts.map((entry) => {
     const e = { ...((entry ?? {}) as Record<string, unknown>) };
 
-    // 1. Attested — the model cited, AND the id resolves in the bundle.
+    // 1. Attested — the model cited, AND the citation RESOLVES TO THE CLAIM
+    //    THAT IS DISPLAYED.
     //
     // ⚠ This branch validates the id ITSELF. The earlier version of this file
     // delegated to `shape-check.ts`'s hard reject and was WRONG on the live
@@ -250,17 +357,47 @@ export function applyDskGroundingPolicy(
     // production caller. So on every live turn, claim ids were validated
     // NOWHERE, and `{dsk_claim_id: 'DSK-T-999', principle: 'anything'}` would
     // have rendered a grounding badge citing a claim that does not exist.
-    // Enforcing it here is the first real check on that path.
+    //
+    // ⚠⚠ …and validating EXISTENCE alone was still not enough. See the header:
+    // `{dsk_claim_id:'DSK-T-002', dsk_protocol_id:'DSK-P-BOGUS',
+    //   evidence_strength:'weak'}` passed that check while displaying a
+    // nonexistent protocol and a false strength under a real id. Everything
+    // shown as provenance is now bound to the canonical record.
     if (nonEmptyString(e.dsk_claim_id)) {
-      if (claimIds.has(e.dsk_claim_id)) {
+      const citedId = e.dsk_claim_id;
+      const canonical = index.byId.get(citedId);
+
+      let reason: keyof DskGroundingPolicyStats['unverifiedByReason'] | undefined;
+      if (canonical === undefined) {
+        // A real claim of the wrong family is a different diagnosis from an
+        // invented id: the first means the model reached outside the table it
+        // was shown, the second means it invented a row.
+        reason = allClaimIds.has(citedId) ? 'nonTechniqueId' : 'unknownId';
+      } else if (
+        !nonEmptyString(e.principle) ||
+        normaliseTitle(e.principle) !== normaliseTitle(canonical.claim.title)
+      ) {
+        // The sentence the user reads is not this claim's. Attesting it would
+        // put the bundle's authority behind prose the bundle never made.
+        reason = 'principleMismatch';
+      } else if (
+        (e.evidence_strength !== undefined &&
+          e.evidence_strength !== canonical.claim.evidence_strength) ||
+        (e.dsk_protocol_id !== undefined && e.dsk_protocol_id !== canonical.protocolId)
+      ) {
+        // Companions appear ONLY when they equal the bundle's values. "The id
+        // resolves" is satisfied exactly by the DSK-P-BOGUS case, so it is
+        // necessary and NOT sufficient.
+        reason = 'companionMismatch';
+      }
+
+      if (reason === undefined) {
         stats.attested++;
+        // Canonical even on the happy path: the wire carries the BUNDLE's
+        // values, never the model's copy of them, so `attested` and `resolved`
+        // are byte-identical in everything they display.
+        bindCanonicalProvenance(e, canonical!);
         e[DSK_GROUNDING_KEY] = 'attested' satisfies DskGroundingState;
-        // Observed but NOT acted on: `decision_quality_prompts` are offered the
-        // TECHNIQUE table only, so a bias-claim citation here is off-contract.
-        // It is counted rather than stripped — the documented boundary is
-        // "id exists in the bundle", and silently dropping a real claim would
-        // be stricter than the rule this branch exists to enforce.
-        if (!e.dsk_claim_id.startsWith('DSK-T-')) stats.nonTechniqueAttested++;
         return e;
       }
 
@@ -275,7 +412,9 @@ export function applyDskGroundingPolicy(
       //   - it is strictly stronger than the status quo, which shipped the
       //     badge. Whole-response rejection remains available as a policy
       //     choice; it is deliberately not taken unilaterally here.
+      // Stripping is not a repair: nothing is invented, a claim is removed.
       stats.unverified++;
+      stats.unverifiedByReason[reason]++;
       delete e.dsk_claim_id;
       delete e.dsk_protocol_id;
       delete e.evidence_strength;
@@ -285,13 +424,11 @@ export function applyDskGroundingPolicy(
 
     // 2. Resolved — id omitted, but the principle IS a bundle claim title.
     const principle = nonEmptyString(e.principle) ? normaliseTitle(e.principle) : '';
-    const hit = principle ? index.get(principle) : undefined;
+    const hit = principle ? index.byTitle.get(principle) : undefined;
     if (hit) {
       stats.resolved++;
       // Bundle is the single source of truth — "copied exactly from it".
-      e.dsk_claim_id = hit.claim.id;
-      e.evidence_strength = hit.claim.evidence_strength;
-      if (hit.protocolId) e.dsk_protocol_id = hit.protocolId;
+      bindCanonicalProvenance(e, hit);
       e[DSK_GROUNDING_KEY] = 'resolved' satisfies DskGroundingState;
       return e;
     }
