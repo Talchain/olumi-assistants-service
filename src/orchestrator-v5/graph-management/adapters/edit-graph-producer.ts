@@ -59,6 +59,39 @@ export function parseEdgeTargetPath(path: string): { from: string; to: string } 
 /** Fixed, content-free reason for removals initiated through the edit loop. */
 const EDIT_REMOVE_REASON = 'user_requested_edit';
 
+/**
+ * ROADMAP 2.478 — the identity keys an add op's value carries that are ALREADY
+ * projected into the reviewable `node` / `edge` payload. Everything else on the
+ * value is what the applier will additionally write, and is carried to the
+ * envelope as `screened_value` so the referee's R4 field-safety check can see
+ * it. Before this, the projection DROPPED those keys and the referee screened
+ * only update kinds, so an `observed_state.source` stamp on a NEW node met no
+ * guard between the model and the applier.
+ *
+ * `id` is on the node list because `op.path` is the authoritative id (the
+ * applier overrides any id in the value) — carrying it again would only give
+ * the screen a key it has no rule for.
+ */
+const NODE_IDENTITY_KEYS: readonly string[] = ['id', 'kind', 'label'];
+const EDGE_IDENTITY_KEYS: readonly string[] = ['from', 'to'];
+
+/**
+ * `{ screened_value }` for the non-identity keys of `value`, or `{}` when there
+ * are none — so a plain identity-only add projects the SAME envelope it always
+ * did (the field is optional and simply absent).
+ */
+function withoutKeys(
+  value: Record<string, unknown>,
+  identityKeys: readonly string[],
+): Record<string, unknown> {
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (identityKeys.includes(k)) continue;
+    rest[k] = v;
+  }
+  return Object.keys(rest).length > 0 ? { screened_value: rest } : {};
+}
+
 interface RawEnvelopeParts {
   readonly kind: CandidateKind | string;
   readonly payload: Record<string, unknown>;
@@ -78,7 +111,14 @@ function projectOperation(op: EditPatchOperationLike): RawEnvelopeParts[] {
         {
           kind: 'add_node',
           // op.path is the authoritative node id (patch-applier contract).
-          payload: { node: { id: op.path, kind: value.kind, label: value.label } },
+          payload: {
+            node: { id: op.path, kind: value.kind, label: value.label },
+            // ROADMAP 2.478: everything the applier will write BEYOND the
+            // identity triple, carried so R4 can screen it. Omitted entirely
+            // when there is nothing beyond identity, so the envelope of a
+            // plain add is byte-identical to what it was.
+            ...withoutKeys(value, NODE_IDENTITY_KEYS),
+          },
         },
       ];
     case 'remove_node':
@@ -108,7 +148,15 @@ function projectOperation(op: EditPatchOperationLike): RawEnvelopeParts[] {
       return parts;
     }
     case 'add_edge':
-      return [{ kind: 'add_edge', payload: { edge: { from: value.from, to: value.to } } }];
+      return [
+        {
+          kind: 'add_edge',
+          payload: {
+            edge: { from: value.from, to: value.to },
+            ...withoutKeys(value, EDGE_IDENTITY_KEYS),
+          },
+        },
+      ];
     case 'remove_edge': {
       const target = parseEdgeTargetPath(op.path);
       return [

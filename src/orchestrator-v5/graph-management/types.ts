@@ -115,9 +115,27 @@ const AddOptionInterventionSpec = z
 /** Payload schema per kind. Kept minimal-but-strict; value-bearing pipeline-owned
  *  fields (sensitivity_score/elasticity/e-values/robustness) are excluded by
  *  construction and additionally screened by R4. */
+/**
+ * ROADMAP 2.478 — the add op's NON-IDENTITY value keys, carried for R4
+ * FIELD-SAFETY SCREENING ONLY.
+ *
+ * `NodeInput`/`EdgeInput` are the reviewable identity of the change and stay
+ * exactly as narrow as they were; the candidate builders
+ * (`buildAddNodeCandidate` / `buildAddEdgeCandidate`) read only those. But the
+ * op the applier will eventually run carries the FULL value — `AddNodeValue`
+ * in patch-validation.ts is `.passthrough()` — and until this field existed the
+ * referee could not see it, so an `observed_state.source` stamp on a NEW node
+ * met no guard anywhere. Optional because the OTHER producer of these
+ * envelopes (the dual-draft adapter) has no value beyond the identity triple.
+ *
+ * NOTHING APPLIES THIS. It exists so the screen can refuse; a batch carrying a
+ * denied key is rejected whole, so the op never becomes a pending.
+ */
+const ScreenedAddValue = z.record(z.string(), z.unknown()).optional();
+
 const PAYLOAD_BY_KIND = {
-  add_node: z.object({ node: NodeInput }).strict(),
-  add_edge: z.object({ edge: EdgeInput }).strict(),
+  add_node: z.object({ node: NodeInput, screened_value: ScreenedAddValue }).strict(),
+  add_edge: z.object({ edge: EdgeInput, screened_value: ScreenedAddValue }).strict(),
   update_node_field: z
     .object({
       node_id: z.string().min(1),

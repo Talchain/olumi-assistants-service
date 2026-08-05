@@ -71,8 +71,23 @@ const ALLOWED_RESOLVED = new Set(
   ].map((s) => resolve(moduleDir, s)),
 );
 
-/** External bare specifiers permitted in production (pure libs, no live-path coupling). */
-const EXTERNAL_ALLOWED = new Set(['zod']);
+/** External bare specifiers permitted in production (pure libs, no live-path coupling).
+ *
+ *  ROADMAP 2.474 / design-review amendment A6 — `@talchain/schemas/orchestrator`
+ *  is admitted as a SECOND external, in the same class as the
+ *  `required-nested-merge` seam above: the CLASSED FIELD-PARITY TABLE and its
+ *  derivation accessors are pure data + zod over the shared contract — no I/O,
+ *  no hash derivation, no persistence, no live-path coupling. It exists because
+ *  `field-safety.ts`'s allowlists MUST be derived from the one canonical table
+ *  rather than hand-reconciled against the UI's inspector setters; a second
+ *  hand-written copy is the mirror defect this guard exists to prevent
+ *  (trap 12), and the drift it produces reads as green.
+ *
+ *  EXACT SUBPATH, not the package: admitting the orchestrator entry point does
+ *  NOT admit `@talchain/schemas` root, `/boundary`, or `/fixtures` — those carry
+ *  wire/transport surfaces this module is deliberately isolated from. Pinned by
+ *  the meta-check below. */
+const EXTERNAL_ALLOWED = new Set(['zod', '@talchain/schemas/orchestrator']);
 
 /** Named imports that must NEVER appear in a production module file. */
 const BANNED_NAMED_IMPORTS = new Set(['mergeMutatedGraphForPersistence']);
@@ -206,6 +221,16 @@ describe('isolation guards (AST import enforcement / off-path / no persistence-m
     expect(importAllowed(moduleDir, '../session/pending-action.js')).toBe(false);
     expect(importAllowed(moduleDir, '../bad.js')).toBe(false);
     expect(importAllowed(moduleDir, 'lodash')).toBe(false);
+  });
+
+  /** ROADMAP 2.474 / A6 — admitting `@talchain/schemas/orchestrator` must not
+   *  have widened the boundary to the PACKAGE. Same discipline as the
+   *  required-nested-merge meta-check: exact specifier, not a prefix. */
+  it('meta-check: admitting @talchain/schemas/orchestrator did NOT admit the package', () => {
+    expect(importAllowed(moduleDir, '@talchain/schemas/orchestrator')).toBe(true);
+    expect(importAllowed(moduleDir, '@talchain/schemas')).toBe(false);
+    expect(importAllowed(moduleDir, '@talchain/schemas/boundary')).toBe(false);
+    expect(importAllowed(moduleDir, '@talchain/schemas/fixtures')).toBe(false);
   });
 
   /** ROADMAP 2.380 — admitting `schemas/required-nested-merge.js` must not have
