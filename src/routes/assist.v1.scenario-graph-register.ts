@@ -201,7 +201,14 @@ export default async function route(app: FastifyInstance) {
       ) =>
         reply
           .code(422)
-          .send(buildErrorV1("VALIDATION_FAILED", message, { code, ...details }, requestId));
+          // `ErrorCode` is a deliberately coarse SHARED family
+          // (`BAD_INPUT | UNAUTHENTICATED | FORBIDDEN | NOT_FOUND |
+          // RATE_LIMITED | INTERNAL`) with a status mapping in
+          // `getStatusCodeForErrorCode`. The precise, actionable reason rides
+          // in `details.code`, and the HTTP status carries the class. Widening
+          // that union from a build lane would change a contract every route
+          // shares — not this slice's call to make.
+          .send(buildErrorV1("BAD_INPUT", message, { code, ...details }, requestId));
 
       const unavailable = () =>
         reply
@@ -408,7 +415,10 @@ export default async function route(app: FastifyInstance) {
             .code(409)
             .send(
               buildErrorV1(
-                "CONFLICT",
+                // See the `invalid()` note: the shared `ErrorCode` family has
+                // no CONFLICT member, so 409 is carried by the HTTP status and
+                // the reason by `details.code`.
+                "BAD_INPUT",
                 "This model changed while you were importing. Reload and import again.",
                 { code: "GRAPH_STALE" },
                 requestId,
