@@ -493,9 +493,23 @@ export async function enrichRunAnalysisWithDecisionReview(
             attested: graded.stats.attested,
             resolved: graded.stats.resolved,
             general: graded.stats.general,
+            unverified: graded.stats.unverified,
+            non_technique_attested: graded.stats.nonTechniqueAttested,
           },
           'v5.decision_review.dsk_grounding',
         );
+        if (graded.stats.unverified > 0) {
+          // A fabricated citation. Not routine — this is the condition
+          // `shape-check.ts` was believed to reject and does not on this path.
+          log.warn(
+            {
+              request_id: input.requestId,
+              scenario_id: input.scenarioId,
+              unverified: graded.stats.unverified,
+            },
+            'v5.decision_review.dsk_claim_id_unverified',
+          );
+        }
       }
     }
     // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:

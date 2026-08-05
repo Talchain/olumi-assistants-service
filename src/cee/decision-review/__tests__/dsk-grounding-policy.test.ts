@@ -87,21 +87,91 @@ describe('the asymmetry is closed: no input is left unverdicted', () => {
     ]);
 
     expect(prompts.map(verdict)).toEqual(['attested', 'resolved', 'general']);
-    expect(stats).toEqual({ attested: 1, resolved: 1, general: 1, skipped: false });
+    expect(stats).toEqual({
+      attested: 1,
+      resolved: 1,
+      general: 1,
+      unverified: 0,
+      nonTechniqueAttested: 0,
+      skipped: false,
+    });
     // Not one entry escapes a verdict — the 2.456 hole, stated as an assertion.
     expect(prompts.every((p) => typeof verdict(p) === 'string')).toBe(true);
   });
 
-  it('leaves the present-but-unknown arm to shape-check: the policy never rescues a bad id', () => {
-    // The hard-reject arm belongs to `shape-check.ts` (it rejects the WHOLE
-    // response before egress). The policy's obligation is only that it does
-    // not quietly launder an id it was handed. Pinned so a future refactor
-    // cannot move rescue logic in here.
-    const { prompts } = applyDskGroundingPolicy([
-      { question: 'q', principle: 'Outside view and reference class forecasting', dsk_claim_id: 'DSK-T-999' },
+  /**
+   * ⚠ THIS TEST REPLACES ONE THAT ASSERTED THE OPPOSITE AND WAS WRONG.
+   *
+   * The original asserted `DSK-T-999` passes through as `attested`, on the
+   * stated ground that `shape-check.ts` hard-rejects unknown ids before egress.
+   * That premise is FALSE on the live path — complete manifest:
+   * `performShapeCheck` is called only from `decompose.ts:781` (behind a
+   * DEFAULT-OFF flag) and `routes/assist.v1.decision-review.ts`; NEVER from
+   * `invoke.ts`, which is what the V5 enricher calls. `getClaimById` has no
+   * production caller outside `shape-check.ts`. So a fabricated id reached the
+   * user with a badge citing a claim that does not exist, and the old test
+   * PINNED that behaviour as correct.
+   */
+  it('a fabricated claim id is STRIPPED, not blessed — the boundary is enforced here', () => {
+    const bogus = 'DSK-T-999';
+    // Precondition, derived: the id must genuinely not be in the bundle, or
+    // this test proves nothing the day someone adds it.
+    expect(techniqueClaims.map((c) => c.id)).not.toContain(bogus);
+
+    const { prompts, stats } = applyDskGroundingPolicy([
+      { question: 'q', principle: 'An improvised heuristic', dsk_claim_id: bogus, evidence_strength: 'strong', dsk_protocol_id: 'DSK-P-999' },
     ]);
-    expect(prompts[0].dsk_claim_id).toBe('DSK-T-999'); // untouched, not repaired
-    expect(verdict(prompts[0])).toBe('attested');
+
+    expect(verdict(prompts[0])).toBe('general');
+    // Nothing unverifiable survives to the wire.
+    expect(prompts[0].dsk_claim_id).toBeUndefined();
+    expect(prompts[0].dsk_protocol_id).toBeUndefined();
+    expect(prompts[0].evidence_strength).toBeUndefined();
+    expect(stats.unverified).toBe(1);
+    expect(stats.attested).toBe(0);
+  });
+
+  it('a fabricated id whose principle IS a bundle title re-grades to resolved, with the BUNDLE id', () => {
+    const { prompts, stats } = applyDskGroundingPolicy([
+      { question: 'q', principle: 'Pre-mortem and prospective hindsight', dsk_claim_id: 'DSK-T-999' },
+    ]);
+    expect(verdict(prompts[0])).toBe('resolved');
+    // Identity-bound: the bundle's id, never the fabricated one.
+    expect(prompts[0].dsk_claim_id).toBe('DSK-T-001');
+    expect(stats.unverified).toBe(1);
+  });
+
+  it('DISCRIMINATING PAIR: a real id survives while a fabricated one is stripped', () => {
+    // Neither assertion alone shows the check binds to bundle membership; the
+    // pair does. A check that stripped everything would fail the first; one
+    // that stripped nothing would fail the second.
+    const { prompts, stats } = applyDskGroundingPolicy([
+      { question: 'real', principle: 'Outside view and reference class forecasting', dsk_claim_id: 'DSK-T-002' },
+      { question: 'fake', principle: 'Outside view and reference class forecasting', dsk_claim_id: 'DSK-T-002-NOPE' },
+    ]);
+    const real = prompts.find((p) => p.question === 'real')!;
+    const fake = prompts.find((p) => p.question === 'fake')!;
+
+    expect(verdict(real)).toBe('attested');
+    expect(real.dsk_claim_id).toBe('DSK-T-002');
+
+    // The fake's principle happens to be a real title, so it re-grades to
+    // `resolved` — carrying the BUNDLE's id, not the string it arrived with.
+    expect(verdict(fake)).toBe('resolved');
+    expect(fake.dsk_claim_id).toBe('DSK-T-002');
+    expect(stats).toMatchObject({ attested: 1, resolved: 1, unverified: 1 });
+  });
+
+  it('every bundle claim id is accepted by the validator — derived, not mirrored', () => {
+    // The union side of trap 12d: the validator must not be narrower than the
+    // bundle. Iterates every claim, so a hand-narrowed id set REDs.
+    for (const c of getAllByType('claim') as DSKClaim[]) {
+      const { prompts, stats } = applyDskGroundingPolicy([
+        { question: 'q', principle: 'An improvised heuristic', dsk_claim_id: c.id },
+      ]);
+      expect(stats.unverified).toBe(0);
+      expect(prompts[0].dsk_claim_id).toBe(c.id);
+    }
   });
 });
 

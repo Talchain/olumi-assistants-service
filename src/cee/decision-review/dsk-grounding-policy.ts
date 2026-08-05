@@ -42,10 +42,17 @@
  *
  * | `dsk_claim_id` | `principle`                        | verdict     |
  * |----------------|------------------------------------|-------------|
- * | present, known | (any)                              | `attested`  |
- * | present, unknown | (any)                            | HARD REJECT (unchanged, `shape-check.ts`) |
+ * | present, resolves in bundle | (any)                 | `attested`  |
+ * | present, does NOT resolve | (any)                   | **provenance STRIPPED**, then re-graded as if omitted (`resolved` or `general`) |
  * | omitted        | EXACT match of a bundle claim title | `resolved`  |
  * | omitted        | no exact match                      | `general`   |
+ *
+ * ⚠ The unknown-id row is enforced HERE, not delegated. An earlier version of
+ * this file claimed `shape-check.ts` hard-rejects first; that is false on the
+ * live path — `performShapeCheck` is never called from `invoke.ts`, which is
+ * what the V5 enricher uses (its only two callers are a default-off flag arm in
+ * `decompose.ts` and the standalone route). Claim ids were validated NOWHERE on
+ * a live turn, so a fabricated id rendered a badge citing a nonexistent claim.
  *
  * `resolved` restores the citation the prompt already mandated, **from the same
  * table the prompt already gave the model** — an identity lookup, not a repair
@@ -100,6 +107,18 @@ export interface DskGroundingPolicyStats {
   attested: number;
   resolved: number;
   general: number;
+  /**
+   * Entries whose `dsk_claim_id` did NOT resolve in the bundle. The id and its
+   * companion provenance were stripped and the entry re-graded. Non-zero means
+   * the model fabricated a citation — alarm-worthy, not routine.
+   */
+  unverified: number;
+  /**
+   * Attested entries citing a non-`DSK-T-` claim. Off-contract (DQPs are
+   * offered the technique table only) but the claim is real, so it is counted
+   * and kept rather than stripped.
+   */
+  nonTechniqueAttested: number;
   /** True when the bundle was unavailable/disabled and nothing was marked. */
   skipped: boolean;
 }
@@ -193,6 +212,8 @@ export function applyDskGroundingPolicy(
     attested: 0,
     resolved: 0,
     general: 0,
+    unverified: 0,
+    nonTechniqueAttested: 0,
     skipped: false,
   };
 
@@ -210,16 +231,56 @@ export function applyDskGroundingPolicy(
   // No bundle (load failure) ⇒ we can neither attest nor honestly disclaim.
   if (index.size === 0) return passthrough();
 
+  // Every claim id in the loaded bundle. Derived, never mirrored. This is the
+  // set `getClaimById` searches, so validating against it enforces exactly the
+  // documented boundary — no wider, no narrower.
+  const claimIds = new Set((getAllByType('claim') as DSKClaim[]).map((c) => c.id));
+
   const out = prompts.map((entry) => {
     const e = { ...((entry ?? {}) as Record<string, unknown>) };
 
-    // 1. Attested — the model cited. An id that does not resolve never reaches
-    //    here: `shape-check.ts` hard-rejects the whole response first. We do
-    //    not re-litigate the id, so this branch cannot weaken that boundary.
+    // 1. Attested — the model cited, AND the id resolves in the bundle.
+    //
+    // ⚠ This branch validates the id ITSELF. The earlier version of this file
+    // delegated to `shape-check.ts`'s hard reject and was WRONG on the live
+    // path: `performShapeCheck` is called from exactly two places
+    // (`decompose.ts:781`, behind a DEFAULT-OFF flag, and the standalone
+    // `assist.v1.decision-review` route) and NEVER from `invoke.ts` — which is
+    // what the V5 enricher actually calls. `getClaimById` has no other
+    // production caller. So on every live turn, claim ids were validated
+    // NOWHERE, and `{dsk_claim_id: 'DSK-T-999', principle: 'anything'}` would
+    // have rendered a grounding badge citing a claim that does not exist.
+    // Enforcing it here is the first real check on that path.
     if (nonEmptyString(e.dsk_claim_id)) {
-      stats.attested++;
-      e[DSK_GROUNDING_KEY] = 'attested' satisfies DskGroundingState;
-      return e;
+      if (claimIds.has(e.dsk_claim_id)) {
+        stats.attested++;
+        e[DSK_GROUNDING_KEY] = 'attested' satisfies DskGroundingState;
+        // Observed but NOT acted on: `decision_quality_prompts` are offered the
+        // TECHNIQUE table only, so a bias-claim citation here is off-contract.
+        // It is counted rather than stripped — the documented boundary is
+        // "id exists in the bundle", and silently dropping a real claim would
+        // be stricter than the rule this branch exists to enforce.
+        if (!e.dsk_claim_id.startsWith('DSK-T-')) stats.nonTechniqueAttested++;
+        return e;
+      }
+
+      // UNVERIFIABLE CITATION. The disposition is to strip the provenance and
+      // fall through, NOT to discard the whole response:
+      //   - the trust property we need is "no fabricated citation reaches the
+      //     user", and stripping achieves it completely;
+      //   - this policy runs at EGRESS, after the LLM call. Throwing here trips
+      //     the enricher's safety net, which returns the facts unchanged — the
+      //     user would lose the entire decision review (narrative, assumptions,
+      //     every other prompt) over one bad field;
+      //   - it is strictly stronger than the status quo, which shipped the
+      //     badge. Whole-response rejection remains available as a policy
+      //     choice; it is deliberately not taken unilaterally here.
+      stats.unverified++;
+      delete e.dsk_claim_id;
+      delete e.dsk_protocol_id;
+      delete e.evidence_strength;
+      // …and fall through: the prompt may still resolve by title, and if it
+      // does not it is marked `general` like any other unattested prompt.
     }
 
     // 2. Resolved — id omitted, but the principle IS a bundle claim title.

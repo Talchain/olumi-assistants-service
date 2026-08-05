@@ -84,6 +84,20 @@ const LIVE_RESOLVABLE = {
   principle: 'Pre-mortem and prospective hindsight',
   applies_because: 'Volume uncertainty is dominant.',
 };
+/**
+ * A FABRICATED citation. Not observed on the walk, but reachable today: the
+ * live V5 path validates claim ids nowhere (`performShapeCheck` is never called
+ * from `invoke.ts`), so this shape would have rendered a grounding badge citing
+ * a claim that does not exist.
+ */
+const FABRICATED = {
+  question: 'What single number would change your mind fastest?',
+  principle: 'Bayesian belief updating under ambiguity',
+  applies_because: 'Improvised.',
+  dsk_claim_id: 'DSK-T-404',
+  dsk_protocol_id: 'DSK-P-404',
+  evidence_strength: 'strong',
+};
 
 describe('enricher installs the DSK grounding policy (2.491)', () => {
   beforeEach(() => {
@@ -173,7 +187,7 @@ describe('enricher installs the DSK grounding policy (2.491)', () => {
         evidence_enhancements: [],
         bias_findings: [],
         key_assumptions: ['price is elastic'],
-        decision_quality_prompts: [LIVE_ATTESTED, LIVE_UNGROUNDED, LIVE_RESOLVABLE],
+        decision_quality_prompts: [LIVE_ATTESTED, LIVE_UNGROUNDED, LIVE_RESOLVABLE, FABRICATED],
       },
       raw: '{}',
       model: 'gpt-4.1',
@@ -218,6 +232,17 @@ describe('enricher installs the DSK grounding policy (2.491)', () => {
     expect(resolvable.dsk_grounding).toBe('resolved');
     expect(resolvable.dsk_claim_id).toBe('DSK-T-001');
     expect(resolvable.dsk_protocol_id).toBe('DSK-P-001');
+
+    // A FABRICATED citation is stripped on the live path — the boundary that
+    // `shape-check.ts` was believed to provide and does not reach here.
+    const fabricated = dqps.find((p) => p.question === FABRICATED.question)!;
+    expect(fabricated.dsk_grounding).toBe('general');
+    expect(fabricated.dsk_claim_id).toBeUndefined();
+    expect(fabricated.dsk_protocol_id).toBeUndefined();
+    expect(fabricated.evidence_strength).toBeUndefined();
+    // …and the question itself still reaches the user: we strip the false
+    // claim, we do not delete the coaching.
+    expect(fabricated.question).toBe(FABRICATED.question);
 
     // The rest of the F.6 verbatim contract is untouched.
     expect(dr.narrative_summary).toBe('option A wins');
