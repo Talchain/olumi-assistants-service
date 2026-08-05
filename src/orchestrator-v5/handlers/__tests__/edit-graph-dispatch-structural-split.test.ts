@@ -39,6 +39,9 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
     ...actual,
     loadPersistedGraphStrict: vi.fn(),
     loadRecentConversationTurns: vi.fn().mockResolvedValue([]),
+    // Mockable so ONE test can inject a prior run_analysis fact. Every other
+    // test restores the real implementation in `beforeEach`.
+    buildTurnContext: vi.fn(),
   };
 });
 
@@ -46,7 +49,9 @@ import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import { getAdapter } from '../../../adapters/llm/router.js';
-import { loadPersistedGraphStrict } from '../../build-turn-context.js';
+import { loadPersistedGraphStrict, buildTurnContext } from '../../build-turn-context.js';
+import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import {
   STRUCTURAL_EDIT_TOO_LARGE_TEXT,
@@ -121,16 +126,51 @@ function rulebookDeadEnd(): EditGraphResult {
   };
 }
 
-/** Whatever the pipeline returns for the submitted part; irrelevant to the
- *  assertions, which are about what it was GIVEN. */
-function pipelineHeld(): EditGraphResult {
+/**
+ * The pipeline's result for the submitted part.
+ *
+ * ⚠ This must be a SUCCESSFUL APPLIED MUTATION shape (`!wasRejected` +
+ * `appliedGraph` + non-empty `operations`), because that is the guard on the
+ * Graph Management referee gate. With the earlier `appliedGraph: null` fixture
+ * the gate never ran, `gmDecision` stayed null, and no test in this file could
+ * see the hold, the disclosure, or the chip — which is exactly how the
+ * user-visible half of this feature went unpinned.
+ */
+function pipelineApplied(operations: readonly { op: string; path: string; value?: unknown }[]): EditGraphResult {
+  const created = operations.filter((o) => o.op === 'add_node');
+  const linked = operations.filter((o) => o.op === 'add_edge');
   return {
     blocks: [],
     assistantText: 'Holding these changes.',
     latencyMs: 20,
-    appliedGraph: null,
+    appliedGraph: {
+      nodes: [
+        ...GRAPH.nodes,
+        ...created.map((o) => ({ id: o.path, kind: 'factor', label: `Driver ${o.path}` })),
+      ],
+      edges: [
+        ...GRAPH.edges,
+        ...linked.map((o) => ({ ...(o.value as { from: string; to: string }) })),
+      ],
+    } as unknown as EditGraphResult['appliedGraph'],
     wasRejected: false,
-    operations: [],
+    operations: operations as EditGraphResult['operations'],
+  };
+}
+
+/** A successful prior analysis, taken against a NAMED graph hash. */
+function runAnalysisFact(graphHashAtRun: string): RunAnalysisHandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: SCENARIO_ID,
+      leading_option_id: 'opt_a',
+      summary: 'Ran analysis on your current scenario.',
+      graph_hash_at_run: graphHashAtRun,
+      enrichment: {},
+    },
   };
 }
 
@@ -165,8 +205,16 @@ async function runTurn() {
   });
 }
 
-beforeEach(() => {
+let realBuildTurnContext: typeof buildTurnContext;
+
+beforeEach(async () => {
   vi.clearAllMocks();
+  const actual = await vi.importActual<typeof import('../../build-turn-context.js')>(
+    '../../build-turn-context.js',
+  );
+  realBuildTurnContext = actual.buildTurnContext;
+  (buildTurnContext as MockedFunction<typeof buildTurnContext>)
+    .mockImplementation(realBuildTurnContext);
   (loadPersistedGraphStrict as MockedFunction<typeof loadPersistedGraphStrict>)
     .mockResolvedValue(GRAPH as never);
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue({
@@ -183,7 +231,9 @@ describe('⭐ A3 — an over-cap request submits ONE part and never the whole ba
       .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
     (handleEditGraph as MockedFunction<typeof handleEditGraph>)
       .mockResolvedValueOnce(rulebookDeadEnd())
-      .mockResolvedValueOnce(pipelineHeld());
+      .mockImplementationOnce(async (_c, _m, _a, _r, _t, opts) =>
+        pipelineApplied((opts?.preComposedOperations ?? []) as never),
+      );
   });
 
   it('the pipeline is handed a batch SMALLER than the one the model composed', async () => {
@@ -232,7 +282,9 @@ describe('⭐ POSITIVE CONTROL (trap 13) — a normal request submits the WHOLE 
       .mockReturnValue(adapterComposing(PROBE_D_OPERATIONS) as never);
     (handleEditGraph as MockedFunction<typeof handleEditGraph>)
       .mockResolvedValueOnce(rulebookDeadEnd())
-      .mockResolvedValueOnce(pipelineHeld());
+      .mockImplementationOnce(async (_c, _m, _a, _r, _t, opts) =>
+        pipelineApplied((opts?.preComposedOperations ?? []) as never),
+      );
   });
 
   it('probe D`s six operations are submitted in full, in the order the model composed them', async () => {
@@ -333,5 +385,156 @@ describe('the honest refusal copy is swept by the estate`s own guards', () => {
         expect(text.toLowerCase()).not.toContain(token.toLowerCase());
       }
     }
+  });
+});
+
+/**
+ * ⭐⭐ THE USER-VISIBLE HALF, PINNED AT DISPATCH LEVEL.
+ *
+ * ⚠ WHY THIS BLOCK EXISTS. A reviewer DELETED the entire
+ * `if (structuralEditSplit !== null) {…}` emission block from
+ * `edit-graph-dispatch.ts` and every spec for this feature stayed GREEN — the
+ * only non-test consumer of the disclosure builder was that one call site, and
+ * every test hit was the pure builder's own spec. The notice and the chip, the
+ * half a user actually reads, were unpinned.
+ *
+ * The acceptance criterion for these tests is therefore stated as a mutant:
+ * DELETE THE EMISSION BLOCK AND THESE MUST GO RED.
+ */
+describe('⭐⭐ the split disclosure REACHES THE RESPONSE (delete the emission block and this REDs)', () => {
+  beforeEach(() => {
+    (getAdapter as MockedFunction<typeof getAdapter>)
+      .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValueOnce(rulebookDeadEnd())
+      .mockImplementationOnce(async (_c, _m, _a, _r, _t, opts) =>
+        pipelineApplied((opts?.preComposedOperations ?? []) as never),
+      );
+  });
+
+  it('the turn actually holds a proposal — the precondition, measured not assumed', async () => {
+    const result = await runTurn();
+    const ids = (result.response.suggested_actions ?? []).map((a) => a.id);
+    // A gate-minted confirm chip exists, so there IS a step 1 to follow.
+    expect(ids.some((id) => id.startsWith('gmh_'))).toBe(true);
+  });
+
+  it('the assistant text carries the split notice, naming the remaining drivers', async () => {
+    const text = (await runTurn()).response.assistant_text ?? '';
+    expect(text).toContain('larger change than I can propose in one step');
+    expect(text).toContain('3 steps');
+    expect(text).toContain('Plan B cost driver');
+    expect(text).toContain('Shared overhead driver');
+  });
+
+  it('and a next-step chip is offered alongside the confirm chip', async () => {
+    const actions = (await runTurn()).response.suggested_actions ?? [];
+    const next = actions.find((a) => a.id === 'structural_edit_next_step');
+    expect(next).toBeDefined();
+    expect(next!.label).toBe('Propose the next step');
+    // The confirm chip is NOT displaced by it.
+    expect(actions.some((a) => a.id.startsWith('gmh_'))).toBe(true);
+  });
+});
+
+/**
+ * ⭐⭐ FINDING 2 — THE DISCLOSURE MUST NOT FIRE ON A TURN THAT PROPOSED NOTHING.
+ *
+ * Measured before the fix: with part 1 rejected the user received
+ *   "I couldn't take that change forward, so the model is unchanged. …"
+ *   "That is a larger change than I can propose in one step, so it comes in 3
+ *    steps and this is the first. Still to come: …"
+ * plus a chip for step 2 of a sequence with no step 1. Two contradictory
+ * sentences on one turn.
+ */
+describe('⭐⭐ no proposal ⇒ no disclosure and no chip', () => {
+  beforeEach(() => {
+    (getAdapter as MockedFunction<typeof getAdapter>)
+      .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValueOnce(rulebookDeadEnd())
+      .mockResolvedValueOnce({
+        blocks: [],
+        assistantText: "I couldn't take that change forward, so the model is unchanged.",
+        latencyMs: 20,
+        appliedGraph: null,
+        wasRejected: true,
+      });
+  });
+
+  it('a REJECTED part 1 leaves the refusal standing, with no "this is the first" sentence', async () => {
+    const result = await runTurn();
+    const text = result.response.assistant_text ?? '';
+    expect(text).toContain("couldn't take that change forward");
+    expect(text).not.toContain('this is the first');
+    expect(text).not.toContain('Still to come');
+  });
+
+  it('and offers no step-2 chip for a sequence that has no step 1', async () => {
+    const ids = ((await runTurn()).response.suggested_actions ?? []).map((a) => a.id);
+    expect(ids).not.toContain('structural_edit_next_step');
+    expect(ids).not.toContain('chip_action_rerun_analysis');
+  });
+});
+
+/**
+ * ⭐⭐ FINDING 1 — THE ALREADY-ANALYSED SCENARIO, WHICH NO TEST HERE COULD SEE.
+ *
+ * Every other test in this file runs on a PRE-ANALYSIS scenario
+ * (`freshness:'none'`, reason `no_successful_run_analysis_fact`) — the one
+ * state in which "Propose the next step" works. On a scenario that HAS been
+ * analysed (the normal state for someone restructuring a model) the graph hash
+ * moves when part 1 is applied, freshness flips to `stale`, and a STRUCTURAL
+ * candidate does not trust `stale` — so the next part is blocked until the
+ * user re-runs.
+ *
+ * ⚠ SCOPE OF WHAT THIS PROVES, stated because the distinction matters: the
+ * fact is INJECTED here, so this pins the CONSUMER (given a prior successful
+ * run_analysis fact, the copy and the chip change). It does NOT prove the
+ * loader delivers that fact on a post-apply turn — see the note in the PR.
+ */
+describe('⭐⭐ an already-analysed scenario is told the REAL order, and given a control that works', () => {
+  beforeEach(async () => {
+    (getAdapter as MockedFunction<typeof getAdapter>)
+      .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValueOnce(rulebookDeadEnd())
+      .mockImplementationOnce(async (_c, _m, _a, _r, _t, opts) =>
+        pipelineApplied((opts?.preComposedOperations ?? []) as never),
+      );
+    // The fact's hash MATCHES the current graph, so freshness is `fresh` and
+    // part 1 still holds — the honest shape of "analysed, not yet edited".
+    const hash = computeAnalysisAffectingGraphHash(GRAPH as never)!;
+    (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockImplementation(
+      async (...args) => {
+        const ctx = await realBuildTurnContext(...(args as Parameters<typeof buildTurnContext>));
+        return { ...ctx, prior_facts: [runAnalysisFact(hash)] };
+      },
+    );
+  });
+
+  it('part 1 still holds — the prior analysis does not block the FIRST step', async () => {
+    const ids = ((await runTurn()).response.suggested_actions ?? []).map((a) => a.id);
+    expect(ids.some((id) => id.startsWith('gmh_'))).toBe(true);
+  });
+
+  it('the copy states confirm, then re-run, then the rest', async () => {
+    const text = (await runTurn()).response.assistant_text ?? '';
+    expect(text).toContain('already analysed this model');
+    expect(text).toContain('Re-run the analysis after confirming');
+    // It still names every remaining operation.
+    expect(text).toContain('Plan B cost driver');
+  });
+
+  it('⭐ the chip offered is the RE-RUN, not a next step that cannot be delivered', async () => {
+    const actions = (await runTurn()).response.suggested_actions ?? [];
+    expect(actions.map((a) => a.id)).not.toContain('structural_edit_next_step');
+    const rerun = actions.find((a) => a.id === 'chip_action_rerun_analysis');
+    expect(rerun).toBeDefined();
+    expect(rerun!.label).toBe('Re-run analysis');
+    // Executable, so the control can actually do what it says.
+    expect((rerun as { action_type?: string }).action_type).toBe('run_analysis');
+    // The remainder is still carried, behind the short label.
+    expect((rerun as { detail?: string }).detail).toContain('Shared overhead driver');
   });
 });

@@ -23,7 +23,14 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { buildStructuralEditSplitDisclosure } from '../structural-edit-split-disclosure.js';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  buildStructuralEditSplitDisclosure,
+  STRUCTURAL_EDIT_RERUN_ACTION,
+} from '../structural-edit-split-disclosure.js';
 import { describeChangeset, type ChangesetOpLike } from '../describe-changeset.js';
 import {
   FORBIDDEN_USER_FACING_PHRASES,
@@ -58,6 +65,21 @@ function disclose(proposedIndices: number[], partCount = 3, dependent = false) {
     proposedIndices,
     partCount,
     remainderDependsOnThisStep: dependent,
+    // The PRE-ANALYSIS case. Every test in this file used to run here
+    // implicitly; it is now named, because it is the only state in which
+    // "Propose the next step" can actually deliver.
+    rerunRequiredBeforeNextStep: false,
+  });
+}
+
+/** The already-analysed case, where the next step needs a re-run first. */
+function discloseAnalysed(proposedIndices: number[], partCount = 3) {
+  return buildStructuralEditSplitDisclosure({
+    wholeBatch: description(),
+    proposedIndices,
+    partCount,
+    remainderDependsOnThisStep: false,
+    rerunRequiredBeforeNextStep: true,
   });
 }
 
@@ -96,6 +118,7 @@ describe('⭐ the remainder is described against the WHOLE batch, not the part',
       proposedIndices: [0],
       partCount: 2,
       remainderDependsOnThisStep: true,
+      rerunRequiredBeforeNextStep: false,
     });
     expect(d!.notice).toContain("link 'Plan A cost driver' to 'Profit'");
     expect(d!.notice).not.toContain('add a link');
@@ -163,6 +186,7 @@ describe('⭐ POSITIVE CONTROL (trap 13) — no disclosure on the ordinary path'
         proposedIndices: [0, 1, 2, 3, 4, 5],
         partCount: 1,
         remainderDependsOnThisStep: false,
+        rerunRequiredBeforeNextStep: false,
       }),
     ).toBeNull();
   });
@@ -176,7 +200,97 @@ describe('⭐ POSITIVE CONTROL (trap 13) — no disclosure on the ordinary path'
         proposedIndices: [0, 1, 2, 3, 4, 5],
         partCount: 2,
         remainderDependsOnThisStep: false,
+        rerunRequiredBeforeNextStep: false,
       }),
     ).toBeNull();
+  });
+});
+
+/**
+ * ⭐⭐ THE ALREADY-ANALYSED BRANCH — a control that can deliver, or none.
+ *
+ * On a scenario carrying a successful `run_analysis` fact, confirming step 1
+ * moves the graph hash, freshness flips to `stale`, and a STRUCTURAL candidate
+ * does not trust `stale` (`frame-gate.ts`: the relaxation is tunable-only). So
+ * "Propose the next step" is a control that CANNOT do what it says — the
+ * estate's named dominant defect. The copy states the real order instead, and
+ * the chip becomes the thing that unblocks it.
+ */
+describe('⭐⭐ already analysed — the copy states the real order and the chip is the re-run', () => {
+  it('says the model has been analysed and names the confirm-then-re-run sequence', () => {
+    const d = discloseAnalysed([0, 1]);
+    expect(d!.notice).toContain('already analysed this model');
+    expect(d!.notice).toContain('Re-run the analysis after confirming');
+  });
+
+  it('still names EVERY remaining operation — the disclosure is not traded for the warning', () => {
+    const d = discloseAnalysed([0, 1]);
+    expect(d!.notice).toContain('Plan B cost driver');
+    expect(d!.notice).toContain('Shared overhead');
+    expect(d!.notice).not.toContain('more changes');
+  });
+
+  it('offers the executable re-run chip, and NOT the next-step chip', () => {
+    const d = discloseAnalysed([0, 1]);
+    expect(d!.action.id).toBe('chip_action_rerun_analysis');
+    expect(d!.action.actionType).toBe('run_analysis');
+    expect(d!.action.id).not.toBe('structural_edit_next_step');
+    // The remainder still rides on `detail`.
+    expect(d!.action.detail).toContain('Shared overhead');
+  });
+
+  it('DISCRIMINATING PAIR — the same input with the flag off keeps the next-step chip', () => {
+    // Neither reading alone shows the flag is bound to anything.
+    expect(disclose([0, 1])!.action.id).toBe('structural_edit_next_step');
+    expect(disclose([0, 1])!.action.actionType).toBeUndefined();
+    expect(disclose([0, 1])!.notice).not.toContain('already analysed');
+  });
+
+  it('the re-run copy is swept clean by the estate`s own guards', () => {
+    const d = discloseAnalysed([0, 1])!;
+    for (const text of [d.notice, d.action.label, d.action.message, d.action.detail]) {
+      for (const re of FORBIDDEN_USER_FACING_PHRASES) {
+        expect(re.test(text), `${re} matched: ${text}`).toBe(false);
+      }
+      for (const re of SUCCESS_CLAIM_PATTERNS) {
+        expect(re.test(text), `${re} matched: ${text}`).toBe(false);
+      }
+      expect(text).not.toContain('—');
+    }
+  });
+});
+
+/**
+ * ⚠ MIRROR GUARD — this module carries a THIRD copy of the estate's canonical
+ * re-run chip, because the two existing ones
+ * (`routing/post-analysis-label-intercept.ts` RERUN_ANALYSIS_CHIP,
+ * `routing/run-comparison-gate.ts` RERUN_ACTION) are module-private and
+ * exporting a shared leaf would widen this PR. A hand-maintained copy is the
+ * estate's dominant defect class, so it is not trusted: this reads BOTH
+ * originals out of their source and fails loud if the triple drifts. Rowed for
+ * extraction to one leaf.
+ */
+describe('the re-run chip does not drift from the estate`s existing definitions', () => {
+  const ORIGINS = [
+    '../../routing/post-analysis-label-intercept.ts',
+    '../../routing/run-comparison-gate.ts',
+  ];
+
+  it('id, label, message and action_type match both existing definitions', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    let checked = 0;
+    for (const rel of ORIGINS) {
+      const src = readFileSync(join(here, rel), 'utf8');
+      // The block is whichever const carries the canonical id.
+      const idx = src.indexOf(STRUCTURAL_EDIT_RERUN_ACTION.id);
+      expect(idx, `${rel} must define ${STRUCTURAL_EDIT_RERUN_ACTION.id}`).toBeGreaterThan(-1);
+      const block = src.slice(idx, idx + 260);
+      expect(block, rel).toContain(`label: '${STRUCTURAL_EDIT_RERUN_ACTION.label}'`);
+      expect(block, rel).toContain(`message: '${STRUCTURAL_EDIT_RERUN_ACTION.message}'`);
+      expect(block, rel).toContain(`action_type: '${STRUCTURAL_EDIT_RERUN_ACTION.action_type}'`);
+      checked += 1;
+    }
+    // Zero origins checked would make every assertion above vacuous.
+    expect(checked).toBe(ORIGINS.length);
   });
 });

@@ -1537,6 +1537,12 @@ export async function dispatchEditGraph(
   // ROADMAP 2.474 / A3 — set only when the structural edit tool split an
   // over-cap request. Read once, in the response-assembly region below.
   let structuralEditSplit: StructuralEditSplitOutcome | null = null;
+  // A3 — true when this scenario already carries a successful run_analysis
+  // fact, which is what makes a LATER part require a re-run first (see the
+  // derivation in the gate block below). Defaults true so an unreached
+  // derivation produces the honest, non-promising copy rather than a chip that
+  // cannot deliver.
+  let priorAnalysisExistsForSplit = true;
   // Track the deterministic clarification path independently so
   // llm_calls_used records 0 when no adapter call was made.
   let deterministicAddRiskAttempted = false;
@@ -2448,10 +2454,29 @@ export async function dispatchEditGraph(
     // against the graph the candidates were generated on? Re-uses the SAME
     // prior facts the post-edit derivation loaded (pure re-projection, no
     // extra I/O). A degraded prior-fact load fails closed to 'unknown'.
-    const gmFreshness: FrameFreshness =
+    const gmFreshnessDerivation =
       freshness.reason === 'derivation_failed'
-        ? 'unknown'
-        : deriveAnalysisFreshness(priorFactsForRecovery, gmCurrentHash).freshness;
+        ? null
+        : deriveAnalysisFreshness(priorFactsForRecovery, gmCurrentHash);
+    const gmFreshness: FrameFreshness =
+      gmFreshnessDerivation === null ? 'unknown' : gmFreshnessDerivation.freshness;
+    // ROADMAP 2.474 / A3 — DOES A LATER PART NEED A RE-RUN FIRST?
+    //
+    // Read off the SAME derivation the gate is about to use, so the answer
+    // cannot drift from the thing that will actually block. A structural
+    // candidate trusts only `fresh`/`none` (`frame-gate.ts`
+    // TRUSTWORTHY_FRESHNESS; the `stale` relaxation is tunable-only). Once
+    // part 1 is confirmed and applied the graph hash moves, so a scenario that
+    // ALREADY carries a successful run_analysis fact flips to `stale` and the
+    // next part is blocked with ANALYSIS_NOT_FRESH until the user re-runs.
+    // A scenario with no such fact stays `none` and the next part proceeds.
+    //
+    // `selected_fact_index !== null` is exactly "a successful run_analysis
+    // fact was selected". A failed derivation is treated as REQUIRING the
+    // re-run: the cost of over-warning is a longer sentence, and the cost of
+    // under-warning is a chip that cannot do what it says.
+    priorAnalysisExistsForSplit =
+      gmFreshnessDerivation === null || gmFreshnessDerivation.selected_fact_index !== null;
     gmDecision = evaluateEditGraphMutations({
       mode: gmMode,
       operations: editResult.operations!,
@@ -2634,7 +2659,38 @@ export async function dispatchEditGraph(
   // every operation that reached the gate; the remainder reached NOTHING. The
   // notice says the remaining work is still to come — never that part of a
   // judged batch was dropped, because no part of a judged batch was dropped.
-  if (structuralEditSplit !== null) {
+  //
+  // ⚠⚠ GATED ON THE TURN HAVING ACTUALLY PROPOSED SOMETHING. This block used
+  // to fire on `structuralEditSplit !== null` alone, with no reference to the
+  // governing verdict — while the supersession notice twenty lines above was
+  // correctly gated. Measured consequence: on a turn where part 1 was REJECTED
+  // (or STALED — which finding 1 below makes reachable on turn 1), the user
+  // received two contradictory sentences, "I couldn't take that change
+  // forward, so the model is unchanged" immediately followed by "this is the
+  // first [of 3 steps]", plus a chip offering step 2 of a sequence that had no
+  // step 1. The condition below MIRRORS the supersession notice's, deliberately.
+  //
+  // A disclosure describes what is HELD and what follows it. With no hold
+  // there is nothing for it to follow, so it must not be written. The tool
+  // engages only where the hold spine is live and structural batches always
+  // hold, so a split that produced no pending is not an expected state — it is
+  // emitted as telemetry rather than passed over in silence.
+  const splitTurnProposedSomething =
+    gmDecision !== null &&
+    gmDecision.governing === 'held' &&
+    gmDecision.pendingActions !== null &&
+    gmDecision.pendingActions.length > 0;
+  if (structuralEditSplit !== null && !splitTurnProposedSomething) {
+    emit(TelemetryEvents.V5StructuralEditToolEntry, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      decision: 'split_disclosure_suppressed',
+      part_count: structuralEditSplit.partCount,
+      governing: gmDecision?.governing ?? null,
+      was_rejected: editResult.wasRejected,
+    });
+  }
+  if (structuralEditSplit !== null && splitTurnProposedSomething) {
     const wholeDescription = describeChangeset(
       structuralEditSplit.wholeBatch as readonly ChangesetOpLike[],
       gmFrameBase,
@@ -2647,6 +2703,7 @@ export async function dispatchEditGraph(
             proposedIndices: structuralEditSplit.submittedIndices,
             partCount: structuralEditSplit.partCount,
             remainderDependsOnThisStep: structuralEditSplit.remainderDependsOnThisStep,
+            rerunRequiredBeforeNextStep: priorAnalysisExistsForSplit,
           });
     if (disclosure !== null) {
       response = {
@@ -2659,6 +2716,9 @@ export async function dispatchEditGraph(
             label: disclosure.action.label,
             message: disclosure.action.message,
             detail: disclosure.action.detail,
+            ...(disclosure.action.actionType !== undefined
+              ? { action_type: disclosure.action.actionType }
+              : {}),
           },
         ],
       };

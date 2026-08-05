@@ -82,6 +82,8 @@ export interface StructuralEditNextStepAction {
   readonly message: string;
   /** The full remainder sentence, behind a short label (wave-2 ask #20). */
   readonly detail: string;
+  /** Set only for the executable re-run chip, so the UI can run it directly. */
+  readonly actionType?: 'run_analysis';
 }
 
 export interface StructuralEditSplitDisclosure {
@@ -111,7 +113,49 @@ export interface BuildSplitDisclosureInput {
    * copy says so instead of implying a free choice of order.
    */
   readonly remainderDependsOnThisStep: boolean;
+  /**
+   * ⚠⚠ TRUE WHEN THE SCENARIO HAS ALREADY BEEN ANALYSED — and then the next
+   * step CANNOT be proposed immediately, whatever this copy would like to say.
+   *
+   * Measured at the seam the dispatcher uses: once part 1 is confirmed and
+   * applied the graph hash moves, so a scenario carrying a successful
+   * run_analysis fact flips to `stale`; a STRUCTURAL candidate trusts only
+   * `fresh`/`none` (`frame-gate.ts`, where the `stale` relaxation is
+   * tunable-only), so the gate returns `governing:'stale'`, `blockApply:true`,
+   * `ANALYSIS_NOT_FRESH` and `pendingActions: null`. No proposal, no chip.
+   *
+   * Note WHY this was invisible: every test of this feature ran on a
+   * PRE-ANALYSIS scenario (`freshness:'none'`, reason
+   * `no_successful_run_analysis_fact`), which is the one state where the next
+   * step does work — and it is NOT the normal state for someone restructuring
+   * a model they have already analysed.
+   *
+   * So when this is true the copy states the real order (confirm, re-run, then
+   * the rest) and the chip offered is the RE-RUN, which is a control that can
+   * actually deliver. Offering "Propose the next step" here would be the
+   * estate's named dominant defect: a control that cannot do what it says.
+   */
+  readonly rerunRequiredBeforeNextStep: boolean;
 }
+
+/**
+ * The re-run chip.
+ *
+ * ⚠ id / label / message / action_type are the estate's CANONICAL re-run chip,
+ * which already exists in two module-private copies
+ * (`routing/post-analysis-label-intercept.ts` RERUN_ANALYSIS_CHIP and
+ * `routing/run-comparison-gate.ts` RERUN_ACTION). Neither is exported, and
+ * extracting a shared leaf would widen this PR beyond its remit — so this is
+ * knowingly a THIRD copy, and it is guarded rather than trusted: the spec for
+ * this module reads both existing definitions out of their source and fails if
+ * this triple drifts from them. Extraction to one leaf is rowed.
+ */
+export const STRUCTURAL_EDIT_RERUN_ACTION = Object.freeze({
+  id: 'chip_action_rerun_analysis',
+  label: 'Re-run analysis',
+  message: 'Re-run the analysis.',
+  action_type: 'run_analysis' as const,
+});
 
 /**
  * Build the disclosure, or null when there is nothing to disclose (one part, or
@@ -128,16 +172,33 @@ export function buildStructuralEditSplitDisclosure(
 
   const remainderSubject = joinItems(remainderItems);
   const stepsWord = `${input.partCount} steps`;
+  const opening =
+    `That is a larger change than I can propose in one step, so it comes in ${stepsWord} ` +
+    `and this is the first. Still to come: ${remainderSubject}.`;
+
+  // ── THE ALREADY-ANALYSED CASE — say the real order, offer the real control ─
+  if (input.rerunRequiredBeforeNextStep) {
+    return {
+      notice:
+        `${opening} You have already analysed this model, so once you confirm this step ` +
+        'the figures will need refreshing before I can propose the rest. Re-run the ' +
+        'analysis after confirming, then ask me for the rest.',
+      action: {
+        id: STRUCTURAL_EDIT_RERUN_ACTION.id,
+        label: STRUCTURAL_EDIT_RERUN_ACTION.label,
+        message: STRUCTURAL_EDIT_RERUN_ACTION.message,
+        actionType: STRUCTURAL_EDIT_RERUN_ACTION.action_type,
+        detail: `Still to come: ${remainderSubject}.`,
+      },
+    };
+  }
+
   const dependencyClause = input.remainderDependsOnThisStep
     ? ' Confirm this step first, because the rest builds on what it adds.'
     : '';
 
-  const notice =
-    `That is a larger change than I can propose in one step, so it comes in ${stepsWord} ` +
-    `and this is the first. Still to come: ${remainderSubject}.${dependencyClause}`;
-
   return {
-    notice,
+    notice: `${opening}${dependencyClause}`,
     action: {
       // Deterministic and stable for the turn; the confirm chip for the held
       // part keeps its own gate-minted id, so these can never collide.

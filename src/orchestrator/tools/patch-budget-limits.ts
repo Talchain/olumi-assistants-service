@@ -28,13 +28,32 @@ export const MAX_EDGE_OPS = 8;
  * Edge budget for edges incident to an option/intervention node the SAME batch
  * creates.
  *
- * ⚠ MEASURED 2026-08-05, recorded because the comment that used to sit on this
- * constant asserted otherwise: it reads "the default 4-edge limit is too tight"
- * — but `MAX_EDGE_OPS` is 8, not 4, so the elevated limit ELEVATES NOTHING at
- * this tip and the option-addition split-budget branch in `checkPatchBudget`
- * cannot change any verdict that the plain branch would not already reach.
- * Left at its measured value deliberately: raising it is a behaviour change
- * with no witness behind it, and this lane's remit is to make the caps
- * COHERENT, not to widen an unmeasured one.
+ * ⚠⚠ THIS CONSTANT HAS NOW CARRIED TWO FALSE LABELS IN A ROW. Read both.
+ *
+ * The ORIGINAL comment said the elevated limit exists because "the default
+ * 4-edge limit is too tight". That was stale: `MAX_EDGE_OPS` is 8, not 4.
+ *
+ * The REPLACEMENT this file shipped then claimed the option-addition branch
+ * "cannot change any verdict that the plain branch would not already reach".
+ * **That is also false, and a discriminating pair refutes it:**
+ *
+ *   checkPatchBudget([option add_node, 7 incident edges, 5 unrelated edges])
+ *     -> edgeOps: 12, allowed: TRUE
+ *   CONTROL, the same 12 edge ops under a plain add_node
+ *     -> edgeOps: 12, allowed: FALSE
+ *
+ * Because the branch checks `incident <= 8` AND `unrelated <= 8`
+ * INDEPENDENTLY, it admits up to SIXTEEN edge operations against the flat cap
+ * of eight. Equalising the two constants removed the per-bucket elevation;
+ * **the BUCKET SPLIT is itself the elevation, and it survives.**
+ *
+ * So the honest statement is: this constant's VALUE currently adds nothing
+ * beyond `MAX_EDGE_OPS`, while the branch it feeds is materially more
+ * permissive than the plain path. Whether to raise it, or delete the branch
+ * and let the flat cap govern, is a ROWED decision and is not taken here.
+ *
+ * The splitter is unaffected either way — it sizes parts against the strict
+ * FLAT cap, which is stricter than anything this branch admits, so it can only
+ * be conservative in the safe direction.
  */
 export const OPTION_ADD_MAX_EDGE_OPS = 8;
