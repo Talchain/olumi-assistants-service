@@ -538,3 +538,60 @@ describe('⭐⭐ an already-analysed scenario is told the REAL order, and given 
     expect((rerun as { detail?: string }).detail).toContain('Shared overhead driver');
   });
 });
+
+/**
+ * ⚠⚠ THE KNOWN RESIDUAL, PINNED SO IT IS NOT SILENTLY BELIEVED TO BE CLOSED.
+ *
+ * The re-run derivation reads `turnContext.prior_facts` — a WINDOW over the 20
+ * most recent turn rows, not the scenario. An analysis older than that window
+ * is invisible, so the disclosure reverts to the promising copy on a scenario
+ * that HAS been analysed. `claim-safety-read.ts` records the same blindness
+ * confirmed live (scenario `f63ccb45-…`: `false` at rank 20, `true` at rank 21,
+ * zero store change).
+ *
+ * This test does not assert the behaviour is RIGHT. It asserts what it IS, and
+ * fails if someone changes it without changing this note — which is the only
+ * honest thing to write while the fix (a scenario-scoped read through the
+ * sanctioned seam) is rowed rather than taken here.
+ */
+describe('⚠ KNOWN RESIDUAL — an analysis outside the 20-turn window is not seen', () => {
+  beforeEach(() => {
+    (getAdapter as MockedFunction<typeof getAdapter>)
+      .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValueOnce(rulebookDeadEnd())
+      .mockImplementationOnce(async (_c, _m, _a, _r, _t, opts) =>
+        pipelineApplied((opts?.preComposedOperations ?? []) as never),
+      );
+    // An analysed scenario whose analysis fact has aged out of the window:
+    // `prior_facts` empty, exactly as the loader would return it.
+    (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockImplementation(
+      async (...args) => {
+        const ctx = await realBuildTurnContext(...(args as Parameters<typeof buildTurnContext>));
+        return { ...ctx, prior_facts: [] };
+      },
+    );
+  });
+
+  it('CURRENT behaviour: the promising copy is used, because the fact is invisible', async () => {
+    const result = await runTurn();
+    const ids = (result.response.suggested_actions ?? []).map((a) => a.id);
+    expect(ids).toContain('structural_edit_next_step');
+    expect(result.response.assistant_text ?? '').not.toContain('already analysed this model');
+  });
+
+  it('DISCRIMINATOR: the SAME turn with the fact inside the window warns correctly', async () => {
+    // Proves the residual is the WINDOW and not a broken derivation — without
+    // this pair, the test above would look like the feature simply not working.
+    const hash = computeAnalysisAffectingGraphHash(GRAPH as never)!;
+    (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockImplementation(
+      async (...args) => {
+        const ctx = await realBuildTurnContext(...(args as Parameters<typeof buildTurnContext>));
+        return { ...ctx, prior_facts: [runAnalysisFact(hash)] };
+      },
+    );
+    const ids = ((await runTurn()).response.suggested_actions ?? []).map((a) => a.id);
+    expect(ids).toContain('chip_action_rerun_analysis');
+    expect(ids).not.toContain('structural_edit_next_step');
+  });
+});

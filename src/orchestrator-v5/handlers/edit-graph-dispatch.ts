@@ -2476,6 +2476,35 @@ export async function dispatchEditGraph(
     // fact was selected". A failed derivation is treated as REQUIRING the
     // re-run: the cost of over-warning is a longer sentence, and the cost of
     // under-warning is a chip that cannot do what it says.
+    //
+    // ⚠⚠ KNOWN RESIDUAL, NAMED RATHER THAN GLOSSED — THIS READS A WINDOW, AND
+    // THE WINDOW HAS ALREADY SHIPPED THIS DEFECT ONCE.
+    //
+    // `priorFactsForRecovery` is `turnContext.prior_facts`, which is a WINDOW
+    // over the 20 turn rows `readRecent` returned — NOT the scenario. A
+    // `run_analysis` fact whose parent turn has aged out is invisible here, so
+    // this reads `false` on a scenario that HAS been analysed, and the
+    // over-promising chip returns. That is the wrong direction.
+    //
+    // It is not hypothetical: `claim-safety-read.ts` records the same window
+    // blindness confirmed LIVE on scenario `f63ccb45-…` (31 turns) — the
+    // analysis turn read `false` at rank 20 and `true` at rank 21 after one
+    // more turn committed, WITH ZERO STORE CHANGE. The estate's answer to it
+    // is `turn_context.newest_analysis_fact`, read past the window and
+    // scenario-scoped.
+    //
+    // NOT USED HERE, deliberately: that field carries an explicit contract —
+    // "Consumed ONLY through `readMayNameLeadingOptionVerdict` — never read
+    // directly, or it becomes a second derivation." Reaching past a documented
+    // seam to fix my own copy would trade a bounded copy defect for an
+    // unbounded derivation defect, and the sanctioned pattern (a UNION into
+    // the fact array, one-directional) is a change to the FRESHNESS input that
+    // other consumers share. Rowed as its own piece of work.
+    //
+    // Bound on the harm as it stands: the disclosure over-promises only on a
+    // scenario whose analysis is more than 20 turns old. Everything else on
+    // this path is unaffected — the gate still blocks part 2 correctly, so the
+    // user is never told a change applied when it did not.
     priorAnalysisExistsForSplit =
       gmFreshnessDerivation === null || gmFreshnessDerivation.selected_fact_index !== null;
     gmDecision = evaluateEditGraphMutations({
