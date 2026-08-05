@@ -291,15 +291,22 @@ export function partitionStructuralEditBatch(
     }
   }
 
-  // ⚠ THE ORDINARY PATH IS BYTE-IDENTICAL, AND THAT IS A REQUIREMENT.
+  // THE ORDINARY PATH: a fast path, and NOT the thing that keeps it in order.
   //
-  // Clustering REORDERS (it moves an operation next to the create it names).
-  // On a batch that fits in one proposal there is nothing to reorder FOR, and
-  // reordering it anyway would change what the tool submits on every ordinary
-  // turn — a behaviour change on the happy path that nobody asked for, in the
-  // one place the live witness already proved sound. Caught by the positive
-  // control, which compares the single part to the input operation-for-
-  // operation.
+  // ⚠ THIS COMMENT USED TO CLAIM OTHERWISE, and a mutant proved the claim
+  // wrong. It said the early return was what stopped clustering reordering a
+  // batch that fits in one proposal. It was true when written — and stopped
+  // being true the moment the within-part ASCENDING SORT went into `flush()`,
+  // because a single part containing every operation sorts back to exactly the
+  // input order. Deleting this branch changes no output on any fixture in the
+  // suite, and by that argument on any single-part batch at all: every prefix
+  // of a batch that fits also fits, so all clusters land in one part.
+  //
+  // It is kept because it is worth keeping — it skips union-find on the common
+  // turn — but it is a PERFORMANCE short-circuit, not a correctness guarantee,
+  // and the ordering guarantee belongs to the sort. Recorded rather than
+  // quietly corrected because "which line is load-bearing" is exactly what a
+  // later tidy-up reads off a comment like this one.
   if (fits(measurePart(operations), limits)) {
     return {
       ok: true,

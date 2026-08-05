@@ -454,6 +454,66 @@ describe('⭐ GROUNDING STILL WINS — an ungrounded batch is never partitioned'
   });
 });
 
+/**
+ * ⚠ THIS BLOCK EXISTS BECAUSE TWO MUTANTS SURVIVED, and the reason each
+ * survived is a different thing worth recording.
+ *
+ * Deleting the NODE-budget check from the part sizer changed nothing on any
+ * fixture above: in every one of them the envelope cap binds first. That is a
+ * COVERAGE GAP, not an equivalence — the node budget is a real cap with a real
+ * frame that reaches it, and the first case below is that frame.
+ *
+ * Deleting the EDGE-budget check also changed nothing, for a different and
+ * more interesting reason: every edge operation projects to AT LEAST one
+ * envelope, so `edgeOps <= envelopeCount` always holds — and at the shipped
+ * values `MAX_EDGE_OPS` and `PROPOSAL_CAP` are BOTH 8, so the envelope cap
+ * subsumes the edge budget exactly. The check is therefore unobservable today
+ * and would start binding the moment `PROPOSAL_CAP` moved. The second case
+ * proves it is wired up by relaxing the envelope cap and watching the edge
+ * budget do the splitting on its own — demonstrated, not asserted.
+ */
+describe('every cap in the sizer is REACHABLE, including the ones the others hide', () => {
+  it('the NODE budget splits a batch the envelope cap would have let through', () => {
+    // Five creates: 5 envelopes (under the cap of 8) but 5 node ops (over 4).
+    const operations = Array.from({ length: MAX_NODE_OPS + 1 }, (_, i) => ({
+      op: 'add_node',
+      path: `f-new-${i}`,
+      value: { id: `f-new-${i}`, kind: 'factor', label: `New factor ${i}` },
+    }));
+    const whole = measurePart(operations);
+    expect(whole.nodeOps).toBeGreaterThan(MAX_NODE_OPS);
+    expect(whole.envelopeCount).toBeLessThanOrEqual(PROPOSAL_CAP); // the cap that does NOT bind
+    const partition = partitionStructuralEditBatch(operations, LIMITS);
+    expect(partition.ok).toBe(true);
+    if (!partition.ok) throw new Error('unreachable');
+    expect(partition.parts).toHaveLength(2);
+    for (const part of partition.parts) {
+      expect(measurePart(part.operations).nodeOps).toBeLessThanOrEqual(MAX_NODE_OPS);
+    }
+  });
+
+  it('the EDGE budget splits on its own once the envelope cap stops hiding it', () => {
+    const operations = Array.from({ length: MAX_EDGE_OPS + 1 }, (_, i) => ({
+      op: 'add_edge',
+      path: `f-spend::f-reach-${i}`,
+      value: { from: 'f-spend', to: `f-reach-${i}` },
+    }));
+    // Control first: at the SHIPPED limits the two caps are indistinguishable.
+    const m = measurePart(operations);
+    expect(m.edgeOps).toBe(m.envelopeCount);
+    expect(LIMITS.maxEdgeOps).toBe(LIMITS.maxEnvelopes);
+    // Now relax the envelope cap so only the edge budget can bind.
+    const relaxed = { ...LIMITS, maxEnvelopes: 100 };
+    const partition = partitionStructuralEditBatch(operations, relaxed);
+    expect(partition.ok).toBe(true);
+    if (!partition.ok) throw new Error('unreachable');
+    expect(partition.parts).toHaveLength(2);
+    for (const part of partition.parts) {
+      expect(measurePart(part.operations).edgeOps).toBeLessThanOrEqual(MAX_EDGE_OPS);
+    }
+  });
+});
+
 describe('the caps a part is sized against are DERIVED from what enforces them', () => {
   it('the split limits ARE the pipeline`s own constants, not a copy of their values', () => {
     expect(LIMITS.maxNodeOps).toBe(MAX_NODE_OPS);
