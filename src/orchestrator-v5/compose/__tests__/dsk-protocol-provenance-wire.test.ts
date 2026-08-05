@@ -27,6 +27,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { ExerciseBlockSchema } from '@talchain/schemas/boundary';
@@ -35,7 +36,10 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { DSKBundle, DSKProtocol } from '../../../dsk/types.js';
 import { LENS_DSK_PROVENANCE, selectLens } from '../lens-selector.js';
-import { resolveDskProtocolProvenance } from '../dsk-protocol-record.js';
+import {
+  resolveDskProtocolProvenance,
+  _resetDskProtocolRecordCache,
+} from '../dsk-protocol-record.js';
 import {
   buildLensCompanionBlocks,
   type BlockBuildCtx,
@@ -241,6 +245,64 @@ describe('DSK protocol provenance reaches the wire (2.490 slice 2)', () => {
     // the attribution would be a claim the code cannot support.
     expect(protocolsById.has('DSK-P-001'), 'precondition: the tempting record exists').toBe(true);
     expect(LENS_DSK_PROVENANCE.pre_mortem).toBeUndefined();
+  });
+
+  it('a bundle that FAILS ITS OWN HASH yields no provenance at all — the badge is withheld, not guessed', () => {
+    // The badge's claim is "this text is the published record's". A bundle that
+    // cannot prove its own integrity cannot support that claim. Exercised on
+    // the REAL read path (a temp cwd with a tampered bundle), not by stubbing
+    // the resolver — a stub would prove only that a mock returns what I told it.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dskproto7f3a91-hash-'));
+    fs.mkdirSync(path.join(tmp, 'data', 'dsk'), { recursive: true });
+    const tampered = {
+      ...bundle,
+      objects: bundle.objects.map((o) =>
+        o.id === 'DSK-P-003' ? { ...o, title: 'Totally Legitimate Science' } : o,
+      ),
+    };
+    fs.writeFileSync(
+      path.join(tmp, 'data', 'dsk', 'v1.json'),
+      JSON.stringify(tampered),
+      'utf-8',
+    );
+
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      _resetDskProtocolRecordCache();
+      // Positive control IN THE SAME INVOCATION: prove the tampering actually
+      // landed, so a null result cannot be an artefact of an unread file.
+      const onDisk = JSON.parse(
+        fs.readFileSync(path.join(tmp, 'data', 'dsk', 'v1.json'), 'utf-8'),
+      ) as DSKBundle;
+      expect(
+        onDisk.objects.find((o) => o.id === 'DSK-P-003')?.title,
+      ).toBe('Totally Legitimate Science');
+
+      expect(resolveDskProtocolProvenance('DSK-P-003')).toBeNull();
+    } finally {
+      process.chdir(cwd);
+      _resetDskProtocolRecordCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+
+    // …and the real bundle still resolves afterwards, so the test cleaned up.
+    expect(resolveDskProtocolProvenance('DSK-P-003')).not.toBeNull();
+  });
+
+  it('a MISSING bundle yields no provenance and does not throw', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dskproto7f3a91-missing-'));
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      _resetDskProtocolRecordCache();
+      expect(fs.existsSync(path.join(tmp, 'data', 'dsk', 'v1.json'))).toBe(false);
+      expect(resolveDskProtocolProvenance('DSK-P-003')).toBeNull();
+    } finally {
+      process.chdir(cwd);
+      _resetDskProtocolRecordCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it('the emitted triple is accepted by the 0.37.0 contract on a real block shape', () => {
