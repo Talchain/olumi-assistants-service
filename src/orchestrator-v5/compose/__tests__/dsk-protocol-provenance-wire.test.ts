@@ -34,6 +34,7 @@ import { ExerciseBlockSchema } from '@talchain/schemas/boundary';
 
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
+import { computeDSKHash } from '../../../dsk/hash.js';
 import type { DSKBundle, DSKProtocol } from '../../../dsk/types.js';
 import { LENS_DSK_PROVENANCE, selectLens } from '../lens-selector.js';
 import {
@@ -303,6 +304,83 @@ describe('DSK protocol provenance reaches the wire (2.490 slice 2)', () => {
       _resetDskProtocolRecordCache();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  /**
+   * ⚠ WHY THE NEXT TWO TESTS USE A SYNTHETIC BUNDLE, AND WHY THAT IS NOT
+   * "testing the mock". Two of this module's gates — the id-FORMAT check and
+   * the DEPRECATED filter — are UNOBSERVABLE against bundle v1.0.0, and that
+   * was found by measurement, not by inspection: mutating either one left all
+   * 24 tests GREEN. The cause is that on this bundle the id format and the
+   * object type agree on all 27 objects (0 disagreements) and no protocol is
+   * deprecated (0 of 6), so each gate is fully shadowed by the other checks.
+   *
+   * That makes both mutants EQUIVALENT ON THIS BUNDLE and NOT equivalent in
+   * general — a distinction this estate requires to be demonstrated rather than
+   * asserted, in EITHER direction. Declaring them equivalent and moving on
+   * would have left two real gates with no coverage at all, so that the day a
+   * bundle revision introduces a deprecated protocol or an off-format id,
+   * nothing REDs. The synthetic bundles below construct exactly the states
+   * v1.0.0 cannot express, and each recomputes the canonical hash with the
+   * production hasher so it passes the integrity check for the RIGHT reason —
+   * otherwise a null result would only prove the hash gate fired first.
+   */
+  function withSyntheticBundle(mutate: (b: DSKBundle) => DSKBundle, run: () => void): void {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dskproto7f3a91-syn-'));
+    fs.mkdirSync(path.join(tmp, 'data', 'dsk'), { recursive: true });
+    const synthetic = mutate(JSON.parse(JSON.stringify(bundle)) as DSKBundle);
+    synthetic.dsk_version_hash = computeDSKHash(synthetic);
+    fs.writeFileSync(
+      path.join(tmp, 'data', 'dsk', 'v1.json'),
+      JSON.stringify(synthetic),
+      'utf-8',
+    );
+    const cwd = process.cwd();
+    try {
+      process.chdir(tmp);
+      _resetDskProtocolRecordCache();
+      run();
+    } finally {
+      process.chdir(cwd);
+      _resetDskProtocolRecordCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  it('the ID-FORMAT gate is real, not shadowed by the type filter', () => {
+    withSyntheticBundle(
+      (b) => {
+        b.objects = b.objects.map((o) =>
+          o.id === 'DSK-P-003' ? { ...o, id: 'DSK-X-001' } : o,
+        );
+        return b;
+      },
+      () => {
+        // Positive control in the same invocation: the synthetic bundle IS
+        // being read and its integrity check passes, so a null below is the
+        // format gate and not a load failure.
+        expect(resolveDskProtocolProvenance('DSK-P-005')).not.toBeNull();
+        // A genuine `type: 'protocol'` object whose id is not a protocol id.
+        expect(resolveDskProtocolProvenance('DSK-X-001')).toBeNull();
+      },
+    );
+  });
+
+  it('a DEPRECATED protocol is refused — the wire must not cite withdrawn science', () => {
+    withSyntheticBundle(
+      (b) => {
+        b.objects = b.objects.map((o) =>
+          o.id === 'DSK-P-003'
+            ? { ...o, deprecated: true, deprecated_reason: 'superseded in this fixture' }
+            : o,
+        );
+        return b;
+      },
+      () => {
+        expect(resolveDskProtocolProvenance('DSK-P-005')).not.toBeNull();
+        expect(resolveDskProtocolProvenance('DSK-P-003')).toBeNull();
+      },
+    );
   });
 
   it('the emitted triple is accepted by the 0.37.0 contract on a real block shape', () => {
