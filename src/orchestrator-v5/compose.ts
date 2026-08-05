@@ -1100,7 +1100,7 @@ function rebuildPhase3BlocksFresh(
   // `buildPreMortemExerciseBlock`) so it cannot mislead a dashboard.
   const lensCompanions =
     lensSurface !== null
-      ? buildLensCompanionBlocks(fact, ctx, lensSurface.selection, reviewCards)
+      ? buildLensCompanionBlocks(fact, ctx, lensSurface.selection, reviewCards, lookup)
       : [];
 
   // T1 CLAIM SAFETY — THE SINGLE FUNNEL.

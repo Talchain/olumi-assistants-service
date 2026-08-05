@@ -90,9 +90,22 @@
  * because that affordance is inert on the live UI today (brief Revision-1
  * item 3 — "no inert chips, ever"). The prose names the live action.
  *
- * Deferred lenses (weighted matrix · outside view · richer devil's advocacy)
- * are NOT selectable here — they need compute / reference-class evidence we do
- * not have (brief Revision-1 items 1 & 5).
+ * ── AMENDMENT, DSK slice 1 (2026-08-05): TWO DSK-DERIVED LENSES ─────────────
+ * `consider_opposite` (DSK-TR-003 → protocol DSK-P-003, disconfirmation) and
+ * `devils_advocacy` (DSK-TR-005 → DSK-P-005, structured dissent) are now
+ * selectable, below the three locked core lenses and above the what-if
+ * extension. Their triggers are pure computable-fact readings of the bundle's
+ * own trigger objects (see the evaluators + `LENS_DSK_PROVENANCE`); their
+ * executors are the deterministic ExerciseBlock companions emitted the same
+ * turn. An earlier revision of this header said "richer devil's advocacy" was
+ * deferred for want of compute — the DSK trigger's actual condition (dominant
+ * factor + non-fragile robustness) is computable from the enrichment we
+ * already read, so the deferral no longer applied. Outside view REMAINS
+ * deferred, twice over: DSK-TR-002's signal is a conversation-text heuristic
+ * the bundle itself labels "not production quality" (not a compose-time graph
+ * fact), and its `reference_class` content must come from the user or real
+ * evidence — a deterministic template would fabricate exactly what the
+ * protocol exists to elicit.
  */
 
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
@@ -101,6 +114,11 @@ import {
   readFlipClaimPosture,
   type FlipClaimPosture,
 } from '../context/flip-threshold-rows.js';
+import {
+  readRawRobustnessSignals,
+  type RawRobustnessSignals,
+} from '../coaching/pick-raw-robustness.js';
+import { isRawFragile } from '../coaching/robustness-honesty.js';
 import { bandConfidence, type ConfidenceBand } from './confidence-bands.js';
 
 // ============================================================================
@@ -119,6 +137,8 @@ export type LensId =
   | 'sensitivity_flip_risk'
   | 'pre_mortem'
   | 'evpi_evidence_priority'
+  | 'consider_opposite'
+  | 'devils_advocacy'
   | 'what_if_counterfactual';
 
 /**
@@ -144,6 +164,10 @@ export type LensRationaleCode =
   | 'WIN_PROB_MODERATE' // a leader exists but not decisively
   // evpi_evidence_priority
   | 'MATERIAL_EVPI' // learning more about a factor would move the decision
+  // consider_opposite (DSK-TR-003 → DSK-P-003 disconfirmation)
+  | 'CLEAR_WINNER_DISCONFIRMATION' // a decisive, attested-non-fragile leader invites structured disconfirmation
+  // devils_advocacy (DSK-TR-005 → DSK-P-005 devil's advocate)
+  | 'DOMINANT_FACTOR_DISSENT' // one factor carries the result and the analysis is not already challenging it
   // what_if_counterfactual (wave-3 λ extension, executor-gated)
   | 'WHATIF_EXPLORE_DRIVER'; // a top-influence factor is worth a counterfactual probe
 
@@ -270,6 +294,108 @@ export const PREMORTEM_WINPROB_MAX = 0.7;
  */
 export const EVPI_MATERIAL_MIN_PP = 1.0;
 
+/**
+ * Rule 4 (consider_opposite, DSK-TR-003) — the leader must be clear of the
+ * runner-up by at least this much. This is TR-003's own negative condition
+ * ("Do not fire if the analysis shows a close call (separation <10%) — the
+ * model already reflects uncertainty") made explicit. With normalised win
+ * probabilities a ≥0.7 leader always clears it; the guard exists for the
+ * defensive-read case where a producer emits non-normalised values.
+ */
+export const CONSIDER_OPPOSITE_MIN_SEPARATION = 0.1;
+
+/**
+ * DSK provenance for the lenses whose TRIGGER RULE is a computable-fact
+ * derivation of a specific `data/dsk/v1.json` trigger object. CEE-INTERNAL:
+ * the ExerciseBlock wire shape at schemas 0.32.0 is `.strict()` with no dsk
+ * field, so this provenance rides TELEMETRY (the lens suggestion event), not
+ * the wire; a contract field is a schemas-repo change, deliberately out of
+ * this slice.
+ *
+ * HAND-WRITTEN map, so per trap 12 it fails loud on drift:
+ * `dsk-provenance-attestation.test.ts` asserts every id here against the
+ * bundle BYTES (exists, right type, non-deprecated, trigger links protocol).
+ * The three original lenses are deliberately ABSENT — their rules predate the
+ * bundle and differ from DSK-TR-001's conditions; claiming provenance they do
+ * not have would be a false label (trap 14).
+ */
+export const LENS_DSK_PROVENANCE: Partial<
+  Readonly<Record<LensId, { readonly protocolId: string; readonly triggerId: string }>>
+> = {
+  consider_opposite: { protocolId: 'DSK-P-003', triggerId: 'DSK-TR-003' },
+  devils_advocacy: { protocolId: 'DSK-P-005', triggerId: 'DSK-TR-005' },
+};
+
+/**
+ * ⚠ THE DSK "DO NOT RUN IMMEDIATELY AFTER" CONTRAINDICATIONS — AND WHY THE
+ * 2.211 DIVERSITY RULE POINTS THE WRONG WAY WITHOUT THEM.
+ *
+ * Verbatim from the bundle (`data/dsk/v1.json`, protocol `contraindications`):
+ *   DSK-P-003 (disconfirmation) — "Do not run immediately after the user has
+ *     already run a pre-mortem on the same decision"
+ *   DSK-P-005 (devil's advocate) — "Do not run immediately after a pre-mortem
+ *     or disconfirmation exercise on the same decision"
+ *
+ * 2.211's no-immediate-repeat hands a repeated head's slot to the RUNNER-UP.
+ * With these lenses on the ladder that promotion produces exactly the sequence
+ * the protocols forbid: measured before this filter, `pre_mortem` on turn N
+ * yielded `consider_opposite` on turn N+1 with `displacementCause: 'no_repeat'`.
+ * The diversity heuristic and the protocol's own science disagreed, and the
+ * science wins — a platform that ships a decision-science bundle must not emit
+ * the sequence that bundle contraindicates.
+ *
+ * NO NEW PERSISTENCE IS NEEDED for this case, which is why it is here and not
+ * deferred: `previousAnalysisLens` is already threaded for 2.211, so
+ * "immediately after" is answerable from inputs the selector already has. The
+ * filter removes the lens from the ELIGIBLE set (not merely from the head), so
+ * a runner-up promotion cannot re-introduce it.
+ *
+ * THE ASYMMETRY IS THE BUNDLE'S AND MUST NOT BE TIDIED: P-003 names only the
+ * pre-mortem; P-005 names the pre-mortem AND disconfirmation. Making these two
+ * sets symmetric would suppress a protocol its own science permits — pinned by
+ * a test.
+ *
+ * ⚠ ACCEPTED TRADE-OFF: THIS FILTER CAN CAUSE THE pre_mortem REPEAT THAT 2.211
+ * EXISTS TO PREVENT. When the only lens available to take a repeated
+ * `pre_mortem` head's slot is a contraindicated one, removing it leaves nothing
+ * to promote, so 2.211's condition (2) fails and the repeat stands — the user
+ * sees the pre-mortem lens twice running. That is the correct direction:
+ * DSK-P-001 carries NO immediately-after clause (its contraindications are
+ * "only one option / no meaningful alternatives" and "already identified
+ * fragile edges and wants to proceed" — verified at the bundle bytes), so a
+ * repeated pre-mortem is merely monotonous, whereas the promotion it replaces
+ * would have been a sequence the bundle explicitly forbids. Monotony is a UX
+ * cost; a contraindicated sequence is a science defect. Stated here because it
+ * is a real regression against 2.211's intent and must not be discovered as a
+ * surprise.
+ *
+ * SCOPE, STATED HONESTLY (this note replaces an earlier one that framed the
+ * whole cooldown class as un-implementable — a false label the next slice would
+ * have inherited): what is NOT covered is the GENERAL cooldown class — "already
+ * fired for this decision in this stage", "user has already completed a
+ * structured risk assessment", "already run this exercise this stage". Those
+ * need a persisted per-stage fired-ledger the selector has no input for today,
+ * and they remain slice-2 work. What IS covered is precisely the
+ * immediately-after ordering, on the immediately-preceding ANALYSIS turn.
+ */
+const CONTRAINDICATED_IMMEDIATELY_AFTER: Partial<
+  Readonly<Record<LensId, ReadonlySet<LensId>>>
+> = {
+  consider_opposite: new Set<LensId>(['pre_mortem']),
+  devils_advocacy: new Set<LensId>(['pre_mortem', 'consider_opposite']),
+};
+
+/**
+ * Is `lens` contraindicated because of what ran on the immediately-preceding
+ * analysis turn? Absent history ⇒ never contraindicated (the fail-safe
+ * direction: an unavailable history can only cost the filter, never
+ * manufacture a suppression).
+ */
+function isContraindicatedAfter(lens: LensId, previous: LensId | null | undefined): boolean {
+  if (previous == null) return false;
+  return CONTRAINDICATED_IMMEDIATELY_AFTER[lens]?.has(previous) ?? false;
+}
+
 // ============================================================================
 // Executor availability + the extension-lens enable gate (wave-3 λ)
 // ============================================================================
@@ -293,6 +419,12 @@ const LENS_EXECUTOR_INTRINSICALLY_AVAILABLE: Readonly<Record<LensId, boolean>> =
   sensitivity_flip_risk: true,
   pre_mortem: true,
   evpi_evidence_priority: true,
+  // DSK slice 1: the executor for each DSK lens is the deterministic
+  // ExerciseBlock companion emitted on the SAME turn (fixed copy, no
+  // transport, no producer-content dependency) plus the conversational
+  // follow-through — intrinsically present on the live path.
+  consider_opposite: true,
+  devils_advocacy: true,
   what_if_counterfactual: false,
 };
 
@@ -413,6 +545,16 @@ interface AnalysisSignals {
    * `fact.result.enrichment` (the property `lens-history.ts` replays on).
    */
   readonly flipClaimPosture: FlipClaimPosture;
+  /**
+   * DSK slice 1 — the RAW `enrichment.robustness` signals, through the shared
+   * S4 normaliser (`readRawRobustnessSignals` — one normaliser, every caller;
+   * `robustness-honesty.ts` owns the fragile truth table). `null` when the
+   * producer emitted no robustness object. Consulted by the DSK trigger rules:
+   * TR-003 states a POSITIVE robustness condition (an absent attestation must
+   * NOT fire consider_opposite), TR-005 a NEGATIVE one (only shown-fragile
+   * suppresses devils_advocacy).
+   */
+  readonly rawRobustness: RawRobustnessSignals | null;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -482,6 +624,7 @@ function readAnalysisSignals(fact: RunAnalysisHandlerFact): AnalysisSignals | nu
     optionWinProbabilities,
     confidenceTier,
     flipClaimPosture: readFlipClaimPosture(enrichment),
+    rawRobustness: readRawRobustnessSignals(enrichment.robustness),
   };
 }
 
@@ -561,28 +704,44 @@ function evaluateSensitivityFlipRisk(signals: AnalysisSignals): EvaluatorHit | n
     };
   }
 
-  // 1b — one factor carries a STRICT majority share of total positive influence.
-  // Behaviour-identical to the prior `Math.max`/`reduce` trigger; additionally
-  // carries the dominating factor's id as the focus subject.
+  // 1b — one factor carries a STRICT majority share of total positive influence
+  // (the shared dominance derivation). Behaviour-identical to the prior inline
+  // trigger; additionally carries the dominating factor's id as the focus
+  // subject.
+  const dominant = findDominantDriver(signals);
+  if (dominant !== null) {
+    // DOMINANT_DRIVER's copy ends "…how far it can move before the leading
+    // option changes", which presupposes the leading option CAN change. On an
+    // attested-no-flip run it cannot, so this door is remapped too.
+    return {
+      code: noFlip ? 'DOMINANT_DRIVER_NO_FLIP' : 'DOMINANT_DRIVER',
+      subjectFactorId: dominant.factorId,
+    };
+  }
+  return null;
+}
+
+/**
+ * Shared dominance derivation — ONE derivation, two callers (rule 1b above and
+ * the devils_advocacy DSK rule below). Two inline copies of "which factor
+ * dominates?" over the same fact is the two-derivations-of-one-fact shape this
+ * module's own comments refuse (trap 12/16), so the extraction is the point,
+ * not a convenience. A factor dominates when its influence_score is a STRICT
+ * majority of the summed positive influence — scale-invariant, and two equal
+ * halves do NOT trip it (only a genuine single dominator does).
+ */
+function findDominantDriver(
+  signals: AnalysisSignals,
+): (FactorSignal & { influenceScore: number }) | null {
   const scored = signals.factors.filter(
     (f): f is FactorSignal & { influenceScore: number } =>
       f.influenceScore !== null && f.influenceScore > 0,
   );
-  if (scored.length >= 1) {
-    const total = scored.reduce((a, f) => a + f.influenceScore, 0);
-    let top = scored[0]!;
-    for (const f of scored) if (f.influenceScore > top.influenceScore) top = f;
-    if (total > 0 && top.influenceScore / total > DOMINANCE_SHARE_MIN) {
-      // DOMINANT_DRIVER's copy ends "…how far it can move before the leading
-      // option changes", which presupposes the leading option CAN change. On an
-      // attested-no-flip run it cannot, so this door is remapped too.
-      return {
-        code: noFlip ? 'DOMINANT_DRIVER_NO_FLIP' : 'DOMINANT_DRIVER',
-        subjectFactorId: top.factorId,
-      };
-    }
-  }
-  return null;
+  if (scored.length === 0) return null;
+  const total = scored.reduce((a, f) => a + f.influenceScore, 0);
+  let top = scored[0]!;
+  for (const f of scored) if (f.influenceScore > top.influenceScore) top = f;
+  return total > 0 && top.influenceScore / total > DOMINANCE_SHARE_MIN ? top : null;
 }
 
 /** Rule 2 — pre-mortem: the decision is acceptance-plausible but fragile. */
@@ -629,7 +788,118 @@ function evaluateEvpiEvidencePriority(signals: AnalysisSignals): EvaluatorHit | 
 }
 
 /**
- * Rule 4 (wave-3 λ extension, executor-gated) — what-if counterfactual. LOWEST
+ * Rule 4 — consider_opposite (DSK slice 1: TR-003 → DSK-P-003 disconfirmation).
+ *
+ * The DSK trigger's observable signal, read at the computable facts:
+ * "Analysis results show one option with win probability >70% AND robustness =
+ * 'robust' or 'moderate'", with its own negative condition "do not fire on a
+ * close call (separation <10%)". Mapping choices, stated because each is a
+ * fidelity decision:
+ *
+ *   - DECISIVE region = `top ≥ PREMORTEM_WINPROB_MAX` — the exact complement
+ *     of pre_mortem rule 2c's [MIN, MAX) band, SHARING the constant so the
+ *     boundary cannot drift a gap or an overlap between the two rules.
+ *   - The robustness condition is POSITIVE in the DSK ("robust or moderate"),
+ *     so it requires an ATTESTED, non-fragile raw level: absent robustness
+ *     does NOT fire (fail-closed), the shared `RAW_FRAGILE_LEVELS` truth table
+ *     decides fragility (never a local copy), and the raw `near_tie.is_tie`
+ *     override suppresses regardless of margin (upstream knows things the
+ *     projection does not — robustness-honesty doctrine).
+ *   - ≥2 finite win probabilities are required: with a single option there is
+ *     no alternative to argue for, and no separation is computable.
+ *
+ * ⚠ THE ROBUSTNESS CHECK IS A DENYLIST IMPLEMENTING A POSITIVE CONDITION, AND
+ * THAT MISMATCH IS DELIBERATE. DSK-TR-003 names an ALLOWLIST — "robustness =
+ * 'robust' or 'moderate'" — but only half of that vocabulary is real. MEASURED
+ * over this repo's fixtures (`robustness.level` values only, excluding the
+ * distinct `robustness_band` / `robustness.score` / review-`severity` fields):
+ * `moderate` (48), `low`, `high` (9), `very_low`, `stable`, `fragile`, and the
+ * stray `mid` / `medium` — while **`robust` never appears as a level at all**.
+ * So a literal `['robust','moderate']` allowlist would NOT be dead: it would
+ * fire on the `moderate` turns, which are the most common single value here.
+ * What it would do is MISS most live non-fragile turns — `high` (the level on
+ * both live decision-review captures), `stable`, and the strays all sit outside
+ * it — while its `robust` limb matched nothing ever.
+ *
+ * ⚠ An earlier revision of this comment said a literal allowlist "would match
+ * NOTHING and ship this lens 100% dark". That was MEASURABLY FALSE (`moderate`
+ * fires today) and is corrected here at the bytes rather than inherited — an
+ * unverified correction is how the next false label lands (trap 7b). The
+ * architectural decision is unchanged; only the justification was wrong.
+ *
+ * So the implemented rule is: an ATTESTED level that is not a known
+ * fragile synonym. The consequence, stated rather than hidden: an unrecognised
+ * level (`unknown`, `insufficient_data`, or a producer typo) reads as
+ * non-fragile and CAN fire this lens. That is the accepted cost of not shipping
+ * dark, it is bounded (the lens offers a reflective exercise; it makes no claim
+ * about the robustness value itself), and the honest fix is a canonical
+ * robustness vocabulary shared by producer and bundle — slice-2 work, not a
+ * silent local allowlist.
+ *
+ * DSK negative conditions: the "do not run immediately after a pre-mortem"
+ * contraindication IS enforced — see {@link CONTRAINDICATED_IMMEDIATELY_AFTER},
+ * applied at eligibility in `selectLens`. The GENERAL per-stage fired-cooldown
+ * ("already fired this stage", "user already completed a structured risk
+ * assessment") is NOT: it needs a persisted ledger the selector has no input
+ * for, and is slice-2 work rather than a silent claim.
+ */
+function evaluateConsiderOpposite(signals: AnalysisSignals): EvaluatorHit | null {
+  const raw = signals.rawRobustness;
+  if (raw === null || raw.level === null) return null;
+  if (isRawFragile(raw)) return null;
+  if (raw.near_tie_is_tie) return null;
+
+  const probs = signals.optionWinProbabilities;
+  if (probs.length < 2) return null;
+  const sorted = [...probs].sort((a, b) => b - a);
+  const top = sorted[0]!;
+  const runnerUp = sorted[1]!;
+  if (top < PREMORTEM_WINPROB_MAX) return null;
+  if (top - runnerUp < CONSIDER_OPPOSITE_MIN_SEPARATION) return null;
+
+  // Option-level subject: no single-factor subjectRef — the focus directive
+  // falls back to the v1 winner-highlight, which IS the leading option.
+  return { code: 'CLEAR_WINNER_DISCONFIRMATION', subjectFactorId: null };
+}
+
+/**
+ * Rule 5 — devils_advocacy (DSK slice 1: TR-005 → DSK-P-005 devil's advocate).
+ *
+ * The DSK trigger's observable signal: "top factor contributing >50% of
+ * outcome variance AND robustness != 'fragile'". The computable analogue of
+ * the variance-contribution clause is the platform's own dominance signal —
+ * the SAME strict-majority influence-share derivation rule 1b uses
+ * ({@link findDominantDriver}; one derivation, two callers). The robustness
+ * clause is NEGATIVE in the DSK ("do not fire if the model already shows
+ * fragile robustness — the analysis is already providing the challenge"), so
+ * only an ATTESTED fragile level suppresses; an absent attestation may fire.
+ *
+ * Because the trigger condition is (deliberately) a subset of rule 1b's, this
+ * lens can only win the head slot when a higher lens is displaced — which is
+ * the designed surfacing path: dominance turn N → sensitivity pressure-test;
+ * turn N+1 → the structured-dissent exercise via the no-repeat tie-break.
+ * Same subject factor, different decision-science method — diversity IS
+ * usefulness on consecutive turns (the 2.211 ruling).
+ *
+ * The robustness clause here is the same denylist-for-a-positive-condition
+ * shape discussed on {@link evaluateConsiderOpposite}, but INVERTED and
+ * therefore safe: TR-005's condition is negative ("robustness != 'fragile'"),
+ * so a denylist is the faithful implementation, and an unrecognised level
+ * falls through to "may fire" exactly as the DSK intends.
+ *
+ * DSK-P-005's "do not run immediately after a pre-mortem or disconfirmation"
+ * contraindication is enforced at eligibility — see
+ * {@link CONTRAINDICATED_IMMEDIATELY_AFTER}.
+ */
+function evaluateDevilsAdvocacy(signals: AnalysisSignals): EvaluatorHit | null {
+  if (isRawFragile(signals.rawRobustness)) return null;
+  const dominant = findDominantDriver(signals);
+  if (dominant === null) return null;
+  return { code: 'DOMINANT_FACTOR_DISSENT', subjectFactorId: dominant.factorId };
+}
+
+/**
+ * Rule 6 (wave-3 λ extension, executor-gated) — what-if counterfactual. LOWEST
  * priority: only reached when no flip-risk / pre-mortem / EVPI lens fired, so it
  * NEVER displaces a core lens (priority-preservation guard). Points the user at
  * exploring how the leading option changes if the single most-influential factor
@@ -661,6 +931,8 @@ export const TITLE_BY_LENS: Readonly<Record<LensId, string>> = {
   sensitivity_flip_risk: 'Strengthen your model: pressure-test the key driver',
   pre_mortem: 'Strengthen your model: run a quick pre-mortem',
   evpi_evidence_priority: 'Strengthen your model: focus your evidence-gathering',
+  consider_opposite: 'Strengthen your model: argue the other side',
+  devils_advocacy: 'Strengthen your model: challenge the main assumption',
   what_if_counterfactual: 'Strengthen your model: try a what-if on the key driver',
 };
 
@@ -679,6 +951,11 @@ export const BODY_BY_RATIONALE: Readonly<Record<LensRationaleCode, string>> = {
     'The leading option is ahead, but not by a wide margin. A pre-mortem — assuming it went wrong and asking why — helps you see what would have to break for that to happen.',
   MATERIAL_EVPI:
     'There is a factor where learning more would change the decision the most. Gathering evidence there first, rather than everywhere, is the fastest way to firm up the choice.',
+  // ── DSK slice 1 — disconfirmation + devil's advocacy ───────────────────────
+  CLEAR_WINNER_DISCONFIRMATION:
+    'One option is clearly ahead here. Before you commit, spend a few minutes making the strongest honest case against it — if that case falls apart, the choice has earned more trust; if it holds up, you have found something worth checking first.',
+  DOMINANT_FACTOR_DISSENT:
+    'Most of this result rests on a single factor. Arguing the case against that factor — that it is overstated, less certain than it looks, or outweighed by something outside the model — shows quickly whether the result would survive honest dissent.',
   WHATIF_EXPLORE_DRIVER:
     'One factor shapes this result more than the others. Trying a what-if on that driver — seeing how the leading option changes as it moves — shows how much the choice hangs on it.',
 
@@ -739,6 +1016,13 @@ export const GROUNDING_FIELD_BY_RATIONALE: Readonly<Record<LensRationaleCode, Le
   SENSITIVITY_ISOLATED_NO_FLIP: 'factor_sensitivity',
   SENSITIVITY_CORRELATED_NO_FLIP: 'factor_sensitivity',
   DOMINANT_DRIVER_NO_FLIP: 'factor_sensitivity',
+  // DSK slice 1: disconfirmation's claim is about the OPTION-LEVEL result
+  // (win-probability decisiveness) → option_comparison (deliberately not
+  // Tier-2 allow-listed — the suggestion ships prose-only, same as
+  // WIN_PROB_MODERATE); dissent's claim is about the dominant factor →
+  // factor_sensitivity.
+  CLEAR_WINNER_DISCONFIRMATION: 'option_comparison',
+  DOMINANT_FACTOR_DISSENT: 'factor_sensitivity',
   // The what-if claim is about the OUTCOME (option win probability) → grounds in
   // option_comparison, which is deliberately NOT allow-listed, so the σ cage
   // DENIES surfacing its value: the counterfactual outcome number stays omitted
@@ -840,11 +1124,25 @@ export function selectLens(
     ['sensitivity_flip_risk', evaluateSensitivityFlipRisk(signals)],
     ['pre_mortem', evaluatePreMortem(signals)],
     ['evpi_evidence_priority', evaluateEvpiEvidencePriority(signals)],
+    // DSK slice 1 — below the three locked core lenses (their order is not
+    // touched), above the generic what-if explorer: a lens derived from a
+    // specific DSK trigger's evidence condition outranks the last-resort
+    // exploration filler, and what_if keeps its documented "only occupies a
+    // slot no other lens claimed" position.
+    ['consider_opposite', evaluateConsiderOpposite(signals)],
+    ['devils_advocacy', evaluateDevilsAdvocacy(signals)],
     ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
   ];
   const eligible: { lens: LensId; hit: EvaluatorHit }[] = [];
   for (const [lens, hit] of ladder) {
-    if (hit !== null && isLensExecutorAvailable(lens, options)) eligible.push({ lens, hit });
+    if (hit === null || !isLensExecutorAvailable(lens, options)) continue;
+    // DSK "do not run immediately after" — applied at ELIGIBILITY, before both
+    // tie-breaks, so neither the correlated yield nor the no-repeat promotion
+    // can hand the slot to a contraindicated protocol. See
+    // CONTRAINDICATED_IMMEDIATELY_AFTER for why the diversity rule alone
+    // produced the forbidden sequence.
+    if (isContraindicatedAfter(lens, options?.previousAnalysisLens)) continue;
+    eligible.push({ lens, hit });
   }
 
   // Load-bearing negative: no lens whose evidence fired has an available executor.

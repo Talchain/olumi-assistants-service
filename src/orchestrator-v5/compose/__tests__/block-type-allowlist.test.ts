@@ -530,6 +530,7 @@ describe('V5 block-type allowlist — Phase-3 composer emission subset (GUARD 3)
         CTX,
         surface!.selection,
         buildReviewCardBlocks(fact, lookup, CTX),
+        lookup,
       ),
     ];
   }
