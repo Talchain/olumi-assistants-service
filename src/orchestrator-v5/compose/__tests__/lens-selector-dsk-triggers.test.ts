@@ -278,11 +278,18 @@ describe('selectLens — devils_advocacy (DSK-TR-005 structured dissent)', () =>
     expect(displaced!.lens).toBe('devils_advocacy');
     expect(displaced!.displacedLens).toBe('sensitivity_flip_risk');
     expect(displaced!.displacementCause).toBe('no_repeat');
-    // NON-VACUITY: pre_mortem really is the lens that lost the slot. Its rule
-    // 2c trigger is OPTION-level (leader 0.55 ∈ [0.4, 0.7)) and therefore
-    // untouched by swapping the factors — so replacing only the dominance
-    // isolates the change: with it, devils; without it, pre_mortem. A
-    // promotion-order change, not an uncontested fallthrough.
+    // NON-VACUITY, AND EXACTLY WHAT IT DOES AND DOES NOT SHOW. It shows that
+    // pre_mortem's rule 2c trigger is genuinely live on this option_comparison
+    // (leader 0.55 ∈ [0.4, 0.7)) — so the lens devils displaced above is a real
+    // competitor and not a lens that never fired.
+    // ⚠ It does NOT show pre_mortem losing a DISPLACED slot: with BALANCED_
+    // FACTORS neither rule 1b nor devils fires, so sensitivity is not eligible
+    // at all and pre_mortem here is the HEAD, winning outright with no
+    // displacement. An earlier version of this comment called that "not an
+    // uncontested fallthrough", which is backwards — it IS one. The
+    // displaced-slot claim is proven on the live capture instead, in
+    // `lens-dsk-sequence-2490.test.ts` §5, where sensitivity IS the head and
+    // pre_mortem IS the runner-up it takes the slot from.
     const withoutDominance = selectLens(
       makeFact({ ...DOMINANT, factor_sensitivity: BALANCED_FACTORS }),
       { previousAnalysisLens: 'sensitivity_flip_risk' },

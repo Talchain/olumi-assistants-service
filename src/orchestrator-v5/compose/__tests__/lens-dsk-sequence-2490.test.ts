@@ -329,7 +329,16 @@ describe('ROADMAP 2.490 — the two DSK exercises partition the live shapes', ()
     expect(seen).not.toContain('consider_opposite');
   });
 
-  it('NEITHER STARVES when both observables hold on a NON-yielding sensitivity head', () => {
+  it('the sequel stands down while consider_opposite is eligible (non-yielding head)', () => {
+    // ⚠ SCOPE, stated because the stronger reading is the tempting one: what is
+    // pinned here is that the sequence rule does not TAKE a slot
+    // consider_opposite would otherwise have had — on THIS shape, where
+    // consider_opposite is the ordinary runner-up. It is NOT a general "neither
+    // DSK lens ever starves" claim: with a core lens eligible BETWEEN the two,
+    // pre_mortem takes the slot and then contraindicates both exercises, so
+    // consider_opposite goes unselected anyway. That is pristine behaviour,
+    // unchanged by this rule — see the clause's comment in `lens-selector.ts`.
+    //
     // The shape no live capture happens to contain, and the one the unnarrowed
     // sequence rule got wrong: sessionA's real bytes with the flip category
     // rewritten to `isolated` — a value taken from sessionB2's own capture, so

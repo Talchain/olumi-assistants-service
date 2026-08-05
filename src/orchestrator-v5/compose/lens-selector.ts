@@ -1356,15 +1356,29 @@ export function selectLens(
   //   and hand the slot straight back to it: a no-repeat rule emitting a
   //   repeat.
   //
-  //   `!slotOrder.some(consider_opposite)` — THE SEQUEL MUST NOT DISPLACE THE
-  //   OTHER DSK EXERCISE. Without it, any shape with a NON-yielding sensitivity
-  //   head on which BOTH DSK triggers fire loses consider_opposite entirely —
-  //   measured, and it is the same STARVATION SWAP that refuted fix (2) above,
-  //   arriving by a different door. The bundle names no priority between the
-  //   two, so a tie-break here would be this file silently inverting the
-  //   shipped ladder; instead the two lenses separate onto their own declared
-  //   observables. No live capture contains that shape, which is exactly why it
-  //   is pinned by a test rather than trusted to the walk.
+  //   `!slotOrder.some(consider_opposite)` — WHENEVER consider_opposite IS
+  //   ELIGIBLE, THIS RULE STANDS DOWN ENTIRELY AND THE TURN IS DECIDED BY THE
+  //   UNCHANGED LADDER. State it that way and no stronger: the clause is
+  //   PRISTINE-PRESERVING, it is NOT "the slot goes to consider_opposite".
+  //   What it buys, measured on a fixture where consider_opposite is the
+  //   ordinary runner-up: without it the sequel takes that slot and
+  //   consider_opposite goes dark for the whole cycle — the same STARVATION
+  //   SWAP that refuted fix (2) above, arriving by a different door. The bundle
+  //   names no priority between the two, so a tie-break here would be this file
+  //   silently inverting the shipped ladder.
+  //
+  //   ⚠ AND THE LIMIT, measured by adversarial review and recorded because the
+  //   over-read is the tempting one: on a shape where a CORE lens is eligible
+  //   BETWEEN the two (sensitivity + pre_mortem + both DSK lenses, non-yielding
+  //   head), this clause suppresses the sequel and `pre_mortem` takes the slot
+  //   — which then contraindicates BOTH DSK exercises, so the cycle locks to
+  //   sensitivity ↔ pre_mortem and consider_opposite is NEVER selected even
+  //   though its own observable holds. That is byte-identical to pristine, so
+  //   this rule neither causes nor fixes it; it is the shipped ladder's
+  //   behaviour and a separate question. The clause's guarantee is only the
+  //   pristine-preservation. No live capture contains either shape, which is
+  //   why the one this rule does change is pinned by a test rather than
+  //   trusted to the walk.
   //
   // ⚠ THIS IS A BEHAVIOUR CHANGE TO SHARED, LOCKED-ORDER MACHINERY, not a
   // DSK-local tweak: a displaced sensitivity head that would previously have
