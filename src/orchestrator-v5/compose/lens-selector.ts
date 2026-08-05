@@ -900,16 +900,39 @@ function evaluateDevilsAdvocacy(signals: AnalysisSignals): EvaluatorHit | null {
 
 /**
  * Rule 6 (wave-3 λ extension, executor-gated) — what-if counterfactual. LOWEST
- * priority: only reached when no flip-risk / pre-mortem / EVPI lens fired, so it
- * NEVER displaces a core lens (priority-preservation guard). Points the user at
- * exploring how the leading option changes if the single most-influential factor
- * moves — a counterfactual they can run explicitly (`what_would_flip`'s ISL
- * counterfactual extension, #646). Trigger: an identifiable top-influence factor
- * (rank 1 with a finite influence score) exists to intervene on. NOTE: the exact
- * intervention-target semantics are ROADMAP 1.195 gate item 4 (pending); this
- * evaluator is provisional and, crucially, the lens is enable-GATED — its
- * executor availability is injected `false` today, so it never fires in
- * production regardless of this trigger.
+ * priority: it is LAST on the ladder, so it never OUTRANKS a lens that fired.
+ * Points the user at exploring how the leading option changes if the single
+ * most-influential factor moves — a counterfactual they can run explicitly
+ * (`what_would_flip`'s ISL counterfactual extension, #646). Trigger: an
+ * identifiable top-influence factor (rank 1 with a finite influence score)
+ * exists to intervene on. The exact intervention-target semantics are ROADMAP
+ * 1.195 gate item 4 (pending), so this evaluator is provisional.
+ *
+ * ⚠ THIS COMMENT USED TO END: "the lens is enable-GATED — its executor
+ * availability is injected `false` today, so it never fires in production
+ * regardless of this trigger." THAT WAS FALSE, and it was measured false on
+ * 5 Aug 2026: a live guest walk captured 10 analysis turns across five staging
+ * sessions and `what_if_counterfactual` was the EMITTED lens on THREE of them
+ * (sessions A2/A3/B, turn 2 each), identified on the wire by its companion
+ * title `TITLE_BY_LENS.what_if_counterfactual`. A verification control written
+ * from this sentence predicted the wrong lens on 2 of 10 live turns and had to
+ * be corrected at the observation — a false comment in a selector teaches a
+ * probe to stop looking (trap 14).
+ *
+ * ⚠ AND THE "only reached when no flip-risk / pre-mortem / EVPI lens fired"
+ * clause that stood here was false too, by the same evidence: all three live
+ * emissions were as the ROADMAP 2.211 no-repeat RUNNER-UP, i.e. on turns where
+ * a higher lens had fired and was displaced. Last position bounds this lens's
+ * PRIORITY; it does not make it unreachable.
+ *
+ * FOR THE ACTUAL GATE POSTURE, READ {@link WHATIF_SUGGESTION_GATE_CLEARED} —
+ * deliberately the ONLY place it is described. It is not restated here, and a
+ * restatement must not be re-added: the defect above was one prose copy of a
+ * posture going stale while its twin stayed correct, which is trap 12's
+ * hand-maintained mirror in comment form. Note that a test pinning the two
+ * copies' AGREEMENT would not have caught it — agreement is not truth, and
+ * both copies can be wrong together (trap 12d). One description, cross-
+ * referenced, is the only version with no drift surface.
  */
 function evaluateWhatIfCounterfactual(signals: AnalysisSignals): EvaluatorHit | null {
   const topDriver = signals.factors.find(
@@ -1129,6 +1152,81 @@ export function selectLens(
     // specific DSK trigger's evidence condition outranks the last-resort
     // exploration filler, and what_if keeps its documented "only occupies a
     // slot no other lens claimed" position.
+    //
+    // ⚠⚠ ROADMAP 2.490 — devils_advocacy IS STRUCTURALLY DARK AT THIS ORDER,
+    // AND REORDERING DOES NOT FIX IT. Both halves were MEASURED; read both
+    // before touching these two entries, because the obvious fix is wrong.
+    //
+    // THE DEFECT. Replaying the five live staging captures in
+    // `PHASE0-EVIDENCE-2026-07-28/walk-dsk-raw/` (real `enrichment`, through
+    // this selector): `devils_advocacy` was selected on ZERO of 5 sessions,
+    // across every `previousAnalysisLens` state and every turn of a 6-turn
+    // cycle walk.
+    //
+    // WHY — and it is NOT that these two rules share a threshold in this file.
+    // They read different fields (option win_probability vs the shared
+    // dominance derivation). The coupling is one hop upstream and invisible
+    // here:
+    //   ISL  — `is_robust = recommendation_stability >= 0.7`
+    //          (`robustness_analyzer_v2.py:5459` @ 88275e5c;
+    //          `recommendation_stability` IS the winner's sample-win share)
+    //   PLoT — `level` in 'high'|'medium'|'low'|'very_low', mapped from that
+    //          (`isl/adapters/robustness-analysis.ts` @ 45e23f10)
+    //   here — `isRawFragile(level)` gates devils_advocacy
+    // So `robustness.level` is NOT an independent robustness measure: it is
+    // the leader's win probability compared against 0.7 — which is
+    // `PREMORTEM_WINPROB_MAX`, consider_opposite's own decisive floor.
+    // Confirmed on all five captures: level was non-fragile iff the leader
+    // cleared 0.7 (0.8576→high; 0.6664/0.6740/0.6401→low; 0.4363→very_low).
+    // devils_advocacy's fragility clause therefore admits it EXACTLY where
+    // consider_opposite also fires (and outranks it), and blocks it
+    // everywhere else. A perfect anti-filter.
+    //
+    // THREE FIXES WERE TRIED AND MEASURED. All three fail; none is shipped:
+    //  (1) Drop devils' win-prob-derived robustness clause — byte-identical
+    //      selections on all 5 live sessions. Inert: the ladder binds first.
+    //  (2) Swap these two entries — a STARVATION SWAP, not a fix. With
+    //      exactly two eligible lenses the 2.211 no-repeat promotion is a
+    //      fixed-order 2-CYCLE (head <-> runner-up), so whichever DSK lens is
+    //      second is dark. Measured on a dominant+decisive fixture: at this
+    //      order `sensitivity <-> consider_opposite` (devils dark); swapped,
+    //      `sensitivity <-> devils_advocacy` (consider_opposite dark).
+    //      Reordering chooses WHICH protocol is dark; it cannot surface both.
+    //  (3) (1)+(2) together — byte-identical to (2).
+    //
+    // THE ROOT, stated so the next lane does not re-derive it: devils'
+    // trigger is a strict SUBSET of sensitivity rule 1b's — both call
+    // {@link findDominantDriver} on the same fact. So sensitivity ALWAYS
+    // fires when devils does; devils can never be the eligible HEAD and
+    // depends entirely on a displacement, of which there is at most one per
+    // turn (the no-repeat explicitly does not cascade). Two lenses, one
+    // observable, fixed priority => the lower one is unreachable by
+    // construction.
+    //
+    // ONE CONFIGURATION DID surface both, and its scope must be stated
+    // exactly, because it is easy to over-read. Under the SWAPPED order AND
+    // with a `correlated` flip hit engaging the 2.211-(1) yield (live
+    // sessionA's real shape), the cycle became
+    //   devils_advocacy -> consider_opposite -> sensitivity_flip_risk -> ...
+    // with both protocols surfacing and DSK-P-005's "not immediately after a
+    // disconfirmation" contraindication still honoured — the yield supplies a
+    // THIRD rotation position, which is what breaks the 2-cycle. ⚠ That was
+    // measured under the SWAPPED order ONLY. At the order shipped here, the
+    // same correlated fixture still yields NO devils_advocacy (measured) —
+    // the yield promotes consider_opposite, which is still above it. So the
+    // third position is necessary but not sufficient on its own.
+    // The candidate fix is therefore a rotation position PLUS a resolution of
+    // the pair's fixed priority — e.g. letting a defanged
+    // `DOMINANT_DRIVER_NO_FLIP` head yield the way a correlated head does,
+    // which is a change to the LOCKED CORE ladder's yield semantics.
+    // Deliberately NOT taken here: it needs a product ruling, not a lane's
+    // preference.
+    //
+    // The bundle does NOT adjudicate this. `data/dsk/v1.json` declares only
+    // RECIPROCAL deference — TR-003 "Do not fire if user has already run a
+    // pre-mortem or devil's advocate exercise on this decision this stage";
+    // TR-005 "...a pre-mortem or disconfirmation exercise this stage" — which
+    // presumes both are reachable, but names no priority between them.
     ['consider_opposite', evaluateConsiderOpposite(signals)],
     ['devils_advocacy', evaluateDevilsAdvocacy(signals)],
     ['what_if_counterfactual', evaluateWhatIfCounterfactual(signals)],
