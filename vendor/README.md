@@ -7,7 +7,97 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.35.0.tgz`
+### `talchain-schemas-0.37.0.tgz`
+
+> **✔ SOURCE-PACKED FROM `main` AT THE MERGE SHA, AND RE-DERIVED HERE RATHER
+> THAN INHERITED — NOT COMPARED AGAINST THE REGISTRY BYTES.** The tarball was
+> vendored onto this branch at 18:13Z on 5 Aug, which is **~6 hours BEFORE**
+> olumi-schemas #36 merged (`685d92ec`, 23:55:54Z). That timing makes
+> "merged-main pack" a claim the vendoring commit could not have measured, so
+> this lane measured it: a fresh blobless clone of olumi-schemas checked out at
+> **`685d92ec49b3caf14e1086a2a0c94a5cc50f95ea`** (HEAD asserted equal to the SHA
+> before any read — fetching a ref is not checking it out), `npm ci && npm run
+> build && npm pack` (node 20.19.5 / npm 10.8.2), produced a tarball
+> **byte-identical** to the vendored one.
+>
+> sha256 `835ab4b8381e1280f239de0d408c2da6790ab9f93a0a14ce6e5a389acd4dd369`
+> — 347,174 bytes. So the entry states three separate, separately-measured
+> facts: the bytes are the MERGED-MAIN bytes (not a pre-publish branch pack),
+> the pack is REPRODUCIBLE, and the version identity is confirmed
+> (`package/package.json` reads `@talchain/schemas 0.37.0`; tag `v0.37.0` and
+> `main` tip both resolve to `685d92ec`).
+>
+> **✔ BYTE-IDENTITY WITH DGAI IS PROVEN, NOT ASSERTED.** The estate rule is that
+> DGAI and CEE must never hold DIFFERENT bytes under one version string. Both
+> repos' vendored tarballs are the **same git blob**,
+> `51ad170451a51e5edbdf89b34738fcdf2d65ddbf` (CEE at this commit; DGAI at
+> `04d9bece`, the reader car's head) — blob identity is byte identity, which is
+> a stronger check than comparing two recorded sha256 strings, since a manifest
+> can be copied without the bytes being.
+>
+> The registry-bytes comparison (ROADMAP 2.464) remains open and was NOT
+> performed here — this lane's token has no GitHub Packages read scope
+> (`gh api /orgs/Talchain/packages?package_type=npm` → 404), so the honest
+> statement is "merged-main source pack, reproducible, byte-identical across
+> both consumers, unverified against the registry".
+
+**What CEE adopts here (ROADMAP 2.490 slice 2):** the atomic DSK protocol
+provenance triple — `DskProtocolProvenanceSchema` (`protocol_id` constrained to
+`/^DSK-P-\d{3}$/`, `protocol_title` `min(1)`, `evidence_strength` ∈
+`strong|medium|weak|mixed`, `.strict()`) and its optional carrier
+`ExerciseBlock.dsk_provenance`.
+
+Slice 1 (#820) shipped two protocol exercises whose DSK attribution reached
+TELEMETRY ONLY, because `ExerciseBlockSchema` was `.strict()` with no dsk field
+— the user saw a bare instruction paragraph with nothing marking it as
+published decision science. This bump is what lets that attribution reach the
+user. `src/orchestrator-v5/compose/dsk-protocol-record.ts` fills it by reading
+`data/dsk/v1.json` and returning the triple **only** when the id resolves to a
+live protocol record in a bundle that passes its own `verifyDSKHash`; the key is
+OMITTED otherwise (never `null`, never partial — the schema field is
+`.optional()`, so absence is the only representable non-emission).
+
+⚠ **THE TITLE AND STRENGTH ARE READ FROM THE BUNDLE, NEVER TYPED IN THIS REPO,
+AND THAT ASYMMETRY IS THE WHOLE POINT.** Only the protocol *id* comes from
+CEE's hand-written `LENS_DSK_PROVENANCE` map (a lens id is not derivable from
+the bundle; `dsk-provenance-attestation.test.ts` attests every id in it against
+the bundle bytes per trap 12). Everything DISPLAYED is the record's own. This is
+CEE #830's defect refused at a new site: there, an attestation checked that a
+DSK claim id EXISTED but never that the prose shown under it resolved to that
+id, so a badge printed the model's own words under the bundle's authority.
+
+⚠ **THIS BUMP UNAVOIDABLY INHERITS 0.36.0's EDITABLE-FIELD-TABLE REVISION 2** —
+no consumer had pinned 0.36.0, so CEE is the first to take it, and the
+inheritance was MEASURED rather than waved through (see
+`src/orchestrator-v5/graph-management/__tests__/field-parity-derivation.test.ts`,
+which moves 42→43 rows, `provenance_owned` 7→8, digest
+`f6354a44-ea998eaa` → `67cea469-77605f3b`). The semantic delta is EXACTLY ONE
+added row — `edge|validation|validation|provenance_owned` — with zero removals;
+every other changed row differs only in `reason` / `ui_write_sites` prose. That
+row is behaviourally INERT at this consumer: `validation` is already in
+`CEE_ANALYSIS_OWNED_ROOTS` (`field-safety.ts:173`), unioned into
+`PIPELINE_OWNED_ROOTS`, so the deny set is unchanged. Verified at the bytes, not
+taken from the row's own prose claiming it.
+
+**The closing bolt ships in the same PR:**
+`src/orchestrator-v5/compose/__tests__/dsk-protocol-provenance-wire.test.ts`
+derives every expectation from `data/dsk/v1.json` AT TEST TIME (a literal would
+only prove CEE agrees with the test author — trap 13c), binds each assertion to
+its protocol by explicit id rather than by a value predicate (trap 19), and
+covers the fail-closed arms: bundle hash mismatch and missing bundle both yield
+NO provenance rather than a partial or fabricated triple.
+
+**Rollback path:** revert the whole PR. Git history restores
+`vendor/talchain-schemas-0.35.0.tgz`, its `.sha256`, the `package.json` `file:`
+reference and this README. Re-run `pnpm install` after the revert. This one
+cannot be reverted alone — `dsk-protocol-record.ts` and `phase3-blocks.ts`
+depend on the 0.37.0 field, and `field-parity-derivation.test.ts` pins the
+0.36.0 table revision, so the source changes must revert with it. Reverting does
+NOT unpublish 0.37.0. **Merge order is schemas → UI → CEE** (reader before
+producer): the field is additive and optional, so an older-pinned consumer
+simply does not see it, but the badge must be readable before it is emitted.
+
+### `talchain-schemas-0.35.0.tgz` (historical — no longer vendored)
 
 > **✔ SOURCE-PACKED FROM `main` AT THE MERGE SHA — NOT COMPARED AGAINST THE
 > REGISTRY BYTES** (same provenance class as the 0.33.0 entry below, and better
