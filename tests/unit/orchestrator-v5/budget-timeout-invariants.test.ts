@@ -20,6 +20,9 @@ import { describe, it, expect } from "vitest";
 import {
   PLOT_RUN_TIMEOUT_MS,
   PLOT_RUN_BRIEF_TIMEOUT_MS,
+  PLOT_VALIDATE_TIMEOUT_MS,
+  ORCHESTRATOR_TIMEOUT_MS,
+  MIN_TIMEOUT_MS,
   ROUTE_TIMEOUT_MS,
   // IMPORTED, not hand-copied. A local `const RETRY_BACKOFF_MS = 2_000` here
   // could not do what its comment claimed: raise the client's backoff to 10s
@@ -36,6 +39,7 @@ import {
 } from "../../../src/config/timeouts.js";
 import { getTurnExecutorBudgets, getHandlerBudgetMs } from "../../../src/orchestrator-v5/budgets.js";
 import { resolveDecisionReviewHardBudgetMs } from "../../../src/orchestrator-v5/coaching/decision-review-enricher.js";
+import { resolveComposerTimeoutMs } from "../../../src/orchestrator-v5/tools/compose-structural-edit.js";
 import { config } from "../../../src/config/index.js";
 
 describe("PLOT_RUN_TIMEOUT_MS ↔ handler budget lockstep", () => {
@@ -202,5 +206,111 @@ describe("worst-case analysis path fits inside the turn budget", () => {
   it("bounds the handler budget inside the turn budget", () => {
     const { turn_ms } = getTurnExecutorBudgets();
     expect(getHandlerBudgetMs()).toBeLessThan(turn_ms);
+  });
+});
+
+// ============================================================================
+// ROADMAP 2.665 (CEE half) — the structural-edit composer's budget.
+//
+// THE WITNESSED DEFECT. `propose_structural_edit`'s composer call was capped by
+// a bare `const COMPOSER_DEFAULT_TIMEOUT_MS = 60_000` in
+// `tools/compose-structural-edit.ts`, and the dispatcher at
+// `handlers/edit-graph-dispatch.ts` passes NEITHER `timeoutMs` NOR `signal` —
+// so that constant WAS the effective bound. The composer was killed at 60.0s
+// deterministically (witnessed 2/2), returning `unavailable: call_failed`, and
+// `decision=engaged` has therefore never once been reached.
+//
+// WHY A DERIVED BUDGET AND NOT A BIGGER LITERAL. A second literal would be the
+// hand-maintained mirror this whole file exists to abolish: lower
+// BROWSER_PROXY_TIMEOUT_MS on Render and a hardcoded composer cap silently
+// escapes the turn it has to fit inside, and the symptom is a generic
+// TURN_BUDGET_EXCEEDED with nothing naming the cause. The resolver derives from
+// the SAME ladder constants asserted above, so both ends move together.
+//
+// ⚠ WHAT THE DERIVATION CHARGES, STATED SO IT IS A DECISION AND NOT AN
+// OVERSIGHT. Inside the edit_graph handler the chain is strictly serial:
+// rulebook `handleEditGraph` (bounded by ORCHESTRATOR_TIMEOUT_MS) → composer →
+// apply (`preComposedOperations`, which SKIPS the LLM call — edit-graph.ts:2090
+// — so its only bounded cost is the PLoT gate at PLOT_VALIDATE_TIMEOUT_MS).
+// The V5 ROUTING call ahead of the handler (a second ORCHESTRATOR_TIMEOUT_MS)
+// is deliberately NOT charged. This follows the precedent already recorded for
+// decision_review in `config/timeouts.ts`: the nominal ladder is ALREADY
+// over-subscribed (routing 30s + handler 85s = turn_ms exactly), so a ceiling
+// that charges every term at its bound derives 0 and is therefore useless.
+// Charging routing at measurement is what makes this rung mean something; it is
+// also why the rung below is an upper bound on the HANDLER chain, not a
+// sufficiency proof for the whole turn.
+// ============================================================================
+
+/** The measured kill point, from the 2.634/2.655 walk. Provenance, not a knob:
+ *  the fix is only a fix if the resolved budget is strictly greater than the
+ *  value that was observed killing the composer. */
+const WITNESSED_COMPOSER_KILL_MS = 60_000;
+
+describe("ROADMAP 2.665 — the structural-edit composer fits the turn and outlives the witnessed kill", () => {
+  it("U2-1 resolves a composer budget STRICTLY ABOVE the witnessed 60.0s kill", () => {
+    // RED at pristine: the constant was exactly 60_000, so it could never be
+    // greater than the value that killed it.
+    expect(resolveComposerTimeoutMs()).toBeGreaterThan(WITNESSED_COMPOSER_KILL_MS);
+  });
+
+  it("U2-2 keeps the ONE-ATTEMPT serial handler chain inside the resolved turn budget", () => {
+    // The clamp still binds — this is the half that must NOT regress when the
+    // budget goes up. Rulebook + composer + apply must fit in turn_ms.
+    //
+    // ⚠ SCOPE, because the stronger reading is the tempting one: this charges
+    // the rulebook at ONE attempt. It makes up to `maxRepairRetries + 1` = 2
+    // (edit-graph.ts:2041), and the V5 routing call ahead of the handler is not
+    // charged here at all. Both omissions are deliberate and argued in
+    // `compose-structural-edit.ts`; the consequence is that this rung is an
+    // upper bound on the one-attempt HANDLER chain, NOT a sufficiency proof for
+    // the whole turn.
+    const { turn_ms } = getTurnExecutorBudgets();
+    const chain =
+      ORCHESTRATOR_TIMEOUT_MS + resolveComposerTimeoutMs() + PLOT_VALIDATE_TIMEOUT_MS;
+    expect(chain).toBeLessThanOrEqual(turn_ms);
+  });
+
+  it("U2-3 is DERIVED, not a literal — tightening the turn budget tightens it IN LOCKSTEP", () => {
+    // The anti-mirror pin, and the one that discriminates a derived budget from
+    // a bigger literal: a literal survives U2-1 and U2-2 at repo defaults and
+    // fails ONLY here. The delta must be EQUAL to the turn budget's own delta —
+    // "it went down a bit" would also pass for a Math.min against a constant.
+    const budgetBefore = resolveComposerTimeoutMs();
+    const turnBefore = getTurnExecutorBudgets().turn_ms;
+    const original = process.env.TURN_BUDGET_MS;
+    try {
+      process.env.TURN_BUDGET_MS = "60000";
+      const budgetAfter = resolveComposerTimeoutMs();
+      const turnAfter = getTurnExecutorBudgets().turn_ms;
+
+      // PRECONDITION PIN (trap 13b third face): the override must actually have
+      // moved the turn budget, or the lockstep assertion below is vacuous.
+      expect(turnAfter).toBeLessThan(turnBefore);
+
+      expect(budgetAfter).toBeLessThan(budgetBefore);
+      expect(turnBefore - turnAfter).toBe(budgetBefore - budgetAfter);
+
+      // …and the tightened budget still fits the tightened turn.
+      expect(
+        ORCHESTRATOR_TIMEOUT_MS + budgetAfter + PLOT_VALIDATE_TIMEOUT_MS,
+      ).toBeLessThanOrEqual(turnAfter);
+    } finally {
+      if (original === undefined) delete process.env.TURN_BUDGET_MS;
+      else process.env.TURN_BUDGET_MS = original;
+    }
+  });
+
+  it("U2-4 never resolves below the platform timeout floor", () => {
+    // A pathological proxy deadline must degrade to the floor, not to a
+    // negative or zero budget that would make every compose fail instantly.
+    const original = process.env.TURN_BUDGET_MS;
+    try {
+      process.env.TURN_BUDGET_MS = "6000";
+      expect(resolveComposerTimeoutMs()).toBeGreaterThanOrEqual(MIN_TIMEOUT_MS);
+    } finally {
+      if (original === undefined) delete process.env.TURN_BUDGET_MS;
+      else process.env.TURN_BUDGET_MS = original;
+    }
   });
 });
