@@ -161,7 +161,17 @@ function makeFenceBackedClient(opts: { appendFails?: boolean } = {}): FenceBacke
                 },
               };
             }
-            if (fenceGeneration < maxGeneration) {
+            // ROADMAP 2.709/2.736 — this fake models the MIGRATED v4
+            // (20260806120000): OLTF2 raises only when the scenario already
+            // holds a committed graph, read under the same lock as the write.
+            // It used to model the pre-migration gate and rely on the app-side
+            // OLTF2 recovery to reach the same outcome; 2.736 removed that
+            // recovery (its check-to-write window could resurrect a stopped
+            // draft), so the exemption exists ONLY in SQL and the model has to
+            // be the SQL. Both database states are still covered — with an
+            // explicit semantics toggle — in
+            // turn-fence-first-write-exemption.test.ts.
+            if (fenceGeneration < maxGeneration && graph !== null) {
               return {
                 data: null,
                 error: {
@@ -364,6 +374,10 @@ describe('V5 turn fence — INCIDENTAL DISCONNECT KEEPS finish-atomically', () =
     // stopped). Before 2.709 this pin settled for "refused as superseded,
     // not stopped"; a commit is a strictly stronger proof that no tombstone
     // attached to A.
+    //
+    // 2.736: the exemption that makes this commit reachable is now the
+    // MIGRATED v4's in-transaction gate, which this file's fake models — not
+    // the removed app-side recovery.
     expect(outcome).not.toBeInstanceOf(TurnFenceRejectedError);
     expect((outcome as { id: string }).id).toBe(`row-${TURN_A}`);
     expect(backend.rows.find((r) => r.turnId === TURN_A)?.stoppedAt).toBeNull();

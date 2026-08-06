@@ -39,6 +39,7 @@ import {
   GraphStaleWriteError,
   SessionReadError,
   StateCommitFailedError,
+  type GraphWriteFailureDisclosure,
   type SessionStore,
   type SessionTurnWrite,
 } from './store.js';
@@ -334,8 +335,21 @@ export class SupabaseSessionStore implements SessionStore {
     // invariants. The next readRecent pays one DB round-trip and is
     // guaranteed consistent. Cache-ahead-of-DB is impossible.
     this.cache.invalidateAll(write.scenario_id);
+    await this.resolveDraftLossAfterGraphCommit(write);
 
     return { id: data };
+  }
+
+  /**
+   * ROADMAP 2.735 — a graph has committed, so any outstanding draft loss on
+   * this scenario is over. Called from BOTH successful graph-write paths
+   * (checked and atomic) and a no-op for graph-less writes: a conversational
+   * turn resolves nothing, and firing on one would clear a mark while the
+   * user's model is still missing.
+   */
+  private async resolveDraftLossAfterGraphCommit(write: SessionTurnWrite): Promise<void> {
+    if (write.graph == null) return;
+    await this.resolveScenarioDraftLoss(write.scenario_id);
   }
 
   /**
@@ -604,10 +618,16 @@ export class SupabaseSessionStore implements SessionStore {
 
     // Invariant 6 — leave the trace BEFORE the throw, keyed on the SLOT
     // identity (the fence row's key), never the write identity.
+    //
+    // 2.735 disclosure: `draft_loss`, and it is derivable rather than asserted
+    // — `enforceTurnFence` returns at its first line unless `write.graph` is
+    // non-null, so every refusal reachable here is refusing a real graph the
+    // turn was holding. A model was lost; the user is owed the disclosure.
     await this.markGraphWriteFailed(
       write.scenario_id,
       handle.turnId,
       evaluation.verdict,
+      'draft_loss',
     );
     this.throwFenceRefusal(write, handle.turnId, evaluation, 'pre_rpc');
   }
@@ -686,13 +706,26 @@ export class SupabaseSessionStore implements SessionStore {
    * 42703 answer means migration 20260806120000 has not executed — said
    * loudly, because until it does the loss-notice surface is dark.
    */
-  async markGraphWriteFailed(scenarioId: string, turnId: string, reason: string): Promise<void> {
+  async markGraphWriteFailed(
+    scenarioId: string,
+    turnId: string,
+    reason: string,
+    disclosure: GraphWriteFailureDisclosure,
+  ): Promise<void> {
     try {
+      const now = new Date().toISOString();
       const { error } = await this.client
         .from('v5_turn_fence')
         .update({
-          graph_write_failed_at: new Date().toISOString(),
+          graph_write_failed_at: now,
           graph_write_failure_reason: reason,
+          // ROADMAP 2.735 — the disclosure claim, written as its own column
+          // rather than inferred from `reason`. A reason-string allowlist at
+          // the READ site would be a hand-maintained mirror (trap 12): every
+          // future reason would default to whichever side the list happened to
+          // put it on, silently. Here the decision is made at the ONE site that
+          // knows what actually happened, and the read is a null test.
+          ...(disclosure === 'draft_loss' ? { graph_loss_disclosable_at: now } : {}),
         })
         .eq('scenario_id', scenarioId)
         .eq('turn_id', turnId)
@@ -724,6 +757,7 @@ export class SupabaseSessionStore implements SessionStore {
         scenario_id: scenarioId,
         turn_id: turnId,
         reason,
+        disclosure,
       });
     } catch (err) {
       log.warn(
@@ -739,10 +773,24 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
-   * ROADMAP 2.709 invariant 3 — an ADMITTED, not-failure-marked fence row by
-   * another turn id. One indexed read; 42703 (pre-migration column) retries
-   * without the failure filter — semantically identical there, because no
-   * marks can exist before the column does.
+   * ROADMAP 2.709 invariant 3 — an ADMITTED, LIVE fence row by another turn id.
+   * One indexed read; 42703 (pre-migration column) retries without the failure
+   * filter — the STOP filter survives that fallback, because `stopped_at` has
+   * existed since 20260731120000 and is not part of the pending migration.
+   *
+   * ⚠ ROADMAP 2.738(b) — LIVE means UNSTOPPED as well as UNFAILED. A turn the
+   * user explicitly Stopped before it could commit is never failure-marked by
+   * the fence (nothing refused it — it simply never wrote), so under the
+   * previous predicate its fence row stayed "admitted and live" forever, and a
+   * graph-less scenario whose only turn was stopped classified as a
+   * CONTINUATION for the rest of its life: the brief could never be redrafted.
+   *
+   * `uncommitted` is deliberately NOT part of this predicate, and that is a
+   * measured choice rather than an omission: the sole consumer
+   * (`route-v2.ts` `isContinuationScenario`) ORs this read with
+   * `loadHasPriorTurns`, which is TRUE for exactly the committed case — so
+   * adding a committed-row anti-join here would cost a second round trip on
+   * the hot path and could not change any answer.
    */
   async hasOtherAdmittedLiveTurn(scenarioId: string, excludeTurnId: string): Promise<boolean> {
     const { data, error } = await this.client
@@ -750,6 +798,7 @@ export class SupabaseSessionStore implements SessionStore {
       .select('generation')
       .eq('scenario_id', scenarioId)
       .neq('turn_id', excludeTurnId)
+      .is('stopped_at', null)
       .is('graph_write_failed_at', null)
       .limit(1);
     if (error) {
@@ -759,6 +808,7 @@ export class SupabaseSessionStore implements SessionStore {
           .select('generation')
           .eq('scenario_id', scenarioId)
           .neq('turn_id', excludeTurnId)
+          .is('stopped_at', null)
           .limit(1);
         if (e2) {
           throw new SessionReadError(
@@ -777,17 +827,30 @@ export class SupabaseSessionStore implements SessionStore {
   }
 
   /**
-   * ROADMAP 2.709 invariant 6 — does a draft loss stand? Cheap-first order:
-   * the failure-mark read answers false for almost every scenario; the
-   * graph-presence read runs only behind a hit. Throws on read failure —
+   * ROADMAP 2.709 invariant 6, narrowed by 2.735 — does a draft loss stand?
+   * Cheap-first order: the mark read answers false for almost every scenario;
+   * the graph-presence read runs only behind a hit. Throws on read failure —
    * callers degrade to "no notice".
+   *
+   * THE PREDICATE, and why each clause is here:
+   *   · `graph_loss_disclosable_at IS NOT NULL` — a model was actually lost
+   *     (preview streamed, or a commit attempted with a graph in hand). The
+   *     old predicate read `graph_write_failed_at IS NOT NULL`, which is TRUE
+   *     for a draft that died at the LLM call — and the notice then told that
+   *     user "your last draft didn't save" about a draft that never existed.
+   *   · `graph_loss_resolved_at IS NULL` — no later commit has superseded it.
+   *     Without this the mark is merely MASKED by the graph-presence read, so
+   *     the notice re-fires the moment the graph goes away again (a delete, a
+   *     reset), disclosing a loss the user resolved long ago.
+   *   · no committed graph — the loss still has consequences to disclose.
    */
   async scenarioDraftLossStands(scenarioId: string): Promise<boolean> {
     const { data, error } = await this.client
       .from('v5_turn_fence')
       .select('generation')
       .eq('scenario_id', scenarioId)
-      .not('graph_write_failed_at', 'is', null)
+      .not('graph_loss_disclosable_at', 'is', null)
+      .is('graph_loss_resolved_at', null)
       .limit(1);
     if (error) {
       throw new SessionReadError(
@@ -797,6 +860,56 @@ export class SupabaseSessionStore implements SessionStore {
     }
     if (((data as unknown[] | null) ?? []).length === 0) return false;
     return !(await this.scenarioHasCommittedGraph(scenarioId));
+  }
+
+  /**
+   * ROADMAP 2.735 — a graph committed, so any outstanding draft loss on this
+   * scenario is RESOLVED. Stamped explicitly rather than left to be masked by
+   * the graph-presence read, so a later graph deletion cannot resurrect a
+   * notice about a draft the user has already replaced.
+   *
+   * Best-effort by contract, on the same terms as {@link markGraphWriteFailed}:
+   * the commit has already landed and every failure here is swallowed. A
+   * 42703 means the pending migration has not executed — the disclosure
+   * surface is dark there anyway, so it is logged at debug, not ERROR.
+   */
+  async resolveScenarioDraftLoss(scenarioId: string): Promise<void> {
+    try {
+      const { error } = await this.client
+        .from('v5_turn_fence')
+        .update({ graph_loss_resolved_at: new Date().toISOString() })
+        .eq('scenario_id', scenarioId)
+        .not('graph_loss_disclosable_at', 'is', null)
+        .is('graph_loss_resolved_at', null);
+      if (error) {
+        if (errCode(error) === '42703') {
+          log.debug(
+            { event: 'v5.turn_fence.loss_resolution_column_missing', scenario_id: scenarioId },
+            'V5 turn fence — graph_loss_resolved_at absent (migration 20260806120000 pending); nothing to resolve because nothing can be marked',
+          );
+        } else {
+          log.warn(
+            {
+              event: 'v5.turn_fence.loss_resolution_failed',
+              scenario_id: scenarioId,
+              err: errMessage(error),
+            },
+            'V5 turn fence — draft-loss resolution write failed; the commit stands but a stale loss mark may survive',
+          );
+        }
+        return;
+      }
+      emit(TelemetryEvents.V5TurnFenceDraftLossResolved, { scenario_id: scenarioId });
+    } catch (err) {
+      log.warn(
+        {
+          event: 'v5.turn_fence.loss_resolution_failed',
+          scenario_id: scenarioId,
+          err: errMessage(err),
+        },
+        'V5 turn fence — draft-loss resolution write threw; the commit stands but a stale loss mark may survive',
+      );
+    }
   }
 
   /**
@@ -911,23 +1024,17 @@ export class SupabaseSessionStore implements SessionStore {
       }
       const fenceEvaluation = classifyAtomicFenceError(error);
       if (fenceEvaluation !== null) {
-        // ── ROADMAP 2.709 — FIRST-WRITE EXEMPTION RECOVERY ───────────────
-        // Against a PRE-migration database, v4 raises OLTF2 for a superseded
-        // first write (the fresh-journey P0). The whole transaction rolled
-        // back, so a recovery is safe to attempt: prove the scenario still
-        // holds no graph, re-read the fence for a Stop that may have landed
-        // since (OLTF2 itself implies not-stopped AT GATE TIME — the SQL
-        // checks stopped first), then dispatch the pre-v4 append. Once
-        // migration 20260806120000 executes, v4 stops raising OLTF2 for
-        // this case and this branch is unreachable — kept for the
-        // deploy-before-migrate window, which is the window the P0 lives in.
+        // ── ROADMAP 2.736 — READ-ONLY REPLAY PASSTHROUGH ─────────────────
+        // This used to be the first-write exemption RECOVERY: an unfenced
+        // re-append that could resurrect a stopped draft or clobber a newer
+        // graph (Codex finding, 2026-08-08). It now only answers the
+        // idempotency question — "has this exact turn already committed?" —
+        // and returns the existing row id if so. It performs NO write, so
+        // there is no check-to-write window left to race. The exemption
+        // itself lives in migration 20260806120000's in-transaction gate,
+        // under the scenarios row lock. See tryFirstWriteExemptRecovery.
         if (fenceEvaluation.verdict === 'superseded') {
-          const recovered = await this.tryFirstWriteExemptRecovery(
-            write,
-            baseRpcArgs,
-            rpcMode,
-            fenceEvaluation,
-          );
+          const recovered = await this.tryFirstWriteExemptRecovery(write);
           if (recovered !== null) return recovered;
         }
         this.emitFenceEvaluated(
@@ -941,6 +1048,9 @@ export class SupabaseSessionStore implements SessionStore {
           write.scenario_id,
           currentTurnFenceSlot()?.turnId ?? write.turn_id,
           fenceEvaluation.verdict,
+          // 2.735: the atomic gate only fires for a graph-bearing append, so
+          // this refusal always destroys a real drafted model.
+          'draft_loss',
         );
         this.throwFenceRefusal(write, write.turn_id, fenceEvaluation, 'atomic_append');
       }
@@ -976,91 +1086,66 @@ export class SupabaseSessionStore implements SessionStore {
     // Commit ordering — identical to the pre-v4 path: RPC success → cache
     // evict → return.
     this.cache.invalidateAll(write.scenario_id);
+    await this.resolveDraftLossAfterGraphCommit(write);
     return { id: data };
   }
 
   /**
-   * ROADMAP 2.709 — the OLTF2 first-write recovery (atomic path, pre-migration
-   * database only). Returns the committed row id, or `null` when the original
-   * superseded refusal must stand; THROWS the stopped refusal itself when a
-   * Stop landed inside the recovery window.
+   * ROADMAP 2.709, REWRITTEN BY 2.736 — the OLTF2 replay passthrough.
    *
-   * Ordering, and why: (1) graph-presence read — a committed graph means the
-   * supersede protects a real model, recovery ends; (2) fence re-evaluate —
-   * OLTF2 proved not-stopped at gate time, but the rollback happened and a
-   * Stop may have landed since; a stopped verdict refuses with the reason the
-   * user would recognise; (3) dispatch the pre-v4 append. Steps 1→3 are the
-   * pre-v4 check-not-lock posture, priced exactly as the documented fallback
-   * path (one RPC window out of a ~50 s turn).
+   * ── WHAT THIS USED TO DO, AND WHY IT IS GONE ────────────────────────────
+   * It used to RECOVER the refused write: read graph absence → re-evaluate the
+   * fence → then dispatch `dispatchCheckedAppend`, which calls
+   * `append_turn_atomic_v2/v3` — RPCs with NO fence check at all. An external
+   * audit (Codex, 2026-08-08) put the objection precisely: a Stop, or a rival
+   * commit, landing between the re-evaluation and that write is INVISIBLE, so
+   * the recovery could resurrect a draft the user had explicitly stopped, or
+   * overwrite a graph newer than the one it was holding. Our own review had
+   * priced this as "bounded to a few ms, and it dies when the migration runs";
+   * that is a defence made of DEPLOY ORDER, and deploy order is not a
+   * guarantee. The tests only ever covered a Stop arriving BEFORE the
+   * re-evaluation — never after it, which is the whole window.
+   *
+   * The remedy is the first one the audit named: the exemption executes ONLY
+   * inside the locking SQL path. Migration 20260806120000 makes
+   * `append_turn_atomic_v4` decide the exemption under the `scenarios FOR
+   * UPDATE` it already holds — zero check-to-write window, a Stop serialises
+   * on the same fence row — so once it executes this branch is unreachable by
+   * construction and nothing here needs to reproduce it.
+   *
+   * ⚠ THE COST, STATED PLAINLY RATHER THAN HIDDEN: between this deploy and
+   *   that migration, a superseded FIRST write is refused again — the
+   *   fresh-journey P0 is reopened for that window. That is a disclosed,
+   *   bounded regression chosen over an unfenced write, and it is why the
+   *   migration must follow this deploy promptly. It is NOT "deploy order is
+   *   free"; it is the opposite, and the migration header now says so.
+   *
+   * ── WHAT REMAINS: a read-only idempotency answer ─────────────────────────
+   * If THIS (scenario, turn) has already committed, the honest answer to a
+   * retry is the existing row id, not a 500 about a turn that is in fact
+   * persisted (turn-fence.ts arrival 8). This is a SELECT; it writes nothing,
+   * so no interleaving can make it unsafe. It now runs UNCONDITIONALLY —
+   * previously it was reachable only when the scenario already held a graph,
+   * so a replay of a committed turn on a still-graph-less scenario 500ed.
    */
   private async tryFirstWriteExemptRecovery(
     write: SessionTurnWrite,
-    baseRpcArgs: Record<string, unknown>,
-    rpcMode: GraphCasRpcMode,
-    originalEvaluation: TurnFenceEvaluation,
   ): Promise<{ id: string } | null> {
-    if (!(await this.firstWriteExemptionApplies(write))) {
-      // Arrival-8 replay passthrough (found by the 20260806120000
-      // rehearsal): the scenario holds a graph, but if THIS (scenario,
-      // turn) already committed — e.g. a retry of the very draft whose
-      // exempted commit landed, on a pre-migration database — the honest
-      // answer is the existing row id, not a 500 about a turn that is in
-      // fact persisted. Read-only; no graph write happens on this path.
-      try {
-        const { data, error } = await this.client
-          .from('v5_conversation_turns')
-          .select('id')
-          .eq('scenario_id', write.scenario_id)
-          .eq('turn_id', write.turn_id)
-          .limit(1);
-        if (!error) {
-          const row = ((data as Array<{ id?: unknown }> | null) ?? [])[0];
-          if (row && typeof row.id === 'string') return { id: row.id };
-        }
-      } catch {
-        // Fall through to the original refusal.
-      }
-      return null;
-    }
-
-    const slot = currentTurnFenceSlot();
-    const handle = slot?.handle;
-    if (handle == null || handle.generation === null) return null;
-
-    let fresh: TurnFenceEvaluation;
     try {
-      fresh = await evaluateTurnFence(this.client, handle);
-    } catch (err) {
-      // evaluateTurnFence never throws by contract; belt-and-braces.
-      log.warn(
-        {
-          event: 'v5.turn_fence.first_write_recovery_evaluate_failed',
-          scenario_id: write.scenario_id,
-          turn_id: handle.turnId,
-          err: errMessage(err),
-        },
-        'V5 turn fence — first-write recovery evaluate threw; the superseded refusal STANDS',
-      );
-      return null;
+      const { data, error } = await this.client
+        .from('v5_conversation_turns')
+        .select('id')
+        .eq('scenario_id', write.scenario_id)
+        .eq('turn_id', write.turn_id)
+        .limit(1);
+      if (!error) {
+        const row = ((data as Array<{ id?: unknown }> | null) ?? [])[0];
+        if (row && typeof row.id === 'string') return { id: row.id };
+      }
+    } catch {
+      // Fall through to the original refusal.
     }
-    if (fresh.verdict === 'stopped') {
-      this.emitFenceEvaluated(
-        write,
-        'stopped',
-        fresh.generation,
-        fresh.maxGeneration,
-        'atomic_append',
-      );
-      await this.markGraphWriteFailed(write.scenario_id, handle.turnId, 'stopped');
-      this.throwFenceRefusal(write, write.turn_id, fresh, 'atomic_append');
-    }
-    if (fresh.verdict !== 'superseded' && fresh.verdict !== 'current') {
-      // unclaimed / unavailable — cannot prove the ordering; original refusal.
-      return null;
-    }
-
-    this.emitFirstWriteExemption(write, originalEvaluation, 'atomic_recovery');
-    return await this.dispatchCheckedAppend(write, baseRpcArgs, rpcMode);
+    return null;
   }
 
   /**

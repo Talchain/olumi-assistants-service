@@ -1224,7 +1224,21 @@ export const TelemetryEvents = {
   // left its trace on the turn's fence row (graph_write_failed_at), so the
   // SAME scenario's next turn can surface the loss to a user whose client is
   // gone. Content-free ids + the closed reason string.
+  //
+  // 2.735 adds `disclosure`: `draft_loss` (a model the user had, or a commit
+  // that was actually attempted — the next turn tells them) vs
+  // `turn_dead_only` (the draft failed before there was a graph — the turn is
+  // marked dead so continuation detection stops counting it, and NOTHING is
+  // disclosed, because nothing was lost). Splitting these is the whole of the
+  // 2.735 fix: the old single state made the notice claim a model had been
+  // displayed to users who never saw one.
   V5TurnFenceGraphWriteFailureMarked: "v5.turn_fence.graph_write_failure_marked",
+
+  // V5 TURN FENCE — ROADMAP 2.735: a later graph commit RESOLVED the
+  // scenario's outstanding draft loss. Emitted once per resolving commit;
+  // scenario id only. Without an explicit resolution the old mark was merely
+  // masked by graph presence, so a later graph deletion re-fired the notice.
+  V5TurnFenceDraftLossResolved: "v5.turn_fence.draft_loss_resolved",
 
   // V5 — ROADMAP 2.709 invariant 6: a graph-less 200 on a scenario whose
   // draft loss stands carried the DRAFT_LOSS_NOTICE to the user. Lives in

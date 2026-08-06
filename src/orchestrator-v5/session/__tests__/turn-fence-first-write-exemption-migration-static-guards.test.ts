@@ -3,7 +3,7 @@
  * over 20260806120000, same convention as the v3/v4 guard suites beside this
  * file: CI cannot reach a live database, so these pin the load-bearing lines
  * of the migration FILE. The BEHAVIOUR is proven by the executable rehearsal
- * (scripts/rehearse-turn-fence-first-write-exemption.mjs — 26/26 against
+ * (scripts/rehearse-turn-fence-first-write-exemption.mjs — 38/38 against
  * real Postgres 16, including the RED reproduction of the phantom state
  * against the deployed 20260802120000 SQL), and the app-side semantics are
  * mirrored by the fake in turn-fence-first-write-exemption.test.ts.
@@ -38,8 +38,12 @@ const ROLLBACK_PATH = fileURLToPath(
   ),
 );
 
+const STORE_PATH = fileURLToPath(new URL('../supabase-store.ts', import.meta.url));
+
 const sql = readFileSync(MIGRATION_PATH, 'utf8');
 const rollback = readFileSync(ROLLBACK_PATH, 'utf8');
+/** The app half, so column-name guards are DERIVED from both sides, not mirrored. */
+const storeSource = readFileSync(STORE_PATH, 'utf8');
 
 /** Comment-stripped view — executable-SQL assertions must not match prose. */
 function stripComments(text: string): string {
@@ -67,11 +71,21 @@ describe('first-write-exemption migration — execution posture', () => {
   });
 });
 
-describe('first-write-exemption migration — the trace columns (invariant 6)', () => {
-  it('adds both columns with IF NOT EXISTS (idempotent re-apply)', () => {
+describe('first-write-exemption migration — the trace columns (invariant 6 + 2.735)', () => {
+  it('adds all four columns with IF NOT EXISTS (idempotent re-apply)', () => {
     expect(codeOneline).toMatch(
-      /ALTER TABLE public\.v5_turn_fence ADD COLUMN IF NOT EXISTS graph_write_failed_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS graph_write_failure_reason TEXT/,
+      /ALTER TABLE public\.v5_turn_fence ADD COLUMN IF NOT EXISTS graph_write_failed_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS graph_write_failure_reason TEXT, ADD COLUMN IF NOT EXISTS graph_loss_disclosable_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS graph_loss_resolved_at TIMESTAMPTZ/,
     );
+  });
+
+  it('2.735: the disclosure columns are the ones the app actually reads and writes', () => {
+    // Derived, not mirrored: the column names come from the STORE source, so
+    // renaming one there without amending the migration fails here rather
+    // than silently shipping a 42703 at runtime.
+    for (const column of ['graph_loss_disclosable_at', 'graph_loss_resolved_at']) {
+      expect(storeSource).toContain(column);
+      expect(code).toContain(column);
+    }
   });
 });
 
@@ -88,19 +102,41 @@ describe('first-write-exemption migration — THE EXEMPTION ITSELF', () => {
     expect(codeOneline).not.toMatch(/IF p_fence_generation < v_fence_max THEN/);
   });
 
-  it('OLTF2 also carries the arrival-8 replay passthrough (committed turn retries return the row id)', () => {
+  it('ROADMAP 2.738(a): the replay check guards the WHOLE gate, and is evaluated BEFORE it', () => {
+    // The replay predicate is computed once, above the gate…
     expect(codeOneline).toMatch(
-      /AND NOT EXISTS \( SELECT 1 FROM v5_conversation_turns WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id \)/,
+      /SELECT EXISTS \( SELECT 1 FROM v5_conversation_turns WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id \) INTO v_already_committed/,
     );
+    // …and the gate is entered only when this turn has NOT already committed.
+    expect(codeOneline).toMatch(
+      /IF p_fence_generation IS NOT NULL AND p_graph IS NOT NULL AND NOT v_already_committed THEN/,
+    );
+    // ORDER, asserted as order: the replay read precedes the stopped raise.
+    const replayIdx = code.indexOf('INTO v_already_committed');
+    const stoppedIdx = code.indexOf(`ERRCODE = '${TURN_FENCE_ATOMIC_SQLSTATE.stopped}'`);
+    expect(replayIdx).toBeGreaterThan(-1);
+    expect(stoppedIdx).toBeGreaterThan(replayIdx);
   });
 
-  it('OLTF1 (stopped) stays UNCONDITIONAL — no graph-presence or replay term anywhere near it', () => {
+  it('ROADMAP 2.738(a): the replay predicate exists exactly ONCE (the inner copy is gone)', () => {
+    // It used to be a clause inside the OLTF2 condition. Two copies of one
+    // predicate is the mirror defect (trap 12) and was also what put the
+    // replay answer AFTER the stopped raise.
+    const occurrences = codeOneline.match(
+      /SELECT 1 FROM v5_conversation_turns WHERE scenario_id = p_scenario_id AND turn_id = p_turn_id/g,
+    );
+    expect(occurrences).toHaveLength(1);
+    expect(codeOneline).not.toMatch(/AND NOT EXISTS \( SELECT 1 FROM v5_conversation_turns/);
+  });
+
+  it('OLTF1 (stopped) stays UNCONDITIONAL within the gate — no graph-presence or replay term near it', () => {
     const stoppedRaise = code.slice(
       code.indexOf('IF v_fence_stopped_at IS NOT NULL'),
       code.indexOf(`ERRCODE = '${TURN_FENCE_ATOMIC_SQLSTATE.stopped}'`),
     );
     expect(stoppedRaise.length).toBeGreaterThan(0);
     expect(stoppedRaise).not.toContain('v_has_graph');
+    expect(stoppedRaise).not.toContain('v_already_committed');
     expect(stoppedRaise).not.toContain('NOT EXISTS');
   });
 

@@ -86,6 +86,23 @@ interface FenceRow {
   stoppedAt: string | null;
   graphWriteFailedAt: string | null;
   graphWriteFailureReason: string | null;
+  /** ROADMAP 2.735 — a graph the USER had was lost (preview streamed, or a commit attempted). */
+  graphLossDisclosableAt: string | null;
+  /** ROADMAP 2.735 — a later commit ended the loss. */
+  graphLossResolvedAt: string | null;
+}
+
+/** Every field a freshly-claimed fence row starts with. One place, so a new column cannot be forgotten in one of the two constructors. */
+function blankMarks(): Pick<
+  FenceRow,
+  'graphWriteFailedAt' | 'graphWriteFailureReason' | 'graphLossDisclosableAt' | 'graphLossResolvedAt'
+> {
+  return {
+    graphWriteFailedAt: null,
+    graphWriteFailureReason: null,
+    graphLossDisclosableAt: null,
+    graphLossResolvedAt: null,
+  };
 }
 
 interface Filter {
@@ -108,6 +125,14 @@ interface ExemptionBackend {
   markColumnMissing: boolean;
   /** Runs at the top of the NEXT v5_evaluate_turn_fence call (recovery window). */
   onBeforeEvaluate: (() => void) | null;
+  /**
+   * ROADMAP 2.736 — runs at the top of the NEXT unfenced append
+   * (`append_turn_atomic_v2/v3`), i.e. INSIDE the window between the
+   * recovery's fence re-evaluation and the write it performs. This is the
+   * window the existing `onBeforeEvaluate` hook could never reach, and it is
+   * the one the audit named.
+   */
+  onBeforeCheckedAppend: (() => void) | null;
   stop: (turnId: string) => void;
   claim: (turnId: string) => number;
 }
@@ -137,6 +162,7 @@ function makeBackend(): ExemptionBackend {
     v4Missing: false,
     markColumnMissing: false,
     onBeforeEvaluate: null,
+    onBeforeCheckedAppend: null,
     stop: (turnId: string) => {
       const existing = find(SCENARIO, turnId);
       if (existing) {
@@ -148,8 +174,7 @@ function makeBackend(): ExemptionBackend {
           scenarioId: SCENARIO,
           turnId,
           stoppedAt: new Date().toISOString(),
-          graphWriteFailedAt: null,
-          graphWriteFailureReason: null,
+          ...blankMarks(),
         });
       }
     },
@@ -162,8 +187,7 @@ function makeBackend(): ExemptionBackend {
         scenarioId: SCENARIO,
         turnId,
         stoppedAt: null,
-        graphWriteFailedAt: null,
-        graphWriteFailureReason: null,
+        ...blankMarks(),
       });
       return sequence;
     },
@@ -193,7 +217,11 @@ function makeBackend(): ExemptionBackend {
                   ? r.generation
                   : f.col === 'graph_write_failed_at'
                     ? r.graphWriteFailedAt
-                    : undefined;
+                    : f.col === 'graph_loss_disclosable_at'
+                      ? r.graphLossDisclosableAt
+                      : f.col === 'graph_loss_resolved_at'
+                        ? r.graphLossResolvedAt
+                        : undefined;
         if (f.op === 'eq') return value === f.val;
         if (f.op === 'neq') return value !== f.val;
         if (f.op === 'is') return f.val === null ? value === null : value === f.val;
@@ -228,11 +256,46 @@ function makeBackend(): ExemptionBackend {
           updateCalls.push({ table, values: updateValues, filters: [...filters] });
           for (const r of rows) {
             if (matchesFence(r)) {
-              r.graphWriteFailedAt = String(updateValues.graph_write_failed_at ?? null);
-              r.graphWriteFailureReason = String(updateValues.graph_write_failure_reason ?? null);
+              // Apply exactly the columns the caller sent — a PATCH, like
+              // PostgREST. Assigning all four unconditionally would let the
+              // resolution write (which sends only graph_loss_resolved_at)
+              // silently clear the failure trace, and the fake would then
+              // disagree with the database it stands in for.
+              const vals = updateValues;
+              if ('graph_write_failed_at' in vals) {
+                r.graphWriteFailedAt = String(vals.graph_write_failed_at ?? null);
+              }
+              if ('graph_write_failure_reason' in vals) {
+                r.graphWriteFailureReason = String(vals.graph_write_failure_reason ?? null);
+              }
+              if ('graph_loss_disclosable_at' in vals) {
+                r.graphLossDisclosableAt = String(vals.graph_loss_disclosable_at ?? null);
+              }
+              if ('graph_loss_resolved_at' in vals) {
+                r.graphLossResolvedAt = String(vals.graph_loss_resolved_at ?? null);
+              }
             }
           }
           return { data: null, error: null };
+        }
+        // Pre-migration database: a SELECT that FILTERS on a column which does
+        // not exist answers 42703 too, not just an UPDATE. Modelling only the
+        // UPDATE would let a read-side fallback look exercised while never
+        // being taken (trap 13 — an absence assertion needs to be able to see
+        // a presence).
+        if (backend.markColumnMissing) {
+          const missing = filters.find(
+            (f) =>
+              f.col === 'graph_write_failed_at' ||
+              f.col === 'graph_loss_disclosable_at' ||
+              f.col === 'graph_loss_resolved_at',
+          );
+          if (missing !== undefined) {
+            return {
+              data: null,
+              error: { code: '42703', message: `column "${missing.col}" does not exist` },
+            };
+          }
         }
         return { data: rows.filter(matchesFence).map((r) => ({ generation: r.generation })), error: null };
       }
@@ -308,6 +371,11 @@ function makeBackend(): ExemptionBackend {
       }
 
       if (fn.startsWith('append_turn_atomic')) {
+        if (fn !== 'append_turn_atomic_v4' && backend.onBeforeCheckedAppend !== null) {
+          const hook = backend.onBeforeCheckedAppend;
+          backend.onBeforeCheckedAppend = null;
+          hook();
+        }
         if (fn === 'append_turn_atomic_v4') {
           if (backend.v4Missing) {
             return {
@@ -505,22 +573,98 @@ describe('first-write exemption — CHECKED path (v4 not migrated)', () => {
 
 // ═══ 2. ATOMIC path against the PRE-migration DB (the deploy-first window) ═
 
-describe('first-write exemption — ATOMIC path, pre-migration v4 (OLTF2 recovery)', () => {
-  it('REPRO→FIX: OLTF2 on a graph-less scenario recovers via the pre-v4 append and COMMITS', async () => {
+describe('first-write exemption — ATOMIC path, pre-migration v4 (2.736: NO unfenced recovery)', () => {
+  /**
+   * ⚠ THIS BLOCK'S EXPECTATIONS WERE INVERTED BY ROADMAP 2.736, DELIBERATELY.
+   *
+   * It used to pin that an OLTF2 on a graph-less scenario RECOVERED and
+   * committed, via `dispatchCheckedAppend` — `append_turn_atomic_v2/v3`, which
+   * carry no fence check at all. An external audit (Codex, 2026-08-08) showed
+   * the recovery re-read the fence and then wrote OUTSIDE any lock, so a Stop
+   * or a rival commit landing in that window was invisible. The old suite
+   * could not see it: every Stop test placed the Stop BEFORE the
+   * re-evaluation, which is the only part of the window the code checks.
+   *
+   * The exemption now exists ONLY in migration 20260806120000's
+   * in-transaction gate. Against a pre-migration database the refusal stands
+   * — a disclosed, bounded reopening of the fresh-journey P0 for the window
+   * between this deploy and that migration, chosen over an unfenced write.
+   */
+  it('2.736: OLTF2 on a graph-less scenario REFUSES — the exemption is not reproduced by an unfenced write', async () => {
     const backend = makeBackend();
     backend.v4Semantics = 'pre_exemption';
     const store = makeStore(backend.client);
     const { draftGen } = phantomSetup(backend);
 
-    const result = await runWithTurnFence(handleFor(draftGen, TURN_A), () =>
-      store.append(write(TURN_A, GRAPH_A)),
-    );
+    let thrown: unknown = null;
+    try {
+      await runWithTurnFence(handleFor(draftGen, TURN_A), () =>
+        store.append(write(TURN_A, GRAPH_A)),
+      );
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(TurnFenceRejectedError);
+    expect((thrown as TurnFenceRejectedError).verdict).toBe('superseded');
+    expect(backend.storedGraph()).toBeNull();
+  });
 
-    expect(result.id).toBe(`row-${TURN_A}`);
-    expect(backend.storedGraph()).toEqual(GRAPH_A);
-    // The recovery re-evaluated the fence (fresh stopped check) before committing.
-    expect(backend.rpcCalls.some((c) => c.fn === 'v5_evaluate_turn_fence')).toBe(true);
-    expect(events.some((e) => e.event === 'v5.turn_fence.first_write_exemption')).toBe(true);
+  it('2.736 STRUCTURAL: an OLTF2 refusal dispatches NO unfenced append (v2/v3) at all', async () => {
+    // The invariant in its most directly falsifiable form, and the one a
+    // mutant cannot satisfy by accident: the fenceless RPCs are never reached
+    // from this path. Asserted by RPC identity, not by an outcome another
+    // route could also produce (trap 19).
+    const backend = makeBackend();
+    backend.v4Semantics = 'pre_exemption';
+    const store = makeStore(backend.client);
+    const { draftGen } = phantomSetup(backend);
+
+    await expect(
+      runWithTurnFence(handleFor(draftGen, TURN_A), () => store.append(write(TURN_A, GRAPH_A))),
+    ).rejects.toThrow(TurnFenceRejectedError);
+
+    const unfenced = backend.rpcCalls.filter(
+      (c) => c.fn === 'append_turn_atomic_v2' || c.fn === 'append_turn_atomic_v3',
+    );
+    expect(unfenced).toEqual([]);
+    // POSITIVE CONTROL (trap 13): the recorder CAN see those RPCs — the v4
+    // attempt itself was recorded, so an empty list is a real absence rather
+    // than a recorder that never fires.
+    expect(backend.rpcCalls.some((c) => c.fn === 'append_turn_atomic_v4')).toBe(true);
+  });
+
+  it('2.736 INTERLEAVING: a Stop landing AFTER the fence re-evaluation cannot resurrect the draft', async () => {
+    // THE AUDIT'S EXACT CASE, and the one the old suite structurally could
+    // not reach. The Stop lands in the window between the recovery's
+    // re-evaluation and the write it performs — invisible to a check made
+    // before it and a write made without a lock.
+    const backend = makeBackend();
+    backend.v4Semantics = 'pre_exemption';
+    const store = makeStore(backend.client);
+    const { draftGen } = phantomSetup(backend);
+    backend.onBeforeCheckedAppend = () => backend.stop(TURN_A);
+
+    await expect(
+      runWithTurnFence(handleFor(draftGen, TURN_A), () => store.append(write(TURN_A, GRAPH_A))),
+    ).rejects.toThrow(TurnFenceRejectedError);
+    // The user stopped this draft. Nothing of it may reach the scenario.
+    expect(backend.storedGraph()).toBeNull();
+  });
+
+  it('2.736 INTERLEAVING: a rival commit landing AFTER the fence re-evaluation is not clobbered', async () => {
+    // The second half of the same window. The recovery proved "no graph"
+    // and then wrote unconditionally; a rival graph committing in between was
+    // overwritten by an older turn's draft.
+    const backend = makeBackend();
+    backend.v4Semantics = 'pre_exemption';
+    const store = makeStore(backend.client);
+    const { draftGen } = phantomSetup(backend);
+    backend.onBeforeCheckedAppend = () => backend.setStoredGraph(GRAPH_RIVAL);
+
+    await expect(
+      runWithTurnFence(handleFor(draftGen, TURN_A), () => store.append(write(TURN_A, GRAPH_A))),
+    ).rejects.toThrow(TurnFenceRejectedError);
+    expect(backend.storedGraph()).not.toEqual(GRAPH_A);
   });
 
   it('CONTROL: OLTF2 with a committed graph present refuses — no recovery attempt commits', async () => {
@@ -543,19 +687,18 @@ describe('first-write exemption — ATOMIC path, pre-migration v4 (OLTF2 recover
     expect(backend.storedGraph()).toEqual(GRAPH_RIVAL);
   });
 
-  it('arrival-8 replay: retrying an exempt-committed turn returns the SAME row id, never a 500 (found by the migration rehearsal)', async () => {
+  it('arrival-8 replay: retrying a COMMITTED turn returns the SAME row id, never a 500 (read-only, and now unconditional)', async () => {
     const backend = makeBackend();
-    backend.v4Semantics = 'pre_exemption';
+    // The turn commits normally (migrated semantics), then a retry arrives on
+    // a database whose v4 raises OLTF2 unconditionally.
+    backend.v4Semantics = 'exempt';
     const store = makeStore(backend.client);
     const { draftGen } = phantomSetup(backend);
 
     const first = await runWithTurnFence(handleFor(draftGen, TURN_A), () =>
       store.append(write(TURN_A, GRAPH_A)),
     );
-    // The retry arrives with the scenario now holding the turn's OWN graph:
-    // OLTF2 fires again (pre-migration v4), the exemption no longer applies
-    // (graph present), and the recovery must answer with the committed row
-    // id instead of manufacturing a false 500 about a persisted turn.
+    backend.v4Semantics = 'pre_exemption';
     const replay = await runWithTurnFence(handleFor(draftGen, TURN_A), () =>
       store.append(write(TURN_A, GRAPH_A)),
     );
@@ -563,14 +706,35 @@ describe('first-write exemption — ATOMIC path, pre-migration v4 (OLTF2 recover
     expect(backend.storedGraph()).toEqual(GRAPH_A);
   });
 
-  it('a Stop landing inside the recovery window refuses with verdict STOPPED, not a commit', async () => {
+  it('2.736: the replay answer is UNCONDITIONAL — a committed turn on a still-graph-less scenario also replays', async () => {
+    // Previously the replay read was reachable only when the scenario already
+    // held a graph (it sat behind `!firstWriteExemptionApplies`), so this
+    // shape 500ed on a turn that was in fact persisted. It is a SELECT, so
+    // running it first costs nothing and cannot race.
+    const backend = makeBackend();
+    backend.v4Semantics = 'exempt';
+    const store = makeStore(backend.client);
+    const { draftGen } = phantomSetup(backend);
+
+    // Commit the turn WITHOUT a graph, then retry with one: the scenario is
+    // still graph-less, and the turn row already exists.
+    const first = await runWithTurnFence(handleFor(draftGen, TURN_A), () =>
+      store.append(write(TURN_A)),
+    );
+    expect(backend.storedGraph()).toBeNull();
+    backend.v4Semantics = 'pre_exemption';
+    const replay = await runWithTurnFence(handleFor(draftGen, TURN_A), () =>
+      store.append(write(TURN_A, GRAPH_A)),
+    );
+    expect(replay.id).toBe(first.id);
+  });
+
+  it('CONTROL (unchanged): a Stop landing BEFORE the OLTF2 answer still refuses, and nothing commits', async () => {
     const backend = makeBackend();
     backend.v4Semantics = 'pre_exemption';
     const store = makeStore(backend.client);
     const { draftGen } = phantomSetup(backend);
-    // The rival Stop lands between the OLTF2 rollback and the recovery's
-    // fence re-evaluation — the strongest ordering, deterministic.
-    backend.onBeforeEvaluate = () => backend.stop(TURN_A);
+    backend.stop(TURN_A);
 
     let thrown: unknown = null;
     try {
@@ -670,7 +834,104 @@ describe('graph-write failure trace (invariant 6)', () => {
       store.append(write(TURN_A, GRAPH_A)),
     );
     expect(backend.rows.find((r) => r.turnId === TURN_A)?.graphWriteFailedAt).toBeNull();
-    expect(backend.updateCalls.length).toBe(0);
+    // 2.735: a successful GRAPH commit now also issues the loss-RESOLUTION
+    // update, so "no updates at all" is no longer the right pin. Assert the
+    // thing that actually matters — no FAILURE mark was written — by naming
+    // the columns rather than counting calls.
+    const failureMarks = backend.updateCalls.filter((c) => 'graph_write_failed_at' in c.values);
+    expect(failureMarks).toEqual([]);
+  });
+
+  // ═══ ROADMAP 2.735 — DISCLOSURE is a narrower claim than FAILURE ════════
+
+  it('2.735: a fence refusal marks the loss DISCLOSABLE — the fence only ever refuses a graph-bearing write', async () => {
+    const backend = makeBackend();
+    backend.v4Missing = true;
+    const store = makeStore(backend.client);
+    const { draftGen } = phantomSetup(backend);
+    backend.setStoredGraph(GRAPH_RIVAL);
+
+    await expect(
+      runWithTurnFence(handleFor(draftGen, TURN_A), () => store.append(write(TURN_A, GRAPH_A))),
+    ).rejects.toThrow(TurnFenceRejectedError);
+
+    const row = backend.rows.find((r) => r.turnId === TURN_A);
+    expect(row?.graphLossDisclosableAt).toBeTruthy();
+  });
+
+  it('2.735: a turn_dead_only mark records the failure but NOT the disclosure', async () => {
+    // The pre-preview draft failure, as the route now records it. The turn
+    // must be dead (continuation detection stops counting it) while nothing
+    // is disclosed to the user, because nothing was lost.
+    const backend = makeBackend();
+    const store = makeStore(backend.client);
+    backend.claim(TURN_A);
+
+    await store.markGraphWriteFailed(
+      SCENARIO,
+      TURN_A,
+      'draft_graph_pipeline_threw_before_preview',
+      'turn_dead_only',
+    );
+
+    const row = backend.rows.find((r) => r.turnId === TURN_A);
+    expect(row?.graphWriteFailedAt).toBeTruthy();
+    expect(row?.graphLossDisclosableAt).toBeNull();
+  });
+
+  it('2.735: scenarioDraftLossStands is FALSE for a turn_dead_only mark and TRUE for a draft_loss mark', async () => {
+    // The discriminating pair. Same scenario, same graph-less state, same
+    // read — the ONLY difference is the claim the mark records. A predicate
+    // that ignored the claim (the shipped defect) would answer true twice.
+    const deadOnly = makeBackend();
+    const deadStore = makeStore(deadOnly.client);
+    deadOnly.claim(TURN_A);
+    await deadStore.markGraphWriteFailed(SCENARIO, TURN_A, 'pipeline_threw', 'turn_dead_only');
+    await expect(deadStore.scenarioDraftLossStands(SCENARIO)).resolves.toBe(false);
+
+    const realLoss = makeBackend();
+    const lossStore = makeStore(realLoss.client);
+    realLoss.claim(TURN_A);
+    await lossStore.markGraphWriteFailed(SCENARIO, TURN_A, 'pipeline_threw', 'draft_loss');
+    await expect(lossStore.scenarioDraftLossStands(SCENARIO)).resolves.toBe(true);
+  });
+
+  it('2.735: a later graph commit RESOLVES the loss, and the resolution survives the graph going away again', async () => {
+    // The stale-marker path. Previously a later commit merely MASKED the mark
+    // (the predicate read "mark present AND graph now null"), so clearing the
+    // graph later re-fired a notice about a draft the user had replaced.
+    const backend = makeBackend();
+    const store = makeStore(backend.client);
+    const draftGen = backend.claim(TURN_A);
+    await store.markGraphWriteFailed(SCENARIO, TURN_A, 'superseded', 'draft_loss');
+    expect(await store.scenarioDraftLossStands(SCENARIO)).toBe(true);
+
+    // A later turn drafts successfully.
+    const laterGen = backend.claim(TURN_B);
+    await runWithTurnFence(handleFor(laterGen, TURN_B), () => store.append(write(TURN_B, GRAPH_A)));
+    expect(await store.scenarioDraftLossStands(SCENARIO)).toBe(false);
+
+    // …and now the graph goes away (a delete, a reset). The OLD predicate
+    // would resurrect the notice here; the resolution stamp must not.
+    backend.setStoredGraph(null);
+    expect(await store.scenarioDraftLossStands(SCENARIO)).toBe(false);
+    // Bind by identity: the resolution is recorded on the row that carried
+    // the loss, not merely implied by graph presence.
+    expect(backend.rows.find((r) => r.turnId === TURN_A)?.graphLossResolvedAt).toBeTruthy();
+    void draftGen;
+  });
+
+  it('2.735 CONTROL: a graph-LESS commit resolves nothing (the user is still without a model)', async () => {
+    const backend = makeBackend();
+    const store = makeStore(backend.client);
+    backend.claim(TURN_A);
+    await store.markGraphWriteFailed(SCENARIO, TURN_A, 'superseded', 'draft_loss');
+
+    const laterGen = backend.claim(TURN_B);
+    await runWithTurnFence(handleFor(laterGen, TURN_B), () => store.append(write(TURN_B)));
+
+    expect(await store.scenarioDraftLossStands(SCENARIO)).toBe(true);
+    expect(backend.rows.find((r) => r.turnId === TURN_A)?.graphLossResolvedAt).toBeNull();
   });
 
   it('a missing mark column (pre-migration DB) degrades loudly but never changes the refusal', async () => {
@@ -718,5 +979,44 @@ describe('hasOtherAdmittedLiveTurn (invariant 3 read)', () => {
     const store = makeStore(backend.client);
     backend.claim(TURN_A);
     await expect(store.hasOtherAdmittedLiveTurn(SCENARIO, TURN_A)).resolves.toBe(false);
+  });
+
+  it('ROADMAP 2.738(b): a STOPPED turn is not live — a stopped-before-commit draft must not make the scenario a continuation forever', async () => {
+    // The audit's case. A turn the user Stopped before it could commit is
+    // never failure-marked by the fence — nothing refused it, it simply never
+    // wrote — so under the old predicate its fence row stayed "admitted and
+    // live" for the life of the scenario. A graph-less scenario whose only
+    // other turn was stopped then classified as a CONTINUATION on every later
+    // turn, and the brief could never be redrafted.
+    const backend = makeBackend();
+    const store = makeStore(backend.client);
+    backend.claim(TURN_A);
+    backend.claim(TURN_B);
+
+    // POSITIVE CONTROL (trap 13) FIRST: while TURN_A is live, this read must
+    // see it — otherwise the `false` below proves nothing about stopping.
+    await expect(store.hasOtherAdmittedLiveTurn(SCENARIO, TURN_B)).resolves.toBe(true);
+
+    backend.stop(TURN_A);
+    await expect(store.hasOtherAdmittedLiveTurn(SCENARIO, TURN_B)).resolves.toBe(false);
+    // Bind by identity: it is the STOP that did this, not a failure mark —
+    // the row carries no failure trace at all.
+    expect(backend.rows.find((r) => r.turnId === TURN_A)?.graphWriteFailedAt).toBeNull();
+  });
+
+  it('ROADMAP 2.738(b): the STOP filter survives the pre-migration 42703 fallback', async () => {
+    // `stopped_at` predates the pending migration; only the failure columns
+    // are new. So on a database where the failure filter 42703s, the retry
+    // must still exclude stopped rows — otherwise the fix is dark on exactly
+    // the deployment state it was written for.
+    const backend = makeBackend();
+    backend.markColumnMissing = true;
+    const store = makeStore(backend.client);
+    backend.claim(TURN_A);
+    backend.claim(TURN_B);
+    await expect(store.hasOtherAdmittedLiveTurn(SCENARIO, TURN_B)).resolves.toBe(true);
+
+    backend.stop(TURN_A);
+    await expect(store.hasOtherAdmittedLiveTurn(SCENARIO, TURN_B)).resolves.toBe(false);
   });
 });
