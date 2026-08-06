@@ -41,7 +41,7 @@
  *         which is the only guard that can notice a short list.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { GRAPH_MUTATING_HANDLER_IDS } from '../mutation-consent.js';
@@ -82,6 +82,45 @@ describe('DERIVED: GRAPH_MUTATING_HANDLER_IDS matches the modules that can mutat
 
   it('the constant equals the derived set exactly — a new mutating handler REDs here on the day it is written', () => {
     expect([...GRAPH_MUTATING_HANDLER_IDS].sort()).toEqual(derived);
+  });
+});
+
+/**
+ * ⭐ A COMMENT THAT CITES A GUARANTEE BY FILENAME IS A CLAIM, AND IT WAS
+ * FALSE (ROADMAP 2.628, fixed 6 Aug 2026).
+ *
+ * `mutation-consent.ts` told every reader that the handler-id list could not
+ * drift because `__tests__/graph-mutating-handler-ids.test.ts` derived it.
+ * NO SUCH FILE HAS EVER EXISTED. The derivation was real — it lives in THIS
+ * file — but nobody could have discovered that from the citation, and a
+ * reader who went looking and found nothing would reasonably conclude the
+ * guarantee was absent.
+ *
+ * This is the estate's dominant defect (CLAUDE.md trap 12) wearing a
+ * comment's clothes: a hand-maintained pointer that drifts silently and reads
+ * as reassurance either way. Deriving it costs three lines.
+ */
+describe('DERIVED: every test file the consent module cites by name exists', () => {
+  const MODULE_DIR = join(SRC_ROOT, 'orchestrator-v5/routing');
+  const CITING_MODULES = ['mutation-consent.ts', 'calibration-semantics.ts'] as const;
+
+  const citations = CITING_MODULES.flatMap((moduleName) => {
+    // readFileSync, not grep: `edit-graph-referee-gate.ts` in this tree
+    // carries a NUL sentinel and plain grep is blind to such files
+    // (CLAUDE.md trap 17).
+    const body = readFileSync(join(MODULE_DIR, moduleName), 'utf8');
+    return [...body.matchAll(/__tests__\/[\w.-]+\.test\.ts/g)].map((m) => ({
+      moduleName,
+      cited: m[0],
+    }));
+  });
+
+  it('the scan found citations at all (positive control — an empty scan would pass every assertion below)', () => {
+    expect(citations.length).toBeGreaterThan(0);
+  });
+
+  it.each(citations)('$moduleName cites $cited, and it exists', ({ cited }) => {
+    expect(existsSync(join(MODULE_DIR, cited))).toBe(true);
   });
 });
 

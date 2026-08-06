@@ -47,10 +47,14 @@
  *     reading which handler modules import `applyAndValidateMutation` (the
  *     single in-memory mutation chokepoint) and asserts equality. A new
  *     mutating handler turns that test RED on the day it is written.
- *     (⚠ This line named `__tests__/graph-mutating-handler-ids.test.ts`
- *     until 6 Aug 2026. NO SUCH FILE HAS EVER EXISTED — a comment citing a
+ *     (⚠ Until 6 Aug 2026 this line cited a "graph-mutating-handler-ids"
+ *     spec that HAS NEVER EXISTED — ROADMAP 2.628. A comment citing a
  *     guarantee by the name of a file nobody can open is the same defect
- *     class as an absent guarantee, and harder to notice.)
+ *     class as an absent guarantee, and harder to notice. The dead path is
+ *     deliberately not spelled here: the citation guard in the manifest spec
+ *     derives every `__tests__/…` path this module names and asserts it
+ *     resolves, and a historical mention would be indistinguishable from a
+ *     live one — it RED-ed on this very note when first written.)
  *  2. The guarantee does not actually depend on this list being right — the
  *     commit-closure backstop in turn-executor strips the graph from ANY
  *     commit on a withheld turn, with no handler ids involved at all. This
