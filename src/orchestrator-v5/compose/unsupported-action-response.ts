@@ -70,7 +70,10 @@ function supportedMutationPhrases(
 ): readonly string[] {
   return Object.entries(MUTATION_CAPABILITY_PHRASES)
     .filter(([id]) => GRAPH_MUTATING_HANDLER_IDS.has(id))
-    .filter(([id]) => (registry as unknown as Record<string, unknown>)[id] != null)
+    // `HandlerValidationRegistry` IS `Readonly<Record<string, …>>`, so this
+    // indexes directly. (An `as unknown as Record<string, unknown>` cast here
+    // was pointless and tripped the forbidden-boundary ratchet, correctly.)
+    .filter(([id]) => registry[id] != null)
     .map(([, phrase]) => phrase);
 }
 
