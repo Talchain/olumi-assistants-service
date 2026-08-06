@@ -721,3 +721,120 @@ describe('INV-2 — a repair that cannot touch the defective row discloses that 
     expect(response.assistant_text.toLowerCase()).not.toContain('stay in place');
   });
 });
+
+/**
+ * ⭐⭐ ROADMAP 2.663 (F-B) — OFFER ACCEPTANCE IS A WARRANT.
+ *
+ * WITNESSED (consent-witness walk, CEE `bb33751`): the demotion above emits an
+ * offer, the user accepts it in their own words, and the gate answers "You did
+ * not ask me to edit the model." That is the demotion's own dead end — the
+ * consent loop offer → yes → "you did not ask me" — and it is closed by
+ * WIDENING WARRANT SOURCE 3 (confirm-resume), never by weakening the gate.
+ *
+ * The unit-level vocabulary lives in
+ * `routing/__tests__/short-confirm-offer-reference.test.ts`. THIS file asserts
+ * the property that matters at the persistence boundary: the acceptance turn
+ * WRITES, and the gate stands down because a pending was consumed — not
+ * because the message was re-classified as a mutation request.
+ */
+describe('INV-1 / 2.663 F-B — accepting the assistant’s own offer carries the warrant', () => {
+  function seedDemotedProposal(graph: GraphV3T): void {
+    servedGraph = graph;
+    const graphHash =
+      computeAnalysisAffectingGraphHash(
+        graph as unknown as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      ) ?? 'h_unset';
+    pendingActionsForRead = [
+      {
+        id: `pa-${randomUUID()}`,
+        scenario_id: SCENARIO_ID,
+        chip_id: 'prop_offeraccept0',
+        action: {
+          kind: 'apply_proposed_change',
+          proposal_ref: 'prop_offeraccept0',
+          inline_patch: {
+            handler_id: 'add_constraint',
+            params: { constraint_type: 'at_most', value: 3, unit: '%' },
+            target_entity_ids: ['f-churn'],
+          },
+          public_label: 'Add this limit',
+          public_message: 'Add that limit to my model.',
+        },
+        preconditions: { graph_hash: graphHash },
+        expires_at_turn_count: 2,
+        expires_at_iso: '2099-12-31T23:59:59.000Z',
+        emitted_at_iso: '2026-08-07T11:00:00.000Z',
+      } as PendingAction,
+    ];
+  }
+
+  it('⭐ THE WITNESSED DEAD END — "Yes, please rephrase … as you offered earlier." now APPLIES the held offer', async () => {
+    const graph = buildChurnGraph();
+    seedDemotedProposal(graph);
+
+    await runTurnExecutor(
+      payload('Yes, please rephrase the churn constraint as you offered earlier.'),
+      'req-offer-accept-witnessed',
+      { routingAdapter: throwingRoutingAdapter(), graphState: graph },
+    );
+
+    // TRAP 19 — the constraint lands on f-churn BY ID, not "a constraint exists".
+    expect(graphWrites()).toHaveLength(1);
+    expect(churnConstraints(graphWrites()[0]!.graph)).toHaveLength(1);
+    // The gate stood down because a pending was CONSUMED (warrant source 3),
+    // which is the only reason available: the throwing adapter proves no LLM
+    // reclassified the utterance, and the message carries no mutation signal.
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+  });
+
+  it('⭐ the generic form the row names — "Yes, please do what you offered." — applies it too', async () => {
+    const graph = buildChurnGraph();
+    seedDemotedProposal(graph);
+
+    await runTurnExecutor(
+      payload('Yes, please do what you offered.'),
+      'req-offer-accept-generic',
+      { routingAdapter: throwingRoutingAdapter(), graphState: graph },
+    );
+
+    expect(graphWrites()).toHaveLength(1);
+    expect(churnConstraints(graphWrites()[0]!.graph)).toHaveLength(1);
+    expect(warrantEvents('step2_gate')).toHaveLength(0);
+  });
+
+  it('⭐ CONTROL — the SAME back-reference on a READ-shaped ask writes NOTHING (2.652 must not run backwards)', async () => {
+    const graph = buildChurnGraph();
+    seedDemotedProposal(graph);
+
+    // Read intent present, and the back-reference verb is one the pattern DOES
+    // recognise (`offered`) — an earlier draft said "described", which the
+    // back-reference set never matched, so the control was blocked by
+    // vocabulary rather than by the guard it names (trap 13b; mutant M4
+    // survived it). If the widened vocabulary ever swallows this, a held
+    // mutation applies on a turn that asked to LOOK.
+    await runTurnExecutor(
+      payload('Yes, show me the option comparison as you offered earlier.'),
+      'req-offer-accept-read-control',
+      { routingAdapter: witnessedAddConstraintAdapter(), graphState: graph },
+    );
+
+    expect(graphWrites()).toHaveLength(0);
+  });
+
+  it('⭐ CONTROL — an acceptance naming its OWN value does not resume the held proposal', async () => {
+    const graph = buildChurnGraph();
+    seedDemotedProposal(graph);
+
+    // The held proposal is 3%. Resuming it here would apply 3% while the user
+    // typed 5% — a wrong-target mutation wearing the clothes of consent.
+    await runTurnExecutor(
+      payload('Yes, set churn to 5% as you offered earlier.'),
+      'req-offer-accept-quantity-control',
+      { routingAdapter: throwingRoutingAdapter(), graphState: graph },
+    );
+
+    // The throwing adapter means "did not resume" is the only survivable
+    // outcome; a resume would have written 3%.
+    expect(churnConstraints(persistedGraph ?? {})).toHaveLength(0);
+  });
+});
