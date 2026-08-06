@@ -8,26 +8,29 @@
  * live network), writes exclusively via the SECURITY DEFINER RPC, typed
  * error mapping on the migration's distinct SQLSTATEs.
  *
- * RPC: `create_decision_record` — migration
- * supabase/migrations/20260710113000_v5_decision_records.sql (#406,
- * MERGED but execution is Paul-gated — see the migration header). Until
- * the migration is executed the RPC does not exist on staging: this
- * adapter then surfaces the PostgREST "function not found" error as a
- * DecisionRecordStoreError, which the capture hook logs and swallows
- * (never silent data corruption, never a turn failure).
+ * RPCs: `create_decision_record` + `record_decision_outcome` — migration
+ * supabase/migrations/20260710113000_v5_decision_records.sql (#406).
+ * ⚠ CORRECTED (calibration R0, reconcile R7): this header used to say
+ * execution was "Paul-gated … until the migration is executed the RPC does
+ * not exist on staging". FALSE at the current tip — the migration header
+ * reads "✅ EXECUTED ON STAGING" (`…decision_records.sql:5-14`) and the
+ * 2026-07-12 amendment widened both key whitelists (`:26-34,446-467`). A
+ * stale warning teaches the next lane to route around a hazard that is gone
+ * (CLAUDE.md trap 7b).
  *
  * Error mapping (distinct SQLSTATEs raised by the migration's RPCs):
  *   DR001 → DecisionRecordSignInRequiredError (guest refusal — the
  *           DESIGNED outcome for unowned scenarios, recoverable)
+ *   DR404 → DecisionRecordNotFoundError      (record_decision_outcome)
+ *   DR409 → DecisionRecordOutcomeConflictError (write-once violation;
+ *           an IDENTICAL-payload retry is deduped by the RPC, not errored)
  *   else  → DecisionRecordStoreError
- * (DR404 / DR409 belong to `record_decision_outcome` — the write-once
- * outcome surface, a later slice; only `create_decision_record` is called
- * here.)
  *
- * Rows in decision_records are effectively immutable from this seam: this
- * adapter only creates records (idempotently by p_record_id — the RPC's
- * same-scenario replay branch returns the existing record with
- * `deduped: true`).
+ * Rows in decision_records are append-then-fill: this adapter creates
+ * records (idempotently by p_record_id — the RPC's same-scenario replay
+ * branch returns the existing record with `deduped: true`) and fills the
+ * WRITE-ONCE `outcome` exactly once (DR409 on any conflicting rewrite).
+ * Nothing here can rewrite a decision or a prediction.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -36,6 +39,7 @@ import { log } from '../../utils/telemetry.js';
 import type {
   DecisionRecordAnalysisSummary,
   DecisionRecordConfidenceSourceLiteral,
+  DecisionRecordOutcomeResultLiteral,
 } from '@talchain/schemas/boundary';
 
 // ---------------------------------------------------------------------------
@@ -56,6 +60,26 @@ export class DecisionRecordStoreError extends Error {
   }
 }
 
+/** SQLSTATE DR404 — `record_decision_outcome` on a record that does not exist. */
+export class DecisionRecordNotFoundError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'DecisionRecordNotFoundError';
+  }
+}
+
+/**
+ * SQLSTATE DR409 — the outcome is WRITE-ONCE and a CONFLICTING rewrite was
+ * attempted. An identical-payload retry never reaches here: the RPC returns
+ * the existing record with `deduped: true` (…decision_records.sql:726-746).
+ */
+export class DecisionRecordOutcomeConflictError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'DecisionRecordOutcomeConflictError';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Inputs / outcomes.
 // ---------------------------------------------------------------------------
@@ -67,14 +91,14 @@ export class DecisionRecordStoreError extends Error {
  * enforces the same key-set whitelists value-level; anything off-whitelist
  * is a 22023 refusal, so the builder in capture.ts validates before send).
  *
- * ⚠ 0.16.0 SEAM NOTE: the merged-but-UNEXECUTED migration
- * (supabase/migrations/20260710113000_v5_decision_records.sql) still guards
- * p_prediction against the 0.15.0 key-set {statement, confidence} — its
- * whitelist (and the dr_prediction_shape CHECK) must be amended in place
- * (the file's own documented pre-execution amendment flow) to admit
- * confidence_source / probability_of_goal / probability_of_joint_goal
- * BEFORE the Paul-gated execution, or every capture from this seam will be
- * 22023-refused wholesale once the RPC exists.
+ * ⚠ THE 0.16.0 SEAM NOTE THAT USED TO SIT HERE IS DELETED (calibration R0,
+ * reconcile R7). It warned that the "merged-but-UNEXECUTED" migration still
+ * guarded `p_prediction` against the 0.15.0 key-set `{statement, confidence}`
+ * and had to be amended before execution. BOTH HALVES ARE FALSE at the
+ * current tip: the migration is executed (`…decision_records.sql:5-14`) and
+ * its whitelists already admit `committed_by_user`, `confidence_source`,
+ * `probability_of_goal` and `probability_of_joint_goal` (`:26-34,422-424,
+ * 446-467`) — verified at the bytes, not inherited.
  */
 export interface CreateDecisionRecordWrite {
   readonly scenario_id: string;
@@ -86,6 +110,11 @@ export interface CreateDecisionRecordWrite {
      *  PLoT's response_hash / hashGraph, NEVER graph_identity_hash. */
     readonly graph_hash: string;
     readonly analysis_summary?: DecisionRecordAnalysisSummary;
+    /** true when the record was created by an explicit "record the decision"
+     *  action (0.16.0). Absent on ambient auto-capture — a disclosed
+     *  inference, never a fabricated `false`. Live on the RPC whitelist
+     *  (`…decision_records.sql:422-424`). */
+    readonly committed_by_user?: boolean;
   };
   readonly prediction: {
     readonly statement: string;
@@ -117,6 +146,64 @@ export interface DecisionRecordWriteOutcome {
   /** true = p_record_id already existed; nothing was written. */
   readonly deduped: boolean;
   readonly event_id: string | null;
+}
+
+/**
+ * Write payload for `record_decision_outcome`'s `p_outcome`. Mirrors
+ * `DecisionRecordOutcomeSchema` VERBATIM, and the RPC's key whitelist is
+ * CLOSED at exactly these four keys (`…decision_records.sql:672`) — an
+ * off-whitelist key is a 22023 refusal of the WHOLE outcome.
+ *
+ * `brier_component` is OMITTED, never null and never 0, when the record
+ * cannot be scored (no confidence on the prediction, or `abandoned`). See
+ * scoring.ts for why a stored 0 would be a fabrication.
+ */
+export interface RecordDecisionOutcomeWrite {
+  readonly record_id: string;
+  readonly outcome: {
+    /** ISO offset datetime — the contract's `.datetime({offset:true})`. */
+    readonly recorded_at: string;
+    readonly result: DecisionRecordOutcomeResultLiteral;
+    readonly notes?: string;
+    readonly brier_component?: number;
+  };
+  /** Deterministic journey-event id (idempotent by event_id in the RPC). */
+  readonly event_id: string;
+}
+
+/**
+ * What the outcome path needs to know about a record BEFORE writing: who owns
+ * it, and what confidence (if any) the prediction staked.
+ *
+ * ⭐ READ FROM `decision_records`, NEVER FROM THE EVENT JOURNAL. Records
+ * OUTLIVE scenarios by design (no FK — the migration's own comment,
+ * `…decision_records.sql:697,753-754`), and `record_decision_outcome`
+ * DELIBERATELY SKIPS the journey event when the scenario has been deleted
+ * (`:753-757`). A scoring path built over `scenarios.events` would therefore
+ * silently lose exactly the records whose scenarios were deleted, while a
+ * read over this table keeps them. The two sources disagree BY CONSTRUCTION;
+ * `decision_records` is the scoring source of truth and the journal is
+ * provenance only.
+ */
+export interface DecisionRecordOwnerRead {
+  readonly record_id: string;
+  readonly owner_user_id: string | null;
+  /** `prediction.confidence` when present, finite and in [0,1]; else undefined. */
+  readonly confidence: number | undefined;
+  /** true when an outcome has already been written (write-once). */
+  readonly hasOutcome: boolean;
+}
+
+/**
+ * The analysis anchor a USER COMMIT is recorded against: the `graph_hash_at_run`
+ * of the scenario's newest non-noop `run_analysis` fact, plus when it was
+ * computed. Derived SERVER-side — never supplied by a caller (see
+ * user-commit.ts's anchor note).
+ */
+export interface AnalysisAnchorRead {
+  /** UNPREFIXED — the builder applies `aag_v1:sha256:`. */
+  readonly graphHashAtRun: string;
+  readonly computedAt: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +274,33 @@ export interface DecisionRecordStorePort {
     scenarioId: string,
     opts?: RetrieveDecisionRecordsOpts,
   ): Promise<DecisionRecordReadPage>;
+
+  /**
+   * Fill a record's WRITE-ONCE outcome. Throws
+   * {@link DecisionRecordNotFoundError} (DR404) and
+   * {@link DecisionRecordOutcomeConflictError} (DR409) as typed errors; an
+   * identical-payload retry returns `deduped: true` rather than throwing.
+   */
+  recordOutcome(write: RecordDecisionOutcomeWrite): Promise<DecisionRecordWriteOutcome>;
+
+  /**
+   * `scenarios.user_id` for one scenario — NULL for a guest scenario, and
+   * `undefined` when no such scenario exists. This is the exact identity the
+   * RPC derives `owner_user_id` from, so an ownership check against it cannot
+   * drift from the RPC's own answer.
+   */
+  readScenarioOwner(scenarioId: string): Promise<string | null | undefined>;
+
+  /** Owner + staked confidence for one record, or null when absent. */
+  readRecordForOutcome(recordId: string): Promise<DecisionRecordOwnerRead | null>;
+
+  /**
+   * The scenario's newest non-noop `run_analysis` fact, reduced to the
+   * analysis anchor. `null` when the scenario has never completed an
+   * analysis — a commit then has nothing to anchor to and is refused rather
+   * than anchored to a fabricated hash.
+   */
+  readNewestAnalysisAnchor(scenarioId: string): Promise<AnalysisAnchorRead | null>;
 }
 
 /**
@@ -324,6 +438,121 @@ export class SupabaseDecisionRecordStore implements DecisionRecordStorePort {
     }
     return { records: out, totalCount };
   }
+
+  async recordOutcome(write: RecordDecisionOutcomeWrite): Promise<DecisionRecordWriteOutcome> {
+    // Same PostgREST discipline as createRecord: distinct function name, all
+    // named args passed explicitly.
+    const { data, error } = await this.client.rpc('record_decision_outcome', {
+      p_record_id: write.record_id,
+      p_outcome: write.outcome,
+      p_event_id: write.event_id,
+    });
+    if (error) {
+      throw mapRpcError('record_decision_outcome', error);
+    }
+    return parseWriteOutcome('record_decision_outcome', data);
+  }
+
+  async readScenarioOwner(scenarioId: string): Promise<string | null | undefined> {
+    const { data, error } = await this.client
+      .from('scenarios')
+      .select('user_id')
+      .eq('id', scenarioId)
+      .limit(1);
+    if (error) {
+      throw new DecisionRecordStoreError(
+        `readScenarioOwner(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error },
+      );
+    }
+    const rows = (data ?? []) as Array<{ user_id?: unknown }>;
+    const row = rows[0];
+    // THREE distinct answers, never conflated: absent scenario (undefined),
+    // guest scenario (null), owned scenario (the uuid). Collapsing the first
+    // two would turn "there is no such scenario" into "sign in", which is a
+    // different — and wrong — thing to tell a signed-in user.
+    if (!row) return undefined;
+    return typeof row.user_id === 'string' && row.user_id.length > 0 ? row.user_id : null;
+  }
+
+  async readRecordForOutcome(recordId: string): Promise<DecisionRecordOwnerRead | null> {
+    const { data, error } = await this.client
+      .from('decision_records')
+      .select('record_id, owner_user_id, prediction, outcome')
+      .eq('record_id', recordId)
+      .limit(1);
+    if (error) {
+      throw new DecisionRecordStoreError(
+        `readRecordForOutcome(${recordId}) failed: ${errMsg(error)}`,
+        { cause: error },
+      );
+    }
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    const row = rows[0];
+    if (!row) return null;
+    if (typeof row.record_id !== 'string' || row.record_id.length === 0) return null;
+    const prediction = isPlainObject(row.prediction) ? row.prediction : {};
+    const rawConfidence = prediction.confidence;
+    // The SAME usability bound the contract and the RPC enforce ([0,1],
+    // finite). An unusable stored value yields undefined — the outcome then
+    // records UNSCORED rather than scoring a number nothing can justify.
+    const confidence =
+      typeof rawConfidence === 'number' &&
+      Number.isFinite(rawConfidence) &&
+      rawConfidence >= 0 &&
+      rawConfidence <= 1
+        ? rawConfidence
+        : undefined;
+    return {
+      record_id: row.record_id,
+      owner_user_id:
+        typeof row.owner_user_id === 'string' && row.owner_user_id.length > 0
+          ? row.owner_user_id
+          : null,
+      confidence,
+      hasOutcome: row.outcome !== null && row.outcome !== undefined,
+    };
+  }
+
+  async readNewestAnalysisAnchor(scenarioId: string): Promise<AnalysisAnchorRead | null> {
+    // SCOPE AT THE BYTES: `.eq('scenario_id', …)` is the only thing between
+    // this service-role read and every other scenario's facts — the client
+    // bypasses RLS. Index: (scenario_id, handler_id, created_at DESC)
+    // = v5_handler_facts_scenario_handler_idx (migration 20260417160000), so
+    // the ORDER BY … LIMIT 1 is a single index descent.
+    //
+    // `handler_id` + the real `noop` COLUMN, never a JSONB path: the same
+    // filter shape the session store's own newest-analysis read uses.
+    const { data, error } = await this.client
+      .from('v5_handler_facts')
+      .select('payload')
+      .eq('scenario_id', scenarioId)
+      .eq('handler_id', 'run_analysis')
+      .eq('noop', false)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) {
+      // THROWS, never returns null: "this scenario has no analysis" and "I
+      // could not look" are exactly the two states a commit must not
+      // conflate — the second would anchor nothing and refuse a legitimate
+      // decision, or worse, invite a fabricated anchor.
+      throw new DecisionRecordStoreError(
+        `readNewestAnalysisAnchor(${scenarioId}) failed: ${errMsg(error)}`,
+        { cause: error },
+      );
+    }
+    const rows = (data ?? []) as Array<{ payload?: unknown }>;
+    const payload = rows[0]?.payload;
+    if (!isPlainObject(payload)) return null;
+    const result = payload.result;
+    if (!isPlainObject(result)) return null;
+    const hashAtRun = result.graph_hash_at_run;
+    if (typeof hashAtRun !== 'string' || hashAtRun.length === 0) return null;
+    return {
+      graphHashAtRun: hashAtRun,
+      computedAt: typeof result.computed_at === 'string' ? result.computed_at : null,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +591,12 @@ function mapRpcError(rpc: string, error: unknown): Error {
   const message = `${rpc} RPC failed: ${errMsg(error)}`;
   if (code === 'DR001') {
     return new DecisionRecordSignInRequiredError(message, { cause: error });
+  }
+  if (code === 'DR404') {
+    return new DecisionRecordNotFoundError(message, { cause: error });
+  }
+  if (code === 'DR409') {
+    return new DecisionRecordOutcomeConflictError(message, { cause: error });
   }
   return new DecisionRecordStoreError(message, { cause: error });
 }
