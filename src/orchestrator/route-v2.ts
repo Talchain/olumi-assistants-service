@@ -160,7 +160,10 @@ import {
 } from '../orchestrator-v5/boundary/request-extensions.js';
 import {
   buildTurnContext,
+  loadDraftLossStands,
+  loadHasOtherAdmittedLiveTurn,
   loadHasPriorTurns,
+  markDraftGraphWriteFailed,
   loadMostRecentPendingActions,
   loadMostRecentPendingActionsStrict,
   loadPersistedGraphStrict,
@@ -333,6 +336,24 @@ export function detectChipClickForcedIntent(
  */
 export const DRAFT_OFFER_CHIP_LABEL = 'Build the model';
 export const DRAFT_OFFER_CHIP_MESSAGE = 'Yes, build the model from what I have shared.';
+
+/**
+ * ROADMAP 2.709 invariant 6 — the draft-loss disclosure. Prepended by
+ * `sendFinalised200` to any graph-less 200 on a scenario whose draft loss
+ * STANDS (a failure-marked fence row + no committed graph), because the
+ * client that lost the draft may be gone — this is the receipt channel that
+ * does not depend on the socket the client aborted. Two sentences, both
+ * true by construction of the gate that fires them: the loss is proven by
+ * the trace, the emptiness by the graph read, and the redraft promise is
+ * kept by the draft-shortcut unstranding term. Exported for the route test
+ * and for the UI, which may key on this copy arriving as ordinary
+ * assistant text (no wire-shape change — schema-skew hazard 1 avoided by
+ * construction).
+ */
+export const DRAFT_LOSS_NOTICE =
+  "Heads-up: your last draft didn't save, so no model is stored for this " +
+  'conversation yet — the graph you saw was never saved. Send your decision ' +
+  "brief again and I'll redraft it.";
 /**
  * C3 — appended to the frame-guard copy ONLY when a usable brief seed was
  * captured (so the offer is never made with nothing to build from). The
@@ -634,7 +655,7 @@ type V5ExitPath = Exclude<V5DiagnosticExitPath, 'draft_graph_error'>;
  * computed_at to be ISO-formatted) catches drift in the finaliser itself
  * rather than letting bad timestamps through.
  */
-function sendFinalised200(
+async function sendFinalised200(
   reply: import('fastify').FastifyReply<{ Reply: V5RouteReply }>,
   requestId: string,
   exitPath: V5ExitPath,
@@ -844,7 +865,33 @@ function sendFinalised200(
      */
     readonly withheldExplanationReason?: WithheldExplanationReason;
   },
-): import('fastify').FastifyReply<{ Reply: V5RouteReply }> {
+): Promise<import('fastify').FastifyReply<{ Reply: V5RouteReply }>> {
+  // ── ROADMAP 2.709 invariant 6 — surface a STANDING draft loss ─────────
+  // Persistence failure is never dark: when a scenario carries a
+  // failure-marked fence row and no committed graph (the phantom state's
+  // server half), every graph-less 200 tells the user plainly, because the
+  // client that triggered the loss may have aborted its socket and gone.
+  // Gated OFF for: system events (no user is reading), exits that carry a
+  // graph (the loss just healed — `ctx.graph` is the committed graph of
+  // THIS turn), and exits without a scenario id. The read degrades to
+  // no-notice on any failure (loadDraftLossStands). This is the ONE async
+  // step of this finaliser; every call site already `return`s it from an
+  // async handler.
+  let candidateForFinalise = candidate;
+  if (exitPath !== 'system_event' && ctx.graph == null && ctx.scenarioId !== undefined) {
+    const lossStands = await loadDraftLossStands(ctx.scenarioId, requestId);
+    if (lossStands) {
+      candidateForFinalise = {
+        ...candidate,
+        assistant_text: `${DRAFT_LOSS_NOTICE}\n\n${candidate.assistant_text ?? ''}`.trimEnd(),
+      } as import('@talchain/schemas/boundary').OlumiResponse;
+      emit(TelemetryEvents.V5DraftLossNoticeSurfaced, {
+        request_id: requestId,
+        scenario_id: ctx.scenarioId,
+        exit_path: exitPath,
+      });
+    }
+  }
   // Mechanism A in action — the route's `Reply: V5RouteReply` makes
   // `reply.code(200).send(<non-branded>)` a tsc error. To satisfy that,
   // `wireBody` MUST be the finaliser's output. There's a subtle wrinkle:
@@ -868,7 +915,7 @@ function sendFinalised200(
   // egress validation + re-attach + send. Flag-off cost is one
   // `Date.now()` call — the value is discarded if no trace is built.
   const finaliseStart = Date.now();
-  const candidateFinalised = finaliseV5Response(candidate, ctx);
+  const candidateFinalised = finaliseV5Response(candidateForFinalise, ctx);
   // Fix 4 (observability) + V5 diagnostic trace (Phase A): pluck out the
   // optional `_timings` and `_diagnostic_trace` blocks before egress
   // validation. OlumiResponseSchema is `.strict()` — unknown keys would
@@ -2912,9 +2959,32 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // new-decision / reset / template / import flows likewise allocate a fresh
     // scenario_id, so they are unaffected.
     const frameStageNoGraph = ingress.stage === 'frame' && extensions.graphState == null;
+    // ROADMAP 2.709 invariant 3 — continuation detection must SEE in-flight
+    // turns. Committed rows alone cannot: a draft turn's atomic commit lands
+    // ~50-80 s after admission, and the fresh-journey P0's S2 was exactly a
+    // question arriving inside that window being intake-captured as a NEW
+    // brief (zero committed rows, phantom state). The fence table holds the
+    // draft's ADMITTED claim from the first seconds, so it is consulted as
+    // the second disjunct — only when the committed-rows answer is false,
+    // which is precisely the phantom-shaped state. Failure-marked rows are
+    // excluded by the read so a scenario whose only draft LOST its commit
+    // classifies fresh and a re-sent brief can redraft.
     const isContinuationScenario = frameStageNoGraph
-      ? await loadHasPriorTurns(ingress.scenario_id, requestId)
+      ? (await loadHasPriorTurns(ingress.scenario_id, requestId)) ||
+        (await loadHasOtherAdmittedLiveTurn(ingress.scenario_id, ingress.turn_id, requestId))
       : false;
+    // ROADMAP 2.709 invariant 6 — the draft-shortcut UNSTRANDING term. While
+    // a draft loss stands (a failure-marked fence row + no committed graph),
+    // the loss notice tells the user "send your decision brief again and
+    // I'll redraft it" — so a shaped brief must be ALLOWED to draft even on
+    // a continuation scenario (e.g. the mid-draft interrupt committed a
+    // conversational row). Same unstranding pattern as the C3 draft-offer
+    // marker. Read only on frame-stage continuation turns; heals itself the
+    // moment any graph commits.
+    const draftLossRedraftUnstrand =
+      frameStageNoGraph && isContinuationScenario
+        ? await loadDraftLossStands(ingress.scenario_id, requestId)
+        : false;
     if (isContinuationScenario) {
       const wouldDraft = isDraftShapedText(ingress.message);
       emit(TelemetryEvents.V5ContinuationGuardApplied, {
@@ -3411,7 +3481,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // question" after the framing prompt). Marker presence, not liveness:
       // drafting a full shaped brief the user just typed carries no consent
       // risk, so a wall-expired offer still un-strands it.
-      (!isContinuationScenario || draftOfferMarker !== null) &&
+      // ROADMAP 2.709 — AND except while a draft loss stands (third
+      // disjunct): the loss notice promises "send your brief again and I'll
+      // redraft it", and a promise the classifier does not keep is a
+      // dead-end. Self-limiting — the term is false again the moment a
+      // graph commits.
+      (!isContinuationScenario || draftOfferMarker !== null || draftLossRedraftUnstrand) &&
       // META-DECISION-DIAGNOSIS-2026-07-20 — a chip_click carries EXPLICIT
       // product-intent metadata; the draft heuristic exists to classify
       // anonymous free text and must never capture product-authored canned
@@ -3537,6 +3612,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
               : {}),
         });
         if (!dg.commitPerformed) {
+          // ROADMAP 2.709 invariant 6 — the trace, BEFORE the 500. The
+          // client that triggered this failure may have aborted the socket
+          // (the streamed-preempt path delivers this 500 to a closed
+          // connection), so the loss must be readable by the scenario's
+          // NEXT turn, whichever client sends it.
+          await markDraftGraphWriteFailed(
+            ingress.scenario_id,
+            ingress.turn_id,
+            'draft_graph_commit_failed',
+            requestId,
+          );
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',
             reason: 'draft_graph_commit_failed',
@@ -3612,6 +3698,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             pipeline_error_code: pipelineErrorCode,
           },
           'V5 draft_graph pipeline threw — returning 500 BoundaryError',
+        );
+        // ROADMAP 2.709 invariant 6 — the second draft-500 entry fault (e.g.
+        // CEE_GRAPH_INVALID after GRAPH_READY has already streamed). Same
+        // trace, same reason class: the next turn on this scenario surfaces
+        // the loss to the user whichever client sends it.
+        await markDraftGraphWriteFailed(
+          ingress.scenario_id,
+          ingress.turn_id,
+          'draft_graph_pipeline_threw',
+          requestId,
         );
         const { reason, retryable } = pipelineStatusCode != null && pipelineErrorCode != null
           ? mapDraftGraphPipelineReason(pipelineStatusCode, pipelineErrorCode, pipelineReason)

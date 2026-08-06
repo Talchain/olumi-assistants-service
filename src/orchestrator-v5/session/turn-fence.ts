@@ -43,12 +43,29 @@
  * than hoped about:
  *
  *  1. A SECOND TURN starts on the scenario → it claims a HIGHER generation →
- *     this write evaluates `superseded` → REFUSED. (The defect.)
- *  2. A second turn starts AND commits first → identical to 1; the refusal is
- *     what stops the older turn overwriting the newer graph.
- *  3. A second turn starts and has NOT committed → still supersedes.
- *     DELIBERATE: the later user intent owns the scenario, and a graph computed
- *     from an older base is stale whether or not the newer one has landed yet.
+ *     this write evaluates `superseded` → REFUSED **iff the scenario holds a
+ *     committed graph** (⚠ RE-PRICED by ROADMAP 2.709 — see below). (The
+ *     defect, when a graph exists to protect.)
+ *  2. A second turn starts AND commits a GRAPH first → refusal stands; the
+ *     refusal is what stops the older turn overwriting the newer graph.
+ *  3. A second turn starts and has NOT committed a graph → ⚠ RE-PRICED
+ *     (ROADMAP 2.709, the fresh-journey P0). The original rule — "the later
+ *     user intent owns the scenario, and a graph computed from an older base
+ *     is stale whether or not the newer one has landed" — was written for
+ *     writes that HAVE an older base. For a scenario with NO committed graph
+ *     there is no base and nothing to clobber, and enforcing the rule there
+ *     destroyed the ONLY graph write a scenario ever had in favour of a
+ *     QUESTION: the browser had already rendered the GRAPH_READY preview, the
+ *     atomic rollback discarded graph AND turn row, and the user was left
+ *     with a PHANTOM model (canvas full, `scenarios.graph` NULL — proven at
+ *     the wire, fresh-journey-p0-diagnosis-2026-08-08.md). A `superseded`
+ *     graph write on a scenario whose `scenarios.graph IS NULL` therefore
+ *     COMMITS (the FIRST-WRITE EXEMPTION): in-transaction under the
+ *     scenarios row lock post-migration 20260806120000, and via the
+ *     store-side OLTF2 recovery against the pre-migration database. The
+ *     newer turn's own graph write still lands over it (verdict `current`) —
+ *     later intent keeps winning wherever it writes anything. An explicit
+ *     Stop (OLTF1) is NEVER exempted.
  *  4. An explicit STOP for THIS turn → `stopped` → REFUSED.
  *  5. An explicit STOP that arrives BEFORE the claim lands → `v5_mark_turn_stopped`
  *     upserts a tombstoned row, and the claim's `ON CONFLICT DO UPDATE` is a

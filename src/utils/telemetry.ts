@@ -1211,6 +1211,25 @@ export const TelemetryEvents = {
   // filtering the every-commit event. Same payload and privacy contract.
   V5TurnFenceGraphWriteRefused: "v5.turn_fence.graph_write_refused",
 
+  // V5 TURN FENCE — ROADMAP 2.709 first-write exemption. A graph write whose
+  // fence verdict was `superseded` PROCEEDED because the scenario held NO
+  // committed graph at commit time (a first draft must not be destroyed by a
+  // non-graph-writing turn's claim — the fresh-journey P0). Payload mirrors
+  // the evaluated event plus `channel` (pre_rpc / atomic_recovery); the
+  // in-transaction SQL exemption (migration 20260806120000) emits nothing —
+  // it simply never raises OLTF2 for that case.
+  V5TurnFenceFirstWriteExemption: "v5.turn_fence.first_write_exemption",
+
+  // V5 TURN FENCE — ROADMAP 2.709 invariant 6: a refused/failed graph commit
+  // left its trace on the turn's fence row (graph_write_failed_at), so the
+  // SAME scenario's next turn can surface the loss to a user whose client is
+  // gone. Content-free ids + the closed reason string.
+  V5TurnFenceGraphWriteFailureMarked: "v5.turn_fence.graph_write_failure_marked",
+
+  // V5 — ROADMAP 2.709 invariant 6: a graph-less 200 on a scenario whose
+  // draft loss stands carried the DRAFT_LOSS_NOTICE to the user.
+  V5DraftLossNoticeSurfaced: "v5.draft_loss_notice.surfaced",
+
   // V5 TURN FENCE — an explicit user Stop arrived at the server
   // (POST /proxy/v5/turn/stop). `already_committed` records whether the turn
   // had already been persisted when the Stop landed, which is the fact the UI's

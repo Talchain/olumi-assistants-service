@@ -249,15 +249,30 @@ function makeAtomicFenceBackend(): AtomicFenceBackend {
 
       return { data: null, error: { message: `unexpected rpc ${fn}` } };
     }),
-    from: vi.fn(() => {
+    from: vi.fn((table: string) => {
+      // ROADMAP 2.709 fidelity: the first-write exemption reads `scenarios`
+      // graph-presence before honouring a superseded refusal; answer from
+      // the SAME `graph` state the append writes (see the sibling comment in
+      // turn-fence-stop-vs-disconnect.test.ts).
       const chain = {
         select: () => chain,
         eq: () => chain,
+        neq: () => chain,
         order: () => chain,
-        limit: () => Promise.resolve({ data: [], error: null }),
+        limit: () =>
+          Promise.resolve({
+            data: table === 'scenarios' && graph !== null ? [{ id: SCENARIO }] : [],
+            error: null,
+          }),
         maybeSingle: () => Promise.resolve({ data: null, error: null }),
         not: () => chain,
+        is: () => chain,
         in: () => chain,
+        update: () => chain,
+        then: (
+          resolve: (v: { data: unknown; error: null }) => unknown,
+          reject?: (e: unknown) => unknown,
+        ) => Promise.resolve({ data: null, error: null }).then(resolve, reject),
       };
       return chain as never;
     }),
@@ -322,23 +337,35 @@ describe('2.174 fix c — the evaluate→append window (deterministic interleavi
     expect(backend.storedGraph()).toBeNull();
   });
 
-  it('a NEWER CLAIM landing inside the window refuses the older graph write', async () => {
+  it('a NEWER CLAIM landing inside the window is SEEN (OLTF2) — and a graph-less first write then commits via the recovery (ROADMAP 2.709)', async () => {
+    // ⚠ THIS PIN DELIBERATELY FLIPPED with the first-write exemption. The
+    // window-detection property it existed for is unchanged and asserted
+    // below: the in-transaction gate DID see the rival claim (v4 answered
+    // OLTF2). What changed is the pricing of that verdict for a scenario
+    // with NO committed graph — the write is the scenario's ONLY graph, the
+    // rival wrote nothing, so the recovery path re-proves (graph absent +
+    // not stopped) and commits through the pre-v4 append instead of
+    // manufacturing the phantom state. The refusal case (rival's graph
+    // LANDED) is pinned in turn-fence-first-write-exemption.test.ts.
     const backend = makeAtomicFenceBackend();
     const store = makeStore(backend.client);
     const genA = backend.claim(TURN_A);
 
     backend.onBeforeAppend = () => void backend.claim(TURN_B);
 
-    const outcome = await runWithTurnFence(handleFor(genA, TURN_A), async () =>
-      store.append(write(TURN_A, GRAPH_A)).then(
-        () => null,
-        (e: unknown) => e,
-      ),
+    const result = await runWithTurnFence(handleFor(genA, TURN_A), async () =>
+      store.append(write(TURN_A, GRAPH_A)),
     );
 
-    expect(outcome).toBeInstanceOf(TurnFenceRejectedError);
-    expect((outcome as TurnFenceRejectedError).verdict).toBe('superseded');
-    expect(backend.storedGraph()).toBeNull();
+    expect(result.id).toBe(`row-${TURN_A}`);
+    expect(backend.storedGraph()).toEqual(GRAPH_A);
+    // The gate saw the rival: the FIRST append was v4 (refused OLTF2), the
+    // commit landed on the recovery's pre-v4 dispatch, after a fresh fence
+    // evaluation (the stopped re-check).
+    const appendFns = backend.calls.filter((c) => c.fn.startsWith('append_turn_atomic')).map((c) => c.fn);
+    expect(appendFns[0]).toBe('append_turn_atomic_v4');
+    expect(appendFns.length).toBe(2);
+    expect(backend.calls.some((c) => c.fn === 'v5_evaluate_turn_fence')).toBe(true);
   });
 
   // ── POSITIVE CONTROL (trap 13): the atomic fence can be PASSED ───────────
