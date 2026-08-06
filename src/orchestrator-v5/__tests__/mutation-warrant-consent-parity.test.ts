@@ -806,10 +806,14 @@ describe('INV-1 / 2.663 F-B — accepting the assistant’s own offer carries th
     const graph = buildChurnGraph();
     seedDemotedProposal(graph);
 
-    // No affirmative lead, read intent present. If the widened vocabulary ever
-    // swallows this, a held mutation applies on a turn that asked to LOOK.
+    // Read intent present, and the back-reference verb is one the pattern DOES
+    // recognise (`offered`) — an earlier draft said "described", which the
+    // back-reference set never matched, so the control was blocked by
+    // vocabulary rather than by the guard it names (trap 13b; mutant M4
+    // survived it). If the widened vocabulary ever swallows this, a held
+    // mutation applies on a turn that asked to LOOK.
     await runTurnExecutor(
-      payload('Show me the option comparison as you described earlier.'),
+      payload('Yes, show me the option comparison as you offered earlier.'),
       'req-offer-accept-read-control',
       { routingAdapter: witnessedAddConstraintAdapter(), graphState: graph },
     );

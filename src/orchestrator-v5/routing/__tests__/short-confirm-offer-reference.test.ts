@@ -148,10 +148,26 @@ describe('F-B — an affirmative that points at the assistant’s own offer reso
 });
 
 describe('F-B — the offer-reference family may NEVER over-reach (2.652 running backwards)', () => {
-  it('CONTROL 1 — with NO live proposal it does not resolve anything (the phrase alone is not a warrant)', () => {
+  it('CONTROL 1 — with NO live proposal the CLOSED form does not activate at all', () => {
     const out = resume('Yes, please do what you offered.', [heldRunAnalysis()]);
-    // It must not bind the run_analysis pending: the phrase names a proposal.
-    expect(out).toMatchObject({ matched: false });
+    // Bind to the SKIP REASON, not to `matched: false`. Both offer-reference
+    // forms are gated on a live proposal; without that gate the phrase would
+    // still fail to resolve (the narrowing empties the pool) and report
+    // `kind_not_yet_resumable` instead — so `matched: false` alone cannot tell
+    // "the gate held" from "the gate was gone and something else caught it".
+    // Measured: mutant M5 (precondition deleted) SURVIVED the weaker form.
+    expect(out).toMatchObject({ matched: false, skip_reason: 'no_short_confirm' });
+  });
+
+  it('CONTROL 1b — with NO live proposal the FREE-CONTENT form does not activate either', () => {
+    // The twin of control 1 for the other pattern. Control 1 exercises only the
+    // closed-vocabulary form, whose precondition rides `isProposalConfirm`;
+    // this one is the single case that observes the acceptance form's own gate.
+    const out = resume(
+      'Yes, please rephrase the churn constraint as you offered earlier.',
+      [heldRunAnalysis()],
+    );
+    expect(out).toMatchObject({ matched: false, skip_reason: 'no_short_confirm' });
   });
 
   it('CONTROL 1 POSITIVE PAIR — the SAME message with a live proposal DOES resolve, proving control 1 is not vacuous', () => {
@@ -162,10 +178,27 @@ describe('F-B — the offer-reference family may NEVER over-reach (2.652 running
     expect((out as { pending: PendingAction }).pending.chip_id).toBe('prop_paircontrol');
   });
 
-  it('⭐ CONTROL 2 — a READ-SHAPED ask carrying the same back-reference is NOT consent', () => {
+  it('⭐ CONTROL 2a — a READ-SHAPED ask with NO affirmative lead is NOT consent', () => {
     // The 2.652 defect inverted: this must never apply a held mutation.
+    // ⚠ The back-reference verb here is deliberately `offered` — one the
+    // pattern DOES recognise. The first draft said "as you described earlier",
+    // which the back-reference set never matched, so the control passed for a
+    // reason it did not name and mutant M4 survived it (trap 13b). Now the only
+    // thing standing between this sentence and a held mutation is the mandatory
+    // affirmative lead, which is exactly what the control claims.
     const out = resume(
-      'Show me the option comparison as you described earlier.',
+      'Show me the option comparison as you offered earlier.',
+      [heldProposal()],
+    );
+    expect(out).toMatchObject({ matched: false });
+  });
+
+  it('⭐ CONTROL 2b — an AFFIRMATIVE followed by a read request is still not consent to mutate', () => {
+    // Lead present, back-reference recognised: the read-intent guard is the
+    // ONLY thing holding here. A user can agree with something and ask to look
+    // in the same breath; that is not permission to write.
+    const out = resume(
+      'Yes, show me the option comparison as you offered earlier.',
       [heldProposal()],
     );
     expect(out).toMatchObject({ matched: false });
