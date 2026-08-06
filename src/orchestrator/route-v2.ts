@@ -4432,6 +4432,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           request: req,
           graphState: effectiveGraphState!,
           analysisState: extensions.analysisState ?? null,
+          // ROADMAP 2.684 — the turn's wall-clock baseline, threaded so the
+          // structural-edit composer can derive what is LEFT of the turn rather
+          // than a static ceiling. Same baseline `dispatchDraftGraph` already
+          // receives, and for the same reason: pre-flight, ingress parse and
+          // scenario upsert spend the deadline before either dispatcher starts.
+          //
+          // ⚠ This one line is the difference between the composer getting the
+          // turn's real remaining time and getting a number derived from
+          // constants the deployed box does not hold. Witness #3 measured that
+          // difference as a 5.0s kill. Removing it is caught by
+          // `structural-edit-deadline-plumbing.test.ts`.
+          requestStartMs: routeStartedAt,
         });
         if (!eg.commitPerformed) {
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({

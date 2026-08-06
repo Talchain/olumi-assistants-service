@@ -116,7 +116,11 @@ import {
   holdSpineActiveForMode,
 } from '../tools/structural-edit-entry.js';
 import { buildStructuralEditGrounding } from '../tools/propose-structural-edit.js';
-import { composeStructuralEdit } from '../tools/compose-structural-edit.js';
+import {
+  composeStructuralEdit,
+  resolveComposerBudget,
+  COMPOSER_POST_CALL_RESERVE_MS,
+} from '../tools/compose-structural-edit.js';
 import {
   accountEditParts,
   buildMultiPartRejectionClarify,
@@ -776,6 +780,8 @@ async function tryStructuralEditTool(input: {
   readonly adapter: ReturnType<typeof getAdapter>;
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
+  /** ROADMAP 2.684 — the turn's wall-clock baseline, for the composer budget. */
+  readonly requestStartMs: number;
 }): Promise<StructuralEditToolResult | null> {
   const outcome = await runStructuralEditTool(input);
   if (outcome.kind === 'engaged') return outcome.result;
@@ -814,8 +820,10 @@ async function runStructuralEditTool(input: {
   readonly adapter: ReturnType<typeof getAdapter>;
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
+  /** ROADMAP 2.684 — the turn's wall-clock baseline, for the composer budget. */
+  readonly requestStartMs: number;
 }): Promise<StructuralEditToolOutcome> {
-  const { editResult, context, adapter, payload, requestId } = input;
+  const { editResult, context, adapter, payload, requestId, requestStartMs } = input;
 
   const emitEntry = (decision: string): void => {
     emit(TelemetryEvents.V5StructuralEditToolEntry, {
@@ -917,6 +925,39 @@ async function runStructuralEditTool(input: {
     return { kind: 'declined', declineClass: 'model_unreadable' };
   }
 
+  // ── ROADMAP 2.684 — THE BUDGET IS DERIVED HERE, AT DISPATCH, NOT IN THE
+  //    COMPOSER ────────────────────────────────────────────────────────────
+  //
+  // This is the last point on the path that knows how much of the turn is
+  // GONE, and that is the whole reason the derivation moved here. Everything
+  // above — the rulebook's LLM call, its repair round, the strict persisted
+  // read — has already been paid for by the time control reaches this line.
+  // Witness #3 measured that prelude at ~62s of a 115s turn. A budget computed
+  // anywhere upstream of it, however carefully derived, is a budget computed
+  // before the spending happened.
+  const budget = resolveComposerBudget({ requestStartMs });
+  if (budget.kind === 'exhausted') {
+    log.warn(
+      {
+        event: 'v5.structural_edit_tool.no_budget',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        remaining_ms: budget.remainingMs,
+        post_call_reserve_ms: COMPOSER_POST_CALL_RESERVE_MS,
+      },
+      'V5 propose_structural_edit — too little of the turn remains to compose; declining without spending a call that cannot finish',
+    );
+    emitEntry('no_budget');
+    // ⚠ THE DECLINE THAT USED TO BE A DOOMED CALL. Before 2.684 the budget
+    // floored at MIN_TIMEOUT_MS and fired anyway; witness #3 caught exactly
+    // that, twice, at 5.008s and 5.006s — an `UpstreamTimeoutError` that was
+    // certain before the request left the box. `compose_unavailable` is the
+    // right class and its copy is already true of this exit: the composition
+    // could not run, a retry meets the same wall, and the honest next step is
+    // a smaller ask. The user pays nothing for the finding.
+    return { kind: 'declined', declineClass: 'compose_unavailable' };
+  }
+
   const outcome = await composeStructuralEdit({
     adapter,
     grounding,
@@ -924,6 +965,7 @@ async function runStructuralEditTool(input: {
     maxPatchOperations: config.cee.maxPatchOperations,
     requestId,
     scenarioId: payload.scenario_id,
+    timeoutMs: budget.timeoutMs,
   });
   if (outcome.status !== 'composed') {
     emitEntry(outcome.status === 'rejected' ? `rejected_${outcome.code}` : outcome.reason);
@@ -1031,6 +1073,23 @@ export interface DispatchEditGraphParams {
   readonly graphState: GraphStateIngress;
   /** Permissive ingress shape. Adapter inside converts to V2RunResponseEnvelope. */
   readonly analysisState: AnalysisStateIngress | null;
+  /**
+   * ROADMAP 2.684 — wall-clock baseline of the HTTP request (`routeStartedAt`),
+   * against which the structural-edit composer's remaining budget is derived.
+   * Same thread and same rationale as `dispatchDraftGraph`'s `requestStartMs`:
+   * pre-flight, ingress parse and scenario upsert all spend the turn's deadline
+   * before this dispatcher is entered, so measuring from the dispatcher's own
+   * start under-charges the turn.
+   *
+   * ⚠ OPTIONAL ONLY BECAUSE 128 TEST CALL SITES PREDATE IT — never because a
+   * caller may reasonably omit it. Omitting it falls back to the dispatcher's
+   * own `startedAt`, which is CONSERVATIVE (it can only over-estimate what is
+   * left, never under-estimate it), so the fallback is a real hazard and not a
+   * neutral default. `structural-edit-deadline-plumbing.test.ts` asserts the
+   * ONE production call site (route-v2.ts) passes it, so the fallback cannot
+   * become the live path without a RED.
+   */
+  readonly requestStartMs?: number;
 }
 
 export interface DispatchEditGraphResult {
@@ -1620,6 +1679,11 @@ export async function dispatchEditGraph(
 ): Promise<DispatchEditGraphResult> {
   const { payload, requestId, graphState, analysisState } = params;
   const startedAt = Date.now();
+  // ROADMAP 2.684 — the deadline baseline. `routeStartedAt` when the route
+  // threaded it (the live path); the dispatcher's own start otherwise, which
+  // over-estimates the remaining budget by however long pre-flight took. See
+  // the `requestStartMs` jsdoc on DispatchEditGraphParams.
+  const requestStartMs = params.requestStartMs ?? startedAt;
 
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
     graphStateToGraphV3WithParseResult(graphState, requestId);
@@ -2058,6 +2122,7 @@ export async function dispatchEditGraph(
           adapter,
           payload,
           requestId,
+          requestStartMs,
         });
         if (toolOutcome !== null) {
           editResult = toolOutcome.editResult;
