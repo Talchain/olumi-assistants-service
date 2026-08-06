@@ -217,24 +217,59 @@ export const CLARIFY_V2_HEDGED_PROCEED_PATTERN =
 export const CLARIFY_V2_QUESTION_REPLY_PATTERN = INTERROGATIVE_QUESTION_PATTERN;
 
 /**
- * INV-M (ROADMAP 2.716) — a clarify-LOCAL extension to the edit-intent
- * positive regex, for the correction frame it does not carry.
+ * INV-M (ROADMAP 2.716) — a mutation COMMAND is an IMPERATIVE, and the
+ * imperative position is what separates it from an ANSWER.
+ *
+ * ⚠ THIS ANCHOR IS THE PRECISION TERM, AND IT WAS DERIVED FROM THE ESTATE'S
+ * OWN TESTS, NOT FROM A HAND-WRITTEN CORPUS. The first cut of this predicate
+ * used `EDIT_GRAPH_POSITIVE_REGEX` unanchored and passed a negative corpus
+ * this lane wrote itself. Running the full required gate then turned four
+ * existing suites RED on real clarify answers — `"The goal is to increase
+ * revenue."` (`clarify-v2.preflight.test.ts`) and `"Yes, add the churn-risk
+ * factor."` (a proposal chip's canned message) — because a perfectly ordinary
+ * answer mentions an edit verb inside a clause. A self-authored negative
+ * corpus could not see that; the suite could.
+ *
+ * So the verb must be in COMMAND position: at the head of the message, after
+ * at most a leading discourse marker. `"Change the price to 90,000"` is an
+ * instruction; `"The goal is to increase revenue"` is a statement that
+ * happens to contain `increase`.
+ *
+ * The verb alphabet is NOT re-spelled here — the pattern is composed from
+ * `EDIT_GRAPH_POSITIVE_REGEX.source`, so the route's list stays the single
+ * source and this anchor cannot drift from it.
+ *
+ * The marker list is deliberately TINY. It is a recall widener only: a marker
+ * this list lacks means the command folds, i.e. today's behaviour, never a new
+ * failure mode. `yes`/`ok`/`no` are deliberately absent — `"Yes, add the
+ * churn-risk factor."` is a CONSENT chip replay, and claiming it here would
+ * break the proposal flow next door.
+ */
+const MUTATION_IMPERATIVE_PREAMBLE = String.raw`^\s*(?:(?:actually|please|sorry)\b[\s,.:;—–-]*)*`;
+
+const CLARIFY_V2_MUTATION_IMPERATIVE_PATTERN = new RegExp(
+  MUTATION_IMPERATIVE_PREAMBLE + EDIT_GRAPH_POSITIVE_REGEX.source,
+  'i',
+);
+
+/**
+ * The correction frame the estate-wide positive regex does not carry.
  *
  * Measured at `8c316b5e`: of the eight mutation commands proven to fold,
  * "Actually, make HubSpot's licence cost 90,000 instead" matches NEITHER
- * `EDIT_GRAPH_POSITIVE_REGEX` (no listed edit verb — `make` is not one) NOR
+ * `EDIT_GRAPH_POSITIVE_REGEX` (`make` is not a listed edit verb) NOR
  * `isValueUpdatePhrasing`. The derivation's own §3.2 table records it as
- * `edit-lane: no` while its §5.2 asks for 8/8; this pattern is what closes
- * that gap without widening the ESTATE-WIDE edit-dispatch recall, which is
- * rowed separately (§6 R1) precisely because it needs its own precision
- * controls across every edit surface.
+ * `edit-lane: no` while its §5.2 asks for 8/8; this closes that gap without
+ * widening ESTATE-WIDE edit-dispatch recall, which is rowed separately (§6 R1)
+ * precisely because it needs its own precision controls at every edit surface.
  *
- * Deliberately narrow: `make` AND an explicit replacement marker. It sits
- * after the standalone-restatement bar, so a genuine new brief that happens to
- * say "…or make the switch instead?" still REPLACES rather than deflecting.
+ * Same imperative anchor, for the same reason: "we could make the switch
+ * instead of waiting" is an answer, not a command.
  */
-const CLARIFY_V2_MUTATION_CORRECTION_PATTERN =
-  /\bmake\b[^?]*\b(?:instead|rather\s+than)\b/i;
+const CLARIFY_V2_MUTATION_CORRECTION_PATTERN = new RegExp(
+  MUTATION_IMPERATIVE_PREAMBLE + String.raw`make\b[^?]*\b(?:instead|rather\s+than)\b`,
+  'i',
+);
 
 /**
  * INV-M (ROADMAP 2.716) — does this reply read as a command to MUTATE the
@@ -242,9 +277,9 @@ const CLARIFY_V2_MUTATION_CORRECTION_PATTERN =
  *
  * Uses the route's OWN edit-dispatch gates (`edit-graph-intent-regex.ts`,
  * extracted under ROADMAP 2.308/S2 to be import-clean for exactly this kind of
- * consumer) plus the correction frame above. The negative regex is load-
- * bearing: it is what keeps "Can you explain why you added that factor?" an
- * ordinary question rather than a mutation command.
+ * consumer), in imperative position. The negative regex is load-bearing: it is
+ * what keeps "Can you explain why you added that factor?" an ordinary question
+ * rather than a mutation command.
  *
  * ⚠ NOT `containsMutationLanguage` (`routing/mutation-language.ts`). That
  * module detects the ASSISTANT's own first-person claims ("I'll add…",
@@ -255,7 +290,7 @@ export function isGraphMutationCommand(message: string): boolean {
   if (typeof message !== 'string') return false;
   if (EDIT_GRAPH_NEGATIVE_REGEX.test(message)) return false;
   return (
-    EDIT_GRAPH_POSITIVE_REGEX.test(message) ||
+    CLARIFY_V2_MUTATION_IMPERATIVE_PATTERN.test(message) ||
     CLARIFY_V2_MUTATION_CORRECTION_PATTERN.test(message)
   );
 }

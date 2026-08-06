@@ -819,8 +819,22 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
         expectDispatch: true,
       },
       {
-        label: 'positive: ends with ?',
+        // ⚠ FLIPPED BY ROADMAP 2.715 (INV-Q), DELIBERATELY AND AT THE ROW'S
+        // CORE. This case existed to pin the `\?$` arm of
+        // DRAFT_GRAPH_DECISION_BRIEF_REGEX — the arm that made EVERY >=30-char
+        // question draft-shaped, and the reason a typed coaching question got
+        // modelled as a decision on an empty canvas. "Is this a reasonable
+        // plan…?" names no options and no choice: it asks the assistant for an
+        // assessment. It now reaches the frame-stage no-brief guard, which asks
+        // for a decision question and offers the model behind an explicit tap.
+        // The legitimate half of the `\?$` arm stays pinned by the case below.
+        label: 'negative (2.715): a question TO the assistant, not a brief',
         message: 'Is this a reasonable plan for the next six months of growth?',
+        expectDispatch: false,
+      },
+      {
+        label: 'positive: ends with ? AND names a choice',
+        message: 'Should we open a second warehouse in Poland or expand the Leeds site?',
         expectDispatch: true,
       },
       {

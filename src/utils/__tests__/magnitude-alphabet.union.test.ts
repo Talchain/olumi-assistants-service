@@ -401,6 +401,15 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // --- Comment-only mentions. Each of these imports the canonical alphabet
     // --- or spells no magnitude list at all; the hits are prose describing the
     // --- historical defect, which is exactly the prose we want people writing.
+    "cee/transforms/stated-value-honour.ts":
+      "ROADMAP 2.714 (INV-HONOUR). Spells NO alphabet: it imports " +
+      "MAGNITUDE_ALTERNATION and derives one guard from it. The hits are that " +
+      "import plus prose naming `grand`/`t`/`trillion` — the canonical keys " +
+      "`numeric-parser`'s own MULTIPLIERS lacks, which is precisely why this " +
+      "module refuses any binding carrying a magnitude word the parser did not " +
+      "consume. Without that refusal the honour rule would read '£2 grand' as " +
+      "2 GBP and stamp it as the USER'S OWN value. A key added to the canonical " +
+      "alphabet is covered here on arrival, with nothing to keep in sync.",
     "cee/compound-goal/extractor.ts": "comments only; derives its patterns from the canonical alphabet",
     "cee/factor-extraction/index.ts": "comments only; derives its patterns from the canonical alphabet",
     "context/resolver.ts": "comments only; derives its patterns from the canonical alphabet",

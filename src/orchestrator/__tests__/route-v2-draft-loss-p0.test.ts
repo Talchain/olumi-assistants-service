@@ -207,7 +207,22 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
     expect(hasOtherAdmittedLiveTurnMock).toHaveBeenCalledWith(SCENARIO_ID, TURN_ID);
   });
 
-  it('CONTROL: the same question on a genuinely FRESH scenario keeps today’s intake behaviour', async () => {
+  /**
+   * ⚠ THIS CONTROL WAS RE-BASED BY ROADMAP 2.715 (INV-Q), AND ITS OWN COMMENT
+   * ANTICIPATED IT ("capture semantics themselves are rows 2.714-2.716, out of
+   * scope here"). `MID_DRAFT_QUESTION` is 2.715's own example string: a
+   * question TO the assistant is no longer draft-shaped, so it now opens no
+   * clarify round on a FRESH scenario either.
+   *
+   * That change would have HOLLOWED this control — it must show that the
+   * 2.709 continuation guard is what suppresses above, not something else, and
+   * a message suppressed on both paths shows nothing (trap 12b: a control that
+   * stops discriminating still passes). So it is split: the question's new
+   * fresh-scenario behaviour is pinned HERE, and the discriminating half moves
+   * to a genuine brief, which still engages clarify on a fresh scenario and is
+   * still suppressed on a continuation.
+   */
+  it('2.715: the same question on a FRESH scenario opens no clarify round either', async () => {
     hasPriorTurnsForRead = false;
     hasOtherAdmittedLiveTurnForRead = false;
 
@@ -218,8 +233,24 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    // Fresh scenario + draft-shaped question → clarify v2 round 1 engages
-    // (capture semantics themselves are rows 2.714-2.716, out of scope here).
+    const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
+    expect(chipIds).not.toContain(CLARIFY_V2_PROCEED_CHIP_ID);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL (discriminating): a genuine BRIEF on a FRESH scenario still engages clarify', async () => {
+    hasPriorTurnsForRead = false;
+    hasOtherAdmittedLiveTurnForRead = false;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(
+        'We are weighing whether to expand into Germany or double down on the UK next year.',
+      ),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
     const chipIds = ((body.suggested_actions ?? []) as Array<{ id: string }>).map((a) => a.id);
     expect(chipIds).toContain(CLARIFY_V2_PROCEED_CHIP_ID);
   });

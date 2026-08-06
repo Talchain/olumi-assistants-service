@@ -70,13 +70,31 @@ const MUTATION_COMMANDS: readonly string[] = [
   "change X to Y",
 ];
 
-/** Genuine answers to a clarify question. These MUST still fold. */
+/**
+ * Genuine answers to a clarify question. These MUST still fold.
+ *
+ * ⚠ THE FIRST FOUR ARE TAKEN FROM THE ESTATE'S OWN EXISTING SUITES, NOT
+ * WRITTEN BY THIS LANE, and they are the reason the predicate is anchored to
+ * the imperative position. A self-authored negative corpus passed against an
+ * UNANCHORED `EDIT_GRAPH_POSITIVE_REGEX`; the full required gate then turned
+ * four existing suites RED, because a real clarify answer says things like
+ * "The goal is to increase revenue." A corpus you write yourself encodes your
+ * own model of the input space — which is exactly the fixture-honesty failure
+ * this brief warns about, one level up.
+ */
 const GENUINE_ANSWERS: readonly string[] = [
+  // tests/unit/clarify-v2.preflight.test.ts + route-v2-clarify-v2.test.ts
+  "The goal is to increase revenue.",
+  // the churn-risk proposal chip's canned public_message (route-v2-clarify-v2)
+  "Yes, add the churn-risk factor.",
+  "We want to reduce the sales cycle and add two new markets next year.",
+  "The plan is to set a target of 30 days and change nothing else.",
+  // this lane's own additions
   "About 90,000 a year",
   "Roughly £2m over three years",
   "Probably around twelve percent, based on last year",
   "The main constraint is the finance team's capacity",
-  "We want to make the right call for the sales team",
+  "We could make the switch instead of waiting until Q4",
   "Around 8 engineers, and the budget is £400,000",
 ];
 
@@ -126,7 +144,7 @@ describe("INV-M — mutation intent during a live clarify round is never folded"
   describe("B3 — ordering: a standalone draft-shaped restatement still REPLACES", () => {
     it("a new brief carrying an edit verb replaces rather than deflecting", () => {
       const message =
-        "Should we expand into Germany or add a second warehouse in Poland instead?";
+        "Change the decision to whether we should expand into Germany or double down on the UK.";
       // Precondition, pinned in-test: this message WOULD trip the mutation
       // predicate on its own, so the assertion below is about ORDERING and
       // cannot pass by the predicate quietly failing to match.
