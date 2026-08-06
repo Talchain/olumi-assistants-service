@@ -4690,10 +4690,34 @@ function isEdgeIncidentTo(op: PatchOperation, nodeIds: Set<string>): boolean {
  * Implicit edge removals from remove_node do NOT count.
  *
  * When the operation set includes an option-addition (add_node with kind
- * 'option'/'intervention'), edge ops incident to the new option node(s) are
- * budgeted at the elevated OPTION_ADD_MAX_EDGE_OPS limit, while unrelated
- * edge ops stay under the standard MAX_EDGE_OPS cap. This prevents the
- * elevated budget from masking unrelated high-impact edge rewires.
+ * 'option'/'intervention'), edge ops are BUCKETED: those incident to the new
+ * option node(s) are budgeted at OPTION_ADD_MAX_EDGE_OPS, unrelated edge ops
+ * at MAX_EDGE_OPS, and both buckets must pass INDEPENDENTLY.
+ *
+ * ⚠ ROADMAP 2.624 — READ THIS WITH `patch-budget-limits.ts`, WHICH THIS
+ * COMMENT CONTRADICTED. The old wording ("this prevents the elevated budget
+ * from masking unrelated high-impact edge rewires") described only the
+ * unrelated bucket and left the reader believing the branch was no more
+ * permissive than the flat cap. It is more permissive, and a discriminating
+ * pair shows it:
+ *
+ *   [option add_node, 7 incident edges, 5 unrelated edges] → edgeOps 12, ALLOWED
+ *   CONTROL, the same 12 edge ops under a plain add_node → edgeOps 12, REFUSED
+ *
+ * Because the two buckets are checked independently, this branch admits up to
+ * MAX_EDGE_OPS + OPTION_ADD_MAX_EDGE_OPS (sixteen at today's values) against
+ * a flat cap of eight. The two constants are currently EQUAL, so it is the
+ * BUCKET SPLIT — not the constant — that is the elevation. Whether to raise
+ * OPTION_ADD_MAX_EDGE_OPS or delete the branch entirely is rowed, not decided
+ * here; what matters at this seam is that a reader is not told the opposite of
+ * what the code does.
+ *
+ * The structural-edit splitter is unaffected in either direction: it sizes
+ * parts against the strict FLAT cap, which is stricter than anything this
+ * branch admits, so a part it emits is legal here. That implication is no
+ * longer prose — it is executed by the property test in
+ * `orchestrator-v5/tools/__tests__/structural-edit-batch-split.test.ts`,
+ * which calls THIS function on every part the splitter produces.
  */
 export function checkPatchBudget(operations: PatchOperation[]): PatchBudgetResult {
   let nodeOps = 0;

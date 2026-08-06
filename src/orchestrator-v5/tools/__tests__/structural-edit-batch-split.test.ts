@@ -54,6 +54,10 @@ import {
   MAX_NODE_OPS,
 } from '../../../orchestrator/tools/patch-budget-limits.js';
 import { buildReadyGraph } from '../../graph-management/__tests__/fixtures.js';
+// ROADMAP 2.624 — THE ENFORCER, imported so the splitter's justifying
+// guarantee is executed rather than asserted in a comment. This is the exact
+// function `handleEditGraph` calls; a part it refuses dies the way probe C did.
+import { checkPatchBudget } from '../../../orchestrator/tools/edit-graph.js';
 
 const GRAPH = buildReadyGraph();
 const OPTS = { maxPatchOperations: 15 } as const;
@@ -525,5 +529,114 @@ describe('the caps a part is sized against are DERIVED from what enforces them',
   it('maxParts is derived from the tightest cap, with a floor of two', () => {
     expect(deriveSplitLimits(15).maxParts).toBe(Math.ceil(15 / MAX_NODE_OPS));
     expect(deriveSplitLimits(1).maxParts).toBe(2);
+  });
+});
+
+/**
+ * ⭐⭐ ROADMAP 2.624 — THE GUARANTEE THAT JUSTIFIES THE WHOLE SPLITTER, EXECUTED.
+ *
+ * `structural-edit-batch-split.ts` closes its header with the safety argument
+ * for the entire feature: this module sizes parts against its own imported
+ * copies of the caps, its counts differ from the pipeline's only UPWARD, and
+ * therefore **"a part legal here is legal there"**. Everything the splitter is
+ * allowed to do rests on that sentence.
+ *
+ * ⚠ Until now that sentence was PROSE. A sweep for `checkPatchBudget` found it
+ * in three files, two of them as comments, and this test file never imported
+ * it — so the guarantee justifying the feature was a paragraph repeated in two
+ * modules with nothing executing it. A cap could move in `edit-graph.ts`, or
+ * the option-add branch could be reshaped, and every test here would stay
+ * green while the splitter emitted parts the pipeline rejects: the witnessed
+ * defect, restored, with the splitting machinery in place.
+ *
+ * The property is asserted against THE ENFORCER ITSELF, not a restatement of
+ * it. `checkPatchBudget` is the function `handleEditGraph` calls; if it says a
+ * part is not allowed, that part dies exactly as probe C died.
+ *
+ * ⚠ WHAT WOULD HAVE TO BE TRUE FOR THIS TO PASS WHILE THE PROPERTY FAILS
+ * (trap 13b): a fixture family that never actually splits. So each case
+ * asserts its own precondition — the whole batch must be REJECTED by
+ * `checkPatchBudget` and the partition must produce more than one part — which
+ * makes every "allowed" below a statement about a real part of a real split.
+ */
+describe('⭐⭐ EVERY PART THE SPLITTER EMITS IS LEGAL AT THE ENFORCER (2.624)', () => {
+  function partsOf(operations: readonly unknown[], limits = LIMITS) {
+    const partition = partitionStructuralEditBatch(
+      operations as Parameters<typeof partitionStructuralEditBatch>[0],
+      limits,
+    );
+    expect(partition.ok).toBe(true);
+    if (!partition.ok) throw new Error('unreachable');
+    return partition.parts;
+  }
+
+  const asPatch = (ops: readonly unknown[]) => ops as Parameters<typeof checkPatchBudget>[0];
+
+  it('probe C: the WHOLE batch is refused by the enforcer, and EVERY part is admitted', () => {
+    const whole = probeCShape().operations;
+    // The precondition, measured. Without it "every part is allowed" would be
+    // satisfied by a batch that never needed splitting.
+    expect(checkPatchBudget(asPatch(whole)).allowed).toBe(false);
+    const parts = partsOf(whole);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) {
+      const budget = checkPatchBudget(asPatch(part.operations));
+      expect(budget.allowed, `part ${JSON.stringify(part.indices)}: ${budget.breachedLimit}`)
+        .toBe(true);
+    }
+  });
+
+  it('the non-interleaved composition too — order must not change the verdict', () => {
+    const whole = probeCShape(false).operations;
+    expect(checkPatchBudget(asPatch(whole)).allowed).toBe(false);
+    const parts = partsOf(whole);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) {
+      expect(checkPatchBudget(asPatch(part.operations)).allowed).toBe(true);
+    }
+  });
+
+  it('a NODE-heavy batch, where the node cap is what binds', () => {
+    // MAX_NODE_OPS + 1 creates, no edges: the one shape whose split is driven
+    // by the node budget rather than the edge or envelope caps.
+    const whole = Array.from({ length: MAX_NODE_OPS + 1 }, (_, i) => ({
+      op: 'add_node',
+      path: `f-extra-${i}`,
+      value: { id: `f-extra-${i}`, kind: 'factor', label: `Extra driver ${i}` },
+    }));
+    expect(checkPatchBudget(asPatch(whole)).allowed).toBe(false);
+    const parts = partsOf(whole);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) {
+      expect(checkPatchBudget(asPatch(part.operations)).allowed).toBe(true);
+    }
+  });
+
+  it('an EDGE-heavy batch, with the envelope cap relaxed so only the edge budget binds', () => {
+    const whole = Array.from({ length: MAX_EDGE_OPS + 1 }, (_, i) => ({
+      op: 'add_edge',
+      path: `f-spend::f-reach-${i}`,
+      value: { from: 'f-spend', to: `f-reach-${i}` },
+    }));
+    expect(checkPatchBudget(asPatch(whole)).allowed).toBe(false);
+    const parts = partsOf(whole, { ...LIMITS, maxEnvelopes: 100 });
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) {
+      expect(checkPatchBudget(asPatch(part.operations)).allowed).toBe(true);
+    }
+  });
+
+  it('⭐ POSITIVE CONTROL — the enforcer really can say NO to a part-shaped batch', () => {
+    // If `checkPatchBudget` returned `allowed: true` for everything, every
+    // assertion above would be vacuous. This is the same SIZE of batch a part
+    // could be, over the cap by one, and it must be refused.
+    const overByOne = Array.from({ length: MAX_NODE_OPS + 1 }, (_, i) => ({
+      op: 'add_node',
+      path: `f-control-${i}`,
+      value: { id: `f-control-${i}`, kind: 'factor', label: `Control ${i}` },
+    }));
+    const budget = checkPatchBudget(asPatch(overByOne));
+    expect(budget.allowed).toBe(false);
+    expect(budget.breachedLimit).toBe('node');
   });
 });

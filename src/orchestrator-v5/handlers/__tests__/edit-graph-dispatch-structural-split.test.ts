@@ -419,10 +419,11 @@ describe('⭐⭐ the split disclosure REACHES THE RESPONSE (delete the emission 
     expect(ids.some((id) => id.startsWith('gmh_'))).toBe(true);
   });
 
-  it('the assistant text carries the split notice, naming the remaining drivers', async () => {
+  it('the assistant text carries the scope notice, naming the remaining drivers', async () => {
     const text = (await runTurn()).response.assistant_text ?? '';
-    expect(text).toContain('larger change than I can propose in one step');
+    expect(text).toContain('larger change than I can work through in one go');
     expect(text).toContain('3 steps');
+    expect(text).toContain('were not looked at on this turn');
     expect(text).toContain('Plan B cost driver');
     expect(text).toContain('Shared overhead driver');
   });
@@ -438,16 +439,31 @@ describe('⭐⭐ the split disclosure REACHES THE RESPONSE (delete the emission 
 });
 
 /**
- * ⭐⭐ FINDING 2 — THE DISCLOSURE MUST NOT FIRE ON A TURN THAT PROPOSED NOTHING.
+ * ⭐⭐ ROADMAP 2.620 — SCOPE SURVIVES REFUSAL; CONTINUATION DOES NOT.
  *
- * Measured before the fix: with part 1 rejected the user received
- *   "I couldn't take that change forward, so the model is unchanged. …"
- *   "That is a larger change than I can propose in one step, so it comes in 3
- *    steps and this is the first. Still to come: …"
- * plus a chip for step 2 of a sequence with no step 1. Two contradictory
- * sentences on one turn.
+ * This describe has now caught the SAME seam failing in BOTH directions, and
+ * both failures are pinned here because either one alone reads as correct.
+ *
+ *   Direction 1 (the original defect) — nothing was gated. With part 1
+ *   rejected the user received "I couldn't take that change forward, so the
+ *   model is unchanged" immediately followed by "this is the first [of 3
+ *   steps]", plus a chip for step 2 of a sequence with no step 1. Two
+ *   contradictory sentences on one turn.
+ *
+ *   Direction 2 (the fix's own defect, ROADMAP 2.620) — EVERYTHING was gated,
+ *   on one condition. The turn became coherent and SILENT: the user read the
+ *   refusal and was never told that 8 of their 12 operations had not been
+ *   submitted at all. A test in this very file PINNED that silence as
+ *   intended (`expect(text).not.toContain('Still to come')`).
+ *
+ * Direction 2 is the worse of the two — silent truncation at the only place
+ * the user can see it, against this feature's own doctrine ("disclosure, NEVER
+ * silent truncation") and against the sibling unmapped-part notice at this
+ * exact seam, which is deliberately NOT gated on `wasRejected` for the same
+ * reason. The two assertions below are therefore a PAIR: neither is safe to
+ * keep without the other.
  */
-describe('⭐⭐ no proposal ⇒ no disclosure and no chip', () => {
+describe('⭐⭐ a REFUSED part 1 — the user is still told what was never submitted', () => {
   beforeEach(() => {
     (getAdapter as MockedFunction<typeof getAdapter>)
       .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
@@ -462,18 +478,63 @@ describe('⭐⭐ no proposal ⇒ no disclosure and no chip', () => {
       });
   });
 
-  it('a REJECTED part 1 leaves the refusal standing, with no "this is the first" sentence', async () => {
+  it('⭐⭐ SCOPE SURVIVES: the refusal stands AND the unsubmitted work is named', async () => {
     const result = await runTurn();
     const text = result.response.assistant_text ?? '';
+    // The refusal is not overwritten.
     expect(text).toContain("couldn't take that change forward");
-    expect(text).not.toContain('this is the first');
-    expect(text).not.toContain('Still to come');
+    // And the scope is disclosed anyway — by IDENTITY of the operations that
+    // never reached the gate, not merely by the sentence being present.
+    expect(text).toContain('Still to come');
+    expect(text).toContain('Plan B cost driver');
+    expect(text).toContain('Shared overhead driver');
+    expect(text).toContain('were not looked at on this turn');
   });
 
-  it('and offers no step-2 chip for a sequence that has no step 1', async () => {
+  it('⭐ and the scope notice claims NOTHING about a proposal that never happened', async () => {
+    // The other half of the pair. Without this, "scope survives" could be
+    // satisfied by restoring the original contradictory sentence.
+    const text = (await runTurn()).response.assistant_text ?? '';
+    expect(text).not.toContain('this is the first');
+    expect(text).not.toContain('Confirm this step first');
+    expect(text).not.toContain('already analysed this model');
+  });
+
+  it('⭐ CONTINUATION IS WITHHELD: no step-2 chip for a sequence that has no step 1', async () => {
     const ids = ((await runTurn()).response.suggested_actions ?? []).map((a) => a.id);
     expect(ids).not.toContain('structural_edit_next_step');
     expect(ids).not.toContain('chip_action_rerun_analysis');
+  });
+});
+
+/**
+ * ⭐ THE POSITIVE CONTROL FOR THE PAIR ABOVE (trap 13b).
+ *
+ * "Scope survives refusal" and "continuation is withheld" are both satisfiable
+ * by a seam that emits the scope notice and NEVER emits a continuation. This
+ * asserts the continuation does arrive on the outcome that licenses it, on the
+ * same fixture family, so neither assertion above can pass vacuously.
+ *
+ * (The held case's full copy and chip are asserted in the first describe of
+ * this file; what is added here is the CONTRAST with the refusal above.)
+ */
+describe('⭐ CONTROL — the same split on a HELD turn does offer the continuation', () => {
+  beforeEach(() => {
+    (getAdapter as MockedFunction<typeof getAdapter>)
+      .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>)
+      .mockResolvedValueOnce(rulebookDeadEnd())
+      .mockImplementationOnce(async (_c, _m, _a, _r, _t, opts) =>
+        pipelineApplied((opts?.preComposedOperations ?? []) as never),
+      );
+  });
+
+  it('scope AND continuation, where the refused turn gets scope only', async () => {
+    const result = await runTurn();
+    const text = result.response.assistant_text ?? '';
+    const ids = (result.response.suggested_actions ?? []).map((a) => a.id);
+    expect(text).toContain('Still to come');
+    expect(ids).toContain('structural_edit_next_step');
   });
 });
 
@@ -545,9 +606,9 @@ describe('⭐⭐ an already-analysed scenario is told the REAL order, and given 
  * The re-run derivation reads `turnContext.prior_facts` — a WINDOW over the 20
  * most recent turn rows, not the scenario. An analysis older than that window
  * is invisible, so the disclosure reverts to the promising copy on a scenario
- * that HAS been analysed. `claim-safety-read.ts` records the same blindness
- * confirmed live (scenario `f63ccb45-…`: `false` at rank 20, `true` at rank 21,
- * zero store change).
+ * that HAS been analysed. The defect and its live witness are recorded once,
+ * on `TurnContext.newest_analysis_fact` in `build-turn-context.ts` (scenario
+ * `f63ccb45-…`: `false` at rank 20, `true` at rank 21, zero store change).
  *
  * This test does not assert the behaviour is RIGHT. It asserts what it IS, and
  * fails if someone changes it without changing this note — which is the only

@@ -105,6 +105,7 @@ import {
 import {
   buildHeldSupersessionNotice,
   evaluateEditGraphMutations,
+  hasLiveHeldProposal,
   type EditGmDecision,
 } from './edit-graph-referee-gate.js';
 // ROADMAP 2.474 — the coach's structural editing tool: contract, entry
@@ -130,11 +131,12 @@ import {
 } from '../routing/edit-part-decomposition.js';
 import { clampLabel, describeChangeset, type ChangesetOpLike } from './describe-changeset.js';
 import {
-  buildStructuralEditSplitDisclosure,
-  shouldEmitSplitDisclosure,
+  buildStructuralEditScopeNotice,
+  buildStructuralEditContinuation,
   STRUCTURAL_EDIT_TOO_LARGE_TEXT,
   STRUCTURAL_EDIT_TOO_LARGE_ACTIONS,
 } from './structural-edit-split-disclosure.js';
+import { staleAnalysisBlocksApply } from '../graph-management/frame-gate.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import {
@@ -2455,58 +2457,35 @@ export async function dispatchEditGraph(
     // against the graph the candidates were generated on? Re-uses the SAME
     // prior facts the post-edit derivation loaded (pure re-projection, no
     // extra I/O). A degraded prior-fact load fails closed to 'unknown'.
-    const gmFreshnessDerivation =
-      freshness.reason === 'derivation_failed'
-        ? null
-        : deriveAnalysisFreshness(priorFactsForRecovery, gmCurrentHash);
     const gmFreshness: FrameFreshness =
-      gmFreshnessDerivation === null ? 'unknown' : gmFreshnessDerivation.freshness;
-    // ROADMAP 2.474 / A3 — DOES A LATER PART NEED A RE-RUN FIRST?
+      freshness.reason === 'derivation_failed'
+        ? 'unknown'
+        : deriveAnalysisFreshness(priorFactsForRecovery, gmCurrentHash).freshness;
+    // ROADMAP 2.474 / A3 — DOES THIS SCENARIO ALREADY CARRY AN ANALYSIS?
     //
-    // Read off the SAME derivation the gate is about to use, so the answer
-    // cannot drift from the thing that will actually block. A structural
-    // candidate trusts only `fresh`/`none` (`frame-gate.ts`
-    // TRUSTWORTHY_FRESHNESS; the `stale` relaxation is tunable-only). Once
-    // part 1 is confirmed and applied the graph hash moves, so a scenario that
-    // ALREADY carries a successful run_analysis fact flips to `stale` and the
-    // next part is blocked with ANALYSIS_NOT_FRESH until the user re-runs.
-    // A scenario with no such fact stays `none` and the next part proceeds.
-    //
-    // `selected_fact_index !== null` is exactly "a successful run_analysis
-    // fact was selected". A failed derivation is treated as REQUIRING the
-    // re-run: the cost of over-warning is a longer sentence, and the cost of
+    // Read off the SAME freshness verdict the gate is about to use, so the
+    // answer cannot drift from the thing that will actually block. `'none'` is
+    // emitted by exactly one branch of `deriveAnalysisFreshness` — "no
+    // successful run_analysis fact was selected" — so `!== 'none'` IS "an
+    // analysis exists", with no second derivation and no extra I/O. A failed
+    // derivation lands on `'unknown'`, i.e. treated as an analysis existing:
+    // the cost of over-warning is a longer sentence, and the cost of
     // under-warning is a chip that cannot do what it says.
     //
-    // ⚠⚠ KNOWN RESIDUAL, NAMED RATHER THAN GLOSSED — THIS READS A WINDOW, AND
-    // THE WINDOW HAS ALREADY SHIPPED THIS DEFECT ONCE.
-    //
-    // `priorFactsForRecovery` is `turnContext.prior_facts`, which is a WINDOW
-    // over the 20 turn rows `readRecent` returned — NOT the scenario. A
-    // `run_analysis` fact whose parent turn has aged out is invisible here, so
-    // this reads `false` on a scenario that HAS been analysed, and the
-    // over-promising chip returns. That is the wrong direction.
-    //
-    // It is not hypothetical: `claim-safety-read.ts` records the same window
-    // blindness confirmed LIVE on scenario `f63ccb45-…` (31 turns) — the
-    // analysis turn read `false` at rank 20 and `true` at rank 21 after one
-    // more turn committed, WITH ZERO STORE CHANGE. The estate's answer to it
-    // is `turn_context.newest_analysis_fact`, read past the window and
-    // scenario-scoped.
-    //
-    // NOT USED HERE, deliberately: that field carries an explicit contract —
-    // "Consumed ONLY through `readMayNameLeadingOptionVerdict` — never read
-    // directly, or it becomes a second derivation." Reaching past a documented
-    // seam to fix my own copy would trade a bounded copy defect for an
-    // unbounded derivation defect, and the sanctioned pattern (a UNION into
-    // the fact array, one-directional) is a change to the FRESHNESS input that
-    // other consumers share. Rowed as its own piece of work.
-    //
-    // Bound on the harm as it stands: the disclosure over-promises only on a
-    // scenario whose analysis is more than 20 turns old. Everything else on
-    // this path is unaffected — the gate still blocks part 2 correctly, so the
-    // user is never told a change applied when it did not.
-    priorAnalysisExistsForSplit =
-      gmFreshnessDerivation === null || gmFreshnessDerivation.selected_fact_index !== null;
+    // ⚠ KNOWN RESIDUAL: `priorFactsForRecovery` is a 20-turn WINDOW, not the
+    // scenario, so an analysis older than the window reads as absent here.
+    // The defect, its live witness and the sanctioned scenario-scoped fix are
+    // recorded ONCE, on the field that owns them —
+    // `build-turn-context.ts` `TurnContext.newest_analysis_fact`, whose
+    // docstring also states the contract that stops this seam reading it
+    // directly ("Consumed ONLY through `readMayNameLeadingOptionVerdict`").
+    // Deliberately not restated here (ROADMAP 2.625): a narrative told in
+    // four files is four places to miss when the fix lands. Bound on the
+    // harm: the disclosure over-warns or over-promises about the NEXT step on
+    // a scenario whose analysis is more than 20 turns old; the gate still
+    // governs part 1 correctly either way, so nothing false is ever said
+    // about what happened.
+    priorAnalysisExistsForSplit = gmFreshness !== 'none';
     gmDecision = evaluateEditGraphMutations({
       mode: gmMode,
       operations: editResult.operations!,
@@ -2626,11 +2605,7 @@ export async function dispatchEditGraph(
     // different target → both stay live and the copy names the earlier hold
     // so two consents are never held silently. Appended BEFORE the commit so
     // stored copy == wire copy (same seam doctrine as the lapse notice).
-    if (
-      gmDecision.governing === 'held' &&
-      gmDecision.pendingActions !== null &&
-      gmDecision.pendingActions.length > 0
-    ) {
+    if (hasLiveHeldProposal(gmDecision)) {
       const supersessionNotice = buildHeldSupersessionNotice(
         gmDecision.pendingActions[0]!,
         priorPendingForCarry,
@@ -2677,89 +2652,116 @@ export async function dispatchEditGraph(
     );
   }
 
-  // ── ROADMAP 2.474 / A3 — DISCLOSE THE REMAINDER OF A SPLIT REQUEST ────────
+  // ══ ROADMAP 2.474 / A3 — A SPLIT REQUEST MAKES TWO STATEMENTS, NOT ONE ════
   //
-  // Appended AFTER the gate has written its hold copy (and after the
-  // supersession notice) so the user reads, in order: what is held, what
-  // supersedes what, and then that this is step 1 of N. Appended BEFORE the
-  // commit for the same reason the supersession notice is: stored copy must
-  // equal wire copy.
+  // ⭐⭐ THE RULE, STATED ONCE, HERE — this is the ONLY place either
+  // precondition is written, and the two builders below take no argument that
+  // could re-couple them (ROADMAP 2.620):
   //
-  // ⚠ WHAT THIS IS NOT. It is not disclosed-partial. `submittedIndices` names
-  // every operation that reached the gate; the remainder reached NOTHING. The
-  // notice says the remaining work is still to come — never that part of a
-  // judged batch was dropped, because no part of a judged batch was dropped.
+  //   SCOPE, on EVERY outcome — "only the first of N parts was put to the
+  //     gate; the rest were never judged". It is a fact about the REQUEST, and
+  //     the gate's verdict on the part it judged does not touch it. Applied,
+  //     held, rejected, stale, clarify: the user is told what was not
+  //     submitted. ⭐ SCOPE SURVIVES REFUSAL.
   //
-  // ⚠⚠ GATED ON THE TURN HAVING ACTUALLY PROPOSED SOMETHING. This block used
-  // to fire on `structuralEditSplit !== null` alone, with no reference to the
-  // governing verdict — while the supersession notice twenty lines above was
-  // correctly gated. Measured consequence: on a turn where part 1 was REJECTED
-  // (or STALED — which finding 1 below makes reachable on turn 1), the user
-  // received two contradictory sentences, "I couldn't take that change
-  // forward, so the model is unchanged" immediately followed by "this is the
-  // first [of 3 steps]", plus a chip offering step 2 of a sequence that had no
-  // step 1. The condition below MIRRORS the supersession notice's, deliberately.
+  //   CONTINUATION, only on a live hold — "here is step 2", plus the chip that
+  //     takes it. An offer needs a live path to continue, and the only live
+  //     path here is a held proposal the user can still confirm.
   //
-  // A disclosure describes what is HELD and what follows it. With no hold
-  // there is nothing for it to follow, so it must not be written. The tool
-  // engages only where the hold spine is live and structural batches always
-  // hold, so a split that produced no pending is not an expected state — it is
-  // emitted as telemetry rather than passed over in silence.
-  const splitTurnProposedSomething = shouldEmitSplitDisclosure({
-    governing: gmDecision?.governing ?? null,
-    pendingActionCount: gmDecision?.pendingActions?.length ?? 0,
-  });
-  if (structuralEditSplit !== null && !splitTurnProposedSomething) {
-    emit(TelemetryEvents.V5StructuralEditToolEntry, {
-      request_id: requestId,
-      scenario_id: payload.scenario_id,
-      decision: 'split_disclosure_suppressed',
-      part_count: structuralEditSplit.partCount,
-      governing: gmDecision?.governing ?? null,
-      was_rejected: editResult.wasRejected,
-    });
-  }
-  if (structuralEditSplit !== null && splitTurnProposedSomething) {
+  // ⚠ WHY THE RULE IS SPELLED OUT RATHER THAN IMPLIED BY THE CODE. The first
+  // version of this block gated BOTH on the verdict, in one condition, and the
+  // result was measured: on a rejected turn the user read "I couldn't take
+  // that change forward, so the model is unchanged" and WAS NEVER TOLD that
+  // 8 of their 12 operations had never been submitted. Coherent, and silent.
+  // The turn before it was contradictory (it offered step 2 of a sequence with
+  // no step 1). Both wrong — because one gate was being asked to answer two
+  // different questions.
+  //
+  // ⚠ NEITHER STATEMENT IS DISCLOSED-PARTIAL. `submittedIndices` names every
+  // operation that reached the gate; the remainder reached NOTHING — not
+  // applied, not rejected, not judged. The copy says the rest were not looked
+  // at, never that part of a judged batch was dropped.
+  //
+  // Appended AFTER the gate's own copy (and after the supersession notice) so
+  // the user reads what happened first, and BEFORE the commit so stored copy
+  // equals wire copy — the same seam doctrine as the lapse notice.
+  if (structuralEditSplit !== null) {
     const wholeDescription = describeChangeset(
       structuralEditSplit.wholeBatch as readonly ChangesetOpLike[],
       gmFrameBase,
     );
-    const disclosure =
+    const scopeInput =
       wholeDescription === null
         ? null
-        : buildStructuralEditSplitDisclosure({
+        : {
             wholeBatch: wholeDescription,
             proposedIndices: structuralEditSplit.submittedIndices,
             partCount: structuralEditSplit.partCount,
-            remainderDependsOnThisStep: structuralEditSplit.remainderDependsOnThisStep,
-            rerunRequiredBeforeNextStep: priorAnalysisExistsForSplit,
-          });
-    if (disclosure !== null) {
+          };
+    const scopeNotice =
+      scopeInput === null ? null : buildStructuralEditScopeNotice(scopeInput);
+    if (scopeNotice !== null) {
       response = {
         ...response,
-        assistant_text: appendLapseNotice(response.assistant_text, disclosure.notice),
+        assistant_text: appendLapseNotice(response.assistant_text, scopeNotice),
+      };
+    }
+
+    // The continuation's precondition, read through the PRODUCER's predicate
+    // (ROADMAP 2.623(a)) rather than rebuilt from two nullable fields here.
+    const continuationAvailable = hasLiveHeldProposal(gmDecision);
+    const continuation =
+      scopeInput === null || !continuationAvailable
+        ? null
+        : buildStructuralEditContinuation({
+            ...scopeInput,
+            remainderDependsOnThisStep: structuralEditSplit.remainderDependsOnThisStep,
+            // Both halves derived, neither restated (ROADMAP 2.474/A3):
+            // (i) does an analysis exist to go stale, and (ii) does a stale
+            // frame actually block a STRUCTURAL apply — asked of the frame
+            // gate itself, so the staleness-editability ruling moves this
+            // copy automatically instead of leaving a stale sentence behind.
+            rerunRequiredBeforeNextStep:
+              priorAnalysisExistsForSplit && staleAnalysisBlocksApply('structural'),
+          });
+    if (continuation !== null) {
+      response = {
+        ...response,
+        ...(continuation.notice !== null
+          ? {
+              assistant_text: appendLapseNotice(
+                response.assistant_text,
+                continuation.notice,
+              ),
+            }
+          : {}),
+        // `action_type` is snake_case on the builder's type precisely so this
+        // is a whole-object spread: the earlier field-by-field remap silently
+        // dropped anything the builder added (ROADMAP 2.623(c)).
         suggested_actions: [
           ...(response.suggested_actions ?? []),
-          {
-            id: disclosure.action.id,
-            label: disclosure.action.label,
-            message: disclosure.action.message,
-            detail: disclosure.action.detail,
-            ...(disclosure.action.actionType !== undefined
-              ? { action_type: disclosure.action.actionType }
-              : {}),
-          },
+          { ...continuation.action },
         ],
       };
-      emit(TelemetryEvents.V5StructuralEditToolEntry, {
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-        decision: 'split_disclosed',
-        part_count: structuralEditSplit.partCount,
-        submitted_operations: structuralEditSplit.submittedIndices.length,
-        total_operations: structuralEditSplit.wholeBatch.length,
-      });
     }
+
+    emit(TelemetryEvents.V5StructuralEditToolEntry, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      decision: 'split_disclosed',
+      part_count: structuralEditSplit.partCount,
+      submitted_operations: structuralEditSplit.submittedIndices.length,
+      total_operations: structuralEditSplit.wholeBatch.length,
+      // Reported separately because they now FAIL separately: a scope notice
+      // with no continuation is the ordinary refusal shape, and a split with
+      // no scope notice at all means `describeChangeset` returned nothing —
+      // which is the one case where the user IS told nothing, and must be
+      // visible rather than inferred from silence.
+      scope_disclosed: scopeNotice !== null,
+      continuation_offered: continuation !== null,
+      governing: gmDecision?.governing ?? null,
+      was_rejected: editResult.wasRejected,
+    });
   }
 
   // V5 H5 — false-success invariant (defence-in-depth).
@@ -3478,12 +3480,14 @@ export async function dispatchEditGraph(
     // path above (that path requires a non-applied editResult; GM only
     // engages on applied ones), but GM wins deterministically if both ever
     // co-occur.
-    if (
-      gmBlockedApply &&
-      gmDecision !== null &&
-      gmDecision.pendingActions !== null &&
-      gmDecision.pendingActions.length > 0
-    ) {
+    // ROADMAP 2.623(a) — reads "a live held proposal" through the producer's
+    // own predicate rather than rebuilding it here. Equivalent to the previous
+    // `pendingActions !== null && length > 0`, derived not assumed: the ONLY
+    // branch in `evaluateEditGraphMutations` that mints a non-empty
+    // `pendingActions` is inside `if (governing === 'held')` — every other
+    // return, including the fail-closed catch, sets `null`. So the added
+    // verdict check cannot drop a pending the producer is able to mint.
+    if (gmBlockedApply && hasLiveHeldProposal(gmDecision)) {
       pendingActionsForCommit = [...gmDecision.pendingActions].slice(0, 3);
     }
     // ── HOLD-WIPE fix (task_2e1b8c87): thread holds through this commit ──

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildPatchRejectionEnvelope } from '../../../src/orchestrator/patch-rejection-helper.js';
 import type { ConversationContext } from '../../../src/orchestrator/types.js';
+import {
+  MAX_NODE_OPS,
+  MAX_EDGE_OPS,
+} from '../../../src/orchestrator/tools/patch-budget-limits.js';
 
 // Suppress log output in tests
 vi.mock('../../../src/utils/telemetry.js', () => ({
@@ -40,11 +44,22 @@ describe('buildPatchRejectionEnvelope', () => {
       mockContext,
     );
 
-    // Envelope shape — renders default limits (3/4) when max_*_ops not specified
+    // Envelope shape. ROADMAP 2.624: when `max_*_ops` is not supplied the copy
+    // falls back to THE ENFORCER'S OWN CONSTANTS, derived here rather than
+    // spelled. This test previously pinned a hardcoded "limit: 3 node ops, 4
+    // edge ops" — numbers that matched nothing: the caps are 4 and 8, and that
+    // stale "4-edge limit" was the origin of a false comment in `edit-graph.ts`
+    // that survived for months. A user reading the old sentence was told a
+    // limit the pipeline does not apply.
     expect(envelope.turn_id).toBe('test-turn-id');
     expect(envelope.assistant_text).toBeTruthy();
     expect(envelope.assistant_text).toContain('5 node operations');
-    expect(envelope.assistant_text).toContain('limit: 3 node ops, 4 edge ops');
+    expect(envelope.assistant_text).toContain(
+      `limit: ${MAX_NODE_OPS} node ops, ${MAX_EDGE_OPS} edge ops`,
+    );
+    // The numbers the fallback used to invent, gone. Bound to the exact
+    // rendered clause so an unrelated "4" elsewhere in the copy cannot hide it.
+    expect(envelope.assistant_text).not.toContain('limit: 3 node ops, 4 edge ops');
 
     // No GraphPatchBlock
     expect(envelope.blocks).toHaveLength(0);
