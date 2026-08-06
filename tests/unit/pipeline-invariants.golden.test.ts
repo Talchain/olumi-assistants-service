@@ -501,7 +501,6 @@ function makeGoldenCtx(): any {
     goalConstraints: undefined,
     constraintStrpResult: undefined,
     repairCost: 0,
-    repairFallbackReason: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
 

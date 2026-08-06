@@ -101,7 +101,6 @@ function buildInitialContext(
     goalConstraints: undefined,
     constraintStrpResult: undefined,
     repairCost: 0,
-    repairFallbackReason: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
 
@@ -805,15 +804,13 @@ export async function runUnifiedPipeline(
       ctx.pipelineOutcome.rescue_score = sweepTrace.rescue_score;
     }
 
-    // LLM repair outcome
-    ctx.pipelineOutcome.llm_repair = {
-      triggered: ctx.llmRepairNeeded ?? false,
-      outcome: ctx.llmRepairNeeded
-        ? (ctx.repairFallbackReason ? 'rejected' : 'accepted')
-        : 'skipped',
-      fallback_reason: ctx.repairFallbackReason ?? null,
-      attempts: ctx.llmRepairNeeded ? 1 : 0,
-    };
+    // LLM repair outcome: the draft path's LLM repair was REMOVED
+    // (ROADMAP 2.731 — 0/12 successes in the 7-day efficacy window), so
+    // llm_repair stays at its init value ({ triggered: false, outcome:
+    // 'skipped', attempts: 0 }), which is now the truth on every turn.
+    // The field itself is kept: V5 diagnostics (v5-diagnostic-trace.ts)
+    // reads it, and a constant-honest 'skipped' is not a constant-wrong
+    // claim.
 
     // Factor value coverage + edge strength unique count (computed from graph)
     if (ctx.graph) {

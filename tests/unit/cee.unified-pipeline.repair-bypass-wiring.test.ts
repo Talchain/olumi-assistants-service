@@ -8,10 +8,14 @@
  *   ★ runPlotValidation MUST NOT be called when the bypass fires.
  *
  * This is the load-bearing assertion for the user-stated requirement
- * "OPTIONS_IDENTICAL is never allowed to reach an 86s failed repair path."
+ * "OPTIONS_IDENTICAL is never allowed to reach a slow failed repair path."
+ * (Substep 2's LLM repair was itself removed by ROADMAP 2.731; the gate
+ * still matters because it short-circuits ahead of the whole remaining
+ * pipeline with clarification-shaped copy.)
  *
  * Other Bucket C codes (NO_PATH_TO_GOAL, NO_EFFECT_PATH) must still flow
- * through to LLM repair — that's verified by the negative case below.
+ * through to substep 2 (PLoT validation + deterministic normalisation) —
+ * that's verified by the negative case below.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -160,7 +164,7 @@ describe("runStageRepair — OPTIONS_IDENTICAL bypass wiring", () => {
     expect(runStructuralParseMock).not.toHaveBeenCalled();
   });
 
-  it("NO_PATH_TO_GOAL alone (no OPTIONS_IDENTICAL) → bypass does NOT fire, LLM repair still runs", async () => {
+  it("NO_PATH_TO_GOAL alone (no OPTIONS_IDENTICAL) → bypass does NOT fire, substep 2 still runs", async () => {
     runDeterministicSweepMock.mockImplementation(async (ctx: StageContext) => {
       ctx.remainingViolations = [
         { code: "NO_PATH_TO_GOAL", path: "nodes[opt_a]" },
@@ -175,9 +179,10 @@ describe("runStageRepair — OPTIONS_IDENTICAL bypass wiring", () => {
     // substep set it, but the mocks are no-op).
     expect(ctx.earlyReturn).toBeUndefined();
 
-    // CRITICAL: LLM repair (PLoT validation) MUST have been called.
-    // Other Bucket C codes are still LLM-repaired — only OPTIONS_IDENTICAL
-    // is gated.
+    // CRITICAL: substep 2 (PLoT validation + deterministic normalisation)
+    // MUST have been called. Other Bucket C codes still flow through it —
+    // only OPTIONS_IDENTICAL is gated. (Its LLM repair was removed by
+    // ROADMAP 2.731; what flows through now is validation + simpleRepair.)
     expect(runPlotValidationMock).toHaveBeenCalledTimes(1);
 
     // Downstream substeps run as normal.

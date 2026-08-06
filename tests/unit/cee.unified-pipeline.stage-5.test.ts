@@ -281,6 +281,27 @@ describe("runStagePackage", () => {
     expect(ctx.quality).toEqual(defaultQuality);
   });
 
+  it("2.732: repair_summary carries llm_repair_needed but NONE of the deleted LLM-repair bookkeeping fields", async () => {
+    // Producer-bound pin (not a hand-built literal): run the REAL
+    // runStagePackage and inspect the trace it emits. The draft path's LLM
+    // repair was removed (ROADMAP 2.731); llm_repair_called /
+    // llm_repair_brief_included / llm_repair_skipped_reason were deleted
+    // with it (2.732) because they could only ever be constant-wrong.
+    // Re-adding any of them to package.ts REDs here.
+    const ctx = makeCtx();
+    ctx.llmRepairNeeded = true;
+    await runStagePackage(ctx);
+
+    const summary = (ctx.pipelineTrace as any)?.repair_summary;
+    expect(summary).toBeDefined();
+    // Still-truthful sweep diagnostic survives.
+    expect(summary.llm_repair_needed).toBe(true);
+    // Deleted fields are ABSENT AS KEYS, not merely falsy.
+    expect("llm_repair_called" in summary).toBe(false);
+    expect("llm_repair_brief_included" in summary).toBe(false);
+    expect("llm_repair_skipped_reason" in summary).toBe(false);
+  });
+
   // ── Archetype inference ─────────────────────────────────────────────────
 
   it("calls inferArchetype when draftArchetypesEnabled = true", async () => {

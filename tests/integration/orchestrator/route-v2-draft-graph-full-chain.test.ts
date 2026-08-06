@@ -102,10 +102,65 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+// Real producer for the OPTIONS_IDENTICAL fail-fast envelope (NOT mocked —
+// the vi.mock above only replaces unified-pipeline/index.js).
+const { runOptionsIdenticalBypass } = await import(
+  '../../../src/cee/unified-pipeline/stages/repair/options-identical-bypass.js'
+);
 
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 const LONG_BRIEF =
   'Should we expand the product into the German market next quarter or hold?';
+
+// ──────────────────────────────────────────────────────────────────
+// 2.733-B1: OPTIONS_IDENTICAL fixtures derived from the REAL producer.
+//
+// The previous fixtures were hand-written mirrors of a 2026-07 producer
+// that has since moved twice (domain-neutral copy 2026-07-24; declared
+// retryable:true the same day). They fed `retryable:false` + pricing-
+// scripted copy into the chain, so the wire assertions proved nothing
+// about what the deployed producer emits — a stale positive control
+// (trap 18's fixture corollary). These helpers invoke the actual
+// `runOptionsIdenticalBypass` at this tip and use ITS bytes as the
+// pipeline mock, so fixture and producer cannot drift again.
+// ──────────────────────────────────────────────────────────────────
+function produceOptionsIdenticalEarlyReturn(
+  violationContext?: Record<string, unknown>,
+): { statusCode: number; body: Record<string, any> } {
+  // Minimal StageContext for the producer. The duplicate options carry
+  // DISTINCT labels (and one baseline-shaped label), so the graceful dedup
+  // declines (Guards 2/3b) and the fail-fast producer runs — the same
+  // shape as the live staging firings.
+  const ctx = {
+    requestId: 'pipeline-internal-id',
+    graph: {
+      nodes: [
+        { id: 'dec_pricing', kind: 'decision', label: 'Choose price point' },
+        { id: 'opt_49', kind: 'option', label: 'Charge $49', data: { interventions: { fac_price: 0.5 } } },
+        { id: 'opt_99', kind: 'option', label: 'Charge $99', data: { interventions: { fac_price: 0.5 } } },
+        { id: 'opt_status_quo', kind: 'option', label: 'Status quo', data: { interventions: { fac_price: 0.5 } } },
+      ],
+      edges: [],
+      version: '1.2',
+    },
+    pipelineOutcome: { warnings: [] },
+    remainingViolations: [
+      {
+        code: 'OPTIONS_IDENTICAL',
+        ...(violationContext !== undefined ? { context: violationContext } : {}),
+      },
+    ],
+  } as any;
+
+  const fired = runOptionsIdenticalBypass(ctx);
+  // Precondition pin (CLAUDE.md trap 13b, third face): the fixture is only
+  // evidence if the producer actually fired. A silent non-fire here would
+  // otherwise let every downstream assertion pass against nothing.
+  if (!fired || !ctx.earlyReturn) {
+    throw new Error('OPTIONS_IDENTICAL producer did not fire — fixture harness invalid');
+  }
+  return ctx.earlyReturn;
+}
 
 describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () => {
   let app: FastifyInstance;
@@ -301,45 +356,33 @@ describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () 
   });
 
   // ──────────────────────────────────────────────────────────────────
-  // OPTIONS_IDENTICAL pre-LLM-repair bypass — full chain.
+  // OPTIONS_IDENTICAL fail-fast — full chain, REAL producer bytes.
   //
-  // Simulates the bypass setting ctx.earlyReturn with the new
-  // CEE_GRAPH_INVALID + options-specific recovery payload.
+  // The pipeline mock is fed the envelope the actual
+  // runOptionsIdenticalBypass builds at this tip (see harness above).
   // Asserts the full chain (pipeline → handleDraftGraph → dispatch →
-  // route catch → wire) propagates everything: typed reason, the new
-  // recovery copy, identical_option_ids in details, no graph persisted.
+  // route catch → wire) propagates everything: typed reason, the
+  // producer's recovery copy, identical_option_ids in details, the
+  // producer-declared retryable:true (2.733-B1 pin), no graph persisted.
   // ──────────────────────────────────────────────────────────────────
 
-  it('mocked runUnifiedPipeline returns OPTIONS_IDENTICAL bypass shape → user-actionable clarification copy on wire', async () => {
-    runUnifiedPipelineMock.mockResolvedValueOnce({
-      statusCode: 400,
-      body: {
-        schema: 'cee.error.v1',
-        code: 'CEE_GRAPH_INVALID',
-        message: 'Options need at least one distinct value to compare',
-        retryable: false,
-        source: 'cee',
-        request_id: 'pipeline-internal-id',
-        reason: 'options_identical_unrepairable_by_llm',
-        recovery: {
-          suggestion:
-            'Your options need at least one distinct value to compare. ' +
-            'For a pricing decision, give a price for each option ' +
-            '(e.g. Low = £49/month, Mid = £99/month, High = £199/month).',
-          hints: [
-            'Give each option at least one unique value (price, headcount, timeline, scope).',
-            'Use specific numbers rather than vague descriptions.',
-            'Or describe how each option differs from the others in plain language.',
-          ],
-        },
-        details: {
-          violation_code: 'OPTIONS_IDENTICAL',
-          identical_option_ids: ['opt_49', 'opt_99', 'opt_status_quo'],
-          intervention_signature: 'fac_price:0.5000',
-          repair_skip_reason: 'options_identical_unrepairable_by_llm',
-        },
-      },
+  it('REAL OPTIONS_IDENTICAL producer bytes → retry-first clarification copy AND retryable:true on wire (2.733-B1)', async () => {
+    const produced = produceOptionsIdenticalEarlyReturn({
+      optionIds: ['opt_49', 'opt_99', 'opt_status_quo'],
+      signature: 'fac_price:0.5000',
     });
+
+    // Producer-side pins BEFORE the chain runs: the envelope declares its own
+    // retryability (2026-07-24 honesty fix) and retry-first copy. If the
+    // producer regresses to a hard dead end, the fixture itself REDs here —
+    // not silently downstream.
+    expect(produced.statusCode).toBe(400);
+    expect(produced.body.code).toBe('CEE_GRAPH_INVALID');
+    expect(produced.body.retryable).toBe(true);
+    expect(produced.body.recovery.suggestion).toMatch(/retry/i);
+    expect(produced.body.details.identical_option_ids).toEqual(['opt_49', 'opt_99', 'opt_status_quo']);
+
+    runUnifiedPipelineMock.mockResolvedValueOnce(produced);
 
     const res = await app.inject({
       method: 'POST',
@@ -361,15 +404,17 @@ describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () 
 
     // Typed reason from PR #201 mapping
     expect(body.details.reason).toBe('draft_graph_cee_graph_invalid');
-    expect(body.details.retryable).toBe(false);
+    // ⭐ 2.733-B1 WIRE PIN: the producer's explicit retryable:true survives to
+    // the wire at BOTH levels via #845's monotone promotion. The previous
+    // fixtures pinned `false` here, i.e. they pinned the defect.
+    expect(body.retryable).toBe(true);
+    expect(body.details.retryable).toBe(true);
     expect(body.details.pipeline_error_code).toBe('CEE_GRAPH_INVALID');
 
-    // The new user-actionable recovery copy from the bypass survives the
-    // boundary intact. This is the load-bearing assertion for the user's
-    // "fast, user-actionable clarification" requirement.
-    expect(body.details.recovery).toBeDefined();
-    expect(body.details.recovery.suggestion).toContain('distinct value');
-    expect(body.details.recovery.suggestion).toMatch(/£49|£99|£199/);
+    // The producer's recovery copy survives the boundary BYTE-IDENTICAL —
+    // asserted against the produced bytes, not a hand-written mirror.
+    expect(body.details.recovery).toEqual(produced.body.recovery);
+    expect(body.details.recovery_suggestion).toBe(produced.body.recovery.suggestion);
     expect(Array.isArray(body.details.recovery.hints)).toBe(true);
     expect(body.details.recovery.hints.length).toBeGreaterThan(0);
 
@@ -396,34 +441,18 @@ describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () 
     expect(runUnifiedPipelineMock).toHaveBeenCalledTimes(1);
   });
 
-  it('OPTIONS_IDENTICAL bypass with empty/missing context → empty identical_option_ids on wire', async () => {
-    // Defensive case: the bypass helper handles missing validator
-    // `context` (validator omitted it) by emitting an empty
-    // identical_option_ids array. The allowlist + propagation chain must
-    // surface that intent intact — not drop the field, not invent values.
-    runUnifiedPipelineMock.mockResolvedValueOnce({
-      statusCode: 400,
-      body: {
-        schema: 'cee.error.v1',
-        code: 'CEE_GRAPH_INVALID',
-        message: 'Options need at least one distinct value to compare',
-        retryable: false,
-        source: 'cee',
-        request_id: 'pipeline-internal-id',
-        reason: 'options_identical_unrepairable_by_llm',
-        recovery: {
-          suggestion: 'Your options need at least one distinct value to compare.',
-          hints: ['Give each option a unique value.'],
-        },
-        details: {
-          violation_code: 'OPTIONS_IDENTICAL',
-          identical_option_ids: [],
-          repair_skip_reason: 'options_identical_unrepairable_by_llm',
-          // intervention_signature deliberately omitted (validator
-          // didn't supply it).
-        },
-      },
-    });
+  it('OPTIONS_IDENTICAL producer with empty/missing context → empty identical_option_ids on wire', async () => {
+    // Defensive case, REAL producer bytes: the bypass handles a missing
+    // validator `context` by emitting an empty identical_option_ids array
+    // and omitting intervention_signature. The allowlist + propagation
+    // chain must surface that intent intact — not drop the field, not
+    // invent values.
+    const produced = produceOptionsIdenticalEarlyReturn(undefined);
+    expect(produced.body.details.identical_option_ids).toEqual([]);
+    expect(produced.body.details.intervention_signature).toBeUndefined();
+    expect(produced.body.retryable).toBe(true);
+
+    runUnifiedPipelineMock.mockResolvedValueOnce(produced);
 
     const res = await app.inject({
       method: 'POST',
@@ -449,6 +478,8 @@ describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () 
     // Field absent from upstream stays absent on wire (not invented).
     expect(body.details.intervention_signature).toBeUndefined();
     expect(body.details.repair_skip_reason).toBe('options_identical_unrepairable_by_llm');
+    // 2.733-B1 wire pin holds on the defensive path too.
+    expect(body.details.retryable).toBe(true);
 
     expect(appendMock).not.toHaveBeenCalled();
   });
@@ -458,18 +489,15 @@ describe('POST /orchestrate/v2/turn — draft_graph FULL CHAIN integration', () 
     // filters out any field that isn't explicitly approved for the wire
     // (protects against future CEE error sites adding fields that
     // contain user input echoes, stack traces, or other unsafe content).
+    // Base bytes come from the REAL producer; the unsafe fields are
+    // injected on top to exercise the filter.
+    const produced = produceOptionsIdenticalEarlyReturn({ optionIds: ['opt_a'] });
     runUnifiedPipelineMock.mockResolvedValueOnce({
-      statusCode: 400,
+      statusCode: produced.statusCode,
       body: {
-        schema: 'cee.error.v1',
-        code: 'CEE_GRAPH_INVALID',
-        message: 'Test',
-        retryable: false,
-        source: 'cee',
-        request_id: 'pipeline-internal-id',
+        ...produced.body,
         details: {
-          violation_code: 'OPTIONS_IDENTICAL', // allowlisted
-          identical_option_ids: ['opt_a'],     // allowlisted
+          ...produced.body.details,
           // The following are NOT in the allowlist and must be dropped:
           stack_trace: 'Error at ... (sensitive internal path)',
           internal_factor_ids: ['fac_internal_x'],

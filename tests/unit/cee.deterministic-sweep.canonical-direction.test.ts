@@ -86,7 +86,6 @@ function makeMinimalStageContext(graph: GraphT): StageContext {
     goalConstraints: null,
     constraintStrpResult: null,
     repairCost: 0,
-    repairFallbackReason: undefined,
     structuralMeta: null,
     validationSummary: null,
     quality: undefined,

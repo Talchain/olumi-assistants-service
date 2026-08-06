@@ -1,25 +1,39 @@
 /**
- * Stage 4 Substep 2: PLoT validation + LLM repair
+ * Stage 4 Substep 2: PLoT validation + deterministic normalisation
  *
- * Source: Pipeline B lines 1341-1447
- * Validates graph against PLoT engine, applies LLM repair or simple fallback.
+ * LLM REPAIR REMOVED — ROADMAP 2.731 (efficacy measurement,
+ * PHASE0-EVIDENCE-2026-07-28/repair-efficacy-measurement-2026-08-08.md):
+ * over the full 7-day window the gpt-4.1 `repair_graph` call succeeded on
+ * 0/12 invocations (`repair_success` emitted zero times; INVALID_EDGE_TYPE
+ * violations returned byte-identical), while the deterministic sweep already
+ * resolved 97.8% of violations and every DELIVERED turn on this path was
+ * rescued by the deterministic simpleRepair fallback below — AFTER the LLM
+ * call had failed and cost ~44.7s. The call also carried the 2.286
+ * wholesale-graph-replacement hazard.
  *
- * Fallback reasons (ctx.repairFallbackReason):
- *   "budget_exceeded"       — skipRepairDueToBudget triggered simpleRepair
- *   "revalidation_failed"   — LLM repair succeeded but re-validation failed
- *   "llm_repair_error"      — LLM repair threw (API error, schema error)
- *   "dag_transform_failed"  — LLM repair succeeded but DAG stabilisation failed
+ * Post-removal contract:
+ *  - PLoT validation still runs (normalisation + violation detection).
+ *  - The deterministic fallback (simpleRepair → re-validate → prefer the
+ *    engine's normalised graph) is UNCHANGED — it is the path that rescued
+ *    every delivered turn in the measurement window.
+ *  - Violations neither the sweep nor simpleRepair can fix stay on
+ *    ctx.graph and fail closed at the post-enforcement gate (substep 9b),
+ *    which emits the honest 422 CEE_GRAPH_INVALID with producer-declared
+ *    `retryable: true` + retry-first recovery copy (#845). The fast honest
+ *    failure IS the feature: the user waits ~31s, not ~76s.
+ *  - This substep does NOT set ctx.earlyReturn.
  *
- * This substep does NOT set ctx.earlyReturn — all failure paths fall back to simpleRepair.
+ * The edit path's repair (`repair_edit_graph`, orchestrator/tools/
+ * edit-graph.ts) is a different prompt on a different seam and is NOT
+ * affected by this removal.
  */
 
 import type { StageContext } from "../../types.js";
 import { validateGraph } from "../../../../services/validateClientWithCache.js";
 import { preserveFieldsFromOriginal } from "../../../../routes/assist.draft-graph.js";
 import { simpleRepair } from "../../../../services/repair.js";
-import { getAdapter } from "../../../../adapters/llm/router.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../../../../orchestrator/index.js";
-import { log, emit, calculateCost, TelemetryEvents } from "../../../../utils/telemetry.js";
+import { log } from "../../../../utils/telemetry.js";
 
 /**
  * Coerce a raw violations array from the external PLoT engine into plain strings.
@@ -27,12 +41,10 @@ import { log, emit, calculateCost, TelemetryEvents } from "../../../../utils/tel
  * The PLoT engine's /v1/validate endpoint is declared to return violations?: string[],
  * but the actual runtime payload may contain structured objects
  * { code, severity, level, at?, suggestion? }. Template literal interpolation of an
- * object produces "[object Object]", making the repair prompt useless to the LLM.
- * This function normalises both formats so the LLM always receives readable text.
+ * object produces "[object Object]", making log lines useless.
+ * This function normalises both formats so logs always receive readable text.
  *
  * Output format: "[CODE] at <location>: <message>"
- * This format is a soft contract with the repair prompt — do not change without
- * updating the repair prompt's VIOLATION FORMAT section.
  *
  * Location priority order (deterministic, parseable):
  *   1. at.from + at.to  → "at edge from→to"
@@ -101,9 +113,11 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
   }
 
   const issues = coerceViolations(first.violations);
+  const issueCodes = issues.map((v) => {
+    const match = v.match(/^\[([^\]]+)\]/);
+    return match ? match[1] : "prose";
+  });
 
-  // Repair gating: if deterministic sweep determined LLM repair is not needed,
-  // skip LLM repair but still run PLoT validation for normalization.
   if (ctx.llmRepairNeeded === false) {
     log.info({
       event: "REPAIR_SKIPPED",
@@ -111,174 +125,33 @@ export async function runPlotValidation(ctx: StageContext): Promise<void> {
       remaining_violations: ctx.remainingViolations?.length ?? 0,
       correlation_id: ctx.requestId,
     }, "Skipping LLM repair — deterministic sweep resolved all actionable violations");
-
-    // Still apply simple repair for normalization
-    const repaired = stabiliseGraph(
-      ensureDagAndPrune(simpleRepair(candidate, ctx.requestId), { collector }),
-      { collector },
-    );
-    const second = await validateGraph(repaired);
-    if (second.ok && second.normalized) {
-      const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
-      candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
-    } else {
-      candidate = repaired;
-    }
-
-    ctx.graph = candidate;
-    return;
-  }
-
-  // Budget exceeded → skip LLM repair, use simple repair only
-  if (ctx.skipRepairDueToBudget) {
+  } else {
+    // Bucket-C violations survived the sweep. Pre-2.731 this routed to the
+    // gpt-4.1 `repair_graph` call (0/12 successes, ~44.7s per failed turn).
+    // Now: deterministic normalisation only; anything still blocking fails
+    // closed at the post-enforcement gate (substep 9b) → honest 422
+    // retryable:true.
     log.info({
-      stage: "repair_skipped",
-      violation_count: issues?.length ?? 0,
-      reason: "budget_exceeded",
+      event: "REPAIR_SKIPPED",
+      reason: "llm_repair_removed",
+      violation_count: issues.length,
+      violation_codes: issueCodes,
       correlation_id: ctx.requestId,
-    }, "Skipping LLM repair due to time budget - using simple repair");
-
-    ctx.repairFallbackReason = "budget_exceeded";
-    const repaired = stabiliseGraph(
-      ensureDagAndPrune(simpleRepair(candidate, ctx.requestId), { collector }),
-      { collector },
-    );
-    const second = await validateGraph(repaired);
-    if (second.ok && second.normalized) {
-      const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
-      candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
-    } else {
-      candidate = repaired;
-    }
-
-    emit(TelemetryEvents.RepairFallback, {
-      fallback: "simple_repair",
-      reason: "budget_exceeded",
-      error_type: "none",
-    });
-
-    ctx.graph = candidate;
-    return;
+    }, "LLM repair removed (ROADMAP 2.731) — deterministic normalisation only; unfixable violations fail closed at the post-enforcement gate");
   }
 
-  // LLM-guided repair
-  try {
-    const violationSummary = issues.join("; ").slice(0, 500);
-    const violationCodes = issues.map((v) => {
-      const match = v.match(/^\[([^\]]+)\]/);
-      return match ? match[1] : "prose";
-    });
-    emit(TelemetryEvents.RepairStart, {
-      violation_count: issues.length,
-      violation_summary: violationSummary,
-      violation_codes: violationCodes,
-    });
-
-    const modelOverride = (ctx.input as any).model as string | undefined;
-    const repairAdapter = getAdapter("repair_graph", modelOverride);
-
-    const repairResult = await repairAdapter.repairGraph(
-      {
-        graph: candidate,
-        violations: issues,
-        brief: ctx.effectiveBrief || undefined,
-        docs: (ctx.input as any).docs || undefined,
-        currencyInstruction: ctx.input.currencyInstruction,
-      },
-      { requestId: `repair_${Date.now()}`, timeoutMs: ctx.repairTimeoutMs, signal: ctx.opts.signal },
-    );
-    ctx.llmRepairBriefIncluded = Boolean(ctx.effectiveBrief);
-
-    ctx.repairCost += calculateCost(
-      repairAdapter.model,
-      repairResult.usage.input_tokens,
-      repairResult.usage.output_tokens,
-    );
-
-    // ID preservation check: all input node IDs must be present in repair output.
-    // New IDs may be added (repair can create nodes), but no input ID may be missing.
-    const inputNodeIds = new Set(
-      ((candidate as any).nodes ?? []).map((n: any) => n.id),
-    );
-    const repairNodeIds = new Set(
-      (Array.isArray(repairResult.graph?.nodes) ? repairResult.graph.nodes : []).map((n: any) => n.id),
-    );
-    const missingIds = [...inputNodeIds].filter((id) => !repairNodeIds.has(id));
-    if (missingIds.length > 0) {
-      log.warn({
-        event: "cee.repair.id_preservation_failed",
-        missing_ids: missingIds,
-        input_count: inputNodeIds.size,
-        repair_count: repairNodeIds.size,
-        correlation_id: ctx.requestId,
-      }, `LLM repair removed ${missingIds.length} node ID(s) — rejecting repair`);
-      ctx.repairFallbackReason = "id_preservation_failed";
-      throw new Error(`LLM repair removed node IDs: ${missingIds.join(", ")}`);
-    }
-
-    let repaired: any;
-    try {
-      repaired = stabiliseGraph(
-        ensureDagAndPrune(repairResult.graph, { collector }),
-        { collector },
-      );
-    } catch (dagError) {
-      log.warn({ error: dagError }, "Repaired graph failed DAG validation, using simple repair");
-      ctx.repairFallbackReason = "dag_transform_failed";
-      throw dagError;
-    }
-
-    // Re-validate repaired graph
-    const second = await validateGraph(repaired);
-    if (second.ok && second.normalized) {
-      const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
-      candidate = stabiliseGraph(
-        ensureDagAndPrune(normalizedWithCategory, { collector }),
-        { collector },
-      );
-      emit(TelemetryEvents.RepairSuccess, { repair_worked: true });
-    } else {
-      // Repair didn't fix all issues → fallback to simple repair
-      candidate = stabiliseGraph(
-        ensureDagAndPrune(simpleRepair(repaired, ctx.requestId), { collector }),
-        { collector },
-      );
-      ctx.repairFallbackReason = "revalidation_failed";
-      emit(TelemetryEvents.RepairPartial, {
-        repair_worked: false,
-        fallback_reason: ctx.repairFallbackReason,
-      });
-    }
-  } catch (error) {
-    const errorType = error instanceof Error ? error.name : "unknown";
-    if (!ctx.repairFallbackReason) {
-      ctx.repairFallbackReason = "llm_repair_error";
-    }
-    log.warn(
-      { error, fallback_reason: ctx.repairFallbackReason },
-      "LLM repair failed, falling back to simple repair",
-    );
-
-    const repaired = stabiliseGraph(
-      ensureDagAndPrune(simpleRepair(candidate, ctx.requestId), { collector }),
-      { collector },
-    );
-    const second = await validateGraph(repaired);
-    if (second.ok && second.normalized) {
-      const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
-      candidate = stabiliseGraph(
-        ensureDagAndPrune(normalizedWithCategory, { collector }),
-        { collector },
-      );
-    } else {
-      candidate = repaired;
-    }
-
-    emit(TelemetryEvents.RepairFallback, {
-      fallback: "simple_repair",
-      reason: ctx.repairFallbackReason,
-      error_type: errorType,
-    });
+  // Deterministic normalisation — byte-identical to the pre-2.731 fallback
+  // that rescued every delivered turn in the measurement window.
+  const repaired = stabiliseGraph(
+    ensureDagAndPrune(simpleRepair(candidate, ctx.requestId), { collector }),
+    { collector },
+  );
+  const second = await validateGraph(repaired);
+  if (second.ok && second.normalized) {
+    const normalizedWithCategory = preserveFieldsFromOriginal(second.normalized, repaired);
+    candidate = stabiliseGraph(ensureDagAndPrune(normalizedWithCategory, { collector }), { collector });
+  } else {
+    candidate = repaired;
   }
 
   ctx.graph = candidate;

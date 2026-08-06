@@ -851,9 +851,11 @@ describe("observability", () => {
       ],
       unreachable_factors: { reclassified: ["fac_x"], marked_droppable: [] },
       status_quo: { fixed: false, marked_droppable: false },
-      llm_repair_called: false,
-      llm_repair_brief_included: false,
-      llm_repair_skipped_reason: "deterministic_sweep_sufficient",
+      // llm_repair_called / llm_repair_brief_included /
+      // llm_repair_skipped_reason were deleted with the draft path's LLM
+      // repair (ROADMAP 2.731/2.732). llm_repair_needed survives as the
+      // sweep's own Bucket-C diagnostic.
+      llm_repair_needed: false,
       remaining_violations_count: 0,
       remaining_violation_codes: [],
       edge_format_detected: "V1_FLAT",
@@ -862,7 +864,7 @@ describe("observability", () => {
 
     expect(repairSummary.deterministic_repairs_count).toBe(3);
     expect(repairSummary.unreachable_factors.reclassified).toContain("fac_x");
-    expect(repairSummary.llm_repair_called).toBe(false);
+    expect(repairSummary.llm_repair_needed).toBe(false);
     expect(repairSummary.edge_format_detected).toBe("V1_FLAT");
     expect(repairSummary.graph_delta.nodes_before).toBe(7);
   });

@@ -668,15 +668,19 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
       deterministic_sweep_version: sweepTrace?.sweep_version ?? "unknown",
       bucket_summary: sweepTrace ? (sweepTrace.bucket_summary ?? null) : null,
       status_quo_action: deriveStatusQuoAction(sweepTrace),
+      // Post-2.731 semantics: Bucket-C violations survived the deterministic
+      // sweep. No LLM repair exists to be "needed" any more — this is the
+      // sweep's own diagnostic and predicts the post-enforcement 422 when
+      // the deterministic normalisation cannot clear the violations.
+      // (llm_repair_called / llm_repair_brief_included /
+      // llm_repair_skipped_reason were DELETED with the call — ROADMAP
+      // 2.732; leaving them would have made them constant-wrong.)
       llm_repair_needed: ctx.llmRepairNeeded ?? false,
       // Existing fields
       deterministic_repairs_count: repairs.length,
       deterministic_repairs: repairs,
       unreachable_factors: sweepTrace?.unreachable_factors ?? { reclassified: [], marked_droppable: [] },
       status_quo: sweepTrace?.status_quo ?? { fixed: false, marked_droppable: false },
-      llm_repair_called: ctx.llmRepairNeeded ?? false,
-      llm_repair_brief_included: ctx.llmRepairBriefIncluded ?? false,
-      llm_repair_skipped_reason: ctx.llmRepairNeeded === false ? "deterministic_sweep_sufficient" : undefined,
       remaining_violations_count: ctx.remainingViolations?.length ?? 0,
       remaining_violation_codes: [...new Set((ctx.remainingViolations ?? []).map((v) => v.code))],
       edge_format_detected: ctx.detectedEdgeFormat ?? "NONE",

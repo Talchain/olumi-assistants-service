@@ -48,11 +48,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         LegacySSEPath: "assist.draft.legacy_sse_path",
 
         ValidationFailed: "assist.draft.validation_failed",
-        RepairAttempted: "assist.draft.repair_attempted",
-        RepairStart: "assist.draft.repair_start",
-        RepairSuccess: "assist.draft.repair_success",
-        RepairPartial: "assist.draft.repair_partial",
-        RepairFallback: "assist.draft.repair_fallback",
+        // assist.draft.repair_* quintet DELETED with the draft path's LLM
+        // repair (ROADMAP 2.731/2.732) — see the negative assertions below.
 
         ClarifierRoundStart: "assist.clarifier.round_start",
         ClarifierRoundComplete: "assist.clarifier.round_complete",
@@ -765,13 +762,22 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       expect(TelemetryEvents.LegacySSEPath).toBe("assist.draft.legacy_sse_path");
     });
 
-    it("has validation and repair events for quality tracking", () => {
+    it("has validation events for quality tracking", () => {
       expect(TelemetryEvents.ValidationFailed).toBe("assist.draft.validation_failed");
-      expect(TelemetryEvents.RepairAttempted).toBe("assist.draft.repair_attempted");
-      expect(TelemetryEvents.RepairStart).toBe("assist.draft.repair_start");
-      expect(TelemetryEvents.RepairSuccess).toBe("assist.draft.repair_success");
-      expect(TelemetryEvents.RepairPartial).toBe("assist.draft.repair_partial");
-      expect(TelemetryEvents.RepairFallback).toBe("assist.draft.repair_fallback");
+    });
+
+    it("2.732: the orphaned assist.draft.repair_* events are DELETED, not left constant-wrong", () => {
+      // The draft path's LLM repair was removed (ROADMAP 2.731); its
+      // telemetry went with it. Re-adding any of these keys without a live
+      // emitter would recreate the broken-alarm class this estate hunts.
+      expect((TelemetryEvents as Record<string, unknown>).RepairAttempted).toBeUndefined();
+      expect((TelemetryEvents as Record<string, unknown>).RepairStart).toBeUndefined();
+      expect((TelemetryEvents as Record<string, unknown>).RepairSuccess).toBeUndefined();
+      expect((TelemetryEvents as Record<string, unknown>).RepairPartial).toBeUndefined();
+      expect((TelemetryEvents as Record<string, unknown>).RepairFallback).toBeUndefined();
+      // The adapter-level truncation event survives (gated/legacy consumers
+      // of adapter.repairGraph still exist) — it is NOT part of the quintet.
+      expect(TelemetryEvents.RepairPromptTruncated).toBe("llm.repair_prompt.truncated");
     });
 
     it("has deprecation tracking events", () => {
@@ -791,10 +797,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "draft.sse.completed": [TelemetryEvents.SSECompleted],
         "draft.sse.errors": [TelemetryEvents.SSEError],
         "draft.validation.failed": [TelemetryEvents.ValidationFailed],
-        "draft.repair.attempted": [TelemetryEvents.RepairAttempted, TelemetryEvents.RepairStart],
-        "draft.repair.success": [TelemetryEvents.RepairSuccess],
-        "draft.repair.partial": [TelemetryEvents.RepairPartial],
-        "draft.repair.fallback": [TelemetryEvents.RepairFallback],
+        // draft.repair.* counters removed with the assist.draft.repair_*
+        // events (ROADMAP 2.731/2.732) — dashboards querying them now read a
+        // legitimately-ended series.
         "draft.legacy_provenance.occurrences": [TelemetryEvents.LegacyProvenance],
         "draft.sse.legacy_path": [TelemetryEvents.LegacySSEPath],
         "draft.fixture.shown": [TelemetryEvents.FixtureShown],
@@ -1612,11 +1617,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.draft.fixture_replaced",
         "assist.draft.legacy_sse_path",
         "assist.draft.validation_failed",
-        "assist.draft.repair_attempted",
-        "assist.draft.repair_start",
-        "assist.draft.repair_success",
-        "assist.draft.repair_partial",
-        "assist.draft.repair_fallback",
+        // assist.draft.repair_* quintet deleted — ROADMAP 2.731/2.732
         "assist.draft.guard_violation",
         "assist.draft.legacy_provenance",
         "assist.draft.stage",

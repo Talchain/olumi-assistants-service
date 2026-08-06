@@ -135,7 +135,6 @@ function makeCtx(graph: unknown, brief: string): any {
     goalConstraints: undefined,
     constraintStrpResult: undefined,
     repairCost: 0,
-    repairFallbackReason: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
   };
