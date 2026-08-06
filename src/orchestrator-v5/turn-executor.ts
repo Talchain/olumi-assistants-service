@@ -101,6 +101,16 @@ import {
   buildConsentWithheldText,
   GRAPH_MUTATING_HANDLER_IDS,
 } from './routing/mutation-consent.js';
+// ⭐⭐ MUTATION WARRANT (INV-1, ROADMAP 2.652, 7 Aug 2026). The AFFIRMATIVE
+// half of the consent question — "did the user ask for a change at all?".
+// `detectWithheldConsent` above answers the NEGATIVE half and stands down on a
+// read request, which is how the walk's unrequested constraint write happened.
+// See the two gates below: the STEP 2 demotion, and the commit-closure strip.
+import {
+  detectMutationWarrant,
+  buildMutationWarrantDemotionText,
+  type MutationWarrant,
+} from './routing/mutation-warrant.js';
 import {
   classifyCalibrationMessage,
   buildCalibrationReply,
@@ -188,7 +198,12 @@ import {
   RENDER_SAFE_LABEL_FALLBACK,
   resolveProposalRenderCopy,
   sanitisePublicCopyOrFallback,
+  emitProposedChange,
 } from './compose/proposed-change.js';
+import {
+  buildWarrantDemotion,
+  type PersistedConstraintRow,
+} from './compose/warrant-demotion.js';
 import {
   derivePendingActivity,
   PENDING_ACTION_DEFAULT_TURN_TTL,
@@ -976,6 +991,48 @@ export async function runTurnExecutor(
   // decides, because on that turn the model decided to mutate.
   const consentDirective = detectWithheldConsent(payload.message);
 
+  // ⭐⭐ MUTATION WARRANT (INV-1) — the INGRESS half, evaluated ONCE, from the
+  // turn's own request, BEFORE any model call. Two layers hang off it, exactly
+  // mirroring the withheld-consent pair above:
+  //
+  //   LAYER 1 (product) — STEP 2 DEMOTES a warrantless mutating proposal to the
+  //   propose-confirm channel (chip + pending) instead of executing it. That
+  //   gate adds the third warrant source, `confirm_resume`, which is only known
+  //   once the short-confirm / clarification pre-routes have run.
+  //
+  //   LAYER 2 (guarantee) — `commitTurn` below STRIPS a HANDLER-MUTATED graph
+  //   from any warrantless executor commit. List-free: it names no handler ids
+  //   and no routes, so a future mutating path cannot quietly escape it.
+  //
+  // WHY BOTH (CLAUDE.md trap 12d — the two guard kinds are not redundant):
+  // layer 1 keeps the RESPONSE honest and the change RECOVERABLE (a stripped
+  // commit with no chip would silently lose the user a change they may want);
+  // layer 2 makes the PROPERTY true regardless of layer 1's coverage.
+  //
+  // WITNESSED DEFECT this closes (staging `8687a31`, 6 Aug 2026, walk 2.634
+  // §J7): the user asked "Open the analysis panel and show me the option
+  // comparison" — a pure READ — and the turn wrote a constraint into the model,
+  // reported it "Applied" with no chip, and could not remove the broken
+  // constraint it was "repairing", so one unevaluable constraint became two.
+  //
+  // ⚠ FAIL-SAFE DIRECTION IS INVERTED relative to `consentDirective` — see
+  // `routing/mutation-warrant.ts`. A missed warrant costs one chip click; a
+  // wrongly-granted one is the defect itself. Judgement calls resolve toward
+  // NOT granting.
+  const ingressMutationWarrant: MutationWarrant = detectMutationWarrant(
+    {
+      message: payload.message,
+      turnSource: payload.source,
+      chipActionType: payload.chip?.action_type,
+      // The `confirm_resume` source is unknowable this early — the pre-routes
+      // that consume a pending action have not run. LAYER 1 re-derives with it;
+      // LAYER 2 reads the commit's own `consumedPendingRefs` instead, which is
+      // the same fact recorded on the meta by every consuming site.
+      isConfirmResume: false,
+    },
+    GRAPH_MUTATING_HANDLER_IDS,
+  );
+
   const commitTurn = async (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
@@ -1018,6 +1075,70 @@ export async function runTurnExecutor(
           handler_id: meta.handler_id ?? null,
         },
         'V5 consent backstop — the user withheld consent to apply; refusing the graph write',
+      );
+      meta = { ...meta, graph: undefined };
+    }
+
+    // ⭐⭐ LAYER 2 (INV-1) — THE WARRANT GUARANTEE. Same closure, same
+    // placement rationale, same list-free discipline as the withheld strip
+    // above, and deliberately AFTER it so a withheld turn is recorded as
+    // withheld rather than as warrantless (the user's explicit "do not apply"
+    // is the stronger, more specific fact about the turn).
+    //
+    // THE THREE CONJUNCTS, and why each is the shape it is:
+    //
+    //  1. `!ingressMutationWarrant.granted` — no message signal, no typed
+    //     mutation chip. The third source, `confirm_resume`, is conjunct 2.
+    //
+    //  2. NO consumed pending ref on the commit. This is the DERIVED
+    //     confirm-resume signal, and it is why this layer needs no list of
+    //     resume sites: every path that honours a proposal the user confirmed
+    //     already records the consumed ref on the commit meta (the D1 resume
+    //     sites via `consumedPendingAction`, and both Graph-Management
+    //     held-execute writers via `heldPending.chip_id`). A resume site that
+    //     forgot to record it would be a zombie-chip defect in its own right,
+    //     caught by the carry-forward guard, not silently mis-judged here.
+    //
+    //  3. `handlerEmittedMutatedGraph` — the graph on this commit came from a
+    //     HANDLER MUTATION, not from graph ADOPTION. ⚠ This conjunct is
+    //     load-bearing and was derived, not assumed: `graphForCommit` is NOT
+    //     always a mutation. Its case A ("no-model + incoming + no-mutate →
+    //     ADOPT") persists a request-supplied `graph_state` on a NON-mutating
+    //     turn, so stripping every warrantless graph write — the shape the
+    //     withheld backstop above can safely use, because a withheld turn must
+    //     write nothing at all — would silently refuse to persist a user's
+    //     model on their first read turn. The flag is the executor's own
+    //     existing observation (`handlerOutcome.mutated_graph !== null`), and
+    //     its own comment states the property this layer needs: "handler-id
+    //     strings are not load-bearing here".
+    //
+    // Reaching this branch means a mutating route exists that the STEP 2 gate
+    // does not cover. Fail closed and say so loudly rather than persist a
+    // change the user never asked for.
+    const consumedRefsOnCommit = meta.consumedPendingRefs;
+    const commitResumedAConfirmedProposal =
+      Array.isArray(consumedRefsOnCommit) && consumedRefsOnCommit.length > 0;
+    if (
+      !ingressMutationWarrant.granted &&
+      !commitResumedAConfirmedProposal &&
+      handlerEmittedMutatedGraph &&
+      meta.graph !== undefined &&
+      meta.graph !== null
+    ) {
+      emit(TelemetryEvents.V5MutationWarrantAbsent, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        layer: 'commit_backstop',
+        handler_id: meta.handler_id ?? null,
+      });
+      log.warn(
+        {
+          event: 'v5.warrant.graph_write_stripped',
+          request_id: requestId,
+          scenario_id: context.session_id,
+          handler_id: meta.handler_id ?? null,
+        },
+        'V5 warrant backstop — the user requested no change; refusing the graph write',
       );
       meta = { ...meta, graph: undefined };
     }
@@ -7533,6 +7654,202 @@ export async function runTurnExecutor(
               err: serialiseError(error),
             },
             'V5 TurnExecutor commit failure on recoverable validator path',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      }
+
+      // ⭐⭐ LAYER 1 (INV-1) — THE ACTION-LAYER WARRANT GATE. ROADMAP 2.652.
+      //
+      // ⚠ PLACEMENT IS A CORRECTED PREMISE, AND THE CORRECTION IS MEASURED.
+      // The 2.652 trace prescribed the STEP-2 convergence chokepoint — where
+      // the withheld-consent gate sits, ahead of `validateToolCall`. That is
+      // right for WITHHELD consent (the user said do not touch it, so we should
+      // not even validate) and WRONG here, because the two gates want opposite
+      // things from a bad proposal: withheld consent wants to refuse it,
+      // whereas a warrant miss wants to OFFER it. Offering a change the
+      // validator would have rejected mints a chip that cannot be honoured.
+      //
+      // Measured at `a3944b9a`: placed pre-validate, this gate pre-empted the
+      // execute-chokepoint refusals (`OPTION_INTERVENTION_MISROUTE`,
+      // `VALUE_UNIT_UNRESOLVED`, `HANDLER_NOT_FOUND`, `PRECONDITION_UNMET`) and
+      // turned their specific clarifies into a generic offer — 15 of the 37
+      // failures in the first full-gate run. Here, every existing refusal path
+      // keeps its refusal and only a VALIDATED mutating proposal is demoted.
+      //
+      // The convergence property the trace relied on is unchanged: every
+      // proposal route (Sonnet-routed, deterministic value update, deictic,
+      // compound, typed-chip, clarification-resume, short-confirm) converges on
+      // `routingResult.proposal.action` upstream and passes through STEP 2, and
+      // nothing between STEP 2 and here can mutate. `action` at this point is
+      // additionally the RESOLVED proposal (post relative-delta resolution), so
+      // the chip describes what would actually be applied.
+      //
+      // ⚠ ORDER IS STILL LOAD-BEARING with respect to withheld consent, which
+      // returns far above this line: a user who said "don't apply this yet"
+      // gets the withheld answer even if their message ALSO carries a mutation
+      // signal. Withhold beats warrant.
+      //
+      // THE THIRD WARRANT SOURCE IS ONLY KNOWABLE HERE. `consumedPendingAction`
+      // is set by the short-confirm / ordinal / label / clarification resumes,
+      // all of which run upstream of this line — so the ingress warrant is
+      // re-derived with `isConfirmResume` rather than reused. A turn that
+      // resumed a proposal the user confirmed carries its warrant from the
+      // turn that emitted it.
+      //
+      // WHAT HAPPENS ON A MISS: the proposal is DEMOTED to the propose-confirm
+      // channel — the same `emitProposedChange` chip + pending the flip-
+      // threshold seam uses — never executed, and never dropped. The witnessed
+      // defect wrote the change and reported "Applied" with no chip; the
+      // opposite failure (silently discarding a change the user did want) would
+      // be its own defect, which is why this branch offers rather than refuses.
+      const warrantForTurn = detectMutationWarrant(
+        {
+          message: payload.message,
+          turnSource: payload.source,
+          chipActionType: payload.chip?.action_type,
+          isConfirmResume: consumedPendingAction !== null,
+        },
+        GRAPH_MUTATING_HANDLER_IDS,
+      );
+      // REGISTRY-EXECUTABLE PRECONDITION, in parity with the typed-chip and
+      // deterministic value-update pre-routes. If the handler cannot run on
+      // this executor, there is nothing to offer: a chip would promise a change
+      // the resumer could never honour, and the existing dispatch-level
+      // `handler_not_registered` → FEATURE_NOT_ENABLED path is the honest
+      // outcome. Stand down and let it fire. (Measured: without this, the
+      // registry-miss invariant test lost its typed error to a generic offer.)
+      const warrantGateHandlerExecutable =
+        resolveHandler(options.handlerRegistry ?? getDefaultRegistry(), proposedHandlerId) !== null;
+      if (
+        !warrantForTurn.granted &&
+        warrantGateHandlerExecutable &&
+        GRAPH_MUTATING_HANDLER_IDS.has(proposedHandlerId)
+      ) {
+        // INV-2 input: the constraints already on the persisted model, so the
+        // demotion can disclose which of them this "repair" would NOT remove.
+        const existingConstraints: readonly PersistedConstraintRow[] = (() => {
+          const source = (context.persistedGraph ?? graphStateForTurn) as
+            | { goal_constraints?: unknown }
+            | null
+            | undefined;
+          const rows = source?.goal_constraints;
+          return Array.isArray(rows) ? (rows as readonly PersistedConstraintRow[]) : [];
+        })();
+
+        const demotion = buildWarrantDemotion(action, existingConstraints);
+        const graphHashForProposal =
+          currentAnalysisGraphHashForTurn ?? freshness?.current_graph_hash ?? null;
+
+        let demotionChips: SuggestedAction[] = [];
+        let demotionPending: PendingAction[] = [];
+        let demotionOutcome: string;
+        let demotionText: string;
+
+        if (!demotion.ok) {
+          // A mutating handler outside the three proposable intents. There is
+          // no chip channel for it, so the honest outcome is a refusal that
+          // says nothing was changed — never an execution.
+          demotionOutcome = `emit_refused:${demotion.reason}`;
+          demotionText = buildMutationWarrantDemotionText(
+            'that change to your model',
+            null,
+          );
+        } else if (graphHashForProposal === null) {
+          // `emitProposedChange` needs the analysis-affecting graph hash for
+          // the pending action's drift precondition. Without it a chip could
+          // be honoured against a graph it was never computed for, so we
+          // decline to emit rather than emit an unguarded one.
+          demotionOutcome = 'emit_refused:no_graph_hash';
+          demotionText = buildMutationWarrantDemotionText(
+            demotion.changeDescription,
+            demotion.residualDisclosure,
+          );
+        } else {
+          const emitted = emitProposedChange(demotion.proposal, {
+            scenario_id: context.session_id,
+            graph_hash: graphHashForProposal,
+            emitted_at_iso: new Date().toISOString(),
+            registry: options.handlerRegistry ?? getDefaultRegistry(),
+          });
+          if (emitted.status === 'success') {
+            demotionOutcome = 'offered';
+            demotionChips = [emitted.chip];
+            demotionPending = [emitted.pending];
+          } else {
+            // Copy or intent refused at emit. The change is not offered, but
+            // it is still NOT applied — and the telemetry says which, so a
+            // silent drop is visible rather than looking like a clean refusal.
+            demotionOutcome =
+              emitted.status === 'unsafe_copy'
+                ? `emit_refused:unsafe_copy:${emitted.field}`
+                : 'emit_refused:unknown_intent';
+          }
+          demotionText = buildMutationWarrantDemotionText(
+            demotion.changeDescription,
+            demotion.residualDisclosure,
+          );
+        }
+
+        emit(TelemetryEvents.V5MutationWarrantAbsent, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          layer: 'step2_gate',
+          handler_id: proposedHandlerId,
+          demotion: demotionOutcome,
+        });
+
+        const demotionResponse = composeAnswer({
+          answerKind: 'functional',
+          assistant_text: demotionText,
+          stage: context.stage,
+          suggested_actions: demotionChips,
+        });
+        sonnetTextForLog = demotionResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        // `orient` and `validate` are already recorded — this gate runs AFTER
+        // STEP 2, so re-pushing them would overstate what the turn did.
+        stagesCompleted.push('compose');
+
+        try {
+          // `handler_id: null` and `handler_facts: []` are the honest record:
+          // no handler ran. No `graph` is passed, so nothing is persisted —
+          // and `commitTurn`'s layer-2 strip would refuse one anyway.
+          const committed = await commitTurn(demotionResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: llmCallsUsed,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            pending_actions: demotionPending,
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              err:
+                error instanceof Error
+                  ? { name: error.name, message: error.message }
+                  : { message: String(error) },
+            },
+            'V5 TurnExecutor: commit failed on warrant-absent demotion',
           );
           failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
           response = buildFailureResponse(

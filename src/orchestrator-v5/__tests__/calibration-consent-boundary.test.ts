@@ -440,6 +440,28 @@ describe('CALIBRATION CONSENT BOUNDARY: "show me before applying" is enforced by
  * the situation the backstop exists for: a mutating route the STEP 2 gate's
  * enumeration does not know about.
  */
+/**
+ * ⚠ MESSAGE CHANGED 2026-08-07 (ROADMAP 2.652 / INV-1), and the change is
+ * deliberately shared by BOTH tests in this block so the consent clause stays
+ * the ONLY variable between them.
+ *
+ * The pair used to read 'Run the analysis.' / 'Run the analysis, but show me
+ * the numbers before applying anything.'. INV-1 added a second commit-closure
+ * backstop that strips a HANDLER-MUTATED graph on a turn where the user asked
+ * for no change — and 'Run the analysis.' asks for no change, so the CONTROL
+ * (which relies on a deliberately-misbehaving `run_analysis` handler emitting a
+ * `mutated_graph`) stopped persisting for the new reason instead of the old one.
+ *
+ * Adding a mutation request to both messages restores the control's premise
+ * without weakening either test: the control still proves the harness reaches
+ * the commit path with this unlisted handler, and the backstop test still
+ * proves the WITHHELD strip fires, because the consent clause remains the sole
+ * difference. Exempting `run_analysis` from the warrant backstop by name was
+ * the alternative and was rejected — that is the hand-maintained list this
+ * estate keeps being bitten by (CLAUDE.md trap 12).
+ */
+const LAYER2_CONTROL_MESSAGE = 'Update the model and run the analysis.';
+
 describe('LAYER 2 — the commit backstop, with LAYER 1 bypassed', () => {
   /** A `run_analysis` handler that (wrongly) mutates the graph. */
   function mutatingUnlistedHandlerRegistry(mutated: unknown) {
@@ -492,7 +514,7 @@ describe('LAYER 2 — the commit backstop, with LAYER 1 bypassed', () => {
         .mockImplementation(async () => mkToolUseResult(runAnalysisProposal())),
     };
 
-    await runTurnExecutor(payload('Run the analysis.'), 'req-layer2-control', {
+    await runTurnExecutor(payload(LAYER2_CONTROL_MESSAGE), 'req-layer2-control', {
       routingAdapter,
       graphState: buildChurnGraph(),
       handlerRegistry: mutatingUnlistedHandlerRegistry(mutated) as never,
@@ -513,7 +535,7 @@ describe('LAYER 2 — the commit backstop, with LAYER 1 bypassed', () => {
     };
 
     await runTurnExecutor(
-      payload('Run the analysis, but show me the numbers before applying anything.'),
+      payload(`${LAYER2_CONTROL_MESSAGE} But show me the numbers before applying anything.`),
       'req-layer2-backstop',
       {
         routingAdapter,

@@ -2205,6 +2205,33 @@ export const TelemetryEvents = {
   // (0.70) belonged.
   V5CalibrationConsentWithheld: "v5.turn_executor.calibration_consent_withheld",
 
+  // ⭐⭐ V5MutationWarrantAbsent (INV-1, ROADMAP 2.652) — a graph-mutating
+  // proposal arrived on a turn carrying NO affirmative mutation warrant: the
+  // user's message asked for no change, they clicked no typed mutation chip,
+  // and the turn resumed no proposal they had confirmed. The action layer
+  // DEMOTED it to the propose-confirm channel instead of applying it.
+  //
+  // The AFFIRMATIVE twin of V5CalibrationConsentWithheld above. That event
+  // fires when the user said "do not apply"; this one fires when the user said
+  // nothing about applying at all — the case the walk witnessed live on
+  // `8687a31` ("Open the analysis panel and show me the option comparison" →
+  // "Added constraint: ... Applied", no chip).
+  //
+  // Emitted at TWO layers, distinguished by `layer`:
+  //   - 'step2_gate'      — demoted BEFORE validate/execute; the user got a
+  //                         chip offering the change. This is the product
+  //                         behaviour and a healthy non-zero rate.
+  //   - 'commit_backstop' — a handler mutation reached the commit closure
+  //                         anyway and its graph write was stripped. This
+  //                         should be UNREACHABLE; a non-zero rate means a
+  //                         mutating route exists that the STEP 2 gate does
+  //                         not cover, and is a defect, not noise.
+  // Payload carries `handler_id` and, on the gate layer, `demotion` — whether
+  // the proposal was successfully offered as a chip (`offered`) or the emit
+  // helper refused the copy (`emit_refused:<reason>`), so a demotion that
+  // silently DROPS a change is visible rather than looking like a clean refusal.
+  V5MutationWarrantAbsent: "v5.turn_executor.mutation_warrant_absent",
+
   // PR #414 review — F3 fail-open fallback visibility. The STEP 7 commit
   // chokepoint re-projects the committed D1 graph (wire `analysis_ready` +
   // the egress label graph) through GraphV3; when that parse FAILS the turn
