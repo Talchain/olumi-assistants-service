@@ -24,11 +24,7 @@
  */
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
-import {
-  MIN_TIMEOUT_MS,
-  ORCHESTRATOR_TIMEOUT_MS,
-  PLOT_VALIDATE_TIMEOUT_MS,
-} from '../../config/timeouts.js';
+import { MIN_TIMEOUT_MS, PLOT_VALIDATE_TIMEOUT_MS } from '../../config/timeouts.js';
 import { getTurnExecutorBudgets } from '../budgets.js';
 import type {
   ChatWithToolsArgs,
@@ -94,7 +90,21 @@ export interface StructuralEditComposeInput {
   readonly maxPatchOperations: number;
   readonly requestId: string;
   readonly scenarioId: string;
-  readonly timeoutMs?: number;
+  /**
+   * ⚠ REQUIRED, and that is the fix (ROADMAP 2.684).
+   *
+   * It was `timeoutMs?: number` with a module-local default behind the `??`,
+   * so "the dispatcher never passes one" was not a type error, was not a test
+   * failure, and was not visible anywhere — it was simply the behaviour. Two
+   * budget fixes shipped against this file without either of them making the
+   * caller pass a budget, because nothing could see that it didn't. Making the
+   * parameter required turns that entire defect class into a COMPILE ERROR: no
+   * caller can reach this function without having derived a deadline.
+   *
+   * There is deliberately no fallback. A default here would be a static value,
+   * and the whole finding of witness #3 is that no static value can be right.
+   */
+  readonly timeoutMs: number;
   readonly signal?: AbortSignal;
 }
 
@@ -116,78 +126,150 @@ const COMPOSER_SYSTEM_PROMPT =
 const COMPOSER_MAX_TOKENS = 4000;
 
 /**
- * ROADMAP 2.665 (CEE half) — the composer's call budget, DERIVED from the turn
- * ladder rather than declared as a literal.
+ * What still has to happen on this turn AFTER the composer returns, charged at
+ * its only bounded cost.
  *
- * ⚠ WHAT WAS HERE AND WHY IT WAS THE BUG. This was
- * `const COMPOSER_DEFAULT_TIMEOUT_MS = 60_000`, justified by "matches the edit
- * pipeline's own ORCHESTRATOR_TIMEOUT_MS posture". The posture claim was true
- * and the CONSEQUENCE was not: `edit-graph-dispatch.ts` passes neither
- * `timeoutMs` nor `signal`, so this constant WAS the whole bound, and the
- * composer was killed at 60.0s deterministically (witnessed 2/2 on the
- * 2.634/2.655 walk) — returning `unavailable: call_failed` every time, which is
- * why `decision=engaged` has never once been reached. The rulebook that ran
- * ahead of it then supplied the user's final answer, which is the #829 shape.
+ * The composer's success path re-enters `handleEditGraph` with
+ * `preComposedOperations`, which SKIPS the LLM call entirely
+ * (edit-graph.ts:2090) — so the apply's only bounded cost is the PLoT gate.
+ * DERIVED from that constant rather than restated next to it: raise the PLoT
+ * validate timeout on Render and this reserve rises with it.
  *
- * THE LADDER THIS SITS IN, derived at the bytes, not restated from a comment:
+ * ⚠ DISCLOSED, not silently assumed: the commit that follows the apply is
+ * charged AT MEASUREMENT, not at a bound, because it has no bounded constant to
+ * charge it at. `turn_ms` is itself already `proxy − TURN_RESPONSE_HEADROOM_MS`
+ * (10,000), so the serialisation headroom is inside the deadline this reserve
+ * is measured against; the commit's Supabase writes are not. They were ~2.0s on
+ * both witness #3 attempts (composer end → boundary.response), comfortably
+ * inside that 10,000 — but that is a measurement, not a guarantee, and it is
+ * recorded here so the next person does not read this reserve as one.
+ */
+export const COMPOSER_POST_CALL_RESERVE_MS = PLOT_VALIDATE_TIMEOUT_MS;
+
+/**
+ * The composer's budget, or the honest finding that there is none left.
  *
- *   proxy deadline            `config.proxy.browserProxyTimeoutMs`   125,000
- *   V5 turn abort  turn_ms  = min(TURN_BUDGET_MS, proxy − 10,000)    115,000
- *     ├─ rulebook  `handleEditGraph`  ORCHESTRATOR_TIMEOUT_MS         30,000
- *     │            ⚠ PER ATTEMPT, and it makes up to
- *     │            `config.cee.maxRepairRetries + 1` = 2 of them
- *     │            (edit-graph.ts:2041) — see the charging note below
- *     ├─ composer  THIS CALL                                          ← here
- *     └─ apply     `handleEditGraph({ preComposedOperations })`
- *                  — SKIPS the LLM call entirely (edit-graph.ts:2090), so its
- *                    only bounded cost is the PLoT gate               5,000
+ * `exhausted` is not an error and not a refusal of the user's request — it is
+ * the turn running out of time before the composer could be given a usable
+ * window. The caller must decline, and must never present it as a judgement
+ * about the edit.
+ */
+export type StructuralEditComposerBudget =
+  | {
+      readonly kind: 'available';
+      /** What to give the call. Always ≥ MIN_TIMEOUT_MS. */
+      readonly timeoutMs: number;
+      /** Time to the turn deadline at the moment of the derivation. */
+      readonly remainingMs: number;
+    }
+  | {
+      readonly kind: 'exhausted';
+      /** Time to the turn deadline. May be negative: the deadline has passed. */
+      readonly remainingMs: number;
+    };
+
+/**
+ * ROADMAP 2.684 — the composer's budget is THE TURN'S ACTUAL REMAINING TIME.
  *
- * ⚠ TWO TERMS ARE DELIBERATELY CHARGED AT MEASUREMENT RATHER THAN AT THEIR
- * BOUND, and that is a decision on the record, not an oversight:
+ * ── WHY NEITHER PREDECESSOR WORKED, because both were reasonable ───────────
  *
- *   1. The V5 ROUTING call ahead of this handler (a second
- *      ORCHESTRATOR_TIMEOUT_MS) is not charged at all.
- *   2. The rulebook is charged ONE attempt, not its worst-case TWO.
+ * #829-era: `const COMPOSER_DEFAULT_TIMEOUT_MS = 60_000`. The dispatcher passed
+ * nothing, so that literal WAS the bound, and the composer was killed at 60.0s
+ * deterministically (witnessed 2/2).
  *
- * WHY. Charging both at their bounds gives 115,000 − 60,000 − 30,000 − 5,000 =
- * 20,000 — LESS than the 60,000 that was already here and demonstrably too
- * small, so a "fix" derived that way would ship a composer that still cannot
- * fire. The ladder is already over-subscribed before this path spends anything
- * (routing 30,000 + getHandlerBudgetMs() 85,000 = turn_ms EXACTLY), and
- * `config/timeouts.ts` records the identical situation for decision_review and
- * resolves it the identical way: "a ceiling derived from the nominal ladder
- * alone would be 0 and therefore useless". The second rulebook attempt is also
- * the least likely term to co-occur with this call — the composer only runs
- * when the rulebook produced NO operations, whereas the repair round exists for
- * a batch that failed validation.
+ * #842: a DERIVED static ceiling,
+ * `max(MIN_TIMEOUT_MS, turn_ms − ORCHESTRATOR_TIMEOUT_MS − PLOT_VALIDATE_TIMEOUT_MS)`
+ * = 80,000 at repo defaults. Correct arithmetic. It shipped, and witness #3
+ * measured the composer killed at **5.008s and 5.006s** — WORSE than the
+ * literal it replaced. Cause, measured at the deployed bytes: the Render
+ * dashboard carries `ORCHESTRATOR_TIMEOUT_MS=150000`, five times the 30,000
+ * code default the arithmetic assumed, so `115,000 − 150,000 − 5,000` = −40,000
+ * and the floor clamped it to 5,000. That is trap 18 — the deployed env is not
+ * the YAML and is not the code default — breaking a derivation that was right
+ * about everything except which numbers the box holds.
  *
- * CONSEQUENCE, STATED PLAINLY SO NOBODY READS MORE INTO THIS THAN IT PROVES:
- * this is an upper bound on the ONE-ATTEMPT HANDLER CHAIN, NOT a sufficiency
- * proof for the whole turn. A turn whose routing burns its full 30s, or whose
- * rulebook takes its repair round, can still reach the outer abort. That is a
- * pre-existing property of the ladder which this change neither causes nor
- * fixes; making it go away needs the turn deadline plumbed into this call
- * (`composeStructuralEdit` already accepts a `signal` the dispatcher never
- * passes), which is a larger, separate piece of work.
+ * ── THE TWO INVARIANTS THAT REPLACE THEM ──────────────────────────────────
  *
- * WHY DERIVED AND NOT SIMPLY A BIGGER NUMBER. Both ends of every relationship
- * above are env-overridable on Render. A literal raised to 80,000 would be
- * correct at repo defaults and would silently escape the turn the moment
- * BROWSER_PROXY_TIMEOUT_MS was lowered — the hand-maintained mirror, whose
- * symptom is a generic TURN_BUDGET_EXCEEDED with nothing naming the cause.
- * Deriving makes that drift impossible by construction: lower the proxy
- * deadline and this budget falls in lockstep, pinned by U2-3 in
- * `budget-timeout-invariants.test.ts`.
+ * I-A. NO STATIC VALUE CAN BE RIGHT, so this derives no ceiling at all. It asks
+ * one question — how long until this turn must have answered? — and hands the
+ * rest to the composer minus what still has to happen after it. A static
+ * ceiling is blind to what the turn ALREADY SPENT: witness #3 measured ~62s of
+ * edit_graph + repair ahead of the composer, so even a perfect 80,000 ceiling
+ * would have authorised a call that could not finish inside the turn. Remaining
+ * time cannot be blind to that, because consumed time is precisely what it
+ * measures.
+ *
+ * I-B. THE ARITHMETIC READS NO ENV CONSTANT WHOSE DEPLOYED VALUE CAN SILENTLY
+ * DIVERGE. `ORCHESTRATOR_TIMEOUT_MS` is GONE from this file. It never belonged:
+ * it is the per-call cap on the rulebook's LLM call, not a description of the
+ * turn's shape, and setting it to 150,000 on the dashboard does not lengthen
+ * the turn by one millisecond — it only made a formula that subtracted it
+ * believe the turn was over. Subtracting a parallel constant is a claim about
+ * the deployment that the deployment never agreed to.
+ *
+ * ⚠ AND THE OBVIOUS ALTERNATIVE FIX IS A TRAP, so it is closed here in writing:
+ * "just set ORCHESTRATOR_TIMEOUT_MS back to 30,000 on the dashboard" WOULD
+ * repair this formula and BREAK the live product. The 2.684 archaeology read
+ * the deployed env from the Render API and traced every consumer at
+ * `e8fcb4f2`: the key is the V5 ROUTING call's per-call LLM budget
+ * (`routing/route-with-tool-use.ts:578`, and its retry window at `:799`) and
+ * the edit_graph tool's own call budget (`orchestrator/tools/edit-graph.ts:2024`).
+ * Lowering it 150,000 → 30,000 cuts the live routing budget by five-sixths.
+ * The value is load-bearing somewhere else entirely, which is exactly why a
+ * formula here must not depend on it — and why the fix had to be this one and
+ * not a dashboard edit. (Its provenance is UNTRACEABLE: set by hand in the
+ * dashboard between 2026-02-07 and 2026-04-11, no commit, PR, YAML or handover
+ * entry records it; Render's API exposes no env-change events. It is also on
+ * cee-demo, identically. Rowed as a question for Paul, not a change.)
+ *
+ * The one env-bearing term that remains is `turn_ms`, and it qualifies because
+ * it is not parallel to anything: it is the value the turn executor itself
+ * arms its abort with (`setTimeout(() => turnAbort.abort(), budgets.turn_ms)`,
+ * turn-executor.ts), clamped by `clampTurnBudgetToProxyDeadline` to the browser
+ * proxy's real deadline. Raise it or lower it and the turn's actual lifetime
+ * moves with it. That is the whole test: the value that ends the turn is the
+ * value the budget is measured against.
+ *
+ * ⚠ SCOPE, STATED PRECISELY BECAUSE THE OVERCLAIM IS AVAILABLE HERE. On the
+ * edit_graph path `turn_ms` is a DEADLINE, not an abort. This path runs through
+ * `route-v2.ts` → `dispatchEditGraph` and never enters the turn executor, so no
+ * `turnAbort` fires on it; what actually cuts it off is the browser proxy at
+ * `browserProxyTimeoutMs` (125,000), which `turn_ms` is derived to sit 10,000
+ * below precisely so CEE answers first with its own typed error. Measuring
+ * against `turn_ms` therefore means "answer before the proxy gives up on you",
+ * which is the deadline that matters to the user, and it is strictly the safer
+ * of the two. It is NOT the claim that something aborts this call at turn_ms.
+ *
+ * ── WHY A FLOOR-HIT NOW MEANS DECLINE, NOT A DOOMED CALL ──────────────────
+ * The old floor was a clamp: below the minimum, fire a 5s call anyway. Witness
+ * #3 is what that looks like from the user's chair — a guaranteed
+ * `UpstreamTimeoutError` dressed as an attempt, 5s of the user's time spent to
+ * learn nothing. `exhausted` says the true thing instead, and the caller
+ * declines through `compose_unavailable` without paying for a call that cannot
+ * finish. The floor stays as a sanity minimum; it no longer manufactures
+ * failures.
  *
  * Read at CALL TIME, never at module load, so an env rotation on the deployed
  * instance is honoured without a restart (the `getTurnExecutorBudgets` posture).
+ *
+ * @param input.requestStartMs Wall-clock baseline of the HTTP request, threaded
+ *   from `route-v2.ts`'s `routeStartedAt`. The REQUEST's start, not the
+ *   dispatcher's: pre-flight, ingress parse and scenario upsert all happen
+ *   before the dispatcher and all spend the same deadline.
+ * @param input.nowMs Injectable clock. Tests only; defaults to `Date.now()`.
  */
-export function resolveComposerTimeoutMs(): number {
+export function resolveComposerBudget(input: {
+  readonly requestStartMs: number;
+  readonly nowMs?: number;
+}): StructuralEditComposerBudget {
   const { turn_ms } = getTurnExecutorBudgets();
-  return Math.max(
-    MIN_TIMEOUT_MS,
-    turn_ms - ORCHESTRATOR_TIMEOUT_MS - PLOT_VALIDATE_TIMEOUT_MS,
-  );
+  const nowMs = input.nowMs ?? Date.now();
+  const remainingMs = input.requestStartMs + turn_ms - nowMs;
+  const timeoutMs = remainingMs - COMPOSER_POST_CALL_RESERVE_MS;
+  if (timeoutMs < MIN_TIMEOUT_MS) {
+    return { kind: 'exhausted', remainingMs };
+  }
+  return { kind: 'available', timeoutMs, remainingMs };
 }
 
 /**
@@ -219,7 +301,9 @@ export async function composeStructuralEdit(
       },
       {
         requestId: input.requestId,
-        timeoutMs: input.timeoutMs ?? resolveComposerTimeoutMs(),
+        // No `??` fallback, deliberately — see the `timeoutMs` jsdoc. Every
+        // caller derives a deadline or does not compile.
+        timeoutMs: input.timeoutMs,
         ...(input.signal !== undefined ? { signal: input.signal } : {}),
       },
     );

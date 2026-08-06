@@ -42,6 +42,12 @@ function baseInput(chatWithTools: unknown) {
     maxPatchOperations: 15,
     requestId: 'req-1',
     scenarioId: 'scn-1',
+    // ROADMAP 2.684 — REQUIRED since the deadline was plumbed in. A fixed
+    // value here is right: these cases are about the transport contract (one
+    // call, reject-don't-repair), not about the budget. The budget's own
+    // derivation is pinned in `budget-timeout-invariants.test.ts` and its
+    // plumbing in `structural-edit-deadline-plumbing.test.ts`.
+    timeoutMs: 60_000,
   };
 }
 
