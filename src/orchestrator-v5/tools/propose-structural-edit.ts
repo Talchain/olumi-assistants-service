@@ -719,7 +719,32 @@ export function buildProposeStructuralEditTool(grounding: StructuralEditGroundin
               },
               value: {
                 type: 'object',
-                additionalProperties: true,
+                // ⭐⭐ ROADMAP 2.655 — `additionalProperties: true` WAS HERE, AND
+                // IT 400'd EVERY SINGLE CALL. Measured in the cee-staging logs,
+                // 2026-08-05T14:34Z .. 2026-08-06T03:19Z: EIGHTEEN attempts,
+                // eighteen identical rejections, ZERO `engaged` entries — so
+                // the 2.474/A3 splitter had never once composed on staging.
+                // The API's words, verbatim:
+                //
+                //   tools.0.custom: For 'object' type, 'additionalProperties:
+                //   true' is not supported. Please set 'additionalProperties'
+                //   to false
+                //
+                // The walk's own turn is in that window (03:18:29 and
+                // 03:19:15), which is why the canonical compound edit received
+                // the pre-split dead end months after the split shipped: the
+                // feature was dead at the transport, and the dispatcher's
+                // decline path then handed the turn back to the rulebook's
+                // refusal (the other half of 2.655).
+                //
+                // ⚠ THE KEY IS OMITTED, NOT SET TO FALSE. `false` would forbid
+                // every field, and this object declares NO properties by
+                // design: it is the open bag of node/edge content, whose real
+                // contract is `validateProposedStructuralEdit` below (the
+                // JSONSchema here is DESCRIPTIVE, as this file's header says).
+                // Setting it to `false` would turn a 400 into a tool that can
+                // only ever emit `{}` — a working call composing nothing, which
+                // is strictly harder to notice than the crash.
                 description:
                   'The new content. add_node: {kind, label, ...}. add_edge: ' +
                   '{from, to, strength, exists_probability, effect_direction}. ' +
