@@ -568,8 +568,11 @@ describe('⭐⭐ 2.655 — NO decline of the structural-edit tool resurrects the
       });
 
       it('nothing is applied — a decline is still a decline', async () => {
-        const result = await runWalkTurn();
-        expect(result.response.graph ?? null).toBeNull();
+        await runWalkTurn();
+        // Bound to the APPLIER, not to a response field: the claim is that no
+        // batch reached `handleEditGraph`, which is what "nothing was applied"
+        // actually means at this seam.
+        expect(preComposedCalls()).toHaveLength(0);
       });
     });
   }
