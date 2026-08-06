@@ -245,7 +245,7 @@ export class SupabaseSessionStore implements SessionStore {
     // this is what keeps the DEFAULT path byte-identical to today AND safe
     // against the un-migrated schema (v3 need not exist). See GraphCasRpcMode.
     const rpcMode: GraphCasRpcMode = this.options.graphCasRpc ?? 'off';
-    const useV3 = rpcMode !== 'off' && write.graph != null;
+    // (`useV3` is derived where it is used — inside dispatchCheckedAppend.)
 
     // ── V5 TURN FENCE — the last thing before the write ────────────────────
     // Placed HERE, after every argument is built and with nothing between it

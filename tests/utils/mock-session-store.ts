@@ -107,6 +107,10 @@ export function createMockSessionStore(
     readMostRecentPendingActions: async () => [],
     readMostRecentCoachingState: async () => null,
     hasPriorTurns: async () => false,
+    // ROADMAP 2.709 — the drift alarm fired again for these three, as designed.
+    hasOtherAdmittedLiveTurn: async () => false,
+    scenarioDraftLossStands: async () => false,
+    markGraphWriteFailed: async () => undefined,
   };
   return { ...complete, ...overrides };
 }

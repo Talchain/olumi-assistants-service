@@ -477,7 +477,9 @@ describe('first-write exemption — CHECKED path (v4 not migrated)', () => {
     const store = makeStore(backend.client);
     const { draftGen } = phantomSetup(backend);
     // Break the scenarios read only.
-    const realFrom = (backend.client.from as ReturnType<typeof vi.fn>).getMockImplementation()!;
+    const realFrom = (backend.client.from as ReturnType<typeof vi.fn>).getMockImplementation()! as (
+      table: string,
+    ) => unknown;
     (backend.client.from as ReturnType<typeof vi.fn>).mockImplementation(((table: string) => {
       if (table === 'scenarios') {
         return {
