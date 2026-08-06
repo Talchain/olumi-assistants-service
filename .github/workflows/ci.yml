@@ -343,22 +343,41 @@ jobs:
       # the unit-tests job blocks the half-migration in either direction.
       # Auditing from the committed lockfile needs no NPM_PACKAGES_TOKEN.
       - name: Check for duplicate files (prevents drift from shadow copies)
-        run: |
-          # Fail if any duplicate-pattern files exist in tracked files
-          # Only match delimited patterns to avoid false positives (e.g., "deepcopy.ts" is legitimate)
-          PATTERNS=('* 2.ts' '* 2.js' '* copy.ts' '* copy.js' '*_copy.ts' '*_copy.js' '*-copy.ts' '*-copy.js')
-          FOUND_FILES=""
-          for pattern in "${PATTERNS[@]}"; do
-            MATCHES=$(git ls-files "$pattern" 2>/dev/null || true)
-            if [ -n "$MATCHES" ]; then
-              FOUND_FILES="$FOUND_FILES$MATCHES"$'\n'
-            fi
-          done
-          if [ -n "$FOUND_FILES" ]; then
-            echo "ERROR: Duplicate files detected (shadow copies create drift risk):"
-            echo "$FOUND_FILES"
-            exit 1
-          fi
+        # ROADMAP 2.660. This used to be eight inline globs — '* 2.ts', '* 2.js',
+        # '* copy.*', '*_copy.*', '*-copy.*' — under a comment claiming they were
+        # "delimited patterns to avoid false positives". A hyphen is NOT a
+        # delimiter inside a kebab-case filename, and kebab-case is this repo's
+        # dominant convention, so '*-copy.ts' convicted any module whose SUBJECT
+        # is user-facing copy. It hard-failed PR #835 on
+        # `structural-edit-decline-copy.ts`; that PR renamed the module (63bdd0f4)
+        # to route around a guard that was simply wrong about it. '*_copy.*' had
+        # the identical defect for snake_case.
+        #
+        # The script replaces the pattern list with the property a shadow copy
+        # actually has: its basename minus a duplication suffix names an EXISTING
+        # TRACKED SIBLING in the same directory. It derives the file list from
+        # `git ls-files -z` (NUL-safe — this repo carries NUL-bearing sources),
+        # and it is STRICTLY STRONGER than what it replaces: it scans every
+        # tracked file rather than a .ts/.js allowlist (most of both real
+        # cleanups here were .md/.json/.yml), catches extensionless artefacts and
+        # ` copy 2` chains, and hard-fails if it ever reads zero tracked files
+        # rather than reporting a clean tree. Full derivation of what actually
+        # happened in this repo — 228 artefact path-events, all of them the
+        # macOS/Finder `<name> 2.<ext>` shape, none ever `-copy`/`_copy` — is in
+        # the script header, with the orphan trade-off stated.
+        #
+        # Node-builtins only, no deps: this job deliberately runs NO pnpm install.
+        run: node scripts/ci/assert-no-shadow-copies.mjs
+      - name: Assert the shadow-copy guard still discriminates
+        # The guard's own positive AND negative controls, on synthetic fixtures
+        # in a temp dir. Each control runs the FROZEN historical glob logic and
+        # the current mechanism over the same fixture, so the pair proves both
+        # halves in one place: the #835 name fires on the old guard and passes on
+        # the new one (the narrowing landed), and every genuine shadow pair fires
+        # on BOTH (the narrowing was not a weakening). A guard whose only
+        # measured behaviour is false positives gets disabled; this step is the
+        # standing evidence that this one bites on the real thing.
+        run: node scripts/ci/assert-no-shadow-copies.mjs --self-test
       - name: Run security audit
         # This is the always-on, blocking dependency-vuln alarm. It is NOT made
         # redundant by security-scanning.yml: Snyk there is gated on SNYK_TOKEN
