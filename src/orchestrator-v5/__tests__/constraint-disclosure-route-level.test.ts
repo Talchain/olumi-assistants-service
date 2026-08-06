@@ -691,9 +691,9 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // (b) the condition is NAMED — in the serialised bytes
     expect(turn.raw).toContain('Total three-year cost');
     expect(turn.assistantText).toContain('Total three-year cost');
-    expect(turn.assistantText).toContain('was not checked');
+    expect(turn.assistantText).toContain('could not be checked');
     // (c) the repair step is present
-    expect(turn.assistantText).toContain('Re-state that limit');
+    expect(turn.assistantText).toContain('Tell me the limit you meant');
   });
 
   it('IDENTITY_UNRESOLVED: the honest wording reaches the wire, and says neither false thing', async () => {
@@ -709,7 +709,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     expect(turn.assistantText).not.toBe(FALLBACK);
     expect(turn.raw).toContain('could not be matched to the condition you set');
     // It does NOT say the condition went unchecked (#703's false statement).
-    expect(turn.assistantText).not.toContain('was not checked');
+    expect(turn.assistantText).not.toContain('could not be checked');
     // It does NOT certify safety — no leader is named (#707's false statement).
     expect(turn.assistantText).not.toContain('Hire Marketing Manager');
     expect(turn.assistantText).toContain('no option can be put forward yet');
@@ -730,7 +730,7 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     });
     const turn = await runAnalysisTurn(app);
     expect(turn.confirmation).toContain('\u201cTotal three-year cost\u201d');
-    expect(turn.confirmation.endsWith('then run the analysis again.')).toBe(true);
+    expect(turn.confirmation.endsWith('Then run the analysis again.')).toBe(true);
     // Single-line: the allowlist rejects any confirmation containing a newline,
     // so a multi-line disclosure would be silently replaced by the fallback.
     expect(turn.confirmation).not.toContain('\n');
@@ -747,8 +747,8 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
       warningCodes: ['CONSTRAINT_OUT_OF_DOMAIN'],
     });
     const turn = await runAnalysisTurn(app);
-    expect(turn.confirmation).toContain('was not checked');
-    expect(turn.confirmation).toContain('Re-state that limit');
+    expect(turn.confirmation).toContain('could not be checked');
+    expect(turn.confirmation).toContain('Tell me the limit you meant');
     expect(turn.confirmation.startsWith(FALLBACK)).toBe(true);
     // The withheld headline is why the confirmation opens with the locked
     // template rather than "Hire Marketing Manager currently leads".
@@ -765,8 +765,8 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
  * it names the option outright. Observed verbatim before the fix:
  *
  *   [0] "Ran analysis on your current scenario. One of the conditions you set
- *        was not checked: “Total three-year cost”. … so no option can be put
- *        forward yet. Re-state that limit … then run the analysis again."
+ *        could not be checked: “Total three-year cost”. … so no option can be put
+ *        forward yet. Tell me the limit you meant … then run the analysis again."
  *   [1] "Your first analysis is ready. Take a moment to explore the leading
  *        option and the factors shaping it before acting on the result."
  *
@@ -1990,12 +1990,12 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     // assertions below are about CONTENT, not about an empty string.
     expect(turn.blockSummary).toContain('Delivery deadline');
 
-    // untruth #2 — "was not checked", framing a deliberate, disclosed removal
+    // untruth #2 — "could not be checked", framing a deliberate, disclosed removal
     // as an engine anomaly.
-    expect(turn.raw).not.toContain('was not checked');
+    expect(turn.raw).not.toContain('could not be checked');
     expect(turn.raw).not.toContain('could not evaluate it against this model');
     // untruth #3 — a repair step that can never change the outcome.
-    expect(turn.raw).not.toContain('Re-state that limit');
+    expect(turn.raw).not.toContain('Tell me the limit you meant');
     // and the withheld-leader consequence, which is simply false here.
     expect(turn.raw).not.toContain('no option can be put forward yet');
   });
@@ -2035,7 +2035,7 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     const body = JSON.parse(turn.raw) as Record<string, any>;
     const block = body.blocks.find((b: any) => b.type === 'analysis_result');
     expect(block.leading_option_id).toBeNull();
-    expect(turn.assistantText).toContain('was not checked');
+    expect(turn.assistantText).toContain('could not be checked');
   });
 
   it('IDENTITY-BOUND (trap 19): with NO producer disclosure the withhold fires unchanged', async () => {
@@ -2047,8 +2047,8 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     const body = JSON.parse(turn.raw) as Record<string, any>;
     const block = body.blocks.find((b: any) => b.type === 'analysis_result');
     expect(block.leading_option_id).toBeNull();
-    expect(turn.assistantText).toContain('was not checked');
-    expect(turn.assistantText).toContain('Re-state that limit');
+    expect(turn.assistantText).toContain('could not be checked');
+    expect(turn.assistantText).toContain('Tell me the limit you meant');
   });
 
   it('MIXED: a second, genuinely unscored constraint still withholds AND both are disclosed', async () => {
@@ -2065,7 +2065,7 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     const block = body.blocks.find((b: any) => b.type === 'analysis_result');
     expect(block.leading_option_id).toBeNull();
     expect(turn.assistantText).toContain('Total three-year cost');
-    expect(turn.assistantText).toContain('was not checked');
+    expect(turn.assistantText).toContain('could not be checked');
     expect(turn.assistantText).toContain('This analysis does not test');
     expect(turn.assistantText).toContain('Delivery deadline');
   });

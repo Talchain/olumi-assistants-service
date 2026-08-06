@@ -27,6 +27,10 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { REDUCTION_VERB_PATTERN } from "../../utils/reduction-framing.js";
+import {
+  buildBoundDisplayName,
+  buildReductionDisplayName,
+} from "./constraint-display-name.js";
 
 // ============================================================================
 // Types
@@ -354,7 +358,9 @@ function extractUpperBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         operator: "<=",
         value,
         unit,
-        label: `${targetName.trim()} ceiling`,
+        // ROADMAP 2.653 (I-B): plain words + the user's own number text, never
+        // the internal direction word. See `constraint-display-name.ts`.
+        label: buildBoundDisplayName(targetName, "<=", valueStr),
         sourceQuote: match[0].slice(0, 200),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
@@ -401,7 +407,9 @@ function extractLowerBoundConstraints(brief: string): ExtractedGoalConstraint[] 
         operator: ">=",
         value,
         unit,
-        label: `${targetName.trim()} floor`,
+        // ROADMAP 2.653 (I-B): plain words + the user's own number text, never
+        // the internal direction word. See `constraint-display-name.ts`.
+        label: buildBoundDisplayName(targetName, ">=", valueStr),
         sourceQuote: match[0].slice(0, 200),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
@@ -442,7 +450,8 @@ function extractReductionConstraints(brief: string): ExtractedGoalConstraint[] {
         // reading here is the fix for the traced sign-inversion bug.
         value: -value,
         unit,
-        label: `${targetName.trim()} reduction target`,
+        // ROADMAP 2.653 (I-B) — the CHANGE phrasing, not the level phrasing.
+        label: buildReductionDisplayName(targetName, valueStr),
         sourceQuote: match[0].slice(0, 200),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
@@ -474,7 +483,7 @@ function extractBetweenConstraints(brief: string): ExtractedGoalConstraint[] {
       operator: ">=",
       value: lower.value,
       unit: lower.unit,
-      label: `${targetName.trim()} minimum`,
+      label: buildBoundDisplayName(targetName, ">=", lowerStr),
       sourceQuote: fullMatch.slice(0, 200),
       confidence: 0.9,
       provenance: "explicit",
@@ -487,7 +496,7 @@ function extractBetweenConstraints(brief: string): ExtractedGoalConstraint[] {
       operator: "<=",
       value: upper.value,
       unit: upper.unit,
-      label: `${targetName.trim()} maximum`,
+      label: buildBoundDisplayName(targetName, "<=", upperStr),
       sourceQuote: fullMatch.slice(0, 200),
       confidence: 0.9,
       provenance: "explicit",

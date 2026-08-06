@@ -134,12 +134,48 @@ const ALL_VOICES = [...STATE_VOICES, 'out_of_scope'] as const;
 
 /**
  * The repair step for the UNEVALUATED voice. Deterministic and constant — it
- * never interpolates a value, unit, or engine message. The out-of-domain class
- * is always the same shape of mistake: a threshold in real units bound to a
- * target that does not carry those units.
+ * never interpolates a value, unit, or engine message.
+ *
+ * ⚠ ROADMAP 2.653 (I-C) — REWRITTEN. It used to read:
+ *
+ *   "Re-state that limit against a measure recorded in the same units as the
+ *    limit, then run the analysis again."
+ *
+ * with the justification that "the out-of-domain class is always the same shape
+ * of mistake: a threshold in real units bound to a target that does not carry
+ * those units." THE WALK DISPROVED THAT PREMISE. On the witnessed session the
+ * limit was unevaluable because its OPERATOR WAS INVERTED — a floor minted from
+ * "churn could rise above 3%" — and no restatement in any units, however
+ * faithfully followed, could have fixed it. The user was handed a units
+ * diagnosis for a sign defect, about a constraint THIS SERVICE authored from
+ * their brief, and the exercise had to tell them the truth on the third prompt.
+ *
+ * That is the same mistake this module already refuses to make one voice over:
+ * `unresolvedRepairStep` is documented as "deliberately NOT the units advice
+ * above… telling the user to fix their units would assert a diagnosis this
+ * state exists precisely because CEE cannot make". The rule was right; it had
+ * simply never been applied to the `unevaluated` voice, whose docstring
+ * asserted a certainty about the cause that the producer's warning code does
+ * not carry.
+ *
+ * WHAT REPLACES IT, and why each clause is defensible:
+ *   - it asks for the limit IN THE USER'S OWN WORDS, which is an action they
+ *     can always perform, rather than a units correction they may have no
+ *     mistake to make;
+ *   - "I will record it" is a live capability, not a hope — `add_constraint` is
+ *     a registered V5 handler (witnessed applying on staging in
+ *     `consent-witness-findings-2026-08-07.md` §4 control (a)) and is pinned
+ *     against the registry in this module's tests, so the claim cannot ship
+ *     dark if the handler is ever removed;
+ *   - it DISCLOSES THE RESIDUAL. There is no conversational remove/replace
+ *     constraint operation (ROADMAP 2.659), so a correction appends beside the
+ *     bad row rather than replacing it. The walk watched the product silently
+ *     append and turn one unevaluable constraint into two. Saying so is the
+ *     INV-2 discipline the consent fix (#836) established: a repair that cannot
+ *     touch the defective row must disclose that the row remains.
  */
 const UNEVALUATED_REPAIR_STEP =
-  ' Re-state that limit against a measure recorded in the same units as the limit, then run the analysis again.';
+  ' Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again.';
 
 /**
  * The repair step for the IDENTITY_UNRESOLVED voice. Deliberately NOT the
@@ -211,14 +247,28 @@ function subjectSentence(
   named: readonly string[],
 ): string {
   if (voice === 'unevaluated') {
+    // ⚠ ROADMAP 2.653 (I-C) — "the conditions you set" WITHDRAWN from this
+    // voice. It is an attribution claim, and on the witnessed session it was
+    // false: the limit was minted by THIS SERVICE's own brief extractor from
+    // the sentence "customer churn could rise above 3%", shown to the user for
+    // the first time inside this very message, under a name they had never
+    // seen ("churn could rise floor"). The tester's note, verbatim: *"the
+    // constraint was AUTHORED BY THE DRAFTER, not by me."* Telling a user they
+    // set something they did not is the trust defect underneath the whole arc,
+    // and it is the reason the message reads as blame.
+    //
+    // "on your model" is the claim that survives every authorship case: the row
+    // IS on their model, whoever put it there. It asserts nothing about who,
+    // which is exactly right, because at this point in the pipeline nothing
+    // knows — `RatifiedConstraint` carries only an id and a label.
     if (named.length === 0) {
       return total === 1
-        ? 'One of the conditions you set was not checked.'
-        : `${total} of the conditions you set were not checked.`;
+        ? 'One limit on your model could not be checked.'
+        : `${total} limits on your model could not be checked.`;
     }
     return total === 1
-      ? `One of the conditions you set was not checked: ${joinLabels(named)}.`
-      : `${total} of the conditions you set were not checked, including ${joinLabels(named)}.`;
+      ? `One limit on your model could not be checked: ${joinLabels(named)}.`
+      : `${total} limits on your model could not be checked, including ${joinLabels(named)}.`;
   }
   if (voice === 'out_of_scope') {
     const what =
@@ -250,7 +300,14 @@ function subjectSentence(
  */
 function consequenceSentence(voice: DisclosureVoice, total: number): string {
   if (voice === 'unevaluated') {
-    return ` The analysis engine could not evaluate ${total === 1 ? 'it' : 'them'} against this model, so no option can be put forward yet.`;
+    // ROADMAP 2.653 (I-C): "we could not line it up" — OURS, stated as ours.
+    // The old sentence named "the analysis engine" as the party that failed,
+    // which reads to a user as a third party they cannot reach and reinforces
+    // the "your condition, their engine, your problem" framing this whole voice
+    // was rewritten to remove. It also says less than it seems: the observable
+    // is that the limit was not scored, not that any particular component was
+    // unable to evaluate it.
+    return ` We could not line ${total === 1 ? 'it' : 'them'} up with anything this analysis measures, so no option can be put forward yet.`;
   }
   if (voice === 'out_of_scope') {
     // NOT "so no option can be put forward" — that consequence is FALSE here.
@@ -421,9 +478,9 @@ const JOINED_LABELS = `${LABEL_SLOT}(?:(?:, ${LABEL_SLOT})* and ${LABEL_SLOT})?`
 const UNEVALUATED_RE_SRC =
   ' ' +
   '(?:' +
-  `One of the conditions you set was not checked(?:: ${JOINED_LABELS})?\\.` +
+  `One limit on your model could not be checked(?:: ${JOINED_LABELS})?\\.` +
   '|' +
-  `\\d{1,3} of the conditions you set were not checked(?:, including ${JOINED_LABELS})?\\.` +
+  `\\d{1,3} limits on your model could not be checked(?:, including ${JOINED_LABELS})?\\.` +
   ')' +
   // Both consequence variants ("it" / "them"), derived from the builder.
   `(?:${escapeForRegex(consequenceSentence('unevaluated', 1))}|${escapeForRegex(consequenceSentence('unevaluated', 2))})` +

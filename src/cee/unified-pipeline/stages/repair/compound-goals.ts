@@ -17,6 +17,7 @@ import {
   normaliseConstraintUnits,
   remapConstraintTargets,
 } from "../../../compound-goal/index.js";
+import { partitionRiskFramedInversions } from "../../../compound-goal/risk-polarity.js";
 import { log } from "../../../../utils/telemetry.js";
 
 /**
@@ -183,7 +184,17 @@ export function runCompoundGoals(ctx: StageContext): void {
   // ROADMAP 2.349 — the single, source-agnostic gate. See
   // `partitionTemporalNonBinding` for why it is here rather than in either
   // producer, and for what it deliberately does NOT remove.
-  const { binding, temporal } = partitionTemporalNonBinding([...merged.values()]);
+  const { binding: notTemporal, temporal } = partitionTemporalNonBinding([...merged.values()]);
+
+  // ROADMAP 2.653 — THE SECOND source-agnostic gate, on the same merged set and
+  // for the same reason: a threshold the user stated as a RISK ("churn could
+  // rise above 3%") is not a requirement, and the operator both producers mint
+  // for it is the exact inverse of what the sentence means. The regex extractor
+  // keys on the word "above"; the draft prompt tells the model the identical
+  // comparator-only rule. One gate, both producers, stated once in
+  // `risk-polarity.ts` — which is also where the argument for SUPPRESSING
+  // rather than flipping is written out.
+  const { binding, inverted } = partitionRiskFramedInversions(notTemporal, ctx.effectiveBrief);
 
   if (temporal.length > 0) {
     // FAIL LOUD, not silent (CLAUDE.md trap 12): a drop that leaves no trace
@@ -199,6 +210,24 @@ export function runCompoundGoals(ctx: StageContext): void {
     }, `${temporal.length} temporal constraint(s) withheld from goal_constraints[] — a deadline is not evaluable on a static causal graph`);
   }
 
+  if (inverted.length > 0) {
+    // FAIL LOUD, same contract as the temporal gate above: ids, counts and the
+    // contradicted polarity only — no labels, no thresholds, no user text.
+    // A silent suppression here would be indistinguishable from an extractor
+    // that simply stopped matching, which is the one thing a reader of these
+    // logs must be able to tell apart.
+    log.info({
+      event: "cee.compound_goal.risk_framed_inversion_withheld",
+      request_id: ctx.requestId,
+      dropped_count: inverted.length,
+      dropped_constraint_ids: inverted.map((e) => (e.constraint as any)?.constraint_id ?? null),
+      dropped_node_ids: inverted.map((e) => (e.constraint as any)?.node_id ?? null),
+      dropped_operators: inverted.map((e) => (e.constraint as any)?.operator ?? null),
+      contradicted_polarities: inverted.map((e) => e.polarity),
+      reason: "operator_contradicts_risk_polarity_of_source_phrase",
+    }, `${inverted.length} constraint(s) withheld from goal_constraints[] — the operator contradicts the risk framing of the phrase it was minted from`);
+  }
+
   ctx.goalConstraints = binding;
 
   log.info({
@@ -208,5 +237,6 @@ export function runCompoundGoals(ctx: StageContext): void {
     from_regex: regexConstraints.length,
     from_llm: llmConstraints.length,
     temporal_withheld: temporal.length,
+    risk_inversion_withheld: inverted.length,
   }, "Compound goal constraints emitted to goal_constraints[]");
 }

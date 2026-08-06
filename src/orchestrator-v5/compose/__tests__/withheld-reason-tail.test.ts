@@ -172,8 +172,8 @@ describe('composeWithheldReasonTail — it answers, for every state that withhol
     // reintroduce it here.
     const unevaluated = composeWithheldReasonTail('unevaluated', ONE)!.text;
     const unresolved = composeWithheldReasonTail('identity_unresolved', ONE)!.text;
-    expect(unevaluated).toContain('was not checked');
-    expect(unresolved).not.toContain('was not checked');
+    expect(unevaluated).toContain('could not be checked');
+    expect(unresolved).not.toContain('could not be checked');
     expect(unresolved).toContain('could not be matched');
     expect(unevaluated).not.toContain('could not be matched');
   });

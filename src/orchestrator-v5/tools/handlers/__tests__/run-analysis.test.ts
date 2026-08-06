@@ -1391,7 +1391,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     // the user ratified nothing — this is the byte-parity guarantee, and it
     // is what proves the assertions in the next test are not vacuous.
     expect(outcome.assistant_text).toContain('currently leads');
-    expect(outcome.assistant_text).not.toContain('was not checked');
+    expect(outcome.assistant_text).not.toContain('could not be checked');
   });
 
   it('(a) withholds leading-option language, (b) names the unevaluated condition, (c) offers a repair step', async () => {
@@ -1406,7 +1406,7 @@ describe('run_analysis handler — T1 unevaluated hard constraint', () => {
     expect(outcome.assistant_text).not.toContain('percentage points');
 
     // (b) Exactly which user condition was not evaluated.
-    expect(outcome.assistant_text).toContain('was not checked');
+    expect(outcome.assistant_text).toContain('could not be checked');
     expect(outcome.assistant_text).toContain('Total three-year cost');
 
     // (c) A deterministic repair step.

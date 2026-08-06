@@ -307,10 +307,17 @@ function composeUnlabelledStateText(
   state: 'unevaluated' | 'identity_unresolved',
 ): string {
   if (state === 'unevaluated') {
+    // ⚠ ROADMAP 2.653 (I-C) — the SAME two claims withdrawn here as in
+    // `coaching/constraint-gap-disclosure.ts`, because this is the second
+    // surface that speaks the `unevaluated` voice and a user can reach either
+    // one. Fixing only the primary message would have left the identical
+    // authorship claim ("a condition you set") and the identical units
+    // prescription reachable on the tail — the half-done fix that leaves the
+    // defect witnessable on the next walk.
     return (
-      ` A condition you set could not be evaluated against this model on this run, ` +
-      `${NO_OPTION_YET}. Re-state that limit against a measure recorded in the same units ` +
-      'as the limit, then run the analysis again.'
+      ` A limit on your model could not be checked against it on this run, ` +
+      `${NO_OPTION_YET}. Tell me the limit you meant in your own words and I will record it; ` +
+      'this one stays on the model. Then run the analysis again.'
     );
   }
   return (
