@@ -370,11 +370,11 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
   // this" is the point of the branch, not an incidental property of it.
   withheldText: {
     stance: 'structural',
-    why: 'Withheld-consent refusal. Deterministic copy from buildCalibrationPreviewText / buildConsentWithheldText; the turn returns BEFORE any handler runs, so there is no analysis claim in scope.',
+    why: 'Withheld-consent refusal. Deterministic copy from buildCalibrationReply / buildConsentWithheldText; the turn returns BEFORE any handler runs, so there is no analysis claim in scope.',
   },
-  'buildCalibrationPreviewText(calibrationOnly': {
+  'calibrationOffer.assistant_text': {
     stance: 'structural',
-    why: 'Calibration pre-route preview. Fires BEFORE routeWithToolUse — zero LLM calls — and states a phrase-to-percentage mapping plus "nothing has been changed". Names no option and reads no analysis.',
+    why: 'Calibration pre-route preview. Fires BEFORE routeWithToolUse — zero LLM calls — and states a phrase-to-percentage mapping plus "nothing has been changed". Names no option and reads no analysis. (Site RENAMED 6 Aug 2026, ROADMAP 2.627: the expression was buildCalibrationPreviewText(calibrationOnly...) until text AND chips moved behind the single buildCalibrationReply builder. Same branch, same stance, re-derived not carried over — a rename inheriting a stance silently is exactly what this ledger exists to catch.)',
   },
   'buildClarifyAssistantText(deterministicValueUpdate.candidates)': { stance: 'structural', why: 'Clarify template.' },
   clarifyGuardedText: { stance: 'structural', why: 'Clarify question, entity-guarded.' },
