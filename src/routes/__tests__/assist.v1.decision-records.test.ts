@@ -50,6 +50,13 @@ const {
 } = await import('../../orchestrator-v5/decision-records/store-adapter.js');
 type StorePort =
   import('../../orchestrator-v5/decision-records/store-adapter.js').DecisionRecordStorePort;
+// The mocks are typed by the PORT's own signatures, so `mock.calls[0][0]` is
+// the real write payload and every assertion below reads a typed field rather
+// than a cast (a cast can silently drift from the shape actually sent).
+type CreateWrite =
+  import('../../orchestrator-v5/decision-records/store-adapter.js').CreateDecisionRecordWrite;
+type OutcomeWrite =
+  import('../../orchestrator-v5/decision-records/store-adapter.js').RecordDecisionOutcomeWrite;
 
 const decisionRecordsRoute = (await import('../assist.v1.decision-records.js')).default;
 
@@ -124,13 +131,13 @@ function makeStore(overrides?: Partial<FakeStoreState>) {
     ...overrides,
   };
 
-  const createRecord = vi.fn(async (write: { record_id: string }) => ({
+  const createRecord = vi.fn(async (write: CreateWrite) => ({
     ...state.createResult,
     record_id: state.createResult.record_id === 'new-record'
       ? write.record_id
       : state.createResult.record_id,
   }));
-  const recordOutcome = vi.fn(async () => {
+  const recordOutcome = vi.fn(async (_write: OutcomeWrite) => {
     if (state.outcomeError !== null) throw state.outcomeError;
     return state.outcomeResult;
   });
@@ -191,11 +198,7 @@ describe('T1 — a commit for an already-auto-captured graph writes a SECOND, di
 
     expect(res.statusCode).toBe(201);
     expect(createRecord).toHaveBeenCalledTimes(1);
-    const write = createRecord.mock.calls[0]![0] as {
-      record_id: string;
-      decision: Record<string, unknown>;
-      prediction: Record<string, unknown>;
-    };
+    const write = createRecord.mock.calls[0]![0];
 
     // IDENTITY: the auto-capture id for THIS analysed graph, named exactly.
     const autoId = deriveDecisionRecordId(SCENARIO_ID, GRAPH_HASH, COMPUTED_AT);
@@ -225,7 +228,7 @@ describe('T1 — a commit for an already-auto-captured graph writes a SECOND, di
       payload: { ...COMMIT_BODY, graph_hash: 'response_hash:forged', decision: { graph_hash: 'x' } },
     });
 
-    const write = createRecord.mock.calls[0]![0] as { decision: { graph_hash: string } };
+    const write = createRecord.mock.calls[0]![0];
     expect(write.decision.graph_hash).toBe(GRAPH_HASH);
     expect(write.decision.graph_hash).not.toContain('forged');
     await app.close();
@@ -425,8 +428,8 @@ describe('T7 — confidence_0_100 → [0,1] happens SERVER-side', () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { ...COMMIT_BODY, confidence_0_100: input },
     });
-    const write = createRecord.mock.calls[0]![0] as { prediction: { confidence: number } };
-    expect(write.prediction.confidence).toBeCloseTo(expected, 12);
+    const write = createRecord.mock.calls[0]![0];
+    expect(write.prediction.confidence!).toBeCloseTo(expected, 12);
     await app.close();
   });
 
@@ -464,7 +467,7 @@ describe('T9 — the response discloses which review-date rung was used', () => 
       payload: { ...COMMIT_BODY, revisit_trigger_or_date: '2026-12-01' },
     });
     expect(res.json().review_date_source).toBe('user_set');
-    const write = createRecord.mock.calls[0]![0] as { review_date: string };
+    const write = createRecord.mock.calls[0]![0];
     expect(write.review_date).toBe(new Date('2026-12-01').toISOString());
     await app.close();
   });
@@ -498,14 +501,10 @@ describe('T2/T3 — outcome writes the brier component, or honestly none', () =>
       payload: { result: 'worse', notes: 'Two customers churned.' },
     });
     expect(res.statusCode).toBe(200);
-    const write = recordOutcome.mock.calls[0]![0] as {
-      record_id: string;
-      outcome: Record<string, unknown>;
-      event_id: string;
-    };
+    const write = recordOutcome.mock.calls[0]![0];
     expect(write.record_id).toBe(RECORD_ID);
     expect(write.outcome.result).toBe('worse');
-    expect(write.outcome.brier_component as number).toBeCloseTo(0.5184, 12);
+    expect(write.outcome.brier_component!).toBeCloseTo(0.5184, 12);
     expect(write.outcome.notes).toBe('Two customers churned.');
     expect(write.outcome.recorded_at).toBe(NOW.toISOString());
     expect(write.event_id).toBe(`decision_outcome_recorded_${RECORD_ID}`);
@@ -527,8 +526,8 @@ describe('T2/T3 — outcome writes the brier component, or honestly none', () =>
       headers: { authorization: `Bearer ${token}` },
       payload: { result: 'as_expected' },
     });
-    const write = recordOutcome.mock.calls[0]![0] as { outcome: Record<string, unknown> };
-    expect(write.outcome.brier_component as number).toBeCloseTo(0.0784, 12);
+    const write = recordOutcome.mock.calls[0]![0];
+    expect(write.outcome.brier_component!).toBeCloseTo(0.0784, 12);
     await app.close();
   });
 
@@ -541,7 +540,7 @@ describe('T2/T3 — outcome writes the brier component, or honestly none', () =>
       headers: { authorization: `Bearer ${token}` },
       payload: { result: 'abandoned' },
     });
-    const write = recordOutcome.mock.calls[0]![0] as { outcome: Record<string, unknown> };
+    const write = recordOutcome.mock.calls[0]![0];
     expect(write.outcome).not.toHaveProperty('brier_component');
     expect(Object.keys(write.outcome).sort()).toEqual(['recorded_at', 'result']);
     expect(res.json().scored).toBe(false);
@@ -561,7 +560,7 @@ describe('T2/T3 — outcome writes the brier component, or honestly none', () =>
       payload: { result: 'worse' },
     });
     expect(res.statusCode).toBe(200);
-    const write = recordOutcome.mock.calls[0]![0] as { outcome: Record<string, unknown> };
+    const write = recordOutcome.mock.calls[0]![0];
     expect(write.outcome).not.toHaveProperty('brier_component');
     expect(res.json().scored).toBe(false);
     await app.close();
@@ -591,7 +590,7 @@ describe('T2/T3 — outcome writes the brier component, or honestly none', () =>
       headers: { authorization: `Bearer ${token}` },
       payload: { result: 'worse', notes: '   ' },
     });
-    const write = recordOutcome.mock.calls[0]![0] as { outcome: Record<string, unknown> };
+    const write = recordOutcome.mock.calls[0]![0];
     expect(write.outcome).not.toHaveProperty('notes');
     await app.close();
   });
@@ -688,8 +687,8 @@ describe('T8 — a record outlives its scenario and is still scoreable', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().event_id).toBeNull();
     expect(res.json().scored).toBe(true);
-    const write = recordOutcome.mock.calls[0]![0] as { outcome: Record<string, unknown> };
-    expect(write.outcome.brier_component as number).toBeCloseTo(0.5184, 12);
+    const write = recordOutcome.mock.calls[0]![0];
+    expect(write.outcome.brier_component!).toBeCloseTo(0.5184, 12);
 
     // AND the outcome path never consults the scenario at all — a scoring
     // path routed through `scenarios`/its event journal would have lost this
