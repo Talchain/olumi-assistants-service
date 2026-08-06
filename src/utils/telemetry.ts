@@ -1215,7 +1215,8 @@ export const TelemetryEvents = {
   // fence verdict was `superseded` PROCEEDED because the scenario held NO
   // committed graph at commit time (a first draft must not be destroyed by a
   // non-graph-writing turn's claim — the fresh-journey P0). Payload mirrors
-  // the evaluated event plus `channel` (pre_rpc / atomic_recovery); the
+  // the evaluated event plus `channel` (pre_rpc — 2.736 removed the
+  // atomic_recovery producer along with the unfenced recovery it named); the
   // in-transaction SQL exemption (migration 20260806120000) emits nothing —
   // it simply never raises OLTF2 for that case.
   V5TurnFenceFirstWriteExemption: "v5.turn_fence.first_write_exemption",

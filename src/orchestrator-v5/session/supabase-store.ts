@@ -673,11 +673,21 @@ export class SupabaseSessionStore implements SessionStore {
     return ((data as unknown[] | null) ?? []).length > 0;
   }
 
-  /** Exemption telemetry — the refusal event must NOT fire for an allowed write. */
+  /**
+   * Exemption telemetry — the refusal event must NOT fire for an allowed write.
+   *
+   * ROADMAP 2.736 narrowed `channel` to its ONE remaining producer. The union
+   * used to carry `'atomic_recovery'` for the app-side OLTF2 recovery; that
+   * recovery is gone, so the label described nothing. A label that outlives
+   * the thing it named is how a reader learns to trust a value that can never
+   * appear (CLAUDE.md trap 14), so it is removed rather than left inert —
+   * the type now makes re-introducing it a compile error rather than a
+   * silently-dead branch.
+   */
   private emitFirstWriteExemption(
     write: SessionTurnWrite,
     evaluation: TurnFenceEvaluation,
-    channel: 'pre_rpc' | 'atomic_recovery',
+    channel: 'pre_rpc',
   ): void {
     try {
       const payload = {
