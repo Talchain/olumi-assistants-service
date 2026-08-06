@@ -45,8 +45,14 @@ const QUALITY_SUMMARIES = {
   needs_strengthening: {
     uniform_weights: "Edge strengths use placeholder values — add real estimates",
     low_risk_coverage: "Consider adding risk factors for each option",
+    // ROADMAP 2.725 — "Recommendation is sensitive to N assumptions" → "The
+    // ranking is …". Also outside the 2026-08-06 audit's 19; found by the
+    // static doctrine sweep this row adds. REACHABLE: PLoT's
+    // `extractCeeResultsPanelFields()` copies `decision_quality.summary`
+    // verbatim onto its own `/v2/run` body. The `fragile_recommendation` KEY is
+    // internal and unchanged — only the prose moves.
     fragile_recommendation: (count: number) =>
-      `Recommendation is sensitive to ${count} assumption${count !== 1 ? "s" : ""}`,
+      `The ranking is sensitive to ${count} assumption${count !== 1 ? "s" : ""}`,
     low_confidence: "Model structure needs refinement for reliable results",
     default: "Model needs some attention to improve analysis confidence",
   },

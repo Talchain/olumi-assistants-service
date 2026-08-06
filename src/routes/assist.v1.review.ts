@@ -37,6 +37,7 @@ import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
 import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { scanPayloadForDoctrineHits } from "../services/doctrine/route-egress-doctrine-scan.js";
 import { getCeeFeatureRateLimiter } from "../cee/config/limits.js";
 import { config } from "../config/index.js";
 import type { GraphT } from "../schemas/graph.js";
@@ -638,6 +639,29 @@ export default async function route(app: FastifyInstance) {
         status: assessment.level === "not_ready" ? "degraded" : "ok",
         httpStatus: 200,
       });
+
+      // ROADMAP 2.725 — doctrine coverage at route egress. The V5 guard scans
+      // only `assistant_text` on the turn path; this route family never passed
+      // through it, and every producer-side verdict string the 2026-08-06 audit
+      // found in CEE sat behind one of these routes. NON-MUTATING by design —
+      // see route-egress-doctrine-scan.ts for why importing the turn path's
+      // remedy would corrupt user-authored graph labels. The enforcement that
+      // stops a regression shipping is the fail-loud producer spec; this is the
+      // runtime observability half.
+      const doctrineHits = scanPayloadForDoctrineHits(response);
+      if (doctrineHits.length > 0) {
+        log.warn(
+          {
+            event: "cee.route_egress.doctrine_hit",
+            route: "/assist/v1/review",
+            request_id: requestId,
+            correlation_id: correlationId,
+            hit_count: doctrineHits.length,
+            hits: doctrineHits.slice(0, 10),
+          },
+          "verdict-language doctrine hit on assist.v1.review egress",
+        );
+      }
 
       reply.header("X-CEE-API-Version", "v1");
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);

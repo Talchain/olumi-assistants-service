@@ -15,8 +15,9 @@ import { getCeeFeatureRateLimiter } from "../cee/config/limits.js";
 import { getRequestId } from "../utils/request-id.js";
 import { getRequestKeyId, getRequestCallerContext } from "../plugins/auth.js";
 import { contextToTelemetry } from "../context/index.js";
-import { emit, TelemetryEvents } from "../utils/telemetry.js";
+import { emit, log, TelemetryEvents } from "../utils/telemetry.js";
 import { logCeeCall } from "../cee/logging.js";
+import { scanPayloadForDoctrineHits } from "../services/doctrine/route-egress-doctrine-scan.js";
 
 export default async function route(app: FastifyInstance) {
   const rateLimiter = getCeeFeatureRateLimiter(
@@ -153,6 +154,22 @@ export default async function route(app: FastifyInstance) {
         status: "ok",
         httpStatus: 200,
       });
+
+      // ROADMAP 2.725 — doctrine coverage at route egress (see the review
+      // route for the full rationale; non-mutating by design).
+      const doctrineHits = scanPayloadForDoctrineHits(response);
+      if (doctrineHits.length > 0) {
+        log.warn(
+          {
+            event: "cee.route_egress.doctrine_hit",
+            route: "/assist/v1/isl-synthesis",
+            request_id: requestId,
+            hit_count: doctrineHits.length,
+            hits: doctrineHits.slice(0, 10),
+          },
+          "verdict-language doctrine hit on assist.v1.isl-synthesis egress",
+        );
+      }
 
       reply.header("X-CEE-API-Version", "v1");
       reply.header("X-CEE-Feature-Version", FEATURE_VERSION);
