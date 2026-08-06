@@ -180,15 +180,32 @@ function makeFenceBackedClient(opts: { appendFails?: boolean } = {}): FenceBacke
 
       return { data: null, error: { message: `unexpected rpc ${fn}` } };
     }),
-    from: vi.fn(() => {
+    from: vi.fn((table: string) => {
+      // ROADMAP 2.709 fidelity: the store's first-write exemption reads
+      // `scenarios` graph-presence (`.not('graph','is',null)`) before
+      // honouring a superseded refusal. The fake answers from the SAME
+      // `graph` state the append writes, so a test in which a rival's graph
+      // LANDED sees the refusal and a graph-less scenario sees the
+      // exemption — mirroring the real table instead of a chain of no-ops.
       const chain = {
         select: () => chain,
         eq: () => chain,
+        neq: () => chain,
         order: () => chain,
-        limit: () => Promise.resolve({ data: [], error: null }),
+        limit: () =>
+          Promise.resolve({
+            data: table === 'scenarios' && graph !== null ? [{ id: SCENARIO }] : [],
+            error: null,
+          }),
         maybeSingle: () => Promise.resolve({ data: null, error: null }),
         not: () => chain,
+        is: () => chain,
         in: () => chain,
+        update: () => chain,
+        then: (
+          resolve: (v: { data: unknown; error: null }) => unknown,
+          reject?: (e: unknown) => unknown,
+        ) => Promise.resolve({ data: null, error: null }).then(resolve, reject),
       };
       return chain as never;
     }),
@@ -278,25 +295,28 @@ describe('V5 turn fence — the reproduced corruption (staging 2026-07-29)', () 
     expect(backend.calls.filter((c) => c.fn === 'v5_evaluate_turn_fence')).toHaveLength(0);
   });
 
-  it('REFUSES a superseded graph write even with NO stop at all (the pure ordering fence)', async () => {
+  it('a superseded FIRST write on a graph-less scenario COMMITS — the ordering fence is re-priced for first writes (ROADMAP 2.709)', async () => {
+    // ⚠ THIS PIN DELIBERATELY FLIPPED. It used to assert the "pure ordering
+    // fence": a later CLAIM alone refused the older graph write, graph or no
+    // graph ("arrival 3"). That pricing destroyed exactly one thing in
+    // production — a fresh scenario's ONLY draft, voided by a mid-draft
+    // QUESTION that wrote nothing, leaving a phantom model (canvas full,
+    // `scenarios.graph` NULL — the fresh-journey P0, diagnosed at the wire).
+    // The ordering fence still refuses whenever it protects a real model:
+    // see the CONTROL below (B's graph landed → A refused), which is now the
+    // canonical pure-ordering refusal pin.
     const backend = makeFenceBackedClient();
     const store = makeStore(backend.client);
 
     const handleA = await store.claimTurnFence(SCENARIO, TURN_A);
-    await store.claimTurnFence(SCENARIO, TURN_B); // a later turn claims
+    await store.claimTurnFence(SCENARIO, TURN_B); // a later turn claims, writes nothing
 
-    const refusal = await runWithTurnFence(handleA as TurnFenceHandle, async () =>
-      await store.append(write(TURN_A, GRAPH_A)).then(
-        () => null,
-        (e: unknown) => e,
-      ),
+    const result = await runWithTurnFence(handleA as TurnFenceHandle, async () =>
+      await store.append(write(TURN_A, GRAPH_A)),
     );
 
-    expect(refusal).toBeInstanceOf(TurnFenceRejectedError);
-    expect((refusal as TurnFenceRejectedError).verdict).toBe('superseded');
-    expect((refusal as TurnFenceRejectedError).generation).toBe(1);
-    expect((refusal as TurnFenceRejectedError).maxGeneration).toBe(2);
-    expect(backend.storedGraph()).toBeNull();
+    expect(result.id).toBe(`row-${TURN_A}`);
+    expect(backend.storedGraph()).toEqual(GRAPH_A);
   });
 });
 
@@ -331,16 +351,21 @@ describe('V5 turn fence — INCIDENTAL DISCONNECT KEEPS finish-atomically', () =
     // newest CLAIMED generation only if the stop's synthetic row is older.
     await store.markTurnStopped(SCENARIO, 'a-completely-different-turn');
 
-    const refusal = await runWithTurnFence(handleA as TurnFenceHandle, async () =>
+    const outcome = await runWithTurnFence(handleA as TurnFenceHandle, async () =>
       await store.append(write(TURN_A, GRAPH_A)).then(
-        () => null,
+        (r) => r,
         (e: unknown) => e,
       ),
     );
-    // The unrelated stop created a LATER fence row, so A is legitimately
-    // superseded — but it must NOT read as `stopped`. That distinction is the
-    // assertion: a stop for another turn never tombstones this one.
-    expect((refusal as TurnFenceRejectedError).verdict).toBe('superseded');
+    // A stop for another turn never tombstones this one — that is the
+    // assertion, and it is now proven in its STRONGEST form: A's write
+    // COMMITS (2.709 first-write exemption — the foreign stop's later row
+    // supersedes A, but the scenario holds no graph, and A was never
+    // stopped). Before 2.709 this pin settled for "refused as superseded,
+    // not stopped"; a commit is a strictly stronger proof that no tombstone
+    // attached to A.
+    expect(outcome).not.toBeInstanceOf(TurnFenceRejectedError);
+    expect((outcome as { id: string }).id).toBe(`row-${TURN_A}`);
     expect(backend.rows.find((r) => r.turnId === TURN_A)?.stoppedAt).toBeNull();
   });
 });
@@ -576,7 +601,13 @@ describe('V5 turn fence — scope and fail-closed posture', () => {
     setTestSink((event, payload) => events.push({ event, payload }));
 
     const handleA = await store.claimTurnFence(SCENARIO, TURN_A);
-    await store.claimTurnFence(SCENARIO, TURN_B);
+    const handleB = await store.claimTurnFence(SCENARIO, TURN_B);
+    // 2.709: a refusal now requires the supersede to PROTECT something — B's
+    // graph must land first (a claim alone would exempt-commit A's first
+    // write instead of refusing it, and this test pins the refusal event).
+    await runWithTurnFence(handleB as TurnFenceHandle, async () => {
+      await store.append(write(TURN_B, GRAPH_B));
+    });
     await runWithTurnFence(handleA as TurnFenceHandle, async () =>
       await store.append(write(TURN_A, GRAPH_A)).then(
         () => null,

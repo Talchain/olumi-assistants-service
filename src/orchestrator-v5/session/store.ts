@@ -505,6 +505,41 @@ export interface SessionStore {
    * (`SupabaseSessionStore`) always implements it.
    */
   hasPriorTurns?(scenarioId: string): Promise<boolean>;
+
+  /**
+   * ROADMAP 2.709 invariant 3 — does the scenario carry an ADMITTED turn by
+   * another turn id whose graph write has not been marked failed? The fence
+   * table holds a row from the moment a turn is admitted, ~50 s before its
+   * commit can land, so this is what lets continuation detection SEE an
+   * in-flight draft (the mid-draft-question capture defect). Failure-marked
+   * rows are excluded so the post-loss state classifies fresh — a re-sent
+   * brief must be allowed to redraft.
+   *
+   * Read failures throw; the bounded loader degrades to `false` (same
+   * posture as {@link hasPriorTurns}). Optional so existing mocks need not
+   * implement it.
+   */
+  hasOtherAdmittedLiveTurn?(scenarioId: string, excludeTurnId: string): Promise<boolean>;
+
+  /**
+   * ROADMAP 2.709 invariant 6 — does a draft loss STAND on this scenario?
+   * True iff some fence row carries a graph-write failure mark AND the
+   * scenario holds no committed graph. Self-healing: any successful graph
+   * commit turns it false with no clearing write. Throws on read failure;
+   * callers degrade to "no notice". Optional for mock tolerance.
+   */
+  scenarioDraftLossStands?(scenarioId: string): Promise<boolean>;
+
+  /**
+   * ROADMAP 2.709 invariant 6 — leave the server-side trace of a refused or
+   * failed graph commit on the turn's own fence row. Best-effort by
+   * contract: implementations MUST swallow failures (log-only) — the turn is
+   * already failing and the trace must never change what the caller returns.
+   * `turnId` is the ADMISSION identity (the fence row's key), never the
+   * commit metadata's write identity (2.301 lesson). Optional for mock
+   * tolerance.
+   */
+  markGraphWriteFailed?(scenarioId: string, turnId: string, reason: string): Promise<void>;
 }
 
 /**

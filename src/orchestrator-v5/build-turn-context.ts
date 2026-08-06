@@ -854,6 +854,102 @@ export async function loadHasPriorTurns(
   }
 }
 
+/**
+ * ROADMAP 2.709 invariant 3 — bounded "does another ADMITTED turn exist on
+ * this scenario?" read for the continuation guard. The fence table holds a
+ * row from ADMISSION, ~50 s before the turn's commit can land, so this is
+ * what lets a mid-draft question classify as a continuation instead of being
+ * intake-captured as a fresh brief while the draft's atomic commit is still
+ * in flight (the fresh-journey P0's S2). Failure-marked rows are excluded by
+ * the store read so the post-loss state classifies fresh.
+ *
+ * Degrades to `false` on a missing store, an unimplemented method (legacy
+ * mocks), or a read failure — identical posture to {@link loadHasPriorTurns}:
+ * an uncertain read keeps today's behaviour rather than suppressing a
+ * genuine new decision. (The fail-open direction of BOTH loaders is rowed
+ * separately as 2.717; this loader deliberately matches the incumbent.)
+ */
+export async function loadHasOtherAdmittedLiveTurn(
+  scenarioId: string,
+  excludeTurnId: string,
+  requestId: string,
+): Promise<boolean> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store?.hasOtherAdmittedLiveTurn) return false;
+  try {
+    return await store.hasOtherAdmittedLiveTurn(scenarioId, excludeTurnId);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — hasOtherAdmittedLiveTurn failed; degrading to false (do not suppress draft/frame)',
+    );
+    return false;
+  }
+}
+
+/**
+ * ROADMAP 2.709 invariant 6 — bounded "does a draft loss stand?" read: a
+ * fence row carries a graph-write failure mark AND the scenario holds no
+ * committed graph. Consumed by the route's loss-notice surface and the
+ * draft-shortcut unstranding term. Degrades to `false` (no notice, no
+ * unstrand) on a missing store / method / read failure — the notice is a
+ * disclosure and must never fail a turn.
+ */
+export async function loadDraftLossStands(
+  scenarioId: string,
+  requestId: string,
+): Promise<boolean> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store?.scenarioDraftLossStands) return false;
+  try {
+    return await store.scenarioDraftLossStands(scenarioId);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — scenarioDraftLossStands failed; degrading to false (no notice this turn)',
+    );
+    return false;
+  }
+}
+
+/**
+ * ROADMAP 2.709 invariant 6 — leave the failure trace for a draft turn whose
+ * graph commit did not land (either 500 exit: commitPerformed=false, or the
+ * pipeline threw after admission). Best-effort and tolerant of stores that
+ * lack the method (legacy mocks): the turn is already failing; the trace
+ * must never change the response. `turnId` is the INGRESS identity
+ * (payload.turn_id — the fence row's key).
+ */
+export async function markDraftGraphWriteFailed(
+  scenarioId: string,
+  turnId: string,
+  reason: string,
+  requestId: string,
+): Promise<void> {
+  const store = tryGetSessionStore(requestId, scenarioId);
+  if (!store?.markGraphWriteFailed) return;
+  try {
+    await store.markGraphWriteFailed(scenarioId, turnId, reason);
+  } catch (e) {
+    log.warn(
+      {
+        request_id: requestId,
+        scenario_id: scenarioId,
+        err: (e as Error)?.message ?? String(e),
+      },
+      'V5 build-turn-context — markGraphWriteFailed threw; the 500 is unchanged but the loss trace is missing',
+    );
+  }
+}
+
 async function fetchPersistedScenarioState(
   scenarioId: string,
   requestId: string,
