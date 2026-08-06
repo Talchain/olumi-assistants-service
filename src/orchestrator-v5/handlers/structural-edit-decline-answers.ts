@@ -38,6 +38,17 @@
  * Collapsing those would put the user's next action wrong: the first is worth
  * retrying unchanged, the second is worth rephrasing, the third never is.
  *
+ * ── ⚠ WHY THIS FILE IS NOT CALLED `…-decline-copy.ts` ─────────────────────
+ * It was, and CI refused it. The required job's shadow-copy guard globs
+ * `*-copy.ts` to catch files like `foo-copy.ts` left behind by a duplication,
+ * and a module whose subject IS user-facing copy is indistinguishable from one
+ * under that glob. The guard's own comment says it uses "delimited patterns to
+ * avoid false positives (e.g. `deepcopy.ts` is legitimate)" — but a hyphen is
+ * not a delimiter in a hyphenated filename, so the false-positive class it
+ * meant to exclude is still open. Renaming here was the cheap fix; the guard
+ * is worth narrowing separately, and this note exists so the next person who
+ * reaches for the obvious name knows why it is not taken.
+ *
  * ── COPY CONSTRAINTS (inherited from the sibling disclosure module) ───────
  * British English; no em dashes; no ids, op tokens, counts or internal caps; no
  * success claim (`SUCCESS_CLAIM_PATTERNS`); no denial of change

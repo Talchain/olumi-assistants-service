@@ -137,7 +137,7 @@ import {
 import {
   STRUCTURAL_EDIT_DECLINE_COPY,
   type StructuralEditDeclineClass,
-} from './structural-edit-decline-copy.js';
+} from './structural-edit-decline-answers.js';
 import { isPatchBudgetRejection } from '../../orchestrator/tools/patch-budget-limits.js';
 import { staleAnalysisBlocksApply } from '../graph-management/frame-gate.js';
 import type { FrameFreshness } from '../graph-management/types.js';

@@ -91,7 +91,7 @@ import {
   STRUCTURAL_EDIT_DECLINE_COPY,
   STRUCTURAL_EDIT_DECLINE_CLASSES,
   type StructuralEditDeclineClass,
-} from '../structural-edit-decline-copy.js';
+} from '../structural-edit-decline-answers.js';
 import {
   FORBIDDEN_USER_FACING_PHRASES,
   SUCCESS_CLAIM_PATTERNS,
