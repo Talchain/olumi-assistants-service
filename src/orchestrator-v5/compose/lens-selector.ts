@@ -308,11 +308,18 @@ export const CONSIDER_OPPOSITE_MIN_SEPARATION = 0.1;
 
 /**
  * DSK provenance for the lenses whose TRIGGER RULE is a computable-fact
- * derivation of a specific `data/dsk/v1.json` trigger object. CEE-INTERNAL:
- * the ExerciseBlock wire shape at schemas 0.32.0 is `.strict()` with no dsk
- * field, so this provenance rides TELEMETRY (the lens suggestion event), not
- * the wire; a contract field is a schemas-repo change, deliberately out of
- * this slice.
+ * derivation of a specific `data/dsk/v1.json` trigger object.
+ *
+ * ⚠ NO LONGER CEE-INTERNAL — corrected at the 0.37.0 pin (ROADMAP 2.490 slice
+ * 2). This comment used to read "the ExerciseBlock wire shape at schemas
+ * 0.32.0 is `.strict()` with no dsk field, so this provenance rides TELEMETRY
+ * (the lens suggestion event), not the wire". That was true when written and is
+ * FALSE now: 0.37.0 adds `ExerciseBlock.dsk_provenance`, and
+ * `phase3-blocks.ts:buildDskExerciseBlock` reads `protocolId` from THIS map to
+ * fill it, so a wrong id here is now user-visible rather than telemetry-only.
+ * Only the ID travels from this map — the title and evidence strength are read
+ * from the bundle record by `dsk-protocol-record.ts` and are never typed in
+ * this repo.
  *
  * HAND-WRITTEN map, so per trap 12 it fails loud on drift:
  * `dsk-provenance-attestation.test.ts` asserts every id here against the

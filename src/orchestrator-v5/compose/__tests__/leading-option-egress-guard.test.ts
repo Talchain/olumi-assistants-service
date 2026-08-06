@@ -25,6 +25,9 @@ import {
 import { setTestSink } from '../../../utils/telemetry.js';
 import { ExerciseBlockSchema } from '@talchain/schemas/boundary';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
+import { resolveDskProtocolProvenance } from '../dsk-protocol-record.js';
 
 /** Minimal envelope; `patch` overlays the field under test. */
 function envelope(patch: Record<string, unknown> = {}): OlumiResponse {
@@ -437,6 +440,18 @@ describe('findLeaderClaims — ExerciseBlock prose (B1)', () => {
       'category',
       'priority',
       'signal_code',
+      // 0.37.0 — `dsk_provenance` is structured, not a prose slot, and the
+      // exclusion is MEASURED rather than asserted by category (row 2.595: an
+      // exclusion list has no failure mode of its own, so it must earn its
+      // entry). Two measurements back it, both below in
+      // `the dsk_provenance exclusion is EARNED, not assumed`: (1) the
+      // contract REJECTS a bare string here, so it cannot carry prose at all —
+      // the same structural ground as `target_element_ref`; (2) its every
+      // member is read from `data/dsk/v1.json` and pinned byte-equal to that
+      // record by `dsk-protocol-provenance-wire.test.ts`, so no user text, no
+      // graph label and no producer prose can reach it. A leading-option claim
+      // cannot appear in a field whose only source is a committed data file.
+      'dsk_provenance',
     ]);
     const proseKeys = Object.keys(ExerciseBlockSchema.shape).filter(
       (k) => !STRUCTURED_OR_METADATA.has(k),
@@ -485,6 +500,46 @@ describe('findLeaderClaims — ExerciseBlock prose (B1)', () => {
       // …and name the path, so a hit that came from some OTHER field cannot
       // stand in for this one.
       expect(hits.some((h) => h.path.startsWith(`blocks[0].${key}`))).toBe(true);
+    }
+  });
+
+  it('the dsk_provenance exclusion is EARNED, not assumed (row 2.595)', () => {
+    const VALID_BASE = {
+      block_id: '550e8400-e29b-41d4-a716-446655440099',
+      signal_id: 'exercise:consider_opposite:gh',
+      created_at: '2026-07-31T09:00:00.000Z',
+      source_handler: 'decision_review_enricher',
+      graph_hash_at_generation: 'gh_drift_guard',
+      freshness: 'fresh',
+      type: 'exercise',
+      exercise_kind: 'consider_opposite',
+      target_refs: [],
+    } as const;
+
+    // (1) STRUCTURAL: the contract refuses prose in this slot, in either the
+    // scalar or the array form the loop above would have tried. A field that
+    // cannot hold a string cannot leak a leading-option label through one.
+    expect(
+      ExerciseBlockSchema.safeParse({ ...VALID_BASE, dsk_provenance: ROSTER }).success,
+    ).toBe(false);
+    expect(
+      ExerciseBlockSchema.safeParse({ ...VALID_BASE, dsk_provenance: [ROSTER] }).success,
+    ).toBe(false);
+
+    // (2) PROVENANCE: every member the emitter can put here is a value the
+    // canonical bundle already contains. Measured over the WHOLE protocol set,
+    // so this does not depend on which two lenses happen to be wired today.
+    const bundle = JSON.parse(
+      readFileSync(resolvePath(process.cwd(), 'data/dsk/v1.json'), 'utf-8'),
+    ) as { objects: { id: string; type: string; title: string }[] };
+    const protocols = bundle.objects.filter((o) => o.type === 'protocol');
+    expect(protocols.length).toBeGreaterThanOrEqual(6);
+    for (const p of protocols) {
+      const resolved = resolveDskProtocolProvenance(p.id);
+      expect(resolved, `bundle protocol ${p.id} must resolve`).not.toBeNull();
+      // The emitted title IS the bundle's, so nothing user- or graph-derived
+      // can reach the wire through this field.
+      expect(resolved!.protocol_title).toBe(p.title);
     }
   });
 });

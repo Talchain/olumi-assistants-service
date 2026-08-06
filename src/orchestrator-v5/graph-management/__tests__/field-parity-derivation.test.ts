@@ -79,7 +79,7 @@ const FIELD_SCREEN_CODES = new Set<string>([FIELD_NOT_ALLOWED, PIPELINE_OWNED_FI
 // ---------------------------------------------------------------------------
 
 describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this repo derives from', () => {
-  it('the INSTALLED package version is 0.35.0 (read off the resolved install, not the declaration)', () => {
+  it('the INSTALLED package version is 0.37.0 (read off the resolved install, not the declaration)', () => {
     // The package's own `exports` map exposes neither ./package.json nor a CJS
     // condition, so this reads the manifest of the INSTALLED module in
     // node_modules — what `pnpm install` actually produced, never what
@@ -90,7 +90,7 @@ describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this
       readFileSync(join(repoRoot, 'node_modules', '@talchain', 'schemas', 'package.json'), 'utf8'),
     ) as { name: string; version: string };
     expect(pkg.name).toBe('@talchain/schemas');
-    expect(pkg.version).toBe('0.35.0');
+    expect(pkg.version).toBe('0.37.0');
   });
 
   it('the DECLARED pin and the installed version agree (a stale vendor tarball fails loud)', () => {
@@ -98,7 +98,7 @@ describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this
       readFileSync(join(repoRoot, 'package.json'), 'utf8'),
     ) as { dependencies?: Record<string, string> };
     expect(manifest.dependencies?.['@talchain/schemas']).toBe(
-      'file:./vendor/talchain-schemas-0.35.0.tgz',
+      'file:./vendor/talchain-schemas-0.37.0.tgz',
     );
   });
 
@@ -107,7 +107,21 @@ describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this
     // the table you actually resolved returns the same value — otherwise the
     // constant could be right while the rows are not.
     expect(computeEditableFieldTableDigest(EDITABLE_FIELD_TABLE)).toBe(EDITABLE_FIELD_TABLE_DIGEST);
-    expect(EDITABLE_FIELD_TABLE_DIGEST).toBe('f6354a44-ea998eaa');
+    // Moved 0.35.0 -> 0.37.0 by the DSK-provenance pin bump (2.490 slice 2).
+    // ⚠ THAT BUMP UNAVOIDABLY ADOPTS 0.36.0's editable-field table revision 2 —
+    // no consumer had pinned 0.36.0, so this lane is the first to inherit it,
+    // and the inheritance was MEASURED rather than waved through:
+    //   · 42 -> 43 rows; the SEMANTIC delta (entity|wire_field|field_root|
+    //     field_class) is EXACTLY ONE added row, `edge|validation|validation|
+    //     provenance_owned`, and ZERO removed. Every other changed row differs
+    //     only in `reason` / `ui_write_sites` PROSE.
+    //   · That one row is behaviourally INERT AT THIS CONSUMER: `validation`
+    //     is already in `CEE_ANALYSIS_OWNED_ROOTS` (field-safety.ts:173),
+    //     unioned into `PIPELINE_OWNED_ROOTS`, so the deny set is unchanged.
+    //     Verified at the bytes here, NOT taken from the row's own prose
+    //     claiming it — the row asserting its own inertness is exactly the
+    //     kind of sentence this estate has learned not to inherit.
+    expect(EDITABLE_FIELD_TABLE_DIGEST).toBe('67cea469-77605f3b');
   });
 
   it('the resolved table revision is at least the revision the derivation requires', () => {
@@ -116,8 +130,8 @@ describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this
     );
   });
 
-  it('the resolved table is the 42-row classed table (a shorter pin is a different contract)', () => {
-    expect(EDITABLE_FIELD_TABLE.length).toBe(42);
+  it('the resolved table is the 43-row classed table (a shorter pin is a different contract)', () => {
+    expect(EDITABLE_FIELD_TABLE.length).toBe(43);
     const byClass = new Map<string, number>();
     for (const r of EDITABLE_FIELD_TABLE) {
       byClass.set(r.field_class, (byClass.get(r.field_class) ?? 0) + 1);
@@ -127,7 +141,11 @@ describe('A6 — pin-skew: the resolved @talchain/schemas carries the table this
       deferred_derivation: 1,
       grant: 22,
       invariant_coupled: 7,
-      provenance_owned: 7,
+      // 7 -> 8 at the 0.37.0 pin. The histogram moved by EXACTLY the one
+      // semantic row the delta measurement predicted (`edge.validation`,
+      // provenance_owned) and in no other class — an independent confirmation
+      // that the 0.36.0 table revision is prose everywhere else.
+      provenance_owned: 8,
     });
   });
 });

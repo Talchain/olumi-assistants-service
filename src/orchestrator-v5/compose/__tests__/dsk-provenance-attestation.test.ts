@@ -8,9 +8,18 @@
  * every trigger→protocol linkage is asserted against the trigger object's
  * own `linked_protocol_ids`. Mutating any id to an unattested value REDs
  * here — the emission-side analogue of the decision_quality_prompts
- * shape-check warning (which does not cover exercises: the ExerciseBlock
- * wire shape at schemas 0.32.0 is `.strict()` with no dsk field, so
- * provenance rides telemetry, and THIS file is what keeps it honest).
+ * shape-check warning.
+ *
+ * ⚠ THE STAKES ROSE AT THE 0.37.0 PIN (ROADMAP 2.490 slice 2). This header
+ * used to say the warning "does not cover exercises: the ExerciseBlock wire
+ * shape at schemas 0.32.0 is `.strict()` with no dsk field, so provenance
+ * rides telemetry, and THIS file is what keeps it honest". The second clause
+ * still holds and the first no longer does: `ExerciseBlock.dsk_provenance`
+ * exists now, and `phase3-blocks.ts` fills it from the ids this file attests.
+ * An unattested id here is therefore a false claim shown to a USER, not a
+ * mislabelled telemetry event. The wire-side companion spec is
+ * `dsk-protocol-provenance-wire.test.ts`; this file remains the one that binds
+ * the hand-written ids to the bundle bytes.
  *
  * Deliberately reads the bundle FILE directly rather than through
  * `dsk-loader.ts`: the loader is env-flag-gated (DSK_ENABLED) and the

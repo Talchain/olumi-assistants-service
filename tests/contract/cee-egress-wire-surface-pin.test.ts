@@ -281,6 +281,10 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'category',
       'counter_case',
       'created_at',
+      // 0.37.0-new (ROADMAP 2.490 slice 2) — the atomic DSK protocol triple.
+      // Additive + optional, so a consumer on an older pin simply does not see
+      // it; the merge order schemas -> UI -> CEE keeps that window closed.
+      'dsk_provenance',
       'exercise_kind',
       'failure_scenario',
       'freshness',
