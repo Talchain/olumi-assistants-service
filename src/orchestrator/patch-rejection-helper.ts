@@ -17,6 +17,7 @@ import type {
   ConversationContext,
 } from "./types.js";
 import { assembleEnvelope } from "./envelope.js";
+import { MAX_NODE_OPS, MAX_EDGE_OPS } from "./tools/patch-budget-limits.js";
 
 // ============================================================================
 // Types
@@ -106,8 +107,20 @@ export function buildPatchRejectionEnvelope(
 
 function buildAssistantText(ctx: PatchRejectionContext): string {
   if (ctx.reason === 'budget_exceeded') {
-    const maxNodes = ctx.max_node_ops ?? 3;
-    const maxEdges = ctx.max_edge_ops ?? 4;
+    // ROADMAP 2.624 — these were hardcoded `?? 3` / `?? 4`: a FOURTH copy of
+    // the operation budget, and a WRONG one (the caps are 4 and 8). It was
+    // the origin of the "4-edge limit" that a stale comment in `edit-graph.ts`
+    // was still echoing years later. Derived from the leaf that owns them, so
+    // a fallback can never again name a limit the enforcer does not apply.
+    //
+    // ⚠ ROWED, NOT FIXED HERE: on the option-addition path the caller passes
+    // `effectiveMaxEdgeOps`, i.e. the cap of the BUCKET that breached, while
+    // `edge_ops` is the TOTAL edge count. The sentence then reads as a flat
+    // limit ("12 edge operations … limit: 8") for a rule that is per-bucket
+    // and admits up to sixteen. Correcting that is a copy change with its own
+    // acceptance, and this lane is not taking it.
+    const maxNodes = ctx.max_node_ops ?? MAX_NODE_OPS;
+    const maxEdges = ctx.max_edge_ops ?? MAX_EDGE_OPS;
     return (
       `I tried to make that change, but it would require ${ctx.node_ops ?? '?'} node operations ` +
       `and ${ctx.edge_ops ?? '?'} edge operations — more than is safe in a single edit ` +

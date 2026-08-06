@@ -105,6 +105,7 @@ import {
 import {
   buildHeldSupersessionNotice,
   evaluateEditGraphMutations,
+  hasLiveHeldProposal,
   type EditGmDecision,
 } from './edit-graph-referee-gate.js';
 // ROADMAP 2.474 — the coach's structural editing tool: contract, entry
@@ -128,7 +129,14 @@ import {
   type EditPartAccounting,
   type PatchOperationLike,
 } from '../routing/edit-part-decomposition.js';
-import { clampLabel } from './describe-changeset.js';
+import { clampLabel, describeChangeset, type ChangesetOpLike } from './describe-changeset.js';
+import {
+  buildStructuralEditScopeNotice,
+  buildStructuralEditContinuation,
+  STRUCTURAL_EDIT_TOO_LARGE_TEXT,
+  STRUCTURAL_EDIT_TOO_LARGE_ACTIONS,
+} from './structural-edit-split-disclosure.js';
+import { staleAnalysisBlocksApply } from '../graph-management/frame-gate.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
 import {
@@ -680,13 +688,37 @@ function mapStageToDecisionStage(stage: MessageTurnPayload['stage']): DecisionSt
  * the UI sends a turn, never a graph), so the check costs nothing in practice
  * — and on the day they diverge, the tool declines instead of guessing.
  */
+/**
+ * ROADMAP 2.474 / A3 — what the dispatcher needs to know about a SPLIT, carried
+ * back separately from the `EditGraphResult` (a V4 type this path has no
+ * business widening).
+ *
+ * ⚠ THIS IS NOT DISCLOSED-PARTIAL (A2). `submittedIndices` is the complete list
+ * of operations that reached `handleEditGraph`; every other index in
+ * `wholeBatch` was NEVER SUBMITTED — not applied, not rejected, not judged. The
+ * gate's one verdict governs the submitted part WHOLE, exactly as it does for a
+ * batch that did not split.
+ */
+interface StructuralEditSplitOutcome {
+  readonly wholeBatch: readonly PatchOperation[];
+  readonly submittedIndices: readonly number[];
+  readonly partCount: number;
+  readonly remainderDependsOnThisStep: boolean;
+}
+
+interface StructuralEditToolResult {
+  readonly editResult: EditGraphResult;
+  /** Present only when the batch was too large for one proposal. */
+  readonly split: StructuralEditSplitOutcome | null;
+}
+
 async function tryStructuralEditTool(input: {
   readonly editResult: EditGraphResult;
   readonly context: ConversationContext;
   readonly adapter: ReturnType<typeof getAdapter>;
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
-}): Promise<EditGraphResult | null> {
+}): Promise<StructuralEditToolResult | null> {
   const { editResult, context, adapter, payload, requestId } = input;
 
   const emitEntry = (decision: string): void => {
@@ -780,21 +812,89 @@ async function tryStructuralEditTool(input: {
     scenarioId: payload.scenario_id,
   });
   if (outcome.status !== 'composed') {
-    // Rejected (ungrounded batch) or unavailable (no call, no tool block).
-    // Either way the rulebook's own answer stands — REJECT, NEVER REPAIR.
     emitEntry(outcome.status === 'rejected' ? `rejected_${outcome.code}` : outcome.reason);
+
+    // ── ⚠ THE CLAIM/SUPPRESS PATH, AND WHY A CAP REFUSAL MUST NOT USE IT ────
+    //
+    // Returning `null` here means "the rulebook's own answer stands". For a
+    // GROUNDING failure that is right: the rulebook's clarify copy is a better
+    // answer than anything this path could say, and the tool's reason is
+    // model-facing prose that quotes ids.
+    //
+    // For a CAP refusal it is wrong, and it is the measured dead end. The
+    // sequence is: the rulebook composes an over-cap batch, its own budget
+    // check rejects it, and `buildRejectionResult` returns copy that names a
+    // limit and no next step ("limit: 4 node ops, 8 edge ops"). The tool then
+    // engages, reaches the same conclusion for the same reason, and returns
+    // null — so the FAILED RULEBOOK OPERATION supplies the final answer and
+    // the fallback is suppressed. The user sees a number they cannot act on.
+    // An external review reproduced this independently: zero usable proposals
+    // across models and sessions, with `BATCH_CAP_EXCEEDED` on the wire.
+    //
+    // Splitting removes the dominant instance (the envelope cap now
+    // partitions), but a genuinely unsplittable request still reaches here.
+    // When it does, the turn is answered HONESTLY AND ACTIONABLY rather than
+    // handed back to the copy that could not explain itself.
+    if (outcome.status === 'rejected' && outcome.code === 'BATCH_CAP_EXCEEDED') {
+      return {
+        editResult: {
+          blocks: [],
+          assistantText: STRUCTURAL_EDIT_TOO_LARGE_TEXT,
+          latencyMs: 0,
+          appliedGraph: null,
+          wasRejected: true,
+          suggestedActions: STRUCTURAL_EDIT_TOO_LARGE_ACTIONS.map((a) => ({ ...a })),
+        },
+        split: null,
+      };
+    }
     return null;
   }
-  emitEntry('engaged');
+  emitEntry(outcome.parts.length > 1 ? 'engaged_split' : 'engaged');
+
+  // A3 — SUBMIT THE FIRST PART ONLY, and never a later one on this turn.
+  //
+  // `parts[0]` is the whole batch on the ordinary path. When the request was
+  // too large for one proposal, the later parts are not submitted at all: they
+  // are DISCLOSED by the caller and offered as a next step. Submitting a second
+  // part here would put two batches through one turn's single governing verdict
+  // and is precisely the disclosed-partial shape A2 forbids.
+  const firstPart = outcome.parts[0];
+  if (firstPart === undefined) {
+    // A composed outcome always carries at least one part; treat the
+    // impossible case as "the tool declined" rather than submitting nothing.
+    emitEntry('no_parts');
+    return null;
+  }
 
   // A1 — ONE entry seam. The grounded batch re-enters the SAME handler and
   // runs the SAME downstream train (normalisation, Zod, PLoT gate, apply,
   // receipts); the referee gate below in this dispatch then returns its ONE
   // governing verdict over the whole batch, exactly as it does for the
   // deterministic path. No second applier exists.
-  return await handleEditGraph(context, payload.message, adapter, requestId, payload.turn_id, {
-    preComposedOperations: outcome.operations as readonly PatchOperation[],
-  });
+  const editResultForPart = await handleEditGraph(
+    context,
+    payload.message,
+    adapter,
+    requestId,
+    payload.turn_id,
+    { preComposedOperations: firstPart.operations as readonly PatchOperation[] },
+  );
+
+  return {
+    editResult: editResultForPart,
+    split:
+      outcome.parts.length > 1
+        ? {
+            wholeBatch: outcome.operations as readonly PatchOperation[],
+            submittedIndices: firstPart.indices,
+            partCount: outcome.parts.length,
+            remainderDependsOnThisStep: outcome.parts
+              .slice(1)
+              .some((p) => p.dependsOnEarlierPart),
+          }
+        : null,
+  };
 }
 
 export interface DispatchEditGraphParams {
@@ -1437,6 +1537,15 @@ export async function dispatchEditGraph(
   const adapter = getAdapter('edit_graph');
 
   let editResult: EditGraphResult;
+  // ROADMAP 2.474 / A3 — set only when the structural edit tool split an
+  // over-cap request. Read once, in the response-assembly region below.
+  let structuralEditSplit: StructuralEditSplitOutcome | null = null;
+  // A3 — true when this scenario already carries a successful run_analysis
+  // fact, which is what makes a LATER part require a re-run first (see the
+  // derivation in the gate block below). Defaults true so an unreached
+  // derivation produces the honest, non-promising copy rather than a chip that
+  // cannot deliver.
+  let priorAnalysisExistsForSplit = true;
   // Track the deterministic clarification path independently so
   // llm_calls_used records 0 when no adapter call was made.
   let deterministicAddRiskAttempted = false;
@@ -1824,7 +1933,12 @@ export async function dispatchEditGraph(
           payload,
           requestId,
         });
-        if (toolOutcome !== null) editResult = toolOutcome;
+        if (toolOutcome !== null) {
+          editResult = toolOutcome.editResult;
+          // A3 — carried to the response-assembly region below, where the hold
+          // copy has already been built and can be appended to.
+          structuralEditSplit = toolOutcome.split;
+        }
       }
     }
   } catch (err) {
@@ -2347,6 +2461,31 @@ export async function dispatchEditGraph(
       freshness.reason === 'derivation_failed'
         ? 'unknown'
         : deriveAnalysisFreshness(priorFactsForRecovery, gmCurrentHash).freshness;
+    // ROADMAP 2.474 / A3 — DOES THIS SCENARIO ALREADY CARRY AN ANALYSIS?
+    //
+    // Read off the SAME freshness verdict the gate is about to use, so the
+    // answer cannot drift from the thing that will actually block. `'none'` is
+    // emitted by exactly one branch of `deriveAnalysisFreshness` — "no
+    // successful run_analysis fact was selected" — so `!== 'none'` IS "an
+    // analysis exists", with no second derivation and no extra I/O. A failed
+    // derivation lands on `'unknown'`, i.e. treated as an analysis existing:
+    // the cost of over-warning is a longer sentence, and the cost of
+    // under-warning is a chip that cannot do what it says.
+    //
+    // ⚠ KNOWN RESIDUAL: `priorFactsForRecovery` is a 20-turn WINDOW, not the
+    // scenario, so an analysis older than the window reads as absent here.
+    // The defect, its live witness and the sanctioned scenario-scoped fix are
+    // recorded ONCE, on the field that owns them —
+    // `build-turn-context.ts` `TurnContext.newest_analysis_fact`, whose
+    // docstring also states the contract that stops this seam reading it
+    // directly ("Consumed ONLY through `readMayNameLeadingOptionVerdict`").
+    // Deliberately not restated here (ROADMAP 2.625): a narrative told in
+    // four files is four places to miss when the fix lands. Bound on the
+    // harm: the disclosure over-warns or over-promises about the NEXT step on
+    // a scenario whose analysis is more than 20 turns old; the gate still
+    // governs part 1 correctly either way, so nothing false is ever said
+    // about what happened.
+    priorAnalysisExistsForSplit = gmFreshness !== 'none';
     gmDecision = evaluateEditGraphMutations({
       mode: gmMode,
       operations: editResult.operations!,
@@ -2466,11 +2605,7 @@ export async function dispatchEditGraph(
     // different target → both stay live and the copy names the earlier hold
     // so two consents are never held silently. Appended BEFORE the commit so
     // stored copy == wire copy (same seam doctrine as the lapse notice).
-    if (
-      gmDecision.governing === 'held' &&
-      gmDecision.pendingActions !== null &&
-      gmDecision.pendingActions.length > 0
-    ) {
+    if (hasLiveHeldProposal(gmDecision)) {
       const supersessionNotice = buildHeldSupersessionNotice(
         gmDecision.pendingActions[0]!,
         priorPendingForCarry,
@@ -2515,6 +2650,118 @@ export async function dispatchEditGraph(
       },
       'V5 edit_graph — Graph Management live gate blocked the apply path (mutation NOT persisted)',
     );
+  }
+
+  // ══ ROADMAP 2.474 / A3 — A SPLIT REQUEST MAKES TWO STATEMENTS, NOT ONE ════
+  //
+  // ⭐⭐ THE RULE, STATED ONCE, HERE — this is the ONLY place either
+  // precondition is written, and the two builders below take no argument that
+  // could re-couple them (ROADMAP 2.620):
+  //
+  //   SCOPE, on EVERY outcome — "only the first of N parts was put to the
+  //     gate; the rest were never judged". It is a fact about the REQUEST, and
+  //     the gate's verdict on the part it judged does not touch it. Applied,
+  //     held, rejected, stale, clarify: the user is told what was not
+  //     submitted. ⭐ SCOPE SURVIVES REFUSAL.
+  //
+  //   CONTINUATION, only on a live hold — "here is step 2", plus the chip that
+  //     takes it. An offer needs a live path to continue, and the only live
+  //     path here is a held proposal the user can still confirm.
+  //
+  // ⚠ WHY THE RULE IS SPELLED OUT RATHER THAN IMPLIED BY THE CODE. The first
+  // version of this block gated BOTH on the verdict, in one condition, and the
+  // result was measured: on a rejected turn the user read "I couldn't take
+  // that change forward, so the model is unchanged" and WAS NEVER TOLD that
+  // 8 of their 12 operations had never been submitted. Coherent, and silent.
+  // The turn before it was contradictory (it offered step 2 of a sequence with
+  // no step 1). Both wrong — because one gate was being asked to answer two
+  // different questions.
+  //
+  // ⚠ NEITHER STATEMENT IS DISCLOSED-PARTIAL. `submittedIndices` names every
+  // operation that reached the gate; the remainder reached NOTHING — not
+  // applied, not rejected, not judged. The copy says the rest were not looked
+  // at, never that part of a judged batch was dropped.
+  //
+  // Appended AFTER the gate's own copy (and after the supersession notice) so
+  // the user reads what happened first, and BEFORE the commit so stored copy
+  // equals wire copy — the same seam doctrine as the lapse notice.
+  if (structuralEditSplit !== null) {
+    const wholeDescription = describeChangeset(
+      structuralEditSplit.wholeBatch as readonly ChangesetOpLike[],
+      gmFrameBase,
+    );
+    const scopeInput =
+      wholeDescription === null
+        ? null
+        : {
+            wholeBatch: wholeDescription,
+            proposedIndices: structuralEditSplit.submittedIndices,
+            partCount: structuralEditSplit.partCount,
+          };
+    const scopeNotice =
+      scopeInput === null ? null : buildStructuralEditScopeNotice(scopeInput);
+    if (scopeNotice !== null) {
+      response = {
+        ...response,
+        assistant_text: appendLapseNotice(response.assistant_text, scopeNotice),
+      };
+    }
+
+    // The continuation's precondition, read through the PRODUCER's predicate
+    // (ROADMAP 2.623(a)) rather than rebuilt from two nullable fields here.
+    const continuationAvailable = hasLiveHeldProposal(gmDecision);
+    const continuation =
+      scopeInput === null || !continuationAvailable
+        ? null
+        : buildStructuralEditContinuation({
+            ...scopeInput,
+            remainderDependsOnThisStep: structuralEditSplit.remainderDependsOnThisStep,
+            // Both halves derived, neither restated (ROADMAP 2.474/A3):
+            // (i) does an analysis exist to go stale, and (ii) does a stale
+            // frame actually block a STRUCTURAL apply — asked of the frame
+            // gate itself, so the staleness-editability ruling moves this
+            // copy automatically instead of leaving a stale sentence behind.
+            rerunRequiredBeforeNextStep:
+              priorAnalysisExistsForSplit && staleAnalysisBlocksApply('structural'),
+          });
+    if (continuation !== null) {
+      response = {
+        ...response,
+        ...(continuation.notice !== null
+          ? {
+              assistant_text: appendLapseNotice(
+                response.assistant_text,
+                continuation.notice,
+              ),
+            }
+          : {}),
+        // `action_type` is snake_case on the builder's type precisely so this
+        // is a whole-object spread: the earlier field-by-field remap silently
+        // dropped anything the builder added (ROADMAP 2.623(c)).
+        suggested_actions: [
+          ...(response.suggested_actions ?? []),
+          { ...continuation.action },
+        ],
+      };
+    }
+
+    emit(TelemetryEvents.V5StructuralEditToolEntry, {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      decision: 'split_disclosed',
+      part_count: structuralEditSplit.partCount,
+      submitted_operations: structuralEditSplit.submittedIndices.length,
+      total_operations: structuralEditSplit.wholeBatch.length,
+      // Reported separately because they now FAIL separately: a scope notice
+      // with no continuation is the ordinary refusal shape, and a split with
+      // no scope notice at all means `describeChangeset` returned nothing —
+      // which is the one case where the user IS told nothing, and must be
+      // visible rather than inferred from silence.
+      scope_disclosed: scopeNotice !== null,
+      continuation_offered: continuation !== null,
+      governing: gmDecision?.governing ?? null,
+      was_rejected: editResult.wasRejected,
+    });
   }
 
   // V5 H5 — false-success invariant (defence-in-depth).
@@ -3233,12 +3480,14 @@ export async function dispatchEditGraph(
     // path above (that path requires a non-applied editResult; GM only
     // engages on applied ones), but GM wins deterministically if both ever
     // co-occur.
-    if (
-      gmBlockedApply &&
-      gmDecision !== null &&
-      gmDecision.pendingActions !== null &&
-      gmDecision.pendingActions.length > 0
-    ) {
+    // ROADMAP 2.623(a) — reads "a live held proposal" through the producer's
+    // own predicate rather than rebuilding it here. Equivalent to the previous
+    // `pendingActions !== null && length > 0`, derived not assumed: the ONLY
+    // branch in `evaluateEditGraphMutations` that mints a non-empty
+    // `pendingActions` is inside `if (governing === 'held')` — every other
+    // return, including the fail-closed catch, sets `null`. So the added
+    // verdict check cannot drop a pending the producer is able to mint.
+    if (gmBlockedApply && hasLiveHeldProposal(gmDecision)) {
       pendingActionsForCommit = [...gmDecision.pendingActions].slice(0, 3);
     }
     // ── HOLD-WIPE fix (task_2e1b8c87): thread holds through this commit ──

@@ -43,7 +43,10 @@
  *
  * Rules, in evaluation order (first failure wins, whole batch):
  *   G1  SCHEMA_INVALID        — payload/op shape unreadable.
- *   G2  BATCH_CAP_EXCEEDED    — over the DERIVED caps (A3; see below).
+ *   G2  BATCH_CAP_EXCEEDED    — a runaway OPERATION COUNT, or a batch no
+ *                               partition can make cap-legal (A3; see below).
+ *                               ⚠ Being merely over the ENVELOPE cap is no
+ *                               longer a rejection — it is a SPLIT.
  *   G3  UNKNOWN_ENTITY_ID     — an op names an id/edge absent from the graph
  *                               (and not created earlier in this batch).
  *   G4  CREATED_ID_COLLIDES   — a create re-uses an id the graph already has,
@@ -67,15 +70,26 @@
  *                               passes (trap 19 / the 2.392 family); the echo
  *                               catches wrong-id-right-shape.
  *
- * ── A3: THE CAPS ARE DERIVED, NEVER RESTATED ───────────────────────────────
- * Two live caps govern, and they disagree: the pipeline accepts
- * `MAX_PATCH_OPERATIONS` operations, while the referee rejects a batch of more
- * than `PROPOSAL_CAP` ENVELOPES — and envelopes fan out ONE PER FIELD, so a
- * 5-op batch with multi-field updates can exceed 8. This module counts the
- * envelope fan-out with the SAME producer the gate uses
- * (`editOperationsToCandidateEnvelopes`), so the number can never drift from
- * the thing that actually rejects (CLAUDE.md trap 12 — derive, don't mirror).
- * The brief's "20-node cap" is STRUCK: it is not derivable at this tip.
+ * ── A3: THE CAPS ARE DERIVED, AND THEY SPLIT RATHER THAN REFUSE ────────────
+ * FOUR live caps govern a batch on this path, enforced in three modules, and
+ * they do not agree with one another:
+ *
+ *   operation count  `config.cee.maxPatchOperations` (15)  edit-graph.ts
+ *   node operations  `MAX_NODE_OPS` (4)                    patch-budget-limits.ts
+ *   edge operations  `MAX_EDGE_OPS` (8)                    patch-budget-limits.ts
+ *   envelope fan-out `PROPOSAL_CAP` (8)                    referee.ts
+ *
+ * The last is per FIELD, so a 5-op batch of multi-field updates can exceed 8
+ * while looking small; the middle two are per OPERATION KIND, so probe C's
+ * "3 node + 12 edge" batch was legal on operations and illegal on edges.
+ * `structural-edit-batch-split.ts` IMPORTS all four and counts envelopes with
+ * the SAME producer the gate consumes, so no number here can drift from the
+ * thing that actually rejects (CLAUDE.md trap 12 — derive, don't mirror).
+ *
+ * ⚠ AND THE CAPS NO LONGER DEAD-END THE TURN. An over-cap batch is PARTITIONED
+ * into ordered, individually cap-legal parts; the caller proposes the first and
+ * discloses the rest. The brief's "20-node cap" is STRUCK: it is not derivable
+ * at this tip.
  *
  * ── WHAT THIS MODULE DELIBERATELY DOES NOT DO ──────────────────────────────
  *  - It does not stamp `base_graph_hash` (A5b: the executor stamps it
@@ -89,12 +103,28 @@
  *    incapable of it (caps, base-hash currency, LLM-computed diffs = 2.461).
  */
 
-import { PROPOSAL_CAP } from '../graph-management/types.js';
 import {
-  editOperationsToCandidateEnvelopes,
   parseEdgeTargetPath,
   type EditPatchOperationLike,
 } from '../graph-management/adapters/edit-graph-producer.js';
+import {
+  collectInterventionTargetIds,
+  edgeKeyOf as sharedEdgeKeyOf,
+} from './structural-edit-references.js';
+import {
+  deriveSplitLimits,
+  partitionStructuralEditBatch,
+  measurePart,
+  type StructuralEditPart,
+} from './structural-edit-batch-split.js';
+
+/**
+ * Re-exported so the one definition of "what does this operation name?" has a
+ * single home (`structural-edit-references.ts`) while every existing importer
+ * of this module keeps working. See that module's header for the measured
+ * defect the scan exists for.
+ */
+export { collectInterventionTargetIds };
 
 // ---------------------------------------------------------------------------
 // The op grammar — DERIVED from the canonical PatchOperation union.
@@ -171,9 +201,7 @@ function readString(value: unknown): string | null {
 }
 
 /** Canonical edge key. Directional — the graph's edges are directional. */
-export function edgeKeyOf(from: string, to: string): string {
-  return `${from}::${to}`;
-}
+export const edgeKeyOf = sharedEdgeKeyOf;
 
 /**
  * Project the PERSISTED graph into the grounding table.
@@ -283,10 +311,26 @@ export interface StructuralEditRejection {
 
 export interface StructuralEditAcceptance {
   readonly ok: true;
-  /** The canonical batch. A1: this is what enters `handleEditGraph`. */
+  /**
+   * The canonical batch, WHOLE — every operation the model composed, in order.
+   * Retained even when the batch splits, so a caller can describe the complete
+   * change (labels of nodes a later part references included) and so nothing is
+   * silently lost between here and the disclosure.
+   */
   readonly operations: readonly EditPatchOperationLike[];
-  /** Envelope fan-out this batch will produce at the referee (diagnostics). */
+  /** Envelope fan-out the WHOLE batch would produce at the referee. */
   readonly envelopeCount: number;
+  /**
+   * A3 — THE BATCH, PARTITIONED INTO CAP-LEGAL PARTS.
+   *
+   * Always at least one part; `parts.length === 1` is the ordinary case and
+   * `parts[0].operations` is then the whole batch. `parts.length > 1` means the
+   * request was too large for one proposal and the caller must propose
+   * `parts[0]` and DISCLOSE the rest (never truncate, never submit them
+   * silently). See `structural-edit-batch-split.ts` for why splitting is not
+   * disclosed-partial.
+   */
+  readonly parts: readonly StructuralEditPart[];
 }
 
 export type StructuralEditValidation = StructuralEditAcceptance | StructuralEditRejection;
@@ -296,78 +340,6 @@ function reject(
   reason: string,
 ): StructuralEditRejection {
   return { ok: false, code, reason };
-}
-
-// ---------------------------------------------------------------------------
-// Entity references hiding inside `value` (the measured smuggle class).
-// ---------------------------------------------------------------------------
-
-/**
- * ⚠ THE DEFECT THIS EXISTS FOR, measured at three rungs before the guard
- * existed: the validator checked `path` and copied `value` through verbatim,
- * so an id in a field it did not read reached the graph unchallenged —
- * `update_node path='option_1' value={interventions:{ghost_factor:…}}` was
- * accepted, governed `proceed` in live mode (no hold, NO CONFIRM CHIP), and
- * REPLACED the option's real intervention map on apply. That is the 2.461
- * fabrication class inside the tool built to kill it, sitting on the headline
- * scenario's most natural composition: "give each option its own driver" is an
- * option `update_node` carrying an `interventions` map KEYED BY FACTOR ID.
- *
- * The scan is BY KEY NAME AT ANY DEPTH, deliberately, and not a list of paths.
- * field-safety sanctions the intervention subtree in three places
- * (`interventions`, `observed_state/interventions`, `data/interventions/<id>`),
- * so a path list here would be a mirror of that list and would drift from it
- * the first time the field-parity table grants a fourth (trap 12). One rule
- * about a key NAME covers all of them, and covers a nesting nobody has thought
- * of yet.
- *
- * SCOPE, stated so the guarantee upstream is not read as wider than it is:
- * this resolves ENTITY REFERENCES — intervention map keys, and the identity
- * fields `id`/`from`/`to`. It does not and cannot validate opaque content in
- * `value` (a label, a description, a number); WHICH fields may be written at
- * all is field-safety's judgement downstream, not this module's.
- */
-const INTERVENTION_KEY = 'interventions';
-
-/** Depth bound — a hostile/deep payload must not cost unbounded work. */
-const MAX_VALUE_SCAN_DEPTH = 12;
-
-/**
- * Collect every factor id used as an INTERVENTION MAP KEY anywhere in `value`.
- * Total: cycles and depth overruns stop the walk rather than throwing, and a
- * truncated walk can only under-collect, which the caller treats as "nothing
- * more to check" — so the failure mode is a missed rejection, never a
- * fabricated one.
- */
-export function collectInterventionTargetIds(value: unknown): string[] {
-  const found: string[] = [];
-  const seen = new Set<unknown>();
-  const walk = (node: unknown, depth: number): void => {
-    if (depth > MAX_VALUE_SCAN_DEPTH) return;
-    if (Array.isArray(node)) {
-      for (const item of node) walk(item, depth + 1);
-      return;
-    }
-    const record = asRecord(node);
-    if (record === null) return;
-    if (seen.has(record)) return;
-    seen.add(record);
-    for (const [key, child] of Object.entries(record)) {
-      if (key === INTERVENTION_KEY) {
-        const map = asRecord(child);
-        if (map !== null) {
-          for (const targetId of Object.keys(map)) {
-            if (targetId.length > 0) found.push(targetId);
-          }
-        }
-        // Keep walking: an intervention map's VALUES are payloads, and a
-        // nested `interventions` inside one is still an intervention map.
-      }
-      walk(child, depth + 1);
-    }
-  };
-  walk(value, 0);
-  return found;
 }
 
 /**
@@ -620,27 +592,45 @@ export function validateProposedStructuralEdit(
     operations.push(canonical);
   }
 
-  // ── G2 (second half): the ENVELOPE fan-out, counted by the SAME producer
-  // the gate uses. This is the cap that actually rejects in live mode, and it
-  // is per-FIELD, so it is NOT derivable from the operation count. Counted
-  // last so a grounding failure always wins over a cap failure (a hallucinated
-  // id is the more important thing to tell the model about).
-  const envelopeCount = editOperationsToCandidateEnvelopes(operations, {
-    base_graph_hash: 'preflight',
-    scenario_id: 'preflight',
-    turn_id: 'preflight',
-    makeCandidateId: () => 'preflight',
-  }).length;
-  if (envelopeCount > PROPOSAL_CAP) {
+  // ── G2 (second half): THE CAPS BECOME A SPLIT, NOT A REFUSAL (A3) ────────
+  //
+  // ⚠ WHAT CHANGED, AND WHY. This used to REJECT any batch whose envelope
+  // fan-out exceeded PROPOSAL_CAP. Ten live runs of the canonical headline
+  // sentence (witness-2474-live-2026-08-05.md) produced a usable proposal
+  // twice; probe C composed a real "3 node operations and 12 edge operations"
+  // batch and the whole thing was discarded on a cap the user cannot see. A
+  // composed edit thrown away is the worst outcome available — the user paid
+  // the model call and got nothing to confirm.
+  //
+  // So the caps now PARTITION. Run LAST, after every grounding rule, so a
+  // hallucinated id still wins: an ungrounded batch must be rejected whole and
+  // never partitioned into ungrounded parts. Splitting is reserved for a batch
+  // that is entirely legitimate and merely large.
+  //
+  // Note what did NOT change: `rawOps.length > maxPatchOperations` above is
+  // still a hard rejection. That guard is about a runaway emission, not about
+  // an honest restructure, and this lane had no witness for widening it.
+  const limits = deriveSplitLimits(options.maxPatchOperations);
+  const partition = partitionStructuralEditBatch(operations, limits);
+  if (!partition.ok) {
     return reject(
       'BATCH_CAP_EXCEEDED',
-      `This batch expands to ${envelopeCount} reviewable changes; at most ${PROPOSAL_CAP} ` +
-        'can be proposed at once (each field of a multi-field update counts separately). ' +
-        'Split the restructure into smaller batches.',
+      partition.failure === 'operation_exceeds_part'
+        ? `One operation in this batch is on its own larger than a single reviewable ` +
+            `change allows (at most ${limits.maxEnvelopes} fields change per proposal). ` +
+            'Change fewer fields of that item at a time.'
+        : `This batch would need ${partition.partsNeeded} separate proposals; at most ` +
+            `${limits.maxParts} can be offered for one request. Ask for a smaller part of ` +
+            'the restructure.',
     );
   }
 
-  return { ok: true, operations, envelopeCount };
+  return {
+    ok: true,
+    operations,
+    envelopeCount: measurePart(operations).envelopeCount,
+    parts: partition.parts,
+  };
 }
 
 // ---------------------------------------------------------------------------

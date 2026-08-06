@@ -218,3 +218,108 @@ describe('A2 — precedence order, pinned end to end (rejected > stale > held > 
     expect(decision.pendingActions).toBeNull();
   });
 });
+
+/**
+ * ⭐⭐ ROADMAP 2.474 / A3 — SPLITTING IS NOT DISCLOSED-PARTIAL, AND THE TWO
+ * MUST STAY TELLABLE APART.
+ *
+ * A3 makes an over-cap request become SEVERAL proposals instead of a dead
+ * turn. The obvious way to get that wrong is to let it become disclosed-partial
+ * by the back door: submit the whole batch, apply what fits, disclose the rest.
+ * That is the composite-batch nightmare this file exists to prevent, wearing a
+ * friendlier sentence.
+ *
+ * The distinction is structural, and this is where it is pinned:
+ *
+ *   DISCLOSED-PARTIAL — one batch reaches the gate; the verdict governs only
+ *     some of what it was given.
+ *   SPLITTING         — part 1 reaches the gate and the verdict governs ALL of
+ *     part 1. The remainder reaches NOTHING: no verdict, no pending, no chip.
+ *
+ * So the assertions below are about what the gate was GIVEN and what it HELD,
+ * bound by op+path identity — never about how the outcome was described.
+ */
+describe('⭐⭐ A3 — a SPLIT proposes one part WHOLE and submits nothing else', () => {
+  const DRIVERS = [
+    { id: 'f-driver-a', label: 'Plan A cost driver' },
+    { id: 'f-driver-b', label: 'Plan B cost driver' },
+    { id: 'f-driver-c', label: 'Shared overhead driver' },
+  ] as const;
+  const TARGETS = ['g-profit', 'f-spend', 'f-reach', 'd-choice'] as const;
+
+  /** Probe C's measured composition: 3 node ops + 12 edge ops. */
+  const PROBE_C_PAYLOAD = {
+    operations: DRIVERS.flatMap((d) => [
+      { op: 'add_node', path: d.id, value: { id: d.id, kind: 'factor', label: d.label } },
+      ...TARGETS.map((t) => ({
+        op: 'add_edge',
+        path: `${d.id}::${t}`,
+        value: { from: d.id, to: t },
+      })),
+    ]),
+  };
+
+  function partsOf() {
+    const result = validateProposedStructuralEdit(PROBE_C_PAYLOAD, grounding(), OPTS);
+    if (!result.ok) throw new Error(`validator rejected probe C: ${result.code}`);
+    return result;
+  }
+
+  it('the batch really is over-cap — otherwise this whole block tests nothing', () => {
+    expect(PROBE_C_PAYLOAD.operations).toHaveLength(15);
+    expect(partsOf().parts.length).toBeGreaterThan(1);
+  });
+
+  it('the gate is given ONE part, and its single verdict governs EVERY operation in it', () => {
+    const { parts } = partsOf();
+    const decision = gateFor(parts[0]!.operations as { op: string; path: string; value?: unknown }[]);
+    expect(decision.governing).toBe('held');
+    expect(decision.blockApply).toBe(true);
+    // One verdict for the batch, one pending for the batch — never one per op.
+    expect(decision.pendingActions).toHaveLength(1);
+    expect(decision.suggestedActions).toHaveLength(1);
+    // Every op in part 0 is inside that hold, bound by op+path IDENTITY.
+    const action = decision.pendingActions![0]!.action as {
+      inline_patch: { operations?: { op: string; path: string }[] };
+    };
+    const heldPaths = (action.inline_patch.operations ?? []).map((o) => `${o.op}:${o.path}`);
+    expect(heldPaths).toEqual(
+      parts[0]!.operations.map((o) => `${o.op}:${o.path}`),
+    );
+  });
+
+  it('NOT ONE operation from a later part is held, applied, or judged', () => {
+    const { parts } = partsOf();
+    const decision = gateFor(parts[0]!.operations as { op: string; path: string; value?: unknown }[]);
+    const action = decision.pendingActions![0]!.action as {
+      inline_patch: { operations?: { op: string; path: string }[] };
+    };
+    const heldKeys = new Set(
+      (action.inline_patch.operations ?? []).map((o) => `${o.op}:${o.path}`),
+    );
+    const remainderKeys = parts
+      .slice(1)
+      .flatMap((p) => p.operations.map((o) => `${o.op}:${o.path}`));
+    expect(remainderKeys.length).toBeGreaterThan(0);
+    for (const key of remainderKeys) {
+      expect(heldKeys.has(key), `${key} must not be in the submitted batch`).toBe(false);
+    }
+    // And the tally counts only what was submitted — a gate that had seen the
+    // remainder would show it here even if the pending hid it.
+    const tallied = Object.values(decision.verdictCounts).reduce((a, b) => a + (b ?? 0), 0);
+    expect(tallied).toBe(parts[0]!.envelopeCount);
+  });
+
+  it('a REJECT of the proposed part still applies nothing — splitting does not soften A2', () => {
+    // Same shape, but the first part carries an op the referee rejects. The
+    // batch-governing rule must still be all-or-nothing WITHIN the part.
+    const { parts } = partsOf();
+    const poisoned = [
+      ...parts[0]!.operations,
+      { op: 'remove_node', path: 'f-driver-a' },
+    ] as { op: string; path: string; value?: unknown }[];
+    const decision = gateFor(poisoned);
+    expect(decision.blockApply).toBe(true);
+    expect(decision.governing).not.toBe('proceed');
+  });
+});

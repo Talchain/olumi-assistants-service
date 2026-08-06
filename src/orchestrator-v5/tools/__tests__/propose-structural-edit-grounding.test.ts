@@ -518,7 +518,18 @@ describe('A5(c) DUAL IDENTITY BINDING — the label echo catches wrong-id-right-
 });
 
 describe('A3 — the caps are DERIVED from what actually rejects, not restated', () => {
-  it('an over-cap ENVELOPE fan-out is pre-caught, counted by the producer the referee uses', () => {
+  /**
+   * ⚠ CHANGED DELIBERATELY, 2026-08-05 (A3). This case asserted that an
+   * over-cap envelope fan-out was REJECTED. The live witness measured what
+   * that rejection costs: the canonical headline sentence composed a real
+   * batch and had it discarded on this exact rule, eight times in ten. The cap
+   * now SPLITS. What is still pinned here is the thing that made the original
+   * assertion worth writing — that the fan-out is counted per FIELD, by the
+   * producer the referee consumes, so a batch of only six operations is
+   * correctly recognised as too large. Full split behaviour:
+   * `structural-edit-batch-split.test.ts`.
+   */
+  it('an over-cap ENVELOPE fan-out is caught per-FIELD by the producer the referee uses, and SPLITS', () => {
     // Nine single-field updates = nine envelopes > PROPOSAL_CAP (8), even
     // though nine operations is well under the pipeline's 15.
     const ids = ['f-spend', 'f-reach', 'g-profit', 'd-choice', 'o-a', 'o-b'];
@@ -540,10 +551,17 @@ describe('A3 — the caps are DERIVED from what actually rejects, not restated',
     ];
     expect(operations.length).toBeLessThanOrEqual(OPTS.maxPatchOperations);
     const result = validateProposedStructuralEdit({ operations }, grounding(), OPTS);
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('unreachable');
-    expect(result.code).toBe('BATCH_CAP_EXCEEDED');
-    expect(result.reason).toContain(String(PROPOSAL_CAP));
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('unreachable');
+    // Nine envelopes from six operations — the per-FIELD count, still derived
+    // from the producer the referee consumes.
+    expect(result.envelopeCount).toBe(9);
+    expect(result.envelopeCount).toBeGreaterThan(PROPOSAL_CAP);
+    // And it becomes more than one proposal rather than a dead turn.
+    expect(result.parts.length).toBeGreaterThan(1);
+    for (const part of result.parts) {
+      expect(part.envelopeCount).toBeLessThanOrEqual(PROPOSAL_CAP);
+    }
   });
 
   it('an over-cap OPERATION count is rejected against the pipeline cap that was passed in', () => {

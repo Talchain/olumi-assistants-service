@@ -609,7 +609,16 @@ const SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS: ReadonlySet<string> = new S
   'chip_action_rerun_analysis_after_mutation',
 ]);
 
-function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
+/**
+ * Exported (ROADMAP 2.622) so a chip-minting seam can ASK whether the chip it
+ * is about to emit survives a live hold, instead of a downstream reader having
+ * to re-derive the answer from this module's private set. The structural-edit
+ * split disclosure mints a re-run chip on exactly the condition that arms this
+ * suppression; its spec binds to this predicate so a change to the set moves
+ * the pin with it rather than leaving a test describing a behaviour that has
+ * gone. Pure, no side effects, safe to call from anywhere.
+ */
+export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
   return (
     chip.action_type === 'run_analysis' &&
     SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS.has(chip.id)

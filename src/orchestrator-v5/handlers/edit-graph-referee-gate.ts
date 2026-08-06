@@ -219,6 +219,45 @@ export interface EditGmDecision {
   readonly heldProposalBlock?: HeldProposalBlock | null;
 }
 
+/**
+ * ⭐ IS THERE A LIVE PROPOSAL THE USER CAN STILL CONFIRM? — asked of the
+ * PRODUCER of the decision, never reconstructed from its fields.
+ *
+ * ROADMAP 2.623(a). `governing === 'held' && pendingActions.length > 0` had
+ * reached three call sites in `edit-graph-dispatch.ts`, each rebuilding "a
+ * proposal is live" out of two independently-nullable fields of a type this
+ * module owns. That is the hand-maintained mirror (CLAUDE.md trap 12) in its
+ * most expensive form: the invalid pair `governing: 'held'` with
+ * `pendingActions: null` is REACHABLE (the fail-closed catch below returns
+ * exactly that), so every consumer had to remember the second half of the
+ * condition, and the consequence of forgetting is a turn that offers a
+ * follow-on to a confirmation that does not exist.
+ *
+ * Expressed here, once, next to the type it reads: a held verdict is only a
+ * live proposal when it actually minted a pending the user can act on.
+ *
+ * ⚠ NOT an emptiness helper. `pendingActions: []` and `pendingActions: null`
+ * are both "no confirm control", and both must answer false — a `!== null`
+ * check would not.
+ *
+ * It is a TYPE PREDICATE on purpose. Every consumer of this condition also
+ * wants `pendingActions[0]`, and a plain boolean would leave each of them
+ * re-asserting non-nullness with a `!`. Narrowing here means the compiler
+ * carries the guarantee the predicate establishes, so a consumer cannot hold
+ * the check and still reach for a pending that might not be there.
+ */
+export function hasLiveHeldProposal<
+  T extends Pick<EditGmDecision, 'governing' | 'pendingActions'>,
+>(
+  decision: T | null | undefined,
+): decision is T & {
+  readonly governing: 'held';
+  readonly pendingActions: readonly PendingAction[];
+} {
+  if (decision === null || decision === undefined) return false;
+  return decision.governing === 'held' && (decision.pendingActions?.length ?? 0) > 0;
+}
+
 const PROCEED_DECISION: EditGmDecision = {
   governing: 'proceed',
   blockApply: false,

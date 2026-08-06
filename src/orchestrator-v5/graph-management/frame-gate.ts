@@ -89,3 +89,38 @@ export function evaluateFrameGate(
   }
   return { outcome: { kind: 'proceed' }, baseHashMatch };
 }
+
+/**
+ * ⭐ WOULD A STALE ANALYSIS BLOCK AN APPLY FOR THIS CLASS? — ASKED OF THE GATE,
+ * never restated from its trust set.
+ *
+ * ROADMAP 2.474 / A3. The structural-edit split disclosure has to tell the user
+ * whether a re-run is needed between step 1 and step 2, and the answer is
+ * entirely a property of rung 3 above: once part 1 is confirmed and applied the
+ * graph hash moves, so a scenario that already carries a successful analysis
+ * flips to `freshness: 'stale'` by construction, and whether the NEXT part is
+ * then apply-eligible is exactly what this gate decides.
+ *
+ * The alternative — a comment in the disclosure module saying "structural
+ * candidates trust only fresh/none" — is a mirror of the two sets above, green
+ * the day it is written and silently over-warning (or silently under-warning)
+ * the day either set moves. The staleness-editability ruling under
+ * consideration (ROADMAP 2.474/A4) proposes moving exactly that set. Deriving
+ * the answer means that ruling changes the copy automatically, and a lane that
+ * changes the trust set cannot leave a stale sentence behind.
+ *
+ * The probe frame is a REACHABLE state, not an invented one: base hash matching
+ * its own frame with `freshness: 'stale'` is the post-apply state the D-S
+ * commit message names ("the first auto-applied edit flips freshness to
+ * stale"). The hash value is irrelevant and cancels — it is compared only with
+ * itself, which is what isolates rung 3 from rung 2.
+ */
+export function staleAnalysisBlocksApply(mutationClass: MutationClass | null): boolean {
+  const SAME_HASH = 'frame-gate-stale-probe';
+  const result = evaluateFrameGate(
+    SAME_HASH,
+    { currentGraphHash: SAME_HASH, graphReadable: true, freshness: 'stale' },
+    mutationClass,
+  );
+  return result.outcome.kind !== 'proceed';
+}
