@@ -108,7 +108,10 @@ describe('composeWithheldReasonTail — it answers, for every state that withhol
     expect(answer!.named_constraint).toBe(false);
     expect(answer!.text).not.toContain('Three-Year Total Cost of Ownership');
     expect(answer!.text).not.toContain('Delivery within two quarters');
-    expect(answer!.text).toContain('All 2 conditions you set were checked');
+    // ROADMAP 2.675: "you set" withdrawn — the row may have been minted by the
+    // drafter. "on your model" is true whoever authored it. The "were checked"
+    // half STAYS: this is the one state where it is true.
+    expect(answer!.text).toContain('All 2 conditions on your model were checked');
     expect(answer!.text).toContain('Which one that is has not been recorded');
   });
 
@@ -145,7 +148,12 @@ describe('composeWithheldReasonTail — it answers, for every state that withhol
     const answer = composeWithheldReasonTail('evaluated_infeasible', []);
     expect(answer!.named_constraint).toBe(false);
     expect(answer!.text).toContain('the limits in your model');
-    expect(answer!.text).not.toContain('the condition you set was checked');
+    // ⚠ NEGATIVE CONTROL RE-DERIVED (ROADMAP 2.675, CLAUDE.md trap 13b). This
+    // named 'the condition you set was checked' — a string that, after 2.675,
+    // appears in NO copy anywhere, so the assertion could no longer fail and
+    // stopped guarding the zero-row branch against borrowing the one-row
+    // sentence. Re-pointed at the marker that DOES exist now, so it still bites.
+    expect(answer!.text).not.toContain('The condition on your model was checked');
   });
 
   it('unevaluated / identity_unresolved REUSE the disclosure copy rather than restating it', () => {
@@ -198,7 +206,12 @@ describe('composeWithheldReasonTail — it answers, for every state that withhol
     const answer = composeWithheldReasonTail(null, TWO);
     expect(answer!.kind).toBe('reason_unrecorded');
     expect(answer!.text).toContain('the reason is not recorded on it');
-    expect(answer!.text).not.toContain('condition you set');
+    // ⚠ NEGATIVE CONTROL RE-DERIVED (ROADMAP 2.675, CLAUDE.md trap 13b): the
+    // old marker 'condition you set' no longer exists in any voice, so this
+    // could not have failed. Pointed at the phrase the ratified-condition
+    // voices now share, which is what this test exists to keep out of the
+    // fail-closed answer.
+    expect(answer!.text).not.toContain('condition on your model');
     expect(answer!.text).not.toContain('Three-Year Total Cost of Ownership');
   });
 
