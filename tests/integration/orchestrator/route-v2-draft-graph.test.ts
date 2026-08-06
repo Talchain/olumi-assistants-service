@@ -472,6 +472,72 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
     expect(body.details.recovery).toBeDefined();
   });
 
+  it('typed mapping: 422 CEE_GRAPH_INVALID with producer-declared retryable:true → wire retryable=true (Test 6c2, ROADMAP 2.718)', async () => {
+    // The EXACT witnessed envelope (golden-journey 20260806T142014Z-failed-
+    // draft-39cf53, request 41152fb5): the post-enforcement gate fail-closed
+    // a stochastic goal-less draft with `retryable: true` + retry-first copy,
+    // and the wire delivered `retryable: false` beside that copy. This test
+    // binds to the enforcement emitter's identity: its 422 status, its
+    // pinned recovery copy, and the producer-declared retryable threaded as
+    // `pipelineRetryable`.
+    const recovery = {
+      suggestion:
+        'Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you — this is usually transient. Try again.',
+      hints: [
+        'Retrying the same brief usually succeeds',
+        'If it keeps happening, state the outcome you are optimising for explicitly',
+        'Naming how each consideration affects that outcome helps the model connect them',
+      ],
+    };
+    const err = Object.assign(new Error('CEE_GRAPH_INVALID'), {
+      pipelineStatusCode: 422,
+      pipelineErrorCode: 'CEE_GRAPH_INVALID',
+      pipelineRetryable: true,
+      pipelineRecovery: recovery,
+      pipelineDetails: {
+        validation_error_codes: ['MISSING_BRIDGE', 'NO_PATH_TO_GOAL', 'NO_EFFECT_PATH'],
+        last_phase: 'deterministic_enforcement',
+      },
+    });
+    dispatchDraftGraphMock.mockRejectedValueOnce(err);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111c02',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: LONG_BRIEF,
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+    // HTTP 500 preserved (Strategy B): no DGAI status-code change.
+    expect(res.statusCode).toBe(500);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('INTERNAL_ERROR');
+    expect(body.details.reason).toBe('draft_graph_cee_graph_invalid');
+    // THE FIX: the producer declared this failure retryable (stochastic
+    // topology, not a bad brief) — the wire must agree with the copy it
+    // carries, at BOTH levels.
+    expect(body.details.retryable).toBe(true);
+    expect(body.retryable).toBe(true);
+    // The retry-first copy survives untouched, with its pinned flat mirror.
+    expect(body.details.recovery).toEqual(recovery);
+    expect(body.details.recovery_suggestion).toBe(recovery.suggestion);
+    expect(body.details.pipeline_error_code).toBe('CEE_GRAPH_INVALID');
+    // Diagnosability (2.718): the validator codes that blocked packaging are
+    // on the wire — today they were only recoverable from Render logs.
+    expect(body.details.validation_error_codes).toEqual([
+      'MISSING_BRIDGE',
+      'NO_PATH_TO_GOAL',
+      'NO_EFFECT_PATH',
+    ]);
+    expect(body.details.last_phase).toBe('deterministic_enforcement');
+    expect(() => BoundaryErrorSchema.parse(body)).not.toThrow();
+  });
+
   it('typed mapping: 400 CEE_VALIDATION_FAILED → generic validation reason + retryable=false (Test 6d)', async () => {
     const err = Object.assign(new Error('CEE_VALIDATION_FAILED'), {
       pipelineStatusCode: 400,

@@ -1745,6 +1745,38 @@ export function mapDraftGraphPipelineReason(
   pipelineStatusCode: number,
   pipelineErrorCode: string,
   pipelineReason?: string | null,
+  // ROADMAP 2.718 — the pipeline body's OWN top-level `retryable`, threaded
+  // by handleDraftGraph as `pipelineRetryable`. `null` = producer silent
+  // (or a pre-2.718 caller): the static map below decides alone.
+  producerRetryable?: boolean | null,
+): { reason: string; retryable: boolean } {
+  const mapped = mapDraftGraphPipelineReasonStatic(
+    pipelineStatusCode,
+    pipelineErrorCode,
+    pipelineReason,
+  );
+  // Producer-authoritative promotion (ROADMAP 2.718). An emitter that
+  // EXPLICITLY declares `retryable: true` on its error body is believed —
+  // this map is a hand-maintained mirror of producer semantics and had
+  // drifted: the post-enforcement gate declares its CEE_GRAPH_INVALID
+  // retryable (stochastic model topology — the same brief drafts cleanly on
+  // rerun; see graph-enforcement.ts "HONEST RETRY", 2026-07-24) while this
+  // map said "retrying reproduces" and flipped it to false on the wire,
+  // beside recovery copy reading "Try again" (witnessed 2026-08-06, runs
+  // de79da/39cf53). Promotion is MONOTONE: an explicit producer `false` is
+  // indistinguishable from buildCeeErrorResponse's omission default, so it
+  // never demotes a mapped true (a timeout stays retryable even when its
+  // body carries the default false).
+  if (producerRetryable === true && !mapped.retryable) {
+    return { ...mapped, retryable: true };
+  }
+  return mapped;
+}
+
+function mapDraftGraphPipelineReasonStatic(
+  pipelineStatusCode: number,
+  pipelineErrorCode: string,
+  pipelineReason?: string | null,
 ): { reason: string; retryable: boolean } {
   switch (pipelineErrorCode) {
     case 'CEE_LLM_VALIDATION_FAILED':
@@ -1785,10 +1817,17 @@ export function mapDraftGraphPipelineReason(
       return { reason: 'draft_graph_cee_internal_error', retryable: true };
     case 'CEE_GRAPH_INVALID':
       // Emitted when enrichment or repair determines the LLM produced a
-      // graph that cannot be made structurally valid (see
-      // unified-pipeline/index.ts:523, orchestrator-validation.ts).
-      // Client must refine the brief — retrying with the same input
-      // reproduces.
+      // graph that cannot be made structurally valid. ⚠ CORRECTED 2026-08-06
+      // (ROADMAP 2.718): this arm previously asserted "retrying with the
+      // same input reproduces" — FALSE for two of the code's emitters. The
+      // post-enforcement gate (graph-enforcement.ts) and the
+      // OPTIONS_IDENTICAL bypass both fail on STOCHASTIC model topology and
+      // declare `retryable: true` with retry-first recovery copy; the
+      // witnessed 2026-08-06 runs drafted the SAME brief cleanly in
+      // neighbouring runs of the same hour. `false` here is only the FLOOR
+      // for emitters that declare nothing (enrichment crash, structural
+      // parse) — an explicit producer `retryable: true` promotes it via the
+      // wrapper above.
       return { reason: 'draft_graph_cee_graph_invalid', retryable: false };
     case 'CEE_VALIDATION_FAILED':
       // Generic validation failure surface (graph-enforcement and orchestrator
@@ -3666,6 +3705,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           readonly pipelineStatusCode?: number;
           readonly pipelineErrorCode?: string | null;
           readonly pipelineReason?: string | null;
+          readonly pipelineRetryable?: boolean | null;
           readonly pipelineRecovery?: Record<string, unknown> | null;
           readonly pipelineDetails?: Record<string, unknown> | null;
         };
@@ -3675,6 +3715,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           typeof meta.pipelineErrorCode === 'string' ? meta.pipelineErrorCode : null;
         const pipelineReason =
           typeof meta.pipelineReason === 'string' ? meta.pipelineReason : null;
+        // ROADMAP 2.718 — the producer's own retryability declaration.
+        // Strict boolean; anything else = producer silent (null).
+        const pipelineRetryable =
+          typeof meta.pipelineRetryable === 'boolean' ? meta.pipelineRetryable : null;
         const pipelineRecovery =
           meta.pipelineRecovery && typeof meta.pipelineRecovery === 'object'
             ? meta.pipelineRecovery
@@ -3710,7 +3754,12 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           requestId,
         );
         const { reason, retryable } = pipelineStatusCode != null && pipelineErrorCode != null
-          ? mapDraftGraphPipelineReason(pipelineStatusCode, pipelineErrorCode, pipelineReason)
+          ? mapDraftGraphPipelineReason(
+              pipelineStatusCode,
+              pipelineErrorCode,
+              pipelineReason,
+              pipelineRetryable,
+            )
           : { reason: 'draft_graph_pipeline_threw', retryable: true };
         // Build postStageExtras additively: recovery (when present), the
         // raw CEE category code (when present), AND any allowlisted

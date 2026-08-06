@@ -547,6 +547,14 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
               message: e.message,
               path: e.path,
             })),
+            // Codes-only mirror for the WIRE (ROADMAP 2.718). The route
+            // boundary's PIPELINE_DETAILS_ALLOWLIST forwards only fixed-enum
+            // fields; `validation_errors` stays off-wire because its
+            // `message` strings embed node labels drafted from user input.
+            // Diagnosing the 2026-08-06 failures (runs de79da/39cf53) cost a
+            // Render-logs round-trip precisely because the wire carried no
+            // codes. Derived from the same array, so the two cannot drift.
+            validation_error_codes: revalidation.errors.map((e) => e.code),
             enforcement_repairs: allRepairs.length,
             last_phase: "deterministic_enforcement",
           },

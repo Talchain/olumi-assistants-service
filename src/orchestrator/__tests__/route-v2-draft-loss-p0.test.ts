@@ -258,6 +258,42 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
     );
   });
 
+  it('a typed-metadata pipeline throw (CEE_GRAPH_INVALID, producer retryable:true) STILL 500s, marks the trace, AND the wire honours the producer retryable (2.718)', async () => {
+    // Invariant 6 must hold on the typed-envelope path too — the witnessed
+    // 2026-08-06 failures (runs de79da/39cf53) travel exactly this path: the
+    // post-enforcement gate's 422 body becomes a typed throw, route-v2 maps
+    // it, and the fence row must be marked BEFORE the 500 leaves. The
+    // retryable assertion is the 2.718 fix: producer-declared true must
+    // survive to the wire, not be flipped by the static per-code map.
+    dispatchDraftGraphMock.mockRejectedValue(
+      Object.assign(new Error('CEE_GRAPH_INVALID'), {
+        pipelineStatusCode: 422,
+        pipelineErrorCode: 'CEE_GRAPH_INVALID',
+        pipelineRetryable: true,
+        pipelineRecovery: {
+          suggestion:
+            'Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you — this is usually transient. Try again.',
+          hints: ['Retrying the same brief usually succeeds'],
+        },
+      }),
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: messagePayload(COMPLETE_BRIEF),
+    });
+    expect(res.statusCode).toBe(500);
+    expect(markGraphWriteFailedMock).toHaveBeenCalledWith(
+      SCENARIO_ID,
+      TURN_ID,
+      expect.stringContaining('draft'),
+    );
+    const body = JSON.parse(res.body);
+    expect(body.details.reason).toBe('draft_graph_cee_graph_invalid');
+    expect(body.details.retryable).toBe(true);
+    expect(body.retryable).toBe(true);
+  });
+
   it('CONTROL: a draft that commits marks nothing', async () => {
     const res = await app.inject({
       method: 'POST',
