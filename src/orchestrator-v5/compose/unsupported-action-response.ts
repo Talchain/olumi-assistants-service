@@ -33,7 +33,52 @@
 import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 
 import { curatedHandlerChips, sanitiseForUser } from './helpers.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
+import type { HandlerValidationRegistry } from '../routing/validator.js';
 import type { ComposeContext, SuggestedAction } from './types.js';
+
+/**
+ * ⭐ ROADMAP 2.663 rider — WHAT CHAT CAN ACTUALLY DO, in the user's words.
+ *
+ * Keyed by handler id so the sentence is DERIVED from the live registry
+ * (`supportedMutationPhrases`) rather than written out beside it. The
+ * structural template used to deny structural editing outright; on a
+ * deployment where these three are registered that sentence is false, and the
+ * consent-witness walk caught a user reading it two turns after chat had added
+ * a constraint for them.
+ *
+ * ⚠ THIS TABLE IS A HAND-WRITTEN LIST AND THEREFORE THE PART THAT CAN GO SHORT
+ * (CLAUDE.md trap 12d: derivation proves agreement, never completeness). It is
+ * pinned BOTH WAYS against `GRAPH_MUTATING_HANDLER_IDS` in
+ * `__tests__/unsupported-action-capability-honesty.test.ts` — a new mutating
+ * handler with no phrase REDs, and a phrase for a non-mutating handler REDs —
+ * so it cannot drift out of the sentence silently.
+ */
+export const MUTATION_CAPABILITY_PHRASES: Readonly<Record<string, string>> = {
+  add_constraint: 'add a limit',
+  set_factor_value: "set a factor's value",
+  adjust_edge_strength: 'change how strongly one factor affects another',
+};
+
+/**
+ * The phrases for the mutating handlers this deployment actually registers,
+ * in the table's declared order. Empty when none are registered — in which
+ * case the blanket denial below is TRUE and is kept.
+ */
+function supportedMutationPhrases(
+  registry: HandlerValidationRegistry,
+): readonly string[] {
+  return Object.entries(MUTATION_CAPABILITY_PHRASES)
+    .filter(([id]) => GRAPH_MUTATING_HANDLER_IDS.has(id))
+    .filter(([id]) => (registry as unknown as Record<string, unknown>)[id] != null)
+    .map(([, phrase]) => phrase);
+}
+
+/** "a, b or c" — house style, no Oxford comma, no em dash. */
+function joinPhrases(phrases: readonly string[]): string {
+  if (phrases.length <= 1) return phrases[0] ?? '';
+  return `${phrases.slice(0, -1).join(', ')} or ${phrases[phrases.length - 1]!}`;
+}
 
 /** Coarse category used to pick copy. */
 type HandlerCategory = 'structural' | 'value_change' | 'analysis_dep' | 'generic';
@@ -100,7 +145,12 @@ export function composeUnsupportedActionResponse(
   const safeHandlerId = sanitiseForUser(handlerId);
 
   const chips = buildChips(context, category, hasAnalysis);
-  const assistantText = buildText(category, safeHandlerId, hasAnalysis);
+  const assistantText = buildText(
+    category,
+    safeHandlerId,
+    hasAnalysis,
+    supportedMutationPhrases(context.handlerRegistry),
+  );
 
   return {
     response: {
@@ -120,14 +170,30 @@ function buildText(
   category: HandlerCategory,
   safeHandlerId: string,
   hasAnalysis: boolean,
+  supportedMutations: readonly string[],
 ): string {
   switch (category) {
-    case 'structural':
-      return (
-        "I can't make structural changes to the model through chat in this version. " +
+    case 'structural': {
+      const canvasFallback =
         `You can make this change (${safeHandlerId.replace(/_/g, ' ')}) directly on the canvas, ` +
-        'then come back and I can run the analysis on the updated model.'
+        'then come back and I can run the analysis on the updated model.';
+      // ROADMAP 2.663 rider. The blanket denial is only true when this
+      // deployment registers NO graph-mutating handler. When it does, deny the
+      // NARROW thing that is genuinely unavailable and say what is not — the
+      // witnessed defect was a user reading "I can't make structural changes
+      // through chat" two turns after chat had added a constraint for them.
+      if (supportedMutations.length === 0) {
+        return (
+          "I can't make structural changes to the model through chat in this version. " +
+          canvasFallback
+        );
+      }
+      return (
+        `I can't do that one (${safeHandlerId.replace(/_/g, ' ')}) through chat yet. ` +
+        `Through chat I can ${joinPhrases(supportedMutations)}. ` +
+        canvasFallback
       );
+    }
     case 'value_change':
       return (
         `Direct value updates like ${safeHandlerId.replace(/_/g, ' ')} aren't available through chat yet. ` +
