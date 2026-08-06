@@ -147,7 +147,7 @@ describe("generateRobustnessSynthesis", () => {
       const explanation = result?.assumption_explanations?.[0]?.explanation;
       expect(explanation).toContain("Market Size");
       expect(explanation).toContain("Growth");
-      expect(explanation).toContain("recommendation could change");
+      expect(explanation).toContain("ranking could change");
     });
 
     it("generates contextualised explanation for cost factors", () => {
