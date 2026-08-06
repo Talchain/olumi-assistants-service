@@ -238,6 +238,62 @@ function formatThreshold(t: CalibrationThreshold): string {
 }
 
 /**
+ * ⭐⭐ MAY THIS CLASSIFICATION BE TURNED INTO A POINT VALUE FOR THE FACTOR?
+ * (ROADMAP 2.627.)
+ *
+ * `probability_only` — YES. "Set X to pretty likely" names one quantity and
+ * the phrase IS the user's estimate of it. 0.70 is what they said.
+ *
+ * `probability_of_threshold` — NO, and this is the whole of 2.627. "Churn
+ * staying below 3% is pretty likely" asserts P(churn < 3%) ~ 0.70. It names
+ * TWO numbers and the factor's value is NEITHER of them:
+ *
+ *   - 0.03 is the user's BOUND. The PR already refused to store it (that was
+ *     the witnessed live defect).
+ *   - 0.70 is a probability ABOUT that bound. `belief-elicitation/index.ts`
+ *     declares `CERTAINTY_TERMS` as probability expressions and feeds them to
+ *     `elicitBelief` for `target_type: 'prior' | 'edge_weight'` — P(event),
+ *     never a factor's level. Storing it as churn says churn is 70%.
+ *
+ * The statement fixes 3% at roughly the user's 70th percentile. Recovering a
+ * point estimate from ONE quantile requires assuming a distributional family
+ * the user never named, and inventing one is the same class of defect as the
+ * fabricated numbers this estate has spent the week removing.
+ *
+ * ⚠ AND THE SECOND ANCHOR HAS NOWHERE TO GO — derived at the bytes, because
+ * the obvious remedy is to elicit one ("what figure would surprise you to
+ * exceed?") and store the resulting range. There is no reachable field:
+ *
+ *   - `GRAPH_MUTATING_HANDLER_IDS` is {set_factor_value, add_constraint,
+ *     adjust_edge_strength}. `set-factor-value.ts`'s own docstring: it
+ *     "mutates a factor node's `observed_state.{value, raw_value}`" — a point
+ *     value, and nothing else.
+ *   - `ObservedStateSchema.std` exists but no handler writes it; the schemas
+ *     package's own `EDITABLE_FIELD_TABLE` calls it "a pure uncertainty
+ *     tunable with a human setter and NO AI ACCESS".
+ *   - `PriorSchema {distribution, range_min, range_max}` and
+ *     `StateSpaceSchema {range}` exist on the node but are reachable only
+ *     through the `edit_graph` path, which does not run inside
+ *     `runTurnExecutor` at all (ROADMAP 2.628a).
+ *
+ * Two quantiles are two points on a CDF; `range_min`/`range_max` is a support
+ * interval and `std` is a Gaussian dispersion. Converting between them needs
+ * the same invented assumption — and no reachable handler could store the
+ * result anyway. So asking for a second anchor would pose a question whose
+ * answer this product cannot keep. The schemas table's own verdict on a field
+ * with no reader applies exactly: it "manufactures a lever that moves nothing
+ * while looking like it moves something".
+ *
+ * WHAT IS LEFT IS THE HONEST MINIMUM: say what was understood, say why it is
+ * not a value, and ask for the one number that IS storable.
+ */
+export function mayOfferPointValue(
+  classification: CalibrationClassification,
+): classification is Extract<CalibrationClassification, { kind: 'probability_only' }> {
+  return classification.kind === 'probability_only';
+}
+
+/**
  * The user-visible preview. Composed HERE, deterministically, from the
  * classification — never by the model. That is not a style choice: on the
  * witnessed turn the model's own routing deliberation was rendered into
@@ -257,15 +313,21 @@ export function buildCalibrationPreviewText(
   const target = targetLabel ?? 'that factor';
 
   if (classification.kind === 'probability_of_threshold') {
+    // ⭐ 2.627 — NO POINT VALUE IS OFFERED HERE. See `mayOfferPointValue`
+    // above for the derivation. The copy keeps BOTH numbers, each named as
+    // what it is (discarding them would throw away the only thing the user
+    // actually told us), and ends by asking for the one number this product
+    // can honestly store.
     const t = classification.threshold;
     const bound = t.comparator === 'at_most' ? 'stays below' : 'stays above';
     return (
-      `I read that as a probability, not as the value itself: you are saying there is about a ` +
+      `I read that as a probability, not as a value: you are saying there is about a ` +
       `${pct} chance that ${target} ${bound} ${formatThreshold(t)} — ` +
-      `not that ${target} equals ${formatThreshold(t)}. ` +
-      `"${classification.probability.phrase}" maps to ${pct}. ` +
-      `Nothing has been changed. Confirm and I will set ${target} to ${pct}, ` +
-      `or give me a different number.`
+      `not that ${target} equals ${formatThreshold(t)}, and not that it equals ${pct}. ` +
+      `Nothing has been changed. ` +
+      `One probability about one threshold does not pin down a single number for ${target}: ` +
+      `I would have to invent a spread you have not given me. ` +
+      `What would you put down as your best estimate for ${target} itself?`
     );
   }
 
@@ -276,15 +338,68 @@ export function buildCalibrationPreviewText(
   );
 }
 
-/** The replay message a confirm chip sends — an explicit, unambiguous number. */
+/**
+ * The replay message a confirm chip sends — an explicit, unambiguous number,
+ * so confirming travels the ordinary numeric path.
+ *
+ * ⚠ REFUSES `probability_of_threshold` BY CONSTRUCTION (2.627). It threw only
+ * on `none` before, and the caller minted a chip reading "Set Monthly Churn
+ * Rate to 70%." for a sentence that never said churn was 70%. Making the
+ * unsafe conversion UNREPRESENTABLE is the point: a future call site cannot
+ * reintroduce it by forgetting a condition. Ask `mayOfferPointValue` first.
+ */
 export function buildCalibrationConfirmMessage(
   classification: CalibrationClassification,
   targetLabel: string,
 ): string {
-  if (classification.kind === 'none') {
-    throw new Error('buildCalibrationConfirmMessage called with no classification');
+  if (!mayOfferPointValue(classification)) {
+    throw new Error(
+      `buildCalibrationConfirmMessage refuses classification "${classification.kind}": ` +
+        'no point value is derivable from it (ROADMAP 2.627)',
+    );
   }
   return `Set ${targetLabel} to ${formatProbabilityPercent(classification.probability.value)}.`;
+}
+
+/**
+ * ⭐ THE SINGLE PLACE A CALIBRATION REPLY IS ASSEMBLED — text AND chips.
+ *
+ * Both turn-executor call sites (the STEP 2 consent gate and the calibration
+ * pre-route) consume THIS, rather than composing a chip apiece beside a
+ * shared text builder. That was the shape 2.627 shipped in, and it is a
+ * hand-maintained mirror in miniature (CLAUDE.md trap 12): two sites, one
+ * "is a value offerable here?" judgement, no derivation between them. Now
+ * there is exactly one, and a call site cannot mint a numeric chip because it
+ * never constructs one.
+ */
+export function buildCalibrationReply(
+  classification: CalibrationClassification,
+  targetLabel: string | null,
+): {
+  readonly assistant_text: string;
+  readonly suggested_actions: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly message: string;
+  }>;
+} {
+  const assistant_text = buildCalibrationPreviewText(classification, targetLabel);
+  if (targetLabel === null || !mayOfferPointValue(classification)) {
+    return { assistant_text, suggested_actions: [] };
+  }
+  return {
+    assistant_text,
+    suggested_actions: [
+      {
+        // `chip_prompt_*` (suggestion family), not `chip_clarify_*`: this is
+        // a route the user MAY take, not an answer to a question we asked.
+        // The egress chip finaliser sizes and dedupes the two differently.
+        id: 'chip_prompt_calibration_confirm',
+        label: `Use ${formatProbabilityPercent(classification.probability.value)}`,
+        message: buildCalibrationConfirmMessage(classification, targetLabel),
+      },
+    ],
+  };
 }
 
 /**

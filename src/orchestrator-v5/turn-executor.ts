@@ -103,9 +103,7 @@ import {
 } from './routing/mutation-consent.js';
 import {
   classifyCalibrationMessage,
-  buildCalibrationPreviewText,
-  buildCalibrationConfirmMessage,
-  formatProbabilityPercent,
+  buildCalibrationReply,
   resolveFactorLabelForConsentPreview,
 } from './routing/calibration-semantics.js';
 import {
@@ -4814,17 +4812,16 @@ export async function runTurnExecutor(
             matched_phrase: calibrationOnly.probability.phrase,
           });
 
+          // ⭐ 2.627 — text AND chips come from the ONE builder. A
+          // `probability_of_threshold` turn gets no value-bearing chip,
+          // because the value does not exist to be offered. This call site
+          // no longer decides that; it cannot.
+          const calibrationOffer = buildCalibrationReply(calibrationOnly, calibrationTarget);
           const calibrationResponse = composeAnswer({
             answerKind: 'functional',
-            assistant_text: buildCalibrationPreviewText(calibrationOnly, calibrationTarget),
+            assistant_text: calibrationOffer.assistant_text,
             stage: context.stage,
-            suggested_actions: [
-              {
-                id: 'chip_prompt_calibration_confirm',
-                label: `Use ${formatProbabilityPercent(calibrationOnly.probability.value)}`,
-                message: buildCalibrationConfirmMessage(calibrationOnly, calibrationTarget),
-              },
-            ],
+            suggested_actions: [...calibrationOffer.suggested_actions],
           });
           sonnetTextForLog = calibrationResponse.assistant_text;
           resolvedTurnClass = 'direct_answer';
@@ -6937,10 +6934,17 @@ export async function runTurnExecutor(
             ? action.entity.label
             : resolveFactorLabelForConsentPreview(payload.message, graphStateForTurn);
 
+        // ⭐ 2.627 — one builder owns both the sentence and the chips on the
+        // calibration branch. See `mayOfferPointValue` in
+        // `calibration-semantics.ts`: a probability about a threshold yields
+        // no value this product can honestly write, so it yields no offer.
+        const calibrationOffer =
+          calibration.kind === 'none' ? null : buildCalibrationReply(calibration, targetLabel);
+
         const withheldText =
-          calibration.kind === 'none'
+          calibrationOffer === null
             ? buildConsentWithheldText(targetLabel)
-            : buildCalibrationPreviewText(calibration, targetLabel);
+            : calibrationOffer.assistant_text;
 
         emit(TelemetryEvents.V5CalibrationConsentWithheld, {
           request_id: requestId,
@@ -6962,23 +6966,7 @@ export async function runTurnExecutor(
             calibration.kind === 'none' ? null : calibration.probability.phrase,
         });
 
-        const consentChips: SuggestedAction[] =
-          calibration.kind !== 'none' && targetLabel !== null
-            ? [
-                {
-                  // `chip_prompt_*` (suggestion family), not
-                  // `chip_clarify_*`: this is a route the user MAY take, not
-                  // an answer to a question we asked. The egress chip
-                  // finaliser sizes and dedupes the two families differently.
-                  id: 'chip_prompt_calibration_confirm',
-                  label: `Use ${formatProbabilityPercent(calibration.probability.value)}`,
-                  // The replay message carries an EXPLICIT number, so the
-                  // confirming turn travels the ordinary, already-tested
-                  // numeric path — this gate mints no new apply route.
-                  message: buildCalibrationConfirmMessage(calibration, targetLabel),
-                },
-              ]
-            : [];
+        const consentChips: SuggestedAction[] = [...(calibrationOffer?.suggested_actions ?? [])];
 
         const consentResponse = composeAnswer({
           answerKind: 'functional',

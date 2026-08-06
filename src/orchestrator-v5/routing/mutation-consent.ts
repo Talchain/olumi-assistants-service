@@ -43,10 +43,14 @@
  * ⚠ THIS IS A LIST, AND A LIST IS THE ESTATE'S DOMINANT DEFECT (CLAUDE.md
  * trap 12). Two things stop it drifting:
  *
- *  1. `__tests__/graph-mutating-handler-ids.test.ts` DERIVES the true set by
+ *  1. `__tests__/consent-coverage-manifest.test.ts` DERIVES the true set by
  *     reading which handler modules import `applyAndValidateMutation` (the
  *     single in-memory mutation chokepoint) and asserts equality. A new
  *     mutating handler turns that test RED on the day it is written.
+ *     (⚠ This line named `__tests__/graph-mutating-handler-ids.test.ts`
+ *     until 6 Aug 2026. NO SUCH FILE HAS EVER EXISTED — a comment citing a
+ *     guarantee by the name of a file nobody can open is the same defect
+ *     class as an absent guarantee, and harder to notice.)
  *  2. The guarantee does not actually depend on this list being right — the
  *     commit-closure backstop in turn-executor strips the graph from ANY
  *     commit on a withheld turn, with no handler ids involved at all. This
@@ -55,11 +59,26 @@
  *     property holds.
  *
  * NOT included: `edit_graph`. It is a system-layer dispatch outside
- * `runTurnExecutor`'s STEP 3, and it already has a consent mechanism of its
- * own — the Graph-Management referee, which HOLDS every structural op and
- * demotes `would_apply` to `held` for user-protected entities
- * (`graph-management/protection-scope.ts`). Adding it here would collide
- * with that lane, not reinforce it.
+ * `runTurnExecutor`'s STEP 3 (reached from `orchestrator/route-v2.ts` on
+ * `editIntentDetected`), so it never passes either layer of this gate.
+ *
+ * ⚠ CORRECTED 6 Aug 2026 (ROADMAP 2.628). This paragraph used to say the
+ * Graph-Management referee "HOLDS every structural op". IT DOES NOT, and the
+ * sentence was reassuring in exactly the direction that costs a user their
+ * model. Measured in `graph-management/referee.ts`: `rename_node` and
+ * `update_node/edge_field` are declared **would_apply-eligible** in its own
+ * header, and it returns `verdict: 'would_apply'` for them — i.e. those ops
+ * APPLY regardless of what the user's message asked for. The referee holds
+ * SOME ops and demotes ops targeting user-protected entities
+ * (`graph-management/protection-scope.ts`); it is not a consent mechanism and
+ * does not read the user's words at all.
+ *
+ * So `edit_graph` is genuinely UNCOVERED by withheld-consent enforcement,
+ * not covered by a different mechanism. That is recorded as a gap
+ * (ROADMAP 2.628a) rather than closed here: this module is scoped to the
+ * executor's action layer, and reaching into a separate dispatch path would
+ * collide with the lane that owns it. The manifest test states the same
+ * scope in an assertion rather than in prose.
  */
 export const GRAPH_MUTATING_HANDLER_IDS: ReadonlySet<string> = new Set([
   'set_factor_value',

@@ -262,12 +262,17 @@ describe('CALIBRATION CONSENT BOUNDARY: "show me before applying" is enforced by
     expect(graphWrites()).toHaveLength(0);
     expect(persistedGraph).toBeNull();
 
-    // The mapped value IS shown before applying — "pretty likely" is 0.70.
+    // The mapped probability IS surfaced — "pretty likely" is 0.70. It is
+    // reported as a PROBABILITY, never proposed as the factor's value; the
+    // 2.627 block below owns that distinction.
     expect(response.assistant_text).toContain('70%');
 
-    // The number in the sentence was a THRESHOLD. It must never be presented
-    // as the value we are about to store.
-    expect(response.assistant_text).not.toMatch(/set .{0,40}to 3%/i);
+    // Neither number in the sentence may be presented as the value we are
+    // about to store: 3% is the user's THRESHOLD and 70% is a probability
+    // ABOUT it (ROADMAP 2.627 — the second half of this pair was missing
+    // when the PR was first reviewed, and the product offered 70%).
+    expect(response.assistant_text).not.toMatch(/set .{0,60}to 3%/i);
+    expect(response.assistant_text).not.toMatch(/set .{0,60}to 70%/i);
 
     // No routing/deliberation text may reach the user.
     expect(response.assistant_text).not.toContain('set_factor_value');
@@ -530,6 +535,125 @@ describe('LAYER 2 — the commit backstop, with LAYER 1 bypassed', () => {
         e.data.layer === 'commit_backstop',
     );
     expect(backstopEvents).toHaveLength(1);
+  });
+});
+
+/**
+ * ⭐⭐ ROADMAP 2.627 — THE NUMBER THE PRODUCT OFFERS MUST BE A NUMBER IT CAN
+ * STATE THE SEMANTICS OF.
+ *
+ * The consent guarantee above holds. The review that measured it found the
+ * OFFER wrong, and named why every instrument here missed it: "every
+ * instrument was pointed at whether the number is SHOWN and none at whether
+ * the number is RIGHT" (CLAUDE.md trap 13c — a mutation kit measures whether
+ * a test can DETECT a change; nothing in it can measure whether the
+ * expectation is TRUE).
+ *
+ * DERIVED FROM THE PRODUCER, NOT FROM THIS LANE'S READING OF IT:
+ *   - `belief-elicitation/index.ts` declares `CERTAINTY_TERMS` as
+ *     "natural language probability expressions -> normalized 0-1 values",
+ *     consumed by `elicitBelief` for `target_type: 'prior' | 'edge_weight'`.
+ *     0.70 is therefore P(event), never a factor's level.
+ *   - `calibration-semantics.ts` itself declares the classification:
+ *     "churn staying below 3% is pretty likely" asserts P(churn < 3%) ~ 0.70.
+ *
+ * So for that sentence the factor's value is NEITHER 0.03 NOR 0.70, and one
+ * probability about one threshold does not determine one. Converting it into
+ * a point value requires a distributional assumption the user never made.
+ *
+ * ── WHY THE ASSERTIONS ARE END-TO-END, NOT COPY CHECKS ────────────────────
+ * The defect was not only in the sentence. The confirm chip's replay message
+ * ("Set Monthly Churn Rate to 70%.") carries no threshold marker and no
+ * probability phrase, so REPLAYING IT travels the ordinary numeric path and
+ * writes 0.70. A test that only read the sentence would have passed while
+ * one click still moved the user's model. These tests therefore REPLAY every
+ * suggested action the turn offers and assert at the SAME persistence
+ * boundary the consent tests use.
+ */
+describe('2.627 — a probability-of-threshold utterance offers no point value', () => {
+  /**
+   * Replay a chip's message as its own turn and report what it wrote.
+   * `throwingRoutingAdapter` is deliberate: a replay that needs the LLM is
+   * not "the ordinary numeric path", and the throw makes that visible
+   * instead of silently passing.
+   */
+  async function replay(message: string, requestId: string): Promise<AppendWrite[]> {
+    appendCalls.length = 0;
+    persistedGraph = null;
+    await runTurnExecutor(payload(message), requestId, {
+      routingAdapter: throwingRoutingAdapter(),
+      graphState: buildChurnGraph(),
+    });
+    return graphWrites();
+  }
+
+  it('POSITIVE CONTROL (trap 13) — the replay harness CAN see a write, so the absence assertion below is not vacuous', async () => {
+    const writes = await replay('Set Monthly Churn Rate to 70%.', 'req-2627-replay-control');
+    expect(writes).toHaveLength(1);
+    expect(churnRawValue(writes[0]!.graph)).toBe(70);
+  });
+
+  it('⭐ NO ACTION THE TURN OFFERS MAY WRITE A VALUE — every suggested action, replayed, writes nothing', async () => {
+    const { response } = await runTurnExecutor(payload(PROMPT_A), 'req-2627-offer', {
+      routingAdapter: witnessedRoutingAdapter(),
+      graphState: buildChurnGraph(),
+    });
+
+    const actions = response.suggested_actions ?? [];
+    for (const [i, action] of actions.entries()) {
+      const message = (action as { message?: string }).message;
+      if (typeof message !== 'string' || message.trim().length === 0) continue;
+      const writes = await replay(message, `req-2627-offer-replay-${i}`);
+      expect(
+        writes,
+        `suggested action ${(action as { id?: string }).id} replayed as "${message}" wrote a graph`,
+      ).toHaveLength(0);
+    }
+  });
+
+  it('⭐ THE SENTENCE OFFERS NO VALUE EITHER — neither the probability nor the threshold is proposed as the factor value', async () => {
+    const { response } = await runTurnExecutor(payload(PROMPT_A), 'req-2627-sentence', {
+      routingAdapter: witnessedRoutingAdapter(),
+      graphState: buildChurnGraph(),
+    });
+
+    // The witnessed-review defect, verbatim: "Confirm and I will set Monthly
+    // Churn Rate to 70%." 70% is P(churn < 3%); it is not churn.
+    expect(response.assistant_text).not.toMatch(/set .{0,60}to 70%/i);
+    // The pre-existing sibling defect the PR already refused: 3% is the bound.
+    expect(response.assistant_text).not.toMatch(/set .{0,60}to 3%/i);
+  });
+
+  it('what WAS learned is stated, and what is missing is asked for', async () => {
+    const { response } = await runTurnExecutor(payload(PROMPT_A), 'req-2627-elicit', {
+      routingAdapter: witnessedRoutingAdapter(),
+      graphState: buildChurnGraph(),
+    });
+
+    // Both numbers survive, each named as what it is — dropping them would
+    // discard the only thing the user did tell us.
+    expect(response.assistant_text).toContain('70%');
+    expect(response.assistant_text).toContain('3%');
+    // ...and the turn ends by asking for the value it does not have.
+    expect(response.assistant_text).toContain('?');
+  });
+
+  it('DISCRIMINATING PAIR (trap 19) — the sibling `probability_only` classification is UNTOUCHED and still offers 70%', async () => {
+    // If the fix were a blanket "never offer a calibration value" it would
+    // pass every assertion above and silently destroy the working half. This
+    // is the GREEN half of the pair.
+    const routingAdapter = throwingRoutingAdapter();
+    const { response } = await runTurnExecutor(payload(PROMPT_REFUSED), 'req-2627-pair-green', {
+      routingAdapter,
+      graphState: buildChatbotGraph(),
+    });
+
+    expect(response.assistant_text).toMatch(/set .{0,60}to 70%/i);
+    const chip = (response.suggested_actions ?? []).find(
+      (a) => (a as { id?: string }).id === 'chip_prompt_calibration_confirm',
+    );
+    expect(chip, 'the probability_only confirm chip must survive').toBeDefined();
+    expect((chip as { message?: string }).message).toBe('Set AI Chatbot Deployment to 70%.');
   });
 });
 

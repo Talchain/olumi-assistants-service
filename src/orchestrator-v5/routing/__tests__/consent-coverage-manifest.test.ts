@@ -20,16 +20,21 @@
  *       `commitDirectAnswer` is the service's single `scenarios.graph`
  *       writer, but several dispatchers call it directly, bypassing
  *       `commitTurn` and therefore bypassing the backstop.
- *       → ENUMERATED HERE, derived from the source. The manifest is
- *         asserted so a NEW out-of-executor writer turns this RED and
- *         forces a decision, instead of silently widening the hole.
+ *       → ENUMERATED HERE, derived from the source.
+ *       ⚠⚠ WHAT THIS SCAN ACTUALLY PROVES — narrowed 6 Aug 2026 after an
+ *         adversarial review MEASURED it (ROADMAP 2.628b). This is a
+ *         FILE-LEVEL TOKEN CONJUNCTION: a file is flagged when it contains
+ *         both `commitDirectAnswer(` and a literal `graph: ` field. It is
+ *         NOT call-graph analysis. Measured both directions: a new writer
+ *         spelling a literal `graph:` REDs it ✔, but a writer that forwards
+ *         a PRE-BUILT `meta` object carrying the graph — no `graph:` token
+ *         in the file — stays GREEN. Do not read the assertion below as
+ *         "no new uncovered writer can appear"; read it as "no new writer
+ *         SPELLING A GRAPH FIELD can appear unnoticed". The stronger guard
+ *         is rowed, not shipped.
  *       ⚠ HONEST SCOPE: these writers are NOT covered by this change. The
  *         per-writer reason is recorded beside each entry in the manifest
- *         below — `edit-graph-dispatch` already has the GM referee;
- *         `system-events/dispatch` (the inspector value edit) and
- *         `route-v2` are UI-originated direct manipulations that carry no
- *         conversational message to withhold consent in. Recorded, not
- *         hidden.
+ *         below. Recorded, not hidden.
  *
  *   (3) THE DETECTOR FAILS TO FIRE on a phrasing a user considers a hold.
  *       → COVERED by the hand-written corpus in `mutation-consent.test.ts`,
@@ -90,8 +95,14 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
    * so widening the hole cannot happen quietly.
    */
   const KNOWN_UNCOVERED_WRITERS: readonly string[] = [
-    // Has its own consent machinery: the GM referee HOLDS every structural
-    // op and demotes ops targeting user-protected entities.
+    // ⚠ UNCOVERED, and NOT "covered by a different mechanism" — corrected
+    // 6 Aug 2026 (ROADMAP 2.628a) after this entry claimed the GM referee
+    // "HOLDS every structural op". Measured in `graph-management/referee.ts`:
+    // `rename_node` and `update_node/edge_field` are would_apply-ELIGIBLE and
+    // apply regardless of the user's words; the referee never reads the
+    // message. This dispatch is reached from `route-v2.ts` on
+    // `editIntentDetected`, never through `runTurnExecutor`, so neither
+    // consent layer sees it. Recorded as an open gap.
     'orchestrator-v5/handlers/edit-graph-dispatch.ts',
     // First-draft persistence — there is no prior model to protect.
     'orchestrator-v5/handlers/draft-graph-dispatch.ts',

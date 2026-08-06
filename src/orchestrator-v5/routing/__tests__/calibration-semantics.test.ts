@@ -24,6 +24,8 @@ import {
   formatProbabilityPercent,
   buildCalibrationPreviewText,
   buildCalibrationConfirmMessage,
+  buildCalibrationReply,
+  mayOfferPointValue,
   resolveFactorLabelForConsentPreview,
 } from '../calibration-semantics.js';
 import { CERTAINTY_TERMS } from '../../../cee/belief-elicitation/index.js';
@@ -200,6 +202,62 @@ describe('the preview copy', () => {
     expect(buildCalibrationConfirmMessage(c, 'AI Chatbot Deployment')).toBe(
       'Set AI Chatbot Deployment to 70%.',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ROADMAP 2.627 — WHICH CLASSIFICATIONS MAY BECOME A POINT VALUE
+//
+// The end-to-end proof lives in `__tests__/calibration-consent-boundary.test.ts`
+// (it REPLAYS every offered chip and asserts at the persistence boundary,
+// because the defect was reachable by clicking, not only by reading). These
+// are the unit-level statements of the same rule, at the one place that
+// decides it.
+// ---------------------------------------------------------------------------
+describe('2.627 — a probability ABOUT a threshold yields no point value', () => {
+  const THRESHOLD = classifyCalibrationMessage(CAPTURED_A);
+  const ONLY = classifyCalibrationMessage('Set AI Chatbot Deployment to pretty likely.');
+
+  it('the two fixtures really are the two classifications (precondition, trap 13b) — otherwise the pair below tests one branch twice', () => {
+    expect(THRESHOLD.kind).toBe('probability_of_threshold');
+    expect(ONLY.kind).toBe('probability_only');
+  });
+
+  it('DISCRIMINATING PAIR — probability_only may offer a value; probability_of_threshold may not', () => {
+    expect(mayOfferPointValue(ONLY)).toBe(true);
+    expect(mayOfferPointValue(THRESHOLD)).toBe(false);
+    expect(mayOfferPointValue({ kind: 'none' })).toBe(false);
+  });
+
+  it('the unsafe conversion is UNREPRESENTABLE, not merely unused — the confirm message REFUSES a threshold classification', () => {
+    // Before 2.627 this returned "Set Monthly Churn Rate to 70%." — a message
+    // that, replayed, wrote 0.70 into a churn factor. A future call site
+    // cannot reintroduce that by forgetting a condition.
+    expect(() => buildCalibrationConfirmMessage(THRESHOLD, 'Monthly Churn Rate')).toThrow(/2\.627/);
+  });
+
+  it('the reply offers NO action on a threshold classification, and keeps both numbers', () => {
+    const reply = buildCalibrationReply(THRESHOLD, 'Monthly Churn Rate');
+    expect(reply.suggested_actions).toHaveLength(0);
+    // What was learned survives...
+    expect(reply.assistant_text).toContain('70%');
+    expect(reply.assistant_text).toContain('3%');
+    // ...neither number is offered as the value...
+    expect(reply.assistant_text).not.toMatch(/set .{0,60}to 70%/i);
+    expect(reply.assistant_text).not.toMatch(/set .{0,60}to 3%/i);
+    // ...and the turn asks for what it does not have.
+    expect(reply.assistant_text).toContain('?');
+  });
+
+  it('the reply DOES offer one action on a bare qualitative set — the sibling branch is untouched', () => {
+    const reply = buildCalibrationReply(ONLY, 'AI Chatbot Deployment');
+    expect(reply.suggested_actions).toHaveLength(1);
+    expect(reply.suggested_actions[0]!.id).toBe('chip_prompt_calibration_confirm');
+    expect(reply.suggested_actions[0]!.message).toBe('Set AI Chatbot Deployment to 70%.');
+  });
+
+  it('an unresolved factor gets no action either — a chip cannot name a target we would not name in prose', () => {
+    expect(buildCalibrationReply(ONLY, null).suggested_actions).toHaveLength(0);
   });
 });
 
