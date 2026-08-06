@@ -238,6 +238,29 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   /\bnode[\s_]ids?\b/i,
   /\b_meta\b/i,
   /\borchestrator\b/i,
+  // ROADMAP 2.655 — THE OPERATION-BUDGET VOCABULARY.
+  //
+  // Witnessed on the wire (walk 2.634, 2026-08-07): "it would require 6 node
+  // operations and 6 edge operations - more than is safe in a single edit
+  // (limit: 4 node ops, 8 edge ops)". A patch operation is an internal unit;
+  // a user has no way to count one, and the sentence named a cap that had not
+  // even been breached.
+  //
+  // ⚠ SCOPE, DELIBERATELY NARROW. This bans the internal NOUN, not the numbers
+  // beside it. A pattern for the numbers themselves ("limit: 4") would have to
+  // fire on a colon followed by a digit, and a user's own constraint is
+  // legitimately written that way ("churn limit: 3%") — with a REMEDY that
+  // erases the whole response, over-reach here costs a turn. The numeric shape
+  // is swept where it is BUILT instead, over every rejection the copy builder
+  // can produce (`tests/unit/orchestrator/patch-rejection-no-internal-caps`),
+  // which is also the only level at which the whole input matrix can be
+  // checked rather than the one fixture a dispatch test happens to run.
+  //
+  // Swept before adding: the phrase appears nowhere in user-facing prose in
+  // this repo. Its only non-comment occurrence was the sentence above, which
+  // 2.655 removed at the producer. `node/edge operations` in the edit prompts
+  // is model-facing and is not scanned by this guard.
+  /\b(?:node|edge)\s+op(?:eration)?s?\b/i,
 ];
 
 /**

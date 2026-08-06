@@ -35,7 +35,13 @@ import { getMaxTokensFromConfig } from "../../adapters/llm/router.js";
 import { ANTHROPIC_EDIT_GRAPH_SCHEMA } from "./anthropic-edit-graph-schema.js";
 // ROADMAP 2.474 / A3 — ONE definition of the complexity budget, shared with the
 // structural-edit batch splitter (see patch-budget-limits.ts for why).
-import { MAX_NODE_OPS, MAX_EDGE_OPS, OPTION_ADD_MAX_EDGE_OPS } from "./patch-budget-limits.js";
+import {
+  MAX_NODE_OPS,
+  MAX_EDGE_OPS,
+  OPTION_ADD_MAX_EDGE_OPS,
+  PATCH_BUDGET_FAILURE_CODE,
+  type PatchBudgetDimension,
+} from "./patch-budget-limits.js";
 import { getSystemPrompt, getSystemPromptMeta } from "../../adapters/llm/prompt-loader.js";
 import type { LLMAdapter, CallOpts } from "../../adapters/llm/types.js";
 import { GraphV3, FactorCategoryV3 } from "../../schemas/cee-v3.js";
@@ -2541,11 +2547,15 @@ export async function handleEditGraph(
         );
         const rejectionCtx: PatchRejectionContext = {
           reason: 'budget_exceeded',
-          detail: 'Consider breaking this into smaller steps, or rebuilding the model from an updated brief.',
+          // ROADMAP 2.655 — INTERNAL from here on. This string is the logged
+          // `failure_message`; it is no longer appended to user copy, which the
+          // rejection helper now owns end to end.
+          detail: 'Patch operation budget exceeded; the request needs to be made in smaller parts.',
           node_ops: budgetResult.nodeOps,
           edge_ops: budgetResult.edgeOps,
           max_node_ops: MAX_NODE_OPS,
           max_edge_ops: budgetResult.effectiveMaxEdgeOps ?? MAX_EDGE_OPS,
+          breached_dimensions: budgetResult.breachedDimensions,
           suggested_actions: [
             { role: 'facilitator', label: 'Break into smaller steps', prompt: "Let's make this change in smaller steps." },
             { role: 'challenger', label: 'Rebuild from updated brief', prompt: 'Would you like to rebuild the model from an updated brief instead?' },
@@ -2558,7 +2568,11 @@ export async function handleEditGraph(
         branchTaken = 'rejection';
         branchReason = 'patch_budget_exceeded';
         failureBranch = 'patch_budget';
-        failureCode = 'budget_exceeded';
+        // ROADMAP 2.655 — the V5 dispatcher recognises this exact code to stop
+        // a declining structural-edit tool handing the turn back to the copy
+        // above. Consumed from the leaf, never re-spelled, so the producer and
+        // the consumer cannot drift apart.
+        failureCode = PATCH_BUDGET_FAILURE_CODE;
         failureMessage = rejectionCtx.detail;
         return {
           blocks: [],
@@ -4627,6 +4641,23 @@ interface PatchBudgetResult {
   breachedLimit?: 'incident' | 'unrelated' | 'node' | null;
   /** The effective max edge ops that was applied for the breached category. */
   effectiveMaxEdgeOps?: number;
+  /**
+   * ROADMAP 2.655 — the breach in the terms a USER can be told about, derived
+   * from the two allow/deny verdicts themselves rather than from bucket
+   * bookkeeping.
+   *
+   * ⚠ WHY NOT JUST READ `breachedLimit`. Measured at the bytes, that field
+   * cannot answer this question:
+   *   · a plain edge-only breach (no option addition) leaves it `null`, because
+   *     only the option-addition branch ever assigns an edge value;
+   *   · when node AND edge both breach under an option addition, the edge
+   *     bucket is assigned first and the `!nodeAllowed` clause is skipped, so
+   *     the node breach disappears from the report.
+   * Copy driven off it would therefore be silent, or wrong, in exactly the
+   * cases where it most needs to be right. `breachedLimit` is unchanged and
+   * keeps its existing meaning for its existing readers.
+   */
+  breachedDimensions: readonly PatchBudgetDimension[];
 }
 
 /**
@@ -4776,12 +4807,19 @@ export function checkPatchBudget(operations: PatchOperation[]): PatchBudgetResul
     breachedLimit = 'node';
   }
 
+  // ROADMAP 2.655 — derived from the verdicts, so it can never disagree with
+  // what was enforced and can never go silent on a dimension that breached.
+  const breachedDimensions: PatchBudgetDimension[] = [];
+  if (!nodeAllowed) breachedDimensions.push('node');
+  if (!edgeAllowed) breachedDimensions.push('edge');
+
   return {
     allowed: nodeAllowed && edgeAllowed,
     nodeOps,
     edgeOps,
     breachedLimit,
     effectiveMaxEdgeOps,
+    breachedDimensions,
   };
 }
 

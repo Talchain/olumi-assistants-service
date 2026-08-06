@@ -133,9 +133,12 @@ import { clampLabel, describeChangeset, type ChangesetOpLike } from './describe-
 import {
   buildStructuralEditScopeNotice,
   buildStructuralEditContinuation,
-  STRUCTURAL_EDIT_TOO_LARGE_TEXT,
-  STRUCTURAL_EDIT_TOO_LARGE_ACTIONS,
 } from './structural-edit-split-disclosure.js';
+import {
+  STRUCTURAL_EDIT_DECLINE_COPY,
+  type StructuralEditDeclineClass,
+} from './structural-edit-decline-copy.js';
+import { isPatchBudgetRejection } from '../../orchestrator/tools/patch-budget-limits.js';
 import { staleAnalysisBlocksApply } from '../graph-management/frame-gate.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import { derivePendingActionsFromFinalizedChips } from '../compose/derive-pending-actions.js';
@@ -712,6 +715,61 @@ interface StructuralEditToolResult {
   readonly split: StructuralEditSplitOutcome | null;
 }
 
+/**
+ * ⭐⭐ ROADMAP 2.655 — EVERY EXIT OF THE TOOL IS NAMED, AT THE TYPE LEVEL.
+ *
+ * ── WHAT WENT WRONG ──────────────────────────────────────────────────────
+ * This function used to return `EditGraphResult | null`, and `null` meant "the
+ * rulebook's answer stands". That is right after a grounding failure on an
+ * ordinary turn. It is CATASTROPHIC after a budget refusal, because the
+ * rulebook's answer is then the leaked-limits dead end this whole feature
+ * exists to abolish — and the walk measured exactly that, on the canonical
+ * compound edit, months after the fix shipped.
+ *
+ * ── WHY A DISCRIMINATED RETURN AND NOT A CONVENTION ──────────────────────
+ * The obvious repair is "remember to build honest copy at each `return null`".
+ * There were nine such returns. A convention across nine sites, in a 3,700-line
+ * dispatcher, is the hand-maintained mirror CLAUDE.md trap 12 is about: green
+ * the day it is written, silently short the day a tenth exit is added.
+ *
+ * So the inner function CANNOT return `null` — the type does not permit it. A
+ * new exit must name a {@link StructuralEditDeclineClass} or the build fails,
+ * and there is exactly ONE place (the wrapper below) where a decline becomes
+ * something a user reads.
+ */
+type StructuralEditToolOutcome =
+  | { readonly kind: 'engaged'; readonly result: StructuralEditToolResult }
+  | { readonly kind: 'declined'; readonly declineClass: StructuralEditDeclineClass };
+
+/**
+ * Build the replacement edit result for a declined tool.
+ *
+ * The rulebook's `latencyMs` and `diagnostics` are CARRIED, not discarded: the
+ * turn really did spend that time and really did refuse for that reason, and
+ * the R7 turn event reads `diagnostics.failure_code`. Only what the user reads
+ * is replaced.
+ */
+function structuralEditDeclineResult(
+  declineClass: StructuralEditDeclineClass,
+  rulebookResult: EditGraphResult,
+): StructuralEditToolResult {
+  const answer = STRUCTURAL_EDIT_DECLINE_COPY[declineClass];
+  return {
+    editResult: {
+      blocks: [],
+      assistantText: answer.text,
+      latencyMs: rulebookResult.latencyMs,
+      appliedGraph: null,
+      wasRejected: true,
+      suggestedActions: answer.actions.map((a) => ({ ...a })),
+      ...(rulebookResult.diagnostics !== undefined
+        ? { diagnostics: rulebookResult.diagnostics }
+        : {}),
+    },
+    split: null,
+  };
+}
+
 async function tryStructuralEditTool(input: {
   readonly editResult: EditGraphResult;
   readonly context: ConversationContext;
@@ -719,6 +777,44 @@ async function tryStructuralEditTool(input: {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
 }): Promise<StructuralEditToolResult | null> {
+  const outcome = await runStructuralEditTool(input);
+  if (outcome.kind === 'engaged') return outcome.result;
+
+  // ── ⭐⭐ THE ONE PLACE A DECLINE BECOMES AN ANSWER ─────────────────────────
+  //
+  // Two conditions license the tool to speak over the rulebook, and only two:
+  //
+  //  1. THE TOOL HAS A FINDING THE RULEBOOK DOES NOT. A cap refusal is the
+  //     tool's own conclusion about the user's request, reached after it
+  //     composed the batch. It is reported whatever the rulebook said, exactly
+  //     as it has been since #829 — behaviour deliberately unchanged here.
+  //
+  //  2. THE RULEBOOK'S ANSWER IS KNOWN TO BE THE DEAD END. Asked of the
+  //     PRODUCER'S stamped failure code, never of the sentence: matching on the
+  //     copy would stop recognising it the moment the copy was rewritten, and
+  //     2.655 rewrites it.
+  //
+  // ⚠ AND THE NEGATIVE HALF MATTERS AS MUCH. When the rulebook produced a
+  // legitimate answer of its own — a clarifying question, a no-op explanation —
+  // a declining tool must leave it alone. "Never the rulebook's answer" is the
+  // wrong rule; "never the rulebook's DEAD END" is the right one. Widening this
+  // would erase good coaching on every turn the tool happens to decline.
+  if (
+    outcome.declineClass !== 'too_large_to_split' &&
+    !isPatchBudgetRejection(input.editResult)
+  ) {
+    return null;
+  }
+  return structuralEditDeclineResult(outcome.declineClass, input.editResult);
+}
+
+async function runStructuralEditTool(input: {
+  readonly editResult: EditGraphResult;
+  readonly context: ConversationContext;
+  readonly adapter: ReturnType<typeof getAdapter>;
+  readonly payload: MessageTurnPayload;
+  readonly requestId: string;
+}): Promise<StructuralEditToolOutcome> {
   const { editResult, context, adapter, payload, requestId } = input;
 
   const emitEntry = (decision: string): void => {
@@ -752,7 +848,21 @@ async function tryStructuralEditTool(input: {
   });
   if (!preGate.engage) {
     emitEntry(preGate.reason);
-    return null;
+    // ⭐ 2.655 — ALL FIVE pre-gate reasons share one honest sentence, and that
+    // is a judgement rather than a shortcut. What they have in common is that
+    // THE STEP-BY-STEP PATH NEVER RAN: no model was read, no batch composed,
+    // nothing judged. `capability_unavailable` says exactly that and claims
+    // nothing about the request. The alternatives would all overclaim — "I
+    // could not work it out" implies an attempt that did not happen.
+    //
+    // Reachability, derived rather than assumed: on the budget-refusal turns
+    // this copy can actually ship, `rulebook_claimed` is impossible
+    // (`rulebookClaimedTurn` is false whenever `wasRejected`), and
+    // `not_edit_shaped` / `no_grounding` / `already_engaged` are unreachable
+    // from this call site because the three inputs are passed as constants.
+    // `hold_spine_inactive` is the live one, and it is the systematic candidate
+    // for the walk (production downgrades the mode by standing lockdown).
+    return { kind: 'declined', declineClass: 'capability_unavailable' };
   }
 
   let persisted: unknown = null;
@@ -770,13 +880,13 @@ async function tryStructuralEditTool(input: {
       'V5 propose_structural_edit — strict persisted read failed; the tool declines rather than grounding on the ingress echo',
     );
     emitEntry('no_grounding');
-    return null;
+    return { kind: 'declined', declineClass: 'model_unreadable' };
   }
 
   const grounding = buildStructuralEditGrounding(persisted);
   if (grounding === null) {
     emitEntry('no_grounding');
-    return null;
+    return { kind: 'declined', declineClass: 'model_unreadable' };
   }
 
   // The base the model is SHOWN must be the base the pipeline will APPLY to.
@@ -800,7 +910,11 @@ async function tryStructuralEditTool(input: {
       'V5 propose_structural_edit — persisted graph and edit-context graph disagree; declining rather than grounding on one and applying to the other',
     );
     emitEntry('no_grounding');
-    return null;
+    // The persisted model and the one on screen are not the same model. From
+    // the user's chair that is indistinguishable from "I could not read your
+    // model", and it is the honest thing to say: whichever is right, this path
+    // cannot tell, so it must not act.
+    return { kind: 'declined', declineClass: 'model_unreadable' };
   }
 
   const outcome = await composeStructuralEdit({
@@ -814,41 +928,50 @@ async function tryStructuralEditTool(input: {
   if (outcome.status !== 'composed') {
     emitEntry(outcome.status === 'rejected' ? `rejected_${outcome.code}` : outcome.reason);
 
-    // ── ⚠ THE CLAIM/SUPPRESS PATH, AND WHY A CAP REFUSAL MUST NOT USE IT ────
+    // ── ⚠ THE CLAIM/SUPPRESS PATH, AND WHY NO DECLINE MAY USE IT BLINDLY ────
     //
-    // Returning `null` here means "the rulebook's own answer stands". For a
-    // GROUNDING failure that is right: the rulebook's clarify copy is a better
-    // answer than anything this path could say, and the tool's reason is
-    // model-facing prose that quotes ids.
+    // #829 recorded the mechanism here and fixed ONE limb of it. The record was
+    // right and the fix was too narrow, so both halves are kept.
     //
-    // For a CAP refusal it is wrong, and it is the measured dead end. The
-    // sequence is: the rulebook composes an over-cap batch, its own budget
-    // check rejects it, and `buildRejectionResult` returns copy that names a
-    // limit and no next step ("limit: 4 node ops, 8 edge ops"). The tool then
-    // engages, reaches the same conclusion for the same reason, and returns
-    // null — so the FAILED RULEBOOK OPERATION supplies the final answer and
-    // the fallback is suppressed. The user sees a number they cannot act on.
-    // An external review reproduced this independently: zero usable proposals
-    // across models and sessions, with `BATCH_CAP_EXCEEDED` on the wire.
+    // THE MECHANISM (#829, still exactly true): declining meant "the rulebook's
+    // own answer stands". After a budget refusal, the rulebook's own answer is
+    // copy that names a limit and no next step ("limit: 4 node ops, 8 edge
+    // ops"). The tool engages, reaches the same conclusion, declines — and the
+    // FAILED RULEBOOK OPERATION supplies the final answer. The user sees a
+    // number they cannot act on.
     //
-    // Splitting removes the dominant instance (the envelope cap now
-    // partitions), but a genuinely unsplittable request still reaches here.
-    // When it does, the turn is answered HONESTLY AND ACTIONABLY rather than
-    // handed back to the copy that could not explain itself.
-    if (outcome.status === 'rejected' && outcome.code === 'BATCH_CAP_EXCEEDED') {
+    // ⚠ WHAT #829 MISSED, AND WHAT THE 2.634 WALK THEN MEASURED (ROADMAP
+    // 2.655): the fix was attached to ONE decline class, the cap refusal. Every
+    // other class — mode not live, model unreadable, base divergence, call
+    // failed, no tool call, each grounding-rejection code — still returned
+    // `null`, and the dead end came straight back. The canonical compound edit
+    // received it verbatim months after the fix shipped. The suite could not
+    // see it because every fixture in the feature stubs the composer to
+    // SUCCEED, so no test exercised a decline after a budget rejection at all.
+    //
+    // Hence the shape now: a decline NAMES ITS CLASS and the wrapper decides
+    // whether the tool speaks. This branch chooses the class only.
+    if (outcome.status === 'rejected') {
       return {
-        editResult: {
-          blocks: [],
-          assistantText: STRUCTURAL_EDIT_TOO_LARGE_TEXT,
-          latencyMs: 0,
-          appliedGraph: null,
-          wasRejected: true,
-          suggestedActions: STRUCTURAL_EDIT_TOO_LARGE_ACTIONS.map((a) => ({ ...a })),
-        },
-        split: null,
+        kind: 'declined',
+        // A cap refusal is the tool's own conclusion about the request, reached
+        // after composing the batch, so it is reported whatever the rulebook
+        // said (unchanged from #829). Every other code means a batch came back
+        // and did not hold together against the persisted graph, which is a
+        // different sentence and must not borrow this one.
+        declineClass:
+          outcome.code === 'BATCH_CAP_EXCEEDED' ? 'too_large_to_split' : 'compose_invalid',
       };
     }
-    return null;
+    return {
+      kind: 'declined',
+      // `no_tool_call` is NOT a failure: the model was asked and correctly
+      // declined to compose, which is what it should do when the request
+      // cannot be expressed against this graph. Telling the user "I could not
+      // work that out" would be true but useless; telling them the change does
+      // not fit their model as it stands is actionable.
+      declineClass: outcome.reason === 'no_tool_call' ? 'not_expressible' : 'compose_unavailable',
+    };
   }
   emitEntry(outcome.parts.length > 1 ? 'engaged_split' : 'engaged');
 
@@ -864,7 +987,7 @@ async function tryStructuralEditTool(input: {
     // A composed outcome always carries at least one part; treat the
     // impossible case as "the tool declined" rather than submitting nothing.
     emitEntry('no_parts');
-    return null;
+    return { kind: 'declined', declineClass: 'compose_unavailable' };
   }
 
   // A1 — ONE entry seam. The grounded batch re-enters the SAME handler and
@@ -882,18 +1005,21 @@ async function tryStructuralEditTool(input: {
   );
 
   return {
-    editResult: editResultForPart,
-    split:
-      outcome.parts.length > 1
-        ? {
-            wholeBatch: outcome.operations as readonly PatchOperation[],
-            submittedIndices: firstPart.indices,
-            partCount: outcome.parts.length,
-            remainderDependsOnThisStep: outcome.parts
-              .slice(1)
-              .some((p) => p.dependsOnEarlierPart),
-          }
-        : null,
+    kind: 'engaged',
+    result: {
+      editResult: editResultForPart,
+      split:
+        outcome.parts.length > 1
+          ? {
+              wholeBatch: outcome.operations as readonly PatchOperation[],
+              submittedIndices: firstPart.indices,
+              partCount: outcome.parts.length,
+              remainderDependsOnThisStep: outcome.parts
+                .slice(1)
+                .some((p) => p.dependsOnEarlierPart),
+            }
+          : null,
+    },
   };
 }
 

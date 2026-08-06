@@ -17,7 +17,7 @@ import type {
   ConversationContext,
 } from "./types.js";
 import { assembleEnvelope } from "./envelope.js";
-import { MAX_NODE_OPS, MAX_EDGE_OPS } from "./tools/patch-budget-limits.js";
+import type { PatchBudgetDimension } from "./tools/patch-budget-limits.js";
 
 // ============================================================================
 // Types
@@ -58,6 +58,21 @@ export interface PatchRejectionContext {
   max_node_ops?: number;
   /** Effective edge budget used for enforcement (for budget_exceeded reason). */
   max_edge_ops?: number;
+  /**
+   * ROADMAP 2.655 — WHICH budget was actually breached. Supplied by the
+   * enforcer, which is the only thing that knows; the copy says it in plain
+   * words and never in numbers.
+   *
+   * ⚠ THIS IS NOT `PatchBudgetResult.breachedLimit`, AND THE DIFFERENCE MATTERS.
+   * That field answers a narrower question (which OPTION-ADDITION BUCKET
+   * breached) and is measurably incomplete for this purpose: on a plain
+   * edge-only breach with no option addition it stays `null`, and when node AND
+   * edge both breach under an option addition it reports only the edge bucket.
+   * Copy driven off it would go silent exactly where it needed to speak. This
+   * field is derived from the two allow/deny verdicts themselves, so it cannot
+   * disagree with what was enforced.
+   */
+  breached_dimensions?: readonly PatchBudgetDimension[];
   /** 1–2 suggested follow-up actions. */
   suggested_actions: SuggestedAction[];
 }
@@ -105,27 +120,69 @@ export function buildPatchRejectionEnvelope(
 // Assistant Text
 // ============================================================================
 
+/**
+ * ⭐⭐ ROADMAP 2.655 — WHAT THE USER IS TOLD WHEN THE COMPLEXITY BUDGET REFUSES.
+ *
+ * ── THE SENTENCE THIS REPLACES, VERBATIM (walk 2.634, 2026-08-07) ──────────
+ *   "I tried to make that change, but it would require 6 node operations and 6
+ *    edge operations — more than is safe in a single edit (limit: 4 node ops,
+ *    8 edge ops). Consider breaking this into smaller steps ..."
+ *
+ * Three faults, and the fix addresses each:
+ *   1. TWO INTERNAL CAPS the user cannot act on, in engineering vocabulary.
+ *   2. THE WRONG CONSTRAINT NAMED. Six edge operations were UNDER the eight it
+ *      quotes; only the node budget tripped, and the copy never said so. A
+ *      user who reads it removes links that were never the problem.
+ *   3. THE WORK PUSHED BACK. "Consider breaking this into smaller steps" asks
+ *      the user to compute a decomposition the server can compute itself.
+ *
+ * ── WHY THE COUNTS GO ENTIRELY, NOT JUST THE CAPS ─────────────────────────
+ * A count without its cap ("it would require six additions") is no more
+ * actionable than the pair, because the user still has no way to know what
+ * number would have been accepted. What IS actionable is the SHAPE of a
+ * smaller ask, so that is what the sentence names.
+ *
+ * ── ⚠ THIS COPY IS NOT THE END OF THE STORY, AND MUST NOT READ AS IF IT IS ─
+ * On the live V5 path a budget refusal is followed by the structural-edit tool,
+ * which splits the request and proposes the first part. This sentence is what
+ * ships when that second path also declines, so it must stand alone AND must
+ * never contradict a split that did fire. It therefore claims nothing about
+ * what was or was not attempted beyond the refusal itself.
+ */
+function budgetExceededText(ctx: PatchRejectionContext): string {
+  const dims = new Set(ctx.breached_dimensions ?? []);
+  const subject =
+    dims.has('node') && dims.has('edge')
+      ? 'more separate additions, and more links between them, than'
+      : dims.has('node')
+        ? 'more separate additions than'
+        : dims.has('edge')
+          ? 'more links between the pieces of your model than'
+          : 'more than';
+  return (
+    `That is ${subject} I can put into a single change, so I have not made it. ` +
+    'Ask me for one part of it and I will do that part: the changes for a ' +
+    'single option, for example, or just the new factors without the links.'
+  );
+}
+
 function buildAssistantText(ctx: PatchRejectionContext): string {
   if (ctx.reason === 'budget_exceeded') {
-    // ROADMAP 2.624 — these were hardcoded `?? 3` / `?? 4`: a FOURTH copy of
-    // the operation budget, and a WRONG one (the caps are 4 and 8). It was
-    // the origin of the "4-edge limit" that a stale comment in `edit-graph.ts`
-    // was still echoing years later. Derived from the leaf that owns them, so
-    // a fallback can never again name a limit the enforcer does not apply.
+    // ROADMAP 2.655 — the counts, the caps and the appended `detail` have all
+    // left this sentence. `detail` stays on the context because it is still
+    // the internal `failure_message` the enforcer logs; it is no longer USER
+    // copy, which is why the previous version's "Consider breaking this into
+    // smaller steps" is gone from the wire.
     //
-    // ⚠ ROWED, NOT FIXED HERE: on the option-addition path the caller passes
-    // `effectiveMaxEdgeOps`, i.e. the cap of the BUCKET that breached, while
-    // `edge_ops` is the TOTAL edge count. The sentence then reads as a flat
-    // limit ("12 edge operations … limit: 8") for a rule that is per-bucket
-    // and admits up to sixteen. Correcting that is a copy change with its own
-    // acceptance, and this lane is not taking it.
-    const maxNodes = ctx.max_node_ops ?? MAX_NODE_OPS;
-    const maxEdges = ctx.max_edge_ops ?? MAX_EDGE_OPS;
-    return (
-      `I tried to make that change, but it would require ${ctx.node_ops ?? '?'} node operations ` +
-      `and ${ctx.edge_ops ?? '?'} edge operations — more than is safe in a single edit ` +
-      `(limit: ${maxNodes} node ops, ${maxEdges} edge ops). ${ctx.detail}`
-    );
+    // ⚠ HISTORICAL NOTE, KEPT DELIBERATELY (ROADMAP 2.624). The cap numbers
+    // here were once hardcoded `?? 3` / `?? 4` — a fourth copy of the budget,
+    // and a WRONG one, since the caps are 4 and 8. That stale "4-edge limit"
+    // propagated into a comment in `edit-graph.ts` and survived for months.
+    // Deriving them from the enforcer's leaf fixed the drift; 2.655 removes
+    // the reason to name them at all. The lesson is why the note stays: a
+    // number in user copy is a mirror of an internal rule, and the safest
+    // mirror is the one that is not there.
+    return budgetExceededText(ctx);
   }
 
   // structural_violation — never surface raw violation text to the user.
