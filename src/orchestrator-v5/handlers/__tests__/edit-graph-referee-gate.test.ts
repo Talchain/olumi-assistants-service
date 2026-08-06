@@ -229,14 +229,23 @@ describe('live verdict routing', () => {
     expect(decision).toEqual({ status: 'invalid', reason: 'unknown_handler_id' });
   });
 
-  it('base-hash divergence → stale with the rerun affordance (TUNABLE op — D-S leaves CAS semantics untouched)', () => {
+  /**
+   * FLIPPED by RULING A4 only in its AFFORDANCE, not its verdict: a base-hash
+   * divergence still stales (rung 2 is byte-identical). The rerun chip goes
+   * because re-running the analysis cannot resolve a divergence — the candidate
+   * was generated against a graph that has since moved, and what resolves that
+   * is restating the change. After A4, BASE_HASH_DIVERGED is the ONLY thing a
+   * `stale` governing verdict can mean, so the futile affordance stopped being
+   * half-right (design §2.4(b)).
+   */
+  it('base-hash divergence → stale, and NO rerun affordance (A4: a rerun cannot resolve a divergence)', () => {
     const d = evaluateEditGraphMutations(
       baseInput({ operations: [FIELD_OP], baseGraphHash: 'divergent-hash' }),
     );
     expect(d.governing).toBe('stale');
     expect(d.blockApply).toBe(true);
     expect(d.assistantText).toBe(GM_STALE_ASSISTANT_TEXT);
-    expect(d.suggestedActions![0]!.action_type).toBe('run_analysis');
+    expect(d.suggestedActions).toEqual([]);
     expect(d.publicReason).toMatchObject({ verdict: 'stale', blocker_code: 'BASE_HASH_DIVERGED' });
   });
 
@@ -246,16 +255,29 @@ describe('live verdict routing', () => {
     expect(d.blockApply).toBe(false);
   });
 
-  it('TUNABLE on an UNKNOWN-freshness frame → stale (D-S relaxation stops at stale; unknown authority still fails closed)', () => {
+  /**
+   * FLIPPED by RULING A4. This was the exact pin the design named as "a guard
+   * agreeing with itself" (trap 13b): it asserted the verdict but never read
+   * the COPY against `base_hash_match`, so it happily pinned a decision that
+   * told the user "the model has moved" while shipping `base_hash_match: true`
+   * in the same payload. The carve-out re-homes it as a HOLD, and the honesty
+   * invariant that would have caught the contradiction now lives in
+   * `staleness-editability-a4-gate.test.ts` R6.
+   */
+  it('TUNABLE on an UNKNOWN-freshness frame → HELD FRESHNESS_UNRESOLVED (A4 carve-out: authority unresolved is an ask, not a refusal)', () => {
     const d = evaluateEditGraphMutations(baseInput({ operations: [FIELD_OP], freshness: 'unknown' }));
-    expect(d.governing).toBe('stale');
-    expect(d.publicReason).toMatchObject({ blocker_code: 'ANALYSIS_NOT_FRESH' });
+    expect(d.governing).toBe('held');
+    expect(d.publicReason).toMatchObject({
+      blocker_code: 'FRESHNESS_UNRESOLVED',
+      base_hash_match: true,
+    });
   });
 
-  it('STRUCTURAL on a stale-freshness frame → stale (frame gate still fails closed outside the tunable class)', () => {
+  /** FLIPPED by RULING A4 — the dead end the ruling exists to kill. */
+  it('STRUCTURAL on a stale-freshness frame → HELD (A4: reaches the confirm chip instead of dead-ending)', () => {
     const d = evaluateEditGraphMutations(baseInput({ operations: [STRUCT_OP], freshness: 'stale' }));
-    expect(d.governing).toBe('stale');
-    expect(d.publicReason).toMatchObject({ blocker_code: 'ANALYSIS_NOT_FRESH' });
+    expect(d.governing).toBe('held');
+    expect(d.publicReason).toMatchObject({ blocker_code: 'STRUCTURAL_APPLY_HELD' });
   });
 
   it('integrity failure (id collision) governs as rejected over a held sibling', () => {

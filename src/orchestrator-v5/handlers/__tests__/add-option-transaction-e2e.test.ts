@@ -211,8 +211,41 @@ describe('dispatchAddOptionTransaction — held + skip classification', () => {
     expect(out).toMatchObject({ kind: 'skip', reason: 'parent_not_decision' });
   });
 
-  it('a stale frame does NOT hold a structural add (skips → edit path owns it)', () => {
+  /**
+   * ⭐⭐ RULING A4 (Paul, 2026-08-05) — FLIPPED, deliberately, from
+   * `{ kind: 'skip', reason: 'not_held' }`.
+   *
+   * The old pin recorded a DEAD END, not a design: a stale frame made the
+   * typed chip skip to the free-text edit lane, which staled too, so the user
+   * got a refusal on a path that had a perfectly good confirm chip waiting.
+   * Staleness is a property of the RESULTS; it is not a lock on the editor.
+   */
+  /** The option id the PURE builder mints for PARAMS — the identity every
+   *  assertion below binds to (trap 19: never "a pending exists"). */
+  function expectedOptionId(): string {
+    const built = buildAddOptionTransaction(PARAMS, {
+      nodes: GRAPH.nodes.map((n) => ({ id: n.id, kind: n.kind, label: n.label })),
+      edges: GRAPH.edges.map((e) => ({ from: e.from, to: e.to })),
+    });
+    if (!built.matched) throw new Error('fixture must build');
+    return built.proposal.optionId;
+  }
+
+  it('⭐ A4: a stale frame HOLDS the structural add — the typed chip reaches its confirm', () => {
     const out = dispatchAddOptionTransaction({ ...base, freshness: 'stale' });
-    expect(out).toMatchObject({ kind: 'skip', reason: 'not_held' });
+    expect(out.kind).toBe('held');
+    if (out.kind !== 'held') return;
+    expect(out.optionId).toBe(expectedOptionId());
+    expect(out.pendingActions).toHaveLength(1);
+    const patch = (out.pendingActions[0]!.action as { inline_patch: Record<string, unknown> })
+      .inline_patch;
+    expect(patch.handler_id).toBe(GM_HELD_HANDLER_ID);
+  });
+
+  it("⭐ A4 carve-out: an 'unknown'-freshness frame also holds (authority unresolved is a consent ask, not a refusal)", () => {
+    const out = dispatchAddOptionTransaction({ ...base, freshness: 'unknown' });
+    expect(out.kind).toBe('held');
+    if (out.kind !== 'held') return;
+    expect(out.optionId).toBe(expectedOptionId());
   });
 });
