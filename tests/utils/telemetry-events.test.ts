@@ -209,7 +209,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
         // LLM Repair events (large graph handling)
-        RepairPromptTruncated: "llm.repair_prompt.truncated",
 
         // Goal generation tracking (prompt tuning)
         GoalGeneration: "cee.goal_generation",
@@ -776,9 +775,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       expect((TelemetryEvents as Record<string, unknown>).RepairSuccess).toBeUndefined();
       expect((TelemetryEvents as Record<string, unknown>).RepairPartial).toBeUndefined();
       expect((TelemetryEvents as Record<string, unknown>).RepairFallback).toBeUndefined();
-      // The adapter-level truncation event survives (gated/legacy consumers
-      // of adapter.repairGraph still exist) — it is NOT part of the quintet.
-      expect(TelemetryEvents.RepairPromptTruncated).toBe("llm.repair_prompt.truncated");
+      // ROADMAP 2.763 — the adapter-level truncation event NO LONGER survives.
+      // Its 2.731-era exemption ("gated/legacy consumers of adapter.repairGraph
+      // still exist") died with `LLMAdapter.repairGraph`: its only two emitters
+      // were the Anthropic and OpenAI repair-prompt builders, both deleted.
+      // It is now the SIXTH member of the quintet.
+      expect((TelemetryEvents as Record<string, unknown>).RepairPromptTruncated).toBeUndefined();
     });
 
     it("has deprecation tracking events", () => {
@@ -1168,7 +1170,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Options interventions defaulting (diagnostic only)
         TelemetryEvents.InterventionsMissingDefaulted,
         // Repair prompt truncation (diagnostic only - large graph handling)
-        TelemetryEvents.RepairPromptTruncated,
         // Orchestrator events (Track C - diagnostic only during PoC)
         TelemetryEvents.OrchestratorTurnStarted,
         TelemetryEvents.OrchestratorTurnCompleted,
@@ -1758,7 +1759,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "llm.normalization.node_kind_mapped",
 
         // LLM Repair events (large graph handling)
-        "llm.repair_prompt.truncated",
 
         // CEE Clarification enforcement events (Phase 5)
         "cee.clarification.required",

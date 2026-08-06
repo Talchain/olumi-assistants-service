@@ -2304,14 +2304,26 @@ export function registerAllDefaultPrompts(): void {
 
   registerDefaultPrompt('draft_graph', draftPromptWithCaps);
   registerDefaultPrompt('suggest_options', SUGGEST_OPTIONS_PROMPT);
-  // ⚠ ORPHANED BY ROADMAP 2.731 (draft-path LLM repair removed — 0/12
-  // successes in the 7-day efficacy window). The ONLY remaining consumers of
-  // `repair_graph` are (a) the default-OFF orchestrator-validation gate
-  // (CEE_ORCHESTRATOR_VALIDATION_ENABLED, substep 1b) and (b) legacy
-  // graph-orchestrator functions with zero live callers. The operator-managed
-  // PMS row `repair_graph` (v6, gpt-4.1) is likewise orphaned — its deletion
-  // is Paul-gated and lives outside this repo. Registration kept so the
-  // gated path cannot 500 on a missing prompt; do NOT wire new callers.
+  // ⚠⚠ FULLY ORPHANED AS OF ROADMAP 2.763. The 2.731 note below is superseded:
+  // its two named survivors are both gone — (a) the default-OFF
+  // orchestrator-validation gate (substep 1b) was removed by 2.740a (#851),
+  // and (b) the legacy graph-orchestrator repair limbs went with it. 2.763
+  // then removed `LLMAdapter.repairGraph` itself, so `getSystemPrompt(
+  // 'repair_graph')` now has ZERO callers anywhere in `src/`.
+  // History: 0/12 successes over a full 7-day efficacy window (2.731);
+  // 0 invocations across 398 executions while armed (2.740a).
+  //
+  // WHY THE REGISTRATION STAYS (deliberate, not oversight): the PMS row
+  // `repair_graph` (v6, gpt-4.1) is operator-managed, lives OUTSIDE this repo,
+  // and its retirement is PAUL-GATED. `repair_graph` is still a member of
+  // `CRITICAL_PMS_TASKS` (src/prompts/estate.ts) — which `/healthz` gates on —
+  // and of `logStartupHealthCheck`'s `coreRoutes` (prompt-loader.ts). Deleting
+  // this registration alone would make boot warn about a fallback that no
+  // longer exists while healthz still gated on the row. The prompt estate and
+  // the PMS row must be retired TOGETHER, in one deliberate move, via
+  // RETIRED_PMS_TASKS / RETIRED_PMS_ROWS.
+  // Until then: this constant is INERT — nothing can resolve it, and there is
+  // no longer any code path that can make an LLM repair call. Do NOT wire one.
   registerDefaultPrompt('repair_graph', REPAIR_GRAPH_PROMPT);
   registerDefaultPrompt('clarify_brief', CLARIFY_BRIEF_PROMPT);
   registerDefaultPrompt('critique_graph', CRITIQUE_GRAPH_PROMPT);

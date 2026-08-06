@@ -388,14 +388,19 @@ describe('2.281 D — the strip is wired to draft ingress only', () => {
       const callSites = [...src.matchAll(/\bstripModelAuthoredGoalThreshold\(/g)];
       const normSites = [...src.matchAll(/\bnormaliseDraftResponse\(/g)];
 
-      // Two normalisation sites exist per adapter: draft, then repair.
-      expect(normSites.length, 'expected a draft site and a repair site').toBe(2);
-      // Exactly ONE strip — the draft one. A second would hit the repair path,
-      // which runs at Stage 4 AFTER Stage 3 has enriched, and would delete a
-      // threshold the enricher had already minted and attested.
+      // ONE normalisation site per adapter. There used to be two (draft, then
+      // repair); ROADMAP 2.763 retired the LLM repair seam entirely, so the
+      // repair site is gone. The claim this test makes is UNCHANGED and now
+      // strictly stronger: the strip is wired to the draft ingress and to
+      // nothing else. If a repair seam is ever re-introduced, this REDs at 2
+      // and the reviewer must re-decide where the strip belongs.
+      expect(normSites.length, 'expected exactly the draft site (repair seam retired, 2.763)').toBe(1);
+      // Exactly ONE strip — the draft one. Historically a second would have hit
+      // the repair path, which ran at Stage 4 AFTER Stage 3 had enriched, and
+      // would have deleted a threshold the enricher had already minted.
       expect(
         callSites.length,
-        'the strip must NOT be wired to the repair seam — it would destroy an attested threshold',
+        'the strip must be wired to the draft seam exactly once',
       ).toBe(1);
       // …and it must run before the draft normalisation, so the degenerate-cap
       // repair below it can never "repair" a quad that is about to be deleted.
