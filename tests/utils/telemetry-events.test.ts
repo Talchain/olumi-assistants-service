@@ -594,6 +594,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // relative-delta resolution at the set_factor_value dispatch seam.
         EditGraphBareSingleOpWrapped: "edit_graph.bare_single_op_wrapped",
         V5RelativeDeltaResolved: "v5.turn_executor.relative_delta_resolved",
+        // ⭐ Calibration consent boundary (2026-08-05) — the action layer
+        // refused to apply a mutation the user asked to see first, at the
+        // STEP 2 gate or (should be unreachable) at the commit backstop.
+        V5CalibrationConsentWithheld: "v5.turn_executor.calibration_consent_withheld",
         // PR #414 review — F3 fail-open fallback made dashboard-visible
         V5CommittedGraphReprojectionFailed:
           "v5.turn_executor.committed_graph_reprojection_failed",
@@ -1237,6 +1241,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // in-transaction OLGC1 conflict — closed enums + hash prefixes + rpc_code
         // only, no Datadog metric until activation dashboards exist.
         TelemetryEvents.V5GraphCasRpcConflict,
+        // Calibration consent boundary: diagnostic-only for now — the
+        // operational signal is `layer === 'commit_backstop'` appearing at
+        // all, which is a defect alarm rather than a rate to dashboard.
+        TelemetryEvents.V5CalibrationConsentWithheld,
         // V5 turn fence: diagnostic-only (structured logs are the operational
         // signal; no Datadog metric mapping until dashboards exist).
         TelemetryEvents.V5TurnFenceEvaluated,
@@ -2056,6 +2064,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // relative-delta resolution at the set_factor_value dispatch seam
         "edit_graph.bare_single_op_wrapped",
         "v5.turn_executor.relative_delta_resolved",
+        "v5.turn_executor.calibration_consent_withheld",
         // PR #414 review — F3 fail-open re-projection fallback visibility
         "v5.turn_executor.committed_graph_reprojection_failed",
         // Lane 8 — GM referee live wiring + MM commit-seam version hook

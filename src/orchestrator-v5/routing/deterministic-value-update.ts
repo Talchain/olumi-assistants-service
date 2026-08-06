@@ -70,7 +70,13 @@ import {
   impliesOptionInterventionEdit,
 } from './option-intervention-guard.js';
 
-const EDIT_VERB_PATTERN =
+/**
+ * ⭐ EXPORTED 2026-08-05 so the calibration pre-route gates on the SAME edit
+ * verbs this detector does. A second copy would drift, and a drift here
+ * means one path treats "Set X to pretty likely" as an edit and the other
+ * does not (CLAUDE.md trap 12 — the hand-maintained mirror).
+ */
+export const EDIT_VERB_PATTERN =
   /\b(increase|decrease|reduce|raise|lower|set|change|update|make|adjust)\b/i;
 
 /**

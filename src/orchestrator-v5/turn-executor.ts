@@ -91,8 +91,21 @@ import {
   buildDeicticClarifyAssistantText,
   mapCqeQuantityToProposalValue,
   deriveOperator,
+  EDIT_VERB_PATTERN as CALIBRATION_EDIT_VERB_PATTERN,
 } from './routing/deterministic-value-update.js';
 import type { CompoundUpdatePart } from './routing/deterministic-value-update.js';
+// ⭐ CALIBRATION + CONSENT (5 Aug 2026). See the two gates below —
+// `consentDirective` near `commitTurn`, and the STEP 2 action-layer refusal.
+import {
+  detectWithheldConsent,
+  buildConsentWithheldText,
+  GRAPH_MUTATING_HANDLER_IDS,
+} from './routing/mutation-consent.js';
+import {
+  classifyCalibrationMessage,
+  buildCalibrationReply,
+  resolveFactorLabelForConsentPreview,
+} from './routing/calibration-semantics.js';
 import {
   buildStructuralRemainderNotice,
   buildUnmappedPartsNotice,
@@ -934,11 +947,81 @@ export async function runTurnExecutor(
   // Pinned RED-first by tests/integration/turn-fence-hoisted-conflict-
   // mapping.test.ts (pre-hoist: `expected 500 to be 409` on a non-A2 path).
   let lastCommitConflictError: TurnFenceRejectedError | GraphStaleWriteError | null = null;
+
+  // ⭐⭐ WITHHELD CONSENT — evaluated ONCE, from the user's own words, BEFORE
+  // any model call. Two layers hang off this one value:
+  //
+  //   LAYER 1 (product) — STEP 2 refuses to validate/execute a mutating
+  //   proposal on a withheld turn, and answers with a deterministic preview
+  //   instead. See the gate just below `proposedHandlerId`.
+  //
+  //   LAYER 2 (guarantee) — `commitTurn` below STRIPS the graph from ANY
+  //   executor commit on a withheld turn. That layer needs no handler list
+  //   and no knowledge of which route produced the mutation, so a future
+  //   mutating path cannot quietly escape it.
+  //
+  // WHY BOTH (CLAUDE.md trap 12d — the two guard kinds are not redundant):
+  // layer 1 keeps the RESPONSE honest (a stripped commit with an "Applied"
+  // receipt would be its own lie); layer 2 makes the PROPERTY true
+  // regardless of layer 1's handler enumeration being complete.
+  //
+  // WITNESSED DEFECT this closes (staging `e82738b2`, 5 Aug 2026): the user
+  // wrote "...show me the number you will use before applying it", the turn
+  // applied 3% to Monthly Churn Rate anyway, rendered its own routing
+  // deliberation into the reply, and then told the user the model was
+  // unchanged. Evidence: PHASE0-EVIDENCE-2026-07-28/codex-simulated-user-
+  // review-2026-08-05.md §2.1.
+  //
+  // Deliberately message-only: the guarantee cannot depend on what the model
+  // decides, because on that turn the model decided to mutate.
+  const consentDirective = detectWithheldConsent(payload.message);
+
   const commitTurn = async (
     resp: Parameters<typeof commitDirectAnswer>[0],
     meta: Parameters<typeof commitDirectAnswer>[1],
     store?: Parameters<typeof commitDirectAnswer>[2],
   ): Promise<Awaited<ReturnType<typeof commitDirectAnswer>>> => {
+    // ⭐⭐ LAYER 2 — THE GUARANTEE. Placed FIRST, ahead of every other
+    // commit concern, and deliberately BEFORE the CAS derivation below so a
+    // stripped commit is not even hashed as a graph write.
+    //
+    // `commitTurn` is the single closure ALL 24 executor commit sites funnel
+    // through (see its introduction above). Exactly three of those sites can
+    // carry a graph. Rather than gate those three by name — a hand-maintained
+    // mirror, and CLAUDE.md trap 12's dominant defect — the strip is applied
+    // to `meta.graph` itself, which is the definition of "this turn moved the
+    // user's model". Any future graph-bearing commit site inherits it.
+    //
+    // This is a BACKSTOP, not the product behaviour: STEP 2's gate should
+    // already have prevented a mutating handler from running, so reaching
+    // here means a mutation was produced by a path the gate does not know
+    // about. Fail closed and say so loudly in telemetry rather than persist
+    // a change the user explicitly asked us to hold.
+    if (
+      consentDirective.withheld &&
+      meta.graph !== undefined &&
+      meta.graph !== null
+    ) {
+      emit(TelemetryEvents.V5CalibrationConsentWithheld, {
+        request_id: requestId,
+        scenario_id: context.session_id,
+        layer: 'commit_backstop',
+        rule: consentDirective.rule,
+        handler_id: meta.handler_id ?? null,
+      });
+      log.warn(
+        {
+          event: 'v5.consent.graph_write_stripped',
+          request_id: requestId,
+          scenario_id: context.session_id,
+          rule: consentDirective.rule,
+          handler_id: meta.handler_id ?? null,
+        },
+        'V5 consent backstop — the user withheld consent to apply; refusing the graph write',
+      );
+      meta = { ...meta, graph: undefined };
+    }
+
     // A3 graph CAS observe-mode: derive the expected-base hashes ONLY from
     // the server-side persisted read buildTurnContext performed at turn start
     // (`context.persistedGraph`) — NEVER from request-supplied graph_state,
@@ -4674,6 +4757,120 @@ export async function runTurnExecutor(
       // S2-L3 precedence: when the typed-chip mutation pre-route above already
       // synthesised a proposal (routingResult set), the text parser must NOT
       // re-parse the chip copy and overwrite it — typed ahead of the heuristic.
+      // ⭐ CALIBRATION PRE-ROUTE — "Set <factor> to pretty likely".
+      //
+      // WITNESSED REFUSAL (02-calibration-thinking.snapshot.yml, 5 Aug):
+      //   user:   "Set AI Chatbot Deployment to pretty likely."
+      //   system: "...Chatbot Deployment doesn't currently carry a
+      //            percentage scale in your model..."
+      // while the UI rendered that factor as `0% -> 100%` at 35%. The claim
+      // was false, and it was false because the ROUTING path had no idea
+      // what "pretty likely" meant — CQE extracts NOTHING from that sentence
+      // (measured: `extractQuantities('Set AI Chatbot Deployment to pretty
+      // likely.')` returns `[]`), so the value-update pre-route skipped with
+      // `no_quantity` and the model was left to invent an explanation.
+      //
+      // Answering it deterministically is the only way item 5 of the brief
+      // ("never claim a factor has no percentage scale when it does") can be
+      // GUARANTEED rather than prompted for: a sentence CEE composes cannot
+      // contain a scale claim CEE did not make.
+      //
+      // NARROW BY CONSTRUCTION, and the asymmetry is deliberate. All three
+      // must hold: a recognised probability phrase, an edit verb, and
+      // EXACTLY ONE factor label present in the message. Over-gating costs
+      // one LLM call on a path the LLM already serves badly; under-gating
+      // hijacks an ordinary conversational turn. Where it is uncertain it
+      // declines. (Same reasoning, same direction, as `edge_phrasing_gate`.)
+      //
+      // It never applies anything — it proposes, with the mapped number
+      // visible and a confirm chip whose replay message carries an EXPLICIT
+      // percentage, so confirming travels the ordinary numeric path. A
+      // qualitative phrase is CEE's inference, not the user's number; the
+      // user ratifies it before it becomes their model.
+      if (routingResult === undefined && !typedChipMutationUnroutedFallThrough) {
+        const calibrationOnly = classifyCalibrationMessage(payload.message);
+        const calibrationTarget =
+          calibrationOnly.kind === 'none'
+            ? null
+            : resolveFactorLabelForConsentPreview(payload.message, graphStateForTurn);
+        if (
+          calibrationOnly.kind !== 'none' &&
+          calibrationTarget !== null &&
+          CALIBRATION_EDIT_VERB_PATTERN.test(payload.message)
+        ) {
+          emit(TelemetryEvents.V5CalibrationConsentWithheld, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            layer: 'calibration_preroute',
+            rule: consentDirective.withheld ? consentDirective.rule : null,
+            handler_id: null,
+            probability_value: calibrationOnly.probability.value,
+            threshold_value:
+              calibrationOnly.kind === 'probability_of_threshold'
+                ? calibrationOnly.threshold.value
+                : null,
+            matched_phrase: calibrationOnly.probability.phrase,
+          });
+
+          // ⭐ 2.627 — text AND chips come from the ONE builder. A
+          // `probability_of_threshold` turn gets no value-bearing chip,
+          // because the value does not exist to be offered. This call site
+          // no longer decides that; it cannot.
+          const calibrationOffer = buildCalibrationReply(calibrationOnly, calibrationTarget);
+          const calibrationResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: calibrationOffer.assistant_text,
+            stage: context.stage,
+            suggested_actions: [...calibrationOffer.suggested_actions],
+          });
+          sonnetTextForLog = calibrationResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+
+          try {
+            const committed = await commitTurn(calibrationResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+              pending_actions: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                err:
+                  error instanceof Error
+                    ? { name: error.name, message: error.message }
+                    : { message: String(error) },
+              },
+              'V5 TurnExecutor: commit failed on calibration pre-route',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
       let deterministicValueUpdate =
         routingResult === undefined && !typedChipMutationUnroutedFallThrough
           ? tryDeterministicValueUpdate(
@@ -6706,6 +6903,125 @@ export async function runTurnExecutor(
       resolutionStatus = action.entity.resolution_status;
       proposedHandlerIdForLog = action.handler_id;
       proposedHandlerIdForOutcome = action.handler_id;
+
+      // ⭐⭐ LAYER 1 — THE ACTION-LAYER CONSENT GATE.
+      //
+      // Positioned HERE, ahead of STEP 2's `validateToolCall` and therefore
+      // ahead of STEP 3's handler invocation, because this is the first line
+      // at which BOTH facts are known: what the user said, and what the turn
+      // is about to do. Every proposal — Sonnet-routed, deterministic value
+      // update, deictic, compound, typed-chip, clarification-resume,
+      // short-confirm — converges on `routingResult.proposal.action` before
+      // this point, so one gate covers all of them.
+      //
+      // ⚠ THIS IS THE LINE THE BRIEF CALLS THE MOST IMPORTANT ONE: the
+      // refusal is enforced by NOT RUNNING THE HANDLER, not by wording. On
+      // the witnessed turn the reply said the model was unchanged while the
+      // row had already moved; any fix expressed in prose reproduces exactly
+      // that. Nothing below this branch can mutate, because control returns.
+      //
+      // The response is composed deterministically from
+      // `calibration-semantics.ts` — no model call — so the routing
+      // deliberation that leaked into the witnessed reply has no channel to
+      // travel on for this turn.
+      if (
+        consentDirective.withheld &&
+        GRAPH_MUTATING_HANDLER_IDS.has(proposedHandlerId)
+      ) {
+        const calibration = classifyCalibrationMessage(payload.message);
+        const targetLabel =
+          typeof action.entity.label === 'string' && action.entity.label.trim().length > 0
+            ? action.entity.label
+            : resolveFactorLabelForConsentPreview(payload.message, graphStateForTurn);
+
+        // ⭐ 2.627 — one builder owns both the sentence and the chips on the
+        // calibration branch. See `mayOfferPointValue` in
+        // `calibration-semantics.ts`: a probability about a threshold yields
+        // no value this product can honestly write, so it yields no offer.
+        const calibrationOffer =
+          calibration.kind === 'none' ? null : buildCalibrationReply(calibration, targetLabel);
+
+        const withheldText =
+          calibrationOffer === null
+            ? buildConsentWithheldText(targetLabel)
+            : calibrationOffer.assistant_text;
+
+        emit(TelemetryEvents.V5CalibrationConsentWithheld, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          layer: 'step2_gate',
+          rule: consentDirective.rule,
+          handler_id: proposedHandlerId,
+          // The two numbers whose confusion IS the defect. `probability_value`
+          // is what "pretty likely" means (0.70); `threshold_value` is the
+          // bound the user named (0.03 for "below 3%"). The witnessed build
+          // stored the second where the first belonged.
+          probability_value:
+            calibration.kind === 'none' ? null : calibration.probability.value,
+          threshold_value:
+            calibration.kind === 'probability_of_threshold'
+              ? calibration.threshold.value
+              : null,
+          matched_phrase:
+            calibration.kind === 'none' ? null : calibration.probability.phrase,
+        });
+
+        const consentChips: SuggestedAction[] = [...(calibrationOffer?.suggested_actions ?? [])];
+
+        const consentResponse = composeAnswer({
+          answerKind: 'functional',
+          assistant_text: withheldText,
+          stage: context.stage,
+          suggested_actions: consentChips,
+        });
+        sonnetTextForLog = consentResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+
+        try {
+          // `handler_id: null` and `handler_facts: []` are the honest record:
+          // no handler ran. No `graph` is passed, so nothing is persisted —
+          // and `commitTurn`'s layer-2 strip would refuse one anyway.
+          const committed = await commitTurn(consentResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: llmCallsUsed,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            pending_actions: [],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              err:
+                error instanceof Error
+                  ? { name: error.name, message: error.message }
+                  : { message: String(error) },
+            },
+            'V5 TurnExecutor: commit failed on withheld-consent refusal',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      }
 
       // Lane CEE-D (edit-loop reliability) — relative-delta resolution for
       // set_factor_value, BEFORE validateToolCall so the validator, the
