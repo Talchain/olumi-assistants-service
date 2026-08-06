@@ -112,7 +112,7 @@ import {
 // the guard and the prompt can never disagree about what the producer said. That
 // module imports nothing, so this edge cannot create a compose ⇄ context cycle.
 import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
-import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
+import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
   evidenceSignals,
@@ -180,12 +180,18 @@ const TECHNIQUE_MAX = 300;
 // only. "v1.3", "1.5x", "10.5%" do NOT match (no leading zero/dot
 // pattern).
 //
+// ⭐ MOVED to `forbidden-user-facing-phrases.ts` (ROADMAP 2.688 slice 1)
+// and IMPORTED here rather than declared locally. It had become a second
+// prose-guard lexicon living apart from the canonical one, and the
+// reference-class exercise builder needs the SAME rule — copying the
+// regex into a second builder is precisely the hand-maintained mirror
+// (CLAUDE.md trap 12). One definition site, both consumers derive.
+//
 // Banned recommendation/winner language is sourced from the central
 // `FORBIDDEN_USER_FACING_PHRASES` list via `findForbiddenPhraseHit`.
 // RC4: for the REWRITABLE prescriptive-lexicon subset the remedy is a
 // deterministic terminology substitution, not a drop — see
 // `validateProseAndSchemaOrDrop`.
-const RAW_DECIMAL_RE = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
 
 // ============================================================================
 // Doctrine D-U F2 — option-set lever suppression on "investigate this" surfaces

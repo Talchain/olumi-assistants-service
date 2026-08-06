@@ -116,6 +116,15 @@ import {
   buildCalibrationReply,
   resolveFactorLabelForConsentPreview,
 } from './routing/calibration-semantics.js';
+// ⭐ ELICITED REFERENCE-CLASS BASE RATES (ROADMAP 2.688 slice 1). See the
+// pre-route below — it sits IMMEDIATELY BEFORE the calibration pre-route.
+import {
+  buildOutsideViewExerciseBlock,
+  buildReferenceClassRecordedText,
+  buildReferenceClassReply,
+  createConfirmedReferenceClass,
+  recogniseReferenceClass,
+} from './belief-elicitation/index.js';
 import {
   buildStructuralRemainderNotice,
   buildUnmappedPartsNotice,
@@ -4908,6 +4917,154 @@ export async function runTurnExecutor(
       // percentage, so confirming travels the ordinary numeric path. A
       // qualitative phrase is CEE's inference, not the user's number; the
       // user ratifies it before it becomes their model.
+      // ⭐⭐ ELICITED REFERENCE-CLASS PRE-ROUTE (ROADMAP 2.688 slice 1).
+      //
+      //   user: "Of the 7 product launches like this I've seen, 3 hit their
+      //          first-year target."
+      //
+      // The product has asked that question in three places for months —
+      // DSK-P-002's outside-view steps, the R3 decision-review prompt's
+      // "base rate for decisions like this?", and the actions-menu prompt a
+      // user can click TODAY — and had NOTHING that could compute an answer
+      // from what the user said back. This is that arithmetic, and it is the
+      // first `outside_view` exercise the product ever emits.
+      //
+      // ⭐ IT RUNS BEFORE THE CALIBRATION PRE-ROUTE, and the ordering is
+      // load-bearing, not stylistic (ROADMAP 2.722 / design I6). A K-of-N
+      // sentence can carry a recognised probability phrase ("3 out of 7
+      // similar projects succeeded, so it's a good chance"), and whichever
+      // layer sees it first owns the turn. Calibration would answer with a
+      // single number; this layer answers with the number AND the band the
+      // counts imply. Point-collapse is exactly what the row exists to
+      // prevent, so the layer that preserves the sample size goes first.
+      //
+      // NARROW BY CONSTRUCTION, same asymmetry as calibration and
+      // `edge_phrasing_gate`: the grammar requires two integers in a K-of-N
+      // construction, a class noun phrase, AND an outcome verb phrase. Where
+      // it is uncertain it declines, and declining costs exactly one LLM
+      // turn that behaves as it does today.
+      //
+      // IT NEVER APPLIES ANYTHING. The statement turn PREVIEWS — it says
+      // "Nothing has been changed.", creates no object, and offers a confirm
+      // chip whose replay message carries the full K / N / class / outcome
+      // so it re-parses unambiguously. Only the confirm branch constructs
+      // the object, and even then the effect is display plus session
+      // context: no graph write, no ISL field, no blend (the storage wall —
+      // there is no AI-reachable distribution field on the turn path). Any
+      // FUTURE slice that writes anything derived from this to the graph
+      // must pass `mutation-warrant`'s INV-1; recording a user's own stated
+      // counts as context is not a model mutation and does not.
+      if (routingResult === undefined && !typedChipMutationUnroutedFallThrough) {
+        const referenceClass = recogniseReferenceClass(payload.message);
+        if (referenceClass.kind !== 'none') {
+          const referenceClassAt = new Date().toISOString();
+          let referenceClassText: string;
+          let referenceClassChips: ReadonlyArray<{
+            readonly id: string;
+            readonly label: string;
+            readonly message: string;
+          }> = [];
+          let referenceClassBlocks: OlumiResponse['blocks'] = [];
+
+          if (referenceClass.kind === 'confirm') {
+            // I8 — CONFIRMATION IS EXISTENCE. This is the ONLY call site of
+            // the constructor in the executor, reached only by a message
+            // bearing the confirm prefix the preview's own chip minted.
+            const elicitation = createConfirmedReferenceClass({
+              parsed: referenceClass.parsed,
+              session_id: context.session_id,
+              stated_at: referenceClassAt,
+            });
+            // The acknowledgement is built FROM THE CREATED OBJECT, never
+            // from the parse, so it cannot describe something that was not
+            // recorded.
+            referenceClassText = buildReferenceClassRecordedText(elicitation);
+            const block = buildOutsideViewExerciseBlock(elicitation, {
+              created_at: referenceClassAt,
+            });
+            // Fail-closed: a dropped block costs the card, never the answer —
+            // the disclosure is already in `assistant_text`.
+            referenceClassBlocks = block !== null ? [block] : [];
+          } else {
+            const reply = buildReferenceClassReply(referenceClass);
+            referenceClassText = reply.assistant_text;
+            referenceClassChips = reply.suggested_actions;
+          }
+
+          log.info(
+            {
+              event: 'v5.reference_class.preroute',
+              request_id: requestId,
+              session_id: context.session_id,
+              recognition_kind: referenceClass.kind,
+              // Counts only on a recognised parse; NEVER the user's prose.
+              observed_k:
+                referenceClass.kind === 'clarify' ? null : referenceClass.parsed.observed_k,
+              observed_n:
+                referenceClass.kind === 'clarify' ? null : referenceClass.parsed.observed_n,
+              clarify_reason: referenceClass.kind === 'clarify' ? referenceClass.reason : null,
+              block_emitted: referenceClassBlocks.length > 0,
+            },
+            'V5 TurnExecutor reference-class pre-route answered deterministically',
+          );
+
+          const referenceClassResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: referenceClassText,
+            stage: context.stage,
+            suggested_actions: [...referenceClassChips],
+            blocks: referenceClassBlocks,
+          });
+          sonnetTextForLog = referenceClassResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+
+          try {
+            const committed = await commitTurn(referenceClassResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              // v1 HAS NO COMPUTE EFFECT: no handler ran, and nothing is
+              // pending. Both stay empty by construction.
+              handler_facts: [],
+              pending_actions: [],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                err:
+                  error instanceof Error
+                    ? { name: error.name, message: error.message }
+                    : { message: String(error) },
+              },
+              'V5 TurnExecutor: commit failed on reference-class pre-route',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
+        }
+      }
+
       if (routingResult === undefined && !typedChipMutationUnroutedFallThrough) {
         const calibrationOnly = classifyCalibrationMessage(payload.message);
         const calibrationTarget =

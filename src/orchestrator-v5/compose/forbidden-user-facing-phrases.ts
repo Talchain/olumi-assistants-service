@@ -264,6 +264,29 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
 ];
 
 /**
+ * ⭐ RAW PROBABILITY DECIMALS IN USER-FACING BLOCK PROSE.
+ *
+ * Intentionally NARROW: a leading `0.\d` or `.\d` only. `"v1.3"`, `"1.5x"`,
+ * `"10.5%"` do NOT match — the rule targets bare probabilities leaking into
+ * copy, not every decimal.
+ *
+ * ⚠ MOVED HERE from `phase3-blocks.ts` (ROADMAP 2.688 slice 1), where it was
+ * a `const` local to one builder file. It is a prose-guard lexicon and this
+ * module is where the prose-guard lexicons live; keeping it next to
+ * `FORBIDDEN_USER_FACING_PHRASES` means a second builder (the
+ * reference-class `outside_view` exercise) DERIVES the rule instead of
+ * copying the regex — the hand-maintained mirror is the defect class this
+ * estate loses most time to (CLAUDE.md trap 12). `phase3-blocks.ts` now
+ * imports it; the pattern source is unchanged, byte for byte.
+ *
+ * ⚠ SCOPE, stated rather than implied: this catches LEADING-decimal form
+ * ONLY. A producer-authored `'55%'` or `'16000 GBP'` passes it. That is a
+ * known, rowed gap (ROADMAP 2.205), not an oversight — a blanket numeric
+ * block would gut legitimate prose ("review in 3 months").
+ */
+export const RAW_DECIMAL_RE = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
+
+/**
  * Return the first forbidden phrase that hits in `text`, or null when
  * clean. Used by the egress guard for both the detection signal and the
  * telemetry payload. Returns the matched substring (not the source regex)
