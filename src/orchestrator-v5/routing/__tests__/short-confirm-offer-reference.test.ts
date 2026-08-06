@@ -193,6 +193,23 @@ describe('F-B — the offer-reference family may NEVER over-reach (2.652 running
     expect(out).toMatchObject({ matched: false });
   });
 
+  it('⭐ CONTROL 2c — a bare IMPERATIVE with a back-reference does not auto-resume; only an affirmative does', () => {
+    // The case where the mandatory affirmative lead is the SOLE guard: no read
+    // verb for the read-intent rule to catch, no quantity for the edit gate,
+    // a recognised back-reference. Measured: without this case mutant M11
+    // (lead made optional) SURVIVED, because control 2a was ALSO covered by
+    // the read-intent guard — two guards over one case demonstrate neither.
+    //
+    // Falling through is the safe outcome, not a loss: the turn reaches the
+    // normal route, and #836 offers the change again rather than applying a
+    // held proposal on an instruction that named its own action.
+    const out = resume(
+      'Rephrase the churn constraint as you offered earlier.',
+      [heldProposal()],
+    );
+    expect(out).toMatchObject({ matched: false });
+  });
+
   it('⭐ CONTROL 2b — an AFFIRMATIVE followed by a read request is still not consent to mutate', () => {
     // Lead present, back-reference recognised: the read-intent guard is the
     // ONLY thing holding here. A user can agree with something and ask to look
