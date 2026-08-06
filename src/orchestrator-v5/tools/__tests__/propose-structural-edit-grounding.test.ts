@@ -183,8 +183,11 @@ describe('THE ID CAN HIDE IN `value` — every entity reference is grounded, not
    *                  REPLACED, not merged.
    *
    * The validator read `path` and (for add_edge) `value.from`/`value.to`, and
-   * copied `value` through verbatim — while the tool advert declares `value` as
-   * `additionalProperties: true`. So the answer to "what would have to be true
+   * copied `value` through verbatim — while the tool advert of the day declared
+   * `value` as `additionalProperties: true` (2.655 has since closed it to a
+   * declared field list, and the scan below is unaffected: it walks whatever
+   * `value` actually carries, not what the advert says it may carry). So the
+   * answer to "what would have to be true
    * for these tests to pass while the property fails?" was: THE ID IS IN A
    * FIELD THE VALIDATOR DOES NOT READ.
    *
@@ -364,8 +367,21 @@ describe('THE ID CAN HIDE IN `value` — every entity reference is grounded, not
   it('the tool advert TELLS the model that ids inside `value` are checked', () => {
     // A guard the model is not told about is a guard it will trip repeatedly,
     // and every trip costs the user the whole batch.
+    //
+    // ⚠ THIS ASSERTION USED TO READ `toContain('interventions')`, which was a
+    // value predicate standing in for the property (trap 19): it passed on the
+    // presence of one WORD, not on the advert making the claim. 2.655 closed
+    // `value` to a declared field list, and a dynamic-key map cannot be
+    // advertised under a rule that admits only `additionalProperties: false`,
+    // so the field name left the advert while the RULE — which the validator
+    // still enforces at any depth, `collectInterventionTargetIds` — stayed.
+    // The old assertion would have gone red on a change that lost nothing, and
+    // would have stayed green on a rewrite that dropped the rule and kept the
+    // word. It now binds to the claim.
     const tool = buildProposeStructuralEditTool(grounding());
-    expect(tool.description).toContain('interventions');
+    expect(tool.description).toMatch(/ids inside `value` are checked/i);
+    expect(tool.description).toMatch(/keyed by factor id/i);
+    expect(tool.description).toMatch(/must be in the table above/i);
   });
 });
 

@@ -724,3 +724,45 @@ describe('the decline copy passes the estate`s user-facing copy guards', () => {
     }
   });
 });
+
+/**
+ * ⭐⭐ 2.655 — A FIRST STEP THAT IS KNOWN NOT TO WORK IS NOT A FIRST STEP.
+ *
+ * WITNESSED 2026-08-07 ~04:5xZ, deterministic 6/6 across three fresh scenarios:
+ * every `compose_unavailable` decline in that session came from the SAME
+ * Anthropic 400 on the composer's tool schema, and the copy answered every one
+ * of them with "Try asking me again." A retry was not merely unlikely to help;
+ * it re-failed identically, including the two the tester performed via the UI's
+ * own Retry control. The sentence was not false about the past, it was false
+ * about the future, which is the half a user acts on.
+ *
+ * ⚠ THE PAIR BELOW IS THE POINT, NOT THE FIRST HALF OF IT. `model_unreadable`
+ * SHOULD invite a retry — nothing was attempted there and a transient read is
+ * genuinely worth repeating (this module's own header says so). Asserting only
+ * that `compose_unavailable` dropped the invitation would pass just as well if
+ * a tidy-up stripped retry language from the whole table, which would put the
+ * OTHER class's user wrong. Both directions, on different classes, or neither.
+ */
+describe('⭐⭐ 2.655 — the decline copy does not prescribe a futile retry', () => {
+  /** An unconditional invitation to put the same request again. */
+  const RETRY_INVITATION = /\b(try (asking me |it )?again|ask(ing)? me again|once more)\b/i;
+
+  it('compose_unavailable does NOT invite a bare retry, and names what does help', () => {
+    const text = STRUCTURAL_EDIT_DECLINE_COPY.compose_unavailable.text;
+    expect(
+      RETRY_INVITATION.test(text),
+      'The composer could not run. Repeating the request runs the same ' +
+        'composer, so this class must point at a smaller ask instead of a ' +
+        `retry. Copy: ${text}`,
+    ).toBe(false);
+    expect(text).toMatch(/ask me for one part/i);
+  });
+
+  it('model_unreadable DOES still invite a retry (the discrimination)', () => {
+    // Nothing was attempted on this class, so retrying unchanged is the correct
+    // first step and must survive. If this goes red, the fix above was applied
+    // with a broom rather than a scalpel.
+    const text = STRUCTURAL_EDIT_DECLINE_COPY.model_unreadable.text;
+    expect(RETRY_INVITATION.test(text), `Copy: ${text}`).toBe(true);
+  });
+});

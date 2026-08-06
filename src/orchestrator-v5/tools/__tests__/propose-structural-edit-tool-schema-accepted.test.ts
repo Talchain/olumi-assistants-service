@@ -86,11 +86,20 @@ describe('⭐⭐ 2.655 — the propose_structural_edit tool schema carries no re
     ).toEqual([]);
   });
 
-  it('⭐ the open-content object stays OPEN — it must not be closed to fix the 400', () => {
-    // The other way to satisfy the assertion above is to set the key to
-    // `false`. That would be worse than the crash: `value` declares no
-    // properties, so a closed object could only ever be `{}` and the composer
-    // would return operations with no content while every call succeeded.
+  it('⭐ the content object is closed AND carries fields — never closed to nothing', () => {
+    // ⚠ THIS TEST PINNED THE DEFECT UNTIL 2026-08-07. It asserted, verbatim,
+    // `expect('additionalProperties' in valueSchema).toBe(false)` and
+    // `expect(valueSchema.properties ?? null).toBeNull()` — i.e. it required
+    // the exact shape the API then rejected for a second day running
+    // ("'additionalProperties' must be explicitly set to false", deterministic
+    // 6/6). The reasoning behind it was sound and is preserved below; only the
+    // conclusion was wrong, because OMITTING the key was never a third option.
+    //
+    // The concern it existed for is real and is now asserted directly: closing
+    // an object that declares NO properties would be worse than the crash —
+    // every call would succeed and the composer could only ever emit `{}`. So
+    // the pin is now "closed AND non-empty", which is the property that
+    // actually matters, and it holds whichever way a future edit moves.
     const value = (
       (
         (tool.input_schema as Record<string, never>).properties as Record<string, never>
@@ -98,7 +107,24 @@ describe('⭐⭐ 2.655 — the propose_structural_edit tool schema carries no re
     ).items as Record<string, unknown>;
     const valueSchema = (value.properties as Record<string, Record<string, unknown>>).value;
     expect(valueSchema.type).toBe('object');
-    expect(valueSchema.properties ?? null).toBeNull();
-    expect('additionalProperties' in valueSchema).toBe(false);
+    expect(valueSchema.additionalProperties).toBe(false);
+    const declared = Object.keys(
+      (valueSchema.properties ?? {}) as Record<string, unknown>,
+    );
+    expect(declared.length).toBeGreaterThan(0);
+    // The fields the tool's own description promises the model it may write.
+    // Bound by IDENTITY (exact key names), never by a count another edit could
+    // satisfy (CLAUDE.md trap 19).
+    expect(declared).toEqual(
+      expect.arrayContaining([
+        'kind',
+        'label',
+        'from',
+        'to',
+        'strength',
+        'exists_probability',
+        'effect_direction',
+      ]),
+    );
   });
 });
