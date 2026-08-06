@@ -76,6 +76,39 @@ describe('T5 — the outside_view ExerciseBlock', () => {
     expect(block!.counter_case).toBe(OUTSIDE_VIEW_COUNTER_CASE);
   });
 
+  it('⭐ I4 ON THE CARD ITSELF — the block never ships a point without its band', () => {
+    // ⚠ WHY THIS EXISTS, and it is the sharpest lesson from this lane's own
+    // mutant kit. The byte-equality assertion above binds the card to
+    // `buildReferenceClassDisclosure` — which means it agrees with that
+    // builder WHATEVER the builder says. The M3 mutant (delete the interval)
+    // REDded the disclosure suite and the pre-route suite and left this file
+    // entirely GREEN: a card carrying a bare "central estimate 44%" with no
+    // band would have shipped past a full block suite (CLAUDE.md trap 13b —
+    // a guard whose evidence comes from itself).
+    //
+    // So the I4 property is asserted HERE INDEPENDENTLY, against the wire
+    // string, with no reference to the builder that produced it.
+    const block = buildOutsideViewExerciseBlock(elicitationFixture(), { created_at: CREATED_AT });
+    expect(block!.reference_class).toMatch(/central estimate \d+%/);
+    expect(block!.reference_class).toMatch(
+      /middle half of the evidence sits between \d+% and \d+%/,
+    );
+  });
+
+  it('I4 holds on the CARD for every count pair, independently of the builder', () => {
+    for (let n = 1; n <= 12; n += 1) {
+      for (let k = 0; k <= n; k += 1) {
+        const block = buildOutsideViewExerciseBlock(elicitationFixture({ k, n }), {
+          created_at: CREATED_AT,
+        });
+        expect(block, `dropped at K=${k} N=${n}`).not.toBeNull();
+        expect(block!.reference_class, `K=${k} N=${n}`).toMatch(
+          /middle half of the evidence sits between \d+% and \d+%/,
+        );
+      }
+    }
+  });
+
   it('carries DSK-P-002 provenance, with the TITLE read from the bundle, not typed here', () => {
     const block = buildOutsideViewExerciseBlock(elicitationFixture(), { created_at: CREATED_AT });
     expect(block!.dsk_provenance).toBeDefined();
