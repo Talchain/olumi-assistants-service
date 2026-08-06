@@ -96,6 +96,21 @@ const GENUINE_ANSWERS: readonly string[] = [
   "The main constraint is the finance team's capacity",
   "We could make the switch instead of waiting until Q4",
   "Around 8 engineers, and the budget is £400,000",
+  /**
+   * ⚠ THE NEXT FIVE ARE THE ONLY CASES THAT EXERCISE
+   * `EDIT_GRAPH_NEGATIVE_REGEX`, AND THEY WERE ADDED AFTER A MEASURED
+   * SURVIVING MUTANT, NOT ASSERTED. Once the predicate was anchored to the
+   * imperative position, dropping the negative guard stopped turning anything
+   * red — every earlier negative had its edit verb mid-clause, so the anchor
+   * alone rejected it and the guard was never consulted. A survivor is a claim
+   * either way; these are the demonstration that it is NOT equivalent. Each
+   * one opens with a genuine positive edit verb and is nonetheless an ANSWER.
+   */
+  "Add some context: we are a 30-person fintech based in London.",
+  "Change my mind if you think the other option is stronger.",
+  "Update our approach to focus on retention rather than new sales.",
+  "Reduce complexity wherever you can in the model.",
+  "Remove any doubt about the timeline: it is fixed at six months.",
 ];
 
 describe("INV-M — mutation intent during a live clarify round is never folded", () => {
