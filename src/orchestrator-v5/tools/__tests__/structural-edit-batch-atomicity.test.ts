@@ -33,6 +33,24 @@ import {
 import { buildReadyGraph, hashOf } from '../../graph-management/__tests__/fixtures.js';
 import * as telemetry from '../../../utils/telemetry.js';
 
+/**
+ * ⚠ ROADMAP 2.713 — a CAUSAL link create must carry the belief the apply
+ * contract has required since February (`strength.{mean,std}`,
+ * `exists_probability`, `effect_direction`). The reconstructed fixtures here
+ * carried only `{from,to}`, and separately supplied a `value.id` the deployed
+ * advert makes structurally impossible — so they were unfaithful to the wire in
+ * both directions and could not see the seam defect. Identity now arrives by
+ * server-side synthesis from the authoritative `path`; the belief is stated,
+ * because the composer refuses a link the model did not describe rather than
+ * inventing one. Neither change alters an envelope count.
+ */
+const CAUSAL_BELIEF = {
+  strength: { mean: 0.4, std: 0.15 },
+  exists_probability: 0.8,
+  effect_direction: 'positive',
+} as const;
+
+
 const GRAPH = buildReadyGraph();
 const HASH = hashOf(GRAPH);
 const OPTS = { maxPatchOperations: 15 } as const;
@@ -80,12 +98,12 @@ const MIXED_TOOL_PAYLOAD = {
     {
       op: 'add_node',
       path: 'f-referrals',
-      value: { id: 'f-referrals', kind: 'factor', label: 'Referral rate' },
+      value: { kind: 'factor', label: 'Referral rate' },
     },
     {
       op: 'add_edge',
       path: 'f-referrals::g-profit',
-      value: { from: 'f-referrals', to: 'g-profit' },
+      value: { from: 'f-referrals', to: 'g-profit', ...CAUSAL_BELIEF },
     },
   ],
 };
@@ -155,7 +173,7 @@ describe('A2 — a reject applies NOTHING, and holds nothing either', () => {
     const decision = gateFor([
       { op: 'update_node', path: 'f-spend', value: { observed_state: { value: 0.6 } } },
       { op: 'update_node', path: 'f-reach', value: { observed_state: { value: 0.6 } } },
-      { op: 'add_node', path: 'f-new', value: { id: 'f-new', kind: 'factor', label: 'New' } },
+      { op: 'add_node', path: 'f-new', value: { kind: 'factor', label: 'New' } },
       { op: 'update_node', path: 'f-imagined', value: { observed_state: { value: 0.6 } } },
     ]);
     expect(decision.governing).toBe('rejected');
@@ -169,7 +187,7 @@ describe('A2 — a reject applies NOTHING, and holds nothing either', () => {
     // "first verdict wins" would answer `held` and mint a pending the user
     // could confirm — applying a batch containing an impossible op.
     const decision = gateFor([
-      { op: 'add_node', path: 'f-new', value: { id: 'f-new', kind: 'factor', label: 'New' } },
+      { op: 'add_node', path: 'f-new', value: { kind: 'factor', label: 'New' } },
       { op: 'update_node', path: 'f-imagined', value: { observed_state: { value: 0.6 } } },
     ]);
     expect(decision.governing).toBe('rejected');
@@ -250,11 +268,11 @@ describe('⭐⭐ A3 — a SPLIT proposes one part WHOLE and submits nothing else
   /** Probe C's measured composition: 3 node ops + 12 edge ops. */
   const PROBE_C_PAYLOAD = {
     operations: DRIVERS.flatMap((d) => [
-      { op: 'add_node', path: d.id, value: { id: d.id, kind: 'factor', label: d.label } },
+      { op: 'add_node', path: d.id, value: { kind: 'factor', label: d.label } },
       ...TARGETS.map((t) => ({
         op: 'add_edge',
         path: `${d.id}::${t}`,
-        value: { from: d.id, to: t },
+        value: { from: d.id, to: t, ...CAUSAL_BELIEF },
       })),
     ]),
   };

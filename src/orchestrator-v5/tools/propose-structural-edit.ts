@@ -118,6 +118,7 @@ import {
   measurePart,
   type StructuralEditPart,
 } from './structural-edit-batch-split.js';
+import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';
 
 /**
  * Re-exported so the one definition of "what does this operation name?" has a
@@ -308,7 +309,23 @@ export interface StructuralEditRejection {
    * rather than repairing (reject-don't-repair).
    */
   readonly reason: string;
+  /**
+   * ROADMAP 2.713 — WHICH GUARD FIRED, machine-readable.
+   *
+   * `BATCH_CAP_EXCEEDED` is shared by two guards that mean opposite things: a
+   * RUNAWAY emission (raw operation count over the pipeline cap, judged before
+   * anything else) and an UNPARTITIONABLE one (a legitimate batch no split can
+   * make cap-legal). The user-facing copy already differs; the telemetry did
+   * not, so a live reject was indistinguishable from outside and blocked a
+   * diagnosis. Structural only — never prose, which quotes ids.
+   */
+  readonly detail?: StructuralEditRejectionDetail;
 }
+
+export type StructuralEditRejectionDetail =
+  | 'runaway'
+  | 'operation_exceeds_part'
+  | 'too_many_parts';
 
 export interface StructuralEditAcceptance {
   readonly ok: true;
@@ -339,8 +356,102 @@ export type StructuralEditValidation = StructuralEditAcceptance | StructuralEdit
 function reject(
   code: StructuralEditRejectionCode,
   reason: string,
+  detail?: StructuralEditRejectionDetail,
 ): StructuralEditRejection {
-  return { ok: false, code, reason };
+  return { ok: false, code, reason, ...(detail !== undefined ? { detail } : {}) };
+}
+
+// ---------------------------------------------------------------------------
+// ROADMAP 2.713 — THE APPLY CONTRACT'S DUPLICATE FIELDS.
+//
+// The apply-side Zod contract (`PatchOperationsArraySchema`, unchanged since
+// 2026-02-25, three consumers) requires fields on a CREATE that this tool's
+// advert cannot express: `value.id` on `add_node` (the advert declares no `id`
+// property, closes `value` to additional properties, and its prose forbids
+// restating identity), and the full `{strength:{mean,std}, exists_probability,
+// effect_direction}` payload on `add_edge` (of which the advert requires only
+// `strength.mean`). Every composed `add_node` therefore failed apply with
+// `zod:invalid_type` at `value.id` — deterministically, 100%, witnessed live on
+// the first-ever `engaged_split`.
+//
+// THE COMPOSER IS THE STALE SIDE and is fixed here. Two rules govern what
+// follows, and they are the whole of the design:
+//
+//  1. SYNTHESISE ONLY FROM AN AUTHORITATIVE SOURCE. `value.id` is derived from
+//     `path`, which every other module already treats as authoritative for a
+//     create — `applyAddNode` ("op.path is authoritative — override any id in
+//     value"), the envelope producer, `createdNodeIdOf`, `batchFullyLanded`.
+//     The synthesis is therefore an ECHO of the one identity, never a second
+//     one; a model restatement that DISAGREES is still a G7 rejection, and the
+//     echo is written only after that check has passed.
+//  2. NEVER INVENT A VALUE. Where the apply contract requires a field with no
+//     authoritative source — a node's `kind`/`label`, a CAUSAL link's strength
+//     and probability — the op is REFUSED with a model-facing reason. A
+//     fabricated strength behind a confirm chip is the 2.461 defect class, and
+//     it is worse than a refusal because the user cannot see it.
+//
+// The one edge case where a source DOES exist is topology: a decision→option
+// or option→factor link is structure, not a belief, and the apply path already
+// stamps `STRUCTURAL_EDGE_DEFAULTS` over it deterministically
+// (`enforceStructuralEdgeDefaults`, and `add-option-transaction` before it).
+// This module applies THE SAME IMPORTED CONSTANT rather than a copy, so what
+// the user is shown is what lands; a test asserts composed output is a FIXED
+// POINT of the apply-path enforcer, and that the two modules classify the kind
+// cross-product identically.
+// ---------------------------------------------------------------------------
+
+/**
+ * Is a link between these two node kinds TOPOLOGY rather than a causal belief?
+ *
+ * Mirrors `enforceStructuralEdgeDefaults`' classification, and is pinned to it
+ * by a behaviour-to-behaviour agreement test over the FULL `NodeKindV3` cross
+ * product (trap 12d — a mirror is only safe when something REDs on drift).
+ * Directional, by kind and never by id prefix: a factor whose id starts `opt_`
+ * is not an option.
+ */
+function isStructuralEdgeKindPair(
+  fromKind: string | undefined,
+  toKind: string | undefined,
+): boolean {
+  return (
+    (fromKind === 'decision' && toKind === 'option') ||
+    (fromKind === 'option' && toKind === 'factor')
+  );
+}
+
+/**
+ * Complete an `add_edge` value to the apply contract, or report what is
+ * missing. Returns the canonical value on success; on failure the caller
+ * refuses the WHOLE batch naming the absent fields.
+ */
+function completeAddEdgeValue(
+  value: Record<string, unknown> | null,
+  fromKind: string | undefined,
+  toKind: string | undefined,
+): { readonly ok: true; readonly value: Record<string, unknown> } | { readonly ok: false; readonly missing: readonly string[] } {
+  const base: Record<string, unknown> = { ...(value ?? {}) };
+
+  if (isStructuralEdgeKindPair(fromKind, toKind)) {
+    // Topology. The apply path stamps these deterministically; stamping the
+    // SAME imported constant here keeps composed output a fixed point of it,
+    // so the disclosure the user reads is the payload that lands. The flat
+    // `strength_*` twins are dropped for the same reason the enforcer drops
+    // them — they would survive Zod and contradict the nested canonical form.
+    const { strength_mean: _mean, strength_std: _std, ...cleaned } = base;
+    return { ok: true, value: { ...cleaned, ...STRUCTURAL_EDGE_DEFAULTS } };
+  }
+
+  // A CAUSAL link. Every field below is a claim about the world that only the
+  // model (from the user) can make; a default here would be a fabrication.
+  const missing: string[] = [];
+  const strength = asRecord(base.strength);
+  if (strength === null || typeof strength.mean !== 'number') missing.push('strength.mean');
+  if (strength === null || typeof strength.std !== 'number') missing.push('strength.std');
+  if (typeof base.exists_probability !== 'number') missing.push('exists_probability');
+  if (base.effect_direction !== 'positive' && base.effect_direction !== 'negative') {
+    missing.push('effect_direction');
+  }
+  return missing.length > 0 ? { ok: false, missing } : { ok: true, value: base };
 }
 
 /**
@@ -421,6 +532,7 @@ export function validateProposedStructuralEdit(
       'BATCH_CAP_EXCEEDED',
       `The batch carries ${rawOps.length} operations; the pipeline accepts at most ` +
         `${options.maxPatchOperations}. Split the restructure into smaller batches.`,
+      'runaway',
     );
   }
 
@@ -429,6 +541,11 @@ export function validateProposedStructuralEdit(
   const createdIds = new Set<string>();
   const removedIds = new Set<string>();
   const createdEdgeKeys = new Set<string>();
+  // id → kind, for the topology classification below. Seeded from the
+  // PERSISTED graph and extended by this batch's creates, exactly as the apply
+  // path's `enforceStructuralEdgeDefaults` builds its own map.
+  const kindById = new Map<string, string>();
+  for (const node of grounding.nodes) kindById.set(node.id, node.kind);
 
   const nodeExists = (id: string): boolean =>
     grounding.nodeIds.has(id) || createdIds.has(id);
@@ -451,6 +568,8 @@ export function validateProposedStructuralEdit(
     if (path === null) {
       return reject('SCHEMA_INVALID', `${at} has no \`path\` (the target id).`);
     }
+    /** Set by the `add_edge` branch; needed again at canonicalisation. */
+    let edgeEndpoints: { readonly from: string; readonly to: string } | null = null;
 
     // ── G5 first for the target itself: a removed id may not come back. ────
     if (removedIds.has(path)) {
@@ -517,6 +636,12 @@ export function validateProposedStructuralEdit(
         );
       }
       createdIds.add(path);
+      // Register the declared kind for the topology classification of any
+      // LATER edge in this batch. A create whose `kind` is missing is refused
+      // at canonicalisation below (after G7, which is the more precise reason
+      // when both apply), so an unusable entry here can never outlive this op.
+      const createKind = readString(asRecord(opRecord.value)?.kind ?? null);
+      if (createKind !== null) kindById.set(path, createKind);
     } else {
       // add_edge — endpoints must exist (persisted or created earlier).
       const value = asRecord(opRecord.value);
@@ -543,6 +668,7 @@ export function validateProposedStructuralEdit(
         );
       }
       createdEdgeKeys.add(edgeKeyOf(from, to));
+      edgeEndpoints = { from, to };
     }
 
     // ── THE ID CAN HIDE IN `value` ────────────────────────────────────────
@@ -581,13 +707,63 @@ export function validateProposedStructuralEdit(
       removedIds.add(path);
     }
 
+    // ── 2.713: MEET THE APPLY CONTRACT, OR REFUSE ─────────────────────────
+    // Runs LAST, after every grounding rule and after G7 — so a hallucinated
+    // id or a forked identity is still the reason the model is given, and the
+    // identity echo below is written only onto an op whose single identity has
+    // already been established.
+    let canonicalValue: unknown = opRecord.value;
+
+    if (kind === 'add_node') {
+      const createLabel = readString(valueRecord?.label ?? null);
+      const createKind = readString(valueRecord?.kind ?? null);
+      const missing = [
+        ...(createKind === null ? ['kind'] : []),
+        ...(createLabel === null ? ['label'] : []),
+      ];
+      if (missing.length > 0) {
+        // NEVER INVENTED. A node whose kind or name we made up is a node the
+        // user never described, arriving behind a confirm chip.
+        return reject(
+          'SCHEMA_INVALID',
+          `${at} creates node '${path}' but its \`value\` carries no ` +
+            `${missing.map((f) => `\`${f}\``).join(' and no ')}. A new node needs ` +
+            'both: `kind` (what sort of thing it is) and `label` (the name the user reads).',
+        );
+      }
+      // THE IDENTITY ECHO. `path` is authoritative (patch-applier contract);
+      // this restates it where the apply contract requires it, and can only
+      // ever agree, because a disagreeing restatement was rejected by G7 above.
+      canonicalValue = { ...(valueRecord ?? {}), id: path };
+    } else if (kind === 'add_edge') {
+      const completion = completeAddEdgeValue(
+        valueRecord,
+        edgeEndpoints === null ? undefined : kindById.get(edgeEndpoints.from),
+        edgeEndpoints === null ? undefined : kindById.get(edgeEndpoints.to),
+      );
+      if (!completion.ok) {
+        return reject(
+          'SCHEMA_INVALID',
+          `${at} adds a link but its \`value\` carries no ` +
+            `${completion.missing.map((f) => `\`${f}\``).join(', no ')}. A new causal link ` +
+            'needs all of them: how strong the effect is (`strength.mean`), how unsure ' +
+            'you are (`strength.std`), how likely the link exists (`exists_probability`), ' +
+            'and which way it runs (`effect_direction`). State what the user told you — ' +
+            'do not guess a number.',
+        );
+      }
+      canonicalValue = completion.value;
+    }
+
     // The canonical op — `target_label` is a GROUNDING field, not part of the
     // PatchOperation vocabulary, and is stripped here. What leaves this
-    // module is exactly what `PatchOperationsArraySchema` validates.
+    // module is exactly what `PatchOperationsArraySchema` validates — and
+    // since 2.713 that claim is pinned by a derived round-trip test importing
+    // both this module and that schema, rather than merely asserted here.
     const canonical: EditPatchOperationLike = {
       op: kind,
       path,
-      ...(opRecord.value !== undefined ? { value: opRecord.value } : {}),
+      ...(canonicalValue !== undefined ? { value: canonicalValue } : {}),
       ...(opRecord.old_value !== undefined ? { old_value: opRecord.old_value } : {}),
     };
     operations.push(canonical);
@@ -623,6 +799,7 @@ export function validateProposedStructuralEdit(
         : `This batch would need ${partition.partsNeeded} separate proposals; at most ` +
             `${limits.maxParts} can be offered for one request. Ask for a smaller part of ` +
             'the restructure.',
+      partition.failure,
     );
   }
 
@@ -676,6 +853,17 @@ export function buildProposeStructuralEditTool(grounding: StructuralEditGroundin
       'must be in the table above, or created earlier in the same batch. And ' +
       'do not name a target once in `path` and again, differently, inside ' +
       '`value`: name it once, in `path`.\n' +
+      '\n' +
+      'WHAT A CREATE MUST CARRY. Creating a node needs `kind` and `label` in ' +
+      '`value` — both, every time; nothing is guessed for you and an ' +
+      'incomplete create rejects the whole batch. Creating a CAUSAL link (any ' +
+      'link that is not decision→option or option→factor) needs all four of ' +
+      '`strength.mean`, `strength.std`, `exists_probability` and ' +
+      '`effect_direction`. State what the user actually told you; if you do ' +
+      'not know a number, do not compose the link. Links from a decision to ' +
+      'an option, or from an option to a factor, are STRUCTURE rather than a ' +
+      'belief — leave their strength out and the system supplies the ' +
+      'canonical topology itself.\n' +
       '\n' +
       'THE CURRENT MODEL:\n' +
       `${renderGroundingTable(grounding)}\n` +
@@ -780,8 +968,11 @@ export function buildProposeStructuralEditTool(grounding: StructuralEditGroundin
                 additionalProperties: false,
                 description:
                   'The new content, carrying only the fields that apply. ' +
-                  'add_node: {kind, label, ...}. add_edge: {from, to, ' +
-                  'strength, exists_probability, effect_direction}. ' +
+                  'add_node: {kind, label, ...} — both required, and the id ' +
+                  'goes in `path`, never here. add_edge: {from, to, strength: ' +
+                  '{mean, std}, exists_probability, effect_direction} — all ' +
+                  'required for a causal link; for a decision→option or ' +
+                  'option→factor link give only {from, to}. ' +
                   'update_node / update_edge: only the fields that change.',
                 properties: {
                   // ── Creation identity ──────────────────────────────────

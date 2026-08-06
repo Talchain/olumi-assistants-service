@@ -44,6 +44,24 @@ import {
 import { measurePart } from '../structural-edit-batch-split.js';
 import { PROPOSAL_CAP } from '../../graph-management/types.js';
 
+/**
+ * ⚠ ROADMAP 2.713 — a CAUSAL link create must carry the belief the apply
+ * contract has required since February (`strength.{mean,std}`,
+ * `exists_probability`, `effect_direction`). The reconstructed fixtures here
+ * carried only `{from,to}`, and separately supplied a `value.id` the deployed
+ * advert makes structurally impossible — so they were unfaithful to the wire in
+ * both directions and could not see the seam defect. Identity now arrives by
+ * server-side synthesis from the authoritative `path`; the belief is stated,
+ * because the composer refuses a link the model did not describe rather than
+ * inventing one. Neither change alters an envelope count.
+ */
+const CAUSAL_BELIEF = {
+  strength: { mean: 0.4, std: 0.15 },
+  exists_probability: 0.8,
+  effect_direction: 'positive',
+} as const;
+
+
 const here = dirname(fileURLToPath(import.meta.url));
 const CAPTURED = JSON.parse(
   readFileSync(join(here, 'captured', 'canvas-export-2026-08-05.json'), 'utf8'),
@@ -69,12 +87,12 @@ function driversFor(optionIds: readonly string[]) {
         {
           op: 'add_node',
           path: driverId,
-          value: { id: driverId, kind: 'factor', label: `Driver for option ${i + 1}` },
+          value: { kind: 'factor', label: `Driver for option ${i + 1}` },
         },
         {
           op: 'add_edge',
           path: `${driverId}::${optId}`,
-          value: { from: driverId, to: optId },
+          value: { from: driverId, to: optId, ...CAUSAL_BELIEF },
         },
       ];
     }),
@@ -132,7 +150,7 @@ describe('⭐ THE FOUR-OPTION BOUNDARY — the reviewer`s arithmetic, measured',
         {
           op: 'add_edge',
           path: `fac_driver_0::${GOAL_ID}`,
-          value: { from: 'fac_driver_0', to: GOAL_ID },
+          value: { from: 'fac_driver_0', to: GOAL_ID, ...CAUSAL_BELIEF },
         },
       ],
     };

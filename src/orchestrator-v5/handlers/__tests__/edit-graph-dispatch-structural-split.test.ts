@@ -63,6 +63,24 @@ import {
   SUCCESS_CLAIM_PATTERNS,
 } from '../../compose/forbidden-user-facing-phrases.js';
 
+/**
+ * ⚠ ROADMAP 2.713 — a CAUSAL link create must carry the belief the apply
+ * contract has required since February (`strength.{mean,std}`,
+ * `exists_probability`, `effect_direction`). The reconstructed fixtures here
+ * carried only `{from,to}`, and separately supplied a `value.id` the deployed
+ * advert makes structurally impossible — so they were unfaithful to the wire in
+ * both directions and could not see the seam defect. Identity now arrives by
+ * server-side synthesis from the authoritative `path`; the belief is stated,
+ * because the composer refuses a link the model did not describe rather than
+ * inventing one. Neither change alters an envelope count.
+ */
+const CAUSAL_BELIEF = {
+  strength: { mean: 0.4, std: 0.15 },
+  exists_probability: 0.8,
+  effect_direction: 'positive',
+} as const;
+
+
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const STUB_REQUEST = {} as FastifyRequest;
@@ -87,8 +105,8 @@ const TARGETS = ['goal_profit', 'fac_spend', 'fac_reach', 'dec_plan'];
 
 /** PROBE C: 3 add_node + 12 add_edge, exactly as witnessed. */
 const PROBE_C_OPERATIONS = DRIVERS.flatMap((d) => [
-  { op: 'add_node', path: d.id, value: { id: d.id, kind: 'factor', label: d.label } },
-  ...TARGETS.map((t) => ({ op: 'add_edge', path: `${d.id}::${t}`, value: { from: d.id, to: t } })),
+  { op: 'add_node', path: d.id, value: { kind: 'factor', label: d.label } },
+  ...TARGETS.map((t) => ({ op: 'add_edge', path: `${d.id}::${t}`, value: { from: d.id, to: t, ...CAUSAL_BELIEF } })),
 ]);
 
 /** PROBE D: six operations, under every cap — the positive control. */
@@ -96,12 +114,12 @@ const PROBE_D_OPERATIONS = [
   ...DRIVERS.map((d) => ({
     op: 'add_node',
     path: d.id,
-    value: { id: d.id, kind: 'factor', label: d.label },
+    value: { kind: 'factor', label: d.label },
   })),
   ...DRIVERS.map((d) => ({
     op: 'add_edge',
     path: `${d.id}::goal_profit`,
-    value: { from: d.id, to: 'goal_profit' },
+    value: { from: d.id, to: 'goal_profit', ...CAUSAL_BELIEF },
   })),
 ];
 
@@ -323,7 +341,7 @@ describe('⭐⭐ a cap refusal is ACTIONABLE and does not fall back to the ruleb
   const UNSPLITTABLE = Array.from({ length: 16 }, (_, i) => ({
     op: 'add_node',
     path: `fac_x${i}`,
-    value: { id: `fac_x${i}`, kind: 'factor', label: `X${i}` },
+    value: { kind: 'factor', label: `X${i}` },
   }));
 
   const RULEBOOK_DEAD_END_COPY =
