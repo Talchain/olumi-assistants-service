@@ -480,6 +480,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5TurnFenceEvaluated: "v5.turn_fence.evaluated",
         V5TurnFenceGraphWriteRefused: "v5.turn_fence.graph_write_refused",
         V5TurnStopRequested: "v5.turn_fence.stop_requested",
+        // ROADMAP 2.709 — first-write exemption + the draft-loss trace/notice.
+        V5TurnFenceFirstWriteExemption: "v5.turn_fence.first_write_exemption",
+        V5TurnFenceGraphWriteFailureMarked: "v5.turn_fence.graph_write_failure_marked",
+        V5DraftLossNoticeSurfaced: "v5.turn_fence.draft_loss_notice_surfaced",
         // Lane 8 — Graph Management referee live wiring (CEE_GRAPH_MANAGEMENT_MODE)
         V5CandidateMutationWouldApply: "v5.candidate_mutation.would_apply",
         V5CandidateMutationHeld: "v5.candidate_mutation.held",
@@ -1257,6 +1261,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5TurnFenceEvaluated,
         TelemetryEvents.V5TurnFenceGraphWriteRefused,
         TelemetryEvents.V5TurnStopRequested,
+        // ROADMAP 2.709 first-write exemption family: diagnostic-only
+        // (structured logs are the operational signal; no Datadog metric
+        // mapping until dashboards exist).
+        TelemetryEvents.V5TurnFenceFirstWriteExemption,
+        TelemetryEvents.V5TurnFenceGraphWriteFailureMarked,
+        TelemetryEvents.V5DraftLossNoticeSurfaced,
         // Lane 8 — Graph Management referee verdict events + Model Management
         // version hook: diagnostic-only (structured logs are the operational
         // signal; no Datadog metric mapping until activation dashboards exist).
@@ -2216,6 +2226,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.turn_fence.evaluated",
         "v5.turn_fence.graph_write_refused",
         "v5.turn_fence.stop_requested",
+        // ROADMAP 2.709 (fresh-journey P0) — first-write exemption, the
+        // graph-write failure trace, and the draft-loss notice surface.
+        // Deliberate frozen-registry addition per the registry discipline.
+        "v5.turn_fence.first_write_exemption",
+        "v5.turn_fence.graph_write_failure_marked",
+        "v5.turn_fence.draft_loss_notice_surfaced",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

@@ -1227,8 +1227,9 @@ export const TelemetryEvents = {
   V5TurnFenceGraphWriteFailureMarked: "v5.turn_fence.graph_write_failure_marked",
 
   // V5 — ROADMAP 2.709 invariant 6: a graph-less 200 on a scenario whose
-  // draft loss stands carried the DRAFT_LOSS_NOTICE to the user.
-  V5DraftLossNoticeSurfaced: "v5.draft_loss_notice.surfaced",
+  // draft loss stands carried the DRAFT_LOSS_NOTICE to the user. Lives in
+  // the turn_fence namespace with the rest of the 2.709 family.
+  V5DraftLossNoticeSurfaced: "v5.turn_fence.draft_loss_notice_surfaced",
 
   // V5 TURN FENCE — an explicit user Stop arrived at the server
   // (POST /proxy/v5/turn/stop). `already_committed` records whether the turn
