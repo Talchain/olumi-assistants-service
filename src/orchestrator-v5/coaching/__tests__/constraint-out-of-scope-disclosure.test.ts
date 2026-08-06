@@ -4,9 +4,9 @@
  *
  * WHAT IT REPLACES. On every walk run carrying a time phrase the user was told:
  *
- *   "One of the conditions you set was not checked: “Delivery deadline”. The
+ *   "One of the conditions you set could not be checked: “Delivery deadline”. The
  *    analysis engine could not evaluate it against this model, so no option
- *    can be put forward yet. Re-state that limit against a measure recorded in
+ *    can be put forward yet. Tell me the limit you meant against a measure recorded in
  *    the same units as the limit, then run the analysis again."
  *
  * — verbatim from `journey-witness-2026-08-04b-raw/p3b/wire-run1-4-res.txt`.
@@ -101,14 +101,14 @@ describe('2.349 — the out-of-scope voice says the true thing and none of the f
   it('does NOT say the engine failed to check it', () => {
     // Untruth #2. The removal was deliberate and disclosed; framing it as an
     // engine anomaly is the sentence gap 5 put on screen.
-    expect(suffix).not.toContain('was not checked');
+    expect(suffix).not.toContain('could not be checked');
     expect(suffix).not.toContain('could not evaluate');
   });
 
   it('does NOT offer the units repair step', () => {
     // Untruth #3, and the one that cost users real effort: following it can
     // never change the outcome for this class.
-    expect(suffix).not.toContain('Re-state that limit');
+    expect(suffix).not.toContain('Tell me the limit you meant');
     expect(suffix).not.toContain('same units');
   });
 
@@ -168,7 +168,7 @@ describe('2.349 — EGRESS: the voice reaches the bytes the user receives', () =
       verdictOf('unevaluated', [BUDGET], [DEADLINE]),
     )}`;
     // Composition order: the more serious state voice leads.
-    expect(composed.indexOf('was not checked')).toBeLessThan(
+    expect(composed.indexOf('could not be checked')).toBeLessThan(
       composed.indexOf('This analysis does not test'),
     );
     expect(isAllowedRunAnalysisAssistantText(composed)).toBe(true);

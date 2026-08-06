@@ -374,13 +374,13 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       const turn = await rerunTurn(app);
       // (b) which condition
       expect(turn.assistantText).toContain('Three-Year Total Cost of Ownership');
-      expect(turn.assistantText).toContain('was not checked');
+      expect(turn.assistantText).toContain('could not be checked');
       // the consequence, in the estate's own wording ("put forward", never
       // "recommended" — the forbidden-vocabulary ban is blunt by design)
       expect(turn.assistantText).toContain('no option can be put forward yet');
       // (c) a repair step the user can act on
       expect(turn.assistantText).toContain(
-        'Re-state that limit against a measure recorded in the same units as the limit',
+        'Tell me the limit you meant in your own words and I will record it',
       );
     });
 
@@ -438,9 +438,9 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
         expect(turn.assistantText).not.toContain('Your latest analysis is still current');
         // …and the disclosure the live bodies dropped 3/4 of the time.
         expect(turn.assistantText).toContain('Three-Year Total Cost of Ownership');
-        expect(turn.assistantText).toContain('was not checked');
+        expect(turn.assistantText).toContain('could not be checked');
         expect(turn.assistantText).toContain(
-          'Re-state that limit against a measure recorded in the same units as the limit',
+          'Tell me the limit you meant in your own words and I will record it',
         );
       });
 
@@ -462,7 +462,7 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
         // Exactly ONE copy. A naive append would emit the repair step twice,
         // which reads as a stutter on the turn the user is already being told
         // the least.
-        const occurrences = turn.assistantText.split('was not checked').length - 1;
+        const occurrences = turn.assistantText.split('could not be checked').length - 1;
         expect(occurrences, 'the disclosure was appended to an answer that already had it').toBe(1);
       });
     });
@@ -508,7 +508,7 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       expect(turn.assistantText).toContain('“Three-Year Total Cost of Ownership”');
       expect(turn.assistantText).toContain('so no option can be put forward yet');
       // The requirement this test was written for, unchanged.
-      expect(turn.assistantText).not.toContain('was not checked');
+      expect(turn.assistantText).not.toContain('could not be checked');
     });
   });
 

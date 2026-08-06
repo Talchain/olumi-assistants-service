@@ -177,7 +177,7 @@ describe('findLeaderClaims — the scan surface, field by field', () => {
   it('does NOT fire on prose that names no leader (the false-positive direction)', () => {
     for (const prose of [
       'Two factors dominate this result and both are uncertain.',
-      'Re-state that limit against a measure recorded in the same units as the limit.',
+      'Tell me the limit you meant in your own words and I will record it.',
       'The analysis engine could not evaluate it against this model, so no option can be put forward yet.',
       'Imagine this decision has failed: what went wrong?',
     ]) {

@@ -140,9 +140,12 @@ describe('T1 gap disclosure — reaches the wire', () => {
     // (b) the condition is named
     expect(out).toContain('Total three-year cost');
     // (c) the repair step is present
-    expect(out).toContain('Re-state that limit against a measure recorded in the same units');
-    // and the withheld-recommendation statement survives
-    expect(out).toContain('conditions you set');
+    expect(out).toContain('Tell me the limit you meant in your own words and I will record it');
+    // and the withheld-recommendation statement survives. ROADMAP 2.653: this
+    // used to pin 'conditions you set', which was an ATTRIBUTION claim, not the
+    // withholding statement it was labelled as — and a false one whenever the
+    // brief extractor authored the row. Pin the statement the comment names.
+    expect(out).toContain('no option can be put forward yet');
   });
 
   it('the count-only form (label unusable) also reaches the wire', () => {
@@ -152,8 +155,8 @@ describe('T1 gap disclosure — reaches the wire', () => {
     const composed = composeSummary([{ constraint_id: 'c_x', label: null }]);
     const out = throughForwarder(composed);
     expect(out).not.toBe(FALLBACK);
-    expect(out).toContain('was not checked');
-    expect(out).toContain('Re-state that limit');
+    expect(out).toContain('could not be checked');
+    expect(out).toContain('Tell me the limit you meant');
   });
 
   it('the composed summary is on the egress allowlist', () => {
@@ -189,8 +192,8 @@ describe('T1 gap disclosure — the three INDEPENDENT blockers, named separately
     ]);
     const out = throughForwarder(composed);
     expect(out).not.toBe(FALLBACK);
-    expect(out).toContain('was not checked');
-    expect(out).toContain('Re-state that limit');
+    expect(out).toContain('could not be checked');
+    expect(out).toContain('Tell me the limit you meant');
     expect(out).not.toContain('LLLL');
   });
 
@@ -233,7 +236,7 @@ describe('identity_unresolved — its OWN wording, and it reaches the wire too',
   it('does NOT claim the condition went unchecked', () => {
     // The #703 false statement. "Was not checked" is assertable only in the
     // `unevaluated` state, and this is not that state.
-    expect(UNRESOLVED).not.toContain('was not checked');
+    expect(UNRESOLVED).not.toContain('could not be checked');
     expect(UNRESOLVED).not.toContain('were not checked');
     expect(UNRESOLVED).not.toContain('could not evaluate');
   });
@@ -355,9 +358,9 @@ describe('the forwarder honesty floor — a REJECTED summary still discloses', (
     // The combined string is re-checked, so a disclosure-shaped slice carrying
     // banned content falls back bare rather than riding the salvage path.
     const poisoned =
-      ' One of the conditions you set was not checked: “the best option”.' +
+      ' One of the conditions you set could not be checked: “the best option”.' +
       ' The analysis engine could not evaluate it against this model, so no option can be put forward yet.' +
-      ' Re-state that limit against a measure recorded in the same units as the limit, then run the analysis again.';
+      ' Tell me the limit you meant in your own words and I will record it, then run the analysis again.';
     expect(throughForwarder(`${REJECTED_HEAD}${poisoned}`)).toBe(FALLBACK);
   });
 });
