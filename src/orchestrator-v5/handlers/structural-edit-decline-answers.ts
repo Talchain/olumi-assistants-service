@@ -123,14 +123,25 @@ export const STRUCTURAL_EDIT_DECLINE_COPY: Readonly<
     actions: SMALLER_ASK_ACTIONS,
   },
 
-  // Something was attempted and did not come back. Also worth retrying, but the
-  // honest sentence is different: the failure was in working the change out,
-  // not in reading the model.
+  // Something was attempted and did not come back. The honest sentence differs
+  // from `model_unreadable` twice over: the failure was in working the change
+  // out rather than in reading the model, AND a retry is not the first step.
+  //
+  // ⚠ THIS COPY SAID "Try asking me again." AND WAS WITNESSED PRESCRIBING A
+  // DETERMINISTIC RE-FAILURE (2026-08-07, 6/6 across three fresh scenarios,
+  // every one of them the same composer rejection, including the two retries
+  // the tester made through the UI's own Retry control). The exits behind this
+  // class are "the composer could not run" — no tool adapter, a failed call —
+  // so putting the same request again runs the same composer. Decomposition is
+  // the step that genuinely routes around it, and it is now the one offered.
+  // The sentence stops short of promising the smaller ask will work: some of
+  // these exits are transport failures that a smaller request meets too.
   compose_unavailable: {
     text:
       'I could not work that change out just then, so I have not put anything ' +
-      'forward. Try asking me again. If it keeps happening, ask me for one ' +
-      'part of it at a time: the changes for a single option, for example.',
+      'forward. Putting the same request to me a second time may well meet ' +
+      'the same problem, so ask me for one part of it instead: the changes ' +
+      'for a single option, for example.',
     actions: SMALLER_ASK_ACTIONS,
   },
 

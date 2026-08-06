@@ -107,6 +107,7 @@ import {
   parseEdgeTargetPath,
   type EditPatchOperationLike,
 } from '../graph-management/adapters/edit-graph-producer.js';
+import { NodeKindV3, FactorCategoryV3 } from '../../schemas/cee-v3.js';
 import {
   collectInterventionTargetIds,
   edgeKeyOf as sharedEdgeKeyOf,
@@ -670,11 +671,11 @@ export function buildProposeStructuralEditTool(grounding: StructuralEditGroundin
       'match the id you named, the batch is rejected — this is how a ' +
       'wrong-but-plausible target gets caught before it is applied.\n' +
       '\n' +
-      'IDS INSIDE `value` ARE CHECKED THE SAME WAY. An `interventions` map is ' +
-      'keyed by the id of the factor each effect acts on, and every one of ' +
-      'those keys must be in the table above (or created earlier in the same ' +
-      'batch). Do not name a target once in `path` and differently in ' +
-      '`value.id`, `value.from` or `value.to` — name it once, in `path`.\n' +
+      'IDS INSIDE `value` ARE CHECKED THE SAME WAY. Every id you write inside ' +
+      '`value` — a link endpoint, or the key of any map keyed by factor id — ' +
+      'must be in the table above, or created earlier in the same batch. And ' +
+      'do not name a target once in `path` and again, differently, inside ' +
+      '`value`: name it once, in `path`.\n' +
       '\n' +
       'THE CURRENT MODEL:\n' +
       `${renderGroundingTable(grounding)}\n` +
@@ -717,38 +718,161 @@ export function buildProposeStructuralEditTool(grounding: StructuralEditGroundin
                   "that node's exact label, copied from the table above. " +
                   'Omit only when the operation creates the node.',
               },
+              // ⭐⭐ ROADMAP 2.655 — THIS OBJECT 400'd EVERY CALL, TWICE OVER.
+              //
+              // Round 1 (18 consecutive failures, cee-staging
+              // 2026-08-05T14:34Z .. 2026-08-06T03:19Z, ZERO `engaged` in the
+              // whole window — the 2.474/A3 splitter had never once composed):
+              //
+              //   tools.0.custom: For 'object' type, 'additionalProperties:
+              //   true' is not supported. Please set 'additionalProperties'
+              //   to false
+              //
+              // #835 removed the `true` and left the key OMITTED, reasoning
+              // that `false` on an object declaring no properties would be
+              // worse than the crash: a working call that can only compose
+              // `{}`. The reasoning about `false` was right; the conclusion
+              // was not, because omitting is not a third option —
+              //
+              // Round 2 (deterministic 6/6 across three fresh scenarios on the
+              // fixed build, 2026-08-07 ~04:4xZ):
+              //
+              //   tools.0.custom: For 'object' type, 'additionalProperties'
+              //   must be explicitly set to false
+              //
+              // THE REQUIREMENT IS EXPLICIT `false` ON EVERY OBJECT. So the
+              // only way to keep this field usable is the one #835 ruled out
+              // for the wrong reason: DECLARE THE FIELDS IT CARRIES. That is
+              // what follows. Every declared property is a wire field the
+              // shared editable-field table classes `grant` or `ai_only` for
+              // its entity, and that `NodeV3` / `EdgeV3` actually declare (an
+              // undeclared field is stripped on persist and would be dead
+              // advert — see field-safety.ts's persistence-survival note),
+              // plus the three CREATION-identity fields no update may touch
+              // but every create needs: `kind` for add_node, `from`/`to` for
+              // add_edge.
+              //
+              // ⚠ TWO THINGS THIS NARROWS, STATED RATHER THAN LEFT TO BE FOUND:
+              //  1. `interventions` (a node grant) is a map keyed by FACTOR ID.
+              //     A dynamic-key map cannot be advertised at all under a rule
+              //     that admits only `additionalProperties: false`, so it is
+              //     not declared here. Nothing is lost at the ENFORCEMENT
+              //     layer: this schema is descriptive, and
+              //     `validateProposedStructuralEdit` below still accepts an
+              //     interventions map and still grounds every key of it at any
+              //     depth. What is lost is the ADVERT, i.e. the model is no
+              //     longer told it may compose one. Rowed for a follow-up that
+              //     can enumerate the grounded factor ids as properties.
+              //  2. No `required` is declared on this object, because there is
+              //     no field every op kind needs (an update carries only what
+              //     changes). `required` is optional in JSON Schema and the API
+              //     has never named it in either rejection; the "every object
+              //     needs `required`" rule in
+              //     adapters/llm/anthropic-schema-compliance.ts is scoped to
+              //     STRUCTURED OUTPUTS, which this call does not use —
+              //     `buildStrictAnthropicTools` sends `strict: true` only for
+              //     STRUCTURED_OUTPUTS_SUPPORTED_MODELS, and staging's
+              //     claude-sonnet-5 is deliberately not in that set. If a third
+              //     round of 400s ever names `required`, this is the note to
+              //     start from.
               value: {
                 type: 'object',
-                // ⭐⭐ ROADMAP 2.655 — `additionalProperties: true` WAS HERE, AND
-                // IT 400'd EVERY SINGLE CALL. Measured in the cee-staging logs,
-                // 2026-08-05T14:34Z .. 2026-08-06T03:19Z: EIGHTEEN attempts,
-                // eighteen identical rejections, ZERO `engaged` entries — so
-                // the 2.474/A3 splitter had never once composed on staging.
-                // The API's words, verbatim:
-                //
-                //   tools.0.custom: For 'object' type, 'additionalProperties:
-                //   true' is not supported. Please set 'additionalProperties'
-                //   to false
-                //
-                // The walk's own turn is in that window (03:18:29 and
-                // 03:19:15), which is why the canonical compound edit received
-                // the pre-split dead end months after the split shipped: the
-                // feature was dead at the transport, and the dispatcher's
-                // decline path then handed the turn back to the rulebook's
-                // refusal (the other half of 2.655).
-                //
-                // ⚠ THE KEY IS OMITTED, NOT SET TO FALSE. `false` would forbid
-                // every field, and this object declares NO properties by
-                // design: it is the open bag of node/edge content, whose real
-                // contract is `validateProposedStructuralEdit` below (the
-                // JSONSchema here is DESCRIPTIVE, as this file's header says).
-                // Setting it to `false` would turn a 400 into a tool that can
-                // only ever emit `{}` — a working call composing nothing, which
-                // is strictly harder to notice than the crash.
+                additionalProperties: false,
                 description:
-                  'The new content. add_node: {kind, label, ...}. add_edge: ' +
-                  '{from, to, strength, exists_probability, effect_direction}. ' +
+                  'The new content, carrying only the fields that apply. ' +
+                  'add_node: {kind, label, ...}. add_edge: {from, to, ' +
+                  'strength, exists_probability, effect_direction}. ' +
                   'update_node / update_edge: only the fields that change.',
+                properties: {
+                  // ── Creation identity ──────────────────────────────────
+                  kind: {
+                    type: 'string',
+                    enum: [...NodeKindV3.options],
+                    description:
+                      'add_node only: what kind of thing this node is.',
+                  },
+                  from: {
+                    type: 'string',
+                    description:
+                      'add_edge only: the id of the node the link starts at. ' +
+                      'It must be in the table above, or created earlier in ' +
+                      'this batch.',
+                  },
+                  to: {
+                    type: 'string',
+                    description:
+                      'add_edge only: the id of the node the link ends at. ' +
+                      'Same grounding rule as `from`.',
+                  },
+                  // ── Node content ───────────────────────────────────────
+                  label: {
+                    type: 'string',
+                    description:
+                      'The name the user reads. Required when creating a node.',
+                  },
+                  description: {
+                    type: 'string',
+                    description: 'A sentence explaining what this is.',
+                  },
+                  category: {
+                    type: 'string',
+                    enum: [...FactorCategoryV3.options],
+                    description:
+                      'Factors only: whether the user controls it, merely ' +
+                      'observes it, or it comes from outside.',
+                  },
+                  observed_state: {
+                    type: 'object',
+                    additionalProperties: false,
+                    description:
+                      "A factor's current quantity. Give the number in the " +
+                      "user's own units and name the unit.",
+                    properties: {
+                      value: { type: 'number', description: 'The current amount.' },
+                      unit: {
+                        type: 'string',
+                        description: "The unit the amount is in, e.g. '%' or '£'.",
+                      },
+                      baseline: {
+                        type: 'number',
+                        description: 'The amount before any change, when it differs.',
+                      },
+                    },
+                    required: ['value'],
+                  },
+                  // ── Edge content ───────────────────────────────────────
+                  strength: {
+                    type: 'object',
+                    additionalProperties: false,
+                    description:
+                      'How strongly the link carries an effect. `mean` is ' +
+                      'signed and runs from -1 to 1; `std` is how unsure you ' +
+                      'are about it and must be above zero.',
+                    properties: {
+                      mean: { type: 'number' },
+                      std: { type: 'number' },
+                    },
+                    // `mean` is the honest minimum: a create needs both, an
+                    // update may legitimately move only one of them.
+                    required: ['mean'],
+                  },
+                  exists_probability: {
+                    type: 'number',
+                    description:
+                      'How likely it is that this link exists at all, from 0 to 1.',
+                  },
+                  effect_direction: {
+                    type: 'string',
+                    // Derived nowhere it could drift from: EdgeV3 declares this
+                    // as a two-member enum and the applier rejects anything
+                    // else, so the advert states the same two words.
+                    enum: ['positive', 'negative'],
+                    description:
+                      'Whether more of the source means more of the target ' +
+                      "('positive') or less of it ('negative'). It must agree " +
+                      'with the sign of `strength.mean`.',
+                  },
+                },
               },
             },
             required: ['op', 'path'],
