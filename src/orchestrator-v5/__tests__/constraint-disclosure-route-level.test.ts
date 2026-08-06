@@ -662,8 +662,15 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
     return runAnalysisTurn(app).then((turn) => {
       expect(turn.status).toBe(200);
-      expect(turn.raw).not.toContain('conditions you set');
-      expect(turn.raw).not.toContain('could not be matched');
+      // ⚠ NEGATIVE CONTROL RE-DERIVED (ROADMAP 2.675, CLAUDE.md trap 13b). This
+      // named 'conditions you set' — withdrawn from every voice by 2.675, so it
+      // appears nowhere and the assertion could never fail again. Re-pointed at
+      // the markers that DO distinguish a disclosure-bearing turn at this tip:
+      // one per speakable voice, so a disclosure appended on a HEALTHY run REDs
+      // whichever voice leaked.
+      expect(turn.raw).not.toContain('could not be checked'); // unevaluated
+      expect(turn.raw).not.toContain('could not be matched'); // identity_unresolved
+      expect(turn.raw).not.toContain('This analysis does not test'); // out_of_scope
       expect(turn.assistantText.length).toBeGreaterThan(0);
     });
   });
@@ -707,14 +714,18 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
 
     // It survives the forwarder.
     expect(turn.assistantText).not.toBe(FALLBACK);
-    expect(turn.raw).toContain('could not be matched to the condition you set');
+    // ROADMAP 2.675: the authorship half withdrawn, the "could not be matched"
+    // half — this voice's entire truth condition — kept.
+    expect(turn.raw).toContain('could not be matched to the condition on your model');
     // It does NOT say the condition went unchecked (#703's false statement).
     expect(turn.assistantText).not.toContain('could not be checked');
     // It does NOT certify safety — no leader is named (#707's false statement).
     expect(turn.assistantText).not.toContain('Hire Marketing Manager');
     expect(turn.assistantText).toContain('no option can be put forward yet');
     // And it offers ITS repair step, not the units one.
-    expect(turn.assistantText).toContain('Re-state the condition and run the analysis again');
+    expect(turn.assistantText).toContain(
+      'State the condition in your own words and run the analysis again',
+    );
     expect(turn.assistantText).not.toContain('recorded in the same units');
   });
 

@@ -23,7 +23,10 @@ import { describe, it, expect } from 'vitest';
 
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import { RUN_ANALYSIS_ASSISTANT_TEMPLATES } from '../../tools/handlers/run-analysis.js';
-import { buildConstraintDisclosure } from '../constraint-gap-disclosure.js';
+import {
+  buildConstraintDisclosure,
+  CONSTRAINT_GAP_DISCLOSURE_RE_SRC,
+} from '../constraint-gap-disclosure.js';
 import {
   isAllowedRunAnalysisAssistantText,
   MAX_ASSISTANT_TEXT_CHARS,
@@ -248,7 +251,9 @@ describe('identity_unresolved — its OWN wording, and it reaches the wire too',
   });
 
   it('says what actually happened: the results could not be matched', () => {
-    expect(UNRESOLVED).toContain('could not be matched to the condition you set');
+    // ROADMAP 2.675: "you set" withdrawn (the row may be drafter-authored);
+    // "could not be matched" — this voice's whole truth condition — stays.
+    expect(UNRESOLVED).toContain('could not be matched to the condition on your model');
     expect(UNRESOLVED).toContain('Total three-year cost');
     expect(UNRESOLVED).toContain('cannot be confirmed whether it was checked');
   });
@@ -256,7 +261,10 @@ describe('identity_unresolved — its OWN wording, and it reaches the wire too',
   it('offers the repair step that matches ITS diagnosis, not the units one', () => {
     // Telling the user to fix their units here would assert a cause this state
     // exists precisely because CEE cannot determine.
-    expect(UNRESOLVED).toContain('Re-state the condition and run the analysis again');
+    // ROADMAP 2.675: "Re-state" → "State … in your own words". The mechanism is
+    // unchanged (re-ratifying re-issues the identity, which is what can clear
+    // the divergence); the presupposition that the user stated it once is gone.
+    expect(UNRESOLVED).toContain('State the condition in your own words and run the analysis again');
     expect(UNRESOLVED).not.toContain('recorded in the same units');
   });
 
@@ -275,8 +283,8 @@ describe('identity_unresolved — its OWN wording, and it reaches the wire too',
       'identity_unresolved',
     );
     expect(throughForwarder(composed)).toBe(composed);
-    expect(composed).toContain('the 2 conditions you set');
-    expect(composed).toContain('Re-state the conditions and run the analysis again');
+    expect(composed).toContain('the 2 conditions on your model');
+    expect(composed).toContain('State the conditions in your own words and run the analysis again');
   });
 
   it('is budgeted: the worst case fits the egress cap', () => {
@@ -299,7 +307,7 @@ describe('identity_unresolved — its OWN wording, and it reaches the wire too',
     );
     expect(throughForwarder(composed)).toBe(composed);
     expect(composed).not.toContain('LLLL');
-    expect(composed).toContain('could not be matched to the condition you set.');
+    expect(composed).toContain('could not be matched to the condition on your model.');
   });
 });
 
@@ -357,10 +365,32 @@ describe('the forwarder honesty floor — a REJECTED summary still discloses', (
   it('salvage cannot smuggle a POISONED disclosure through', () => {
     // The combined string is re-checked, so a disclosure-shaped slice carrying
     // banned content falls back bare rather than riding the salvage path.
+    //
+    // ⚠ THIS CONTROL HAD GONE VACUOUS, AND WAS REBUILT (ROADMAP 2.675, CLAUDE.md
+    // trap 13b). Its fixture was HAND-WRITTEN against the copy of the day, and
+    // #840 then rewrote the `unevaluated` voice out from under it. Measured at
+    // that tip: the fixture no longer matched the published grammar AT ALL, so
+    // the forwarder rejected it STRUCTURALLY and the CONTENT defence — the only
+    // thing this test names — was never the operative cause. It would have
+    // passed just as well on a string of pure noise.
+    //
+    // Rebuilt to the CURRENT grammar so the poison is the sole reason it fails,
+    // and the two preconditions are now PINNED IN-TEST rather than assumed: if a
+    // future copy edit desynchronises the fixture again, the precondition REDs
+    // loudly instead of the assertion going quietly green.
     const poisoned =
-      ' One of the conditions you set could not be checked: “the best option”.' +
-      ' The analysis engine could not evaluate it against this model, so no option can be put forward yet.' +
-      ' Tell me the limit you meant in your own words and I will record it, then run the analysis again.';
+      ' One limit on your model could not be checked: “the best option”.' +
+      ' We could not line it up with anything this analysis measures, so no option can be put forward yet.' +
+      ' Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again.';
+
+    // PRECONDITION 1 — it is disclosure-SHAPED (else we test structure, not content).
+    expect(
+      new RegExp(`^(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})$`).test(poisoned),
+      'fixture must match the published grammar, or this test proves nothing about content',
+    ).toBe(true);
+    // PRECONDITION 2 — and it is genuinely poisoned.
+    expect(passesAssistantTextContentDefences(poisoned)).toBe(false);
+
     expect(throughForwarder(`${REJECTED_HEAD}${poisoned}`)).toBe(FALLBACK);
   });
 });

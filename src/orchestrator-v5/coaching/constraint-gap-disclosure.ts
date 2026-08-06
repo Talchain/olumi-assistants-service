@@ -181,14 +181,25 @@ const UNEVALUATED_REPAIR_STEP =
  * The repair step for the IDENTITY_UNRESOLVED voice. Deliberately NOT the
  * units advice above: the observable is an id/keying divergence, and telling
  * the user to fix their units would assert a diagnosis this state exists
- * precisely because CEE cannot make. Re-stating the condition re-ratifies it
- * and re-issues its identity, which is the one action available to the user
- * that can plausibly clear the divergence.
+ * precisely because CEE cannot make. Stating the condition re-ratifies it and
+ * re-issues its identity, which is the one action available to the user that
+ * can plausibly clear the divergence.
+ *
+ * ⚠ ROADMAP 2.675 — "RE-state" WITHDRAWN. The mechanism above is unchanged and
+ * still correct; the word was not. "Re-state X" can only be addressed to
+ * someone who stated X, so on a drafter-authored row it instructs the user to
+ * repeat something they never said — the same authorship falsehood the subject
+ * sentence carried, one grammatical step back, and the same reading the walk's
+ * tester gave the whole message. "State … in your own words" asks for exactly
+ * the same action, re-ratifies identically, and presupposes nothing about who
+ * put the row there. It also matches the phrasing #840 chose for the
+ * `unevaluated` voice's offer, so the two repair steps no longer disagree about
+ * whether the user is presumed to have authored anything.
  */
 function unresolvedRepairStep(total: number): string {
   return total === 1
-    ? ' Re-state the condition and run the analysis again.'
-    : ' Re-state the conditions and run the analysis again.';
+    ? ' State the condition in your own words and run the analysis again.'
+    : ' State the conditions in your own words and run the analysis again.';
 }
 
 /**
@@ -271,14 +282,33 @@ function subjectSentence(
       : `${total} limits on your model could not be checked, including ${joinLabels(named)}.`;
   }
   if (voice === 'out_of_scope') {
+    // ⚠ ROADMAP 2.675 — "the conditions you set" WITHDRAWN here too, for the
+    // reason #840 withdrew it from `unevaluated`: `goal_constraints[]` rows are
+    // minted by the DRAFTER as well as by the user's own `add_constraint` turn,
+    // and `RatifiedConstraint` carries only an id and a label, so nothing at
+    // this point in the pipeline knows who authored the row. This voice is the
+    // one gap 5 was witnessed on — a time-phrase constraint CEE INFERRED, whose
+    // disclosure then blamed the user for setting it.
+    //
+    // The truth condition is about the MODEL's scope, not about the row's
+    // author, so nothing this voice needs to say depends on authorship at all.
     const what =
-      total === 1 ? 'one of the conditions you set' : `${total} of the conditions you set`;
+      total === 1
+        ? 'one of the conditions on your model'
+        : `${total} of the conditions on your model`;
     if (named.length === 0) return `${OUT_OF_SCOPE_LEAD_IN}${what}.`;
     return total === 1
       ? `${OUT_OF_SCOPE_LEAD_IN}${what}: ${joinLabels(named)}.`
       : `${OUT_OF_SCOPE_LEAD_IN}${what}, including ${joinLabels(named)}.`;
   }
-  const subject = total === 1 ? 'the condition you set' : `the ${total} conditions you set`;
+  // ⚠ ROADMAP 2.675 — same withdrawal, same reason. Note what this voice may
+  // NOT retreat to: it cannot drop the subject entirely, because the whole
+  // sentence is about a FAILURE TO MATCH two things and the reader has to know
+  // which two. "the condition(s) on your model" names the second one without
+  // asserting who put it there — and it keeps the noun the lead-in already
+  // uses ("condition results"), so the pairing stays legible.
+  const subject =
+    total === 1 ? 'the condition on your model' : `the ${total} conditions on your model`;
   if (named.length === 0) return `${UNRESOLVED_LEAD_IN}${subject}.`;
   return total === 1
     ? `${UNRESOLVED_LEAD_IN}${subject}: ${joinLabels(named)}.`
@@ -491,9 +521,9 @@ const UNRESOLVED_RE_SRC =
   ' ' +
   escapeForRegex(UNRESOLVED_LEAD_IN) +
   '(?:' +
-  `the condition you set(?:: ${JOINED_LABELS})?\\.` +
+  `the condition on your model(?:: ${JOINED_LABELS})?\\.` +
   '|' +
-  `the \\d{1,3} conditions you set(?:, including ${JOINED_LABELS})?\\.` +
+  `the \\d{1,3} conditions on your model(?:, including ${JOINED_LABELS})?\\.` +
   ')' +
   `(?:${escapeForRegex(consequenceSentence('identity_unresolved', 1))}|${escapeForRegex(consequenceSentence('identity_unresolved', 2))})` +
   `(?:${escapeForRegex(unresolvedRepairStep(1))}|${escapeForRegex(unresolvedRepairStep(2))})`;
@@ -510,9 +540,9 @@ const OUT_OF_SCOPE_RE_SRC =
   ' ' +
   escapeForRegex(OUT_OF_SCOPE_LEAD_IN) +
   '(?:' +
-  `one of the conditions you set(?:: ${JOINED_LABELS})?\\.` +
+  `one of the conditions on your model(?:: ${JOINED_LABELS})?\\.` +
   '|' +
-  `\\d{1,3} of the conditions you set(?:, including ${JOINED_LABELS})?\\.` +
+  `\\d{1,3} of the conditions on your model(?:, including ${JOINED_LABELS})?\\.` +
   ')' +
   `(?:${escapeForRegex(consequenceSentence('out_of_scope', 1))}|${escapeForRegex(consequenceSentence('out_of_scope', 2))})` +
   `(?:${escapeForRegex(outOfScopeCloser(1))}|${escapeForRegex(outOfScopeCloser(2))})`;

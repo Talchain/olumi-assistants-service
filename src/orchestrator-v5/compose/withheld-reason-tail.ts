@@ -275,19 +275,36 @@ function composeInfeasibleText(
 
   if (label !== null) {
     return (
-      ` The condition you set was checked on this run: ${quoted(label)}. The option this ` +
+      ` The condition on your model was checked on this run: ${quoted(label)}. The option this ` +
       `result would otherwise have put forward does not stand up against it, ${NO_OPTION_YET}. ` +
       'Relax that limit, or bring in an option that can meet it, and run the analysis again.'
     );
   }
 
-  const plural = constraints.length === 1 ? 'condition' : 'conditions';
-  const count = constraints.length === 1 ? 'The' : `All ${constraints.length}`;
+  // ⚠ ROADMAP 2.675 — ONE ratified row whose label is unusable gets its OWN
+  // shape, not the plural one with a singular article bolted on. The count
+  // branch used to serve it, emitting "The condition you set WERE checked …
+  // does not stand up against ONE OF THEM … Which one that is has not been
+  // recorded" — a subject/verb disagreement wrapped around a question that
+  // cannot arise when there is exactly one candidate. It was live: this
+  // module's own load-time probe drives the `one-unlabelled` shape.
+  //
+  // With one row, WHICH row fell short is not in doubt — only its label is
+  // unreadable — so the answer is the labelled sentence minus the quotation,
+  // and the "which one" caveat is dropped because there is nothing to caveat.
+  if (constraints.length === 1) {
+    return (
+      ` The condition on your model was checked on this run, and the option this result ` +
+      `would otherwise have put forward does not stand up against it, ${NO_OPTION_YET}. ` +
+      'Relax that limit, or bring in an option that can meet it, and run the analysis again.'
+    );
+  }
+
   return (
-    ` ${count} ${plural} you set were checked on this run, and the option this result would ` +
-    `otherwise have put forward does not stand up against one of them, ${NO_OPTION_YET}. ` +
-    'Which one that is has not been recorded on this result. Relax the limits, or bring in ' +
-    'an option that can meet them, and run the analysis again.'
+    ` All ${constraints.length} conditions on your model were checked on this run, and the ` +
+    `option this result would otherwise have put forward does not stand up against one of ` +
+    `them, ${NO_OPTION_YET}. Which one that is has not been recorded on this result. Relax ` +
+    'the limits, or bring in an option that can meet them, and run the analysis again.'
   );
 }
 
@@ -320,10 +337,18 @@ function composeUnlabelledStateText(
       'this one stays on the model. Then run the analysis again.'
     );
   }
+  // ⚠ ROADMAP 2.675 — the SAME withdrawal as the labelled sibling in
+  // `coaching/constraint-gap-disclosure.ts`, for the same reason and on the
+  // same two clauses: the authorship claim ("the conditions you set") and the
+  // presupposition inside its repair step ("Re-state"). This is the second
+  // surface that speaks the `identity_unresolved` voice and a user reaches
+  // either one, so fixing only the primary message would leave the identical
+  // claim witnessable on the tail — the half-done fix #840's own comment warns
+  // about, one voice over.
   return (
     ' The analysis engine returned condition results that could not be matched to the ' +
-    `conditions you set, so it cannot be confirmed whether they were checked, and ` +
-    `${NO_OPTION_YET}. Re-state the conditions and run the analysis again.`
+    `conditions on your model, so it cannot be confirmed whether they were checked, and ` +
+    `${NO_OPTION_YET}. State the conditions in your own words and run the analysis again.`
   );
 }
 
