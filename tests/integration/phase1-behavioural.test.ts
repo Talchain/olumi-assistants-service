@@ -124,7 +124,25 @@ describe('phase 1 behavioural — right-tool-for-job', () => {
         }),
       ),
     };
-    const rightTool = await runTurnExecutor(BASE_PAYLOAD, 'req-rt-right', {
+    // ⚠ MESSAGE CORRECTED 2026-08-07 (ROADMAP 2.652 / INV-1). This call passed
+    // `BASE_PAYLOAD`, whose message is 'do something' — which is neither the
+    // "set churn to 5%" this test's own name claims nor an edit request of any
+    // kind. The mismatch was invisible while any proposal could execute
+    // regardless of what the user said; the mutation warrant made it visible,
+    // because a `set_factor_value` proposal on 'do something' now demotes to a
+    // chip instead of executing.
+    //
+    // Fixed by giving the case a real edit request rather than by exempting it:
+    // 'do something' reaching a value write with no chip IS the defect 2.652
+    // closes, so asserting `execute` on it would pin the defect. The literal
+    // string from the test name ('set churn to 5%') is NOT used — measured, it
+    // is claimed by an upstream deterministic guard and never reaches the
+    // routing adapter this case is about, which would make the assertion
+    // vacuous in the other direction. Everything else is unchanged, and the
+    // wrong-tool half below still uses BASE_PAYLOAD (it asserts a VALIDATION
+    // rejection, which the warrant gate runs after and cannot pre-empt).
+    const rightToolPayload = { ...BASE_PAYLOAD, message: 'update the churn factor' };
+    const rightTool = await runTurnExecutor(rightToolPayload, 'req-rt-right', {
       routingAdapter: adapterRight,
       handlerRegistry,
       validationRegistry,

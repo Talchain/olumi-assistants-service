@@ -372,6 +372,20 @@ const TURN_EXECUTOR_SITES: Readonly<Record<string, RegisteredSite>> = {
     stance: 'structural',
     why: 'Withheld-consent refusal. Deterministic copy from buildCalibrationReply / buildConsentWithheldText; the turn returns BEFORE any handler runs, so there is no analysis claim in scope.',
   },
+  // ── THE MUTATION-WARRANT DEMOTION SITE (INV-1, ROADMAP 2.652, 2026-08-07) ──
+  // Same argument as the two calibration sites above, and for the same reason:
+  // the branch exists so that NO model text reaches the user on it. The copy is
+  // built by pure functions in `routing/mutation-warrant.ts` +
+  // `compose/warrant-demotion.ts` from the PROPOSAL's own parameters (a factor
+  // label, a bound, a unit) plus the persisted constraint rows. It states that
+  // nothing was changed and offers the change; it reads no analysis, names no
+  // option, and cannot carry a verdict claim. The witnessed defect it closes
+  // (walk 2.634 §J7) was an "Applied" receipt for a change nobody asked for, so
+  // "the model composes none of this" is the point of the branch.
+  demotionText: {
+    stance: 'structural',
+    why: 'Warrant-absent demotion. Deterministic copy from buildMutationWarrantDemotionText / buildWarrantDemotion; the turn returns BEFORE any handler runs, so there is no analysis claim in scope.',
+  },
   'calibrationOffer.assistant_text': {
     stance: 'structural',
     why: 'Calibration pre-route preview. Fires BEFORE routeWithToolUse — zero LLM calls — and states a phrase-to-percentage mapping plus "nothing has been changed". Names no option and reads no analysis. (Site RENAMED 6 Aug 2026, ROADMAP 2.627: the expression was buildCalibrationPreviewText(calibrationOnly...) until text AND chips moved behind the single buildCalibrationReply builder. Same branch, same stance, re-derived not carried over — a rename inheriting a stance silently is exactly what this ledger exists to catch.)',
@@ -910,7 +924,10 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // form, so both are keyable by the OLD regex and both belong in this
     // count; a site that were NOT keyable would have to be excluded here and
     // that difference is exactly what this number protects.
-    expect(compared, 'the re-key comparison compared nothing').toBe(37);
+    // ⚠ MUTATION WARRANT (2026-08-07): 37 -> 38. ONE compose site added in
+    // turn-executor.ts — the warrant-absent demotion. Explicit `assistant_text:`
+    // form, so keyable by the same regex and in scope for this count.
+    expect(compared, 'the re-key comparison compared nothing').toBe(38);
   });
 
   it('THE DOMAIN IS DERIVED: scanned ∪ unscanned == every compose file in src/', () => {
@@ -1082,8 +1099,14 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // got here, for the same reason the L16 note above does: the author did not
     // remember this ledger existed, and `pnpm test:required` failed on the
     // commit that created the sites. The guard found the omission, not a human.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(39);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(35);
+    // ⚠ MUTATION WARRANT (2026-08-07): 39 -> 40 sites, 35 -> 36 keys, files
+    // unchanged. One ADDED compose site in turn-executor.ts, registered
+    // `structural` with its derivation (see the mutation-warrant block in
+    // TURN_EXECUTOR_SITES). Recorded the same way as the entries above: this
+    // ledger failed the build on the commit that created the site, and the
+    // guard found the omission rather than a human remembering it.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(40);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(36);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/edit-clarify-response.ts',

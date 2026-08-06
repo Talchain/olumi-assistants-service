@@ -598,6 +598,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // refused to apply a mutation the user asked to see first, at the
         // STEP 2 gate or (should be unreachable) at the commit backstop.
         V5CalibrationConsentWithheld: "v5.turn_executor.calibration_consent_withheld",
+        // ⭐⭐ Mutation warrant (INV-1, ROADMAP 2.652, 2026-08-07) — the
+        // AFFIRMATIVE twin of the event above: a graph-mutating proposal
+        // arrived on a turn that asked for no change, and was demoted to the
+        // propose-confirm channel at the STEP 2 gate, or (should be
+        // unreachable) stripped at the commit backstop.
+        V5MutationWarrantAbsent: "v5.turn_executor.mutation_warrant_absent",
         // PR #414 review — F3 fail-open fallback made dashboard-visible
         V5CommittedGraphReprojectionFailed:
           "v5.turn_executor.committed_graph_reprojection_failed",
@@ -1245,6 +1251,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // operational signal is `layer === 'commit_backstop'` appearing at
         // all, which is a defect alarm rather than a rate to dashboard.
         TelemetryEvents.V5CalibrationConsentWithheld,
+        TelemetryEvents.V5MutationWarrantAbsent,
         // V5 turn fence: diagnostic-only (structured logs are the operational
         // signal; no Datadog metric mapping until dashboards exist).
         TelemetryEvents.V5TurnFenceEvaluated,
@@ -2065,6 +2072,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "edit_graph.bare_single_op_wrapped",
         "v5.turn_executor.relative_delta_resolved",
         "v5.turn_executor.calibration_consent_withheld",
+        "v5.turn_executor.mutation_warrant_absent",
         // PR #414 review — F3 fail-open re-projection fallback visibility
         "v5.turn_executor.committed_graph_reprojection_failed",
         // Lane 8 — GM referee live wiring + MM commit-seam version hook
