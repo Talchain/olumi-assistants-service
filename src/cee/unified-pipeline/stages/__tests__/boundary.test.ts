@@ -141,7 +141,6 @@ function makeCtx(overrides?: Partial<StageContext>): StageContext {
     goalConstraints: null,
     constraintStrpResult: null,
     repairCost: 0,
-    repairFallbackReason: undefined,
     structuralMeta: null,
     validationSummary: null,
     quality: undefined,

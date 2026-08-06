@@ -224,8 +224,11 @@ export interface StageContext {
   goalConstraints: any;
   /** Late STRP result (Stage 4 substep 6 — Rules 3,5 with goalConstraints context) */
   constraintStrpResult: any;
+  /** Cost accumulator for the gated orchestrator-validation repair
+   *  (substep 1b, default OFF). Write-only today — kept because substep 1b
+   *  still increments it. The draft-path LLM repair that also wrote it was
+   *  removed (ROADMAP 2.731). */
   repairCost: number;
-  repairFallbackReason: string | undefined;
   structuralMeta: any;
   validationSummary: any;
   orchestratorRepairUsed?: boolean;
@@ -237,16 +240,21 @@ export interface StageContext {
   // `context` carries validator-specific structured detail when available
   // (e.g. OPTIONS_IDENTICAL → { optionIds, signature }). Optional and
   // additive — existing consumers that destructure {code,path,message} are
-  // unaffected. Consumed by the pre-LLM-repair fail-fast gate in
-  // stages/repair/index.ts for OPTIONS_IDENTICAL.
+  // unaffected. Consumed by the OPTIONS_IDENTICAL fail-fast gate in
+  // stages/repair/index.ts (substep 1.5).
   remainingViolations?: Array<{
     code: string;
     path?: string;
     message?: string;
     context?: Record<string, unknown>;
   }>;
+  /** Set by the deterministic sweep: Bucket-C violations survived the sweep
+   *  (and PLoT validation is needed). Since ROADMAP 2.731 removed the draft
+   *  path's LLM repair, this no longer triggers any repair call — it remains
+   *  a truthful sweep diagnostic (predicts the post-enforcement 422 when the
+   *  deterministic normalisation cannot clear the violations) and still
+   *  gates substep 1b's defer-vs-422 decision. */
   llmRepairNeeded?: boolean;
-  llmRepairBriefIncluded?: boolean;
   detectedEdgeFormat?: EdgeFormat;
 
   // ── Stage 4b (Threshold Sweep) outputs ──────────────────────────────

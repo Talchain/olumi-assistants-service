@@ -91,7 +91,6 @@ function makeCtx(nodes: unknown[], edges: unknown[]): StageContext {
     goalConstraints: null,
     constraintStrpResult: null,
     repairCost: 0,
-    repairFallbackReason: undefined,
     structuralMeta: null,
     orchestratorRepairUsed: false,
     orchestratorWarnings: [],

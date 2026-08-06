@@ -2289,6 +2289,14 @@ export function registerAllDefaultPrompts(): void {
 
   registerDefaultPrompt('draft_graph', draftPromptWithCaps);
   registerDefaultPrompt('suggest_options', SUGGEST_OPTIONS_PROMPT);
+  // ⚠ ORPHANED BY ROADMAP 2.731 (draft-path LLM repair removed — 0/12
+  // successes in the 7-day efficacy window). The ONLY remaining consumers of
+  // `repair_graph` are (a) the default-OFF orchestrator-validation gate
+  // (CEE_ORCHESTRATOR_VALIDATION_ENABLED, substep 1b) and (b) legacy
+  // graph-orchestrator functions with zero live callers. The operator-managed
+  // PMS row `repair_graph` (v6, gpt-4.1) is likewise orphaned — its deletion
+  // is Paul-gated and lives outside this repo. Registration kept so the
+  // gated path cannot 500 on a missing prompt; do NOT wire new callers.
   registerDefaultPrompt('repair_graph', REPAIR_GRAPH_PROMPT);
   registerDefaultPrompt('clarify_brief', CLARIFY_BRIEF_PROMPT);
   registerDefaultPrompt('critique_graph', CRITIQUE_GRAPH_PROMPT);

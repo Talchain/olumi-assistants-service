@@ -97,19 +97,21 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
         error_count: error.errors.length,
       });
 
-      // If the deterministic sweep flagged that LLM repair is needed,
-      // defer to PLoT repair (substep 2) instead of returning a 422 here.
-      // The orchestrator's limited repair budget may not suffice for semantic
-      // errors (INVALID_EDGE_TYPE, CYCLE_DETECTED, etc.) that PLoT repair
-      // handles with fuller context (brief + docs + violation details).
+      // If the deterministic sweep flagged surviving Bucket-C violations,
+      // defer to substep 2 + the post-enforcement gate (9b) instead of
+      // returning a 422 here. Substep 2's LLM repair was removed (ROADMAP
+      // 2.731); the defer now reaches PLoT validation + deterministic
+      // normalisation, and anything still blocking fails closed at 9b with
+      // the honest retryable:true envelope — a strictly better 422 than
+      // this one (it reflects the post-normalisation graph).
       if (ctx.llmRepairNeeded) {
         log.info({
           stage: "orchestrator_validation_deferred",
           error_count: error.errors.length,
           correlation_id: ctx.requestId,
-        }, "Orchestrator validation failed but deferring to PLoT repair (llmRepairNeeded=true)");
+        }, "Orchestrator validation failed — deferring to PLoT validation + post-enforcement gate (llmRepairNeeded=true)");
 
-        // Preserve the best graph the orchestrator produced for PLoT repair
+        // Preserve the best graph the orchestrator produced for substep 2
         if (error.lastGraph) {
           ctx.graph = error.lastGraph as any;
         }

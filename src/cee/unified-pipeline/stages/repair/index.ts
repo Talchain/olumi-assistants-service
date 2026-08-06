@@ -11,12 +11,16 @@
  *                                  No-op when no such collision exists; safe-conservative
  *                                  rule (only fires when a non-baseline survives).
  * 1.  Deterministic sweep        — resolves mechanical violations, unreachable factors, status quo
- * 1.5 Options-identical bypass   — fail-fast gate for OPTIONS_IDENTICAL: skips LLM repair and emits
- *                                  a clarification-shaped CEE_GRAPH_INVALID so the user is not
- *                                  blocked behind a ~30s repair-then-fail loop. Other Bucket C
- *                                  codes still route through LLM repair (substep 2).
+ * 1.5 Options-identical bypass   — fail-fast gate for OPTIONS_IDENTICAL: emits a
+ *                                  clarification-shaped CEE_GRAPH_INVALID so the user is not
+ *                                  blocked behind a slow failure. Other Bucket C codes proceed
+ *                                  down the deterministic path (substep 2) and, if unfixable,
+ *                                  fail closed at the post-enforcement gate (9b).
  * 1b. Orchestrator validation    — optional LLM-backed validation (gated), runs AFTER sweep
- * 2.  PLoT validation            — external validation + LLM repair (only if Bucket C remains)
+ * 2.  PLoT validation            — external validation + deterministic normalisation.
+ *                                  (The gpt-4.1 LLM repair that used to run here for surviving
+ *                                  Bucket C was REMOVED — ROADMAP 2.731, 0/12 successes in the
+ *                                  7-day efficacy window at ~44.7s per failed turn.)
  * 3. Edge ID stabilisation    — deterministic IDs BEFORE goal merge
  * 4. Goal merge               — enforceSingleGoal, captures nodeRenames
  * 5. Compound goals           — generates constraint nodes/edges
@@ -41,7 +45,7 @@
  *
  * EARLY RETURN RULES:
  * Substeps 1b, 9b, and 10 can set ctx.earlyReturn.
- * Substep 2 falls back to simpleRepair (never early-returns).
+ * Substep 2 normalises via simpleRepair (never early-returns).
  * Substep 8 writes validationSummary (never early-returns).
  * Substeps 1 and 3-7 are deterministic transforms that must not fail.
  * The earlyReturn guards after substeps 1b and 2 are defensive only.
@@ -100,13 +104,12 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   // for the explicit-baseline-duplicates-non-explicit case.
   await runDeterministicSweep(ctx);
 
-  // Substep 1.5: Pre-LLM-repair fail-fast gate for OPTIONS_IDENTICAL.
-  // Bypasses the ~30s LLM repair call when the deterministic sweep leaves
-  // an OPTIONS_IDENTICAL violation — `repair_graph` has repeatedly failed
-  // to fix this class in staging, producing a user-hostile 86s "draft +
-  // repair-then-fail" loop. Emits a fail-fast CEE_GRAPH_INVALID with a
-  // clarification-shaped recovery payload. Other Bucket C codes continue
-  // to route through LLM repair. See options-identical-bypass.ts.
+  // Substep 1.5: Fail-fast gate for OPTIONS_IDENTICAL. Emits a fail-fast
+  // CEE_GRAPH_INVALID with a clarification-shaped recovery payload instead
+  // of letting the draft limp on to a later, less actionable failure.
+  // (Historically this gate existed to skip the ~30s `repair_graph` LLM
+  // call, which 2.731 has since removed for ALL Bucket C codes.)
+  // See options-identical-bypass.ts.
   if (runOptionsIdenticalBypass(ctx)) {
     return;
   }
@@ -115,7 +118,8 @@ export async function runStageRepair(ctx: StageContext): Promise<void> {
   await runOrchestratorValidation(ctx);
   if (ctx.earlyReturn) return;
 
-  // Substep 2: PLoT validation + LLM repair (gated by deterministic sweep)
+  // Substep 2: PLoT validation + deterministic normalisation
+  // (LLM repair removed — ROADMAP 2.731)
   await runPlotValidation(ctx);
   if (ctx.earlyReturn) return;
 

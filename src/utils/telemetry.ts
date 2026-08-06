@@ -300,13 +300,15 @@ export const TelemetryEvents = {
   FixtureReplaced: "assist.draft.fixture_replaced",
   LegacySSEPath: "assist.draft.legacy_sse_path",
 
-  // Validation and repair events
+  // Validation events
+  // (The assist.draft.repair_* quintet — repair_attempted / repair_start /
+  // repair_success / repair_partial / repair_fallback — was DELETED with the
+  // draft path's LLM repair call: ROADMAP 2.731/2.732. The efficacy
+  // measurement that killed the call was made THROUGH these events:
+  // repair_success emitted zero times in the full 7-day window. Any dashboard
+  // or log query over draft.repair.* / assist.draft.repair_* now reads a
+  // legitimately-empty series, not a broken emitter.)
   ValidationFailed: "assist.draft.validation_failed",
-  RepairAttempted: "assist.draft.repair_attempted",
-  RepairStart: "assist.draft.repair_start",
-  RepairSuccess: "assist.draft.repair_success",
-  RepairPartial: "assist.draft.repair_partial",
-  RepairFallback: "assist.draft.repair_fallback",
 
   // Preflight validation events (v1.13)
   PreflightValidationPassed: "cee.preflight.passed",
@@ -2758,23 +2760,8 @@ export function emit(event: string, data: Event) {
           break;
         }
 
-        case TelemetryEvents.RepairAttempted:
-        case TelemetryEvents.RepairStart: {
-          datadogClient.increment("draft.repair.attempted", 1);
-          break;
-        }
-
-        case TelemetryEvents.RepairSuccess: {
-          datadogClient.increment("draft.repair.success", 1);
-          break;
-        }
-
-        case TelemetryEvents.RepairFallback: {
-          datadogClient.increment("draft.repair.fallback", 1, {
-            reason: String((eventData.reason as string) || "unknown"),
-          });
-          break;
-        }
+        // draft.repair.* Datadog counters removed with the assist.draft.repair_*
+        // events (ROADMAP 2.732) — the LLM repair they measured is gone (2.731).
 
         case TelemetryEvents.LegacyProvenance: {
           datadogClient.increment("draft.legacy_provenance.occurrences", 1);
