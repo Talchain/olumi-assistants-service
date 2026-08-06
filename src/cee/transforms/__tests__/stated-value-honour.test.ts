@@ -253,6 +253,31 @@ describe("INV-HONOUR — a value stated in the brief wins, deterministically", (
     });
   });
 
+  describe("C10 — the LABEL requirement is what binds, and it is load-bearing", () => {
+    /**
+     * Added after a MEASURED surviving mutant, not asserted: dropping the
+     * label requirement for all nodes left the whole suite green, because in
+     * the other fixtures the downstream fail-closed guards (rival labels, unit
+     * families, cap) happened to catch every stray binding. So the label term
+     * itself was unmeasured. This is the case that isolates it — a brief that
+     * states a currency amount, names NO node label, and whose first sentence
+     * carries no rival label either. Without the label requirement
+     * `fac_hiring_cost` (unit £, cap 400,000) takes 150,000 it was never told.
+     */
+    it("a number in the brief that names no node NEVER overrides anything", () => {
+      const body = capturedBody();
+      const summary = runGraphDataIntegrityChecks(body, "req-c10", "The annual budget is £150,000.");
+      expect(summary.stated_value_honour_repairs).toHaveLength(0);
+      expect(summary.stated_value_honour_skips).toHaveLength(0);
+      for (const n of body.nodes) {
+        if (!n.observed_state) continue;
+        expect(n.observed_state.source).not.toBe("user_override");
+      }
+      expect(nodeById(body, "fac_hiring_cost").observed_state.raw_value).toBe(0);
+      expect(nodeById(body, "risk_budget_overrun").observed_state.raw_value).toBe(0);
+    });
+  });
+
   describe("C8 — no-op control: the control reads EXACTLY zero", () => {
     it("a brief agreeing with the capture produces no repairs at all", () => {
       const body = capturedBody();
