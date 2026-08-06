@@ -40,7 +40,14 @@
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
-import { DRAFT_GRAPH_MAX_BRIEF_LENGTH } from '../../schemas/assist.js';
+import {
+  DRAFT_GRAPH_MAX_BRIEF_LENGTH,
+  INTERROGATIVE_QUESTION_PATTERN,
+} from '../../schemas/assist.js';
+import {
+  EDIT_GRAPH_POSITIVE_REGEX,
+  EDIT_GRAPH_NEGATIVE_REGEX,
+} from '../../orchestrator/routing/edit-graph-intent-regex.js';
 import type { SuggestedAction } from '../compose/types.js';
 import {
   assessBriefCompleteness,
@@ -200,9 +207,58 @@ export const CLARIFY_V2_HEDGED_PROCEED_PATTERN =
  * question TO the assistant (interrogative opener + trailing '?'). Never
  * folded into the working brief; re-offered once per round, then treated
  * as a decline.
+ *
+ * ROADMAP 2.715: the pattern itself now lives in `schemas/assist.ts` as
+ * `INTERROGATIVE_QUESTION_PATTERN`, so round-1 INTAKE can consult the same
+ * discriminator this resume path has always used (the asymmetry named in
+ * `process-meta-intake.ts`). Re-exported here under the historical name —
+ * this IS that object, not a copy of it.
  */
-export const CLARIFY_V2_QUESTION_REPLY_PATTERN =
-  /^\s*(?:what|why|how|who|whom|whose|when|where|which|can|could|do|does|did|is|are|was|were|will|would|should|shall|whether)\b[\s\S]*\?\s*$/i;
+export const CLARIFY_V2_QUESTION_REPLY_PATTERN = INTERROGATIVE_QUESTION_PATTERN;
+
+/**
+ * INV-M (ROADMAP 2.716) — a clarify-LOCAL extension to the edit-intent
+ * positive regex, for the correction frame it does not carry.
+ *
+ * Measured at `8c316b5e`: of the eight mutation commands proven to fold,
+ * "Actually, make HubSpot's licence cost 90,000 instead" matches NEITHER
+ * `EDIT_GRAPH_POSITIVE_REGEX` (no listed edit verb — `make` is not one) NOR
+ * `isValueUpdatePhrasing`. The derivation's own §3.2 table records it as
+ * `edit-lane: no` while its §5.2 asks for 8/8; this pattern is what closes
+ * that gap without widening the ESTATE-WIDE edit-dispatch recall, which is
+ * rowed separately (§6 R1) precisely because it needs its own precision
+ * controls across every edit surface.
+ *
+ * Deliberately narrow: `make` AND an explicit replacement marker. It sits
+ * after the standalone-restatement bar, so a genuine new brief that happens to
+ * say "…or make the switch instead?" still REPLACES rather than deflecting.
+ */
+const CLARIFY_V2_MUTATION_CORRECTION_PATTERN =
+  /\bmake\b[^?]*\b(?:instead|rather\s+than)\b/i;
+
+/**
+ * INV-M (ROADMAP 2.716) — does this reply read as a command to MUTATE the
+ * graph rather than as an answer to the pending clarify question?
+ *
+ * Uses the route's OWN edit-dispatch gates (`edit-graph-intent-regex.ts`,
+ * extracted under ROADMAP 2.308/S2 to be import-clean for exactly this kind of
+ * consumer) plus the correction frame above. The negative regex is load-
+ * bearing: it is what keeps "Can you explain why you added that factor?" an
+ * ordinary question rather than a mutation command.
+ *
+ * ⚠ NOT `containsMutationLanguage` (`routing/mutation-language.ts`). That
+ * module detects the ASSISTANT's own first-person claims ("I'll add…",
+ * "Proposing to set…") and matches none of these user imperatives — the row's
+ * named instrument is the wrong machine.
+ */
+export function isGraphMutationCommand(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  if (EDIT_GRAPH_NEGATIVE_REGEX.test(message)) return false;
+  return (
+    EDIT_GRAPH_POSITIVE_REGEX.test(message) ||
+    CLARIFY_V2_MUTATION_CORRECTION_PATTERN.test(message)
+  );
+}
 
 /**
  * ROADMAP 2.171 (Paul-ratified) — the post-explicit-Stop choice.
@@ -324,7 +380,14 @@ export type ClarifyV2DeflectionCue =
   | 'bare_ack'
   | 'question_reply'
   | 'decline'
-  | 'hedged_proceed';
+  | 'hedged_proceed'
+  /**
+   * ROADMAP 2.716 (INV-M): the reply is a command to change the MODEL, not an
+   * answer to the pending question. Never folded, never silently routed —
+   * routing is frequently not even executable here, because the clarify gate
+   * only runs when the ingress graph is unpopulated.
+   */
+  | 'mutation_intent';
 
 export type ClarifyV2Decision =
   | {
@@ -622,6 +685,35 @@ export function decideClarifyV2Resume(
     };
   }
 
+  // ── ROADMAP 2.716 (INV-M) — a mutation command is never an ANSWER ────────
+  // The defect this closes is an ABSENT BRANCH, not a wrong predicate: eight
+  // anchored guards decline the message and the ninth position is the raw
+  // concatenation below, so "Change the price to 90,000" became part of the
+  // working brief verbatim and the WHOLE MODEL was redrafted from the run-on
+  // string (measured 8/8 at 8c316b5e). The edit lane never gets a say — this
+  // seam claims the turn ~800 lines before `editIntentDetected` is computed.
+  //
+  // ASK, do not route. The clarify gate is entered only when the ingress graph
+  // is UNPOPULATED, so there is frequently nothing to route an edit to; asking
+  // is the only move correct in both the phantom-model and the genuinely-empty
+  // state, and 2.171 ratified this disclose-and-offer shape next door.
+  //
+  // Placed AFTER the standalone-restatement bar, deliberately and by the same
+  // `!standaloneRestatement` term the question guard uses: a genuine new brief
+  // that happens to carry an edit verb ("…or add a second warehouse in
+  // Poland?") must still REPLACE. Calibration is the ladder's existing one:
+  // one re-offer per round, then decline.
+  if (!standaloneRestatement && isGraphMutationCommand(message)) {
+    if (state.reoffered === true) {
+      return { kind: 'decline', brief: state.brief, cue: 'mutation_intent' };
+    }
+    return {
+      kind: 'reoffer',
+      state: { ...state, reoffered: true },
+      cue: 'mutation_intent',
+    };
+  }
+
   // ── 2.171 live-probe fix (30 Jul) — ONE branch, and everything derives ──
   // from it. The acceptance probe (liveproof-post-stop-disclosure.md, Arm
   // 2/3) proved the old shape deterministic-wrong at the copy: post-Stop, a
@@ -892,7 +984,15 @@ export function composeClarifyV2ReofferResponse(
   const assistantText =
     cue === 'question_reply'
       ? "Happy to clarify — the questions are optional and each one just sharpens the draft. Answer whichever you like above, or say 'go ahead' and I'll draft with sensible defaults."
-      : 'Just to check — shall I draft with sensible defaults, or would you like to answer any of the questions above first?';
+      : cue === 'mutation_intent'
+        // ROADMAP 2.716 (INV-M). DISCLOSE, then offer both ways forward. The
+        // message is NOT folded, so the copy must tell the user what became of
+        // it — a silent drop is the same class of lie as the silent fold. No
+        // "change the model" chip: there is no model on this state, and a chip
+        // whose consent cannot resume is guarantee-theatre (the same rule that
+        // keeps a proceed chip off the decline response).
+        ? "That reads like a change to the model, but I have not built the model yet — I am still asking about the decision itself, so I have left your message out of the brief rather than guess. Answer any of the questions above, or say 'go ahead' and I'll draft with sensible defaults; once it is on the canvas you can change any value on it."
+        : 'Just to check — shall I draft with sensible defaults, or would you like to answer any of the questions above first?';
   const proceedChip: SuggestedAction = {
     id: CLARIFY_V2_PROCEED_CHIP_ID,
     label: 'Use sensible defaults',

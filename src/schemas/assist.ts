@@ -41,8 +41,114 @@ export const DRAFT_GRAPH_MAX_BRIEF_LENGTH = 5000;
  * See `tests/integration/orchestrator/route-v2-draft-graph.test.ts` for
  * regression cases including known false negatives.
  */
-export const DRAFT_GRAPH_DECISION_BRIEF_REGEX =
-  /\b(should|shall|whether|versus|vs\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure)\b|\?$/i;
+export const DECISION_VERB_ALTERNATION_SOURCE =
+  "should|shall|whether|versus|vs\\.?|choose|decide|expand|invest|launch|hire|fire|buy|sell|acquire|pivot|layoff|restructure";
+
+export const DRAFT_GRAPH_DECISION_BRIEF_REGEX = new RegExp(
+  `\\b(${DECISION_VERB_ALTERNATION_SOURCE})\\b|\\?$`,
+  "i",
+);
+
+/** The decision-verb arm ALONE — the `\?$` arm's absence is the point. */
+export const DRAFT_GRAPH_DECISION_VERB_REGEX = new RegExp(
+  `\\b(?:${DECISION_VERB_ALTERNATION_SOURCE})\\b`,
+  "i",
+);
+
+/**
+ * INV-Q (ROADMAP 2.715) — the interrogative-opener alphabet.
+ *
+ * CANONICAL. `CLARIFY_V2_QUESTION_REPLY_PATTERN`
+ * (`orchestrator-v5/clarify-v2/preflight.ts`) IS the pattern below, re-exported
+ * under its historical name — not a copy of it. It lives here so the round-1
+ * intake path can consult the same discriminator the clarify RESUME path has
+ * always used, which is exactly the asymmetry `process-meta-intake.ts:15-18`
+ * records: "the clarify RESUME path already refuses to fold a question back to
+ * us into the brief; round-1 intake had NO equivalent."
+ */
+export const INTERROGATIVE_OPENER_ALTERNATION_SOURCE =
+  "what|why|how|who|whom|whose|when|where|which|can|could|do|does|did|is|are|was|were|will|would|should|shall|whether";
+
+/** Interrogative opener + trailing `?`. */
+export const INTERROGATIVE_QUESTION_PATTERN = new RegExp(
+  `^\\s*(?:${INTERROGATIVE_OPENER_ALTERNATION_SOURCE})\\b[\\s\\S]*\\?\\s*$`,
+  "i",
+);
+
+const INTERROGATIVE_OPENER_CAPTURE = new RegExp(
+  `^\\s*(${INTERROGATIVE_OPENER_ALTERNATION_SOURCE})\\b`,
+  "i",
+);
+
+/**
+ * The decision verbs that are ALSO interrogative openers AND are ordinary
+ * advice modals outside the opener slot.
+ *
+ * WHY A POSITIONAL RULE RATHER THAN "no decision verb anywhere". Measured at
+ * `8c316b5e` against the derivation's own corpus: 10 of the 11 questions that
+ * capture as briefs carry no decision verb, but the eleventh —
+ * "What should I be checking before I run this?" — carries `should`. A flat
+ * "no decision verb anywhere" rule therefore leaves 1 of 11 capturing, and the
+ * derivation's claim that "none contains a decision verb" is false. `should`
+ * and `shall` are decision-BEARING when they OPEN the question ("Should we
+ * expand into Germany?") and are advice modals everywhere else ("What should I
+ * be checking?"). That is the same positional distinction
+ * `process-meta-intake.ts:119-121` already draws when it refuses these words
+ * as ARM OPENERS.
+ *
+ * ⚠ `whether` is in the same intersection and is DELIBERATELY NOT here — and
+ * the exclusion is TESTED, not implicit. It is a choice marker (a sibling of
+ * `versus`), not an advice modal: demoting it would strand
+ * "Can you help me work out whether to migrate the CRM or stay?", and
+ * over-blocking a genuine brief is the worse defect (the ratified precision
+ * bias, META-DECISION-DIAGNOSIS-2026-07-20).
+ *
+ * The list is checked against BOTH source alphabets at module load — a derived
+ * guard cannot prove a hand-written list is RIGHT, but it can prove it has not
+ * drifted out of the lists it claims to be an intersection of (trap 12d), and
+ * a corpus in `__tests__/question-to-assistant.test.ts` is the other half.
+ */
+export const AMBIGUOUS_MODAL_DECISION_VERBS: readonly string[] = ["should", "shall"];
+
+const UNAMBIGUOUS_DECISION_VERB_REGEX = (() => {
+  const verbs = DECISION_VERB_ALTERNATION_SOURCE.split("|");
+  const openers = INTERROGATIVE_OPENER_ALTERNATION_SOURCE.split("|");
+  for (const modal of AMBIGUOUS_MODAL_DECISION_VERBS) {
+    if (!verbs.includes(modal) || !openers.includes(modal)) {
+      throw new Error(
+        `AMBIGUOUS_MODAL_DECISION_VERBS: '${modal}' must be a member of BOTH the ` +
+          `decision-verb alternation and the interrogative-opener alternation — ` +
+          `it is the intersection that makes it ambiguous. Remove it, or restore the source list.`,
+      );
+    }
+  }
+  const remaining = verbs.filter((v) => !AMBIGUOUS_MODAL_DECISION_VERBS.includes(v));
+  return new RegExp(`\\b(?:${remaining.join("|")})\\b`, "i");
+})();
+
+/**
+ * INV-Q (ROADMAP 2.715) — is this message a question TO the assistant rather
+ * than a decision brief?
+ *
+ * True when the message is interrogative-shaped (opener from the alphabet
+ * above, trailing `?`), its OPENER is not itself a decision verb, and it
+ * carries no unambiguous decision verb anywhere. Pure and total. No LLM, and
+ * no new vocabulary — both inputs are existing single-source alternations.
+ *
+ * This inverts the capture default for interrogatives: the `\?$` arm of
+ * `DRAFT_GRAPH_DECISION_BRIEF_REGEX` makes EVERY ≥30-char question
+ * draft-shaped, which is how the product's own coaching prompts — retyped
+ * rather than tapped, so the exact-string mirror misses them — came to be
+ * modelled as decisions on an empty canvas.
+ */
+export function isQuestionToAssistant(message: string): boolean {
+  if (typeof message !== "string") return false;
+  const trimmed = message.trim();
+  if (!INTERROGATIVE_QUESTION_PATTERN.test(trimmed)) return false;
+  const opener = INTERROGATIVE_OPENER_CAPTURE.exec(trimmed)?.[1];
+  if (opener !== undefined && DRAFT_GRAPH_DECISION_VERB_REGEX.test(opener)) return false;
+  return !UNAMBIGUOUS_DECISION_VERB_REGEX.test(trimmed);
+}
 
 /**
  * Draft-shaped TEXT predicate — the length + decision-regex core of the
@@ -56,8 +162,16 @@ export const DRAFT_GRAPH_DECISION_BRIEF_REGEX =
  *   - clarify-v2-dispatch's resume replacement check uses the text
  *     predicate alone (the round is pre-graph by construction).
  * Previously each of those hand-duplicated the two terms below.
+ *
+ * ROADMAP 2.715 (INV-Q): a question TO the assistant is never draft-shaped,
+ * whatever the `\?$` arm says. Applied HERE rather than at each consumer so
+ * every path that asks "would this have drafted?" gets the same answer — the
+ * route's dispatch heuristic, its continuation-guard telemetry, and
+ * clarify-v2-dispatch's resume replacement check (which is what bars a
+ * mid-round question from REPLACING a live round's working brief).
  */
 export function isDraftShapedText(message: string): boolean {
+  if (isQuestionToAssistant(message)) return false;
   return (
     message.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH &&
     DRAFT_GRAPH_DECISION_BRIEF_REGEX.test(message)

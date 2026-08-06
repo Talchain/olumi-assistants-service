@@ -48,11 +48,17 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
     //    from observed root nodes (ISL evaluates non-intervened roots as value + intercept,
     //    so the duplicate doubles the baseline). Never assigns intercepts.
     // Mutations are logged in trace.pipeline.repair_summary.graph_data_integrity.
-    const integrityRepairs = runGraphDataIntegrityChecks(v3Body, ctx.requestId);
+    // 4. ROADMAP 2.714 (INV-HONOUR): a value the user stated in THIS turn's
+    //    brief is never overridden by the drafter. `ctx.input.brief` is the
+    //    same brief the transform above read; on a clarify resume it is the
+    //    ACCUMULATED working brief, which carries the user's words verbatim.
+    const integrityRepairs = runGraphDataIntegrityChecks(v3Body, ctx.requestId, ctx.input.brief);
     if (
       integrityRepairs.scale_consistency_repairs.length > 0 ||
       integrityRepairs.edge_field_repairs.length > 0 ||
-      integrityRepairs.intercept_population_repairs.length > 0
+      integrityRepairs.intercept_population_repairs.length > 0 ||
+      integrityRepairs.stated_value_honour_repairs.length > 0 ||
+      integrityRepairs.stated_value_honour_skips.length > 0
     ) {
       // Attach to pipeline trace so debug bundles capture the corrections.
       const pipelineTrace = (v3Body as any)?.trace?.pipeline;
