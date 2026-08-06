@@ -282,6 +282,19 @@ export async function handleDraftGraph(
       pipelineRecoveryRaw && typeof pipelineRecoveryRaw === 'object'
         ? (pipelineRecoveryRaw as Record<string, unknown>)
         : null;
+    // The PRODUCER's own retryability declaration (ROADMAP 2.718).
+    // `buildCeeErrorResponse` emits `retryable` at the body top level on
+    // every CEE error body; emitters that mean "retry is the honest lever"
+    // set it TRUE deliberately (the post-enforcement gate's stochastic-
+    // topology 422, the OPTIONS_IDENTICAL bypass). Dropping it here forced
+    // route-v2 to re-derive retryability from a static per-code map, which
+    // flipped those producers' `true` to `false` on the wire — beside
+    // recovery copy that says "Try again" (witnessed 2026-08-06, runs
+    // de79da/39cf53). Strict boolean guard: any other shape → null, and the
+    // route treats null as "producer silent" (static map decides alone).
+    const pipelineRetryableRaw = (body as { retryable?: unknown }).retryable;
+    const pipelineRetryable: boolean | null =
+      typeof pipelineRetryableRaw === 'boolean' ? pipelineRetryableRaw : null;
     // Pipeline-side `body.details` may carry diagnostic fields the route
     // boundary needs to surface on the wire (e.g. OPTIONS_IDENTICAL bypass
     // attaches `violation_code`, `identical_option_ids`,
@@ -307,6 +320,16 @@ export async function handleDraftGraph(
       'identical_option_ids',    // OPTIONS_IDENTICAL bypass diagnostic — internal graph IDs
       'intervention_signature',  // OPTIONS_IDENTICAL bypass diagnostic — internal factor:value fingerprint
       'repair_skip_reason',      // OPTIONS_IDENTICAL bypass diagnostic
+      // ROADMAP 2.718 (2026-08-06): the two graph-validation emitters now
+      // ship a codes-only mirror of their blocking errors. Codes are fixed
+      // validator enum strings (MISSING_BRIDGE, NO_PATH_TO_GOAL, …) — no
+      // user content. The full `validation_errors` objects remain
+      // NON-allowlisted: their `message` strings embed node labels drafted
+      // from user input. Without the codes on the wire, diagnosing a
+      // CEE_GRAPH_INVALID 500 requires a Render-logs round-trip (which is
+      // exactly what the de79da/39cf53 diagnosis cost).
+      'validation_error_codes',  // codes-only blocking-error mirror — fixed validator enums
+      'last_phase',              // which validation emitter fired — fixed pipeline-phase string
     ]);
     const rawDetails = (body as { details?: unknown }).details;
     const pipelineDetails: Record<string, unknown> | null =
@@ -337,6 +360,7 @@ export async function handleDraftGraph(
       pipelineStatusCode: pipelineResult.statusCode,
       pipelineErrorCode,
       pipelineReason,
+      pipelineRetryable,
       pipelineRecovery,
       pipelineDetails,
     });

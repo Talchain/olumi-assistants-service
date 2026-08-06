@@ -130,6 +130,11 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
               message: e.message,
               path: e.path,
             })),
+            // Codes-only mirror for the WIRE (ROADMAP 2.718) — see the
+            // matching field in graph-enforcement.ts. Only fixed-enum codes
+            // cross the route boundary's allowlist; the message-bearing
+            // objects above stay off-wire. Derived, not restated.
+            validation_error_codes: error.errors.map((e) => e.code),
             attempts: error.attempts,
           },
         },

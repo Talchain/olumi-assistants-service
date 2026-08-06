@@ -170,6 +170,29 @@ describe("CEE_GRAPH_INVALID post-enforcement 422 — honest, actionable, still f
     }
   });
 
+  it("ships codes-only validation_error_codes for the wire (ROADMAP 2.718 diagnosability)", () => {
+    // The route boundary's details allowlist forwards ONLY safe fixed-enum
+    // fields; the message-bearing `validation_errors` never cross it. Without
+    // a codes-only field the wire says "topology error(s)" and the operator
+    // must round-trip Render logs to learn WHICH — exactly what the 2026-08-06
+    // diagnosis of runs de79da/39cf53 cost. The codes must mirror
+    // `validation_errors` 1:1, same order (derived, not restated).
+    const ctx = makeBlockedCtx();
+    applyDeterministicEnforcement(ctx);
+    const body = ctx.earlyReturn!.body as Record<string, any>;
+
+    expect(Array.isArray(body.details.validation_error_codes)).toBe(true);
+    expect(body.details.validation_error_codes).toEqual(
+      body.details.validation_errors.map((e: { code: string }) => e.code),
+    );
+    expect(body.details.validation_error_codes).toContain("NO_PATH_TO_GOAL");
+    // Codes only — never the message strings (they embed node labels).
+    for (const code of body.details.validation_error_codes) {
+      expect(typeof code).toBe("string");
+      expect(code).toMatch(/^[A-Z][A-Z0-9_]*$/);
+    }
+  });
+
   it("still FAILS CLOSED — the invalid model is never packaged", () => {
     const ctx = makeBlockedCtx();
     applyDeterministicEnforcement(ctx);

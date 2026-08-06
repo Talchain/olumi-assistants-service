@@ -380,6 +380,82 @@ describe("handleDraftGraph", () => {
     }
   });
 
+  // ROADMAP 2.718: the pipeline body's own top-level `retryable` is the
+  // PRODUCER's declaration (buildCeeErrorResponse emits it on every error
+  // body; emitters that mean retry set it true deliberately — the
+  // post-enforcement gate and the OPTIONS_IDENTICAL bypass both do). Before
+  // this fix the throw dropped it, and route-v2's static per-code map
+  // re-derived `retryable: false` for CEE_GRAPH_INVALID — putting
+  // "this is usually transient. Try again" and `retryable: false` in the
+  // same wire body (witnessed: golden-journey 20260806T142014Z-failed-
+  // draft-39cf53, request 41152fb5).
+
+  it("attaches pipelineRetryable from the body's top-level retryable: true (Test 1m — producer declaration, ROADMAP 2.718)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 422,
+      body: {
+        schema: "cee.error.v1",
+        code: "CEE_GRAPH_INVALID",
+        message: "Graph failed post-enforcement validation (10 topology error(s))",
+        retryable: true,
+        source: "cee",
+        request_id: "test-md1d",
+        recovery: {
+          suggestion:
+            "Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you — this is usually transient. Try again.",
+          hints: ["Retrying the same brief usually succeeds"],
+        },
+      },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1d");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineRetryable?: boolean | null };
+      expect(meta.pipelineRetryable).toBe(true);
+    }
+  });
+
+  it("attaches pipelineRetryable: false when the body declares false (Test 1n — no promotion invented here)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: { code: "CEE_LLM_VALIDATION_FAILED", retryable: false },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1e");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineRetryable?: boolean | null };
+      expect(meta.pipelineRetryable).toBe(false);
+    }
+  });
+
+  it("attaches pipelineRetryable: null when the body carries no boolean retryable (Test 1o — type guard)", async () => {
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: { code: "CEE_GRAPH_INVALID", retryable: "yes" },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1f");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineRetryable?: boolean | null };
+      expect(meta.pipelineRetryable).toBeNull();
+    }
+
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 400,
+      body: { code: "CEE_GRAPH_INVALID" },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1f2");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineRetryable?: boolean | null };
+      expect(meta.pipelineRetryable).toBeNull();
+    }
+  });
+
   // PR #202 review-fix R1: handleDraftGraph propagates body.details via
   // PIPELINE_DETAILS_ALLOWLIST. Tests 1g-1k cover the allowlist + null/
   // missing handling. The previous OPTIONS_IDENTICAL diagnostics
@@ -441,6 +517,48 @@ describe("handleDraftGraph", () => {
       expect(details.stack_trace).toBeUndefined();
       expect(details.internal_path).toBeUndefined();
       expect(details.user_input_echo).toBeUndefined();
+    }
+  });
+
+  it("allowlists validation_error_codes + last_phase, but NOT validation_errors (Test 1p — 2.718 diagnosability)", async () => {
+    // 2026-08-06: diagnosing the witnessed CEE_GRAPH_INVALID wire failures
+    // required a Render-logs round-trip because the validator codes that
+    // blocked packaging never reached the wire. The enforcement emitter now
+    // ships codes-only `validation_error_codes` (fixed validator enum
+    // strings) and `last_phase` (fixed pipeline-phase string); the full
+    // `validation_errors` objects stay OFF the wire — their `message`
+    // fields embed node labels drafted from user input.
+    mockRunUnifiedPipeline.mockResolvedValueOnce({
+      statusCode: 422,
+      body: {
+        code: "CEE_GRAPH_INVALID",
+        retryable: true,
+        details: {
+          validation_error_codes: ["MISSING_BRIDGE", "NO_PATH_TO_GOAL", "NO_EFFECT_PATH"],
+          last_phase: "deterministic_enforcement",
+          validation_errors: [
+            { code: "NO_PATH_TO_GOAL", message: 'Node "Adoption risk" has no path to the goal', path: "nodes/fac_adoption" },
+          ],
+          enforcement_repairs: 0,
+        },
+      },
+    });
+    try {
+      await handleDraftGraph("Test brief", mockRequest, "turn-md1p");
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      const meta = err as { pipelineDetails?: Record<string, unknown> | null };
+      expect(meta.pipelineDetails).not.toBeNull();
+      const details = meta.pipelineDetails!;
+      expect(details.validation_error_codes).toEqual([
+        "MISSING_BRIDGE",
+        "NO_PATH_TO_GOAL",
+        "NO_EFFECT_PATH",
+      ]);
+      expect(details.last_phase).toBe("deterministic_enforcement");
+      // The message-bearing objects must NOT pass the filter.
+      expect(details.validation_errors).toBeUndefined();
+      expect(details.enforcement_repairs).toBeUndefined();
     }
   });
 
