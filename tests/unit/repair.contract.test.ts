@@ -11,12 +11,26 @@
  * - Sentinel fields at all depths including nested objects (e.g., edge.provenance._sentinel_prov)
  * - Mocks configured to pass through graph fields (not replace them)
  *
- * Mocks: orchestrator validation OFF, PLoT validates OK, clarifier OFF.
- * Real: deterministic sweep, edge stabilisation, goal merge (single goal → no-op),
- *       compound goals (no compound → no-op), late STRP, edge restoration, connectivity.
+ * Mocks: PLoT validates OK, clarifier OFF.
+ * Real: deterministic sweep, substep 1b orchestrator validation, edge
+ *       stabilisation, goal merge (single goal → no-op), compound goals (no
+ *       compound → no-op), late STRP, edge restoration, connectivity.
+ *
+ * ⚠ ROADMAP 2.740a — POSTURE. This suite used to pin
+ * `orchestratorValidationEnabled: false` and stub `validateAndRepairGraph`,
+ * so the Stage-4 preservation contract was proven ONLY against a pipeline
+ * with substep 1b switched off. That was the one substep able to violate
+ * every guarantee in the contract at once (it handed the whole graph to
+ * gpt-4.1 and adopted the reply, including on its own failure path), so the
+ * contract's `node.id` justification — "no repair substep reassigns existing
+ * node IDs" — was false precisely when the gate was on.
+ *
+ * The LLM limb is gone, so that justification is true again. It is no longer
+ * asserted, it is EXERCISED: the gate-ENABLED block at the bottom of this
+ * file runs the same contract harness with substep 1b live.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { STAGE_CONTRACT } from "../../src/cee/unified-pipeline/stages/repair/repair.contract.js";
 import {
   assertSentinel,
@@ -27,37 +41,39 @@ import {
 
 // ── Mocks (must be before imports) ──────────────────────────────────────────
 
-vi.mock("../../src/cee/graph-orchestrator.js", () => ({
-  validateAndRepairGraph: vi.fn(),
-  GraphValidationError: class GraphValidationError extends Error {
-    errors: any[];
-    attempts: number;
-    lastGraph?: any;
-    constructor(msg: string, errors: any[], attempts: number, lastGraph?: any) {
-      super(msg);
-      this.name = "GraphValidationError";
-      this.errors = errors;
-      this.attempts = attempts;
-      this.lastGraph = lastGraph;
-    }
-  },
-}));
+// ROADMAP 2.740a: this used to be a hand-written stub
+// (`validateAndRepairGraph: vi.fn()` + a copied GraphValidationError class),
+// which meant substep 1b never executed here at all. It is now an
+// `importOriginal` spread — DERIVED, not mirrored — so the real deterministic
+// validator runs and the copied error class cannot drift from the real one.
+vi.mock("../../src/cee/graph-orchestrator.js", async (importOriginal) => {
+  const orig: any = await importOriginal();
+  return { ...orig };
+});
 
 vi.mock("../../src/adapters/llm/router.js", () => ({
   getAdapter: vi.fn(),
   getMaxTokensFromConfig: () => undefined,
 }));
 
-vi.mock("../../src/config/index.js", () => ({
-  config: {
-    cee: {
-      orchestratorValidationEnabled: false,
-      enforceSingleGoal: true,
-      clarifierEnabled: false,
-      debugLoggingEnabled: false,
-    },
-    features: { optionShortcutRepair: true },
+// ROADMAP 2.740a: mutable so the contract can be proven under BOTH substep-1b
+// postures. Previously this was a frozen literal pinning the gate to `false`
+// — the Stage-4 preservation contract was therefore only ever proven against
+// a pipeline in which the one substep that could violate every guarantee at
+// once was switched off (trap 3b). See the gate-ENABLED block at the bottom
+// of this file.
+const mockConfig = vi.hoisted(() => ({
+  cee: {
+    orchestratorValidationEnabled: false,
+    enforceSingleGoal: true,
+    clarifierEnabled: false,
+    debugLoggingEnabled: false,
   },
+  features: { optionShortcutRepair: true },
+}));
+
+vi.mock("../../src/config/index.js", () => ({
+  config: mockConfig,
   isProduction: vi.fn().mockReturnValue(true),
 }));
 
@@ -166,6 +182,8 @@ vi.mock("../../src/cee/constants/versions.js", () => ({
 
 import { runStageRepair } from "../../src/cee/unified-pipeline/stages/repair/index.js";
 import { validateGraph } from "../../src/services/validateClientWithCache.js";
+import { getAdapter } from "../../src/adapters/llm/router.js";
+import { log } from "../../src/utils/telemetry.js";
 import {
   validateAndFixGraph,
 } from "../../src/cee/structure/index.js";
@@ -452,6 +470,10 @@ function buildExternalDataGraph() {
 
 function setupDefaults(): void {
   vi.clearAllMocks();
+
+  // Default posture = the deployed one (gate off on staging, demo and
+  // production). The gate-ENABLED block at the bottom flips it explicitly.
+  mockConfig.cee.orchestratorValidationEnabled = false;
 
   // PLoT validation passes, returning graph as-is
   (validateGraph as any).mockImplementation(async (_g: any) => ({
@@ -933,5 +955,123 @@ describe("Stage 4 (Repair) — field preservation contract", () => {
       );
       expect(edgeViolation).toBeDefined();
     });
+  });
+});
+
+// ── ROADMAP 2.740a: the contract, proven with substep 1b ENABLED ────────────
+//
+// The gate is false in every deployed CEE environment, so this block is about
+// the posture ONE dashboard boolean away — the posture under which the
+// contract's guarantees used to be false. Now that substep 1b is
+// deterministic, the same harness that proves the contract with the gate off
+// proves it with the gate on.
+
+describe("Stage 4 (Repair) — field preservation contract, substep 1b ENABLED", () => {
+  beforeEach(() => {
+    setupDefaults();
+    mockConfig.cee.orchestratorValidationEnabled = true;
+  });
+
+  afterEach(() => {
+    mockConfig.cee.orchestratorValidationEnabled = false;
+  });
+
+  /**
+   * Identity-bound marker for substep 1b's DEFER limb.
+   *
+   * `stage: "orchestrator_validation_deferred"` is emitted at exactly one
+   * place in the whole tree (orchestrator-validation.ts) — derived by
+   * `grep -a`, not assumed. So its presence in the log mock proves this
+   * specific limb executed, and nothing else can produce it.
+   */
+  function deferLimbRan(): boolean {
+    return ((log as any).info.mock.calls as any[][]).some(
+      (c) => c[0]?.stage === "orchestrator_validation_deferred",
+    );
+  }
+
+  it("PRECONDITION: substep 1b executes and takes the DEFER limb — the limb that used to adopt the LLM's rejected graph", async () => {
+    // Pins the block's own premise. Without this, every assertion below could
+    // pass because the gate silently stayed off, or because substep 1b
+    // early-returned a 422 and the rest of Stage 4 never ran — a guard
+    // agreeing with itself (trap 13b). The first draft of this block DID
+    // pass vacuously; this assertion is what caught it.
+    //
+    // On this fixture the deterministic validator rejects the graph and the
+    // sweep has set llmRepairNeeded, so substep 1b defers. That is precisely
+    // the limb the 2.740a evidence flagged: before the removal it would have
+    // installed gpt-4.1's rejected output into ctx.graph here, and every
+    // contract assertion below would have been evaluated against an LLM
+    // rewrite.
+    const ctx = makeCtx();
+    await runStageRepair(ctx);
+
+    expect(deferLimbRan(), "substep 1b defer limb must have executed").toBe(true);
+    expect(ctx.earlyReturn).toBeUndefined();
+  });
+
+  it("CONTROL: with the gate off, that same marker is absent", async () => {
+    // Proves the precondition discriminates. If the marker appeared here
+    // too, it would be measuring something other than substep 1b.
+    mockConfig.cee.orchestratorValidationEnabled = false;
+    const ctx = makeCtx();
+    await runStageRepair(ctx);
+
+    expect(deferLimbRan()).toBe(false);
+  });
+
+  it("node IDs survive — the guarantee whose justification the LLM limb falsified", async () => {
+    const ctx = makeCtx();
+    const baseline = structuredClone(ctx.graph);
+    await runStageRepair(ctx);
+
+    // The contract permits ADDING nodes (status quo, goal inference,
+    // connectivity) but forbids dropping them and guarantees `node.id`.
+    // So: every input ID must still be present, unreassigned.
+    const beforeIds = baseline.nodes.map((n: any) => n.id).sort();
+    const afterIds = (ctx.graph as any).nodes.map((n: any) => n.id);
+    for (const id of beforeIds) {
+      expect(afterIds, `input node id ${id} must survive substep 1b`).toContain(id);
+    }
+  });
+
+  it("all preservation-guaranteed fields survive unchanged", async () => {
+    const ctx = makeCtx();
+    const baseline = structuredClone(ctx.graph);
+    await runStageRepair(ctx);
+
+    const violations = assertPreservationGuarantees(
+      STAGE_CONTRACT as unknown as StageContract,
+      baseline,
+      ctx.graph,
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it("representative fixture passes full contract validation", async () => {
+    const ctx = makeCtx();
+    const baseline = structuredClone(ctx.graph);
+    await runStageRepair(ctx);
+
+    const externalNodeIds = baseline.nodes
+      .filter((n: any) => n.category === "external")
+      .map((n: any) => n.id);
+
+    const violations = validateContractCompliance(
+      STAGE_CONTRACT as unknown as StageContract,
+      baseline,
+      ctx.graph,
+      { skipDataForNodeIds: externalNodeIds },
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it("no LLM repair adapter is requested while the gate is on", async () => {
+    const ctx = makeCtx();
+    await runStageRepair(ctx);
+
+    expect(
+      (getAdapter as any).mock.calls.filter((c: any[]) => c[0] === "repair_graph"),
+    ).toHaveLength(0);
   });
 });
