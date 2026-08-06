@@ -307,6 +307,77 @@ describe('DSK protocol provenance reaches the wire (2.490 slice 2)', () => {
   });
 
   /**
+   * ⚠ THE CARD MUST SURVIVE THE BADGE'S FAILURE — AND UNTIL THIS TEST, NOTHING
+   * SAID SO AT THE BLOCK LEVEL.
+   *
+   * The two arms above prove the RESOLVER returns null when the bundle is
+   * unusable. That is a different claim from the one this module's docstring
+   * actually makes: "the exercise card still renders on its instruction copy,
+   * simply without an attribution. Fail-closed, always — a missing badge is a
+   * lost affordance, a wrong badge is a lie about science."
+   *
+   * Found by a surviving mutant. Replacing the emit site's
+   * `...(p !== null ? { dsk_provenance: p } : {})` with
+   * `...(p !== null ? { dsk_provenance: p } : { dsk_provenance: null })` left
+   * all 30 tests GREEN, because every existing block-level assertion runs with
+   * a healthy bundle, where the omitting branch is never taken. That mutant is
+   * NOT equivalent, and the difference is user-visible: `dsk_provenance` is
+   * `.optional()`, which in Zod accepts `undefined` and REJECTS `null`
+   * (measured: `{...,dsk_provenance:null}` → `invalid_type, expected object,
+   * received null`). So a `null` there fails `ExerciseBlockSchema`,
+   * `validateProseAndSchemaOrDrop` drops the block, and a bundle problem on a
+   * deployed box would silently delete the ENTIRE EXERCISE CARD instead of
+   * costing it a badge — turning a degraded affordance into a missing feature.
+   *
+   * `buildDskExerciseBlock` is typed to the two attributed lenses, so the
+   * omitting branch is reachable ONLY through bundle failure. This test is
+   * therefore the only thing that can hold that branch honest.
+   */
+  it('bundle unusable → the exercise BLOCK still ships, with the key OMITTED (never null)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dskproto7f3a91-cardsurvives-'));
+    const cwd = process.cwd();
+    const fact = considerOppositeFact();
+    const selection = selectLens(fact, { previousAnalysisLens: null });
+    // Precondition pinned in-test (trap 13b, third face): without this, a
+    // dropped block and an unfired lens are indistinguishable, and the
+    // assertions below could hold vacuously on an empty list.
+    expect(selection?.lens, 'fixture no longer produces consider_opposite').toBe(
+      'consider_opposite',
+    );
+
+    try {
+      process.chdir(tmp);
+      _resetDskProtocolRecordCache();
+      // Positive control IN THE SAME INVOCATION (trap 13): prove resolution
+      // genuinely fails here, so an omitted key cannot be an artefact of a
+      // bundle that quietly still resolved.
+      expect(fs.existsSync(path.join(tmp, 'data', 'dsk', 'v1.json'))).toBe(false);
+      expect(resolveDskProtocolProvenance('DSK-P-003')).toBeNull();
+
+      const blocks = buildLensCompanionBlocks(fact, CTX, selection!, [], LOOKUP);
+
+      // 1. THE CARD SURVIVES. This is the assertion the surviving mutant broke.
+      expect(blocks, 'the exercise card must not be deleted by a bundle fault').toHaveLength(1);
+      const block = blocks[0]!;
+      expect(block.exercise_kind).toBe('consider_opposite');
+      // 2. It still carries its instruction copy — degraded, not empty.
+      expect(block.counter_case).toBeTruthy();
+      // 3. The key is ABSENT, not present-and-null. `toBeUndefined()` alone
+      //    cannot tell those apart, so assert on the key set itself.
+      expect(Object.hasOwn(block, 'dsk_provenance')).toBe(false);
+      expect(Object.keys(block)).not.toContain('dsk_provenance');
+    } finally {
+      process.chdir(cwd);
+      _resetDskProtocolRecordCache();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+
+    // The healthy path is intact afterwards, so this test cleaned up after
+    // itself and the two preceding arms still mean what they claim.
+    expect(resolveDskProtocolProvenance('DSK-P-003')).not.toBeNull();
+  });
+
+  /**
    * ⚠ WHY THE NEXT TWO TESTS USE A SYNTHETIC BUNDLE, AND WHY THAT IS NOT
    * "testing the mock". Two of this module's gates — the id-FORMAT check and
    * the DEPRECATED filter — are UNOBSERVABLE against bundle v1.0.0, and that
