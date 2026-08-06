@@ -2718,11 +2718,17 @@ export async function dispatchEditGraph(
             remainderDependsOnThisStep: structuralEditSplit.remainderDependsOnThisStep,
             // Both halves derived, neither restated (ROADMAP 2.474/A3):
             // (i) does an analysis exist to go stale, and (ii) does a stale
-            // frame actually block a STRUCTURAL apply — asked of the frame
-            // gate itself, so the staleness-editability ruling moves this
-            // copy automatically instead of leaving a stale sentence behind.
+            // frame actually block an apply — asked of the frame gate itself.
+            //
+            // ⭐ AND THE RULING LANDED (2.474/A4, 2026-08-05): the gate now
+            // answers `false`, so this conjunction is false and the re-run
+            // copy RETIRED ITSELF — no sentence left behind, no lane needed to
+            // remember. That is the entire return on deriving it. The
+            // expression stays derived rather than collapsing to a literal:
+            // a hardcoded `false` here would be the mirror #829 removed, and
+            // would silently over-promise if the trust set ever moves back.
             rerunRequiredBeforeNextStep:
-              priorAnalysisExistsForSplit && staleAnalysisBlocksApply('structural'),
+              priorAnalysisExistsForSplit && staleAnalysisBlocksApply(),
           });
     if (continuation !== null) {
       response = {

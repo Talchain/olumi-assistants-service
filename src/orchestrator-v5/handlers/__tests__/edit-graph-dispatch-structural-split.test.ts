@@ -51,6 +51,7 @@ import { commitDirectAnswer } from '../../commit.js';
 import { getAdapter } from '../../../adapters/llm/router.js';
 import { loadPersistedGraphStrict, buildTurnContext } from '../../build-turn-context.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { staleAnalysisBlocksApply } from '../../graph-management/frame-gate.js';
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
 import {
@@ -539,22 +540,27 @@ describe('⭐ CONTROL — the same split on a HELD turn does offer the continuat
 });
 
 /**
- * ⭐⭐ FINDING 1 — THE ALREADY-ANALYSED SCENARIO, WHICH NO TEST HERE COULD SEE.
+ * ⭐⭐ FINDING 1 — AUTO-RETIRED BY RULING A4 (Paul, 2026-08-05), WHICH IS
+ * EXACTLY WHAT #829's DERIVATION WAS BUILT FOR.
  *
- * Every other test in this file runs on a PRE-ANALYSIS scenario
- * (`freshness:'none'`, reason `no_successful_run_analysis_fact`) — the one
- * state in which "Propose the next step" works. On a scenario that HAS been
- * analysed (the normal state for someone restructuring a model) the graph hash
- * moves when part 1 is applied, freshness flips to `stale`, and a STRUCTURAL
- * candidate does not trust `stale` — so the next part is blocked until the
- * user re-runs.
+ * The finding was real and the fix was right: on an already-analysed scenario,
+ * applying part 1 moved the graph hash, freshness flipped to `stale`, and a
+ * STRUCTURAL candidate did not trust `stale` — so the next part was blocked
+ * and the honest copy said "confirm, re-run, then the rest".
  *
- * ⚠ SCOPE OF WHAT THIS PROVES, stated because the distinction matters: the
- * fact is INJECTED here, so this pins the CONSUMER (given a prior successful
- * run_analysis fact, the copy and the chip change). It does NOT prove the
- * loader delivers that fact on a post-apply turn — see the note in the PR.
+ * A4 removed the block itself. `rerunRequiredBeforeNextStep` is DERIVED from
+ * the frame gate (`staleAnalysisBlocksApply`), never restated, so the moment
+ * the ruling moved the trust set this copy retired on its own — no stale
+ * sentence left behind, no lane needed to remember. The pins below therefore
+ * flip from "the re-run chip is offered" to "the next step is offered", and
+ * the assertion that MATTERS now is that the promise is DELIVERABLE: the next
+ * step really can be proposed immediately, because the gate no longer refuses
+ * it.
+ *
+ * ⚠ SCOPE, unchanged: the fact is INJECTED, so this pins the CONSUMER. It does
+ * not prove the loader delivers that fact on a post-apply turn.
  */
-describe('⭐⭐ an already-analysed scenario is told the REAL order, and given a control that works', () => {
+describe('⭐⭐ an already-analysed scenario can continue straight to the next step (A4)', () => {
   beforeEach(async () => {
     (getAdapter as MockedFunction<typeof getAdapter>)
       .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
@@ -579,43 +585,57 @@ describe('⭐⭐ an already-analysed scenario is told the REAL order, and given 
     expect(ids.some((id) => id.startsWith('gmh_'))).toBe(true);
   });
 
-  it('the copy states confirm, then re-run, then the rest', async () => {
+  it('A4: the copy no longer interposes a re-run, and still names every remaining operation', async () => {
     const text = (await runTurn()).response.assistant_text ?? '';
-    expect(text).toContain('already analysed this model');
-    expect(text).toContain('Re-run the analysis after confirming');
-    // It still names every remaining operation.
+    expect(text).not.toContain('already analysed this model');
+    expect(text).not.toContain('Re-run the analysis after confirming');
     expect(text).toContain('Plan B cost driver');
   });
 
-  it('⭐ the chip offered is the RE-RUN, not a next step that cannot be delivered', async () => {
+  it('⭐ A4: the chip offered is the NEXT STEP, and it is now a promise the gate will keep', async () => {
     const actions = (await runTurn()).response.suggested_actions ?? [];
-    expect(actions.map((a) => a.id)).not.toContain('structural_edit_next_step');
-    const rerun = actions.find((a) => a.id === 'chip_action_rerun_analysis');
-    expect(rerun).toBeDefined();
-    expect(rerun!.label).toBe('Re-run analysis');
-    // Executable, so the control can actually do what it says.
-    expect((rerun as { action_type?: string }).action_type).toBe('run_analysis');
-    // The remainder is still carried, behind the short label.
-    expect((rerun as { detail?: string }).detail).toContain('Shared overhead driver');
+    const next = actions.find((a) => a.id === 'structural_edit_next_step');
+    expect(next).toBeDefined();
+    expect(next!.label).toBe('Propose the next step');
+    // The remainder is still carried behind the short label.
+    expect((next as { detail?: string }).detail).toContain('Shared overhead driver');
+    // The re-run chip is gone from the SPLIT disclosure (it is unchanged on
+    // the applied receipt, which is where a real staleness cue belongs).
+    expect(actions.map((a) => a.id)).not.toContain('chip_action_rerun_analysis');
+  });
+
+  /**
+   * ⭐ THE DELIVERABILITY PROOF — the assertion the old pin could not make.
+   *
+   * The re-run copy existed because the next step genuinely could not be
+   * proposed. Offering "Propose the next step" is only honest if the gate
+   * would now hold that step rather than refuse it. Asked of the gate itself,
+   * for the same class and the same post-apply frame state.
+   */
+  it('⭐ the promise is DELIVERABLE: a stale frame no longer blocks a structural apply', () => {
+    expect(staleAnalysisBlocksApply()).toBe(false);
   });
 });
 
 /**
- * ⚠⚠ THE KNOWN RESIDUAL, PINNED SO IT IS NOT SILENTLY BELIEVED TO BE CLOSED.
+ * ⚠⚠ THE KNOWN RESIDUAL — NOW WITHOUT A VISIBLE CONSEQUENCE ON THIS COPY, AND
+ * SAID THAT WAY RATHER THAN DELETED.
  *
- * The re-run derivation reads `turnContext.prior_facts` — a WINDOW over the 20
- * most recent turn rows, not the scenario. An analysis older than that window
- * is invisible, so the disclosure reverts to the promising copy on a scenario
- * that HAS been analysed. The defect and its live witness are recorded once,
- * on `TurnContext.newest_analysis_fact` in `build-turn-context.ts` (scenario
+ * The residual is unchanged and still real: `priorAnalysisExistsForSplit` reads
+ * `turnContext.prior_facts`, a WINDOW over the 20 most recent turn rows, so an
+ * analysis older than the window is invisible. Its live witness is recorded on
+ * `TurnContext.newest_analysis_fact` in `build-turn-context.ts` (scenario
  * `f63ccb45-…`: `false` at rank 20, `true` at rank 21, zero store change).
  *
- * This test does not assert the behaviour is RIGHT. It asserts what it IS, and
- * fails if someone changes it without changing this note — which is the only
- * honest thing to write while the fix (a scenario-scoped read through the
- * sanctioned seam) is rowed rather than taken here.
+ * ⭐ WHAT RULING A4 CHANGED: the residual fed a conjunction
+ * (`priorAnalysisExistsForSplit && staleAnalysisBlocksApply()`) whose SECOND
+ * term is now always false, so the window's blindness can no longer change what
+ * the user is told. The old discriminator pair below therefore stops
+ * discriminating — and that is stated here, in the test names, rather than
+ * being left as a pair that silently agrees with itself (trap 13b's third face:
+ * a guard whose discriminating power quietly disappeared).
  */
-describe('⚠ KNOWN RESIDUAL — an analysis outside the 20-turn window is not seen', () => {
+describe('⚠ KNOWN RESIDUAL — the 20-turn window is still blind, and now has no effect on this copy', () => {
   beforeEach(() => {
     (getAdapter as MockedFunction<typeof getAdapter>)
       .mockReturnValue(adapterComposing(PROBE_C_OPERATIONS) as never);
@@ -634,16 +654,21 @@ describe('⚠ KNOWN RESIDUAL — an analysis outside the 20-turn window is not s
     );
   });
 
-  it('CURRENT behaviour: the promising copy is used, because the fact is invisible', async () => {
+  it('the fact is invisible to the window → the next-step copy is used', async () => {
     const result = await runTurn();
     const ids = (result.response.suggested_actions ?? []).map((a) => a.id);
     expect(ids).toContain('structural_edit_next_step');
     expect(result.response.assistant_text ?? '').not.toContain('already analysed this model');
   });
 
-  it('DISCRIMINATOR: the SAME turn with the fact inside the window warns correctly', async () => {
-    // Proves the residual is the WINDOW and not a broken derivation — without
-    // this pair, the test above would look like the feature simply not working.
+  it('⭐ A4: the SAME turn with the fact INSIDE the window is told the SAME thing — the window no longer matters here', async () => {
+    // The old version of this test was the discriminator that proved the
+    // residual was the WINDOW and not a broken derivation. After A4 the two
+    // sides are identical BY DESIGN, and pretending otherwise would be a guard
+    // agreeing with itself. What is asserted instead: the outcomes MATCH, so a
+    // future change that re-introduces a window-dependent divergence here goes
+    // RED rather than passing quietly.
+    const withoutFact = ((await runTurn()).response.suggested_actions ?? []).map((a) => a.id);
     const hash = computeAnalysisAffectingGraphHash(GRAPH as never)!;
     (buildTurnContext as MockedFunction<typeof buildTurnContext>).mockImplementation(
       async (...args) => {
@@ -651,8 +676,9 @@ describe('⚠ KNOWN RESIDUAL — an analysis outside the 20-turn window is not s
         return { ...ctx, prior_facts: [runAnalysisFact(hash)] };
       },
     );
-    const ids = ((await runTurn()).response.suggested_actions ?? []).map((a) => a.id);
-    expect(ids).toContain('chip_action_rerun_analysis');
-    expect(ids).not.toContain('structural_edit_next_step');
+    const withFact = ((await runTurn()).response.suggested_actions ?? []).map((a) => a.id);
+    expect(withFact).toEqual(withoutFact);
+    expect(withFact).toContain('structural_edit_next_step');
+    expect(withFact).not.toContain('chip_action_rerun_analysis');
   });
 });

@@ -44,7 +44,7 @@ import {
   BATCH_CAP_EXCEEDED,
   FRAME_UNAVAILABLE,
   BASE_HASH_DIVERGED,
-  ANALYSIS_NOT_FRESH,
+  FRESHNESS_UNRESOLVED,
   CURRENT_GRAPH_UNREADABLE,
   ENTITY_NOT_FOUND,
   ENTITY_ID_COLLISION,
@@ -224,10 +224,10 @@ export function refereeMutation(
   const mutation_class = classifyMutation(kind);
 
   try {
-    // R2 — frame / stale gate (consumes the frame; never re-derives). The
-    // mutation class rides along for the D-S tunable freshness relaxation
-    // (frame-gate.ts) — hash/readability semantics are class-independent.
-    const gate = evaluateFrameGate(env.base_graph_hash, frame, mutation_class);
+    // R2 — frame / stale gate (consumes the frame; never re-derives). RULING
+    // A4 (2026-08-05): the gate is CLASS-INDEPENDENT — staleness is a property
+    // of the results, so the mutation class no longer reaches it at all.
+    const gate = evaluateFrameGate(env.base_graph_hash, frame);
     const base_hash_match = gate.baseHashMatch;
     const meta = { kind, candidate_id, mutation_class, base_hash_match } as const;
 
@@ -244,15 +244,32 @@ export function refereeMutation(
           verdict: 'held',
           blocker: { code: CURRENT_GRAPH_UNREADABLE, readable: 'The frame could not read or hash the current graph.' },
         };
+      case 'freshness_unresolved':
+        // A4 carve-out: the freshness AUTHORITY could not be resolved. Same
+        // family as the two holds above — we cannot establish an authority, so
+        // we ASK rather than refuse. Never `stale`: the base hash matches here
+        // by construction, so stale copy would contradict the payload it ships
+        // beside.
+        return {
+          ...meta,
+          verdict: 'held',
+          blocker: {
+            code: FRESHNESS_UNRESOLVED,
+            readable:
+              'The analysis-freshness authority could not be resolved; held for confirmation.',
+          },
+        };
       case 'stale':
-        // Both stale reasons carry a machine-readable code (no-silent-outcome contract).
+        // A4: exactly ONE producer remains — a genuine base-hash divergence.
+        // The narrowed `reason` literal is what enforces that (the compiler,
+        // not this comment).
         return {
           ...meta,
           verdict: 'stale',
-          blocker:
-            gate.outcome.reason === 'base_hash_diverged'
-              ? { code: BASE_HASH_DIVERGED, readable: 'The graph has moved since this candidate was generated.' }
-              : { code: ANALYSIS_NOT_FRESH, readable: 'The analysis is not current (freshness is not fresh); re-run before applying.' },
+          blocker: {
+            code: BASE_HASH_DIVERGED,
+            readable: 'The graph has moved since this candidate was generated.',
+          },
         };
       case 'proceed':
         break;

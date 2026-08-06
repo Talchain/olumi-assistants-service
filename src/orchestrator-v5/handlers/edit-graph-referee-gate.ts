@@ -289,11 +289,21 @@ export const GM_HELD_NO_PENDING_ASSISTANT_TEXT =
   'unchanged for the moment. Tell me again what you would like to change and ' +
   "I'll pick it up fresh.";
 
-/** stale — the base moved or the analysis is not current. provisional_doctrine_v0. */
+/**
+ * stale — RULING A4 (2026-08-05) narrowed this to ONE meaning: the graph moved
+ * between the candidate being generated and being judged (`BASE_HASH_DIVERGED`).
+ * The freshness rung can no longer produce a `stale` verdict, so the old copy's
+ * second half — "Run the analysis again to get back in sync" — has to go: a
+ * re-run does NOT resolve a base-hash divergence. What resolves it is restating
+ * the change against the graph as it now is. (Design §2.4(b): a control that
+ * cannot do what it says is this estate's named dominant defect, and copy that
+ * prescribes a futile action is the same defect in prose.)
+ * provisional_doctrine_v0.
+ */
 export const GM_STALE_ASSISTANT_TEXT =
   'The model has moved since that edit was prepared, so I held it rather ' +
-  'than applying it against the wrong baseline. Run the analysis again to ' +
-  'get back in sync, then tell me the change once more.';
+  'than applying it against the wrong baseline. Tell me the change once ' +
+  'more and I will work it out against the model as it stands now.';
 
 /** rejected — integrity/safety failure. provisional_doctrine_v0. */
 export const GM_REJECTED_ASSISTANT_TEXT =
@@ -833,13 +843,24 @@ function buildHeldPending(
   return { pending, chip, targetKey };
 }
 
-/** The rerun affordance for the stale template (existing executable chip shape). */
-const GM_STALE_RERUN_CHIP: EditGmChip = {
-  id: 'chip_action_rerun_analysis_gm_stale',
-  label: 'Re-run analysis',
-  message: 'Rerun the analysis.',
-  action_type: 'run_analysis',
-};
+/**
+ * ⭐ RULING A4 (2026-08-05) — THE RERUN CHIP IS GONE FROM THE STALE TEMPLATE,
+ * DELIBERATELY, AND NOTHING REPLACES IT YET.
+ *
+ * `governing: 'stale'` now means exactly one thing — `BASE_HASH_DIVERGED`, the
+ * graph moved under the candidate — and re-running the analysis does not fix
+ * that. Offering `run_analysis` here was a control that could not do what it
+ * said, on the one path where the user most needs a true instruction. The
+ * assistant text carries the real next step (restate the change), which the
+ * user can take by typing; inventing a new "show me the current model" chip
+ * would be a second, unproven control on a trust surface and is deliberately
+ * left to the owner rather than smuggled into this diff.
+ *
+ * (The `chip_action_rerun_analysis_gm_stale` id is retired with it. The
+ * receipt-side rerun chip — the one the D-S header nominates to resolve real
+ * staleness — is untouched and still ships on APPLIED edits.)
+ */
+const GM_STALE_SUGGESTED_ACTIONS: readonly EditGmChip[] = [];
 
 // ---------------------------------------------------------------------------
 // The gate.
@@ -979,11 +1000,15 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
     }
 
     if (governing === 'stale') {
+      // A4: reachable ONLY through a genuine base-hash divergence now. The
+      // batch is refused WHOLE (stale outranks held), which is exactly what
+      // the mixed-batch invariant demands for a candidate generated against a
+      // graph that has since moved.
       return {
         governing,
         blockApply: true,
         assistantText: GM_STALE_ASSISTANT_TEXT,
-        suggestedActions: [GM_STALE_RERUN_CHIP],
+        suggestedActions: [...GM_STALE_SUGGESTED_ACTIONS],
         pendingActions: null,
         publicReason,
         verdictCounts,

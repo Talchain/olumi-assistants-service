@@ -14,11 +14,13 @@
  *  - STRUCTURAL mutations still hold (propose-confirm unchanged).
  *  - MIXED tunable+structural batches still hold WHOLESALE (worst-of
  *    governing; no partial apply).
- *  - R2 relaxation is the NARROWEST one: tunable-class edits are
- *    additionally allowed when freshness='stale' (the first auto-applied
- *    edit flips freshness to stale, so the old rule would block every
- *    consecutive tweak); 'unknown' still fails closed; base-hash
- *    divergence still stales for EVERY class (CAS semantics untouched).
+ *  - ⭐ SUPERSEDED BY RULING A4 (2026-08-05), recorded rather than deleted so
+ *    the sequence stays readable: the R2 relaxation WAS the narrowest one
+ *    (tunable-class only). A4 found the D-S rationale class-independent and
+ *    generalised it, so the freshness rung now trusts 'stale' for EVERY class
+ *    and no longer sees the class at all. What survives A4 verbatim:
+ *    'unknown' never auto-applies (it is now a HOLD, FRESHNESS_UNRESOLVED),
+ *    and base-hash divergence still stales for EVERY class (CAS untouched).
  *  - R6 non-downgrade still governs: a tunable that reduces EP2 readiness
  *    is held READINESS_DOWNGRADE, never auto-applied.
  *  - A tunable whose candidate fails GraphV3 validation is rejected
@@ -32,7 +34,7 @@ import {
   buildUpdateNodeFieldCandidate,
 } from '../candidate-graph.js';
 import {
-  ANALYSIS_NOT_FRESH,
+  FRESHNESS_UNRESOLVED,
   BASE_HASH_DIVERGED,
   CANDIDATE_BUILD_FAILED,
   GRAPH_INVARIANT_VIOLATED,
@@ -132,35 +134,42 @@ describe('D-S doctrine boundary — STRUCTURAL still holds; MIXED batches hold w
   });
 });
 
-describe('D-S R2 relaxation — consecutive tunable tweaks on a stale frame', () => {
-  it('frame gate: tunable + freshness=stale + matching hash → proceed', () => {
-    const r = evaluateFrameGate(H, frameFor(G, 'stale'), 'tunable');
+/**
+ * ⭐⭐ GENERALISED BY RULING A4 (Paul, 2026-08-05).
+ *
+ * The D-S relaxation was, in its own commit message, the "NARROWEST R2
+ * relaxation" — not the only safe one. A4 read that argument back and found it
+ * class-INDEPENDENT: the base-hash rung proves candidate currency for every
+ * class, and staleness is a property of the ANALYSIS for every class. So the
+ * tunable-only carve-out is now the rule, and the class no longer reaches the
+ * gate at all.
+ *
+ * The pins below therefore flip from "the relaxation is tunable-only" to "the
+ * trust set is class-independent". WHAT DOES NOT FLIP, and is asserted harder
+ * here than before: base-hash divergence still stales for every class, and
+ * `'unknown'` still refuses to auto-apply — it is now a HOLD (the honest ask)
+ * rather than a `stale` refusal carrying copy that contradicted its own
+ * `base_hash_match` field.
+ */
+describe('A4 — the freshness rung is class-independent (generalising the D-S relaxation)', () => {
+  it('frame gate: freshness=stale + matching hash → proceed (was: tunable-only)', () => {
+    const r = evaluateFrameGate(H, frameFor(G, 'stale'));
     expect(r.outcome.kind).toBe('proceed');
     expect(r.baseHashMatch).toBe(true);
   });
 
-  it('frame gate: tunable + freshness=unknown → stale (still fails closed)', () => {
-    const r = evaluateFrameGate(H, frameFor(G, 'unknown'), 'tunable');
-    expect(r.outcome).toEqual({ kind: 'stale', reason: 'freshness_not_fresh' });
+  it('frame gate: freshness=unknown → freshness_unresolved (authority unresolved → HOLD, never stale)', () => {
+    const r = evaluateFrameGate(H, frameFor(G, 'unknown'));
+    expect(r.outcome).toEqual({ kind: 'freshness_unresolved' });
   });
 
-  it('frame gate: structural + freshness=stale → stale (relaxation is tunable-only)', () => {
-    const r = evaluateFrameGate(H, frameFor(G, 'stale'), 'structural');
-    expect(r.outcome).toEqual({ kind: 'stale', reason: 'freshness_not_fresh' });
-  });
-
-  it('frame gate: no class given + freshness=stale → stale (default posture unchanged)', () => {
-    const r = evaluateFrameGate(H, frameFor(G, 'stale'));
-    expect(r.outcome).toEqual({ kind: 'stale', reason: 'freshness_not_fresh' });
-  });
-
-  it('frame gate: tunable + DIVERGED hash → stale BASE_HASH_DIVERGED even when freshness would pass (CAS semantics untouched)', () => {
-    const r = evaluateFrameGate('some-other-hash', frameFor(G, 'stale'), 'tunable');
+  it('frame gate: DIVERGED hash → stale BASE_HASH_DIVERGED even when freshness would pass (CAS semantics UNTOUCHED)', () => {
+    const r = evaluateFrameGate('some-other-hash', frameFor(G, 'stale'));
     expect(r.outcome).toEqual({ kind: 'stale', reason: 'base_hash_diverged' });
     expect(r.baseHashMatch).toBe(false);
   });
 
-  it('referee: tunable update on a stale frame (hash matching) → would_apply (the consecutive-tweak case)', () => {
+  it('referee: tunable update on a stale frame (hash matching) → would_apply (the consecutive-tweak case, unchanged)', () => {
     const raw = makeEnvelope('update_edge_field', SAMPLE_PAYLOADS.update_edge_field, {
       base_graph_hash: H,
     });
@@ -168,20 +177,20 @@ describe('D-S R2 relaxation — consecutive tunable tweaks on a stale frame', ()
     expect(v.verdict).toBe('would_apply');
   });
 
-  it('referee: tunable update on an UNKNOWN-freshness frame → stale ANALYSIS_NOT_FRESH (still blocked)', () => {
+  it('referee: tunable update on an UNKNOWN-freshness frame → held FRESHNESS_UNRESOLVED (still never auto-applies)', () => {
     const raw = makeEnvelope('update_node_field', SAMPLE_PAYLOADS.update_node_field, {
       base_graph_hash: H,
     });
     const v = refereeMutation(raw, G, frameFor(G, 'unknown'));
-    expect(v.verdict).toBe('stale');
-    expect(v.blocker?.code).toBe(ANALYSIS_NOT_FRESH);
+    expect(v.verdict).toBe('held');
+    expect(v.blocker?.code).toBe(FRESHNESS_UNRESOLVED);
   });
 
-  it('referee: structural mutation on a stale frame → stale (structural posture unchanged by the relaxation)', () => {
+  it('referee: structural mutation on a stale frame → held STRUCTURAL_APPLY_HELD (A4: the dead end becomes a consent ask)', () => {
     const raw = makeEnvelope('add_node', SAMPLE_PAYLOADS.add_node, { base_graph_hash: H });
     const v = refereeMutation(raw, G, frameFor(G, 'stale'));
-    expect(v.verdict).toBe('stale');
-    expect(v.blocker?.code).toBe(ANALYSIS_NOT_FRESH);
+    expect(v.verdict).toBe('held');
+    expect(v.blocker?.code).toBe(STRUCTURAL_APPLY_HELD);
   });
 
   it('referee: tunable with a diverged base hash → stale BASE_HASH_DIVERGED (stale-write behaviour unchanged)', () => {

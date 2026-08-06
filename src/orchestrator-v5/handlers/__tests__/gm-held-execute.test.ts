@@ -12,8 +12,11 @@
  *  - `executeGmHeldResume`: the full propose→hold→confirm→apply loop over
  *    a gate-emitted pending applies the batch, preserves rich top-level
  *    graph fields, and emits an `edit_graph` receipt fact (DL-7);
- *  - a "yes" can never override integrity: rejected / stale re-referee
- *    verdicts decline (`referee_blocked`), nothing returned to persist;
+ *  - a "yes" can never override INTEGRITY: a rejected re-referee verdict
+ *    declines (`referee_blocked`), nothing returned to persist. ⭐ RULING A4
+ *    (2026-08-05) removed FRESHNESS from that list — a stale or unresolvable
+ *    analysis is a property of the RESULTS and must never discard consent the
+ *    user has already given (design §2.3);
  *  - applied receipt copy survives the forbidden-phrase guard (it IS a
  *    success claim — sanctioned because it ships only post-commit).
  */
@@ -429,16 +432,27 @@ describe('executeGmHeldResume', () => {
     expect(outcome).toEqual({ status: 'referee_blocked', governing: 'rejected' });
   });
 
-  it('a "yes" never overrides staleness: STRUCTURAL batch + freshness=stale re-referees stale → referee_blocked', () => {
-    // (op switched tunable → structural per D-S: the R2 relaxation makes a
-    // stale-freshness TUNABLE legitimately executable — it would not even
-    // hold at dispatch — so the staleness override pin belongs to the
-    // structural class. The unknown-freshness pin below still covers
-    // tunables: 'unknown' fails closed for every class.)
+  /**
+   * ⭐⭐ FLIPPED by RULING A4, and this pin was recording a LIVE DEFECT, not a
+   * doctrine (design §2.3 — the asymmetry the ruling itself did not anticipate).
+   *
+   * The batch reaching here has ALREADY been consented to: the user was asked,
+   * said yes, and the caller has verified the pin equals the current hash. The
+   * old behaviour silently declined that consent whenever the resume turn's
+   * freshness read `stale` — which it does after any intervening tunable edit,
+   * a state `threadHoldsThroughMutatingCommit` deliberately BUILDS by re-pinning
+   * the hold through the mutation. The HOLD-WIPE fix bypassed the freshness rung
+   * to save the hold; this path re-imposed it one layer down and threw the
+   * consent away, logging `gm_held_execute_referee_blocked`.
+   *
+   * A "yes" still never overrides INTEGRITY — the rejected-op pin above is
+   * unchanged and is the assertion that carries that guarantee.
+   */
+  it('⭐ A4: a CONFIRMED structural batch executes on a stale-freshness resume turn (was: silently declined)', () => {
     const outcome = executeGmHeldResume(
       executeInput({ operations: [STRUCT_OP] as never, freshness: 'stale' }),
     );
-    expect(outcome).toEqual({ status: 'referee_blocked', governing: 'stale' });
+    expect(outcome.status).toBe('executed');
   });
 
   it('D-S: a confirmed TUNABLE on a stale-freshness frame executes (R2 relaxation applies at confirm-time re-referee too)', () => {
@@ -446,9 +460,17 @@ describe('executeGmHeldResume', () => {
     expect(outcome.status).toBe('executed');
   });
 
-  it('unknown freshness fails closed (frame gate → stale → declined)', () => {
+  /**
+   * FLIPPED by RULING A4's carve-out. `'unknown'` now governs `held`, and the
+   * resume's acceptance set — unchanged, and deliberately so — executes a
+   * `held` governing verdict, because the user's consent is what the hold was
+   * FOR. Declining a consented batch because we cannot tell whether the
+   * analysis is current is the same defect as declining it because the analysis
+   * is stale; both discard consent over a property of the RESULTS.
+   */
+  it("⭐ A4 carve-out: 'unknown' freshness at confirm HOLDS and therefore executes (was: declined)", () => {
     const outcome = executeGmHeldResume(executeInput({ freshness: 'unknown' }));
-    expect(outcome).toEqual({ status: 'referee_blocked', governing: 'stale' });
+    expect(outcome.status).toBe('executed');
   });
 
   it('re-referee telemetry is attributed to the resume path (dispatch_path=gm_held_resume, registered names only)', () => {

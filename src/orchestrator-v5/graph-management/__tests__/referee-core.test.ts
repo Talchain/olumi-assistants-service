@@ -13,7 +13,7 @@ import {
   FRAME_UNAVAILABLE,
   CURRENT_GRAPH_UNREADABLE,
   BASE_HASH_DIVERGED,
-  ANALYSIS_NOT_FRESH,
+  FRESHNESS_UNRESOLVED,
   BATCH_CAP_EXCEEDED,
   ENTITY_NOT_FOUND,
   ENTITY_ID_COLLISION,
@@ -68,9 +68,20 @@ describe('R2 — frame / stale gate', () => {
     expect(v.blocker?.code).toBe(BASE_HASH_DIVERGED);
   });
 
-  it('freshness unknown → stale (fail-closed) even when the hash matches', () => {
+  /**
+   * FLIPPED by RULING A4 (Paul, 2026-08-05) from `stale`. `'unknown'` is the
+   * freshness AUTHORITY being unresolved, not the analysis being out of date;
+   * the ladder holds every other unresolved-authority state (FRAME_UNAVAILABLE,
+   * CURRENT_GRAPH_UNREADABLE) and this one now joins them. Note the direction:
+   * a hold ASKS the user, where `stale` refused them — and refused them with
+   * copy that said "the model has moved" while `base_hash_match` was true in
+   * the same payload.
+   */
+  it('freshness unknown → HELD FRESHNESS_UNRESOLVED when the hash matches (A4: authority unresolved, not staleness)', () => {
     const v = refereeMutation(envFor('rename_node'), G, frameFor(G, 'unknown'));
-    expect(v.verdict).toBe('stale');
+    expect(v.verdict).toBe('held');
+    expect(v.blocker?.code).toBe(FRESHNESS_UNRESOLVED);
+    expect(v.base_hash_match).toBe(true);
   });
 
   it('freshness STALE + tunable (rename) → would_apply (D-S R2 relaxation — consecutive tunable tweaks; ROADMAP §D, Paul 2026-07-12)', () => {
@@ -84,11 +95,19 @@ describe('R2 — frame / stale gate', () => {
     expect(v.verdict).toBe('would_apply');
   });
 
-  it('freshness STALE + STRUCTURAL → stale ANALYSIS_NOT_FRESH (fail-closed posture unchanged outside the D-S tunable relaxation)', () => {
+  /**
+   * FLIPPED by RULING A4 from `stale ANALYSIS_NOT_FRESH`. This pin recorded the
+   * dead end the ruling exists to kill: a structural edit on a scenario that
+   * has been analysed once was refused, because applying ANY edit flips
+   * freshness to `stale` by construction. The base-hash rung above still proves
+   * the candidate was generated against the current graph — which is the only
+   * currency an edit needs — so the verdict is the propose-confirm HOLD the
+   * structural class has always had. Nothing auto-applies that did not before.
+   */
+  it('freshness STALE + STRUCTURAL → held STRUCTURAL_APPLY_HELD (A4: staleness is a property of the RESULTS, not a lock on the graph)', () => {
     const v = refereeMutation(envFor('add_node'), G, frameFor(G, 'stale'));
-    expect(v.verdict).toBe('stale');
-    // No-silent-outcome: the freshness-driven stale carries a machine-readable code.
-    expect(v.blocker?.code).toBe(ANALYSIS_NOT_FRESH);
+    expect(v.verdict).toBe('held');
+    expect(v.blocker?.code).toBe(STRUCTURAL_APPLY_HELD);
   });
 
   it('freshness NONE (pre-analysis) → would_apply for a hash-matching rename (legitimate pre-analysis edit)', () => {

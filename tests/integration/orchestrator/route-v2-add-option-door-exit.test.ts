@@ -205,20 +205,50 @@ describe('route-v2 — add-option intent-chip door + exit_path (R2)', () => {
     emitSpy = vi.spyOn(telemetry, 'emit');
   });
 
-  it('(a) a STALE-baseline add_option chip reaches TurnExecutor, NOT the LLM edit lane', async () => {
+  /**
+   * ⭐⭐ FLIPPED BY RULING A4 (Paul, 2026-08-05) — AND THE ARM IT EXERCISED IS
+   * NOW UNREACHABLE FROM THIS INPUT, WHICH IS SAID RATHER THAN PAPERED OVER.
+   *
+   * The executor door (#658) exists to keep ONE case away from the 13.6s LLM
+   * edit lane: a typed add_option chip whose deterministic transaction declined
+   * `not_held` because the frame was stale. A4 removed that decline — a stale
+   * analysis is a property of the RESULTS and never a reason to refuse a
+   * structural add — so the chip now HOLDS and the user gets the real confirm
+   * chip on a zero-LLM turn. Strictly better than either branch of the old
+   * fork: no edit lane, no executor, no LLM call at all.
+   *
+   * ⚠ WHAT THIS MEANS FOR THE DOOR, stated precisely because it is a narrowing
+   * and not a removal — DERIVED at the bytes, not inferred from this test:
+   * `dispatchAddOptionTransaction` pins `baseGraphHash: input.currentGraphHash`
+   * (add-option-dispatch.ts), so the base-hash rung can never diverge on this
+   * path; `add_option` is held-by-design in every referee branch except
+   * `GRAPH_INVARIANT_VIOLATED` (referee.ts R7); and after A4 no freshness value
+   * yields a non-held governing. So `not_held` here now means exactly ONE
+   * thing: an integrity REJECT. The door's routing for that case is unchanged
+   * by A4 (it behaved identically before), and the two F1 tests below still pin
+   * that only `not_held` takes it. Whether an integrity reject belongs at the
+   * executor rather than the edit lane is a separate question, deliberately not
+   * answered in this diff.
+   */
+  it('(a) ⭐ A4: a STALE-baseline add_option chip HOLDS — no edit lane, no executor, no LLM call', async () => {
     // Diverged baseline: a prior run_analysis fact whose graph hash != current.
     storeHolder.turns = [STALE_PRIOR_TURN];
     storeHolder.facts = [STALE_RUN_ANALYSIS_FACT];
 
-    const { status } = await post(app, addOptionPayload(VALID_PARAMS));
+    const { status, body } = await post(app, addOptionPayload(VALID_PARAMS));
     expect(status).toBe(200);
 
-    // The deterministic transaction declined on stale (structural fail-closed).
-    expect(addOptionEvents(emitSpy).some((e) => String(e.outcome).startsWith('fell_through'))).toBe(true);
-    // The declined chip did NOT go to the 13.6s LLM edit lane…
+    // The deterministic transaction HELD (identity: the exact telemetry
+    // outcome, not "some add_option event fired").
+    const outcomes = addOptionEvents(emitSpy).map((e) => String(e.outcome));
+    expect(outcomes).toContain('held');
+    expect(outcomes.some((o) => o.startsWith('fell_through'))).toBe(false);
+    // Neither fallback ran: the turn resolved deterministically.
     expect(dispatchEditGraphMock).not.toHaveBeenCalled();
-    // …it reached TurnExecutor instead (the door widening's whole point).
-    expect(runTurnExecutorMock).toHaveBeenCalled();
+    expect(runTurnExecutorMock).not.toHaveBeenCalled();
+    // The user is left with a real confirm affordance, not a refusal.
+    const blocks = (body.blocks ?? []) as Array<{ type?: string }>;
+    expect(blocks.some((b) => b.type === 'held_proposal')).toBe(true);
   });
 
   // ── egress-F1 (2026-07-24): the door exclusion is NARROWED to `not_held`. The

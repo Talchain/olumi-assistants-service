@@ -32,7 +32,30 @@ export const BATCH_CAP_EXCEEDED = 'BATCH_CAP_EXCEEDED' as const;
 // --- R2 frame / stale gate (frame-provided authority; never re-derived) -------
 export const FRAME_UNAVAILABLE = 'FRAME_UNAVAILABLE' as const;
 export const BASE_HASH_DIVERGED = 'BASE_HASH_DIVERGED' as const;
+/**
+ * RETIRED as a referee outcome by RULING A4 (Paul, 2026-08-05: staleness is a
+ * property of the RESULTS, never a lock on the GRAPH) but kept REGISTERED —
+ * historical `pending_actions` rows and the ratified `held_proposal` wire enum
+ * still carry it, exactly as `TUNABLE_APPLY_HELD` is kept below. NO production
+ * path emits it: the freshness rung can no longer produce a `stale` outcome
+ * (the narrowed `FrameGateOutcome['reason']` literal enforces that at the type
+ * level; `staleness-editability-a4.test.ts` R9 enforces it at runtime).
+ */
 export const ANALYSIS_NOT_FRESH = 'ANALYSIS_NOT_FRESH' as const;
+/**
+ * RULING A4's carve-out. The freshness AUTHORITY could not be resolved
+ * (`deriveAnalysisFreshness` returned `'unknown'` — a legacy fact with no
+ * `graph_hash_at_run`, or a failed derivation). That is a statement about the
+ * SYSTEM'S KNOWLEDGE, not about the analysis being out of date, and it belongs
+ * with `FRAME_UNAVAILABLE` / `CURRENT_GRAPH_UNREADABLE` — the other two
+ * "we cannot establish authority" rungs, both of which HOLD for confirmation
+ * rather than refusing. It is deliberately OUTSIDE `SURFACEABLE_REASON_CODES`
+ * (compose/held-proposal.ts) and outside the ratified `HeldProposalReasonCode`
+ * wire enum, so the held_proposal CARD fails closed to null while the ask, the
+ * confirm chip and `publicReason.blocker_code` still carry the hold — the
+ * already-shipped posture for `GRAPH_OPTIONS_MALFORMED` / `READINESS_DOWNGRADE`.
+ */
+export const FRESHNESS_UNRESOLVED = 'FRESHNESS_UNRESOLVED' as const;
 export const CURRENT_GRAPH_UNREADABLE = 'CURRENT_GRAPH_UNREADABLE' as const;
 
 // --- R3 referential integrity -------------------------------------------------
@@ -98,6 +121,7 @@ export const MUTATION_REASON_CODES = Object.freeze([
   FRAME_UNAVAILABLE,
   BASE_HASH_DIVERGED,
   ANALYSIS_NOT_FRESH,
+  FRESHNESS_UNRESOLVED,
   CURRENT_GRAPH_UNREADABLE,
   ENTITY_NOT_FOUND,
   ENTITY_ID_COLLISION,
