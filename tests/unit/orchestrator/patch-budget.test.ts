@@ -227,3 +227,78 @@ describe('stripNoOps', () => {
     expect(stripped).toHaveLength(1);
   });
 });
+
+/**
+ * ⭐⭐ ROADMAP 2.655 — `breachedDimensions`, AND WHY `breachedLimit` COULD NOT
+ * DO THE JOB.
+ *
+ * The walk's refusal quoted BOTH caps when only the node budget had breached,
+ * so the fix needed the enforcer to say WHICH dimension was the problem. The
+ * obvious field to read was `breachedLimit` — and reading it at the bytes
+ * shows it cannot answer this question:
+ *
+ *   · a plain edge-only breach (no option addition) leaves it `null`, because
+ *     only the option-addition branch ever assigns an edge value;
+ *   · when node AND edge both breach under an option addition, the edge bucket
+ *     is assigned first and the `!nodeAllowed` clause is skipped, so the node
+ *     breach disappears from the report.
+ *
+ * `breachedDimensions` is derived from the two allow/deny verdicts themselves,
+ * so it cannot disagree with what was enforced. The cases below are written as
+ * a DISCRIMINATING SET: each asserts the new field AND, where they differ,
+ * records what `breachedLimit` says, so the correction is executed rather than
+ * described. `breachedLimit` is deliberately unchanged for its existing
+ * readers.
+ */
+describe('checkPatchBudget — breachedDimensions (ROADMAP 2.655)', () => {
+  const nodeOp = (i: number): PatchOperation => ({
+    op: 'add_node',
+    path: `n${i}`,
+    value: { id: `n${i}`, kind: 'factor', label: `N${i}` },
+  });
+  const edgeOp = (i: number): PatchOperation => ({
+    op: 'add_edge',
+    path: `e${i}::goal`,
+    value: { from: `e${i}`, to: 'goal' },
+  });
+
+  it('within budget: no dimension is reported', () => {
+    const r = checkPatchBudget([nodeOp(1), edgeOp(1)]);
+    expect(r.allowed).toBe(true);
+    expect(r.breachedDimensions).toEqual([]);
+  });
+
+  it("⭐ THE WALK'S SHAPE — 6 node ops, 6 edge ops: node only, and NOT edge", () => {
+    const ops = [1, 2, 3, 4, 5, 6].flatMap((i) => [nodeOp(i), edgeOp(i)]);
+    const r = checkPatchBudget(ops);
+    expect(r.allowed).toBe(false);
+    expect(r.nodeOps).toBe(6);
+    expect(r.edgeOps).toBe(6);
+    // The user was told about an edge limit that had not been breached.
+    expect(r.breachedDimensions).toEqual(['node']);
+  });
+
+  it('⭐ edge-only breach with no option addition: reported, where `breachedLimit` is silent', () => {
+    const ops = [nodeOp(1), ...Array.from({ length: 9 }, (_, i) => edgeOp(i))];
+    const r = checkPatchBudget(ops);
+    expect(r.allowed).toBe(false);
+    expect(r.breachedDimensions).toEqual(['edge']);
+    // The measured gap this field exists to close, executed rather than
+    // asserted in prose: the older field reports nothing here.
+    expect(r.breachedLimit ?? null).toBeNull();
+  });
+
+  it('⭐ both breached: BOTH reported, where `breachedLimit` can only name one', () => {
+    const ops = [
+      // An option addition, so the bucketed edge branch is the one that runs.
+      { op: 'add_node', path: 'opt_a', value: { id: 'opt_a', kind: 'option', label: 'A' } },
+      ...Array.from({ length: 5 }, (_, i) => nodeOp(i)),
+      ...Array.from({ length: 9 }, (_, i) => edgeOp(i)),
+    ] as PatchOperation[];
+    const r = checkPatchBudget(ops);
+    expect(r.allowed).toBe(false);
+    expect(r.breachedDimensions).toEqual(['node', 'edge']);
+    // The older field names the edge bucket and drops the node breach.
+    expect(r.breachedLimit).not.toBe('node');
+  });
+});
