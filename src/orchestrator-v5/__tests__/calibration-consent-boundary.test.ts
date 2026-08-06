@@ -638,6 +638,65 @@ describe('2.627 — a probability-of-threshold utterance offers no point value',
     expect(response.assistant_text).toContain('?');
   });
 
+  /**
+   * ⭐⭐ THE SECOND ENTRY POINT, and the mutation kit is the only reason it is
+   * here.
+   *
+   * `M8_preroute_mints_own_chip` (restoring the locally-minted chip at the
+   * CALIBRATION PRE-ROUTE) SURVIVED the whole suite. Not because the pre-route
+   * is safe — because nothing drove it with a `probability_of_threshold`
+   * message. Every threshold case above carries a consent clause and is
+   * answered by the STEP 2 gate; every pre-route case above is
+   * `probability_only`, where a chip is correct. So the pre-route's threshold
+   * branch was UNOBSERVED, and an unobserved guard is indistinguishable from
+   * an absent one (CLAUDE.md trap 13b — a guard agreeing with itself because
+   * it only looks where nothing is hidden).
+   *
+   * This message reaches the pre-route: it names the factor by its FULL label
+   * (so `resolveFactorLabelForConsentPreview` resolves it — the captured
+   * prompt says "monthly churn", which does not match "Monthly Churn Rate"
+   * and is why that prompt never took this path), carries an edit verb, a
+   * threshold and a probability phrase — and NO consent clause, so the
+   * withheld-consent gate is not what is being tested here.
+   */
+  const PROMPT_PREROUTE_THRESHOLD =
+    'Set Monthly Churn Rate on the basis that staying below 3% is pretty likely.';
+
+  it('⭐ THE PRE-ROUTE TOO — a threshold utterance with NO consent clause is answered without an LLM, offers no value, and writes nothing', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+
+    const { response } = await runTurnExecutor(
+      payload(PROMPT_PREROUTE_THRESHOLD),
+      'req-2627-preroute',
+      { routingAdapter, graphState: buildChurnGraph() },
+    );
+
+    // Proves the PRE-ROUTE served this turn, not the STEP 2 gate: the gate
+    // sits downstream of routing, and routing here would throw.
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.suggested_actions ?? []).toHaveLength(0);
+    expect(response.assistant_text).not.toMatch(/set .{0,60}to 70%/i);
+    expect(response.assistant_text).not.toMatch(/set .{0,60}to 3%/i);
+  });
+
+  it('POSITIVE CONTROL for the pre-route (trap 13b) — the SAME route with a `probability_only` message DOES offer a chip, so the emptiness above is a decision, not a dead path', async () => {
+    const routingAdapter = throwingRoutingAdapter();
+
+    const { response } = await runTurnExecutor(
+      payload('Set Monthly Churn Rate to pretty likely.'),
+      'req-2627-preroute-control',
+      { routingAdapter, graphState: buildChurnGraph() },
+    );
+
+    expect(routingAdapter.chatWithTools).not.toHaveBeenCalled();
+    const actions = response.suggested_actions ?? [];
+    expect(actions).toHaveLength(1);
+    expect((actions[0] as { id?: string }).id).toBe('chip_prompt_calibration_confirm');
+    expect((actions[0] as { message?: string }).message).toBe('Set Monthly Churn Rate to 70%.');
+  });
+
   it('DISCRIMINATING PAIR (trap 19) — the sibling `probability_only` classification is UNTOUCHED and still offers 70%', async () => {
     // If the fix were a blanket "never offer a calibration value" it would
     // pass every assertion above and silently destroy the working half. This
