@@ -456,7 +456,15 @@ export function buildPredictionBlock(ctx: BlockBuilderContext): BlockBuilderResu
   // M1: Generate headline based on inference or graph structure
   if (inference?.ranked_actions && inference.ranked_actions.length > 0) {
     const topAction = inference.ranked_actions[0];
-    headline = `"${topAction.label}" appears to be the strongest option.`;
+    // ROADMAP 2.725 — no-verdict doctrine. This headline read
+    // `"{label}" appears to be the strongest option.` and was a MEASURED
+    // evasion of the DOCTRINE_FATAL superlative set: `strongest` was absent
+    // from pattern 1's alternation while `best|better|optimal|…` were all
+    // present, so the crowning passed a guard that existed to stop it.
+    // 2.725 rewrites the copy AND closes the alternation. Language-only: the
+    // ranked-actions ordering and the expected-utility explanation are
+    // unchanged (ordering is analysis, not verdict).
+    headline = `"${topAction.label}" currently leads.`;
     explanation = inference.summary || `Based on the current model, ${topAction.label} has the highest expected utility.`;
   } else {
     const goals = getNodesByKind(graph, "goal");
@@ -464,7 +472,7 @@ export function buildPredictionBlock(ctx: BlockBuilderContext): BlockBuilderResu
 
     if (goals.length > 0 && options.length > 0) {
       headline = `${options.length} options identified for achieving ${goals[0].label || "your goal"}.`;
-      explanation = "Run inference to determine which option best achieves your goals.";
+      explanation = "Run inference to compare how each option performs against your goals.";
     } else if (goals.length === 0) {
       headline = "No clear goal identified in the model.";
       explanation = "Add a goal node to enable meaningful analysis.";

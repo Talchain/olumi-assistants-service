@@ -107,7 +107,16 @@ function detectFactorType(label: string): {
 // =============================================================================
 
 /**
- * Generate the headline from recommendation stability and recommended option
+ * Generate the headline from recommendation stability and the leading option.
+ *
+ * ROADMAP 2.725 — no-verdict doctrine. This headline used to read
+ * "{pct}% confident that {label} remains your best option" / "{pct}% confidence
+ * in the current recommendation": a system verdict on a route the V5 egress
+ * guard never scanned. The rewrite is LANGUAGE-ONLY — the stability percentage
+ * and the option label both survive; only the crowning goes.
+ *
+ * `recommendation_stability` / `recommended_option` are PLoT wire field names
+ * (schema-owned) and are deliberately unchanged.
  */
 function generateHeadline(data: PLoTRobustnessDataT): string | undefined {
   if (data.recommendation_stability === undefined) {
@@ -117,10 +126,10 @@ function generateHeadline(data: PLoTRobustnessDataT): string | undefined {
   const stabilityPct = Math.round(data.recommendation_stability * 100);
 
   if (data.recommended_option?.label) {
-    return `${stabilityPct}% confident that ${data.recommended_option.label} remains your best option`;
+    return `${data.recommended_option.label} stays in front in ${stabilityPct}% of tested scenarios`;
   }
 
-  return `${stabilityPct}% confidence in the current recommendation`;
+  return `The ranking holds in ${stabilityPct}% of tested scenarios`;
 }
 
 // =============================================================================

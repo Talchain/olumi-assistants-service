@@ -220,12 +220,19 @@ function generateNarratives(input: CEEIslSynthesisInputT): Narratives {
       ? ` across ${top.scenarios_dominant ?? "most"} of ${top.scenarios_tested} tested scenarios`
       : "";
 
+    // ROADMAP 2.725 — no-verdict doctrine. These three branches read "The
+    // recommendation to X is highly robust… The optimal choice remains
+    // stable…" — the advisory register on a route the V5 egress guard never
+    // scanned. Language-only rewrite: the robustness score, the scenario
+    // counts and the option label all survive; "the recommendation" becomes
+    // "the leading option" and "the optimal choice" becomes "the ranking".
+    // `recommendation_label` is the wire field name (schema-owned), unchanged.
     if (top.robustness_score >= 0.8) {
-      narratives.robustness_narrative = `The recommendation${top.recommendation_label ? ` to ${top.recommendation_label}` : ""} is highly robust with a ${scorePercent}% confidence score${scenarioText}. The optimal choice remains stable even with significant parameter variations.`;
+      narratives.robustness_narrative = `The leading option${top.recommendation_label ? ` (${top.recommendation_label})` : ""} is highly robust with a ${scorePercent}% confidence score${scenarioText}. The ranking remains stable even with significant parameter variations.`;
     } else if (top.robustness_score >= 0.5) {
-      narratives.robustness_narrative = `The recommendation${top.recommendation_label ? ` to ${top.recommendation_label}` : ""} has moderate robustness (${scorePercent}%)${scenarioText}. While it performs well in most scenarios, some parameter combinations could shift the optimal choice.`;
+      narratives.robustness_narrative = `The leading option${top.recommendation_label ? ` (${top.recommendation_label})` : ""} has moderate robustness (${scorePercent}%)${scenarioText}. While it performs well in most scenarios, some parameter combinations could shift the ranking.`;
     } else {
-      narratives.robustness_narrative = `The recommendation${top.recommendation_label ? ` to ${top.recommendation_label}` : ""} shows limited robustness (${scorePercent}%)${scenarioText}. The optimal choice is sensitive to parameter variations - consider gathering more information before committing.`;
+      narratives.robustness_narrative = `The leading option${top.recommendation_label ? ` (${top.recommendation_label})` : ""} shows limited robustness (${scorePercent}%)${scenarioText}. The ranking is sensitive to parameter variations - consider gathering more information before committing.`;
     }
   }
 
@@ -272,7 +279,9 @@ function generateNarratives(input: CEEIslSynthesisInputT): Narratives {
       ? ` from ${tip.optimal_before} to ${tip.optimal_after}`
       : "";
 
-    narratives.tipping_narrative = `Critical threshold detected: if ${label} exceeds ${tip.threshold_value.toFixed(2)}, the optimal choice shifts${optionShift}.${proximityText} ${input.tipping_points.length > 1 ? `${input.tipping_points.length - 1} additional tipping points identified.` : ""}`;
+    // ROADMAP 2.725 — "the optimal choice shifts" → "the leading option
+    // changes". The from/to labels and every number are unchanged.
+    narratives.tipping_narrative = `Critical threshold detected: if ${label} exceeds ${tip.threshold_value.toFixed(2)}, the leading option changes${optionShift}.${proximityText} ${input.tipping_points.length > 1 ? `${input.tipping_points.length - 1} additional tipping points identified.` : ""}`;
   }
 
   // Executive summary
@@ -289,7 +298,11 @@ function generateExecutiveSummary(input: CEEIslSynthesisInputT, _narratives: Nar
     parts.push(`Goal: ${input.goal_label}.`);
   }
   if (input.recommendation_label) {
-    parts.push(`Recommended action: ${input.recommendation_label}.`);
+    // ROADMAP 2.725 — "Recommended action: X." was a system verdict the
+    // 2026-08-06 audit missed (it enumerated the three robustness branches and
+    // the tipping branch, not the executive summary). Language-only: the label
+    // survives verbatim.
+    parts.push(`Leading option: ${input.recommendation_label}.`);
   }
 
   // Key findings
