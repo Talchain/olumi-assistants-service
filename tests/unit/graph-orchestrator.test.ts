@@ -103,6 +103,27 @@ function createGraphWithSignMismatch(): GraphT {
 
 const idsOf = (g: any): string[] => (g?.nodes ?? []).map((n: any) => n.id).sort();
 
+/**
+ * Await a call that MUST reject with GraphValidationError, and return it
+ * typed. Fails loudly if the promise resolves — a plain `.catch(e => e)`
+ * would hand back the success result and let the assertions run against the
+ * wrong object.
+ */
+async function rejectsWithValidationError(
+  p: Promise<unknown>,
+): Promise<GraphValidationError> {
+  let result: unknown;
+  try {
+    result = await p;
+  } catch (e) {
+    expect(e).toBeInstanceOf(GraphValidationError);
+    return e as GraphValidationError;
+  }
+  throw new Error(
+    `expected validateAndRepairGraph to reject with GraphValidationError, but it resolved: ${JSON.stringify(result)?.slice(0, 200)}`,
+  );
+}
+
 // =============================================================================
 // validateAndRepairGraph — the surviving deterministic entry point
 // =============================================================================
@@ -150,13 +171,14 @@ describe("validateAndRepairGraph", () => {
     });
 
     it("carries the validator's own MISSING_GOAL code on the thrown error", async () => {
-      const error = await validateAndRepairGraph({
-        graph: createInvalidGraphMissingGoal(),
-        brief: "Test decision",
-        requestId: "test-codes",
-      }).catch((e) => e as GraphValidationError);
+      const error = await rejectsWithValidationError(
+        validateAndRepairGraph({
+          graph: createInvalidGraphMissingGoal(),
+          brief: "Test decision",
+          requestId: "test-codes",
+        }),
+      );
 
-      expect(error).toBeInstanceOf(GraphValidationError);
       expect(error.errors.map((e) => e.code)).toContain("MISSING_GOAL");
       expect(error.attempts).toBe(1);
     });
@@ -171,13 +193,14 @@ describe("validateAndRepairGraph", () => {
     it("2.740a: GraphValidationError.lastGraph is a deterministic derivative of the INPUT", async () => {
       const input = createInvalidGraphMissingGoal();
 
-      const error = await validateAndRepairGraph({
-        graph: input,
-        brief: "Test decision",
-        requestId: "test-lastgraph",
-      }).catch((e) => e as GraphValidationError);
+      const error = await rejectsWithValidationError(
+        validateAndRepairGraph({
+          graph: input,
+          brief: "Test decision",
+          requestId: "test-lastgraph",
+        }),
+      );
 
-      expect(error).toBeInstanceOf(GraphValidationError);
       expect(error.lastGraph).toBeDefined();
       expect(idsOf(error.lastGraph)).toEqual(idsOf(input));
     });
@@ -200,13 +223,14 @@ describe("validateAndRepairGraph", () => {
     });
 
     it("catches an empty node id via Zod, before any deterministic phase runs", async () => {
-      const error = await validateAndRepairGraph({
-        graph: createZodInvalidGraph(),
-        brief: "Test",
-        requestId: "test-zod-empty-id",
-      }).catch((e) => e as GraphValidationError);
+      const error = await rejectsWithValidationError(
+        validateAndRepairGraph({
+          graph: createZodInvalidGraph(),
+          brief: "Test",
+          requestId: "test-zod-empty-id",
+        }),
+      );
 
-      expect(error).toBeInstanceOf(GraphValidationError);
       expect(error.errors.length).toBeGreaterThan(0);
       // Zod failed before Phase 1.5, so nothing was normalised and there is
       // no graph to carry forward.
@@ -218,13 +242,14 @@ describe("validateAndRepairGraph", () => {
     // Re-routed from the deleted generateGraph suite: this is the only
     // coverage of the Phase-4 (post-normalisation) failure path.
     it("rejects a sign mismatch between effect_direction and strength_mean", async () => {
-      const error = await validateAndRepairGraph({
-        graph: createGraphWithSignMismatch(),
-        brief: "Test sign mismatch",
-        requestId: "test-sign",
-      }).catch((e) => e as GraphValidationError);
+      const error = await rejectsWithValidationError(
+        validateAndRepairGraph({
+          graph: createGraphWithSignMismatch(),
+          brief: "Test sign mismatch",
+          requestId: "test-sign",
+        }),
+      );
 
-      expect(error).toBeInstanceOf(GraphValidationError);
       expect(error.errors.map((e) => e.code)).toContain("SIGN_MISMATCH");
     });
   });
