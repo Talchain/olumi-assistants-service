@@ -90,7 +90,6 @@ function makeCtx(nodes: unknown[], edges: unknown[]): StageContext {
     nodeRenames: new Map(),
     goalConstraints: null,
     constraintStrpResult: null,
-    repairCost: 0,
     structuralMeta: null,
     orchestratorRepairUsed: false,
     orchestratorWarnings: [],

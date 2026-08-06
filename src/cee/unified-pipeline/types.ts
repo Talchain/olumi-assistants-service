@@ -224,11 +224,6 @@ export interface StageContext {
   goalConstraints: any;
   /** Late STRP result (Stage 4 substep 6 — Rules 3,5 with goalConstraints context) */
   constraintStrpResult: any;
-  /** Cost accumulator for the gated orchestrator-validation repair
-   *  (substep 1b, default OFF). Write-only today — kept because substep 1b
-   *  still increments it. The draft-path LLM repair that also wrote it was
-   *  removed (ROADMAP 2.731). */
-  repairCost: number;
   structuralMeta: any;
   validationSummary: any;
   orchestratorRepairUsed?: boolean;

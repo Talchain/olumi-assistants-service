@@ -140,7 +140,6 @@ function makeCtx(overrides?: Partial<StageContext>): StageContext {
     nodeRenames: new Map(),
     goalConstraints: null,
     constraintStrpResult: null,
-    repairCost: 0,
     structuralMeta: null,
     validationSummary: null,
     quality: undefined,

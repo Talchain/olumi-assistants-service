@@ -134,7 +134,6 @@ function makeCtx(graph: unknown, brief: string): any {
     nodeRenames: new Map<string, string>(),
     goalConstraints: undefined,
     constraintStrpResult: undefined,
-    repairCost: 0,
     structuralMeta: undefined,
     validationSummary: undefined,
   };
