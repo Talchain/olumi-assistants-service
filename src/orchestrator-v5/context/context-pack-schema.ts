@@ -71,6 +71,20 @@ export const CONTEXT_PACK_VERSION_LITERAL = '2.0' as const;
 export const CONTEXT_PACK_BRIEF_CHAR_CAP = 2000;
 
 /**
+ * Verbatim conversation memory window — the number of most-recent turns the
+ * ContextPack carries in full (turns beyond it are folded into the rolling
+ * summary). Raised 5 → 8 per the D-59-11 "S5 flip" (2026-07-24).
+ *
+ * SINGLE SOURCE OF TRUTH (FINAL-SWEEP, 2026-07-24; Codex quality F4). Previously
+ * this literal was hand-typed in BOTH the assembler (CONTEXT_PACK_RECENT_TURNS_CAP)
+ * and the policy (POLICY_VERBATIM_TURNS) with a "move both together" comment and a
+ * conformance test pinning them equal — the exact hand-mirror trap-12 hazard. It
+ * now lives in this cycle-safe leaf (both the assembler and the policy already
+ * import from here) and both derive from it, so it CANNOT drift.
+ */
+export const CONTEXT_PACK_RECENT_TURNS_CAP = 8;
+
+/**
  * Lane 28 — the projected decision brief carried on the ContextPack. Strict:
  * `text` is non-empty and hard-bounded at {@link CONTEXT_PACK_BRIEF_CHAR_CAP}
  * (the bound is enforced, not advisory); `truncated` + `original_chars`
@@ -150,6 +164,15 @@ const ContextPackAnalysisFlipThresholdSchema = z
     flip_value: z.number().finite().nullable(),
     unit: z.string().nullable(),
     no_flip_within_bounds: z.boolean(),
+    /**
+     * ROADMAP 2.205 practical resolution (2026-07-31) — the display licence
+     * (see `ContextPackAnalysisFlipThreshold`). Optional and ABSENT when
+     * unlicensed, so an unlicensed pack is byte-identical to today's. Kept
+     * `.strict()`-compatible deliberately: a stray display key on an entry
+     * that never earned one must still fail the schema.
+     */
+    current_display: z.string().min(1).optional(),
+    flip_display: z.string().min(1).optional(),
   })
   .strict();
 
@@ -254,11 +277,18 @@ const ContextPackConversationSchema = z
     // turns arrive via `conversation_summary` instead of vanishing —
     // present IFF a summary section was injected (0 there is honest: a
     // floor / withheld block absorbs nothing).
+    // `available` is the conversation's PRE-CAP length (the store's exact
+    // count), NOT the length of the read window — it was the latter until
+    // 2026-07-25, which made a 78-turn conversation report 20.
+    // `notice` is the code-owned in-band disclosure emitted by
+    // `projectConversation` whenever turns exist that the pack does not show;
+    // it travels with the numbers it describes so it cannot drift from them.
     window: z
       .object({
         shown: z.number().int().nonnegative(),
         available: z.number().int().nonnegative(),
         summarised: z.number().int().nonnegative().optional(),
+        notice: z.string().min(1).optional(),
       })
       .strict()
       .optional(),
@@ -480,6 +510,14 @@ export const ContextPackSchema = z
      * absent otherwise — byte-identity with pre-S4 packs).
      */
     conversation_summary: ContextPackConversationSummarySchema.optional(),
+    /**
+     * Knowledge-over-time (ROADMAP 1.199, P6): the pre-projected, bounded,
+     * disclosed decision-records read slice. Present ONLY when the scenario has
+     * prior decision records (key absent otherwise — byte-identity for
+     * record-less scenarios). A plain string (the loader owns projection +
+     * truncation disclosure).
+     */
+    older_relevant_facts: z.string().optional(),
     recent_changes: z.array(RecentMutationSchema).readonly(),
     coaching: CoachingCacheSchema,
     compound_detected: z.boolean(),

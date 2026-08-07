@@ -21,10 +21,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 const mockCreate = vi.fn();
+// Lane C (2026-07-23): draftGraphWithAnthropic now STREAMS (messages.stream);
+// the chat / chat_with_tools paths under test still use messages.create.
+const mockStream = vi.fn();
 
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class MockAnthropic {
-    messages = { create: mockCreate };
+    messages = { create: mockCreate, stream: mockStream };
   },
 }));
 
@@ -237,7 +240,11 @@ describe("chatWithAnthropic — thinking (edit_graph path)", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not include thinking block when thinking is absent", async () => {
+  it("sends an EXPLICIT thinking:{type:'disabled'} when thinking is absent (R1/D-61: adaptive thinking off by default)", async () => {
+    // R1 (D-61, 2026-07-24): a chat call with no explicit thinking arg previously
+    // OMITTED the field, so Sonnet-5 adaptive thinking ran and ate the caller
+    // budget (the decision_review class). The adapter now ALWAYS transmits an
+    // explicit posture — here, disabled — rather than leaving it ambiguous.
     const { chatWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
     await chatWithAnthropic({
       system: "sys",
@@ -246,7 +253,7 @@ describe("chatWithAnthropic — thinking (edit_graph path)", () => {
     });
 
     const [body] = mockCreate.mock.calls[0];
-    expect(body.thinking).toBeUndefined();
+    expect(body.thinking).toEqual({ type: "disabled" });
     expect(body.temperature).toBe(0);
   });
 
@@ -312,11 +319,29 @@ const MINIMAL_DRAFT_JSON = JSON.stringify({
   ],
 });
 
+/** Fake MessageStream for the streamed draft path: streams the JSON as a text
+ *  delta, resolves finalMessage with the same {content, stop_reason, usage}
+ *  shape as the non-streaming response (so body-param assertions are unchanged). */
+function makeDraftStream(jsonText: string) {
+  return () => {
+    async function* gen() {
+      yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: jsonText } };
+    }
+    const iterator = gen();
+    return {
+      [Symbol.asyncIterator]: () => iterator,
+      finalMessage: async () => makeResponse([{ type: "text", text: jsonText }]),
+      abort: () => {},
+    };
+  };
+}
+
 describe("draftGraphWithAnthropic — thinking", () => {
   beforeEach(() => {
     vi.resetModules();
     mockCreate.mockReset();
-    mockCreate.mockResolvedValue(makeResponse([{ type: "text", text: MINIMAL_DRAFT_JSON }]));
+    mockStream.mockReset();
+    mockStream.mockImplementation(makeDraftStream(MINIMAL_DRAFT_JSON));
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
   });
 
@@ -334,8 +359,10 @@ describe("draftGraphWithAnthropic — thinking", () => {
       model: "claude-sonnet-4-6",
     });
 
-    const [body] = mockCreate.mock.calls[0];
-    expect(body.thinking).toBeUndefined();
+    const [body] = mockStream.mock.calls[0];
+    // F-5 (FINAL-SWEEP): the draft body now sends an EXPLICIT disabled posture
+    // (never omits the field) so a thinking-class model can't run adaptive thinking.
+    expect(body.thinking).toEqual({ type: "disabled" });
     expect(body.temperature).toBe(0);
   });
 
@@ -349,7 +376,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
       thinking: { type: "enabled", budget_tokens: 6000 },
     });
 
-    const [body] = mockCreate.mock.calls[0];
+    const [body] = mockStream.mock.calls[0];
     expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 6000 });
     expect(body.temperature).toBe(1);
   });
@@ -367,7 +394,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
       thinking: { type: "enabled", budget_tokens: 6000 },
     });
 
-    const [body] = mockCreate.mock.calls[0];
+    const [body] = mockStream.mock.calls[0];
     expect(body.max_tokens).toBeGreaterThanOrEqual(6000 + 1024);
   });
 
@@ -383,8 +410,9 @@ describe("draftGraphWithAnthropic — thinking", () => {
       thinking: { type: "enabled", budget_tokens: 6000 },
     });
 
-    const [body] = mockCreate.mock.calls[0];
-    expect(body.thinking).toBeUndefined();
+    const [body] = mockStream.mock.calls[0];
+    // F-5 (FINAL-SWEEP): explicit disabled posture even when thinking is dropped.
+    expect(body.thinking).toEqual({ type: "disabled" });
     expect(body.temperature).toBe(0);
 
     warnSpy.mockRestore();
@@ -402,7 +430,7 @@ describe("draftGraphWithAnthropic — thinking", () => {
       thinking: { type: "enabled", budget_tokens: 6000 },
     });
 
-    const [body] = mockCreate.mock.calls[0];
+    const [body] = mockStream.mock.calls[0];
     // output_config must be absent when thinking is enabled (incompatible)
     expect(body.output_config).toBeUndefined();
   });

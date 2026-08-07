@@ -81,6 +81,7 @@ import {
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
+import { SET_OPTION_VALUES_CHIP } from '../configure-option-chip-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
@@ -407,13 +408,13 @@ function buildPostDraftChips(params: {
       },
     ];
   }
-  return [
-    {
-      id: 'chip_prompt_set_option_values',
-      label: 'Set values for options',
-      message: 'Help me set up the options for this decision so the analysis can run.',
-    },
-  ];
+  // ROADMAP 2.308 / S2(b) — derived from `configure-option-chip-text.ts`, the
+  // single source both the configure gate and every configure chip build from.
+  // The literal that used to sit here ("Help me set up the options …") was
+  // NO_MATCH at the gate AND blocked by EDIT_GRAPH_NEGATIVE_REGEX's "set up",
+  // so the product's own readiness chip could not reach the one chat path that
+  // writes option interventions.
+  return [{ ...SET_OPTION_VALUES_CHIP }];
 }
 
 export async function dispatchDraftGraph(

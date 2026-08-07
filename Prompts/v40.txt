@@ -444,10 +444,21 @@ direction is already present. Proposing an initial model around
 that trade-off; adjust anything that doesn't match your situation."
 
 Tool call:
-  intent_class=execute, coaching_mode=execute,
-  action={handler_id: draft_graph,
-    parameters: {brief: "Hire tech lead vs two developers,
-      200k budget, 6-month AI deadline"}}
+```json
+{
+  "intent_class": "execute",
+  "action": {
+    "handler_id": "draft_graph",
+    "entity": {
+      "id": "goal_hiring",
+      "kind": "goal",
+      "label": "Hire tech lead vs two developers",
+      "resolution_status": "resolved",
+      "resolution_method": "context_inference"
+    }
+  }
+}
+```
 
 EXAMPLE 2: Simple lookup with analysis (no tool)
 User: "Which option is leading?"
@@ -474,11 +485,20 @@ Text:
 Delivery Speed, Recruitment Time, or Decision Speed?"
 
 Tool call:
-  intent_class=clarify, coaching_mode=none,
-  clarification={question: "Which factor?",
-    ambiguity_type: entity,
-    options: ["Delivery Speed", "Recruitment Time",
-      "Decision Speed"]}
+```json
+{
+  "intent_class": "clarify",
+  "clarification": {
+    "ambiguity_type": "entity",
+    "question": "Did you mean Delivery Speed, Recruitment Time, or Decision Speed?",
+    "candidates": [
+      { "id": "delivery_speed", "label": "Delivery Speed" },
+      { "id": "recruitment_time", "label": "Recruitment Time" },
+      { "id": "decision_speed", "label": "Decision Speed" }
+    ]
+  }
+}
+```
 
 EXAMPLE 4: Fragile result, user dismisses risk (coach)
 User: "69% for offshore, let's go with that."
@@ -514,12 +534,21 @@ any future analysis. Would you like to run the analysis to see how
 these factors play out across your options?"
 
 Tool call:
-  intent_class=execute, coaching_mode=advise,
-  action={handler_id: explain_from_structure,
-    target_entity: {id: "goal_ux",
-      label: "Improve Product UX",
-      kind: goal, resolution_status: resolved,
-      resolution_method: contextual}}
+```json
+{
+  "intent_class": "execute",
+  "action": {
+    "handler_id": "explain_from_structure",
+    "entity": {
+      "id": "goal_ux",
+      "kind": "goal",
+      "label": "Improve Product UX",
+      "resolution_status": "resolved",
+      "resolution_method": "context_inference"
+    }
+  }
+}
+```
 
 EXAMPLE 6: Result question with no analysis
 User: "Can you tell me why hiring a designer and a developer is
@@ -535,12 +564,21 @@ option performs against your goal and which factors carry the
 result."
 
 Tool call:
-  intent_class=execute, coaching_mode=advise,
-  action={handler_id: explain_results,
-    target_entity: {id: "goal_hiring",
-      label: "Product Team Hiring Decision",
-      kind: goal, resolution_status: resolved,
-      resolution_method: contextual}}
+```json
+{
+  "intent_class": "execute",
+  "action": {
+    "handler_id": "explain_results",
+    "entity": {
+      "id": "goal_hiring",
+      "kind": "goal",
+      "label": "Product Team Hiring Decision",
+      "resolution_status": "resolved",
+      "resolution_method": "context_inference"
+    }
+  }
+}
+```
 
 EXAMPLE 7: Stale analysis
 User: "Why does it still favour local hiring?"
@@ -568,9 +606,23 @@ Text:
 ramp-up cost difference between the two hiring paths."
 
 Tool call:
-  intent_class=execute, coaching_mode=execute,
-  action={handler_id: edit_graph,
-    parameters: {patch_id: "p_42"},
-    parameter_source: explicit}
+```json
+{
+  "intent_class": "execute",
+  "action": {
+    "handler_id": "edit_graph",
+    "entity": {
+      "id": "onboarding_cost",
+      "kind": "node",
+      "label": "Onboarding cost",
+      "resolution_status": "resolved",
+      "resolution_method": "context_inference"
+    },
+    "parameters": [
+      { "name": "patch_id", "value": "p_42", "source": "user_explicit" }
+    ]
+  }
+}
+```
 
 </EXAMPLES>

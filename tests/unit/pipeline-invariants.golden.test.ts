@@ -29,7 +29,6 @@ const tripwireAdapter = {
   name: "TRIPWIRE",
   model: "TRIPWIRE",
   draftGraph: tripwireMethod,
-  repairGraph: tripwireMethod,
   clarifyBrief: tripwireMethod,
   suggestOptions: tripwireMethod,
   critiqueGraph: tripwireMethod,
@@ -500,8 +499,6 @@ function makeGoldenCtx(): any {
     nodeRenames: new Map<string, string>(),
     goalConstraints: undefined,
     constraintStrpResult: undefined,
-    repairCost: 0,
-    repairFallbackReason: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
 
@@ -552,7 +549,6 @@ describe("Network tripwire", () => {
   it("throws NETWORK TRIPWIRE on any LLM adapter call", () => {
     const adapter = getAdapter();
     expect(() => adapter.draftGraph({} as any, {} as any)).toThrow(TRIPWIRE_MSG);
-    expect(() => adapter.repairGraph({} as any, {} as any)).toThrow(TRIPWIRE_MSG);
     expect(() => adapter.clarifyBrief({} as any, {} as any)).toThrow(TRIPWIRE_MSG);
   });
 

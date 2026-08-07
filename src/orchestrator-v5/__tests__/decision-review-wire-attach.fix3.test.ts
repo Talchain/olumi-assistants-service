@@ -103,6 +103,18 @@ const DECISION_REVIEW_OUTPUT: Record<string, unknown> = {
 function makeRunAnalysisFact(withDecisionReview: boolean): HandlerFact {
   const enrichment: Record<string, unknown> = {
     graph: { nodes: [{ id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' }] },
+    // T1 claim safety — the fixture must DECLARE its constraint verdict.
+    // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without it,
+    // dropping every leader-presuming card (narrative / robustness /
+    // scenario_context / pre_mortem / flip_threshold and the `strengthen` lens
+    // block). `evaluated_feasible` is the branch this fixture must reach: the
+    // leader may be named, so those cards ship and the assertions below are
+    // about block CONSTRUCTION, not about claim safety. A fixture that omitted
+    // this would pass its absence assertions for the wrong reason.
+    __cee_claim_safety: {
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    },
     factor_sensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
     option_comparison: [
       {
@@ -134,6 +146,7 @@ function makeRunAnalysisFact(withDecisionReview: boolean): HandlerFact {
 
 function compose(withDecisionReview: boolean) {
   return composeToolCallResponse({
+    answerKind: 'functional',
     orientation: '',
     confirmation: 'Ran analysis on your current scenario.',
     coaching: null,

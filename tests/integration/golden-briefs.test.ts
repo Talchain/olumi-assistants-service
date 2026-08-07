@@ -149,8 +149,6 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => {
     });
   });
 
-  const repairGraphWithAnthropic = vi.fn();
-
   // Create mock AnthropicAdapter class
   class AnthropicAdapter {
     readonly name = 'anthropic' as const;
@@ -170,15 +168,10 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => {
         usage: mockUsage,
       };
     }
-
-    async repairGraph(args: any, _opts: any) {
-      return repairGraphWithAnthropic(args);
-    }
   }
 
   return {
     draftGraphWithAnthropic,
-    repairGraphWithAnthropic,
     AnthropicAdapter,
   };
 });

@@ -89,9 +89,9 @@ vi.mock("../../src/cee/llm-output-store.js", () => ({
   buildLLMRawTrace: vi.fn(),
 }));
 
-// Mock context pack (assembleContextPack computes hashes over pipeline state)
+// Mock context pack (assembleDraftProvenanceDescriptor computes hashes over pipeline state)
 vi.mock("../../src/context/context-pack.js", () => ({
-  assembleContextPack: vi.fn().mockReturnValue({
+  assembleDraftProvenanceDescriptor: vi.fn().mockReturnValue({
     pipelinePath: "unified",
     context_hash: "test-hash",
   }),

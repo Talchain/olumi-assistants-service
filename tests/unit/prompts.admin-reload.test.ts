@@ -21,6 +21,7 @@ import {
   ensureRoutingPromptSnapshot,
 } from '../../src/orchestrator-v5/routing/prompt-loader.js';
 import { __resetPromptsReadyCacheForTests } from '../../src/prompts/readiness.js';
+import { STATUS_KEYS } from '../../src/prompts/tracked.js';
 
 beforeAll(() => {
   registerAllDefaultPrompts();
@@ -77,7 +78,11 @@ describe('POST /admin/prompts/reload', () => {
     };
     expect(body.reload_ok).toBe(true);
     expect(body.snapshot_error).toBeNull();
-    expect(body.keys).toHaveLength(5);
+    // DERIVED, not a literal. This used to assert `5` — a third copy of the
+    // hand-listed tracked-key set, which meant widening the reported estate
+    // read as a regression instead of as the fix. The route's job is to report
+    // exactly the derived reporting set, so that is what is asserted.
+    expect(body.keys.map((r) => r.key).sort()).toEqual([...STATUS_KEYS].sort());
     for (const row of body.keys) {
       expect(['pms', 'default']).toContain(row.source);
       expect(row.version).toBeTruthy();
@@ -113,6 +118,53 @@ describe('POST /admin/prompts/reload', () => {
     // that the call succeeded at all (i.e. reload didn't break loading).
     const after = await getSystemPrompt('edit_graph');
     expect(after).toBe(before);
+    await app.close();
+  });
+
+  it('a rate-limited request returns 429, not 500', async () => {
+    // The adversarial review of #753 proved empirically that every admin
+    // errorResponseBuilder in this repo omits `statusCode`, so @fastify/rate-limit
+    // (which reads it off the error object, index.js:31-35) fell through to 500.
+    // The new 20/15-min cap on /admin/prompts/inventory makes that
+    // misdiagnosis-fuel likely to actually fire, so the builder in THIS plugin
+    // now sets it. The repo-wide sweep of the sibling builders is rowed.
+    //
+    // ⚠ ROADMAP 2.181 — that diagnosis was INCOMPLETE, and this test could not
+    // see the remainder. `statusCode` on a plain object is read only by
+    // Fastify's DEFAULT error handler — which is what this bare `Fastify()`
+    // harness uses. The REAL server installs a custom `setErrorHandler` that
+    // derives the status from the error.v1 code, and it received the plain
+    // object as an *unknown error type*: this route still answered 500 live.
+    // The builder now returns a real `RateLimitedError` (@fastify/rate-limit
+    // THROWS the builder's return value, index.js:333), which is correct under
+    // BOTH handlers. The body asserted below is therefore Fastify's default
+    // serialisation of that Error — a harness artefact; on the real server the
+    // central handler turns the same Error into `error.v1`/`RATE_LIMITED`,
+    // which is asserted end-to-end in
+    // tests/integration/global-rate-limit-429.test.ts.
+    const app = Fastify();
+    await adminPromptStatusRoutes(app);
+
+    let limited: { statusCode: number; body: string } | null = null;
+    for (let i = 0; i < 40; i++) {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/admin/prompts/inventory',
+        headers: { 'x-admin-key': 'test-admin-key' },
+      });
+      if (res.statusCode !== 200) {
+        limited = { statusCode: res.statusCode, body: res.body };
+        break;
+      }
+    }
+
+    // Positive control: assert the cap actually FIRED before asserting its
+    // status code, or the assertion below passes by never being reached.
+    expect(limited, 'the 20/15-min cap never fired — the assertion below would be vacuous').not.toBeNull();
+    expect(limited!.statusCode, `got ${limited!.statusCode}: ${limited!.body}`).toBe(429);
+    expect(JSON.parse(limited!.body).message).toBe(
+      'Too many requests. Please try again later.',
+    );
     await app.close();
   });
 

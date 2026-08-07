@@ -35,14 +35,36 @@
  *     is exactly the frozen allowlist (nothing dropped, nothing extra).
  *   - GUARD 3 (emission subset, bounded): exercises the V5 Phase-3 composer
  *     builders and asserts their emitted types ⊆ {review_card, coaching,
- *     evidence} ⊆ allowlist. Behaviourally-exercised emission sites are the
- *     Phase-3 builders; the other emitters (analysis_result/graph_patch via
- *     compose.ts, ui_directive via compose.ts behind CEE_UI_DIRECTIVE_EMIT —
- *     behaviourally driven in ui-directive-emit.test.ts — draft_graph via
- *     draft dispatch, text/explanation/comparison/flip_analysis via the
- *     direct-answer composers, error via failure paths) are covered GLOBALLY
- *     by GUARD 1 (type system) + GUARD 2 (egress walker), not behaviourally
- *     driven here.
+ *     evidence, exercise} ⊆ allowlist.
+ *
+ *     ⚠ `exercise` + the FOURTH builder ADDED 2026-07-31 (capability P1, CEE
+ *     #770 review F2). This header previously said GUARD 3 "exercises the V5
+ *     Phase-3 composer builders" with the set {review_card, coaching,
+ *     evidence}. #770 added a fourth Phase-3 builder
+ *     (`buildLensCompanionBlocks`, emitting `exercise`) which GUARD 3 neither
+ *     DROVE nor ALLOWED — so the guard stayed green only because
+ *     `emitAllPhase3Blocks()` calls the three old builders by name. A coverage
+ *     claim that holds because it never looked is the same incidental-pass
+ *     shape as the `no ExerciseBlocks` pin #770 also had to repair, and it is
+ *     the exact defect this file's own header calls "the gap" it exists to
+ *     close. The fourth builder is now DRIVEN, and — as with the other three —
+ *     its non-vacuity is asserted (it must actually emit).
+ *
+ *     Behaviourally-exercised emission sites are the Phase-3 builders; the
+ *     other emitters (analysis_result/graph_patch via compose.ts, ui_directive
+ *     via compose.ts — behaviourally driven in ui-directive-emit.test.ts —
+ *     draft_graph via draft dispatch, error via failure paths) are covered
+ *     GLOBALLY by GUARD 1 (type system) + GUARD 2 (egress walker), not
+ *     behaviourally driven here.
+ *
+ *     ⚠ AND ONE CORRECTION THIS PR DID NOT CAUSE, recorded rather than
+ *     repeated: that list used to include "text/explanation/comparison/
+ *     flip_analysis via the direct-answer composers". At this tip NONE of
+ *     those four has a V5 producer — `composeDirectAnswerResponse` returns
+ *     `blocks: []` (asserted in compose.test.ts) and an `rg` over `src/`
+ *     non-test finds no constructor for an explanation/comparison/
+ *     flip_analysis block. Naming absent producers as covered emission sites
+ *     overstates what is driven anywhere, so the phrase is dropped.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -56,6 +78,8 @@ import {
   buildEvidenceBlocks,
   buildFactorConfidenceLookup,
   buildGraphNodeLookup,
+  buildLensCompanionBlocks,
+  buildLensSurface,
   buildReviewCardBlocks,
   type BlockBuildCtx,
 } from '../phase3-blocks.js';
@@ -196,6 +220,8 @@ interface FactInput {
   readonly decisionReview?: Record<string, unknown>;
   readonly graphNodes?: ReadonlyArray<Record<string, unknown>>;
   readonly factorSensitivity?: ReadonlyArray<Record<string, unknown>>;
+  /** Capability P1: drives `selectLens` rule 2a for the companion builder. */
+  readonly confidenceTier?: string;
 }
 
 function makeFact(input: FactInput = {}): RunAnalysisHandlerFact {
@@ -203,6 +229,7 @@ function makeFact(input: FactInput = {}): RunAnalysisHandlerFact {
   if (input.decisionReview !== undefined) enrichment.decision_review = input.decisionReview;
   if (input.graphNodes !== undefined) enrichment.graph = { nodes: input.graphNodes };
   if (input.factorSensitivity !== undefined) enrichment.factor_sensitivity = input.factorSensitivity;
+  if (input.confidenceTier !== undefined) enrichment.confidence_tier = input.confidenceTier;
   const result: Record<string, unknown> = {
     scenario_id: 'scen-test',
     leading_option_id: 'opt_a',
@@ -434,7 +461,7 @@ describe('V5 block-type allowlist — egress choke point (GUARD 2)', () => {
   it('passes every frozen block type through egress with no drop and no off-allowlist type', () => {
     const out = sanitiseOlumiResponseForEgress(
       makeResponse({ blocks: oneBlockOfEachType() }),
-      { graph: makeGraph(), requestId: 'req-allowlist', exitPath: 'test', userMessage: null },
+      { graph: makeGraph(), requestId: 'req-allowlist', exitPath: 'test', userMessage: null, mayNameLeadingOption: true },
     );
 
     // Nothing dropped: all 12 survive the egress walk.
@@ -458,7 +485,55 @@ describe('V5 block-type allowlist — egress choke point (GUARD 2)', () => {
 // ============================================================================
 
 describe('V5 block-type allowlist — Phase-3 composer emission subset (GUARD 3)', () => {
-  const PHASE3_ALLOWED = new Set<FrozenBlockType>(['review_card', 'coaching', 'evidence']);
+  const PHASE3_ALLOWED = new Set<FrozenBlockType>([
+    'review_card',
+    'coaching',
+    'evidence',
+    // Capability P1 (#770): the lens companion. See the file header for why
+    // adding the type WITHOUT driving its builder would have been the same
+    // incidental pass this amendment exists to remove.
+    'exercise',
+  ]);
+
+  /**
+   * The FOURTH Phase-3 builder (capability P1). Needs a fact whose enrichment
+   * BOTH selects the `pre_mortem` lens (`confidence_tier: 'needs_work'` — rule
+   * 2a) AND carries a pre_mortem prose object that survives `buildPreMortemCard`
+   * (the companion inherits that card's drop rules), so `grounded_in` must
+   * resolve against the graph nodes.
+   */
+  function emitLensCompanionBlocks(): Array<{ type: string }> {
+    const fact = makeFact({
+      graphNodes: STANDARD_GRAPH_NODES,
+      factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.4 }],
+      decisionReview: {
+        pre_mortem: {
+          failure_scenario:
+            'Delivery risk was underestimated and the rollout slipped past the planned window.',
+          warning_signs: ['Sprint burndown flattens for two consecutive weeks.'],
+          mitigation: 'Book a mid-point checkpoint before committing budget.',
+          grounded_in: ['fac_delivery_risk'],
+        },
+      },
+      confidenceTier: 'needs_work',
+    });
+    const lookup = buildGraphNodeLookup(fact);
+    const surface = buildLensSurface(fact, CTX);
+    // Non-vacuity, stated as a precondition rather than assumed: if the lens
+    // stops selecting, the companion below is trivially empty and this arm
+    // would go green while driving nothing.
+    expect(surface, 'GUARD 3 precondition: the fixture must select a lens').not.toBeNull();
+    expect(surface!.selection.lens).toBe('pre_mortem');
+    return [
+      ...buildLensCompanionBlocks(
+        fact,
+        CTX,
+        surface!.selection,
+        buildReviewCardBlocks(fact, lookup, CTX),
+        lookup,
+      ),
+    ];
+  }
 
   function emitAllPhase3Blocks(): Array<{ type: string }> {
     const reviewFact = makeFact({
@@ -504,11 +579,26 @@ describe('V5 block-type allowlist — Phase-3 composer emission subset (GUARD 3)
       CTX,
     );
 
-    return [...reviewBlocks, ...coachingBlocks, ...evidenceBlocks];
+    return [
+      ...reviewBlocks,
+      ...coachingBlocks,
+      ...evidenceBlocks,
+      ...emitLensCompanionBlocks(),
+    ];
   }
 
   it('emits at least one block from the exercised builders (non-vacuous)', () => {
     expect(emitAllPhase3Blocks().length).toBeGreaterThan(0);
+  });
+
+  it('DRIVES the fourth Phase-3 builder, and it actually emits an exercise block', () => {
+    // Per-builder non-vacuity. Without this, adding 'exercise' to PHASE3_ALLOWED
+    // would widen the allowed set while the builder stayed undriven — a strictly
+    // WEAKER guard wearing a wider claim, which is the failure mode F2 raised.
+    const companions = emitLensCompanionBlocks();
+    expect(companions.length).toBeGreaterThan(0);
+    expect(companions.every((b) => b.type === 'exercise')).toBe(true);
+    expect(emitAllPhase3Blocks().some((b) => b.type === 'exercise')).toBe(true);
   });
 
   it('every emitted Phase-3 block type is in the allowlist and the Phase-3 subset', () => {

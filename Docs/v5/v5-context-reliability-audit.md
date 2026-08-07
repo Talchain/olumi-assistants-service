@@ -137,7 +137,7 @@ on `27bb71a8` (the map's baseline was `d59be1a8`).
 | `pickLatestDecisionReview` | `pick-decision-review.ts:45-61` | no | `selectRunAnalysisFact` | reads `enrichment.decision_review` | no | returns `null` when absent/malformed |
 | Stale-rerun guard | `stale-rerun-guard.ts` (gate `turn-executor.ts:3013`) | no | freshness verdict | no | no | not-stale → falls through |
 | State-query guard | `state-query-guard.ts` (gate `:2907`) | `recent_changes` only | no | no | no | empty → "nothing applied" |
-| Fresh-analysis follow-up guard | `fresh-analysis-followup-guard.ts` (gate `:3251`) | no | readiness snapshot | no | no | structural recap constant |
+| ~~Fresh-analysis follow-up guard~~ **RETIRED 2026-08-01 (ROADMAP 2.229, founder ruling)** — module deleted, gate removed from `turn-executor.ts`. Row kept for readers of older logs; a recognised post-analysis question now falls through to `routeWithToolUse`. | ~~`fresh-analysis-followup-guard.ts` (gate `:3251`)~~ | no | readiness snapshot | no | no | ~~structural recap constant~~ |
 | No-analysis guard | `no-analysis-guard.ts` (gate `:3336`) | no | readiness snapshot | no | no | graph-ready/not-ready copy |
 | `run_analysis` handler | `tools/handlers/run-analysis.ts` | no | no | writes the fact (raw enrichment verbatim) | no | deterministic headline |
 | `explain_results` / `what_would_flip` / `explain_from_structure` | `tools/handlers/*` | router path only | own thin projection + raw robustness | no (uses raw robustness) | thin | deterministic fallback prose |

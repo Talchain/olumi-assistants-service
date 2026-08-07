@@ -36,10 +36,13 @@ import type { GraphT } from "../../src/schemas/graph.js";
 // ---------------------------------------------------------------------------
 
 const mockCreate = vi.fn();
+// Lane C (2026-07-23): draftGraphWithAnthropic now STREAMS. The other operations
+// under test (suggest/repair/clarify/critique/explainDiff) still use create.
+const mockStream = vi.fn();
 
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class MockAnthropic {
-    messages = { create: mockCreate };
+    messages = { create: mockCreate, stream: mockStream };
   },
 }));
 
@@ -89,6 +92,29 @@ function makeResponse(content: object[]) {
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,
     },
+  };
+}
+
+/**
+ * Fake MessageStream for the streamed draft path: streams `streamedText` as a
+ * text delta (thinking blocks are not text deltas, so they are not streamed),
+ * then resolves finalMessage with the full `finalContent` — exercising the
+ * "find the first text block" contract on finalMessage().content just as the
+ * non-streaming response did.
+ */
+function makeDraftStream(finalContent: object[], streamedText: string) {
+  return () => {
+    async function* gen() {
+      if (streamedText) {
+        yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: streamedText } };
+      }
+    }
+    const iterator = gen();
+    return {
+      [Symbol.asyncIterator]: () => iterator,
+      finalMessage: async () => makeResponse(finalContent),
+      abort: () => {},
+    };
   };
 }
 
@@ -171,6 +197,7 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
   beforeEach(() => {
     vi.resetModules();
     mockCreate.mockReset();
+    mockStream.mockReset();
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     // Force the prompt-only (robust-extractor) draft path so the fixture text
     // is parsed the same way in every environment.
@@ -187,8 +214,8 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
   // -------------------------------------------------------------------------
 
   it("draftGraphWithAnthropic parses a [thinking, text] response", async () => {
-    mockCreate.mockResolvedValue(
-      makeResponse([THINKING_BLOCK, { type: "text", text: VALID_GRAPH_JSON }]),
+    mockStream.mockImplementation(
+      makeDraftStream([THINKING_BLOCK, { type: "text", text: VALID_GRAPH_JSON }], VALID_GRAPH_JSON),
     );
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
@@ -204,7 +231,7 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
   });
 
   it("draftGraphWithAnthropic still rejects a response with no text block", async () => {
-    mockCreate.mockResolvedValue(makeResponse([THINKING_BLOCK]));
+    mockStream.mockImplementation(makeDraftStream([THINKING_BLOCK], ""));
     const { draftGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
 
     await expect(
@@ -261,36 +288,14 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
   });
 
   // -------------------------------------------------------------------------
-  // repairGraphWithAnthropic
+  // repairGraphWithAnthropic — REMOVED (ROADMAP 2.763)
+  //
+  // The two cases that lived here exercised `repairGraphWithAnthropic`'s
+  // thinking-block handling. That function was deleted with the LLM
+  // graph-repair capability; there is no longer a repair entry point whose
+  // response parsing could regress. The remaining cases in this file cover
+  // the same [thinking, text] contract on the entry points that survive.
   // -------------------------------------------------------------------------
-
-  it("repairGraphWithAnthropic parses a [thinking, text] response", async () => {
-    mockCreate.mockResolvedValue(
-      makeResponse([THINKING_BLOCK, { type: "text", text: VALID_GRAPH_JSON }]),
-    );
-    const { repairGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
-
-    const result = await repairGraphWithAnthropic({
-      graph: MINIMAL_GRAPH,
-      violations: ["isolated node opt_1"],
-      model: "claude-sonnet-4-6",
-    });
-
-    expect(result.graph.nodes.map((n) => n.id)).toContain("goal_1");
-  });
-
-  it("repairGraphWithAnthropic still rejects a response with no text block", async () => {
-    mockCreate.mockResolvedValue(makeResponse([THINKING_BLOCK]));
-    const { repairGraphWithAnthropic } = await import("../../src/adapters/llm/anthropic.js");
-
-    await expect(
-      repairGraphWithAnthropic({
-        graph: MINIMAL_GRAPH,
-        violations: ["isolated node opt_1"],
-        model: "claude-sonnet-4-6",
-      }),
-    ).rejects.toThrow("unexpected_response_type");
-  });
 
   // -------------------------------------------------------------------------
   // clarifyBriefWithAnthropic

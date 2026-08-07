@@ -138,6 +138,53 @@ export function projectRecentChanges(
   return Object.freeze(out);
 }
 
+/**
+ * Context-audit #1 (keep-list inventory row #4) — the conformance surface for
+ * `summariseMutation`'s dispatch. The silent-drop risk: a NEW handler emits a
+ * `fact_type` that `summariseMutation` has no branch for, so the mutation
+ * never appears in "what just changed" and no test notices.
+ *
+ * These two sets partition the ENTIRE `HandlerFact['fact_type']` discriminated
+ * union (the source of truth is `HandlerFactSchema.options` in
+ * `@talchain/schemas/orchestrator`, enumerated by
+ * `__tests__/recent-changes.conformance.test.ts`):
+ *   - {@link MUTATION_RECEIPT_FACT_TYPES} — types with a receipt branch below.
+ *   - {@link MUTATION_DISPATCH_SKIP} — types deliberately not surfaced, each
+ *     with a reason.
+ * The conformance test asserts receipt ∪ skip == the schema's fact_type set
+ * EXACTLY (a new fact_type in neither ⇒ RED) AND binds each set to the actual
+ * `projectRecentChanges` behaviour (receipt types produce an entry, skip types
+ * produce none), so the sets can never drift into a lie about the dispatch.
+ *
+ * Adding a mutation handler ⇒ add its `fact_type` here AND a branch below.
+ */
+export const MUTATION_RECEIPT_FACT_TYPES: ReadonlySet<HandlerFact['fact_type']> =
+  new Set<HandlerFact['fact_type']>([
+    'add_constraint',
+    'set_factor_value',
+    'adjust_edge_strength',
+    'edit_graph',
+  ]);
+
+/** Non-surfaced fact types + the reason each carries no `recent_changes` entry. */
+export const MUTATION_DISPATCH_SKIP: ReadonlyMap<HandlerFact['fact_type'], string> =
+  new Map<HandlerFact['fact_type'], string>([
+    ['run_analysis', 'Computation, not a graph mutation — no before/after state change to report.'],
+    ['explain_result', 'Read-only explanation (legacy singular) — no state change.'],
+    ['explain_results', 'Read-only explanation — no state change.'],
+    ['explain_from_structure', 'Read-only explanation — no state change.'],
+    ['compare_options', 'Read-only comparison — no state change.'],
+    ['what_would_flip', 'Read-only sensitivity answer — no state change.'],
+    // 0.34.0 — P4 transport judgement receipts. All three PERSIST a human
+    // judgement without touching the graph (carry the signal; compute
+    // consequence is a separate design decision), so there is no graph
+    // mutation to report in "what just changed". Surfacing them in coaching
+    // context is a deliberate FUTURE consumption decision, not a default.
+    ['feedback', 'Judgement receipt (thumbs rating) — no graph state change.'],
+    ['edge_adjudication', 'Judgement receipt (contested-edge verdict) — no graph state change.'],
+    ['prior_range_edit', 'Judgement receipt (user-set prior range) — no graph state change.'],
+  ]);
+
 function summariseMutation(fact: HandlerFact): RecentMutation | null {
   // Successful mutations only — noops carry no user-visible change to
   // reference. `isNoopFact` is the shared predicate (tools/fact-noop.ts);

@@ -310,6 +310,68 @@ function createGraphCasRpcMode(
 }
 
 /**
+ * F3 (Codex deep-review) — ONE boot-resolved graph-CAS capability.
+ *
+ * Two switches used to be orthogonal:
+ *   - `CEE_V5_GRAPH_CAS_MODE`  (appMode) — the app-side observe/enforce hook,
+ *     and the ONLY thing that gated whether callers DERIVE an expected-base
+ *     hash for a graph write.
+ *   - `CEE_V5_GRAPH_CAS_RPC`   (rpcMode) — the atomic in-transaction RPC CAS.
+ *
+ * So a deploy could set `RPC=enforce` while `MODE=off`: callers derived NO
+ * expected hash, the store sent SQL `NULL`, and the migration fell through to
+ * an UNCONDITIONAL update — `enforce` compared nothing (enforcement theatre).
+ *
+ * Resolving both into ONE capability makes the coupling explicit and is done
+ * once at parse:
+ *   - `requiresExpectedHash` — callers MUST derive a trusted expected-base hash
+ *     for graph-bearing commits. True whenever the app hook is on OR the RPC is
+ *     enforcing, so an enforcing RPC NEVER runs with a null expected. For every
+ *     VALID config this equals `appMode !== 'off'` (a valid enforce config
+ *     always has an app mode), i.e. byte-identical to the old caller gate.
+ *   - `assertGraphCasCapabilityValid` — the BOOT-REJECT (called from
+ *     `validateConfig()` at startup, never on lazy config access): rejects the
+ *     foot-gun combo `RPC=enforce` + `MODE=off`. Staging runs `MODE=observe` +
+ *     `RPC=enforce`, which PASSES.
+ */
+export interface GraphCasCapability {
+  readonly appMode: "off" | "observe" | "enforce";
+  readonly rpcMode: "off" | "shadow" | "enforce";
+  readonly rpcEnforce: boolean;
+  readonly requiresExpectedHash: boolean;
+}
+
+/** Pure resolution of the two CAS switches into one capability (no I/O, no throw). */
+export function resolveGraphCasCapability(
+  appMode: "off" | "observe" | "enforce",
+  rpcMode: "off" | "shadow" | "enforce",
+): GraphCasCapability {
+  const rpcEnforce = rpcMode === "enforce";
+  // Derive an expected base whenever the app hook wants it OR the atomic RPC is
+  // enforcing — this closes the "enforce with a null expected" hole even if the
+  // boot guard is ever relaxed (belt-and-suspenders; a no-op for valid configs).
+  const requiresExpectedHash = appMode !== "off" || rpcEnforce;
+  return { appMode, rpcMode, rpcEnforce, requiresExpectedHash };
+}
+
+/**
+ * BOOT-REJECT invalid CAS combinations. Called from `validateConfig()` at
+ * server startup so the process fails fast (never on lazy config access, so
+ * unit tests can still read the parsed capability for any combination).
+ */
+export function assertGraphCasCapabilityValid(cap: GraphCasCapability): void {
+  if (cap.rpcEnforce && cap.appMode === "off") {
+    throw new Error(
+      "Invalid graph-CAS configuration: CEE_V5_GRAPH_CAS_RPC=enforce requires " +
+        "CEE_V5_GRAPH_CAS_MODE to be 'observe' or 'enforce'. With MODE=off no caller " +
+        "derives an expected-base hash, so the atomic enforce RPC receives a NULL " +
+        "expected and the DB update falls through to UNCONDITIONAL — enforcement theatre. " +
+        "Set CEE_V5_GRAPH_CAS_MODE=observe (the staging posture) or turn RPC enforce off.",
+    );
+  }
+}
+
+/**
  * Environment-enforced three-state mode for the Graph Management live wiring
  * (CEE_GRAPH_MANAGEMENT_MODE). Values: 'off' | 'shadow' | 'live'
  * (lowercased + trimmed). Mirrors `createEnvEnforcedMode` (the A3 CAS flag)
@@ -325,7 +387,8 @@ function createGraphCasRpcMode(
  * - staging/local/test: the requested mode is honoured (staging is where
  *   shadow → live evidence is gathered).
  *
- * @param defaultValue - Code default ('off' for graphManagementMode).
+ * @param defaultValue - Code default ('live' for graphManagementMode since
+ *   ROADMAP 2.474 / amendment A10 — see the setting's note below).
  * @param settingName  - Env var name for logging/audit events.
  */
 function createEnvEnforcedGraphManagementMode(
@@ -511,7 +574,6 @@ const ConfigSchema = z.object({
     // field was never env-mapped in rawConfig and had zero source consumers.
     shareReview: booleanString.default(false),
     enableLegacySSE: booleanString.default(false),
-    orchestrator: booleanString.default(false), // CEE_ORCHESTRATOR_ENABLED — Track C: multi-turn conversational decision modelling
     orchestratorV2: booleanString.default(false), // ENABLE_ORCHESTRATOR_V2 — V2 five-phase pipeline
     // CEE_ORCHESTRATOR_CONTEXT_ENABLED — Context Fabric: 3-zone cache-aware context assembly pipeline
     // IMPORTANT: V2 prompt path must have parity with V1 before enabling on staging. See A.4 audit.
@@ -615,17 +677,49 @@ const ConfigSchema = z.object({
     // CEE_GRAPH_MANAGEMENT_MODE — Graph Management referee live wiring
     // ('off' | 'shadow' | 'live'). Gates the edit_graph → CandidateMutation
     // Envelope → referee seam in edit-graph-dispatch.ts.
-    // 'off' (default): zero referee calls, byte-identical edit path.
+    // 'off': zero referee calls, byte-identical edit path.
     // 'shadow': the referee evaluates every envelope and emits redacted
     // v5.candidate_mutation.<verdict> telemetry; the existing path proceeds
-    // UNCHANGED (the A3 CAS-observe pattern). 'live' (staging-gated,
-    // auto-downgraded to 'shadow' in prod): verdicts route — would_apply
-    // proceeds through the existing apply path; held emits a real pending
-    // confirmation; stale/rejected/clarify_required emit recovery templates.
-    // GM never writes graph state itself in ANY mode — the single durable
-    // writer remains commitDirectAnswer.
+    // UNCHANGED (the A3 CAS-observe pattern). 'live': verdicts route —
+    // would_apply proceeds through the existing apply path; held emits a real
+    // pending confirmation; stale/rejected/clarify_required emit recovery
+    // templates. GM never writes graph state itself in ANY mode — the single
+    // durable writer remains commitDirectAnswer.
+    //
+    // ⭐ REPO DEFAULT IS 'live' since ROADMAP 2.474 (amendment A10). It was
+    // 'off', with staging setting 'live' through the Render dashboard — and
+    // that arrangement was a trust hazard, not a safety measure: EVERY hold
+    // the Graph Management design relies on exists only while the mode is
+    // 'live', the resume path re-reads the mode AT RESUME TIME, and an env
+    // reset therefore silently bypasses every consent hold (ARCH-REVIEW-2
+    // S2S3 R-7). A safety story that hangs on a dashboard variable is a
+    // safety story one careless edit away from being untrue. Under Paul's
+    // no-env-var-gates + no-dark-launches doctrine the capability ships ON and
+    // rollback is a code revert.
+    //
+    // The env var REMAINS as a kill-switch (set it to 'shadow' or 'off'), and
+    // the production lockdown above is UNCHANGED: in prod, 'live' still
+    // downgrades to 'shadow' with an [AUDIT] warning.
+    //
+    // Consequence of the new default, stated rather than discovered: an
+    // unconfigured PROD boot now resolves to 'shadow' (the referee evaluates
+    // and emits telemetry, and by the mode's definition never blocks) where it
+    // previously resolved to 'off' (no referee calls at all). For the REFEREE
+    // that is added observability and nothing else.
+    //
+    // ⚠ AND THAT IS A CLAIM ABOUT THE REFEREE ALONE — it was once written here
+    // as if it settled the whole change, which it does not. This mode also
+    // governs whether the structural edit tool (ROADMAP 2.474) engages at all,
+    // because the tool's only safety guarantee is the hold this mode routes.
+    // The tool therefore requires 'live' explicitly
+    // (orchestrator-v5/tools/structural-edit-entry.ts, `holdSpineActive`), so
+    // in prod — and in any 'shadow'/'off' environment — it does not run.
+    // Turning the mode down disables the capability; it never strips the hold
+    // and leaves the capability applying. Without that binding, this comment
+    // would be describing a kill switch that makes the system MORE dangerous
+    // when it is used.
     graphManagementMode: createEnvEnforcedGraphManagementMode(
-      "off",
+      "live",
       "CEE_GRAPH_MANAGEMENT_MODE",
     ),
     // CEE_REASONING_CAPTURE_ENABLED — ROADMAP 1.42: capture Sonnet-5 extended
@@ -711,20 +805,6 @@ const ConfigSchema = z.object({
     // failed). The backing migration (20260710113000_v5_decision_records.sql,
     // #406, amended by #417) was EXECUTED on staging 2026-07-10/11 — see
     // that file's header for the evidence pointers. Rollback = code revert.
-    // CEE_CONTEXT_BRIEF_ALL_SITES — Context Architecture v2 S2 (ROADMAP
-    // 1.73, design pack 02 §Seam 1): thread the persisted decision brief
-    // (`scenarios.brief_text`) into the edit/repair LLM context — the two
-    // turn-path sites that today receive NOTHING of the brief. When true,
-    // dispatchEditGraph reads the brief (one extra scenarios read, degrade-
-    // to-absent on failure) and the edit-context serialiser renders a
-    // `## Decision Brief` section: first 1,000 chars, truncation disclosed
-    // (edit needs decision framing to resolve "the hire option" style
-    // referents, not the full narrative — 02 §Seam 1 sizes table).
-    // Repair inherits automatically (same contextSection). Default OFF;
-    // flag-off = no read, no section, byte-identical prompts (pinned by
-    // tests/unit/edit-context-brief.test.ts). Ships dark: not declared in
-    // render*.yaml.
-    contextBriefAllSites: booleanString.default(false),
     // CEE_ENRICHMENT_VALIDATION — Context Architecture v2 S6 (ROADMAP 1.73,
     // design pack 02 §Seam 3): staged validation of the PLoT→CEE enrichment
     // passthrough (the platform's known-open seam — attached today as
@@ -757,7 +837,13 @@ const ConfigSchema = z.object({
     // was EXECUTED on staging 2026-07-14 (Paul-authorised); in an environment
     // without the RPCs every store call degrades to a swallowed error, never
     // a turn failure.
-  }),
+  }).transform((f) => ({
+    // F3 — resolve the single graph-CAS capability ONCE at parse. Non-throwing
+    // here (the BOOT-REJECT lives in validateConfig() so lazy config access in
+    // tests never fails); callers read `config.features.graphCas`.
+    ...f,
+    graphCas: resolveGraphCasCapability(f.graphCasMode, f.graphCasRpc),
+  })),
 
   // Prompt Cache Configuration
   promptCache: z.object({
@@ -919,46 +1005,14 @@ const ConfigSchema = z.object({
     // (Paul-ratified); env var = kill-switch: CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL=false
     // restores the byte-identical legacy path (the generic/Cap-2A copy).
     editConnectivityNamedRefusalEnabled: booleanString.default(true),
-    // R1 residual (follow-up to #509) — held-confirm value-op canonicalisation
-    // (CEE_GM_HELD_VALUE_CANONICALISATION). A mixed compound edit ("set X to
-    // 0.5, and add a risk about Y") is HELD, and on confirm the batch is
-    // re-applied LOCALLY. The tunable value op arrives in a field spelling the
-    // GraphV3 re-parse strips (the prompt-taught `data/value`), so #509
-    // honestly refuses the WHOLE batch — the value cannot apply on this path.
-    // When true, the confirm-side canonicaliser translates those spellings to
-    // the one GraphV3 preserves (a MERGE onto observed_state, PLoT's own
-    // update_node semantics) so the value ACTUALLY applies while the atomicity
-    // guard (batchFullyLanded) still backstops genuinely-unlandable ops.
-    // Behaviour-visible (previously-refused batches now succeed) → default OFF;
-    // env var = kill-switch: CEE_GM_HELD_VALUE_CANONICALISATION=false restores
-    // the byte-identical #509 path.
-    gmHeldValueCanonicalisationEnabled: booleanString.default(false),
-    // B5 (Codex deep review) — NORMAL-path value-op canonicalisation +
-    // landed-op postcondition (CEE_VALUE_OP_CANONICALISATION).
-    //
-    // The SAME strip #521 fixed on the held path is live on the primary
-    // edit_graph lane, and worse: `GraphV3.safeParse(candidate)` SUCCEEDS
-    // (Zod strips the unknown key instead of erroring) and the code then
-    // promoted the UNPARSED candidate — so the edit was reported APPLIED with
-    // `observed_state.value` unmoved. Reproduced on staging HEAD 1063394.
-    //
-    // When true: (a) the shared canonicaliser translates the prompt-taught
-    // spellings to the one GraphV3 preserves, (b) the PARSED canonical graph
-    // is promoted so validation validates what is actually persisted, and
-    // (c) `batchFullyLanded` refuses — visibly — any op that did not land.
-    //
-    // The postcondition is deliberately on THIS flag rather than its own: on
-    // its own it would start refusing edits that previously "succeeded"
-    // silently, without the canonicaliser that makes most of them succeed for
-    // real. Shipping the refusal without the repair is a strictly worse user
-    // outcome, and shipping the repair without the refusal leaves the
-    // strip-and-succeed class open for untranslatable spellings. They are one
-    // behaviour change and get one switch.
-    //
-    // Behaviour-visible on the live edit path → default OFF; env var =
-    // kill-switch: CEE_VALUE_OP_CANONICALISATION=false restores the
-    // byte-identical legacy path.
-    valueOpCanonicalisationEnabled: booleanString.default(false),
+    // NOTE (2026-07-25): `CEE_GM_HELD_VALUE_CANONICALISATION` and
+    // `CEE_VALUE_OP_CANONICALISATION` used to live here, both defaulting OFF.
+    // Value-op canonicalisation is now UNCONDITIONAL on both lanes — see
+    // `orchestrator/canonicalise-value-ops.ts`, `tools/edit-graph.ts` and
+    // `orchestrator-v5/handlers/gm-held-execute.ts`. Neither variable was ever
+    // set on any Render service, so the capability had been dark since it
+    // shipped and the defect it repairs was live on 100% of real edits.
+    // Rollback is a code revert, not an env flip.
     // Session cache (for /ask endpoint)
     sessionCacheTtlSeconds: z.coerce.number().int().positive().default(14400), // 4 hours default
     // Anthropic Structured Outputs for draft_graph and edit_graph (CEE_ANTHROPIC_STRUCTURED_OUTPUTS)
@@ -977,11 +1031,25 @@ const ConfigSchema = z.object({
     // CEE_ORCHESTRATOR_THINKING_BUDGET — budget_tokens in tokens (min 1024, default 10000)
     //   max_tokens is automatically raised to budget + 1024 when no explicit override is set.
     // CEE_DRAFT_GRAPH_THINKING / CEE_EDIT_GRAPH_THINKING — same contract as orchestrator
+    //
+    // DRAFT_GRAPH thinking defaults ON (no-dark-launches doctrine): plan-then-prune
+    // extended thinking is the lever against the draft cardinality bistability
+    // (sonnet-4-6 over-produces 50-100+ nodes vs the useful ~14-16; it ignores soft
+    // caps and structured-outputs rejects maxItems). Thinking lets the model plan the
+    // right ~14-node graph and PRUNE the runaway before emitting JSON. Kill switch:
+    // CEE_DRAFT_GRAPH_THINKING=false. The default budget (4000) is deliberately BELOW
+    // the affordable draft envelope (~8550 tokens at DRAFT_LLM_TIMEOUT_MS) so it fits
+    // UNCLAMPED and leaves ~4550 tokens of visible-output headroom for a pruned draft's
+    // JSON — enabling thinking must not gut healthy drafts. `resolveDraftThinking`
+    // (draft-budget.ts) still clamps any explicit over-budget so the TOTAL request
+    // (thinking + reserved output) is provably ≤ affordable and completes inside the
+    // 110s window; the boot assertion (validateDraftThinkingAffordability) stays green
+    // at this default (4000 + 1024 ≤ 8550) instead of ERRORing every startup.
     thinking: z.object({
       orchestratorEnabled: thinkingMode.default(false),
       orchestratorBudget: z.coerce.number().int().min(1024).default(10000),
-      draftGraphEnabled: thinkingMode.default(false),
-      draftGraphBudget: z.coerce.number().int().min(1024).default(10000),
+      draftGraphEnabled: thinkingMode.default(true),
+      draftGraphBudget: z.coerce.number().int().min(1024).default(4000),
       editGraphEnabled: thinkingMode.default(false),
       editGraphBudget: z.coerce.number().int().min(1024).default(10000),
     }).default({}),
@@ -1216,8 +1284,27 @@ const ConfigSchema = z.object({
     // BriefSignals context header (appended to user message after compliance reminder)
     briefSignalsHeaderEnabled: booleanString.default(false), // CEE_BRIEF_SIGNALS_HEADER_ENABLED
     // Cross-turn entity memory (tracks per-factor interaction state for Zone 2)
-    // Two-pass graph parameter validation pipeline (CEE_VALIDATION_PIPELINE_ENABLED)
-    validationPipelineEnabled: booleanString.default(false),
+    // Two-pass graph parameter validation pipeline — the contested-edge
+    // capability (CEE_VALIDATION_PIPELINE_ENABLED).
+    //
+    // DEFAULT ON since 2026-08-03 (ROADMAP 2.146, L44 activation lane). The arc
+    // closed on 30 Jul — #764 sized the Pass-2 budget, the pre-check re-ran
+    // VIABLE (58% token headroom, 27.5% latency margin), and the capability was
+    // live-proven n=5 (0/5 degraded, GRAPH_READY inside the flag-OFF
+    // distribution 5/5, model tab rendering contested cards that match the wire,
+    // neutral baseline 47.4% contested). But it was turned on by SETTING THE
+    // RENDER DASHBOARD VARIABLE, with the code default left at `false` — the
+    // env-var gate the no-env-gates doctrine forbids, and a capability that is
+    // dark in every environment that does not carry the var. This makes the
+    // shipped default the live one; the env var remains a kill-switch and still
+    // wins (pinned). Rollback = revert this line, not an env edit.
+    //
+    // Cost/behaviour, stated so the default is an informed one: Pass 2 is a
+    // second LLM review of the drafted graph's parameters (~2–7¢/draft) whose
+    // latency hides behind the coaching pass (the await was moved behind it in
+    // #758 — `cee/unified-pipeline/index.ts`), and whose failure path is
+    // fail-safe: a `failed_degraded` warning, never a blocked draft.
+    validationPipelineEnabled: booleanString.default(true),
     // Post-assembly Zod schema verification pipeline (CEE_VERIFICATION_PIPELINE_ENABLED)
     verificationPipelineEnabled: booleanString.default(true),
     // Coaching architecture kill switches
@@ -1308,17 +1395,28 @@ const ConfigSchema = z.object({
     isVitest: booleanString.default(false),
   }),
 
-  // Research (web search for evidence gathering)
-  research: z.object({
-    enabled: booleanString.default(false),                                 // RESEARCH_ENABLED — master switch
-    model: z.string().default('gpt-4o'),                                   // RESEARCH_MODEL — model for Responses API
-    webSearchToolType: z.string().default('web_search_preview'),           // RESEARCH_WEB_SEARCH_TOOL_TYPE — tool type (updatable without code change)
-    rateLimitPerScenario: z.coerce.number().int().min(1).default(5),       // RESEARCH_RATE_LIMIT — max calls per scenario per window
-    rateLimitWindowMs: z.coerce.number().int().min(1).default(1_800_000),  // RESEARCH_RATE_LIMIT_WINDOW_MS — 30 minutes
-    cacheTtlMs: z.coerce.number().int().min(0).default(1_800_000),         // RESEARCH_CACHE_TTL_MS — 30 minutes
-    cacheMaxSize: z.coerce.number().int().min(1).default(200),             // RESEARCH_CACHE_MAX_SIZE
-    timeoutMs: z.coerce.number().int().min(1000).default(15_000),          // RESEARCH_TIMEOUT_MS — 15 seconds
-  }).default({}),
+  // Research (web search for evidence gathering) — BLOCK DELETED 2026-08-03.
+  //
+  // It sat here as "the committed spec for the rebuild" after its reader
+  // (`orchestrator/tools/research-topic.ts` + `research-client.ts`, 412 lines) was
+  // deleted on 2026-07-22 in `f957d6d8`. Re-derived at `210c0ff` with the note's own
+  // command: `rg -n '\.research\b' --glob '!**/node_modules/**' --glob '!**/*.md'
+  // --glob '!**/*.json'` returned EXACTLY ONE hit — the comment telling the reader to
+  // run that grep. Zero executable readers, in any file, at any hop.
+  //
+  // A parsed, validated, ZERO-READER config key is not a switch; it is a value that
+  // READS as one, and `RESEARCH_ENABLED=true` was in fact live-set on cee-staging
+  // against nothing (removed from the dashboard 2026-07-25). Keeping the spec in the
+  // Zod schema meant the next reader had to re-derive the absence to find that out.
+  //
+  // So the spec moves to prose and the plumbing goes. The eight `RESEARCH_*` variables
+  // are registered in DEAD_ENV_VARS below, which makes the removal LOUD: a stale
+  // dashboard entry is now reported by `checkDeadEnvVars()` instead of being silently
+  // parsed into a value nobody consults. The rebuild's design still lives in
+  // `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` §2.1 (Olumi programme docs,
+  // a sibling directory, untracked) and the deleted implementation is recoverable at
+  // `f957d6d8^` — reintroduce config only WITH a call site, the same rule already
+  // applied to the WS3/WS4/WS7 flags above.
 
   // Prompt Management
   prompts: z.object({
@@ -1429,8 +1527,6 @@ function parseConfig(): Config {
       clarifier: env.CLARIFIER_ENABLED,
       shareReview: env.SHARE_REVIEW_ENABLED,
       enableLegacySSE: env.ENABLE_LEGACY_SSE,
-      // CEE_ORCHESTRATOR_ENABLED preferred; falls back to ENABLE_ORCHESTRATOR
-      orchestrator: env.CEE_ORCHESTRATOR_ENABLED ?? env.ENABLE_ORCHESTRATOR,
       orchestratorV2: env.ENABLE_ORCHESTRATOR_V2,
       contextFabric: env.CEE_ORCHESTRATOR_CONTEXT_ENABLED,
       dskV0: env.ENABLE_DSK_V0,
@@ -1457,7 +1553,6 @@ function parseConfig(): Config {
       reasoningCaptureEnabled: env.CEE_REASONING_CAPTURE_ENABLED,
       coachThinkingDisabled: env.CEE_COACH_THINKING_DISABLED,
       constraintInfeasibleGate: env.CEE_CONSTRAINT_INFEASIBLE_GATE,
-      contextBriefAllSites: env.CEE_CONTEXT_BRIEF_ALL_SITES,
       enrichmentValidation: env.CEE_ENRICHMENT_VALIDATION,
     },
     promptCache: {
@@ -1540,11 +1635,8 @@ function parseConfig(): Config {
       editCapSplitEnabled: env.CEE_EDIT_CAP_SPLIT,
       // POC-BOARD #5c — connectivity/orphan named refusal (default OFF)
       editConnectivityNamedRefusalEnabled: env.CEE_EDIT_CONNECTIVITY_NAMED_REFUSAL,
-      // R1 residual — held-confirm value-op canonicalisation (default OFF)
-      gmHeldValueCanonicalisationEnabled: env.CEE_GM_HELD_VALUE_CANONICALISATION,
-      // B5 — normal-path value-op canonicalisation + landed-op postcondition
-      // (default OFF)
-      valueOpCanonicalisationEnabled: env.CEE_VALUE_OP_CANONICALISATION,
+      // (value-op canonicalisation is unconditional since 2026-07-25 — the two
+      // CEE_*_CANONICALISATION env mappings that used to sit here are gone)
       // Session cache TTL
       sessionCacheTtlSeconds: env.CEE_SESSION_CACHE_TTL_SECONDS,
       // Anthropic Structured Outputs
@@ -1706,16 +1798,7 @@ function parseConfig(): Config {
     testing: {
       isVitest: env.VITEST,
     },
-    research: {
-      enabled: env.RESEARCH_ENABLED,
-      model: env.RESEARCH_MODEL,
-      webSearchToolType: env.RESEARCH_WEB_SEARCH_TOOL_TYPE,
-      rateLimitPerScenario: env.RESEARCH_RATE_LIMIT,
-      rateLimitWindowMs: env.RESEARCH_RATE_LIMIT_WINDOW_MS,
-      cacheTtlMs: env.RESEARCH_CACHE_TTL_MS,
-      cacheMaxSize: env.RESEARCH_CACHE_MAX_SIZE,
-      timeoutMs: env.RESEARCH_TIMEOUT_MS,
-    },
+    // `research:` deleted 2026-08-03 — see the note where the schema block stood.
     prompts: {
       enabled: env.PROMPTS_ENABLED,
       storeType: env.PROMPTS_STORE_TYPE,
@@ -1742,7 +1825,9 @@ function parseConfig(): Config {
       // override an explicit `PROMPTS_ENVIRONMENT=staging`, with no mismatch
       // and no degraded reason (the staging-serves-production direction is
       // deliberately unflagged as the safe one). That is exactly the shape
-      // shipped in tools/conversation-harness/staging-parity.env.example:85.
+      // shipped in tools/conversation-harness/staging-parity.env.example, which
+      // carries a bare `PROMPTS_USE_STAGING=` row. (Cited by KEY, not by line
+      // number — the line-number form of this citation had already drifted.)
       //
       // Normalising blank → undefined here is the ONLY place the distinction
       // still exists; by the time the value reaches resolvePromptEnvironment()
@@ -1935,6 +2020,11 @@ export function validateConfig(): Config {
   // The Proxy will parse and validate the config
   const validated = config.server;
   void validated; // Use the value to satisfy linter
+  // F3 — BOOT-REJECT invalid graph-CAS combinations (e.g. RPC=enforce +
+  // MODE=off, which would send a null expected hash to the enforcing RPC and
+  // silently fall through to an unconditional update). Startup-only so lazy
+  // config access in tests still resolves the capability.
+  assertGraphCasCapabilityValid(config.features.graphCas);
   return config;
 }
 
@@ -2165,7 +2255,13 @@ const DEAD_ENV_VARS: string[] = [
   'CEE_LEGACY_PIPELINE_ENABLED',       // Legacy pipeline code removed
   'CEE_BIAS_LLM_DETECTION_ENABLED',    // Never existed in config schema
   'CAUSAL_CLAIMS_ENABLED',             // Feature gated by CEE_CAUSAL_VALIDATION_ENABLED, not this
-  'ORCHESTRATOR_ENABLED',              // Actual legacy name is ENABLE_ORCHESTRATOR
+  // V1 orchestrator belt deleted (PR #615): its enable flags are now inert. The
+  // old note here — "actual legacy name is ENABLE_ORCHESTRATOR" — is stale: that
+  // var was the belt's own gate and is itself dead now. Remove all three from
+  // deployment/Render config; the admin dashboard flags them via checkDeadEnvVars.
+  'ORCHESTRATOR_ENABLED',              // Never had a reader; the belt read ENABLE_ORCHESTRATOR
+  'ENABLE_ORCHESTRATOR',               // V1 orchestrator-belt enable flag; belt deleted (#615)
+  'CEE_ORCHESTRATOR_ENABLED',          // V1 orchestrator-belt enable flag (CEE_ variant); belt deleted (#615)
   'VITE_ENABLE_ORCHESTRATOR_V2',       // Frontend-only (Vite prefix); not read by backend
   'CEE_UNIFIED_PIPELINE_ENABLED',      // Unified pipeline is always-on; flag retired
   'CEE_MODEL_REPAIR_GRAPH',            // Never existed; canonical name is CEE_MODEL_REPAIR
@@ -2179,6 +2275,20 @@ const DEAD_ENV_VARS: string[] = [
   'CEE_CLARIFIER_STABILITY_THRESHOLD',
   'CEE_CLARIFIER_MIN_IMPROVEMENT_THRESHOLD',
   'CEE_CLARIFIER_QUESTION_CACHE_TTL_SECONDS',
+  // Research artefact retired 2026-08-03 (L44 activation lane). The READER went on
+  // 2026-07-22 (`f957d6d8`); the config block that outlived it — with zero executable
+  // consumers anywhere in the tree — went with this entry. `RESEARCH_ENABLED` had been
+  // live-set `true` on cee-staging against nothing, which is why the whole family is
+  // listed rather than the master switch alone: a half-swept family is how a dead flag
+  // reads as live again. Removed from the Render dashboard 2026-07-25.
+  'RESEARCH_ENABLED',
+  'RESEARCH_MODEL',
+  'RESEARCH_WEB_SEARCH_TOOL_TYPE',
+  'RESEARCH_RATE_LIMIT',
+  'RESEARCH_RATE_LIMIT_WINDOW_MS',
+  'RESEARCH_CACHE_TTL_MS',
+  'RESEARCH_CACHE_MAX_SIZE',
+  'RESEARCH_TIMEOUT_MS',
 ];
 
 /**

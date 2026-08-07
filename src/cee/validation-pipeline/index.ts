@@ -22,6 +22,10 @@ import { VALIDATION_PIPELINE_TIMEOUT_MS } from '../../config/timeouts.js';
 import type { StageContext } from '../unified-pipeline/types.js';
 import type { EdgeV3T, NodeV3T } from '../../schemas/cee-v3.js';
 import type { GraphValidationSummary, LintEntry, ValidationMetadata } from './types.js';
+import {
+  VALIDATION_EDGE_METADATA_KEY,
+  VALIDATION_GRAPH_SUMMARY_KEY,
+} from './types.js';
 
 import { extractGraphStructureForPass2, isStructuralEdge } from './utils.js';
 import { callValidateGraph } from './validate-graph.js';
@@ -58,7 +62,7 @@ function extractGraphFromCtx(ctx: StageContext): ValidationPipelineGraph {
 function attachSummaryToGraph(ctx: StageContext, summary: GraphValidationSummary): void {
   const graph = ctx.graph as Record<string, unknown> | undefined;
   if (graph) {
-    graph.validation_summary = summary;
+    graph[VALIDATION_GRAPH_SUMMARY_KEY] = summary;
   }
 }
 
@@ -205,7 +209,7 @@ export async function runValidationPipeline(ctx: StageContext): Promise<void> {
     if (metadata.status === 'contested') contestedCount++;
 
     // Attach to the edge in-place (passthrough schema preserves it).
-    edge.validation = metadata;
+    edge[VALIDATION_EDGE_METADATA_KEY] = metadata;
   }
 
   log.debug(

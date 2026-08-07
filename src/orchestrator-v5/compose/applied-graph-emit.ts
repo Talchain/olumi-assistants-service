@@ -39,10 +39,35 @@ export type AppliedGraphWireField = NonNullable<OlumiResponse['draft_graph']>;
  * shape: permissive node/edge arrays plus counts from the SAME graph.
  */
 export function buildAppliedGraphWireField(graph: GraphV3T): AppliedGraphWireField {
+  // Root-level `goal_constraints` is a SIBLING of nodes/edges on GraphV3
+  // (cee-v3.ts:429), not causal structure — so this field is the only channel
+  // by which a committed constraint reaches the client on the applied-edit
+  // path. Omitting it shipped a graph that had been silently stripped of the
+  // user's own stated limits, and the UI panel correctly rendered
+  // "Constraints — No limits on record" against a canvas built from them.
+  //
+  // Emitted ONLY when a non-empty array is actually present, matching
+  // draft-graph-dispatch.ts's rule byte-for-byte: an absent or empty array
+  // omits the key rather than emitting `[]`, so no-constraint responses stay
+  // byte-identical to the previous wire and the contract's "consumers must
+  // treat absence and [] as equivalent" note is never exercised by us.
+  //
+  // Consumer-pin check (2026-07-26): DraftGraphBlockSchema declares
+  // `goal_constraints` optional since @talchain/schemas 0.18.0. CEE pins
+  // 0.23.0; UI and PLoT pin 0.22.0 — both above the floor, verified at the
+  // bytes in olumi-schemas `src/boundary/blocks.ts` at tag v0.22.0. The field
+  // is therefore representable at the consumer and will not be silently
+  // dropped by the pin skew.
+  const goalConstraints =
+    Array.isArray(graph.goal_constraints) && graph.goal_constraints.length > 0
+      ? graph.goal_constraints
+      : undefined;
+
   return {
     nodes: graph.nodes as unknown[],
     edges: graph.edges as unknown[],
     node_count: graph.nodes.length,
     edge_count: graph.edges.length,
+    ...(goalConstraints ? { goal_constraints: goalConstraints } : {}),
   };
 }

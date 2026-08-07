@@ -43,19 +43,51 @@ const moduleFiles = collectModuleSourceFiles(moduleDir);
  *  context/frame/types.js is the SANCTIONED type-only seam for the
  *  CanonicalContextFrame → MutationFrame adapter (lane 8 live wiring): import
  *  direction is graph-management → context/frame types, never the reverse,
- *  and the frame types module carries no hash-derivation runtime. */
+ *  and the frame types module carries no hash-derivation runtime.
+ *
+ *  ROADMAP 2.380 — `../../schemas/required-nested-merge.js` is admitted as a
+ *  SIXTH seam target, in the same class as `cee-v3.js`: pure schema derivation
+ *  over the canonical Zod shapes, zod-only, no live-path coupling, no hash
+ *  derivation, no persistence, no I/O. It exists because the candidate builder
+ *  and the LIVE applier (`src/orchestrator/patch-applier.ts`) MUST agree on how
+ *  a partial write onto a REQUIRED nested object merges — they did not, and
+ *  every live edge-strength edit was discarded as a result. The boundary
+ *  forbids importing the applier itself (correctly — that IS V4 patch/apply
+ *  machinery), so the shared semantics were extracted to a neutral module both
+ *  sides import. A second hand-written copy would have been the mirror defect
+ *  this whole guard exists to prevent.
+ *
+ *  This is an EXACT-PATH allowlist, not a directory allowlist: admitting this
+ *  module does not admit `src/schemas/*` generally (pinned by the meta-check
+ *  below). */
 const ALLOWED_RESOLVED = new Set(
   [
     '../tools/handlers/d1-shared/apply-graph-mutation.js',
     '../tools/handlers/d1-shared/errors.js',
     '../tools/handlers/analysis-ready-core.js',
     '../../schemas/cee-v3.js',
+    '../../schemas/required-nested-merge.js',
     '../context/frame/types.js',
   ].map((s) => resolve(moduleDir, s)),
 );
 
-/** External bare specifiers permitted in production (pure libs, no live-path coupling). */
-const EXTERNAL_ALLOWED = new Set(['zod']);
+/** External bare specifiers permitted in production (pure libs, no live-path coupling).
+ *
+ *  ROADMAP 2.474 / design-review amendment A6 — `@talchain/schemas/orchestrator`
+ *  is admitted as a SECOND external, in the same class as the
+ *  `required-nested-merge` seam above: the CLASSED FIELD-PARITY TABLE and its
+ *  derivation accessors are pure data + zod over the shared contract — no I/O,
+ *  no hash derivation, no persistence, no live-path coupling. It exists because
+ *  `field-safety.ts`'s allowlists MUST be derived from the one canonical table
+ *  rather than hand-reconciled against the UI's inspector setters; a second
+ *  hand-written copy is the mirror defect this guard exists to prevent
+ *  (trap 12), and the drift it produces reads as green.
+ *
+ *  EXACT SUBPATH, not the package: admitting the orchestrator entry point does
+ *  NOT admit `@talchain/schemas` root, `/boundary`, or `/fixtures` — those carry
+ *  wire/transport surfaces this module is deliberately isolated from. Pinned by
+ *  the meta-check below. */
+const EXTERNAL_ALLOWED = new Set(['zod', '@talchain/schemas/orchestrator']);
 
 /** Named imports that must NEVER appear in a production module file. */
 const BANNED_NAMED_IMPORTS = new Set(['mergeMutatedGraphForPersistence']);
@@ -189,6 +221,32 @@ describe('isolation guards (AST import enforcement / off-path / no persistence-m
     expect(importAllowed(moduleDir, '../session/pending-action.js')).toBe(false);
     expect(importAllowed(moduleDir, '../bad.js')).toBe(false);
     expect(importAllowed(moduleDir, 'lodash')).toBe(false);
+  });
+
+  /** ROADMAP 2.474 / A6 — admitting `@talchain/schemas/orchestrator` must not
+   *  have widened the boundary to the PACKAGE. Same discipline as the
+   *  required-nested-merge meta-check: exact specifier, not a prefix. */
+  it('meta-check: admitting @talchain/schemas/orchestrator did NOT admit the package', () => {
+    expect(importAllowed(moduleDir, '@talchain/schemas/orchestrator')).toBe(true);
+    expect(importAllowed(moduleDir, '@talchain/schemas')).toBe(false);
+    expect(importAllowed(moduleDir, '@talchain/schemas/boundary')).toBe(false);
+    expect(importAllowed(moduleDir, '@talchain/schemas/fixtures')).toBe(false);
+  });
+
+  /** ROADMAP 2.380 — admitting `schemas/required-nested-merge.js` must not have
+   *  widened the boundary to the schemas DIRECTORY. The allowlist is
+   *  exact-path; these pin that it stayed exact-path. Without this, a later
+   *  "it's just another schemas import" would sail through. */
+  it('meta-check: admitting required-nested-merge did NOT admit src/schemas/* generally', () => {
+    expect(importAllowed(moduleDir, '../../schemas/required-nested-merge.js')).toBe(true);
+    expect(importAllowed(moduleDir, '../../schemas/cee-v3.js')).toBe(true);
+    // Everything else under src/schemas/ is still refused.
+    expect(importAllowed(moduleDir, '../../schemas/index.js')).toBe(false);
+    expect(importAllowed(moduleDir, '../../schemas/anything-else.js')).toBe(false);
+    // And the applier itself — the module whose semantics were extracted —
+    // remains forbidden. Sharing happened via the neutral module, NOT by
+    // opening the boundary to V4 patch/apply machinery.
+    expect(importAllowed(moduleDir, '../../orchestrator/patch-applier.js')).toBe(false);
   });
 
   it('zero persistence: the input graph is never mutated by refereeMutation', () => {

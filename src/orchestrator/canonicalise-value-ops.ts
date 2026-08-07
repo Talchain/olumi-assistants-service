@@ -241,6 +241,73 @@ export function canonicaliseValueOps(
 }
 
 // ---------------------------------------------------------------------------
+// User-edit provenance stamp (ROADMAP 2.396(b) — P4 transport, 2026-08-05).
+//
+// Every op that reaches either edit seam is a CHAT-SET, USER-CONFIRMED write
+// (the normal path applies what the user asked for; the held path applies what
+// the user explicitly confirmed). Yet the applied value carried NO user
+// provenance, so the UI's "User edited" pill — earned from
+// `observed_state.source` (its reliable rung; node `provenance` is clobbered
+// by the V3 response transform, `schema-v3.ts` nodeProvenanceDisplay) — could
+// never earn on these lanes, and every chat-set value rendered as "Olumi
+// estimate — check first".
+//
+// The stamp is written INTO THE OP, pre-apply, deliberately:
+//   · the applier then writes it, the GraphV3 re-parse keeps it (the
+//     ObservedStateV3.source enum now carries the user members), and
+//     `batchFullyLanded`'s per-field survival check sees it IDENTICAL on both
+//     the raw and canonical sides. Stamping the canonical graph AFTER the
+//     apply would instead make raw != canonical on the observed_state key and
+//     refuse every stamped batch.
+//   · ONE function, called by BOTH seams — the same no-second-copy rule as
+//     `canonicaliseValueOps` itself (see the module header).
+//
+// Scope: ONLY `update_node` ops whose (post-canonicalisation) `observed_state`
+// payload carries a `value` member — the pill is a claim about the VALUE.
+// Unit-only edits, label edits, structural ops and intervention writes are
+// returned BY REFERENCE, untouched. An explicit LLM-claimed producer source on
+// a value write is OVERRIDDEN: the user consented to this write, and letting a
+// model stamp its own output as `cee_inference` on a user-confirmed value is
+// the exact mislabel this exists to close.
+//
+// This deliberately does NOT ride inside `canonicaliseValueOps`: that module's
+// pinned contract is spelling-only ("byte-identical for canonical batches"),
+// and folding a semantic stamp into it would break that pin. Compose them:
+//   stampUserEditProvenance(canonicaliseValueOps(ops, graph).operations)
+// ---------------------------------------------------------------------------
+
+/** The observed_state.source literal CEE's chat-edit writers stamp. */
+export const USER_EDIT_SOURCE = 'user_override' as const;
+/** The node-level provenance literal (the set_factor_value precedent). */
+export const USER_EDIT_PROVENANCE = 'user_set' as const;
+
+/**
+ * Stamp user provenance onto every value-writing `update_node` op. Pure and
+ * total — never throws, never mutates its inputs; ops needing no stamp are
+ * returned by reference.
+ */
+export function stampUserEditProvenance(
+  operations: readonly PatchOperation[],
+): PatchOperation[] {
+  return operations.map((op) => {
+    if (op.op !== 'update_node') return op;
+    const value = asRecord(op.value);
+    if (value === null) return op;
+    const observed = asRecord(value[OBSERVED_ROOT]);
+    if (observed === null) return op;
+    if (!Object.prototype.hasOwnProperty.call(observed, 'value')) return op;
+    return {
+      ...op,
+      value: {
+        ...value,
+        [OBSERVED_ROOT]: { ...observed, source: USER_EDIT_SOURCE },
+        provenance: USER_EDIT_PROVENANCE,
+      },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Landed-op postcondition (#509's `heldBatchFullyLanded`, generalised to serve
 // the normal edit path too).
 //

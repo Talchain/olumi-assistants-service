@@ -22,17 +22,18 @@
  */
 
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  deriveContextSectionBudgets,
+  emitContextPolicyDivergence,
+  type BudgetTelemetryCallSite,
+} from './context-policy.js';
 
 // ---------------------------------------------------------------------------
-// Budget tables (03 §1) — measurement targets, NOT enforcement
+// Budget tables — a DERIVED VIEW of CONTEXT_POLICY (ROADMAP 1.199, Q1 rule 2)
 // ---------------------------------------------------------------------------
 
-export type ContextBudgetCallSite =
-  | 'routing'
-  | 'edit_graph'
-  | 'repair_edit_graph'
-  | 'decision_review'
-  | 'draft_graph';
+// The call-site enum is the same set the policy's derived view keys on.
+export type ContextBudgetCallSite = BudgetTelemetryCallSite;
 
 interface SiteBudget {
   /** Per-section char budgets. Sections absent here are unbudgeted. */
@@ -42,65 +43,18 @@ interface SiteBudget {
 }
 
 /**
- * Verbatim from 03 §1. `conversation_summary` / `older_relevant_facts` /
- * `decision_records` budgets are pre-declared for layers that later slices
- * (S3/S4/S5) introduce — they measure as 0 until those ship, which is the
- * point: the dashboard shows the layer arriving.
- *
- * NOTE (edit_graph.conversation): the 03 §1 design budget is 6,000 chars
- * while today's enforced serialiser cap is 4,000 — S0 measures against the
- * design budget; the enforcement change is S4/S5 territory, not S0's.
+ * The per-site char-budget table. Formerly a hand-authored parallel table that
+ * DRIFTED from the enforced caps (decision_review `brief:8_000` vs enforced
+ * 2_000; edit `conversation:6_000` vs enforced 4_000). It is now a DERIVED VIEW
+ * of {@link CONTEXT_POLICY} (ROADMAP 1.199, Q1 rule 2 / Q5): every budget is
+ * projected out of the policy's per-section `char_budget`, so the two mirrors
+ * can no longer diverge. `conversation_summary` / `older_relevant_facts` /
+ * `decision_records` remain pre-declared reservations (policy `unpopulated`),
+ * measuring 0 until the layer that fills them ships — the dashboard still shows
+ * the layer arriving. draft_graph stays instrumented-only (POST wave-1, P4).
  */
-export const CONTEXT_SECTION_BUDGETS: Readonly<Record<ContextBudgetCallSite, SiteBudget>> = {
-  routing: {
-    sections: {
-      conversation: 34_000,
-      conversation_summary: 1_300,
-      brief: 2_000,
-      display_analysis: 4_000,
-      display_graph: 8_000,
-      older_relevant_facts: 3_000,
-      rest: 2_500,
-    },
-    total: 55_000,
-  },
-  edit_graph: {
-    sections: {
-      graph_json: 8_000,
-      conversation: 6_000,
-      conversation_summary: 1_300,
-      brief: 1_000,
-    },
-    total: 16_300,
-  },
-  repair_edit_graph: {
-    // Same site budget as edit_graph — repair reuses the identical
-    // contextSection (edit-graph.ts), it only swaps the system prompt.
-    sections: {
-      graph_json: 8_000,
-      conversation: 6_000,
-      conversation_summary: 1_300,
-      brief: 1_000,
-    },
-    total: 16_300,
-  },
-  decision_review: {
-    sections: {
-      graph_json: 16_000,
-      isl_results: 16_000,
-      brief: 8_000,
-      decision_records: 1_800,
-      conversation_summary: 1_300,
-    },
-    total: 43_100,
-  },
-  draft_graph: {
-    // Instrumented but NOT re-budgeted here — the 58,564-char draft prompt
-    // is ROADMAP 1.75's scope (03 §1). Boundary kept deliberately.
-    sections: {},
-    total: null,
-  },
-};
+export const CONTEXT_SECTION_BUDGETS: Readonly<Record<ContextBudgetCallSite, SiteBudget>> =
+  deriveContextSectionBudgets();
 
 /**
  * Which sections (by name, plus the sentinel `'total'`) exceed the 03 §1
@@ -135,6 +89,14 @@ export interface ContextTruncationRecord {
   readonly original_chars: number;
   readonly kept_chars: number;
   readonly disclosed: boolean;
+  /**
+   * Item counts, for sections cut by ITEM rather than by chars (the
+   * decision-records read drops whole records at the SQL LIMIT, whose chars
+   * never enter the process and must not be invented). Absent on char-only
+   * cuts. Additive: char-cut producers are unchanged.
+   */
+  readonly original_records?: number;
+  readonly kept_records?: number;
 }
 
 /**
@@ -219,6 +181,18 @@ export function emitContextBudget(args: ContextBudgetArgs): void {
       'v5.context_budget emit failed (swallowed — telemetry must never fail a turn)',
     );
   }
+  // ROADMAP 1.199 — the ContextPolicy divergence tripwire rides the SAME
+  // once-per-LLM-call seam, so it covers every migrated call site from one
+  // insertion point (derive-don't-mirror). Observe-only, never throws; it fires
+  // v5.context_policy.divergence only when the realised composition departs from
+  // CONTEXT_POLICY (an undeclared section or an enforced section over budget).
+  emitContextPolicyDivergence(
+    args.call_site,
+    args.section_chars,
+    args.total_chars,
+    args.request_id,
+    args.scenario_id,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +206,9 @@ export interface ContextTruncationArgs {
   readonly section: string;
   readonly original_chars: number;
   readonly kept_chars: number;
+  /** Item counts for item-wise cuts — see {@link ContextTruncationRecord}. */
+  readonly original_records?: number;
+  readonly kept_records?: number;
   /** Bounded enum-ish string, e.g. 'hard_slice' | 'window_slice'. */
   readonly strategy: string;
   /** Whether the LLM can SEE that the cut happened (in-band disclosure). */
@@ -248,6 +225,8 @@ export function emitContextTruncation(args: ContextTruncationArgs): void {
       section: args.section,
       original_chars: args.original_chars,
       kept_chars: args.kept_chars,
+      ...(args.original_records === undefined ? {} : { original_records: args.original_records }),
+      ...(args.kept_records === undefined ? {} : { kept_records: args.kept_records }),
       strategy: args.strategy,
       disclosed: args.disclosed,
       request_id: args.request_id ?? null,

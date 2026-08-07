@@ -97,9 +97,9 @@ vi.mock("../../src/cee/llm-output-store.js", () => ({
   buildLLMRawTrace: vi.fn(),
 }));
 
-// Mock context pack (assembleContextPack computes hashes over pipeline state)
+// Mock context pack (assembleDraftProvenanceDescriptor computes hashes over pipeline state)
 vi.mock("../../src/context/context-pack.js", () => ({
-  assembleContextPack: vi.fn().mockReturnValue({
+  assembleDraftProvenanceDescriptor: vi.fn().mockReturnValue({
     pipelinePath: "unified",
     context_hash: "test-hash",
   }),
@@ -281,6 +281,27 @@ describe("runStagePackage", () => {
     expect(ctx.quality).toEqual(defaultQuality);
   });
 
+  it("2.732: repair_summary carries llm_repair_needed but NONE of the deleted LLM-repair bookkeeping fields", async () => {
+    // Producer-bound pin (not a hand-built literal): run the REAL
+    // runStagePackage and inspect the trace it emits. The draft path's LLM
+    // repair was removed (ROADMAP 2.731); llm_repair_called /
+    // llm_repair_brief_included / llm_repair_skipped_reason were deleted
+    // with it (2.732) because they could only ever be constant-wrong.
+    // Re-adding any of them to package.ts REDs here.
+    const ctx = makeCtx();
+    ctx.llmRepairNeeded = true;
+    await runStagePackage(ctx);
+
+    const summary = (ctx.pipelineTrace as any)?.repair_summary;
+    expect(summary).toBeDefined();
+    // Still-truthful sweep diagnostic survives.
+    expect(summary.llm_repair_needed).toBe(true);
+    // Deleted fields are ABSENT AS KEYS, not merely falsy.
+    expect("llm_repair_called" in summary).toBe(false);
+    expect("llm_repair_brief_included" in summary).toBe(false);
+    expect("llm_repair_skipped_reason" in summary).toBe(false);
+  });
+
   // ── Archetype inference ─────────────────────────────────────────────────
 
   it("calls inferArchetype when draftArchetypesEnabled = true", async () => {
@@ -440,12 +461,23 @@ describe("runStagePackage", () => {
 
   // ── Strengthen item action_type defaulting ─────────────────────────────
 
-  it("defaults action_type to 'add_constraint' on LLM strengthen_items missing it (v0.11.0 canonical enum)", async () => {
+  it("forces every action_type onto the canonical enum — missing AND off-contract (v0.11.0 canonical enum)", async () => {
     // v0.11.0 schema amendment: StrengthenItemActionType canonical enum
     // is `add_option | add_constraint | add_risk | reframe_goal`. Pre-
     // amendment default `"improve"` was outside the canonical enum and
     // would fail the tightened Zod parse. Default migrated to
     // `"add_constraint"`.
+    //
+    // CHANGED 2026-07-24 (draft-honesty lane). This test previously asserted
+    // `expect(items[1].action_type).toBe("refine")` — i.e. it PINNED the
+    // behaviour that a PRESENT but off-contract action_type passes straight
+    // through. That is precisely the live defect: the day-3 drafting matrix
+    // found 8 of 9 successful drafts stamped `verification_status:
+    // failed_degraded` because coaching carried action types
+    // (`add_edge`/`add_factor`/`quantify`/`clarify_goal`) outside this enum.
+    // Stage 5 now enforces the contract for missing AND off-contract values
+    // alike, so an unrecognised category resolves to the generic canonical
+    // member rather than shipping a schema violation.
     const ctx = makeCtx({
       coaching: {
         summary: "Some coaching",
@@ -458,8 +490,8 @@ describe("runStagePackage", () => {
     await runStagePackage(ctx);
 
     const items = (ctx.coaching as any).strengthen_items;
-    expect(items[0].action_type).toBe("add_constraint");
-    expect(items[1].action_type).toBe("refine");
+    expect(items[0].action_type).toBe("add_constraint"); // was missing
+    expect(items[1].action_type).toBe("add_constraint"); // was off-contract "refine"
   });
 
   // ── Coaching narrow + sanitise on the response ──────────────────────────

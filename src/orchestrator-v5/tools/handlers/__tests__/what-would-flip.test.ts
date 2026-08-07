@@ -143,10 +143,19 @@ describe('what_would_flip — registration', () => {
     expect(resolveHandler(registry, 'what_would_flip')).not.toBeNull();
   });
 
-  it('declares accepted_entity_kinds = [goal, option] in the validation registry', () => {
+  // ROADMAP 2.229 fix 2 — `'node'` added. The wire entity-kind enum collapses
+  // factor / outcome / decision / risk / action into the single `'node'`
+  // literal (`toEntityKind`, graph-lookup-adapter.ts), so WITHOUT it every
+  // factor-named flip question ("How far would Market Receptivity to Channel
+  // have to move before the other option wins?") died on
+  // ENTITY_KIND_MISMATCH and was answered with the generic "I wasn't sure what
+  // you meant" clarifier offering the goal and the options — i.e. four things
+  // that are not factors. This is the remaining half of the Live AI
+  // Experience audit's P0, closed for the two explainers and left open here.
+  it('declares accepted_entity_kinds = [goal, option, node] in the validation registry', () => {
     const decl = HANDLER_VALIDATION_REGISTRY.what_would_flip;
     expect(decl).toBeDefined();
-    expect(decl?.accepted_entity_kinds).toEqual(['goal', 'option']);
+    expect(decl?.accepted_entity_kinds).toEqual(['goal', 'option', 'node']);
   });
 });
 
@@ -156,12 +165,69 @@ describe('what_would_flip — validator', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('rejects a node-kind proposal with ENTITY_KIND_MISMATCH', () => {
+  // ROADMAP 2.229 fix 2 — this test previously PINNED the dead-end: a
+  // node-kind proposal was rejected with ENTITY_KIND_MISMATCH, which is what
+  // every factor-targeted flip question produced on the wire. The assertion is
+  // inverted, not deleted: the guarantee it now pins is that a factor target
+  // ROUTES.
+  //
+  // Safe because the handler never consumes the proposal entity: its only
+  // target-aware branch keys on `invocation.flipTargetOption`
+  // (what-would-flip.ts:159-166), which turn-executor.ts:7249-7259 resolves
+  // from the MESSAGE TEXT via `resolveTargetOptionFromMessage`, not from the
+  // proposal. A factor target therefore leaves `flipTargetOption` null and the
+  // handler takes its existing, untouched scenario-wide branch — the same one
+  // it already takes whenever no option is named.
+  it('accepts a node-kind proposal (factor/outcome/decision/risk target)', () => {
     const result = validateToolCall(
       buildProposal({
         entity: {
           id: 'node_dec_1',
           kind: 'node',
+          resolution_status: 'resolved',
+          resolution_method: 'kind_inference',
+        },
+      }),
+      undefined,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  // The widening is scoped: 'edge' and 'constraint' stay rejected, exactly as
+  // they are for the two explanation handlers (the validator skips the
+  // existence + kind cross-check for edges, so accepting 'edge' would mean
+  // ZERO existence validation).
+  it('still rejects an edge-kind proposal with ENTITY_KIND_MISMATCH', () => {
+    const result = validateToolCall(
+      buildProposal({
+        entity: {
+          id: 'edg_1',
+          kind: 'edge',
+          resolution_status: 'resolved',
+          resolution_method: 'kind_inference',
+        },
+      }),
+      undefined,
+      HANDLER_VALIDATION_REGISTRY,
+    );
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.error.code).toBe('ENTITY_KIND_MISMATCH');
+    }
+  });
+
+  // The comment above claims BOTH 'edge' and 'constraint' stay rejected, and
+  // so does validation-registry.ts:214 ("'edge' and 'constraint' stay rejected
+  // for the same reason as above") — but only 'edge' was pinned. Half a claim
+  // asserted in prose is exactly the shape a later widening slips through
+  // (2.229 fix 2 widened this handler once already). Pinned now.
+  it('still rejects a constraint-kind proposal with ENTITY_KIND_MISMATCH', () => {
+    const result = validateToolCall(
+      buildProposal({
+        entity: {
+          id: 'con_1',
+          kind: 'constraint',
           resolution_status: 'resolved',
           resolution_method: 'kind_inference',
         },

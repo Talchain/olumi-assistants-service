@@ -34,6 +34,7 @@ import type { HandlerInvocation } from '../../registry.js';
 import {
   isAllowedRunAnalysisAssistantText,
 } from '../../../coaching/analysis-result-headline.js';
+import { buildScaffoldPromptDisclosure } from '../../../coaching/scaffold-disclosure.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../routing/validation-registry.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -140,6 +141,44 @@ function makePreflightPlotClient(): { client: PLoTClient; run: ReturnType<typeof
   });
   const client = { run, validatePatch: vi.fn().mockResolvedValue({}) } as unknown as PLoTClient;
   return { client, run };
+}
+
+/** The mock PLoT `run` signature, so a wrapper can call the inner mock. */
+type PlotRunFn = (payload: Record<string, unknown>) => Promise<V2RunResponseEnvelope>;
+
+/**
+ * The same preflight mirror, but the engine RETURNS the scaffolded arm in
+ * its per-option records.
+ *
+ * Why this exists (2026-07-25): `v2-run-golden-happy.json` carries exactly
+ * two records (`opt_a`, `opt_b`), so every test using the plain mirror models
+ * a run in which the scaffolded option did NOT reach the comparison — which
+ * is the LIVE case (staging scenario 454c14fb…: PLoT/ISL removed the
+ * scaffolded arm with `IDENTICAL_OPTIONS_DEDUPED` because the scaffold's
+ * neutral values coincide with the baseline option's). This variant is the
+ * other half of the matrix: the arm survives, so "placeholder values were
+ * used" is a TRUE statement and must still ship.
+ */
+function makeArmKeptPlotClient(optionId: string, optionLabel: string): {
+  client: PLoTClient;
+  run: ReturnType<typeof vi.fn>;
+} {
+  const { client, run } = makePreflightPlotClient();
+  const inner = run.getMockImplementation()! as PlotRunFn;
+  const wrapped = vi.fn(async (payload: Record<string, unknown>) => {
+    const envelope = (await inner(payload)) as Record<string, unknown>;
+    const records = envelope.results as Array<Record<string, unknown>>;
+    records.push({
+      option_id: optionId,
+      option_label: optionLabel,
+      win_probability: 0.05,
+      percentile_p10: 0.01,
+      percentile_p90: 0.09,
+    });
+    return envelope as unknown as V2RunResponseEnvelope;
+  });
+  (client as unknown as { run: unknown }).run = wrapped;
+  return { client, run: wrapped };
 }
 
 function makeInvocation(): HandlerInvocation {
@@ -324,7 +363,13 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
   // -------------------------------------------------------------------------
 
   it('DISCLOSURE: summary + assistant_text say the option’s values are placeholders and point at the configure route', async () => {
-    const { client } = makePreflightPlotClient();
+    // The arm SURVIVED to the comparison, so "placeholder values were used"
+    // is true and is what must ship. (Before 2026-07-25 this test used the
+    // plain mirror, whose golden fixture returns only opt_a/opt_b — so it
+    // asserted the placeholder claim on a run where the option was NOT in
+    // the results. That is the live defect, now covered by its own test
+    // below; this one keeps the true-claim path honest.)
+    const { client } = makeArmKeptPlotClient('opt_new', 'New Option');
     const handler = createRunAnalysisHandler({
       plotClient: client,
       scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
@@ -347,7 +392,7 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
   });
 
   it('DISCLOSURE survives the wire egress allowlist (validation-registry forwarder does NOT replace it with the bland fallback)', async () => {
-    const { client } = makePreflightPlotClient();
+    const { client } = makeArmKeptPlotClient('opt_new', 'New Option');
     const handler = createRunAnalysisHandler({
       plotClient: client,
       scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
@@ -365,6 +410,107 @@ describe('run_analysis D-ask-1 scaffold backstop (2.11 P0-1)', () => {
     const forwarded = (forwarder as (o: unknown) => string)(outcome);
     expect(forwarded).toBe(outcome.assistant_text);
     expect(forwarded).toMatch(/Placeholder values were used/);
+  });
+
+  // -------------------------------------------------------------------------
+  // ⭐ 2026-07-25 — the option the scaffold filled placeholders for did NOT
+  // reach the comparison. RED-first against staging tip 74c785f: the summary
+  // there claims "Placeholder values were used for 'New Option'" while the
+  // returned records contain only opt_a / opt_b.
+  //
+  // LIVE REPRODUCTION (deployed staging, CEE 74c785f, scenario
+  // 454c14fb-cfa3-40d9-b285-cb6acb1897ff; independently again on
+  // 0cc2923b-1b36-4ed6-903e-eeedade12bdb):
+  //   user: "What about franchising instead? Add that as a fourth option."
+  //   → held → confirmed → persisted `opt_franchise` (no interventions)
+  //   → run_analysis → option_comparison had 3 entries, win_probabilities 3
+  //     keys, `opt_franchise` in NEITHER, while the summary said
+  //     "Placeholder values were used for 'Franchise the Leeds Location'".
+  //   → v5_handler_facts carried the reason:
+  //     IDENTICAL_OPTIONS_DEDUPED — "…has identical interventions to 'Stay at
+  //     Current Location (Status Quo)' and was removed."
+  // The collision is structural: the scaffold's neutral rule is the factor's
+  // current observed position, which is exactly how the drafter defines the
+  // baseline option.
+  // -------------------------------------------------------------------------
+
+  it('⭐ RED: an option the engine dropped is NOT claimed as included — the honest omission sentence ships instead', async () => {
+    // Plain mirror: the golden fixture returns opt_a/opt_b only, i.e. the
+    // scaffolded arm did not survive — the live shape.
+    const { client } = makePreflightPlotClient();
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+
+    // Positive control for this whole test: the option really is absent from
+    // the numbers the user is shown. Without this the assertions below could
+    // pass against a run where nothing was dropped.
+    expect(Object.keys(fact.result.win_probabilities ?? {})).not.toContain('New Option');
+
+    for (const text of [outcome.assistant_text, fact.result.summary]) {
+      // The false claim must be GONE …
+      expect(text).not.toMatch(/Placeholder values were used/);
+      // … and replaced by the honest one, still pointing at the working route.
+      expect(text).toContain("'New Option' was left out of this comparison because it has no values set.");
+      expect(text).toContain("say 'Help me configure New Option.'");
+    }
+  });
+
+  it('⭐ the omission sentence SURVIVES the wire egress allowlist (it is not swapped for the bland fallback)', async () => {
+    const { client } = makePreflightPlotClient();
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+
+    expect(isAllowedRunAnalysisAssistantText(outcome.assistant_text)).toBe(true);
+    const forwarder = HANDLER_VALIDATION_REGISTRY.run_analysis!.confirmation_template;
+    const forwarded = (forwarder as (o: unknown) => string)(outcome);
+    expect(forwarded).toBe(outcome.assistant_text);
+    expect(forwarded).toMatch(/was left out of this comparison/);
+  });
+
+  it('⭐ the omission verdict is stamped on the outcome channel so the review prompt inherits it', async () => {
+    const { client } = makePreflightPlotClient();
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+    const records = outcome.__scaffolded_options!;
+    expect(records).toHaveLength(1);
+    expect(records[0]!.in_comparison).toBe(false);
+    // And the LLM-facing disclosure built from that channel refuses to give
+    // the dropped option numbers.
+    const prompt = buildScaffoldPromptDisclosure(records);
+    expect(prompt).toMatch(/is NOT in the option comparison/);
+    expect(prompt).not.toMatch(/the analysis used neutral placeholder interventions/);
+  });
+
+  it('⭐ an unreadable result set asserts NO absence (trap-13 positive control)', async () => {
+    // Engine returns zero per-option records: presence cannot be seen, so an
+    // absence must not be derived. The pre-existing copy is the fail-safe.
+    const { client } = makePreflightPlotClient();
+    const inner = (client as unknown as { run: ReturnType<typeof vi.fn> }).run
+      .getMockImplementation()! as PlotRunFn;
+    (client as unknown as { run: unknown }).run = vi.fn(async (payload: Record<string, unknown>) => {
+      const envelope = (await inner(payload)) as Record<string, unknown>;
+      envelope.results = [];
+      envelope.option_comparison = [];
+      return envelope as unknown as V2RunResponseEnvelope;
+    });
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).not.toMatch(/was left out of this comparison/);
+    expect(outcome.__scaffolded_options![0]!.in_comparison).toBeUndefined();
   });
 
   it('exposes the scaffold record on the outcome with the value_defaulted marker (chip + telemetry channel)', async () => {
@@ -618,5 +764,195 @@ describe('run_analysis D-ask-1 scaffold — paths the scaffold must NOT touch', 
     expect(thrown).toBeInstanceOf(HandlerInvocationFailedError);
     expect((thrown as HandlerInvocationFailedError).cause_kind).toBe('options_not_configured');
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐ ROADMAP 2.120(c) — 2026-07-29. The removal is disclosed with the ENGINE'S
+// reason, end-to-end through the real handler.
+//
+// The tests above pin the FALLBACK sentence ("because it has no values set"),
+// which is what ships when PLoT gives no reason — the golden fixture carries no
+// `critiques` at all. These tests supply the reason PLoT actually gives, in the
+// EXACT shape captured off deployed staging, and pin that the disclosure names
+// the option the removed one collapsed onto.
+//
+// Live warning shape, verbatim from
+// `PHASE0-EVIDENCE-2026-07-28/recapture-748-turn-bodies.json` (CEE `f2e00b6`,
+// 2026-07-28 22:22Z) crossed with the producer read at PLoT `3d13e0a`
+// (`validation/preflight-v2.ts:433-441`, which is where `affected_option_ids`
+// comes from — the CEE→UI turn payload strips it, so only the PLoT→CEE hop
+// carries it, and only this hop is what the handler reads):
+//
+//   { code: 'IDENTICAL_OPTIONS_DEDUPED', severity: 'warning', source: 'validation',
+//     message: "Option 'Partner with Specialist Consultancy to Extend Current
+//               System' has identical interventions to 'Defer Replacement
+//               (Status Quo)' and was removed. Analysis proceeds with
+//               deduplicated options.",
+//     affected_option_ids: ['opt_status_quo', 'opt_consultancy'],
+//     blocks_analysis: false }
+// ---------------------------------------------------------------------------
+
+/**
+ * The preflight mirror, plus the engine's dedup reason for `removedId` —
+ * `keptId` being an option the fixture DOES return. Mirrors the real envelope:
+ * the removed arm is absent from the per-option records and named only in the
+ * critique.
+ */
+function makeDedupPlotClient(
+  removedId: string,
+  keptId: string,
+  overrides?: { affectedIds?: unknown; code?: string },
+): { client: PLoTClient; run: ReturnType<typeof vi.fn> } {
+  const { client, run } = makePreflightPlotClient();
+  const inner = run.getMockImplementation()! as (
+    payload: Record<string, unknown>,
+  ) => Promise<V2RunResponseEnvelope>;
+  const wrapped = vi.fn(async (payload: Record<string, unknown>) => {
+    const envelope = (await inner(payload)) as Record<string, unknown>;
+    envelope.critiques = [
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        code: 'DOMINANT_FACTOR',
+        severity: 'warning',
+        message: 'One factor dominates.',
+        source: 'validation',
+        blocks_analysis: false,
+      },
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        code: overrides?.code ?? 'IDENTICAL_OPTIONS_DEDUPED',
+        severity: 'warning',
+        message:
+          `Option 'New Option' has identical interventions to 'Option A' and was removed. ` +
+          'Analysis proceeds with deduplicated options.',
+        source: 'validation',
+        affected_option_ids:
+          overrides && 'affectedIds' in overrides ? overrides.affectedIds : [keptId, removedId],
+        blocks_analysis: false,
+      },
+    ];
+    return envelope as unknown as V2RunResponseEnvelope;
+  });
+  (client as unknown as { run: unknown }).run = wrapped;
+  return { client, run: wrapped };
+}
+
+describe('⭐ 2.120(c) run_analysis — the removal carries the engine\'s reason', () => {
+  it('⭐ RED: the disclosure NAMES the kept option and drops the "no values set" reason', async () => {
+    const { client } = makeDedupPlotClient('opt_new', 'opt_a');
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
+
+    // Positive control (trap-13): the removed arm really is absent from the
+    // numbers, and the KEPT arm really is present — otherwise the sentence
+    // below would be naming an option the user never saw.
+    const shown = Object.keys(fact.result.win_probabilities ?? {});
+    expect(shown).not.toContain('New Option');
+    expect(shown).toContain('Option A');
+
+    for (const text of [outcome.assistant_text, fact.result.summary]) {
+      expect(text).toContain(
+        "'New Option' was left out of this comparison because it is currently " +
+          "indistinguishable from 'Option A' — its result is that option's result.",
+      );
+      // The engine's reason REPLACES the proxy reason on this branch.
+      expect(text).not.toContain('left out of this comparison because it has no values set');
+      // The deterministic configure route is still advised.
+      expect(text).toContain("say 'Help me configure New Option.'");
+      // And the false inclusion claim is still gone.
+      expect(text).not.toMatch(/Placeholder values were used/);
+    }
+  });
+
+  it('⭐ the new sentence SURVIVES the wire egress allowlist (not swapped for the bland fallback)', async () => {
+    const { client } = makeDedupPlotClient('opt_new', 'opt_a');
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(isAllowedRunAnalysisAssistantText(outcome.assistant_text)).toBe(true);
+    const forwarder = HANDLER_VALIDATION_REGISTRY.run_analysis!.confirmation_template;
+    const forwarded = (forwarder as (o: unknown) => string)(outcome);
+    expect(forwarded).toBe(outcome.assistant_text);
+    expect(forwarded).toContain("indistinguishable from 'Option A'");
+  });
+
+  it('CONTROL — the kept id is derived from PRESENCE, not from the array position PLoT happens to use', async () => {
+    // Same warning, ids REVERSED. PLoT emits [kept, dropped] today; if this
+    // handler read position 0 as "kept" it would name the REMOVED option as the
+    // one to compare against — a self-referential sentence. Presence in the
+    // returned comparison decides, so the flip changes nothing.
+    const { client } = makeDedupPlotClient('opt_new', 'opt_a', {
+      affectedIds: ['opt_new', 'opt_a'],
+    });
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toContain("indistinguishable from 'Option A'");
+    expect(outcome.assistant_text).not.toContain("indistinguishable from 'New Option'");
+  });
+
+  it('CONTROL — a DIFFERENT engine code keeps today\'s sentence (a future filter does not inherit a dedup explanation)', async () => {
+    const { client } = makeDedupPlotClient('opt_new', 'opt_a', {
+      code: 'SOME_FUTURE_OPTION_FILTER',
+    });
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+    expect(outcome.assistant_text).toContain(
+      "'New Option' was left out of this comparison because it has no values set.",
+    );
+    expect(outcome.assistant_text).not.toContain('indistinguishable');
+    expect(isAllowedRunAnalysisAssistantText(outcome.assistant_text)).toBe(true);
+  });
+
+  it('CONTROL — an unusable affected_option_ids shape keeps today\'s sentence rather than guessing', async () => {
+    for (const affectedIds of [
+      undefined, // field absent (an older PLoT, or a shape change)
+      [], // empty
+      ['opt_new'], // only the REMOVED id → nothing present to name
+      ['opt_a', 'opt_b'], // both present → nothing was removed per this warning
+      ['opt_a'], // only a KEPT id → no removed option to attach it to
+      'opt_a,opt_new', // not an array
+      [null, 42], // non-strings
+    ]) {
+      const { client } = makeDedupPlotClient('opt_new', 'opt_a', { affectedIds });
+      const handler = createRunAnalysisHandler({
+        plotClient: client,
+        scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+      });
+      const outcome = await handler(makeInvocation());
+      expect(outcome.assistant_text).toContain(
+        "'New Option' was left out of this comparison because it has no values set.",
+      );
+      expect(outcome.assistant_text).not.toContain('indistinguishable');
+      expect(isAllowedRunAnalysisAssistantText(outcome.assistant_text)).toBe(true);
+    }
+  });
+
+  it('the omission verdict is still stamped on the outcome channel, and the review prompt still forbids a result for the removed arm', async () => {
+    const { client } = makeDedupPlotClient('opt_new', 'opt_a');
+    const handler = createRunAnalysisHandler({
+      plotClient: client,
+      scenarioReader: makeReader(snapshotWithUnconfiguredOption()),
+    });
+    const outcome = await handler(makeInvocation());
+    const stamped = (outcome as { __scaffolded_options?: Array<{ option_id: string; in_comparison?: boolean }> })
+      .__scaffolded_options;
+    expect(stamped).toBeDefined();
+    expect(stamped!.find((s) => s.option_id === 'opt_new')?.in_comparison).toBe(false);
+    const prompt = buildScaffoldPromptDisclosure(stamped as never);
+    expect(prompt).toContain('is NOT in the option comparison');
   });
 });

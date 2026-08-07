@@ -50,8 +50,17 @@ export {
   DecisionRecordSignInRequiredError,
   DecisionRecordStoreError,
 } from './store-adapter.js';
+export { DECISION_RECORDS_HARD_CAP } from './store-adapter.js';
 export type {
   CreateDecisionRecordWrite,
   DecisionRecordWriteOutcome,
   DecisionRecordStorePort,
+  DecisionRecordRead,
+  DecisionRecordReadPage,
+  RetrieveDecisionRecordsOpts,
 } from './store-adapter.js';
+export {
+  projectDecisionRecords,
+  loadOlderRelevantFactsSection,
+  type DecisionRecordsProjection,
+} from './project.js';

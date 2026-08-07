@@ -76,7 +76,16 @@ export type BuildGraphLookupResult =
  * is a separate top-level array. "constraint" comes from graph.goal_constraints[]
  * and is handled separately in buildGraphLookup (see debt inventory §1.3).
  */
-function toEntityKind(nodeKind: string): EntityKind | null {
+/**
+ * Project a GRAPH node kind onto the coarse WIRE entity kind the routing
+ * model and the validation registry speak in. Exported because it is the
+ * only correct way to compare a handler's graph-kind allowlist (e.g.
+ * add-constraint's `['factor','outcome','goal','risk']`) against a registry
+ * entry's `accepted_entity_kinds` (e.g. `['node','goal']`) — the two lists
+ * live in DIFFERENT taxonomies and comparing them directly is a category
+ * error that reads as a bug in whichever list you looked at second.
+ */
+export function toEntityKind(nodeKind: string): EntityKind | null {
   if (nodeKind === 'option') return 'option';
   if (nodeKind === 'goal') return 'goal';
   if (

@@ -60,18 +60,68 @@ describe('decision-review enricher — constraint-infeasible winner (config-gate
     await setGate(prior);
   });
 
+  /**
+   * RE-POINTED 2026-07-26 (G-CEE-1 remediation). The two flags used to move
+   * together, both keyed on `deriveWinnerConstraintInfeasibility` and both
+   * behind `CEE_CONSTRAINT_INFEASIBLE_GATE`. They are now DIFFERENT CLAIMS with
+   * different owners, and this suite asserts the split:
+   *
+   *   `constraint_infeasible`      — NARROW: "the leader breaks a limit we DID
+   *                                  check". Still keyed on the infeasibility
+   *                                  predicate, still behind its own gate.
+   *   `recommendation_suppressed`  — WIDE: "we cannot stand behind naming a
+   *                                  leader at all". Now keyed on the ONE
+   *                                  constraint verdict, read off the stamp the
+   *                                  run_analysis handler persisted, and
+   *                                  deliberately NOT flag-gated.
+   *
+   * WHY. Keyed on the infeasibility predicate, `recommendation_suppressed`
+   * fired for exactly one of the three withholding states —
+   * `evaluated_infeasible` — and never for `unevaluated` or
+   * `identity_unresolved`. On the live `unevaluated` staging run (build
+   * 1c078f0) the flag existed, was correct, and simply did not fire: the
+   * decision-review prompt was told to name a winner, and the review card came
+   * back "The MacBook Pro leads by a margin of about 52 percentage points"
+   * underneath "no option can be put forward yet".
+   *
+   * And it is not flag-gated because a claim-safety withhold a feature flag can
+   * switch off is not a withhold.
+   */
   it('flag ON: marks the over-budget winner infeasible + suppressed', async () => {
     await setGate('true');
-    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium');
+    // The verdict is THREADED now, not re-read from `enrichment`: since
+    // @talchain/schemas 0.25.0 it lives on `result.constraint_verdict`, a
+    // SIBLING of the enrichment record that `buildInvokeInput` never sees.
+    // `false` is what the production caller passes on a withheld turn.
+    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium', undefined, false);
     expect(input).not.toBeNull();
     expect(input!.winner.id).toBe('opt_premium');
     expect(input!.winner.constraint_infeasible).toBe(true);
     expect(input!.winner.recommendation_suppressed).toBe(true);
   });
 
-  it('flag OFF: byte-identical — winner unflagged', async () => {
+  it('flag OFF: the NARROW infeasibility flag is gated off; the WIDE withhold is not', async () => {
     await setGate('false');
-    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium');
+    // The fact carries NO verdict at all (neither the typed
+    // `result.constraint_verdict` nor the interim stamp), so
+    // `readMayNameLeadingOptionFromResult` fails CLOSED at the call site and
+    // threads `false` — the honest reading: "we did not record whether the
+    // leader may be named" is not "verified feasible". The feature flag does
+    // not, and must not, reach it.
+    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium', undefined, false);
+    expect(input).not.toBeNull();
+    expect(input!.winner.id).toBe('opt_premium');
+    expect(input!.winner.constraint_infeasible).toBeUndefined();
+    expect(input!.winner.recommendation_suppressed).toBe(true);
+  });
+
+  it('POSITIVE CONTROL: a stamped, permitted verdict leaves the winner unflagged', async () => {
+    // The byte-identical case the old "flag OFF" test was reaching for, now
+    // stated precisely. Without this the suppression assertions above would
+    // pass on an enricher that suppressed unconditionally — the exact
+    // over-correction that would cost every healthy run its recommendation.
+    await setGate('false');
+    const input = buildInvokeInputForTests('brief', LIVE_WIRE_ENRICHMENT, 'opt_premium', undefined, true);
     expect(input).not.toBeNull();
     expect(input!.winner.id).toBe('opt_premium');
     expect(input!.winner.constraint_infeasible).toBeUndefined();

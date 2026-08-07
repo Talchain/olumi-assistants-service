@@ -83,6 +83,10 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 
 // ----- decision_review mock: return a fake output so enrichment lights up ---
 const FAKE_DECISION_REVIEW_OUTPUT = {
+  // narrative_summary present so the POST-parse contract gate admits the
+  // review (a missing review_card is dropped down the no-review path);
+  // `summary`/`confidence` remain the fields the attach assertion reads.
+  narrative_summary: 'Option A leads on the current evidence.',
   summary: 'Proceed with option A — dominant on return of investment.',
   confidence: 'high',
   headline: 'Group 1 activation proof',

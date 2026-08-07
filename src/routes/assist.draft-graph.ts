@@ -7,15 +7,9 @@ import { processAttachments, type AttachmentInput, type GroundingStats } from ".
 import { log } from "../utils/telemetry.js";
 import type { GraphT } from "../schemas/graph.js";
 import { isFeatureEnabled } from "../utils/feature-flags.js";
-import {
-} from "../utils/degraded-mode.js";
 import { DRAFT_BUDGET_MS, REPAIR_TIMEOUT_MS, SSE_WRITE_TIMEOUT_MS } from "../config/timeouts.js";
 import type { DraftGraphResult } from "../adapters/llm/types.js";
 import { config } from "../config/index.js";
-import {
-} from "../cee/graph-orchestrator.js";
-import {
-} from "../cee/compound-goal/index.js";
 
 const EVENT_STREAM = "text/event-stream";
 const STAGE_EVENT = "stage";

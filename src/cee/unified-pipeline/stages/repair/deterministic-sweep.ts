@@ -18,6 +18,7 @@ import type { ValidationIssue } from "../../../../validators/graph-validator.typ
 import { fuzzyMatchNodeId } from "../../../../validators/structural-reconciliation.js";
 import { NAN_FIX_SIGNATURE_STD } from "../../../constants.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
+import { sweepNodePath, pathsNameNode } from "../../../../validators/violation-paths.js";
 import { detectEdgeFormat, canonicalStructuralEdge, patchEdgeNumeric } from "../../utils/edge-format.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
 import { handleUnreachableFactors } from "./unreachable-factors.js";
@@ -1065,6 +1066,13 @@ function canReachGoalViaAllowed(
 
     for (const edge of edges) {
       if (edge === excludeEdge) continue;
+      // Adopt the estate's directed-edge policy (`src/graph/reachability.ts`).
+      // A bidirected edge is an unmeasured common cause, not a causal path
+      // (`schemas/graph.ts:333-335`), so it must not vouch for an outcome
+      // "already having a valid path to goal" and thereby authorise deleting a
+      // forbidden shortcut. The kind whitelist below is a DELIBERATE extra
+      // narrowing and is retained; only the edge policy is shared.
+      if (!isDirectedEdge(edge)) continue;
       if (edge.from !== current) continue;
       const toKind = nodeKindMap.get(edge.to);
       if (!toKind) continue;
@@ -2041,16 +2049,28 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
   let proactiveDisconnected = false;
   if (disconnectedAfter.length > 0) {
     proactiveDisconnected = true;
-    // Add synthetic remaining violations for disconnected options not already flagged
-    const existingPaths = new Set(remainingErrors.filter((v) => v.code === "NO_PATH_TO_GOAL").map((v) => v.path));
+    // Add synthetic remaining violations for disconnected options not already flagged.
+    //
+    // The suppression test MUST be format-agnostic: the paths in this set are
+    // minted by graph-validator (`nodesById.<id>`) while the path we are about
+    // to push is minted by this sweep (`nodes[<id>]`). Comparing one literal
+    // against the other — as this guard used to — can never match, so every
+    // already-flagged option was reported twice. `pathsNameNode` derives both
+    // spellings from the shared builders instead of re-writing either literal
+    // here (platform trap 12: derive, don't mirror).
+    const existingPaths = new Set(
+      remainingErrors
+        .filter((v) => v.code === "NO_PATH_TO_GOAL")
+        .map((v) => v.path)
+        .filter((p): p is string => typeof p === "string"),
+    );
     for (const optId of disconnectedAfter) {
-      const path = `nodes[${optId}]`;
-      if (!existingPaths.has(path)) {
+      if (!pathsNameNode(existingPaths, optId)) {
         remainingErrors.push({
           code: "NO_PATH_TO_GOAL" as any,
           severity: "error" as any,
           message: `Option "${optId}" has no directed path to goal (proactive check)`,
-          path,
+          path: sweepNodePath(optId),
         });
       }
     }

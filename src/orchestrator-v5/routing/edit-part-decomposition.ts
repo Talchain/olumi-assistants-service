@@ -69,11 +69,48 @@ export type EditPartKind =
   | 'structural_add'
   | 'structural_remove'
   | 'link'
+  /**
+   * A clause with a recognisable, POSITIVELY-CLASSIFIED edit intent that this
+   * lane has no operation vocabulary for, so no returned operation can ever
+   * cover it (#697 follow-up, 2026-07-25). Today: quantified limit/cap
+   * clauses only — see {@link UNMAPPED_LIMIT_VERB_PATTERN}.
+   *
+   * NOT accountable (see {@link PART_KIND_ACCOUNTABLE}) — attribution against
+   * operations is meaningless for a request no operation can express, and
+   * making it accountable would move the `accountableParts.length >= 2`
+   * routing gate and `mixedValueStructural`. It is instead DISCLOSED by
+   * {@link buildUnmappedPartsNotice} whenever the same message also carried
+   * something this lane could act on, so the user is never told about half
+   * their request and left to assume the rest landed.
+   *
+   * ⚠ ADDING A MEMBER: requires an at-the-bytes proof that NO live path
+   * serves the phrasing. A servable intent misfiled here would tell the user
+   * their edit was dropped when it landed, which is worse than silence.
+   */
+  | 'unmapped'
   /** A clause with a conjunction seam but no recognisable edit intent
    *  ("run the analysis", "tell me more"). NEVER accounted — other
    *  machinery owns those; failing closed on low confidence here would
-   *  spray clarifies over legitimate messages. */
+   *  spray clarifies over legitimate messages. This is the FALL-THROUGH
+   *  (classifySegment's final return), never a positive classification. */
   | 'other';
+
+/**
+ * Which kinds participate in conservation accounting. An ALLOWLIST keyed by
+ * the kind union, so TypeScript forces every future kind to declare itself
+ * (derive, don't mirror — a `!== 'other'` blacklist silently enrolled any new
+ * kind into the `>= 2` routing gate and `mixedValueStructural`, which select
+ * the serving lane in value-update-gate.ts). New kinds default to NOT
+ * accountable, which is the direction that cannot change routing by accident.
+ */
+const PART_KIND_ACCOUNTABLE: Readonly<Record<EditPartKind, boolean>> = {
+  value: true,
+  structural_add: true,
+  structural_remove: true,
+  link: true,
+  unmapped: false,
+  other: false,
+};
 
 export interface DecomposedEditPart {
   /** Document-order index over ALL segments (including 'other'). */
@@ -98,8 +135,16 @@ export interface DecomposedEditPart {
 
 export interface EditPartDecomposition {
   readonly parts: readonly DecomposedEditPart[];
-  /** Parts that participate in conservation accounting (kind !== 'other'). */
+  /** Parts that participate in conservation accounting (see
+   *  {@link PART_KIND_ACCOUNTABLE}). */
   readonly accountableParts: readonly DecomposedEditPart[];
+  /**
+   * Positively-classified sub-requests this lane has no operation for, so no
+   * returned operation can cover them. Disclosed rather than accounted — see
+   * the 'unmapped' member of {@link EditPartKind} and
+   * {@link buildUnmappedPartsNotice}. Disjoint from `accountableParts`.
+   */
+  readonly unmappedParts: readonly DecomposedEditPart[];
   /**
    * True when the message mixes >= 1 value part with >= 1 structural/link
    * part — the exact scope #549's compound VALUE detector is blind to.
@@ -161,6 +206,48 @@ const RELATIONAL_VERB_PATTERN =
 const LINK_VERB_PATTERN =
   /\b(?:link|connect)\b[^,;.]*?\bto\s+(?:the\s+)?["'‘’“”]?(.{1,60}?)["'‘’“”]?(?=$|[,.;:!?])/i;
 
+/**
+ * Quantified LIMIT / CAP clauses — "cap the upfront spend at 50k", "keep
+ * marketing under 20k", "spend no more than 50k on the shop".
+ *
+ * WHY THESE ARE 'unmapped' AND NOT 'value' (verified at the bytes, 2026-07-25):
+ *  - `PatchOperation` (orchestrator/types.ts) has exactly five ops —
+ *    add_node / add_edge / update_node / remove_node / remove_edge. None of
+ *    them expresses a BOUND on a value, so no operation the edit lane can
+ *    return could ever cover such a clause.
+ *  - value-update-gate.ts clause D re-admits constraint intent ONLY for the
+ *    explicit noun "constraint(s)" (`CONSTRAINT_PATTERN_SOURCE`), which these
+ *    phrasings do not carry, so they are not routed to `add_constraint`
+ *    either. The gate's own doc states the reason: "the V4 edit_graph lane
+ *    has no constraint operation whatsoever."
+ *  - Live probe on staging build bdb7a97 (2026-07-25): "cap the upfront spend
+ *    at 50k" sent ALONE returned a non-sequitur clarify and changed nothing;
+ *    sent as half of a compound it was silently dropped while the other half
+ *    was held — the defect this classification exists to disclose.
+ *
+ * Both a limit VERB (or limit PHRASE) and a numeric token are required, so
+ * unquantified uses ("limit the options we compare", "add a factor called
+ * Capacity cap") stay 'other' and behave exactly as they do today.
+ */
+const UNMAPPED_LIMIT_VERB_PATTERN =
+  /\b(?:cap|caps|capped|capping|limit|limits|limited|limiting|restrict|restricts|restricted|restricting|constrain|constrains|constrained|constraining)\b/i;
+
+/** Limit phrasings that carry no limit verb ("no more than 50k", "at most 20k"). */
+const UNMAPPED_LIMIT_PHRASE_PATTERN =
+  /\b(?:no\s+more\s+than|no\s+higher\s+than|no\s+lower\s+than|at\s+most|at\s+least|not\s+exceed|maximum\s+of|minimum\s+of|max\s+of|min\s+of)\b/i;
+
+/** "keep/hold X under|below|above|over <number>" — a bound without a limit verb. */
+const UNMAPPED_KEEP_BOUND_PATTERN = new RegExp(
+  `\\b(?:keep|keeps|keeping|hold|holds|holding|stay|stays|staying)\\b[^,;.]{0,60}?\\b(?:under|below|above|over|beneath|within|beyond)\\s+${NUMERIC_TOKEN_SOURCE}`,
+  'i',
+);
+
+/** The numeric bound a limit clause must carry to be claimed as 'unmapped'. */
+const UNMAPPED_BOUND_CONNECTOR_PATTERN = new RegExp(
+  `\\b(?:at|to|of|under|below|above|over|beneath|within|beyond|than)\\s+${NUMERIC_TOKEN_SOURCE}`,
+  'i',
+);
+
 /** Removal-target extraction ("remove the Shipping costs factor"). */
 const REMOVE_TARGET_PATTERN =
   /\b(?:remove|delete)\s+(?:the\s+|my\s+|our\s+)?(.{1,60}?)(?=\s*(?:$|[,.;:!?])|\s+(?:factor|risk|option|outcome|node|edge|link)s?\b|\s+from\b)/i;
@@ -188,28 +275,132 @@ function seamIsNumericRange(before: string, after: string): boolean {
   return /\d[\s]*$/.test(before.trimEnd()) && /^\s*(?:£|\$|€)?\d/.test(after);
 }
 
+// ---------------------------------------------------------------------------
+// Quote-aware scanning (Codex F6)
+// ---------------------------------------------------------------------------
+//
+// A conjunction/comma seam that sits INSIDE a quoted label is not a clause
+// boundary, and a quoted label must not be truncated at an interior
+// conjunction. Proven live: "add a factor called 'Shipping and handling' and
+// set Cost to 3" split on the FIRST interior "and" into a truncated
+// structural_add ("…called 'Shipping") plus an orphan "handling'", and the
+// replay chip (edit-graph-dispatch.ts) then re-dispatched the truncated clause,
+// mutating the user's entity name. The regex grammar had no quote state; this
+// stateful scanner supplies it (ASCII straight quotes + smart quotes, with
+// backslash-escape handling).
+
+/** Opening quote char → its matching closer. */
+const QUOTE_CLOSERS: Readonly<Record<string, string>> = {
+  "'": "'",
+  '"': '"',
+  '‘': '’', // ‘ ’
+  '“': '”', // “ ”
+};
+
+function isLetterOrDigit(ch: string | undefined): boolean {
+  return ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+}
+
+/**
+ * Boolean mask, one entry per code unit of `s`, true where the position lies
+ * inside a WELL-FORMED quote span (opener + matching closer, inclusive).
+ * Escaped quotes (`\'`) inside a span do not close it. ASCII straight quotes
+ * are disambiguated from apostrophes: a `'`/`"` with a letter/digit on the
+ * inner side is a contraction/possessive, not a quote delimiter, so it never
+ * opens or closes a span (keeps "don't" / "it's" from masking real seams).
+ * An unbalanced opener masks nothing — the char is treated as ordinary.
+ */
+function computeQuoteMask(s: string): boolean[] {
+  const mask = new Array<boolean>(s.length).fill(false);
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i]!;
+    const closer = QUOTE_CLOSERS[ch];
+    if (closer === undefined) {
+      i += 1;
+      continue;
+    }
+    const ambiguous = ch === "'" || ch === '"';
+    if (ambiguous && isLetterOrDigit(s[i - 1])) {
+      i += 1; // mid-word apostrophe/possessive — not a quote opener
+      continue;
+    }
+    // Scan for the matching closer, honouring backslash escapes.
+    let j = i + 1;
+    let found = -1;
+    while (j < s.length) {
+      if (s[j] === '\\') {
+        j += 2;
+        continue;
+      }
+      if (s[j] === closer) {
+        if (ambiguous && isLetterOrDigit(s[j + 1])) {
+          j += 1; // mid-word — not a closer
+          continue;
+        }
+        found = j;
+        break;
+      }
+      j += 1;
+    }
+    if (found === -1) {
+      i += 1; // unbalanced opener — treat as ordinary char
+      continue;
+    }
+    for (let k = i; k <= found; k += 1) mask[k] = true;
+    i = found + 1;
+  }
+  return mask;
+}
+
+/**
+ * Split `text` on every match of `seam` whose delimiter lies entirely OUTSIDE a
+ * quoted span, optionally skipping matches for which `skip(before, after)`
+ * returns true (delimiter discarded). A fresh globally-flagged clone of `seam`
+ * is used so shared module-level `lastIndex` state is never mutated.
+ */
+function splitOutsideQuotes(
+  text: string,
+  seam: RegExp,
+  skip?: (before: string, after: string) => boolean,
+): string[] {
+  const mask = computeQuoteMask(text);
+  const re = new RegExp(seam.source, seam.flags.includes('g') ? seam.flags : `${seam.flags}g`);
+  const pieces: string[] = [];
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const seamStart = m.index;
+    const seamEnd = m.index + m[0].length;
+    let quoted = false;
+    for (let k = seamStart; k < seamEnd; k += 1) {
+      if (mask[k]) {
+        quoted = true;
+        break;
+      }
+    }
+    if (quoted) continue;
+    const before = text.slice(cursor, seamStart);
+    const after = text.slice(seamEnd);
+    if (skip && skip(before, after)) continue;
+    pieces.push(before);
+    cursor = seamEnd;
+  }
+  pieces.push(text.slice(cursor));
+  return pieces;
+}
+
 function splitIntoSegments(message: string): string[] {
-  const sentences = message
-    .split(SENTENCE_SPLIT)
+  const segments: string[] = [];
+  const sentences = splitOutsideQuotes(message, SENTENCE_SPLIT)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  const segments: string[] = [];
   for (const sentence of sentences) {
-    const clauses: string[] = [];
-    let cursor = 0;
-    CONJUNCTION_SEAM.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = CONJUNCTION_SEAM.exec(sentence)) !== null) {
-      const before = sentence.slice(cursor, m.index);
-      const after = sentence.slice(m.index + m[0].length);
-      if (seamIsNumericRange(before, after)) continue;
-      if (before.trim().length > 0) clauses.push(before.trim());
-      cursor = m.index + m[0].length;
-    }
-    const tail = sentence.slice(cursor).trim();
-    if (tail.length > 0) clauses.push(tail);
+    const clauses = splitOutsideQuotes(sentence, CONJUNCTION_SEAM, seamIsNumericRange)
+      .map((c) => c.trim())
+      .filter((c) => c.length > 0);
     for (const clause of clauses) {
-      for (const piece of clause.split(COMMA_VERB_SEAM)) {
+      for (const piece of splitOutsideQuotes(clause, COMMA_VERB_SEAM)) {
         const trimmed = piece.trim();
         if (trimmed.length > 0) segments.push(trimmed);
       }
@@ -231,20 +422,70 @@ function cleanCapture(raw: string | undefined): string | null {
     // Trim trailing punctuation the lookaheads may have left behind.
     .replace(/[,.;:!?]+$/, '')
     .trim();
-  if (cleaned.length < 2 || cleaned.length > 60) return null;
+  // Codex F7: a legitimate label can be a single character ('X') or a short
+  // non-Latin token ('成本'). Reject only the empty string and pathologically
+  // long spans; short-label matchability is enforced downstream in
+  // labelMatches (exact equality for 1-2 char, containment reserved for >= 3).
+  if (cleaned.length < 1 || cleaned.length > 60) return null;
   return cleaned;
 }
+
+/**
+ * Quote-aware label capture (Codex F6): when a naming/relational/link/remove
+ * VERB is immediately followed by a quoted span, return the FULL quoted content
+ * (interior conjunctions and all) rather than letting the regex lookaheads
+ * truncate it at the first " and ". Returns null when there is no quote right
+ * after the verb (the caller then keeps the plain regex capture). Honours
+ * backslash escapes; the opener here is unambiguously a quote (it follows a
+ * verb + whitespace), so no contraction disambiguation is needed.
+ */
+function extractQuotedLabelAfter(segment: string, prefix: RegExp): string | null {
+  const m = prefix.exec(segment);
+  if (m === null) return null;
+  const start = m.index + m[0].length;
+  const opener = segment[start];
+  if (opener === undefined) return null;
+  const closer = QUOTE_CLOSERS[opener];
+  if (closer === undefined) return null;
+  let j = start + 1;
+  while (j < segment.length) {
+    if (segment[j] === '\\') {
+      j += 2;
+      continue;
+    }
+    if (segment[j] === closer) {
+      return cleanCapture(segment.slice(start + 1, j));
+    }
+    j += 1;
+  }
+  return null; // unterminated quote — fall back to the regex capture
+}
+
+/** Verb prefixes whose trailing quoted span carries the label/target. Kept in
+ *  lock-step with the capture regexes above so a quoted argument is taken whole
+ *  regardless of interior conjunctions. */
+const NAMING_PREFIX = /\b(?:called|named|labelled|labeled|titled)\s+/i;
+const RELATIONAL_PREFIX =
+  /\b(?:reduces|increases|decreases|affects|impacts|influences|improves|boosts|lowers|raises|strengthens|weakens|drives|feeds)\s+(?:the\s+)?/i;
+const LINK_PREFIX = /\b(?:link|connect)\b[^,;.]*?\bto\s+(?:the\s+)?/i;
+const REMOVE_PREFIX = /\b(?:remove|delete)\s+(?:the\s+|my\s+|our\s+)?/i;
+const VALUE_PREFIX =
+  /\b(?:set|change|update|increase|decrease|reduce|raise|lower|adjust)\s+(?:the\s+|my\s+|our\s+|its\s+|their\s+)?/i;
 
 function classifySegment(segment: string, index: number): DecomposedEditPart {
   const namedTargets: string[] = [];
   const newLabels: string[] = [];
 
-  const namingHit = NAMING_PATTERN.exec(segment);
-  const newLabel = cleanCapture(namingHit?.[1]);
+  // Prefer the full quoted span when the verb is followed by a quote (Codex
+  // F6), else fall back to the plain regex capture.
+  const newLabel =
+    extractQuotedLabelAfter(segment, NAMING_PREFIX) ??
+    cleanCapture(NAMING_PATTERN.exec(segment)?.[1]);
   if (newLabel !== null) newLabels.push(newLabel);
 
-  const relationalHit = RELATIONAL_VERB_PATTERN.exec(segment);
-  const relationalTarget = cleanCapture(relationalHit?.[1]);
+  const relationalTarget =
+    extractQuotedLabelAfter(segment, RELATIONAL_PREFIX) ??
+    cleanCapture(RELATIONAL_VERB_PATTERN.exec(segment)?.[1]);
 
   // STRUCTURAL ADD: add/create/introduce verb anchored by a node-kind noun
   // or an explicit naming construction. Checked BEFORE value: "add a new
@@ -265,21 +506,27 @@ function classifySegment(segment: string, index: number): DecomposedEditPart {
     STRUCTURAL_REMOVE_VERB_PATTERN.test(segment) &&
     (STRUCTURAL_NOUN_PATTERN.test(segment) || newLabels.length > 0)
   ) {
-    const removeTarget = cleanCapture(REMOVE_TARGET_PATTERN.exec(segment)?.[1]);
+    const removeTarget =
+      extractQuotedLabelAfter(segment, REMOVE_PREFIX) ??
+      cleanCapture(REMOVE_TARGET_PATTERN.exec(segment)?.[1]);
     if (removeTarget !== null) namedTargets.push(removeTarget);
     return { index, text: segment, kind: 'structural_remove', namedTargets, newLabels };
   }
 
   // VALUE: imperative edit verb + a "to/by <number>" connector.
   if (VALUE_EDIT_VERB_PATTERN.test(segment) && VALUE_CONNECTOR_PATTERN.test(segment)) {
-    const target = cleanCapture(VALUE_TARGET_PATTERN.exec(segment)?.[1]);
+    const target =
+      extractQuotedLabelAfter(segment, VALUE_PREFIX) ??
+      cleanCapture(VALUE_TARGET_PATTERN.exec(segment)?.[1]);
     if (target !== null) namedTargets.push(target);
     return { index, text: segment, kind: 'value', namedTargets, newLabels };
   }
 
   // LINK: explicit link/connect clause, or a bare relational clause that
   // survived segmentation on its own.
-  const linkTarget = cleanCapture(LINK_VERB_PATTERN.exec(segment)?.[1]);
+  const linkTarget =
+    extractQuotedLabelAfter(segment, LINK_PREFIX) ??
+    cleanCapture(LINK_VERB_PATTERN.exec(segment)?.[1]);
   if (linkTarget !== null) {
     namedTargets.push(linkTarget);
     return { index, text: segment, kind: 'link', namedTargets, newLabels };
@@ -287,6 +534,23 @@ function classifySegment(segment: string, index: number): DecomposedEditPart {
   if (relationalTarget !== null && !VALUE_EDIT_VERB_PATTERN.test(segment)) {
     namedTargets.push(relationalTarget);
     return { index, text: segment, kind: 'link', namedTargets, newLabels };
+  }
+
+  // UNMAPPED: a quantified limit/cap clause. Checked LAST, immediately before
+  // the fall-through, so it can only ever claim a segment that would otherwise
+  // be 'other' — every clause the grammar above classifies is untouched, and
+  // both 'unmapped' and 'other' are non-accountable, so `accountableParts` and
+  // `mixedValueStructural` (and therefore every routing decision that reads
+  // them) are byte-identical for EVERY input. Pinned by the corpus invariant
+  // test in __tests__/edit-part-decomposition.test.ts.
+  if (
+    (UNMAPPED_LIMIT_VERB_PATTERN.test(segment) &&
+      UNMAPPED_BOUND_CONNECTOR_PATTERN.test(segment)) ||
+    (UNMAPPED_LIMIT_PHRASE_PATTERN.test(segment) &&
+      UNMAPPED_BOUND_CONNECTOR_PATTERN.test(segment)) ||
+    UNMAPPED_KEEP_BOUND_PATTERN.test(segment)
+  ) {
+    return { index, text: segment, kind: 'unmapped', namedTargets, newLabels };
   }
 
   return { index, text: segment, kind: 'other', namedTargets, newLabels };
@@ -299,7 +563,8 @@ function classifySegment(segment: string, index: number): DecomposedEditPart {
 export function decomposeEditMessage(message: string): EditPartDecomposition {
   const segments = splitIntoSegments(message);
   const parts = segments.map((segment, i) => classifySegment(segment, i));
-  const accountableParts = parts.filter((p) => p.kind !== 'other');
+  const accountableParts = parts.filter((p) => PART_KIND_ACCOUNTABLE[p.kind]);
+  const unmappedParts = parts.filter((p) => p.kind === 'unmapped');
   const hasValue = accountableParts.some((p) => p.kind === 'value');
   const hasStructural = accountableParts.some(
     (p) => p.kind === 'structural_add' || p.kind === 'structural_remove' || p.kind === 'link',
@@ -307,6 +572,7 @@ export function decomposeEditMessage(message: string): EditPartDecomposition {
   return {
     parts,
     accountableParts,
+    unmappedParts,
     mixedValueStructural: hasValue && hasStructural,
   };
 }
@@ -358,20 +624,31 @@ export interface EditPartAccounting {
 }
 
 function norm(s: string): string {
+  // Codex F7: NFKC-fold then keep Unicode letters/numbers (plus the currency
+  // and percent symbols the value grammar cares about) instead of ASCII-only
+  // stripping, so non-Latin labels ('成本', '运输', 'Café') survive
+  // normalisation rather than collapsing to the empty string.
   return s
+    .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^a-z0-9%£$€ ]+/g, ' ')
+    .replace(/[^\p{L}\p{N}%£$€ ]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-/** Symmetric containment match on normalised labels; requires substance on
- *  both sides so 2-char fragments can never claim coverage. */
+/**
+ * Match on normalised labels. Codex F7: short labels (1-2 normalised chars —
+ * 'X', 'AI', '成本') are legitimate, so they match by EXACT equality; only
+ * labels with >= 3 chars on BOTH sides use symmetric containment (so a 2-char
+ * fragment can still never claim coverage of a longer label). Empty
+ * normalisations never match.
+ */
 function labelMatches(a: string | null | undefined, b: string | null | undefined): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   const na = norm(a);
   const nb = norm(b);
-  if (na.length < 3 || nb.length < 3) return false;
+  if (na.length === 0 || nb.length === 0) return false;
+  if (na.length < 3 || nb.length < 3) return na === nb;
   return na.includes(nb) || nb.includes(na);
 }
 
@@ -603,11 +880,21 @@ function clampClause(text: string): string {
   return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
 }
 
+/**
+ * British-English Oxford-less enumeration join over pre-formatted items:
+ * `[a]` → "a", `[a, b]` → "a and b", `[a, b, c]` → "a, b and c". Quote-
+ * agnostic — callers pre-format each item (single- or double-quoted, or bare)
+ * so this is the single join used by {@link joinQuoted},
+ * {@link buildSubstitutionClarify} and {@link buildMultiPartRejectionClarify}.
+ */
+export function oxfordJoin(items: readonly string[]): string {
+  if (items.length === 1) return items[0]!;
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 function joinQuoted(names: readonly string[]): string {
-  const quoted = names.map((n) => `'${n}'`);
-  if (quoted.length === 1) return quoted[0]!;
-  if (quoted.length === 2) return `${quoted[0]} and ${quoted[1]}`;
-  return `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+  return oxfordJoin(names.map((n) => `'${n}'`));
 }
 
 function dedupe(names: readonly string[]): string[] {
@@ -685,6 +972,51 @@ export function buildPartAccountingDisclosure(
 }
 
 /**
+ * DISCLOSURE for the 'unmapped' parts of a compound message (#697 follow-up,
+ * 2026-07-25 — the end-to-end journey's Finding #5).
+ *
+ * THE DEFECT THIS CLOSES. On staging build `bdb7a97`, "cap the upfront spend
+ * at 50k, and add a risk called Head Roaster Departure" replied with the held
+ * risk proposal and said NOTHING about the cap. The conservation law could not
+ * see it: the cap clause carries no verb in any grammar above, so it fell
+ * through to 'other', `accountableParts.length` was 1, and the whole
+ * accounting block (edit-graph-dispatch.ts, gated on `>= 2`) never engaged.
+ * The user asked for two things, got one, and was told nothing about the
+ * other. Several turns later the same product could state accurately that the
+ * cap "was never applied" and that "nothing in the graph currently enforces
+ * it" — so the information was always available; only the turn that owed it
+ * stayed silent. This builder says it at the time.
+ *
+ * Returns null when there is no unmapped part, and null when the message
+ * carried NOTHING this lane could act on (`accountableCount === 0`): a turn
+ * that served nothing already owns its own clarify copy, and "I haven't taken
+ * forward this part" framing would imply another part landed.
+ *
+ * Copy discipline as elsewhere in this file: British English, no em dashes,
+ * no internal vocabulary, and deliberately NOT reusing the "Tell me that part
+ * on its own and I'll pick it up" tail — the same live probe proved a solo
+ * limit clause does NOT get picked up, and a promise the product cannot keep
+ * is the defect wearing a friendlier face. Swept against both egress
+ * detectors (FORBIDDEN_USER_FACING_PHRASES, SUCCESS_CLAIM_PATTERNS).
+ */
+export function buildUnmappedPartsNotice(
+  unmappedParts: readonly DecomposedEditPart[],
+  accountableCount: number,
+): string | null {
+  if (unmappedParts.length === 0) return null;
+  if (accountableCount === 0) return null;
+  const many = unmappedParts.length > 1;
+  const clauses = oxfordJoin(unmappedParts.map((p) => `"${clampClause(p.text)}"`));
+  return (
+    `I haven't taken forward ${many ? 'these parts' : 'this part'} of your request: ` +
+    `${clauses}. I can't set ${many ? 'limits' : 'a limit'} like that in the model here, ` +
+    `so nothing in it enforces ${many ? 'them' : 'that'}. If ${many ? 'they matter' : 'it matters'} ` +
+    `to the decision, tell me and I'll add ${many ? 'them as factors or risks' : 'it as a factor or a risk'} ` +
+    `you can weigh.`
+  );
+}
+
+/**
  * Fail-closed clarify for the proven substitution shape (defect B): the
  * user named a target that does not exist and the ops linked to a
  * different existing node instead. The WHOLE batch is blocked (no partial
@@ -697,12 +1029,7 @@ export function buildSubstitutionClarify(
   accounting: EditPartAccounting,
 ): string {
   const clauses = parts.map((p) => `"${clampClause(p.text)}"`);
-  const enumeration =
-    clauses.length === 1
-      ? clauses[0]!
-      : clauses.length === 2
-        ? `${clauses[0]} and ${clauses[1]}`
-        : `${clauses.slice(0, -1).join(', ')} and ${clauses[clauses.length - 1]}`;
+  const enumeration = oxfordJoin(clauses);
   const allMissing = dedupe([
     ...accounting.substitutions.map((s) => s.missingName),
     ...accounting.missingTargets.map((i) => i.name),
@@ -714,6 +1041,85 @@ export function buildSubstitutionClarify(
     `stand-in, so I'm holding off on all of it for now. Tell me which part of the model ` +
     `${allMissing.length === 1 ? 'that name refers to' : 'those names refer to'}, ` +
     `and I'll set the whole thing up together.`
+  );
+}
+
+/**
+ * Full-rejection part clarify (F4, 2026-07-22 — mixed-compound dead-end).
+ *
+ * When a MIXED value+structural (or any >= 2-accountable-part) edit message
+ * is forced whole into the LLM edit lane — because the value-update
+ * suppressor stands down for mixed messages (value-update-gate.ts
+ * `shouldSuppressEditDispatchForValueUpdate`) — and that lane REJECTS the
+ * whole thing (SYNTHESIZED_GRAPH_INVALID / parse_failure / structural_
+ * validation), the conservation-law accounting in edit-graph-dispatch.ts is
+ * bypassed (it is gated on `!wasRejected`). Today the turn then falls to the
+ * generic single-cajole ("I wasn't able to make that change safely. Describe
+ * what to change") which DISCARDS the known decomposition and forces the user
+ * to re-describe the entire compound — which re-enters the same fragile LLM
+ * lane and re-fails. That is the observed cajole LOOP.
+ *
+ * This builder replaces that context-losing cajole with an honest per-part
+ * clarify: every accountable part is named, and (paired with per-part replay
+ * chips at the dispatch) the user is invited to send each on its own — where
+ * its dedicated DETERMINISTIC lane serves it (a single value edit through the
+ * value-update path, a single structural remove/add through the referee gate,
+ * each of which is live-verified to terminate cleanly on its own). No part is
+ * silent-dropped; the loop is broken because each part now has a terminal.
+ *
+ * Returns null for < 2 accountable parts — a single-part rejection keeps
+ * today's generic recovery copy (the false-compound trap: never grow a
+ * multi-part disclosure on a single-part message). Copy follows the same
+ * DISCLOSED-PARTIAL discipline as the other builders in this file (British
+ * English, no em dashes, clause-quoted verbatim, neither a denial-of-any-
+ * change nor a success claim).
+ */
+export function buildMultiPartRejectionClarify(
+  decomposition: EditPartDecomposition,
+): string | null {
+  const parts = decomposition.accountableParts;
+  if (parts.length < 2) return null;
+  // parts.length >= 2 is guaranteed above, so oxfordJoin's 2- and 3+-item
+  // arms produce byte-identical output to the previous inline enumeration.
+  const items = parts.map((p) => `"${clampClause(p.text)}"`);
+  const enumeration = oxfordJoin(items);
+  return (
+    "I wasn't able to make those edits together. Let me take them one at a " +
+    `time. Tell me each part on its own and I'll pick it up: ${enumeration}.`
+  );
+}
+
+/**
+ * Cross-boundary invariant (Codex F8): the UI's `SuggestedChips` renders at
+ * most three chips (`slice(0, 3)`). CEE must cap the replay actions it emits to
+ * the same number — an unbounded list is silently truncated on the wire, so a
+ * 4th+ replay clause would have a chip that the user never sees. The dispatch
+ * emits `<= MAX_REPLAY_CHIPS` chips and discloses any clauses beyond the cap in
+ * prose (see {@link buildReplayOverflowNotice}) so none is hidden.
+ */
+export const MAX_REPLAY_CHIPS = 3;
+
+/**
+ * Honest disclosure of the accountable parts that fall BEYOND the replay-chip
+ * cap (Codex F8): those clauses have no clickable chip, so they are named in
+ * prose with an instruction to send them as a message. Returns null when the
+ * part count is within the cap (nothing is hidden). Same DISCLOSED-PARTIAL
+ * vocabulary as the other builders here (British English, no em dashes, neither
+ * a denial-of-any-change nor a success claim — swept against both egress
+ * detectors).
+ */
+export function buildReplayOverflowNotice(
+  parts: readonly DecomposedEditPart[],
+  cap: number = MAX_REPLAY_CHIPS,
+): string | null {
+  if (parts.length <= cap) return null;
+  const overflow = parts.slice(cap).map((p) => `"${clampClause(p.text)}"`);
+  const enumeration = oxfordJoin(overflow);
+  const many = overflow.length > 1;
+  return (
+    `I can only show the first ${cap} as buttons here. ` +
+    `Send ${many ? 'these parts' : 'this part'} as a message and I'll pick ` +
+    `${many ? 'them' : 'it'} up too: ${enumeration}.`
   );
 }
 

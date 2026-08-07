@@ -57,6 +57,7 @@ describe("clarify_v2 — #464 egress guard coverage (by construction)", () => {
       requestId: "cv2-egress-pin",
       exitPath: "clarify_v2",
       userMessage: candidateChip.message,
+      mayNameLeadingOption: true,
     });
     const ids = sanitised.suggested_actions.map((a) => a.id);
     expect(ids).not.toContain(candidateChip.id);
@@ -73,6 +74,7 @@ describe("clarify_v2 — #464 egress guard coverage (by construction)", () => {
       requestId: "cv2-egress-pin",
       exitPath: "clarify_v2",
       userMessage: THIN_BRIEF,
+      mayNameLeadingOption: true,
     });
     expect(sanitised.suggested_actions.map((a) => a.id)).toEqual(
       response.suggested_actions.map((a) => a.id),

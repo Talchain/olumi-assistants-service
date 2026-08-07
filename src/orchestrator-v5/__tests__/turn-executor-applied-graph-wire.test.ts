@@ -166,6 +166,30 @@ function buildBudgetGraph(): GraphV3T {
   };
 }
 
+/**
+ * Constraint-bearing variant of the budget graph. `goal_constraints` is a
+ * ROOT-LEVEL sibling of nodes/edges on GraphV3 (cee-v3.ts:429) — deliberately
+ * NOT causal structure, so it reaches the client through this field or not at
+ * all. Used to pin that the applied-graph wire mirrors the WHOLE committed
+ * graph, not just its node/edge halves.
+ */
+function buildConstrainedBudgetGraph(): GraphV3T {
+  return {
+    ...buildBudgetGraph(),
+    goal_constraints: [
+      {
+        constraint_id: 'constraint_f-budget_max',
+        node_id: 'f-budget',
+        operator: '<=',
+        value: 50000,
+        label: 'Budget cap',
+        unit: '£',
+        provenance: 'explicit',
+      },
+    ],
+  };
+}
+
 function setFactorValueToolCall() {
   return {
     intent_class: 'execute',
@@ -387,7 +411,7 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
     expect(committedHash).not.toBe(PRE_MUTATION_HASH);
   });
 
-  it('negative: a non-mutating turn attaches NO draft_graph', async () => {
+  it('negative: a non-mutating first-touch turn attaches NO draft_graph BLOCK (though it adopts the graph_state)', async () => {
     const result = await runTurnExecutor(
       payload('What does the analysis say?'),
       'req-applied-graph-non-mutating',
@@ -404,7 +428,12 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
         graphState: buildBudgetGraph() as never,
       },
     );
-    expect(appendCalls.find((w) => w.graph != null)).toBeUndefined();
+    // ROADMAP 1.192: this is a FIRST-TOUCH turn (loadGraph → null), so the
+    // graph_state IS adopted and persisted at commit (was `undefined` pre-1.192).
+    // The load-bearing assertion here is the SECOND one: adopting the graph
+    // must NOT advertise a `draft_graph` on the wire — adopt persists via the
+    // commit chokepoint, it does not compose a draft_graph applied-receipt.
+    expect(appendCalls.find((w) => w.graph != null)).toBeDefined();
     expect('draft_graph' in result.response).toBe(false);
   });
 
@@ -427,5 +456,73 @@ describe('F-DG — applied D1 receipts on the routed STEP 7 path carry draft_gra
       result.response.blocks as Array<{ type: string; error_code?: string }>
     ).find((b) => b.type === 'error');
     expect(errorBlock?.error_code).toBe('INTERNAL_ERROR');
+  });
+
+  // -------------------------------------------------------------------------
+  // T2 — the applied-graph wire must mirror the COMMITTED graph, root-level
+  // `goal_constraints` included.
+  //
+  // Defect: buildAppliedGraphWireField serialised only nodes/edges/counts, so
+  // every applied-edit turn shipped a graph whose constraints had been
+  // silently dropped, while the draft path (draft-graph-dispatch.ts) emits
+  // them. Live consequence: the right-hand panel renders "Constraints — No
+  // limits on record" against a canvas built from exactly those inputs. The
+  // panel was telling the truth about the payload it received.
+  //
+  // The tests ABOVE this block assert node/edge parity only, which is why the
+  // drop survived — parity over a subset is not parity.
+  // -------------------------------------------------------------------------
+  it('T2: an applied receipt carries the committed graph’s root-level goal_constraints', async () => {
+    const result = await runTurnExecutor(
+      payload('Set the budget to £45,000'),
+      'req-applied-graph-goal-constraints',
+      {
+        routingAdapter: mockRoutingAdapter(setFactorValueToolCall()),
+        graphState: buildConstrainedBudgetGraph() as never,
+      },
+    );
+    expect(result.telemetry.commit_performed).toBe(true);
+
+    // POSITIVE CONTROL — the constraint survives the mutation pipeline and is
+    // present on the graph that was durably committed. Without this, the wire
+    // assertion below could pass by testing nothing (an empty source cannot
+    // prove a serialiser drops anything).
+    const graphWrite = appendCalls.find((w) => w.graph != null);
+    expect(graphWrite).toBeDefined();
+    const committed = graphWrite!.graph as GraphV3T;
+    expect(committed.goal_constraints).toHaveLength(1);
+    expect(committed.goal_constraints![0]!.constraint_id).toBe('constraint_f-budget_max');
+
+    // THE FIX — the wire mirrors it, field for field, from the SAME graph.
+    const dg = result.response.draft_graph as
+      | (NonNullable<typeof result.response.draft_graph> & { goal_constraints?: unknown[] })
+      | undefined;
+    expect(dg).toBeDefined();
+    expect(dg!.goal_constraints).toEqual(committed.goal_constraints);
+
+    // And the mutation itself still rides, so this is a WIDENING of the
+    // mirror, not a swap.
+    const wireBudget = (dg!.nodes as Array<Record<string, unknown>>).find(
+      (n) => n.id === 'f-budget',
+    );
+    expect((wireBudget!.observed_state as Record<string, unknown>).raw_value).toBe(45000);
+  });
+
+  it('T2 negative: a graph with no goal_constraints OMITS the key entirely (byte-parity with the no-constraint wire)', async () => {
+    const result = await runTurnExecutor(
+      payload('Set the budget to £45,000'),
+      'req-applied-graph-no-goal-constraints',
+      {
+        routingAdapter: mockRoutingAdapter(setFactorValueToolCall()),
+        graphState: buildBudgetGraph() as never,
+      },
+    );
+    expect(result.telemetry.commit_performed).toBe(true);
+    const dg = result.response.draft_graph;
+    expect(dg).toBeDefined();
+    // Absent, not `[]` — matching draft-graph-dispatch.ts's emit rule so
+    // no-constraint responses stay byte-identical to the pre-fix wire and the
+    // contract's "absence and [] are equivalent" note is never exercised.
+    expect('goal_constraints' in (dg as object)).toBe(false);
   });
 });

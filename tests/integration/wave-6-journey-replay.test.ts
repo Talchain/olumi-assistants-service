@@ -173,36 +173,6 @@ vi.mock('../../src/config/index.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../src/orchestrator/route-v2.js');
-const { computeAnalysisAffectingGraphHash } = await import(
-  '../../src/orchestrator-v5/context/graph-hash.js'
-);
-
-function smallAnalysisReadyGraph() {
-  return {
-    nodes: [
-      { id: 'goal_1', kind: 'goal', label: 'Profit', successThreshold: 100 },
-      { id: 'fac_eng', kind: 'factor', label: 'Engineering Capacity' },
-      { id: 'fac_cost', kind: 'factor', label: 'Hiring Cost' },
-      { id: 'opt_a', kind: 'option', label: 'Plan A' },
-      { id: 'opt_b', kind: 'option', label: 'Plan B' },
-    ],
-    edges: [
-      {
-        from: 'fac_eng',
-        to: 'goal_1',
-        strength: { mean: 0.6, std: 0.1 },
-        exists_probability: 1,
-        effect_direction: 'positive' as const,
-      },
-    ],
-    options: [
-      { id: 'opt_a', status: 'ready', interventions: {} },
-      { id: 'opt_b', status: 'ready', interventions: {} },
-    ],
-    goal_node_id: 'goal_1',
-  };
-}
-
 function valueUpdateGraph() {
   return {
     nodes: [
@@ -269,64 +239,7 @@ describe('Wave 6 — journey replay across the four named brief failures', () =>
   // Failure 1 — chip click on what_would_flip dispatches handler
   // ─────────────────────────────────────────────────────────────────
 
-  it('failure 1 — chip_click + action_type=what_would_flip with fresh analysis dispatches the handler at HTTP boundary, no LLM call', async () => {
-    const graphState = smallAnalysisReadyGraph();
-    const liveHash = computeAnalysisAffectingGraphHash(graphState as never);
-    expect(liveHash).not.toBeNull();
-    mockedPriorRunAnalysisGraphHash = liveHash;
-    // ROADMAP 1.148 C7: 'fresh' requires the PERSISTED graph to match the
-    // prior fact's hash — the wire graph_state is deliberately ignored by
-    // the freshness derivation (anti-false-fresh doctrine, PR #306/#298).
-    mockedPersistedGraph = graphState;
-    mockedMostRecentPendingActions = [
-      {
-        id: `pa-${randomUUID()}`,
-        scenario_id: SCENARIO_ID,
-        chip_id: 'chip-explore',
-        action: { kind: 'what_would_flip' },
-        preconditions: { required_freshness: 'fresh' },
-        expires_at_turn_count: 2,
-        expires_at_iso: '2099-12-31T23:59:59.000Z',
-        emitted_at_iso: '2026-05-05T00:00:00.000Z',
-      },
-    ];
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: {
-        kind: 'message',
-        turn_id: randomUUID(),
-        scenario_id: SCENARIO_ID,
-        message: 'Explore what would change the result.',
-        turn_class: 'decide',
-        stage: 'analyse',
-        source: 'chip_click',
-        chip: { action_type: 'what_would_flip' },
-        graph_state: graphState,
-      },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(llmCallTracker.count).toBe(0);
-    const body = OlumiResponseSchema.parse(JSON.parse(res.body));
-    // Success-branch wire signals: response is NOT the rerun-analysis
-    // recovery copy, and contains some explanation prose
-    // (deterministic fallback since Sonnet is mocked-throwing).
-    expect(body.assistant_text).not.toMatch(/run analysis again/i);
-    expect(body.assistant_text).not.toMatch(/no pending action/i);
-    expect(body.assistant_text).not.toMatch(/internal error/i);
-    // Explanation prose mentions the leading option's wire vocabulary
-    // ("plan a"/"plan b"/"leading"/"probability") — proves the
-    // what_would_flip handler ran and composed.
-    const composed = body.assistant_text.toLowerCase();
-    expect(
-      composed.includes('plan a') ||
-        composed.includes('plan b') ||
-        composed.includes('leading') ||
-        composed.includes('probability'),
-    ).toBe(true);
-  });
+  // F2 CHANGE A — removed: deterministic what_would_flip chip dispatch is gone (removed from DETERMINISTIC_CHIP_ACTION_TYPES); the pill now routes to the coach — covered by tests/integration/orchestrator/route-v2-chip-click-explain.test.ts.
 
   // ─────────────────────────────────────────────────────────────────
   // Failure 3 (HAPPY PATH only) — unambiguous deterministic
@@ -378,66 +291,7 @@ describe('Wave 6 — journey replay across the four named brief failures', () =>
   // Failure 4 — explanation egress is bucketed and clean
   // ─────────────────────────────────────────────────────────────────
 
-  it('failure 4 — what_would_flip deterministic prose contains no raw decimals and no internal terms on the wire', async () => {
-    // Same fixture as failure 1 (success branch). The Sonnet adapter
-    // is throwing, so the deterministic explanation fallback fires.
-    // Wire response must respect the egress invariants.
-    const graphState = smallAnalysisReadyGraph();
-    const liveHash = computeAnalysisAffectingGraphHash(graphState as never);
-    expect(liveHash).not.toBeNull();
-    mockedPriorRunAnalysisGraphHash = liveHash;
-    // ROADMAP 1.148 C7: persist the graph so this test exercises the
-    // SUCCESS branch it documents ("same fixture as failure 1"), not the
-    // recovery branch — see failure 1's note on the anti-false-fresh
-    // doctrine (PR #306/#298).
-    mockedPersistedGraph = graphState;
-    mockedMostRecentPendingActions = [
-      {
-        id: `pa-${randomUUID()}`,
-        scenario_id: SCENARIO_ID,
-        chip_id: 'chip-explore',
-        action: { kind: 'what_would_flip' },
-        preconditions: { required_freshness: 'fresh' },
-        expires_at_turn_count: 2,
-        expires_at_iso: '2099-12-31T23:59:59.000Z',
-        emitted_at_iso: '2026-05-05T00:00:00.000Z',
-      },
-    ];
-
-    const res = await app.inject({
-      method: 'POST',
-      url: '/orchestrate/v2/turn',
-      payload: {
-        kind: 'message',
-        turn_id: randomUUID(),
-        scenario_id: SCENARIO_ID,
-        message: 'Explore what would change the result.',
-        turn_class: 'decide',
-        stage: 'analyse',
-        source: 'chip_click',
-        chip: { action_type: 'what_would_flip' },
-        graph_state: graphState,
-      },
-    });
-
-    expect(res.statusCode).toBe(200);
-    const body = OlumiResponseSchema.parse(JSON.parse(res.body));
-    // No raw decimals — the Wave 5H egress guard rejects 3+ fractional
-    // digits and 2-fractional-digits paired with a unit marker.
-    expect(body.assistant_text).not.toMatch(/-?\d+\.\d{3,}/);
-    expect(body.assistant_text).not.toMatch(/-?\d+\.\d{2}\s*(?:%|pp|x)/i);
-    // No forbidden internal terms (Wave 5H denylist).
-    expect(body.assistant_text).not.toMatch(/\bnoop\b/);
-    expect(body.assistant_text).not.toMatch(/\bBUDGET_TARGET\b/);
-    expect(body.assistant_text).not.toMatch(/\bgraph_hash\b/);
-    expect(body.assistant_text).not.toMatch(/\bZod\b/);
-    expect(body.assistant_text).not.toMatch(/\bfact_type\b/);
-    // No em dash in user-facing prose (brief rule).
-    expect(body.assistant_text).not.toContain('—');
-    // No raw ids leaked.
-    expect(body.assistant_text).not.toMatch(/\bopt_[ab]\b/);
-    expect(body.assistant_text).not.toMatch(/\bfac_[a-z]+\b/);
-  });
+  // F2 CHANGE A — removed: the what_would_flip PILL now routes to the coach; its wire egress safety (no raw decimals / internal terms) is enforced by validateExplanationAnswer (raw_decimal_coefficient + forbidden_internal_term guards, unit-tested) and the routed composer tests. Coach-routing itself: route-v2-chip-click-explain.test.ts.
 
   // Failure 2 (at-limit add-risk preflight) is intentionally NOT in
   // this file. Coverage lives in

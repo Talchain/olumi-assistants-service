@@ -96,6 +96,10 @@ export function buildFrozenInput(): DecisionReviewInvokeInput {
     },
     winner: { id: 'opt-raise-8', label: 'Raise prices by 8 percent', win_probability: 0.46, outcome_mean: 2130000 },
     runner_up: { id: 'opt-raise-15', label: 'Raise prices by 15 percent', win_probability: 0.24, outcome_mean: 2050000 },
+    // FROZEN HISTORY — not a live shape. These rows are the B1 measurement
+    // baseline and are deliberately left in the pre-2.228 form so the recorded
+    // latency/cost figures stay comparable; the production derivation now
+    // reads PLoT's top-level `enrichment.flip_thresholds[]` instead.
     flip_threshold_data: [
       { factor_id: 'fac-1', factor_label: 'Customer demand elasticity', current_value: 0.62, flip_value: 0.38, direction: 'decrease', unit: 'elasticity' },
       { factor_id: 'fac-4', factor_label: 'Churn among long-tenure accounts', current_value: 0.19, flip_value: 0.34, direction: 'increase', unit: 'elasticity' },

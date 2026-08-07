@@ -33,6 +33,131 @@
 
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 
+/**
+ * ROADMAP 2.213 — the no-recommendations doctrine, at the wire seam.
+ *
+ * Founder's BINDING ruling: "the product should not be recommending
+ * anything. It should be just providing science-grounded data and
+ * coaching." The four recommendation-NOUN patterns in the V5 P0 set
+ * (`recommendation`, `recommended`, `the winner`, `winning <X>`) let the
+ * whole ADVISORY REGISTER through: "X is the clear best choice", "X is your
+ * best bet", "X is advisable", "X is the way to go", "you should choose X"
+ * all passed clean. `src/cee/key-insight/index.ts` (12 strings) and
+ * `src/cee/recommendation-narrative/templates.ts` (11) shipped exactly that
+ * copy on live registered routes behind this guard until 2.213 deleted both.
+ * The guard read as protection and was not.
+ *
+ * REMEDY CLASS — deliberately FATAL, not rewritable. The RC4 rewrite-first
+ * path (`applyTerminologyRewrite`) fixes a vocabulary offence in place
+ * ("recommendation" → "leading option"). A choice directive is not a
+ * vocabulary offence: substituting a noun leaves the product still telling
+ * the user what to pick. So there is NO TERMINOLOGY_RULES entry for this
+ * family, and a hit takes the whole-response neutral fallback. Because that
+ * remedy is destructive, every pattern below is anchored to a CHOICE frame
+ * rather than to bare English, and each was false-positive-swept over all
+ * 2,813 string-bearing files in this repo (src, tests, Prompts, tools,
+ * contracts, config, data, openapi.yaml) before being added.
+ *
+ * ⚠ WHY THIS IS A NAMED EXPORT AND NOT SIX INLINE ENTRIES. The fatal class is
+ * distinguished from the rewritable class by an ABSENCE — no TERMINOLOGY_RULES
+ * entry matches these frames — and an absence has no symbol to assert against.
+ * Inlined, the only way to test the class was a hand-listed array of exemplar
+ * strings in the spec, i.e. a hand-maintained mirror: add a seventh pattern (or
+ * add a TERMINOLOGY_RULES entry that quietly downgrades one of these six to a
+ * content-preserving rewrite) and the spec keeps passing while the doctrine
+ * silently weakens. Exporting the set lets the spec ITERATE it and derive the
+ * three properties per pattern — hits / no terminology rewrite applies /
+ * remedy is the whole-response fallback — so both drift directions go RED.
+ * See `__tests__/forbidden-user-facing-phrases.test.ts`.
+ */
+export const DOCTRINE_FATAL_PATTERNS: readonly RegExp[] = [
+  // 1. The superlative-choice crowning: "<X> is/remains/looks like/appears to
+  //    be [the|your|clearly the|…] <superlative> <choice-noun>". The copula
+  //    anchor is what keeps legitimate coaching sayable — "what would make
+  //    Option B the better choice?" (adapters/llm/router.ts) carries no copula
+  //    and does not match. The negation lookahead keeps the product able
+  //    to DE-recommend: "the status quo is not always the safest choice"
+  //    (cee/validation/pre-decision-checks.ts) must survive, and does.
+  //    `become` is deliberately absent from the copula set so conditional
+  //    flip readings ("X could become the better choice") stay sayable.
+  //
+  //    ⚠ ROADMAP 2.725 — `strongest|most promising` ADDED, closing a MEASURED
+  //    evasion. `src/services/review/blockBuilders.ts:459` shipped
+  //    `"{label}" appears to be the strongest option.` and passed this pattern
+  //    clean, because `strongest` was absent from an alternation that already
+  //    carried `best|better|optimal|right|obvious|clear|clearest|smartest|
+  //    safest|sensible|superior|preferable`. Two sibling layers in this same
+  //    estate ALREADY treat it as a crowning word — the decision-review
+  //    validator's WIN_CUE (`decompose.ts`) and the unified-pipeline coaching
+  //    instructions (`coaching-pass.ts:172-173`, which ban "strongest or most
+  //    promising option" verbatim). The wire guard was the one that did not
+  //    know it. `most promising` rides along because the sibling that already
+  //    bans `strongest` bans it in the same breath, and leaving it out would
+  //    recreate the same one-word hole one synonym over.
+  //
+  //    FALSE-POSITIVE SWEEP (2.725, at 8c316b5e, 2,991 string-bearing files
+  //    across src/ Prompts/ data/ tools/ tests/ contracts/ config/ +
+  //    openapi.yaml + package.json): the extended alternation matches 12 lines
+  //    the current one does not. ONE is production source — the evasion above,
+  //    fixed in the same change. The other ELEVEN are all ADVERSARIAL fixtures
+  //    and negative-assertion strings (validator-explanation, validation-
+  //    registry `adversarial`, journey-classifiers, coaching-output-postcheck,
+  //    critiques-leader-claim-scan, the orchestrator-eval vocabulary fixture),
+  //    i.e. strings that exist precisely BECAUSE this register is banned.
+  //    Zero legitimate-prose false positives.
+  /\b(?:is|are|was|were|remains?|looks?\s+like|seems?|appears?\s+to\s+be)\s+(?!not\b|never\b|no\b|rarely\b|seldom\b)(?:\w+\s+){0,2}(?:best|better|optimal|right|obvious|clear|clearest|smartest|safest|sensible|superior|preferable|strongest|most\s+promising)\s+(?:choice|option|bet|path|route)\b/i,
+  // 2. "your/the best bet" without a copula ("Your best bet: X").
+  /\b(?:your|the)\s+best\s+bet\b/i,
+  // 3. "advisable" — the ruling's exact prohibited verb. Bare-word safe: the
+  //    sweep found it in exactly four places, all inside the two modules 2.213
+  //    deleted, and nowhere else in the repo.
+  /\badvisable\b/i,
+  // 4. "the way to go" — one occurrence repo-wide, in a deleted template. No
+  //    legitimate use in data or coaching register.
+  /\bthe\s+way\s+to\s+go\b/i,
+  // 5. "gives you the best chance of <goal>" — a superlative crowning wearing
+  //    a probability's clothes, with no number attached.
+  /\bgives?\s+you\s+the\s+best\s+chance\b/i,
+  // 6. The explicit choice directive. This mirrors, verbatim, the pattern
+  //    `coaching/copy-quality-gate.ts:127` has policed on the COACHING path
+  //    since PR #171 — the gap 2.213 closes is that the WIRE guard never
+  //    carried it. Reusing the already-swept shape (rather than inventing a
+  //    wider one) is why bare "go with" / "proceed with" are NOT here: the
+  //    sweep found 66 legitimate "proceed with" and 69 legitimate "go with"
+  //    hits — option labels ("Proceed with acquisition"), coaching ("proceed
+  //    with caution"), and the user's own quoted question ("Should I go with
+  //    A or B?"). Banning them bare would erase real responses.
+  /\b(?:you|i)\s+(?:should|would)\s+(?:choose|pick|go\s+with|select)\b/i,
+];
+
+/**
+ * ROADMAP 2.725 — the recommendation-NOUN class, extracted so a SECOND surface
+ * can share this exact definition instead of copying it.
+ *
+ * These four patterns lived inline in {@link FORBIDDEN_USER_FACING_PHRASES}
+ * until 2.725 needed them on the `assist.v1.*` route family too (see
+ * `src/services/doctrine/route-egress-doctrine-scan.ts`). Copying four regexes
+ * into a second module would have been the estate's dominant defect — a
+ * hand-maintained mirror that reads green while it drifts (CLAUDE.md trap 12).
+ * Naming the set is what makes both consumers spread ONE definition, and lets
+ * a spec assert set-membership by IDENTITY (`toContain(pattern)` on the regex
+ * object, not on its source string) so adding a fifth pattern here
+ * automatically covers both paths and cannot silently cover only one.
+ *
+ * Remedy class differs BY CONSUMER and that is deliberate:
+ *   - turn path: rewritable — `applyTerminologyRewrite` maps every one of these
+ *     ("recommendation" → "leading option", "recommended" → "suggested",
+ *     "the winner" → "the leading option", "winning <X>" → "leading <X>").
+ *   - route family: detection only. See that module's header for why importing
+ *     the turn path's remedy would corrupt user-authored content.
+ */
+export const DOCTRINE_VERDICT_PATTERNS: readonly RegExp[] = [
+  /\brecommendations?\b/i,
+  /\brecommended\b/i,
+  /\bthe\s+winners?\b/i,
+  /\bwinning\s+(?:option|probability|side|choice|outcome)\b/i,
+];
+
 export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // "I haven't applied any changes" — straight apostrophe AND curly
   // apostrophe variants. Anchoring on `\b` after `changes` allows for
@@ -132,10 +257,16 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // fallback. The narrowed forms target the prescriptive uses
   // ("the winner", "winning option / probability / side / choice")
   // without catching label-quotes.
-  /\brecommendations?\b/i,
-  /\brecommended\b/i,
-  /\bthe\s+winners?\b/i,
-  /\bwinning\s+(?:option|probability|side|choice|outcome)\b/i,
+  // Declared above as DOCTRINE_VERDICT_PATTERNS (2.725) and spread in here, so
+  // the `assist.v1.*` route scanner and this turn-path guard share ONE
+  // definition rather than two copies that drift. Full rationale on that
+  // constant.
+  ...DOCTRINE_VERDICT_PATTERNS,
+  // ROADMAP 2.213 — the no-recommendations doctrine (the six choice-directive
+  // frames). Declared above as DOCTRINE_FATAL_PATTERNS and spread in here, so
+  // the fatal-remedy class has a symbol the spec can iterate; full rationale
+  // lives on that constant.
+  ...DOCTRINE_FATAL_PATTERNS,
   // V5 deterministic-copy hardening (Area A) — internal implementation
   // vocabulary that must never reach user-facing prose. CONSERVATIVE set:
   // only multi-word internal phrases + single words with no legitimate
@@ -160,7 +291,53 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   /\bnode[\s_]ids?\b/i,
   /\b_meta\b/i,
   /\borchestrator\b/i,
+  // ROADMAP 2.655 — THE OPERATION-BUDGET VOCABULARY.
+  //
+  // Witnessed on the wire (walk 2.634, 2026-08-07): "it would require 6 node
+  // operations and 6 edge operations - more than is safe in a single edit
+  // (limit: 4 node ops, 8 edge ops)". A patch operation is an internal unit;
+  // a user has no way to count one, and the sentence named a cap that had not
+  // even been breached.
+  //
+  // ⚠ SCOPE, DELIBERATELY NARROW. This bans the internal NOUN, not the numbers
+  // beside it. A pattern for the numbers themselves ("limit: 4") would have to
+  // fire on a colon followed by a digit, and a user's own constraint is
+  // legitimately written that way ("churn limit: 3%") — with a REMEDY that
+  // erases the whole response, over-reach here costs a turn. The numeric shape
+  // is swept where it is BUILT instead, over every rejection the copy builder
+  // can produce (`tests/unit/orchestrator/patch-rejection-no-internal-caps`),
+  // which is also the only level at which the whole input matrix can be
+  // checked rather than the one fixture a dispatch test happens to run.
+  //
+  // Swept before adding: the phrase appears nowhere in user-facing prose in
+  // this repo. Its only non-comment occurrence was the sentence above, which
+  // 2.655 removed at the producer. `node/edge operations` in the edit prompts
+  // is model-facing and is not scanned by this guard.
+  /\b(?:node|edge)\s+op(?:eration)?s?\b/i,
 ];
+
+/**
+ * ⭐ RAW PROBABILITY DECIMALS IN USER-FACING BLOCK PROSE.
+ *
+ * Intentionally NARROW: a leading `0.\d` or `.\d` only. `"v1.3"`, `"1.5x"`,
+ * `"10.5%"` do NOT match — the rule targets bare probabilities leaking into
+ * copy, not every decimal.
+ *
+ * ⚠ MOVED HERE from `phase3-blocks.ts` (ROADMAP 2.688 slice 1), where it was
+ * a `const` local to one builder file. It is a prose-guard lexicon and this
+ * module is where the prose-guard lexicons live; keeping it next to
+ * `FORBIDDEN_USER_FACING_PHRASES` means a second builder (the
+ * reference-class `outside_view` exercise) DERIVES the rule instead of
+ * copying the regex — the hand-maintained mirror is the defect class this
+ * estate loses most time to (CLAUDE.md trap 12). `phase3-blocks.ts` now
+ * imports it; the pattern source is unchanged, byte for byte.
+ *
+ * ⚠ SCOPE, stated rather than implied: this catches LEADING-decimal form
+ * ONLY. A producer-authored `'55%'` or `'16000 GBP'` passes it. That is a
+ * known, rowed gap (ROADMAP 2.205), not an oversight — a blanket numeric
+ * block would gut legitimate prose ("review in 3 months").
+ */
+export const RAW_DECIMAL_RE = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
 
 /**
  * Return the first forbidden phrase that hits in `text`, or null when

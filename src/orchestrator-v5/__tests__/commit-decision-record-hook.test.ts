@@ -33,6 +33,7 @@ import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 const { storeMock } = vi.hoisted(() => ({
   storeMock: {
     createRecord: vi.fn(),
+    retrieveRecords: vi.fn(async () => ({ records: [], totalCount: 0 })),
     getStoreCalls: 0,
     throwOnGet: false,
   },
@@ -44,7 +45,7 @@ vi.mock('../decision-records/index.js', () => ({
     if (storeMock.throwOnGet) {
       throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set');
     }
-    return { createRecord: storeMock.createRecord };
+    return { createRecord: storeMock.createRecord, retrieveRecords: storeMock.retrieveRecords };
   }),
 }));
 
@@ -105,7 +106,8 @@ function meta(facts: readonly RunAnalysisHandlerFact[]) {
 }
 
 function composed() {
-  return composeDirectAnswerResponse({ assistant_text: 'hi', stage: 'analyse' });
+  return composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'hi', stage: 'analyse' });
 }
 
 /** Owned-scenario store: the guest pre-check resolves an owner. */

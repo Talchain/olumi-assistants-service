@@ -40,11 +40,13 @@
 warnOnInvalid=0
 
 # Exact ratchet: distinctive double-cast that erases types at boundaries.
-as_unknown_as=94
+# Lowered 94 -> 61 by PR #615 (V1 orchestrator-belt deletion banked the cleanup).
+as_unknown_as=59
 
 # Exact ratchet: constant fallback on a science field — `field ?? null|0|0.x`
 # or `field || null|0|0.x`. HIGH-SIGNAL (catches fabricated defaults like
 # `confidence ?? 0.8`) but PARTIAL — it misses laundered cases (field
 # destructured, renamed, mapped, or cast before the fallback). A low count
 # means "not detected by this cheap gate", NOT "safe".
-science_field_default_fallback=16
+# Lowered 16 -> 10 by PR #615 (V1 orchestrator-belt deletion banked the cleanup).
+science_field_default_fallback=10

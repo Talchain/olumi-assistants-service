@@ -43,9 +43,9 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { applyPatchOperations } from '../../orchestrator/patch-applier.js';
 import {
   canonicaliseValueOps,
+  stampUserEditProvenance,
   batchFullyLanded,
 } from '../../orchestrator/canonicalise-value-ops.js';
-import { config } from '../../config/index.js';
 import {
   PatchOperationsArraySchema,
   type ValidatedPatchOperation,
@@ -118,12 +118,36 @@ export function buildGmHeldAppliedReceipt(
 }
 
 /**
- * Honest notice for options that block analysis. Null when every option is
- * configured (copy byte-identical to the pre-2.11 receipt). The advised
- * phrasing MUST carry the deterministic configure-option gate's own
+ * Honest notice for options that still lack effect values. Null when every
+ * option is configured (copy byte-identical to the pre-2.11 receipt). The
+ * advised phrasing MUST carry the deterministic configure-option gate's own
  * vocabulary ("configure … option") so a user who echoes it routes to the
  * edit lane without the LLM router — pinned by
  * configure-option-copy-detector-contract.test.ts.
+ *
+ * ⚠⚠ ROADMAP 2.117 — PREDICTION-FREE BY DESIGN. This notice states the fact
+ * and names the deterministic remedy. It must NOT forecast what the analysis
+ * will do with the option, in EITHER direction. Two generations were
+ * falsified live, in opposite directions:
+ *
+ *   gen 1  "…so the analysis cannot run until they are set."  → FALSE
+ *          post-#747 (JOURNEY-PROOF step 3 captured it): the option is
+ *          scaffolded and the run proceeds.
+ *   gen 2  "…so Olumi will include it using provisional placeholder values."
+ *          (#748) → FALSE on the next live re-capture: the value-free option
+ *          collapsed onto the baseline and the engine removed it,
+ *          `IDENTICAL_OPTIONS_DEDUPED`. It was never scored.
+ *
+ * The outcome is draft-dependent, and dedup fires DOWNSTREAM of the scaffold
+ * — so even `will_scaffold_options: true` does not license an inclusion
+ * promise. Disclosing what actually happened is the analysis result's job.
+ *
+ * Two further facts, kept because they cost real time to establish and would
+ * otherwise be re-derived: labels here come from `deriveUnconfiguredOptionLabels`
+ * (status !== 'ready') with no intent filter, and option STATUS is not a proxy
+ * for scaffoldability — an edge-less option is stamped `needs_user_mapping`
+ * yet IS scaffolded via the sibling comparison basis. So this copy must not be
+ * split on status either.
  */
 export function buildUnconfiguredOptionsNotice(
   unconfiguredOptionLabels: readonly string[],
@@ -136,10 +160,9 @@ export function buildUnconfiguredOptionsNotice(
       ? first
       : `${first} and ${labels.length - 1} more option${labels.length - 1 === 1 ? '' : 's'}`;
   return (
-    `Note: ${named} ${labels.length === 1 ? 'does' : 'do'} not have effect values yet, ` +
-    `so the analysis cannot run until they are set. ` +
+    `Note: ${named} ${labels.length === 1 ? 'does' : 'do'} not have effect values yet. ` +
     `Say 'configure the ${labels[0]} option' and tell me what ` +
-    `${labels.length === 1 ? 'it' : 'each one'} changes, and I'll write it in.`
+    `${labels.length === 1 ? 'it' : 'each one'} changes, and I'll write in the real numbers.`
   );
 }
 
@@ -326,7 +349,7 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
     return { status: 'referee_blocked', governing: decision.governing };
   }
 
-  // ── 2b. Canonicalise value-op field spellings (R1 residual, flag-gated) ─
+  // ── 2b. Canonicalise value-op field spellings (R1 residual) ────────────
   // The confirm re-applies LOCALLY (no PLoT round-trip), so a tunable value op
   // in the edit pipeline's non-canonical field spelling (`{ data: { value } }`,
   // slash-keyed `data/value`, dotted `observed_state.value`) is Object.assign-
@@ -334,12 +357,29 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
   // silently no-ops while structural siblings land, which #509 refuses WHOLE.
   // Translating those spellings to the one GraphV3 preserves (a merge onto
   // observed_state) makes the value actually apply. Runs AFTER the re-referee
-  // (verdict + telemetry byte-identical) and BEFORE the apply. Flag OFF (the
-  // default) returns the operations unchanged by reference — byte-identical to
-  // #509. The atomicity guard below still backstops any op left untranslated.
-  const opsToApply: PatchOperation[] = config.cee.gmHeldValueCanonicalisationEnabled
-    ? canonicaliseValueOps(operations, input.currentGraph).operations
-    : operations;
+  // (verdict + telemetry byte-identical) and BEFORE the apply. The atomicity
+  // guard below still backstops any op left untranslated.
+  //
+  // UNCONDITIONAL since 2026-07-25 (was `CEE_GM_HELD_VALUE_CANONICALISATION`,
+  // default OFF). This lane's POSTCONDITION (`batchFullyLanded`, below) has
+  // always been ungated, so the gate left the held lane running the refusal
+  // WITHOUT the repair — it declined confirmed batches it could have applied.
+  // Replayed over all 43 real held batches (`pending_actions` where
+  // `handler_id = graph_management_held_v1`): rewriter OFF = 21 land / 2
+  // refuse; rewriter ON = 23 land / 0 refuse; batches that flipped from
+  // landing to refusing = ZERO. One of the two repairs is a real user who
+  // confirmed "Yes, go ahead" on 2026-07-18, was declined, retried five times,
+  // and whose factor value is unchanged in the database to this day.
+  //
+  // Rollback is a code revert, not an env flip (no dark launches).
+  //
+  // 2.396(b): a held batch the user explicitly CONFIRMED is the strongest
+  // consent signal in the product — its value writes earn the USER stamp
+  // (observed_state.source + node provenance) exactly like the normal seam.
+  // Same single stamp function; see canonicalise-value-ops.ts.
+  const opsToApply: PatchOperation[] = stampUserEditProvenance(
+    canonicaliseValueOps(operations, input.currentGraph).operations,
+  );
 
   // ── 3. Apply through the existing apply path ──────────────────────────
   let mutatedGraph: PersistedGraphV3T;

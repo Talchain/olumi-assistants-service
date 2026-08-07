@@ -47,8 +47,16 @@ import type { AddConstraintHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { GoalConstraintSchema, type GoalConstraintT } from '../../../schemas/assist.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
-import { resolveGoalThresholdCap } from '../../../utils/goal-threshold-cap.js';
-import { hasReductionByFraming } from '../../../utils/reduction-framing.js';
+import {
+  CEE_GOAL_THRESHOLD_FRAME,
+  resolveGoalThresholdCap,
+} from '../../../utils/goal-threshold-cap.js';
+import {
+  extractIncreaseByDelta,
+  hasReductionByFraming,
+  valuesMatch,
+} from '../../../utils/reduction-framing.js';
+import { extractGoalTargetWithBaseline } from '../../../cee/factor-extraction/index.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
@@ -108,7 +116,12 @@ const TYPE_TO_OPERATOR: Record<'at_least' | 'at_most', '>=' | '<='> = {
  * the constrained-node kind. `add_constraint` itself does not call
  * PLoT — see file header.
  */
-const ALLOWED_TARGET_KINDS: readonly string[] = [
+// Exported as the SINGLE source of truth for this handler's target-kind
+// capability. `routing/__tests__/registry-handler-kind-drift.test.ts` projects
+// it through `toEntityKind` and asserts the routing registry's
+// `accepted_entity_kinds` matches exactly, so the registry can no longer
+// drift into refusing a target this handler would have accepted.
+export const ALLOWED_TARGET_KINDS: readonly string[] = [
   'factor',
   'outcome',
   'goal',
@@ -349,6 +362,35 @@ export function createAddConstraintHandler(): HandlerFn {
             'the target instead of guessing the flip.',
           { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
         );
+      }
+
+      // ROADMAP 2.273 prerequisite — the INCREASE-side mirror of the backstop
+      // above. "grow revenue BY 2M" states a CHANGE amount; persisting it as
+      // `>= 2M` and stamping `goal_threshold_frame: 'level'` asserts an
+      // ABSOLUTE level the user never stated (their target is baseline + 2M).
+      // Inert before this PR — a goal with no `observed_state.baseline` made
+      // ISL refuse the conversion outright — but this PR POPULATES that
+      // baseline, so the same misencoding now yields a confident WRONG
+      // probability. Refuse rather than guess the delta→level arithmetic:
+      // same doctrine as 1.52, never a silent auto-correction.
+      //
+      // The trigger is deliberately narrower than 1.52's whole-message scan:
+      // it fires only when the RESOLVED value IS the stated delta. If the
+      // model already resolved "grow by 2M" to `at_least 6M` it did the
+      // arithmetic correctly and must not be punished for it.
+      if (operator === '>=' && params.value > 0) {
+        const statedDelta = extractIncreaseByDelta(invocation.payload.message);
+        if (statedDelta !== null && valuesMatch(params.value, statedDelta)) {
+          throw new D1HandlerError(
+            'PARAMETER_INVALID',
+            'add_constraint: increase-framed message ("increase/grow/raise/' +
+              'boost/lift/expand ... by <amount>") resolved to ">= " that same ' +
+              'amount, so a stated CHANGE would be persisted and attested as an ' +
+              'absolute LEVEL (ROADMAP 2.273). Refusing to persist; ask the user ' +
+              'for the target level rather than guessing baseline + delta.',
+            { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE },
+          );
+        }
       }
 
       // Default the constraint label from the target node's label so the
@@ -599,6 +641,53 @@ export function createAddConstraintHandler(): HandlerFn {
             if (cap !== null) {
               goalNode.goal_threshold_cap = cap;
               goalNode.goal_threshold = params.value / cap; // model units (0–1)
+              // ROADMAP 2.273 — the chat-path twin of the draft-path baseline
+              // stamp (cee/factor-extraction/enricher.ts). Same shared
+              // extractor, so the two registration paths cannot drift.
+              //
+              // GATED ON THE TARGET MATCHING `params.value`. The extractor
+              // guarantees its target and baseline came from ONE match, i.e.
+              // the same metric — but it says nothing about whether that
+              // metric is the one being persisted here. Requiring the stated
+              // target to equal the value actually being stamped carries that
+              // guarantee across: if the user mentioned a different metric's
+              // target in the same message, the numbers won't match and no
+              // baseline is written. Divided by the SAME `cap` as the line
+              // above, never a separately-derived one.
+              // This path already holds a V3 node, so it writes the WIRE field
+              // (`observed_state`) directly rather than a V1 carrier the
+              // transform would later convert — there is no transform left to
+              // run. `value` and `baseline` are the same single extracted
+              // number for the reason documented in
+              // `cee/transforms/schema-v3.ts`: ISL's `ObservedState.value` is
+              // required, and at registration time the goal's current observed
+              // level IS its baseline.
+              const statedPair = extractGoalTargetWithBaseline(invocation.payload.message);
+              if (statedPair) {
+                const rawTarget =
+                  statedPair.unit === '%' ? statedPair.value * 100 : statedPair.value;
+                const rawBaseline =
+                  statedPair.unit === '%' ? statedPair.baseline * 100 : statedPair.baseline;
+                if (valuesMatch(rawTarget, params.value)) {
+                  const normalisedBaseline = rawBaseline / cap;
+                  goalNode.observed_state = {
+                    ...goalNode.observed_state,
+                    value: normalisedBaseline,
+                    baseline: normalisedBaseline,
+                    source: 'brief_extraction',
+                    raw_value: rawBaseline,
+                    cap,
+                    ...(goalNode.goal_threshold_unit !== undefined && {
+                      unit: goalNode.goal_threshold_unit,
+                    }),
+                  };
+                }
+              }
+              // ROADMAP 2.258 — attest the FRAME beside the number, on the
+              // same branch that mints it so the two can never diverge. A CODE
+              // CONSTANT: the line above divides a user-units target by a cap,
+              // which is an absolute LEVEL by construction.
+              goalNode.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
             }
           }
         }

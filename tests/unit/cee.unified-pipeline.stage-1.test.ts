@@ -61,6 +61,12 @@ vi.mock("../../src/config/timeouts.js", async (importOriginal) => ({
   DRAFT_LLM_TIMEOUT_MS: 105_000,
   LLM_POST_PROCESSING_HEADROOM_MS: 15_000,
   REPAIR_TIMEOUT_MS: 10_000,
+  // The repair gate now DERIVES its remaining budget via remainingRequestBudgetMs
+  // (2026-07-24 budget-primitive consolidation). That function closes over the
+  // module's REAL constants, so a plain constant override above does not reach
+  // inside it — override the derived function too, consistently with the two
+  // budget constants above, so the mocked headroom (15s) actually applies.
+  remainingRequestBudgetMs: (elapsedMs: number) => Math.max(0, 120_000 - 15_000 - elapsedMs),
   getJitteredRetryDelayMs: vi.fn().mockReturnValue(0),
 }));
 
@@ -97,7 +103,7 @@ import { groundAttachments, buildRefinementBrief } from "../../src/routes/assist
 import { calcConfidence, shouldClarify } from "../../src/utils/confidence.js";
 import { allowedCostUSD } from "../../src/utils/costGuard.js";
 import { getAdapter, getAdapterWithResolution } from "../../src/adapters/llm/router.js";
-import { UpstreamTimeoutError, ClientDisconnectError } from "../../src/adapters/llm/errors.js";
+import { UpstreamTimeoutError, ClientDisconnectError, RequestBudgetExceededError } from "../../src/adapters/llm/errors.js";
 import { createEdgeFieldStash } from "../../src/cee/unified-pipeline/edge-identity.js";
 import { normaliseCeeGraphVersionAndProvenance } from "../../src/cee/transforms/graph-normalisation.js";
 import { config } from "../../src/config/index.js";
@@ -107,6 +113,7 @@ import { DRAFT_LEAN_RETRY_DIRECTIVE } from "../../src/cee/constants.js";
 // here derives from the same code parse.ts runs.
 import {
   DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
+  DRAFT_LLM_TIMEOUT_MS,
   getDraftLlmRetryBudgetMs,
   getAffordableDraftTokens,
 } from "../../src/config/timeouts.js";
@@ -574,26 +581,30 @@ describe("runStageParse", () => {
     );
   });
 
-  it("REACHABILITY: fires the lean retry at a sentinel-truncation elapsed (~62s) where the pre-recalibration 4,500 floor would NOT have", async () => {
+  it("ANTI-DOOM (2026-07-23 firefight): does NOT retry into a budget SMALLER than the attempt that overflowed — the exact doomed-retry scenario is closed", async () => {
     setupMocks();
 
-    // The load-bearing reachability fix. With attempt-1 capped at the runaway
-    // sentinel (6,800 tok), a runaway truncates ~62s into the request (vs ~78s
-    // at the old 8,550-tok budget). At 62s elapsed the remaining window affords
-    // ~2,970 tokens — ABOVE the recalibrated 2,700 floor (fires) but BELOW the
-    // old 4,500 floor (would have stayed unreachable). This test pins that the
-    // retry is now reachable exactly in the window the sentinel creates.
+    // THE 2026-07-23 draft-down mechanism. A truncation at ~62s elapsed leaves a
+    // window that affords ~2,970 tokens — but attempt 1 used the FULL affordable
+    // budget (8,550). Retrying into 2,970 (< half of 8,550) re-truncates: a model
+    // that could not fit 8,550 never fits 2,970. The anti-doom guard
+    // (isDraftRetryAffordable) forbids it, so the typed truncation error
+    // propagates immediately (fail fast) instead of burning a doomed second call.
     const elapsedMs = 62_000;
-    const window = getDraftLlmRetryBudgetMs(elapsedMs); // real fn: 110_000 - 62_000
-    const affordable = getAffordableDraftTokens(window);
-    // Guard the premise: affordable sits in the (2700, 4500) gap. If the
-    // constants move, this derived guard fails loudly rather than the test
-    // silently asserting the wrong regime.
-    expect(affordable).toBeGreaterThanOrEqual(2_700);
-    expect(affordable).toBeLessThan(4_500);
+    const window = getDraftLlmRetryBudgetMs(elapsedMs); // 110_000 - 62_000 = 48_000
+    const leanAffordable = getAffordableDraftTokens(window);
+    const attempt1MaxTokens = Math.min(
+      getAffordableDraftTokens(DRAFT_LLM_TIMEOUT_MS),
+      DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
+    );
+    // Premise guard: the remaining budget is genuinely SMALLER than attempt 1's
+    // (so a retry here would re-truncate). If constants move, fail loudly.
+    expect(leanAffordable).toBeLessThan(attempt1MaxTokens);
 
     mockAdapter.draftGraph
       .mockRejectedValueOnce(makeTruncationError())
+      // A second call must NEVER be made; wire a would-succeed result to prove
+      // the guard — not exhausted mocks — is what stops it.
       .mockResolvedValueOnce({
         graph: { ...validGraph, nodes: [...validGraph.nodes], edges: [...validGraph.edges] },
         rationales: [],
@@ -604,14 +615,10 @@ describe("runStageParse", () => {
     const ctx = makeCtx({
       opts: { schemaVersion: "v3", requestStartMs: Date.now() - elapsedMs },
     });
-    await runStageParse(ctx);
 
-    expect(ctx.earlyReturn).toBeUndefined();
-    expect(ctx.graph).toBeDefined();
-    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
-    expect(mockAdapter.draftGraph.mock.calls[1][0].systemDirective).toContain(
-      DRAFT_LEAN_RETRY_DIRECTIVE,
-    );
+    await expect(runStageParse(ctx)).rejects.toThrow("truncated at max_tokens");
+    // No doomed sub-budget retry: exactly ONE draft call.
+    expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(1);
   });
 
   it("does NOT fire the lean retry when the remaining budget cannot afford a lean draft (fail fast with the typed truncation error)", async () => {
@@ -796,5 +803,51 @@ describe("runStageParse", () => {
       // Must have retried (2 attempts)
       expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(2);
     }
+  });
+
+  // ── F1 (Codex deep-review): every attempt's timeout honours elapsed ───────
+  // Mock budget: DRAFT_LLM_TIMEOUT_MS=105s cap, request budget 120s, headroom
+  // reserved so the real getDraftLlmRetryBudgetMs (spread from source) returns
+  // min(110s, 110s-elapsed). RED-first: pre-fix attempt 1 took the full cap
+  // regardless of pre-LLM elapsed time.
+  describe("F1 — attempt 1 honours pre-LLM elapsed request time", () => {
+    it("caps attempt 1's timeout to the remaining request budget (15s pre-LLM elapsed → well below the single-attempt cap)", async () => {
+      setupMocks();
+      // 15s of the request budget already spent before the LLM stage.
+      const ctx = makeCtx({ opts: { schemaVersion: "v3" as const, requestStartMs: Date.now() - 15_000 } });
+
+      await runStageParse(ctx);
+
+      expect(mockAdapter.draftGraph).toHaveBeenCalledTimes(1);
+      const callOpts = mockAdapter.draftGraph.mock.calls[0][1] as { timeoutMs: number };
+      // Pre-fix: attempt 1 = the full 105s cap (RED here). Post-fix: capped to
+      // ~95s remaining (min(cap, budget-headroom-elapsed)).
+      expect(callOpts.timeoutMs).toBeLessThan(105_000);
+      expect(callOpts.timeoutMs).toBeGreaterThan(90_000);
+      expect(callOpts.timeoutMs).toBeLessThanOrEqual(96_000);
+    });
+
+    it("attempt 1 at ~zero elapsed is (near) the full single-attempt window — no regression for a fresh request", async () => {
+      setupMocks();
+      const ctx = makeCtx({ opts: { schemaVersion: "v3" as const, requestStartMs: Date.now() } });
+
+      await runStageParse(ctx);
+
+      const callOpts = mockAdapter.draftGraph.mock.calls[0][1] as { timeoutMs: number };
+      // ~0 elapsed → min(110s cap, ~110s remaining) ≈ the full window; the fix
+      // never SHORTENS a fresh first attempt.
+      expect(callOpts.timeoutMs).toBeGreaterThan(105_000);
+    });
+
+    it("refuses to START the draft when the request budget is fully exhausted (no LLM call, typed budget error)", async () => {
+      setupMocks();
+      // ~118s of a 120s budget already spent → the honest remaining window has
+      // collapsed to zero; the attempt must fail fast BEFORE calling the provider.
+      const ctx = makeCtx({ opts: { schemaVersion: "v3" as const, requestStartMs: Date.now() - 118_000 } });
+
+      await expect(runStageParse(ctx)).rejects.toBeInstanceOf(RequestBudgetExceededError);
+      // Pre-fix: attempt 1 ignored elapsed → the provider WAS called (RED).
+      expect(mockAdapter.draftGraph).not.toHaveBeenCalled();
+    });
   });
 });

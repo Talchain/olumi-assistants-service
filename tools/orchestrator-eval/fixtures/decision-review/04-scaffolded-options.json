@@ -1,0 +1,323 @@
+{
+  "id": "04-scaffolded-options",
+  "description": "A run whose leading option was SCAFFOLDED, so the input carries scaffold_disclosure. Without that section the review narrates placeholder numbers as real user data; this is the only fixture that exercises the <SCAFFOLDED_OPTIONS> block of the production assembler.",
+  "provenance": {
+    "origin": "input-field-coverage",
+    "source": "src/cee/decision-review/invoke.ts:124-134 (scaffold_disclosure, D-ask-1 / 2.11 P0-1)",
+    "note": "No March fixture reaches this input field — the whole 2026-03 pack predates it. Built to hold the assembler section, not to reproduce a defect. | FLIP_THRESHOLDS GOLDEN CORRECTED 2026-07-31 (fix-decision-review-v15 lane, disclosed): the golden flip_thresholds entries were hand-written as { factor_label, current, flip_at, note } with rounded values. Two independent defects. (a) FIELD NAMES: the runtime contract is { factor_id, factor_label, current_display, flip_display, narrative } (src/orchestrator-v5/compose/phase3-blocks.ts:1703-1765 reads factor_id/factor_label/narrative and DROPS any entry missing one), so the old goldens described a shape production would discard entirely — a golden nothing could ever produce. (b) VALUE FORM: the served v14 prompt contradicts itself here — :344-350 orders the raw value verbatim while :116-118/:220 order the percentage form and no_raw_probability_decimals scores the raw form as a failure. The goldens now follow the NON-self-contradictory rule (percentage form) and the runtime field names. The prompt-side resolution is drafted but NOT YET PROMOTED (tools/orchestrator-eval/drafts/decision_review.v15-draft.txt); until it is, this fixture encodes the contract the runtime and the scorer agree on, not the flip bullet the served prompt still carries."
+  },
+  "input": {
+    "brief": "We need to cut support response time. Which lever should we pull first?",
+    "brief_hash": "cafe1234beef5678",
+    "graph": {
+      "nodes": [
+        {
+          "id": "dec_support",
+          "kind": "decision",
+          "label": "Support Response Programme"
+        },
+        {
+          "id": "opt_hire",
+          "kind": "option",
+          "label": "Hire Two Support Engineers"
+        },
+        {
+          "id": "opt_automate",
+          "kind": "option",
+          "label": "Automate Tier One Triage"
+        },
+        {
+          "id": "fac_ticket_volume",
+          "kind": "factor",
+          "label": "Ticket Volume"
+        },
+        {
+          "id": "fac_automation_rate",
+          "kind": "factor",
+          "label": "Automation Coverage"
+        },
+        {
+          "id": "out_response",
+          "kind": "outcome",
+          "label": "Response Time"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_volume_response",
+          "from": "fac_ticket_volume",
+          "to": "out_response",
+          "effect_direction": "positive"
+        },
+        {
+          "id": "edge_automation_response",
+          "from": "fac_automation_rate",
+          "to": "out_response",
+          "effect_direction": "negative"
+        }
+      ]
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_automate",
+          "option_label": "Automate Tier One Triage",
+          "win_probability": 0.64,
+          "outcome": {
+            "mean": 0.6,
+            "p10": 0.35,
+            "p90": 0.82
+          }
+        },
+        {
+          "option_id": "opt_hire",
+          "option_label": "Hire Two Support Engineers",
+          "win_probability": 0.36,
+          "outcome": {
+            "mean": 0.44,
+            "p10": 0.25,
+            "p90": 0.62
+          }
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "factor_id": "fac_automation_rate",
+          "factor_label": "Automation Coverage",
+          "elasticity": 0.58,
+          "confidence": 0.66
+        },
+        {
+          "factor_id": "fac_ticket_volume",
+          "factor_label": "Ticket Volume",
+          "elasticity": 0.31,
+          "confidence": 0.79
+        }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "edge_automation_response",
+          "from_label": "Automation Coverage",
+          "to_label": "Response Time",
+          "switch_probability": 0.24
+        }
+      ],
+      "robustness": {
+        "level": "medium",
+        "recommendation_stability": 0.73,
+        "overall_confidence": 0.58
+      }
+    },
+    "deterministic_coaching": {
+      "headline_type": "moderate_winner",
+      "readiness": "ready",
+      "evidence_gaps": [
+        {
+          "factor_id": "fac_automation_rate",
+          "factor_label": "Automation Coverage",
+          "voi": 0.14,
+          "confidence": 0.66
+        }
+      ],
+      "model_critiques": []
+    },
+    "winner": {
+      "id": "opt_automate",
+      "label": "Automate Tier One Triage",
+      "win_probability": 0.64,
+      "outcome_mean": 0.6
+    },
+    "runner_up": {
+      "id": "opt_hire",
+      "label": "Hire Two Support Engineers",
+      "win_probability": 0.36,
+      "outcome_mean": 0.44
+    },
+    "scaffold_disclosure": "Automate Tier One Triage was scaffolded: its intervention values are placeholders, not values you supplied. Treat its numbers as illustrative until you set them.",
+    "flip_threshold_data": [
+      {
+        "factor_id": "fac_automation_rate",
+        "factor_label": "Automation Coverage",
+        "current_value": 0.58,
+        "flip_value": 0.31
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Discloses the placeholder inputs in plain language. Should PASS.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Automate Tier One Triage comes out ahead by about 28 percentage points, though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
+        "story_headlines": {
+          "opt_automate": "Ahead on response time, resting on placeholder inputs",
+          "opt_hire": "Steadier but slower to move response time"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 73% of runs, with automation coverage carrying most of the movement.",
+          "primary_risk": "Automation coverage may not reach the placeholder level assumed for it.",
+          "stability_factors": [
+            "Ticket volume is well supported and moves the outcome consistently."
+          ],
+          "fragility_factors": [
+            "Automation coverage reverses the ordering in about 24% of runs."
+          ]
+        },
+        "readiness_rationale": "The comparison rests on a placeholder automation coverage level, so it should be confirmed before acting.",
+        "evidence_enhancements": {
+          "fac_automation_rate": {
+            "why": "Automation coverage is a placeholder and carries the result.",
+            "expected_gain": "Replaces the illustrative input with a real one."
+          }
+        },
+        "scenario_contexts": {
+          "edge_automation_response": {
+            "context": "If automation coverage lands lower than the placeholder, response time improves less and the two options converge."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_automation_rate",
+            "factor_label": "Automation Coverage",
+            "current_display": "58%",
+            "flip_display": "31%",
+            "narrative": "If Automation Coverage moves from 58% to 31%, the leading option changes."
+          }
+        ],
+        "bias_findings": [],
+        "key_assumptions": [
+          "The placeholder automation coverage is achievable in the period modelled.",
+          "Ticket volume stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What automation coverage can you actually commit to in the first quarter?",
+            "technique": "assumption test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "em_dash",
+      "note": "Contains an em dash, banned in every output string by the served prompt.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Automate Tier One Triage comes out ahead by about 28 percentage points — though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
+        "story_headlines": {
+          "opt_automate": "Ahead on response time, resting on placeholder inputs",
+          "opt_hire": "Steadier but slower to move response time"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 73% of runs, with automation coverage carrying most of the movement.",
+          "primary_risk": "Automation coverage may not reach the placeholder level assumed for it.",
+          "stability_factors": [
+            "Ticket volume is well supported and moves the outcome consistently."
+          ],
+          "fragility_factors": [
+            "Automation coverage reverses the ordering in about 24% of runs."
+          ]
+        },
+        "readiness_rationale": "The comparison rests on a placeholder automation coverage level, so it should be confirmed before acting.",
+        "evidence_enhancements": {
+          "fac_automation_rate": {
+            "why": "Automation coverage is a placeholder and carries the result.",
+            "expected_gain": "Replaces the illustrative input with a real one."
+          }
+        },
+        "scenario_contexts": {
+          "edge_automation_response": {
+            "context": "If automation coverage lands lower than the placeholder, response time improves less and the two options converge."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_automation_rate",
+            "factor_label": "Automation Coverage",
+            "current_display": "58%",
+            "flip_display": "31%",
+            "narrative": "If Automation Coverage moves from 58% to 31%, the leading option changes."
+          }
+        ],
+        "bias_findings": [],
+        "key_assumptions": [
+          "The placeholder automation coverage is achievable in the period modelled.",
+          "Ticket volume stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What automation coverage can you actually commit to in the first quarter?",
+            "technique": "assumption test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "internal_leak",
+      "note": "Leaks runtime vocabulary (\"normalised\", \"run_analysis\") into user-facing prose.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Automate Tier One Triage comes out ahead by about 28 percentage points, though its inputs are placeholders rather than values you supplied. Automation coverage is what carries the result.",
+        "story_headlines": {
+          "opt_automate": "Ahead on response time, resting on placeholder inputs",
+          "opt_hire": "Steadier but slower to move response time"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 73% of runs, with automation coverage carrying most of the movement.",
+          "primary_risk": "Automation coverage may not reach the placeholder level assumed for it.",
+          "stability_factors": [
+            "Ticket volume is well supported and moves the outcome consistently."
+          ],
+          "fragility_factors": [
+            "Automation coverage reverses the ordering in about 24% of runs."
+          ]
+        },
+        "readiness_rationale": "The normalised context pack could not settle automation coverage, so run_analysis should be repeated before acting.",
+        "evidence_enhancements": {
+          "fac_automation_rate": {
+            "why": "Automation coverage is a placeholder and carries the result.",
+            "expected_gain": "Replaces the illustrative input with a real one."
+          }
+        },
+        "scenario_contexts": {
+          "edge_automation_response": {
+            "context": "If automation coverage lands lower than the placeholder, response time improves less and the two options converge."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_automation_rate",
+            "factor_label": "Automation Coverage",
+            "current_display": "58%",
+            "flip_display": "31%",
+            "narrative": "If Automation Coverage moves from 58% to 31%, the leading option changes."
+          }
+        ],
+        "bias_findings": [],
+        "key_assumptions": [
+          "The placeholder automation coverage is achievable in the period modelled.",
+          "Ticket volume stays inside the range examined."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What automation coverage can you actually commit to in the first quarter?",
+            "technique": "assumption test"
+          }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "good": true,
+    "em_dash": false,
+    "internal_leak": false
+  },
+  "expectedFailedDimensions": {
+    "em_dash": [
+      "no_dashes"
+    ],
+    "internal_leak": [
+      "no_internal_term_leak"
+    ]
+  }
+}

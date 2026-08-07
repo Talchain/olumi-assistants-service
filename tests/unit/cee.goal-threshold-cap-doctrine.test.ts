@@ -33,8 +33,17 @@ describe('cap-doctrine unification: resolveGoalThresholdCap (chat-path doctrine)
     expect(resolveGoalThresholdCap(undefined, 15, '%', undefined)).toBe(100);
   });
 
-  it('reuses a compatible existing cap that is >= the raw target', () => {
+  // ⚠ ROADMAP 2.239 — the title of this case read ">= the raw target" until
+  // 2026-08-01, mirroring the `>=` in the code. The ASSERTION was never wrong
+  // (1000 > 150 strictly, so it passes unchanged) but the title asserted the
+  // boundary the fix removed — a trap-14 label that would have gone false and
+  // taught the next reader that an equal cap is sanctioned. Title corrected;
+  // the equal-cap boundary is pinned in
+  // `cee.goal-threshold-degenerate-cap.test.ts`, and the strictly-greater
+  // boundary is pinned here so both sides of the new `>` are covered.
+  it('reuses a compatible existing cap that is STRICTLY GREATER than the raw target', () => {
     expect(resolveGoalThresholdCap(1000, 150, undefined, undefined)).toBe(1000);
+    expect(resolveGoalThresholdCap(151, 150, undefined, undefined)).toBe(151);
   });
 
   it('ignores an incompatible-unit existing cap and re-derives headroom', () => {

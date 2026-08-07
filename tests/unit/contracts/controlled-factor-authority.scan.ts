@@ -97,18 +97,31 @@ export const AUTHORITY_ALLOWLIST: Readonly<
     // 4th site (ROADMAP 2.73): STEP-5 applyCoachingSignal threads the
     // controlled set into the rerun-delta comparator — same persisted-first
     // form as the other three sites.
-    count: 4,
+    //
+    // 5th site (F1-flip lane, 2026-07-22): the bounded routing-failure fallback
+    // for a FORCED what_would_flip pill filters the prior-fact flip summary
+    // through the controlled set before composing the deterministic flip answer
+    // — the SAME persisted-first authority the routed happy-path fallback uses,
+    // so the pill's degrade-honestly answer suppresses option-pinned levers
+    // identically. No request-graph leg.
+    count: 5,
     allowedArgs: ['context.persistedGraph ?? options.graphState'],
   },
   'orchestrator-v5/handlers/chip-click-dispatch.ts': {
-    // 2nd site (ROADMAP 2.73): the run_analysis chip path threads the
-    // controlled set into applyCoachingSignal. Persisted-derived on both
-    // legs: the pre-loaded scenario snapshot's raw persisted graph
-    // (production) with the turn-context persisted graph as the
-    // injected-registry test-path fallback. No request-graph leg.
-    count: 2,
+    // The run_analysis chip path threads the controlled set into
+    // applyCoachingSignal. Persisted-derived: the pre-loaded scenario
+    // snapshot's raw persisted graph (production) with the turn-context
+    // persisted graph as the injected-registry test-path fallback. No
+    // request-graph leg.
+    //
+    // 2026-07-22 dead-noop deletion: 2 → 1 — the second site lived in the
+    // deterministic no-op explanation chip-click dispatch
+    // (`buildProjectionInputs`, removed as dead code post-#619) and derived
+    // the controlled set from `context.persistedGraph`. Deleting that dead
+    // path removed the site and its `context.persistedGraph` allowedArg. The
+    // surviving site is the live run_analysis leg below.
+    count: 1,
     allowedArgs: [
-      'context.persistedGraph',
       'cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph',
     ],
   },

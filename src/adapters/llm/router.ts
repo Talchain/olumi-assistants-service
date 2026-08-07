@@ -24,8 +24,6 @@ import type {
   DraftGraphResult,
   SuggestOptionsArgs,
   SuggestOptionsResult,
-  RepairGraphArgs,
-  RepairGraphResult,
   ClarifyBriefArgs,
   ClarifyBriefResult,
   CritiqueGraphArgs,
@@ -75,9 +73,18 @@ export const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> 
  * the router never applies a code default; with the env var unset they fall
  * through to canonical handling / the global LLM_MODEL.
  *
- *   - 'validate' / 'validate_graph': the Pass-2 validation pipeline is inert on
- *     staging (CEE_VALIDATION_PIPELINE_ENABLED=false), so no live call reaches
- *     them; their intended model (o4-mini) is env-only via CEE_MODEL_VALIDATION.
+ *   - 'validate': the ALIAS of 'validate_graph'. ⚠ CORRECTED 2026-07-30 (ROADMAP
+ *     2.146): the sibling 'validate_graph' USED to be listed here on the grounds
+ *     that "the Pass-2 validation pipeline is inert on staging
+ *     (CEE_VALIDATION_PIPELINE_ENABLED=false), so no live call reaches them".
+ *     That premise is being retired — 2.146 flips the pipeline on, at which point
+ *     an unset CEE_MODEL_VALIDATION would have handed the "independent reviewer"
+ *     role to whatever the global LLM_MODEL happens to be. 'validate_graph' now
+ *     has a checked-in default (o4-mini) in TASK_MODEL_DEFAULTS.
+ *     'validate' stays here because it has NO CALLERS — `getAdapter('validate')`
+ *     appears nowhere in src/ (scope: rg "getAdapter\(['\"]validate" over src/,
+ *     one hit, and it is 'validate_graph'). Giving a callerless alias a default
+ *     would be decoration; declaring it env-only is the honest record.
  *   - 'clarify_brief': the standalone POST /assist/clarify-brief route. With
  *     CEE_MODEL_CLARIFICATION unset it currently resolves to the global model
  *     (a known pre-existing gap, distinct from the 'clarification' CeeTask which
@@ -90,7 +97,6 @@ export const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> 
  */
 export const ROUTER_ENV_ONLY_TASKS: readonly string[] = [
   'validate',
-  'validate_graph',
   'clarify_brief',
 ];
 
@@ -361,19 +367,6 @@ class FixturesAdapter implements LLMAdapter {
       },
     };
   }
-
-  async repairGraph(args: RepairGraphArgs, _opts: CallOpts): Promise<RepairGraphResult> {
-    // For fixtures, just return the input graph unchanged
-    return {
-      graph: args.graph,
-      rationales: [{ violation_code: "FIXTURE", node_or_edge: "graph", action: "No actual changes", elements_changed: 0 }],
-      usage: {
-        input_tokens: 0,
-        output_tokens: 0,
-      },
-    };
-  }
-
   async clarifyBrief(args: ClarifyBriefArgs, _opts: CallOpts): Promise<ClarifyBriefResult> {
     return {
       questions: [

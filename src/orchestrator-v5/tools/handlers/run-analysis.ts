@@ -47,8 +47,13 @@ import type {
 } from '@talchain/schemas/orchestrator';
 
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
-import { deriveWinnerConstraintInfeasibility } from '../../../orchestrator/context/constraint-feasibility.js';
-import type { PLoTClient } from '../../../orchestrator/plot-client.js';
+import {
+  deriveConstraintVerdict,
+  readRatifiedConstraints,
+  projectClaimSafety,
+} from '../../../orchestrator/context/constraint-feasibility.js';
+import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
+import type { PLoTClient, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError, PLoTTimeoutError } from '../../../orchestrator/plot-client.js';
 
 import { getHandlerBudgetMs } from '../../budgets.js';
@@ -75,7 +80,10 @@ import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js'
 import { AnalysisNotReadyError } from './analysis-ready-core.js';
 import { scaffoldUnconfiguredOptions } from './scaffold-unconfigured-options.js';
 import { isRecommendableOption } from './recommendable-option.js';
-import { buildScaffoldDisclosureSuffix } from '../../coaching/scaffold-disclosure.js';
+import {
+  buildScaffoldDisclosureForPartition,
+  partitionScaffoldedByAnalysisPresence,
+} from '../../coaching/scaffold-disclosure.js';
 import {
   buildAnalysisResultHeadline,
   describeAnalysisHeadline,
@@ -636,12 +644,62 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // `plot_error` (the 422→recoverable reroute is War-Room-gated).
         const isTypedFailedEnvelope =
           runError.status !== 422 && v2Err?.analysis_status === 'failed';
+
+        // ROADMAP 2.202 fix ③ — BUSY, not INTERNAL_ERROR. Two ways a 429
+        // reaches this seam, and both mean the same product truth ("the engine
+        // is at capacity; retry shortly"):
+        //   1. PLoT's own limiter rejected CEE            → runError.status 429
+        //   2. ISL's compute governor rejected PLoT       → typed FAILED
+        //      envelope whose status_reason names HTTP 429
+        // Narrow on purpose. `blocked` is excluded (PLoT DECIDED it cannot
+        // answer — telling the user to retry that would be a lie), and every
+        // non-429 status keeps the fatal `analysis_failed` mapping so genuine
+        // breakage stays a visible 500.
+        const parsedStatus = isTypedFailedEnvelope ? readDownstreamHttpStatus(v2Err) : null;
+        const downstreamStatus = runError.status === 429 ? 429 : parsedStatus;
+        if (downstreamStatus === 429) {
+          throw new HandlerInvocationFailedError(
+            `PLoT returned error: ${runError.message}`,
+            {
+              cause_kind: 'analysis_engine_busy',
+              retryable: true,
+              details: {
+                ...errorDetailsBase,
+                ...extractPlotFailureDetails(v2Err),
+                downstream_http_status: 429,
+              },
+              cause: runError,
+            },
+          );
+        }
+
+        // N1 — CARRY THE PARSE OUTCOME ON THE FATAL PATH TOO.
+        // The busy classification rests on a prose read of a template owned by
+        // ANOTHER SERVICE. If PLoT rewords it, busy-classification dies and
+        // every 429 quietly returns to being a 500 — and without this, with no
+        // signal anywhere. That is the guarantee-theatre shape: machinery that
+        // stops working and says nothing. So the fatal error carries the status
+        // when one was read, and an explicit `downstream_http_status_parsed:
+        // false` when a typed failure arrived bearing a status_reason the
+        // pattern could NOT read. The second is the tripwire: a sudden run of
+        // them IS the rewording, visible in telemetry before anyone has to
+        // notice a rise in 500s.
+        const unreadableStatusReason =
+          isTypedFailedEnvelope &&
+          typeof v2Err?.status_reason === 'string' &&
+          v2Err.status_reason.length > 0 &&
+          parsedStatus === null;
         throw new HandlerInvocationFailedError(
           `PLoT returned error: ${runError.message}`,
           {
             cause_kind: isTypedFailedEnvelope ? 'analysis_failed' : 'plot_error',
             retryable: true,
-            details: { ...errorDetailsBase, ...extractPlotFailureDetails(v2Err) },
+            details: {
+              ...errorDetailsBase,
+              ...extractPlotFailureDetails(v2Err),
+              ...(parsedStatus !== null ? { downstream_http_status: parsedStatus } : {}),
+              ...(unreadableStatusReason ? { downstream_http_status_parsed: false } : {}),
+            },
             cause: runError,
           },
         );
@@ -730,6 +788,11 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // and rejected 'computed' from real staging as analysis_not_completed.
     const analysisStatus = readAnalysisStatus(response);
     const resultRecords = readResultRecords(response);
+    // D-ask-1 disclosure honesty (2026-07-25): the option ids that ACTUALLY
+    // reached the comparison. Read off the same records the win-probability
+    // map and the leader selection are built from, so "was it analysed?" and
+    // "is it in the numbers the user sees?" cannot answer differently.
+    const analysedOptionIds = readAnalysedOptionIds(resultRecords);
     const statusOutcome = evaluateAnalysisStatus(analysisStatus, resultRecords, {
       request_id: invocation.requestId,
     });
@@ -793,19 +856,93 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       statusOutcome.kind === 'ok' || statusOutcome.kind === 'partial' || statusOutcome.kind === 'unknown'
         ? statusOutcome.kind
         : 'ok';
+    // T1 — a user-ratified hard constraint that was APPLIED and then never
+    // evaluated to decision grade. PLoT already computes and ships this
+    // verdict (`inference_warnings` codes CONSTRAINT_OUT_OF_DOMAIN /
+    // CONSTRAINT_TARGET_UNRELIABLE, `constraints_status: 'unavailable'`, and
+    // the per-option `constraint_probabilities` it withholds); we READ it off
+    // the wire and never re-derive it. The ratified set comes from CEE's own
+    // persisted `goal_constraints` — the only record of what the user agreed
+    // to. With no ratified constraints this is byte-identical to before.
+    //
+    // Distinct from `constraint_infeasible` below: that means "the leader
+    // breaks a limit we DID check"; this means "we never checked the limit".
+    // `deriveWinnerConstraintInfeasibility` cannot cover this case — it fails
+    // OPEN when constraint probabilities are absent, which is precisely what
+    // PLoT withholds on the suppressed-unreliable path.
+    // Prefer the snapshot's own `goal_constraints` — that is the exact array
+    // this handler forwards to PLoT (see the plotPayload assembly above), so
+    // "we asked PLoT to enforce it" and "PLoT never scored it" are compared
+    // against the same bytes. Falls back to the persisted graph for snapshots
+    // that carry the constraints only there. Hoisted so the identity telemetry
+    // below can report what we actually asked for.
+    const ratifiedConstraints = readRatifiedConstraints(
+      snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
+    );
+    // ONE verdict, five states, each declaring whether a leading option may be
+    // named. Both withholding predicates (never evaluated / the leader breaks a
+    // checked limit) and the seam's third answer (we could not reconcile which
+    // condition was evaluated) come from this single call, so no two surfaces
+    // can disagree about what the constraint evidence said.
+    const constraintVerdict = deriveConstraintVerdict(
+      response as Record<string, unknown>,
+      ratifiedConstraints,
+      leadingOptionId ?? null,
+    );
+    if (constraintVerdict.state === 'unevaluated') {
+      emit(TelemetryEvents.V5RunAnalysisConstraintUnevaluated, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        // Redacted: ids + codes only — no labels, no thresholds, no units.
+        constraint_ids: constraintVerdict.constraints.map((c) => c.constraint_id),
+        codes: constraintVerdict.codes,
+      });
+    }
+    if (constraintVerdict.state === 'identity_unresolved') {
+      // FAIL LOUD. PLoT scored constraints under ids that reconcile with
+      // nothing we ratified, so BOTH confident verdicts were withheld rather
+      // than asserted. That is the honest outcome, but it must be visible — an
+      // unmatched id space is a real contract divergence at an unenforced seam,
+      // and it costs the user a recommendation every time it happens.
+      emit(TelemetryEvents.V5RunAnalysisConstraintIdentityUnresolved, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        // Redacted: ids + counts only — no labels, no thresholds, no units.
+        ratified_constraint_ids: ratifiedConstraints.map((c) => c.constraint_id),
+        ratified_count: ratifiedConstraints.length,
+      });
+    }
+
     const headlineInput = {
       enrichment: response as Record<string, unknown>,
       leading_option_id: leadingOptionId ?? '',
       status_kind: headlineStatusKind,
+      // T1: withhold the confident "{X} currently leads" claim while any
+      // ratified condition is unchecked. A recommendation must not exist
+      // unless every user-ratified hard constraint is decision-grade.
+      constraint_unevaluated: constraintVerdict.state === 'unevaluated',
+      // T1, the third answer: the producer evaluated constraints under ids we
+      // could not reconcile. Withheld under its own reason so "we could not
+      // tell" is never logged or worded as "the engine did not check".
+      constraint_identity_unresolved:
+        constraintVerdict.state === 'identity_unresolved',
       // Trust-spine board #1 (CEE half): withhold the confident "{X} currently
       // leads" headline when the leading option violates a hard constraint.
-      // Gate default OFF → always false → byte-identical headline path.
-      constraint_infeasible: config.features.constraintInfeasibleGate
-        ? deriveWinnerConstraintInfeasibility(
-            response as Record<string, unknown>,
-            leadingOptionId ?? '',
-          ).infeasible
-        : false,
+      //
+      // The gate stays. It is read HERE, at the caller, exactly as it is at the
+      // other two call sites (analysis-compact, decision-review-enricher) —
+      // `deriveConstraintVerdict` is pure, so the verdict is computed the same
+      // way whether or not the flag is on, and only the ACTING on it is gated.
+      // Retiring the flag is a real change to a claim-safety withhold's
+      // switch-off path and belongs in its own PR, not bundled with the verdict
+      // rewrite. NOTE for that PR: the comment previously on this line said
+      // "Gate default OFF → always false → byte-identical headline path", which
+      // had been false since 18 Jul (`constraintInfeasibleGate:
+      // booleanString.default(true)`, config/index.ts:728). Two identical stale
+      // claims remain, at analysis-compact.ts and decision-review-enricher.ts.
+      constraint_infeasible:
+        config.features.constraintInfeasibleGate &&
+        constraintVerdict.state === 'evaluated_infeasible',
       samples_reduced: samplesReduced,
       // Spine A backstop: the headline reads raw `factor_sensitivity` directly
       // (bypassing projectTopDrivers), so it must skip option-controlled levers.
@@ -823,11 +960,64 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // suffix), matching the registry egress grammar in
     // analysis-result-headline.ts so the disclosure survives to the wire on
     // both the chat receipt and the analysis_result block.
+    //
+    // 2026-07-25 — the claim is now DERIVED FROM THE RETURNED RESULT, not
+    // from the scaffold's intent. Reproduced on deployed staging (scenario
+    // 454c14fb…, CEE 74c785f): a scaffolded option can be scaffolded and
+    // still not reach `option_comparison`, because the scaffold's neutral
+    // rule ("the factor's current position") coincides with how the drafter
+    // defines the baseline / status-quo option, so PLoT/ISL removes the arm
+    // (`IDENTICAL_OPTIONS_DEDUPED`). The summary then told the user
+    // "Placeholder values were used for 'X'" while X was absent from the
+    // comparison AND from `win_probabilities`. The partition below reads
+    // what actually came back, so any downstream filter — dedup today, a
+    // status gate or a future rule tomorrow — is disclosed automatically
+    // instead of being mirrored here (trap-12).
+    const scaffoldPresence = partitionScaffoldedByAnalysisPresence(
+      scaffoldOutcome.scaffolded,
+      analysedOptionIds,
+    );
+    if (scaffoldPresence.omitted.length > 0) {
+      emit(TelemetryEvents.V5RunAnalysisOptionsScaffolded, {
+        request_id: invocation.requestId,
+        scenario_id: args.scenario_id,
+        // Redacted: ids + counts only — no labels, no magnitudes.
+        scaffolded_option_ids: scaffoldPresence.omitted.map((s) => s.option_id),
+        scaffolded_factor_counts: scaffoldPresence.omitted.map((s) => s.factor_ids.length),
+        option_count: snapshot.options.length,
+        outcome: 'omitted_from_comparison',
+      });
+    }
+    // 2.120(c), 2026-07-29 — the omission sentence now carries the ENGINE'S
+    // reason where the engine gave one. Previously it said the option was left
+    // out "because it has no values set", while the payload's own reason was
+    // `IDENTICAL_OPTIONS_DEDUPED` (identical interventions to another option).
+    // The proxy reason is causally related but points the user at the wrong
+    // repair, and it is outright wrong for an option whose values ARE set to
+    // the same numbers as another's — dedup is a fingerprint match, not an
+    // emptiness test. The resolver reads the warning crossed with the returned
+    // comparison; no warning ⇒ null ⇒ the previous sentence ships unchanged.
+    const dedupKeptLabelFor = buildDedupKeptLabelResolver(
+      response,
+      resultRecords,
+      analysedOptionIds,
+    );
     const scaffoldDisclosure =
       scaffoldOutcome.scaffolded.length > 0
-        ? buildScaffoldDisclosureSuffix(scaffoldOutcome.scaffolded)
+        ? buildScaffoldDisclosureForPartition(scaffoldPresence, dedupKeptLabelFor)
         : '';
-    const summary = `${headline ?? template}${scaffoldDisclosure}`;
+    // T1 disclosure. The VERDICT is passed whole: which sentence is honest
+    // depends on which state the producer evidence selected, and that pairing
+    // is made inside the builder rather than here — `unevaluated` names the
+    // condition that was not checked and gives the units repair step;
+    // `identity_unresolved` says the results could not be matched to the
+    // conditions set, and asks for a re-statement instead. Every other state
+    // discloses nothing. Appended after the scaffold disclosure so it is the
+    // LAST thing in the primary message — the headline has already been
+    // withheld above, so the message can no longer lead with an option while
+    // this is present.
+    const constraintGapDisclosure = buildConstraintDisclosure(constraintVerdict);
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases
@@ -874,10 +1064,44 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
         // rather than emitting an empty string.
         ...(graphHashAtRun !== null ? { graph_hash_at_run: graphHashAtRun } : {}),
         computed_at: runComputedAt,
+        // T1 claim safety, LAYER 2 — "may a leading option be named" is a FACT
+        // ABOUT THIS ANALYSIS, so it is persisted WITH the analysis facts and
+        // read back on every path that rebuilds from them, rather than
+        // re-derived at each call site (which is how two surfaces end up
+        // contradicting each other inside one HTTP response — CLAUDE.md trap
+        // #12).
+        //
+        // FIRST-CLASS since @talchain/schemas 0.25.0. It rode
+        // `enrichment.__cee_claim_safety` from #710 until this release, because
+        // `RunAnalysisResultSchema` is `.strict()` and the field could not be
+        // added without a package release (blocked behind V5-CI-01). This is
+        // that release, and the contract's `ConstraintVerdictSchema` mirrors
+        // `PersistedClaimSafety` verbatim — enforced at compile time by the
+        // drift bolt in constraint-feasibility.ts.
+        //
+        // Written HERE, inside the validated fact, not bolted on afterwards:
+        // the field is CEE-OWNED and sits alongside the other CEE-owned fields
+        // (`graph_hash_at_run`, `computed_at`), so the handler-ownership
+        // invariant that `enrichment` is byte-for-byte PLoT
+        // (`scripts/validate-handler-ownership.sh` §6) is satisfied by
+        // construction instead of by a second parse.
+        //
+        // Live-proven harm this closes (G-CEE-1 walk, staging 1c078f0): the
+        // confirmation said "no option can be put forward yet" while
+        // `blocks[1].body` in the SAME response said "The MacBook Pro leads by
+        // a margin of about 52 percentage points".
+        constraint_verdict: projectClaimSafety(constraintVerdict),
       },
     };
 
     // --- 7. Zod-validate the fact ----------------------------------------
+    //
+    // ONE parse, not two. Until 0.25.0 the claim-safety verdict had to be
+    // bolted onto `enrichment` AFTER this parse and the fact re-validated,
+    // because `RunAnalysisResultSchema` is `.strict()` and had no home for it.
+    // The verdict is now a declared member of that schema, so it is validated
+    // by this parse like every other CEE-owned field — and the second
+    // safeParse it needed is gone with it.
     const parsed = RunAnalysisHandlerFactSchema.safeParse(factCandidate);
     if (!parsed.success) {
       throw new HandlerResultInvalidError(
@@ -910,9 +1134,36 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // D-ask-1 (2.11 P0-1): internal channel (never the wire envelope
       // directly) — the turn-executor / chip-click dispatch thread this to
       // the chip generator so the success turn offers the configure chip.
+      // Stamped with the derived `in_comparison` verdict so the
+      // decision-review prompt disclosure inherits it without a second
+      // channel (see partitionScaffoldedByAnalysisPresence).
       ...(scaffoldOutcome.scaffolded.length > 0
-        ? { __scaffolded_options: scaffoldOutcome.scaffolded }
+        ? { __scaffolded_options: scaffoldPresence.stamped }
         : {}),
+      // ROADMAP 2.804 — `__leading_option_claim_withheld` USED TO BE SET HERE
+      // and is deliberately gone. It carried THIS RUN's verdict to the STEP-5
+      // coaching detector, which is a narrower question than that slot asks:
+      // the slot needs the TURN-level, display-bound permission, and this
+      // channel could never carry the displayed-analysis conjunct #737 added
+      // because a handler outcome never sees the fact array. The coaching slot
+      // now derives the permission from the fact chain in
+      // `applyCoachingSignal`, so this field had no consumer left and a second
+      // authority sitting here is an invitation for a future handler to start
+      // writing one. The persisted `constraint_verdict` above is the channel a
+      // handler influences the leader claim through.
+      //
+      // ⚠ SCOPE, STATED NARROWLY BECAUSE AN EARLIER DRAFT OF THIS COMMENT
+      // OVERSTATED IT. This unifies the PROSE channel only. It is NOT true that
+      // `constraint_verdict` is "the one channel" for the leader claim on the
+      // wire: `compose.ts`'s `analysis_result` block gates `leading_option_id`
+      // and `summary` on `mayNameLeadingOptionForFact` — the PER-FACT leaf
+      // reader — and the TURN-level verdict never reaches `compose.ts` at all
+      // (zero references, verified repo-wide). So on the exact divergence path
+      // this change addresses, the response withholds the leader in prose and
+      // still ships `leading_option_id` in the structured block, because the
+      // current fact's own verdict permits. That gate is PRE-EXISTING, is not
+      // touched here, and whether the block channel should honour the
+      // turn-level verdict is rowed separately as ROADMAP 2.844.
     };
   };
 }
@@ -941,6 +1192,46 @@ function readAnalysisStatus(response: V2RunResponseEnvelope): string | null {
  * rendered (no prose-safety gate exists on this path). Returns {} for
  * shapes with nothing to carry, so unknown-error fallbacks stay unchanged.
  */
+/**
+ * ROADMAP 2.202 fix ③ — recover the DOWNSTREAM HTTP status from PLoT's typed
+ * failure envelope.
+ *
+ * ⚠ THIS IS A PROSE READ, AND THAT IS THE ONLY CARRIER THAT EXISTS. PLoT's
+ * envelope has no structured downstream-status field on the wire: the critique
+ * codes (`ISL_ERROR`, `ISL_CALL_FAILED`) do not distinguish a 429 from a 500,
+ * and `isl_status_reason` is not lifted by the plot-client's
+ * `extractTypedFailureEnvelope` (which carries `analysis_status`,
+ * `status_reason`, `critiques` only).
+ *
+ * The template is fixed and verified at PLoT's own staging tip `5ab93383`,
+ * `src/routes/v2/run.ts:1606` (`buildIslFailureDetail`):
+ *
+ *     error.code === 'ISL_ERROR' && error.status
+ *       ? `The analysis service returned an error (HTTP ${error.status}).`
+ *       : classStatusReason
+ *
+ * So the `(HTTP <n>)` suffix is emitted by exactly one site, only for
+ * `ISL_ERROR`, and always in that form. We parse the STATUS NUMBER rather than
+ * substring-matching "429", so the reader states what it means and a 500 can
+ * never be mistaken for a 429.
+ *
+ * Fail-CLOSED by construction: no match ⇒ `null` ⇒ the caller keeps the
+ * existing fatal mapping. If PLoT ever reworded the template the effect is a
+ * return to today's behaviour (an honest 500), never a false "busy" — the safe
+ * direction. Should PLoT gain a structured status field, prefer it and delete
+ * this.
+ */
+const PLOT_DOWNSTREAM_HTTP_STATUS_RE = /\(HTTP\s+(\d{3})\)/;
+
+function readDownstreamHttpStatus(v2Err: V2RunError | undefined): number | null {
+  const reason = v2Err?.status_reason;
+  if (typeof reason !== 'string') return null;
+  const match = PLOT_DOWNSTREAM_HTTP_STATUS_RE.exec(reason);
+  if (match === null || match[1] === undefined) return null;
+  const status = Number.parseInt(match[1], 10);
+  return Number.isFinite(status) ? status : null;
+}
+
 function extractPlotFailureDetails(source: unknown): Record<string, unknown> {
   if (source === null || typeof source !== 'object') return {};
   const rec = source as Record<string, unknown>;
@@ -1146,6 +1437,107 @@ export function readResultRecords(response: V2RunResponseEnvelope): ReadonlyArra
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
+/**
+ * The set of option ids present in the returned per-option records.
+ *
+ * Deliberately id-only (never labels): the scaffold record carries
+ * `option_id`, and matching on ids avoids the label-collision class. An
+ * empty set means the envelope carried no readable option identity — the
+ * caller MUST treat that as "cannot derive", never as "everything was
+ * omitted" (trap-13: prove a PRESENCE before asserting an ABSENCE).
+ */
+export function readAnalysedOptionIds(
+  records: ReadonlyArray<Record<string, unknown>>,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const record of records) {
+    const id = record.option_id;
+    if (typeof id === 'string' && id.length > 0) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * ROADMAP 2.120(c) — resolve, for each option the engine REMOVED as a
+ * duplicate, the label of the option it was indistinguishable from.
+ *
+ * Why this exists: the omission disclosure used to give "because it has no
+ * values set" as the reason an option was left out. That is not the engine's
+ * reason — the engine's reason is `IDENTICAL_OPTIONS_DEDUPED`, a fingerprint
+ * match on the interventions, which fires whether or not values were set. The
+ * accurate sentence has to NAME the option that was kept, and that name is only
+ * derivable here, where the warning and the returned comparison are both in
+ * hand. See `coaching/scaffold-disclosure.ts` for the copy.
+ *
+ * PROVENANCE OF THE FIELD, verified at the bytes on PLoT `3d13e0a`:
+ * `validation/preflight-v2.ts:433-441` composes the warning with
+ * `affected_option_ids`, `routes/v2/run.ts:6268` aggregates it into
+ * `critiques`, and `:3496` publishes it through `addUserMessages`, which
+ * SPREADS each critique (`critique-humaniser.ts:499-502`) — so no field is
+ * dropped on the way to us. (The CEE→UI turn payload does strip it; that is a
+ * different hop and the reason a wire capture cannot answer this question.)
+ *
+ * ⚠ WHICH ID IS THE KEPT ONE IS **DERIVED, NOT POSITIONAL**. PLoT happens to
+ * emit `[keptOption.id, droppedOption.id]` today, but encoding that order here
+ * would be a hand-maintained mirror of another repo's array literal — trap-12,
+ * silent and green when it drifts. Instead: the KEPT option is the one PRESENT
+ * in the returned comparison and the REMOVED ones are those ABSENT from it,
+ * read off the same `analysedOptionIds` the omission partition uses. So
+ * "which option do we name?" and "which option did we say was left out?"
+ * cannot answer differently, and a PLoT order flip changes nothing here.
+ *
+ * Trap-13 built in: a warning is only honoured when EXACTLY ONE of its affected
+ * ids is present in the comparison AND at least one is absent. Anything else
+ * (no comparison read at all, both present, both absent, no resolvable label)
+ * resolves to null, and the caller falls back to the pre-existing sentence — we
+ * never name an option we did not see in the results.
+ */
+export function buildDedupKeptLabelResolver(
+  response: V2RunResponseEnvelope,
+  resultRecords: ReadonlyArray<Record<string, unknown>>,
+  analysedOptionIds: ReadonlySet<string>,
+): (omittedOptionId: string) => string | null {
+  const rawCritiques = (response as Record<string, unknown>).critiques;
+  if (!Array.isArray(rawCritiques) || analysedOptionIds.size === 0) return () => null;
+
+  const labelById = new Map<string, string>();
+  for (const record of resultRecords) {
+    const id = record.option_id;
+    if (typeof id !== 'string' || id.length === 0) continue;
+    const label =
+      typeof record.option_label === 'string' && record.option_label.length > 0
+        ? record.option_label
+        : typeof record.label === 'string' && record.label.length > 0
+          ? record.label
+          : null;
+    if (label !== null) labelById.set(id, label);
+  }
+
+  const keptLabelByRemovedId = new Map<string, string>();
+  for (const critique of rawCritiques) {
+    if (!isRecord(critique)) continue;
+    if (critique.code !== 'IDENTICAL_OPTIONS_DEDUPED') continue;
+    const affected = critique.affected_option_ids;
+    if (!Array.isArray(affected)) continue;
+    const ids = affected.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    const present = ids.filter((id) => analysedOptionIds.has(id));
+    const absent = ids.filter((id) => !analysedOptionIds.has(id));
+    if (present.length !== 1 || absent.length === 0) continue;
+    const keptLabel = labelById.get(present[0]!);
+    if (keptLabel === undefined) continue;
+    for (const removedId of absent) {
+      // First warning wins: a second warning naming the same removed option is
+      // a shape we have never observed, and picking arbitrarily between two
+      // kept labels would be a claim neither warning supports on its own.
+      if (!keptLabelByRemovedId.has(removedId)) keptLabelByRemovedId.set(removedId, keptLabel);
+    }
+  }
+
+  if (keptLabelByRemovedId.size === 0) return () => null;
+  return (omittedOptionId: string): string | null =>
+    keptLabelByRemovedId.get(omittedOptionId) ?? null;
 }
 
 /**

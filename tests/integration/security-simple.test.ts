@@ -24,7 +24,6 @@ vi.mock("../../src/adapters/llm/anthropic.js", () => ({
       cache_read_input_tokens: 0,
     },
   }),
-  repairGraphWithAnthropic: vi.fn(),
 }));
 
 vi.mock("../../src/services/validateClient.js", () => ({
@@ -33,6 +32,16 @@ vi.mock("../../src/services/validateClient.js", () => ({
 
 // Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph
 // TODO: ISSUE-9014 — security-simple suite parked
+//
+// ⚠ ROADMAP 2.181 — while this suite is parked, note its rate-limit blocks build
+// their OWN bare `Fastify()` app with a COPY of the pre-fix plain-object
+// `errorResponseBuilder`. That shape returns 429 under Fastify's DEFAULT error
+// handler and 500 INTERNAL under the real app's custom one, so these assertions
+// could never have observed the production contract. Two sibling files with the
+// same defect (`rate-limit.test.ts`, `sse-rate-limit.test.ts`) were deleted for
+// it. If this suite is ever unparked, point its rate-limit cases at `build()`;
+// the app's real contract is pinned in `global-rate-limit-429.test.ts` and
+// `rate-limit-rungs-real-server.test.ts`.
 describe.skip("Security Tests (Simplified)", () => {
   describe("Body size limits", () => {
     it("rejects requests larger than 1MB", async () => {

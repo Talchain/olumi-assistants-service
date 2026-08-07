@@ -5,14 +5,21 @@
  * Calls existing functions from their current locations — no logic rewrite.
  */
 
-import type { StageContext } from "../types.js";
+import type { StageContext, DraftInputWithCeeExtras } from "../types.js";
 import type { DraftGraphResult } from "../../../adapters/llm/types.js";
 import type { DocPreview } from "../../../services/docProcessing.js";
 import type { GraphT } from "../../../schemas/graph.js";
 import { groundAttachments, buildRefinementBrief } from "../../../routes/assist.draft-graph.js";
+import {
+  buildDraftDocumentBlock,
+  DraftAttachmentError,
+  type BuiltDraftAttachment,
+  type DraftAttachmentKind,
+} from "../../../adapters/llm/draft-attachment.js";
 import { calcConfidence } from "../../../utils/confidence.js";
 import { estimateTokens, allowedCostUSD } from "../../../utils/costGuard.js";
 import { getAdapterWithResolution } from "../../../adapters/llm/router.js";
+import { getModelProvider } from "../../../config/models.js";
 import { recordModelResolution } from "../../../orchestrator-v5/debug/turn-debug-store.js";
 import { getSystemPromptMeta } from "../../../adapters/llm/prompt-loader.js";
 import { config, shouldUseStagingPrompts } from "../../../config/index.js";
@@ -21,20 +28,22 @@ import { normaliseCeeGraphVersionAndProvenance } from "../../transforms/graph-no
 import {
   DRAFT_REQUEST_BUDGET_MS,
   DRAFT_LLM_TIMEOUT_MS,
-  LLM_POST_PROCESSING_HEADROOM_MS,
   MIN_DRAFT_RETRY_BUDGET_MS,
-  LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+  viableDraftRetryFloorTokens,
   DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
   REPAIR_TIMEOUT_MS,
   getDraftLlmRetryBudgetMs,
   getAffordableDraftTokens,
   getJitteredRetryDelayMs,
+  isDraftRetryAffordable,
+  remainingRequestBudgetMs,
 } from "../../../config/timeouts.js";
 import { LLMTimeoutError, RequestBudgetExceededError, ClientDisconnectError, UpstreamTimeoutError } from "../../../adapters/llm/errors.js";
 import { buildCeeErrorResponse } from "../../validation/pipeline.js";
 import { log, emit, calculateCost, TelemetryEvents } from "../../../utils/telemetry.js";
 import { detectStrengthDefaultsV1 } from "../../validation/integrity-sentinel.js";
 import { STRENGTH_DEFAULT_RETRY_NUDGE, DRAFT_LEAN_RETRY_DIRECTIVE } from "../../constants.js";
+import { DRAFT_SOFT_NODE_CAP, DRAFT_SOFT_EDGE_CAP } from "../../draft/anthropic-graph-schema.js";
 
 /**
  * Stage 1: Parse — LLM draft + adapter normalisation.
@@ -56,23 +65,106 @@ import { STRENGTH_DEFAULT_RETRY_NUDGE, DRAFT_LEAN_RETRY_DIRECTIVE } from "../../
  * 12. Repair budget computation
  * 13. Draft cost calculation
  */
+/** Wire payload shape for a single attachment (base64 string or `{ data, encoding }`). */
+type RawAttachmentPayload = string | { data?: unknown; encoding?: unknown };
+
+/**
+ * Resolve the FIRST attached document to a `{kind, name, base64}` input for the
+ * native document-block builder (D-59-7). The slice carries ONE document (the
+ * simplest honest transport). Returns undefined when there is no attachment or
+ * its payload is missing (brief-only draft — matches the legacy grounding skip;
+ * a missing payload is a client-shape gap, not a document CONTENT failure).
+ */
+function resolveFirstDraftAttachment(
+  input: DraftInputWithCeeExtras,
+  rawBody: unknown,
+): { kind: DraftAttachmentKind; name: string; base64: string } | undefined {
+  const first = input.attachments?.[0];
+  if (!first) return undefined;
+  const payloads = (rawBody as { attachment_payloads?: Record<string, RawAttachmentPayload> } | null | undefined)
+    ?.attachment_payloads;
+  const payload = payloads?.[first.id];
+  if (payload === undefined || payload === null) return undefined;
+  let base64: string;
+  if (typeof payload === "string") {
+    base64 = payload;
+  } else if (typeof payload.data === "string") {
+    // Only base64 payloads are supported for the native block; a non-base64
+    // encoding would be re-flagged INVALID_BASE64 by the strict decoder.
+    base64 = payload.data;
+  } else {
+    return undefined;
+  }
+  return { kind: first.kind as DraftAttachmentKind, name: first.name, base64 };
+}
+
 export async function runStageParse(ctx: StageContext): Promise<void> {
   log.info({ requestId: ctx.requestId, stage: "parse" }, "Unified pipeline: Stage 1 (Parse) started");
 
-  // ── Step 1: Ground attachments ──────────────────────────────────────────
-  let docs: DocPreview[];
-  try {
-    const result = await groundAttachments(ctx.input, ctx.rawBody);
-    docs = result.docs;
-  } catch (error) {
-    const err = error instanceof Error ? error : new Error(String(error));
-    ctx.earlyReturn = {
-      statusCode: 400,
-      body: buildCeeErrorResponse("CEE_VALIDATION_FAILED", `Attachment processing failed: ${err.message}`, {
-        requestId: ctx.requestId,
-      }),
-    };
-    return;
+  // ── Step 1a: Native document attachment (D-59-7) — PRIMARY document path ──
+  // The model-native doc-attach bet: carry the FIRST attached document as a
+  // native Anthropic `document` block (no parser build — Anthropic reads the
+  // PDF/text natively). This SUPERSEDES the legacy `grounding` text-preview
+  // parser (Step 1b), which runs ONLY when native carries nothing — so exactly
+  // one path ever carries the document (no double-send; the parser is bypassed
+  // for every attachment native carries, whether or not the grounding flag is
+  // on). Native touches NO config, so it is deterministic regardless of the
+  // grounding env posture. Fail-closed: an oversize / unparseable / empty
+  // document → a typed 4xx with honest copy, never a silent drop.
+  //
+  // LIMITATION (documented, out of slice scope): the native block is
+  // Anthropic-native, so it is consumed only when the draft model is a Claude
+  // model (the live default, model-routing.ts). If the draft model is overridden
+  // to a non-Anthropic provider AND a document is attached, that provider ignores
+  // the block — the document is not consumed (A2/follow-up).
+  let draftAttachment: BuiltDraftAttachment | undefined;
+  const attInput = resolveFirstDraftAttachment(ctx.input, ctx.rawBody);
+  if (attInput) {
+    // Disclosure (not a silent drop): the slice carries ONE document. If more
+    // were attached, record that the extras were not carried so it is observable
+    // rather than silent. (Multi-document is a follow-up; A2 ask.)
+    const totalAttachments = ctx.input.attachments?.length ?? 0;
+    if (totalAttachments > 1) {
+      log.warn(
+        { requestId: ctx.requestId, total_attachments: totalAttachments, carried: 1, redacted: true },
+        "draft: multiple documents attached; the native doc-attach slice carries the first only",
+      );
+    }
+    try {
+      draftAttachment = buildDraftDocumentBlock(attInput);
+    } catch (error) {
+      if (error instanceof DraftAttachmentError) {
+        ctx.earlyReturn = {
+          statusCode: error.httpStatus,
+          body: buildCeeErrorResponse("CEE_VALIDATION_FAILED", error.message, {
+            requestId: ctx.requestId,
+          }),
+        };
+        return;
+      }
+      throw error;
+    }
+  }
+
+  // ── Step 1b: Legacy grounding text-preview — FALLBACK ONLY ────────────────
+  // Runs only when native did NOT carry a document (no attachment, or a payload
+  // native could not resolve). Native supersedes the parser for every document
+  // it carries, so this never double-processes the native document.
+  let docs: DocPreview[] = [];
+  if (!draftAttachment) {
+    try {
+      const result = await groundAttachments(ctx.input, ctx.rawBody);
+      docs = result.docs;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      ctx.earlyReturn = {
+        statusCode: 400,
+        body: buildCeeErrorResponse("CEE_VALIDATION_FAILED", `Attachment processing failed: ${err.message}`, {
+          requestId: ctx.requestId,
+        }),
+      };
+      return;
+    }
   }
 
   // ── Step 2: Confidence ──────────────────────────────────────────────────
@@ -140,9 +232,53 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
     resolution_source: draftResolution.resolution_source,
   });
 
+  // ── Step 5b: attachment / adapter compatibility (fail-closed, F-1) ────────
+  // The native document block (Step 1a) is Anthropic-native — only a Claude
+  // model reads it. If a document was attached but the resolved draft model is
+  // NOT Anthropic (a per-call `model` override, or a store modelConfig override,
+  // to another provider), that provider IGNORES the block: the draft would be
+  // generated brief-only and the user would believe the document was considered
+  // — a SILENT drop of user-supplied source material, violating the slice's own
+  // "never a silent drop" invariant (draft-attachment.ts). Refuse fail-closed
+  // with honest copy rather than pretend. The live DEFAULT draft model is Claude
+  // (model-routing.ts), so this NEVER fires on the default journey — only on a
+  // non-Anthropic override combined with an attachment.
+  if (draftAttachment && getModelProvider(draftAdapter.model) !== "anthropic") {
+    log.warn(
+      {
+        event: "cee.draft.attachment_model_incompatible",
+        requestId: ctx.requestId,
+        resolved_model: draftAdapter.model,
+        resolution_source: draftResolution.resolution_source,
+        attachment_kind: draftAttachment.meta.kind,
+      },
+      "draft: a document was attached but the resolved model is not Anthropic — the native document block would be ignored; refusing fail-closed (never a silent drop)",
+    );
+    ctx.earlyReturn = {
+      statusCode: 400,
+      body: buildCeeErrorResponse(
+        "CEE_VALIDATION_FAILED",
+        `Attached documents require the default model. The draft model was overridden to "${draftAdapter.model}", which cannot read attachments — remove the attachment or drop the model override.`,
+        { requestId: ctx.requestId },
+      ),
+    };
+    return;
+  }
+
   // ── Step 6: Cost guard ──────────────────────────────────────────────────
   const promptChars = ctx.effectiveBrief.length + docs.reduce((acc, doc) => acc + doc.preview.length, 0);
-  const tokensIn = estimateTokens(promptChars);
+  // F-2: the native document (Step 1a) is real input the model is billed for, but
+  // it rides an Anthropic `document` block OUTSIDE `docs`/`promptChars`, so the
+  // guard was blind to it — up to ~131k tokens for a 512KB doc, under-counting
+  // per-request input spend by up to ~50x. Count it here (Step 5b already refused
+  // a non-Anthropic model, so a `draftAttachment` at this point IS sent): use the
+  // computed `meta.tokens_est` for text kinds; for PDF (page-based, not derivable
+  // without the parse the slice avoids) fall back to a conservative bytes-derived
+  // estimate so the guard never UNDER-counts a document (fail-closed on spend).
+  const attachmentTokens = draftAttachment
+    ? draftAttachment.meta.tokens_est ?? estimateTokens(draftAttachment.meta.bytes)
+    : 0;
+  const tokensIn = estimateTokens(promptChars) + attachmentTokens;
   const tokensOut = estimateTokens(1200);
 
   if (!allowedCostUSD(tokensIn, tokensOut, draftAdapter.model)) {
@@ -191,18 +327,56 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   // before strength detection runs, so only one of the two directives is ever
   // appended to a given attempt.
   let leanDraftRetried = false;
+  // ROADMAP 1.204 M1 — labels already surfaced to the staged PROGRESS frames.
+  // Declared OUTSIDE the attempt loop on purpose: the adapter's scanner is
+  // per-attempt, so without this a retry replays the whole draft's labels.
+  const emittedProgressLabels = new Set<string>();
 
   while (attempt < 2) {
     attempt += 1;
     const requestId = attempt === 1 ? `draft_${Date.now()}` : `draft_retry_${Date.now()}`;
 
-    // Attempt 1 gets the full single-attempt cap; any retry (timeout or
-    // strength-default) is CAPPED to what is still affordable inside
-    // DRAFT_REQUEST_BUDGET_MS — never a fresh full window. An uncapped retry
-    // produced the 2026-07-20 211s worst case against a 125s proxy deadline.
-    const attemptTimeoutMs = attempt === 1
-      ? effectiveLlmTimeout
-      : getDraftLlmRetryBudgetMs(Date.now() - requestStartMs);
+    // F1 (Codex deep-review) — EVERY attempt's LLM window honours elapsed
+    // request time. `getDraftLlmRetryBudgetMs(elapsed)` returns
+    // min(DRAFT_LLM_TIMEOUT_MS, remainingRequestBudgetMs(elapsed)) — the
+    // single-attempt cap clamped to the request budget still unspent. Attempt 1
+    // USED to take the full cap regardless of pre-LLM elapsed time, so a request
+    // that spent (e.g.) 15s on ingress / prompt-load / preprocessing still
+    // launched a full-length attempt 1 and could reach the ~125s proxy deadline
+    // before validation/packaging finished — a 504, or a provider success paid
+    // for and then discarded by the Step-11 budget guard. Deriving attempt 1
+    // from the SAME primitive as the retry closes that. The adapter derives
+    // max_tokens from THIS window (`resolveDraftMaxTokens(timeoutMs)`), so a
+    // shortened window also lowers the token budget — no separate max_tokens site.
+    const elapsedBeforeAttemptMs = Date.now() - requestStartMs;
+    const attemptTimeoutMs = getDraftLlmRetryBudgetMs(elapsedBeforeAttemptMs);
+
+    // Refuse to START a draft with NO remaining budget: when the honest window
+    // has collapsed to zero (the request budget is fully spent), a call would
+    // launch with a 0ms deadline and abort instantly — pointless provider spend
+    // that also pushes past the proxy deadline F1 fixes. Fail fast with the
+    // typed budget error instead. Kept at the exhausted-budget floor (<= 0)
+    // rather than a larger minimum: a sub-second window is still a legitimate
+    // (if doomed) attempt that the existing truncation/timeout handling reaps in
+    // bounded time, and a larger floor collides with the request-budget test
+    // ladder that deliberately drives elapsed to ~100-105s. The retry path keeps
+    // its own richer MIN_DRAFT_RETRY_BUDGET_MS affordability gate below.
+    if (attemptTimeoutMs <= 0) {
+      log.warn({
+        event: "cee.llm.attempt_refused_budget",
+        attempt,
+        attempt_timeout_ms: attemptTimeoutMs,
+        elapsed_since_request_start_ms: elapsedBeforeAttemptMs,
+        request_id: ctx.requestId,
+      }, "Draft attempt refused to start — remaining request budget cannot fund a draft (fail fast, no LLM call)");
+      throw new RequestBudgetExceededError(
+        `Request budget exhausted before the draft LLM call could start (only ${Math.round(attemptTimeoutMs / 1000)}s remained of the ${Math.round(DRAFT_REQUEST_BUDGET_MS / 1000)}s budget)`,
+        DRAFT_REQUEST_BUDGET_MS,
+        elapsedBeforeAttemptMs,
+        "pre_llm_draft",
+        ctx.requestId,
+      );
+    }
 
     try {
       const draftThinking = config.cee.thinking?.draftGraphEnabled
@@ -236,6 +410,9 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           currencyInstruction: ctx.input.currencyInstruction,
           ...(systemDirective ? { systemDirective } : {}),
           ...(draftThinking ? { thinking: draftThinking } : {}),
+          // Native document attachment (D-59-7). Anthropic-native; other adapters
+          // ignore it. Undefined ⇒ brief-only draft (byte-identical to before).
+          ...(draftAttachment ? { attachment: draftAttachment } : {}),
         },
         {
           requestId,
@@ -252,6 +429,51 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
           bypassCache: ctx.opts.refreshPrompts,
           forceDefault: ctx.opts.forceDefault,
           signal: ctx.opts.signal,
+          // ROADMAP 1.204 M1 — bridge the adapter's mid-draft label stream onto
+          // the pipeline's staged-emission seam. Added ONLY when a stage
+          // consumer is wired, so the un-wired path (buffered route, 2-frame
+          // stream route, V5 draft_graph tool) passes the identical opts object
+          // it passed before and the adapter's scanner is never constructed.
+          //
+          // Two properties this bridge owns, both learned in review:
+          //
+          //  1. IT SWALLOWS. `emitStageEvent` in the pipeline guarantees a
+          //     throwing consumer cannot fail a draft, but this call reaches
+          //     `onStage` DIRECTLY and so bypasses that guard. Today the only
+          //     producer is the adapter, which already wraps the call in a bare
+          //     catch — but relying on a caller two layers away to hold the
+          //     guarantee is exactly how it gets lost when a second producer is
+          //     added. The try/catch here makes the property local.
+          //
+          //  2. IT DEDUPES ACROSS ATTEMPTS. The adapter builds a fresh scanner
+          //     per ATTEMPT, so a lean-retry or runaway retry re-streams the
+          //     whole draft and would re-emit every label the client already
+          //     has. Labels are an append-only skeleton on the canvas, so a
+          //     replay would duplicate nodes. Dedupe at the bridge, which is
+          //     the one place that sees every attempt of a single draft.
+          ...(ctx.opts.onStage
+            ? {
+                onDraftProgress: (progress: { labels: string[]; phase: "nodes" | "edges" }) => {
+                  try {
+                    const fresh = progress.labels.filter((l) => !emittedProgressLabels.has(l));
+                    if (fresh.length === 0) return;
+                    for (const l of fresh) emittedProgressLabels.add(l);
+                    ctx.opts.onStage?.({
+                      kind: "PROGRESS",
+                      labels: fresh,
+                      phase: progress.phase,
+                      // Pipeline-relative, matching GRAPH_READY / COACHING_READY.
+                      // The adapter's own attempt-relative clock is deliberately
+                      // not forwarded: two different origins on one timeline is
+                      // a trap for the consumer.
+                      elapsed_ms: Date.now() - ctx.start,
+                    });
+                  } catch {
+                    // A progress consumer must never be able to fail a draft.
+                  }
+                },
+              }
+            : {}),
         },
       );
 
@@ -398,30 +620,40 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
         );
       }
 
-      // Lean-retry backstop (fix e, S-AUDIT-2026-07-20; REACHABILITY 2026-07-21):
-      // a draft truncated at max_tokens is a demand-exceeds-budget failure — the
-      // model committed to a graph too large to finish inside the derived token
-      // budget. Fire ONE corrective retry with a directive that CUTS output-token
-      // demand (primary trade-off only, ≤12 nodes, numbers qualitative). The
-      // attempt-1 runaway sentinel (DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL, passed as
-      // maxTokensCeiling above) is what makes THIS retry reachable: it truncates
-      // the runaway ~15-30s earlier than the full 8,550-token budget would, so a
-      // window big enough for a lean draft actually remains. Attempt-1-only, so a
-      // second truncation falls through to the typed error below. Budget honesty
-      // (reuse #576's affordability gate): if the window still affordable inside
-      // DRAFT_REQUEST_BUDGET_MS cannot fit even a lean draft
-      // (LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR, recalibrated to the ≤12-node
-      // directive), fail fast with the existing typed truncation error rather
-      // than burn a second generation on a result guaranteed to truncate again
-      // or be discarded by the Step-11 budget guard. No double-spend beyond one
-      // retry.
+      // Truncation recovery (fix e, S-AUDIT-2026-07-20; ANTI-DOOM GUARD
+      // 2026-07-23 firefight). A draft truncated at max_tokens is a
+      // demand-exceeds-budget failure. The PRIMARY recovery is SALVAGE — the
+      // adapter (`closeTruncatedJson` in anthropic.ts) closes the truncated JSON
+      // and, if the recovered partial still validates as a GraphV3 (nodes+edges
+      // present), RETURNS it instead of throwing, so most late truncations never
+      // reach this catch at all.
+      //
+      // A lean corrective retry is only a fallback, and ONLY when it is NOT
+      // doomed: `isDraftRetryAffordable` forbids retrying into a budget SMALLER
+      // than the attempt that overflowed (`attempt1EffectiveMaxTokens`). Retrying
+      // a 6,800-token truncation at ~3,178 tokens (< half) was the exact
+      // 2026-07-23 draft-down mechanism — the model that could not fit 6,800
+      // re-truncated in 3,178 and the request 400'd after ~89s. Since attempt 1
+      // now uses the FULL affordable budget, no smaller window can fund an
+      // equal-or-larger retry, so this gate does not fire — truncation falls
+      // through to the typed error + honest retry copy below. Attempt-1-only; no
+      // double-spend beyond one retry.
       if (isTruncation && attempt === 1 && !leanDraftRetried) {
+        // The max_tokens the adapter actually derived for attempt 1 comes from
+        // `attemptTimeoutMs` (resolveDraftMaxTokens), but this affordability
+        // comparison keeps using the full single-attempt cap as the CEILING it
+        // guards against — a conservative bound (never understates attempt 1's
+        // budget), so the anti-doom gate only ever errs toward NOT retrying.
+        const attempt1EffectiveMaxTokens = Math.min(
+          getAffordableDraftTokens(effectiveLlmTimeout),
+          DRAFT_ATTEMPT1_MAX_TOKENS_SENTINEL,
+        );
         const leanRetryDelayMs = getJitteredRetryDelayMs();
         const leanRetryWindowMs = getDraftLlmRetryBudgetMs(
           Date.now() - requestStartMs + leanRetryDelayMs,
         );
         const leanAffordableTokens = getAffordableDraftTokens(leanRetryWindowMs);
-        if (leanAffordableTokens >= LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR) {
+        if (isDraftRetryAffordable(leanAffordableTokens, attempt1EffectiveMaxTokens)) {
           leanDraftRetried = true;
           // OBSERVABILITY HONESTY: a structured pino LOG, not a registered
           // TelemetryEvents entry — detection is Render log search
@@ -432,25 +664,32 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
             model: draftAdapter.model,
             lean_retry_window_ms: leanRetryWindowMs,
             lean_affordable_tokens: leanAffordableTokens,
-            lean_tokens_floor: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+            attempt1_effective_max_tokens: attempt1EffectiveMaxTokens,
+            // The EFFECTIVE floor this gate checked, not the bare constant: it
+            // is max(converged-graph floor, attempt-1 cap). Logging the bare
+            // 2,700 understated the real bar and is the same half-a-rule that
+            // made the adapter's gate silent (skip-gate alignment, 2026-07-25).
+            lean_tokens_floor: viableDraftRetryFloorTokens(attempt1EffectiveMaxTokens),
             elapsed_since_request_start_ms: Date.now() - requestStartMs,
             request_id: ctx.requestId,
           }, "Draft truncated at max_tokens — retrying once with a lean directive (demand reduction)");
           await new Promise((resolve) => setTimeout(resolve, leanRetryDelayMs));
           continue;
         }
-        // Remaining budget cannot fit even a lean draft — do NOT retry. Fall
-        // through to the throw path below so the typed truncation error (and
-        // its truncation-specific recovery copy) reaches the client.
+        // Remaining budget is SMALLER than the attempt that overflowed — a retry
+        // would re-truncate (the 2026-07-23 doomed-retry class). Do NOT retry;
+        // fall through to the throw path below so the typed truncation error and
+        // its honest retry copy reach the client (salvage already tried upstream).
         log.warn({
           event: "cee.llm.draft_lean_retry_skipped_budget",
           model: draftAdapter.model,
           lean_retry_window_ms: leanRetryWindowMs,
           lean_affordable_tokens: leanAffordableTokens,
-          lean_tokens_floor: LEAN_DRAFT_AFFORDABLE_TOKENS_FLOOR,
+          attempt1_effective_max_tokens: attempt1EffectiveMaxTokens,
+          lean_tokens_floor: viableDraftRetryFloorTokens(attempt1EffectiveMaxTokens),
           elapsed_since_request_start_ms: Date.now() - requestStartMs,
           request_id: ctx.requestId,
-        }, "Lean retry skipped — remaining request budget cannot fit even a lean draft");
+        }, "Lean retry skipped — remaining budget is smaller than attempt 1 (would re-truncate); failing fast with honest copy");
       }
 
       if (isTimeout) {
@@ -598,6 +837,31 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
 
   ctx.graph = graph as any;
 
+  // ── Cardinality drift alarm (v12 — 2026-07-23, lean-draft contract) ──────
+  // Anthropic structured outputs cannot cap array length (maxItems → HTTP 400),
+  // so a cardinality runaway cannot be prevented structurally — only FLAGGED.
+  // A completed graph far above the converged-draft soft caps signals either a
+  // count-runaway or a structured-outputs prompt-only fallback; surface it
+  // loudly for diagnosis. NON-corrupting by design: we never trim (dropping
+  // nodes would orphan edges → never ship an invalid graph). Structured pino
+  // LOG (Render-log searchable, event:cee.draft_graph.cardinality_drift), not a
+  // registered telemetry event — do not describe it as telemetry.
+  {
+    const nodeCount = Array.isArray((graph as any).nodes) ? (graph as any).nodes.length : 0;
+    const edgeCount = Array.isArray((graph as any).edges) ? (graph as any).edges.length : 0;
+    if (nodeCount > DRAFT_SOFT_NODE_CAP || edgeCount > DRAFT_SOFT_EDGE_CAP) {
+      log.warn({
+        event: "cee.draft_graph.cardinality_drift",
+        node_count: nodeCount,
+        edge_count: edgeCount,
+        soft_node_cap: DRAFT_SOFT_NODE_CAP,
+        soft_edge_cap: DRAFT_SOFT_EDGE_CAP,
+        structured_outputs_used: (llmMeta as any)?.structured_outputs_used,
+        request_id: ctx.requestId,
+      }, "Draft graph exceeded the converged-draft cardinality soft cap — possible count-runaway or structured-outputs prompt-only fallback (graph accepted as-is; never trimmed)");
+    }
+  }
+
   // LLM call success telemetry
   const llmDurationSuccess = Date.now() - llmStartTime;
   log.info({
@@ -639,7 +903,10 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   // Calculate effective repair timeout: min(configured, remaining - 2s safety margin).
   // If no time budget remains, skip repair entirely.
   const REPAIR_SAFETY_MARGIN_MS = 2_000;
-  const remainingForRepair = DRAFT_REQUEST_BUDGET_MS - totalElapsed - LLM_POST_PROCESSING_HEADROOM_MS;
+  // Shared primitive — same "request budget left" derivation as the draft/coaching
+  // gates (altitude 2 / reuse F2, 2026-07-24). Clamped ≥0; the skip decision below
+  // is unchanged (a negative window already skipped repair).
+  const remainingForRepair = remainingRequestBudgetMs(totalElapsed);
   const effectiveRepairTimeout = Math.min(REPAIR_TIMEOUT_MS, remainingForRepair - REPAIR_SAFETY_MARGIN_MS);
   ctx.skipRepairDueToBudget = effectiveRepairTimeout <= 0;
   ctx.repairTimeoutMs = ctx.skipRepairDueToBudget ? 0 : effectiveRepairTimeout;

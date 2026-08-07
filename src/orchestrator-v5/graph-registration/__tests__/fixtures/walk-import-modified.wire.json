@@ -1,0 +1,396 @@
+{
+  "nodes": [
+    {
+      "id": "dec_venue",
+      "kind": "decision",
+      "label": "Product Launch Venue Selection"
+    },
+    {
+      "id": "fac_alpha",
+      "kind": "factor",
+      "label": "Alpha Hall Selected"
+    },
+    {
+      "id": "fac_beta",
+      "kind": "factor",
+      "label": "Beta Garden Selected"
+    },
+    {
+      "id": "fac_gamma",
+      "kind": "factor",
+      "label": "Gamma Rooftop Selected"
+    },
+    {
+      "id": "fac_weather",
+      "kind": "factor",
+      "label": "Weather Conditions on Event Day"
+    },
+    {
+      "id": "goal_turnout",
+      "kind": "goal",
+      "label": "Maximise Attendee Turnout"
+    },
+    {
+      "id": "opt_alpha",
+      "kind": "option",
+      "label": "ZZZ IMPORTED OPTION"
+    },
+    {
+      "id": "opt_beta",
+      "kind": "option",
+      "label": "Beta Garden"
+    },
+    {
+      "id": "opt_gamma",
+      "kind": "option",
+      "label": "Gamma Rooftop"
+    },
+    {
+      "id": "opt_status_quo",
+      "kind": "option",
+      "label": "Defer Venue Decision (Status Quo)"
+    },
+    {
+      "id": "out_appeal",
+      "kind": "outcome",
+      "label": "Attendee Experience Appeal"
+    },
+    {
+      "id": "out_capacity",
+      "kind": "outcome",
+      "label": "Venue Capacity and Accessibility"
+    },
+    {
+      "id": "risk_logistics",
+      "kind": "risk",
+      "label": "Attendee Logistics Friction"
+    },
+    {
+      "id": "risk_weather_exposure",
+      "kind": "risk",
+      "label": "Weather Disruption Risk"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dec_venue",
+      "to": "opt_alpha",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "dec_venue",
+      "to": "opt_beta",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "dec_venue",
+      "to": "opt_gamma",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "dec_venue",
+      "to": "opt_status_quo",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_alpha",
+      "to": "out_appeal",
+      "strength": {
+        "mean": 0.18999999999999997
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_alpha",
+      "to": "out_capacity",
+      "strength": {
+        "mean": 0.5145833333333333
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_alpha",
+      "to": "risk_logistics",
+      "strength": {
+        "mean": -0.2
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "negative",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_beta",
+      "to": "out_appeal",
+      "strength": {
+        "mean": 0.34833333333333333
+      },
+      "exists_probability": 0.82,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_beta",
+      "to": "out_capacity",
+      "strength": {
+        "mean": 0.2770833333333333
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_beta",
+      "to": "risk_logistics",
+      "strength": {
+        "mean": 0.25
+      },
+      "exists_probability": 0.7,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_beta",
+      "to": "risk_weather_exposure",
+      "strength": {
+        "mean": 0.3677419354838709
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_gamma",
+      "to": "out_appeal",
+      "strength": {
+        "mean": 0.4116666666666667
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_gamma",
+      "to": "out_capacity",
+      "strength": {
+        "mean": 0.15833333333333333
+      },
+      "exists_probability": 0.78,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_gamma",
+      "to": "risk_logistics",
+      "strength": {
+        "mean": 0.35
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_gamma",
+      "to": "risk_weather_exposure",
+      "strength": {
+        "mean": 0.45967741935483863
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "fac_weather",
+      "to": "risk_weather_exposure",
+      "strength": {
+        "mean": 0.1225806451612903
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_alpha",
+      "to": "fac_alpha",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_alpha",
+      "to": "fac_beta",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_alpha",
+      "to": "fac_gamma",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_beta",
+      "to": "fac_alpha",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_beta",
+      "to": "fac_beta",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_beta",
+      "to": "fac_gamma",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_gamma",
+      "to": "fac_alpha",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_gamma",
+      "to": "fac_beta",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_gamma",
+      "to": "fac_gamma",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_alpha",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_beta",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_gamma",
+      "strength": {
+        "mean": 1.0
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "out_appeal",
+      "to": "goal_turnout",
+      "strength": {
+        "mean": 0.35
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "out_capacity",
+      "to": "goal_turnout",
+      "strength": {
+        "mean": 0.55
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "positive",
+      "edge_type": "directed"
+    },
+    {
+      "from": "risk_logistics",
+      "to": "goal_turnout",
+      "strength": {
+        "mean": -0.2
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "negative",
+      "edge_type": "directed"
+    },
+    {
+      "from": "risk_weather_exposure",
+      "to": "goal_turnout",
+      "strength": {
+        "mean": -0.3
+      },
+      "exists_probability": 0.85,
+      "effect_direction": "negative",
+      "edge_type": "directed"
+    }
+  ]
+}

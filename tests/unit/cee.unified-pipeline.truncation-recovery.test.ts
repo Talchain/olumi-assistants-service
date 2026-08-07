@@ -81,6 +81,7 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
     code,
     message: msg,
     reason: opts?.reason,
+    retryable: opts?.retryable,
     recovery: opts?.recovery,
   }),
 }));
@@ -158,9 +159,58 @@ describe("truncation-failure recovery copy (probe aggravator 1)", () => {
     // tokens on a failure caused by too many output tokens.
     expect(allCopy).not.toContain("more specific");
     expect(allCopy).not.toContain("clearer");
-    // The honest levers: demand reduction + retry.
+    // The honest levers: scope reduction (fewer options / one decision) + retry.
     expect(allCopy).toMatch(/shorter|simplif|fewer|focus/);
     expect(allCopy).toMatch(/try again|retry/);
+  });
+
+  it("the copy NEVER blames the brief, NEVER says 'simplify the brief', and NEVER promises that a plain retry usually works", async () => {
+    // ⚠ CORRECTED 2026-07-25. This test used to assert that the SUGGESTION
+    // "leads with retry" — encoding the 2026-07-23 claim that retry is the
+    // PRIMARY lever. That claim was measured on 2026-07-24 and is FALSE: the
+    // identical brief was retried 18 times against staging and succeeded 0
+    // times, ~90s and real provider spend each. A test that pinned the false
+    // promise in place is worse than no test, so the assertion is inverted
+    // rather than deleted: the copy must now be honest about retry odds.
+    //
+    // What SURVIVES from the firefight, unchanged: no blame, and never
+    // "simplify"/"be more specific" — a vaguer brief gives the model less to
+    // anchor on → it infers MORE factors → a LARGER graph → MORE likely to
+    // truncate again (the cruel inversion).
+    (runStageParse as any).mockImplementation(async () => {
+      throw makeTruncatedNonJsonError();
+    });
+
+    const result = await runUnifiedPipeline(
+      { brief: "A perfectly ordinary 400-char business brief" } as any,
+      {},
+      mockRequest,
+      baseOpts,
+    );
+
+    const recovery = (result.body as any).recovery;
+    const allCopy = [recovery.suggestion, ...(recovery.hints ?? [])].join(" ").toLowerCase();
+
+    // ⭐ THE MEASURED REGRESSION PIN. Any phrasing that tells the user an
+    // unchanged retry is likely to work invites the ~90s infinite loop the
+    // 2026-07-24 probe walked into 18 times.
+    expect(allCopy).not.toMatch(/usually (succeeds|works)/);
+    expect(allCopy).not.toMatch(/normally (succeeds|works)/);
+    expect(allCopy).not.toMatch(/(retrying|trying again).{0,24}(usually|normally|generally)/);
+
+    // Retry is still OFFERED — a truncation is not a client input error — but
+    // the copy must also name the lever that actually reduces demand.
+    expect(allCopy).toMatch(/retry|try again|trying/);
+    expect(allCopy).toMatch(/fewer|narrow|one decision|scope/);
+
+    // No blame, and no cruel inversion.
+    expect(allCopy).not.toContain("simplify the brief");
+    expect(allCopy).not.toContain("too large to finish");
+    expect(allCopy).not.toContain("more specific");
+    expect(allCopy).not.toContain("clearer");
+
+    // Truncation is a service-side over-generation — the wire marks it retryable.
+    expect((result.body as any).retryable).toBe(true);
   });
 
   it("truncated-then-schema-invalid failure maps to the SAME typed 400 + truncation recovery (was an untyped 500 with none)", async () => {

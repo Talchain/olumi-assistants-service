@@ -13,7 +13,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { cleanBaseUrl } from "../helpers/env-setup.js";
+import { cleanBaseUrl, SERVER_BOOT_HOOK_TIMEOUT_MS } from "../helpers/env-setup.js";
 import { TASK_MODEL_DEFAULTS } from "../../src/config/model-routing.js";
 
 // NOTE: PROMPTS_STORE_PATH ":memory:" is NOT an in-memory store — the file
@@ -41,7 +41,8 @@ beforeAll(async () => {
   const { build } = await import("../../src/server.js");
   app = await build();
   await app.ready();
-});
+  // ROADMAP 2.157: full server boot — explicit timeout, see the constant.
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   await app.close();
@@ -227,7 +228,7 @@ describe("GET /admin/dashboard/env", () => {
     expect(body).toHaveProperty("timestamp");
   });
 
-  it("feature_flags includes all four expected flags", async () => {
+  it("feature_flags includes all three expected flags", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/admin/dashboard/env",
@@ -235,7 +236,7 @@ describe("GET /admin/dashboard/env", () => {
     });
     const body = res.json();
     const flagNames = body.feature_flags.map((f: { name: string }) => f.name);
-    expect(flagNames).toContain("CEE_ORCHESTRATOR_ENABLED");
+    // CEE_ORCHESTRATOR_ENABLED removed with the V1 orchestrator belt (2026-07-21).
     expect(flagNames).toContain("DSK_ENABLED");
     expect(flagNames).toContain("ANTHROPIC_PROMPT_CACHE_ENABLED");
     expect(flagNames).toContain("CEE_ZONE2_REGISTRY_ENABLED");
@@ -311,7 +312,7 @@ describe("GET /admin/models/routing — provider-mismatch (LLM_PROVIDER=anthropi
     const { build } = await import("../../src/server.js");
     appAnthropicProvider = await build();
     await appAnthropicProvider.ready();
-  });
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await appAnthropicProvider.close();
@@ -398,7 +399,7 @@ describe("Read-only key deployment (ADMIN_API_KEY_READ only)", () => {
     const { build } = await import("../../src/server.js");
     appReadOnly = await build();
     await appReadOnly.ready();
-  });
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     await appReadOnly.close();

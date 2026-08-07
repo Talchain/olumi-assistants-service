@@ -72,6 +72,7 @@ import {
   type AnalysisResponseSummaryWithSignals,
 } from './analysis-signals.js';
 import { selectRunAnalysisFact } from './freshness.js';
+import { emitUnknownEnrichmentKeyTelemetry } from './enrichment-manifest.js';
 
 export const FALLBACK_STALENESS_REASON = 'loaded_from_prior_run_freshness_unknown';
 
@@ -527,6 +528,17 @@ export function buildAnalysisFromPriorFacts(
     enrichment && typeof enrichment === 'object' && !Array.isArray(enrichment)
       ? (enrichment as Record<string, unknown>)
       : null;
+  if (enrichmentRecord !== null) {
+    // Runtime tripwire (context-audit #1). This is the single seam where the
+    // byte-for-byte persisted PLoT enrichment (the untyped z.record
+    // passthrough) is read for the analysis→LLM projection; a top-level key
+    // PLoT emits but no deriver reads is invisible to the coach. Emit loud
+    // structured telemetry on any key not in ENRICHMENT_PRODUCER_MANIFEST —
+    // observe-only, never throws, never blocks. (Not placed in the shared
+    // reconcile seam: that also serves the UI ingress analysis_state, a
+    // different producer whose keys are not the PLoT manifest.)
+    emitUnknownEnrichmentKeyTelemetry(enrichmentRecord);
+  }
   const fromEnrichment =
     enrichmentRecord !== null
       ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope)

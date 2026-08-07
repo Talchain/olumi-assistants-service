@@ -37,6 +37,13 @@ const FALLBACK_TABLE: Record<string, FallbackEntry> = {
   'frame:edit_graph':     { message: "There's no model to edit yet. Let's build one — what outcome are you optimising for?", chip: { label: 'Draft a model', prompt: 'Help me build a decision model', role: 'facilitator' } },
   'frame:explain_results':{ message: "There are no results to explain yet. Let's start by framing the decision.", chip: { label: 'Set the goal', prompt: 'What outcome are you optimising for?', role: 'facilitator' } },
   'frame:generate_brief': { message: "We'll need a model and analysis before generating a brief. What's the primary objective?", chip: { label: 'Set the goal', prompt: 'What outcome are you optimising for?', role: 'facilitator' } },
+  // UNREACHABLE since 2026-07-22 — the `research_topic` tool was deleted in `f957d6d8`, so no
+  // turn can route to it and this key can never be looked up. Kept, not deleted: it is a row in a
+  // `stage:tool` lookup table, so it costs nothing and starts working again the moment research is
+  // rebuilt under the same tool name. Deleting it would fall through to `'frame:*'` below, which
+  // still yields a sane message — i.e. the deletion would be invisible, which is exactly why the
+  // deadness needs stating here rather than being left to be rediscovered.
+  // See `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` (programme docs, sibling dir — untracked) §2.1.
   'frame:research_topic': { message: "I'll focus on framing your decision first. Once we have a model, I can research specific factors.", chip: { label: 'Set the goal', prompt: "What's the primary objective?", role: 'facilitator' } },
   'frame:run_exercise':   { message: "Exercises work best once you have analysis results. Let's frame the decision first.", chip: { label: 'Set the goal', prompt: "What's the primary objective?", role: 'facilitator' } },
   'frame:*':              { message: "I'll focus on framing your decision first. What's the primary objective?", chip: { label: 'Set the goal', prompt: 'What outcome are you optimising for?', role: 'facilitator' } },

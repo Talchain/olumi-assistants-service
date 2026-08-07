@@ -26,13 +26,13 @@ import { ActionSchema, OrchestratorTurnPayloadSchema } from '@talchain/schemas/b
 import { validateIngress } from '../../src/validators/b1.js'
 
 /**
- * The complete ActionType vocabulary at @talchain/schemas 0.20.0.
+ * The complete ActionType vocabulary at @talchain/schemas 0.21.0.
  *
  * Update protocol: a value added here is a CONTRACT WIDENING. CEE must land it
  * (this file + the re-vendor) before any producer sends it — see the landing
  * sequence in the package CHANGELOG.
  */
-const ACTION_TYPE_VOCABULARY_0_20_0 = [
+const ACTION_TYPE_VOCABULARY = [
   'run_analysis',
   'set_factor_value',
   'add_constraint',
@@ -46,6 +46,12 @@ const ACTION_TYPE_VOCABULARY_0_20_0 = [
   // READINESS-CLASS sparks only — a spark whose honest intent differs stays
   // gated dark rather than borrowing this literal (consumer sign-off 1).
   'analysis_readiness',
+  // 0.21.0-new (F2 CHANGE B): the "What changed?" pill intent. Typed door for
+  // the two-run result comparison — the pill was device-local before and never
+  // reached CEE. CEE must ACCEPT this at B1 (below) before the UI send lands,
+  // or the whole turn 422s. Name parity with CEE's own `'what_changed'` intent
+  // literal (`classifyAnalyticalIntent` / `run-comparison-gate.ts`).
+  'what_changed',
 ] as const
 
 /** Duck-typed unwrap to the underlying enum values, tolerating optional/effects wrappers. */
@@ -127,16 +133,16 @@ function chipTurn(actionType: string): Record<string, unknown> {
   }
 }
 
-describe('ActionType vocabulary pin (@talchain/schemas 0.20.0)', () => {
+describe('ActionType vocabulary pin (@talchain/schemas 0.21.0)', () => {
   it('pins the vocabulary at the B1 ingress seam (chip.action_type)', () => {
     const chipField = messageTurnMember().shape.chip
     const actionType = unwrapToObject(chipField).shape.action_type
-    expect(enumValues(actionType)).toEqual([...ACTION_TYPE_VOCABULARY_0_20_0])
+    expect(enumValues(actionType)).toEqual([...ACTION_TYPE_VOCABULARY])
   })
 
   it('pins the vocabulary at the egress seam (ActionSchema.action_type)', () => {
     const actionType = unwrapToObject(ActionSchema).shape.action_type
-    expect(enumValues(actionType)).toEqual([...ACTION_TYPE_VOCABULARY_0_20_0])
+    expect(enumValues(actionType)).toEqual([...ACTION_TYPE_VOCABULARY])
   })
 
   it('binds the two seams to ONE enum — ingress and egress cannot drift apart', () => {
@@ -173,9 +179,41 @@ describe('B1 ingress accepts analysis_readiness (0.20.0 handshake — UI is gate
 
   // The pre-0.20.0 vocabulary must keep working — this bump is strictly additive.
   it('still accepts every pre-0.20.0 action_type (additive, nothing displaced)', () => {
-    for (const actionType of ACTION_TYPE_VOCABULARY_0_20_0) {
+    for (const actionType of ACTION_TYPE_VOCABULARY) {
       const result = validateIngress(chipTurn(actionType), `req-vocab-${actionType}`)
       expect(result.ok, `${actionType} must be accepted at B1 ingress`).toBe(true)
+    }
+  })
+})
+
+describe('B1 ingress accepts what_changed (0.21.0 / F2 CHANGE B handshake — UI send is gated on this)', () => {
+  // This is the accept-half of F2 CHANGE B. The "What changed?" pill was
+  // device-local before; once the UI sends it as a typed chip_click, CEE's B1
+  // validator must ACCEPT the literal or the WHOLE turn 422s (fail-closed on the
+  // enum). The re-vendor to 0.21.0 is what makes the derived
+  // OrchestratorTurnPayloadSchema accept it — proven here at the real
+  // validateIngress seam, not by introspection alone.
+  it('validateIngress ACCEPTS a chip carrying action_type=what_changed', () => {
+    const result = validateIngress(chipTurn('what_changed'), 'req-what-changed-accept')
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect((result.value as { chip?: { action_type?: string } }).chip?.action_type).toBe(
+        'what_changed',
+      )
+    }
+  })
+
+  // DISCRIMINATION CONTROL — proves the acceptance above is not vacuous. A
+  // near-miss (`what_change`, no trailing `d`) must still be rejected fail-closed,
+  // so the acceptance is a property of THIS exact literal, not a validator that
+  // waves everything through.
+  it('validateIngress REJECTS a near-miss what_change (fail-closed, 422 class)', () => {
+    const result = validateIngress(chipTurn('what_change'), 'req-what-changed-nearmiss')
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.error).toBe('INGRESS_CONTRACT_VIOLATION')
+      expect(result.error.boundary).toBe('B1')
+      expect(result.error.direction).toBe('ingress')
     }
   })
 })

@@ -7,17 +7,20 @@
  * classification ambiguity. Route-v2.ts detects this shape BEFORE
  * TurnExecutor and calls `dispatchDeterministicChipClick`.
  *
- * Whitelisted action_types (Phase 2b):
- *   - `run_analysis`     — heavyweight handler, scenario-snapshot pre-load
- *   - `explain_results`  — V5 no-op explanation handler (deterministic
- *                          fallback prose composed from prior analysis fact)
- *   - `what_would_flip`  — V5 no-op explanation handler (deterministic
- *                          fallback prose composed from prior analysis fact)
+ * Whitelisted action_types:
+ *   - `run_analysis`     — heavyweight NO-LLM compute handler,
+ *                          scenario-snapshot pre-load
+ *
+ * F2 CHANGE A: `explain_results` and `what_would_flip` are NO LONGER
+ * whitelisted. As explanation intents they must reach the coach LLM with the
+ * loaded conversation window, so they now fall through to TurnExecutor with a
+ * FORCED explanation intent (see `DETERMINISTIC_CHIP_ACTION_TYPES` below).
  *
  * Other chip.action_type values (set_factor_value, explain_result alias,
- * compare_options, etc.) fall through to TurnExecutor, which either routes
- * via Sonnet ORIENT or returns a typed FEATURE_NOT_ENABLED via the
- * existing UNSUPPORTED_ACTION path.
+ * explain_results, what_would_flip, compare_options, etc.) fall through to
+ * TurnExecutor, which either routes via Sonnet ORIENT (explanation intents are
+ * pinned by `chipClickForcedIntent`) or returns a typed FEATURE_NOT_ENABLED via
+ * the existing UNSUPPORTED_ACTION path.
  *
  * Why reinvoke the registered handler rather than TurnExecutor? TurnExecutor
  * runs ORIENT (1 Sonnet call, ~12s) even for an already-classified chip
@@ -53,35 +56,33 @@ import { config } from '../../config/index.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
-import { composeToolCallResponse } from '../compose.js';
+import { composeToolCallResponse, type AnswerKind } from '../compose.js';
 import {
   buildTurnContext,
   loadScenarioSnapshotForRunAnalysis,
-  type EnrichedTurnContext,
 } from '../build-turn-context.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
-import { GraphV3 } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
-  type FreshnessDerivation,
 } from '../context/freshness.js';
+// T1 claim safety — THE shared fact-array read (ROADMAP 1.233). This file
+// neither derives the verdict nor re-implements the read (CLAUDE.md trap #12);
+// it calls the one function turn-executor's two read points call.
+import {
+  claimSafetyScopeFromContext,
+  readMayNameLeadingOptionVerdict,
+} from '../context/claim-safety-read.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { computeStructuralReadiness } from '../../orchestrator/tools/analysis-ready-helper.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
-import { buildAnalysisFromPriorFacts } from '../context/analysis-fallback.js';
-import { buildAnalysisProjectionSummary } from '../context/projection-summaries.js';
-import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
-import { projectTopDrivers, filterLeverSourcedFragileEdges } from '../context/context-pack-assembler.js';
 import { collectInterventionControlledFactorIds } from '../context/intervention-controlled-drivers.js';
 import {
   createRegistry,
   getDefaultPlotClient,
-  getDefaultRegistry,
   resolveHandler,
-  type HandlerFn,
   type HandlerRegistry,
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
@@ -90,12 +91,6 @@ import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { applyCoachingSignal } from '../coaching/coaching-signal-application.js';
 import { enrichRunAnalysisWithDecisionReview } from '../coaching/decision-review-enricher.js';
 import type { V5TurnTimings } from '../telemetry/turn-timings.js';
-import {
-  pickLatestRawRobustness,
-  type RawRobustnessSignals,
-} from '../coaching/pick-raw-robustness.js';
-import { pickLatestFlipSummary } from '../coaching/pick-flip-summary.js';
-import { filterFlipSummaryEntries, type FlipSummary } from '../compose/flip-proposal.js';
 import { generateChips } from '../compose/chip-generator.js';
 import {
   HandlerInvocationFailedError,
@@ -152,10 +147,21 @@ export interface DispatchChipClickRunAnalysisParams {
  * from local state — otherwise the chip-click path will silently
  * degrade UX.
  */
+// F2 CHANGE A (2026-07-22) — `explain_results` and `what_would_flip` REMOVED
+// from this whitelist. They are now routed through the conversation-aware coach
+// path (route-v2 `detectChipClickForcedIntent` → TurnExecutor
+// `chipClickForcedIntent` → `routeWithToolUse` with a FORCED explanation
+// handler + thinking disabled) so the pill answer sees the loaded conversation
+// window instead of composing canned deterministic prose with zero LLM sight of
+// what the user just said. `run_analysis` STAYS — it is a genuine no-LLM compute
+// handler, not an explanation, so bypassing Sonnet for it is correct (and is
+// pinned by the test below). The deterministic composers
+// (`composeExplainResultsFallback` / `composeWhatWouldFlipFallback`) remain
+// wired as the ROUTED fallback (turn-executor), so the honesty guarantees are
+// unchanged — the coach authors the prose when its `answer_text` is valid, the
+// deterministic composer serves it otherwise.
 export const DETERMINISTIC_CHIP_ACTION_TYPES: ReadonlySet<V5ActionType> = new Set<V5ActionType>([
   'run_analysis',
-  'explain_results',
-  'what_would_flip',
 ]);
 
 /**
@@ -213,6 +219,48 @@ export type DispatchChipClickRunAnalysisResult =
        *  minimal diagnostic trace carries the decision_review llm_calls
        *  entry, matching the routed path. */
       readonly turnTimings?: V5TurnTimings;
+      /**
+       * ROADMAP 1.132 (F1) — the declared SUBSTANTIVE/FUNCTIONAL kind of this
+       * chip-click answer (see `AnswerKind`). `'substantive'` for the
+       * explain_results / what_would_flip explanations (progressive disclosure at
+       * egress); `'functional'` for the run_analysis receipt. route-v2 threads it
+       * into `sendFinalised200` so the egress synthesiser shapes the substantive
+       * chip answers exactly as it shapes the turn_executor advice-gate answers.
+       */
+      readonly answerKind?: AnswerKind;
+      /**
+       * T1 claim safety — may THIS chip-click turn name a leading option?
+       *
+       * The run_analysis chip runs a real analysis, so this path can withhold
+       * the leading-option claim exactly as the routed path can. READ from the
+       * stamp the run_analysis handler persisted on the fact; never re-derived
+       * (CLAUDE.md trap #12). route-v2 threads it into `sendFinalised200` so the
+       * layer-3 egress guard is armed on this path too — the coaching slot
+       * defect (#709) reached the wire through a dispatch path that had been
+       * overlooked, and the two paths must not drift again.
+       *
+       * ⚠ REQUIRED, NOT OPTIONAL — changed 2026-07-27 (WALK-2026-07-27-FINAL.md
+       * §11.6). While this was optional, route-v2's `ok` exit read
+       * `cc.mayNameLeadingOption ?? true` — the same `?? true` default the
+       * ROADMAP 1.233 hoist removed everywhere else, and the shape that made the
+       * Layer-3 alarm a licensed no-op on every exit that took it. Required is
+       * the same doctrine `tryRunComparisonGate` already applies: a new `ok`
+       * producer cannot re-open the leak by OMISSION, because omission no longer
+       * compiles.
+       *
+       * ⚠ AND THE WALK'S ACCOMPANYING CLAIM IS REFUTED, in the safe direction:
+       * that default was NOT "live-reachable for every non-`run_analysis` chip
+       * outcome". There are no non-`run_analysis` chip outcomes.
+       * `DETERMINISTIC_CHIP_ACTION_TYPES` has exactly one member (:160-162),
+       * `dispatchDeterministicChipClick` THROWS on anything else (:399-404), and
+       * route-v2 only calls it behind `isDeterministicChipClickActionType`. This
+       * union has ONE `outcome: 'ok'` producer and it always populated the
+       * field. The default was a LATENT re-arming point, like the sibling at
+       * route-v2.ts:4339 — not a live leak. Recorded because "live-reachable"
+       * and "reachable the day the whitelist grows" are different claims and
+       * only the second one was true.
+       */
+      readonly mayNameLeadingOption: boolean;
     }
   | { readonly outcome: 'commit_failed'; readonly response: OlumiResponse; readonly commitPerformed: false; readonly analysisReady?: undefined; readonly graph: GraphV3T | null }
   | {
@@ -352,13 +400,21 @@ function tryComposeRecoverableChipOutcome(
  * gate on `isDeterministicChipClickActionType` first, so reaching this with
  * an unwhitelisted value is a programming error rather than a runtime drift.
  *
- * Branching: `run_analysis` keeps its existing heavyweight code path
- * (scenario-snapshot pre-load, decision_review enrichment, single-source-of-
- * truth analysisReady derivation). The V5 no-op explanation handlers
- * (`explain_results`, `what_would_flip`) flow through a lightweight path
- * that pre-populates `analysisProjection` / `analysisFreshness` /
- * `analysisReady` from prior facts so the handler's precondition decision
- * tree reads the same signals it would have seen on the routed path.
+ * Whitelist contract: `DETERMINISTIC_CHIP_ACTION_TYPES` has exactly ONE
+ * member — `run_analysis`. It is a genuine no-LLM compute handler (not an
+ * explanation), so bypassing Sonnet is correct; it keeps its heavyweight code
+ * path (scenario-snapshot pre-load, decision_review enrichment, single-source-
+ * of-truth analysisReady derivation).
+ *
+ * The analytical pills `explain_results` / `what_would_flip` are NO LONGER
+ * dispatched here (F2 CHANGE A, 2026-07-22 — see the whitelist declaration
+ * above). They are owned by the conversation-aware coach via TYPED FORCED
+ * INTENT (route-v2 `detectChipClickForcedIntent` → TurnExecutor
+ * `chipClickForcedIntent` → `routeWithToolUse` with a forced explanation
+ * handler + thinking disabled), with the deterministic composers
+ * (`composeExplainResultsFallback` / `composeWhatWouldFlipFallback`) serving
+ * as the routed BOUNDED FALLBACK when the coach's `answer_text` is invalid.
+ * No lightweight explanation path exists in this dispatcher any more.
  */
 export async function dispatchDeterministicChipClick(
   actionType: string,
@@ -373,14 +429,12 @@ export async function dispatchDeterministicChipClick(
   if (actionType === 'run_analysis') {
     return dispatchChipClickRunAnalysis(params);
   }
-  // Whitelist invariant: the only remaining action types here are the V5
-  // no-op explanation handlers. The cast is tightened against the static
-  // whitelist; an unhandled future addition will fail the dispatch path's
-  // exhaustiveness inside `dispatchChipClickNoopExplanation` rather than
-  // silently falling through.
-  return dispatchChipClickNoopExplanation(
-    actionType as 'explain_results' | 'what_would_flip',
-    params,
+  // Unreachable: the guard above rejects every action_type except the sole
+  // whitelisted `run_analysis`, which returns in the branch above. Retained as a
+  // defensive throw so a future whitelist expansion fails loud here rather than
+  // silently falling through to an undefined dispatch.
+  throw new Error(
+    `dispatchDeterministicChipClick: unhandled whitelisted action_type '${actionType}'`,
   );
 }
 
@@ -477,6 +531,7 @@ export async function dispatchChipClickRunAnalysis(
     return {
       outcome: 'commit_failed',
       response: composeToolCallResponse({
+        answerKind: 'functional',
         orientation: '',
         confirmation: 'Could not run analysis. The analysis service is temporarily unavailable.',
         coaching: null,
@@ -494,6 +549,7 @@ export async function dispatchChipClickRunAnalysis(
   // Response skeleton used for typed-failure paths where the handler never
   // produced a usable outcome.
   const failureResponse = composeToolCallResponse({
+    answerKind: 'functional',
     orientation: '',
     confirmation: 'Analysis could not complete.',
     coaching: null,
@@ -678,6 +734,12 @@ export async function dispatchChipClickRunAnalysis(
       handlerFacts: enrichedFacts,
       requestId,
       scenarioId: context.session_id,
+      // ROADMAP 2.804 — the SAME scope builder this path's own claim-safety
+      // exit uses below, so the coaching slot and the response's
+      // `mayNameLeadingOption` cannot describe different scenarios. The helper
+      // derives the permission from `enrichedFacts ∪ prior_facts`, which is the
+      // same union the exit builds — one derivation, two read points.
+      claimSafetyScope: claimSafetyScopeFromContext(context),
       // Same collector + raw-graph source the freshness derivation below
       // uses (snapshot first, turn-context fallback on the test path).
       interventionControlledFactorIds: collectInterventionControlledFactorIds(
@@ -749,6 +811,7 @@ export async function dispatchChipClickRunAnalysis(
         ? composedRunFact.result.graph_hash_at_run
         : null;
     let response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',  // no Sonnet orientation on chip clicks.
       confirmation: confirmationText,
       // ROADMAP 2.73 Fix A — was `coaching: null` hardcoded; the chip run
@@ -766,6 +829,13 @@ export async function dispatchChipClickRunAnalysis(
       // registry test path fall back to the turn context's persisted graph.
       persistedGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
       persistedGraphHash: composedRunFactGraphHash,
+      // ROADMAP 2.211 — the PRIOR fact array (this turn's `enrichedFacts`
+      // EXCLUDED), for the no-immediate-repeat lens tie-break. This path is the
+      // one the live walk exercised (the "Run analysis" chip) and it passes no
+      // `lifecycle` at all, so without this line the amendment would be dead on
+      // exactly the journey it was measured against. Already loaded for the turn
+      // — no extra DB read.
+      priorTurnFactsForLensHistory: context.prior_facts,
     });
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.
@@ -908,6 +978,45 @@ export async function dispatchChipClickRunAnalysis(
         // Fix C: present only when the decision_review LLM call returned
         // under an enabled timings/trace gate (never fabricated).
         ...(chipTurnTimings !== undefined ? { turnTimings: chipTurnTimings } : {}),
+        // ROADMAP 1.132 (F1) — the run_analysis chip response is a receipt +
+        // coaching blocks, not a prose answer: functional (stays plain).
+        answerKind: 'functional' as AnswerKind,
+        // T1 claim safety — READ off the just-produced run_analysis fact, using
+        // the SAME canonical selector the routed path uses. Never re-derived
+        // (CLAUDE.md trap #12). No fact ⇒ `true` (this turn withheld nothing);
+        // a fact with no stamp ⇒ `readMayNameLeadingOptionFromResult` fails
+        // CLOSED. (A6, 2026-07-27: this line used to name
+        // `readMayNameLeadingOption`, the legacy enrichment-only reader, which
+        // is NOT on this call chain and which answers `false` unconditionally
+        // on post-0.25.0 facts. The behaviour described was right; the reader
+        // named for it was not.)
+        //
+        // 2026-07-27 — this used to be an INLINE IIFE that was line-for-line the
+        // body of `readMayNameLeadingOptionForFacts`: same selector, same
+        // `null ⇒ true`, same `fact_type` narrow, same result reader, same input
+        // array. Identical behaviour, and that is the point — the shared reader's
+        // own docstring promises "a future third caller gets the same answer by
+        // construction rather than by a reviewer noticing", and this WAS that
+        // third caller, obtaining the right answer by copy instead. A copy is a
+        // hand-maintained mirror (trap #12): the day the shared reader's defaults
+        // change, this exit keeps the old ones and reads as green. Calling it is
+        // what makes the chip-click exit's permission the same permission by
+        // construction.
+        //
+        // 2026-07-27 (the scope fix) — and the SAME argument now forces the
+        // SCOPE to be shared too, not just the reader. `context.prior_facts` is
+        // a 20-turn window; the routed path's permission is derived from
+        // `[...prior_facts, the scenario's newest analysis fact]`. Passing the
+        // window alone here would make this exit's permission a different
+        // permission again — the exact divergence the paragraph above says
+        // calling the shared reader was meant to end, reintroduced one layer
+        // down. `enrichedFacts` usually carries this turn's fresh analysis and
+        // masks the difference; on a degraded analysis it does not, and that is
+        // precisely the turn you least want reading a stale-window `true`.
+        mayNameLeadingOption: readMayNameLeadingOptionVerdict(
+          [...enrichedFacts, ...context.prior_facts],
+          claimSafetyScopeFromContext(context),
+        ).may_name_leading_option,
       };
     } catch (err) {
       log.error(
@@ -950,506 +1059,4 @@ function deriveAnalysisReadyFromSnapshot(
     );
   }
   return readiness;
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2b — V5 no-op explanation chip-click dispatch
-// ---------------------------------------------------------------------------
-//
-// `explain_results` and `what_would_flip` are deterministic no-op handlers:
-// they templated their output from prior `run_analysis` facts (precondition-
-// fail templates when no analysis exists, deterministic prose otherwise).
-// On the routed path the handler additionally consumes Sonnet's
-// `explanation.answer_text` when valid — but the chip-click path does not
-// produce one (no LLM call). The handler's existing `composeExplain*Fallback`
-// composers consume `analysisProjection` directly, so we pre-populate that
-// (plus `analysisFreshness` and `analysisReady`) and the precondition decision
-// tree behaves identically to the routed path.
-//
-// What we do NOT replicate from TurnExecutor:
-//   - Sonnet's `explanation.answer_text` (the whole point of the bypass)
-//   - `structureProjection` (only `explain_from_structure` reads it; not
-//     in the whitelist)
-//   - `proposal` (no LLM proposal — handler ignores when absent)
-//   - `graphForTurn` / `mutated_graph` (explanation handlers don't mutate)
-//   - `enrichRunAnalysisWithDecisionReview` (only run_analysis facts get
-//     enriched; the explanation handlers produce their own fact type)
-
-const NOOP_EXPLANATION_DISPATCH_PATH = {
-  explain_results: 'chip_click_explain_results',
-  what_would_flip: 'chip_click_what_would_flip',
-} as const;
-
-const NOOP_EXPLANATION_FAILURE_TEXT = {
-  explain_results: 'I could not produce an explanation.',
-  what_would_flip: 'I could not produce a sensitivity summary.',
-} as const;
-
-async function dispatchChipClickNoopExplanation(
-  actionType: 'explain_results' | 'what_would_flip',
-  params: DispatchChipClickRunAnalysisParams,
-): Promise<DispatchChipClickRunAnalysisResult> {
-  const { payload, requestId, handlerRegistry } = params;
-  const startedAt = Date.now();
-
-  // Same builder TurnExecutor uses — gives prior_facts (the precondition's
-  // input), persistedGraph (for the freshness hash), and budgets.turn_ms
-  // (for the abort signal).
-  const context = await buildTurnContext(payload, requestId);
-
-  // Pick the handler from the registry. Production uses the singleton; tests
-  // inject their own mocked registry via `params.handlerRegistry`.
-  const registry = handlerRegistry ?? getDefaultRegistry();
-  const handlerFn: HandlerFn | null = resolveHandler(registry, actionType);
-  if (!handlerFn) {
-    log.error(
-      { request_id: requestId, action_type: actionType },
-      'V5 chip_click dispatch — explanation handler missing from registry',
-    );
-    return {
-      outcome: 'commit_failed',
-      response: composeToolCallResponse({
-        orientation: '',
-        confirmation: NOOP_EXPLANATION_FAILURE_TEXT[actionType],
-        coaching: null,
-        stage: payload.stage,
-        handlerFacts: [],
-      }),
-      commitPerformed: false,
-      graph: null,
-    };
-  }
-
-  // Reconstruct the routing-layer fields the handler expects so its
-  // precondition decision tree behaves identically to the routed path.
-  // None of these calls hits the network or makes an LLM call.
-  const projectionInputs = buildProjectionInputs(context, payload, requestId);
-
-  const turnAbort = new AbortController();
-  const turnTimer = setTimeout(() => turnAbort.abort(), context.budgets.turn_ms);
-
-  const failureResponse = composeToolCallResponse({
-    orientation: '',
-    confirmation: NOOP_EXPLANATION_FAILURE_TEXT[actionType],
-    coaching: null,
-    stage: payload.stage,
-    handlerFacts: [],
-  });
-
-  try {
-    let outcome;
-    try {
-      outcome = await handlerFn({
-        context,
-        payload,
-        requestId,
-        signal: turnAbort.signal,
-        orientationText: '',
-        // No Sonnet `explanation.answer_text` on this path — the handler's
-        // deterministic fallback composer kicks in. See handler impl.
-        analysisReady: projectionInputs.analysisReady,
-        analysisProjection: projectionInputs.analysisProjection,
-        analysisFreshness: projectionInputs.analysisFreshness,
-        // Raw robustness signals so the what_would_flip fallback composer
-        // can suppress the "smaller changes are unlikely" sentence on
-        // raw-fragile or near-tie results — same SSOT used by the
-        // free-text post-analysis advice gate.
-        rawRobustness: projectionInputs.rawRobustness,
-        // Honest flip-threshold evidence so the what_would_flip composer
-        // answers from the actual analysis (no single-factor tipping point
-        // within bounds → say so) instead of contradicting it.
-        flipSummary: projectionInputs.flipSummary,
-      });
-    } catch (err) {
-      if (err instanceof HandlerInvocationFailedError) {
-        // V5 C5 — same recoverable-cause escape repair as the run_analysis
-        // ladder (cause-gated + budget-gated), so the two chip-click paths
-        // cannot diverge on recoverability or budget precedence.
-        const recovered = tryComposeRecoverableChipOutcome(
-          err,
-          projectionInputs.graph,
-          payload.stage,
-          requestId,
-          payload.scenario_id,
-          turnAbort.signal.aborted,
-        );
-        if (recovered) return recovered;
-        log.warn(
-          {
-            request_id: requestId,
-            scenario_id: payload.scenario_id,
-            action_type: actionType,
-            cause_kind: err.cause_kind,
-            retryable: err.retryable,
-            message: err.message,
-          },
-          'V5 chip_click explanation — handler invocation failed (typed)',
-        );
-        return {
-          outcome: 'handler_failure',
-          response: failureResponse,
-          commitPerformed: false,
-          causeKind: err.cause_kind,
-          retryable: err.retryable,
-          graph: projectionInputs.graph,
-        };
-      }
-      if (err instanceof HandlerResultInvalidError) {
-        log.error(
-          {
-            request_id: requestId,
-            scenario_id: payload.scenario_id,
-            action_type: actionType,
-            message: err.message,
-          },
-          'V5 chip_click explanation — handler result invalid',
-        );
-        return {
-          outcome: 'handler_result_invalid',
-          response: failureResponse,
-          commitPerformed: false,
-          graph: projectionInputs.graph,
-        };
-      }
-      throw err;
-    }
-
-    const decl = HANDLER_VALIDATION_REGISTRY[actionType];
-    const confirmationText = typeof decl?.confirmation_template === 'function'
-      ? decl.confirmation_template(outcome)
-      : (decl?.confirmation_template ?? outcome.assistant_text);
-
-    // V5 P0-B — post-explanation suggested_actions. The noop explanation
-    // chip-click path previously committed `suggested_actions: []`, leaving
-    // the user with no next step after a deterministic answer. Reuse the
-    // SAME `generateChips` rule the run_analysis chip-click path uses so the
-    // follow-ups are deterministic and honest: the generator emits genuine
-    // next actions (e.g. "Explain the result", "Re-run analysis") only when a
-    // rule matches, and its floor returns `[]` (`v5.chips.empty_intentional`)
-    // when no safe chip applies — no filler. `analysis: null` matches the
-    // run_analysis chip-click call; the post-handler branch does not read it.
-    const noopSuggestedActions = generateChips({
-      stage: payload.stage,
-      handlerFacts: outcome.handler_facts,
-      priorFacts: context.prior_facts,
-      analysis: null,
-      validationRegistry: HANDLER_VALIDATION_REGISTRY,
-      // V5 P0-B blocker fix (Codex review): thread readiness + freshness so a
-      // STALE what_would_flip / explain follow-up steers the user to the
-      // "Rerun analysis" action (chip-generator stale-recovery rule + floor
-      // Priority 1, both of which read `turnOutcome.analysis_freshness` +
-      // `analysisReady.status`) instead of looping back into the executable
-      // (stale) what_would_flip chip. Sourced from the SAME freshness/readiness
-      // the precondition + wire response already use, so no second derivation.
-      analysisReady: projectionInputs.analysisReady,
-      turnOutcome: {
-        graph_mutated: false,
-        analysis_run: false,
-        analysis_selected_fact_index: projectionInputs.analysisFreshness.selected_fact_index,
-        analysis_freshness: projectionInputs.analysisFreshness.freshness,
-        freshness_reason: projectionInputs.analysisFreshness.reason,
-      },
-    });
-
-    let response = composeToolCallResponse({
-      orientation: '',
-      confirmation: confirmationText,
-      coaching: null,
-      stage: payload.stage,
-      handlerFacts: outcome.handler_facts,
-      suggested_actions: noopSuggestedActions,
-      // R4 lookup fix — persisted-snapshot fallback so the FRESH lifecycle
-      // rebuild below resolves non-empty Phase 3 target_refs (the PLoT
-      // envelope on the prior fact carries no `graph` key). Loaded by
-      // buildTurnContext for this turn; no extra DB read.
-      persistedGraph: context.persistedGraph,
-      // PR 3 — explain/flip handlers do NOT produce a run_analysis fact,
-      // so the composer's lifecycle branch 2 fires: it walks prior_facts
-      // for the canonical run_analysis fact (selected by the
-      // precondition's freshness derivation) and emits Phase 3 blocks
-      // tagged by the verdict — fresh blocks when the graph hash still
-      // matches the source fact, or a single stale-safe rerun coaching
-      // block when the graph has diverged. Without this wiring the
-      // explain/flip path emits zero Phase 3 blocks, dropping coaching
-      // the user expects after running analysis.
-      ...(projectionInputs.analysisFreshness !== undefined
-        ? {
-            lifecycle: {
-              priorFacts: context.prior_facts,
-              freshness: projectionInputs.analysisFreshness,
-              requestId,
-              scenarioId: payload.scenario_id,
-            },
-          }
-        : {}),
-    });
-
-    // Same finaliser-level egress guard as the run_analysis path.
-    {
-      const guarded = applyEgressForbiddenPhraseGuard(response.assistant_text ?? '');
-      if (guarded.rewritten) {
-        emit(TelemetryEvents.V5EgressForbiddenPhraseDetected, {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          phrase: guarded.hit,
-          dispatch_path: 'chip_click_finalise',
-        });
-        response = { ...response, assistant_text: guarded.text };
-      }
-    }
-
-    log.info(
-      {
-        event: 'v5_fact_chain_commit',
-        request_id: requestId,
-        scenario_id: payload.scenario_id,
-        turn_id: payload.turn_id,
-        turn_class: 'handler',
-        handler_id: actionType,
-        action_type: actionType,
-        raw_handler_fact_count: outcome.handler_facts.length,
-        enriched_handler_fact_count: outcome.handler_facts.length,
-        has_raw_run_analysis_fact: outcome.handler_facts.some(
-          (f) => f.fact_type === 'run_analysis',
-        ),
-        has_enriched_run_analysis_fact: outcome.handler_facts.some(
-          (f) => f.fact_type === 'run_analysis',
-        ),
-      },
-      'V5 chip-click: explanation fact persistence pre-commit',
-    );
-
-    try {
-      await commitDirectAnswer(response, {
-        scenario_id: payload.scenario_id,
-        turn_id: payload.turn_id,
-        turn_class: 'handler',
-        handler_id: actionType,
-        request_hash: computeRequestHash(payload),
-        llm_calls_used: outcome.llm_calls_used,
-        duration_ms: Date.now() - startedAt,
-        handler_facts: outcome.handler_facts,
-        // V5 Stage 2B-1b: persist the turn-start (pre-dispatch) coaching snapshot.
-        coaching_state: context.coaching_state,
-        // V5 Conversation Context Reliability: persist the user's turn text;
-        // the assistant answer auto-derives from `response.assistant_text`.
-        userMessage: payload.message,
-        // Same GraphV3T the egress sanitiser uses for this exit
-        // (`projectionInputs.graph`) — resolves entity-id labels in the stored
-        // assistant answer so stored == wire.
-        contentGraph: projectionInputs.graph,
-      });
-
-      // Telemetry parity with run_analysis: emit freshness so dashboards
-      // continue to disaggregate by dispatch_path. Reuses the precondition's
-      // freshness derivation (no second hash compute).
-      emitFreshnessTelemetry(
-        projectionInputs.analysisFreshness,
-        {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          dispatch_path: NOOP_EXPLANATION_DISPATCH_PATH[actionType],
-        },
-        {
-          prior_fact_count: context.prior_facts.length,
-          current_turn_fact_count: outcome.handler_facts.length,
-        },
-      );
-
-      return {
-        outcome: 'ok',
-        response,
-        commitPerformed: true,
-        analysisReady: projectionInputs.analysisReady,
-        graph: projectionInputs.graph,
-        freshness: projectionInputs.analysisFreshness,
-      };
-    } catch (err) {
-      log.error(
-        {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          action_type: actionType,
-          err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
-        },
-        'V5 chip_click explanation dispatch — commit failed',
-      );
-      return { outcome: 'commit_failed', response, commitPerformed: false, graph: projectionInputs.graph };
-    }
-  } finally {
-    clearTimeout(turnTimer);
-  }
-}
-
-interface ProjectionInputs {
-  readonly analysisReady: AnalysisReadyPayload | undefined;
-  // `buildAnalysisProjectionSummary` returns `AnalysisProjectionSummary | null`;
-  // the HandlerInvocation contract takes `AnalysisProjectionSummary | undefined`.
-  // We normalise null→undefined in the caller so handlers don't have to.
-  readonly analysisProjection:
-    | NonNullable<ReturnType<typeof buildAnalysisProjectionSummary>>
-    | undefined;
-  readonly analysisFreshness: FreshnessDerivation;
-  readonly graph: GraphV3T | null;
-  // Raw `enrichment.robustness` signals selected off the SAME run_analysis
-  // fact as `analysisProjection`. Reused by the `what_would_flip` fallback
-  // composer so chip-click copy stays as honest as the free-text advice
-  // gate when robustness is raw-fragile or the result is a near-tie.
-  // `null` when no successful run_analysis fact is present (the precondition
-  // bypasses the composer entirely in that case).
-  readonly rawRobustness: RawRobustnessSignals | null;
-  // Honest flip-threshold summary from the SAME run_analysis fact. Lets the
-  // what_would_flip composer answer from the flip evidence (no single-factor
-  // tipping point within bounds → say so) rather than the robustness band.
-  // `null` when no successful fact or the enrichment carries no flip
-  // thresholds.
-  readonly flipSummary: FlipSummary | null;
-}
-
-/**
- * Reconstruct the routing-layer fields the V5 explanation handlers expect,
- * using only local context (prior_facts + persistedGraph). No LLM call,
- * no PLoT call, no scenario read beyond what `buildTurnContext` already
- * performed.
- */
-function buildProjectionInputs(
-  context: EnrichedTurnContext,
-  payload: MessageTurnPayload,
-  requestId: string,
-): ProjectionInputs {
-  // Step 1: parse the persisted graph for readiness derivation. Fall back
-  // to undefined readiness when the graph is missing or fails parse —
-  // mirrors TurnExecutor's behaviour and the precondition tree's defensive
-  // null-projection guard.
-  let graph: GraphV3T | null = null;
-  let analysisReady: AnalysisReadyPayload | undefined;
-  if (context.persistedGraph !== undefined && context.persistedGraph !== null) {
-    const parsed = GraphV3.safeParse(context.persistedGraph);
-    if (parsed.success) {
-      graph = parsed.data as GraphV3T;
-      analysisReady = computeStructuralReadiness(graph);
-    } else {
-      log.warn(
-        {
-          request_id: requestId,
-          scenario_id: payload.scenario_id,
-          analysis_ready_missing_reason: 'graph_parse_failed',
-          issue_count: parsed.error.issues.length,
-        },
-        'V5 chip_click explanation — persisted graph failed GraphV3 parse; analysis_ready omitted',
-      );
-    }
-  }
-
-  // Step 2: build the analysis projection from the most recent successful
-  // (or legacy / degraded) run_analysis fact in prior_facts. The handler's
-  // `decideExplanationPrecondition` reads `invocation.context.prior_facts`
-  // directly to make the missing-vs-degraded distinction, so this projection
-  // only needs to populate the `'execute'` branch's input.
-  const optionLabelSource = graph
-    ? graph.nodes
-        .filter((n) => n.kind === 'option')
-        .map((n) => ({ id: n.id, label: n.label ?? null }))
-    : undefined;
-  // Spine A backstop: option-controlled levers must not be surfaced as tunable
-  // drivers on the chip-click what_would_flip path either. Collect from the RAW
-  // persisted graph, NOT the parsed `graph`: GraphV3.safeParse keeps only
-  // top-level `node.interventions` and strips `node.data.interventions` and the
-  // top-level `options[]` array, so parsing first would make the backstop blind
-  // to canonical intervention bundles stored in those locations. The detector
-  // is defensive against the raw/unparsed shape.
-  const interventionControlledFactorIds =
-    collectInterventionControlledFactorIds(context.persistedGraph);
-  const analysisFromPrior: AnalysisResponseSummary | null = buildAnalysisFromPriorFacts(
-    context.prior_facts,
-    optionLabelSource,
-  );
-  // `buildAnalysisProjectionSummary` consumes `ContextPackAnalysis` (the
-  // post-projection shape used inside the context-pack). On the routed
-  // path that comes from `projectAnalysis` after compactAnalysis. Here
-  // we map AnalysisResponseSummary → AnalysisProjectionSummary directly
-  // by going through a thin contextPack-shaped intermediate, so the
-  // handler reads the same field shape.
-  const analysisProjection = analysisFromPrior
-    ? buildAnalysisProjectionSummary({
-        status: analysisFromPrior.analysis_status,
-        leading_option:
-          analysisFromPrior.options[0] != null
-            ? {
-                label: analysisFromPrior.options[0].option_label,
-                probability: analysisFromPrior.options[0].win_probability,
-              }
-            : null,
-        runner_up:
-          analysisFromPrior.options[1] != null
-            ? {
-                label: analysisFromPrior.options[1].option_label,
-                probability: analysisFromPrior.options[1].win_probability,
-              }
-            : null,
-        margin_pp: analysisFromPrior.margin_pp ?? null,
-        robustness_band:
-          analysisFromPrior.robustness_level &&
-          analysisFromPrior.robustness_level !== 'unknown'
-            ? analysisFromPrior.robustness_level
-            : null,
-        // Shared with projectAnalysis via projectTopDrivers: filter non-finite,
-        // neutral → 0, sort by |signed value|, cap — so a no-effect driver is
-        // never left leading a "would shift the most" claim on this path.
-        top_drivers: projectTopDrivers(
-          analysisFromPrior.top_drivers,
-          interventionControlledFactorIds,
-        ),
-        // P0b-1: mirror projectAnalysis — drop lever-SOURCED fragile edges on the
-        // chip-click re-projection too (this path builds its own projection, so the
-        // assembler filter does not reach it). Source-only; output shape unchanged.
-        fragile_edges: filterLeverSourcedFragileEdges(
-          analysisFromPrior.top_fragile_edges ?? [],
-          interventionControlledFactorIds,
-        ).map((e) => ({
-          from_label: e.from_label,
-          to_label: e.to_label,
-        })),
-      }) ?? undefined
-    : undefined;
-
-  // Step 3: derive freshness from prior_facts + persisted-graph hash. The
-  // chip-click path does not produce a new run_analysis fact, so the
-  // routing-layer derivation IS the wire-bound view (no need to re-derive
-  // post-dispatch the way run_analysis does).
-  let currentGraphHash: string | null = null;
-  if (context.persistedGraph !== undefined && context.persistedGraph !== null) {
-    const parsed = GraphStateIngressSchema.safeParse(context.persistedGraph);
-    if (parsed.success) {
-      currentGraphHash = computeAnalysisAffectingGraphHash(parsed.data);
-    }
-  }
-  const analysisFreshness = deriveAnalysisFreshness(
-    context.prior_facts,
-    currentGraphHash,
-    // Option-identity guard (CEE_OPTION_IDENTITY_FRESHNESS_GUARD): option IDs
-    // from the RAW persisted graph (covers the unparseable case). undefined off.
-    config.cee.optionIdentityFreshnessGuard
-      ? extractGraphOptionIds(context.persistedGraph ?? null)
-      : undefined,
-  );
-
-  // Step 4: raw robustness signals from the SAME run_analysis fact the
-  // freshness/projection layer selected. Reused by the what_would_flip
-  // composer so chip-click copy honours raw-fragile + near-tie overrides
-  // the projection band may have flattened.
-  const rawRobustness = pickLatestRawRobustness(context.prior_facts);
-
-  // Step 5: honest flip-threshold summary from the SAME run_analysis fact, so
-  // the what_would_flip composer answers from the flip evidence rather than a
-  // robustness band that can contradict it. `null` when no flip thresholds.
-  // P0b-1: suppress option-controlled levers so the "clearest one to test"
-  // prose cannot name a lever; re-summarises so overall_status stays honest.
-  const rawFlipSummary = pickLatestFlipSummary(context.prior_facts);
-  const flipSummary =
-    rawFlipSummary !== null
-      ? filterFlipSummaryEntries(rawFlipSummary, interventionControlledFactorIds)
-      : null;
-
-  return { analysisReady, analysisProjection, analysisFreshness, graph, rawRobustness, flipSummary };
 }

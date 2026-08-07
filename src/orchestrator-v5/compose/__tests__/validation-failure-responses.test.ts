@@ -109,11 +109,25 @@ describe('composeValidationFailure — ENTITY_RESOLUTION_AMBIGUOUS', () => {
 });
 
 describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
-  const KIND_MISMATCH_PATTERN =
-    /^I wasn't sure what you meant by .+\. Try asking about a specific option, or describe what you'd like to change\.$/;
+  // AMENDED 2026-07-27 (entity-kind repair). The old copy ended "Try asking
+  // about a specific option, or describe what you'd like to change." — which
+  // was actively misleading, because live evidence shows the overwhelmingly
+  // common target of this refusal is an OUTCOME node, not an option. It also
+  // named no next step the user could act on.
+  //
+  // Two shapes now, distinguished by whether the graph resolved the entity:
+  //   resolved  → we know what it is, so say we found it
+  //   otherwise → we genuinely don't, so say that
+  // Neither names our taxonomy; the no-jargon assertions below are unchanged
+  // and still enforced. When a graph is available the branch offers real
+  // entity chips instead (covered separately).
+  const KIND_MISMATCH_UNRESOLVED =
+    /^I wasn't sure what you meant by .+\. Tell me what you'd like to change\.$/;
+  const KIND_MISMATCH_RESOLVED =
+    /^I found .+, but I can't make that change to it\. Tell me what you'd like to change\.$/;
   const INTERNAL_KIND_LABELS = ['node', 'edge', 'goal', 'constraint'] as const;
 
-  it('uses proposed_label when present and uses the fixed template', () => {
+  it('uses proposed_label when present and no longer suggests an inapplicable option', () => {
     const { response, template_id } = composeFor({
       code: 'ENTITY_KIND_MISMATCH',
       message: 'kind mismatch',
@@ -125,8 +139,10 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
       },
     });
     expect(template_id).toBe('kind_mismatch');
-    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_UNRESOLVED);
     expect(response.assistant_text).toContain('Churn Risk');
+    // The dead end this branch used to be.
+    expect(response.assistant_text).not.toMatch(/specific option/i);
     expect(response.suggested_actions.length).toBe(1);
     assertStyle(response.assistant_text);
   });
@@ -140,10 +156,11 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
         proposed_kind: 'option',
         resolved_kind: 'node',
         proposed_label: 'Churn Risk',
+        resolved_label: 'Churn Risk',
       },
     });
-    expect(template_id).toBe('kind_mismatch');
-    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+    expect(template_id).toBe('kind_mismatch_resolved');
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_RESOLVED);
     expect(response.assistant_text).toContain('Churn Risk');
     expect(response.assistant_text).not.toContain('fac_churn');
     for (const label of INTERNAL_KIND_LABELS) {
@@ -165,8 +182,10 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
             proposed_label: 'Some Entity',
           },
         });
-        expect(template_id).toBe('kind_mismatch');
-        expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+        expect(template_id).toBe(resolved ? 'kind_mismatch_resolved' : 'kind_mismatch');
+        expect(response.assistant_text).toMatch(
+          resolved ? KIND_MISMATCH_RESOLVED : KIND_MISMATCH_UNRESOLVED,
+        );
         for (const label of INTERNAL_KIND_LABELS) {
           expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
         }
@@ -186,8 +205,49 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
       },
     });
     expect(template_id).toBe('kind_mismatch');
-    expect(response.assistant_text).toMatch(KIND_MISMATCH_PATTERN);
+    expect(response.assistant_text).toMatch(KIND_MISMATCH_UNRESOLVED);
     expect(response.suggested_actions.length).toBe(1);
+    assertStyle(response.assistant_text);
+  });
+
+  it('offers real entity chips from the accepted kinds when a graph is available', () => {
+    // The affordance the old branch lacked entirely. `run_analysis` accepts
+    // 'option', so the refusal names the options the user could have meant
+    // instead of leaving them to guess.
+    const graph = graphWith([
+      { id: 'opt_a', label: 'Standardise on Dell XPS', kind: 'option' },
+      { id: 'opt_b', label: 'Standardise on MacBook Pro', kind: 'option' },
+      { id: 'fac_x', label: 'Hardware Unit Cost', kind: 'node' },
+    ]);
+    const { response, template_id, chip_type } = composeFor(
+      {
+        code: 'ENTITY_KIND_MISMATCH',
+        message: 'mismatch',
+        details: {
+          handler_id: 'run_analysis',
+          entity_id: 'fac_x',
+          proposed_kind: 'option',
+          resolved_kind: 'node',
+          accepted_kinds: ['option'],
+          resolved_label: 'Hardware Unit Cost',
+        },
+      },
+      { handlerRegistry: REGISTRY, graph },
+    );
+    expect(template_id).toBe('kind_mismatch_resolved_with_siblings');
+    expect(chip_type).toBe('entity_suggestion');
+    expect(response.suggested_actions.map((a) => a.label)).toEqual([
+      'Standardise on Dell XPS',
+      'Standardise on MacBook Pro',
+    ]);
+    expect(response.assistant_text).toContain('Hardware Unit Cost');
+    for (const label of INTERNAL_KIND_LABELS) {
+      expect(response.assistant_text).not.toMatch(new RegExp(`\\b${label}\\b`, 'i'));
+    }
+    // Chips must never leak ids either.
+    for (const action of response.suggested_actions) {
+      expect(`${action.label} ${action.message}`).not.toMatch(/\b(opt_a|opt_b|fac_x)\b/);
+    }
     assertStyle(response.assistant_text);
   });
 });
@@ -299,7 +359,15 @@ describe('composeValidationFailure — PARAMETER_INVALID', () => {
     });
     expect(template_id).toBe('parameter_invalid');
     expect(response.assistant_text).toContain('value');
-    expect(response.assistant_text).toContain('a number between 0 and 1');
+    // ROADMAP 2.380 (FIX 3) — this line used to assert
+    //   toContain('a number between 0 and 1')
+    // i.e. it PINNED the validator-jargon leak: `describeSchema`'s raw
+    // `_def.checks` reading, rendered verbatim to the user. The live form of
+    // the same defect was "'strength' needs to be a number between -1 and 1."
+    // The constraint description must now NOT reach the user; product copy
+    // replaces it. The value echo is unchanged and still asserted below.
+    expect(response.assistant_text).not.toContain('a number between 0 and 1');
+    expect(response.assistant_text).not.toContain("'value'");
     expect(response.assistant_text).toContain('1.5');
     expect(response.suggested_actions[0]?.label).toBe('Try a different value');
     assertStyle(response.assistant_text);
@@ -374,6 +442,98 @@ describe('composeValidationFailure — PARAMETER_INVALID missing_value (Fix B)',
     expect(template_id).toBe('parameter_invalid');
     expect(response.assistant_text).toContain('1.5');
     expect(response.assistant_text).toContain('You gave');
+    assertStyle(response.assistant_text);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Compound-value hardening. The general PARAMETER_INVALID fallback rendered
+// "You gave [complex value]." on a multi-effect edit whose `actual_value` is
+// an object: `sanitiseForUser` maps objects to the '[complex value]' sentinel,
+// which slipped past the prior 'unknown'-only guard. The echo is now gated on
+// the RAW input type — dropped for any non-scalar, kept for a genuine finite
+// scalar — so a future sentinel can never leak the same way.
+// ---------------------------------------------------------------------------
+
+describe('composeValidationFailure — PARAMETER_INVALID non-scalar actual_value', () => {
+  it('compound-value edit drops the "You gave …" clause instead of leaking "[complex value]"', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'Parameter "value" failed schema: Expected number, received object',
+      details: {
+        parameter: 'value',
+        issue: 'Expected number, received object',
+        actual_value: { magnitude: 0.2, effects: ['cost', 'quality'], direction: 'increase' },
+        constraint_description: 'a valid value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    // The exact live leak must be gone…
+    expect(response.assistant_text).not.toContain('You gave');
+    expect(response.assistant_text).not.toContain('[complex value]');
+    expect(response.assistant_text).not.toBe(
+      "'value' needs to be a valid value. You gave [complex value].",
+    );
+    // …and the surrounding copy is kept verbatim.
+    // ROADMAP 2.380 (FIX 3): this used to assert the jargon sentence
+    //   "'value' needs to be a valid value."
+    // — the quoted internal field name plus `describeSchema`'s raw constraint.
+    // Product copy replaces it. What this test is FOR — that a non-scalar
+    // actual_value drops the echo rather than leaking a sentinel — is
+    // unchanged and still asserted above.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
+    expect(response.suggested_actions[0]?.label).toBe('Try a different value');
+    assertStyle(response.assistant_text);
+  });
+
+  it('array actual_value is also treated as non-scalar and dropped', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Expected number, received array',
+        actual_value: [1, 2, 3],
+        constraint_description: 'a valid value',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).not.toContain('You gave');
+    assertStyle(response.assistant_text);
+  });
+
+  // Positive control — the guard must DISCRIMINATE, not blanket-suppress: a
+  // genuine scalar still echoes back.
+  it('scalar number actual_value still renders "You gave 42000."', () => {
+    const { response, template_id } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'value',
+        issue: 'Number must be less than or equal to 40000',
+        actual_value: 42000,
+        constraint_description: 'a number below 40000',
+      },
+    });
+    expect(template_id).toBe('parameter_invalid');
+    expect(response.assistant_text).toContain('You gave 42000.');
+    assertStyle(response.assistant_text);
+  });
+
+  it('scalar boolean actual_value still renders "You gave false."', () => {
+    const { response } = composeFor({
+      code: 'PARAMETER_INVALID',
+      message: 'bad param',
+      details: {
+        parameter: 'enabled',
+        issue: 'Expected true',
+        actual_value: false,
+        constraint_description: 'true or false',
+      },
+    });
+    expect(response.assistant_text).toContain('You gave false.');
     assertStyle(response.assistant_text);
   });
 });
@@ -590,7 +750,14 @@ describe('composeValidationFailure — PARAMETER_INVALID remaining rejection rea
       details: { parameter: 'value' },
     });
     expect(template_id).toBe('parameter_invalid');
-    expect(response.assistant_text).toContain('needs to be a valid value');
+    // ROADMAP 2.380 (FIX 3) — was toContain('needs to be a valid value'), the
+    // jargon template. The point of this case is that the generic path still
+    // produces actionable copy when the error carries neither an issue nor a
+    // constraint description; that is what is asserted now.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
+    expect(response.suggested_actions.length).toBeGreaterThan(0);
   });
 });
 
@@ -695,8 +862,13 @@ describe('composeValidationFailure — PARAMETER_INVALID undefined actual (task_
     expect(template_id).toBe('parameter_invalid');
     expect(response.assistant_text).not.toContain('You gave');
     expect(response.assistant_text).not.toContain('unknown');
-    // Constraint guidance is preserved.
-    expect(response.assistant_text).toContain('needs to be a valid value');
+    // Guidance is preserved — ROADMAP 2.380 (FIX 3) replaced the jargon
+    // template ("needs to be a valid value") with product copy. The property
+    // this test exists for, that an absent actual_value never renders
+    // "You gave unknown.", is asserted above and is unchanged.
+    expect(response.assistant_text).toBe(
+      "I couldn't use that as the value. Tell me the number you want and I'll set it.",
+    );
     assertStyle(response.assistant_text);
   });
 

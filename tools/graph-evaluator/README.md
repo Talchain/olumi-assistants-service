@@ -126,6 +126,83 @@ The run ID includes the prompt filename, so runs with different prompts produce 
 
 All scoring is **deterministic** — no LLM judge.
 
+### ⚠ Rubric version — read before comparing any two runs
+
+Every `ScoreResult`, every row of `scores.csv`, and the header of every generated
+report carries a **`rubric_version`**. The current value is defined by
+`DRAFT_RUBRIC_VERSION` in `src/scorer.ts`.
+
+**Scores produced under different rubric versions are DIFFERENT MEASURES.** Do
+not plot them on one axis, average them together, plug them into a regression
+check, or describe a rubric change as a quality change. Results predating the
+introduction of this field carry no `rubric_version` column — treat an absent
+column as `draft-graph-rubric-1` and do not compare it with rubric 2.
+
+#### The rubric's governing invariant
+
+> **The rubric scores only fields the model is PERMITTED to emit.**
+
+A rubric term that rewards a field the model cannot write is not a quality
+measure. It is unearnable for every model equally, and it silently advantages
+any graph that has been through the enricher. `tests/rubric-invariant.test.ts`
+enforces this **by derivation**: it reads CEE's own `CEE_MINTED_GOAL_FIELDS`
+(`src/adapters/llm/normalisation.ts` — the list the ingress strip applies) at run
+time and asserts that setting any of those fields cannot change a score. It is
+not a hand-maintained copy, and it fails loud if it cannot find the list.
+
+### Rubric changelog
+
+#### `draft-graph-rubric-2.0.0` — 2026-08-02 (ROADMAP 2.285a)
+
+**⚠ NOT COMPARABLE WITH EARLIER RESULTS.** This is a re-cut of the rubric, not a
+bug-fix that restores the old numbers.
+
+Trigger: PR #789 (ROADMAP 2.281) made the enricher the only mint of
+`goal_threshold` — the quad is cut from the sent grammar by
+`buildDraftGraphSchema()` and stripped at ingress by
+`stripModelAuthoredGoalThreshold()`. The model can no longer author
+`goal_threshold`, `goal_threshold_raw`, `goal_threshold_unit`, or
+`goal_threshold_cap`. Rubric 1 scored all of them.
+
+| Rubric term | Rubric 1 | Rubric 2 |
+|---|---|---|
+| Completeness → *goal threshold* (0.20 of the dimension) | `goalNode.goal_threshold != null` — **unearnable post-#789**, so every numeric-target brief silently lost 0.20 of completeness (0.04 of overall) | Renamed *numeric-target capture*: a well-formed `goal_constraints[]` entry (finite `value` + `>=`/`<=` operator). **1.0** on the goal node · **0.5** on another node · **0.0** if absent |
+| Completeness → *currency preservation* (0.10) | Preferred `goal_threshold_unit` ahead of every other channel | `goal_threshold_unit` **not consulted**. Goal node `data.unit` → `goal_constraints[].unit` → any node's `data.unit` |
+| Ratio encoding | Hard-zeroed on `goal_threshold < expected_min` | That arm **removed**. Still hard-zeroes on `data.value` and `goal_constraints[].value` |
+
+**This is a change of question, not a relocation of the same one.** Rubric 1
+asked *"did the model set the goal's threshold?"*. Rubric 2 asks *"did the model
+record the brief's numeric target as a machine-readable constraint?"*. Rubric 1's
+question is now unanswerable **and no longer about the model at all**: the
+enricher derives the threshold from **brief text by regex**
+(`src/cee/factor-extraction/enricher.ts`, value from
+`extractGoalTargetWithBaseline`), not from anything the draft contains.
+
+⚠ **`goal_constraints[]` does NOT become the goal threshold.** Nothing maps a
+model-authored constraint into the quad; the array is forwarded to PLoT
+(`parse.ts` → `compound-goals.ts` → `package.ts`). Do not read the numeric-target
+sub-dimension as a proxy for threshold extraction.
+
+Known overlap, stated rather than hidden: dimension 5 (*constraint retention*)
+also reads `goal_constraints[]`, but only against a brief's
+`expected_constraints` front-matter — which **no brief in `briefs/` currently
+sets**, so dimension 5 returns 1.0 (not-applicable) for the whole shipped corpus.
+The two terms ask different questions (*was the target recorded at all* vs *does
+each expected constraint match on operator and value*), but if
+`expected_constraints` is ever populated they will share evidence.
+
+Effect on `scripts/pipeline-parity-benchmark.ts`: under rubric 1 that benchmark
+was **structurally biased**. Its pipeline arm goes through the enricher and
+carries the quad; its raw arm cannot, post-#789. The pipeline therefore banked up
+to 0.20 of completeness and 0.10 of currency that no raw draft could match — a
+delta attributable to a forbidden field, not to pipeline quality. Parity deltas
+from earlier runs are not comparable with rubric-2 deltas.
+
+#### `draft-graph-rubric-1` — everything before the above
+
+Unlabelled. Rewarded the goal-threshold quad. Results carry no `rubric_version`
+column.
+
 ### 1. Structural validity (pass/fail)
 
 Validates graph topology against the decision-graph specification:
@@ -166,19 +243,43 @@ Scores the diversity and calibration of causal edge parameters. Calculated from 
 
 | Sub-dimension | Weight | Description |
 |---|---|---|
-| External factor present | 20% | At least 1 factor with category="external". |
-| Coaching populated | 20% | Coaching object has ≥1 strengthen_item or a non-empty summary. |
-| Goal threshold | 20% | When brief.has_numeric_target=true, goal node has goal_threshold set. |
+| External factor present | 15% | At least 1 factor with category="external". |
+| Coaching populated | 15% | Coaching object has ≥1 strengthen_item or a non-empty summary. |
+| Numeric-target capture | 20% | When `brief.has_numeric_target=true`: a well-formed `goal_constraints[]` entry (finite `value` + `>=`/`<=`). 1.0 on the goal node, 0.5 on another node, 0.0 if absent. Full marks when the brief has no numeric target. **Rubric 2 — see the changelog above; this was `goal_threshold` under rubric 1.** |
 | Factor label specificity | 20% | Proportion of factors with non-generic labels. Generic = ["market risk", "competition", "cost", "revenue", "growth", "risk", "demand", "supply"]. |
 | Readability band | 20% | 6–12 nodes = full marks; 13–20 = 0.5 marks; >20 = 0 marks. |
+| Currency preservation | 10% | When the brief names a currency, the graph preserves it in a **model-permitted** unit field: goal node `data.unit` → `goal_constraints[].unit` → any node's `data.unit`. Matched = 1.0, some unit but unmatched = 0.5, no unit anywhere = 0.0. Full marks when the brief names no currency. |
 
 ### 5. Overall score
 
 ```
-overall_score = param_quality × 0.30 + option_diff × 0.30 + completeness × 0.40
+overall_score = param_quality           × 0.20
+              + option_diff             × 0.20
+              + completeness            × 0.20
+              + constraint_retention    × 0.15
+              + external_factor_presence × 0.10
+              + coaching_quality        × 0.10
+              + ratio_encoding          × 0.05
 ```
 
 Only calculated when `structural_valid === true`.
+
+> ⚠ **This section was stale and has been corrected (2026-08-02).** It documented
+> a three-dimension formula (`0.30 / 0.30 / 0.40`) and a five-sub-dimension
+> completeness table, neither of which the code has used since the seven-dimension
+> weighting landed — the weights above are read off `src/scorer.ts`. Dimensions
+> 5–8 below were entirely undocumented here. A rubric description that drifts from
+> the rubric is the same hand-maintained-mirror defect this tool now guards
+> against in `tests/rubric-invariant.test.ts`; derive from `src/scorer.ts` if this
+> table and the code ever disagree again.
+>
+> ⚠ Note also that dimensions 5 (constraint retention), 6 (ratio encoding) and 7
+> (external factor presence) are gated on brief front-matter
+> (`expected_constraints`, `ratio_metrics`, `expect_external_factor`) that **no
+> brief in `briefs/` currently sets**. All three therefore return 1.0
+> (not-applicable) for the entire shipped corpus — 30% of `overall_score` is
+> currently constant. That is a corpus gap, not a rubric change, and it is not
+> addressed by rubric 2.
 
 ### Efficiency metrics (not scored)
 

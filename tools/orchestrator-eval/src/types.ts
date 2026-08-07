@@ -62,24 +62,145 @@ export interface OrchestratorEvalFixture {
   readonly expected: Readonly<Record<string, boolean>>;
 }
 
+/**
+ * Where a dimension's rule comes from.
+ *   - `production-guard`     re-exported runtime code; eval and runtime cannot drift.
+ *   - `served-prompt-derived` PARSED out of the served prompt text at run time,
+ *                            so the rule tracks a prompt bump instead of
+ *                            mirroring one moment of it (see
+ *                            decision-review/served-contract.ts).
+ *   - `eval-assertion`       this pack's own worked logic, with its reasoning
+ *                            written down at the definition site.
+ */
+export type DimensionSource = 'production-guard' | 'served-prompt-derived' | 'eval-assertion';
+
+/**
+ * THREE states, not two. This is the correction that matters most in the pack.
+ *
+ * A dimension that could NOT be evaluated — because the input lacks the field
+ * it reads, or the contract imposes no constraint on this run — is
+ * `not_applicable`. It is NOT a pass.
+ *
+ * The first version of this pack had only pass/fail, so an unevaluable
+ * dimension reported `pass: true, scanned: 0` and was counted in the
+ * denominator. The committed baseline therefore read "18/19" when one of those
+ * nineteen had measured nothing at all: `tone_alignment` resolves its row from
+ * `deterministic_coaching`, which a response-only capture does not carry. An
+ * unmeasured dimension counted as a pass — the exact dishonesty this pack
+ * exists to catch, inside the pack.
+ *
+ * Consequences, all enforced:
+ *   - NA is EXCLUDED from the measured denominator and reported out-of-band;
+ *   - NA never contributes to `pass` (it is not a failure either);
+ *   - a MEASURED-clean dimension that carries a `scanned` count must carry a
+ *     NON-ZERO one, so "passed" and "did not look" can never render alike.
+ *     Asserted for the whole pack in decision-review-anti-vacuity.test.ts.
+ */
+export type DimensionStatus = 'pass' | 'fail' | 'not_applicable';
+
+/** What a dimension's `scanned` count actually counts. */
+export type ScannedUnit =
+  | 'prose_strings' // user-facing strings collected from the output
+  | 'output_strings' // every string in the output, id-bearing fields included
+  | 'graph_ids' // entity ids available to ground against
+  | 'capped_items' // items the contract count-caps were applied to
+  | 'entity_refs' // bias affected_elements references checked
+  | 'descriptive_numbers' // numbers found in the runtime's descriptive fields
+  | 'option_keys' // option ids the run defines
+  | 'headlines' // story_headlines values available to compare
+  | 'scenario_keys' // scenario_contexts keys examined
+  | 'sibling_sections'; // sections compared against primary_risk
+
 /** One scored dimension of a candidate. */
 export interface DimensionResult {
   /** Dimension name (stable key for reporting). */
   readonly name: string;
-  /** Whether this dimension passed. */
+  /**
+   * False ONLY when `status === 'fail'`. A `not_applicable` dimension does not
+   * fail a candidate — but it does not pass one either; read `status` for that
+   * distinction and NEVER infer "measured and clean" from this boolean alone.
+   */
   readonly pass: boolean;
-  /** Where the check comes from — a PRODUCTION guard, or this pack's own logic. */
-  readonly source: 'production-guard' | 'eval-assertion';
+  /** pass | fail | not_applicable — see {@link DimensionStatus}. */
+  readonly status: DimensionStatus;
+  /** Where the check comes from. */
+  readonly source: DimensionSource;
   /** Human-readable evidence, e.g. the offending phrase or "clean". */
   readonly detail: string;
+  /**
+   * ANTI-VACUITY INSTRUMENT — how many units this dimension actually examined.
+   *
+   * Every absence check ("no banned term", "no fabricated callback") passes
+   * trivially when there is nothing to look at, so a green absence dimension is
+   * only meaningful alongside proof that it SAW something. Trap 13 in miniature:
+   * a leak test that captured 0 bytes passed every "no raw value present"
+   * assertion by testing nothing.
+   *
+   * ⚠ ALWAYS THE CONTENT EXAMINED — never the number of rules applied.
+   *
+   * An earlier draft let this field mean either, and the ambiguity flattered
+   * exactly the dimensions that needed watching: `no_banned_lexicon` reported
+   * `scanned: 10` (ten parsed banned terms) on an output containing no prose at
+   * all, which reads as thoroughly measured when nothing was checked. Ten rules
+   * applied to zero strings is zero checks. Rule-set sizes now live in
+   * `detail` ("clean against 10 banned terms"), where they inform without
+   * inflating.
+   *
+   * So a non-zero value here is always real anti-vacuity evidence, and the
+   * assertion over it needs no per-dimension interpretation. {@link scannedUnit}
+   * says WHICH content was counted.
+   *
+   * Optional because some presence dimensions (`shape_valid`,
+   * `review_card_coverage`) inspect a single field rather than a corpus.
+   */
+  readonly scanned?: number;
+
+  /** What {@link scanned} counts — CONTENT or RULES. See the note above. */
+  readonly scannedUnit?: ScannedUnit;
 }
 
 /** The deterministic score for one candidate. */
 export interface ScoreResult {
   readonly candidate: string;
-  /** Overall pass = every dimension passed. */
+  /** Overall pass = no dimension FAILED. `not_applicable` does not fail. */
   readonly pass: boolean;
   readonly dimensions: readonly DimensionResult[];
+  /**
+   * Dimensions actually evaluated. THE DENOMINATOR for any "N/M" statement —
+   * never `dimensions.length`, which silently counts the unevaluable ones.
+   */
+  readonly measured: number;
+  /** Dimensions that could not be evaluated. Reported OUT OF BAND, never as passes. */
+  readonly notApplicable: number;
+  /** Measured dimensions that passed. The NUMERATOR. */
+  readonly passed: number;
+}
+
+/**
+ * Build a {@link ScoreResult} from its dimensions, deriving the verdict and the
+ * measured/NA split in ONE place.
+ *
+ * Centralised deliberately: every "N/M" figure this tool reports — CLI output,
+ * committed report JSON, the baseline README — comes from here, so a
+ * `not_applicable` dimension cannot be counted as a pass in one reader and not
+ * another. That divergence is precisely how the first baseline came to claim
+ * 18/19.
+ */
+export function finaliseScore(
+  candidate: string,
+  dimensions: readonly DimensionResult[],
+): ScoreResult {
+  const notApplicable = dimensions.filter((d) => d.status === 'not_applicable').length;
+  const failed = dimensions.filter((d) => d.status === 'fail').length;
+  const measured = dimensions.length - notApplicable;
+  return {
+    candidate,
+    pass: failed === 0,
+    dimensions,
+    measured,
+    notApplicable,
+    passed: measured - failed,
+  };
 }
 
 /** The result of evaluating one fixture (assembly + every candidate scored). */

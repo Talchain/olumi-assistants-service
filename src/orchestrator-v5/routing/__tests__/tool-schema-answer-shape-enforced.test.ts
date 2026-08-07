@@ -216,7 +216,14 @@ describe('answer_shape — schema pressure (unconditional)', () => {
     ).toThrow(ToolCallParseError);
   });
 
-  it('execute remains FORBIDDEN from carrying answer_shape (and unaffected without one)', () => {
+  it('execute with a stray answer_shape is now COERCED (stripped), not rejected — repair-tax fix 2026-07-22', () => {
+    // BEHAVIOUR CHANGE (repair-tax fix): a stray top-level answer_shape on an
+    // execute action used to be a hard Zod rejection → a ~4-5s REPAIR_ONCE
+    // second LLM call on ~every forced pill. It is now STRIPPED on the first
+    // pass (answer_shape is forbidden on execute, and non-load-bearing there).
+    // On a MUTATION handler (run_analysis) there is no user-facing prose to
+    // lift, so it is dropped outright. See REPAIR-TAX-ROOT-CAUSE-2026-07-22.md
+    // and first-pass-coercion.test.ts for the full coercion + telemetry pins.
     const validExecute = {
       intent_class: 'execute' as const,
       action: {
@@ -232,9 +239,9 @@ describe('answer_shape — schema pressure (unconditional)', () => {
       },
     };
     expect(() => parseToolCallResponse(validExecute)).not.toThrow();
-    expect(() =>
-      parseToolCallResponse({ ...validExecute, answer_shape: VALID_SHAPE }),
-    ).toThrow(/answer_shape is forbidden/);
+    const coerced = parseToolCallResponse({ ...validExecute, answer_shape: VALID_SHAPE });
+    expect(coerced.intent_class).toBe('execute');
+    expect((coerced as { answer_shape?: unknown }).answer_shape).toBeUndefined();
   });
 
   it('clarify remains FORBIDDEN from carrying answer_shape (and unaffected without one)', () => {

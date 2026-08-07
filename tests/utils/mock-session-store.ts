@@ -52,8 +52,45 @@ export function createMockSessionStore(
   const complete: Required<SessionStore> = {
     append: async () => ({ id: 'mock-row-id' }),
     readRecent: async () => [],
+    // Consistent with the empty `readRecent` above: no turns read, none
+    // stored. Tests probing the beyond-window disclosure override it.
+    countTurns: async () => 0,
+    // V5 TURN FENCE (Codex P0). This helper's `Required<SessionStore>` annotation
+    // is the drift alarm described above, and it FIRED for these two the moment
+    // they were added to the interface — which is exactly why it exists.
+    // Defaults mirror production's happy path: the claim succeeds, and the turn
+    // is the newest on its scenario, so a graph write passes the fence. A test
+    // that wants a refusal overrides `claimTurnFence`.
+    claimTurnFence: async (scenarioId: string, turnId: string) => ({
+      scenarioId,
+      turnId,
+      generation: 1,
+    }),
+    markTurnStopped: async () => ({
+      stopped: true,
+      claimed: true,
+      alreadyCommitted: false,
+    }),
+    // 2.174 fix a: benign default = the scenario exists, so every suite keeps
+    // recording Stops unless it seeds an unknown scenario deliberately.
+    scenarioExists: async () => true,
+    // ROADMAP 2.236: benign default = the turn WAS admitted (its fence row
+    // exists), matching `claimTurnFence`'s succeeding default above, so every
+    // suite keeps recording Stops unless it seeds an un-admitted turn id
+    // deliberately.
+    turnFenceRowExists: async () => true,
+    // ROADMAP 2.171: benign default = NOT post-Stop, so every suite keeps the
+    // ordinary coach copy unless it seeds the tombstone deliberately.
+    wasLatestScenarioTurnStopped: async () => false,
     readFactsFor: async () => [],
     readFactsWithTurnFor: async () => [],
+    // Consistent with the empty fact reads above: this scenario has no
+    // analysis. The read SUCCEEDS and reports none — which is the honest
+    // default and NOT the same as the read failing. A default that threw would
+    // arm the claim-safety fail-closed guard across the whole suite; a store
+    // that omitted the method would report "degraded" forever. Tests exercising
+    // the scenario-scoped claim-safety path override it.
+    readNewestAnalysisFactFor: async () => null,
     invalidateScoped: async (_scenarioId, scope) => ({
       scope,
       entries_invalidated: [],
@@ -70,6 +107,17 @@ export function createMockSessionStore(
     readMostRecentPendingActions: async () => [],
     readMostRecentCoachingState: async () => null,
     hasPriorTurns: async () => false,
+    // ROADMAP 2.709 — the drift alarm fired again for these three, as designed.
+    hasOtherAdmittedLiveTurn: async () => false,
+    scenarioDraftLossStands: async () => false,
+    markGraphWriteFailed: async () => undefined,
+    // ROADMAP 2.735 — the drift alarm fired again here, as designed (#848 added
+    // this method to the interface and this helper was not updated, reddening
+    // BOTH test-file typecheck watchers — see the header). Benign default =
+    // the resolution write succeeds and reports nothing, matching production's
+    // best-effort/log-only contract. Consistent with `scenarioDraftLossStands`
+    // above returning `false`: no outstanding loss, so resolving is a no-op.
+    resolveScenarioDraftLoss: async () => undefined,
   };
   return { ...complete, ...overrides };
 }

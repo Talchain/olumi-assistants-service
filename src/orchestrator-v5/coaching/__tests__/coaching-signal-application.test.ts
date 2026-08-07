@@ -34,7 +34,32 @@ vi.mock('../last-coaching-signal-log.js', async () => {
 });
 
 import { applyCoachingSignal } from '../coaching-signal-application.js';
+import type { ClaimSafetyScenarioScope } from '../../context/claim-safety-read.js';
 
+/**
+ * ROADMAP 2.804 — the scenario scope every caller must now supply. Array-only:
+ * no scenario-scoped read, so the degraded-store fail-closed fallback cannot
+ * arm and the permission is decided purely by the facts each test passes.
+ */
+const SCOPE: ClaimSafetyScenarioScope = {
+  newestAnalysisFact: null,
+  readOk: true,
+  windowTruncated: false,
+};
+
+/**
+ * ROADMAP 2.804 — `constraint_verdict` is now LOAD-BEARING in this fixture and
+ * was previously absent.
+ *
+ * The coaching slot's leader-claim permission used to come from an internal
+ * handler-outcome channel that defaulted to "permitted"; it now comes from the
+ * fact chain, which fails CLOSED on a fact carrying no verdict stamp. An
+ * unstamped fact is the pre-#710 population — a shape `run_analysis` has not
+ * written since — so a fixture without this stamp was not modelling a current
+ * production turn at all, and would now (correctly) read as withheld and
+ * suppress the very signals these tests are about. Stamped permitted here, in
+ * the exact shape `projectClaimSafety` writes.
+ */
 function runFact(): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -44,6 +69,10 @@ function runFact(): HandlerFact {
       scenario_id: 'scen-a',
       leading_option_id: 'opt-1',
       summary: 'Ran analysis',
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'not_applicable',
+      },
     },
   } as unknown as HandlerFact;
 }
@@ -61,6 +90,7 @@ describe('applyCoachingSignal', () => {
     const facts = [runFact()];
     const out = applyCoachingSignal({
       proposedHandlerId: 'run_analysis',
+      claimSafetyScope: SCOPE,
       outcome: runOutcome(),
       contextPack: null,
       priorFacts: [],
@@ -88,6 +118,7 @@ describe('applyCoachingSignal', () => {
     const facts = [runFact()];
     const out = applyCoachingSignal({
       proposedHandlerId: 'run_analysis',
+      claimSafetyScope: SCOPE,
       outcome: runOutcome(),
       contextPack: null,
       priorFacts: [runFact()],
@@ -109,6 +140,7 @@ describe('applyCoachingSignal', () => {
     const facts = [runFact()];
     const out = applyCoachingSignal({
       proposedHandlerId: 'explain_results',
+      claimSafetyScope: SCOPE,
       outcome: runOutcome(),
       contextPack: null,
       priorFacts: [],

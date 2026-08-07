@@ -64,6 +64,15 @@ function resolveConfiguredProvider(): string {
 /**
  * Resolve the model and source for a single task.
  *
+ * ⚠ RENAMED from `resolveTaskModel` (sweep-2 efficiency note, adjudicated):
+ * `config/model-resolution-logger.ts` carries a module-private function of
+ * that exact name with DIFFERENT semantics — it models the task-tier
+ * (CEE_MODEL_TASK_*) precedence and no provider mismatch; this one models
+ * provider mismatch and no task tier. Same-named twins with divergent
+ * semantics are the `generateGraphHash` conflation shape (CLAUDE.md trap
+ * 12's expensive cousin), so this copy is named for what it returns: the
+ * admin route's `TaskRouting`.
+ *
  * Replicates router.ts getAdapter() precedence for the task default path:
  * 1. CEE_MODEL_* env override — unconditionally applied (no provider check)
  * 2. TASK_MODEL_DEFAULTS — only when task default provider matches configured provider
@@ -73,7 +82,7 @@ function resolveConfiguredProvider(): string {
  * Note: providers.json config-file overrides and request-time overrides are
  * not reflected here — those are per-request and not determinable statically.
  */
-function resolveTaskModel(task: CeeTask, configuredProvider: string): TaskRouting {
+function resolveTaskRouting(task: CeeTask, configuredProvider: string): TaskRouting {
   const ceeModelKey = TASK_TO_CEE_MODEL_KEY[task];
 
   // Step 1: CEE_MODEL_* env var override — applied unconditionally
@@ -131,7 +140,7 @@ export async function adminModelRoutes(app: FastifyInstance): Promise<void> {
 
     const configuredProvider = resolveConfiguredProvider();
     const tasks = Object.keys(TASK_MODEL_DEFAULTS) as CeeTask[];
-    const taskList = tasks.map((task) => resolveTaskModel(task, configuredProvider));
+    const taskList = tasks.map((task) => resolveTaskRouting(task, configuredProvider));
 
     return reply
       .header('Cache-Control', 'no-store')

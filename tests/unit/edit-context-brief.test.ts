@@ -1,17 +1,19 @@
 /**
- * Context Architecture v2 — S2 "brief → edit/repair" (ROADMAP 1.73).
+ * Context Architecture v2 — S2 "brief → edit/repair" (ROADMAP 1.199).
  *
- * Design of record: docs-designs/CONTEXT-ARCHITECTURE-V2-2026-07-13/
- *   - 02 §Seam 1 — edit_graph/repair get NOTHING today; target = a
+ * Design of record: docs-designs/CONTEXT-ARCHITECTURE-V2-2026-07-13/ +
+ * CONTEXT-POLICY-DESIGN-2026-07-23.
+ *   - 02 §Seam 1 — edit_graph/repair got NOTHING of the brief; target = a
  *     1,000-char first-N slice of the same normalised brief text,
  *     DISCLOSED, threaded as `ConversationContext.brief` + a
  *     `## Decision Brief` section in the edit-context serialiser.
  *     Repair inherits automatically (it reuses the same contextSection).
- *   - 05 §S2 — flag `CEE_CONTEXT_BRIEF_ALL_SITES`, RED: edit prompt
- *     fixture contains brief slice, disclosed.
+ *   - S2 is now shipped ON: the CEE_CONTEXT_BRIEF_ALL_SITES flag is DELETED
+ *     (no-dark-launches — flip = code, rollback = revert). dispatchEditGraph
+ *     reads the brief UNCONDITIONALLY. Mutation-check: reverting the flip
+ *     (re-adding the flag guard) makes the unconditional-read tests below RED.
  *
- * Flag-off byte-identity: no store read, no `brief` on the context, no
- * section in the prompt.
+ * No-brief byte-identity: no `brief` on the context, no section in the prompt.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
@@ -103,11 +105,9 @@ function makeAppliedEditResult(): EditGraphResult {
 
 const STUB_REQUEST = {} as FastifyRequest;
 
-const envBackup: Record<string, string | undefined> = {};
-
 beforeEach(() => {
   vi.clearAllMocks();
-  envBackup.CEE_CONTEXT_BRIEF_ALL_SITES = process.env.CEE_CONTEXT_BRIEF_ALL_SITES;
+  _resetConfigCache();
   (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(makeAppliedEditResult());
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue({
     response: {},
@@ -118,11 +118,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  if (envBackup.CEE_CONTEXT_BRIEF_ALL_SITES === undefined) {
-    delete process.env.CEE_CONTEXT_BRIEF_ALL_SITES;
-  } else {
-    process.env.CEE_CONTEXT_BRIEF_ALL_SITES = envBackup.CEE_CONTEXT_BRIEF_ALL_SITES;
-  }
   _resetConfigCache();
   vi.restoreAllMocks();
 });
@@ -214,30 +209,14 @@ describe('serialiseEditContextForLLM — ## Decision Brief section', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Dispatch threading — flag-gated store read
+// Dispatch threading — UNCONDITIONAL store read (S2 shipped ON, flag deleted)
 // ---------------------------------------------------------------------------
 
-describe('dispatchEditGraph brief threading (CEE_CONTEXT_BRIEF_ALL_SITES)', () => {
-  it('flag OFF (default): no brief read, no brief on the handler context', async () => {
-    delete process.env.CEE_CONTEXT_BRIEF_ALL_SITES;
-    _resetConfigCache();
-
-    await dispatchEditGraph({
-      payload: makePayload(),
-      requestId: 'req-s2-off',
-      request: STUB_REQUEST,
-      graphState: INGRESS_GRAPH,
-      analysisState: null,
-    });
-
-    expect(loadScenarioBriefText).not.toHaveBeenCalled();
-    const context = (handleEditGraph as MockedFunction<typeof handleEditGraph>).mock.calls[0]![0];
-    expect('brief' in context).toBe(false);
-  });
-
-  it('flag ON: reads the scenario brief and threads the disclosed 1,000-char slice', async () => {
-    process.env.CEE_CONTEXT_BRIEF_ALL_SITES = 'true';
-    _resetConfigCache();
+describe('dispatchEditGraph brief threading (S2 unconditional, no flag)', () => {
+  it('reads the scenario brief UNCONDITIONALLY and threads the disclosed 1,000-char slice', async () => {
+    // Mutation-check: reverting the flip (re-adding the flag guard, default
+    // OFF) makes THIS assertion RED — loadScenarioBriefText would not be called
+    // and context.brief would be absent.
     (loadScenarioBriefText as MockedFunction<typeof loadScenarioBriefText>).mockResolvedValue(
       'w'.repeat(4_000),
     );
@@ -259,9 +238,28 @@ describe('dispatchEditGraph brief threading (CEE_CONTEXT_BRIEF_ALL_SITES)', () =
     });
   });
 
-  it('flag ON with no persisted brief: context carries no brief (never an empty section)', async () => {
-    process.env.CEE_CONTEXT_BRIEF_ALL_SITES = 'true';
-    _resetConfigCache();
+  it('ANAPHORA (S2 value): the threaded brief renders the ## Decision Brief section so a referent resolves', () => {
+    // The edit LLM must SEE the decision framing to resolve "the hire option"
+    // style referents (02 §Seam 1). With S2 on, the brief the dispatch threads
+    // becomes the first section of the edit prompt.
+    const briefText =
+      'Should we hire two senior engineers locally (the hire option) or engage an offshore partner?';
+    const { text } = serialiseEditContextForLLMWithMeta({
+      graph: {
+        nodes: [{ id: 'dec_hire', kind: 'decision', label: 'Hire?' }],
+        edges: [],
+      } as unknown as ConversationContext['graph'],
+      analysis_response: null,
+      framing: null,
+      messages: [{ role: 'user', content: 'increase the strength of the hire option edge' }],
+      scenario_id: SCENARIO_ID,
+      brief: projectBriefForEdit(briefText),
+    });
+    expect(text.startsWith('## Decision Brief')).toBe(true);
+    expect(text).toContain('the hire option');
+  });
+
+  it('no persisted brief: context carries no brief (never an empty section)', async () => {
     (loadScenarioBriefText as MockedFunction<typeof loadScenarioBriefText>).mockResolvedValue(null);
 
     await dispatchEditGraph({
@@ -276,9 +274,7 @@ describe('dispatchEditGraph brief threading (CEE_CONTEXT_BRIEF_ALL_SITES)', () =
     expect(context.brief ?? null).toBeNull();
   });
 
-  it('flag ON: a brief-read failure degrades to no-brief (never fails the turn)', async () => {
-    process.env.CEE_CONTEXT_BRIEF_ALL_SITES = 'true';
-    _resetConfigCache();
+  it('a brief-read failure degrades to no-brief (never fails the turn)', async () => {
     (loadScenarioBriefText as MockedFunction<typeof loadScenarioBriefText>).mockRejectedValue(
       new Error('store unavailable'),
     );

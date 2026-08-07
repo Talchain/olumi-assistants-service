@@ -1,0 +1,300 @@
+/**
+ * Label-value divergence detector — the deterministic cross-check that a
+ * label edit whose text carries a CHANGED quantitative value has not silently
+ * diverged from the node's modelled value.
+ *
+ * The live P0 (user-seat critique, build e7f312d, scenario 7b0f2246): the user
+ * asked to "change the raise option from $49 to $39". `change` is deliberately
+ * excluded from the value-update gate's suppressor (routing/value-update-gate),
+ * so the turn dispatched to the edit_graph LLM, which emitted a LABEL-ONLY
+ * `update_node` — renaming the option label to embed "$39" while touching NO
+ * intervention. The deterministic receipt treated the label-only op as cosmetic
+ * ("Renamed …") and claimed success, but the option's `fac_price` intervention
+ * stayed 0.49: the label now says $39 while every re-run computes $49, and the
+ * receipt lies about it. This is the THIRD leg of the silent-wrong-value family
+ * (the typed-chip and typed-text value legs are already closed).
+ *
+ * Doctrine (b), consent-first: apply the label rename the op asked for, but
+ * NEVER silently mutate the modelled value on top of it (a value change is a
+ * different consent class — it affects model outputs and re-runs, and its
+ * unit/derivation is exactly what the value-update path exists to get right).
+ * Instead DISCLOSE the divergence honestly and offer the typed configure
+ * affordance. This module is the single detector both surfaces derive from:
+ *
+ *   - the applied-changes receipt (`buildAppliedChanges`) uses
+ *     `buildLabelValueDivergenceDescription` so the structured card can never
+ *     read as a completed value change, and
+ *   - the edit handler appends `buildLabelValueDivergenceNote` to the assistant
+ *     text and `buildLabelValueDivergenceActions` to the suggested actions.
+ *
+ * Safe-biased and tightly scoped so a plain rename is never disturbed: a
+ * divergence requires (1) an `update_node` op that changes the label but
+ * changes NO modelled value, on a node that (2) actually carries a modelled
+ * numeric value, whose (3) label had a numeric token REPLACED by a different
+ * one (both an old-only and a new-only quantity). A pure rename, an added
+ * annotation, or a formatting-only change is NOT a divergence.
+ */
+
+import type { SuggestedAction } from '../orchestrator/types.js';
+import { buildConfigureOptionChip } from './configure-option-chip-text.js';
+
+type Dict = Record<string, unknown>;
+
+export interface LabelValueDivergence {
+  /** Index of the operation within the batch. */
+  readonly index: number;
+  /** Node id (op.path). Internal — never rendered to the user. */
+  readonly path: string;
+  /** Render-safe resolved label (post-edit). */
+  readonly label: string;
+  readonly oldLabel: string;
+  readonly newLabel: string;
+  /** The raw numeric token replaced (e.g. "$49"). */
+  readonly oldValueToken: string;
+  /** The raw numeric token it was replaced with (e.g. "$39"). */
+  readonly newValueToken: string;
+  /** True when the node is an option (drives the configure-option affordance). */
+  readonly isOption: boolean;
+}
+
+function isPlainObject(v: unknown): v is Dict {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function finiteNum(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function nodesOf(graph: unknown): Dict[] {
+  if (!isPlainObject(graph) || !Array.isArray(graph.nodes)) return [];
+  return (graph.nodes as unknown[]).filter(isPlainObject);
+}
+
+function nodeById(graph: unknown, id: string): Dict | undefined {
+  return nodesOf(graph).find((n) => n.id === id);
+}
+
+/** True when an intervention bundle carries at least one finite numeric value. */
+function bundleHasNumericValue(bundle: unknown): boolean {
+  if (!isPlainObject(bundle)) return false;
+  for (const iv of Object.values(bundle)) {
+    if (finiteNum(iv) !== undefined) return true;
+    if (isPlainObject(iv) && (finiteNum(iv.value) !== undefined || finiteNum(iv.raw_value) !== undefined)) return true;
+  }
+  return false;
+}
+
+/**
+ * True when the node carries a modelled numeric value whose display the label
+ * is expected to track: an option with a numeric intervention, or a
+ * factor/other node with a numeric `observed_state.value` / top-level `value`.
+ * A node with no modelled value (a purely nominal "Phase 3" factor) is not in
+ * scope — its label numbers are a name, not a quantity.
+ */
+function nodeHasModelledValue(node: Dict): boolean {
+  if (bundleHasNumericValue(node.interventions)) return true;
+  const data = node.data;
+  if (isPlainObject(data) && bundleHasNumericValue(data.interventions)) return true;
+  const obs = node.observed_state;
+  if (isPlainObject(obs) && finiteNum(obs.value) !== undefined) return true;
+  if (finiteNum(node.value) !== undefined) return true;
+  return false;
+}
+
+/** True when this op's value payload changes a modelled value (not just a label). */
+function opChangesModelledValue(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  if (finiteNum(value.value) !== undefined) return true;
+  if (value.interventions != null) return true;
+  if (value.observed_state != null) return true;
+  if (finiteNum(value.raw_value) !== undefined) return true;
+  const data = value.data;
+  if (isPlainObject(data) && data.interventions != null) return true;
+  return false;
+}
+
+/**
+ * Extract quantitative tokens from a label: optional currency, a number (with
+ * thousands separators / decimals), optional percent or magnitude suffix.
+ */
+const TOKEN_RE = /[£$€]?-?\d[\d,]*(?:\.\d+)?(?:%|bn|k|m|b)?/gi;
+
+interface ValueToken {
+  readonly raw: string;
+  /** Magnitude+unit key used for equivalence (ignores currency + separators). */
+  readonly key: string;
+}
+
+/** Canonical key for a token so formatting differences ($49 vs 49) compare equal. */
+function tokenKey(raw: string): string {
+  let t = raw.trim().toLowerCase().replace(/[£$€,\s]/g, '');
+  const isPct = t.endsWith('%');
+  if (isPct) t = t.slice(0, -1);
+  let mult = 1;
+  const suffix = t.match(/(bn|k|m|b)$/);
+  if (suffix) {
+    const s = suffix[1];
+    mult = s === 'k' ? 1e3 : s === 'm' ? 1e6 : 1e9; // bn / b
+    t = t.slice(0, -s.length);
+  }
+  const n = parseFloat(t);
+  if (!Number.isFinite(n)) return '';
+  return `${n * mult}${isPct ? '%' : ''}`;
+}
+
+function extractValueTokens(label: string): ValueToken[] {
+  const out: ValueToken[] = [];
+  const matches = label.match(TOKEN_RE) ?? [];
+  for (const raw of matches) {
+    const key = tokenKey(raw);
+    if (key.length > 0) out.push({ raw, key });
+  }
+  return out;
+}
+
+/** Tokens present (by key, as a multiset) in `a` but not `b`. */
+function tokensOnlyIn(a: ValueToken[], b: ValueToken[]): ValueToken[] {
+  const remaining = b.map((t) => t.key);
+  const only: ValueToken[] = [];
+  for (const t of a) {
+    const at = remaining.indexOf(t.key);
+    if (at === -1) only.push(t);
+    else remaining.splice(at, 1);
+  }
+  return only;
+}
+
+function detectOne(
+  op: unknown,
+  index: number,
+  preGraph: unknown,
+  postGraph: unknown,
+  valueChangedPaths: ReadonlySet<string>,
+): LabelValueDivergence | null {
+  if (!isPlainObject(op) || op.op !== 'update_node' || typeof op.path !== 'string') return null;
+  const value = op.value;
+  if (!isPlainObject(value)) return null;
+  const newLabel = typeof value.label === 'string' ? value.label : null;
+  if (newLabel === null) return null; // no label change → not this class
+  if (opChangesModelledValue(value)) return null; // the LLM already changed the model too
+  if (valueChangedPaths.has(op.path)) return null; // a sibling op changed this node's value
+
+  const preNode = nodeById(preGraph, op.path);
+  const oldValue = op.old_value;
+  const oldLabel =
+    isPlainObject(oldValue) && typeof oldValue.label === 'string'
+      ? oldValue.label
+      : preNode && typeof preNode.label === 'string'
+        ? preNode.label
+        : null;
+  if (oldLabel === null) return null;
+
+  // The node whose modelled value the label is supposed to track.
+  const node = preNode ?? nodeById(postGraph, op.path);
+  if (!node || !nodeHasModelledValue(node)) return null;
+
+  const oldTokens = extractValueTokens(oldLabel);
+  const newTokens = extractValueTokens(newLabel);
+  const oldOnly = tokensOnlyIn(oldTokens, newTokens);
+  const newOnly = tokensOnlyIn(newTokens, oldTokens);
+  // A REPLACED quantity: a token present before is gone and a different one
+  // took its place. Add-only / remove-only / formatting-only are excluded.
+  if (oldOnly.length === 0 || newOnly.length === 0) return null;
+
+  const postNode = nodeById(postGraph, op.path);
+  const label = (postNode && typeof postNode.label === 'string' ? postNode.label : newLabel) || oldLabel;
+
+  return {
+    index,
+    path: op.path,
+    label,
+    oldLabel,
+    newLabel,
+    oldValueToken: oldOnly[0]!.raw,
+    newValueToken: newOnly[0]!.raw,
+    isOption: node.kind === 'option',
+  };
+}
+
+/**
+ * Detect every operation in the batch that renames a label so its embedded
+ * quantity changes while the node's modelled value does not.
+ */
+export function detectLabelValueDivergences(
+  operations: unknown,
+  preGraph: unknown,
+  postGraph: unknown,
+): LabelValueDivergence[] {
+  if (!Array.isArray(operations)) return [];
+
+  // Paths whose modelled value changed anywhere in the batch — a label rename
+  // on such a node is a legitimate accompaniment, not a divergence.
+  const valueChangedPaths = new Set<string>();
+  for (const op of operations) {
+    if (isPlainObject(op) && op.op === 'update_node' && typeof op.path === 'string' && opChangesModelledValue(op.value)) {
+      valueChangedPaths.add(op.path);
+    }
+  }
+
+  const out: LabelValueDivergence[] = [];
+  operations.forEach((op, index) => {
+    const d = detectOne(op, index, preGraph, postGraph, valueChangedPaths);
+    if (d) out.push(d);
+  });
+  return out;
+}
+
+/**
+ * The honest description for the applied-changes receipt: the label DID change,
+ * but only the display text — the modelled value did not.
+ */
+export function buildLabelValueDivergenceDescription(d: LabelValueDivergence): string {
+  const kind = d.isOption ? 'option' : 'factor';
+  return (
+    `Renamed the ${kind} to "${d.newLabel}" — display text only. ` +
+    `The modelled value is unchanged (still ${d.oldValueToken}, not ${d.newValueToken}).`
+  );
+}
+
+/**
+ * The honest assistant-text disclosure for a set of divergences. Returns null
+ * when there are none so callers can omit it cleanly.
+ */
+export function buildLabelValueDivergenceNote(divergences: readonly LabelValueDivergence[]): string | null {
+  if (divergences.length === 0) return null;
+  const sentences = divergences.map((d) => {
+    const kind = d.isOption ? 'option' : 'factor';
+    return (
+      `Heads up — that changed the label text only. The ${kind} now reads "${d.newLabel}", ` +
+      `but its modelled value is unchanged, so re-running the analysis will still use ${d.oldValueToken}, ` +
+      `not ${d.newValueToken}. Want me to update the modelled value to ${d.newValueToken}?`
+    );
+  });
+  return sentences.join('\n\n');
+}
+
+/**
+ * The typed affordance that actually changes the value. For an option this is
+ * the canonical configure-option chip (its replayed message routes to the
+ * configure-option lane that WRITES interventions); for a factor it is a
+ * value-set prompt the deterministic value path can serve.
+ */
+export function buildLabelValueDivergenceActions(divergences: readonly LabelValueDivergence[]): SuggestedAction[] {
+  const actions: SuggestedAction[] = [];
+  const seen = new Set<string>();
+  for (const d of divergences) {
+    if (seen.has(d.path)) continue;
+    seen.add(d.path);
+    if (d.isOption) {
+      const chip = buildConfigureOptionChip(d.label);
+      actions.push({ label: chip.label, prompt: chip.message, role: 'facilitator' });
+    } else {
+      actions.push({
+        label: `Update ${d.label}`,
+        prompt: `set ${d.label} to ${d.newValueToken}`,
+        role: 'facilitator',
+      });
+    }
+  }
+  return actions;
+}

@@ -43,7 +43,10 @@ import {
   quoteLabel,
   type RawRobustnessSignals,
 } from '../../coaching/robustness-honesty.js';
-import type { FlipSummary } from '../../compose/flip-proposal.js';
+import {
+  resolveAgreedAlternativeWinner,
+  type FlipSummary,
+} from '../../compose/flip-proposal.js';
 
 export { formatSensitivityDirection };
 
@@ -440,9 +443,10 @@ export function composeExplainResultsFallback(
  * Robustness honesty (PR #193 SSOT reuse): when `rawRobustness` is
  * available the composer prefers the raw signal over the projected band
  * because canonicalisation can flatten a `very_low`/`low` raw level into
- * a moderate-sounding label. The chip-click path threads the raw signal
- * through (`dispatchChipClickNoopExplanation` → handler → here); routed
- * callers may pass `null` and the composer falls back to the projected band.
+ * a moderate-sounding label. The routed (turn-executor) path threads the raw
+ * signal through (`invocation.rawRobustness` → handler → here); callers
+ * without a raw signal may pass `null` and the composer falls back to the
+ * projected band.
  *
  * The margin sentence AND the closing robustness sentence both come from the
  * shared {@link composeRobustnessVerdict} (`flip` mode), so they resolve
@@ -549,10 +553,10 @@ export function composeWhatWouldFlipFallback(
     // threshold value here (the scale-safe "Test X at N" number is surfaced
     // by the separate flip-proposal chip, which honours the value_scale
     // contract); the prose names the factor so we never misprint a scale.
-    const concrete = flip!.entries
+    const namedEntries = flip!.entries
       .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value))
-      .slice(0, 2)
-      .map((e) => e.factor_label);
+      .slice(0, 2);
+    const concrete = namedEntries.map((e) => e.factor_label);
     if (concrete.length === 1) {
       sentences.push(
         `${concrete[0]} is the most likely single factor to change which option leads, so it is the clearest one to test.`,
@@ -561,6 +565,22 @@ export function composeWhatWouldFlipFallback(
       sentences.push(
         `${concrete[0]} and ${concrete[1]} are the most likely single factors to change which option leads, so they are the clearest ones to test.`,
       );
+    }
+
+    // PROVENANCE (contract step-2 slice 1): PLoT already computed WHICH option
+    // would lead once the tipping point is crossed and ships it as
+    // `alternative_winner_id` on every flip row. Name it from that IDENTITY —
+    // never from a label, and never re-derived here. `resolveAgreedAlternativeWinner`
+    // returns null unless the named rows agree on ONE id AND that id has a
+    // display name PLoT actually resolved (its `resolveLabel` echoes the raw id
+    // when lookup fails, so an id-shaped "label" is withheld, not printed).
+    // Null ⇒ this sentence is simply omitted and the copy is byte-identical to
+    // the pre-repair prose. We name the option only; no probability, no margin.
+    if (concrete.length > 0) {
+      const altWinner = resolveAgreedAlternativeWinner(namedEntries);
+      if (altWinner !== null) {
+        sentences.push(`If that happened, ${altWinner.display} would lead instead.`);
+      }
     }
   } else if (flipVerdict === 'insufficient_data') {
     sentences.push(

@@ -16,16 +16,20 @@
 import {
   ROLLING_SUMMARY_SLOT_LABELS,
   ROLLING_SUMMARY_SLOTS,
+  SLOT_RETENTION_REQUIRED,
   SUMMARY_FULL_HISTORY_READ_LIMIT,
   SUMMARY_SCHEMA_VERSION,
+  SUMMARY_SPEAKERS,
 } from './summary-types.js';
 import type {
   RollingSummary,
   RollingSummaryGenerator,
   RollingSummarySlot,
   RollingSummarySlotBlock,
+  SummarySpeaker,
 } from './summary-types.js';
 import type { ParsedSummarySlot } from './parse-summary.js';
+import { isEmptySlotText } from './retention.js';
 
 /** In-band honest-partiality disclosure appended to the stored text when the
  *  maintainer's full-history read filled its cap (Codex r2 fix 4a). Rendered
@@ -33,25 +37,41 @@ import type { ParsedSummarySlot } from './parse-summary.js';
  *  survives into the prompt. */
 export const HISTORY_CAP_DISCLOSURE = `(note: derived from the most recent ${SUMMARY_FULL_HISTORY_READ_LIMIT} turns only — earlier turns were not re-read)`;
 
+/** Resolve ordinal refs to real turn ids AND to the DERIVED speaker set.
+ *
+ *  The speakers come from the ordinal map the input builder produced (one
+ *  speaker per ordinal — build-input.ts `turnUnits`), never from the model's
+ *  prose. That is the whole point: an entry's attribution becomes a derived
+ *  fact about which utterances it cites, checkable by retention.ts, instead of
+ *  an unverifiable claim inside the generated text. */
 function resolveRefs(
   refs: readonly string[],
-  ordinalMap: ReadonlyMap<string, { turn_id: string; created_at: string }>,
-): string[] {
+  ordinalMap: ReadonlyMap<
+    string,
+    { turn_id: string; created_at: string; speaker?: SummarySpeaker }
+  >,
+): { ids: string[]; speakers: SummarySpeaker[] } {
   const ids: string[] = [];
   const seen = new Set<string>();
+  const speakers = new Set<SummarySpeaker>();
   for (const ref of refs) {
     const hit = ordinalMap.get(ref);
-    if (hit && !seen.has(hit.turn_id)) {
+    if (!hit) continue;
+    if (hit.speaker) speakers.add(hit.speaker);
+    if (!seen.has(hit.turn_id)) {
       seen.add(hit.turn_id);
       ids.push(hit.turn_id);
     }
   }
-  return ids;
+  return { ids, speakers: SUMMARY_SPEAKERS.filter((s) => speakers.has(s)) };
 }
 
 export function assembleSummaryFromParsed(args: {
   readonly parsedSlots: readonly ParsedSummarySlot[];
-  readonly ordinalMap: ReadonlyMap<string, { turn_id: string; created_at: string }>;
+  readonly ordinalMap: ReadonlyMap<
+    string,
+    { turn_id: string; created_at: string; speaker?: SummarySpeaker }
+  >;
   readonly watermark: { turn_id: string; created_at: string };
   readonly version: number;
   readonly generator: RollingSummaryGenerator;
@@ -59,8 +79,35 @@ export function assembleSummaryFromParsed(args: {
    *  its cap — the summary discloses its own partiality (stored marker +
    *  in-text note) instead of claiming silent completeness. */
   readonly historyCapped?: boolean;
+  /**
+   * RETENTION (2026-07-25). The prior summary, so a slot holding durable fact
+   * that this pass EMPTIED is CARRIED FORWARD rather than erased.
+   *
+   * Wholesale replacement was the module's only write mode: every pass rebuilt
+   * all four slots from the model's output alone, and nothing carried an old
+   * entry forward except the model choosing to restate it. Measured against
+   * the real summariser, a user turn that merely DOUBTED recorded history
+   * ("were you inventing them?") emptied RESOLVED in 57/57 samples versus
+   * 0/16 on neutral controls — deleting eight named decision records, and
+   * (because the injector reads a bare "(none)" as "the summariser looked and
+   * found none") replacing them with an affirmative claim that no such
+   * history exists.
+   *
+   * Carrying forward, rather than rejecting the pass, is deliberate: the model
+   * is usually RIGHT about the other three slots on that same turn (it
+   * correctly moves the user's challenge into OPEN), and freezing the whole
+   * summary every time a user expresses doubt is its own degradation. So the
+   * pass still lands and the watermark still advances — only the erasure is
+   * refused. Which slots qualify is SLOT_RETENTION_REQUIRED (OPEN legitimately
+   * empties when a question is answered).
+   */
+  readonly priorForRetention?: RollingSummary | null;
 }): RollingSummary {
   const { parsedSlots, ordinalMap, watermark, version, generator, historyCapped } = args;
+  const prior = args.priorForRetention ?? null;
+  const priorBySlot = new Map<RollingSummarySlot, RollingSummarySlotBlock>();
+  for (const b of prior?.slots ?? []) priorBySlot.set(b.slot, b);
+
   const bySlot = new Map<RollingSummarySlot, ParsedSummarySlot>();
   for (const p of parsedSlots) bySlot.set(p.slot, p);
 
@@ -69,14 +116,49 @@ export function assembleSummaryFromParsed(args: {
   for (const slot of ROLLING_SUMMARY_SLOTS) {
     const parsed = bySlot.get(slot);
     const text = parsed?.text.trim() ?? '';
-    const source_turn_ids = parsed ? resolveRefs(parsed.refs, ordinalMap) : [];
+    // "(none)" is the contract's explicit empty marker, and the parser hands it
+    // back VERBATIM rather than normalising it — so emptiness must be judged by
+    // the shared predicate, not by `length === 0`.
+    const isEmpty = isEmptySlotText(text);
+
+    // CARRY-FORWARD: this pass emptied a slot that held durable fact. Restore
+    // the prior entries verbatim — text AND provenance — so the record and
+    // its source turns both survive.
+    const priorBlock = priorBySlot.get(slot);
+    const priorEntries =
+      priorBlock?.entries.filter((e) => !isEmptySlotText(e.text.trim())) ?? [];
+    if (isEmpty && SLOT_RETENTION_REQUIRED[slot] && priorEntries.length > 0) {
+      const carried = priorEntries.map((e) => ({ ...e }));
+      textLines.push(
+        `${ROLLING_SUMMARY_SLOT_LABELS[slot]}: ${carried.map((e) => e.text).join(' ')}`,
+      );
+      slots.push({ slot, entries: carried });
+      continue;
+    }
+    const resolved = parsed
+      ? resolveRefs(parsed.refs, ordinalMap)
+      : { ids: [] as string[], speakers: [] as SummarySpeaker[] };
     // FRAME always renders (it is required); the other slots render their text
     // or a "(none)" marker so the injected block is stable and complete.
-    const rendered = text.length > 0 ? text : slot === 'FRAME' ? '' : '(none)';
+    const rendered = !isEmpty ? text : slot === 'FRAME' ? '' : '(none)';
     textLines.push(`${ROLLING_SUMMARY_SLOT_LABELS[slot]}: ${rendered}`);
     slots.push({
       slot,
-      entries: text.length > 0 ? [{ text, source_turn_ids }] : [],
+      entries:
+        !isEmpty
+          ? [
+              {
+                text,
+                source_turn_ids: resolved.ids,
+                // Conditional spread: ABSENT (not []) when nothing speaker-
+                // scoped was cited, so "unknown" stays distinguishable from
+                // "cited, and no assistant utterance among them".
+                ...(resolved.speakers.length > 0
+                  ? { source_speakers: resolved.speakers }
+                  : {}),
+              },
+            ]
+          : [],
     });
   }
   if (historyCapped === true) textLines.push(HISTORY_CAP_DISCLOSURE);

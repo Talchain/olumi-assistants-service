@@ -1,20 +1,44 @@
 /**
- * Stage 4 Substep 1: Orchestrator validation
+ * Stage 4 Substep 1b: Orchestrator validation — DETERMINISTIC ONLY.
  *
  * Source: Pipeline B lines 1135-1248
- * Runs graph-orchestrator validation with optional LLM repair.
- * Gated by config.cee.orchestratorValidationEnabled.
+ * Runs graph-orchestrator validation. Gated by
+ * config.cee.orchestratorValidationEnabled.
+ *
+ * ⚠ The LLM-repair limb was REMOVED (ROADMAP 2.740a). What it was and why it
+ * went, so nobody re-adds it from the shape of the old code:
+ *
+ *   - It never ran. Measured over a controlled 7-day window: 0 invocations
+ *     across 398 executions of this substep's own parent stage, with a
+ *     positive control proving the instrument could see a firing
+ *     (PHASE0-EVIDENCE-2026-07-28/substep1b-repair-measurement-2026-08-08.md).
+ *     The gate is false on staging and demo and absent→false in production.
+ *   - It was armed. `skipRepairDueToBudget` measured false on 398/398 turns,
+ *     so the in-code budget guard never disarmed it: one dashboard boolean
+ *     would have put a 60 s gpt-4.1 repair on 100 % of draft turns.
+ *   - Its hazard was worse than the draft-path repair removed by 2.731. It
+ *     replaced ctx.graph wholesale with NO preservation call at all, and —
+ *     uniquely — it adopted the LLM's candidate graph on the FAILURE limb
+ *     too (`ctx.graph = error.lastGraph`, where lastGraph was the graph the
+ *     validator had just rejected), with no wire disclosure on that path.
+ *   - The nearest evidence about the same call (same model, same
+ *     `repair_graph` prompt, same 60 s budget, adjacent pipeline position)
+ *     is 0 successes in 12 invocations.
+ *
+ * What was KEPT: `validateAndRepairGraph` is also a deterministic validator
+ * (Zod → structural-edge normalisation → validateGraph → normalise →
+ * validateGraphPostNormalisation). That still runs, still returns warnings,
+ * and still fails closed. Removing the LLM call is not removing the
+ * validator — do not conflate them.
  */
 
 import type { StageContext } from "../../types.js";
 import {
   validateAndRepairGraph,
   GraphValidationError,
-  type RepairOnlyAdapter,
 } from "../../../graph-orchestrator.js";
-import { getAdapter } from "../../../../adapters/llm/router.js";
 import { config } from "../../../../config/index.js";
-import { log, emit, calculateCost, TelemetryEvents } from "../../../../utils/telemetry.js";
+import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 import { buildCeeErrorResponse, isAdminAuthorized } from "../../../validation/pipeline.js";
 import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 
@@ -22,51 +46,12 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
   if (!config.cee.orchestratorValidationEnabled) return;
   if (!ctx.graph) return;
 
-  let repairOnlyAdapter: RepairOnlyAdapter | undefined;
-
-  if (!ctx.skipRepairDueToBudget) {
-    const modelOverride = (ctx.input as any).model as string | undefined;
-    const repairAdapter = getAdapter("repair_graph", modelOverride);
-
-    repairOnlyAdapter = {
-      async repairGraph(brief, failedGraph, errors, reqId) {
-        const violations = errors.map((e) => {
-          const location = e.path ? ` at ${e.path}` : "";
-          return `[${e.code}]${location}: ${e.message}`;
-        });
-
-        const result = await repairAdapter.repairGraph(
-          { graph: failedGraph, violations, brief, docs: [] },
-          { requestId: reqId || `repair_${Date.now()}`, timeoutMs: ctx.repairTimeoutMs, signal: ctx.opts.signal },
-        );
-
-        ctx.repairCost += calculateCost(
-          repairAdapter.model,
-          result.usage.input_tokens,
-          result.usage.output_tokens,
-        );
-
-        return {
-          graph: result.graph,
-          usage: {
-            input_tokens: result.usage.input_tokens,
-            output_tokens: result.usage.output_tokens,
-          },
-        };
-      },
-    };
-  }
-
   try {
-    const validationResult = await validateAndRepairGraph(
-      {
-        graph: ctx.graph,
-        brief: ctx.effectiveBrief,
-        requestId: ctx.requestId,
-        maxRetries: ctx.skipRepairDueToBudget ? 0 : 1,
-      },
-      repairOnlyAdapter,
-    );
+    const validationResult = await validateAndRepairGraph({
+      graph: ctx.graph,
+      brief: ctx.effectiveBrief,
+      requestId: ctx.requestId,
+    });
 
     ctx.graph = validationResult.graph as any;
     ctx.orchestratorRepairUsed = validationResult.repairUsed;
@@ -97,19 +82,32 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
         error_count: error.errors.length,
       });
 
-      // If the deterministic sweep flagged that LLM repair is needed,
-      // defer to PLoT repair (substep 2) instead of returning a 422 here.
-      // The orchestrator's limited repair budget may not suffice for semantic
-      // errors (INVALID_EDGE_TYPE, CYCLE_DETECTED, etc.) that PLoT repair
-      // handles with fuller context (brief + docs + violation details).
+      // If the deterministic sweep flagged surviving Bucket-C violations,
+      // defer to substep 2 + the post-enforcement gate (9b) instead of
+      // returning a 422 here. Substep 2's LLM repair was removed (ROADMAP
+      // 2.731); the defer now reaches PLoT validation + deterministic
+      // normalisation, and anything still blocking fails closed at 9b with
+      // the honest retryable:true envelope — a strictly better 422 than
+      // this one (it reflects the post-normalisation graph).
       if (ctx.llmRepairNeeded) {
         log.info({
           stage: "orchestrator_validation_deferred",
           error_count: error.errors.length,
           correlation_id: ctx.requestId,
-        }, "Orchestrator validation failed but deferring to PLoT repair (llmRepairNeeded=true)");
+        }, "Orchestrator validation failed — deferring to PLoT validation + post-enforcement gate (llmRepairNeeded=true)");
 
-        // Preserve the best graph the orchestrator produced for PLoT repair
+        // Carry forward the deterministically-normalised graph for substep 2.
+        //
+        // ⚠ HONEST LABEL (this comment used to read "the best graph the
+        // orchestrator produced", which mis-described its operand). With the
+        // LLM limb removed, `error.lastGraph` can ONLY be the caller's own
+        // graph after deterministic structural-edge normalisation — there is
+        // no adapter that could put an LLM-authored graph here. Before 2.740a
+        // it was the graph gpt-4.1 returned and the validator then rejected,
+        // adopted silently on a path that reported failure.
+        //
+        // Guarded by tests/unit/cee.substep1b-llm-repair-removed.test.ts,
+        // which binds ctx.graph's node IDs to the INPUT's by identity.
         if (error.lastGraph) {
           ctx.graph = error.lastGraph as any;
         }
@@ -130,6 +128,11 @@ export async function runOrchestratorValidation(ctx: StageContext): Promise<void
               message: e.message,
               path: e.path,
             })),
+            // Codes-only mirror for the WIRE (ROADMAP 2.718) — see the
+            // matching field in graph-enforcement.ts. Only fixed-enum codes
+            // cross the route boundary's allowlist; the message-bearing
+            // objects above stay off-wire. Derived, not restated.
+            validation_error_codes: error.errors.map((e) => e.code),
             attempts: error.attempts,
           },
         },

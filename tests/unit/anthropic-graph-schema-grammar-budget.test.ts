@@ -59,10 +59,15 @@ import { describe, expect, it } from "vitest";
 import {
   ANTHROPIC_DRAFT_GRAPH_SCHEMA,
   ANTHROPIC_OPTIONAL_PARAM_LIMIT,
+  DRAFT_SOFT_EDGE_CAP,
+  DRAFT_SOFT_NODE_CAP,
+  ENRICHER_OWNED_GOAL_KEYS,
+  RUNAWAY_PRONE_NODE_DATA_KEYS,
   buildDraftGraphSchema,
   countOptionalParams,
   countUnionParams,
 } from "../../src/cee/draft/anthropic-graph-schema.js";
+import { FactorType, ExtractionType, PriorDistribution } from "../../src/schemas/graph.js";
 
 // ── Budgets (post-v8 measured values) ───────────────────────────────────────
 // Measured on 2026-07-07 (v8): 3,194 bytes, 9 unions, 5 enums / 17 values,
@@ -90,7 +95,19 @@ const OPTIONAL_PARAMS_BUDGET = 24; // Anthropic hard limit
 // structured outputs in production (400 → silent prompt-only fallback on
 // every draft). To add one, you must take one back into a `required` list.
 const OPTIONAL_PARAMS_TRIPWIRE = 23; // v9 measured 23; 1 slot of headroom left
-const ENUM_VALUES_TRIPWIRE = 20; // v8 measured 17 + headroom
+// ⭐ RAISED 20 -> 34 (v14, 2026-07-25) — a DELIBERATE, LIVE-VERIFIED spend, not a
+// ratchet slipped to make a test pass. v7 pruned `data.extractionType`,
+// `data.factor_type` and `prior.distribution` to plain strings for the
+// grammar-size budget (its own comment says so), NOT because any hard limit
+// forbade enums. Restoring them removes three free-text fields a runaway can
+// loop inside, and an `enum` spends NEITHER a union slot NOR an optional slot —
+// only bytes, measured below.
+// LIVE-VERIFIED, as this file's own instructions require: the SENT schema
+// compiled HTTP 200 at 2,926 B on claude-sonnet-4-6 via
+// scripts/probe-grammar-compile.mjs (2026-07-25), still 268 B UNDER the
+// known-PASS 3,194 B shape and 613 B under the known-FAIL 3,539 B one.
+// 30 measured + 4 headroom.
+const ENUM_VALUES_TRIPWIRE = 34;
 // Object-schema count is pinned EXACTLY: the live bisect showed structural
 // surface is the dominant compile cost, and a 9-object variant of this
 // family already failed. Adding any object schema must be a deliberate,
@@ -278,6 +295,38 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — grammar-size budget", () => {
     expect(countOptionalParams(overBudget)).toBe(2);
   });
 
+  it("v14: the restored enums cost ONLY bytes — no union slot, no optional slot", () => {
+    // The whole argument for restoring them. If a future edit makes an enum
+    // spend a union or optional slot, that argument is void and this fails.
+    const stats = measure();
+    expect(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA)).toBe(9);
+    expect(stats.optionalProps).toBe(22);
+    // The three restored value sets are DERIVED from schemas/graph.ts, never
+    // re-typed. A drifted copy is the estate's dominant defect class, so assert
+    // identity against the Zod source rather than against literals.
+    const nodeData = (ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as {
+      properties: { nodes: { items: { properties: Record<string, { anyOf?: Array<{ properties: Record<string, { enum?: string[] }> }> }> } } };
+    }).properties.nodes.items.properties;
+    const dataProps = nodeData.data.anyOf![0].properties;
+    expect(dataProps.extractionType.enum).toEqual([...ExtractionType.options]);
+    expect(dataProps.factor_type.enum).toEqual([...FactorType.options]);
+    expect(nodeData.prior.anyOf![0].properties.distribution.enum).toEqual([...PriorDistribution.options]);
+  });
+
+  it("v14: `data.unit` is deliberately NOT an enum (measured: the model emits units outside the formatter's list)", () => {
+    // Do not "fix" this by enumerating it. Across a 20-draft live corpus
+    // (2026-07-25) the model emitted "£" x7 and "scale" x4; "scale" is not in
+    // display-value.ts's currency/time/percent set, so an enum derived from that
+    // set would make 4 of 11 observed emissions ungrammatical — the model would
+    // then omit the unit and the UI would render a bare number.
+    // display-value.ts's priority-5 branch exists precisely FOR arbitrary units.
+    // The per-string-value ceiling covers this field instead.
+    const dataProps = (ANTHROPIC_DRAFT_GRAPH_SCHEMA as unknown as {
+      properties: { nodes: { items: { properties: { data: { anyOf: Array<{ properties: Record<string, { enum?: string[] }> }> } } } } };
+    }).properties.nodes.items.properties.data.anyOf[0].properties;
+    expect(dataProps.unit.enum).toBeUndefined();
+  });
+
   it("load-bearing enums are retained (kind, category, operator, effect_direction)", () => {
     const s = JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
     // Node kind — core discriminator for the by-kind normaliser.
@@ -292,73 +341,90 @@ describe("ANTHROPIC_DRAFT_GRAPH_SCHEMA — grammar-size budget", () => {
   });
 });
 
-// ── v11 (2026-07-21): UNCONDITIONAL topology_plan omission ──────────────
-// topology_plan is a zero-reader field the grammar was forcing the model to
-// emit against the served prompt's explicit instruction. v10 shipped this
-// behind CEE_DRAFT_OMIT_TOPOLOGY_PLAN (default false); v11 deletes the flag
-// and makes omission unconditional (no-dark-launches). buildDraftGraphSchema()
-// now always removes the key AND must not spend an optional-parameter slot.
-describe("v11 — buildDraftGraphSchema() (unconditional topology_plan omission)", () => {
-  it("ANCHOR: topology_plan is a property of the base schema", () => {
-    // Guards the builder against becoming a silent no-op if the field is ever
-    // renamed — without this, the builder would look correct and do nothing,
-    // leaking topology_plan back into the grammar.
-    expect(
-      Object.keys(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties),
-    ).toContain("topology_plan");
-    expect(
-      (ANTHROPIC_DRAFT_GRAPH_SCHEMA as { required: string[] }).required,
-    ).toContain("topology_plan");
+// ── v12 (2026-07-23, lean-draft contract, ROADMAP 1.197): STRUCTURE-ONLY ──
+// The draft call now emits STRUCTURE ONLY. buildDraftGraphSchema() drops all
+// THREE deferred aux keys — topology_plan (v11, zero-reader) PLUS coaching and
+// causal_claims (v12) — from the SENT grammar. coaching/causal are ~30% of
+// draft output tokens, the two most prose-heavy / most-runaway-prone surfaces,
+// and no compute consumer reads them (ISL/PLoT read GraphV2 structure only;
+// GraphV3Schema is nodes+edges; validateGraph's coaching/causal checks are
+// warning-only and guard-skip when absent). They are re-produced by the bounded
+// post-draft coaching pass and attached to the same response envelope, so the
+// UI (their only consumer) sees no change. The base object keeps all three (so
+// the grammar-budget pins + guard counts have their single source); the builder
+// is what drops them from the wire.
+//
+// NOTE on grammar cardinality: Anthropic structured outputs REJECTS `maxItems`
+// (HTTP 400 "property 'maxItems' is not supported" — anthropic-schema-compliance
+// .ts) and only accepts minItems 0/1, so array LENGTH cannot be capped in the
+// grammar. Cardinality is a POST-PARSE drift alarm only (DRAFT_SOFT_*_CAP,
+// parse.ts) — never a grammar enforcer. Do not add maxItems here.
+describe("v12 — buildDraftGraphSchema() (structure-only: topology_plan + coaching + causal_claims omitted)", () => {
+  const DEFERRED = ["topology_plan", "coaching", "causal_claims"];
+
+  it("ANCHOR: all three deferred keys are properties of the base schema (so the builder actually removes them, not a silent no-op)", () => {
+    for (const key of DEFERRED) {
+      expect(Object.keys(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)).toContain(key);
+      expect((ANTHROPIC_DRAFT_GRAPH_SCHEMA as { required: string[] }).required).toContain(key);
+    }
   });
 
-  it("ALWAYS removes topology_plan from properties AND required", () => {
-    const v11 = buildDraftGraphSchema();
-    expect(Object.keys(v11.properties)).not.toContain("topology_plan");
-    expect(v11.required).not.toContain("topology_plan");
-    // additionalProperties:false is what makes the key UNEMITTABLE rather
+  it("ALWAYS removes topology_plan, coaching AND causal_claims from properties AND required", () => {
+    const v12 = buildDraftGraphSchema();
+    for (const key of DEFERRED) {
+      expect(Object.keys(v12.properties), `built grammar must not emit "${key}"`).not.toContain(key);
+      expect(v12.required, `built grammar must not require "${key}"`).not.toContain(key);
+    }
+    // additionalProperties:false is what makes the keys UNEMITTABLE rather
     // than merely not-required — the whole point of removing over demoting.
-    expect(v11.additionalProperties).toBe(false);
+    expect(v12.additionalProperties).toBe(false);
   });
 
-  it("does NOT return the base object by identity (the key is dropped, so the shapes differ)", () => {
-    // v10's flag-off path returned the base object by identity; v11 always
-    // derives a topology-omitted variant, so it is never the base object.
+  it("keeps EXACTLY the structural keys the draft still emits (nodes, edges, goal_constraints)", () => {
+    const v12 = buildDraftGraphSchema();
+    expect(Object.keys(v12.properties).sort()).toEqual(["edges", "goal_constraints", "nodes"]);
+    expect(v12.required.slice().sort()).toEqual(["edges", "goal_constraints", "nodes"]);
+  });
+
+  it("does NOT return the base object by identity", () => {
     expect(buildDraftGraphSchema()).not.toBe(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
   });
 
-  it("changes NOTHING else — every other key and required entry survives", () => {
-    const v11 = buildDraftGraphSchema();
-    const baseProps = Object.keys(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)
-      .filter((k) => k !== "topology_plan")
-      .sort();
-    expect(Object.keys(v11.properties).sort()).toEqual(baseProps);
-
-    const baseReq = (ANTHROPIC_DRAFT_GRAPH_SCHEMA as { required: string[] }).required
-      .filter((k) => k !== "topology_plan")
-      .sort();
-    expect(v11.required.slice().sort()).toEqual(baseReq);
-
-    // The other two stringified aux fields must be untouched: they DO have
-    // real CEE readers (coaching.bias_signals[*].detail reaches user-visible
-    // assistant_text; causal_claims feeds graph-validator).
-    expect(Object.keys(v11.properties)).toContain("coaching");
-    expect(Object.keys(v11.properties)).toContain("causal_claims");
-    expect(v11.required).toContain("coaching");
-    expect(v11.required).toContain("causal_claims");
-  });
-
   it("spends NO optional-parameter slot and shrinks the grammar", () => {
-    const v11 = buildDraftGraphSchema();
-    // Removing a REQUIRED property cannot add optional params. Demoting it to
-    // optional would have — v9 left exactly one slot (23 of 24).
-    expect(countOptionalParams(v11)).toBe(
-      countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA),
+    const v12 = buildDraftGraphSchema();
+    // ⚠ FLIP, DISCLOSED (v13, 2026-07-25). This assertion used to read
+    // `toBe(countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA))` — the v12 cut
+    // removed only REQUIRED top-level keys, so the optional count was unchanged.
+    // v13 additionally removes `data.display_value`, which IS optional (it is
+    // not in node.data's `required` list), so the sent grammar now spends
+    // strictly FEWER optional slots than the base. Re-aimed rather than
+    // deleted: the property the test exists to protect is "the sent grammar
+    // never spends MORE of the 24-slot budget than the base", and that is now
+    // asserted directly and derived, not mirrored against a literal.
+    // ⚠ SECOND FLIP, DISCLOSED (v15, 2026-08-01, ROADMAP 2.281). The sent
+    // grammar additionally drops the enricher-owned goal-threshold quad, all
+    // four of which are optional on `nodes.items`, so the delta grows from 1 to
+    // 5. Still DERIVED from the two exported key lists rather than a literal —
+    // the property under protection is unchanged ("the sent grammar never
+    // spends MORE of the 24-slot budget than the base"), and the arithmetic
+    // stays visible so the next cut cannot land silently.
+    const baseOptional = countOptionalParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
+    expect(countOptionalParams(v12)).toBe(
+      baseOptional - RUNAWAY_PRONE_NODE_DATA_KEYS.length - ENRICHER_OWNED_GOAL_KEYS.length,
     );
-    expect(countOptionalParams(v11)).toBeLessThanOrEqual(ANTHROPIC_OPTIONAL_PARAM_LIMIT);
-    // Union budget untouched (topology_plan was a plain string, not a union).
-    expect(countUnionParams(v11)).toBe(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
-    // Grammar-size budget strictly improves.
-    expect(JSON.stringify(v11).length).toBeLessThan(
+    expect(countOptionalParams(v12)).toBeLessThanOrEqual(baseOptional);
+    expect(countOptionalParams(v12)).toBeLessThanOrEqual(ANTHROPIC_OPTIONAL_PARAM_LIMIT);
+    // ⚠ UNION BUDGET NOW FALLS TOO (v15). Three of the four goal keys are
+    // `nullable(...)` = `anyOf`, so the sent grammar sheds exactly three union
+    // slots. Derived from the same list, not a literal: `goal_threshold_cap` is
+    // a plain `{type:"number"}` and contributes none.
+    const goalUnionKeysRemoved = 3;
+    expect(countUnionParams(v12)).toBe(
+      countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA) - goalUnionKeysRemoved,
+    );
+    expect(countUnionParams(v12)).toBeLessThan(countUnionParams(ANTHROPIC_DRAFT_GRAPH_SCHEMA));
+    // Grammar-size budget strictly improves vs the base (3 fewer string props).
+    expect(JSON.stringify(v12).length).toBeLessThan(
       JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA).length,
     );
   });
@@ -367,5 +433,22 @@ describe("v11 — buildDraftGraphSchema() (unconditional topology_plan omission)
     const before = JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA);
     buildDraftGraphSchema();
     expect(JSON.stringify(ANTHROPIC_DRAFT_GRAPH_SCHEMA)).toBe(before);
+  });
+
+  it("edges no longer carry the provenance_source prose field", () => {
+    const v12 = buildDraftGraphSchema() as unknown as {
+      properties: { edges: { items: { properties: Record<string, unknown> } } };
+    };
+    expect(Object.keys(v12.properties.edges.items.properties)).not.toContain("provenance_source");
+  });
+
+  it("cardinality soft caps are pinned (post-parse drift alarm, NOT a grammar enforcer)", () => {
+    // Single source of truth; the parse-stage guard derives from these. Pinned
+    // so they cannot silently drift below the observed converged maxima (17
+    // nodes / 38 edges) and start flagging credible drafts.
+    expect(DRAFT_SOFT_NODE_CAP).toBe(18);
+    expect(DRAFT_SOFT_EDGE_CAP).toBe(40);
+    expect(DRAFT_SOFT_NODE_CAP).toBeGreaterThanOrEqual(17);
+    expect(DRAFT_SOFT_EDGE_CAP).toBeGreaterThanOrEqual(38);
   });
 });

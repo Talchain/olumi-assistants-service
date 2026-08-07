@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { z } from 'zod';
 import { getTurnDebug, getTurnDebugStoreSize } from '../orchestrator-v5/debug/turn-debug-store.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
@@ -19,10 +20,13 @@ export async function adminTurnDebugRoutes(app: FastifyInstance): Promise<void> 
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `turn_debug:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    errorResponseBuilder: () => ({
-      error: 'rate_limit_exceeded',
-      message: 'Too many requests. Please try again later.',
-    }),
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
+    errorResponseBuilder: (_req, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        'Too many requests. Please try again later.',
+      ),
   });
 
   /**

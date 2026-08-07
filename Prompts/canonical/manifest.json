@@ -1,0 +1,182 @@
+{
+  "_meta": {
+    "generated_utc": "2026-07-31T18:47:15.746+00:00",
+    "cee_commit": "74936a650e4b97d9f06d7ee740394c135396edf4",
+    "cee_deployed_build_at_capture": "74936a6",
+    "pms_source": "supabase staging project etmmuzwxtcjipwphdola, tables cee_prompts / cee_prompt_versions",
+    "pointer_resolved": "PROMPTS_USE_STAGING=True on cee-staging => served version = staging_version ?? active_version (src/prompts/stores/supabase.ts:612)",
+    "served_hash_algo": "sha256(content).hex[:16]  (src/prompts/loader.ts:33)",
+    "served_hash_crosscheck": "each key below whose served_hash_verified=true had its exported bytes hashed and matched against the LIVE /admin/prompts/status sent_hash/content_hash on cee-staging; sampled 8x with no instance split",
+    "not_exported_deliberately": "Code-constant prompts already live in src/ and are NOT duplicated here — duplicating them would create exactly the hand-maintained mirror this manifest exists to remove. They are listed under code_constant_live_prompts with their authoritative file path.",
+    "decision_review_regen_note": "decision_review row REGENERATED 2026-07-31 by the fix-decision-review-v15 lane at the moment of promotion: PMS row version 15 created, stagingVersion patched 14->15, reload issued, and the served hash read back from the LIVE /admin/prompts/status (version=15, content_hash=ba4879dd0a714b8f, chars=33049) — not inferred from the file. The other rows are unchanged from the 2026-07-27 generation at cee_commit 74936a65 and remain as stale or as fresh as they were."
+  },
+  "pms_prompts": [
+    {
+      "key": "routing",
+      "pms_task_id": "orchestrator",
+      "pms_prompt_id": "orchestrator_default",
+      "file": "Prompts/canonical/routing.txt",
+      "served_version": 120,
+      "pms_active_version": 113,
+      "pms_staging_version": 120,
+      "sha256": "adcc5128d4e6e6bcc03d8f87cff1c0a93e4b5a45e56ae1b79d940624419ac499",
+      "cee_content_hash_16": "adcc5128d4e6e6bc",
+      "bytes": 25153,
+      "chars": 25149,
+      "served_hash_verified": true,
+      "live_served_hash_observed": "adcc5128d4e6e6bc",
+      "trigger": "EVERY turn (ORIENT system prompt) — no gate"
+    },
+    {
+      "key": "draft_graph",
+      "pms_task_id": "draft_graph",
+      "pms_prompt_id": "draft_graph_default",
+      "file": "Prompts/canonical/draft_graph.txt",
+      "served_version": 195,
+      "pms_active_version": 195,
+      "pms_staging_version": 195,
+      "sha256": "152998b447819c2e9e797b1727f8e05b34480486dca6f672a5d2839facd2353f",
+      "cee_content_hash_16": "152998b447819c2e",
+      "bytes": 59637,
+      "chars": 59293,
+      "served_hash_verified": true,
+      "live_served_hash_observed": "152998b447819c2e",
+      "trigger": "first-brief draft dispatch (route-v2.ts:3100 isDraftGraphShape)"
+    },
+    {
+      "key": "edit_graph",
+      "pms_task_id": "edit_graph",
+      "pms_prompt_id": "edit_graph_default",
+      "file": "Prompts/canonical/edit_graph.txt",
+      "served_version": 11,
+      "pms_active_version": 11,
+      "pms_staging_version": 11,
+      "sha256": "40b79180ad739011cb1438f64fd2427c73a3647b0c63b5b5a371cdf8705f1bfb",
+      "cee_content_hash_16": "40b79180ad739011",
+      "bytes": 28780,
+      "chars": 28777,
+      "served_hash_verified": true,
+      "live_served_hash_observed": "40b79180ad739011",
+      "trigger": "free-text graph-edit turn (route-v2.ts:3847 isEditGraphShape)"
+    },
+    {
+      "key": "decision_review",
+      "pms_task_id": "decision_review",
+      "pms_prompt_id": "decision_review_default",
+      "file": "Prompts/canonical/decision_review.txt",
+      "served_version": 15,
+      "pms_active_version": 11,
+      "pms_staging_version": 15,
+      "sha256": "ba4879dd0a714b8f830d9d0b21353b428d78dd2e1c11b4ad3afe1ed033cd16fd",
+      "cee_content_hash_16": "ba4879dd0a714b8f",
+      "bytes": 33050,
+      "chars": 33049,
+      "served_hash_verified": true,
+      "live_served_hash_observed": "ba4879dd0a714b8f",
+      "trigger": "run_analysis outcome auto-fire (V5_RUN_ANALYSIS_AWAIT_DECISION_REVIEW=true) AND the PLoT->CEE callback POST /assist/v1/decision-review (PLoT DECISION_REVIEW_ENABLE=1)"
+    },
+    {
+      "key": "repair_graph",
+      "pms_task_id": "repair_graph",
+      "pms_prompt_id": "repair_graph_default",
+      "file": "Prompts/canonical/repair_graph.txt",
+      "served_version": 6,
+      "pms_active_version": 6,
+      "pms_staging_version": 6,
+      "sha256": "ed4ead640907dc9cd46ce535d74b1b7bd450ac7d5860cb5e1ffd0b34473cbd94",
+      "cee_content_hash_16": "ed4ead640907dc9c",
+      "bytes": 20518,
+      "chars": 19864,
+      "served_hash_verified": true,
+      "live_served_hash_observed": "ed4ead640907dc9c",
+      "trigger": "draft turn where PLoT validation of the drafted graph fails (plot-validation.ts:180)"
+    },
+    {
+      "key": "repair_edit_graph",
+      "pms_task_id": "repair_edit_graph",
+      "pms_prompt_id": "repair_edit_graph_default",
+      "file": "Prompts/canonical/repair_edit_graph.txt",
+      "served_version": 2,
+      "pms_active_version": 1,
+      "pms_staging_version": 2,
+      "sha256": "d641bd276c5f80a82532f78fe85d0ec45addd2d742ffa449ac66e2e6e23f31c0",
+      "cee_content_hash_16": "d641bd276c5f80a8",
+      "bytes": 2218,
+      "chars": 2214,
+      "served_hash_verified": false,
+      "live_served_hash_observed": null,
+      "trigger": "edit retry attempt >= 2 after invalid ops (edit-graph.ts:2024)"
+    }
+  ],
+  "code_constant_live_prompts": [
+    {
+      "name": "COACHING_SYSTEM",
+      "path": "src/cee/unified-pipeline/stages/coaching-pass.ts:79",
+      "trigger": "every draft turn (call site unified-pipeline/index.ts:897 is unconditional, but the stage returns WITHOUT an LLM call when ctx.coaching is already set, when there is no draftAdapter, when the graph has no nodes, or when the remaining request budget is < 28,000 ms — coaching-pass.ts skip gates)",
+      "gate": "invocation: none (no env var / flag; see trigger for the four runtime skip gates). output: NOT none, and NOT uniform across surfaces — assistant_text is gated by the premature-recommendation lexicon in orchestrator-v5/coaching/copy-quality-gate.ts (gateFullResponse / gateAssumptionFragment); blocks[].body bias cards are gated by gateCoachingCardBody (content rules, drop-on-trip, added 2026-07-27); the raw /assist/v1/draft-graph HTTP response is ungated.",
+      "corrected": "2026-07-27 — the previous \"gate\": \"none\" was FALSE for assistant_text, which has carried the copy-quality lexicon all along, and \"unconditional\" was false for the stage. The register under-described the defence on the biggest user-visible surface and thereby mis-priced the risk (COACHING-SYSTEM-AUDIT-2026-07-27 R2/R4)."
+    },
+    {
+      "name": "SUMMARISER_SYSTEM_PROMPT",
+      "path": "src/orchestrator-v5/rolling-summary/summariser.ts:27",
+      "trigger": "every commit seam, fire-and-forget (off the response path)",
+      "gate": "none — CEE_ROLLING_SUMMARY deleted"
+    },
+    {
+      "name": "ENRICH_FACTORS_PROMPT",
+      "path": "src/prompts/enrich-factors.ts:117 (used raw at src/services/review/enrichFactors.ts:429)",
+      "trigger": "PLoT->CEE callback POST /assist/v1/review on every /v2/run with a brief + ISL enabled",
+      "gate": "none in CEE; requires PLoT CEE_BASE_URL+CEE_API_KEY (both set on staging)",
+      "warning": "The PMS row 'enrich_factors' is a STALE MIRROR with ZERO runtime readers — editing it in PMS silently no-ops. The code constant is the only live source."
+    },
+    {
+      "name": "DRAFT_COMPLIANCE_REMINDER",
+      "path": "src/adapters/llm/anthropic.ts:322",
+      "trigger": "appended to draft user content on every draft turn",
+      "gate": "CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED=true (deployed)"
+    },
+    {
+      "name": "DRAFT_LEAN_RETRY_DIRECTIVE / STRENGTH_DEFAULT_RETRY_NUDGE",
+      "path": "src/cee/constants.ts:124 / :92",
+      "trigger": "draft RETRY attempts only",
+      "gate": "none"
+    }
+  ],
+  "dark_or_dead": [
+    {
+      "key": "suggest_options",
+      "why": "only caller = standalone POST /assist/suggest-options; zero V5 callers; UI never calls it",
+      "pms_active_version": 2
+    },
+    {
+      "key": "clarify_brief",
+      "why": "only caller = standalone POST /assist/clarify-brief; in-pipeline Stage-4 clarifier retired 2026-07-16; clarify-v2 is deterministic (zero LLM calls)",
+      "pms_active_version": 1
+    },
+    {
+      "key": "critique_graph",
+      "why": "only caller = standalone POST /assist/critique-graph; zero callers",
+      "pms_active_version": 1
+    },
+    {
+      "key": "validate_graph",
+      "why": "CEE_VALIDATION_PIPELINE_ENABLED=false on deployed staging",
+      "pms_active_version": 4
+    },
+    {
+      "key": "m2_graph_review",
+      "why": "CEE_V6_DUAL_DRAFT_ENABLED absent->false; CEE_MODEL_M2_REVIEW absent; AND no PMS row exists -> fail-closed sentinel",
+      "pms_active_version": null
+    },
+    {
+      "key": "enrich_factors",
+      "why": "PMS row has ZERO runtime readers (code constant is live instead)",
+      "pms_active_version": 1
+    },
+    {
+      "key": "bias_check / explainer / turn_classifier / clarify_narrate / *_narrate (8 rows)",
+      "why": "registry constants and dead narrate rows; no live request site",
+      "pms_active_version": 1
+    }
+  ]
+}

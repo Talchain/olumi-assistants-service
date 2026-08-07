@@ -60,14 +60,29 @@ import { nearTieReasonByMargin } from './robustness-honesty.js';
 // source of truth, shared with the projection layer). Distinct from the
 // one-argument `sanitiseLabel` in src/utils/label-sanitiser.ts.
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
+// ROADMAP 2.278: the run's own answer to "may this copy claim the result could
+// flip?" — the single owner of that rule (see `readFlipClaimPosture`).
+import { readFlipClaimPosture } from '../context/flip-threshold-rows.js';
 // D-ask-1 (2.11 P0-1): scaffold-disclosure grammar + budget. The suffix copy
 // and this allowlist must accept each other or the disclosure is silently
 // replaced by the locked-template fallback — the drift pin lives in
 // scaffold-disclosure.test.ts.
 import {
-  SCAFFOLD_DISCLOSURE_RE_SRC,
+  SCAFFOLD_ANY_DISCLOSURE_RE_SRC,
   SCAFFOLD_DISCLOSURE_MAX_CHARS,
 } from './scaffold-disclosure.js';
+// T1 (constraint applied then never evaluated): the gap disclosure is the
+// SECOND suffix that may ride on a run_analysis summary, and it needs exactly
+// the same three pieces of plumbing as the scaffold one — a published grammar
+// (below, in TAIL_PATTERN and TEMPLATE_SUFFIX_ONLY_REGEX), a length budget
+// (MAX_ASSISTANT_TEXT_CHARS), and a build-time survival probe in its own
+// builder. Shipped without them, it was rejected here and the user received
+// only the locked template: the withheld-claim half of the fix survived while
+// the "which condition, and how to repair it" half never reached the wire.
+import {
+  CONSTRAINT_GAP_DISCLOSURE_RE_SRC,
+  CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS,
+} from './constraint-gap-disclosure.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
 // their own leaf module so the scaffold-disclosure BUILDER validates its
 // composed suffix against the SAME functions this egress allowlist applies
@@ -89,6 +104,61 @@ export const MAX_HEADLINE_CHARS = 220;
  */
 const NOT_ROBUST_SENTENCE =
   ' The result is not yet robust — small changes could flip it.';
+
+/**
+ * ROADMAP 2.278 — the same VERDICT, an honest REASON, for a run whose own flip
+ * evidence attests that nothing flips in range.
+ *
+ * ⚠ THE DEFECT. `isNotRobust` reads `robustness.is_robust` / `.level` — the
+ * robustness MARGINALS — and the sentence it selects asserts FLIPPABILITY. The
+ * evidence for flippability is `enrichment.flip_thresholds[]`, on the same
+ * enrichment object this function already receives whole. It was never read.
+ * On the four witnessed staging turns (`witness-2267-raw/`, 2026-08-01)
+ * `is_robust` was `false` on every one, so this sentence shipped on every one,
+ * while 19 of 19 flip rows came back `structurally_invariant`.
+ *
+ * ⚠ SCOPE OF WHAT THE EVIDENCE ACTUALLY ATTESTS — the amendment that adversarial
+ * review forced, and it is this PR's own defect class turned on its own fix.
+ * `flip_thresholds[]` is a PER-FACTOR value sweep: each row attests that THAT
+ * factor, moved alone across its tested range, does not change the winner. It
+ * does NOT attest that the ranking is invariant to everything. The first draft
+ * of this sentence said "the ranking held across everything we varied" — a
+ * RUN-LEVEL absolute the same payload refutes: `near_tie.is_tie` is true on 3 of
+ * the 4 witnessed turns and `fragile_edges[].switch_probability` reaches 0.663
+ * with named alternative winners. A reader holding the enrichment could have
+ * falsified the sentence from the object it was derived from. Single-factor
+ * scope is the only claim the evidence carries; say exactly that and no more.
+ *
+ * ⚠ WHY THE VERDICT SURVIVES AND ONLY THE REASON CHANGES. "Not yet robust" is
+ * TRUE on those turns: the robustness Monte Carlo really did report an unstable
+ * result (`level: very_low`). What is false is the explanation attached to it.
+ * Robustness and flip-invariance answer different questions — how big is the
+ * lead, versus who holds it — and the witnessed turns are precisely the case
+ * where the answers differ. Dropping the sentence entirely would suppress a
+ * true caveat; keeping it as written asserts something the engine disproved.
+ * So the caveat stays and is re-aimed at the margin.
+ *
+ * ⚠ NO NUMBERS, NO LABELS — same constraints as its sibling, because it shares
+ * the egress grammar and the length budget below, both of which are DERIVED
+ * from {@link NOT_ROBUST_SENTENCES} rather than restated. A new variant added
+ * to that array is automatically admitted by the grammar and budgeted for; one
+ * added anywhere else is silently rejected at egress and the user receives the
+ * locked template instead (the failure mode the constraint-gap disclosure hit).
+ */
+const NOT_ROBUST_NO_FLIP_SENTENCE =
+  ' The result is not yet robust — no single factor we tested would change the order on its own, but the margin is not settled.';
+
+/**
+ * Every robustness-honesty sentence this module may emit. The grammar
+ * (`NOT_ROBUST_RE_SRC`) and the length budget (`MAX_ASSISTANT_TEXT_CHARS`) are
+ * both derived from this array — add here, nowhere else.
+ */
+const NOT_ROBUST_SENTENCES: readonly string[] = [
+  NOT_ROBUST_SENTENCE,
+  NOT_ROBUST_NO_FLIP_SENTENCE,
+];
+
+const NOT_ROBUST_SENTENCE_MAX_CHARS = Math.max(...NOT_ROBUST_SENTENCES.map((s) => s.length));
 
 /**
  * Elimination floor: an option with a finite win_probability strictly below
@@ -138,13 +208,19 @@ export const REDUCED_SAMPLES_SUFFIX =
  */
 export const MAX_ASSISTANT_TEXT_CHARS =
   MAX_HEADLINE_CHARS +
-  NOT_ROBUST_SENTENCE.length +
+  // 2.278: derived over EVERY robustness-honesty variant, not just the first.
+  NOT_ROBUST_SENTENCE_MAX_CHARS +
   ELIMINATED_SENTENCE_MAX_CHARS +
   REDUCED_SAMPLES_SUFFIX.length +
   // D-ask-1 (2.11 P0-1): the scaffold disclosure suffix rides AFTER every
   // other tail. Budgeted from the builder's own worst case so an honest
   // disclosure can never knock the summary back to the bland fallback.
-  SCAFFOLD_DISCLOSURE_MAX_CHARS;
+  SCAFFOLD_DISCLOSURE_MAX_CHARS +
+  // T1: the constraint-gap disclosure rides after the scaffold one (matching
+  // the handler's append order), and can co-occur with it — a scaffolded run
+  // may also have an unevaluated ratified constraint. Same rule: budgeted from
+  // the builder's own worst case, never hand-estimated.
+  CONSTRAINT_GAP_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -270,6 +346,36 @@ export interface AnalysisResultHeadlineInput {
    * grammar.
    */
   readonly constraint_infeasible?: boolean;
+  /**
+   * T1. True when a user-ratified hard constraint was applied but never
+   * evaluated to decision grade — the `unevaluated` state of the constraint
+   * verdict (`deriveConstraintVerdict` in constraint-feasibility.ts, reading
+   * PLoT's own `inference_warnings` codes / `constraints_status` / per-option
+   * `constraint_probabilities`). When true the headline WITHHOLDS the
+   * confident "{X} currently leads" claim — a recommendation must not exist
+   * while one of the user's stated conditions is unchecked.
+   *
+   * DISTINCT FROM {@link constraint_infeasible}: that one means "the leader
+   * breaks a limit we DID check"; this one means "we never checked the limit
+   * at all". Different claims, different copy, different telemetry reason.
+   * Omitted / false ⇒ no change (byte-identical).
+   */
+  readonly constraint_unevaluated?: boolean;
+  /**
+   * T1. True for the constraint verdict's `identity_unresolved` state: the
+   * producer plainly evaluated constraints, but not one of the ids it returned
+   * reconciles with anything the user ratified.
+   *
+   * THE THIRD ANSWER, and the reason this is not folded into either flag above.
+   * We cannot say the condition went unchecked (it may well have been checked
+   * under a key we cannot read) and we cannot certify constraint-safety (we
+   * cannot tell WHICH condition was checked). So the headline is withheld here
+   * too — naming a leader would assert the user's condition holds on evidence
+   * CEE has just admitted it cannot reconcile — but under its own reason code,
+   * because "we could not tell" must never be logged as either of the two
+   * confident verdicts. Omitted / false ⇒ no change (byte-identical).
+   */
+  readonly constraint_identity_unresolved?: boolean;
 }
 
 /**
@@ -318,6 +424,19 @@ export type HeadlineFallbackReason =
   // constraint, so the confident-lead headline is withheld (see
   // AnalysisResultHeadlineInput.constraint_infeasible).
   | 'constraint_infeasible'
+  // T1: a user-ratified hard constraint was applied but never evaluated to
+  // decision grade, so the confident-lead headline is withheld (see
+  // AnalysisResultHeadlineInput.constraint_unevaluated). Deliberately separate
+  // from `constraint_infeasible` — "we never checked your limit" and "the
+  // leader breaks your limit" must never be conflated in telemetry.
+  | 'constraint_unevaluated'
+  // T1: the producer evaluated constraints under ids that reconcile with
+  // nothing the user ratified, so neither "your condition was not checked" nor
+  // "your condition holds" is assertable and the confident-lead headline is
+  // withheld (see AnalysisResultHeadlineInput.constraint_identity_unresolved).
+  // Its own reason code, so a seam divergence can never be read off a dashboard
+  // as an engine failure to evaluate.
+  | 'constraint_identity_unresolved'
   | 'unknown';
 
 export interface HeadlineDescriptor {
@@ -403,6 +522,53 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
       descriptor: {
         case: null,
         reason: 'constraint_infeasible',
+        has_leading_option: true,
+        has_clean_label: true,
+        has_driver: false,
+        has_fragility: false,
+        margin_bucket: null,
+      },
+    };
+  }
+
+  // T1: a user-ratified hard constraint was APPLIED and then never evaluated
+  // to decision grade (PLoT CONSTRAINT_OUT_OF_DOMAIN /
+  // CONSTRAINT_TARGET_UNRELIABLE / withheld constraint block). A recommendation
+  // must not exist while a stated condition is unchecked, so the confident
+  // "{X} currently leads" claim is WITHHELD here for the same reason as
+  // `constraint_infeasible` — but it is a DIFFERENT claim and carries its own
+  // reason code so telemetry can never conflate "the leader breaks your limit"
+  // with "we never checked your limit". The copy naming the unchecked
+  // condition and its repair step is composed by the run_analysis handler.
+  if (input.constraint_unevaluated === true) {
+    return {
+      text: null,
+      descriptor: {
+        case: null,
+        reason: 'constraint_unevaluated',
+        has_leading_option: true,
+        has_clean_label: true,
+        has_driver: false,
+        has_fragility: false,
+        margin_bucket: null,
+      },
+    };
+  }
+
+  // T1, the third answer: the producer evaluated constraints, but under ids
+  // that reconcile with nothing the user ratified. Withheld for the same
+  // claim-safety reason as the two above — naming a leader here asserts that
+  // the user's condition holds, on evidence CEE has just admitted it cannot
+  // read — but reported under its OWN reason, because conflating "we could not
+  // tell" with "the engine did not check" would turn an unenforced-seam
+  // divergence into a false accusation against the producer, on the dashboard
+  // and in the user-facing copy alike.
+  if (input.constraint_identity_unresolved === true) {
+    return {
+      text: null,
+      descriptor: {
+        case: null,
+        reason: 'constraint_identity_unresolved',
         has_leading_option: true,
         has_clean_label: true,
         has_driver: false,
@@ -1397,7 +1563,15 @@ function buildNarrationTail(
   winner: ResolvedWinner,
 ): string {
   let tail = '';
-  if (isNotRobust(enrichment)) tail += NOT_ROBUST_SENTENCE;
+  if (isNotRobust(enrichment)) {
+    // 2.278: the run's OWN flip evidence picks the REASON. `permitted` — which
+    // includes every run carrying no flip evidence at all — keeps the original
+    // sentence byte-identical.
+    tail +=
+      readFlipClaimPosture(enrichment) === 'attested_no_flip'
+        ? NOT_ROBUST_NO_FLIP_SENTENCE
+        : NOT_ROBUST_SENTENCE;
+  }
   if (winner.eliminatedCount >= ELIMINATED_MIN_COUNT) {
     tail += eliminatedSentence(winner.eliminatedCount);
   }
@@ -1525,22 +1699,34 @@ const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_S
 // optional seam-item-3 reduced-samples disclosure, then the optional status
 // suffix — in exactly that order, mirroring buildNarrationTail +
 // reducedSamplesSuffix + statusSuffix composition in computeHeadline.
-const NOT_ROBUST_RE_SRC = escapeForRegex(NOT_ROBUST_SENTENCE);
+// 2.278: an alternation over EVERY variant in NOT_ROBUST_SENTENCES, derived —
+// a variant emitted but absent from the grammar is rejected at egress and the
+// user silently receives the locked template instead.
+const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
 const ELIMINATED_RE_SRC =
   ' \\d{1,3} options are effectively eliminated \\(each has less than a 1% chance of winning\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
 // narration tail and status suffix — mirroring the handler's
 // `summary + buildScaffoldDisclosureSuffix(...)` append order.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_DISCLOSURE_RE_SRC})?`;
+// T1: the constraint-gap disclosure composes LAST of all — after the scaffold
+// disclosure — mirroring `${headline ?? template}${scaffoldDisclosure}${
+// constraintGapDisclosure}` in the run_analysis handler.
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?`;
 
 /**
- * Anchored form of the scaffold-disclosure grammar, for the locked-template
- * branch of {@link isAllowedRunAnalysisAssistantText}: a template-shaped
- * text may carry EXACTLY one whole disclosure suffix after the template
- * literal — nothing else.
+ * Anchored form of the DISCLOSURE grammars, for the locked-template branch of
+ * {@link isAllowedRunAnalysisAssistantText}: a template-shaped text may carry
+ * the scaffold disclosure, the T1 constraint-gap disclosure, or both in the
+ * handler's append order — and nothing else.
+ *
+ * Both slots are optional here, but the caller only reaches this regex when the
+ * remainder after the template literal is non-empty (`text.length >
+ * template.length`), so an empty match cannot admit a bare template twice.
  */
-const SCAFFOLD_SUFFIX_ONLY_REGEX = new RegExp(`^(?:${SCAFFOLD_DISCLOSURE_RE_SRC})$`);
+const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
+  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?$`,
+);
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three
 // claim-safe bodies emitted by cautionReasonText. Pinned verbatim so
@@ -1654,17 +1840,18 @@ export function isAllowedRunAnalysisAssistantText(text: unknown): boolean {
   if (text.length === 0 || text.length > MAX_ASSISTANT_TEXT_CHARS) return false;
   if (text.includes('\n') || text.includes('\r')) return false;
   if (RUN_ANALYSIS_LOCKED_TEMPLATES.has(text)) return true;
-  // D-ask-1 (2.11 P0-1): a locked template may carry EXACTLY one scaffold
-  // disclosure suffix (the headline path composes it via TAIL_PATTERN
-  // instead). The content defences still bite on the label slot — a
-  // disclosure whose label smuggles an internal id / raw decimal /
-  // forbidden vocabulary is rejected whole, and the builder's
-  // safeScaffoldOptionLabel is what keeps honest labels out of that trap.
+  // D-ask-1 (2.11 P0-1) + T1: a locked template may carry the scaffold
+  // disclosure suffix and/or the constraint-gap disclosure suffix (the headline
+  // path composes them via TAIL_PATTERN instead). The content defences still
+  // bite on the label slots — a disclosure whose label smuggles an internal id
+  // / raw decimal / forbidden vocabulary is rejected whole, and each builder's
+  // own survival probe (safeScaffoldOptionLabel; buildConstraintDisclosure's
+  // degrade-to-count-only) is what keeps honest labels out of that trap.
   for (const template of RUN_ANALYSIS_LOCKED_TEMPLATES) {
     if (
       text.length > template.length &&
       text.startsWith(template) &&
-      SCAFFOLD_SUFFIX_ONLY_REGEX.test(text.slice(template.length))
+      TEMPLATE_SUFFIX_ONLY_REGEX.test(text.slice(template.length))
     ) {
       return passesAssistantTextContentDefences(text);
     }

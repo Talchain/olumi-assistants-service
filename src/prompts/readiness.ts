@@ -15,11 +15,14 @@ import { createHash } from 'node:crypto';
 import { loadPrompt, type PromptResolveTrigger } from './loader.js';
 import {
   TRACKED_KEYS,
+  STATUS_KEYS,
   type TrackedKey,
+  type StatusKey,
   mapSource,
   resolvePublicVersion,
   type PublicSource,
 } from './tracked.js';
+import { dispositionOf, gateActiveOf, gateOf, type PromptDisposition } from './estate.js';
 import { log } from '../utils/telemetry.js';
 import { getRoutingLiveStatus } from './routing-live-status.js';
 import type { CeeTaskId } from './schema.js';
@@ -38,7 +41,7 @@ let coverageCached: { value: CriticalPromptCoverage; expiresAt: number } | null 
 let inflightCoverage: Promise<CriticalPromptCoverage> | null = null;
 
 export interface PromptKeyStatus {
-  key: TrackedKey;
+  key: StatusKey;
   source: PublicSource | 'error';
   version: string | null;
   content_hash: string | null;
@@ -53,6 +56,23 @@ export interface PromptKeyStatus {
    * the raw PMS row reads OK but is NOT what's actually served.
    */
   snapshot_error?: string;
+  /**
+   * Estate disposition: `live` (resolves on a live path) or `gated` (wired,
+   * but behind the named off-by-default `gate`). Derived — see
+   * `src/prompts/estate.ts`.
+   */
+  disposition?: PromptDisposition;
+  /** Env var gating this prompt's call site, when the prompt carries a gate. */
+  gate?: string;
+  /**
+   * Whether that gate is ACTIVE right now — MEASURED from config at request
+   * time, not recorded. Its absence is what let a deployment with the flag ON
+   * keep reporting the prompt as `gated` forever, with nothing failing loud.
+   * When true, `disposition` is `live`.
+   */
+  gate_active?: boolean;
+  /** True when this key GATES health (`prompts_ready` / `all_pms`). */
+  critical?: boolean;
 }
 
 function shortSha256(content: string): string {
@@ -60,14 +80,24 @@ function shortSha256(content: string): string {
 }
 
 /**
- * Resolve every tracked prompt key once and report per-key status.
- * Used by /admin/prompts/status (full detail) and arePromptsReady() (boolean).
+ * Resolve a given set of prompt keys once and report per-key status.
+ *
+ * Two callers, two sets, deliberately:
+ *   - `probeTrackedPrompts()` → the CRITICAL five, for health GATING.
+ *   - `probeStatusPrompts()`  → the derived REPORTED set, for observability.
  */
-export async function probeTrackedPrompts(
+async function probePromptKeys(
+  keys: readonly StatusKey[],
   trigger: PromptResolveTrigger,
 ): Promise<PromptKeyStatus[]> {
   const results = await Promise.all(
-    TRACKED_KEYS.map(async (key): Promise<PromptKeyStatus> => {
+    keys.map(async (key): Promise<PromptKeyStatus> => {
+      const gate = gateOf(key);
+      const meta = {
+        disposition: dispositionOf(key),
+        ...(gate ? { gate, gate_active: gateActiveOf(key) } : {}),
+        critical: (TRACKED_KEYS as readonly string[]).includes(key),
+      };
       // The `routing` key reports from the LIVE served snapshot
       // (guard-applied, atomically swapped), NOT a raw unguarded
       // loadPrompt read of the current PMS row. This closes the
@@ -84,6 +114,7 @@ export async function probeTrackedPrompts(
             content_chars: live.content_chars,
             pms_task: live.pms_task,
             ...(live.snapshot_error ? { snapshot_error: live.snapshot_error } : {}),
+            ...meta,
           };
         }
         // No snapshot built yet (pre-boot) → fall through to loadPrompt.
@@ -96,6 +127,7 @@ export async function probeTrackedPrompts(
           version: resolvePublicVersion(key, loaded.source, loaded.version),
           content_hash: shortSha256(loaded.content),
           content_chars: loaded.content.length,
+          ...meta,
         };
       } catch (err) {
         return {
@@ -105,11 +137,46 @@ export async function probeTrackedPrompts(
           content_hash: null,
           content_chars: null,
           error: err instanceof Error ? err.message : String(err),
+          ...meta,
         };
       }
     }),
   );
   return results;
+}
+
+/**
+ * Resolve the CRITICAL prompt keys — the health-gating five. Feeds
+ * `arePromptsReady()` and `getCriticalPromptCoverage()`.
+ *
+ * DELIBERATELY NOT WIDENED. `all_pms` is the "safe to arm fail-closed?"
+ * signal on /healthz; widening it to every reported prompt would flip a live
+ * health surface (`m2_graph_review` has no PMS row at all, by design).
+ */
+export async function probeTrackedPrompts(
+  trigger: PromptResolveTrigger,
+): Promise<Array<PromptKeyStatus & { key: TrackedKey }>> {
+  // Narrowing cast, not a widening one: the rows come back keyed by exactly
+  // the TRACKED_KEYS passed in, so the critical-coverage callers keep their
+  // `TrackedKey` typing even though the shared prober is set-agnostic.
+  return (await probePromptKeys(TRACKED_KEYS, trigger)) as Array<
+    PromptKeyStatus & { key: TrackedKey }
+  >;
+}
+
+/**
+ * Resolve the DERIVED reported set — every live PMS prompt plus the
+ * gated-but-wired ones. Feeds `/admin/prompts/status` and
+ * `/admin/prompts/inventory`.
+ *
+ * This is the mirror-killer: the set comes from the operation map minus two
+ * drift-guarded exception lists, so a newly wired prompt shows up here with
+ * nobody remembering to add it.
+ */
+export async function probeStatusPrompts(
+  trigger: PromptResolveTrigger,
+): Promise<PromptKeyStatus[]> {
+  return probePromptKeys(STATUS_KEYS, trigger);
 }
 
 /**
@@ -237,4 +304,4 @@ export function resetPromptsReadyCache(): void {
 /** @deprecated use resetPromptsReadyCache() — kept for back-compat. */
 export const __resetPromptsReadyCacheForTests = resetPromptsReadyCache;
 
-export { TRACKED_KEYS } from './tracked.js';
+export { TRACKED_KEYS, STATUS_KEYS } from './tracked.js';

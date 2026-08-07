@@ -114,6 +114,187 @@ describe("clarify_v2 rubric — completeness table", () => {
       "Should we introduce a four-day week at the company?",
       ["goal", "options", "timeframe"],
     ],
+    // ── Preference-goal credit (end-to-end journey 2026-07-25, Finding #4).
+    // Direction A: a first-person PRIORITY statement IS a stated goal, and the
+    // journey's verbatim brief must now be complete — 5 of 5 fresh users were
+    // asked for the goal they had just given, offered "grow revenue" / "cut
+    // costs", neither of which was it. Direction B: an intensifier is required,
+    // so a bare "I care about ..." (a value, not an objective) must NOT silence
+    // a thin brief.
+    [
+      "preference goal: the journey's VERBATIM brief is complete (was: missing goal)",
+      "We run a 12-person specialty coffee roastery in Bristol. Wholesale to cafes is about 70% of our revenue but the margins are thin, and one single account is a quarter of that. I have around 80k I could invest. I'm trying to decide between opening our own retail shop, pushing a direct-to-consumer subscription, or just doubling down on wholesale and hiring another sales rep. I care most about profit in 2 years but I don't want to bet the company.",
+      [],
+    ],
+    [
+      "preference goal: 'what matters most is' satisfies goal",
+      "Should we renew with the incumbent vendor or move to the challenger this quarter? What matters most is total cost over 3 years.",
+      [],
+    ],
+    [
+      "preference goal: 'our priority is' satisfies goal",
+      "Do we ship the rewrite or patch the current stack next month? Our priority is uptime, and we have £40k to spend.",
+      [],
+    ],
+    [
+      "preference goal: 'optimising for' satisfies goal",
+      "Should we run 2 campaigns or 5 this quarter? We are optimising for qualified pipeline on a £30k budget.",
+      [],
+    ],
+    [
+      "preference precision: a bare 'I care about' (no intensifier) does NOT fake a goal",
+      "Should we introduce hot-desking at the company? I care about the team.",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "preference precision: 'the target account list' still does not fake a goal alongside a preference-free brief",
+      "Do we go after the target account list this 2026 or focus on the one big account? I care about growth.",
+      ["goal", "quantities"],
+    ],
+    // ── ROADMAP 2.162a — alternatives named as an ORDINARY SERIAL LIST, plus
+    // the choice-set noun vocabulary. Direction A (missed satisfiers): the
+    // commonest way people name alternatives in English — "A, B, and C" —
+    // was credited by NOTHING in the options battery, so the intake asked
+    // "What alternatives are you weighing this against?" over a brief that
+    // had just named three. Direction B (over-matching satisfiers): ordinary
+    // serial grammar is used for lots of things that are NOT alternatives,
+    // and every one of those must still be asked.
+    [
+      "2.162a A: THE MINIMAL FAILING INPUT — a serial 'and' list of three alternatives satisfies options",
+      "Should we rebuild billing in-house, buy Vendor A, and stay put?",
+      ["goal", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a A: its one-character control (final 'and' → 'or') was already satisfied — the flip was one word",
+      "Should we rebuild billing in-house, buy Vendor A, or stay put?",
+      ["goal", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a A: 'and/or' is a disjunction — the bare-joiner arm required whitespace before 'or', which a slash is not",
+      "Should we hire a lead, hire two juniors, outsource, and/or promote internally?",
+      ["goal", "timeframe"],
+    ],
+    [
+      "2.162a A: counted 'four ways' satisfies options …",
+      "Should we modernise billing? There are four ways: rebuild, Vendor A, Vendor B, and stay put.",
+      ["goal", "timeframe"],
+    ],
+    [
+      "2.162a A: … identically to 'four routes' — the two noun lists in the rubric had drifted (trap 12)",
+      "Should we modernise billing? There are four routes: rebuild, Vendor A, Vendor B, and stay put.",
+      ["goal", "timeframe"],
+    ],
+    [
+      "2.162a A: the colon/enumeration arm now carries routes|paths too",
+      "Should we modernise billing? Routes: rebuild in-house, Vendor A, Vendor B.",
+      ["goal", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a B: a GEOGRAPHY list is not alternatives — one action, three places — and must still be asked",
+      "Should we launch in France, Spain and Italy this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      ["options"],
+    ],
+    [
+      "2.162a B: the same list WITH an Oxford comma defeats a comma-counting guard; the action-verb anchor is what rejects it",
+      "Should we launch in France, Spain, and Italy this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      ["options"],
+    ],
+    [
+      "2.162a B: bulleted FACTS are not alternatives (no bullet-list arm ships — Slice B is deliberately not implemented)",
+      "Should we expand into Europe next year?\n- Our revenue is £2m\n- We have 40 staff\n- Churn is 8%",
+      ["goal", "options"],
+    ],
+    [
+      "2.162a B: a serial list of facts under a choice lead is not alternatives",
+      "Should we expand into Europe next year? We have 40 staff, £2m revenue, and 8% churn.",
+      ["goal", "options"],
+    ],
+    [
+      "2.162a B: a BUNDLE of things to hire is not a choice between them",
+      "Should we hire a designer, a developer, and a PM?",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a B: a shopping list is not a choice set",
+      "Should we buy laptops, monitors, and desks this year?",
+      ["goal", "options", "quantities"],
+    ],
+    [
+      "2.162a B: TWO items is not a serial list — the arm requires ≥3 verb-led items",
+      "Should we rebuild billing in-house, and stay put?",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a B: 'and/or not' still restates the yes/no framing and names no second alternative",
+      "Should we renew the vendor contract and/or not this quarter?",
+      ["goal", "options", "quantities"],
+    ],
+    [
+      "2.162a B: widening the noun set must not let a bare adjective fake an enumeration ('our plans are ambitious')",
+      "Should we expand into Germany? Our plans are ambitious.",
+      ["goal", "options", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a copula arm is UNCHANGED from pre-2.162a: 'our choices are limited' still credits options. A PRE-EXISTING false satisfied this lane does NOT fix — pinned so the residual is visible, not so it is endorsed",
+      "Should we expand into Germany? Our choices are limited.",
+      ["goal", "timeframe", "quantities"],
+    ],
+    [
+      "2.162a positive control: a real two-item copula list still credits ('the candidates are A and B')",
+      "Should we expand into Germany? The candidates are Alice and Bob.",
+      ["goal", "timeframe", "quantities"],
+    ],
+    // ── ROADMAP 2.162a AMENDMENT ROUND. Adversarial review measured the first
+    // cut against an UNTARGETED corpus of naturally-written thin briefs and
+    // found 11 of 36 over-credited (base: 2 of 36) — every widened arm leaked,
+    // and 11 briefs naming no alternatives scored COMPLETE and would have
+    // proceeded silently, leaving the drafter to invent options. Every row
+    // below is one of those leaks, pinned at the exact brief that found it.
+    [
+      "A1: a widened noun in ordinary COPULA prose is not an enumeration ('our plans are ambitious, but our budget is tight' — the first cut's 160-char list-guard fired on the subordinate clause's comma)",
+      "Should we rebuild billing this year? Our plans are ambitious, but our budget is tight at £180,000 and the goal is to cut costs.",
+      ["options"],
+    ],
+    [
+      "A1: the same noun with a trailing clause and no punctuation list",
+      "Should we expand into Germany next year? Our plans are still forming, the goal is to grow revenue, and we have £300,000.",
+      ["options"],
+    ],
+    [
+      "A1: a widened noun as a bare copula subject",
+      "Should we rebuild the data warehouse this year? The paths are unclear, we want to reduce reporting lag, and it is a £250,000 project.",
+      ["options"],
+    ],
+    [
+      "A2: a COUNT in front of a widened noun counts failure modes, not alternatives ('three ways this could go wrong')",
+      "Should we migrate to the new platform this quarter? There are three ways this could go wrong and the goal is to avoid downtime on a £90,000 budget.",
+      ["options"],
+    ],
+    [
+      "A2: … and outcomes ('two directions the market could move')",
+      "Should we raise prices this year? There are two directions the market could move and we want to protect margin on £4m of revenue.",
+      ["options"],
+    ],
+    [
+      "A2 positive control: the SAME counted widened noun WITH a decision frame still credits",
+      "We are considering three approaches to the billing rebuild this year.",
+      ["goal"],
+    ],
+    [
+      "A3: THE ONE-WORD BREAK — a serial list whose MIDDLE item is not an action. Verb at each end, junk between; the first cut scored this COMPLETE and proceeded silently",
+      "Should we launch in France, Spain, Italy, and hire locally this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      ["options"],
+    ],
+    [
+      "A4: an ASSERTIVE lead announces a plan, not a choice — every item IS an action here, so only the lead can reject it",
+      "We will launch in Q1, hire in Q2, and expand in Q3. The goal is to grow revenue by 30% on a £1m budget.",
+      ["options"],
+    ],
+    [
+      "A6: the serial arm must not depend on punctuation style — the same list without the Oxford comma credits",
+      "Should we rebuild billing in-house, buy Vendor A and stay put?",
+      ["goal", "timeframe", "quantities"],
+    ],
   ];
 
   it.each(TABLE)("%s", (_name, brief, expectedMissing) => {

@@ -126,6 +126,7 @@ export function composeEditClarifyResponse(
   const chips = buildClarifyChips(input.nodes ?? []);
 
   return composeDirectAnswerResponse({
+    answerKind: 'functional',
     assistant_text,
     stage: input.stage,
     suggested_actions: chips,

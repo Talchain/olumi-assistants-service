@@ -39,6 +39,10 @@ import { emitProposedChange } from './proposed-change.js';
 import type { SuggestedAction } from './types.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { formatFactorValue, formatFactorValueApprox } from './format-factor-value.js';
+// ROADMAP 2.228 F1 (review amendment 5) — the ONE owner of the open
+// attested-no-flip `flip_reason` vocabulary, shared with the coach-context and
+// decision_review projections.
+import { isAttestedNoFlipReason } from '../context/flip-threshold-rows.js';
 
 /** One entry read defensively from `enrichment.flip_thresholds[]`. */
 export interface FlipEntry {
@@ -80,6 +84,27 @@ export interface FlipEntry {
    * "small changes could flip the result" copy. (Additive.)
    */
   readonly margin_supports_flip?: boolean;
+  /**
+   * IDENTITY of the option PLoT computed would lead if this factor crossed its
+   * tipping point. `null` when no flip was found (PLoT emits the key on EVERY
+   * row — `DenormalisedFlipThreshold.alternative_winner_id: string | null` — so
+   * absent means a pre-contract producer, not "no winner"). This is the
+   * AUTHORITATIVE identity; never re-derive it from a label.
+   */
+  readonly alternative_winner_id?: string | null;
+  /**
+   * PLoT's DISPLAY label for {@link FlipEntry.alternative_winner_id}. Carried
+   * alongside the id, never instead of it.
+   *
+   * ⚠ It is NOT safe to treat this as a display name on its own: PLoT's
+   * `resolveLabel` (`src/lib/flip-threshold-denormaliser.ts`) falls back to
+   * **the raw option id** when the id is absent from its `options` list
+   * (`return option?.label ?? optionId`). A label-only reader therefore cannot
+   * tell a real label from an echoed internal token. Use
+   * {@link resolveAlternativeWinner}, which anchors on the id and refuses to
+   * hand back an unsafe display.
+   */
+  readonly alternative_winner_label?: string | null;
 }
 
 /** The factor's graph node info needed to invert + display safely. */
@@ -317,9 +342,85 @@ export function readFlipEntries(enrichment: unknown): FlipEntry[] {
       value_scale: readValueScale(r),
       flip_reason: typeof r.flip_reason === 'string' ? r.flip_reason : null,
       margin_supports_flip: readMarginSupportsFlip(r),
+      alternative_winner_id:
+        typeof r.alternative_winner_id === 'string' ? r.alternative_winner_id : null,
+      alternative_winner_label:
+        typeof r.alternative_winner_label === 'string' ? r.alternative_winner_label : null,
     });
   }
   return out;
+}
+
+/**
+ * The option PLoT computed would lead if a factor crossed its tipping point,
+ * carried as IDENTITY + an optional safe display name.
+ */
+export interface AlternativeWinner {
+  /** Authoritative identity. Always a non-empty string. Never user-facing. */
+  readonly id: string;
+  /**
+   * Safe user-facing name, or `null` when none could be established. `null`
+   * does NOT mean "no winner" — the identity is still known; it means we have
+   * nothing we may safely print, so the caller must not name the option.
+   */
+  readonly display: string | null;
+}
+
+/**
+ * Resolve one flip entry's alternative winner, anchored on the ID.
+ *
+ * Why this is not "read the label":
+ *  - The ID is the identity. Without a non-empty `alternative_winner_id` there
+ *    is no attested target at all, so we return `null` even when a label is
+ *    present — a label alone never establishes which option PLoT meant.
+ *  - PLoT's `resolveLabel` falls back to **the raw option id** when the id is
+ *    missing from its options list, so `alternative_winner_label === id` is the
+ *    producer's "I could not resolve this" signal, not a display name. Printing
+ *    it would leak an internal token into user prose. We detect that exact
+ *    shape and withhold the display while KEEPING the identity.
+ *
+ * Pure. Returns `null` when the entry carries no usable winner identity.
+ */
+export function resolveAlternativeWinner(entry: FlipEntry): AlternativeWinner | null {
+  const id = typeof entry.alternative_winner_id === 'string' ? entry.alternative_winner_id.trim() : '';
+  if (id.length === 0) return null;
+
+  const rawLabel =
+    typeof entry.alternative_winner_label === 'string' ? entry.alternative_winner_label.trim() : '';
+  // Empty, or PLoT's id-echo fallback ⇒ no safe display name.
+  const display = rawLabel.length > 0 && rawLabel !== id ? rawLabel : null;
+  return { id, display };
+}
+
+/**
+ * Resolve the SINGLE alternative winner that a set of flip entries agrees on,
+ * or `null` when they do not agree / none is safely nameable.
+ *
+ * Agreement is decided on the **ID**, never the label. Two options may share a
+ * display label (the collision case UI #492's resolver had to handle), so a
+ * label-only reader would fold two distinct targets into one and name a winner
+ * the analysis never attested. Distinct ids ⇒ no single target ⇒ `null`.
+ *
+ * Returns `null` unless every entry that carries an identity carries the SAME
+ * identity, and that identity has a safe display name.
+ */
+export function resolveAgreedAlternativeWinner(
+  entries: readonly FlipEntry[],
+): AlternativeWinner | null {
+  const winners = entries
+    .map(resolveAlternativeWinner)
+    .filter((w): w is AlternativeWinner => w !== null);
+  if (winners.length === 0) return null;
+
+  const first = winners[0]!;
+  // Identity agreement, on the id — a shared label across different ids is a
+  // COLLISION, not agreement.
+  if (winners.some((w) => w.id !== first.id)) return null;
+  // Identity is agreed; we may only NAME it when a safe display exists. Prefer
+  // the first non-null display among the agreeing rows.
+  const display = winners.find((w) => w.display !== null)?.display ?? null;
+  if (display === null) return null;
+  return { id: first.id, display };
 }
 
 /** Overall flip-evidence verdict across an analysis's flip thresholds. */
@@ -360,7 +461,14 @@ export function summariseFlipEntries(entries: readonly FlipEntry[]): FlipSummary
   if (hasConcrete) {
     return { overall_status: 'concrete', entries, margin_supports_flip };
   }
-  const allNoEffect = entries.every((e) => e.flip_reason === 'no_effect_within_bounds');
+  // ROADMAP 2.228 F1 (review amendment 5) — one owned predicate for the OPEN
+  // attested-no-flip vocabulary. Matching the single token inline meant ONE
+  // `structurally_invariant` row (PLoT #300) demoted this verdict from
+  // `no_practical_flip` to `insufficient_data`, which swaps the user-facing
+  // copy from a producer-attested certainty ("no single factor on its own
+  // reached a tipping point") to uncertainty ("did not isolate … not clear")
+  // at explanation-fallback.ts:544/:585 and compose-option-targeted-flip.ts:260.
+  const allNoEffect = entries.every((e) => isAttestedNoFlipReason(e.flip_reason));
   return {
     overall_status: allNoEffect ? 'no_practical_flip' : 'insufficient_data',
     entries,

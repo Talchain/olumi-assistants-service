@@ -277,6 +277,11 @@ const HANDLER_MATCHERS: Readonly<
   // surfaced this at the re-vendor: the key set is DERIVED from the enum,
   // so a new action type cannot be silently forgotten here.)
   analysis_readiness: undefined,
+  // 0.21.0 (F2 CHANGE B): `what_changed` is a result-comparison intent, not a
+  // graph mutation — no `after` state for the synthesis path to short-circuit
+  // on, so `undefined` like the other non-mutating intents. Surfaced here by the
+  // same DERIVED exhaustive `Record<V5ActionType, …>` (fail-loud on drift).
+  what_changed: undefined,
 };
 
 /**
@@ -495,11 +500,12 @@ export interface FallbackEntity {
 
 /**
  * Optional lookup callback: given an entity id, return the live graph
- * kind (and label) for that entity. The synthesis builder uses this
- * to render a proposal whose `entity.kind` matches the graph-resolved
- * kind, so the validator's per-entity kind check accepts it. When no
- * lookup is provided (or the id is unknown), the builder falls back
- * to a permissive default ('node' / 'edge' depending on handler).
+ * kind (and label) for that entity. The synthesis builder uses this to
+ * render a proposal whose `entity.kind` already matches the graph, so the
+ * validator has nothing to repair. (It is NOT there to satisfy a "per-entity
+ * kind check" — #736 removed that check; see the note at the call site.)
+ * When no lookup is provided (or the id is unknown), the builder falls back
+ * to a permissive GUESS ('node' / 'edge' depending on handler).
  */
 export interface SynthesisEntityLookup {
   (id: string): { kind: 'option' | 'goal' | 'node' | 'edge' | 'constraint'; label?: string | null } | null;
@@ -614,11 +620,34 @@ export function buildApplyProposedChangeProposal(
         )
       : [];
   const entityId = targets.length > 0 ? targets[0]! : fallbackEntity.id;
-  // Resolve the entity's kind. The validator runs both a structural
-  // check (proposed kind ∈ accepted_entity_kinds) AND a per-entity
-  // check (proposed kind === graph-resolved kind). We therefore
-  // prefer the graph-resolved kind when the lookup is available so
-  // both checks pass; we fall back to a sensible default when not.
+  // Resolve the entity's kind.
+  //
+  // ⚠ THE MECHANISM THIS ONCE DESCRIBED IS GONE. Until #736 the validator ran
+  // TWO kind checks — a structural one (proposed kind ∈ accepted_entity_kinds)
+  // AND a per-entity one (proposed kind === graph-resolved kind) — and the
+  // comment here said we prefer the graph-resolved kind "so both checks pass".
+  // #736 DELETED the per-entity check: the validator now ADOPTS the graph's
+  // kind (and label) for any id that resolves, and runs the structural check
+  // against that. There is no longer a check for a proposed kind to fail by
+  // disagreeing with the graph.
+  //
+  // So preferring the graph-resolved kind here is now REDUNDANT-BUT-HARMLESS,
+  // and it is kept deliberately: it costs one lookup we are already making,
+  // it keeps this builder's output honest at the point of construction rather
+  // than relying on a downstream repair, and — the reason that matters — it
+  // keeps CEE's own synthesis OUT of the `v5.entity_kind_repaired` count. A
+  // proposal we hand over already correct is not a repair, and that count is
+  // read as evidence about the ROUTING PROMPT.
+  //
+  // The `else` fallbacks below are a GUESS ('node', or 'edge' for
+  // adjust_edge_strength) taken when the id did not resolve. Today that guess
+  // cannot pollute the repair count either — the guess fires only when this
+  // lookup misses, and the validator's lookup is the SAME function, so it
+  // misses too and the turn fails ENTITY_NOT_FOUND with no repair. That
+  // coupling is an undeclared accident of the call sites sharing one closure,
+  // and `entityLookup` is optional by signature, so the repair telemetry
+  // carries a `repair_source` discriminator (turn-executor.ts) rather than
+  // trusting the coupling to hold.
   let resolvedLabel: string | null = null;
   let entityKind: FallbackEntity['kind'];
   if (targets.length > 0 && entityLookup !== undefined) {

@@ -215,7 +215,9 @@ function mapFactorRecommendations(
   return recommendations.slice(0, 2).map((rec) => ({
     priority: 4,
     action: rec.recommendation,
-    reason: rec.issues.join("; ") || "Structural improvement recommended",
+    // ROADMAP 2.725 — "recommended" is banned user-facing vocabulary on the
+    // turn path; this route family emitted it unscanned. Language-only.
+    reason: rec.issues.join("; ") || "Structural improvement suggested",
     source: "structure" as const,
   }));
 }

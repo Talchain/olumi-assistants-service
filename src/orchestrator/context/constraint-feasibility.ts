@@ -31,6 +31,8 @@
  * dead on the live object wire — this module does not share that limitation.
  */
 
+import type { ConstraintVerdict as ContractConstraintVerdict } from "@talchain/schemas/orchestrator";
+
 import { readOptionResultSources } from "./option-result-source.js";
 
 export interface WinnerConstraintFeasibility {
@@ -176,4 +178,762 @@ export function deriveWinnerConstraintInfeasibility(
   }
 
   return { infeasible: false, constraintId: null, kind: null };
+}
+
+// ===========================================================================
+// T1 — the constraint that was APPLIED, then never evaluated
+// ===========================================================================
+
+/**
+ * PLoT-originated codes whose meaning is "this hard constraint is NOT
+ * decision-grade" — the engine accepted the constraint, then refused to score
+ * it. Read off the wire; nothing here re-derives the verdict.
+ *
+ * `CONSTRAINT_OUT_OF_DOMAIN`  — the threshold cannot be expressed in the
+ *   target's domain (live: a £2,500 monetary cap attached to a normalised
+ *   [0,1] "Cost Efficiency" outcome).
+ * `CONSTRAINT_TARGET_UNRELIABLE` — the target is not decision-grade, so
+ *   goal-fit probabilities are suppressed (PLoT PR #205 withholds the whole
+ *   top-level constraint block and sets `constraints_status: 'unavailable'`).
+ */
+const CONSTRAINT_NOT_DECISION_GRADE_CODES: ReadonlySet<string> = new Set([
+  "CONSTRAINT_OUT_OF_DOMAIN",
+  "CONSTRAINT_TARGET_UNRELIABLE",
+]);
+
+/** A hard constraint the user ratified and CEE persisted on the graph. */
+export interface RatifiedConstraint {
+  readonly constraint_id: string;
+  /** User-facing label, when the persisted constraint carries one. */
+  readonly label: string | null;
+}
+
+/**
+ * The constraint verdict for one analysis turn. ONE meaning, five answers.
+ *
+ * WHY AN ENUM AND NOT A BOOLEAN. #703 modelled "was the user's hard constraint
+ * honoured?" as a single `unevaluated` boolean. Both of its branches turned out
+ * to be wrong for a real producer state:
+ *
+ *   - `true` on a constraint-IDENTITY failure tells the user their condition
+ *     was never checked, on a run where the engine plainly DID check
+ *     something. False statement, and it costs a valid recommendation.
+ *   - `false` on that same failure (the first attempt at fixing it) reads as
+ *     "no gap" and restores a confident leading-option claim, which asserts
+ *     the user's condition holds on evidence CEE has just admitted it cannot
+ *     read. Also a false statement, and the more dangerous of the two.
+ *
+ * There is no correct boolean, because "we could not tell" is a third answer.
+ * Every state below therefore declares its own leading-option answer in
+ * {@link MAY_NAME_LEADING_OPTION} rather than leaving callers to infer it.
+ */
+export type ConstraintVerdictState =
+  /**
+   * Nothing to withhold for: the user ratified no hard constraints AND the
+   * producer's own constraint scoring gives no reason to hold the leader back.
+   * Byte-identical to the pre-T1 product on this path.
+   */
+  | 'not_applicable'
+  /**
+   * Every ratified constraint was scored under an id we recognise, and the
+   * leading option clears the violation floor. THE RECOMMENDATION SURVIVES.
+   * (With no leading option id the leader half is vacuous — see
+   * {@link deriveConstraintVerdict}.)
+   */
+  | 'evaluated_feasible'
+  /**
+   * The producer scored constraints and the leading option breaks one. "The
+   * leader does not satisfy a limit we checked" is assertable; naming it as the
+   * answer is not.
+   */
+  | 'evaluated_infeasible'
+  /**
+   * At least one ratified constraint was NOT evaluated to decision grade, on
+   * evidence that cannot be confused with a keying failure: either the producer
+   * said so explicitly (a not-decision-grade code, or
+   * `constraints_status: 'unavailable'`), or the id spaces demonstrably line up
+   * elsewhere and this constraint still has no score. "Your condition was not
+   * checked" is assertable HERE AND NOWHERE ELSE.
+   */
+  | 'unevaluated'
+  /**
+   * The producer plainly evaluated constraints, but NOT ONE of the ids it
+   * returned reconciles with anything we ratified.
+   *
+   * The seam is unenforced: CEE's persisted `constraint_id` meets PLoT's map
+   * keys across an untyped `z.record` enrichment boundary that nothing
+   * validates, and PLoT does not promise that key is CEE's id — it resolves
+   * positionally, then by `node_id`+`operator`, then falls back to a
+   * `` `${node_id}_${operator}` `` composite. So the only observable is "these
+   * two id spaces do not intersect", and from that observable "the engine
+   * checked YOUR condition" and "the engine checked a different condition" are
+   * indistinguishable.
+   *
+   * Consequently this state asserts NEITHER claim. It does not say the
+   * condition went unchecked, and it does not certify constraint-safety — so
+   * the leading option is withheld. The user-facing disclosure says the system
+   * could not reconcile which condition was evaluated, and nothing more.
+   */
+  | 'identity_unresolved';
+
+/**
+ * May a leading option be NAMED as the answer, per state? Exhaustive by
+ * construction — `Record<ConstraintVerdictState, boolean>` makes a new state
+ * without a declared answer a compile error rather than a silent `undefined`.
+ *
+ * Exactly two states permit it, and both mean "verified": either there was
+ * nothing to verify, or everything the user ratified was verified and holds.
+ * Every other state is some flavour of "we cannot stand behind that claim".
+ */
+export const MAY_NAME_LEADING_OPTION: Readonly<
+  Record<ConstraintVerdictState, boolean>
+> = Object.freeze({
+  not_applicable: true,
+  evaluated_feasible: true,
+  evaluated_infeasible: false,
+  unevaluated: false,
+  identity_unresolved: false,
+});
+
+export interface ConstraintVerdict {
+  /** Which of the five answers this turn's producer evidence selects. */
+  readonly state: ConstraintVerdictState;
+  /**
+   * The state's declared leading-option answer, copied onto every verdict so
+   * callers read it instead of re-deriving it from `state` (and disagreeing).
+   * Always `MAY_NAME_LEADING_OPTION[state]`.
+   */
+  readonly mayNameLeadingOption: boolean;
+  /** Producer-shipped not-decision-grade codes (deduped, sorted); else `[]`. */
+  readonly codes: readonly string[];
+  /**
+   * The ratified constraints this verdict is ABOUT, in graph order:
+   *   - `unevaluated` — the ones with no usable evaluation (all of them when a
+   *     code or an 'unavailable' status condemns the whole block);
+   *   - `identity_unresolved` — the full ratified set, i.e. the ids we could
+   *     not reconcile. NOTE: these are NOT "unchecked" constraints, and copy
+   *     built from them must not say so;
+   *   - every other state — empty.
+   */
+  readonly constraints: readonly RatifiedConstraint[];
+  /**
+   * The leading option's DETECTED infeasibility — carried on every state, not
+   * just `evaluated_infeasible`, so a run that is both `unevaluated` and led by
+   * an option breaking a scored constraint loses nothing to the precedence
+   * order below. `null` when the leader is feasible, or when feasibility could
+   * not be computed at all (no leading option id, no matching option entry, or
+   * no constraint probabilities — {@link deriveWinnerConstraintInfeasibility}
+   * fails open in all three).
+   */
+  readonly leaderInfeasibility: WinnerConstraintFeasibility | null;
+  /**
+   * ROADMAP 2.349 — the ratified constraints the PRODUCER DELIBERATELY REMOVED
+   * before computing, disclosed by it in `_meta.filtered_constraints`.
+   *
+   * These are NOT part of {@link constraints} and NOT part of the state
+   * derivation: they are excluded from the ratified set before any precedence
+   * step runs (see {@link deriveConstraintVerdict}). They are carried here so
+   * the disclosure can say the one thing that is TRUE about them — the
+   * analysis does not test them — instead of the one thing that is FALSE:
+   * "the engine could not evaluate your condition, re-state it in the same
+   * units". No restatement in any units can make an excluded dimension
+   * testable, so that repair step is structurally a no-op for this class.
+   *
+   * Carried on EVERY state, because a turn can have both an out-of-scope
+   * constraint and a genuinely unscored one, and neither disclosure may eat
+   * the other.
+   */
+  readonly outOfScopeConstraints: readonly RatifiedConstraint[];
+}
+
+function verdict(
+  state: ConstraintVerdictState,
+  parts: {
+    codes?: readonly string[];
+    constraints?: readonly RatifiedConstraint[];
+    leaderInfeasibility?: WinnerConstraintFeasibility | null;
+    outOfScopeConstraints?: readonly RatifiedConstraint[];
+  } = {},
+): ConstraintVerdict {
+  return {
+    state,
+    mayNameLeadingOption: MAY_NAME_LEADING_OPTION[state],
+    codes: parts.codes ?? [],
+    constraints: parts.constraints ?? [],
+    leaderInfeasibility: parts.leaderInfeasibility ?? null,
+    outOfScopeConstraints: parts.outOfScopeConstraints ?? [],
+  };
+}
+
+/**
+ * Read the user-ratified hard constraints.
+ *
+ * Accepts EITHER the `goal_constraints` array itself — the snapshot field the
+ * run_analysis handler forwards verbatim to PLoT, which is the tightest
+ * possible statement of "what we asked the engine to enforce" — OR any object
+ * carrying a root-level `goal_constraints` (the persisted graph, where D1's
+ * `add_constraint` writes them). Taking both means this never depends on which
+ * mirror a given call site happens to hold (CLAUDE.md trap #12).
+ *
+ * Constraints are metadata, never nodes or edges, so this array is the ONLY
+ * record of what the user ratified.
+ */
+export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
+  const raw = Array.isArray(source)
+    ? source
+    : source !== null && typeof source === "object"
+      ? (source as Record<string, unknown>).goal_constraints
+      : undefined;
+  if (!Array.isArray(raw)) return [];
+
+  const out: RatifiedConstraint[] = [];
+  for (const item of raw) {
+    if (item === null || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const id = readString(obj.constraint_id);
+    if (id === null) continue;
+    out.push({ constraint_id: id, label: readString(obj.label) });
+  }
+  return out;
+}
+
+/**
+ * Collect every constraint id PLoT returned a satisfaction probability for.
+ *
+ * TWO sources, deliberately — reading only the per-option map threw away the
+ * producer's own canonical answer:
+ *   1. per-option `constraint_probabilities` keys (both wire shapes);
+ *   2. top-level `constraint_results[].constraint_id`, which is an EXPLICIT
+ *      `constraint_id` field rather than a map key, and is therefore the
+ *      keying-independent statement of "which constraints did the engine
+ *      score" (present on the live doctrine-B wire — see
+ *      tests/fixtures/cross-service/plot-to-cee.doctrine-b.code-derived.json).
+ * Taking both means a per-option keying quirk alone cannot make a scored
+ * constraint look unscored.
+ */
+function collectEvaluatedConstraintIds(
+  envelope: Record<string, unknown>,
+): Set<string> {
+  const seen = new Set<string>();
+  for (const source of readOptionResultSources(envelope)) {
+    for (const entry of source) {
+      for (const { id } of readConstraintSatisfactionProbs(entry as Record<string, unknown>)) {
+        seen.add(id);
+      }
+    }
+  }
+  const results = envelope.constraint_results;
+  if (Array.isArray(results)) {
+    for (const entry of results) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const id = readString((entry as Record<string, unknown>).constraint_id);
+      if (id !== null) seen.add(id);
+    }
+  }
+  return seen;
+}
+
+/**
+ * Collect every constraint id the PRODUCER DELIBERATELY REMOVED before
+ * computing, from its own disclosure channel `_meta.filtered_constraints[]`.
+ *
+ * ROADMAP 2.349. This channel is PLoT's machine-readable statement of "I threw
+ * this one away on purpose, and here is why" (`{constraint_id, node_id,
+ * reason}` — `plot-lite-service/src/types/engine-v3.ts` `CanonicalMeta`,
+ * populated at `routes/v2/run.ts` only when the list is non-empty). Until this
+ * function existed CEE had ZERO readers of it, so a constraint PLoT announced
+ * it had deleted was indistinguishable at the verdict from one the engine
+ * silently failed to score — and the second reading is what withheld the
+ * leading option on every brief carrying a time phrase.
+ *
+ * NO REASON ALLOWLIST, DELIBERATELY (CLAUDE.md trap 12). PLoT types `reason`
+ * as an open `string` and emits two values today (`temporal_deadline`,
+ * `temporal_against_normalised_goal`); a hand-listed set here would be a
+ * mirror that goes silently short the day a third is added, and the missing
+ * entry would fail in the WITHHOLDING direction — i.e. straight back into this
+ * defect. The semantics that matter are carried by PRESENCE in the channel,
+ * not by the reason text: a constraint the producer states it removed before
+ * computing cannot have been scored, and no user restatement can change that.
+ *
+ * IDENTITY-BOUND. Only ids are collected, and the caller matches them against
+ * the ratified ids exactly — a filtered record naming something we never
+ * ratified excludes nothing.
+ *
+ * Fails CLOSED (empty set) on every malformed shape, so a garbled `_meta`
+ * withholds exactly as it does today rather than silently naming a leader.
+ *
+ * Pure.
+ */
+function collectProducerFilteredConstraintIds(
+  envelope: Record<string, unknown>,
+): Set<string> {
+  const out = new Set<string>();
+  const meta = envelope._meta;
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return out;
+  const filtered = (meta as Record<string, unknown>).filtered_constraints;
+  if (!Array.isArray(filtered)) return out;
+  for (const entry of filtered) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const id = readString((entry as Record<string, unknown>).constraint_id);
+    if (id !== null) out.add(id);
+  }
+  return out;
+}
+
+/** Codes on the producer's warning channels that mean "not decision-grade". */
+function collectNotDecisionGradeCodes(
+  envelope: Record<string, unknown>,
+): string[] {
+  const found = new Set<string>();
+  for (const key of ["inference_warnings", "critiques"] as const) {
+    const arr = envelope[key];
+    if (!Array.isArray(arr)) continue;
+    for (const entry of arr) {
+      if (entry === null || typeof entry !== "object") continue;
+      const code = readString((entry as Record<string, unknown>).code);
+      if (code !== null && CONSTRAINT_NOT_DECISION_GRADE_CODES.has(code)) {
+        found.add(code);
+      }
+    }
+  }
+  return [...found].sort();
+}
+
+/**
+ * THE constraint verdict for one analysis turn — the single owner of the
+ * meaning "was the user's hard constraint honoured?".
+ *
+ * DEFECT THIS EXISTS TO CLOSE (reported 1/1 on live staging): a user asks for
+ * "total three-year cost below £2,500"; CEE replies "Added constraint: …";
+ * PLoT returns `CONSTRAINT_OUT_OF_DOMAIN` and withholds goal-fit under
+ * `CONSTRAINT_TARGET_UNRELIABLE`; and CEE nevertheless leads with "MacBook Pro
+ * currently leads by 18 percentage points", disclosing nothing. The user's
+ * stated condition was accepted, silently discarded by the engine, and the
+ * product asserted a recommendation anyway.
+ *
+ * Every signal is READ FROM THE PRODUCER — the codes, the status field, the
+ * per-option probabilities and the top-level `constraint_results` are all
+ * PLoT's own output. Nothing here re-derives a verdict PLoT already computed,
+ * and nothing here mirrors PLoT's key-resolution rule (CLAUDE.md trap #12):
+ * where that rule produces ids CEE cannot reconcile, the verdict SAYS SO
+ * ({@link ConstraintVerdictState} `identity_unresolved`) instead of guessing.
+ *
+ * PRECEDENCE, most-certain evidence first. Exactly one state is returned:
+ *
+ *   0. (2.349) Constraints the producer DISCLOSED IT REMOVED before computing
+ *      (`_meta.filtered_constraints`) are partitioned out of the ratified set
+ *      first, onto {@link ConstraintVerdict.outOfScopeConstraints}. Their
+ *      absence from the results is guaranteed by the producer's own decision
+ *      and is therefore not evidence about anything — it must not reach rules
+ *      1–3, all of which would read it as a reason to withhold. If nothing
+ *      survives the partition the answer is `not_applicable`, the same as for
+ *      a turn with no ratified constraints.
+ *   1. (S1/S2) An explicit producer verdict — a not-decision-grade CODE, or
+ *      `constraints_status: 'unavailable'` — condemns the whole constraint
+ *      block, so every ratified constraint is `unevaluated`. This outranks the
+ *      identity question because the producer has told us in words that it did
+ *      not reach decision grade; no id reconciliation is needed to believe it.
+ *   2. Evaluations present but ZERO reconcile ⇒ `identity_unresolved`. Zero
+ *      overlap is required: a single match proves the id spaces DO line up, so
+ *      any remaining unscored constraint is genuinely unscored.
+ *   3. (S3) A ratified constraint with no score, where step 2 did not fire ⇒
+ *      `unevaluated` for exactly those constraints. This is the honest "applied,
+ *      then silently unscored" case, and it covers "nothing was scored at all"
+ *      (no evaluations ⇒ no id space to reconcile ⇒ no ambiguity).
+ *   4. Otherwise every ratified constraint was scored, and the LEADER decides:
+ *      `evaluated_infeasible` if it breaks one, else `evaluated_feasible`.
+ *
+ * `unevaluated` outranks `evaluated_infeasible` when both are true (constraint
+ * A scored and violated, constraint B never scored): the unevaluated disclosure
+ * is the one that names a condition and offers a repair step, and the
+ * infeasibility is not lost — it is carried on
+ * {@link ConstraintVerdict.leaderInfeasibility} in every state.
+ *
+ * Why {@link deriveWinnerConstraintInfeasibility} cannot cover the gap on its
+ * own: it FAILS OPEN when no constraint probabilities are present
+ * (`probs.length === 0 → infeasible: false`). PLoT's suppressed-unreliable
+ * variant withholds exactly those probabilities, so the suppressed case is
+ * indistinguishable from the no-constraints case at that predicate. This
+ * function distinguishes them by consulting what the user ratified.
+ *
+ * With no ratified constraints the only question left is the pre-T1 one — does
+ * the producer's own scoring show the leader breaking a constraint? — so the
+ * result is `evaluated_infeasible` or `not_applicable`, and every caller stays
+ * byte-identical to its pre-T1 behaviour. `not_applicable` therefore means
+ * "nothing to withhold for", NOT merely "no ratified constraints"; collapsing
+ * it to the latter would silently un-fix trust-spine board #1.
+ *
+ * PURE. The `CEE_CONSTRAINT_INFEASIBLE_GATE` feature flag is enforced by the
+ * callers, exactly as it is for {@link deriveWinnerConstraintInfeasibility}, so
+ * this function stays trivially testable and the gate keeps one owner.
+ */
+export function deriveConstraintVerdict(
+  envelope: Record<string, unknown>,
+  ratified: readonly RatifiedConstraint[],
+  leadingOptionId: string | null | undefined,
+): ConstraintVerdict {
+  // Computed unconditionally so it can be carried on every state (see
+  // `leaderInfeasibility`). Fails open to `{ infeasible: false }`.
+  const leaderRaw = deriveWinnerConstraintInfeasibility(envelope, leadingOptionId);
+  const leader = leaderRaw.infeasible ? leaderRaw : null;
+
+  // ROADMAP 2.349 — STEP 0, BEFORE EVERY PRECEDENCE RULE BELOW. Partition off
+  // the constraints the producer says it DELIBERATELY REMOVED before computing
+  // (`_meta.filtered_constraints`). They are not evidence about the engine's
+  // behaviour on the user's conditions: their absence from the results is
+  // GUARANTEED by the producer's own disclosed decision, not observed.
+  //
+  // It has to happen here rather than inside any single step, because the
+  // absence of a score for a removed constraint would otherwise be read as
+  // evidence by THREE different rules below (the block-level codes rule, the
+  // identity rule, and the unscored rule) — and every one of them would reach
+  // "withhold the leading option" from a fact that says nothing about the
+  // engine at all.
+  //
+  // `effective` is what the rest of this function reasons over; `outOfScope`
+  // rides on the verdict for the disclosure. When they partition to nothing,
+  // the answer is the SAME one a turn with no ratified constraints gets —
+  // `not_applicable`, "nothing to withhold for" — because after removing what
+  // the producer never looked at, there is nothing left to have an opinion
+  // about.
+  const producerFiltered = collectProducerFilteredConstraintIds(envelope);
+  const outOfScope: RatifiedConstraint[] = [];
+  const effective: RatifiedConstraint[] = [];
+  for (const c of ratified) {
+    (producerFiltered.has(c.constraint_id) ? outOfScope : effective).push(c);
+  }
+
+  if (effective.length === 0) {
+    return leaderRaw.infeasible
+      ? verdict('evaluated_infeasible', {
+          leaderInfeasibility: leaderRaw,
+          outOfScopeConstraints: outOfScope,
+        })
+      : verdict('not_applicable', { outOfScopeConstraints: outOfScope });
+  }
+
+  const codes = collectNotDecisionGradeCodes(envelope);
+  const statusUnavailable =
+    readString(envelope.constraints_status) === "unavailable";
+
+  // 1. The producer's own explicit verdict on the whole block.
+  if (codes.length > 0 || statusUnavailable) {
+    return verdict('unevaluated', {
+      codes,
+      constraints: [...effective],
+      leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
+    });
+  }
+
+  const evaluated = collectEvaluatedConstraintIds(envelope);
+  const unscored = effective.filter((c) => !evaluated.has(c.constraint_id));
+
+  // 2. Evaluations exist; not one of them is an id we ratified.
+  if (evaluated.size > 0 && unscored.length === effective.length) {
+    return verdict('identity_unresolved', {
+      constraints: [...effective],
+      leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
+    });
+  }
+
+  // 3. Genuinely unscored — either nothing was evaluated at all, or the
+  //    overlap above proves the id spaces line up and these still have no score.
+  if (unscored.length > 0) {
+    return verdict('unevaluated', {
+      constraints: unscored,
+      leaderInfeasibility: leader,
+      outOfScopeConstraints: outOfScope,
+    });
+  }
+
+  // 4. Everything the user ratified was scored. The leader decides.
+  return leaderRaw.infeasible
+    ? verdict('evaluated_infeasible', {
+        leaderInfeasibility: leaderRaw,
+        outOfScopeConstraints: outOfScope,
+      })
+    : verdict('evaluated_feasible', { outOfScopeConstraints: outOfScope });
+}
+
+// ===========================================================================
+// T1 — PERSISTING the verdict alongside the analysis facts
+// ===========================================================================
+
+/**
+ * The key CEE STAMPED its claim-safety verdict under, inside the run_analysis
+ * fact's `result.enrichment`, before `@talchain/schemas@0.25.0`.
+ *
+ * ⚠ LEGACY READ PATH ONLY — NOTHING WRITES THIS ANY MORE. The verdict now
+ * rides the first-class {@link ConstraintVerdictSchema} field
+ * `result.constraint_verdict` (0.25.0), written by the single stamp site in
+ * `run_analysis`. Read via {@link readMayNameLeadingOptionFromResult}, which
+ * prefers the typed field and falls back HERE.
+ *
+ * WHY THE INTERIM EXISTED. `RunAnalysisResultSchema` is `.strict()`, so an
+ * extra key on `result` failed BOTH the handler's own
+ * `RunAnalysisHandlerFactSchema.safeParse` on write AND
+ * `HandlerFactSchema.safeParse` on every read (`session/supabase-store.ts`
+ * `readFactsWithTurnFor:612`, which THROWS `SessionReadError` rather than
+ * skipping). Moving the field therefore needed a schemas release, which was
+ * blocked behind V5-CI-01. 0.25.0 IS that release, and it mirrors
+ * {@link PersistedClaimSafety} verbatim.
+ *
+ * WHY THIS KEY STILL HAS A READER, and why that is not the mirror trap.
+ * Every run_analysis fact persisted between #710 and the 0.25.0 adoption
+ * carries the interim stamp and nothing else. There is no data migration
+ * (A1 ruling), so dropping this reader would silently reclassify every one of
+ * those rows as "unknown" ⇒ withheld — costing real users their leader-presuming
+ * cards on a re-opened historic analysis, for no safety gain. The two keys are
+ * not two copies of a live meaning: exactly one of them is ever present on a
+ * given fact, and the newer wins. That is a migration ramp, not a mirror.
+ *
+ * It never reached the wire either way: `toSafeTransportEnrichment`
+ * (`compose.ts`) projects enrichment through the
+ * `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP` allowlist, and this key is deliberately
+ * absent from it.
+ */
+export const CEE_CLAIM_SAFETY_ENRICHMENT_KEY = '__cee_claim_safety';
+
+/**
+ * The persisted projection of {@link ConstraintVerdict} — the FACT ABOUT THE
+ * ANALYSIS that "may a leading option be named" is.
+ *
+ * Only the two fields any consumer needs are stored. `constraints` and
+ * `leaderInfeasibility` carry user labels and producer detail; they are
+ * deliberately NOT persisted here, because nothing downstream of the single
+ * derivation reads them and a second copy of a label is a second thing to
+ * drift.
+ *
+ * `@talchain/schemas@0.25.0`'s `ConstraintVerdictSchema` mirrors this interface
+ * VERBATIM — member names, types and order — and the package's own docstring
+ * says so. It is therefore assignable to the typed field with no adapter, and
+ * the compile-time assertion below is what keeps that true.
+ */
+export interface PersistedClaimSafety {
+  /** Verbatim {@link ConstraintVerdict.mayNameLeadingOption}. */
+  readonly may_name_leading_option: boolean;
+  /** Verbatim {@link ConstraintVerdict.state}, for telemetry and triage. */
+  readonly constraint_verdict_state: ConstraintVerdictState;
+}
+
+/**
+ * FAIL-LOUD DRIFT BOLT (CLAUDE.md trap #12 — the mirror must break at build
+ * time, not silently). `PersistedClaimSafety` and the contract's
+ * `ConstraintVerdict` are two declarations of one shape in two repos. If a
+ * future schemas release changes the field names, the member types, or the
+ * state enum, THIS LINE fails `pnpm typecheck` — the gate — instead of the
+ * skew reaching a wire field nobody re-checked (parent CLAUDE.md hazard 1:
+ * "a value that validates in the producer can vanish at the consumer").
+ *
+ * Bidirectional on purpose: assignability in one direction alone would let the
+ * contract grow a member this interface never learns about.
+ */
+const _persistedClaimSafetyMatchesContract: ContractConstraintVerdict extends PersistedClaimSafety
+  ? PersistedClaimSafety extends ContractConstraintVerdict
+    ? true
+    : never
+  : never = true;
+void _persistedClaimSafetyMatchesContract;
+
+/**
+ * Project the verdict into the shape persisted on the fact.
+ *
+ * Called EXACTLY ONCE, in `run_analysis`, immediately after the single
+ * `deriveConstraintVerdict` call that owns this meaning. Every other surface
+ * READS it (see {@link readMayNameLeadingOptionFromResult}) rather than
+ * deriving its own — two derivations can see different inputs (the handler
+ * reads `snapshot.goal_constraints`; compose would read a hash-gated persisted
+ * graph that is `undefined` whenever the gate fails) and produce an internally
+ * inconsistent response, which is the exact defect class this closes
+ * (CLAUDE.md trap #12).
+ *
+ * Pure.
+ */
+export function projectClaimSafety(verdict: ConstraintVerdict): PersistedClaimSafety {
+  return {
+    may_name_leading_option: verdict.mayNameLeadingOption,
+    constraint_verdict_state: verdict.state,
+  };
+}
+
+/**
+ * Read "may a leading option be named" off a persisted run_analysis fact's
+ * `result`. THE reader — every claim-safety surface calls this one.
+ *
+ * TYPED FIRST, INTERIM SECOND, FAIL CLOSED THIRD:
+ *
+ *   1. `result.constraint_verdict` — the 0.25.0 contract field, written by
+ *      every fact from this release onward. PRESENT-but-malformed stops here
+ *      and answers `false`; it does NOT fall through (see
+ *      {@link typedVerdictIsPresent} for why `undefined` is the only absence).
+ *   2. `result.enrichment.__cee_claim_safety` — the interim stamp, present on
+ *      every fact persisted between #710 and this release. Kept as a FALLBACK
+ *      because there is no data migration (A1 ruling); see
+ *      {@link CEE_CLAIM_SAFETY_ENRICHMENT_KEY} for why that is a ramp and not
+ *      a mirror. Exactly one of the two is ever present on a given fact.
+ *   3. Neither ⇒ `false` (withheld).
+ *
+ * WHY CLOSED, unchanged from the interim reader and still the only safe
+ * reading:
+ *
+ *   - Every fact written before #710 carries neither, and for those the
+ *     verdict is genuinely unknown. "Unknown" and "verified feasible" are
+ *     different claims, and only the second licenses naming a leader.
+ *   - A future write path that forgets to stamp is a bug. Failing open would
+ *     make that bug silent and re-open the P0 (G-CEE-1 walk, staging
+ *     `1c078f0`): "no option can be put forward yet" printed directly above
+ *     "The MacBook Pro leads by a margin of about 52 percentage points".
+ *
+ * The cost of the closed default is content, not correctness: a rebuilt view
+ * of a historic analysis drops its leader-presuming cards. The cost of an open
+ * default is the product asserting a recommendation it has just told the user
+ * it cannot make.
+ */
+export function readMayNameLeadingOptionFromResult(result: unknown): boolean {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return false;
+  const typed = (result as Record<string, unknown>).constraint_verdict;
+  if (typedVerdictIsPresent(typed)) {
+    return isPlainObject(typed)
+      ? (typed as Record<string, unknown>).may_name_leading_option === true
+      : // PRESENT but not an object ⇒ fail closed, never fall through. See
+        // {@link typedVerdictIsPresent}.
+        false;
+  }
+  // The ramp's second rung. This is the ONE legitimate call to the legacy
+  // enrichment-only reader in the codebase — it is reached only when the typed
+  // 0.25.0 field is ABSENT, which is exactly the interim-stamp population.
+  return legacyReadMayName_DO_NOT_USE((result as Record<string, unknown>).enrichment);
+}
+
+/** A non-null, non-array object — the only shape a typed verdict can take. */
+function isPlainObject(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Is `result.constraint_verdict` PRESENT, whatever shape it arrived in? (F5)
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE INVARIANT THIS RESTORES, WHICH WAS STATED AND THEN ENFORCED OVER A STRICT
+ * SUBSET OF ITS OWN SCOPE.
+ *
+ * `constraint-verdict-typed-field.test.ts` already declares the rule: "a typed
+ * field that is present but junk is a producer bug; reading past it to an older
+ * key would let the bug pick the more permissive of two answers." Both readers
+ * entered the typed branch on `!== null && typeof === 'object' && !isArray`, so
+ * exactly three OBJECT junk shapes were covered. A `constraint_verdict` that is
+ * `true`, `'feasible'`, `[]`, `0` or `null` skipped the branch ENTIRELY and fell
+ * through to `enrichment.__cee_claim_safety` — which can answer `true`. The
+ * invariant was written down and then routed around by every non-object value.
+ *
+ * `ABSENT` IS `undefined` AND NOTHING ELSE, and that is derived, not chosen:
+ * the contract declares `constraint_verdict: z.optional(z.object(...))`
+ * (`@talchain/schemas@0.25.0` handler-results), so it is either absent or a
+ * strict object. `null` is not a legal value, which is why `null` is treated
+ * here as PRESENT-and-malformed rather than as absence. That is also the only
+ * safe reading: a stray `null` from a future writer or a DB default must not be
+ * able to buy the permissive answer.
+ *
+ * The ONE thing this must not break is the migration ramp: `undefined` still
+ * reaches the interim stamp, or every fact persisted between #710 and 0.25.0
+ * would be silently reclassified as withheld.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+function typedVerdictIsPresent(value: unknown): boolean {
+  return value !== undefined;
+}
+
+/**
+ * Read the persisted verdict STATE off a run_analysis fact's `result`.
+ *
+ * The sibling of {@link readMayNameLeadingOptionFromResult}, walking the SAME
+ * two-step ladder (typed `result.constraint_verdict` first, interim
+ * `result.enrichment.__cee_claim_safety` second) so the boolean and the state
+ * can never be read from different stamps on one fact.
+ *
+ * WHY A SEPARATE READER, AND WHY IT RETURNS `null` RATHER THAN A STATE.
+ * The boolean's fail-closed default is `false` because "withhold" is always a
+ * safe action. A STATE has no such safe default: every one of the five states
+ * makes a positive claim about what happened to the user's condition, and
+ * inventing one would put a sentence on the screen that the evidence does not
+ * support — the exact conflation `ConstraintVerdictState`'s own docstring says
+ * there is "no correct boolean" for. `null` therefore means "not recorded", and
+ * the one consumer ({@link buildConstraintDisclosureFromState} via
+ * `compose/withheld-explanation-answer.ts`) degrades to leader-free copy with
+ * NO named condition rather than guessing a voice.
+ *
+ * Unknown or new state strings are rejected against {@link MAY_NAME_LEADING_OPTION}
+ * — the enum's own key set — rather than a hand-listed copy, so a sixth state
+ * added to the contract reads as `null` (honest absence) instead of silently
+ * flowing into an exhaustive switch that cannot handle it.
+ */
+export function readConstraintVerdictStateFromResult(
+  result: unknown,
+): ConstraintVerdictState | null {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return null;
+  const record = result as Record<string, unknown>;
+  const typed = record.constraint_verdict;
+  // F5 — the SAME present-but-malformed rule as the boolean reader, and it must
+  // be the same or the two readers walk different ladders on one fact. A junk
+  // typed field that fail-closes the permission while the STATE is read from the
+  // interim would break the property this reader's docstring rests on: "the
+  // boolean and the state can never be read from different stamps on one fact".
+  if (typedVerdictIsPresent(typed)) {
+    return isPlainObject(typed)
+      ? asVerdictState((typed as Record<string, unknown>).constraint_verdict_state)
+      : null;
+  }
+  const enrichment = record.enrichment;
+  if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {
+    return null;
+  }
+  const stamp = (enrichment as Record<string, unknown>)[CEE_CLAIM_SAFETY_ENRICHMENT_KEY];
+  if (stamp === null || typeof stamp !== 'object' || Array.isArray(stamp)) return null;
+  return asVerdictState((stamp as Record<string, unknown>).constraint_verdict_state);
+}
+
+/** Narrow an unknown to a contract state, or `null`. Derived from the enum. */
+function asVerdictState(value: unknown): ConstraintVerdictState | null {
+  if (typeof value !== 'string') return null;
+  return Object.prototype.hasOwnProperty.call(MAY_NAME_LEADING_OPTION, value)
+    ? (value as ConstraintVerdictState)
+    : null;
+}
+
+/**
+ * ⛔ DEPRECATED, AND DELIBERATELY UNAUTOCOMPLETABLE. Do not call this.
+ * Call {@link readMayNameLeadingOptionFromResult}.
+ *
+ * LEGACY reader — the interim `enrichment.__cee_claim_safety` stamp ONLY. It is
+ * the second rung of the `FromResult` ladder, not a reader in its own right.
+ *
+ * ⚠ RENAMED 2026-07-27 (R8), AND THE NAME IS THE FIX. It used to be called
+ * `readMayNameLeadingOption` — one autocomplete keystroke away from
+ * `readMayNameLeadingOptionFromResult`, the reader every claim-safety surface
+ * is supposed to call, and IDENTICAL in signature-shape at the call site. The
+ * failure mode of picking the wrong one is not a crash and not a test failure:
+ * on any fact written from `@talchain/schemas@0.25.0` onward the verdict lives
+ * at `result.constraint_verdict`, this function cannot see it, and it returns
+ * `false` for EVERY turn — permitted or withheld alike. That is SILENT
+ * UNIVERSAL WITHHOLDING: the product stops making recommendations it is
+ * entitled to make, no alarm fires, and the symptom is a content regression
+ * nobody can attribute. `decision-review-enricher.ts` has already been bitten
+ * by exactly this read (see the `mayNameLeadingOption` parameter's docstring
+ * there) and was fixed by threading the verdict instead.
+ *
+ * It is not deleted because it has one real caller: the `FromResult` reader
+ * below delegates to it for the migration ramp, and the ramp's own fallback
+ * deserves its own test. It stays EXPORTED only for that test — production has
+ * no business importing it, and the name now says so.
+ */
+export function legacyReadMayName_DO_NOT_USE(enrichment: unknown): boolean {
+  if (enrichment === null || typeof enrichment !== 'object' || Array.isArray(enrichment)) {
+    return false;
+  }
+  const stamp = (enrichment as Record<string, unknown>)[CEE_CLAIM_SAFETY_ENRICHMENT_KEY];
+  if (stamp === null || typeof stamp !== 'object' || Array.isArray(stamp)) return false;
+  const value = (stamp as Record<string, unknown>).may_name_leading_option;
+  return value === true;
 }

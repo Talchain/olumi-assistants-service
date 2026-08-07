@@ -31,6 +31,7 @@ import {
   sanitiseForUser,
   type EntityLike,
 } from './helpers.js';
+import { phrasingForParameter, renderParameterPhrasing } from './parameter-user-phrasing.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
 import { isClaimableByClarificationResume } from '../routing/clarification-resume.js';
 
@@ -159,21 +160,88 @@ function composeEntityResolutionAmbiguous(error: ValidationError): BranchResult 
   };
 }
 
-function composeEntityKindMismatch(error: ValidationError): BranchResult {
+function composeEntityKindMismatch(error: ValidationError, ctx: ComposeContext): BranchResult {
   const details = error.details ?? {};
   const entityLabel = safeLabel({
-    label: readString(details.proposed_label),
+    label: readString(details.resolved_label) ?? readString(details.proposed_label),
     kind: undefined,
   });
+
+  // `resolved_kind` is present only when the graph resolved the id and the
+  // entity's REAL kind is one the handler does not accept. That is now the
+  // only way a genuine kind mismatch survives the validator's repair — the
+  // model mislabelling a valid target is corrected, not refused. So when we
+  // do refuse, we know exactly what the thing is and what we can act on, and
+  // the copy must say both.
+  const resolvedKind = pickKind(details.resolved_kind);
+  const acceptedKinds = readEntityKinds(details.accepted_kinds);
+
+  // Chips from the kinds the handler CAN act on — the same affordance the
+  // entity_not_found_with_siblings branch gives. A dead-end refusal that
+  // names no next step is what this branch used to be.
+  const graph = ctx.graph;
+  const chips: SuggestedAction[] = [];
+  if (graph) {
+    for (const kind of acceptedKinds) {
+      for (const entity of graph.listEntitiesByKind(kind)) {
+        if (chips.length >= ENTITY_SIBLING_CAP) break;
+        const label = safeLabel({ label: entity.label, kind });
+        chips.push({
+          id: chipId('entity', `km-${chips.length}`),
+          label,
+          message: `I meant ${label}.`,
+        });
+      }
+      if (chips.length >= ENTITY_SIBLING_CAP) break;
+    }
+  }
+
+  // What the handler CAN act on is conveyed by the chips — real labels from
+  // the graph — not by naming our taxonomy. The product-voice contract
+  // (pinned in validation-failure-responses.test.ts) forbids the words
+  // node / edge / goal / constraint / kind in user text, and rightly so:
+  // they are our words, not the user's. Concrete labels are also simply more
+  // useful than an abstract category, and they are clickable.
+  if (chips.length > 0) {
+    const found = resolvedKind
+      ? `I found ${entityLabel}, but I can't make that change to it.`
+      : `I wasn't sure what you meant by ${entityLabel}.`;
+    return {
+      body: {
+        assistant_text: `${found} Did you mean one of these?`,
+        suggested_actions: chips,
+      },
+      template_id: resolvedKind ? 'kind_mismatch_resolved_with_siblings' : 'kind_mismatch_with_siblings',
+      chip_type: 'entity_suggestion',
+    };
+  }
+
+  // No graph to draw chips from (graph-absent turn, or the handler accepts
+  // only kinds this graph has none of). Still drop the old tail — "Try asking
+  // about a specific option" was actively misleading when the target was an
+  // outcome node, which live evidence shows is the common case.
+  const found = resolvedKind
+    ? `I found ${entityLabel}, but I can't make that change to it.`
+    : `I wasn't sure what you meant by ${entityLabel}.`;
   return {
     body: {
-      assistant_text:
-        `I wasn't sure what you meant by ${entityLabel}. Try asking about a specific option, or describe what you'd like to change.`,
-      suggested_actions: [fallbackPrompt('Try describing what you want to change')],
+      assistant_text: `${found} Tell me what you'd like to change.`,
+      suggested_actions: [fallbackPrompt('Tell me what you want to change')],
     },
-    template_id: 'kind_mismatch',
+    template_id: resolvedKind ? 'kind_mismatch_resolved' : 'kind_mismatch',
     chip_type: 'text_prompt',
   };
+}
+
+/** Validate a `details.accepted_kinds` array into typed EntityKinds. */
+function readEntityKinds(value: unknown): EntityKind[] {
+  if (!Array.isArray(value)) return [];
+  const out: EntityKind[] = [];
+  for (const raw of value) {
+    const kind = pickKind(raw);
+    if (kind && !out.includes(kind)) out.push(kind);
+  }
+  return out;
 }
 
 function composeEntityNotFound(error: ValidationError, ctx: ComposeContext): BranchResult {
@@ -500,6 +568,17 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
           {
             id: chipId('prompt', 'param-retry'),
             label: 'Try a different value',
+            // ROADMAP 2.380 — DELIBERATELY LEFT ON THE RAW SPELLING. This chip
+            // has the same "internal parameter name in a user-visible string"
+            // smell as the main branch, and I did change it — until CI showed
+            // the change breaking `route-v2-factor-value-edit-scale-
+            // redeclaration.test.ts`, which pins THE REFUSAL SHAPE ON THE WIRE
+            // for the UI half. This branch is reached only when the error
+            // carries an `issue` but NO `constraint_description`, which the
+            // captured live defect does not (it rendered a constraint), so
+            // changing it buys nothing for ROADMAP 2.380 and spends a
+            // documented v2 wire contract to do it. Rowed separately rather
+            // than smuggled into an XS copy fix.
             message: `Use a different value for ${parameter}.`,
           },
         ],
@@ -509,27 +588,60 @@ function composeParameterInvalid(error: ValidationError): BranchResult {
     };
   }
 
-  const constraint = sanitiseForUser(details.constraint_description ?? 'a valid value');
+  // ROADMAP 2.380 (FIX 3) — THE VALIDATOR-JARGON LEAK, FIXED AT ITS SOURCE.
+  //
+  // This template used to render, verbatim to the user:
+  //     'strength' needs to be a number between -1 and 1. You gave 30.
+  // `strength` is a Zod field name; "a number between -1 and 1" is
+  // `describeSchema` reading `_def.checks`; and the retry chip put the field
+  // name in the user's own mouth ("Use a different value for strength."). None
+  // of that is vocabulary the product has ever shown. The repo already quoted
+  // this exact sentence as a known leak in a NEIGHBOURING file's copy contract
+  // (configure-option-clarify-response.ts:50) — the copy there was fixed and
+  // this emission site, the one that actually produces it, was not.
+  //
+  // Copy now comes from `parameter-user-phrasing.ts`, keyed by the parameter
+  // the registry declares, and says what the scale MEANS instead of printing
+  // its bounds. An undeclared parameter falls back to copy that echoes NOTHING
+  // from the error, so no future emission site can leak through this branch.
+  // Coverage is DERIVED over HANDLER_VALIDATION_REGISTRY, not hand-listed:
+  // a handler that adds a parameter without adding phrasing turns
+  // __tests__/parameter-invalid-no-validator-jargon.test.ts RED.
+  //
+  // The "You gave X." echo and its DISCRIMINATING scalar gate are deliberately
+  // KEPT as-is. That gate took several rounds of sentinel leaks ('unknown',
+  // '[complex value]') to get right and has its own positive controls; this
+  // fix replaces the jargon, it does not fold the echo away. What is new is
+  // that a parameter may opt OUT of the echo: on the edge-strength path the
+  // number is the ROUTING MODEL's proposal, not something the user typed, so
+  // "You gave 30." attributes to them a value they never gave, on a scale they
+  // have never been shown. See `echo_actual` in parameter-user-phrasing.ts.
   const actual = sanitiseForUser(details.actual_value);
   // V5 edit_graph P0 (task_99f83f0d) — kill the "You gave unknown." leak.
   // `sanitiseForUser` maps undefined/null/empty inputs to the internal
   // 'unknown' sentinel; rendering "You gave unknown." leaks a placeholder
   // that means nothing to the user. This covers PARAMETER_INVALID emission
   // sites that omit `actual_value` entirely (invalid_operator, graph
-  // predicates) — not just the `missing_value` branch above. When there is
-  // no real value to echo back, drop the clause and keep only the
-  // constraint guidance; genuine scalars still render "You gave X".
-  const showActual = actual !== 'unknown';
+  // predicates) — not just the `missing_value` branch above.
+  //
+  // Compound-value hardening: on a multi-effect edit `actual_value` is an
+  // object, so `sanitiseForUser` returns the '[complex value]' sentinel and
+  // "You gave [complex value]." leaked — the 'unknown'-only check let it
+  // through. Gate the echo on the RAW input type instead: only a genuine
+  // finite scalar (number / boolean / non-empty string) has a meaningful
+  // single-value form. Typing the gate — not string-matching sanitiser
+  // sentinels — means a future sentinel can't leak the same way. The residual
+  // `!== 'unknown'` still catches a non-empty string that sanitises to empty.
+  const showActual = isGenuineScalar(details.actual_value) && actual !== 'unknown';
+  const phrasing = phrasingForParameter(readString(details.parameter));
   return {
     body: {
-      assistant_text: showActual
-        ? `'${parameter}' needs to be ${constraint}. You gave ${actual}.`
-        : `'${parameter}' needs to be ${constraint}.`,
+      assistant_text: renderParameterPhrasing(phrasing, showActual ? actual : null),
       suggested_actions: [
         {
           id: chipId('prompt', 'param-retry'),
           label: 'Try a different value',
-          message: `Use a different value for ${parameter}.`,
+          message: phrasing.chip_message,
         },
       ],
     },
@@ -627,7 +739,7 @@ function composeValueUnitUnresolved(error: ValidationError): BranchResult {
 export const VALIDATION_COMPOSERS: Readonly<Record<ValidationErrorCode, BranchComposerFn>> = {
   HANDLER_NOT_FOUND: composeHandlerNotFound,
   ENTITY_RESOLUTION_AMBIGUOUS: (e) => composeEntityResolutionAmbiguous(e),
-  ENTITY_KIND_MISMATCH: (e) => composeEntityKindMismatch(e),
+  ENTITY_KIND_MISMATCH: (e, ctx) => composeEntityKindMismatch(e, ctx),
   ENTITY_NOT_FOUND: composeEntityNotFound,
   ENTITY_RESOLUTION_SUSPICIOUS: (e) => composeEntityResolutionSuspicious(e),
   PRECONDITION_UNMET: (e) => composePreconditionUnmet(e),
@@ -760,6 +872,22 @@ function pickKind(value: unknown): EntityKind | null {
 
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/**
+ * True only for a genuine finite scalar — a finite number, a boolean, or a
+ * non-empty string. Objects, arrays, null/undefined, and NaN are not.
+ *
+ * Gates the "You gave …" echo in `composeParameterInvalid`: values that are
+ * not scalars have no meaningful single-value form, so `sanitiseForUser`
+ * collapses them to an internal sentinel ('[complex value]' for objects,
+ * 'unknown' for null/undefined) that must never reach the user.
+ */
+function isGenuineScalar(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'string') return value.trim().length > 0;
+  return false;
 }
 
 function readCandidates(value: unknown): EntityLike[] {

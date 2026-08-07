@@ -118,7 +118,13 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // Deliberate, reviewed; migrate with the frame-consumer audit, do not
     // add more.
     'src/orchestrator-v5/turn-executor.ts': 5, // approved assembly seam (frozen file)
-    'src/orchestrator-v5/handlers/chip-click-dispatch.ts': 3, // TOLERATED ad-hoc debt — do not add more
+    // 2026-07-22 dead-noop deletion: 3 → 2 — the deterministic no-op explanation
+    // chip-click dispatch (`buildProjectionInputs`, removed as dead code
+    // post-#619) held one of the three references (its own ad-hoc freshness
+    // re-derivation). Deleting it drops a TOLERATED site; the surviving two are
+    // the import + the live run_analysis path's re-derivation. Reduction, not
+    // growth — the debt shrank.
+    'src/orchestrator-v5/handlers/chip-click-dispatch.ts': 2, // TOLERATED ad-hoc debt — do not add more
     // 2026-07-07 lane-8: +2 — the GM referee gate's pre-edit freshness
     // re-projection (strict persisted-base frame authority for the referee's
     // R2 stale gate; see edit-graph-referee-gate.ts + lane-8 evidence report).
@@ -143,6 +149,16 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // existed. Deliberate, reviewed; still ad-hoc debt — migrate with the
     // frame-consumer audit, do not add more.
     'src/orchestrator-v5/handlers/edit-graph-dispatch.ts': 6,
+    // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
+    // transaction pre-route derives the PRE-edit frame freshness for its
+    // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`
+    // (the SAME hash the referee frame + the held pending's `graph_hash`
+    // precondition use), exactly mirroring edit-graph-dispatch's own
+    // pre-edit frame re-derivation for the free-text edit gate. Consistent by
+    // construction; reusing build-turn-context's decision-context freshness
+    // would derive against a DIFFERENT hash. Deliberate, reviewed; still
+    // ad-hoc debt — migrate with the frame-consumer audit, do not add more.
+    'src/orchestrator/route-v2.ts': 2,
   },
   selectCanonicalAnalysisState: {
     'src/orchestrator-v5/context/canonical-analysis-state.ts': 1, // authority (definition)
@@ -166,7 +182,7 @@ Do NOT re-derive freshness / canonical state / recent changes at your call site:
   - read the value from the CanonicalContextFrame / turn context you already hold, or
   - thread it from build-turn-context / the context-pack assembler.
 
-The pre-existing ad-hoc sites (chip-click-dispatch.ts x2 call sites,
+The pre-existing ad-hoc sites (chip-click-dispatch.ts x1 call site,
 edit-graph-dispatch.ts x2 call sites) are FROZEN as tolerated debt pending the
 turn-executor frame-threading migration (see
 Docs/t4/context-frame-consumer-migration-audit.md). They are not precedent.

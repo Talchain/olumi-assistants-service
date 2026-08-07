@@ -219,6 +219,45 @@ export interface EditGmDecision {
   readonly heldProposalBlock?: HeldProposalBlock | null;
 }
 
+/**
+ * ⭐ IS THERE A LIVE PROPOSAL THE USER CAN STILL CONFIRM? — asked of the
+ * PRODUCER of the decision, never reconstructed from its fields.
+ *
+ * ROADMAP 2.623(a). `governing === 'held' && pendingActions.length > 0` had
+ * reached three call sites in `edit-graph-dispatch.ts`, each rebuilding "a
+ * proposal is live" out of two independently-nullable fields of a type this
+ * module owns. That is the hand-maintained mirror (CLAUDE.md trap 12) in its
+ * most expensive form: the invalid pair `governing: 'held'` with
+ * `pendingActions: null` is REACHABLE (the fail-closed catch below returns
+ * exactly that), so every consumer had to remember the second half of the
+ * condition, and the consequence of forgetting is a turn that offers a
+ * follow-on to a confirmation that does not exist.
+ *
+ * Expressed here, once, next to the type it reads: a held verdict is only a
+ * live proposal when it actually minted a pending the user can act on.
+ *
+ * ⚠ NOT an emptiness helper. `pendingActions: []` and `pendingActions: null`
+ * are both "no confirm control", and both must answer false — a `!== null`
+ * check would not.
+ *
+ * It is a TYPE PREDICATE on purpose. Every consumer of this condition also
+ * wants `pendingActions[0]`, and a plain boolean would leave each of them
+ * re-asserting non-nullness with a `!`. Narrowing here means the compiler
+ * carries the guarantee the predicate establishes, so a consumer cannot hold
+ * the check and still reach for a pending that might not be there.
+ */
+export function hasLiveHeldProposal<
+  T extends Pick<EditGmDecision, 'governing' | 'pendingActions'>,
+>(
+  decision: T | null | undefined,
+): decision is T & {
+  readonly governing: 'held';
+  readonly pendingActions: readonly PendingAction[];
+} {
+  if (decision === null || decision === undefined) return false;
+  return decision.governing === 'held' && (decision.pendingActions?.length ?? 0) > 0;
+}
+
 const PROCEED_DECISION: EditGmDecision = {
   governing: 'proceed',
   blockApply: false,
@@ -250,11 +289,21 @@ export const GM_HELD_NO_PENDING_ASSISTANT_TEXT =
   'unchanged for the moment. Tell me again what you would like to change and ' +
   "I'll pick it up fresh.";
 
-/** stale — the base moved or the analysis is not current. provisional_doctrine_v0. */
+/**
+ * stale — RULING A4 (2026-08-05) narrowed this to ONE meaning: the graph moved
+ * between the candidate being generated and being judged (`BASE_HASH_DIVERGED`).
+ * The freshness rung can no longer produce a `stale` verdict, so the old copy's
+ * second half — "Run the analysis again to get back in sync" — has to go: a
+ * re-run does NOT resolve a base-hash divergence. What resolves it is restating
+ * the change against the graph as it now is. (Design §2.4(b): a control that
+ * cannot do what it says is this estate's named dominant defect, and copy that
+ * prescribes a futile action is the same defect in prose.)
+ * provisional_doctrine_v0.
+ */
 export const GM_STALE_ASSISTANT_TEXT =
   'The model has moved since that edit was prepared, so I held it rather ' +
-  'than applying it against the wrong baseline. Run the analysis again to ' +
-  'get back in sync, then tell me the change once more.';
+  'than applying it against the wrong baseline. Tell me the change once ' +
+  'more and I will work it out against the model as it stands now.';
 
 /** rejected — integrity/safety failure. provisional_doctrine_v0. */
 export const GM_REJECTED_ASSISTANT_TEXT =
@@ -374,11 +423,36 @@ export function buildGmProtectedHeldAssistantText(
 /**
  * ROADMAP 2.11 / P1-3 — needs-encoding disclosure ON THE HOLD. An
  * `add_node` option op whose payload requests NO interventions will, once
- * confirmed, persist an option with no effect values — and PLoT preflight
- * then 422-blocks the WHOLE analysis (`options_not_configured`). The
- * live-proven failure (2.11 diagnosis, scenario A A2→A4) is that the user
- * learns this only two turns later, from a recovery chip that used to loop.
- * The consent ask must say it AT ADD TIME.
+ * confirmed, persist an option with no effect values. The consent ask must
+ * say so AT ADD TIME — the live-proven 2.11 failure (diagnosis scenario A,
+ * A2→A4) was that the user learned it only two turns later, from a recovery
+ * chip that used to loop.
+ *
+ * ⚠⚠ ROADMAP 2.117 — THIS COPY IS PREDICTION-FREE BY DESIGN. It states a
+ * fact that is true at proposal time and names the remedy. It must NOT
+ * forecast what the analysis will do with the option, in EITHER direction.
+ * That rule was learned twice, the hard way:
+ *
+ *   gen 1  "…so the analysis will stay blocked after this is applied until
+ *           you set them."  → FALSE post-#747: the option is scaffolded, the
+ *           gate stays enabled, the analysis runs.
+ *   gen 2  "…so Olumi will include it using provisional placeholder values."
+ *           (#748) → FALSE on the next live re-capture: the value-free option
+ *           scaffolds onto the baseline, collides with "Defer Replacement
+ *           (Status Quo)", and the engine REMOVES it —
+ *           `IDENTICAL_OPTIONS_DEDUPED`. It was never scored.
+ *
+ * gen 2 replaced a false NEGATIVE prediction with a false POSITIVE one. The
+ * outcome is DRAFT-DEPENDENT and at least three independent mechanisms can
+ * suppress inclusion — no projectable neutral target, no configured sibling,
+ * and post-scaffold dedup against the baseline (the third fires AFTER the
+ * scaffold, so `will_scaffold_options: true` does not imply the option
+ * survives to be scored). None of them is knowable here.
+ *
+ * Whether the option ended up scored on placeholders or deduped away is the
+ * ANALYSIS RESULT's disclosure, not the consent ask's. Pinned by
+ * `needs-encoding-copy-prediction-free.test.ts`, whose detector is symmetric
+ * and carries BOTH historical sentences as positive controls.
  *
  * Detection derives from `optionIdsAddedWithInterventionIntent` — the SAME
  * intent classifier the edit pipeline's configure-or-don't-persist gate
@@ -419,9 +493,9 @@ export function buildNeedsEncodingAddNotice(
       ? first
       : `${first} and ${labels.length - 1} more option${labels.length - 1 === 1 ? '' : 's'}`;
   return (
-    `Heads up: ${named} ${labels.length === 1 ? 'has' : 'have'} no effect values yet, ` +
-    'so the analysis will stay blocked after this is applied until you set them. ' +
-    `You can tell me what ${labels.length === 1 ? 'it' : 'each one'} changes once it is added.`
+    `Heads up: ${named} ${labels.length === 1 ? 'has' : 'have'} no effect values yet. ` +
+    `Tell me what ${labels.length === 1 ? 'it' : 'each one'} changes and I'll write in ` +
+    'the real numbers.'
   );
 }
 
@@ -769,13 +843,24 @@ function buildHeldPending(
   return { pending, chip, targetKey };
 }
 
-/** The rerun affordance for the stale template (existing executable chip shape). */
-const GM_STALE_RERUN_CHIP: EditGmChip = {
-  id: 'chip_action_rerun_analysis_gm_stale',
-  label: 'Re-run analysis',
-  message: 'Rerun the analysis.',
-  action_type: 'run_analysis',
-};
+/**
+ * ⭐ RULING A4 (2026-08-05) — THE RERUN CHIP IS GONE FROM THE STALE TEMPLATE,
+ * DELIBERATELY, AND NOTHING REPLACES IT YET.
+ *
+ * `governing: 'stale'` now means exactly one thing — `BASE_HASH_DIVERGED`, the
+ * graph moved under the candidate — and re-running the analysis does not fix
+ * that. Offering `run_analysis` here was a control that could not do what it
+ * said, on the one path where the user most needs a true instruction. The
+ * assistant text carries the real next step (restate the change), which the
+ * user can take by typing; inventing a new "show me the current model" chip
+ * would be a second, unproven control on a trust surface and is deliberately
+ * left to the owner rather than smuggled into this diff.
+ *
+ * (The `chip_action_rerun_analysis_gm_stale` id is retired with it. The
+ * receipt-side rerun chip — the one the D-S header nominates to resolve real
+ * staleness — is untouched and still ships on APPLIED edits.)
+ */
+const GM_STALE_SUGGESTED_ACTIONS: readonly EditGmChip[] = [];
 
 // ---------------------------------------------------------------------------
 // The gate.
@@ -915,11 +1000,15 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
     }
 
     if (governing === 'stale') {
+      // A4: reachable ONLY through a genuine base-hash divergence now. The
+      // batch is refused WHOLE (stale outranks held), which is exactly what
+      // the mixed-batch invariant demands for a candidate generated against a
+      // graph that has since moved.
       return {
         governing,
         blockApply: true,
         assistantText: GM_STALE_ASSISTANT_TEXT,
-        suggestedActions: [GM_STALE_RERUN_CHIP],
+        suggestedActions: [...GM_STALE_SUGGESTED_ACTIONS],
         pendingActions: null,
         publicReason,
         verdictCounts,

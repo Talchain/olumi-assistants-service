@@ -1413,13 +1413,21 @@ flip_thresholds (array, max 3 — always present, may be empty):
   Take the first 3 entries from flip_threshold_data (in order provided) where flip_value is not null:
     factor_id (string): from flip_threshold_data[].factor_id
     factor_label (string): from flip_threshold_data[].factor_label
-    current_display (string): current_value as-is, appended with unit if provided (e.g., "16000 GBP", "800 customers")
-    flip_display (string): flip_value as-is, same format as current_display
-    Do not round, abbreviate (no "k", "m"), add commas, or insert currency symbols unless
-    the unit field already contains them. Output the number exactly as provided.
+    current_display / flip_display (string): the DISPLAY form of current_value / flip_value.
+      TWO CASES, and only two:
+      1. The value carries a unit. Quote it verbatim with the unit appended
+         (e.g., "16000 GBP", "800 customers"). Do not round, abbreviate (no "k", "m"),
+         add commas, or insert currency symbols unless the unit field already contains them.
+      2. The value carries no unit and lies between 0 and 1. It is probability-like, so it takes
+         the PERCENTAGE form, exactly as everywhere else in this response: write "35%", never
+         "0.35"; write "62%", never "0.62". Multiplying by 100 is the one permitted transformation.
+      A bare decimal in either field is a raw probability decimal and gets the whole card
+      discarded. There is no third case: never invent a unit the input did not carry, and
+      never convert between units.
     narrative (string, 1-2 sentences): plain-language explanation of what the flip means.
-      Use factor_label (never factor_id). Frame as "If [factor_label] moves from [current] to [flip],
-      the result changes." Include the unit if provided; if unit is absent, do not add one.
+      Use factor_label (never factor_id). Frame as "If [factor_label] moves from [current_display]
+      to [flip_display], the result changes." Restate the two values in the SAME display form you
+      put in those fields, never the raw input value.
       Use language appropriate to headline_type tone.
       Do not restate factor_id — use display forms only.
   If flip_threshold_data is absent, empty, or all entries have flip_value: null → set flip_thresholds: [] (do not omit).
@@ -1559,6 +1567,21 @@ Focus on grounding correctness — the validator catches structural mistakes.
 // ISL Synthesis Prompt
 // ============================================================================
 
+// ROADMAP 2.725 — no-verdict doctrine, applied to a DORMANT carrier.
+//
+// ⚠ PREMISE CORRECTION vs the 2026-08-06 verdict-language audit, which listed
+// this block as "the served instruction set" for `/assist/v1/isl-synthesis`.
+// Measured at 8c316b5e: `_ISL_SYNTHESIS_PROMPT` has ZERO references anywhere in
+// the repository (`rg -a --no-ignore` over the whole tree, node_modules and
+// .git excluded) — the underscore prefix is the convention for a deliberately
+// unused binding, and the route is 100% deterministic template generation with
+// no LLM call. Nothing serves this text today.
+//
+// It is reworded rather than deleted because a dormant prompt teaching the
+// banned register is a loaded gun for whoever wires it: the moment someone
+// points an LLM at it, the model is being TAUGHT to crown an option, and the
+// `assist.v1.*` family has no egress guard to launder that. Deleting it would
+// also destroy a usable instruction set for no doctrinal gain.
 const _ISL_SYNTHESIS_PROMPT = `You are an expert at translating quantitative decision analysis into clear, actionable narratives.
 
 ## Your Task
@@ -1568,16 +1591,16 @@ Given ISL (Inference & Structure Learning) analysis results, generate human-read
 You will receive JSON with some or all of these fields:
 - sensitivity: Sensitivity analysis showing how changes in factors affect outcomes
 - voi: Value of Information analysis showing which uncertainties matter most
-- tipping_points: Critical thresholds where optimal decisions change
-- robustness: How stable the recommendation is across parameter variations
+- tipping_points: Critical thresholds where the leading option changes
+- robustness: How stable the ranking is across parameter variations
 
 ## Required Outputs
 Generate narratives for each analysis type present:
 
 ### 1. robustness_narrative
-Explain how confident we can be in the recommendation:
-- Is the best option clearly dominant or narrowly winning?
-- Under what conditions might the recommendation change?
+Explain how confident we can be in the ranking:
+- Is the leading option clearly dominant or only narrowly ahead?
+- Under what conditions might the ranking change?
 - What parameters have the largest impact?
 
 ### 2. sensitivity_narrative
@@ -1594,16 +1617,16 @@ Explain what information is worth gathering:
 
 ### 4. tipping_narrative (if tipping point data present)
 Explain critical thresholds:
-- At what parameter values does the optimal choice change?
+- At what parameter values does the leading option change?
 - How close is the current situation to a tipping point?
-- What events could trigger a change in recommendation?
+- What events could trigger a change in the ranking?
 
 ## Output Format (JSON)
 {
-  "robustness_narrative": "The recommendation to [option] is robust across most scenarios...",
+  "robustness_narrative": "The leading option ([option]) is robust across most scenarios...",
   "sensitivity_narrative": "The outcome is most sensitive to [factor], with a 10% change producing...",
   "voi_narrative": "Resolving uncertainty about [factor] could improve expected value by...",
-  "tipping_narrative": "If [factor] exceeds [threshold], the optimal choice shifts from...",
+  "tipping_narrative": "If [factor] exceeds [threshold], the leading option changes from...",
   "executive_summary": "One-paragraph synthesis for busy executives"
 }
 
@@ -2281,6 +2304,26 @@ export function registerAllDefaultPrompts(): void {
 
   registerDefaultPrompt('draft_graph', draftPromptWithCaps);
   registerDefaultPrompt('suggest_options', SUGGEST_OPTIONS_PROMPT);
+  // ⚠⚠ FULLY ORPHANED AS OF ROADMAP 2.763. The 2.731 note below is superseded:
+  // its two named survivors are both gone — (a) the default-OFF
+  // orchestrator-validation gate (substep 1b) was removed by 2.740a (#851),
+  // and (b) the legacy graph-orchestrator repair limbs went with it. 2.763
+  // then removed `LLMAdapter.repairGraph` itself, so `getSystemPrompt(
+  // 'repair_graph')` now has ZERO callers anywhere in `src/`.
+  // History: 0/12 successes over a full 7-day efficacy window (2.731);
+  // 0 invocations across 398 executions while armed (2.740a).
+  //
+  // WHY THE REGISTRATION STAYS (deliberate, not oversight): the PMS row
+  // `repair_graph` (v6, gpt-4.1) is operator-managed, lives OUTSIDE this repo,
+  // and its retirement is PAUL-GATED. `repair_graph` is still a member of
+  // `CRITICAL_PMS_TASKS` (src/prompts/estate.ts) — which `/healthz` gates on —
+  // and of `logStartupHealthCheck`'s `coreRoutes` (prompt-loader.ts). Deleting
+  // this registration alone would make boot warn about a fallback that no
+  // longer exists while healthz still gated on the row. The prompt estate and
+  // the PMS row must be retired TOGETHER, in one deliberate move, via
+  // RETIRED_PMS_TASKS / RETIRED_PMS_ROWS.
+  // Until then: this constant is INERT — nothing can resolve it, and there is
+  // no longer any code path that can make an LLM repair call. Do NOT wire one.
   registerDefaultPrompt('repair_graph', REPAIR_GRAPH_PROMPT);
   registerDefaultPrompt('clarify_brief', CLARIFY_BRIEF_PROMPT);
   registerDefaultPrompt('critique_graph', CRITIQUE_GRAPH_PROMPT);

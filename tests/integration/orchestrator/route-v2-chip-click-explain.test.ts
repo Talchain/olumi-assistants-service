@@ -1,25 +1,48 @@
 /**
- * Phase 2b — route-level integration test for the explain_results /
- * what_would_flip chip-click deterministic dispatch.
+ * F2 CHANGE A — route-level integration test for the explain_results /
+ * what_would_flip chip-click COACH routing (post-whitelist-removal).
+ *
+ * HISTORY: these two pills USED to dispatch deterministically (no Sonnet, no
+ * conversation sight). F2 removed them from `DETERMINISTIC_CHIP_ACTION_TYPES`
+ * so they now route through the conversation-aware coach with a FORCED
+ * explanation intent. The former "no Sonnet routing" assertions were the RED
+ * this change flips — they are inverted below.
  *
  * Scope:
- *   - source='chip_click' + chip.action_type='explain_results' dispatches
- *     deterministically — bypasses Sonnet ORIENT.
+ *   - source='chip_click' + chip.action_type='explain_results' routes through
+ *     `routeWithToolUse` with `forcedExplanationHandlerId='explain_results'`,
+ *     thinking disabled, tool_choice forced, and the PINNED explanation handler
+ *     runs (the coach cannot re-route the typed pill).
  *   - Same for 'what_would_flip'.
- *   - Anthropic adapter is NEVER invoked on the deterministic path
- *     (assert via spy on `getAdapter` + zero LLM-tool calls).
- *
- * What this complements `route-v2-chip-click.test.ts`:
- *   That suite mocks `dispatchChipClickRunAnalysis` directly and asserts
- *   end-to-end finalisation for the run_analysis branch. THIS suite
- *   exercises the FULL real-code path (no dispatcher mock) for the new
- *   Phase 2b whitelist entries, with the handlers stubbed at the registry
- *   seam so we can pin the wire response shape without spinning up PLoT.
+ *   - F1 synergy: the coach explanation answer is SUBSTANTIVE, so the wire body
+ *     auto-shapes under the #618 egress inversion (`_answer_shape` present).
+ *   - set_factor_value (not whitelisted, not an explanation intent) is NOT
+ *     forced and does NOT trigger the explanation handlers.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+
+// A minimal analysable graph sent on the wire. Because no canonical graph is
+// persisted (the store mock has no loadGraphAndBriefText), TurnExecutor hashes
+// THIS ingress graph for the freshness verdict. Seeding the prior run_analysis
+// fact's `graph_hash_at_run` to the SAME hash makes freshness 'fresh', so the
+// deterministic stale-rerun / no-analysis guards pass the turn through to the
+// coach — the F2 path under test.
+const GRAPH_STATE = {
+  nodes: [
+    { id: 'opt-a', kind: 'option', label: 'Option A' },
+    { id: 'opt-b', kind: 'option', label: 'Option B' },
+    { id: 'fac-1', kind: 'factor', label: 'Delivery time' },
+  ],
+  edges: [
+    { from: 'fac-1', to: 'opt-a' },
+    { from: 'fac-1', to: 'opt-b' },
+  ],
+};
+const FRESH_GRAPH_HASH = computeAnalysisAffectingGraphHash(GRAPH_STATE as never);
 
 const {
   routeWithToolUseSpy,
@@ -57,63 +80,117 @@ vi.mock('../../../src/orchestrator-v5/routing/route-with-tool-use.js', async (im
   };
 });
 
-// Spy on the LLM adapter so we can assert zero Anthropic-adapter calls
-// on the deterministic chip-click path. The adapter is the lowest-level
-// boundary; spying here covers any future code path that adds a Sonnet
-// call without going through `routeWithToolUse`.
-vi.mock('../../../src/adapters/llm/router.js', () => ({
-  getAdapter: () => ({
-    name: 'test',
+// F2 CHANGE A — the coach adapter now RETURNS an olumi_action tool_use so the
+// forced explanation intent routes through the full coach → explanation-handler
+// path. The tool_use deliberately proposes `explain_from_structure` (a DIFFERENT
+// explanation handler) with a distinctive multi-sentence answer; a green test
+// therefore proves (a) the coach was called on the pill path, and (b) the
+// handler_id is PINNED to the forced intent regardless of what the model chose.
+const COACH_ANSWER =
+  'Your leading option is currently ahead on the analysis you just ran. ' +
+  'That lead is driven mostly by the delivery-time factor you mentioned. ' +
+  'It is a moderately robust result, so it is worth sanity-checking the key assumptions.';
+
+function coachToolUseResponse() {
+  return {
+    content: [
+      {
+        type: 'tool_use',
+        id: 'toolu_coach',
+        name: 'olumi_action',
+        input: {
+          intent_class: 'execute',
+          action: {
+            handler_id: 'explain_from_structure',
+            entity: {
+              id: 'opt-a',
+              kind: 'option',
+              resolution_status: 'resolved',
+              resolution_method: 'context_inference',
+            },
+            parameters: [],
+            cited_context_fields: [],
+            explanation: { answer_text: COACH_ANSWER },
+          },
+        },
+      },
+    ],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 10, output_tokens: 20 },
     model: 'test-model',
-    chat: (...args: unknown[]) => {
-      llmAdapterChatSpy(...args);
-      return Promise.resolve({ content: 'reply', usage: { input_tokens: 1, output_tokens: 1 } });
-    },
-    chatWithTools: (...args: unknown[]) => {
-      llmAdapterChatWithToolsSpy(...args);
-      return Promise.resolve({
-        content: [{ type: 'text', text: 'text-only response' }],
-        stop_reason: 'end_turn',
-        usage: { input_tokens: 1, output_tokens: 1 },
-      });
-    },
-  }),
-  getAdapterWithResolution: () => ({
-    adapter: {
-      name: 'test',
-      model: 'test-model',
-      chat: (...args: unknown[]) => {
-        llmAdapterChatSpy(...args);
-        return Promise.resolve({ content: 'reply', usage: { input_tokens: 1, output_tokens: 1 } });
+    latencyMs: 5,
+  };
+}
+
+vi.mock('../../../src/adapters/llm/router.js', () => {
+  const chatWithTools = (...args: unknown[]) => {
+    llmAdapterChatWithToolsSpy(...args);
+    return Promise.resolve(coachToolUseResponse());
+  };
+  const chat = (...args: unknown[]) => {
+    llmAdapterChatSpy(...args);
+    return Promise.resolve({ content: 'reply', usage: { input_tokens: 1, output_tokens: 1 } });
+  };
+  const adapter = { name: 'test', model: 'test-model', chat, chatWithTools };
+  return {
+    getAdapter: () => adapter,
+    getAdapterWithResolution: () => ({
+      adapter,
+      resolution: {
+        task: 'narrate',
+        resolved_model: 'test-model',
+        resolution_source: 'task_default' as const,
       },
-      chatWithTools: (...args: unknown[]) => {
-        llmAdapterChatWithToolsSpy(...args);
-        return Promise.resolve({
-          content: [{ type: 'text', text: 'text-only response' }],
-          stop_reason: 'end_turn',
-          usage: { input_tokens: 1, output_tokens: 1 },
-        });
-      },
-    },
-    resolution: {
-      task: 'narrate',
-      resolved_model: 'test-model',
-      resolution_source: 'task_default' as const,
-    },
-  }),
-  getMaxTokensFromConfig: () => undefined,
-}));
+    }),
+    getMaxTokensFromConfig: () => undefined,
+  };
+});
 
 vi.mock('../../../src/adapters/llm/prompt-loader.js', () => ({
   getSystemPrompt: async () => 'test system prompt',
 }));
 
-// Mock the session store so commit succeeds without a real DB.
+// Mock the session store so commit succeeds without a real DB. A prior
+// successful run_analysis fact is seeded so the deterministic no-analysis guard
+// (which honestly short-circuits an analytical question when NO analysis has
+// ever run) does NOT claim the turn — that lets the forced explanation pill
+// reach the coach, which is the F2 path under test.
+const PRIOR_RUN_ANALYSIS_FACT = {
+  fact_type: 'run_analysis' as const,
+  fact_version: 1,
+  noop: false,
+  result: {
+    scenario_id: '33333333-3333-4333-8333-333333333333',
+    leading_option_id: 'opt-a',
+    summary: 'prior analysis',
+    enrichment: { analysis_status: 'complete' },
+    // Matches the ingress graph hash → freshness resolves 'fresh'.
+    graph_hash_at_run: FRESH_GRAPH_HASH,
+    computed_at: '2026-04-30T02:00:00.000Z',
+  },
+};
+const PRIOR_TURN_ROW = {
+  id: 'row-prior-1',
+  scenario_id: '33333333-3333-4333-8333-333333333333',
+  user_id: null,
+  turn_id: 'prior-turn-1',
+  turn_class: 'handler',
+  handler_id: 'run_analysis',
+  request_hash: 'sha256:prior-1',
+  response_emitted: true,
+  llm_calls_used: 0,
+  duration_ms: 8,
+  created_at: '2026-04-30T01:00:00.000Z',
+  user_message: 'Run the analysis.',
+  assistant_message: 'Analysis complete.',
+};
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: appendMock,
-    readRecent: async () => [],
-    readFactsFor: async () => [],
+    // A prior turn is required so build-turn-context's fact loader does not
+    // early-return empty (prior_facts is gated on prior_turns being non-empty).
+    readRecent: async () => [PRIOR_TURN_ROW],
+    readFactsFor: async () => [PRIOR_RUN_ANALYSIS_FACT],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
@@ -206,27 +283,29 @@ describe('POST /orchestrate/v2/turn — Phase 2b chip-click explanation dispatch
     loadScenarioSnapshotForRunAnalysisMock.mockReset();
   });
 
-  it("chip_click + action_type='explain_results' → handler dispatches with NO Sonnet routing, NO Anthropic-adapter calls", async () => {
-    explainResultsHandlerMock.mockResolvedValueOnce({
-      assistant_text:
-        'No analysis has been run on your model yet. Your model has 0 options set up and is ready to analyse. Would you like me to run the analysis?',
+  // Explanation handler mocks: on the ROUTED path the handler receives the
+  // coach's validated `explanation.answer_text` and returns it as its
+  // substantive assistant_text (this is what the real explain_results /
+  // what_would_flip handlers do on the happy path). Multi-sentence so the F1
+  // egress inversion shapes it.
+  function explanationOutcome(factType: 'explain_results' | 'what_would_flip') {
+    return {
+      assistant_text: COACH_ANSWER,
       handler_facts: [
         {
-          fact_type: 'explain_results' as const,
+          fact_type: factType,
           fact_version: 1,
-          noop: true,
-          result: {
-            precondition_unmet: true,
-            option_count: 0,
-            answer_source: 'precondition_template',
-            fallback_reason: null,
-            answer_text_length: 168,
-          },
+          noop: false,
+          result: { answer_source: 'sonnet_answer_text', answer_text_length: COACH_ANSWER.length },
         },
       ],
       llm_calls_used: 0,
       suppress_orientation: true,
-    });
+    };
+  }
+
+  it("chip_click + action_type='explain_results' → routes through the coach with a FORCED intent (no deterministic bypass) and auto-shapes", async () => {
+    explainResultsHandlerMock.mockResolvedValueOnce(explanationOutcome('explain_results'));
 
     const res = await app.inject({
       method: 'POST',
@@ -240,46 +319,42 @@ describe('POST /orchestrate/v2/turn — Phase 2b chip-click explanation dispatch
         turn_class: 'decide',
         source: 'chip_click',
         chip: { action_type: 'explain_results' },
+        graph_state: GRAPH_STATE,
       },
     });
 
     expect(res.statusCode).toBe(200);
+    // F2 CHANGE A — the coach IS called now (the RED this change flips).
+    expect(routeWithToolUseSpy).toHaveBeenCalledTimes(1);
+    // Forced explanation intent threaded into routeWithToolUse.
+    const routeOptions = routeWithToolUseSpy.mock.calls[0]![2] as {
+      forcedExplanationHandlerId?: string;
+    };
+    expect(routeOptions.forcedExplanationHandlerId).toBe('explain_results');
+    // The coach LLM ran (adapter tool call), with thinking disabled + tool forced.
+    expect(llmAdapterChatWithToolsSpy).toHaveBeenCalled();
+    const adapterArgs = llmAdapterChatWithToolsSpy.mock.calls[0]![0] as {
+      thinking?: unknown;
+      tool_choice?: unknown;
+    };
+    expect(adapterArgs.thinking).toEqual({ type: 'disabled' });
+    expect(adapterArgs.tool_choice).toEqual({ type: 'tool', name: 'olumi_action' });
+    // Handler PINNED to the pill's intent even though the model proposed
+    // explain_from_structure — the pill answers the pill.
     expect(explainResultsHandlerMock).toHaveBeenCalledTimes(1);
-    // Canonical Phase 2b assertion — no Sonnet routing call.
-    expect(routeWithToolUseSpy).not.toHaveBeenCalled();
-    // Belt-and-braces — no LLM adapter calls at all (the dispatcher does
-    // not enrich explanation handlers, so the adapter must stay quiet).
-    expect(llmAdapterChatSpy).not.toHaveBeenCalled();
-    expect(llmAdapterChatWithToolsSpy).not.toHaveBeenCalled();
-    // Other registered handlers are not consulted.
     expect(runAnalysisHandlerMock).not.toHaveBeenCalled();
     expect(whatWouldFlipHandlerMock).not.toHaveBeenCalled();
 
     const body = JSON.parse(res.body);
-    expect(body.assistant_text).toContain('No analysis has been run');
+    expect(body.assistant_text.length).toBeGreaterThan(0);
+    // F1 synergy (#618 egress inversion): the substantive coach answer auto-shapes.
+    expect(body._answer_shape).toBeDefined();
+    expect(body._answer_shape.headline).toBeTruthy();
+    expect(body._answer_shape.detail).toBeTruthy();
   });
 
-  it("chip_click + action_type='what_would_flip' → handler dispatches with NO Sonnet routing, NO Anthropic-adapter calls", async () => {
-    whatWouldFlipHandlerMock.mockResolvedValueOnce({
-      assistant_text:
-        'No analysis has been run on your model yet. Your model has 0 options set up and is ready to analyse. Would you like me to run the analysis?',
-      handler_facts: [
-        {
-          fact_type: 'what_would_flip' as const,
-          fact_version: 1,
-          noop: true,
-          result: {
-            precondition_unmet: true,
-            option_count: 0,
-            answer_source: 'precondition_template',
-            fallback_reason: null,
-            answer_text_length: 168,
-          },
-        },
-      ],
-      llm_calls_used: 0,
-      suppress_orientation: true,
-    });
+  it("chip_click + action_type='what_would_flip' → routes through the coach with a FORCED intent and auto-shapes", async () => {
+    whatWouldFlipHandlerMock.mockResolvedValueOnce(explanationOutcome('what_would_flip'));
 
     const res = await app.inject({
       method: 'POST',
@@ -293,16 +368,24 @@ describe('POST /orchestrate/v2/turn — Phase 2b chip-click explanation dispatch
         turn_class: 'decide',
         source: 'chip_click',
         chip: { action_type: 'what_would_flip' },
+        graph_state: GRAPH_STATE,
       },
     });
 
     expect(res.statusCode).toBe(200);
+    expect(routeWithToolUseSpy).toHaveBeenCalledTimes(1);
+    const routeOptions = routeWithToolUseSpy.mock.calls[0]![2] as {
+      forcedExplanationHandlerId?: string;
+    };
+    expect(routeOptions.forcedExplanationHandlerId).toBe('what_would_flip');
+    expect(llmAdapterChatWithToolsSpy).toHaveBeenCalled();
+    // Handler PINNED to what_would_flip (model proposed explain_from_structure).
     expect(whatWouldFlipHandlerMock).toHaveBeenCalledTimes(1);
-    expect(routeWithToolUseSpy).not.toHaveBeenCalled();
-    expect(llmAdapterChatSpy).not.toHaveBeenCalled();
-    expect(llmAdapterChatWithToolsSpy).not.toHaveBeenCalled();
     expect(runAnalysisHandlerMock).not.toHaveBeenCalled();
     expect(explainResultsHandlerMock).not.toHaveBeenCalled();
+
+    const body = JSON.parse(res.body);
+    expect(body._answer_shape).toBeDefined();
   });
 
   it("chip_click + action_type='set_factor_value' (NOT whitelisted) → does NOT use the deterministic dispatcher", async () => {

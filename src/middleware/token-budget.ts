@@ -99,12 +99,10 @@ function taskFromUrl(url: string): string | null {
   if (url.startsWith('/assist/v1/sensitivity-coach')) return 'sensitivity_coach';
   if (url.startsWith('/assist/v1/team-perspectives')) return 'team_perspectives';
   if (url.startsWith('/assist/v1/graph-readiness')) return 'graph_readiness';
-  if (url.startsWith('/assist/v1/key-insight')) return 'key_insight';
   if (url.startsWith('/assist/v1/elicit-belief')) return 'elicit_belief';
   if (url.startsWith('/assist/v1/suggest-utility-weights')) return 'suggest_utility_weights';
   if (url.startsWith('/assist/v1/elicit-risk-tolerance')) return 'elicit_risk_tolerance';
   if (url.startsWith('/assist/v1/suggest-edge-function')) return 'suggest_edge_function';
-  if (url.startsWith('/assist/v1/generate-recommendation')) return 'generate_recommendation';
   if (url.startsWith('/assist/v1/narrate-conditions')) return 'narrate_conditions';
   if (url.startsWith('/assist/v1/explain-policy')) return 'explain_policy';
   if (url.startsWith('/assist/v1/elicit-preferences')) return 'elicit_preferences';

@@ -26,6 +26,7 @@ import type {
 } from '../../adapters/llm/types.js';
 
 import { setTestSink } from '../../utils/telemetry.js';
+import { CONTEXT_PACK_RECENT_TURNS_CAP } from '../context/context-pack-assembler.js';
 import type { RollingSummary } from '../rolling-summary/summary-types.js';
 
 const SCENARIO_ID = randomUUID();
@@ -55,9 +56,10 @@ function turnsNewestFirst(n: number): MockTurn[] {
   return out.reverse();
 }
 
-const SIX_TURNS = turnsNewestFirst(6);
-const NEWEST_TURN = SIX_TURNS[0]!;
-const OLDEST_TURN = SIX_TURNS[SIX_TURNS.length - 1]!;
+// cap+1 turns → exactly ONE falls off the verbatim window (derive-don't-mirror).
+const BEYOND_WINDOW_TURNS = turnsNewestFirst(CONTEXT_PACK_RECENT_TURNS_CAP + 1);
+const NEWEST_TURN = BEYOND_WINDOW_TURNS[0]!;
+const OLDEST_TURN = BEYOND_WINDOW_TURNS[BEYOND_WINDOW_TURNS.length - 1]!;
 
 const STORED_SUMMARY: RollingSummary = {
   text: [
@@ -84,7 +86,7 @@ const STORED_SUMMARY: RollingSummary = {
 
 // Mutable per-test behaviour (the mocks below close over these).
 let loadSummaryImpl: () => Promise<RollingSummary | null> = async () => STORED_SUMMARY;
-let readRecentTurns: MockTurn[] = SIX_TURNS;
+let readRecentTurns: MockTurn[] = BEYOND_WINDOW_TURNS;
 
 vi.mock('../rolling-summary/index.js', () => ({
   getRollingSummaryStore: () => ({
@@ -186,7 +188,7 @@ describe('S4-inject — route-level (unconditional, beyond-window activation)', 
       events.push({ event, payload: payload as Record<string, unknown> });
     });
     loadSummaryImpl = async () => STORED_SUMMARY;
-    readRecentTurns = SIX_TURNS;
+    readRecentTurns = BEYOND_WINDOW_TURNS;
   });
 
   afterEach(() => {
@@ -200,7 +202,7 @@ describe('S4-inject — route-level (unconditional, beyond-window activation)', 
     expect(prompt).toContain('"conversation_summary":');
     expect(prompt).toContain('Keep Maria on the team.');
     expect(prompt).toContain('the structured state is correct');
-    // #536 marker extension: 6 available, 5 shown, 1 absorbed by the block.
+    // #536 marker extension: cap+1 available, cap shown, 1 absorbed by the block.
     expect(prompt).toContain('"summarised": 1');
 
     const budgets = contextBudgetEvents();

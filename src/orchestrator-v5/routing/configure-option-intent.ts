@@ -55,9 +55,26 @@ export type ConfigureOptionIntentTrigger =
 
 export type ConfigureOptionIntentDetection =
   | { readonly matched: true; readonly trigger: ConfigureOptionIntentTrigger }
-  | { readonly matched: false };
+  | {
+      readonly matched: false;
+      /**
+       * ROADMAP 2.308 / S1 — would an option LABEL anchor have flipped this
+       * verdict? True only when the message carries one of the anchored
+       * triggers' payloads AND nothing already anchored it.
+       *
+       * DERIVED, never mirrored (trap 12): computed by re-running the SAME
+       * classifier with the anchor granted, so it cannot drift from the
+       * trigger set it describes. The route uses it to decide whether a
+       * persisted-graph read could possibly change the routing decision —
+       * i.e. it is the guard that keeps the read off turns it cannot help.
+       */
+      readonly labelAnchorWouldDecide: boolean;
+    };
 
-const NO_MATCH: ConfigureOptionIntentDetection = { matched: false };
+const NO_MATCH: ConfigureOptionIntentDetection = {
+  matched: false,
+  labelAnchorWouldDecide: false,
+};
 
 /** "configure"/"configuring"/"configuration" — whole-word, case-insensitive. */
 const CONFIGURE_VOCAB = /\bconfigur(?:e|es|ed|ing|ation)\b/;
@@ -122,6 +139,28 @@ const EFFECT_ASSIGN_VERB = /\b(?:set|change|update|adjust|revise|configure)\b/;
 const VALUE_SET_PAYLOAD = /\b(?:set|change|update|adjust|revise)\b[^.?!]*\bto\b\s*(?:£|\$|€)?\s*\d/;
 
 /**
+ * ⭐ L16 — does this message carry something WRITABLE?
+ *
+ * A configure-option message can match the detector and still name no factor
+ * and no value ("Configure {option}", the chip's own "Help me configure
+ * {option}."). There is nothing to write, so the edit lane must invent an
+ * operation; on the 3 Aug walk that invention did not survive canonicalisation
+ * and the user got `OPERATION_DID_NOT_LAND` behind the generic copy "I wasn't
+ * able to make that change safely." — the product failing to execute its own
+ * chip.
+ *
+ * DERIVED, never mirrored (trap 12): this is the SAME `VALUE_SET_PAYLOAD`
+ * regex that already decides triggers 2b and 5, exported through one predicate
+ * rather than re-spelled at the call site. Widen that constant and the
+ * bare-configure intercept narrows in lockstep, automatically — the two can
+ * never disagree about what "carries a value" means.
+ */
+export function carriesConfigureOptionValuePayload(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  return VALUE_SET_PAYLOAD.test(message.toLowerCase().replace(/\s+/g, ' ').trim());
+}
+
+/**
  * Question-shape suppressor — mirrors the vague-edit guard's doctrine
  * (either signal alone suffices): configure INTENT is imperative, and
  * mutating the graph on a question ("what did you just configure on my
@@ -141,10 +180,72 @@ const QUESTION_LEAD_PATTERN =
   /^(?:what|how|why|when|where|who|which|can|could|would|should|does|do|is|are|will)\b/;
 
 /**
+ * The trigger classifier — the SINGLE place the trigger set lives.
+ *
+ * Split out of `detectConfigureOptionIntent` (ROADMAP 2.308 / S1) so the
+ * "would a label anchor decide this?" question can be answered by re-running
+ * THIS function with `anchored` granted, rather than by a second predicate
+ * that would have to be kept in step by hand (trap 12: the dominant defect is
+ * the hand-maintained mirror). Every trigger below is byte-identical to the
+ * pre-2.308 inline sequence, in the same order.
+ */
+function classifyConfigureOptionTrigger(
+  normalised: string,
+  anchored: boolean,
+): ConfigureOptionIntentTrigger | null {
+  const hasConfigureVocab = CONFIGURE_VOCAB.test(normalised);
+  const hasInterventionVocab = INTERVENTION_VOCAB.test(normalised);
+  const hasValueSetPayload = VALUE_SET_PAYLOAD.test(normalised);
+
+  // Triggers 2–3 — configure / intervention vocabulary, anchored.
+  if ((hasConfigureVocab || hasInterventionVocab) && anchored) {
+    return hasConfigureVocab ? 'configure_vocab' : 'intervention_vocab';
+  }
+
+  // Trigger 2b (T12) — configure vocabulary with a value-set payload but no
+  // visible anchor: "Configure {option label}: set {factor} to 0.7". On the
+  // live wire route-v2 has no labels to anchor with (graph_state absent),
+  // so the assignment payload stands in as the anchor. A configure-verb
+  // imperative that assigns values is an edit whatever it names — the edit
+  // lane is the correct destination for factor configures too.
+  if (hasConfigureVocab && hasValueSetPayload) {
+    return 'configure_vocab';
+  }
+
+  if (!anchored) return null;
+
+  // Trigger 4 (T12c) — effect vocabulary, anchored, with an imperative edit
+  // verb: "Under the {option} option, set its effect on {factor} to 0.7."
+  // "Effect" is the lay synonym for an intervention; without this trigger
+  // the message routes to adjust_edge_strength and WRITES the wrong field.
+  if (EFFECT_VOCAB.test(normalised) && EFFECT_ASSIGN_VERB.test(normalised)) {
+    return 'effect_vocab';
+  }
+
+  // Trigger 5 (T15) — an anchored value assignment: "Set {factor} to 0.7 …
+  // for the {option} option." This is the assistant's own suggested
+  // configure format; the value-update path it previously fell to can only
+  // refuse-to-clarify (its guard cannot write interventions), so the edit
+  // lane must claim it at route time.
+  if (hasValueSetPayload) {
+    return 'option_value_set';
+  }
+
+  return null;
+}
+
+/**
  * Detect configure-option intent. `optionLabels` are the CURRENT graph's
- * option labels (route-v2 projects them from the request graph_state);
- * an empty list disables the label anchor but keeps the chip-prefix and
- * option-word anchors.
+ * option labels; an empty list disables the label anchor but keeps the
+ * chip-prefix and option-word anchors.
+ *
+ * ⚠ ROADMAP 2.308 — the label anchor was STRUCTURALLY UNREACHABLE in
+ * production until S1. route-v2 projected `optionLabels` from
+ * `extensions.graphState`, which the UI never sends, and the persisted graph
+ * that would supply them was loaded 340 lines later inside a block whose
+ * condition is computed FROM this detection. Callers that can reach a
+ * persisted graph should use `resolveConfigureOptionIntent` below rather than
+ * calling this directly with whatever the request happened to carry.
  */
 export function detectConfigureOptionIntent(
   message: string,
@@ -164,10 +265,6 @@ export function detectConfigureOptionIntent(
     return NO_MATCH;
   }
 
-  const hasConfigureVocab = CONFIGURE_VOCAB.test(normalised);
-  const hasInterventionVocab = INTERVENTION_VOCAB.test(normalised);
-  const hasValueSetPayload = VALUE_SET_PAYLOAD.test(normalised);
-
   // Option anchor: the word "option(s)", or a full option label.
   let anchored = OPTION_WORD.test(normalised);
   if (!anchored) {
@@ -182,42 +279,107 @@ export function detectConfigureOptionIntent(
     }
   }
 
-  // Triggers 2–3 — configure / intervention vocabulary, anchored.
-  if ((hasConfigureVocab || hasInterventionVocab) && anchored) {
+  const trigger = classifyConfigureOptionTrigger(normalised, anchored);
+  if (trigger !== null) return { matched: true, trigger };
+
+  return {
+    matched: false,
+    // Derived from the same classifier, with the anchor granted. Nothing to
+    // keep in sync: adding a trigger below the `!anchored` guard automatically
+    // widens this, and adding one above it automatically does not.
+    labelAnchorWouldDecide:
+      !anchored && classifyConfigureOptionTrigger(normalised, true) !== null,
+  };
+}
+
+/**
+ * Project option labels out of a graph's node list.
+ *
+ * ONE derivation for BOTH label sources — the request's `graph_state` and the
+ * persisted `scenarios.graph`. Duck-typed on purpose: it is called with an
+ * already-validated ingress graph in one place and with a raw persisted blob
+ * in the other, and a labels-only read must not acquire the power to reject a
+ * graph the strict parse would have accepted.
+ */
+export function projectOptionLabels(nodes: unknown): string[] {
+  if (!Array.isArray(nodes)) return [];
+  const labels: string[] = [];
+  for (const node of nodes) {
+    if (node === null || typeof node !== 'object') continue;
+    const record = node as Record<string, unknown>;
+    if (record.kind !== 'option') continue;
+    const label = record.label;
+    if (typeof label !== 'string' || label.trim().length === 0) continue;
+    labels.push(label);
+  }
+  return labels;
+}
+
+/** Where the option labels that decided the verdict came from. */
+export type ConfigureOptionLabelSource = 'request' | 'persisted';
+
+/**
+ * What the persisted read did — reported for EVERY outcome, including the
+ * ones that produced no labels.
+ *
+ * Review correction (#796): the first cut reported only `optionLabelSource`,
+ * so a read that FAILED or returned an option-less graph was indistinguishable
+ * from a read never taken. The route's read-frequency meter was therefore
+ * under-counting the exact thing it claimed to measure. `not_attempted` is the
+ * only value that means "no Supabase round-trip happened".
+ */
+export type ConfigureOptionPersistedRead = 'not_attempted' | 'labels' | 'empty' | 'failed';
+
+export interface ConfigureOptionIntentResolution {
+  readonly detection: ConfigureOptionIntentDetection;
+  readonly optionLabelSource: ConfigureOptionLabelSource;
+  readonly persistedRead: ConfigureOptionPersistedRead;
+}
+
+/**
+ * ⭐ ROADMAP 2.308 / S1 — resolve configure-option intent with a label anchor
+ * that actually exists on the live wire.
+ *
+ * The request's own labels are tried first and cost nothing. The persisted
+ * read is taken ONLY when the detector itself reports that a label anchor
+ * would decide the verdict — so conversational turns, chip turns, turns
+ * already anchored by the literal word "option", and turns carrying no
+ * configure/effect/value payload at all pay nothing.
+ *
+ * `loadPersistedOptionLabels` is a supplier, not a graph: the caller owns
+ * memoisation (route-v2 shares ONE persisted read between this and the
+ * edit-lane graph reload, so the edit lane pays no extra round-trip) and owns
+ * failure policy. A supplier that throws or yields nothing degrades to the
+ * request-labels verdict — a labels read must never be able to fail a turn
+ * that would otherwise have succeeded.
+ */
+export async function resolveConfigureOptionIntent(params: {
+  readonly message: string;
+  readonly requestOptionLabels: readonly string[];
+  readonly loadPersistedOptionLabels: () => Promise<readonly string[]>;
+}): Promise<ConfigureOptionIntentResolution> {
+  const fromRequest = detectConfigureOptionIntent(params.message, params.requestOptionLabels);
+  if (fromRequest.matched || !fromRequest.labelAnchorWouldDecide) {
     return {
-      matched: true,
-      trigger: hasConfigureVocab ? 'configure_vocab' : 'intervention_vocab',
+      detection: fromRequest,
+      optionLabelSource: 'request',
+      persistedRead: 'not_attempted',
     };
   }
 
-  // Trigger 2b (T12) — configure vocabulary with a value-set payload but no
-  // visible anchor: "Configure {option label}: set {factor} to 0.7". On the
-  // live wire route-v2 has no labels to anchor with (graph_state absent),
-  // so the assignment payload stands in as the anchor. A configure-verb
-  // imperative that assigns values is an edit whatever it names — the edit
-  // lane is the correct destination for factor configures too.
-  if (hasConfigureVocab && hasValueSetPayload) {
-    return { matched: true, trigger: 'configure_vocab' };
+  let persistedLabels: readonly string[] = [];
+  try {
+    persistedLabels = await params.loadPersistedOptionLabels();
+  } catch {
+    return { detection: fromRequest, optionLabelSource: 'request', persistedRead: 'failed' };
+  }
+  if (persistedLabels.length === 0) {
+    return { detection: fromRequest, optionLabelSource: 'request', persistedRead: 'empty' };
   }
 
-  if (!anchored) return NO_MATCH;
-
-  // Trigger 4 (T12c) — effect vocabulary, anchored, with an imperative edit
-  // verb: "Under the {option} option, set its effect on {factor} to 0.7."
-  // "Effect" is the lay synonym for an intervention; without this trigger
-  // the message routes to adjust_edge_strength and WRITES the wrong field.
-  if (EFFECT_VOCAB.test(normalised) && EFFECT_ASSIGN_VERB.test(normalised)) {
-    return { matched: true, trigger: 'effect_vocab' };
-  }
-
-  // Trigger 5 (T15) — an anchored value assignment: "Set {factor} to 0.7 …
-  // for the {option} option." This is the assistant's own suggested
-  // configure format; the value-update path it previously fell to can only
-  // refuse-to-clarify (its guard cannot write interventions), so the edit
-  // lane must claim it at route time.
-  if (hasValueSetPayload) {
-    return { matched: true, trigger: 'option_value_set' };
-  }
-
-  return NO_MATCH;
+  return {
+    detection: detectConfigureOptionIntent(params.message, persistedLabels),
+    optionLabelSource: 'persisted',
+    persistedRead: 'labels',
+  };
 }

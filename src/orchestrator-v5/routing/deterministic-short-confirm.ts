@@ -103,6 +103,97 @@ export const PROPOSAL_CONFIRM_PATTERN =
   /^\s*(?:add\s+that|make\s+that(?:\s+(?:change|update|edit))?|do\s+that\s+(?:change|update|edit)|apply\s+that(?:\s+(?:change|update|edit))?|try\s+that(?:\s+(?:change|update|edit|one))?|test\s+that(?:\s+(?:change|update|edit|one))?|(?:update|try|test)\s+the\s+model|let'?s\s+(?:do\s+that|apply\s+that|try\s+that|test\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
+ * ⭐⭐ OFFER-REFERENCE ACCEPTANCE (ROADMAP 2.663 / F-B). Two patterns, and the
+ * DIFFERENCE BETWEEN THEM IS THE WHOLE SAFETY ARGUMENT — read both.
+ *
+ * WITNESSED (consent-witness walk, CEE `bb33751`, 6 Aug 2026): the assistant
+ * offered a repair, the user accepted with
+ *   "Yes, please rephrase the churn constraint as you offered earlier."
+ * and #836's warrant gate answered "You did not ask me to edit the model."
+ * The gate was RIGHT — the third warrant source is a consumed pending, and
+ * neither matcher above recognises an acceptance that points BACK at the
+ * offer rather than restating it. The vocabulary was short, not the gate.
+ *
+ * Both patterns fire ONLY while at least one live `apply_proposed_change`
+ * exists, and both are anchored start-to-end.
+ *
+ * ── (1) {@link OFFER_REFERENCE_CONFIRM_PATTERN} — CLOSED VOCABULARY ────────
+ * "do what you offered", "go ahead with the change you suggested". The object
+ * is a fixed generic noun; the user names NO value of their own, so resuming
+ * the held proposal is exactly what they asked for. Safe to OVERRIDE the
+ * edit-verb gate for the same reason `PROPOSAL_CONFIRM_PATTERN` is ("make that
+ * change" carries `change`): the phrase is idiomatic confirmation, not a fresh
+ * request. The affirmative lead is OPTIONAL — "do what you offered" is already
+ * unambiguous.
+ *
+ * ── (2) {@link OFFER_ACCEPTANCE_IN_CONTEXT_PATTERN} — BOUNDED FREE CONTENT ─
+ * The witnessed shape: an acceptance that restates WHAT was offered in the
+ * user's own words and closes with an explicit back-reference ("… as you
+ * offered earlier"). Free content is the risk, so this one is fenced three ways
+ * and is SUBORDINATE to the edit-verb/quantity gate rather than overriding it:
+ *   a. the AFFIRMATIVE LEAD IS MANDATORY. Without it a read-shaped ask
+ *      carrying the same back-reference ("Show me the comparison as you
+ *      described earlier") would resolve a held mutation — ROADMAP 2.652
+ *      running backwards, and the worse direction of the two.
+ *   b. {@link READ_INTENT_PATTERN} must NOT appear. An affirmative can precede
+ *      a read ("Yes, show me the comparison as you offered") and that is not
+ *      consent to mutate.
+ *   c. the caller applies `EDIT_VERB_OR_QUANTITY_PATTERN` to it. "Yes, set
+ *      churn to 5% as you offered earlier" names a DIFFERENT value from the
+ *      held proposal's; resuming would apply 3% and call it agreement — a
+ *      wrong-target mutation dressed as consent.
+ * The free segment is `[^.!?]{1,80}?` so it can never span a sentence.
+ */
+const OFFER_BACKREF = String.raw`you\s+(?:offered|suggested|proposed)`;
+
+/** Trailing recency/politeness tail shared by both offer-reference patterns. */
+const OFFER_TAIL =
+  String.raw`(?:\s+(?:earlier|before|just\s+now|above|a\s+moment\s+ago))?` +
+  String.raw`(?:\s*,?\s*(?:please|now|thanks|thank\s+you))?` +
+  String.raw`[\s.!?\u{1F300}-\u{1FAFF}]*$`;
+
+export const OFFER_REFERENCE_CONFIRM_PATTERN = new RegExp(
+  String.raw`^\s*` +
+    String.raw`(?:(?:yes|yep|yeah|sure|ok(?:ay)?)\b[,\s]+)?` +
+    String.raw`(?:please\b[,\s]+)?` +
+    String.raw`(?:go\s+ahead\s+with|proceed\s+with|do|apply|make)\s+` +
+    String.raw`(?:what|the\s+(?:change|limit|edit|update|one|thing))\s+` +
+    OFFER_BACKREF +
+    OFFER_TAIL,
+  'iu',
+);
+
+/**
+ * Read/display intent. Its presence disqualifies the free-content acceptance
+ * form (2b above). Deliberately broad — a false negative here costs one extra
+ * "yes"; a false positive applies a graph mutation the user never asked for.
+ */
+const READ_INTENT_PATTERN =
+  /\b(?:show|display|explain|describe|tell|list|compare|summarise|summarize|summary|what|why|how|which|where|when)\b/i;
+
+export const OFFER_ACCEPTANCE_IN_CONTEXT_PATTERN = new RegExp(
+  String.raw`^\s*` +
+    // MANDATORY affirmative lead — see (2a) above.
+    String.raw`(?:yes|yep|yeah|sure|ok(?:ay)?)\b[,\s]+` +
+    String.raw`(?:please\b[,\s]+)?` +
+    String.raw`[^.!?]{1,80}?\b(?:as|like)\s+` +
+    OFFER_BACKREF +
+    OFFER_TAIL,
+  'iu',
+);
+
+/**
+ * True when the message is the bounded free-content acceptance (2) AND carries
+ * no read intent. Exported so the spec binds to the predicate the caller uses
+ * rather than re-deriving it (CLAUDE.md trap 12).
+ */
+export function isOfferAcceptanceInContext(message: string): boolean {
+  return (
+    OFFER_ACCEPTANCE_IN_CONTEXT_PATTERN.test(message) && !READ_INTENT_PATTERN.test(message)
+  );
+}
+
+/**
  * Phrasal-ordinal confirmation patterns. When at least one live
  * `apply_proposed_change` pending action exists and the message is
  * an ordinal pointer ("the first one", "first", "option 2", "#3"),
@@ -419,13 +510,28 @@ export function tryShortConfirmResume(
   // Edit-verb / numeric-quantity gate. Override only when a live
   // apply_proposed_change exists AND the message matches a
   // proposal-targeted confirmation phrase ("add that" / "make that
-  // change" / "apply that change").
+  // change" / "apply that change") or the CLOSED-VOCABULARY offer-reference
+  // form ("do what you offered") — see OFFER_REFERENCE_CONFIRM_PATTERN for
+  // why that one may override the gate and its free-content sibling may not.
   const isProposalConfirm =
-    liveApplyProposed.length > 0 && PROPOSAL_CONFIRM_PATTERN.test(input.message);
+    liveApplyProposed.length > 0 &&
+    (PROPOSAL_CONFIRM_PATTERN.test(input.message) ||
+      OFFER_REFERENCE_CONFIRM_PATTERN.test(input.message));
+  // ROADMAP 2.663 (F-B) — the bounded free-content acceptance. Deliberately
+  // NOT folded into `isProposalConfirm`: it is SUBORDINATE to the edit-verb /
+  // quantity gate below, so an acceptance that names its own value
+  // ("Yes, set churn to 5% as you offered") falls through to the value-update
+  // path instead of resuming a proposal carrying a different number.
+  const isOfferAcceptance =
+    liveApplyProposed.length > 0 && isOfferAcceptanceInContext(input.message);
   if (EDIT_VERB_OR_QUANTITY_PATTERN.test(input.message) && !isProposalConfirm) {
     return { matched: false, skip_reason: 'no_short_confirm' };
   }
-  if (!SHORT_CONFIRM_PATTERN.test(input.message) && !isProposalConfirm) {
+  if (
+    !SHORT_CONFIRM_PATTERN.test(input.message) &&
+    !isProposalConfirm &&
+    !isOfferAcceptance
+  ) {
     return { matched: false, skip_reason: 'no_short_confirm' };
   }
   if (input.pendingActions.length === 0) {
@@ -472,10 +578,12 @@ export function tryShortConfirmResume(
 
   // Filter to kinds with a synthesis path.
   let resumable = live.filter((pa) => RESUMABLE_KINDS.has(pa.action.kind));
-  // PROPOSAL_CONFIRM_PATTERN is unambiguous about proposal intent —
-  // narrow the resumable set to apply_proposed_change candidates only,
-  // even if other resumable kinds (e.g. run_analysis) are also live.
-  if (isProposalConfirm) {
+  // PROPOSAL_CONFIRM_PATTERN and both offer-reference forms are unambiguous
+  // about proposal intent — narrow the resumable set to apply_proposed_change
+  // candidates only, even if other resumable kinds (e.g. run_analysis) are
+  // also live. Without this an acceptance of a HELD PROPOSAL could resume a
+  // freshly-minted run_analysis chip instead (the F-HELD wire finding).
+  if (isProposalConfirm || isOfferAcceptance) {
     resumable = resumable.filter((pa) => pa.action.kind === 'apply_proposed_change');
   }
   if (resumable.length === 0) {

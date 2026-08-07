@@ -169,6 +169,18 @@ export type ProposedChangeActionType =
   | 'structural_add'
   | 'structural_remove';
 
+/**
+ * @deprecated VESTIGIAL V4 proposed-change shape — carries NO value field, so a
+ * proposal built from it can never represent the specific it asks for. Its only
+ * remaining live use is building the propose-and-confirm "ask for the specifics"
+ * copy WITHIN a turn (`buildProposeAndConfirmText`); it is no longer minted onto
+ * the edit-lane hold (S3-L1 retired the write-only `pendingProposal` round-trip,
+ * which nothing read back on the live V5 path). The value-bearing carrier is the
+ * V5 `ProposedChange` (`orchestrator-v5/types/proposed-change.ts`, `params` +
+ * `inline_patch.operations`), which has the live reader in
+ * `proposed-change-synthesis.ts`. Do not add new consumers; prefer the V5 type.
+ * Remaining references live behind the default-off V4 pipeline (410 tombstone).
+ */
 export interface ProposedChange {
   description: string;
   element_label: string;
@@ -580,6 +592,16 @@ export interface GraphPatchBlockData {
     blockers?: unknown[];
     model_adjustments?: unknown[];
     goal_threshold?: number;
+    /**
+     * ROADMAP 2.315(a) — the RAW goal target as the user stated it, alongside
+     * the normalised `goal_threshold` above. Carried VERBATIM from the values
+     * the enricher attested on the goal node; never re-derived downstream
+     * (see the contract note on `AnalysisReadyPayload` in
+     * src/schemas/analysis-ready.ts for why re-derivation is unsafe).
+     */
+    goal_threshold_raw?: number;
+    goal_threshold_unit?: string;
+    goal_threshold_cap?: number;
     bias_findings?: Array<{
       id: string;
       category: string;
@@ -707,6 +729,19 @@ export interface FramingBlockData {
  * Evidence block — research findings from web search, grounded with citations.
  * Produced by research_topic tool. Claims and mapping suggestions are best-effort;
  * never auto-applied to the model — advisory only.
+ *
+ * ⚠ NO PRODUCER SINCE 2026-07-22. The `research_topic` tool that filled this shape was deleted
+ * in `f957d6d8` (V1-belt sweep collateral — it met the "zero live-V5 importers" bar because V5
+ * never ported it). Only `createEvidenceBlock()` in `blocks/factory.ts` names it, and that has
+ * zero callers.
+ *
+ * RETAINED DELIBERATELY, and it is the most load-bearing of the research orphans: the SHIPPED
+ * contract's `EvidenceBlock` (`@talchain/schemas` boundary/blocks.ts) describes an evidence
+ * *gap* and carries no `sources[]`, no `url`, no `findings` — so today there is no wire shape
+ * that can carry back what a research call actually found. The `sources[].{title,url}`,
+ * `claims[].source_url` and `confidence_note` fields below are the drafted answer to exactly
+ * that gap. Deleting this would discard a contract proposal, not dead weight.
+ * See `docs-designs/RESEARCH-ARTEFACT-DESIGN-2026-07-25.md` (programme docs, sibling dir — untracked) §2.1 and §2.3.
  */
 export interface EvidenceBlockData {
   query: string;
@@ -787,15 +822,15 @@ export interface ConversationContext {
   analysis_inputs?: AnalysisInputs | null;
   conversational_state?: ConversationalState;
   /**
-   * Context Architecture v2 S2 (ROADMAP 1.73, 02 §Seam 1): the persisted
-   * decision brief (`scenarios.brief_text`), projected to the edit-lane
-   * slice — first EDIT_CONTEXT_BRIEF_CHAR_CAP chars, truncation DISCLOSED
-   * via the same {text, truncated, original_chars} shape the routing
-   * ContextPack uses (ContextPackBriefSchema). Populated by
-   * dispatchEditGraph ONLY when CEE_CONTEXT_BRIEF_ALL_SITES is on and a
-   * brief exists; absent otherwise (flag-off byte-identity). Rendered as
-   * `## Decision Brief` by serialiseEditContextForLLM; repair_edit_graph
-   * inherits automatically (same contextSection).
+   * Context Architecture v2 S2 (ROADMAP 1.199): the persisted decision brief
+   * (`scenarios.brief_text`), projected to the edit-lane slice — first
+   * EDIT_CONTEXT_BRIEF_CHAR_CAP chars, truncation DISCLOSED via the same
+   * {text, truncated, original_chars} shape the routing ContextPack uses
+   * (ContextPackBriefSchema). Populated by dispatchEditGraph UNCONDITIONALLY
+   * when a brief exists (S2 shipped ON, no-dark-launches); absent otherwise
+   * (no-brief byte-identity). Rendered as `## Decision Brief` by
+   * serialiseEditContextForLLM; repair_edit_graph inherits automatically
+   * (same contextSection).
    */
   brief?: { text: string; truncated: boolean; original_chars: number } | null;
 }

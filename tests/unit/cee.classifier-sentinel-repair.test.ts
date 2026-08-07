@@ -3,13 +3,14 @@
  *
  * Fix 1: Structural edge classifier tightening
  * Fix 2: Sentinel interventions cleanup (normaliser, unreachable-factors, sweep)
- * Fix 3: Dedicated LLMRepairResponse schema
+ * Fix 3: (RETIRED — the dedicated LLMRepairResponse schema was removed
+ *         with the LLM graph-repair capability, ROADMAP 2.763.)
  */
 
 import { describe, it, expect, vi } from "vitest";
 import { classifyEdgeByKind, isLegalStructuralEdge } from "../../src/cee/utils/structural-edge-classifier.js";
 import { normaliseDraftResponse } from "../../src/adapters/llm/normalisation.js";
-import { LLMRepairResponse, LLMDraftResponse } from "../../src/adapters/llm/shared-schemas.js";
+import { LLMDraftResponse } from "../../src/adapters/llm/shared-schemas.js";
 import { handleUnreachableFactors } from "../../src/cee/unified-pipeline/stages/repair/unreachable-factors.js";
 
 // Suppress noisy logs
@@ -217,10 +218,10 @@ describe("Fix 2b: handleUnreachableFactors — semantic data guard", () => {
 });
 
 // ============================================================================
-// Fix 3: LLMRepairResponse schema
+// Fix 3 (retired): the repair-response schema is gone; the draft half remains
 // ============================================================================
 
-describe("Fix 3: LLMRepairResponse schema", () => {
+describe("Fix 3 (retired): draft-schema rationale contract", () => {
   const validRepairNode = {
     id: "fac_1",
     kind: "factor",
@@ -234,50 +235,10 @@ describe("Fix 3: LLMRepairResponse schema", () => {
     strength: { mean: 1.0, std: 0.01 },
   };
 
-  it("accepts repair-style rationales (violation_code, node_or_edge, action, elements_changed)", () => {
-    const input = {
-      nodes: [validRepairNode],
-      edges: [validRepairEdge],
-      rationales: [
-        {
-          violation_code: "FORBIDDEN_EDGE",
-          node_or_edge: "opt_a -> out_b",
-          action: "Removed forbidden option->outcome edge",
-          elements_changed: 1,
-        },
-      ],
-    };
-    const result = LLMRepairResponse.safeParse(input);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.rationales).toHaveLength(1);
-      expect(result.data.rationales[0].violation_code).toBe("FORBIDDEN_EDGE");
-    }
-  });
-
-  it("rejects draft-style rationales ({target, why}) on repair schema", () => {
-    const input = {
-      nodes: [validRepairNode],
-      edges: [validRepairEdge],
-      rationales: [
-        { target: "fac_1", why: "Added edge" },
-      ],
-    };
-    const result = LLMRepairResponse.safeParse(input);
-    expect(result.success).toBe(false);
-  });
-
-  it("defaults rationales to empty array when omitted", () => {
-    const input = {
-      nodes: [validRepairNode],
-      edges: [validRepairEdge],
-    };
-    const result = LLMRepairResponse.safeParse(input);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.rationales).toEqual([]);
-    }
-  });
+  // The three LLMRepairResponse cases that lived here were REMOVED by ROADMAP
+  // 2.763: the schema parsed the LLM repair call's output, and that call is
+  // retired. The draft-schema cases below are retained — they were the control
+  // half of the original pair and still guard the LIVE draft contract.
 
   it("draft schema still accepts draft-style rationales", () => {
     const input = {

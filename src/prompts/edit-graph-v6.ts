@@ -12,7 +12,20 @@
  * - Contrastive examples for common mistakes
  *
  * Benchmarked and validated prompt for production use.
+ *
+ * ROADMAP 2.308 / S2(a): the OPTION CONFIGURATION block now interpolates
+ * `CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE` rather than leaving the model to
+ * invent a phrasing for "ask the user for a value". The two phrasings it was
+ * observed inventing ('Set <Factor> to £40,000' and 'Set <factor> to 0.8')
+ * are both NO_MATCH against the deterministic configure-option gate, so the
+ * assistant was advising phrasings that could not return to the lane that
+ * suggested them — a closed loop minted by the product's own copy. The
+ * interpolated template is probe P1's shape, which was live-proven end-to-end.
+ * `configure-option-product-copy-routes.test.ts` asserts the prompt actually
+ * carries it (derive, don't mirror).
  */
+
+import { CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE } from '../orchestrator-v5/configure-option-chip-text.js';
 
 // ============================================================================
 // CEE Edit Graph Prompt v6
@@ -85,6 +98,17 @@ Precondition: the option, the target factor, and the structural
 option -> factor edge must all exist. If any is missing, return
 operations: [] and ask. The intervention path must match the
 runtime schema (verify against the graph structure provided).
+
+ASKING FOR A MISSING EFFECT VALUE. When you return operations: []
+because you need the user to supply an option's effect value, you
+MUST advise exactly this phrasing, with the real names substituted
+and nothing else offered:
+  "${CONFIGURE_OPTION_ADVISED_FORMAT_TEMPLATE}"
+Only that shape returns the user's reply to this lane. Do NOT
+suggest a bare "Set <factor> to <value>": that names a factor, not
+an option, and it routes to the factor-value path, which cannot
+write an option's effect. Do NOT offer a currency amount as the
+effect value; effect values are on the 0-1 scale.
 
 STRUCTURAL EDIT -- Add or remove nodes, edges, or change topology.
 Examples: "add a competitor factor", "remove the FX risk", "add

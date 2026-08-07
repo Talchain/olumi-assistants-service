@@ -60,6 +60,7 @@ import type { CoachingBlock, TargetRefKindLiteral } from '@talchain/schemas/boun
 
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { deterministicBlockId } from '../compose/block-id.js';
+import { gateCoachingCardBody } from '../coaching/copy-quality-gate.js';
 import { guidanceSignalsForCoachingKind } from '../compose/guidance-signals.js';
 
 /**
@@ -229,6 +230,26 @@ export function buildDraftBiasSignalBlocks(
     const detail = typeof raw.detail === 'string' ? raw.detail.trim() : '';
     if (detail.length === 0) continue;
 
+    // ── P1 CONTENT GATE (2026-07-27) ──────────────────────────────────────
+    // `detail` becomes `body` verbatim on a user-visible card. Until now the
+    // only downstream treatment was an entity-ID scrub, so a detail naming a
+    // leading option ("…which is the best option here") shipped intact — on a
+    // DRAFT turn, where no analysis exists and the estate's leader-claim egress
+    // alarm short-circuits (may_name_leading_option is honestly `true` when
+    // nothing has been computed). Gate the exact bytes that will ship.
+    //
+    // DROP, never rewrite: this mirrors the rule one layer up, where a bias
+    // whose TYPE is off-contract is dropped rather than re-labelled, because a
+    // bias label is a claim about a real person. Rewriting the explanation of
+    // such a claim would have the same dishonesty.
+    //
+    // Gated AFTER truncation so the check runs on precisely the shipped text —
+    // an offence living beyond the 300-char cap is never shown, so it must not
+    // cost the user the card. Gated BEFORE the dedupe so a dropped card does
+    // not consume its title's slot and can be replaced by a later clean signal.
+    const body = truncateBody(detail);
+    if (!gateCoachingCardBody(body).accept) continue;
+
     if (seen.has(title)) continue;
     seen.add(title);
 
@@ -249,7 +270,9 @@ export function buildDraftBiasSignalBlocks(
       type: 'coaching',
       coaching_kind: 'bias_signal',
       title,
-      body: truncateBody(detail),
+      // The ORIGINAL bytes the gate approved — the gate is a predicate, not a
+      // rewriter, so a benign detail is byte-identical to what the model wrote.
+      body,
       source: 'draft_graph',
       target_refs: targetRefs,
       // Priority order IS engine order — the signals carry no rank of their

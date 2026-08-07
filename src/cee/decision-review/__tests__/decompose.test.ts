@@ -84,6 +84,11 @@ function baseInput(): DecisionReviewInvokeInput {
     _meta: {
       input_shape_version: 'v5-normalised',
       flip_threshold_count: 1,
+      // ROADMAP 2.228 F1 — the one flip row above is a real pair read from the
+      // live top-level shape, so: no attested no-flips, no scale refusals.
+      flip_threshold_source: 'top_level',
+      flip_no_effect_count: 0,
+      flip_scale_refused_count: 0,
       factor_sensitivity_count: 1,
       fragile_edge_count: 1,
       model_critique_count: 0,

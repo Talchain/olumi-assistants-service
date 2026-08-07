@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
+import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-import { detectCoachingSignal } from '../coaching-signals.js';
+import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
 
 function makeContextPack(overrides: {
   topDrivers?: readonly string[];
@@ -104,19 +105,24 @@ function runAnalysisOutcomeWithEnvelope(
   return { assistant_text: 'done', handler_facts: [fact], llm_calls_used: 0 };
 }
 
-function priorRunAnalysisFactWithEnvelope(env: Record<string, unknown>): HandlerFact {
+function priorRunAnalysisFactWithEnvelope(
+  env: Record<string, unknown>,
+  /** `null` OMITS `computed_at` entirely — the legacy pre-0.10.0 shape. */
+  computedAt: string | null = '2026-07-01T00:00:00.000Z',
+): HandlerFact {
+  const result: Record<string, unknown> = {
+    scenario_id: 'scen-a',
+    leading_option_id: 'opt-1',
+    summary: 'prior',
+    enrichment: env,
+    graph_hash_at_run: 'hash-prior',
+  };
+  if (computedAt !== null) result.computed_at = computedAt;
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
     noop: false,
-    result: {
-      scenario_id: 'scen-a',
-      leading_option_id: 'opt-1',
-      summary: 'prior',
-      enrichment: env,
-      computed_at: '2026-07-01T00:00:00.000Z',
-      graph_hash_at_run: 'hash-prior',
-    },
+    result,
   } as unknown as HandlerFact;
 }
 
@@ -198,11 +204,125 @@ function priorRunAnalysisFact(): HandlerFact {
   };
 }
 
+/**
+ * ROADMAP 2.842 — a prior `run_analysis` fact carrying a NON-SUCCESS status.
+ *
+ * `partial` is the status PLoT's `determineTopLevelStatus` returns when options
+ * are usable but robustness or drivers degraded, so this is a real wire shape,
+ * not an invented one. `isSuccessfulRunAnalysisFact` excludes it
+ * (`normaliseAnalysisStatus('partial')` falls through to `default: return
+ * null`), while the coaching layer's own predicates count it. That divergence
+ * is the whole point of the fixture.
+ */
+function partialPriorRunAnalysisFact(): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: 'scen-a',
+      leading_option_id: 'opt-1',
+      summary: 'prior, degraded',
+      enrichment: { analysis_status: 'partial' },
+    },
+  } as unknown as HandlerFact;
+}
+
+/** A prior fact that is NOT a run_analysis — decoy padding for position tests. */
+function priorEditFact(targetId: string): HandlerFact {
+  return {
+    fact_type: 'set_factor_value',
+    fact_version: 1,
+    noop: false,
+    result: {
+      target_id: targetId,
+      status: 'applied',
+      before: { value: 1 },
+      after: { value: 2 },
+    },
+  };
+}
+
 describe('detectCoachingSignal', () => {
+  /**
+   * ROADMAP 2.804 — the detector's contract for the new REQUIRED
+   * `mayNameLeadingOption` input, pinned directly at this level.
+   *
+   * The wider property (that this boolean is the TURN-level, display-bound
+   * permission and not the per-run one) is proven against real fact chains in
+   * `coaching/__tests__/coaching-signal-leader-permission.test.ts`. What is
+   * pinned HERE is narrower and complementary: given the permission, the
+   * detector does the right thing with it — and it does so on the SAME
+   * fixtures every other test in this file uses, so a change to the fixtures
+   * moves both arms together.
+   */
+  describe('the leader-claim permission governs both run_analysis signals', () => {
+    it('withheld ⇒ FIRST_ANALYSIS_COMPLETE is SUPPRESSED, not reworded', () => {
+      const permitted = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [],
+      });
+      const withheld = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: false,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [],
+      });
+      // The pair is the point: one input flipped, opposite outcomes. Asserting
+      // only the withheld arm would pass on a detector that had stopped firing
+      // this signal altogether.
+      expect(permitted?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+      expect(withheld).toBeNull();
+    });
+
+    it('withheld ⇒ RERUN_ANALYSIS_COMPLETE degrades to the comparison-free copy, keeping its id', () => {
+      const permitted = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      const withheld = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: false,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      // Same id both ways — the telemetry series must not go dark on a
+      // withheld turn — but different copy, bound to the production bank.
+      expect(permitted?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(withheld?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(withheld?.coaching_text).toBe(
+        COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
+      );
+    });
+
+    it('the permission governs run_analysis ONLY — an edit-handler signal is untouched by it', () => {
+      // The gate sits inside `if (proposedHandlerId === 'run_analysis')`. If it
+      // ever escaped that branch, every edit turn would lose its coaching on a
+      // withheld scenario — a silent, wide regression. Pinned by a control.
+      const withheldEdit = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: false,
+        outcome: setFactorOutcome('Customer Churn'),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      expect(withheldEdit?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+  });
+
   describe('FIRST_ANALYSIS_COMPLETE', () => {
     it('fires on the first successful run_analysis (no prior facts)', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [],
@@ -216,6 +336,7 @@ describe('detectCoachingSignal', () => {
       // coaching prose by construction.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -229,6 +350,7 @@ describe('detectCoachingSignal', () => {
       // priorFacts array and fire FIRST_ANALYSIS_COMPLETE.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [], // prior failed attempt produced no fact
@@ -243,6 +365,7 @@ describe('detectCoachingSignal', () => {
       // returns null → the copy acknowledges the rerun without a comparison.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -261,6 +384,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(env),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(env)],
@@ -285,6 +409,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
@@ -294,9 +419,130 @@ describe('detectCoachingSignal', () => {
       expect(detection?.coaching_text).toContain('Onshore now leads');
     });
 
+    // ── F2 (same defect class as the comparison pair): the "previous run"
+    // this copy diffs against must be the canonical newest one, not whichever
+    // successful fact happens to sit first in the array.
+    it('F2 RED: diffs against the NEWEST prior run by computed_at, not the first in the array', () => {
+      const offshoreLeads = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const onshoreLeads = runEnvelope({
+        options: [
+          { id: 'b', label: 'Onshore', win: 0.62 },
+          { id: 'a', label: 'Offshore', win: 0.38 },
+        ],
+      });
+      // A legacy fact with no computed_at sits FIRST; the genuinely newest
+      // prior run sits second. Array position says "Offshore led before";
+      // the canonical ordering says the previous run already led with Onshore.
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcomeWithEnvelope(onshoreLeads),
+        contextPack: makeContextPack(),
+        priorFacts: [
+          priorRunAnalysisFactWithEnvelope(offshoreLeads, null),
+          priorRunAnalysisFactWithEnvelope(onshoreLeads, '2026-07-05T00:00:00.000Z'),
+        ],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text).toContain('Onshore still leads');
+      expect(detection?.coaching_text).not.toContain('Offshore led before');
+    });
+
+    // ── F3: a rename is not an outcome change.
+    it('F3: renaming the leading option does not produce "led before / now leads" copy', () => {
+      const priorEnv = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const currentEnv = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore (EU)', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(detection?.coaching_text).not.toContain('led before');
+      expect(detection?.coaching_text).toContain('Offshore (EU) still leads');
+    });
+
+    // ⭐ A1 — the rerun composer has the same affirmative-continuity arms as
+    // the gate ("The result is unchanged: X still leads.", "…its lead has
+    // widened/narrowed"). On an id-less prior run they assert a continuity we
+    // did not verify — here, one that is actually false.
+    it('A1 RED: an id-less prior run with a DIFFERENT leader gets no continuity claim', () => {
+      const labelOnlyEnv = {
+        analysis_status: 'completed',
+        results: [
+          { option_label: 'Offshore', win_probability: 0.62, factor_sensitivity: [] },
+          { option_label: 'Onshore', win_probability: 0.38, factor_sensitivity: [] },
+        ],
+      } as Record<string, unknown>;
+      const currentEnv = runEnvelope({
+        options: [
+          { id: 'b', label: 'Onshore', win: 0.70 },
+          { id: 'a', label: 'Offshore', win: 0.30 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(labelOnlyEnv)],
+      });
+      expect(detection?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      const text = detection!.coaching_text;
+      // Neither direction, and no margin movement about two different leaders.
+      expect(text).not.toContain('still leads');
+      expect(text).not.toContain('The result is unchanged');
+      expect(text).not.toContain('led before');
+      expect(text).not.toContain('widened');
+      expect(text).not.toContain('narrowed');
+      // What IS said: this run's leader, and the honest limit.
+      expect(text).toContain('Onshore leads after this re-run');
+      expect(text).toContain('cannot line up');
+      // Copy safety, same as the sibling arms.
+      expect(text).not.toContain('—');
+      expect(text).not.toMatch(/0\.\d/);
+    });
+
+    it('POSITIVE CONTROL: with ids on both runs the continuity copy still fires', () => {
+      // Without this, the absence assertions above would pass against a
+      // composer that never makes a continuity claim at all.
+      const env = runEnvelope({
+        options: [
+          { id: 'a', label: 'Offshore', win: 0.62 },
+          { id: 'b', label: 'Onshore', win: 0.38 },
+        ],
+      });
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcomeWithEnvelope(env),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFactWithEnvelope(env)],
+      });
+      expect(detection?.coaching_text).toContain('Offshore still leads');
+    });
+
     it('fires with a NULL contextPack (chip-click path assembles no pack)', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: null,
         priorFacts: [priorRunAnalysisFact()],
@@ -308,6 +554,7 @@ describe('detectCoachingSignal', () => {
     it('FIRST_ANALYSIS_COMPLETE still wins when no prior run fact exists (first-run behaviour unchanged)', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: null,
         priorFacts: [],
@@ -330,6 +577,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
@@ -345,6 +593,7 @@ describe('detectCoachingSignal', () => {
     it('fires on an edit handler when a prior run_analysis fact exists', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('f-cost'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -355,6 +604,7 @@ describe('detectCoachingSignal', () => {
     it('does not fire on an edit handler when no prior analysis exists', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ analysisPresent: false }),
         priorFacts: [],
@@ -372,6 +622,7 @@ describe('detectCoachingSignal', () => {
     it('does NOT fire on a NO-OP set_factor_value even with a prior analysis', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: noopSetFactorOutcome('f-cost'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -382,6 +633,7 @@ describe('detectCoachingSignal', () => {
     it('does NOT fire on a NO-OP adjust_edge_strength even with a prior analysis', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'adjust_edge_strength',
+        mayNameLeadingOption: true,
         outcome: noopEdgeOutcome('f-budget→g-revenue'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -396,6 +648,7 @@ describe('detectCoachingSignal', () => {
       // three edit handlers, not just the two whose narration was wrong.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'add_constraint',
+        mayNameLeadingOption: true,
         outcome: noopAddConstraintOutcome('f-churn'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -409,6 +662,7 @@ describe('detectCoachingSignal', () => {
       // analysis. Without this, `return null` would pass the tests above.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('f-cost'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -418,12 +672,174 @@ describe('detectCoachingSignal', () => {
     });
   });
 
+  // ══════════════════════════════════════════════════════════════════════
+  // ROADMAP 2.842 — the two coaching predicates, asserted rather than
+  // remembered.
+  //
+  // Neither of these blocks was RED at pristine, and that is the honest
+  // situation: 2.842 is a NAMING defect with no observable behaviour (the
+  // ordering was unobservable because its only consumer read truthiness; the
+  // "Successful" looseness is deliberate and already shipped). There was no
+  // failing behaviour to pin first. What proves these tests bite is the mutant
+  // kit, recorded in the PR body — each assertion below has a named mutant that
+  // turns it RED, including a DISCRIMINATING PAIR for the position claim.
+  // ══════════════════════════════════════════════════════════════════════
+  describe('the coaching layer’s predicate is DELIBERATELY broader than the freshness authority’s', () => {
+    /**
+     * The distinction 2.842 exists to stop being folklore: `partial` /
+     * `degraded` run_analysis facts count for the coaching layer and do NOT
+     * count for `isSuccessfulRunAnalysisFact`. Three predicates over one fact
+     * type is exactly the drift class this estate keeps paying for, so the
+     * divergence is pinned at both ends — the authority's verdict AND the
+     * product behaviour that depends on the coaching layer disagreeing with it.
+     */
+    it('the freshness authority REJECTS a partial fact that the coaching layer COUNTS', () => {
+      const partial = partialPriorRunAnalysisFact();
+
+      // End A — the freshness authority excludes it.
+      expect(isSuccessfulRunAnalysisFact(partial)).toBe(false);
+
+      // End B — the run_analysis branch counts it, so this reads as a RE-RUN.
+      // If the coaching predicate were tightened to the freshness authority's,
+      // this would be FIRST_ANALYSIS_COMPLETE and the user would be told their
+      // first analysis is ready on their second one.
+      const rerun = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [partial],
+      });
+      expect(rerun?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(rerun?.signal_id).not.toBe('FIRST_ANALYSIS_COMPLETE');
+
+      // End B again, edit branch — a degraded analysis is still an analysis an
+      // edit can stale.
+      const stale = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-cost'),
+        contextPack: makeContextPack(),
+        priorFacts: [partial],
+      });
+      expect(stale?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+
+    /**
+     * The two coaching predicates are byte-identical today and kept separate on
+     * purpose (CLAUDE.md trap #21 — two authorities answering different
+     * questions must not be collapsed just because they agree). Their agreement
+     * is therefore itself an invariant: pin it, so tightening one without the
+     * other is LOUD instead of silent.
+     *
+     * Observed end-to-end rather than by exporting the private helpers: the
+     * edit branch fires STALE exactly when the run_analysis branch does NOT fire
+     * FIRST_ANALYSIS.
+     */
+    it('the edit-branch and run_analysis-branch predicates agree on every fixture', () => {
+      const cases: ReadonlyArray<{ label: string; priorFacts: HandlerFact[] }> = [
+        { label: 'no prior facts', priorFacts: [] },
+        { label: 'only a non-analysis prior fact', priorFacts: [priorEditFact('f-cost')] },
+        { label: 'a successful prior analysis', priorFacts: [priorRunAnalysisFact()] },
+        { label: 'a PARTIAL prior analysis', priorFacts: [partialPriorRunAnalysisFact()] },
+      ];
+
+      for (const { label, priorFacts } of cases) {
+        const editBranchSawAnalysis =
+          detectCoachingSignal({
+            proposedHandlerId: 'set_factor_value',
+            mayNameLeadingOption: true,
+            // A target that is NOT a top driver, so HIGH_SENSITIVITY cannot
+            // fire and mask the STALE verdict.
+            outcome: setFactorOutcome('f-not-a-driver'),
+            contextPack: makeContextPack(),
+            priorFacts,
+          })?.signal_id === 'STALE_ANALYSIS_AFTER_EDIT';
+
+        const runBranchSawAnalysis =
+          detectCoachingSignal({
+            proposedHandlerId: 'run_analysis',
+            mayNameLeadingOption: true,
+            outcome: runAnalysisOutcome(),
+            contextPack: makeContextPack(),
+            priorFacts,
+          })?.signal_id !== 'FIRST_ANALYSIS_COMPLETE';
+
+        expect(
+          { case: label, editBranchSawAnalysis },
+          `the two coaching predicates disagreed on: ${label}`,
+        ).toEqual({ case: label, editBranchSawAnalysis: runBranchSawAnalysis });
+      }
+    });
+  });
+
+  describe('ROADMAP 2.842 — the edit branch reads EXISTENCE, not array position', () => {
+    /**
+     * `findMostRecentSuccessfulAnalysisFact` walked the array from its LAST
+     * index and returned the first hit, while `prior_facts` arrives
+     * NEWEST-FIRST — so it returned the OLDEST run_analysis fact under a name
+     * promising the newest. The replacement makes no ordering claim at all, and
+     * these two cases are what hold it to that: the same single analysis fact,
+     * once at the NEWEST end and once at the OLDEST end of an otherwise
+     * identical array, must produce the same verdict.
+     *
+     * They are a DISCRIMINATING PAIR, not two samples of one property. A
+     * position-0-only read passes the first and fails the second; a
+     * last-index-only read (the old behaviour's shape) does the reverse.
+     * Neither case alone can tell a position-independent predicate from a
+     * position-dependent one.
+     */
+    it('fires STALE when the analysis fact is NEWEST (index 0)', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-not-a-driver'),
+        contextPack: makeContextPack(),
+        priorFacts: [
+          priorRunAnalysisFact(),
+          priorEditFact('f-a'),
+          priorEditFact('f-b'),
+        ],
+      });
+      expect(detection?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+
+    it('fires STALE when the analysis fact is OLDEST (last index)', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-not-a-driver'),
+        contextPack: makeContextPack(),
+        priorFacts: [
+          priorEditFact('f-a'),
+          priorEditFact('f-b'),
+          priorRunAnalysisFact(),
+        ],
+      });
+      expect(detection?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+
+    it('NEGATIVE CONTROL: no analysis fact at any position ⇒ no STALE', () => {
+      // Without this, a predicate hardcoded to `true` would pass both cases
+      // above.
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-not-a-driver'),
+        contextPack: makeContextPack(),
+        priorFacts: [priorEditFact('f-a'), priorEditFact('f-b')],
+      });
+      expect(detection).toBeNull();
+    });
+  });
+
   describe('HIGH_SENSITIVITY_EDIT', () => {
     it('fires on an edit to a top driver when no prior analysis exists in facts', () => {
       // HIGH_SENSITIVITY branch: no prior run_analysis fact, but contextPack
       // carries top_drivers. The edit target matches a driver label.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn', 'Ad Spend'] }),
         priorFacts: [],
@@ -435,6 +851,7 @@ describe('detectCoachingSignal', () => {
     it('does not fire when the edit target is not among top drivers', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Unrelated Factor'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn'] }),
         priorFacts: [],
@@ -449,6 +866,7 @@ describe('detectCoachingSignal', () => {
       // presuppose an actual edit, so the gate sits on the branch.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: noopSetFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn', 'Ad Spend'] }),
         priorFacts: [],
@@ -462,6 +880,7 @@ describe('detectCoachingSignal', () => {
       // Edit a top driver AND a prior analysis exists in facts. STALE wins.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn'] }),
         priorFacts: [priorRunAnalysisFact()],
@@ -474,6 +893,7 @@ describe('detectCoachingSignal', () => {
     it('returns null for an unknown handler_id', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'explain_result',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [],
@@ -486,18 +906,21 @@ describe('detectCoachingSignal', () => {
     it('never emits em-dashes in any signal text', () => {
       const firstAnalysis = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [],
       });
       const stale = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
       });
       const high = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn'] }),
         priorFacts: [],

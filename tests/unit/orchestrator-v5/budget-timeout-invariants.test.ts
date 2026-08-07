@@ -16,10 +16,14 @@
  * hand-maintained mirror that drifts silently. These assertions are the
  * fail-loud replacement.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   PLOT_RUN_TIMEOUT_MS,
   PLOT_RUN_BRIEF_TIMEOUT_MS,
+  PLOT_VALIDATE_TIMEOUT_MS,
+  MIN_TIMEOUT_MS,
   ROUTE_TIMEOUT_MS,
   // IMPORTED, not hand-copied. A local `const RETRY_BACKOFF_MS = 2_000` here
   // could not do what its comment claimed: raise the client's backoff to 10s
@@ -35,6 +39,11 @@ import {
   getResolvedTimeouts,
 } from "../../../src/config/timeouts.js";
 import { getTurnExecutorBudgets, getHandlerBudgetMs } from "../../../src/orchestrator-v5/budgets.js";
+import { resolveDecisionReviewHardBudgetMs } from "../../../src/orchestrator-v5/coaching/decision-review-enricher.js";
+import {
+  resolveComposerBudget,
+  COMPOSER_POST_CALL_RESERVE_MS,
+} from "../../../src/orchestrator-v5/tools/compose-structural-edit.js";
 import { config } from "../../../src/config/index.js";
 
 describe("PLOT_RUN_TIMEOUT_MS ↔ handler budget lockstep", () => {
@@ -109,6 +118,11 @@ describe("boot validator carries the ladder rungs (positive control)", () => {
     handlerBudgetMs: getHandlerBudgetMs(),
     turnBudgetMs: getTurnExecutorBudgets().turn_ms,
     browserProxyTimeoutMs: config.proxy.browserProxyTimeoutMs,
+    // ROADMAP 2.180-B: resolved through the SAME single-source function the
+    // boot path uses, against the live decompose posture — not a literal.
+    decisionReviewHardBudgetMs: resolveDecisionReviewHardBudgetMs(
+      config.cee.decisionReviewDecompose,
+    ),
   });
 
   it("is silent on the resolved default ladder", () => {
@@ -196,5 +210,244 @@ describe("worst-case analysis path fits inside the turn budget", () => {
   it("bounds the handler budget inside the turn budget", () => {
     const { turn_ms } = getTurnExecutorBudgets();
     expect(getHandlerBudgetMs()).toBeLessThan(turn_ms);
+  });
+});
+
+// ============================================================================
+// ROADMAP 2.665 (CEE half) — the structural-edit composer's budget.
+//
+// THE WITNESSED DEFECT. `propose_structural_edit`'s composer call was capped by
+// a bare `const COMPOSER_DEFAULT_TIMEOUT_MS = 60_000` in
+// `tools/compose-structural-edit.ts`, and the dispatcher at
+// `handlers/edit-graph-dispatch.ts` passes NEITHER `timeoutMs` NOR `signal` —
+// so that constant WAS the effective bound. The composer was killed at 60.0s
+// deterministically (witnessed 2/2), returning `unavailable: call_failed`, and
+// `decision=engaged` has therefore never once been reached.
+//
+// WHY A DERIVED BUDGET AND NOT A BIGGER LITERAL. A second literal would be the
+// hand-maintained mirror this whole file exists to abolish: lower
+// BROWSER_PROXY_TIMEOUT_MS on Render and a hardcoded composer cap silently
+// escapes the turn it has to fit inside, and the symptom is a generic
+// TURN_BUDGET_EXCEEDED with nothing naming the cause. The resolver derives from
+// the SAME ladder constants asserted above, so both ends move together.
+//
+// ⚠ WHAT THE DERIVATION CHARGES, STATED SO IT IS A DECISION AND NOT AN
+// OVERSIGHT. Inside the edit_graph handler the chain is strictly serial:
+// rulebook `handleEditGraph` (bounded by ORCHESTRATOR_TIMEOUT_MS) → composer →
+// apply (`preComposedOperations`, which SKIPS the LLM call — edit-graph.ts:2090
+// — so its only bounded cost is the PLoT gate at PLOT_VALIDATE_TIMEOUT_MS).
+// The V5 ROUTING call ahead of the handler (a second ORCHESTRATOR_TIMEOUT_MS)
+// is deliberately NOT charged. This follows the precedent already recorded for
+// decision_review in `config/timeouts.ts`: the nominal ladder is ALREADY
+// over-subscribed (routing 30s + handler 85s = turn_ms exactly), so a ceiling
+// that charges every term at its bound derives 0 and is therefore useless.
+// Charging routing at measurement is what makes this rung mean something; it is
+// also why the rung below is an upper bound on the HANDLER chain, not a
+// sufficiency proof for the whole turn.
+// ============================================================================
+
+/** The measured kill point, from the 2.634/2.655 walk. Provenance, not a knob:
+ *  the fix is only a fix if the resolved budget is strictly greater than the
+ *  value that was observed killing the composer. */
+const WITNESSED_COMPOSER_KILL_MS = 60_000;
+
+/**
+ * The value the Render dashboard carries for `ORCHESTRATOR_TIMEOUT_MS` on
+ * cee-staging, read from the Render API during witness #3 (2026-08-06). Five
+ * times the 30,000 code default, and the entire reason #842's derivation
+ * collapsed to the floor on the deployed box while reading 80,000 in CI.
+ *
+ * ⚠ PINNED TO THE HISTORICAL MEASUREMENT, PERMANENTLY (trap 12b). This is a
+ * control fixture, not a mirror of the dashboard: it must keep reproducing the
+ * env that broke #842 even after somebody corrects the dashboard, or the test
+ * that proves immunity quietly stops testing anything.
+ */
+const WITNESSED_DEPLOYED_ORCHESTRATOR_TIMEOUT_MS = 150_000;
+
+describe("ROADMAP 2.684 — the composer's budget is the turn's REMAINING time", () => {
+  it("U3-1 survives the DEPLOYED ORCHESTRATOR_TIMEOUT_MS that collapsed #842 to a 5.0s kill", async () => {
+    // ── THE WITNESS, REPRODUCED IN CI ────────────────────────────────────
+    // Witness #3 measured the composer killed at 5.008s and 5.006s on staging
+    // while CI read a healthy 80,000, because `ORCHESTRATOR_TIMEOUT_MS` is
+    // bound at MODULE LOAD from the process env and the dashboard sets it to
+    // 150,000. Reproducing that needs the env present BEFORE the module
+    // evaluates — hence resetModules + a fresh dynamic import, not a plain
+    // assignment (which the already-loaded constant would ignore).
+    //
+    // Measured at pristine with this env: resolveComposerTimeoutMs() = 5000,
+    // "expected 5000 to be greater than 60000". That is the RED this replaces.
+    vi.resetModules();
+    vi.stubEnv(
+      "ORCHESTRATOR_TIMEOUT_MS",
+      String(WITNESSED_DEPLOYED_ORCHESTRATOR_TIMEOUT_MS),
+    );
+    try {
+      const freshTimeouts = await import("../../../src/config/timeouts.js");
+      const freshCompose = await import(
+        "../../../src/orchestrator-v5/tools/compose-structural-edit.js"
+      );
+      const freshBudgets = await import("../../../src/orchestrator-v5/budgets.js");
+
+      // ⚠ PRECONDITION PIN (trap 13b third face). Without this, a resetModules
+      // that silently failed to re-read the env would leave the assertion
+      // below passing for the wrong reason — a guard agreeing with itself. The
+      // test's discriminating power must not depend on an unpinned fixture.
+      expect(freshTimeouts.ORCHESTRATOR_TIMEOUT_MS).toBe(
+        WITNESSED_DEPLOYED_ORCHESTRATOR_TIMEOUT_MS,
+      );
+      // …and the divergence really is large enough to drive the old formula
+      // negative, which is what made it clamp to the floor.
+      const { turn_ms } = freshBudgets.getTurnExecutorBudgets();
+      expect(turn_ms - freshTimeouts.ORCHESTRATOR_TIMEOUT_MS).toBeLessThan(0);
+
+      // THE ASSERTION. At the start of a turn the composer gets essentially the
+      // whole turn, whatever a parallel env constant happens to say.
+      const nowMs = 1_000_000;
+      const budget = freshCompose.resolveComposerBudget({
+        requestStartMs: nowMs,
+        nowMs,
+      });
+      expect(budget.kind).toBe("available");
+      if (budget.kind !== "available") throw new Error("unreachable");
+      expect(budget.timeoutMs).toBeGreaterThan(WITNESSED_COMPOSER_KILL_MS);
+      expect(budget.timeoutMs).toBe(turn_ms - freshCompose.COMPOSER_POST_CALL_RESERVE_MS);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
+  it("U3-2 charges what the turn ALREADY SPENT — 62s consumed is 62s the composer does not get", () => {
+    // The second half of the finding, and the one no static ceiling can reach.
+    // Witness #3's trace: boundary.request → edit_graph LLM call (40s) →
+    // repair call (22s) → composer entry, i.e. ~62s of a 115s turn already
+    // gone. #842's ceiling would have authorised 80,000 at that point — a call
+    // 27s longer than the turn had left.
+    const { turn_ms } = getTurnExecutorBudgets();
+    const CONSUMED_MS = 62_000; // witness #3, w3a1: 09:56:52.280 → 09:57:55.353
+    const requestStartMs = 1_000_000;
+
+    const budget = resolveComposerBudget({
+      requestStartMs,
+      nowMs: requestStartMs + CONSUMED_MS,
+    });
+    expect(budget.kind).toBe("available");
+    if (budget.kind !== "available") throw new Error("unreachable");
+
+    // Exactly what is left, minus what still has to happen after the call.
+    expect(budget.timeoutMs).toBe(turn_ms - CONSUMED_MS - COMPOSER_POST_CALL_RESERVE_MS);
+    // 48,000 at repo defaults — and the point of the test: NOT the 80,000 a
+    // ceiling derived at turn start would have handed out.
+    expect(budget.timeoutMs).toBeLessThan(80_000);
+    // The call plus the work after it still lands inside the deadline.
+    expect(CONSUMED_MS + budget.timeoutMs + COMPOSER_POST_CALL_RESERVE_MS).toBeLessThanOrEqual(
+      turn_ms,
+    );
+  });
+
+  it("U3-3 DECLINES rather than firing a call that cannot finish", () => {
+    // The old floor clamped to MIN_TIMEOUT_MS and called anyway; witness #3 is
+    // what that costs — a guaranteed UpstreamTimeoutError, twice, at 5.0s of
+    // the user's time. A floor-hit must now mean "there is genuinely no time
+    // left", and say so.
+    const { turn_ms } = getTurnExecutorBudgets();
+    const requestStartMs = 1_000_000;
+    const budget = resolveComposerBudget({
+      requestStartMs,
+      // One millisecond short of affording the floor plus the reserve.
+      nowMs: requestStartMs + turn_ms - COMPOSER_POST_CALL_RESERVE_MS - MIN_TIMEOUT_MS + 1,
+    });
+    expect(budget.kind).toBe("exhausted");
+  });
+
+  it("U3-4 pins the exhaustion BOUNDARY on both sides", () => {
+    // A one-sided assertion would pass for a resolver that always exhausts.
+    const { turn_ms } = getTurnExecutorBudgets();
+    const requestStartMs = 1_000_000;
+    // The last instant that still affords the floor.
+    const lastAffordable =
+      requestStartMs + turn_ms - COMPOSER_POST_CALL_RESERVE_MS - MIN_TIMEOUT_MS;
+
+    const justAffordable = resolveComposerBudget({ requestStartMs, nowMs: lastAffordable });
+    expect(justAffordable.kind).toBe("available");
+    if (justAffordable.kind !== "available") throw new Error("unreachable");
+    expect(justAffordable.timeoutMs).toBe(MIN_TIMEOUT_MS);
+
+    const justPast = resolveComposerBudget({ requestStartMs, nowMs: lastAffordable + 1 });
+    expect(justPast.kind).toBe("exhausted");
+  });
+
+  it("U3-5 reports a NEGATIVE remainder when the deadline has already passed", () => {
+    // Not cosmetic: `remainingMs` is logged on the decline, and a value floored
+    // at 0 would make "we were 12s over" indistinguishable from "we were
+    // exactly on time" in the one telemetry line that could tell them apart.
+    const { turn_ms } = getTurnExecutorBudgets();
+    const requestStartMs = 1_000_000;
+    const budget = resolveComposerBudget({
+      requestStartMs,
+      nowMs: requestStartMs + turn_ms + 12_000,
+    });
+    expect(budget.kind).toBe("exhausted");
+    expect(budget.remainingMs).toBe(-12_000);
+  });
+
+  it("U3-6 is DERIVED, not a literal — tightening the turn budget tightens it IN LOCKSTEP", () => {
+    // The anti-mirror pin, carried over from U2-3 and still the assertion that
+    // discriminates a derived budget from a bigger literal. The delta must be
+    // EQUAL to the turn budget's own delta: "it went down a bit" would also
+    // pass for a Math.min against a constant.
+    const requestStartMs = 1_000_000;
+    const at = (): number => {
+      const b = resolveComposerBudget({ requestStartMs, nowMs: requestStartMs });
+      if (b.kind !== "available") throw new Error("fixture must afford a budget");
+      return b.timeoutMs;
+    };
+    const budgetBefore = at();
+    const turnBefore = getTurnExecutorBudgets().turn_ms;
+    const original = process.env.TURN_BUDGET_MS;
+    try {
+      process.env.TURN_BUDGET_MS = "60000";
+      const budgetAfter = at();
+      const turnAfter = getTurnExecutorBudgets().turn_ms;
+
+      // PRECONDITION PIN (trap 13b third face): the override must actually have
+      // moved the turn budget, or the lockstep assertion below is vacuous.
+      expect(turnAfter).toBeLessThan(turnBefore);
+
+      expect(budgetAfter).toBeLessThan(budgetBefore);
+      expect(turnBefore - turnAfter).toBe(budgetBefore - budgetAfter);
+    } finally {
+      if (original === undefined) delete process.env.TURN_BUDGET_MS;
+      else process.env.TURN_BUDGET_MS = original;
+    }
+  });
+
+  it("U3-7 charges the post-composer work from the PLoT constant, not a hand-set number", () => {
+    // The apply re-enters handleEditGraph with preComposedOperations, which
+    // SKIPS the LLM call — its only bounded cost is the PLoT gate. Raise that
+    // cap on Render and the reserve must rise with it.
+    expect(COMPOSER_POST_CALL_RESERVE_MS).toBe(PLOT_VALIDATE_TIMEOUT_MS);
+  });
+
+  it("U3-8 reads NO env constant the deployed box can diverge on behind CEE's back", () => {
+    // ── I-B, ASSERTED AT THE SOURCE ──────────────────────────────────────
+    // The behavioural pins above prove the resolver is immune TODAY. This one
+    // proves the immunity cannot be re-broken the way it was broken before:
+    // #842 was correct arithmetic over a constant that describes a per-call cap
+    // on a DIFFERENT LLM call, so setting it on the dashboard changed the
+    // formula without changing the turn. `turn_ms` is the sole env-bearing term
+    // left, and it qualifies because it is the value the turn executor arms its
+    // own abort with.
+    //
+    // A source assertion because that is where the property lives: the defect
+    // is "this file subtracts a parallel constant", and no fixture can observe
+    // a subtraction that has not happened yet.
+    const source = readFileSync(
+      join(__dirname, "../../../src/orchestrator-v5/tools/compose-structural-edit.ts"),
+      "utf-8",
+    );
+    const arithmetic = source.slice(source.indexOf("export function resolveComposerBudget"));
+    expect(arithmetic).not.toBe("");
+    expect(arithmetic).not.toContain("ORCHESTRATOR_TIMEOUT_MS");
   });
 });

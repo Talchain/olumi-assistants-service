@@ -47,6 +47,7 @@
  * threads it onto the BoundaryError wire envelope.
  */
 
+import type { MayNameLeadingOptionProvenance } from '../context/claim-safety-read.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import type {
   DiagnosticTrace,
@@ -98,6 +99,8 @@ export interface V5BenchmarkingTimings {
     repair_llm_ms?: number;
     repair_deterministic_ms?: number;
     threshold_sweep_ms?: number;
+    // v12 (lean-draft contract): Stage 4.5 post-draft coaching pass.
+    coaching_pass_ms?: number;
     package_ms?: number;
     boundary_ms?: number;
   };
@@ -184,11 +187,104 @@ export interface V5DiagnosticTrace extends DiagnosticTrace {
    */
   coaching_delivery?: V5CoachingDelivery;
   /**
+   * T1 claim safety, made observable at the wire (ROADMAP 1.233). Stamped by
+   * route-v2 on every dispatch family from the values it already holds; see
+   * {@link V5ClaimSafety}.
+   */
+  claim_safety?: V5ClaimSafety;
+  /**
    * Schema version of the V5 trace envelope itself (NOT a prompt /
    * grammar version). Bumped on any breaking shape change. Exporters
    * read this to choose the right field projection.
    */
   trace_version: 1;
+}
+
+/**
+ * T1 claim safety as the WIRE can see it. ROADMAP 1.233.
+ *
+ * WHY THIS EXISTS. Every claim-safety mechanism this programme has shipped is
+ * server-side: the persisted verdict, the Layer-2 projection gate, and the
+ * Layer-3 egress alarm all live in logs. Three consecutive live acceptance
+ * walks were therefore forced to infer the mechanism from prose, and the
+ * POST-#713 walk hit the wall that inference always hits:
+ *
+ *   - it proved the REPLACE branch ONLY because that branch substitutes a
+ *     byte-identifiable exported constant;
+ *   - it recorded `unchanged` as "indistinguishable from 'gate never ran' at
+ *     the wire";
+ *   - it recorded the APPEND branch as **UNVERIFIED — never exercised**, and
+ *     named a telemetry read as the cheapest thing that would settle it;
+ *   - and on non-execute turns it could not use the alarm at all, because the
+ *     permission was the hardcoded `true` this same roadmap row removes.
+ *
+ * Two bounded scalars close all four. This is DIAGNOSTIC ONLY — it rides the
+ * flag-gated `_diagnostic_trace`, never `response`, and no product behaviour
+ * reads it. It is deliberately NOT a second derivation: both members are
+ * stamped from values route-v2 already holds for the egress guard.
+ *
+ * BOUNDED BY CONSTRUCTION (this is the cardinality contract): one boolean and
+ * one four-valued nullable enum. No ids, no labels, no free text, nothing that
+ * could carry the very claim it reports on.
+ */
+export interface V5ClaimSafety {
+  /**
+   * The permission the Layer-3 egress guard was armed with on this turn —
+   * the SAME value passed to `sanitiseOlumiResponseForEgress`, not a re-read.
+   * `false` = the persisted verdict withheld the leading-option claim.
+   */
+  may_name_leading_option: boolean;
+  /**
+   * WHERE the boolean above came from — the discriminator that makes it
+   * FALSIFIABLE.
+   *
+   * ⭐ WHY. Until 2026-07-27, a `true` meaning *"the scenario's newest analysis
+   * PERMITTED naming a leader"* and a `true` meaning *"no analysis was in the
+   * 20-turn window I was handed"* were **the same wire byte**. That is the
+   * reason the acceptance walk which uncovered the window-scope defect could
+   * not construct a valid control, and why it reached for a turn-shape
+   * hypothesis that its own `false` control refuted. A field that reads the
+   * same for "permitted" and for "blind" is not evidence.
+   *
+   *   - `scenario_fact`         — a `run_analysis` fact was selected and its
+   *                               verdict read. The value describes a real
+   *                               analysis, whichever way it went.
+   *   - `no_analysis_exists`    — no selectable analysis anywhere in the
+   *                               scenario. The honest `true`.
+   *   - `fail_closed_truncated` — the scenario-scoped read degraded AND the
+   *                               window was provably truncated, so "no
+   *                               analysis" was unproven and the turn withheld.
+   *
+   * ADDITIVE. `_diagnostic_trace` is stripped before the response schema
+   * validates and re-attached afterwards (route-v2), so a new key breaks no
+   * contract and older consumers drop it silently.
+   *
+   * `fail_closed_truncated` appearing at any volume is an ALARM, not noise: it
+   * means the scenario-scoped fact read is failing in production.
+   */
+  // ⚠ DERIVED, NOT RE-LISTED (2026-07-27). This union used to be a hand-typed
+  // copy of `MayNameLeadingOptionProvenance`, and route-v2.ts carried a THIRD
+  // copy. Adding `fail_closed_uninterpretable` at the source would have left
+  // both copies silently narrower than the values that actually flow — the
+  // mirror defect (CLAUDE.md trap #12) applied to a type, where the compiler
+  // reports it as an error at the consumer rather than at the stale list.
+  // Importing the type makes a new provenance state propagate for free.
+  verdict_provenance: MayNameLeadingOptionProvenance | null;
+  /**
+   * Which branch the Layer-2 withheld-explanation gate took, or `null` when it
+   * did not run on this turn (non-explanation handler, permitted verdict, or a
+   * dispatch family that has no such gate).
+   *
+   * Typed as the string union rather than importing
+   * `WithheldExplanationReason` so this diagnostics module stays free of a
+   * compose-layer dependency; the drift risk is covered by the compile-time
+   * assignability check at the route seam, where the real type is in scope.
+   */
+  withheld_projection_reason:
+    | 'leader_claim_replaced'
+    | 'disclosure_appended'
+    | 'unchanged'
+    | null;
 }
 
 export type V5DiagnosticExitPath =
@@ -231,6 +327,15 @@ export type V5DiagnosticExitPath =
   // with up to 3 tap-able questions instead of dispatching the draft.
   // Zero LLM calls on this path.
   | 'clarify_v2'
+  // ROADMAP 1.203 R2(d) / A2-ASKS 1.193c — the deterministic typed add-option
+  // compound transaction (chip.intent='add_option' → held graph_management batch,
+  // route-v2 S3 §5). Zero LLM calls (`llm_calls:[]`), no LLM edit round-trip; it
+  // was previously mis-stamped `edit_graph` (the LLM edit lane's label), so the
+  // wire `exit_path` could not distinguish the 1.7s deterministic transaction from
+  // the 13.6s LLM edit. Its own member, mirroring the other zero-LLM exits
+  // (process_meta_intake / readiness_intake / clarify_v2). External dashboards
+  // that bucket by exit_path gain a new `add_option_transaction` bucket.
+  | 'add_option_transaction'
   | 'draft_graph_error';
 
 /**

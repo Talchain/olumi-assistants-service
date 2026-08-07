@@ -30,16 +30,31 @@ import {
   invokeDecomposedDecisionReview,
   DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS,
 } from '../../cee/decision-review/decompose.js';
+import {
+  checkDecisionReviewContract,
+  summariseContractViolations,
+} from '../../cee/decision-review/contract-gate.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
-import { deriveWinnerConstraintInfeasibility } from '../../orchestrator/context/constraint-feasibility.js';
+import {
+  deriveWinnerConstraintInfeasibility,
+  readMayNameLeadingOptionFromResult,
+} from '../../orchestrator/context/constraint-feasibility.js';
 import { config } from '../../config/index.js';
 import { sanitiseEnrichment } from '../compose/sanitise-enrichment.js';
 // Graph-label readers relocated to a lean, dependency-free context module so
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
 import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels.js';
+// ROADMAP 2.228 F1 — the SINGLE owner of the parse for PLoT's live top-level
+// `enrichment.flip_thresholds[]` shape, shared with the coach context path so
+// the two surfaces cannot drift into disagreeing about the same rows.
+import {
+  readTopLevelFlipRows,
+  flipRowScaleUnsafeForPromptUnits,
+  type TopLevelFlipRow,
+} from '../context/flip-threshold-rows.js';
 // M1 (Codex r2 pre-merge review): the option-result source precedence is now
 // single-sourced so all four winner-derivation surfaces agree current-first.
 // `readResultsArraySources` is re-exported below (as the shared reader) so this
@@ -57,6 +72,7 @@ import {
 } from './scaffold-disclosure.js';
 
 import type { DecisionReviewOutput } from './types.js';
+import { applyDskGroundingPolicy } from '../../cee/decision-review/dsk-grounding-policy.js';
 
 export interface EnrichDecisionReviewInput {
   readonly handlerFacts: readonly HandlerFact[];
@@ -194,6 +210,12 @@ export async function enrichRunAnalysisWithDecisionReview(
     enrichment,
     fact.result.leading_option_id,
     scaffoldDisclosure,
+    // T1 claim safety, read from the FACT (typed `result.constraint_verdict`
+    // first, interim `enrichment.__cee_claim_safety` second, fail-closed on
+    // neither). This is the only place that can see it: `buildInvokeInput`
+    // receives `enrichment` alone, and since schemas 0.25.0 the verdict is a
+    // SIBLING of that record, not a member of it.
+    readMayNameLeadingOptionFromResult(fact.result),
   );
   if (!invokeInput) {
     skipTelemetry(input, 'no_winner', {
@@ -219,7 +241,76 @@ export async function enrichRunAnalysisWithDecisionReview(
   // abort the monolith fallback at the very moment it was granted its floor.
   // Flag-off behaviour is byte-identical (the reserve is 0).
   const hardBudgetMs = resolveDecisionReviewHardBudgetMs(config.cee.decisionReviewDecompose);
-  const hardTimer = setTimeout(() => childAbort.abort(new Error('decision_review timeout')), hardBudgetMs);
+  // ROADMAP 2.180-B. `hardTimerFired` records whether OUR budget was what
+  // stopped the call, as a FACT rather than an inference. Before this, the only
+  // way to tell a budget abort from an ordinary upstream error was to
+  // string-match the adapter's message ("OpenAI chat aborted by external
+  // signal") on the `.failed` event — which is exactly how the 2.180 probe had
+  // to reconstruct it, and which would go silently wrong the day the adapter
+  // rewords or a second provider phrases it differently. The flag is set in the
+  // timer callback, so it is true if and only if this timer fired.
+  let hardTimerFired = false;
+  const hardTimer = setTimeout(() => {
+    hardTimerFired = true;
+    childAbort.abort(new Error('decision_review timeout'));
+  }, hardBudgetMs);
+
+  /**
+   * ROADMAP 2.180-B — MAKE THE LOSS LOUD.
+   *
+   * THE DEFECT THIS CLOSES. `v5.decision_review_degraded` had exactly ONE
+   * production emit site — `turn-executor.ts`'s OUTER defensive catch, which is
+   * reached only when this enricher RETHROWS. This enricher deliberately
+   * rethrows only when the OUTER turn budget aborted (see the catch below), so
+   * **the event literally named "degraded" could not fire for the dominant
+   * degradation**: the internal hard-budget abort. Anyone dashboarding it was
+   * watching an alarm that the real failure mode does not ring — and the 2.180
+   * probe measured that failure mode at 12 of 363 analysis runs in 14 days,
+   * 3 of 17 on one day. The alarm now rings.
+   *
+   * WHAT IT MEANS, EXACTLY (the complete manifest — this is the claim the event
+   * makes, so it is stated rather than left to be inferred):
+   * `v5.decision_review_degraded` fires on every path where the review was
+   * **INVOKED and the turn nonetheless ships without one**:
+   *   - `timeout`                  — our own hard budget aborted the call
+   *   - `upstream_error`           — the call threw for any other reason
+   *   - `shape_extraction_failed`  — the call returned, the output did not parse
+   *   - `contract_violation`       — parsed, but a SAFETY rule forced the drop
+   * It does NOT fire for the skips (`no_brief` / `no_winner` / `no_results` /
+   * `autofire_disabled`): nothing was attempted, nothing was lost, and those
+   * already have `v5.decision_review.skipped`. It does NOT fire on the outer
+   * turn-budget rethrow either: that turn FAILS wholesale (BUDGET_EXCEEDED) and
+   * is not a degrade.
+   *
+   * NO DOUBLE-EMIT with the executor's outer catch: that catch is reached only
+   * when this function throws, and this function throws only when
+   * `input.signal.aborted` — in which case the executor returns
+   * `translateExecuteError` BEFORE its own degraded emit. The two sites are
+   * mutually exclusive by construction.
+   *
+   * The graceful-degrade behaviour is UNCHANGED. Returning the facts unchanged
+   * is correct; the silence was the defect.
+   */
+  // Declared BEFORE `emitDegraded` closes over it (and before the `invoked`
+  // emit, which is a synchronous sub-millisecond call) so the closure has no
+  // temporal-dead-zone dependency on statement order further down the function.
+  const startedAt = Date.now();
+
+  const emitDegraded = (reason: string): void => {
+    emit(TelemetryEvents.V5DecisionReviewDegraded, {
+      request_id: input.requestId,
+      scenario_id: input.scenarioId,
+      reason,
+      elapsed_ms: Date.now() - startedAt,
+      // The budget that was actually in force — `resolveDecisionReviewHardBudgetMs`,
+      // NOT `DECISION_REVIEW_TIMEOUT_MS`. On the decomposed path they differ by
+      // the fallback floor, and an operator comparing elapsed against the wrong
+      // number would mis-read a legitimate decomposed run as a near-miss.
+      budget_ms: hardBudgetMs,
+      // Derived from the timer itself, never from the error text.
+      timed_out: hardTimerFired,
+    });
+  };
 
   emit(TelemetryEvents.V5DecisionReviewInvoked, {
     request_id: input.requestId,
@@ -239,7 +330,6 @@ export async function enrichRunAnalysisWithDecisionReview(
     leading_option_present: leadingOptionPresent,
   });
 
-  const startedAt = Date.now();
   try {
     // ROADMAP 1.77 (B1). Dedicated decomposed-vs-monolith selector. Flag-off
     // (default) is BYTE-IDENTICAL to today: the single gpt-4.1 monolith. Flag-on
@@ -283,6 +373,58 @@ export async function enrichRunAnalysisWithDecisionReview(
         brief_length: briefLength,
         leading_option_present: leadingOptionPresent,
       });
+      emitDegraded('shape_extraction_failed');
+      return input.handlerFacts;
+    }
+
+    // POST-parse CONTRACT GATE (ROADMAP 1.185(c); enforce-vs-telemetry split
+    // per A1 ruling D-11). The parsed output is non-null but may still violate
+    // the prompt contract the block-parse shape check does not cover. The gate
+    // splits its rules into two classes (see contract-gate.ts):
+    //
+    //   • SAFETY rules (missing review_card, fabricated conversational
+    //     callbacks R-CONT, ungrounded entity references) are model-agnostic
+    //     DEFECTS. A safety violation (`contract.mustDrop`) DROPS the review
+    //     down the SAME graceful no-review path as a shape-extraction failure —
+    //     the turn still succeeds with thin content, never shipping violating
+    //     prose and never silently trimmed into compliance.
+    //
+    //   • COUNT-CAP rules (tight bias/dqp/key_assumptions/scenario_contexts
+    //     bounds) are TELEMETRY-ONLY. They are COUNTED for the per-model A/B
+    //     regression signal but do NOT drop the review — the served v15 prompt
+    //     only rejects at the LOOSE shape-check bounds, so a prompt-legal
+    //     tolerance-band review SHIPS today and dropping it here would silently
+    //     change current gpt-4.1 output. The gate is the A/B PRECONDITION, not
+    //     a live quality change.
+    //
+    // So the telemetry event fires on ANY violation (`!contract.ok`), tagged
+    // `dropped` = whether it enforced a drop; the review is dropped ONLY on
+    // `contract.mustDrop`. Unconditional (no env gate — Paul doctrine). Grounds
+    // entity references against the run's graph.
+    const contract = checkDecisionReviewContract(result.output, {
+      graph: invokeInput.graph,
+    });
+    if (!contract.ok) {
+      emit(TelemetryEvents.V5DecisionReviewContractViolation, {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        duration_ms: Date.now() - startedAt,
+        brief_present: true,
+        brief_length: briefLength,
+        leading_option_present: leadingOptionPresent,
+        // Did this violation ENFORCE a drop (safety) or is it telemetry-only
+        // (count-cap)? Lets the A/B dashboard separate enforced drops from
+        // tolerance-band count signals. Bounded boolean — R-004-clean.
+        dropped: contract.mustDrop,
+        ...summariseContractViolations(contract.violations),
+      });
+    }
+    if (contract.mustDrop) {
+      // 2.180-B: a safety-enforced drop is a review that was invoked, paid for,
+      // and not shipped — the same user-visible loss as a timeout, and until now
+      // the ONLY record of it was a `contract_violation` event whose `dropped`
+      // flag an operator had to know to read. It rings the degraded alarm too.
+      emitDegraded('contract_violation');
       return input.handlerFacts;
     }
 
@@ -321,6 +463,62 @@ export async function enrichRunAnalysisWithDecisionReview(
       ...result.output,
       produced_at: new Date().toISOString(),
     };
+
+    // 2.491 — DSK grounding policy on `decision_quality_prompts[]`, applied at
+    // the SINGLE egress seam so both invoke paths (decomposed and monolithic)
+    // are covered by one rule rather than two drifting copies.
+    //
+    // Closes the 2.456 asymmetry: a PRESENT-but-unknown `dsk_claim_id` already
+    // hard-rejects in `shape-check.ts`, but an OMITTED id used to pass
+    // unvalidated and unmarked — so an unattested prompt reached the user
+    // indistinguishable from an attested one. Every entry now leaves here
+    // carrying an explicit `dsk_grounding` verdict (`attested` | `resolved` |
+    // `general`); see `dsk-grounding-policy.ts` for why omission is resolved
+    // rather than rejected, and why only an EXACT bundle-title match resolves.
+    //
+    // This is additive: `decision_quality_prompts` is untyped in
+    // `@talchain/schemas` (the `decision_review` subtree rides the enrichment
+    // passthrough), and the sanitiser below preserves structural subtrees
+    // byte-equal, so the new key reaches the wire beside `dsk_claim_id`.
+    if (Array.isArray((output as Record<string, unknown>).decision_quality_prompts)) {
+      const graded = applyDskGroundingPolicy(
+        (output as Record<string, unknown>).decision_quality_prompts as readonly unknown[],
+      );
+      (output as Record<string, unknown>).decision_quality_prompts = graded.prompts;
+      if (!graded.stats.skipped) {
+        log.info(
+          {
+            request_id: input.requestId,
+            scenario_id: input.scenarioId,
+            attested: graded.stats.attested,
+            resolved: graded.stats.resolved,
+            general: graded.stats.general,
+            unverified: graded.stats.unverified,
+            // Why each rejection happened. `non_technique_attested` used to sit
+            // here and could not survive the fix that produced these: a
+            // non-technique id can no longer BE attested, so a field named for
+            // that state would be permanently zero — an alarm that cannot fire.
+            unverified_unknown_id: graded.stats.unverifiedByReason.unknownId,
+            unverified_non_technique_id: graded.stats.unverifiedByReason.nonTechniqueId,
+            unverified_principle_mismatch: graded.stats.unverifiedByReason.principleMismatch,
+            unverified_companion_mismatch: graded.stats.unverifiedByReason.companionMismatch,
+          },
+          'v5.decision_review.dsk_grounding',
+        );
+        if (graded.stats.unverified > 0) {
+          // A fabricated citation. Not routine — this is the condition
+          // `shape-check.ts` was believed to reject and does not on this path.
+          log.warn(
+            {
+              request_id: input.requestId,
+              scenario_id: input.scenarioId,
+              unverified: graded.stats.unverified,
+            },
+            'v5.decision_review.dsk_claim_id_unverified',
+          );
+        }
+      }
+    }
     // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:
     // Run the parent-level enrichment through the sanitiser BEFORE
     // attaching decision_review. The sanitiser:
@@ -399,11 +597,23 @@ export async function enrichRunAnalysisWithDecisionReview(
       brief_length: briefLength,
       leading_option_present: leadingOptionPresent,
     });
+    // ROADMAP 2.180-B — THE DOMINANT DEGRADATION, NOW LOUD. This is the branch
+    // the 22 s hard budget lands in: `hardTimerFired` true, the call cancelled,
+    // the turn about to ship with no model review. Rethrow behaviour is
+    // deliberately UNCHANGED — we still degrade gracefully and return the facts
+    // unchanged; what changes is that the loss is now announced on the event
+    // named after it, with the elapsed time and the budget it was measured
+    // against, so "how close to the wall are we" is answerable from telemetry
+    // instead of from a hand-run log sample.
+    emitDegraded(hardTimerFired ? 'timeout' : 'upstream_error');
     log.warn(
       {
         request_id: input.requestId,
         scenario_id: input.scenarioId,
         err: err instanceof Error ? err.message : String(err),
+        elapsed_ms: Date.now() - startedAt,
+        budget_ms: hardBudgetMs,
+        timed_out: hardTimerFired,
       },
       'V5 decision_review auto-fire failed, degrading to thin content',
     );
@@ -439,15 +649,41 @@ export function buildInvokeInputForTests(
   enrichment: Record<string, unknown>,
   leadingOptionId: string | null,
   scaffoldDisclosure?: string,
+  /**
+   * T1 claim safety. THREADED, not re-read from `enrichment`: since
+   * @talchain/schemas 0.25.0 the verdict lives on `result.constraint_verdict`,
+   * which this function never sees. Defaults to `true` so every pre-existing
+   * caller of this test seam keeps its licensed-claim behaviour; the
+   * production caller always passes the fact's real verdict.
+   */
+  mayNameLeadingOption = true,
 ): DecisionReviewInvokeInput | null {
-  return buildInvokeInput(brief, enrichment, leadingOptionId, scaffoldDisclosure);
+  return buildInvokeInput(brief, enrichment, leadingOptionId, scaffoldDisclosure, mayNameLeadingOption);
 }
 
 function buildInvokeInput(
   brief: string,
   enrichment: Record<string, unknown>,
   leadingOptionId: string | null,
-  scaffoldDisclosure?: string,
+  scaffoldDisclosure: string | undefined,
+  /**
+   * T1 claim safety — the turn's OWN answer to "may a leading option be
+   * named", read from the run_analysis fact by the caller.
+   *
+   * THREADED RATHER THAN RE-READ, and that is the fix this parameter exists
+   * for. It used to be derived here as
+   * `readMayNameLeadingOption(enrichment)` — the legacy enrichment-only
+   * reader, renamed `legacyReadMayName_DO_NOT_USE` in 2026-07-27's R8 fix
+   * precisely because of this incident — which worked only while the
+   * verdict rode INSIDE the enrichment record as the interim
+   * `__cee_claim_safety` stamp. Schemas 0.25.0 moves it to
+   * `result.constraint_verdict` — a sibling of `enrichment`, invisible from
+   * here — so the old read would have silently returned `false` on EVERY
+   * turn, permitted or not, suppressing the recommendation universally with
+   * no error anywhere. Exactly the class of silent skew the parent CLAUDE.md
+   * calls the dominant risk at a boundary.
+   */
+  mayNameLeadingOption: boolean,
 ): DecisionReviewInvokeInput | null {
   // Phase 3A fix (2026-05-17): walk every available results source until
   // one can match `leading_option_id`. The previous "first non-empty
@@ -505,15 +741,63 @@ function buildInvokeInput(
   const runnerUp = selectRunnerUp(chosenSource, winner);
 
   // Trust-spine board #1 (CEE half): when the leading option violates a hard
-  // constraint, flag the winner infeasible + suppress the recommendation
-  // framing so the decision-review prompt does not present it as a clean pick.
-  // Gate default OFF → byte-identical. Detection single-sourced (both wire
-  // shapes) in constraint-feasibility.ts, keyed on the SAME winner id.
+  // constraint, flag the winner infeasible so the decision-review prompt does
+  // not present it as a clean pick. Detection single-sourced (both wire shapes)
+  // in constraint-feasibility.ts, keyed on the SAME winner id.
+  //
+  // `constraint_infeasible` is the NARROW claim — "the leader breaks a limit we
+  // DID check" — and it stays keyed on its own predicate, behind its own gate,
+  // because the prompt uses it to say something specific about a checked limit.
   if (config.features.constraintInfeasibleGate) {
     const feasibility = deriveWinnerConstraintInfeasibility(enrichment, winner.id);
     if (feasibility.infeasible) {
-      winner = { ...winner, constraint_infeasible: true, recommendation_suppressed: true };
+      winner = { ...winner, constraint_infeasible: true };
     }
+  }
+
+  // T1 claim safety — `recommendation_suppressed` is the WIDE claim: "we cannot
+  // stand behind naming a leader at all". It is now keyed on the ONE constraint
+  // verdict, read off the stamp the run_analysis handler persisted
+  // (`deriveConstraintVerdict`, the single owner), instead of on
+  // `deriveWinnerConstraintInfeasibility`.
+  //
+  // WHY THIS CHANGED. Keyed on the infeasibility predicate it fired for exactly
+  // ONE of the three withholding states — `evaluated_infeasible` — and never for
+  // `unevaluated` or `identity_unresolved`. That is the G-CEE-1 defect in
+  // miniature: on the live `unevaluated` run (staging 1c078f0) the suppression
+  // flag existed, was correct, and simply did not fire, so the prompt was told
+  // to name a winner and `blocks[1].body` came back "The MacBook Pro leads by a
+  // margin of about 52 percentage points" underneath "no option can be put
+  // forward yet".
+  //
+  // Suppressing HERE is the earliest possible point: it stops the leader claim
+  // being AUTHORED, so it is never written into `enrichment.decision_review` and
+  // never persisted onto the fact.
+  //
+  // ⚠ IT IS NOT A GATE, AND THE LIVE BYTES SAY SO. This flag is an INSTRUCTION
+  // TO A MODEL. On the POST-#710 walk (staging `227e0aa`, which carries this
+  // suppression) the withheld `unevaluated` turn ran its decision_review call —
+  // two LLM calls in `_diagnostic_trace.llm_calls`, `decision_review
+  // .produced_at` 8s after `decision_brief.created_at` — with
+  // `recommendation_suppressed: true` set, and the model returned
+  // *"Defer and Keep Current Machines (Status Quo) leads by about 35 percentage
+  // points…"* anyway, on 5/5 withheld bodies. Prompt-level suppression reduces
+  // the rate; it does not decide the outcome. The deterministic gate is the
+  // egress projection (ROADMAP 1.218, `compose/withheld-claim-projection.ts`),
+  // which drops this blob whole on a withheld turn. This stays because a claim
+  // never authored is strictly better than one dropped downstream.
+  //
+  // Fails closed via `readMayNameLeadingOptionFromResult` at the call site.
+  // `buildInvokeInput` is reached only from
+  // `enrichRunAnalysisWithDecisionReview`, which runs on the run_analysis fact
+  // the handler just wrote, so the verdict is always present on the production
+  // path.
+  //
+  // Deliberately NOT behind `constraintInfeasibleGate`: that flag governs the
+  // narrow infeasibility claim above. A claim-safety withhold that a feature
+  // flag can switch off is not a withhold.
+  if (!mayNameLeadingOption) {
+    winner = { ...winner, recommendation_suppressed: true };
   }
 
   // Build label/unit lookups from enrichment.graph.nodes[]. The graph is
@@ -524,7 +808,8 @@ function buildInvokeInput(
   const labelMap = buildNodeLabelMap(graph);
   const unitMap = buildNodeUnitMap(graph);
 
-  const flipThresholdData = readFlipThresholdData(enrichment, labelMap, unitMap);
+  const flipDerivation = readFlipThresholdData(enrichment, labelMap, unitMap);
+  const flipThresholdData = flipDerivation.rows;
   const islResults = readIslResults(enrichment, labelMap);
   const dcResult = normaliseDeterministicCoachingFromM1(enrichment);
   const deterministicCoaching = dcResult.value;
@@ -537,6 +822,9 @@ function buildInvokeInput(
   const meta: DecisionReviewMeta = {
     input_shape_version: 'v5-normalised',
     flip_threshold_count: flipThresholdData?.length ?? 0,
+    flip_threshold_source: flipDerivation.source,
+    flip_no_effect_count: flipDerivation.noEffectCount,
+    flip_scale_refused_count: flipDerivation.scaleRefusedCount,
     factor_sensitivity_count: countArray(islResults.factor_sensitivity),
     fragile_edge_count: countArray(islResults.fragile_edges),
     model_critique_count: dcResult.model_critique_count,
@@ -1083,42 +1371,160 @@ function normaliseFactorSensitivity(
   return out;
 }
 
+/** What {@link readFlipThresholdData} found, and where it found it. */
+interface FlipThresholdDerivation {
+  readonly rows: ReadonlyArray<Record<string, unknown>> | undefined;
+  readonly source: 'top_level' | 'nested_legacy' | 'none';
+  readonly noEffectCount: number;
+  readonly scaleRefusedCount: number;
+}
+
 /**
- * Derive flip_threshold_data from per-result factor_sensitivity entries.
- * PLoT does not ship a top-level `flip_threshold_data` field; the data
- * exists nested in `results[].factor_sensitivity[].flip_threshold`. This
- * delegates to {@link collectFactorFlipEntries} (shared with
- * analysis-compact.ts) for the read + filter + dedupe step, then projects
- * to the prompt's input shape.
+ * Derive `flip_threshold_data` — the decision_review prompt's flip input.
  *
- * Direction is value-delta-driven (`flip_value > current_value` →
- * `'increase'`) — never elasticity-sign-driven. See FactorFlipEntry doc.
+ * ⚠ ROADMAP 2.228 F1 — THIS FUNCTION USED TO READ A SHAPE NOBODY EMITS.
+ * It delegated exclusively to {@link collectFactorFlipEntries}, which walks
+ * `results[].factor_sensitivity[].flip_threshold | flip_value`. Those keys
+ * have zero occurrences in the producer, and `analysis-signals.ts`'s own
+ * header had already recorded why: *"the per-option derivation inside
+ * `compactAnalysis` is structurally empty on staging, where `results[]` never
+ * carries `factor_sensitivity`"*. The result was silent and total —
+ * `flip_threshold_data` was `undefined` on every live turn,
+ * `enrichment.decision_review.flip_thresholds` came back present-and-empty,
+ * and no flip card ever fired. The LIVE shape is the TOP-LEVEL
+ * `enrichment.flip_thresholds[]` array the coach path has been reading all
+ * along.
+ *
+ * PRECEDENCE — the top-level array is AUTHORITATIVE WHEN PRESENT, including
+ * when it is present and empty, or present and yields no forwardable row.
+ * There is no "fall back if it produced nothing": a producer that shipped the
+ * array has already answered the question, and re-answering it from a dead
+ * shape is how a stale number outlives the run that produced it. The legacy
+ * branch is reached ONLY when the key is absent entirely.
+ *
+ * ⚠ AND THAT MAKES THE LEGACY BRANCH DEAD BY CONSTRUCTION, not merely rare.
+ * PLoT's Tier-B always-emit contract emits `flip_thresholds: flipThresholds ??
+ * []` unconditionally (`isl-to-ui.contract.ts:300`, `run.ts:3594`), so the key
+ * is always an array on the wire and this branch is reachable only for an
+ * envelope the contract forbids. `_meta.flip_threshold_source` will therefore
+ * read `'top_level'` on 100% of live turns.
+ *
+ * (Cross-repo claim, sourced from the #784 adversarial review at PLoT tip
+ * `29703ee` — not re-derived here. If it is wrong, the label is the thing that
+ * tells you: a single `'nested_legacy'` in telemetry refutes it.)
+ *
+ * The branch is kept anyway — it costs nothing, and deleting a reader on the
+ * strength of a claim about another repo is how the original defect happened.
+ * But do NOT read the label as a frequency measurement that might come back
+ * non-zero: it is a tripwire on an envelope that should not exist.
+ *
+ * ⚠ ASYMMETRY, stated because it is invisible at the call site: the legacy
+ * branch applies NEITHER scale gate. Its rows come from
+ * `results[].factor_sensitivity[]`, which carries no `value_scale` and no
+ * `cap`, so there is nothing to gate on — the filter and the refusal below
+ * exist only on the top-level branch. A row reaching the prompt through the
+ * legacy branch is therefore LESS checked, not more. Acceptable only because
+ * the branch is unreachable; if it ever fires, that is the first thing to fix.
+ *
+ * FILTER-VS-FORWARD, decided explicitly: rows the producer attested as having
+ * no flip in range (`flip_value: null`, `flip_reason:
+ * 'no_effect_within_bounds'`) are FILTERED OUT, not forwarded.
+ *   - Both live prompt sources already instruct the model to ignore them
+ *     ("Only emit flip_thresholds for entries where flip_value is non-null",
+ *     `src/prompts/defaults.ts` v11 and `Prompts/canonical/decision_review.txt`),
+ *     so forwarding buys no honest sentence today — it would only consume the
+ *     15-entry section budget.
+ *   - Worse, it would inflate `_meta.flip_threshold_count`, turning the one
+ *     signal that answers *"did this run have usable flip data?"* into a
+ *     false positive on exactly the runs (all three live staging rows are
+ *     `no_effect_within_bounds`) where the answer is no.
+ *   - Teaching the prompt to SAY "no tipping point found in range" is a
+ *     genuine improvement, but it is a prompt change: served from prompt
+ *     admin, version-pinned, drift-gated, and subject to the multi-instance
+ *     cache TTL. It does not belong inside a data-path fix, and shipping the
+ *     data without the prompt would be a capability nobody can observe.
+ * The count is preserved on `_meta.flip_no_effect_count` so that follow-up
+ * lane has its evidence without re-deriving it.
+ *
+ * SCALE — see {@link flipRowScaleUnsafeForPromptUnits} for the full rule and
+ * its evidence. In short: a row is REFUSED and counted when it positively
+ * attests a non-display `value_scale`, OR when it carries no scale but DOES
+ * carry a unit with a value inside the normalised band. The prompt is told
+ * these values are user units and quotes them with the unit appended, so an
+ * uninverted `0.8625` becomes the string `"0.8625 GBP"` while the chip path
+ * renders `£34,500` from the same factor: two numbers, one factor. This layer
+ * holds no `cap` and cannot invert, so it fails closed. A UNITLESS row with an
+ * absent scale is still admitted — that is the prompt's documented
+ * probability-like case, which is gated on the unit being absent.
+ *
+ * Direction is value-delta-driven (`flip_value >= current_value` →
+ * `'increase'`) on both branches — never elasticity-sign-driven, and never
+ * copied from the row's own `direction` string.
  */
 function readFlipThresholdData(
   enrichment: Record<string, unknown>,
   graphNodeLabels: Map<string, string>,
   graphNodeUnits: Map<string, string>,
-): ReadonlyArray<Record<string, unknown>> | undefined {
+): FlipThresholdDerivation {
+  const project = (
+    row: Pick<TopLevelFlipRow, 'factor_id' | 'factor_label' | 'current_value' | 'flip_value' | 'direction' | 'unit'> &
+      Partial<Pick<TopLevelFlipRow, 'alternative_winner_id' | 'alternative_winner_label'>>,
+  ): Record<string, unknown> => {
+    const out: Record<string, unknown> = {
+      factor_id: row.factor_id,
+      factor_label: row.factor_label,
+      current_value: row.current_value,
+      flip_value: row.flip_value,
+      direction: row.direction,
+    };
+    if (row.unit !== null) out.unit = row.unit;
+    // ROADMAP 2.267 (D-2) — WHICH option takes over. Omitted-when-null, exactly
+    // like `unit`: an absent key is the honest encoding of "the producer named
+    // none", and it is what makes the card's option guard able to distinguish
+    // "no attested winner" from "a winner we forgot to forward".
+    //
+    // ⚠ The `Partial<>` half of the parameter type is load-bearing: the LEGACY
+    // branch below projects `FactorFlipEntry` rows (`results[].factor_sensitivity[]`),
+    // a shape that carries no winner at all. Widening the `Pick<>` instead would
+    // not typecheck, and silently dropping the legacy branch to make it fit is
+    // how the reader this function replaced went dead.
+    if (typeof row.alternative_winner_id === 'string' && row.alternative_winner_id.length > 0) {
+      out.alternative_winner_id = row.alternative_winner_id;
+    }
+    if (typeof row.alternative_winner_label === 'string' && row.alternative_winner_label.length > 0) {
+      out.alternative_winner_label = row.alternative_winner_label;
+    }
+    return out;
+  };
+
+  if (Array.isArray(enrichment.flip_thresholds)) {
+    const rows = readTopLevelFlipRows(enrichment, graphNodeLabels, graphNodeUnits);
+    const noEffectCount = rows.filter((r) => r.kind === 'attested_no_flip').length;
+    const pairs = rows.filter((r) => r.kind === 'flip_pair');
+    const kept = pairs.filter((r) => !flipRowScaleUnsafeForPromptUnits(r));
+    return {
+      rows: kept.length > 0 ? kept.map(project) : undefined,
+      source: 'top_level',
+      noEffectCount,
+      scaleRefusedCount: pairs.length - kept.length,
+    };
+  }
+
+  // Legacy branch — reached only when PLoT shipped no `flip_thresholds` key
+  // at all. `collectFactorFlipEntries` is still the shared reader for this
+  // shape (analysis-compact.ts's V4 compact path is its other consumer), so
+  // nothing here re-implements the parse.
   const entries = collectFactorFlipEntries(
     enrichment as V2RunResponseEnvelope,
     graphNodeLabels,
     graphNodeUnits,
   );
-  if (entries.length === 0) return undefined;
-
-  return entries.map((entry) => {
-    const out: Record<string, unknown> = {
-      factor_id: entry.factor_id,
-      factor_label: entry.factor_label,
-      current_value: entry.current_value,
-      flip_value: entry.flip_value,
-      direction: entry.direction,
-    };
-    if (entry.unit !== null) {
-      out.unit = entry.unit;
-    }
-    return out;
-  });
+  return {
+    rows: entries.length > 0 ? entries.map(project) : undefined,
+    source: entries.length > 0 ? 'nested_legacy' : 'none',
+    noEffectCount: 0,
+    scaleRefusedCount: 0,
+  };
 }
 
 // ============================================================================

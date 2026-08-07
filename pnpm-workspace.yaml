@@ -1,2 +1,10 @@
 packages:
   - .
+
+# The scoped audit suppression that used to live here (auditConfig.ignoreGhsas:
+# GHSA-mh99-v99m-4gvg, brace-expansion OOM DoS) was REMOVED 2026-08-04, per its
+# own removal condition: patched 1.x/2.x lines now exist upstream (1.1.17 /
+# 2.1.3, superseded in this tree by 1.1.18 / 2.1.4 which also clear the newer
+# GHSA-rgw5-rvv9-x895), so the "no 1.x/2.x backport exists" premise is gone and
+# the tree no longer resolves 1.1.16 / 2.1.2. The audit now runs unsuppressed.
+# Do NOT re-add entries here without the D-58 evidence trail.

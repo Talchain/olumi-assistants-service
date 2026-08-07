@@ -59,29 +59,13 @@
       "skip": 1,
       "reason": "Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph"
     },
-    "tests/integration/dual-path-canary.test.ts": {
-      "skipIf": 1,
-      "reason": "Env-gated live-staging canary: describe.skipIf unless RUN_CANARY=1 + CEE_BASE_URL + CEE_API_KEY; external-dependent, excluded from the required gate."
-    },
     "tests/integration/golden-briefs.test.ts": {
       "skip": 1,
       "reason": "Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph"
     },
-    "tests/integration/golden-path-v2-e2e.test.ts": {
-      "optionsSkip": 13,
-      "reason": "Env-gated live-staging e2e: every step { skip: !!SKIP_REASON } unless RUN_E2E_GOLDEN_V2=1 + CEE_BASE_URL + CEE_API_KEY; external-dependent, excluded from the required gate."
-    },
     "tests/integration/grounding.attachments.test.ts": {
       "skip": 1,
       "reason": "Skipped: v0 /assist/draft-graph route archived — returns 410 Gone. Tests should target /assist/v1/draft-graph"
-    },
-    "tests/integration/orchestrator/route-v2-flag.test.ts": {
-      "skip": 1,
-      "reason": "describe.skip [skipped post v5-maintenance] — V2 flag-routing suite retained as a change record."
-    },
-    "tests/integration/orchestrator/route.test.ts": {
-      "skip": 3,
-      "reason": "Skipped: analysis_response schema no longer requires analysis_status — accepts partial shapes"
     },
     "tests/integration/prompts.repository.test.ts": {
       "skipIf": 1,
@@ -143,10 +127,6 @@
       "optionsSkip": 1,
       "reason": "One test runs only WITHOUT a live Redis ({ skip: redisAvailable }) — inverse-gated on local Redis presence."
     },
-    "tests/integration/turn-types-e2e.test.ts": {
-      "optionsSkip": 8,
-      "reason": "Env-gated live-staging e2e: per-step { skip: !!SKIP_REASON } unless RUN_E2E_GOLDEN_V2=1 + CEE_BASE_URL + CEE_API_KEY; external-dependent, excluded from the required gate."
-    },
     "tests/integration/v5-brief-text-persistence.test.ts": {
       "skip": 1,
       "reason": "Env-gated staging-Supabase suite: envReady ? describe : describe.skip (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + TEST_SCENARIO_ID); external-dependent, excluded from the required gate."
@@ -175,26 +155,10 @@
       "skip": 1,
       "reason": "Skipped: SSE stream errors with \"Pipeline B removed\" before emitting COMPLETE — needs SSE route migration to unified pipeline"
     },
-    "tests/staging/cross-service-analysis-roundtrip.test.ts": {
-      "optionsSkip": 4,
-      "reason": "graceful skip; Steps 2-4 will hard-fail on missing prerequisite"
-    },
-    "tests/staging/data-flow-verification.test.ts": {
-      "optionsSkip": 6,
-      "reason": "Staging-only suite (tests/staging is excluded from CI vitest configs): steps { skip: !!SKIP_REASON } unless staging env + opt-in flags are set."
-    },
     "tests/staging/decision-record-rpc.live.test.ts": {
       "skip": 1,
       "skipIf": 2,
       "reason": "Skipped until the Paul-gated execution of migration"
-    },
-    "tests/staging/golden-path-staging.test.ts": {
-      "optionsSkip": 4,
-      "reason": "If Step 3 didn't produce analysis (conversational recovery), skip gracefully"
-    },
-    "tests/staging/orchestrator.staging.test.ts": {
-      "optionsSkip": 11,
-      "reason": "Gating — skip entire suite if conditions not met"
     },
     "tests/staging/proxy-v5-hiring-prompt.smoke.test.ts": {
       "skipIf": 1,
@@ -231,14 +195,6 @@
     "tests/unit/orchestrator-v5/routing/chip-simplify-intercept.test.ts": {
       "skip": 1,
       "reason": "TODO: ISSUE-197 — extend tryChipSimplifyIntercept once Action.source_chip_id schema lands."
-    },
-    "tests/unit/orchestrator/pipeline/phase1-enrichment.test.ts": {
-      "todo": 1,
-      "reason": "V2 pipeline: BIL should be injected during FRAME enrichment (tracked: A.4/F.2)"
-    },
-    "tests/unit/orchestrator/route-stream.test.ts": {
-      "skip": 2,
-      "reason": "Skipped: returns 500 due to incomplete mocks — needs mock update for unified pipeline changes"
     },
     "tests/unit/orchestrator/tools/edit-graph-bare-array-safe-envelope.test.ts": {
       "todo": 1,

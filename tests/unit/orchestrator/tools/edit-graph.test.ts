@@ -1632,7 +1632,18 @@ describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
     // No-commit contract.
     expect(result.wasRejected).toBe(false);
     expect(result.appliedGraph).toBeNull();
-    expect(result.pendingProposal).toBeDefined();
+    // S3-L1 — the propose-and-confirm branch no longer mints the vestigial V4
+    // `pendingProposal` payload. It was write-only: the ONLY readers of
+    // `result.pendingProposal` live in the V4 pipeline (phase4-tools,
+    // tools/dispatch, deterministic/actions/edit-graph), which is
+    // 410-tombstoned by default (`pipelineV4Enabled` defaults false → route.ts
+    // returns 410). The LIVE V5 dispatcher (edit-graph-dispatch.ts) calls
+    // handleEditGraph WITHOUT invocationInput and consumes the result via
+    // buildBoundarySuggestedActions, which reads only `suggestedActions` +
+    // `pendingClarification` — never `pendingProposal`. So this field had zero
+    // live readers. The live-observable guarantee this test still pins is the
+    // COPY above (see also proposed-change-v4-retire.test.ts).
+    expect(result.pendingProposal).toBeUndefined();
   });
 
   it("single-change high-impact parameter_update → single-change copy with abstract placeholder example", async () => {
@@ -1674,7 +1685,10 @@ describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
     expect(text).toMatch(/value|direction|parameter|element/i);
     expect(result.wasRejected).toBe(false);
     expect(result.appliedGraph).toBeNull();
-    expect(result.pendingProposal).toBeDefined();
+    // S3-L1 — vestigial V4 `pendingProposal` mint retired (zero live readers;
+    // V4-pipeline-only readers are 410-tombstoned). See the compound-copy test
+    // above for the full rationale. Live guarantee = the COPY.
+    expect(result.pendingProposal).toBeUndefined();
   });
 
   // Codex round-1 improvement #3 — Mode A with malformed / free-text
@@ -1754,7 +1768,10 @@ describe("V5 H5 — handleEditGraph Mode A copy (propose_and_confirm)", () => {
     // No fabricated label that wasn't in the graph.
     expect(text).not.toMatch(/\bNonexistent\b/);
     expect(result.wasRejected).toBe(false);
-    expect(result.pendingProposal).toBeDefined();
+    // S3-L1 — vestigial V4 `pendingProposal` mint retired (zero live readers;
+    // V4-pipeline-only readers are 410-tombstoned). Live guarantee = the
+    // generic-stub COPY asserted above.
+    expect(result.pendingProposal).toBeUndefined();
   });
 });
 
@@ -2359,12 +2376,19 @@ describe("H6 — determineEditResolutionMode label-aware compound detection", ()
     // torn into two fake clauses.
     expect(result.wasRejected).toBe(false);
     expect(result.diagnostics?.resolution_mode).toBe("propose_and_confirm");
-    expect(result.proposedChanges).toBeDefined();
-    expect(result.proposedChanges!.changes).toHaveLength(1);
-    expect(result.proposedChanges!.changes[0]!.element_label).toBe("Headcount and Scaling Spend");
-    // The user-visible Mode A copy must NOT contain a torn "Scaling Spend"
-    // fragment as a fake label.
+    // S3-L1 — the top-level `proposedChanges` field is no longer RETURNED (its
+    // only readers were the 410-tombstoned V4 pipeline — phase4-tools:369 +
+    // dispatch:323; the live V5 dispatcher never reads it). `proposedChanges`
+    // is now a within-turn local that ONLY feeds the copy builder, so the
+    // "no torn labels" guarantee is asserted where it is still live-observable:
+    // the user-facing Mode A copy. The POSITIVE control (trap-13) is that the
+    // full separator-bearing label survives intact and bolded; the negatives
+    // pin that no torn fragment is presented as a fake label.
+    expect(result.proposedChanges).toBeUndefined();
     const text = result.assistantText ?? "";
+    // POSITIVE: the coherent full label is surfaced, un-torn.
+    expect(text).toContain("**Headcount and Scaling Spend**");
+    // NEGATIVE: no torn "Scaling Spend" / "Headcount" fragment as a fake label.
     expect(text).not.toContain("**Scaling Spend**");
     expect(text).not.toContain("**Scaling Spend more important**");
     expect(text).not.toContain("**Headcount**");

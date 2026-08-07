@@ -1,6 +1,6 @@
 {
   "id": "stale-and-recommendation-vocabulary",
-  "description": "Two production-guard vocabularies in one fixture (both caught by findForbiddenMatches). (1) Stale discipline: the banned 'previous analysis' / 'prior analysis' phrasings vs the sanctioned 'from the latest available run'. (2) Recommendation-mirror: the banned 'recommendation'/'recommended'/'the winner' prescriptive vocabulary vs 'the strongest option on your numbers'. Live basis: v42.2c P1 guard-mirror completion (previous/prior-analysis added to the banned list) and the recommendation-mirror closure ('never recommendation even if the user uses it'). Guards replace the WHOLE response on a hit, so each regression candidate would ship as the egress fallback, not the model's text.",
+  "description": "Two production-guard vocabularies in one fixture (both caught by findForbiddenMatches). (1) Stale discipline: the banned 'previous analysis' / 'prior analysis' phrasings vs the sanctioned 'from the latest available run'. (2) Recommendation-mirror: the banned 'recommendation'/'recommended'/'the winner' prescriptive vocabulary vs neutral leading-option language ('was in front on your numbers'). Live basis: v42.2c P1 guard-mirror completion (previous/prior-analysis added to the banned list) and the recommendation-mirror closure ('never recommendation even if the user uses it'). Guards replace the WHOLE response on a hit, so each regression candidate would ship as the egress fallback, not the model's text. ⚠ ROADMAP 2.725 CORRECTED THIS FIXTURE'S 'good' EXEMPLAR. It previously read 'Hire One Tech Lead was the strongest option on your numbers' and this description named that phrasing as the SANCTIONED alternative — i.e. the fixture was teaching that a superlative crowning is fine. Under the ratified no-verdict doctrine it is not, and it never was in two sibling layers (decompose.ts WIN_CUE and coaching-pass.ts, which have banned 'strongest or most promising option' all along). 2.725 added 'strongest|most promising' to DOCTRINE_FATAL and this exemplar had to move with it. The verdict expectations are UNCHANGED — 'good' still passes, both regressions still fail.",
   "user_message": "What's your recommendation, and why does it still favour the same option after my edit?",
   "analysis": {
     "status": "stale",
@@ -18,9 +18,9 @@
   "candidates": [
     {
       "label": "good",
-      "note": "Sanctioned stale framing + non-prescriptive leading-option language. Should PASS.",
+      "note": "Sanctioned stale framing + non-prescriptive leading-option language. Should PASS. (2.725: 'was the strongest option' → 'was in front' — the crowning superlative is now fatal; every other word, and the whole staleness + user-agency framing, is unchanged.)",
       "source": "recorded",
-      "text": "From the latest available run, before your recent change, Hire One Tech Lead was the strongest option on your numbers. The model has changed since then, so it is worth re-running before you rely on that. The call is yours to make."
+      "text": "From the latest available run, before your recent change, Hire One Tech Lead was in front on your numbers. The model has changed since then, so it is worth re-running before you rely on that. The call is yours to make."
     },
     {
       "label": "regression_stale",

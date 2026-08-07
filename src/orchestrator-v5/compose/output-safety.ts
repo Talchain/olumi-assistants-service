@@ -54,9 +54,13 @@
 
 import type { OlumiResponse, Action, Insight, Block } from '@talchain/schemas/boundary';
 import type { GraphV3T } from '../../orchestrator/types.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import { finalizeChips } from './chip-finalizer.js';
 import { guardLoopingChipsAtEgress } from './looping-chip-guard.js';
+// NOTE: `guardLeadingOptionClaimsAtEgress` is deliberately NOT imported here
+// any more — it runs once at the send point in `sendFinalised200`. See the
+// block where it used to be called, below.
 
 // ----------------------------------------------------------------------------
 // Per-string scrubber — moved to neutral location so V4 + CEE pipeline can
@@ -101,6 +105,37 @@ export interface EgressSanitiseOpts {
    * user message"; omission is not an option the type checker allows.
    */
   readonly userMessage: string | null;
+  /**
+   * T1 claim safety, LAYER 3 — may THIS turn name a leading option?
+   *
+   * `false` means the constraint verdict withheld the claim, so any copy on the
+   * envelope naming or presuming a leader contradicts the turn's own
+   * confirmation. The guard reports that (observe-only today) — see
+   * `leading-option-egress-guard.ts`.
+   *
+   * ⚠ VESTIGIAL AS OF 2026-07-27 (E1), AND SAID PLAINLY RATHER THAN DRESSED UP.
+   * This function no longer reads this field: the Layer-3 guard moved to a
+   * single pass in `sendFinalised200`, which arms it from
+   * `ctx.mayNameLeadingOption` — the same value, from the same source, one
+   * frame up. So this is currently a REQUIRED FIELD WITH NO READER.
+   *
+   * It is retained, not removed, and the reason is scope rather than merit:
+   * dropping it is ~38 mechanical call-site edits across seven test files plus
+   * a rewrite of the `EgressSanitiseOpts declares mayNameLeadingOption as
+   * REQUIRED` pin in `route-egress-claim-safety-marking.drift.test.ts`, which
+   * is a claim-safety drift gate and deserves its own reviewed change rather
+   * than a ride-along in a performance PR.
+   *
+   * The paragraph this replaced argued the field must stay REQUIRED because "a
+   * claim-safety guard a caller can forget to arm is theatre". That argument is
+   * still TRUE — but it is now true of `sendFinalised200`'s ctx marking, not of
+   * this field, and the drift test that enforces it scans the
+   * `sendFinalised200` call sites, which is the half that was always
+   * load-bearing. Leaving the old sentence here would have been an honest label
+   * quietly turned false (CLAUDE.md trap #14) — the exact thing this PR's
+   * sibling is fixing two files over.
+   */
+  readonly mayNameLeadingOption: boolean;
 }
 
 /**
@@ -141,6 +176,27 @@ export function sanitiseOlumiResponseForEgress(
     exitPath: opts.exitPath,
   });
 
+  // ROADMAP 1.192 leg κ — identity handshake (top-level `graph_hash`). Stamp
+  // the canonical identity of the graph THIS turn reasoned/committed over onto
+  // the response envelope, at the single V5 egress chokepoint every exit path
+  // funnels through. `opts.graph` (= runResult.effectiveGraph) is the
+  // authoritative per-turn graph — the request graph_state parsed, the
+  // persisted fallback, or the just-ADOPTED graph on a first-touch turn (leg 2
+  // row A) — the SAME graph the entity-id scrub above resolves against.
+  // `computeAnalysisAffectingGraphHash` is the SAME canonical hash function the
+  // freshness envelope uses (freshness.current_graph_hash), so the two are
+  // byte-identical for the same graph. Fail-closed: a null/empty graph yields a
+  // null hash → OMIT `graph_hash` (it is .optional(); never emit an empty
+  // string, the schema is .min(1)). Idempotent: this chokepoint re-runs up to
+  // 4x per response; a graph-derived hash is stable, and a response that
+  // already carries `graph_hash` (a prior pass, or a future authoritative
+  // upstream setter) keeps it.
+  const graphHash =
+    response.graph_hash ??
+    (computeAnalysisAffectingGraphHash(
+      opts.graph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+    ) ?? undefined);
+
   const sanitised: OlumiResponse = {
     ...response,
     assistant_text: collect(response.assistant_text),
@@ -148,7 +204,35 @@ export function sanitiseOlumiResponseForEgress(
     // Spread the finalizer + loop-guard readonly result into the mutable wire array.
     suggested_actions: [...loopGuarded],
     insights: response.insights.map((i) => sanitiseInsight(i, collect)),
+    ...(graphHash !== undefined ? { graph_hash: graphHash } : {}),
   };
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // T1 claim safety, LAYER 3 — THE GUARD USED TO RUN HERE. It now runs ONCE,
+  // in `sendFinalised200`, on the final `wireBody` immediately before
+  // `reply.send`. Moved 2026-07-27 (ROADMAP 1.272 E1).
+  //
+  // ORDERING IS LOAD-BEARING, and the move STRENGTHENS it rather than risking
+  // it. The rule is that the guard must sit after every pass that can edit
+  // user-facing prose — because `compose/terminology-rewrite.ts` turns
+  // "recommendation" into "leading option" and "the winner" into "the leading
+  // option", i.e. OUR OWN SAFETY PASS MANUFACTURES THE BANNED LANGUAGE, and a
+  // scan placed upstream of it reads clean prose and ships the leak.
+  //
+  // ⚠ AND THIS POSITION WAS NOT ACTUALLY LAST. `sendFinalised200` wraps EVERY
+  // call to this function in `finaliseV5Response(...)`, which then deletes
+  // transport-banned enrichment members, rewrites enrichment prose leaves and
+  // overrides `graph_hash`. So the scan here never saw the bytes that shipped —
+  // it saw a pre-finalise draft of them. Worse, the last two re-attach passes
+  // (`_answer_shape`, and the synthesised shape) can FAIL CLOSED and discard
+  // the very object this guard just scanned. Scanning `wireBody` at the send
+  // point is the only position from which "the guard scanned what the user
+  // received" is true by construction.
+  //
+  // Do NOT re-add a call here. This function is re-entered 2–8 times per
+  // response, so a scan here is 2–8 scans of near-identical bytes, and the
+  // alarm's own `hit_count` telemetry was multiplied by that factor.
+  // ═════════════════════════════════════════════════════════════════════════
 
   for (const m of allMatches) {
     log.warn(
@@ -276,6 +360,15 @@ function sanitiseBlock(block: Block, collect: (s: string) => string): Block {
         ...(block.action_label !== undefined
           ? { action_label: collect(block.action_label) }
           : {}),
+        // ROADMAP 2.225 — `action_prompt` is USER-FACING TWICE OVER: it is
+        // rendered on the pill's card and then submitted verbatim as the
+        // user's own message. Without this line it rides through on the
+        // spread above unscrubbed, so a leaked entity id or raw decimal would
+        // not merely be displayed — it would be echoed back into the
+        // conversation as something the user appears to have written.
+        ...(block.action_prompt !== undefined
+          ? { action_prompt: collect(block.action_prompt) }
+          : {}),
       };
 
     case 'evidence':
@@ -302,9 +395,20 @@ function sanitiseBlock(block: Block, collect: (s: string) => string): Block {
       //   failure_scenario, mitigation, reference_class, counter_case,
       //   review_trigger, plus each warning_signs[] entry.
       // exercise_kind (enum), target_element_ref / target_refs
-      // (structured) — untouched. ExerciseBlock is NOT auto-emitted by
-      // any composer in PR 2 (handler-only per v1.3 §1.4); the case
-      // exists for exhaustiveness + future on-demand handler wiring.
+      // (structured) — untouched.
+      //
+      // ⚠ AMENDED 2026-07-31 (capability P1, CEE #770). This comment read
+      // "ExerciseBlock is NOT auto-emitted by any composer in PR 2
+      // (handler-only per v1.3 §1.4); the case exists for exhaustiveness +
+      // future on-demand handler wiring." It was accurate when written (#178,
+      // cf7c85f7 — checked: introduced there, never overwritten, so this is an
+      // OVERTAKEN label and not a swapped confession) and is now FALSE. A V5
+      // composer DOES auto-emit this kind: the pre-mortem lens companion
+      // (`buildPreMortemExerciseBlock` -> `rebuildPhase3BlocksFresh`, permitted
+      // arm only). The scrub arm below is a LIVE path, not a dormant one — the
+      // three fields #770 emits (warning_signs / mitigation / review_trigger)
+      // now carry producer prose to real users, so a change here has user-facing
+      // consequences.
       return {
         ...block,
         ...(block.failure_scenario !== undefined

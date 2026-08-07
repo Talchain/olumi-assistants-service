@@ -86,8 +86,6 @@ export const EXTERNAL_SERVICE_ENV_VARS = [
  */
 export const REQUIRED_GATE_INTEGRATION_EXCLUSIONS = [
   "tests/integration/adversarial.test.ts",
-  "tests/integration/dual-path-canary.test.ts",
-  "tests/integration/golden-path-v2-e2e.test.ts",
   "tests/integration/prompts.repository.test.ts",
   "tests/integration/slice-b-commit-failure.test.ts",
   "tests/integration/slice-b-concurrent-writes.test.ts",
@@ -99,7 +97,6 @@ export const REQUIRED_GATE_INTEGRATION_EXCLUSIONS = [
   "tests/integration/slice-c2-concurrent-analysis.test.ts",
   "tests/integration/slice-c2-run-analysis-real.test.ts",
   "tests/integration/slice-c2-stale-read.test.ts",
-  "tests/integration/turn-types-e2e.test.ts",
   "tests/integration/v5-brief-text-persistence.test.ts",
   "tests/integration/v5-explain-then-yes-flagship.test.ts",
   "tests/integration/v5-pending-actions-commit.test.ts",

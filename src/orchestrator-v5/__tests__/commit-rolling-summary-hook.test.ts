@@ -33,7 +33,8 @@ const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const TURN_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 function composed() {
-  return composeDirectAnswerResponse({ assistant_text: 'hi', stage: 'analyse' });
+  return composeDirectAnswerResponse({
+answerKind: 'functional', assistant_text: 'hi', stage: 'analyse' });
 }
 
 function meta() {

@@ -36,7 +36,7 @@ import {
 import * as telemetry from '../../../utils/telemetry.js';
 import { TelemetryEvents } from '../../../utils/telemetry.js';
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
-import { assembleContextPack } from '../context-pack-assembler.js';
+import { assembleContextPack, CONTEXT_PACK_RECENT_TURNS_CAP } from '../context-pack-assembler.js';
 import { applyContextBudgetToAssemblyInputs } from '../context-budget-enforcement.js';
 import type { DisplaySafeGraph } from '../../format/format-graph-for-context.js';
 import {
@@ -215,18 +215,28 @@ describe('context budget enforcement at assembly (O-3)', () => {
     expect(budgetCuts).toHaveLength(0);
   });
 
-  it('O-2 scope guard: the 5-turn conversation window is untouched by an over-budget graph', () => {
+  it('O-2 scope guard: the verbatim conversation window is untouched by an over-budget graph', () => {
+    // Feed cap+2 turns so the window is bounded by the memory cap, not by graph
+    // budget pressure (derive-don't-mirror: assertions read the constant).
+    const available = CONTEXT_PACK_RECENT_TURNS_CAP + 2;
     const pack = assembleContextPack({
       payload: BASE_PAYLOAD,
-      priorTurns: priorTurnsFixture(7),
+      priorTurns: priorTurnsFixture(available),
       priorFacts: [],
       compactedGraph: overBudgetCompactGraph(),
       compactedConstraints: null,
       analysis: null,
     });
-    expect(pack.conversation.recent_turns).toHaveLength(5);
-    expect(pack.conversation.window).toEqual({ shown: 5, available: 7 });
-    expect(pack.conversation.turn_count).toBe(7);
+    expect(pack.conversation.recent_turns).toHaveLength(CONTEXT_PACK_RECENT_TURNS_CAP);
+    // The two window counts are what this guard is about — assert them by
+    // name rather than by whole-object equality, so the additive disclosure
+    // string (`notice`, emitted whenever turns exist that the pack does not
+    // show) does not read as a budget cut. This call supplies no
+    // `priorTurnsTotal`, so the numbers stay the window's own length.
+    expect(pack.conversation.window?.shown).toBe(CONTEXT_PACK_RECENT_TURNS_CAP);
+    expect(pack.conversation.window?.available).toBe(available);
+    expect(pack.conversation.window?.summarised).toBeUndefined();
+    expect(pack.conversation.turn_count).toBe(available);
   });
 
   it('helper is a no-op returning the same references when both inputs are null', () => {

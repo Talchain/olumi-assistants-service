@@ -102,6 +102,25 @@
  * Serialized size FALLS 3,194B → 2,974B (grammar budget improves).
  */
 
+import { FactorType, ExtractionType, PriorDistribution } from "../../schemas/graph.js";
+
+// ── DRAFT CARDINALITY SOFT CAPS (v12 — 2026-07-23, lean-draft contract) ──
+// Derived from the measured converged-draft distribution (n=17 success corpus:
+// 10–17 nodes / 13–38 edges across every brief class), set ABOVE the observed
+// maxima so no observed credible draft is flagged. These are a POST-PARSE
+// DRIFT ALARM, not an enforcer: Anthropic structured outputs rejects `maxItems`
+// (HTTP 400 "property 'maxItems' is not supported" — see
+// adapters/llm/anthropic-schema-compliance.ts), so the grammar CANNOT cap array
+// length during generation. The pipeline therefore cannot prevent a cardinality
+// runaway structurally; it can only FLAG one loudly for diagnosis (a completed
+// graph far above these caps signals a count-runaway or a structured-outputs
+// prompt-only fallback). Trimming post-parse is deliberately NOT done — dropping
+// nodes would orphan edges and risk shipping an invalid graph (never ship a
+// corrupt draft). Single source of truth for the caps; the guard derives from
+// these, and the grammar-budget test pins them so they cannot silently drift.
+export const DRAFT_SOFT_NODE_CAP = 18;
+export const DRAFT_SOFT_EDGE_CAP = 40;
+
 // Helpers for nullable types (required field that can be null)
 const nullable = (typeName: string) => ({
   anyOf: [{ type: typeName }, { type: "null" }],
@@ -141,11 +160,35 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           data: nullableObject(
             {
               value: { type: "number" },
-              // v7: enums pruned to plain strings (grammar-size budget).
-              // Downstream Zod/normalisers own the value sets; the prompt
-              // still instructs the canonical values.
-              extractionType: { type: "string" },
-              factor_type: { type: "string" },
+              // ── v14 (2026-07-25): ENUMS RESTORED, DERIVED FROM THE ZOD ──
+              // v7 pruned these to plain strings for the grammar-size budget
+              // (the comment said so), NOT because a hard limit forbade them.
+              // An `enum` costs NEITHER a union slot (9/16) NOR an optional
+              // slot (22/24) — ONLY serialized bytes. Restoring them closes
+              // free-text fields the model can loop inside, for bytes alone.
+              // The byte and enum-value costs are MEASURED AND PINNED in
+              // tests/unit/anthropic-graph-schema-grammar-budget.test.ts rather
+              // than restated here: a hand-typed numeral in a comment is exactly
+              // the drift this file's other pins exist to prevent.
+              //
+              // DERIVED from the SAME Zod objects the downstream validator uses
+              // (`schemas/graph.ts`), never re-typed here: the grammar and the
+              // validator cannot disagree about the value set, because there is
+              // only one value set.
+              //
+              // ⚠ SCOPE OF THAT CLAIM, CORRECTED 2026-07-25 (F4). It is TRUE for
+              // `extractionType` and `factor_type` — the draft LLM boundary
+              // validates through `shared-schemas.ts` → `NodeData` →
+              // `graph.ts`, so these two really are one value set. It is FALSE
+              // for `prior.distribution` below: no validator reads
+              // `PriorDistribution`, the wire schema types that field as
+              // `z.string()`, and the enum mirrors a PMS-SERVED PROMPT that can
+              // be re-pinned without a deploy. Do not read this paragraph as
+              // covering that one — see the runtime drift alarm in
+              // `transforms/schema-v3.ts`, which exists because nothing here can
+              // cover it.
+              extractionType: { type: "string", enum: [...ExtractionType.options] },
+              factor_type: { type: "string", enum: [...FactorType.options] },
               uncertainty_drivers: { type: "array", items: { type: "string" } },
               interventions: {
                 type: "array",
@@ -193,6 +236,20 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
                 },
               },
               raw_value: { type: "number" },
+              // ⚠ `unit` STAYS FREE TEXT — v14 deliberately did NOT enumerate it,
+              // against the initial plan, on measured evidence.
+              // The proposal was to derive an enum from the set `display-value.ts`
+              // hand-lists (CURRENCY_SYMBOLS + time units + "%"). Across a 20-draft
+              // live corpus (2026-07-25) the model emitted `"£"` x7 and **`"scale"`
+              // x4** — and `"scale"` is not in that set, so the enum would have made
+              // 4 of 11 observed unit emissions UNGRAMMATICAL. The model would then
+              // omit the unit or mislabel it, and `synthesiseDisplayValue` would
+              // render a bare number instead of a captioned one.
+              // The codebase already documents this: display-value.ts's priority-5
+              // branch exists FOR arbitrary units and names "6 developers" /
+              // "18 months" as the case it serves.
+              // The per-string-value ceiling covers this field instead — which is
+              // the whole point of having a mechanism rather than a field list.
               unit: { type: "string" },
               cap: { type: "number" },
               // Encoding map for categorical factor labels (v191+).
@@ -217,7 +274,11 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
           // ── Prior (external factors) ───────────────────────────────────
           prior: nullableObject(
             {
-              distribution: { type: "string" },
+              // v14 (2026-07-25): one-member enum, DERIVED. The served prompt
+              // already states "distribution is always \"uniform\" in current
+              // version" and 35/35 live emissions agree — this makes the
+              // grammar enforce the promise the prompt already makes.
+              distribution: { type: "string", enum: [...PriorDistribution.options] },
               range_min: { type: "number" },
               range_max: { type: "number" },
             },
@@ -278,7 +339,13 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
             type: "string",
             enum: ["directed", "bidirected"],
           },
-          provenance_source: { type: "string" },
+          // v12 (2026-07-23, lean-draft contract): `provenance_source` free text
+          // dropped from the draft surface. It is per-edge natural-language
+          // justification — exactly the DRAFT_LEAN_RETRY_DIRECTIVE filler — and
+          // was already emitted on 0 edges across the success corpus, so its
+          // removal is token-neutral on the happy path and forecloses a
+          // per-edge-prose runaway. No compute consumer reads it (ISL GraphV2
+          // edges never carry it).
         },
         required: ["from", "to", "strength", "exists_probability", "effect_direction"],
         additionalProperties: false,
@@ -302,11 +369,19 @@ export const ANTHROPIC_DRAFT_GRAPH_SCHEMA = {
     //    widening_log?, bias_signals?}; legacy shapes converted by
     //    normalise-legacy-coaching.ts, canonical CoachingSchema downstream.
     // No `description` keywords (by-construction invariant + grammar-size
-    // budget): the JSON-string instruction to the model rides on the user
-    // message instead — STRUCTURED_OUTPUTS_AUX_STRING_REMINDER in
-    // adapters/llm/anthropic.ts, appended only when structured outputs is
-    // active. This keeps the wire schema byte-identical to the live-verified
+    // budget). This keeps the wire schema byte-identical to the live-verified
     // compiling probe shape (3,194B, HTTP 200 on claude-sonnet-4-6).
+    //
+    // ⚠ CORRECTED 2026-07-25 (F7). This used to say the JSON-string instruction
+    // "rides on the user message instead — STRUCTURED_OUTPUTS_AUX_STRING_REMINDER
+    // in adapters/llm/anthropic.ts". THERE IS NO SUCH IDENTIFIER, and there is no
+    // such instruction: the v12 lean-draft contract dropped coaching /
+    // causal_claims / topology_plan from the SENT grammar, which made the old v8
+    // reminder an empty-string no-op, and it was deleted on 2026-07-24
+    // (simplification F2 — see the note beside DRAFT_COMPLIANCE_REMINDER in
+    // adapters/llm/anthropic.ts, which is the surviving record). So the three
+    // string-typed keys below are simply NOT SENT today. If one is ever restored
+    // to the grammar, the instruction has to be restored with it.
     causal_claims: { type: "string" },
     topology_plan: { type: "string" },
     coaching: { type: "string" },
@@ -411,18 +486,218 @@ export type DraftGraphSchemaObject = {
   additionalProperties: boolean;
 };
 
+// ── DEFERRED AUX KEYS (v12 — 2026-07-23, lean-draft contract, ROADMAP 1.197) ──
+// The draft call now emits STRUCTURE ONLY. `coaching` and `causal_claims` are
+// ~30% of draft output tokens (coaching ~21% + causal ~8%, b2b anatomy), the two
+// most prose-heavy / most-runaway-prone surfaces, and NO compute consumer reads
+// them (ISL/PLoT read GraphV2 structure only; GraphV3Schema is nodes+edges;
+// coaching/causal ride as UI envelope siblings — reader-manifest re-verified
+// at the deployed tips 2026-07-23). They are re-produced from the drafted
+// structure by a bounded post-draft pass (unified-pipeline/stages/coaching-pass)
+// and attached to the same response envelope, so the UI (their only consumer)
+// sees no change. Removing them from the grammar (top-level
+// additionalProperties:false makes the keys UNEMITTABLE, not merely unrequired)
+// is the demand cut made structural, not a soft prompt instruction (1.197).
+// `topology_plan` stays deferred as before (v11, zero-reader).
+//
 // Anchor assertion (trap-15: a tool that cannot fail is theatre). The builder
-// below removes a key BY NAME. If `topology_plan` is ever renamed or dropped
-// from the base object, a silent no-op would make the flag look enabled while
-// changing nothing — so fail loud at module load instead.
+// below removes keys BY NAME. If any is ever renamed or dropped from the base
+// object, a silent no-op would leak it back into the grammar — so fail loud at
+// module load instead.
 const TOPOLOGY_PLAN_KEY = 'topology_plan';
-if (!(TOPOLOGY_PLAN_KEY in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
+const DEFERRED_AUX_KEYS = [TOPOLOGY_PLAN_KEY, 'coaching', 'causal_claims'] as const;
+// ⚠ THESE ANCHORS NOW THROW (2026-07-25). They were `console.error`, which in a
+// Fastify process at import time is a line nobody reads — an anchor that cannot
+// stop anything is the guarantee-theatre class this estate keeps hunting, and
+// the thing it guards is the SILENT return of a runaway-prone field into the
+// sent grammar. The unit suite asserts every anchor holds, so a genuine
+// violation is caught in CI long before it could fail a boot.
+// The UNION / OPTIONAL guardrails further below deliberately stay
+// `console.error`: they warn about Anthropic's limits, which may not even apply
+// (structured outputs can be off), and crashing on them was never intended.
+for (const key of DEFERRED_AUX_KEYS) {
+  if (!(key in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
+    throw new Error(
+      `[anthropic-graph-schema] ANCHOR MISSING: '${key}' is not a property of ` +
+      `ANTHROPIC_DRAFT_GRAPH_SCHEMA. buildDraftGraphSchema() would silently return an ` +
+      `unchanged schema (${key} would leak back into the grammar). Update the v12 builder.`
+    );
+  }
+}
 
-  console.error(
-    `[anthropic-graph-schema] ANCHOR MISSING: '${TOPOLOGY_PLAN_KEY}' is not a property of ` +
-    `ANTHROPIC_DRAFT_GRAPH_SCHEMA. buildDraftGraphSchema() would silently return an ` +
-    `unchanged schema (topology_plan would leak back into the grammar). Update the v11 builder.`
-  );
+// ── RUNAWAY-PRONE NODE-DATA KEYS (v13 — 2026-07-25) ──────────────────────
+// `data.display_value` is the field the draft runaway actually lives in.
+//
+// Re-probed at the wire against api.anthropic.com with the SERVED prompt
+// (draft_graph v195, 59,293 chars), THIS builder's output, claude-sonnet-4-6,
+// temperature 0, thinking disabled, max_tokens 8550 — the live request minus
+// CEE. The control arm reproduced the live failure (5/16 usable) and every
+// characterised failure had the same anatomy:
+//
+//   …"factor_type":"cost","display_value":"No additional headcount hired yet
+//   (baseline)  ␣␣␣… (8,113 more U+200B ZERO WIDTH SPACE) …
+//
+// A character-repetition loop INSIDE the string value of `display_value`.
+// 10 of 10 characterised failures ended in this field (the repeated payload
+// varies — U+200B runs, "← display only.  ", "No additional headcount hired in
+// place currently." — the field never does), always in the SIXTH node, the
+// first `factor`. The entire token budget is spent inside one string of one
+// field. That is why time_to_edges was NULL 17/17, why the schema error was
+// always `edges: Required`, why completion_tokens == cap EXACTLY at 8,550 /
+// 12,000 / 16,000, and why raising the ceiling rescued nothing: an
+// unterminated string has no length it is trying to reach.
+//
+// Measured effect of removing it (four arms, same brief/prompt/model, run
+// concurrently so provider drift hits all arms equally):
+//   control (today's live request)                       5/16 = 31%
+//   temperature 0 -> 0.5                                  3/8  = 38%
+//   two-call nodes-then-edges decomposition               5/8  = 63%
+//   THIS CHANGE                                         16/16 = 100%   p ~ 1.4e-5
+//   CONTROL: drop a DIFFERENT unconstrained free-text
+//            string (data.encoding_map)                   2/8  = 25%
+// The encoding_map arm is the load-bearing control: if the benefit were "a
+// smaller grammar" or "one less optional param" it would have moved too. It did
+// not. The effect is specific to the field the loop happens in.
+//
+// SAFE because the field is display-only and already has a DETERMINISTIC
+// replacement. The served prompt says so itself (v195 line 392: "display_value
+// is display-only; never affects inference or intervention logic"), and
+// `formatGraphForContext` (orchestrator-v5/format/format-graph-for-context.ts)
+// already prefers an existing `display_value` and SYNTHESISES one via
+// `synthesiseDisplayValue` (cee/factor-extraction/display-value.ts, capped at
+// 50 chars) when absent. This routes the field from "free prose the model
+// writes, bounded by nothing" to "a deterministic formatter, bounded at 50
+// characters" — the better answer independent of the runaway.
+//
+// The grammar CANNOT bound the string instead: `maxLength` is accepted by the
+// structured-outputs compiler but not enforced at generation time, and is
+// stripped by enforceAnthropicSchemaCompliance; `maxItems` 400s outright
+// (re-probed at the wire 2026-07-25, still rejected). Removal is the only
+// grammar-level lever that exists.
+//
+// SCOPE — do not over-read this. `label`, `uncertainty_drivers[]`, `unit` and
+// `encoding_map` remain unconstrained strings by construction. 16/16 at the
+// wire is evidence the loop did not migrate; it is not proof that it cannot.
+//
+// Anchor assertion (trap-15: a tool that cannot fail is theatre). The builder
+// removes keys BY NAME from a NESTED object; a rename would make it a silent
+// no-op that leaks the field straight back into the grammar.
+export const RUNAWAY_PRONE_NODE_DATA_KEYS = ['display_value'] as const;
+
+/** The node-`data` object schema (the non-null branch of its anyOf). */
+function nodeDataObjectOf(schema: {
+  properties: Record<string, unknown>;
+}): { properties: Record<string, unknown>; required?: string[] } | undefined {
+  const nodes = schema.properties.nodes as { items?: { properties?: Record<string, unknown> } } | undefined;
+  const data = nodes?.items?.properties?.data as { anyOf?: unknown[] } | undefined;
+  return data?.anyOf?.[0] as { properties: Record<string, unknown>; required?: string[] } | undefined;
+}
+
+for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
+  if (!(key in (nodeDataObjectOf(ANTHROPIC_DRAFT_GRAPH_SCHEMA)?.properties ?? {}))) {
+    throw new Error(
+      `[anthropic-graph-schema] ANCHOR MISSING: '${key}' is not a property of ` +
+      `ANTHROPIC_DRAFT_GRAPH_SCHEMA's node.data object. buildDraftGraphSchema() would ` +
+      `silently return an unchanged grammar (${key} would leak back in). Update the v13 builder.`
+    );
+  }
+}
+
+// ── ENRICHER-OWNED GOAL-THRESHOLD KEYS (v15 — 2026-08-01, ROADMAP 2.281) ──
+// The goal-threshold quad is MINTED BY CEE, never by the model.
+//
+// WHY THIS EXISTS. The whole goal-frame train (schemas 0.31.0, ISL's level→delta
+// converter, PLoT frame forwarding, CEE's frame stamp #786 and baseline
+// extraction #787) shipped and STILL produced no goal probability on staging,
+// because on the live draft path THE MODEL minted `goal_threshold` itself. The
+// enricher's redirect — the only code that stamps the threshold FRAME (see
+// `CEE_GOAL_THRESHOLD_FRAME`, utils/goal-threshold-cap.ts) and that
+// extracts the goal node's `observed_state` baseline — is gated on
+// `goal_threshold === undefined` (factor-extraction/enricher.ts:652). A
+// model-authored value closes that gate, so the frame was never stamped, ISL
+// refused with GOAL_THRESHOLD_FRAME_UNSPECIFIED on every run, and the stated
+// current level was filed as a separate factor node (`fac_current_revenue`).
+// Measured live 2026-08-01 across three briefs, all three runs:
+// PHASE0-EVIDENCE-2026-07-28/witness-2258-goal-probability-live.md §5.1, §7.1.
+// The machinery was correct and UNREACHED — so the fix is not more machinery,
+// it is removing the model's ability to reach past it.
+//
+// ATTESTATION BY CONSTRUCTION. The frame (`CEE_GOAL_THRESHOLD_FRAME`) is a
+// CODE CONSTANT set on
+// the same branch that computes `raw / cap` (enricher.ts:733) — it is true by
+// construction there and is never derived from a model. A threshold the model
+// wrote carries no such attestation and cannot be given one after the fact,
+// because nothing downstream knows what frame the model meant. So the model
+// must be unable to write one.
+//
+// WHY ALL FOUR KEYS, not just `goal_threshold`. The enricher writes the quad as
+// a unit (enricher.ts:724-727) AND READS two of them as inputs to the cap
+// resolver (`goal_threshold_cap`, `goal_threshold_unit` at :680-685). Excising
+// only the gate field would leave the mint reachable but its DENOMINATOR
+// model-authored — a half-attested contract, which is worse than either
+// extreme because it reads as attested. The quad is one contract; it is minted
+// as one or not at all.
+//
+// MECHANISM — REMOVAL IS "CANNOT EMIT", NOT "DISCOURAGED", *WHEN THE GRAMMAR IS
+// SENT*. `nodes.items` carries `additionalProperties: false` (:315), so a key
+// absent from `properties` is ungrammatical rather than merely not-required —
+// the same lever v11/v12 used for the aux keys and v13 used for
+// `data.display_value`. Under Anthropic structured outputs the grammar is
+// compiled into constrained decoding, so the token sequence for the key cannot
+// be produced.
+//
+// ⚠ THE SCOPE LIMIT OF THAT CLAIM, STATED BECAUSE IT IS LOAD-BEARING. The
+// grammar is only sent when `structuredOutputsEnabled` (adapters/llm/
+// anthropic.ts:795): the flag `CEE_ANTHROPIC_STRUCTURED_OUTPUTS` (config
+// default FALSE), a model-allowlist hit, and thinking disabled — plus a
+// documented `so_reject` rebuild that RETRIES prompt-only after a 400. On the
+// prompt-only path THERE IS NO GRAMMAR AT ALL, so this excision alone would be
+// inert exactly where the witness measured the defect. That is why it is paired
+// with an ingress strip at the draft seam (`stripModelAuthoredGoalThreshold`,
+// adapters/llm/normalisation.ts), which holds on every real-provider draft path
+// regardless of structured-outputs posture. NEITHER layer is redundant: the
+// grammar makes it unemittable when sent, the strip makes it unpersistable
+// always. Do not remove one on the grounds that the other covers it.
+//
+// ⚠ NOTE FOR A FUTURE EDITOR: the frame field's literal identifier is
+// deliberately NOT spelled out anywhere in this file, only its constant name.
+// `goal-threshold-frame-stamp.test.ts` scans this file's WHOLE TEXT for that
+// identifier and REDs on any occurrence — a coarse guard on purpose, because
+// "the token must not appear in an LLM output surface at all" is stronger than
+// any comment-aware variant, and the field it protects is the one the model
+// must never be able to guess at. Spelling it out here, even in prose, breaks
+// that gate. Do not "helpfully" restore it.
+//
+// The base object KEEPS the quad — it is what CEE TOLERATES at ingress (a
+// stored graph, a repair response, or a prompt-only draft may legitimately
+// carry the fields), exactly as v12/v13 keep their removed keys on the base.
+//
+// Anchor assertion (trap-15: a tool that cannot fail is theatre). The builder
+// removes keys BY NAME from a NESTED object; a rename would make it a silent
+// no-op that leaks the field straight back into the grammar.
+export const ENRICHER_OWNED_GOAL_KEYS = [
+  'goal_threshold',
+  'goal_threshold_raw',
+  'goal_threshold_unit',
+  'goal_threshold_cap',
+] as const;
+
+/** The node-item object schema (`nodes.items`) — where the goal quad is declared. */
+function nodeItemsObjectOf(schema: {
+  properties: Record<string, unknown>;
+}): { properties: Record<string, unknown>; required?: string[] } | undefined {
+  const nodes = schema.properties.nodes as { items?: Record<string, unknown> } | undefined;
+  return nodes?.items as { properties: Record<string, unknown>; required?: string[] } | undefined;
+}
+
+for (const key of ENRICHER_OWNED_GOAL_KEYS) {
+  if (!(key in (nodeItemsObjectOf(ANTHROPIC_DRAFT_GRAPH_SCHEMA)?.properties ?? {}))) {
+    throw new Error(
+      `[anthropic-graph-schema] ANCHOR MISSING: '${key}' is not a property of ` +
+      `ANTHROPIC_DRAFT_GRAPH_SCHEMA's nodes.items object. buildDraftGraphSchema() would ` +
+      `silently return an unchanged grammar (${key} would leak back in). Update the v15 builder.`
+    );
+  }
 }
 
 /**
@@ -431,22 +706,137 @@ if (!(TOPOLOGY_PLAN_KEY in ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties)) {
  * DERIVED from `ANTHROPIC_DRAFT_GRAPH_SCHEMA` rather than mirrored, so there is
  * exactly one source of truth for every field it shares with the base object.
  *
- * v11 (2026-07-21): topology_plan omission is now UNCONDITIONAL — the
- * `CEE_DRAFT_OMIT_TOPOLOGY_PLAN` flag was deleted per no-dark-launches. The
- * builder always drops the zero-reader `topology_plan` property and its
- * `required` entry (508 output tokens saved, and the live prompt/grammar
- * contradiction — v195 says "must NOT contain a topology_plan key" while the
- * v8/v9 grammar demanded one — is resolved). The base object is never mutated.
+ * v11 (2026-07-21): topology_plan omission is UNCONDITIONAL (zero-reader).
+ * v12 (2026-07-23, lean-draft contract): ALSO drops `coaching` and
+ * `causal_claims` — the draft call is structure-only; both are re-produced by
+ * the bounded post-draft coaching pass. All three deferred keys are dropped
+ * from the sent grammar's `properties` and `required` here; the base object is
+ * never mutated (so the guard counts + anchors keep their single source).
+ * v13 (2026-07-25): ALSO drops the runaway-prone node-`data` free-text keys —
+ * see RUNAWAY_PRONE_NODE_DATA_KEYS above. Because the node-`data` object
+ * carries `additionalProperties: false`, removing the key makes it
+ * UNEMITTABLE, not merely unrequired — which is the whole point: an optional
+ * field the model still chooses to write can still loop inside it.
+ * v15 (2026-08-01, ROADMAP 2.281): ALSO drops the enricher-owned goal-threshold
+ * quad from `nodes.items` — see ENRICHER_OWNED_GOAL_KEYS above. Same lever, same
+ * reason: `additionalProperties: false` turns removal into cannot-emit, so the
+ * enricher's `goal_threshold === undefined` redirect always runs on a
+ * goal-bearing brief and the frame is stamped by the code that earns it.
  */
 export function buildDraftGraphSchema(): DraftGraphSchemaObject {
-  const { [TOPOLOGY_PLAN_KEY]: _omitted, ...properties } =
-    ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties;
+  const deferred = new Set<string>(DEFERRED_AUX_KEYS);
+  const properties = Object.fromEntries(
+    Object.entries(ANTHROPIC_DRAFT_GRAPH_SCHEMA.properties).filter(
+      ([k]) => !deferred.has(k),
+    ),
+  );
 
-  return {
+  const built: DraftGraphSchemaObject = {
     ...ANTHROPIC_DRAFT_GRAPH_SCHEMA,
     properties,
-    required: ANTHROPIC_DRAFT_GRAPH_SCHEMA.required.filter((k) => k !== TOPOLOGY_PLAN_KEY),
+    required: ANTHROPIC_DRAFT_GRAPH_SCHEMA.required.filter((k) => !deferred.has(k)),
   };
+
+  // v13 — the node-data cut. Deep-clone ONLY the path being edited, so the base
+  // object is never mutated (it stays the single source for the guard counts,
+  // the anchors, and what CEE tolerates at ingress).
+  const dropped = new Set<string>(RUNAWAY_PRONE_NODE_DATA_KEYS);
+  const nodes = built.properties.nodes as Record<string, unknown>;
+  const nodeItems = (nodes as { items: Record<string, unknown> }).items;
+  const itemProps = nodeItems.properties as Record<string, unknown>;
+  const dataProp = itemProps.data as { anyOf: unknown[] };
+  // Read the node-`data` object through the SAME accessor the anchors and the
+  // post-condition use, so a future change to that path lands in one place
+  // instead of three. (The enclosing `built` spread shares structure with the
+  // base object here — `clonedDataObject` below is what makes the edit
+  // copy-on-write, so reading via the helper is equivalent and not aliased.)
+  const dataObject = nodeDataObjectOf(built);
+  if (!dataObject) {
+    throw new Error(
+      `[anthropic-graph-schema] STRUCTURE MISSING: nodes.items.properties.data.anyOf[0] is not ` +
+      `reachable on the built schema, so the runaway-prone node-data cut cannot be applied.`
+    );
+  }
+
+  const clonedDataObject = {
+    ...dataObject,
+    properties: Object.fromEntries(
+      Object.entries(dataObject.properties).filter(([k]) => !dropped.has(k)),
+    ),
+    ...(dataObject.required
+      ? { required: dataObject.required.filter((k) => !dropped.has(k)) }
+      : {}),
+  };
+  // v15 — the goal-quad cut. Applied to the SAME cloned node-item properties as
+  // the v13 data cut, so the two edits compose in one copy-on-write rather than
+  // one silently rebuilding over the other.
+  const goalOwned = new Set<string>(ENRICHER_OWNED_GOAL_KEYS);
+  const nodeItemProps = Object.fromEntries(
+    Object.entries({
+      ...itemProps,
+      data: { ...dataProp, anyOf: [clonedDataObject, ...dataProp.anyOf.slice(1)] },
+    }).filter(([k]) => !goalOwned.has(k)),
+  );
+
+  built.properties = {
+    ...built.properties,
+    nodes: {
+      ...nodes,
+      items: {
+        ...nodeItems,
+        properties: nodeItemProps,
+        // The quad is optional on the base object, so `required` cannot contain
+        // it today — filtered anyway so a future promotion to required cannot
+        // leave a dangling name that makes the sent grammar unsatisfiable.
+        ...(Array.isArray((nodeItems as { required?: string[] }).required)
+          ? {
+            required: (nodeItems as { required: string[] }).required.filter(
+              (k) => !goalOwned.has(k),
+            ),
+          }
+          : {}),
+      },
+    },
+  };
+
+  return built;
+}
+
+// POST-CONDITION (trap-15: verify the write LANDED, never assume the edit ran).
+// Asserted against the BUILT object, not the intent.
+//
+// ⚠ MOVED OUT OF THE BUILDER (2026-07-25). It ran on EVERY call — i.e. on every
+// draft — to catch a defect that only an edit to `buildDraftGraphSchema()` can
+// introduce. That is per-request cost for a compile-time property. Running it
+// ONCE at module load makes it strictly stronger (it now fails the process
+// rather than logging into a stream nobody reads) and free on the hot path.
+// F6 (2026-07-25): ONE rebuild, hoisted out of the loop. It used to sit inside
+// the `for`, so the whole grammar was rebuilt once PER KEY — harmless at
+// length 1, pointless work the moment the list grows.
+{
+  const builtSchema = buildDraftGraphSchema();
+  const builtData = nodeDataObjectOf(builtSchema);
+  for (const key of RUNAWAY_PRONE_NODE_DATA_KEYS) {
+    if (builtData && key in builtData.properties) {
+      throw new Error(
+        `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
+        `draft grammar after buildDraftGraphSchema(). The runaway-prone field cut did not land.`
+      );
+    }
+  }
+  // v15 (2.281) — the same post-condition for the goal quad. A silent no-op here
+  // would hand the model back its ability to mint an unattested threshold, which
+  // is the entire defect this cut exists to close.
+  const builtItems = nodeItemsObjectOf(builtSchema);
+  for (const key of ENRICHER_OWNED_GOAL_KEYS) {
+    if (builtItems && key in builtItems.properties) {
+      throw new Error(
+        `[anthropic-graph-schema] REMOVAL NO-OP: '${key}' is still present in the SENT ` +
+        `draft grammar after buildDraftGraphSchema(). The enricher-owned goal-threshold cut ` +
+        `did not land, so the model can still mint an unattested threshold.`
+      );
+    }
+  }
 }
 
 // ── Union-count guardrail ──────────────────────────────────────────────

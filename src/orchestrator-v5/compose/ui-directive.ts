@@ -36,11 +36,20 @@
 
 import {
   UiDirectiveBlockSchema,
+  type OlumiResponse,
   type UiDirectiveBlock,
+  type UiDirectiveVerbLiteral,
 } from '@talchain/schemas/boundary';
-import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
-import type { GraphNodeLookup } from './phase3-blocks.js';
+import {
+  liveLensExecutorAvailability,
+  type GraphNodeLookup,
+  type GraphNodeRef,
+} from './phase3-blocks.js';
+import { selectLens, type LensId } from './lens-selector.js';
+import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
+import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 
 /**
  * Build the single recommended-option `ui_directive` block for a
@@ -76,4 +85,344 @@ export function buildRecommendedOptionUiDirective(
 
   const parsed = UiDirectiveBlockSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
+}
+
+// ============================================================================
+// Wave-4 δ2 — the focus / open_inspector emit policy (ROADMAP 1.202), extended
+// by Lane 2 (P3 UI agency, schemas 0.32.0) with the PANEL rows 5–6.
+// "The AI points at the graph — and opens the surface it is talking about."
+// A deterministic ladder over the fact class + entity kind — ZERO LLM
+// authorship of verb/target. At most ONE directive per turn (the caller's
+// `uiDirectiveEmitted` latch enforces N=1). Every drop is telemetered
+// (reason-tagged) so a suppression is never a silent no-op.
+//
+// §2.1 trigger table:
+//   1 · set_factor_value / adjust_edge_strength (applied) → open_inspector @ the
+//       mutated node/edge (label resolved from the persisted-snapshot lookup —
+//       the fact's `after` snapshot carries no label; add_constraint EXCLUDED).
+//   2 · run_analysis + a SURVIVING lens block + a resolvable subject → focus @
+//       the lens subject factor. SUPERSEDES the winner-highlight (D-53-1).
+//   3 · run_analysis, no lens (or lens subject unresolved) → the v1 highlight @
+//       the recommended option (unchanged — the regression-proof floor).
+//   4 · what_would_flip (precondition met) → focus @ the first flip factor.
+//   5 · explain_results, ANSWERED (`precondition_unmet` false) → open_panel @
+//       ui_target {kind:'tab', id:'results'} — the explanation opens the
+//       results surface it explains. GATE IS precondition_unmet, NOT `noop`:
+//       the live handler stamps noop:true on EVERY explain fact (it is a
+//       no-op handler — explain-results.ts:124/215), so a noop gate would be
+//       dead on arrival.
+//   6 · explain_from_structure + ≥1 CONTESTED edge in the turn's persisted
+//       graph (edges[].validation.status === 'contested', the two-pass
+//       validation verdict the Model tab's relationships section renders) →
+//       open_section @ ui_target {kind:'model_section', id:'relationships'}.
+//       Zero contested / absent / malformed graph → suppressed — never open a
+//       section with nothing remarkable.
+//   (A compare_options row was considered and WITHDRAWN: no V5 handler
+//   produces a compare_options fact — see the tools/handlers registry — so
+//   the row could never fire; a wired gesture nothing can trigger is the
+//   guarantee-theatre class.)
+//
+// Starvation analysis for the new rows: they are keyed to fact classes the
+// existing four rows never consume (explain_* facts return null today), so
+// rows 1–4 keep their gestures byte-identically; cross-fact contention stays
+// governed by the caller's existing first-emit-wins latch, and explain facts
+// never co-occur with run_analysis on a live turn (one handler per turn).
+// ============================================================================
+
+/** Reason tags for a suppressed directive — closed set, no user text. */
+type UiDirectiveSuppressReason =
+  | 'noop'
+  | 'no_recommendation'
+  | 'target_unresolved'
+  | 'lens_subject_unresolved'
+  | 'precondition_unmet'
+  | 'no_flip_factor'
+  /**
+   * §2.1 row 6 (Lane 2, P3): explain_from_structure fired but the persisted
+   * graph carries no contested edge (or is absent/malformed — fail-closed
+   * collapses those to the same suppression: nothing remarkable to open).
+   */
+  | 'no_contested_edges'
+  /**
+   * T1 claim safety (ROADMAP 1.218): the turn's constraint verdict withholds
+   * the leading-option claim, so the row-3 winner HIGHLIGHT is not emitted.
+   * Distinct from `no_recommendation` on purpose — there IS a leader here and
+   * we are declining to point at it, which is a different operational fact
+   * from "the analysis produced none".
+   */
+  | 'leading_option_claim_withheld';
+
+function suppressDirective(factType: string, reason: UiDirectiveSuppressReason): null {
+  emit(TelemetryEvents.V5UiDirectiveSuppressed, { fact_type: factType, reason });
+  return null;
+}
+
+function emitDirective(factType: string, block: UiDirectiveBlock): UiDirectiveBlock {
+  emit(TelemetryEvents.V5UiDirectiveEmitted, {
+    fact_type: factType,
+    verb: block.verb,
+    // Graph verbs carry their target in targets[]; panel verbs (0.32.0) in
+    // ui_target. One of the two is always present on an emitted block.
+    target_kind: block.targets[0]?.kind ?? block.ui_target?.kind ?? null,
+  });
+  return block;
+}
+
+/** Build + strict-validate a single-target directive, or null on schema failure. */
+function directiveFromRef(verb: UiDirectiveVerbLiteral, ref: GraphNodeRef): UiDirectiveBlock | null {
+  const candidate: UiDirectiveBlock = {
+    type: 'ui_directive',
+    verb,
+    targets: [{ id: ref.id, label: ref.label, kind: ref.kind }],
+  };
+  const parsed = UiDirectiveBlockSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Build + strict-validate a PANEL directive (0.32.0 verbs), or null on schema
+ * failure. `targets` is empty by contract — the target lives in `ui_target`
+ * (the schema's cross-field rule enforces both halves; validate-before-emit
+ * keeps this builder honest against it).
+ */
+function directiveFromUiTarget(
+  verb: Extract<UiDirectiveVerbLiteral, 'open_panel' | 'open_section'>,
+  uiTarget: NonNullable<UiDirectiveBlock['ui_target']>,
+): UiDirectiveBlock | null {
+  const candidate: UiDirectiveBlock = {
+    type: 'ui_directive',
+    verb,
+    targets: [],
+    ui_target: uiTarget,
+  };
+  const parsed = UiDirectiveBlockSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * §2.1 row 6 derivation — count the persisted graph's CONTESTED edges (the
+ * two-pass validation verdict: `edges[].validation.status === 'contested'`).
+ * Fail-closed on every malformed shape: absent graph, non-array edges,
+ * non-object edge/validation, any status other than the exact literal → 0.
+ * Exported for direct unit coverage.
+ */
+export function countContestedEdges(graph: unknown): number {
+  if (graph === null || typeof graph !== 'object') return 0;
+  const edges = (graph as { edges?: unknown }).edges;
+  if (!Array.isArray(edges)) return 0;
+  let count = 0;
+  for (const edge of edges) {
+    if (edge === null || typeof edge !== 'object') continue;
+    const validation = (edge as { validation?: unknown }).validation;
+    if (validation === null || typeof validation !== 'object') continue;
+    if ((validation as { status?: unknown }).status === 'contested') count += 1;
+  }
+  return count;
+}
+
+/**
+ * Wave-3 σ COMPOSITION (§Q3): a `focus` on a lens subject may fire ONLY when the
+ * lens's accompanying coaching block SURVIVED the prose/schema gate (and, when it
+ * carries a value, wave-3 σ) — i.e. is present in `freshBlocks`. When σ later
+ * drops a value-bearing lens block, this returns false and the paired directive
+ * drops with it (no "look here" at a caged number). The lens block is the unique
+ * `deterministic_signal` / `strengthen` coaching block.
+ */
+function hasSurvivingLensBlock(freshBlocks: OlumiResponse['blocks']): boolean {
+  return freshBlocks.some(
+    (b) =>
+      b.type === 'coaching' &&
+      b.source === 'deterministic_signal' &&
+      b.coaching_kind === 'strengthen',
+  );
+}
+
+/** §2.1 rows 2 + 3 — lens focus (supersedes) or the v1 winner-highlight floor. */
+function buildRunAnalysisDirective(
+  fact: RunAnalysisHandlerFact,
+  lookup: GraphNodeLookup,
+  freshBlocks: OlumiResponse['blocks'],
+  previousAnalysisLens?: LensId | null,
+): UiDirectiveBlock | null {
+  if (fact.noop) return suppressDirective('run_analysis', 'noop');
+
+  // Row 2 — the lens focus supersedes the winner highlight (D-53-1), gated on the
+  // lens block's σ/prose survival AND a resolvable subject id.
+  if (hasSurvivingLensBlock(freshBlocks)) {
+    // ⚠ ROADMAP 2.211 — THIS IS THE SECOND `selectLens` DERIVATION OF ONE TURN,
+    // and it MUST be handed the same `previousAnalysisLens` the block builder
+    // got. Without it the tie-break applies at one call site and not the other:
+    // the card would announce the pre-mortem lens while this directive told the
+    // canvas to focus the flip-risk lens's factor — two derivations of one fact
+    // disagreeing on one screen (CLAUDE.md trap 12/16). The executor injection
+    // is shared for the same reason (`liveLensExecutorAvailability`).
+    const selection = selectLens(fact, {
+      ...liveLensExecutorAvailability(),
+      previousAnalysisLens: previousAnalysisLens ?? null,
+    });
+    const subjectRef = selection?.subjectRef;
+    if (subjectRef !== undefined) {
+      const ref = lookup.get(subjectRef.id);
+      if (ref !== undefined && ref.kind === 'factor') {
+        const block = directiveFromRef('focus', ref);
+        if (block !== null) return emitDirective('run_analysis', block);
+      }
+      // Lens present + survived but the subject didn't resolve → fall through to
+      // the v1 highlight (the safe floor), never to nothing.
+    }
+  }
+
+  // Row 3 — the shipped v1 recommended-option highlight (byte-unchanged path when
+  // no lens is active: this IS the regression-proof floor).
+  //
+  // T1 CLAIM SAFETY (ROADMAP 1.218 / A1 ruling on row 1.215). GATED, and note
+  // which way round the live defect ran: the POST-#710 walk found the withheld
+  // bodies shipping `highlight → <the leader>` on 5/5, while every PERMITTED
+  // body shipped `focus → <a factor>` on 5/5. The one class of turn that must
+  // not name a leader was the only class telling the canvas to point at it —
+  // the inverse of the expected correlation, and not an accident: row 2's lens
+  // `focus` supersedes this highlight, and the lens block is itself
+  // leader-presuming, so layer 2 drops it on exactly these turns and the ladder
+  // falls through to here.
+  //
+  // Scoped to row 3 deliberately. Row 2's `focus` targets a FACTOR and asserts
+  // no leader; gating it too would cost the user their pointer on the turn they
+  // most need one, which is the over-suppression half of the acceptance
+  // criteria. Rows 1 and 4 (mutation / flip) never name a leader and are
+  // untouched.
+  //
+  // HONEST SIZING, so nobody scores this as the fix. ⚠ CORRECTED 4 Aug 2026
+  // (trap-14 — the previous sentence here had gone stale and was false): an
+  // earlier render probe found `highlight` produced no styling at the
+  // then-deployed UI tip, but highlight styling WORKS at the current tip (the
+  // UI routes highlight targets into the applied-edit pulse — one 2s ring;
+  // DGAI applyV5State.ts). The hygiene point stands on its own: a directive
+  // that says "point at the leader" must not be emitted by the turn that just
+  // declined to name one. The enrichment projection leak
+  // (compose/withheld-claim-projection.ts) was the user-visible half.
+  if (!mayNameLeadingOptionForFact(fact)) {
+    return suppressDirective('run_analysis', 'leading_option_claim_withheld');
+  }
+  const highlight = buildRecommendedOptionUiDirective(fact, lookup);
+  if (highlight !== null) return emitDirective('run_analysis', highlight);
+  return suppressDirective('run_analysis', 'no_recommendation');
+}
+
+/** §2.1 row 1 — open_inspector on the mutated factor node / edge. */
+function buildMutationInspectorDirective(
+  fact: Extract<HandlerFact, { fact_type: 'set_factor_value' | 'adjust_edge_strength' }>,
+  lookup: GraphNodeLookup,
+): UiDirectiveBlock | null {
+  const { target_id, status } = fact.result;
+  // Only an APPLIED mutation — a noop inspector would imply a change that didn't
+  // happen (fail-closed).
+  if (status !== 'applied') return suppressDirective(fact.fact_type, 'noop');
+  if (typeof target_id !== 'string' || target_id.length === 0) {
+    return suppressDirective(fact.fact_type, 'target_unresolved');
+  }
+  // The mutation fact's `after` snapshot carries no label; resolve the node's
+  // label + kind from the persisted-snapshot lookup (labels are stable across
+  // set_factor_value / adjust_edge_strength). Miss → fail-closed.
+  const ref = lookup.get(target_id);
+  if (ref === undefined) return suppressDirective(fact.fact_type, 'target_unresolved');
+  const block = directiveFromRef('open_inspector', ref);
+  if (block === null) return suppressDirective(fact.fact_type, 'target_unresolved');
+  return emitDirective(fact.fact_type, block);
+}
+
+/** §2.1 row 5 (Lane 2, P3) — an ANSWERED explain_results turn opens the
+ *  results panel: `open_panel` @ {kind:'tab', id:'results'}. Gate is
+ *  `precondition_unmet` (NOT `noop` — always true on explain facts, see the
+ *  header). No auto-dock rides explain turns (auto-dock is driven by
+ *  run/results-status transitions in the UI), so this is not redundant. */
+function buildExplainResultsPanelDirective(
+  fact: Extract<HandlerFact, { fact_type: 'explain_results' }>,
+): UiDirectiveBlock | null {
+  if (fact.result.precondition_unmet === true) {
+    return suppressDirective('explain_results', 'precondition_unmet');
+  }
+  const block = directiveFromUiTarget('open_panel', { kind: 'tab', id: 'results' });
+  if (block === null) return suppressDirective('explain_results', 'target_unresolved');
+  return emitDirective('explain_results', block);
+}
+
+/** §2.1 row 6 (Lane 2, P3) — explain_from_structure with ≥1 contested edge in
+ *  the turn's persisted graph opens the Model tab's relationships section:
+ *  `open_section` @ {kind:'model_section', id:'relationships'} (the UI
+ *  activates the diagnostics tab and auto-expands + scrolls the section).
+ *  Fail-closed to `no_contested_edges` on zero/absent/malformed. */
+function buildStructureContestedSectionDirective(
+  fact: Extract<HandlerFact, { fact_type: 'explain_from_structure' }>,
+  rawPersistedGraph: unknown,
+): UiDirectiveBlock | null {
+  if (countContestedEdges(rawPersistedGraph) === 0) {
+    return suppressDirective(fact.fact_type, 'no_contested_edges');
+  }
+  const block = directiveFromUiTarget('open_section', {
+    kind: 'model_section',
+    id: 'relationships',
+  });
+  if (block === null) return suppressDirective(fact.fact_type, 'target_unresolved');
+  return emitDirective(fact.fact_type, block);
+}
+
+/** §2.1 row 4 — focus on the first flip factor (precondition met). */
+function buildFlipFocusDirective(
+  fact: Extract<HandlerFact, { fact_type: 'what_would_flip' }>,
+  lookup: GraphNodeLookup,
+): UiDirectiveBlock | null {
+  if (fact.result.precondition_unmet) {
+    return suppressDirective('what_would_flip', 'precondition_unmet');
+  }
+  const factorId = fact.result.flip_scenarios?.[0]?.factor_id;
+  if (typeof factorId !== 'string' || factorId.length === 0) {
+    return suppressDirective('what_would_flip', 'no_flip_factor');
+  }
+  const ref = lookup.get(factorId);
+  if (ref === undefined || ref.kind !== 'factor') {
+    return suppressDirective('what_would_flip', 'target_unresolved');
+  }
+  const block = directiveFromRef('focus', ref);
+  if (block === null) return suppressDirective('what_would_flip', 'target_unresolved');
+  return emitDirective('what_would_flip', block);
+}
+
+/**
+ * The §2.1 emit ladder (wave-4 rows 1–4; Lane 2 P3 rows 5–6). Dispatches on
+ * fact class; returns the SINGLE directive for this fact, or null
+ * (fail-closed, telemetered). The caller gates every call behind the
+ * `uiDirectiveEmitted` latch so at most one directive emits per turn (N=1).
+ * `lookup` resolves the target label/kind (built from the enrichment/persisted
+ * snapshot for run_analysis, or the persisted snapshot for mutation / flip
+ * turns); `freshBlocks` is consulted only for the row-2 σ gate;
+ * `rawPersistedGraph` only by row 6's contested-edge derivation (absent →
+ * fail-closed suppression, never a throw). `add_constraint` (UI drops the
+ * patch — fail-open avoided), `compare_options` (NO V5 producer exists — a row
+ * would be unreachable), and `edit_graph` return null with no telemetry noise.
+ */
+export function buildFocusInspectorDirective(
+  fact: HandlerFact,
+  lookup: GraphNodeLookup,
+  freshBlocks: OlumiResponse['blocks'],
+  previousAnalysisLens?: LensId | null,
+  rawPersistedGraph?: unknown,
+): UiDirectiveBlock | null {
+  switch (fact.fact_type) {
+    case 'run_analysis':
+      return buildRunAnalysisDirective(fact, lookup, freshBlocks, previousAnalysisLens);
+    case 'set_factor_value':
+    case 'adjust_edge_strength':
+      return buildMutationInspectorDirective(fact, lookup);
+    case 'what_would_flip':
+      return buildFlipFocusDirective(fact, lookup);
+    case 'explain_results':
+      return buildExplainResultsPanelDirective(fact);
+    case 'explain_from_structure':
+      return buildStructureContestedSectionDirective(fact, rawPersistedGraph);
+    default:
+      // add_constraint (UI drops the patch — fail-open avoided), compare_options
+      // (no V5 producer — unreachable), explain_result (deprecated literal,
+      // historic rows only), edit_graph: no directive class.
+      return null;
+  }
 }

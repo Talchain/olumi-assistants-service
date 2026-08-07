@@ -275,7 +275,7 @@ describe('turn-executor — bounded-recovery copy honours the freshness VERDICT,
 
     expect(findPreHandlerFreshnessEvent()?.data.freshness).toBe('fresh');
     expect(result.response.assistant_text).toBe(
-      "I couldn't complete that turn cleanly, but your current analysis is still available.",
+      "I couldn't complete that turn cleanly, but your current analysis is still available."
     );
     const actionTypes = result.response.suggested_actions.map((a: { action_type?: string }) => a.action_type);
     expect(actionTypes).toContain('explain_results');
@@ -348,6 +348,89 @@ describe('turn-executor — bounded-recovery copy honours the freshness VERDICT,
     const actionTypes = result.response.suggested_actions.map((a: { action_type?: string }) => a.action_type);
     expect(actionTypes).toEqual(['run_analysis']);
   });
+
+  it(
+    'NONE (no successful prior fact) + body analysis_state populates the projection: ' +
+      'does NOT assert the model changed, gives honest can\'t-confirm copy + Re-run (F5 fix)',
+    async () => {
+      // The exact F5 defect cell: a request supplies analysis_state in the body
+      // (populating contextPackForLog.analysis.leading_option — te:1498-1526), but
+      // there is NO successful prior run_analysis fact, so deriveAnalysisFreshness
+      // returns 'none' (freshness.ts:458). Before the fix, hasAnalysisProjection &&
+      // !isFresh && !isUnknown lumped 'none' with 'stale' and emitted "The model has
+      // changed since the last analysis" — a change assertion with zero evidence
+      // (there was never a prior analysis to change FROM).
+      mockState.priorTurns = [];
+      mockState.priorFacts = [];
+      mockState.persistedGraph = null;
+      // A V2RunResponse-shaped analysis_state with a clear leading option — enough
+      // for compactAnalysis to project a leading_option (hasAnalysisProjection).
+      const bodyAnalysisState = {
+        analysis_status: 'computed',
+        option_comparison: [
+          {
+            option_id: 'opt_hire',
+            option_label: 'Hire',
+            outcome: { mean: 0.14, p10: -0.1, p90: 0.4 },
+            status: 'computed',
+            win_probability: 0.72,
+          },
+          {
+            option_id: 'opt_status_quo',
+            option_label: 'Hold',
+            outcome: { mean: 0.0, p10: -0.04, p90: 0.05 },
+            status: 'computed',
+            win_probability: 0.28,
+          },
+        ],
+        factor_sensitivity: [
+          { label: 'Capacity', elasticity: 0.42, direction: 'positive', influence_score: 0.42 },
+        ],
+        robustness: {
+          level: 'medium',
+          is_robust: true,
+          recommended_option_id: 'opt_hire',
+          recommended_option_label: 'Hire',
+          fragile_edges: [],
+        },
+      };
+      const adapter = {
+        chatWithTools: vi
+          .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+          .mockResolvedValueOnce(emptyAnswerCoachToolResult()),
+      };
+
+      const result = await runTurnExecutor(
+        mkPayload('help me think this through'),
+        'req-f5-none-with-projection',
+        {
+          routingAdapter: adapter,
+          graphState: READY_GRAPH as never,
+          analysisState: bodyAnalysisState as never,
+        },
+      );
+
+      // Sanity-pin: the verdict genuinely is 'none', not 'stale'.
+      expect(findPreHandlerFreshnessEvent()?.data.freshness).toBe('none');
+
+      const text = result.response.assistant_text;
+      // F5 assertion: no fabricated change claim — there was never a prior analysis.
+      expect(text).not.toMatch(/has changed/i);
+      expect(text.toLowerCase()).not.toContain('out of date');
+      // Honest, and still offers a path forward.
+      expect(text).not.toBe('');
+      expect(text.toLowerCase()).toMatch(/can'?t confirm/);
+      expect(text.toLowerCase()).toMatch(/re-?run analysis/);
+
+      // Conservative chip choice: Re-run only (Explain would surface unconfirmed
+      // results). A projection is present, so the retry copy's no-chip arm must
+      // NOT swallow it.
+      const actionTypes = result.response.suggested_actions.map(
+        (a: { action_type?: string }) => a.action_type,
+      );
+      expect(actionTypes).toEqual(['run_analysis']);
+    },
+  );
 
   it('NONE (no prior analysis) + no projection: generic retry copy, no chips', async () => {
     mockState.priorTurns = [];

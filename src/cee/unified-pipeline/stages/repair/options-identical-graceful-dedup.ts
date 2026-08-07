@@ -81,6 +81,7 @@
 import type { StageContext } from "../../types.js";
 import { log, emit, TelemetryEvents } from "../../../../utils/telemetry.js";
 import { validateGraph } from "../../../../validators/graph-validator.js";
+import { sweepNodePath, pathsNameNode } from "../../../../validators/violation-paths.js";
 import type { GraphT } from "../../../../schemas/graph.js";
 import { findDisconnectedOptions } from "./status-quo-fix.js";
 import {
@@ -251,17 +252,23 @@ export function attemptOptionsIdenticalGracefulDedup(
   const disconnectedAfter = findDisconnectedOptions(ctx.graph as GraphT);
   const proactiveDisconnected = disconnectedAfter.length > 0;
   if (proactiveDisconnected) {
+    // Format-agnostic suppression — see the twin block in deterministic-sweep.ts
+    // Step 8. The set holds validator-minted `nodesById.<id>` paths; the push
+    // mints a sweep-family `nodes[<id>]` path. Both spellings are derived from
+    // the shared builders so the two can never drift apart again.
     const existingPaths = new Set(
-      remainingErrors.filter((v) => v.code === "NO_PATH_TO_GOAL").map((v) => v.path),
+      remainingErrors
+        .filter((v) => v.code === "NO_PATH_TO_GOAL")
+        .map((v) => v.path)
+        .filter((p): p is string => typeof p === "string"),
     );
     for (const optId of disconnectedAfter) {
-      const path = `nodes[${optId}]`;
-      if (!existingPaths.has(path)) {
+      if (!pathsNameNode(existingPaths, optId)) {
         remainingErrors.push({
           code: "NO_PATH_TO_GOAL" as any,
           severity: "error" as any,
           message: `Option "${optId}" has no directed path to goal (proactive check)`,
-          path,
+          path: sweepNodePath(optId),
         });
       }
     }

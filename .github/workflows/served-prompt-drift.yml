@@ -1,0 +1,103 @@
+name: Served Prompt Drift
+
+# THE ALARM FOR A GATE THAT CANNOT SEE ITS OWN INPUT.
+#
+# The prompt↔pack sanction gate (src/orchestrator-v5/context/__tests__/
+# prompt-pack-sanction.gate.test.ts, PR #692) proves every prose-bearing
+# model-facing ContextPack field is NAMED in the served coach prompt. It does
+# that against a CHECKED-IN SNAPSHOT of the prompt, because CI must be hermetic.
+#
+# But the coach prompt is served from PMS and is RE-PINNABLE WITH NO DEPLOY
+# (PATCH stagingVersion + reload). So the snapshot can go stale while every
+# check stays green, and the sanction gate would then be validating the pack
+# against bytes we do not serve — including silently keeping alive the
+# prompt-hash-keyed waivers that are supposed to EXPIRE on a prompt change.
+#
+# The failure reads as green. That is the whole problem.
+#
+# This workflow is deliberately built WITHOUT the mechanisms that made two
+# earlier smoke workflows silent (see staging-journey-smoke.yml for that
+# history):
+#   - NO `continue-on-error`     → a red step fails the run.
+#   - NO `if: vars.X == 'true'`  → cannot be switched off by leaving a repo
+#                                   variable unset. There is no off switch.
+#   - BOTH triggers, not one     → `push` catches a code/snapshot change;
+#                                   `schedule` catches a PMS re-pin, which
+#                                   involves no commit and no deploy and would
+#                                   otherwise never be observed at all.
+#   - NOT production             → targets staging; the script itself refuses
+#                                   to run against the production hostname.
+#
+# These properties are ASSERTED BY A TEST that parses THIS FILE
+# (tests/unit/ci/served-prompt-drift.test.ts). The facts are DERIVED from the
+# YAML rather than kept as a second hand-maintained copy. Re-introducing
+# `continue-on-error`, adding a `vars.` gate, dropping either trigger, or
+# deleting this file turns the test suite red. Disabling this alarm is
+# possible — but it cannot be done SILENTLY.
+
+on:
+  push:
+    branches: [staging]
+    # A snapshot/script change must be re-verified against what is served.
+    paths:
+      - 'scripts/verify-served-prompt.mjs'
+      - 'src/orchestrator-v5/context/__tests__/fixtures/served-orchestrator-prompt.txt'
+      - '.github/workflows/served-prompt-drift.yml'
+  schedule:
+    # THE LOAD-BEARING TRIGGER. A PMS re-pin produces no commit, no deploy and
+    # no GitHub event — only a timer can catch it. Hourly: a stale snapshot is
+    # a silently-wrong gate, so the detection window should be short.
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: served-prompt-drift
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Served coach prompt == pinned snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # SPARSE on purpose: the script needs exactly two paths — itself and the
+      # snapshot it compares against. A full checkout would clone ~160MB for a
+      # dependency-free .mjs.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts
+            src/orchestrator-v5/context/__tests__/fixtures
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # No `pnpm install` on purpose: the script is a dependency-free .mjs on
+      # built-in fetch. The alarm keeps working even when the dependency graph
+      # is what broke.
+      - name: Compare the SERVED coach prompt against the pinned snapshot
+        env:
+          CEE_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL || 'https://cee-staging.onrender.com' }}
+          # OWNER ACTION REQUIRED: this repository secret does not exist yet.
+          # It must hold the staging value of ADMIN_API_KEY (see
+          # .env.staging.local). Until it is set this job goes RED — that is
+          # deliberate and correct: a missing credential must never read as a
+          # pass, and the script has no skip branch for it.
+          ADMIN_API_KEY: ${{ secrets.STAGING_ADMIN_API_KEY }}
+        # `shell: bash` is LOAD-BEARING. GitHub's default Linux shell is
+        # `bash -e {0}` WITHOUT pipefail, so `node ... | tee` would exit with
+        # tee's status (0) and this alarm would pass while the prompt had
+        # drifted — the exact guarantee-theatre it exists to end.
+        shell: bash
+        run: node scripts/verify-served-prompt.mjs 2>&1 | tee served-prompt-drift.log
+
+      - name: Upload drift log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: served-prompt-drift-log
+          path: served-prompt-drift.log

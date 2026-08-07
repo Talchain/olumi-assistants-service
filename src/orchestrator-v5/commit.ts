@@ -37,8 +37,12 @@ import type {
 
 import { getSessionStore } from './session/index.js';
 import type { SessionStore } from './session/store.js';
-import { repairGraphForPersistence } from './repair-graph-for-persistence.js';
-import { normaliseOptionInterventionContract } from './normalise-option-interventions.js';
+import { projectGraphForPersistence } from './persisted-graph-projection.js';
+import {
+  checkPersistedGraphInvariants,
+  PersistedGraphInvariantError,
+  formatViolations,
+} from './persisted-graph-invariants.js';
 import { derivePendingActionsFromFinalizedChips } from './compose/derive-pending-actions.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
 import { sanitiseUserFacingText } from './compose/output-safety.js';
@@ -116,6 +120,18 @@ export interface CommitMetadata {
    * (frame stage, no draft yet).
    */
   readonly graph_hash?: string;
+  /**
+   * The graph as it stood BEFORE this turn, for the terminal invariant check's
+   * DELTA comparison. Structural violations already present here are absorbed
+   * and never refused — only what this turn INTRODUCED can fail the commit.
+   *
+   * Omit it and the check degrades to observe-only for this commit. That is the
+   * safe default: without a baseline there is no way to distinguish an
+   * introduced violation from an inherited one, and refusing on that guess
+   * would make an already-invalid scenario permanently uneditable (the failure
+   * mode `edit-graph.ts:2750-2755` exists to avoid).
+   */
+  readonly baseGraphForInvariants?: unknown;
   /**
    * V5 Signature Loop — pending proposals carried in from the PRIOR turn (the
    * caller's `most_recent_pending_actions`). `commitDirectAnswer` re-persists
@@ -328,6 +344,35 @@ export interface CommitResult {
    * with `priorCount: 0` on legacy callers that thread no prior pendings).
    */
   readonly pendingLifecycle: PendingLifecycleSummary;
+  /**
+   * §3.2 — the analysis hash of the bytes ACTUALLY WRITTEN to `scenarios.graph`,
+   * recomputed after every persist-site mutation. This is the only hash a
+   * caller may advertise for this turn: any hash a caller computed before
+   * calling `commitDirectAnswer` describes the graph as it was BEFORE the
+   * persist projection, which is not what the next turn will read back.
+   *
+   * `null` when this commit wrote no graph (there are no persisted bytes to
+   * hash) or when the graph was empty/unhashable.
+   */
+  readonly persistedAnalysisGraphHash: string | null;
+  /**
+   * The graph bytes ACTUALLY WRITTEN to `scenarios.graph` — the output of
+   * `projectGraphForPersistence`, not the caller's input.
+   *
+   * Exposed because `persistedAnalysisGraphHash` alone is not enough for a
+   * caller that must DERIVE something else from the committed state. The persist
+   * passes mutate `intercept`, node `interventions` and top-level `options[]`,
+   * and at least one downstream derivation reads exactly those:
+   * `computeStructuralReadiness` reads option nodes' merged interventions. A
+   * caller deriving readiness from its own pre-projection copy can therefore
+   * publish a readiness verdict describing a graph that was never stored —
+   * the same "advertised state != persisted state" class the hash field above
+   * exists to prevent, one field over.
+   *
+   * `null` when this commit wrote no graph. Do NOT treat it as a general
+   * read-back: it is this commit's own input after projection, not a re-read.
+   */
+  readonly persistedGraph: unknown | null;
 }
 
 /**
@@ -564,7 +609,16 @@ const SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS: ReadonlySet<string> = new S
   'chip_action_rerun_analysis_after_mutation',
 ]);
 
-function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
+/**
+ * Exported (ROADMAP 2.622) so a chip-minting seam can ASK whether the chip it
+ * is about to emit survives a live hold, instead of a downstream reader having
+ * to re-derive the answer from this module's private set. The structural-edit
+ * split disclosure mints a re-run chip on exactly the condition that arms this
+ * suppression; its spec binds to this predicate so a change to the set moves
+ * the pin with it rather than leaving a test describing a behaviour that has
+ * gone. Pure, no side effects, safe to call from anywhere.
+ */
+export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boolean {
   return (
     chip.action_type === 'run_analysis' &&
     SUPPRESSIBLE_RUN_ANALYSIS_SUGGESTION_CHIP_IDS.has(chip.id)
@@ -676,6 +730,44 @@ export async function commitDirectAnswer(
 
   const store = sessionStore ?? getSessionStore();
 
+  // ── THE PERSISTED FORM, RESOLVED FIRST (design §3.2 closure) ──────────────
+  // `graphForStore` is the exact object that will be written to
+  // `scenarios.graph`. It is resolved HERE, before anything derives a decision
+  // from a graph hash, because the three persist passes it applies
+  // (`repairGraphForPersistence`, `normaliseOptionInterventionContract`,
+  // `reconcileTopLevelOptionsFromNodes`) mutate `intercept`, node
+  // `interventions` and top-level `options[]` — all three inside
+  // `computeAnalysisAffectingGraphHash`'s projection.
+  //
+  // These passes used to run just above `store.append`, AFTER the pending
+  // re-pin and the carry-forward had already been decided against
+  // `metadata.graph_hash` — a hash of the PRE-pass graph. Whenever any pass
+  // fired, freshness, the pending's re-pin and the held thread were all decided
+  // against a graph we did not store. Ordering is the whole fix: project first,
+  // then derive every hash-dependent decision from the projected bytes.
+  const graphForStore = projectGraphForPersistence(metadata.graph, {
+    scenarioId: metadata.scenario_id,
+    turnId: metadata.turn_id,
+    turnClass: metadata.turn_class,
+    source: metadata.handler_id ?? undefined,
+  });
+
+  // The authoritative hash for this turn: RECOMPUTED on the bytes above, never
+  // the caller's advertised value. Callers compute their hash before the
+  // projection is knowable, so a supplied `graph_hash` is only trusted on a
+  // commit that writes NO graph (where there are no persisted bytes to hash
+  // and the caller's value refers to the unchanged stored graph).
+  const persistedInvariants = checkPersistedGraphInvariants(graphForStore, {
+    baseGraph: metadata.baseGraphForInvariants,
+  });
+  const writesGraph = graphWasProvided(metadata.graph);
+  const persistedAnalysisGraphHash = writesGraph
+    ? persistedInvariants.analysisGraphHash
+    : null;
+  const effectiveGraphHash = writesGraph
+    ? (persistedAnalysisGraphHash ?? undefined)
+    : metadata.graph_hash;
+
   // Atomic-emit contract: every chip whose action_type is in the resumable
   // set produces exactly one matching pending action, written in the same
   // `append_turn_atomic` call.
@@ -698,7 +790,8 @@ export async function commitDirectAnswer(
           {
             scenario_id: metadata.scenario_id,
             emitted_at_iso: new Date().toISOString(),
-            graph_hash: metadata.graph_hash,
+            // §3.2: pin this turn's chips to the graph we are STORING.
+            graph_hash: effectiveGraphHash,
           },
         )
       : metadata.pending_actions;
@@ -727,7 +820,7 @@ export async function commitDirectAnswer(
     metadata.priorPendingActions ?? [],
     initialChipDerivedPending,
     metadata.consumedPendingRefs ?? [],
-    metadata.graph_hash,
+    effectiveGraphHash,
     nowMsForPendings,
   );
   const holdLiveAfterCommit =
@@ -774,7 +867,7 @@ export async function commitDirectAnswer(
     metadata.priorPendingActions ?? [],
     chipDerivedPending,
     metadata.consumedPendingRefs ?? [],
-    metadata.graph_hash,
+    effectiveGraphHash,
     nowMsForPendings,
   );
   const survivingPrior = carryForward.survivors;
@@ -894,35 +987,107 @@ export async function commitDirectAnswer(
     'assistant_message',
   );
 
-  // Track S 0.13c-4: persist-site intercept repair. This is the single chokepoint
-  // for scenarios.graph writes (store.append's only caller). Strip any duplicate
-  // observed-root intercept (intercept === observed_state.value) before the write,
-  // closing the non-draft reintroduction path (set_factor_value / edit_graph /
-  // proposal-apply) that the boundary repair and run_analysis guard do not cover.
-  // No-op when no graph is written (system events, chip clicks, non-graph turns);
-  // idempotent on already-repaired draft graphs. Reuses the #263/#269 predicate.
-  const graphToPersist = repairGraphForPersistence(metadata.graph, {
-    scenarioId: metadata.scenario_id,
-    turnId: metadata.turn_id,
-    turnClass: metadata.turn_class,
-    source: metadata.handler_id ?? undefined,
-  });
-
-  // V5 edit_graph P0: normalise edit-added option interventions to the canonical
-  // top-level OptionV3 contract before the write. An option from client-supplied
-  // graph_state can persist interventions under node.data.interventions, which
-  // GraphV3.safeParse strips on read (NodeV3 has no `data` field) — so the option
-  // reaches run_analysis/PLoT with zero interventions (422 / options_not_configured).
-  // Promoting them here makes the persisted record match draft-created options.
-  // Runs alongside (independent of) the Track S intercept repair above: that
-  // operates on factor observed-root intercepts, this on option intervention
-  // bundles. No-op on draft/already-canonical options; fail-open; idempotent.
-  const graphForStore = normaliseOptionInterventionContract(graphToPersist, {
-    scenarioId: metadata.scenario_id,
-    turnId: metadata.turn_id,
-    turnClass: metadata.turn_class,
-    source: metadata.handler_id ?? undefined,
-  });
+  // ── D — THE TERMINAL INVARIANT CHECK (design §8/§13 step 1) ──────────────
+  // The graph was projected into its persisted form at the TOP of this
+  // function (see `graphForStore` above), because every hash-dependent
+  // decision this turn makes had to be derived from the bytes we store rather
+  // than from the caller's pre-projection graph (§3.2). The three passes it
+  // applies keep their original relative order and their original semantics:
+  //   repairGraphForPersistence          — Track S 0.13c-4 intercept repair
+  //   normaliseOptionInterventionContract — V5 edit_graph P0 option contract
+  //   reconcileTopLevelOptionsFromNodes   — Lane C3 / decision ③ options mirror
+  //
+  // What runs HERE is the check, and it runs LAST: nothing mutates the graph
+  // between this line and `store.append`, so this validates the ACTUAL
+  // PERSISTED BYTES. Because `store.append` below is the single
+  // `scenarios.graph` writer in the service, this covers EVERY lane — edit,
+  // draft, chip-click, clarify, system-event, route-v2 add-option — by
+  // construction rather than by a hand-listed set of call sites (trap #12).
+  //
+  // FAIL-CLOSED, NEVER A SILENT REPAIR. Repairing here would put a mutation
+  // AFTER the hash was computed and recreate the exact defect this closes, so
+  // a violation refuses the commit and names what was wrong. The refusal is a
+  // throw: the caller's existing commit-failure catch ladder already maps it
+  // to a typed failure and, on the edit lane, reports the graph as NOT
+  // persisted — which is now true, rather than a graph silently stored corrupt.
+  if (persistedInvariants.status === 'violated') {
+    log.error(
+      {
+        event: 'v5.graph_persist.invariant_violation',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        source: metadata.handler_id ?? undefined,
+        introduced: persistedInvariants.violations.map((v) => ({
+          code: v.code,
+          count: v.count,
+          entity_ids: v.entity_ids,
+        })),
+        inherited_count: persistedInvariants.inheritedViolations.length,
+      },
+      '[commit] REFUSING the write — this turn INTRODUCED a structural violation into the graph',
+    );
+    throw new PersistedGraphInvariantError(persistedInvariants.violations);
+  }
+  // Inherited corruption is absorbed, NOT refused (a legacy/migration-era graph
+  // must stay editable — `edit-graph.ts:2750-2755`), but it is still surfaced:
+  // a violation nobody can see is one nobody will ever fix.
+  if (writesGraph && persistedInvariants.inheritedViolations.length > 0) {
+    log.warn(
+      {
+        event: 'v5.graph_persist.invariant_inherited',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        source: metadata.handler_id ?? undefined,
+        had_baseline: metadata.baseGraphForInvariants !== undefined,
+        inherited: persistedInvariants.inheritedViolations.map((v) => ({
+          code: v.code,
+          count: v.count,
+          entity_ids: v.entity_ids,
+        })),
+      },
+      '[commit] pre-existing structural violation carried through this write (absorbed, not refused) — ' +
+        formatViolations(persistedInvariants.inheritedViolations),
+    );
+  }
+  // Non-fatal findings are surfaced rather than swallowed. These are the
+  // invariants NOT yet demonstrated to hold on real traffic, so they are
+  // reported and the commit proceeds — an honest "we saw this and did not
+  // enforce it", never a silent pass.
+  if (writesGraph && persistedInvariants.observations.length > 0) {
+    log.warn(
+      {
+        event: 'v5.graph_persist.invariant_observation',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        source: metadata.handler_id ?? undefined,
+        observations: persistedInvariants.observations.map((v) => ({
+          code: v.code,
+          count: v.count,
+          entity_ids: v.entity_ids,
+        })),
+      },
+      '[commit] persisted-graph invariant OBSERVED but not enforced — ' +
+        formatViolations(persistedInvariants.observations),
+    );
+  }
+  // A graph whose top-level shape the structural invariants are undefined for
+  // is recorded as UNCHECKED rather than counted as a pass — an absence claim
+  // about this check must not be read wider than the graphs it can evaluate.
+  if (writesGraph && persistedInvariants.status === 'unshaped') {
+    log.warn(
+      {
+        event: 'v5.graph_persist.invariant_unchecked',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        source: metadata.handler_id ?? undefined,
+      },
+      '[commit] persisted-graph invariants NOT evaluated — the graph has no nodes/edges arrays',
+    );
+  }
 
   const { id: persistedRowId } = await store.append({
     scenario_id: metadata.scenario_id,
@@ -1116,8 +1281,10 @@ export async function commitDirectAnswer(
     briefText: metadata.briefText,
   });
 
-  const graphPersisted = graphWasProvided(metadata.graph);
+  const graphPersisted = writesGraph;
   return {
+    persistedAnalysisGraphHash,
+    persistedGraph: writesGraph ? graphForStore : null,
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume

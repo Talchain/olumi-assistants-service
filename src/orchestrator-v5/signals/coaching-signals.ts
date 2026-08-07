@@ -39,7 +39,7 @@ import {
 } from '../coaching/compare-runs.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import type { CoachingSignalId } from '../coaching/types.js';
-import { isSuccessfulRunAnalysisFact } from '../context/freshness.js';
+import { selectRunAnalysisFact } from '../context/freshness.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
@@ -74,6 +74,26 @@ export interface CoachingSignalInput {
    * correctly means "no prior success" per Paul's Task C correction.
    */
   readonly priorFacts: readonly HandlerFact[];
+  /**
+   * ⭐ ROADMAP 2.804 — MAY THIS TURN NAME A LEADING OPTION ON SCREEN?
+   *
+   * The TURN-LEVEL, DISPLAY-BOUND permission, derived by
+   * `readMayNameLeadingOptionVerdict` in `applyCoachingSignal` (the shared
+   * helper both dispatch paths use). It is a conjunction — the entitling
+   * fact's verdict AND the DISPLAYED analysis's verdict — and it fails closed.
+   *
+   * ⚠ THIS IS NOT "did this run's constraint verdict withhold?". That was the
+   * old `HandlerOutcome.__leading_option_claim_withheld` channel, now deleted:
+   * a per-run answer that structurally could not carry the displayed-analysis
+   * conjunct, because it never saw the fact array. Consuming it here meant the
+   * confirmation could withhold the leader while the coaching sentence
+   * directly beneath it named one. Do not reintroduce a per-run signal on this
+   * input — the question this slot must ask is about the TURN.
+   *
+   * REQUIRED, not optional-defaulting-true: an absent permission must not read
+   * as a granted one.
+   */
+  readonly mayNameLeadingOption: boolean;
 }
 
 export interface CoachingSignalDetection {
@@ -90,7 +110,18 @@ const EDIT_HANDLER_IDS = new Set([
 // Coaching-text bank. British English, sentence case, no em-dashes.
 // Typed Record over the derived CoachingSignalId union (coaching/types.ts):
 // adding an id to COACHING_SIGNAL_IDS without a bank entry fails to compile.
-const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
+/**
+ * ⚠ EXPORTED 2026-07-31 (ROADMAP 2.149) SO A CANARY CAN USE THE PRODUCTION COPY.
+ *
+ * `FIRST_ANALYSIS_COMPLETE` is the sentence #755's first cut destroyed — it says
+ * "explore the leading option", which trips the shared leader vocabulary and
+ * DESIGNATES NOTHING. The wire gate has the same exposure at a new address, and
+ * its canary must assert against THIS constant rather than a paraphrase: a
+ * paraphrase proves the gate spares a sentence the test author wrote, which is
+ * the one sentence that never changes. Reword the copy and the canary follows it
+ * in the same commit (CLAUDE.md trap #12).
+ */
+export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   readonly factorLabel?: string;
   readonly runDelta?: RunDelta | null;
 }) => string> = {
@@ -116,6 +147,22 @@ function composeRerunText(delta: RunDelta | null): string {
     // without a projectable envelope, or missing labels). Acknowledge the
     // rerun without claiming a comparison we could not make.
     return 'This was a re-run. It replaces the earlier result as the current analysis.';
+  }
+  // ⭐ THE SAME AMENDMENT AS `composeComparison`, and it belongs here for the
+  // same reason: every arm below asserts CONTINUITY between the two runs —
+  // "still leads", "The result is unchanged", "its lead has widened" — and
+  // `leading_option_changed === false` does not mean the leader is the same
+  // option. It also carries the "we could not tell" case, which `compareRuns`
+  // folds into `false` deliberately. Branching on the bare boolean would turn
+  // an honest abstention into a confident "nothing changed" on precisely the
+  // legacy runs where it can be false. Say this run's leader, state the limit,
+  // and make no claim relating the two (margin included: the lead being
+  // compared may belong to a different option).
+  if (delta.leader_identity_basis !== 'option_id') {
+    return (
+      `${delta.current_leading_label} leads after this re-run. I cannot line up `
+      + 'the earlier result with this one, so I have not compared the two.'
+    );
   }
   if (delta.leading_option_changed) {
     return (
@@ -159,8 +206,11 @@ export function detectCoachingSignal(
     // uses to keep no-ops out of the recent-changes projection.
     if (isNoopEditOutcome(input.outcome)) return null;
 
-    const priorSuccessfulAnalysis = findMostRecentSuccessfulAnalysisFact(input.priorFacts);
-    if (priorSuccessfulAnalysis) {
+    // The question THIS branch asks: "was an analysis on screen that this edit
+    // could have made stale?" — existence, not recency and not success. See the
+    // helper's own note for why it is kept separate from the run_analysis
+    // branch's predicate even though the two agree today.
+    if (hasPriorRunAnalysisFactToStale(input.priorFacts)) {
       // STALE wins over HIGH_SENSITIVITY per the authoritative priority order.
       return {
         signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
@@ -179,7 +229,44 @@ export function detectCoachingSignal(
 
   // run_analysis branch.
   if (input.proposedHandlerId === 'run_analysis') {
-    if (!hasPriorSuccessfulRunAnalysis(input.priorFacts)) {
+    // T1 claim safety. When the constraint verdict forbids naming a leading
+    // option, BOTH texts below become false statements: the first-run copy
+    // tells the user to "explore the leading option", and the rerun copy names
+    // the option outright ("{label} still leads"). The confirmation directly
+    // above them has just said no option can be put forward.
+    //
+    // This is not caught by the egress allowlist — that governs only the
+    // confirmation segment of `assistant_text`; this piece is a separate
+    // compose slot. So the claim-safety machinery built for the headline is
+    // bypassed by the sentence underneath it unless the signal itself is aware.
+    //
+    // ⭐ ROADMAP 2.804 — THE PERMISSION IS THE TURN'S, NOT THE RUN'S. This read
+    // used to be `leadingOptionClaimWithheld(input.outcome)`, an internal
+    // channel carrying THIS RUN's constraint verdict. That answered a narrower
+    // question than the slot asks, and could not see the displayed-analysis
+    // conjunct the turn verdict acquired in #737 — so on the divergence path
+    // the headline withheld the leader and this sentence named it. Nothing here
+    // re-derives the permission: it arrives already computed by the shared
+    // `applyCoachingSignal` helper, from ONE derivation (CLAUDE.md trap #12).
+    const leaderWithheld = !input.mayNameLeadingOption;
+
+    // The question THIS branch asks: "has an analysis ever completed before,
+    // i.e. is this a re-run rather than the first?" — a different question from
+    // the edit branch's, with the same answer today.
+    if (!hasAnyPriorRunAnalysisFact(input.priorFacts)) {
+      // SUPPRESSED, not reworded. The whole of this signal's value is the
+      // "explore the leading option" nudge, and on a withheld turn there is no
+      // leading option to explore. A replacement sentence would either repeat
+      // the confirmation's repair step or put a second, competing
+      // call-to-action on the same screen — and across the three withholding
+      // states, which have three different causes, any single re-diagnosis
+      // would be wrong for two of them. The confirmation already names the
+      // condition and says what to do; the honest coaching here is none.
+      //
+      // Telemetry does not go dark: the verdict's own events
+      // (v5.run_analysis.constraint_unevaluated /
+      // .constraint_identity_unresolved) already count these turns.
+      if (leaderWithheld) return null;
       return {
         signal_id: 'FIRST_ANALYSIS_COMPLETE',
         coaching_text: COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}),
@@ -191,11 +278,19 @@ export function detectCoachingSignal(
     // rerun acknowledgment whose text derives from the shared compareRuns
     // comparator (prior fact vs this turn's fact); when either run cannot
     // be projected the copy degrades to a comparison-free acknowledgment.
+    //
+    // On a withheld turn the comparison is not merely unsayable, it is
+    // unmakeable: every branch of `composeRerunText` that says anything
+    // NAMES an option. So the withheld turn reuses that same comparison-free
+    // degrade — the run is still acknowledged, no leader is asserted, and the
+    // signal id is unchanged so the telemetry series does not go dark.
     return {
       signal_id: 'RERUN_ANALYSIS_COMPLETE',
-      coaching_text: COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
-        runDelta: buildRerunDelta(input),
-      }),
+      coaching_text: leaderWithheld
+        ? composeRerunText(null)
+        : COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
+            runDelta: buildRerunDelta(input),
+          }),
     };
   }
 
@@ -229,9 +324,13 @@ function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
  * current outcome unexpectedly carries no run_analysis fact); the caller
  * then degrades to comparison-free rerun copy.
  *
- * Prior selection uses `isSuccessfulRunAnalysisFact` (the same canonical
- * predicate the freshness / comparison layers use), scanning newest-first
- * per the build-turn-context loader convention.
+ * Prior selection calls `selectRunAnalysisFact` — the canonical newest-first
+ * selector the freshness verdict itself is derived from. It used to be
+ * `priorFacts.find(isSuccessfulRunAnalysisFact)`: the right PREDICATE but a
+ * private ORDERING (first by array position), which is the same drift #738
+ * fixed in `selectTwoNewestRunAnalysisFacts` — a legacy fact with no
+ * `computed_at`, or any timestamp skew, made this acknowledgment diff against
+ * a different "previous run" than the rest of the turn was reasoning about.
  */
 function buildRerunDelta(input: CoachingSignalInput): RunDelta | null {
   const currentFact = input.outcome.handler_facts.find(
@@ -239,7 +338,7 @@ function buildRerunDelta(input: CoachingSignalInput): RunDelta | null {
   );
   if (currentFact === undefined) return null;
 
-  const priorFact = input.priorFacts.find(isSuccessfulRunAnalysisFact);
+  const priorFact = selectRunAnalysisFact(input.priorFacts)?.fact;
   if (priorFact === undefined) return null;
 
   const prior = projectRunFact(priorFact);
@@ -249,21 +348,73 @@ function buildRerunDelta(input: CoachingSignalInput): RunDelta | null {
   return compareRuns(prior, current, input.interventionControlledFactorIds);
 }
 
-function hasPriorSuccessfulRunAnalysis(facts: readonly HandlerFact[]): boolean {
-  // Presence of a run_analysis fact in priorFacts means the handler returned
-  // success on a prior turn (failed handlers throw and never emit facts).
-  // Paul's Task C correction: a failed analysis attempt must NOT block
-  // FIRST_ANALYSIS_COMPLETE from firing on the first success.
+/**
+ * "Has an analysis ever completed before this turn, i.e. is this a RE-RUN
+ * rather than the first analysis?"
+ *
+ * ⚠ APPLIES NO SUCCESS TEST, AND THE LOOSENESS IS THE CONTRACT. Presence of a
+ * run_analysis fact in priorFacts means the handler returned success on a prior
+ * turn (failed handlers throw and never emit facts). Paul's Task C correction:
+ * a failed analysis attempt must NOT block FIRST_ANALYSIS_COMPLETE from firing
+ * on the first success.
+ *
+ * ⚠ RENAMED FROM `hasPriorSuccessfulRunAnalysis` (ROADMAP 2.842). The old name
+ * claimed a success test this function does not perform, which made it a THIRD
+ * status predicate in a codebase whose dominant defect class is predicate
+ * drift: a `partial` / `degraded` fact counts as "successful" here while
+ * `isSuccessfulRunAnalysisFact` (`context/freshness.ts`) excludes exactly
+ * those. The NAME was the defect — tightening the behaviour would change the
+ * first-analysis path. The divergence from the freshness authority is now
+ * pinned by test rather than remembered; see `__tests__/coaching-signals.test.ts`
+ * ("the coaching layer's predicate is DELIBERATELY broader...").
+ *
+ * ⚠ BYTE-IDENTICAL TO `hasPriorRunAnalysisFactToStale` TODAY, AND KEPT SEPARATE
+ * ON PURPOSE. The two answer different questions ("is this a re-run?" vs "could
+ * this edit have staled a shown analysis?") that happen to share an answer, and
+ * they are loose for different reasons. CLAUDE.md trap #21: when two authorities
+ * agree today, the fix is to name the concepts apart, not to collapse them —
+ * merging would silently bind a future tightening of one to the other. Their
+ * agreement is itself pinned by test, so a divergence is loud rather than
+ * silent.
+ */
+function hasAnyPriorRunAnalysisFact(facts: readonly HandlerFact[]): boolean {
   return facts.some((f) => f.fact_type === 'run_analysis');
 }
 
-function findMostRecentSuccessfulAnalysisFact(
-  facts: readonly HandlerFact[],
-): HandlerFact | null {
-  for (let i = facts.length - 1; i >= 0; i--) {
-    if (facts[i].fact_type === 'run_analysis') return facts[i];
-  }
-  return null;
+/**
+ * "Was an analysis produced before this turn whose displayed results this edit
+ * could have made stale?"
+ *
+ * ⚠ EXISTENCE ONLY — THE ORDERING CLAIM WAS DELETED, NOT CORRECTED (ROADMAP
+ * 2.842). This replaced `findMostRecentSuccessfulAnalysisFact`, whose name
+ * asserted an ordering it did not deliver: it walked `facts` from the LAST
+ * index downwards and returned the first hit, while `prior_facts` arrives
+ * NEWEST-FIRST (`build-turn-context.ts`: "Order matches prior_turns
+ * (newest-first)", restated at several sites in `context/freshness.ts`). So it
+ * returned the OLDEST run_analysis fact under a name promising the newest.
+ * There was no live harm — its sole consumer read the result for truthiness, so
+ * the direction was unobservable — but the name guaranteed that the first
+ * caller to read a FIELD off it would silently get the wrong run's data.
+ *
+ * The direction was not "fixed", because nothing here consumes recency: a
+ * most-recent guarantee with no reader is a guarantee kept alive only by its own
+ * test. ⭐ AND A HAND-ROLLED NEWEST-PICKER WOULD BE THE WORSE DEFECT: this file
+ * already imports `selectRunAnalysisFact`, the canonical newest-first selector,
+ * and `buildRerunDelta` already uses it precisely because #738 removed a private
+ * ordering from this same file ("the right PREDICATE but a private ORDERING").
+ * A second private ordering alongside it would recreate that drift. If a caller
+ * here ever needs the newest prior run_analysis fact, `selectRunAnalysisFact` is
+ * the answer.
+ *
+ * ⚠ Applies no success test either, and no longer claims one — a `partial` /
+ * `degraded` fact counts. That is correct for THIS question (an edit invalidates
+ * whatever was on screen, degraded or not) and is a deliberate divergence from
+ * `isSuccessfulRunAnalysisFact`, pinned by test. See the note on
+ * {@link hasAnyPriorRunAnalysisFact} for why the two coaching predicates stay
+ * separate despite agreeing today.
+ */
+function hasPriorRunAnalysisFactToStale(facts: readonly HandlerFact[]): boolean {
+  return facts.some((f) => f.fact_type === 'run_analysis');
 }
 
 /**

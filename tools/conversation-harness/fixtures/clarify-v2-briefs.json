@@ -196,5 +196,307 @@
       ],
       "note": "The explicit ready-to-draft escape: a go-ahead always proceeds with the working brief."
     }
+  ],
+  "no_reask_cases_description_2162a": "ROADMAP 2.162a ADDENDUM — `must_ask` (optional). `supplied` alone can only catch a widening in ONE direction: it fails when the intake asks for something the brief gave. It CANNOT catch the opposite error, a detector widened so far that it credits a brief which names no alternatives at all — such a case still asks about its other missing dimensions, so the flow still 'asks >=1 question' and FLOOR 6 stays green while the product silently drafts options nobody supplied. `must_ask` closes that: every dimension listed must actually be asked somewhere in the pre-draft flow. It is the presence-proof half of trap 13 for the over-credit direction, and it is what makes the `noask-*` negatives below bite — verified by mutation (an over-wide serial-list pattern reddens them).",
+  "no_reask_cases_description": "ROADMAP 2.103 micro eval set — 'the intake must not ask for a fact the brief already supplied'. Each case pairs a decision brief with `supplied`: the completeness dimensions a reader can extract from that brief's own words (the golden label). The deterministic assertion (FLOOR 6 in __tests__/clarify-v2-floors.harness-test.ts) walks the WHOLE pre-draft flow — round 1 plus every resume round the stop rule allows — and fails if any emitted question's dimension is in `supplied`. `expect` is derived-not-declared in spirit but stated for readability: 'silent' = every dimension is supplied, so the flow must proceed with zero questions; 'ask_only_unsupplied' = the flow must still ask (>=1 question) but only about dimensions the brief does NOT supply. Every case is asserted draft-shaped (isDraftShapedText), so a fixture can never pass by being unreachable on the live route. PROVENANCE: reask-01 is the live-journey defect recorded twice independently (HANDOVER 18 Jul: 'a brief explicitly enumerating THREE named priced options still triggers \"What alternatives are you weighing this against?\"'; ROADMAP 2.103, Codex live journey 28 Jul: 'alternatives explicitly supplied -> asked for alternatives; outcome+timeframe supplied -> asked again; two redundant clarify turns before any draft'). noreask-06 is the reproduction brief the 2.103 dispatch specified as MUST-NOT-re-ask. ask-07 is the false-positive control: a genuinely sparse brief MUST still ask.",
+  "no_reask_cases": [
+    {
+      "id": "reask-01-enumerated-priced-options",
+      "brief": "We must decide how to replace our ageing billing platform. We have three options: Vendor A at £180,000, Vendor B at £240,000, and an in-house build at £200,000. The goal is to cut support costs, and the replacement has to be live within this year.",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "LIVE-JOURNEY CASE (HANDOVER 18 Jul + ROADMAP 2.103). Three named, priced alternatives enumerated as a labelled list with no joining 'or'/'versus'. RED at the 2.103 baseline: the options battery required a joining word, so the intake asked 'What alternatives are you weighing this against?' over a brief that had just enumerated three of them."
+    },
+    {
+      "id": "reask-02-stated-deadline-in-six-months",
+      "brief": "We need to decide how to replace our ageing billing system. Budget is £200,000 and it must be live in six months. I am weighing building it in-house against buying a vendor platform.",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "The 2.103 reproduction brief with its horizon phrased 'in six months' instead of 'within six months'. RED at the baseline: the timeframe battery credited only the literal 'within ...' opener and the digit-anchored duration arm, so a word-form horizon behind any other preposition scored MISSING. Single-variable control against noreask-06, which differs by exactly one word."
+    },
+    {
+      "id": "reask-03-deadline-by-month-name",
+      "brief": "Should we renew the vendor contract or move to a competitor by March? The goal is to cut costs and roughly £80,000 is at stake.",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "A bare calendar-month deadline. RED at the baseline: 'by the end of March' matched the existing 'by (the )?end of' arm but the bare 'by March' did not, so the intake asked for a horizon the brief had stated."
+    },
+    {
+      "id": "reask-04-stated-window-word-form",
+      "brief": "The goal is to reduce churn. We have a six month window and £50,000 to spend. Should we rebuild onboarding in-house or buy a vendor tool?",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "A stated window in word form. RED at the baseline: the duration arm was digit-anchored on purpose (to exclude compound adjectives like 'four-day week'), which also excluded an explicit word-form window noun."
+    },
+    {
+      "id": "reask-05-success-stated-as-would-be",
+      "brief": "Success would be fewer than five failed invoices a week. Should we rebuild billing in-house or buy a vendor platform for around £200,000 this year?",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "The outcome half of the 2.103 report. RED at the baseline: the goal battery credited 'success looks like / means / is defined / is measured' but not the equally common 'success would be ...', so the intake asked 'What outcome would make this decision a success?' immediately after the user defined success."
+    },
+    {
+      "id": "noreask-06-billing-brief-as-briefed",
+      "brief": "We need to decide how to replace our ageing billing system. Budget is £200,000 and it must be live within six months. I am weighing building it in-house against buying a vendor platform.",
+      "supplied": [
+        "goal",
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "expect": "silent",
+      "note": "GREEN at the 2.103 baseline and must stay green: the exact brief the 2.103 dispatch named as MUST-NOT-trigger-re-asking. Present as a regression guard, not as evidence of the defect."
+    },
+    {
+      "id": "ask-07-sparse-control-false-positive-guard",
+      "brief": "Help me decide what to do about our billing system.",
+      "supplied": [],
+      "expect": "ask_only_unsupplied",
+      "note": "FALSE-POSITIVE CONTROL. A genuinely sparse brief supplies nothing, so the intake MUST still ask. If a detector widening ever silences this case, the fix has traded the redundant-question defect for the never-asks baseline the whole capability was built to end."
+    },
+    {
+      "id": "mid-08-options-and-scale-only",
+      "brief": "Should we buy the £180,000 vendor platform or rebuild billing in-house for £200,000?",
+      "supplied": [
+        "options",
+        "quantities"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "MIDDLE CASE. Alternatives and scale are supplied; outcome and horizon genuinely are not. The intake must ask about goal and/or timeframe and must never ask about options or quantities. GREEN at the baseline; it guards the fix against over-widening in the other direction."
+    },
+    {
+      "id": "reask-09-serial-and-list-minimal",
+      "brief": "Should we rebuild billing in-house, buy Vendor A, and stay put?",
+      "supplied": [
+        "options"
+      ],
+      "must_ask": [
+        "goal",
+        "timeframe",
+        "quantities"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a — THE MINIMAL FAILING INPUT, verbatim from the adjudication §7. 62 chars, draft-shaped, names THREE alternatives in ordinary English serial grammar. RED at the 2.162a baseline: every options arm required a joining 'or'/'versus'/'weighing … against' or an option-family noun, so nothing credited the list itself and the intake asked 'What alternatives are you weighing this against?' over a brief that had just named three. The one-character control is the same sentence with the final 'and' changed to 'or', which was already SATISFIED — the whole defect surface for this class was one word. `must_ask` pins the other half: the three genuinely-absent dimensions must STILL be asked, so this golden cannot be satisfied by a widening that silences everything."
+    },
+    {
+      "id": "reask-10-hiring-serial-and-list",
+      "brief": "Should we hire a senior tech lead, hire two juniors, bring in an agency, and promote internally?",
+      "supplied": [
+        "options",
+        "quantities"
+      ],
+      "must_ask": [
+        "goal",
+        "timeframe"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a — the HIRING species the 31 Jul Codex journey was explicitly instructed to write (CODEX-REVIEW-BRIEF-2026-07-30.md:31-33, 'a hiring or platform choice with 3+ options'), composed the way a person actually writes a list. RED at the baseline, and it cost TWO redundant questions (options + timeframe) — the row's '+17s + a click'."
+    },
+    {
+      "id": "reask-11-counted-approaches",
+      "brief": "We must decide how to modernise billing. There are four approaches on the table: rebuild in-house, license Vendor A, license Vendor B, and staying put.",
+      "supplied": [
+        "options",
+        "quantities"
+      ],
+      "must_ask": [
+        "goal",
+        "timeframe"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a — a COUNTED choice set using a noun outside the shipped ten-word list. RED at the baseline: 'four approaches' scored MISSING while 'four routes' (same sentence, one noun changed) scored SATISFIED."
+    },
+    {
+      "id": "reask-12-counted-ways-noun-parity",
+      "brief": "Should we modernise billing? There are four ways: rebuild, Vendor A, Vendor B, and stay put.",
+      "supplied": [
+        "options",
+        "quantities"
+      ],
+      "must_ask": [
+        "goal",
+        "timeframe"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a — the NOUN-PARITY case, adjudication §7's second independent minimal flip. 'four ways' vs 'four routes' differed only because this file carried TWO hand-maintained noun lists that had drifted (CLAUDE.md trap 12, inside one source file). Both arms now derive from CHOICE_SET_NOUNS; this golden is what makes a future re-divergence RED."
+    },
+    {
+      "id": "reask-13-and-slash-or",
+      "brief": "Should we hire a lead, hire two juniors, outsource, and/or promote internally?",
+      "supplied": [
+        "options",
+        "quantities"
+      ],
+      "must_ask": [
+        "goal",
+        "timeframe"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a — 'and/or'. RED at the baseline for a WHITESPACE reason, not a decision: the bare-joiner arm was /\\S\\s+or\\s+.../, which requires whitespace immediately before 'or', and in 'and/or' it is preceded by a slash. The 'or not' exclusion still applies through the widened form."
+    },
+    {
+      "id": "reask-14-counted-things-under-consideration",
+      "brief": "Should we modernise billing this year? Four things we are considering: rebuild, Vendor A, Vendor B, and staying put.",
+      "supplied": [
+        "options",
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "goal"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a — a counted set under active consideration. Credited ONLY with the count: 'things we are considering' without a number would fire on any brief that mentions considering anything, so the count carries the >=2 evidence and the consideration verb carries the decision framing."
+    },
+    {
+      "id": "noask-15-geography-comma-list-still-asks",
+      "brief": "Should we launch in France, Spain and Italy this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      "supplied": [
+        "goal",
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "options"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a NEGATIVE — DEMONSTRATED, not hypothesised (adjudication §8). A geography list is NOT a set of alternatives: this brief names one action applied to three places, and the intake MUST still ask what it is being weighed against. GREEN at the baseline and it must stay green. This is the single-dimension case — options is the ONLY thing missing — so an over-wide widening turns round 1 from 'ask' into 'proceed' and this golden goes RED on the spot. If it ever flips, the widening over-reached: narrow the detector, never delete the golden."
+    },
+    {
+      "id": "noask-16-geography-oxford-comma-still-asks",
+      "brief": "Should we launch in France, Spain, and Italy this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      "supplied": [
+        "goal",
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "options"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a NEGATIVE — the SHARPER variant, one character from noask-15 (an Oxford comma). The adjudication warned that a comma-COUNTING guard is not enough: 'add a third country and even a >=2-comma guard fails'. This case has the two commas AND the terminating 'and', so it defeats a purely structural arm and passes only because the serial-list arm also requires the item after the terminator to be a base-form ACTION verb — 'Italy' is not. Without this golden the comma guard would be a control that passes by accident (trap 12b)."
+    },
+    {
+      "id": "noask-17-bulleted-facts-not-options-still-asks",
+      "brief": "Should we expand into Europe next year?\n- Our revenue is £2m\n- We have 40 staff\n- Churn is 8%",
+      "supplied": [
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "options"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a NEGATIVE — DEMONSTRATED (adjudication §8). The bullets are FACTS about the business, not alternatives. A bare 'consecutive bullet lines = alternatives' arm credits this brief, which is why no such structural arm ships here: Slice A adds no bullet/numbered-list crediting at all. A wrongly-credited thin brief is worse than the defect being fixed — it drafts a model from options nobody supplied."
+    },
+    {
+      "id": "reask-15-serial-list-without-oxford-comma",
+      "brief": "Should we rebuild billing in-house, buy Vendor A and stay put?",
+      "supplied": [
+        "options"
+      ],
+      "must_ask": [
+        "goal",
+        "timeframe",
+        "quantities"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a AMENDMENT A6 — `reask-09` with ONE FEWER COMMA. The first cut of the serial arm hard-required the Oxford comma before the terminator, so whether the intake re-asked for alternatives depended on the user's punctuation style. Safe to relax only because every item is now verb-anchored: the comma was never what made the arm precise, and every negative below holds identically with and without it."
+    },
+    {
+      "id": "noask-18-widened-noun-in-ordinary-prose-still-asks",
+      "brief": "Should we rebuild billing this year? Our plans are ambitious, but our budget is tight at £180,000 and the goal is to cut costs.",
+      "supplied": [
+        "goal",
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "options"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a AMENDMENT A1 — NEGATIVE for the widened-noun ENUMERATION arm. `plans` is a choice-set noun in some usages and ordinary prose in others; here it is prose and the brief names no alternatives at all. The first cut admitted the widened nouns into the COPULA construction behind a guard that required a comma or an and/or ANYWHERE within 160 characters — which this sentence's ordinary subordinate clause ('ambitious, but our budget') satisfies. The widened nouns are now admitted only with list-introducing punctuation. Single-missing-dimension shape: `options` is the ONLY thing absent, so an over-credit turns round 1 from ask into proceed and this reddens immediately."
+    },
+    {
+      "id": "noask-19-counted-widened-noun-without-decision-frame-still-asks",
+      "brief": "Should we migrate to the new platform this quarter? There are three ways this could go wrong and the goal is to avoid downtime on a £90,000 budget.",
+      "supplied": [
+        "goal",
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "options"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a AMENDMENT A2 — NEGATIVE for the widened-noun COUNTED arm. 'three ways this could go wrong' counts FAILURE MODES, not alternatives. A count in front of a CORE noun ('three options') is self-evidencing; in front of a widened noun it is not, so the widened counted arm now requires a same-sentence decision frame (list punctuation, 'on the table', or considering/weighing/choosing between). The first cut put the widened nouns into the counted arm with no guard at all."
+    },
+    {
+      "id": "noask-20-serial-list-with-a-non-action-item-still-asks",
+      "brief": "Should we launch in France, Spain, Italy, and hire locally this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      "supplied": [
+        "goal",
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "options"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a AMENDMENT A3 — NEGATIVE for the SERIAL arm, and the sharpest case in the pack. It is `noask-16` with one word changed, and it broke the first cut: that arm checked the FIRST item and the item after the terminating and/or, leaving the middle unchecked — so 'launch' … 'hire' anchored both ends while 'Spain, Italy' sat unexamined between them, and the brief scored COMPLETE and proceeded silently. The arm is now genuinely item-level: every comma-separated item must begin with an action verb, and no comma may appear inside an item. 'Spain' fails at item 2."
+    },
+    {
+      "id": "noask-21-assertive-lead-is-a-plan-not-a-choice-still-asks",
+      "brief": "We will launch in Q1, hire in Q2, and expand in Q3. The goal is to grow revenue by 30% on a £1m budget.",
+      "supplied": [
+        "goal",
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "options"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a AMENDMENT A4 — NEGATIVE for the CHOICE_LEAD. Every item here IS an action verb, so the item-level anchor alone does NOT reject it — this is a sequenced PLAN being announced, not a choice being weighed, and only the lead can tell the difference. The lead now excludes the assertive modals (will/must/shall) and the second/third-person subjects. This case is why A3 and A4 are two amendments and not one: each is necessary and neither is sufficient."
+    },
+    {
+      "id": "noask-22-bare-and-is-not-a-disjunction-still-asks",
+      "brief": "Should we expand into Germany this year? The goal is to grow revenue by 20% and the budget is £500,000.",
+      "supplied": [
+        "goal",
+        "quantities",
+        "timeframe"
+      ],
+      "must_ask": [
+        "options"
+      ],
+      "expect": "ask_only_unsupplied",
+      "note": "ROADMAP 2.162a AMENDMENT A5 — NEGATIVE for the BARE-JOINER arm, which 2.162a widened from `or` to `and/or`. The widening is one slash wide by design; the failure mode to guard is someone later relaxing it to a bare `and`, which is a conjunction and appears in almost every brief ever written. This brief carries exactly that bare `and` and names no alternatives, so any such relaxation reddens here."
+    }
   ]
 }

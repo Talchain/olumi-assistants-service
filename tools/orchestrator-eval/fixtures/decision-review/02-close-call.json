@@ -1,0 +1,373 @@
+{
+  "id": "02-close-call",
+  "description": "close_call / close_call run where the two options overlap and one connection reverses the ordering. This is the fixture that exercises the served TONE table at caution rank 1 (\"clear lead\", \"obvious\" forbidden) and the R-CONT fabricated-callback guard.",
+  "provenance": {
+    "origin": "graph-evaluator-revival",
+    "source": "tools/graph-evaluator/fixtures/decision-review/02-close-call.json (committed 11078d28, 2026-03-06)",
+    "note": "Revived; edge ids added, flip_threshold_data added, and the readiness/headline_type pair kept so the tone row resolves to the close_call row rather than being asserted by hand. | FLIP_THRESHOLDS GOLDEN CORRECTED 2026-07-31 (fix-decision-review-v15 lane, disclosed): the golden flip_thresholds entries were hand-written as { factor_label, current, flip_at, note } with rounded values. Two independent defects. (a) FIELD NAMES: the runtime contract is { factor_id, factor_label, current_display, flip_display, narrative } (src/orchestrator-v5/compose/phase3-blocks.ts:1703-1765 reads factor_id/factor_label/narrative and DROPS any entry missing one), so the old goldens described a shape production would discard entirely — a golden nothing could ever produce. (b) VALUE FORM: the served v14 prompt contradicts itself here — :344-350 orders the raw value verbatim while :116-118/:220 order the percentage form and no_raw_probability_decimals scores the raw form as a failure. The goldens now follow the NON-self-contradictory rule (percentage form) and the runtime field names. The prompt-side resolution is drafted but NOT YET PROMOTED (tools/orchestrator-eval/drafts/decision_review.v15-draft.txt); until it is, this fixture encodes the contract the runtime and the scorer agree on, not the flip bullet the served prompt still carries."
+  },
+  "input": {
+    "brief": "Do we move the team to a four day week or keep the current schedule?",
+    "brief_hash": "a7b8c9d0e1f20304",
+    "graph": {
+      "nodes": [
+        {
+          "id": "dec_schedule",
+          "kind": "decision",
+          "label": "Working Week Change"
+        },
+        {
+          "id": "opt_four_day",
+          "kind": "option",
+          "label": "Move to Four Day Week"
+        },
+        {
+          "id": "opt_status_quo",
+          "kind": "option",
+          "label": "Keep Current Schedule"
+        },
+        {
+          "id": "fac_retention",
+          "kind": "factor",
+          "label": "Staff Retention"
+        },
+        {
+          "id": "fac_throughput",
+          "kind": "factor",
+          "label": "Delivery Throughput"
+        },
+        {
+          "id": "out_margin",
+          "kind": "outcome",
+          "label": "Operating Margin"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_retention_margin",
+          "from": "fac_retention",
+          "to": "out_margin",
+          "effect_direction": "positive"
+        },
+        {
+          "id": "edge_throughput_margin",
+          "from": "fac_throughput",
+          "to": "out_margin",
+          "effect_direction": "positive"
+        }
+      ]
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_four_day",
+          "option_label": "Move to Four Day Week",
+          "win_probability": 0.53,
+          "outcome": {
+            "mean": 0.51,
+            "p10": 0.29,
+            "p90": 0.74
+          }
+        },
+        {
+          "option_id": "opt_status_quo",
+          "option_label": "Keep Current Schedule",
+          "win_probability": 0.47,
+          "outcome": {
+            "mean": 0.49,
+            "p10": 0.3,
+            "p90": 0.71
+          }
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "factor_id": "fac_throughput",
+          "factor_label": "Delivery Throughput",
+          "elasticity": -0.44,
+          "confidence": 0.62
+        },
+        {
+          "factor_id": "fac_retention",
+          "factor_label": "Staff Retention",
+          "elasticity": 0.39,
+          "confidence": 0.75
+        }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "edge_throughput_margin",
+          "from_label": "Delivery Throughput",
+          "to_label": "Operating Margin",
+          "switch_probability": 0.41
+        }
+      ],
+      "robustness": {
+        "level": "low",
+        "recommendation_stability": 0.56,
+        "overall_confidence": 0.48
+      }
+    },
+    "deterministic_coaching": {
+      "headline_type": "close_call",
+      "readiness": "close_call",
+      "evidence_gaps": [
+        {
+          "factor_id": "fac_throughput",
+          "factor_label": "Delivery Throughput",
+          "voi": 0.22,
+          "confidence": 0.62
+        }
+      ],
+      "model_critiques": []
+    },
+    "winner": {
+      "id": "opt_four_day",
+      "label": "Move to Four Day Week",
+      "win_probability": 0.53,
+      "outcome_mean": 0.51
+    },
+    "runner_up": {
+      "id": "opt_status_quo",
+      "label": "Keep Current Schedule",
+      "win_probability": 0.47,
+      "outcome_mean": 0.49
+    },
+    "flip_threshold_data": [
+      {
+        "factor_id": "fac_throughput",
+        "factor_label": "Delivery Throughput",
+        "current_value": 0.44,
+        "flip_value": 0.49
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Hedged in the way the close_call tone row requires. Should PASS.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Move to Four Day Week is ahead by about 6 percentage points over Keep Current Schedule, which is inside the range the model cannot separate. Delivery throughput is the fragility that decides it.",
+        "story_headlines": {
+          "opt_four_day": "Slightly ahead, but only while delivery throughput holds",
+          "opt_status_quo": "Close behind and less exposed to throughput loss"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in only about 56% of runs, so the two options are hard to separate.",
+          "primary_risk": "Delivery throughput could fall far enough to reverse the ordering.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Delivery throughput reverses the ordering in about 41% of runs."
+          ]
+        },
+        "readiness_rationale": "The two options sit close together, so more can be learned about delivery throughput before committing.",
+        "evidence_enhancements": {
+          "fac_throughput": {
+            "why": "Delivery throughput is both the least well supported input and the one that separates the options.",
+            "expected_gain": "Would separate two options that currently overlap."
+          }
+        },
+        "scenario_contexts": {
+          "edge_throughput_margin": {
+            "context": "If delivery throughput drops, operating margin follows and Keep Current Schedule moves ahead."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_throughput",
+            "factor_label": "Delivery Throughput",
+            "current_display": "44%",
+            "flip_display": "49%",
+            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
+          }
+        ],
+        "bias_findings": [],
+        "key_assumptions": [
+          "Delivery throughput responds to the schedule change within the period modelled.",
+          "Staff retention gains hold beyond the first year."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What evidence about delivery throughput would settle this within a month?",
+            "technique": "value of information"
+          }
+        ]
+      }
+    },
+    {
+      "label": "fabricated_callback",
+      "note": "\"As we discussed\" — a shared conversation the review input cannot contain (R-CONT).",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Move to Four Day Week is ahead by about 6 percentage points over Keep Current Schedule, which is inside the range the model cannot separate. Delivery throughput is the fragility that decides it.",
+        "story_headlines": {
+          "opt_four_day": "Slightly ahead, but only while delivery throughput holds",
+          "opt_status_quo": "Close behind and less exposed to throughput loss"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in only about 56% of runs, so the two options are hard to separate.",
+          "primary_risk": "Delivery throughput could fall far enough to reverse the ordering.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Delivery throughput reverses the ordering in about 41% of runs."
+          ]
+        },
+        "readiness_rationale": "As we discussed, the two options sit close together, so more can be learned about delivery throughput first.",
+        "evidence_enhancements": {
+          "fac_throughput": {
+            "why": "Delivery throughput is both the least well supported input and the one that separates the options.",
+            "expected_gain": "Would separate two options that currently overlap."
+          }
+        },
+        "scenario_contexts": {
+          "edge_throughput_margin": {
+            "context": "If delivery throughput drops, operating margin follows and Keep Current Schedule moves ahead."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_throughput",
+            "factor_label": "Delivery Throughput",
+            "current_display": "44%",
+            "flip_display": "49%",
+            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
+          }
+        ],
+        "bias_findings": [],
+        "key_assumptions": [
+          "Delivery throughput responds to the schedule change within the period modelled.",
+          "Staff retention gains hold beyond the first year."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What evidence about delivery throughput would settle this within a month?",
+            "technique": "value of information"
+          }
+        ]
+      }
+    },
+    {
+      "label": "tone_breach",
+      "note": "Uses \"clear lead\" and \"obvious\", both forbidden at this run's tone row.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Move to Four Day Week holds a clear lead over Keep Current Schedule, and the answer here is obvious. Delivery throughput is the fragility that decides it.",
+        "story_headlines": {
+          "opt_four_day": "Slightly ahead, but only while delivery throughput holds",
+          "opt_status_quo": "Close behind and less exposed to throughput loss"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in only about 56% of runs, so the two options are hard to separate.",
+          "primary_risk": "Delivery throughput could fall far enough to reverse the ordering.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Delivery throughput reverses the ordering in about 41% of runs."
+          ]
+        },
+        "readiness_rationale": "The two options sit close together, so more can be learned about delivery throughput before committing.",
+        "evidence_enhancements": {
+          "fac_throughput": {
+            "why": "Delivery throughput is both the least well supported input and the one that separates the options.",
+            "expected_gain": "Would separate two options that currently overlap."
+          }
+        },
+        "scenario_contexts": {
+          "edge_throughput_margin": {
+            "context": "If delivery throughput drops, operating margin follows and Keep Current Schedule moves ahead."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_throughput",
+            "factor_label": "Delivery Throughput",
+            "current_display": "44%",
+            "flip_display": "49%",
+            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
+          }
+        ],
+        "bias_findings": [],
+        "key_assumptions": [
+          "Delivery throughput responds to the schedule change within the period modelled.",
+          "Staff retention gains hold beyond the first year."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What evidence about delivery throughput would settle this within a month?",
+            "technique": "value of information"
+          }
+        ]
+      }
+    },
+    {
+      "label": "internal_vocabulary",
+      "note": "Narrates recommendation_stability and elasticity by name.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Move to Four Day Week is ahead by about 6 percentage points over Keep Current Schedule, which is inside the range the model cannot separate. Delivery throughput is the fragility that decides it.",
+        "story_headlines": {
+          "opt_four_day": "Slightly ahead, but only while delivery throughput holds",
+          "opt_status_quo": "Close behind and less exposed to throughput loss"
+        },
+        "robustness_explanation": {
+          "summary": "The recommendation_stability is about 56%, and the elasticity on the leading factor is what drives it.",
+          "primary_risk": "Delivery throughput could fall far enough to reverse the ordering.",
+          "stability_factors": [],
+          "fragility_factors": [
+            "Delivery throughput reverses the ordering in about 41% of runs."
+          ]
+        },
+        "readiness_rationale": "The two options sit close together, so more can be learned about delivery throughput before committing.",
+        "evidence_enhancements": {
+          "fac_throughput": {
+            "why": "Delivery throughput is both the least well supported input and the one that separates the options.",
+            "expected_gain": "Would separate two options that currently overlap."
+          }
+        },
+        "scenario_contexts": {
+          "edge_throughput_margin": {
+            "context": "If delivery throughput drops, operating margin follows and Keep Current Schedule moves ahead."
+          }
+        },
+        "flip_thresholds": [
+          {
+            "factor_id": "fac_throughput",
+            "factor_label": "Delivery Throughput",
+            "current_display": "44%",
+            "flip_display": "49%",
+            "narrative": "If Delivery Throughput moves from 44% to 49%, the leading option changes. A small move reverses the ordering."
+          }
+        ],
+        "bias_findings": [],
+        "key_assumptions": [
+          "Delivery throughput responds to the schedule change within the period modelled.",
+          "Staff retention gains hold beyond the first year."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What evidence about delivery throughput would settle this within a month?",
+            "technique": "value of information"
+          }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "good": true,
+    "fabricated_callback": false,
+    "tone_breach": false,
+    "internal_vocabulary": false
+  },
+  "expectedFailedDimensions": {
+    "fabricated_callback": [
+      "no_fabricated_continuity"
+    ],
+    "tone_breach": [
+      "tone_alignment"
+    ],
+    "internal_vocabulary": [
+      "no_internal_vocabulary",
+      "no_banned_lexicon"
+    ]
+  }
+}

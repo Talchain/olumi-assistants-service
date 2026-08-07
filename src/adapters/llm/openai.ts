@@ -7,19 +7,20 @@ import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../../config/graphCaps.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { formatEdgeId } from "../../cee/corrections.js";
 import { withRetry } from "../../utils/retry.js";
-import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, RepairGraphArgs, RepairGraphResult, CallOpts, GraphCappedEvent, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ToolResponseBlock } from "./types.js";
+import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, SuggestOptionsResult, CallOpts, ChatArgs, ChatResult, ChatWithToolsArgs, ChatWithToolsResult, ToolResponseBlock } from "./types.js";
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAuthoredGoalThreshold } from "./normalisation.js";
+import { contentDigest } from "../../utils/redaction.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
-import { resolveDraftMaxTokens, isDraftTruncated } from "./draft-budget.js";
+import { resolveDraftMaxTokens, isDraftTruncated, buildFailedCallLlmMeta } from "./draft-budget.js";
+import { wrapUntrusted } from "./untrusted-envelope.js";
 import { getSystemPrompt, getSystemPromptMeta, invalidatePromptCache } from './prompt-loader.js';
 import { isReasoningModel } from "../../config/models.js";
 import {
   LLMDraftResponse as OpenAIDraftResponse,
-  LLMRepairResponse as OpenAIRepairResponse,
   LLMOptionsResponse as OpenAIOptionsResponse,
   LLMClarifyResponse as OpenAIClarifyResponse,
 } from './shared-schemas.js';
@@ -196,137 +197,6 @@ export function buildModelParams(
   }
 }
 
-// Maximum size for graph JSON in repair prompts (50KB)
-const REPAIR_PROMPT_MAX_JSON_SIZE = 50 * 1024;
-
-/**
- * Truncate graph to fit within repair prompt size limit.
- * Prioritizes keeping nodes over edges when truncating.
- */
-function truncateGraphForRepairPrompt(graph: GraphT): { graph: GraphT; truncated: boolean; originalNodes: number; originalEdges: number } {
-  const originalNodes = graph.nodes?.length ?? 0;
-  const originalEdges = graph.edges?.length ?? 0;
-
-  const jsonStr = JSON.stringify(graph, null, 2);
-  if (jsonStr.length <= REPAIR_PROMPT_MAX_JSON_SIZE) {
-    return { graph, truncated: false, originalNodes, originalEdges };
-  }
-
-  log.warn(
-    { json_size: jsonStr.length, max_size: REPAIR_PROMPT_MAX_JSON_SIZE, node_count: originalNodes, edge_count: originalEdges },
-    "Repair prompt graph too large - truncating"
-  );
-
-  // Calculate target sizes (keep 80% of limits to leave room for structure overhead)
-  const targetNodes = Math.min(originalNodes, GRAPH_MAX_NODES);
-  const targetEdges = Math.min(originalEdges, GRAPH_MAX_EDGES);
-
-  // Iteratively reduce until under limit
-  let truncatedGraph = { ...graph };
-  let iterations = 0;
-  const maxIterations = 10;
-
-  while (iterations < maxIterations) {
-    const testStr = JSON.stringify(truncatedGraph, null, 2);
-    if (testStr.length <= REPAIR_PROMPT_MAX_JSON_SIZE) {
-      break;
-    }
-
-    // Reduce by 20% each iteration, prioritizing edge reduction
-    const currentNodes = truncatedGraph.nodes?.length ?? 0;
-    const currentEdges = truncatedGraph.edges?.length ?? 0;
-
-    if (currentEdges > Math.ceil(targetEdges * 0.5)) {
-      // Reduce edges first
-      const newEdgeCount = Math.ceil(currentEdges * 0.8);
-      truncatedGraph = {
-        ...truncatedGraph,
-        edges: truncatedGraph.edges?.slice(0, newEdgeCount),
-      };
-    } else if (currentNodes > Math.ceil(targetNodes * 0.5)) {
-      // Then reduce nodes
-      const newNodeCount = Math.ceil(currentNodes * 0.8);
-      const keptNodeIds = new Set(truncatedGraph.nodes?.slice(0, newNodeCount).map(n => n.id) ?? []);
-      truncatedGraph = {
-        ...truncatedGraph,
-        nodes: truncatedGraph.nodes?.slice(0, newNodeCount),
-        edges: truncatedGraph.edges?.filter(e => keptNodeIds.has(e.from) && keptNodeIds.has(e.to)),
-      };
-    } else {
-      // Already at minimum, break
-      break;
-    }
-    iterations++;
-  }
-
-  emit(TelemetryEvents.RepairPromptTruncated ?? "llm.repair_prompt.truncated", {
-    original_json_size: jsonStr.length,
-    truncated_json_size: JSON.stringify(truncatedGraph, null, 2).length,
-    original_nodes: originalNodes,
-    truncated_nodes: truncatedGraph.nodes?.length ?? 0,
-    original_edges: originalEdges,
-    truncated_edges: truncatedGraph.edges?.length ?? 0,
-  });
-
-  return {
-    graph: truncatedGraph as GraphT,
-    truncated: true,
-    originalNodes,
-    originalEdges,
-  };
-}
-
-async function buildRepairPrompt(
-  graph: GraphT,
-  violations: string[],
-  options?: { brief?: string; docs?: Array<{ title?: string; content?: string }>; attempt?: number; maxAttempts?: number; currencyInstruction?: string },
-): Promise<{ system: string; userContent: string }> {
-  const { graph: truncatedGraph, truncated } = truncateGraphForRepairPrompt(graph);
-  const graphJson = JSON.stringify(
-    {
-      nodes: truncatedGraph.nodes,
-      edges: truncatedGraph.edges,
-    },
-    null,
-    2
-  );
-  const truncatedNote = truncated ? "\n\n**Note: Graph was truncated for repair due to size.**" : "";
-
-  const violationsText = violations.map((v, i) => `${i + 1}. ${v}`).join("\n");
-
-  // Build context sections
-  const briefText = options?.brief ?? "Not provided";
-  const docsText = options?.docs ? JSON.stringify(options.docs.slice(0, 3)) : "None";
-  const attempt = options?.attempt ?? 1;
-  const maxAttempts = options?.maxAttempts ?? 1;
-  const escalationText = attempt > 1 ? "\nPrevious attempt failed. Try a different approach.\n" : "";
-
-  const currencyInstruction = options?.currencyInstruction ?? "";
-  const userContent = `Brief:
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${briefText}
-[END_UNTRUSTED_USER_CONTENT]
-Docs:
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${docsText}
-[END_UNTRUSTED_USER_CONTENT]
-Attempt: ${attempt} of ${maxAttempts}
-${escalationText}
-## Violations Found
-${violationsText}
-
-## Current Graph (INVALID)${truncatedNote}
-${graphJson}${currencyInstruction}`;
-
-  // Load system prompt from prompt management system (with fallback to registered defaults)
-  const systemPrompt = await getSystemPrompt('repair_graph');
-
-  return {
-    system: systemPrompt,
-    userContent,
-  };
-}
-
 function buildSuggestOptionsPrompt(goal: string, constraints?: Record<string, unknown>, existingOptions?: string[]): string {
   const existingContext = existingOptions?.length
     ? `\n\n## Existing Options\nAvoid duplicating these:\n${existingOptions.map((o) => `- ${o}`).join("\n")}`
@@ -449,7 +319,10 @@ const RAW_LLM_PREVIEW_MAX_CHARS = 500;
 // Compliance reminder appended to the user message for initial draft generation only.
 // Reinforces critical structural rules at the point of generation (not in the system prompt).
 // Controlled by CEE_DRAFT_COMPLIANCE_REMINDER_ENABLED (default: true).
-const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
+// EXPORTED (content unchanged) so the estate drift check can assert this copy
+// stays byte-identical to the Anthropic adapter's — see
+// tests/unit/prompt-estate-drift.test.ts.
+export const DRAFT_COMPLIANCE_REMINDER = `\n\nCOMPLIANCE REMINDER:
 - Output valid JSON only (no comments, no text outside the JSON object)
 - Every outcome and risk needs an inbound path from a controllable factor
 - Every option needs a complete path to goal: option → controllable → outcome/risk → goal
@@ -566,7 +439,7 @@ export class OpenAIAdapter implements LLMAdapter {
         parts.push(part);
       }
       if (parts.length) {
-        docContext = `\n\n## Attached Documents\n[BEGIN_UNTRUSTED_USER_CONTENT]\n${parts.join("\n\n")}\n[END_UNTRUSTED_USER_CONTENT]`;
+        docContext = "\n\n" + wrapUntrusted("## Attached Documents", parts.join("\n\n"));
       }
     }
     const complianceReminder = config.cee.draftComplianceReminderEnabled ? DRAFT_COMPLIANCE_REMINDER : "";
@@ -577,10 +450,7 @@ export class OpenAIAdapter implements LLMAdapter {
     // fix so this path does not silently drop the directive now that it is
     // threaded via systemDirective rather than concatenated into `brief`.
     const systemDirective = args.systemDirective ? `\n\n${args.systemDirective}` : "";
-    const userContent = `## Brief
-[BEGIN_UNTRUSTED_USER_CONTENT]
-${brief}
-[END_UNTRUSTED_USER_CONTENT]${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
+    const userContent = `${wrapUntrusted("## Brief", brief)}${docContext}${complianceReminder}${briefSignalsHeader}${currencyInstruction}${systemDirective}`;
 
     // V04: Generate idempotency key for request traceability
     const idempotencyKey = makeIdempotencyKey();
@@ -685,19 +555,24 @@ ${brief}
       // still parses+validates; otherwise fail FAST and TYPED (truncated_at_max_tokens)
       // so the runaway case is diagnosable rather than looking like generic non-JSON.
       const truncatedAtMaxTokens = isDraftTruncated(finishReason);
-      const failedCallLlmMeta = {
+      // Same shape as the Anthropic failure meta, built by the SAME function
+      // (draft-budget.ts is already the cross-provider draft seam). It was a
+      // seventh hand-copy; a key added for one provider silently skipped the
+      // other. Streaming-only keys are absent here because the OpenAI draft path
+      // is not streamed — an honest absence, not a mirrored zero.
+      const failedCallLlmMeta = buildFailedCallLlmMeta({
         model: this.model,
-        prompt_version: promptMeta.prompt_version,
-        prompt_hash: promptMeta.prompt_hash,
+        promptVersion: promptMeta.prompt_version,
+        promptHash: promptMeta.prompt_hash,
         temperature,
-        provider_latency_ms: _elapsedMs,
-        finish_reason: typeof finishReason === 'string' ? finishReason : undefined,
-        token_usage: {
+        providerLatencyMs: _elapsedMs,
+        finishReason: typeof finishReason === 'string' ? finishReason : undefined,
+        tokenUsage: {
           prompt_tokens: response.usage?.prompt_tokens ?? 0,
           completion_tokens: response.usage?.completion_tokens ?? 0,
           total_tokens: response.usage?.total_tokens ?? ((response.usage?.prompt_tokens ?? 0) + (response.usage?.completion_tokens ?? 0)),
         },
-      };
+      });
       if (truncatedAtMaxTokens) {
         log.error({
           event: "cee.llm.draft_truncated_max_tokens",
@@ -743,6 +618,20 @@ ${brief}
           .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
           .filter(Boolean)
         : [];
+      // ROADMAP 2.281 — the goal-threshold contract is CEE-minted. DRAFT ONLY:
+      // the repair_graph site (:1215) deliberately does NOT strip, because it
+      // runs after Stage 3 has enriched and the threshold there IS attested.
+      // OpenAI never sends the Anthropic draft grammar at all, so for this
+      // provider the strip is the ONLY layer — which is precisely why it exists
+      // separately from the grammar cut.
+      const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
+      if (strippedGoal.nodeIds.length > 0) {
+        log.info({
+          event: "cee.draft.model_authored_goal_threshold_stripped",
+          node_ids: strippedGoal.nodeIds,
+          fields: strippedGoal.fields,
+        }, "Discarded a model-authored goal-threshold contract from the draft — the enricher is the only mint (2.281)");
+      }
       const normalised = normaliseDraftResponse(rawJson);
 
       // Pipeline checkpoint: post_adapter_normalisation (after normaliseDraftResponse)
@@ -780,7 +669,8 @@ ${brief}
           raw_node_kinds: Array.isArray(rawJson?.nodes)
             ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
             : [],
-          raw_output_sample: rawOutputSample,
+          // Digest raw model output — never place it on the wire verbatim (see contentDigest).
+          raw_output_sample: contentDigest(rawOutputSample),
           event: 'llm.validation.schema_failed'
         }, "OpenAI response failed schema validation after normalisation");
 
@@ -1122,263 +1012,6 @@ ${brief}
       }
 
       log.error({ error }, "OpenAI options call failed");
-      throw error;
-    }
-  }
-
-  async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    const { graph, violations, brief, docs, currencyInstruction } = args;
-    const collector = opts.collector;
-    const prompt = await buildRepairPrompt(graph, violations, { brief, docs: docs as any, currencyInstruction });
-    const repairPromptMeta = getSystemPromptMeta('repair_graph');
-
-    // V04: Generate idempotency key for request traceability
-    const idempotencyKey = makeIdempotencyKey();
-    const startTime = Date.now();
-
-    log.info({ violation_count: violations.length, model: this.model, provider: 'openai', idempotency_key: idempotencyKey, prompt_id: repairPromptMeta.taskId, prompt_hash: repairPromptMeta.prompt_hash, prompt_source: repairPromptMeta.source }, "calling OpenAI for repair");
-
-    const abortController = new AbortController();
-    const effectiveTimeout = opts.timeoutMs || getTimeoutForModel(this.model);
-    const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
-
-    // Wire external abort signal (e.g. client disconnect / budget cancellation)
-    const externalSignal = opts.signal ?? opts.abortSignal;
-    let onExternalAbort: (() => void) | undefined;
-    if (externalSignal && !externalSignal.aborted) {
-      onExternalAbort = () => abortController.abort();
-      externalSignal.addEventListener("abort", onExternalAbort, { once: true });
-    } else if (externalSignal?.aborted) {
-      abortController.abort();
-    }
-
-    try {
-      const apiClient = getClient();
-      const maxTokens = getMaxTokensFromConfig('repair_graph');
-      const modelParams = buildModelParams(this.model, 0, { maxTokens });
-
-      // Debug: Log model parameters for runtime validation
-      log.debug({
-        model: this.model,
-        reasoning: isReasoningModel(this.model),
-        params: {
-          has_temperature: 'temperature' in modelParams,
-          has_reasoning_effort: 'reasoning_effort' in modelParams,
-          has_max_completion_tokens: 'max_completion_tokens' in modelParams,
-          has_max_tokens: 'max_tokens' in modelParams,
-        },
-        timeout_ms: effectiveTimeout,
-      }, "[OpenAI] repair_graph request parameters");
-
-      const response = await withRetry(
-        async () =>
-          apiClient.chat.completions.create(
-            {
-              model: this.model,
-              messages: [
-                { role: "system", content: prompt.system },
-                { role: "user", content: prompt.userContent },
-              ],
-              response_format: { type: "json_object" },
-              ...modelParams,
-            },
-            {
-              signal: abortController.signal as any,
-              headers: { "Idempotency-Key": idempotencyKey }, // V04: Add idempotency key
-            }
-          ),
-        {
-          adapter: "openai",
-          model: this.model,
-          operation: "repair_graph",
-        }
-      );
-
-      clearTimeout(timeoutId);
-      if (onExternalAbort && externalSignal) {
-        externalSignal.removeEventListener("abort", onExternalAbort);
-      }
-      const _elapsedMs = Date.now() - startTime;
-
-      const content = response.choices[0]?.message?.content;
-      if (!content) {
-        log.error({ response }, "OpenAI returned empty content for repair");
-        throw new Error("openai_empty_response");
-      }
-
-      // Parse, normalise non-standard node kinds, ensure factor baselines, then validate with Zod.
-      // Uses LLMRepairResponse (not LLMDraftResponse) — the repair prompt produces rationales
-      // with {violation_code, node_or_edge, action, elements_changed}, not {target, why}.
-      const rawJson = safeParseJson(content, "repair_graph", _elapsedMs, idempotencyKey);
-      const normalised = normaliseDraftResponse(rawJson);
-      const { response: withBaselines, defaultedFactors: repairDefaultedFactors } = ensureControllableFactorBaselines(normalised);
-      if (repairDefaultedFactors.length > 0) {
-        log.info({ defaultedFactors: repairDefaultedFactors }, `Defaulted baseline values for ${repairDefaultedFactors.length} controllable factor(s) in repair`);
-      }
-      const parseResult = OpenAIRepairResponse.safeParse(withBaselines);
-
-      if (!parseResult.success) {
-        const flatErrors = parseResult.error.flatten();
-        log.error({
-          errors: flatErrors,
-          raw_node_kinds: Array.isArray(rawJson?.nodes)
-            ? rawJson.nodes.map((n: any) => n?.kind).filter(Boolean)
-            : [],
-          event: 'llm.validation.repair_schema_failed'
-        }, "OpenAI repair response failed schema validation after normalisation");
-
-        const fieldIssues = Object.entries(flatErrors.fieldErrors || {})
-          .map(([field, msgs]) => `${field}: ${(msgs as string[]).join(', ')}`)
-          .join('; ');
-        const formIssues = (flatErrors.formErrors || []).join('; ');
-        const details = [fieldIssues, formIssues].filter(Boolean).join(' | ');
-
-        throw new Error(`openai_repair_invalid_schema: ${details || 'unknown validation error'}`);
-      }
-
-      const parsed = parseResult.data;
-
-      // Warn when repair rationales are missing — the repair prompt requests one
-      // rationale per violation, so an empty array may indicate the LLM dropped
-      // audit output. The graph is still usable, but repair quality is opaque.
-      if (!parsed.rationales || parsed.rationales.length === 0) {
-        log.warn({
-          event: 'llm.repair.rationales_missing',
-          adapter: 'openai',
-          request_id: opts.requestId,
-        }, "OpenAI repair response contained no rationales — repair audit trail unavailable");
-      }
-
-      // Cap node/edge counts with structured telemetry
-      const nodesBefore = parsed.nodes.length;
-      const edgesBefore = parsed.edges.length;
-      const nodesCapped = nodesBefore > GRAPH_MAX_NODES;
-      const edgesCapped = edgesBefore > GRAPH_MAX_EDGES;
-
-      if (nodesCapped) {
-        parsed.nodes = parsed.nodes.slice(0, GRAPH_MAX_NODES);
-      }
-      if (edgesCapped) {
-        parsed.edges = parsed.edges.slice(0, GRAPH_MAX_EDGES);
-      }
-
-      // Emit single structured event if any capping occurred
-      if (nodesCapped || edgesCapped) {
-        const cappedEvent: GraphCappedEvent = {
-          event: 'cee.repair.graph_capped',
-          adapter: 'openai',
-          path: 'repair',
-          nodes: {
-            before: nodesBefore,
-            after: parsed.nodes.length,
-            max: GRAPH_MAX_NODES,
-            capped: nodesCapped,
-          },
-          edges: {
-            before: edgesBefore,
-            after: parsed.edges.length,
-            max: GRAPH_MAX_EDGES,
-            capped: edgesCapped,
-          },
-          request_id: opts.requestId,
-        };
-        log.warn(cappedEvent, "OpenAI repair graph capped to limits");
-      }
-
-      // Filter edges to only valid node IDs (Stage 5: Dangling Edge Filter #1 - repair path)
-      const nodeIds = new Set(parsed.nodes.map((n) => n.id));
-      const danglingEdges = parsed.edges.filter((e) => !nodeIds.has(e.from) || !nodeIds.has(e.to));
-
-      if (danglingEdges.length > 0) {
-        log.warn({
-          event: "llm.repair.dangling_edges_removed",
-          removed_count: danglingEdges.length,
-          dangling_edges: danglingEdges.map((e) => ({
-            from: e.from,
-            to: e.to,
-            missing_from: !nodeIds.has(e.from),
-            missing_to: !nodeIds.has(e.to),
-          })).slice(0, 10),
-        }, `Repair: Removed ${danglingEdges.length} edge(s) with dangling node references`);
-
-        if (collector) {
-          for (const edge of danglingEdges) {
-            const missingNode = !nodeIds.has(edge.from) ? edge.from : edge.to;
-            collector.addByStage(
-              5,
-              "edge_removed",
-              { edge_id: formatEdgeId(edge.from, edge.to) },
-              `Node "${missingNode}" not found`,
-              edge,
-              null
-            );
-          }
-        }
-      }
-
-      const validEdges = parsed.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
-
-      // Sort for determinism
-      const sorted = sortGraph({ nodes: parsed.nodes, edges: validEdges });
-
-      const repairedGraph: GraphT = {
-        ...graph,
-        nodes: sorted.nodes,
-        edges: sorted.edges,
-      };
-
-      return {
-        graph: repairedGraph,
-        rationales: parsed.rationales || [],
-        usage: {
-          input_tokens: response.usage?.prompt_tokens || 0,
-          output_tokens: response.usage?.completion_tokens || 0,
-        },
-      };
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (onExternalAbort && externalSignal) {
-        externalSignal.removeEventListener("abort", onExternalAbort);
-      }
-      const elapsedMs = Date.now() - startTime;
-
-      if (error instanceof Error) {
-        // V04: Throw typed UpstreamTimeoutError for timeout classification
-        if (error.name === "AbortError" || abortController.signal.aborted) {
-          const isExternalAbort = externalSignal?.aborted === true;
-          const phase = isExternalAbort ? "pre_aborted" as const : "body" as const;
-          log.error({ timeout_ms: effectiveTimeout, elapsed_ms: elapsedMs, phase }, isExternalAbort ? "OpenAI repair_graph aborted by external signal" : "OpenAI repair call timed out");
-          throw new UpstreamTimeoutError(
-            isExternalAbort ? "OpenAI repair_graph aborted by external signal" : "OpenAI repair_graph timed out",
-            "openai",
-            "repair_graph",
-            phase,
-            elapsedMs,
-            error
-          );
-        }
-
-        // V04: Check for OpenAI API errors (non-2xx responses)
-        if ('status' in error && typeof error.status === 'number') {
-          const apiError = error as any;
-          const requestId = apiError.headers?.['x-request-id'] || apiError.request_id;
-          log.error(
-            { status: apiError.status, request_id: requestId, elapsed_ms: elapsedMs },
-            "OpenAI API returned non-2xx status"
-          );
-          throw new UpstreamHTTPError(
-            `OpenAI repair_graph failed: ${apiError.message || 'unknown error'}`,
-            "openai",
-            apiError.status,
-            apiError.code || apiError.type,
-            requestId,
-            elapsedMs,
-            error
-          );
-        }
-      }
-
-      log.error({ error }, "OpenAI repair call failed");
       throw error;
     }
   }

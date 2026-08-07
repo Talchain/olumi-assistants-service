@@ -1,0 +1,1225 @@
+{
+  "schema_version": "3.0",
+  "goal_node_id": "goal_mrr",
+  "nodes": [
+    {
+      "id": "dec_pricing",
+      "kind": "decision",
+      "label": "B2B SaaS Pricing Strategy",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_current_mrr",
+      "kind": "factor",
+      "label": "Current MRR",
+      "prior": {
+        "range_max": 1,
+        "range_min": 0.36,
+        "distribution": "uniform"
+      },
+      "category": "external",
+      "provenance": "from_brief",
+      "display_value": "0.36 to 1",
+      "extractionType": "explicit"
+    },
+    {
+      "id": "fac_grandfathering",
+      "kind": "factor",
+      "label": "Grandfathering Protection Active",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "encoding_map": {
+        "0": "No grandfathering",
+        "1": "Existing customers grandfathered at current price"
+      },
+      "display_value": "Low (0)",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "factor_type": "other",
+        "extractionType": "inferred",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      }
+    },
+    {
+      "id": "fac_price_level",
+      "kind": "factor",
+      "label": "Seat Price Level",
+      "category": "controllable",
+      "provenance": "from_brief",
+      "encoding_map": {
+        "0.39": "£39 entry tier",
+        "0.49": "£49 current price",
+        "0.54": "£54 blended two-tier",
+        "0.59": "£59 raised price",
+        "0.69": "£69 premium tier"
+      },
+      "display_value": "£49",
+      "observed_state": {
+        "cap": 100,
+        "unit": "£",
+        "value": 0.49,
+        "source": "brief_extraction",
+        "raw_value": 49,
+        "factor_type": "price",
+        "extractionType": "explicit",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      }
+    },
+    {
+      "id": "fac_price_sensitivity",
+      "kind": "factor",
+      "label": "Customer Price Sensitivity",
+      "prior": {
+        "range_max": 0.8,
+        "range_min": 0.3,
+        "distribution": "uniform"
+      },
+      "category": "external",
+      "provenance": "user_set",
+      "display_value": "0.75",
+      "observed_state": {
+        "value": 0.75,
+        "raw_value": 0.75
+      }
+    },
+    {
+      "id": "fac_tier_structure",
+      "kind": "factor",
+      "label": "Two-Tier Pricing Structure Active",
+      "category": "controllable",
+      "provenance": "ai_inferred",
+      "encoding_map": {
+        "0": "Single price",
+        "1": "Two-tier structure active"
+      },
+      "display_value": "Low (0)",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "factor_type": "other",
+        "extractionType": "inferred",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      }
+    },
+    {
+      "id": "goal_mrr",
+      "kind": "goal",
+      "label": "Grow MRR to £250,000",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_hold",
+      "kind": "option",
+      "label": "Hold at £49 Per Seat (Status Quo)",
+      "provenance": "ai_inferred",
+      "is_baseline": true,
+      "interventions": {
+        "fac_price_level": {
+          "unit": "£",
+          "value": 0.49,
+          "source": "brief_extraction",
+          "reasoning": "Direct from V4 prompt data.interventions",
+          "target_match": {
+            "node_id": "fac_price_level",
+            "confidence": "high",
+            "match_type": "exact_id"
+          },
+          "value_confidence": "high"
+        }
+      }
+    },
+    {
+      "id": "opt_pilot",
+      "kind": "option",
+      "label": "Raise to £59 with 90-Day Grandfathering Pilot",
+      "provenance": "ai_inferred",
+      "is_baseline": false,
+      "interventions": {
+        "fac_price_level": {
+          "unit": "£",
+          "value": 0.59,
+          "source": "brief_extraction",
+          "reasoning": "Direct from V4 prompt data.interventions",
+          "target_match": {
+            "node_id": "fac_price_level",
+            "confidence": "high",
+            "match_type": "exact_id"
+          },
+          "value_confidence": "high"
+        },
+        "fac_grandfathering": {
+          "value": 1,
+          "source": "brief_extraction",
+          "reasoning": "Direct from V4 prompt data.interventions",
+          "target_match": {
+            "node_id": "fac_grandfathering",
+            "confidence": "high",
+            "match_type": "exact_id"
+          },
+          "value_confidence": "high"
+        }
+      }
+    },
+    {
+      "id": "opt_raise",
+      "kind": "option",
+      "label": "Raise to £59 Per Seat",
+      "provenance": "ai_inferred",
+      "is_baseline": false,
+      "interventions": {
+        "fac_price_level": {
+          "unit": "£",
+          "value": 0.59,
+          "source": "brief_extraction",
+          "reasoning": "Direct from V4 prompt data.interventions",
+          "target_match": {
+            "node_id": "fac_price_level",
+            "confidence": "high",
+            "match_type": "exact_id"
+          },
+          "value_confidence": "high"
+        }
+      }
+    },
+    {
+      "id": "opt_tiers",
+      "kind": "option",
+      "label": "Introduce £39 / £69 Two-Tier Pricing",
+      "provenance": "ai_inferred",
+      "is_baseline": false,
+      "interventions": {
+        "fac_price_level": {
+          "unit": "£",
+          "value": 0.54,
+          "source": "brief_extraction",
+          "reasoning": "Direct from V4 prompt data.interventions",
+          "target_match": {
+            "node_id": "fac_price_level",
+            "confidence": "high",
+            "match_type": "exact_id"
+          },
+          "value_confidence": "high"
+        },
+        "fac_tier_structure": {
+          "value": 1,
+          "source": "brief_extraction",
+          "reasoning": "Direct from V4 prompt data.interventions",
+          "target_match": {
+            "node_id": "fac_tier_structure",
+            "confidence": "high",
+            "match_type": "exact_id"
+          },
+          "value_confidence": "high"
+        }
+      }
+    },
+    {
+      "id": "out_gross_margin",
+      "kind": "outcome",
+      "label": "Gross Margin",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_mrr_growth",
+      "kind": "outcome",
+      "label": "MRR Growth",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_downgrade_pressure",
+      "kind": "risk",
+      "label": "Tier Downgrade and Seat Reduction Pressure",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_logo_churn",
+      "kind": "risk",
+      "label": "Monthly Logo Churn Rate",
+      "provenance": "ai_inferred",
+      "observed_state": {
+        "cap": 100,
+        "unit": "%",
+        "value": 0.02,
+        "source": "cee_inference",
+        "raw_value": 2,
+        "factor_type": "probability",
+        "extractionType": "inferred"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "to": "opt_hold",
+      "from": "dec_pricing",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "opt_pilot",
+      "from": "dec_pricing",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "opt_raise",
+      "from": "dec_pricing",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "opt_tiers",
+      "from": "dec_pricing",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "out_mrr_growth",
+      "from": "fac_current_mrr",
+      "origin": "ai",
+      "strength": {
+        "std": 0.05155038759689923,
+        "mean": 0.11046511627906976
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.07,
+          "strength_mean": 0.15,
+          "exists_probability": 0.92
+        },
+        "pass2": {
+          "basis": "structural_inference",
+          "reasoning": "Higher starting MRR generally enables larger absolute MRR growth in B2B SaaS.",
+          "strength_std": 0.15,
+          "strength_mean": 0.3,
+          "lint_corrected": false,
+          "needs_user_input": false,
+          "exists_probability": 0.95
+        },
+        "status": "contested",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.39999999999999997,
+        "pass2_adjusted": {
+          "strength_std": 0.125,
+          "strength_mean": 0.35,
+          "exists_probability": 0.91
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [
+          "strength_band_change",
+          "confidence_band_change"
+        ],
+        "validation_lint_log": []
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.92,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "out_mrr_growth",
+      "from": "fac_grandfathering",
+      "origin": "ai",
+      "strength": {
+        "std": 0.05891472868217054,
+        "mean": -0.08837209302325581
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.08,
+          "strength_mean": -0.12,
+          "exists_probability": 0.8
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Grandfathering pilots soften churn spikes and modestly support net MRR gains post-price change.",
+          "strength_std": 0.1,
+          "strength_mean": 0.15,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.85
+        },
+        "status": "contested",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": true,
+        "max_divergence": 1,
+        "pass2_adjusted": {
+          "strength_std": 0.07500000000000001,
+          "strength_mean": 0.2,
+          "exists_probability": 0.81
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [
+          "sign_flip"
+        ],
+        "validation_lint_log": []
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.8,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "risk_logo_churn",
+      "from": "fac_grandfathering",
+      "origin": "ai",
+      "strength": {
+        "std": 0.10363636363636362,
+        "mean": -0.25909090909090904
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.12,
+          "strength_mean": -0.3,
+          "exists_probability": 0.82
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Temporary grandfathering protections typically reduce customer churn by cushioning price increases.",
+          "strength_std": 0.1,
+          "strength_mean": -0.2,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.8
+        },
+        "status": "contested",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.3333333333333333,
+        "pass2_adjusted": {
+          "strength_std": 0.07500000000000001,
+          "strength_mean": -0.15,
+          "exists_probability": 0.7600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [
+          "strength_band_change",
+          "confidence_band_change"
+        ],
+        "validation_lint_log": []
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.82,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "out_gross_margin",
+      "from": "fac_price_level",
+      "origin": "ai",
+      "strength": {
+        "std": 0.1,
+        "mean": 0.5
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.1,
+          "strength_mean": 0.5,
+          "exists_probability": 0.88
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Raising the per-seat price directly increases revenue per seat and thus gross margin.",
+          "strength_std": 0.15,
+          "strength_mean": 0.4,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.9
+        },
+        "status": "agreed",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.09999999999999987,
+        "pass2_adjusted": {
+          "strength_std": 0.125,
+          "strength_mean": 0.45000000000000007,
+          "exists_probability": 0.8600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [],
+        "validation_lint_log": []
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.88,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "out_mrr_growth",
+      "from": "fac_price_level",
+      "origin": "ai",
+      "strength": {
+        "std": 0.08837209302325581,
+        "mean": 0.4565891472868217
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.12,
+          "strength_mean": 0.62,
+          "exists_probability": 0.9
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Higher seat prices tend to depress net new seat additions and thus slow MRR growth.",
+          "strength_std": 0.15,
+          "strength_mean": -0.25,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.9
+        },
+        "status": "contested",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": true,
+        "max_divergence": 1,
+        "pass2_adjusted": {
+          "strength_std": 0.125,
+          "strength_mean": -0.19999999999999998,
+          "exists_probability": 0.8600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [
+          "sign_flip"
+        ],
+        "validation_lint_log": []
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.9,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "risk_logo_churn",
+      "from": "fac_price_level",
+      "origin": "ai",
+      "strength": {
+        "std": 0.12954545454545452,
+        "mean": 0.3886363636363636
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.15,
+          "strength_mean": 0.45,
+          "exists_probability": 0.85
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Customers are more likely to churn when prices rise above their prior expectations.",
+          "strength_std": 0.12,
+          "strength_mean": 0.25,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.9
+        },
+        "status": "agreed",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.29999999999999993,
+        "pass2_adjusted": {
+          "strength_std": 0.095,
+          "strength_mean": 0.30000000000000004,
+          "exists_probability": 0.8600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [],
+        "validation_lint_log": []
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.85,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "out_mrr_growth",
+      "from": "fac_price_sensitivity",
+      "origin": "ai",
+      "strength": {
+        "std": 0.08837209302325581,
+        "mean": -0.1325581395348837
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.12,
+          "strength_mean": -0.18,
+          "exists_probability": 0.75
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Greater price sensitivity reduces net new bookings and thus MRR growth.",
+          "strength_std": 0.15,
+          "strength_mean": -0.2,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.9
+        },
+        "status": "agreed",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.06,
+        "pass2_adjusted": {
+          "strength_std": 0.125,
+          "strength_mean": -0.15,
+          "exists_probability": 0.8600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [],
+        "validation_lint_log": []
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.75,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "risk_logo_churn",
+      "from": "fac_price_sensitivity",
+      "origin": "ai",
+      "strength": {
+        "std": 0.15545454545454543,
+        "mean": 0.3022727272727272
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.18,
+          "strength_mean": 0.35,
+          "exists_probability": 0.8
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Price-sensitive customers are more prone to cancel when prices increase.",
+          "strength_std": 0.12,
+          "strength_mean": 0.2,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.9
+        },
+        "status": "contested",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.3333333333333333,
+        "pass2_adjusted": {
+          "strength_std": 0.095,
+          "strength_mean": 0.25,
+          "exists_probability": 0.8600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [
+          "strength_band_change"
+        ],
+        "validation_lint_log": []
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.8,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "out_mrr_growth",
+      "from": "fac_tier_structure",
+      "origin": "ai",
+      "strength": {
+        "std": 0.10310077519379846,
+        "mean": 0.162015503875969
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.14,
+          "strength_mean": 0.22,
+          "exists_probability": 0.75
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Introducing a lower-priced tier can modestly expand acquisition and net MRR.",
+          "strength_std": 0.1,
+          "strength_mean": 0.1,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.8
+        },
+        "status": "contested",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.13999999999999996,
+        "pass2_adjusted": {
+          "strength_std": 0.07500000000000001,
+          "strength_mean": 0.15000000000000002,
+          "exists_probability": 0.7600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [
+          "confidence_band_change"
+        ],
+        "validation_lint_log": []
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.75,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "risk_downgrade_pressure",
+      "from": "fac_tier_structure",
+      "origin": "ai",
+      "strength": {
+        "std": 0.16,
+        "mean": 0.38
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.16,
+          "strength_mean": 0.38,
+          "exists_probability": 0.78
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Two-tier pricing creates incentives for customers to downgrade seats or tiers.",
+          "strength_std": 0.15,
+          "strength_mean": 0.3,
+          "lint_corrected": false,
+          "needs_user_input": true,
+          "exists_probability": 0.85
+        },
+        "status": "agreed",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.06000000000000005,
+        "pass2_adjusted": {
+          "strength_std": 0.125,
+          "strength_mean": 0.35,
+          "exists_probability": 0.81
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 1,
+        "contested_reasons": [],
+        "validation_lint_log": []
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.78,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "fac_price_level",
+      "from": "opt_hold",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "fac_grandfathering",
+      "from": "opt_pilot",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "fac_price_level",
+      "from": "opt_pilot",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "fac_price_level",
+      "from": "opt_raise",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "fac_price_level",
+      "from": "opt_tiers",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "fac_tier_structure",
+      "from": "opt_tiers",
+      "origin": "ai",
+      "strength": {
+        "std": 0.01,
+        "mean": 1
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "effect_direction": "positive",
+      "exists_probability": 1,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "goal_mrr",
+      "from": "out_gross_margin",
+      "origin": "ai",
+      "strength": {
+        "std": 0.1,
+        "mean": 0.2
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.1,
+          "strength_mean": 0.2,
+          "exists_probability": 0.88
+        },
+        "pass2": {
+          "basis": "structural_inference",
+          "reasoning": "Maintaining a high gross margin supports the financial goal criteria.",
+          "strength_std": 0.15,
+          "strength_mean": 0.19354838709677422,
+          "lint_corrected": true,
+          "needs_user_input": false,
+          "exists_probability": 0.9
+        },
+        "status": "agreed",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.08709677419354844,
+        "pass2_adjusted": {
+          "strength_std": 0.125,
+          "strength_mean": 0.24354838709677423,
+          "exists_probability": 0.8600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 0,
+        "contested_reasons": [],
+        "validation_lint_log": [
+          {
+            "code": "LINT_BUDGET_RESCALE",
+            "after": 0.19354838709677422,
+            "before": 0.3,
+            "edge_key": "out_gross_margin->goal_mrr"
+          }
+        ]
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.88,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "goal_mrr",
+      "from": "out_mrr_growth",
+      "origin": "ai",
+      "strength": {
+        "std": 0.1,
+        "mean": 0.75
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.1,
+          "strength_mean": 0.75,
+          "exists_probability": 0.95
+        },
+        "pass2": {
+          "basis": "structural_inference",
+          "reasoning": "Achieving the MRR growth target is the primary driver of meeting the total MRR goal.",
+          "strength_std": 0.1,
+          "strength_mean": 0.38709677419354843,
+          "lint_corrected": true,
+          "needs_user_input": false,
+          "exists_probability": 0.95
+        },
+        "status": "contested",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.6258064516129032,
+        "pass2_adjusted": {
+          "strength_std": 0.07500000000000001,
+          "strength_mean": 0.4370967741935484,
+          "exists_probability": 0.91
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 0,
+        "contested_reasons": [
+          "strength_band_change",
+          "existence_boundary_crossing"
+        ],
+        "validation_lint_log": [
+          {
+            "code": "LINT_BUDGET_RESCALE",
+            "after": 0.38709677419354843,
+            "before": 0.6,
+            "edge_key": "out_mrr_growth->goal_mrr"
+          }
+        ]
+      },
+      "effect_direction": "positive",
+      "exists_probability": 0.95,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "goal_mrr",
+      "from": "risk_downgrade_pressure",
+      "origin": "ai",
+      "strength": {
+        "std": 0.12,
+        "mean": -0.22
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.12,
+          "strength_mean": -0.22,
+          "exists_probability": 0.78
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Downgrade pressure lowers realized MRR and thus hinders reaching the target.",
+          "strength_std": 0.15,
+          "strength_mean": -0.16129032258064518,
+          "lint_corrected": true,
+          "needs_user_input": true,
+          "exists_probability": 0.9
+        },
+        "status": "agreed",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.21741935483870967,
+        "pass2_adjusted": {
+          "strength_std": 0.125,
+          "strength_mean": -0.11129032258064517,
+          "exists_probability": 0.8600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 0,
+        "contested_reasons": [],
+        "validation_lint_log": [
+          {
+            "code": "LINT_BUDGET_RESCALE",
+            "after": -0.16129032258064518,
+            "before": -0.25,
+            "edge_key": "risk_downgrade_pressure->goal_mrr"
+          }
+        ]
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.78,
+      "provenance_display": "ai_inferred"
+    },
+    {
+      "to": "goal_mrr",
+      "from": "risk_logo_churn",
+      "origin": "ai",
+      "strength": {
+        "std": 0.12,
+        "mean": -0.4
+      },
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "validation": {
+        "pass1": {
+          "strength_std": 0.12,
+          "strength_mean": -0.4,
+          "exists_probability": 0.92
+        },
+        "pass2": {
+          "basis": "domain_prior",
+          "reasoning": "Higher logo churn directly reduces net MRR and undermines the target.",
+          "strength_std": 0.15,
+          "strength_mean": -0.2580645161290323,
+          "lint_corrected": true,
+          "needs_user_input": true,
+          "exists_probability": 0.9
+        },
+        "status": "contested",
+        "evoi_rank": null,
+        "was_shown": false,
+        "evoi_impact": null,
+        "resolved_by": "default",
+        "user_action": "pending",
+        "pass2_missing": false,
+        "sign_unstable": false,
+        "max_divergence": 0.38387096774193546,
+        "pass2_adjusted": {
+          "strength_std": 0.125,
+          "strength_mean": -0.2080645161290323,
+          "exists_probability": 0.8600000000000001
+        },
+        "resolved_value": null,
+        "bias_correction": {
+          "strength_std_offset": -0.025,
+          "strength_mean_offset": 0.05000000000000002,
+          "exists_probability_offset": -0.039999999999999925
+        },
+        "distance_to_goal": 0,
+        "contested_reasons": [
+          "strength_band_change"
+        ],
+        "validation_lint_log": [
+          {
+            "code": "LINT_BUDGET_RESCALE",
+            "after": -0.2580645161290323,
+            "before": -0.4,
+            "edge_key": "risk_logo_churn->goal_mrr"
+          }
+        ]
+      },
+      "effect_direction": "negative",
+      "exists_probability": 0.92,
+      "provenance_display": "ai_inferred"
+    }
+  ],
+  "goal_constraints": [
+    {
+      "unit": "fraction",
+      "label": "and gross margin floor",
+      "value": 0.8,
+      "node_id": "out_gross_margin",
+      "operator": ">=",
+      "confidence": 0.85,
+      "provenance": "explicit",
+      "source_quote": "and gross margin above 80%",
+      "constraint_id": "constraint_out_gross_margin_min"
+    }
+  ]
+}

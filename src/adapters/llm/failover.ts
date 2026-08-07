@@ -25,8 +25,6 @@ import type {
   SuggestOptionsResult,
   ExplainDiffArgs,
   ExplainDiffResult,
-  RepairGraphArgs,
-  RepairGraphResult,
   ClarifyBriefArgs,
   ClarifyBriefResult,
   CritiqueGraphArgs,
@@ -200,10 +198,6 @@ export class FailoverAdapter implements LLMAdapter {
       (adapter) => adapter.suggestOptions(args, opts),
       opts
     );
-  }
-
-  async repairGraph(args: RepairGraphArgs, opts: CallOpts): Promise<RepairGraphResult> {
-    return this.withFailover("repair_graph", (adapter) => adapter.repairGraph(args, opts), opts);
   }
 
   async clarifyBrief(args: ClarifyBriefArgs, opts: CallOpts): Promise<ClarifyBriefResult> {

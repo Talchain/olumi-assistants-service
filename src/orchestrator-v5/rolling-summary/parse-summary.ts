@@ -45,7 +45,16 @@ export type SummaryParseReject =
   | 'unknown_label'
   | 'content_before_label'
   | 'over_cap'
-  | 'duplicate_slot';
+  | 'duplicate_slot'
+  // Durable-memory write gate (retention.ts) — structurally well-formed
+  // output that would nevertheless write a FALSEHOOD into memory, and cannot
+  // be repaired because the offending claim is inside generated prose. Same
+  // verdict as the schema rejects above: keep the prior summary.
+  //
+  // The sibling failure — a slot holding durable fact being EMPTIED — is NOT
+  // here: it is repairable, so assemble.ts carries the prior entries forward
+  // (`priorForRetention`) and the pass still lands. See retention.ts.
+  | 'unwitnessed_assistant_attribution';
 
 export interface ParsedSummarySlot {
   readonly slot: RollingSummarySlot;

@@ -37,6 +37,7 @@ import {
   buildSignInRequiredError,
   extractJwtCandidate,
 } from "../orchestrator/user-identity.js";
+import { recordExplicitTurnStop } from "./turn-stop.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -45,7 +46,8 @@ import {
 const INTERNAL_TARGET = "/orchestrate/v2/turn";
 
 /** Headers forwarded from the browser request to the internal CEE call. */
-const ALLOWED_REQUEST_HEADERS = [
+/** EXPORTED for the streamed sibling — one forwarding policy, not two. */
+export const ALLOWED_REQUEST_HEADERS = [
   "content-type",
   "accept",
   "x-correlation-id",
@@ -78,7 +80,13 @@ const SAFE_RESPONSE_HEADERS = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function parseAllowedOrigins(): Set<string> {
+/**
+ * EXPORTED (ROADMAP 2.122, CEE lane 2) so the streamed sibling
+ * `/proxy/v5/turn/stream` shares ONE origin policy with this route instead of
+ * mirroring it. A second copy of the browser allowlist is trap 12 with a
+ * security blast radius.
+ */
+export function parseAllowedOrigins(): Set<string> {
   const raw = config.proxy.browserProxyAllowedOrigins;
   if (!raw) return new Set();
   return new Set(
@@ -89,7 +97,8 @@ function parseAllowedOrigins(): Set<string> {
   );
 }
 
-function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
+/** EXPORTED for the streamed sibling — see parseAllowedOrigins. */
+export function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
   // Exact-match only. Netlify preview patterns are NOT matched by regex here
   // because the global @fastify/cors plugin (which handles OPTIONS preflight)
   // only knows about ALLOWED_ORIGINS — it has no regex support. A preview
@@ -100,7 +109,15 @@ function isOriginAllowed(origin: string, allowedOrigins: Set<string>): boolean {
   return allowedOrigins.has(origin);
 }
 
-function buildCorsHeaders(origin: string): Record<string, string> {
+/**
+ * EXPORTED for the streamed sibling.
+ *
+ * ⚠ The streamed sibling NEEDS these explicitly, and that is not a style choice:
+ * an SSE route writes `reply.raw.writeHead` directly, which bypasses the Reply
+ * API that `@fastify/cors` stages its headers through. See
+ * `streamed-turn-sse.ts` `buildStagedSseHeaders`.
+ */
+export function buildCorsHeaders(origin: string): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -130,6 +147,32 @@ function pickSafeResponseHeaders(
 // Route registration
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve the service key the proxy injects into its internal call.
+ *
+ * Prefers the single-key config, falls back to the first entry in the multi-key
+ * array — mirroring how `auth.ts` builds its valid-key set from both
+ * `ASSIST_API_KEY` and `ASSIST_API_KEYS`. EXPORTED so the streamed sibling
+ * injects the SAME key by the SAME rule; two resolutions could disagree and the
+ * symptom would be a 401 buried inside a terminal SSE frame.
+ */
+export function resolveProxyAssistKey(): string | undefined {
+  return (
+    config.auth.assistApiKey ??
+    (config.auth.assistApiKeys && config.auth.assistApiKeys.length > 0
+      ? config.auth.assistApiKeys[0]
+      : undefined)
+  );
+}
+
+/**
+ * 2.174 fix a — the public Stop rung's per-IP budget, pinned by
+ * turn-stop-hardening.test.ts. Constants (not env) per the no-env-var-gates
+ * doctrine; the window matches the global limiter's.
+ */
+export const TURN_STOP_RATE_LIMIT_MAX = 30;
+export const TURN_STOP_RATE_LIMIT_WINDOW = "1 minute";
+
 export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   if (!config.proxy.browserProxyEnabled) {
     log.info({}, "[proxy-v5] BROWSER_PROXY_ENABLED is false — route not registered");
@@ -142,11 +185,7 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
   // Resolve the service key: prefer the single-key config, fall back to the
   // first entry in the multi-key array. This mirrors how auth.ts builds its
   // valid-key set from both ASSIST_API_KEY and ASSIST_API_KEYS.
-  const assistKey =
-    config.auth.assistApiKey ??
-    (config.auth.assistApiKeys && config.auth.assistApiKeys.length > 0
-      ? config.auth.assistApiKeys[0]
-      : undefined);
+  const assistKey = resolveProxyAssistKey();
 
   if (!assistKey) {
     log.warn(
@@ -193,6 +232,36 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     },
     "[proxy-v5] Browser proxy registered: POST /proxy/v5/turn",
   );
+
+  // State the auth posture of this deployment out loud, at boot.
+  //
+  // With CEE_REQUIRE_USER_JWT off, this route accepts turns that carry NO
+  // caller identity whatsoever. The origin allowlist above does not change
+  // that: Origin is a browser-only defence and any non-browser client can
+  // send whatever Origin it likes. Owned scenarios are still protected by the
+  // pre-flight ownership check (build-turn-context.ts), but GUEST scenarios
+  // (scenarios.user_id IS NULL) have no owner to check against, so anyone
+  // holding a guest scenario's UUID can read its conversation and append
+  // turns to it.
+  //
+  // This was reported twice by independent reviewers before anyone noticed,
+  // because nothing in the running system ever said it. A posture this open
+  // should be visible in the boot log of every environment that has it, so
+  // that turning it off is a decision someone makes rather than one that
+  // silently persists. Non-fatal by design: it is the accepted PoC posture,
+  // not a misconfiguration.
+  if (config.auth?.requireUserJwt !== true) {
+    log.warn(
+      {
+        require_user_jwt: false,
+        originCount: allowedOrigins.size,
+      },
+      "[proxy-v5] AUTH POSTURE: unauthenticated turns are ACCEPTED (CEE_REQUIRE_USER_JWT is off). " +
+        "Origin is not authentication — a non-browser client can forge it. Guest scenarios " +
+        "(user_id IS NULL) are readable and writable by anyone holding the scenario UUID. " +
+        "Owned scenarios remain protected by the pre-flight ownership check.",
+    );
+  }
 
   // NOTE: OPTIONS preflight is handled by @fastify/cors (registered in server.ts
   // with preflightContinue: false). That plugin intercepts OPTIONS before route
@@ -422,5 +491,95 @@ export async function proxyV5TurnRoute(app: FastifyInstance): Promise<void> {
     }
 
     return reply.code(injectResponse.statusCode).send(responseBody);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // POST /proxy/v5/turn/stop — THE EXPLICIT USER STOP, MADE SERVER-VISIBLE
+  //
+  // Until this existed, pressing Stop aborted the browser's own fetch and
+  // nothing else: no cancel endpoint existed anywhere in CEE, and
+  // `streamed-turn-sse.ts:71-78` deliberately does not cancel a turn on
+  // hangup. Live-reproduced consequence (evidence
+  // PHASE0-EVIDENCE-2026-07-28/fix-stop-fence.md): a draft stopped at +4.0s
+  // ran the full 52.7s, committed, and OVERWROTE the graph of a later turn
+  // the user had sent in the meantime.
+  //
+  // ⚠ THIS ROUTE DOES NOT CANCEL THE TURN, AND THAT IS THE DESIGN. It records
+  //   a tombstone; the turn keeps running and its WRITE is refused at the
+  //   commit chokepoint. Killing the in-flight pipeline is exactly what the
+  //   #751 arc rejected — a turn destroyed mid-flight can leave a scenario
+  //   half-applied. So the observable difference between an explicit Stop and
+  //   an incidental disconnect is ONE thing: whether a tombstone exists. A
+  //   disconnect sends nothing, has no tombstone, and still commits.
+  //
+  // ⚠ THE /orchestrate SIBLING IS NOT OPTIONAL — I first shipped this without
+  //   one, on the argument that only a browser can press Stop. That argument was
+  //   WRONG, and the derivation is what corrected it: the UI derives its stop URL
+  //   as `<buffered endpoint>/stop`, and the buffered endpoint resolves to the
+  //   Netlify edge rung (`/bff/orchestrate/v2/turn`) on any deployment that does
+  //   not bake VITE_V5_ENDPOINT. Without the sibling, that rung 404s and the UI
+  //   can never confirm a Stop on it. Both exist; ONE handler
+  //   (`recordExplicitTurnStop`) serves them.
+  //
+  // ⚠⚠ THIS BLOCK USED TO SAY the Stop rung widened nothing, "because a caller
+  //   who can stop a turn on a scenario is already a caller who can APPEND
+  //   turns to it, which is strictly more power". THAT WAS FALSE, it was the
+  //   sentence that made the hole look reviewed, and it survived a review and a
+  //   deploy. Appending is gated by the turn route's scenario-ownership
+  //   pre-flight (it refuses an anonymous caller on an OWNED scenario);
+  //   stopping was gated by NOTHING but this origin allowlist. On an owned
+  //   scenario the Stop rung therefore granted MORE authority than the turn
+  //   rung — the exact inverse — and an invented `turn_id` could supersede a
+  //   stranger's in-flight turn into losing its graph write. Codex audit C
+  //   finding C-1; fixed under ROADMAP 2.236.
+  //
+  // Auth posture NOW: this rung is still PUBLIC at the plugin (the `/proxy/v5/turn`
+  // prefix rule in src/plugins/auth.ts covers every subpath), and origin +
+  // per-IP rate limit remain INGRESS concerns only — neither is authority.
+  // Authorization lives in the shared handler, where Stop runs the SAME
+  // verified-identity + scenario-ownership pre-flight as turn admission and
+  // additionally requires the turn to have been admitted. Guest (unowned)
+  // scenarios stay addressable by anyone holding the UUID, exactly as on a
+  // turn — the two rungs now grant the same thing, which is the property that
+  // was missing. See src/routes/turn-stop.ts.
+  // ══════════════════════════════════════════════════════════════════════════
+  app.post("/proxy/v5/turn/stop", {
+    // 2.174 fix a — the PUBLIC rung is rate-limited per IP with the repo's
+    // own limiter (@fastify/rate-limit, registered `global: true` in
+    // server.ts; this route config overrides its max for exactly this
+    // route). 30/min is generous for a human — a Stop is a click on a
+    // running draft — and 4× tighter than the global 120 rpm an abuser
+    // otherwise gets for tombstone spray. The /orchestrate sibling stays on
+    // the global limit: it is service-key gated at ingress.
+    config: {
+      rateLimit: {
+        max: TURN_STOP_RATE_LIMIT_MAX,
+        timeWindow: TURN_STOP_RATE_LIMIT_WINDOW,
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const requestId =
+      (request.headers["x-request-id"] as string) ?? crypto.randomUUID();
+
+    // Ingress concerns ONLY — origin allowlist + CORS. Everything else is
+    // `recordExplicitTurnStop`, shared with the /orchestrate sibling.
+    const origin = request.headers.origin;
+    if (!origin || !isOriginAllowed(origin as string, allowedOrigins)) {
+      log.warn({ origin, requestId }, "[proxy-v5] stop rejected: origin not allowed");
+      return reply.code(403).send({
+        error: {
+          code: "PROXY_ORIGIN_REJECTED",
+          message: "Origin not allowed",
+          source: "proxy",
+          request_id: requestId,
+        },
+      });
+    }
+    for (const [k, v] of Object.entries(buildCorsHeaders(origin as string))) {
+      reply.header(k, v);
+    }
+
+    const result = await recordExplicitTurnStop(request, requestId);
+    return reply.code(result.status).send(result.body);
   });
 }

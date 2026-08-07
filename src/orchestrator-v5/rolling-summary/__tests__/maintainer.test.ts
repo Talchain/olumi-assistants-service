@@ -3,7 +3,7 @@
  * maintainer, driven with fakes (no network, deterministic).
  *
  * Containment proofs at the hook level:
- *  - MONOTONIC WRITE (R4): a FakeMonotonicStore mirroring the SQL WHERE clause
+ *  - MONOTONIC WRITE (R4): a shared store fake mirroring the SQL WHERE clause
  *    proves a stale/out-of-order write is a no-op (the store guard is the real
  *    guarantee; the SQL implements this exact semantics — verified live once
  *    Paul executes the migration). The maintainer reports `regressed` honestly.
@@ -26,6 +26,7 @@ import {
 } from '../capture.js';
 import type { ConversationHistoryReader, MaintainerTurn } from '../capture.js';
 import { buildDeterministicFloor } from '../deterministic-floor.js';
+import { MonotonicRollingSummaryStoreFake } from '../../../../tests/utils/rolling-summary-store-fake.js';
 import type { RollingSummaryStorePort, UpsertRollingSummaryOutcome } from '../store-adapter.js';
 import type { SummariserModel } from '../summariser.js';
 import { SUMMARY_SCHEMA_VERSION } from '../summary-types.js';
@@ -82,60 +83,13 @@ class RecordingStore implements RollingSummaryStorePort {
 }
 
 /**
- * A JS APPROXIMATION of the SQL monotonic WHERE clause — COMPOSITE
- * (created_at, turn_id, version), mirroring the amended DRAFT migration
- * (Codex r2 fix 3): the store permits same-timestamp turns and totally orders
- * them (created_at, turn_id), so a timestamp-only guard would no-op the write
- * that absorbs a same-timestamp sibling, stranding that turn's content
- * forever. `version` breaks the tie when the watermark turn itself is
- * unchanged (a later pass that absorbed a smaller-id sibling under the same
- * watermark).
- *
- * FIDELITY / KNOWN DIVERGENCES (MINOR-2 — do not overclaim): this is a
- * behavioural approximation valid for the domain the session store actually
- * emits, NOT a byte-identical port of Postgres semantics. Specifically:
- *   - Timestamps compare as RAW ISO STRINGS (below), which equals the SQL
- *     timestamptz ordering ONLY for same-precision, normalized-ISO-UTC values
- *     (the store's `created_at` column). It does NOT reproduce timestamptz
- *     µs precision across mixed-precision strings; the earlier Date.parse form
- *     was strictly worse (it truncated µs to ms, turning a µs-ordered pair
- *     into a false tie that fell through to the turn_id branch).
- *   - turn_id compares by JS code unit, which equals C-collation byte order
- *     for the ASCII (uuid-style) turn ids in use — but NOT an arbitrary DB
- *     collation.
- *   - It models ONLY the monotonic no-op ({applied:false, regressed:true}).
- *     It does NOT model the RS001 shape guard or the 22007 bad-cast surface
- *     the live function raises on a malformed p_summary.
- * The live guard is verified only once Paul executes the migration.
+ * The monotonic store double + its composite (created_at, turn_id, version)
+ * predicate now live in `tests/utils/rolling-summary-store-fake.ts`, with their
+ * full fidelity/known-divergence notes. They moved because the memory-retention
+ * eval had grown a SECOND in-memory store that compared `created_at` ALONE — a
+ * strictly weaker guarantee than this suite pins, diverging silently and green in
+ * both places. One definition, two consumers.
  */
-class FakeMonotonicStore implements RollingSummaryStorePort {
-  stored: RollingSummary | null = null;
-  async loadSummary(): Promise<RollingSummary | null> {
-    return this.stored;
-  }
-  async upsertSummary(_id: string, s: RollingSummary): Promise<UpsertRollingSummaryOutcome> {
-    const applied = this.stored === null || isStrictlyGreaterComposite(s, this.stored);
-    if (applied) {
-      this.stored = s;
-      return { applied: true, regressed: false, current_watermark: s.updated_turn_created_at };
-    }
-    return { applied: false, regressed: true, current_watermark: this.stored!.updated_turn_created_at };
-  }
-}
-
-/** Strict lexicographic tuple compare (created_at, turn_id, version) mirroring
- *  the SQL composite guard's "strictly greater" predicate. See the fidelity
- *  note on FakeMonotonicStore for the domain in which raw-string timestamp
- *  compare equals the live timestamptz ordering. */
-function isStrictlyGreaterComposite(a: RollingSummary, b: RollingSummary): boolean {
-  if (a.updated_turn_created_at !== b.updated_turn_created_at) {
-    return a.updated_turn_created_at > b.updated_turn_created_at;
-  }
-  if (a.updated_turn_id !== b.updated_turn_id) {
-    return a.updated_turn_id > b.updated_turn_id;
-  }
-  return a.version > b.version;
-}
 
 function emitSpy() {
   return vi.spyOn(telemetry, 'emit').mockImplementation(() => {});
@@ -186,7 +140,7 @@ describe('maintainRollingSummaryForCommit', () => {
   });
 
   it('MONOTONIC: a stale out-of-order write is a no-op — the fresh summary survives', async () => {
-    const store = new FakeMonotonicStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     // Pass A absorbs through turn 5 (fresh).
     store.stored = null;
     await store.upsertSummary(SCENARIO, {
@@ -509,7 +463,7 @@ describe('maintainRollingSummaryForCommit — per-scenario single-flight', () =>
 // the migration).
 // ---------------------------------------------------------------------------
 
-describe('FakeMonotonicStore — composite (created_at, turn_id, version) guard', () => {
+describe('MonotonicRollingSummaryStoreFake — composite (created_at, turn_id, version) guard', () => {
   const base = (over: Partial<RollingSummary>): RollingSummary => ({
     text: 'x',
     slots: [],
@@ -522,7 +476,7 @@ describe('FakeMonotonicStore — composite (created_at, turn_id, version) guard'
   });
 
   it('same timestamp + same watermark turn + higher version → APPLIES (sibling absorbed)', async () => {
-    const store = new FakeMonotonicStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     await store.upsertSummary(SCENARIO, base({ text: 'before sibling' }));
     const outcome = await store.upsertSummary(
       SCENARIO,
@@ -533,7 +487,7 @@ describe('FakeMonotonicStore — composite (created_at, turn_id, version) guard'
   });
 
   it('same timestamp + lexicographically newer watermark turn → APPLIES', async () => {
-    const store = new FakeMonotonicStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     await store.upsertSummary(SCENARIO, base({}));
     const outcome = await store.upsertSummary(
       SCENARIO,
@@ -543,7 +497,7 @@ describe('FakeMonotonicStore — composite (created_at, turn_id, version) guard'
   });
 
   it('identical composite (retry of the same write) → no-op', async () => {
-    const store = new FakeMonotonicStore();
+    const store = new MonotonicRollingSummaryStoreFake();
     await store.upsertSummary(SCENARIO, base({}));
     const outcome = await store.upsertSummary(SCENARIO, base({}));
     expect(outcome).toMatchObject({ applied: false, regressed: true });

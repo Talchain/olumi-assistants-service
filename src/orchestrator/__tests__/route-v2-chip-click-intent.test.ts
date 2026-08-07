@@ -20,7 +20,7 @@
 import { describe, expect, it } from 'vitest';
 import type { OrchestratorTurnPayload } from '@talchain/schemas/boundary';
 
-import { detectChipClickResumeIntent } from '../route-v2.js';
+import { detectChipClickResumeIntent, detectChipClickForcedIntent } from '../route-v2.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
@@ -92,5 +92,53 @@ describe('detectChipClickResumeIntent — route boundary contract', () => {
       event: { type: 'graph_loaded' },
     } as unknown as OrchestratorTurnPayload;
     expect(detectChipClickResumeIntent(sysEvent)).toBeUndefined();
+  });
+});
+
+describe('detectChipClickForcedIntent — F2 forced explanation-intent contract', () => {
+  it('maps a chip_click explain_results pill to the forced explain_results intent', () => {
+    expect(detectChipClickForcedIntent(chipClick('explain_results'))).toBe('explain_results');
+  });
+
+  it('maps a chip_click what_would_flip pill to the forced what_would_flip intent', () => {
+    expect(detectChipClickForcedIntent(chipClick('what_would_flip'))).toBe('what_would_flip');
+  });
+
+  // F2 CHANGE B — the "What changed?" pill is a THIRD forced analytical intent.
+  // It is TYPED here (not the free-text `classifyAnalyticalIntent` regex) so the
+  // pill reaches the run-comparison mechanism deterministically. Unlike the two
+  // explanation intents it is NOT an explanation handler id — TurnExecutor
+  // branches on it before the forced-explanation `routeWithToolUse` call.
+  it('maps a chip_click what_changed pill to the forced what_changed intent', () => {
+    expect(detectChipClickForcedIntent(chipClick('what_changed'))).toBe('what_changed');
+  });
+
+  // HAZARD 3 — the singular `explain_result` alias is NOT a registered handler
+  // id; it must be canonicalised to `explain_results` at the typed door so it
+  // pins to a real handler instead of 400ing as UNSUPPORTED_ACTION downstream.
+  it('canonicalises the singular explain_result alias to explain_results', () => {
+    expect(detectChipClickForcedIntent(chipClick('explain_result'))).toBe('explain_results');
+  });
+
+  it('returns undefined for run_analysis (stays deterministic) and other non-explanation chips', () => {
+    expect(detectChipClickForcedIntent(chipClick('run_analysis'))).toBeUndefined();
+    expect(detectChipClickForcedIntent(chipClick('set_factor_value'))).toBeUndefined();
+    expect(detectChipClickForcedIntent(chipClick('analysis_readiness'))).toBeUndefined();
+    expect(detectChipClickForcedIntent(chipClick(undefined))).toBeUndefined();
+  });
+
+  it('returns undefined when the analytical copy arrives as free text (source !== chip_click) — no regex routing', () => {
+    expect(detectChipClickForcedIntent(plainMessage('Please explain the analysis result.'))).toBeUndefined();
+  });
+
+  it('returns undefined for system_event payloads', () => {
+    const sysEvent = {
+      kind: 'system_event',
+      scenario_id: SCENARIO_ID,
+      turn_id: 't-1',
+      stage: 'analyse',
+      event: { type: 'graph_loaded' },
+    } as unknown as OrchestratorTurnPayload;
+    expect(detectChipClickForcedIntent(sysEvent)).toBeUndefined();
   });
 });

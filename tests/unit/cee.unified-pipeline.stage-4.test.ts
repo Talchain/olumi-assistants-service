@@ -219,8 +219,6 @@ function makeCtx(overrides?: Partial<Record<string, any>>): any {
     nodeRenames: new Map<string, string>(),
     goalConstraints: undefined,
     constraintStrpResult: undefined,
-    repairCost: 0,
-    repairFallbackReason: undefined,
     structuralMeta: undefined,
     validationSummary: undefined,
     quality: undefined,
@@ -390,13 +388,8 @@ describe("Stage 4: Repair Orchestrator", () => {
     (config as any).cee.orchestratorValidationEnabled = false;
   });
 
-  it("substep 2 (PLoT) never sets earlyReturn — always falls back to simpleRepair", async () => {
-    // PLoT validation uses try/catch fallback, never sets earlyReturn
-    (validateGraph as any).mockResolvedValue({ ok: false, violations: ["err1"] });
-    // Make LLM repair throw
-    const mockRepairAdapter = { name: "openai", model: "gpt-4o", repairGraph: vi.fn().mockRejectedValue(new Error("fail")) };
-    (getAdapter as any).mockReturnValue(mockRepairAdapter);
-    // simpleRepair fallback validates
+  it("substep 2 (PLoT) never sets earlyReturn — normalises via simpleRepair (LLM repair removed, 2.731)", async () => {
+    // PLoT validation normalises deterministically, never sets earlyReturn
     (validateGraph as any).mockResolvedValueOnce({ ok: false, violations: ["err1"] }).mockResolvedValueOnce({ ok: true, normalized: { ...validGraph } });
 
     const ctx = makeCtx();
@@ -516,7 +509,7 @@ describe("Substep 1: Orchestrator validation", () => {
 
 // ── Substep 2: PLoT validation ──────────────────────────────────────────────
 
-describe("Substep 2: PLoT validation", () => {
+describe("Substep 2: PLoT validation (LLM repair REMOVED — ROADMAP 2.731)", () => {
   beforeEach(setupDefaults);
 
   it("preserves fields on validation pass", async () => {
@@ -525,10 +518,94 @@ describe("Substep 2: PLoT validation", () => {
     await runPlotValidation(ctx);
 
     expect(ctx.graph).toBeDefined();
-    expect(ctx.repairFallbackReason).toBeUndefined();
+    expect((ctx as any).repairFallbackReason).toBeUndefined();
   });
 
-  it("sets repairFallbackReason='budget_exceeded' when skipRepairDueToBudget", async () => {
+  it("2.731: Bucket-C violations (llmRepairNeeded=true) do NOT invoke the LLM repair adapter", async () => {
+    // Discriminating spy: if the removed invocation is ever re-added, this
+    // adapter is fetched and its repairGraph fires — both assertions RED.
+    const repairGraphSpy = vi.fn().mockRejectedValue(
+      new Error("repairGraph invoked — ROADMAP 2.731 regression (LLM repair was removed)"),
+    );
+    (getAdapter as any).mockReturnValue({ name: "openai", model: "gpt-4.1-2025-04-14", repairGraph: repairGraphSpy });
+
+    (validateGraph as any)
+      .mockResolvedValueOnce({
+        ok: false,
+        violations: [{ code: "INVALID_EDGE_TYPE", severity: "error", suggestion: "option→goal forbidden" }],
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        violations: [{ code: "INVALID_EDGE_TYPE", severity: "error", suggestion: "option→goal forbidden" }],
+      });
+
+    const ctx = makeCtx();
+    // Bind by identity to the Bucket-C route: this is the exact flag the
+    // deterministic sweep sets (deterministic-sweep.ts) when Bucket C
+    // (MISSING_GOAL / MISSING_BRIDGE / INVALID_EDGE_TYPE / …) survives.
+    ctx.llmRepairNeeded = true;
+    ctx.remainingViolations = [{ code: "INVALID_EDGE_TYPE", path: "edges[o1→g1]" }];
+    await runPlotValidation(ctx);
+
+    expect(getAdapter).not.toHaveBeenCalled();
+    expect(repairGraphSpy).not.toHaveBeenCalled();
+    // The deterministic fallback (simpleRepair) is NOT removed with the LLM
+    // call — it is the normalisation that rescued every delivered turn in
+    // the 7-day efficacy window.
+    expect(simpleRepair).toHaveBeenCalled();
+    // Substep 2 never fails closed itself; surviving violations flow to the
+    // post-enforcement gate (substep 9b) which owns the honest 422.
+    expect(ctx.earlyReturn).toBeUndefined();
+  });
+
+  it("2.731: total-time bound — substep 2 completes without awaiting the repair adapter's latency", async () => {
+    // The removed call cost 44.7s per failed turn on staging. Model it with a
+    // 5s adapter: at any tip where the invocation exists this test takes ≥5s
+    // and REDs on the elapsed bound; post-removal it completes in milliseconds.
+    const slowRepairGraph = vi.fn(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () => resolve({ graph: { ...validGraph }, usage: { input_tokens: 1, output_tokens: 1 } }),
+            5000,
+          ),
+        ),
+    );
+    (getAdapter as any).mockReturnValue({ name: "openai", model: "gpt-4.1-2025-04-14", repairGraph: slowRepairGraph });
+
+    (validateGraph as any)
+      .mockResolvedValueOnce({ ok: false, violations: ["[MISSING_BRIDGE] at nodes[f1]: no outcome between factor and goal"] })
+      .mockResolvedValue({ ok: true, normalized: { ...validGraph } });
+
+    const ctx = makeCtx();
+    ctx.llmRepairNeeded = true;
+    const startMs = Date.now();
+    await runPlotValidation(ctx);
+    const elapsedMs = Date.now() - startMs;
+
+    expect(slowRepairGraph).not.toHaveBeenCalled();
+    expect(elapsedMs).toBeLessThan(1500);
+  }, 10_000);
+
+  it("2.731: violations simpleRepair cannot clear stay on ctx.graph for the post-enforcement gate — no earlyReturn, no repair bookkeeping", async () => {
+    (validateGraph as any)
+      .mockResolvedValueOnce({ ok: false, violations: ["[MISSING_BRIDGE] at nodes[f1]: no outcome"] })
+      .mockResolvedValueOnce({ ok: false, violations: ["[MISSING_BRIDGE] at nodes[f1]: no outcome"] });
+
+    const ctx = makeCtx();
+    ctx.llmRepairNeeded = true;
+    await runPlotValidation(ctx);
+
+    expect(ctx.earlyReturn).toBeUndefined();
+    expect(simpleRepair).toHaveBeenCalled();
+    expect(ctx.graph).toBeDefined();
+    // The LLM-repair bookkeeping went with the call (2.732): nothing may
+    // write these ever again.
+    expect((ctx as any).repairFallbackReason).toBeUndefined();
+    expect((ctx as any).llmRepairBriefIncluded).toBeUndefined();
+  });
+
+  it("2.731: budget flag is inert for substep 2 — same deterministic path, no adapter, no fallback-reason", async () => {
     (validateGraph as any)
       .mockResolvedValueOnce({ ok: false, violations: ["err1"] })
       .mockResolvedValueOnce({ ok: true, normalized: { ...validGraph } });
@@ -536,118 +613,24 @@ describe("Substep 2: PLoT validation", () => {
     const ctx = makeCtx({ skipRepairDueToBudget: true });
     await runPlotValidation(ctx);
 
-    expect(ctx.repairFallbackReason).toBe("budget_exceeded");
+    expect(getAdapter).not.toHaveBeenCalled();
     expect(simpleRepair).toHaveBeenCalled();
+    expect((ctx as any).repairFallbackReason).toBeUndefined();
   });
 
-  it("sets repairFallbackReason='revalidation_failed' when LLM repair succeeds but revalidation fails", async () => {
-    const mockRepairAdapter = {
-      name: "openai",
-      model: "gpt-4o",
-      repairGraph: vi.fn().mockResolvedValue({
-        graph: { ...validGraph },
-        usage: { input_tokens: 100, output_tokens: 50 },
-      }),
-    };
-    (getAdapter as any).mockReturnValue(mockRepairAdapter);
-
+  it("sweep-sufficient path (llmRepairNeeded=false) still normalises via simpleRepair and adopts the revalidated graph", async () => {
+    const normalised = { ...validGraph, normalised_marker: true };
     (validateGraph as any)
       .mockResolvedValueOnce({ ok: false, violations: ["err1"] })
-      .mockResolvedValueOnce({ ok: false, violations: ["still_broken"] });
+      .mockResolvedValueOnce({ ok: true, normalized: normalised });
 
     const ctx = makeCtx();
+    ctx.llmRepairNeeded = false;
     await runPlotValidation(ctx);
 
-    expect(ctx.repairFallbackReason).toBe("revalidation_failed");
-  });
-
-  it("sets repairFallbackReason='llm_repair_error' when LLM repair throws", async () => {
-    const mockRepairAdapter = {
-      name: "openai",
-      model: "gpt-4o",
-      repairGraph: vi.fn().mockRejectedValue(new Error("LLM API failed")),
-    };
-    (getAdapter as any).mockReturnValue(mockRepairAdapter);
-
-    (validateGraph as any)
-      .mockResolvedValueOnce({ ok: false, violations: ["err1"] })
-      .mockResolvedValueOnce({ ok: true, normalized: { ...validGraph } });
-
-    const ctx = makeCtx();
-    await runPlotValidation(ctx);
-
-    expect(ctx.repairFallbackReason).toBe("llm_repair_error");
     expect(simpleRepair).toHaveBeenCalled();
-  });
-
-  it("emits RepairStart with violation_summary and violation_codes strings/arrays", async () => {
-    const { emit } = await import("../../src/utils/telemetry.js");
-
-    const mockRepairAdapter = {
-      name: "openai",
-      model: "gpt-4o",
-      repairGraph: vi.fn().mockResolvedValue({
-        graph: { ...validGraph },
-        usage: { input_tokens: 100, output_tokens: 50 },
-      }),
-    };
-    (getAdapter as any).mockReturnValue(mockRepairAdapter);
-
-    // First call: validation fails with structured violations; second: revalidation passes
-    (validateGraph as any)
-      .mockResolvedValueOnce({
-        ok: false,
-        violations: [
-          { code: "CYCLE_DETECTED", severity: "error", suggestion: "Remove weakest edge" },
-          { code: "MISSING_BRIDGE", severity: "error", suggestion: "Add outcome node" },
-        ],
-      })
-      .mockResolvedValueOnce({ ok: true, normalized: { ...validGraph } });
-
-    const ctx = makeCtx();
-    await runPlotValidation(ctx);
-
-    // Find the RepairStart emit call
-    const calls = (emit as any).mock.calls;
-    const repairStartCall = calls.find((c: any[]) => c[0] === "RepairStart");
-    expect(repairStartCall).toBeDefined();
-
-    const payload = repairStartCall[1];
-    expect(payload).toHaveProperty("violation_count", 2);
-    expect(typeof payload.violation_summary).toBe("string");
-    expect(payload.violation_summary.length).toBeGreaterThan(0);
-    expect(Array.isArray(payload.violation_codes)).toBe(true);
-    expect(payload.violation_codes).toContain("CYCLE_DETECTED");
-    expect(payload.violation_codes).toContain("MISSING_BRIDGE");
-  });
-
-  it("sets repairFallbackReason='dag_transform_failed' when DAG stabilisation fails", async () => {
-    const { stabiliseGraph: _stabiliseGraph } = await import("../../src/orchestrator/index.js");
-    const { ensureDagAndPrune } = await import("../../src/orchestrator/index.js");
-
-    const mockRepairAdapter = {
-      name: "openai",
-      model: "gpt-4o",
-      repairGraph: vi.fn().mockResolvedValue({
-        graph: { ...validGraph },
-        usage: { input_tokens: 100, output_tokens: 50 },
-      }),
-    };
-    (getAdapter as any).mockReturnValue(mockRepairAdapter);
-
-    (validateGraph as any).mockResolvedValueOnce({ ok: false, violations: ["err1"] });
-    // Make ensureDagAndPrune throw to trigger dag_transform_failed
-    (ensureDagAndPrune as any).mockImplementationOnce(() => {
-      throw new Error("Cycle detected in DAG");
-    });
-    // After fallback: simpleRepair → validateGraph succeeds
-    (validateGraph as any).mockResolvedValueOnce({ ok: true, normalized: { ...validGraph } });
-
-    const ctx = makeCtx();
-    await runPlotValidation(ctx);
-
-    expect(ctx.repairFallbackReason).toBe("dag_transform_failed");
-    expect(simpleRepair).toHaveBeenCalled();
+    expect(getAdapter).not.toHaveBeenCalled();
+    expect((ctx.graph as any).normalised_marker).toBe(true);
   });
 });
 

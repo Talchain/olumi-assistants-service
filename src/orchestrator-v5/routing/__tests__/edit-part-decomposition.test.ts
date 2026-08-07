@@ -16,16 +16,24 @@ import { describe, it, expect } from 'vitest';
 
 import {
   accountEditParts,
+  buildMultiPartRejectionClarify,
   buildPartAccountingDisclosure,
+  buildReplayOverflowNotice,
   buildStructuralRemainderNotice,
   buildSubstitutionClarify,
+  buildUnmappedPartsNotice,
   decomposeEditMessage,
+  oxfordJoin,
   type PatchOperationLike,
 } from '../edit-part-decomposition.js';
 import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
+import {
+  isValueUpdatePhrasing,
+  shouldSuppressEditDispatchForValueUpdate,
+} from '../../../orchestrator/routing/value-update-gate.js';
 
 /** The exact compound message from the 2026-07-20 dress rehearsal (wire 012). */
 const REHEARSAL_MESSAGE =
@@ -404,5 +412,424 @@ describe('disclosure copy — DISCLOSED-PARTIAL and fail-closed clarify', () => 
   it('buildStructuralRemainderNotice is null for a pure value message (false-compound trap)', () => {
     const d = decomposeEditMessage('Set EU Market Demand to 0.7');
     expect(buildStructuralRemainderNotice(d)).toBeNull();
+  });
+
+  it('buildMultiPartRejectionClarify names every accountable part and passes both egress detectors', () => {
+    // The verbatim F4 live-probe message (cee-staging build 6a202d7).
+    const d = decomposeEditMessage(
+      'Set Headcount Cost to 0.5 and remove the option Hire Two Junior Engineers.',
+    );
+    const text = buildMultiPartRejectionClarify(d);
+    expect(text).not.toBeNull();
+    expect(text!).toContain('Set Headcount Cost to 0.5');
+    expect(text!).toContain('remove the option Hire Two Junior Engineers');
+    expect(text!).toMatch(/one at a time/i);
+    expect(findForbiddenPhraseHit(text!)).toBeNull();
+    expect(findSuccessClaimHit(text!)).toBeNull();
+  });
+
+  it('buildMultiPartRejectionClarify is null for a single-part message (false-compound trap)', () => {
+    expect(
+      buildMultiPartRejectionClarify(
+        decomposeEditMessage('remove the option Hire Two Junior Engineers.'),
+      ),
+    ).toBeNull();
+    expect(
+      buildMultiPartRejectionClarify(decomposeEditMessage('Set Headcount Cost to 0.5')),
+    ).toBeNull();
+  });
+});
+
+describe('oxfordJoin — British-English enumeration (shared by all three clarify sites)', () => {
+  it('joins two pre-formatted items with a bare "and" (no Oxford comma)', () => {
+    expect(oxfordJoin(['"a"', '"b"'])).toBe('"a" and "b"');
+  });
+
+  it('joins three items with commas then a bare "and" before the last', () => {
+    expect(oxfordJoin(['"a"', '"b"', '"c"'])).toBe('"a", "b" and "c"');
+  });
+
+  it('returns a single item verbatim', () => {
+    expect(oxfordJoin(['"only"'])).toBe('"only"');
+  });
+
+  it('is quote-agnostic — single-quoted items join identically', () => {
+    expect(oxfordJoin(["'x'", "'y'", "'z'"])).toBe("'x', 'y' and 'z'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F6 (Codex) — quote-aware decomposition: a conjunction/comma seam INSIDE a
+// quoted label is not a clause boundary, and the quoted label is not truncated
+// at an interior conjunction. Proven live: "add a factor called 'Shipping and
+// handling' and set Cost to 3" split into structural_add "…called 'Shipping"
+// plus an orphan "handling'", and the replay chip (edit-graph-dispatch) then
+// re-dispatched the TRUNCATED clause, mutating the user's entity name.
+// ---------------------------------------------------------------------------
+
+describe('decomposeEditMessage — F6 quote-aware segmentation (conjunctions inside quoted labels)', () => {
+  it("keeps an ASCII-quoted label with an interior 'and' whole, and still splits the trailing value clause", () => {
+    const d = decomposeEditMessage(
+      "add a factor called 'Shipping and handling' and set Cost to 3",
+    );
+    // Exactly two accountable parts — no orphan fragment.
+    expect(d.accountableParts).toHaveLength(2);
+
+    const add = d.accountableParts.find((p) => p.kind === 'structural_add');
+    expect(add).toBeDefined();
+    // The replay CHIP message is this clause verbatim: it must equal the
+    // ORIGINAL clause, not the truncated "…called 'Shipping".
+    expect(add!.text).toBe("add a factor called 'Shipping and handling'");
+    // The user's entity name survives intact (was 'Shipping' before the fix).
+    expect(add!.newLabels).toEqual(['Shipping and handling']);
+
+    // No orphan 'handling'' segment of any kind (was a bare 'other' part).
+    expect(d.parts.some((p) => /handling/i.test(p.text) && p.kind === 'other')).toBe(false);
+    expect(d.parts.map((p) => p.text)).not.toContain("handling'");
+
+    const value = d.accountableParts.find((p) => p.kind === 'value');
+    expect(value).toBeDefined();
+    expect(value!.text).toBe('set Cost to 3');
+  });
+
+  it("keeps a SMART-quoted label with an interior 'and' (and an ampersand) whole — single part, no orphan", () => {
+    const d = decomposeEditMessage('add a factor called ‘R&D and Ops’');
+    expect(d.parts).toHaveLength(1);
+    expect(d.parts[0]!.kind).toBe('structural_add');
+    expect(d.parts[0]!.text).toBe('add a factor called ‘R&D and Ops’');
+    expect(d.parts[0]!.newLabels).toEqual(['R&D and Ops']);
+  });
+
+  it('the ASCII-straight-quote variant behaves identically to the smart-quote one', () => {
+    const d = decomposeEditMessage("add a factor called 'R&D and Ops'");
+    expect(d.parts).toHaveLength(1);
+    expect(d.parts[0]!.kind).toBe('structural_add');
+    expect(d.parts[0]!.newLabels).toEqual(['R&D and Ops']);
+  });
+
+  it('a contraction apostrophe is NOT treated as a quote span (unquoted seams still split)', () => {
+    // "don't" must not open a quote span that would swallow the following
+    // conjunction seam — the two clauses must still separate.
+    const d = decomposeEditMessage("set Churn to 5 and add a factor called Growth");
+    expect(d.accountableParts).toHaveLength(2);
+    expect(d.mixedValueStructural).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F7 (Codex) — short and non-Latin labels must be capturable and matchable.
+// Before: cleanCapture rejected < 2 chars, norm ASCII-stripped everything, and
+// labelMatches rejected normalised < 3 chars — so 'X', 'AI', '成本', '运输'
+// reported covered:false / value_target_missing on legitimate graphs.
+// ---------------------------------------------------------------------------
+
+describe('decomposeEditMessage — F7 short/non-Latin target capture', () => {
+  it('captures a ONE-letter value target (was dropped by the < 2 char reject)', () => {
+    const d = decomposeEditMessage('set X to 5');
+    expect(d.accountableParts).toHaveLength(1);
+    expect(d.accountableParts[0]!.kind).toBe('value');
+    expect(d.accountableParts[0]!.namedTargets).toEqual(['X']);
+  });
+
+  it('captures a CJK value target unchanged (no ASCII stripping at capture)', () => {
+    const d = decomposeEditMessage('set 成本 to 5');
+    expect(d.accountableParts[0]!.namedTargets).toEqual(['成本']);
+  });
+
+  it('captures an accented value target (NFKC keeps the letters)', () => {
+    const d = decomposeEditMessage('set Café to 5');
+    expect(d.accountableParts[0]!.namedTargets).toEqual(['Café']);
+  });
+});
+
+describe('accountEditParts — F7 short/non-Latin labels match instead of reporting missing', () => {
+  const optionAndGoal = [
+    { id: 'opt_a', kind: 'option', label: 'Option A' },
+    { id: 'goal_g', kind: 'goal', label: 'Goal' },
+  ];
+
+  it('a TWO-letter label (AI) matches its graph node via exact equality (not < 3 char reject)', () => {
+    const d = decomposeEditMessage('set AI to 0.5 and add a factor called Roadmap');
+    const parts = d.accountableParts;
+    const a = accountEditParts({
+      parts,
+      operations: [
+        { op: 'update_node', path: 'fac_ai', value: { label: 'AI' } },
+        { op: 'add_node', path: '/nodes/-', value: { id: 'fac_new', label: 'Roadmap' } },
+      ],
+      graphNodes: [{ id: 'fac_ai', label: 'AI' }, ...optionAndGoal],
+    });
+    const valueFate = a.fates.find((f) => f.part.kind === 'value');
+    expect(valueFate!.covered).toBe(true);
+    expect(a.missingTargets.filter((m) => m.kind === 'value_target_missing')).toHaveLength(0);
+  });
+
+  it('a CJK label (成本) matches its graph node instead of reporting value_target_missing', () => {
+    const d = decomposeEditMessage('set 成本 to 3 and add a factor called Roadmap');
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: [
+        { op: 'update_node', path: 'fac_cost', value: { label: '成本' } },
+        { op: 'add_node', path: '/nodes/-', value: { id: 'fac_new', label: 'Roadmap' } },
+      ],
+      graphNodes: [{ id: 'fac_cost', label: '成本' }, ...optionAndGoal],
+    });
+    const valueFate = a.fates.find((f) => f.part.kind === 'value');
+    expect(valueFate!.covered).toBe(true);
+    expect(a.missingTargets.filter((m) => m.kind === 'value_target_missing')).toHaveLength(0);
+  });
+
+  it('a smart-quoted short new label (‘AI’) normalises and matches its add_node op', () => {
+    const d = decomposeEditMessage(
+      'set Churn to 3 and add a factor called ‘AI’',
+    );
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: [
+        { op: 'update_node', path: 'fac_churn', value: { label: 'Churn' } },
+        { op: 'add_node', path: '/nodes/-', value: { id: 'fac_ai', label: 'AI' } },
+      ],
+      graphNodes: [{ id: 'fac_churn', label: 'Churn' }, ...optionAndGoal],
+    });
+    const addFate = a.fates.find((f) => f.part.kind === 'structural_add');
+    expect(addFate!.covered).toBe(true);
+  });
+
+  it('a one-letter target is NOT falsely covered by an unrelated op (capture propagates to matching)', () => {
+    // With the < 2 char reject, the target was dropped (null), and a null
+    // target counts ANY update_node as coverage — a false positive. The
+    // captured 'X' must instead require a label match, leaving this uncovered
+    // (but present, so no value_target_missing).
+    const d = decomposeEditMessage('set X to 5 and add a factor called Roadmap');
+    const a = accountEditParts({
+      parts: d.accountableParts,
+      operations: [
+        { op: 'update_node', path: 'fac_y', value: { label: 'Y' } },
+        { op: 'add_node', path: '/nodes/-', value: { id: 'fac_new', label: 'Roadmap' } },
+      ],
+      graphNodes: [
+        { id: 'fac_x', label: 'X' },
+        { id: 'fac_y', label: 'Y' },
+        ...optionAndGoal,
+      ],
+    });
+    const valueFate = a.fates.find((f) => f.part.kind === 'value');
+    expect(valueFate!.covered).toBe(false);
+    // 'X' exists in the graph, so it is uncovered-but-present, never "missing".
+    expect(a.missingTargets.filter((m) => m.kind === 'value_target_missing')).toHaveLength(0);
+  });
+});
+
+describe('buildReplayOverflowNotice — F8 chip-cap disclosure copy', () => {
+  it('is null at or below the cap', () => {
+    const d = decomposeEditMessage(
+      'set Churn to 3 and add a factor called Growth',
+    );
+    expect(buildReplayOverflowNotice(d.accountableParts)).toBeNull();
+  });
+
+  it('names the clauses beyond the cap and stays clear of both egress detectors', () => {
+    const d = decomposeEditMessage(
+      'set Churn to 3, add a factor called Growth, remove the Localisation factor, and add a risk called Attrition',
+    );
+    expect(d.accountableParts.length).toBeGreaterThan(3);
+    const notice = buildReplayOverflowNotice(d.accountableParts)!;
+    expect(notice).not.toBeNull();
+    // The 4th (overflow) clause is named in prose since it has no chip.
+    expect(notice).toMatch(/add a risk called Attrition/);
+    expect(findForbiddenPhraseHit(notice)).toBeNull();
+    expect(findSuccessClaimHit(notice)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 'unmapped' parts — journey Finding #5, the silent half-drop (2026-07-25)
+// ---------------------------------------------------------------------------
+//
+// RED-first target: on staging build bdb7a97 the message
+//   "cap the upfront spend at 50k, and add a risk called Head Roaster Departure"
+// replied with the held risk and said NOTHING about the cap. Every assertion
+// below fails if the disclosure is removed; the corpus invariant fails if the
+// new kind is allowed to touch routing.
+
+describe("'unmapped' limit clauses — the silent half-drop", () => {
+  /**
+   * The three compound messages the end-to-end journey observed failing, in the
+   * journey's own words. Each is a two-part request whose limit/cap half the
+   * grammar could not see.
+   */
+  const JOURNEY_COMPOUNDS: ReadonlyArray<readonly [string, string]> = [
+    [
+      'row 1 (cap + add option)',
+      'cap the upfront spend at 50k, and add a fourth option to drop the big account',
+    ],
+    [
+      'row 2 (cap + add risk) — the SILENT one',
+      'cap the upfront spend at 50k, and add a risk called Head Roaster Departure',
+    ],
+  ];
+
+  it.each(JOURNEY_COMPOUNDS)(
+    'classifies the limit half as unmapped and discloses it: %s',
+    (_name, message) => {
+      const d = decomposeEditMessage(message);
+      expect(d.unmappedParts.length).toBe(1);
+      expect(d.unmappedParts[0]!.text).toContain('cap the upfront spend at 50k');
+      // The other half is still served by the ordinary grammar.
+      expect(d.accountableParts.length).toBeGreaterThanOrEqual(1);
+
+      const notice = buildUnmappedPartsNotice(d.unmappedParts, d.accountableParts.length);
+      expect(notice).not.toBeNull();
+      expect(notice!).toContain('cap the upfront spend at 50k');
+      expect(notice!).toContain("haven't taken forward");
+      // No promise the product cannot keep: a solo limit clause is live-proven
+      // NOT to be picked up, so the "tell me that part on its own and I'll pick
+      // it up" tail must not appear here.
+      expect(notice!).not.toContain("I'll pick it up");
+      expect(findForbiddenPhraseHit(notice!)).toBeNull();
+      expect(findSuccessClaimHit(notice!)).toBeNull();
+    },
+  );
+
+  it('recognises the other quantified limit phrasings', () => {
+    const cases = [
+      'keep the marketing spend under 20k',
+      'spend no more than 50k on the shop',
+      'limit the retail build to 30k',
+      'restrict the capital outlay to £25,000',
+    ];
+    for (const c of cases) {
+      const d = decomposeEditMessage(`add a risk called Attrition and ${c}`);
+      expect(d.unmappedParts.length, `expected unmapped for: ${c}`).toBe(1);
+    }
+  });
+
+  it('does NOT claim unquantified limit words (they stay non-disclosing)', () => {
+    // No numeric bound -> not a limit request this lane can be sure about.
+    for (const c of [
+      'limit the options we compare',
+      'add a factor called Capacity cap',
+      'tell me what constrains the decision',
+    ]) {
+      const d = decomposeEditMessage(`add a risk called Attrition and ${c}`);
+      expect(d.unmappedParts.length, `expected NO unmapped for: ${c}`).toBe(0);
+    }
+  });
+
+  it('stays silent when the turn served nothing (no false "you also asked" framing)', () => {
+    const d = decomposeEditMessage('cap the upfront spend at 50k');
+    expect(d.unmappedParts.length).toBe(1);
+    expect(d.accountableParts.length).toBe(0);
+    expect(buildUnmappedPartsNotice(d.unmappedParts, d.accountableParts.length)).toBeNull();
+  });
+
+  it('pluralises without breaking either egress detector', () => {
+    const d = decomposeEditMessage(
+      'add a risk called Attrition and cap the upfront spend at 50k and keep marketing under 20k',
+    );
+    expect(d.unmappedParts.length).toBe(2);
+    const notice = buildUnmappedPartsNotice(d.unmappedParts, d.accountableParts.length)!;
+    expect(notice).toContain('these parts');
+    expect(findForbiddenPhraseHit(notice)).toBeNull();
+    expect(findSuccessClaimHit(notice)).toBeNull();
+  });
+
+  /**
+   * ⭐ CORPUS INVARIANT — the routing no-op proof.
+   *
+   * `accountableParts.length` and `mixedValueStructural` select the serving
+   * lane (`shouldSuppressEditDispatchForValueUpdate`) and gate the whole
+   * conservation-accounting block (`>= 2`). The 'unmapped' kind is only ever
+   * claimed from segments that would otherwise be 'other', and both kinds are
+   * non-accountable, so BOTH signals must be unchanged for every message —
+   * including messages that contain limit clauses.
+   *
+   * Positive control: the corpus must contain messages that DO produce
+   * unmapped parts, otherwise this invariant is vacuous.
+   */
+  it('changes NO routing signal on any message, including limit-bearing ones', () => {
+    const corpus = [
+      // limit-bearing (the new class) — the positive control for this test
+      'cap the upfront spend at 50k, and add a risk called Head Roaster Departure',
+      'set churn to 5% and cap the spend at 50k',
+      'keep the marketing spend under 20k and remove the Shipping costs factor',
+      'limit the retail build to 30k',
+      // the estate's existing pins — must be untouched
+      REHEARSAL_MESSAGE,
+      'set churn to 5% and run the analysis',
+      'Change Support cost to 30 and remove any doubt',
+      'Set churn to 5% and add a hard constraint on churn',
+      'set churn to 5%',
+      'increase price by 10%',
+      'add a factor called Shipping and handling and set Cost to 3',
+      'remove the Shipping costs factor and remove the Packaging factor',
+      'thanks — and can you bump cost, also I think the risk factor is wrong?',
+      'update the model to be more realistic',
+    ];
+
+    let sawUnmapped = 0;
+    for (const message of corpus) {
+      const d = decomposeEditMessage(message);
+      if (d.unmappedParts.length > 0) sawUnmapped += 1;
+      // Derived recomputation of the PRE-CHANGE definitions: accountable was
+      // `kind !== 'other'`, and an unmapped segment was an 'other' segment.
+      const preChangeAccountable = d.parts.filter(
+        (p) => p.kind !== 'other' && p.kind !== 'unmapped',
+      );
+      const preChangeHasValue = preChangeAccountable.some((p) => p.kind === 'value');
+      const preChangeHasStructural = preChangeAccountable.some(
+        (p) =>
+          p.kind === 'structural_add' || p.kind === 'structural_remove' || p.kind === 'link',
+      );
+      expect(d.accountableParts.length, `accountable drifted on: ${message}`).toBe(
+        preChangeAccountable.length,
+      );
+      expect(d.mixedValueStructural, `mixedValueStructural drifted on: ${message}`).toBe(
+        preChangeHasValue && preChangeHasStructural,
+      );
+      // Disjointness: an unmapped part is never accountable.
+      for (const u of d.unmappedParts) {
+        expect(d.accountableParts).not.toContain(u);
+      }
+    }
+    // Positive control — the corpus must actually exercise the new class.
+    expect(sawUnmapped).toBeGreaterThanOrEqual(4);
+  });
+
+  it('leaves the value-update suppressor byte-identical on limit-bearing messages', () => {
+    for (const m of [
+      'set churn to 5% and cap the spend at 50k',
+      'set churn to 5%',
+      'cap the upfront spend at 50k',
+      REHEARSAL_MESSAGE,
+    ]) {
+      const d = decomposeEditMessage(m);
+      // The suppressor reads ONLY mixedValueStructural (value-update-gate.ts:413).
+      expect(shouldSuppressEditDispatchForValueUpdate(m)).toBe(
+        isValueUpdatePhrasing(m) && !d.mixedValueStructural,
+      );
+    }
+  });
+});
+
+/**
+ * KNOWN RESIDUAL, pinned deliberately so it cannot rot into a silent surprise:
+ * segmentation is untouched by the 'unmapped' work. `COMMA_VERB_SEAM` splits a
+ * bare comma only when a listed EDIT verb follows, and the limit verbs are not
+ * on that list, so "add a risk called X, cap spend at 50k" stays ONE segment
+ * and the cap is not disclosed. Widening the seam list would change
+ * segmentation for every message, which is exactly the class of change the
+ * corpus invariant above cannot police, so it is deliberately out of scope.
+ * Both journey compounds used ", and " / " and ", which do split.
+ */
+describe("'unmapped' — disclosed residual: comma-only seams", () => {
+  it('does not split a bare-comma limit clause (documented gap, not a regression)', () => {
+    const d = decomposeEditMessage('add a risk called Attrition, cap the upfront spend at 50k');
+    expect(d.unmappedParts.length).toBe(0);
+    // …whereas the conjunction form DOES disclose.
+    const withAnd = decomposeEditMessage(
+      'add a risk called Attrition and cap the upfront spend at 50k',
+    );
+    expect(withAnd.unmappedParts.length).toBe(1);
   });
 });

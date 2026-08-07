@@ -1,0 +1,266 @@
+{
+  "id": "05-constraint-infeasible",
+  "description": "The leading option violates a hard constraint (winner.constraint_infeasible / recommendation_suppressed set). The review must disclose that rather than narrate a clean lead. Also the only fixture whose scenario_contexts key can be wrong without being absent.",
+  "provenance": {
+    "origin": "input-field-coverage",
+    "source": "src/cee/decision-review/invoke.ts:104-115 (constraint_infeasible / recommendation_suppressed, trust-spine board #1)",
+    "note": "No March fixture reaches these flags. readiness is needs_framing, so this fixture ALSO pins the most cautious tone row (caution rank 3)."
+  },
+  "input": {
+    "brief": "Pick a launch date for the new pricing tier. We cannot ship before the audit closes.",
+    "brief_hash": "13579bdf2468ace0",
+    "graph": {
+      "nodes": [
+        {
+          "id": "dec_launch",
+          "kind": "decision",
+          "label": "Pricing Tier Launch"
+        },
+        {
+          "id": "opt_march",
+          "kind": "option",
+          "label": "Launch in March"
+        },
+        {
+          "id": "opt_june",
+          "kind": "option",
+          "label": "Launch in June"
+        },
+        {
+          "id": "fac_audit",
+          "kind": "factor",
+          "label": "Audit Completion"
+        },
+        {
+          "id": "fac_demand",
+          "kind": "factor",
+          "label": "Early Demand"
+        },
+        {
+          "id": "out_arr",
+          "kind": "outcome",
+          "label": "Annual Recurring Revenue"
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge_demand_arr",
+          "from": "fac_demand",
+          "to": "out_arr",
+          "effect_direction": "positive"
+        },
+        {
+          "id": "edge_audit_arr",
+          "from": "fac_audit",
+          "to": "out_arr",
+          "effect_direction": "negative"
+        }
+      ]
+    },
+    "isl_results": {
+      "option_comparison": [
+        {
+          "option_id": "opt_march",
+          "option_label": "Launch in March",
+          "win_probability": 0.69,
+          "outcome": {
+            "mean": 0.63,
+            "p10": 0.4,
+            "p90": 0.85
+          }
+        },
+        {
+          "option_id": "opt_june",
+          "option_label": "Launch in June",
+          "win_probability": 0.31,
+          "outcome": {
+            "mean": 0.47,
+            "p10": 0.3,
+            "p90": 0.64
+          }
+        }
+      ],
+      "factor_sensitivity": [
+        {
+          "factor_id": "fac_demand",
+          "factor_label": "Early Demand",
+          "elasticity": 0.52,
+          "confidence": 0.71
+        },
+        {
+          "factor_id": "fac_audit",
+          "factor_label": "Audit Completion",
+          "elasticity": -0.47,
+          "confidence": 0.83
+        }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "edge_audit_arr",
+          "from_label": "Audit Completion",
+          "to_label": "Annual Recurring Revenue",
+          "switch_probability": 0.29
+        }
+      ],
+      "robustness": {
+        "level": "medium",
+        "recommendation_stability": 0.68,
+        "overall_confidence": 0.62
+      }
+    },
+    "deterministic_coaching": {
+      "headline_type": "moderate_winner",
+      "readiness": "needs_framing",
+      "evidence_gaps": [],
+      "model_critiques": []
+    },
+    "winner": {
+      "id": "opt_march",
+      "label": "Launch in March",
+      "win_probability": 0.69,
+      "outcome_mean": 0.63,
+      "constraint_infeasible": true,
+      "recommendation_suppressed": true
+    },
+    "runner_up": {
+      "id": "opt_june",
+      "label": "Launch in June",
+      "win_probability": 0.31,
+      "outcome_mean": 0.47
+    }
+  },
+  "candidates": [
+    {
+      "label": "good",
+      "note": "Discloses the constraint breach and names the feasible path. Should PASS.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Launch in March scores highest by about 38 percentage points, but it breaches the stated constraint that nothing ships before the audit closes, so it is not available. Launch in June is the feasible path.",
+        "story_headlines": {
+          "opt_march": "Scores highest but breaches the audit constraint",
+          "opt_june": "Feasible path, gives up some early demand"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 68% of runs, but the leading option is infeasible under the stated constraint.",
+          "primary_risk": "The audit constraint rules out the option the model scores highest.",
+          "stability_factors": [
+            "Audit completion is well supported."
+          ],
+          "fragility_factors": [
+            "Early demand carries the widest spread of the inputs examined."
+          ]
+        },
+        "readiness_rationale": "The framing needs work first: the constraint that rules out the top option is not represented in the comparison.",
+        "evidence_enhancements": {},
+        "scenario_contexts": {
+          "edge_audit_arr": {
+            "context": "If the audit closes earlier than expected, the constraint relaxes and the earlier date becomes available."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "The audit close date is fixed and cannot be brought forward.",
+          "Early demand does not decay materially over the delay."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "Should the audit constraint be modelled as an input rather than applied afterwards?",
+            "technique": "framing test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "undisclosed_infeasible",
+      "note": "Narrates the infeasible option as a clean lead; no output string mentions the constraint.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Launch in March scores highest by about 38 percentage points over Launch in June. Early demand is what carries the result.",
+        "story_headlines": {
+          "opt_march": "Scores highest on early demand",
+          "opt_june": "Trails but with a narrower spread"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 68% of runs.",
+          "primary_risk": "Early demand could fade faster than modelled and narrow the gap.",
+          "stability_factors": [
+            "Audit completion is well supported."
+          ],
+          "fragility_factors": [
+            "Early demand carries the widest spread of the inputs examined."
+          ]
+        },
+        "readiness_rationale": "The framing needs work first, because early demand is doing most of the separating.",
+        "evidence_enhancements": {},
+        "scenario_contexts": {
+          "edge_audit_arr": {
+            "context": "If early demand fades, the two dates converge."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "Early demand does not decay materially over the delay."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "What would make early demand fade faster than modelled?",
+            "technique": "assumption test"
+          }
+        ]
+      }
+    },
+    {
+      "label": "ungrounded_scenario_key",
+      "note": "scenario_contexts keyed on a connection that is not in fragile_edges.",
+      "source": "recorded",
+      "output": {
+        "narrative_summary": "Launch in March scores highest by about 38 percentage points, but it breaches the stated constraint that nothing ships before the audit closes, so it is not available. Launch in June is the feasible path.",
+        "story_headlines": {
+          "opt_march": "Scores highest but breaches the audit constraint",
+          "opt_june": "Feasible path, gives up some early demand"
+        },
+        "robustness_explanation": {
+          "summary": "The ordering holds in about 68% of runs, but the leading option is infeasible under the stated constraint.",
+          "primary_risk": "The audit constraint rules out the option the model scores highest.",
+          "stability_factors": [
+            "Audit completion is well supported."
+          ],
+          "fragility_factors": [
+            "Early demand carries the widest spread of the inputs examined."
+          ]
+        },
+        "readiness_rationale": "The framing needs work first: the constraint that rules out the top option is not represented in the comparison.",
+        "evidence_enhancements": {},
+        "scenario_contexts": {
+          "edge_demand_arr": {
+            "context": "If the audit closes earlier than expected, the constraint relaxes and the earlier date becomes available."
+          }
+        },
+        "bias_findings": [],
+        "key_assumptions": [
+          "The audit close date is fixed and cannot be brought forward.",
+          "Early demand does not decay materially over the delay."
+        ],
+        "decision_quality_prompts": [
+          {
+            "prompt": "Should the audit constraint be modelled as an input rather than applied afterwards?",
+            "technique": "framing test"
+          }
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "good": true,
+    "undisclosed_infeasible": false,
+    "ungrounded_scenario_key": false
+  },
+  "expectedFailedDimensions": {
+    "undisclosed_infeasible": [
+      "infeasible_winner_disclosed"
+    ],
+    "ungrounded_scenario_key": [
+      "scenario_contexts_keyed_on_fragile_edges"
+    ]
+  }
+}

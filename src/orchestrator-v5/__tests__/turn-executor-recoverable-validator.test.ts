@@ -164,13 +164,17 @@ const PROPOSAL_KIND_MISMATCH_GRAPH = {
   action: {
     handler_id: 'run_analysis',
     entity: {
-      // Id exists but the graph-resolved kind is `goal`, while the LLM
-      // claims `option`. Triggers the graph-crosscheck branch.
-      id: 'goal_1',
+      // AMENDED 2026-07-27 (entity-kind repair). Was `goal_1` claimed as
+      // `option`: run_analysis accepts BOTH, so the graph's kind is now
+      // adopted and that proposal lands. To keep exercising the
+      // graph-dependent ENTITY_KIND_MISMATCH branch this targets a factor,
+      // which resolves to wire kind 'node' — a kind run_analysis genuinely
+      // cannot serve, so it is still refused.
+      id: 'fac_x',
       kind: 'option',
       resolution_status: 'resolved',
       resolution_method: 'id_match',
-      label: 'Profit',
+      label: 'Factor X',
     },
     parameters: [],
     cited_context_fields: [],
@@ -252,6 +256,8 @@ const GRAPH_KIND_CROSSCHECK: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
     { id: 'opt_a', kind: 'option', label: 'A' },
+    // Target of PROPOSAL_KIND_MISMATCH_GRAPH — resolves to wire kind 'node'.
+    { id: 'fac_x', kind: 'factor', label: 'Factor X' },
   ],
   edges: [],
   options: [{ id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } }],

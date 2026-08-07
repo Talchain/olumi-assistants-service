@@ -61,10 +61,24 @@ Read-only consolidation — no probing beyond repo + PR metadata.
 
 ## S4 — Dependency vulnerability backlog (20 open dependabot PRs)
 
-CI posture: Snyk fails at **high+**; GitHub Dependency Review fails at **moderate** on PRs;
-`pnpm audit` (Security Audit job) is an **inherited advisory red** on staging. `pnpm.overrides`
-already pin the known advisory families (fast-uri, undici, lodash, ajv, minimatch,
-brace-expansion, protobufjs, vite).
+CI posture: Snyk fails at **high+**; GitHub Dependency Review fails at **moderate** on PRs.
+
+> **⚠ CORRECTED 2026-07-27 — the "Security Audit is an inherited advisory red" line below was
+> stale, and staleness in this direction is the expensive kind.** It read: *"`pnpm audit`
+> (Security Audit job) is an **inherited advisory red** on staging."* **That is false.** At
+> `8b46f2a0` the job's conclusion is **success** — `5 vulnerabilities found / Severity: 1 low |
+> 3 moderate | 1 high (1 ignored)`, the one high being the deliberately-suppressed
+> GHSA-mh99-v99m-4gvg (run `30287393129`, job `90048474495`, read from the job output, not from
+> this register). A register that keeps describing a **passing** alarm as a known red is how a
+> real finding gets waved through: it trains every lane to stop reading the job. **Re-read the
+> job output; do not re-state a red from this file.**
+
+The 39 dependency `overrides` pin the known advisory families (fast-uri, undici, lodash, ajv,
+minimatch, brace-expansion, protobufjs, vite, find-my-way, ws, form-data, …). **They live in
+`package.json` (`pnpm.overrides`), and that location is now version-sensitive:** pnpm >=10 does
+not read it. See the `Assert pnpm overrides are readable by the installing pnpm` step in
+`.github/workflows/ci.yml` — it derives the location and every installing job's pnpm major and
+fails if they disagree, so this paragraph cannot quietly go stale about *where* the pins are.
 
 Recommended merge order (safe → decision-needed):
 
@@ -105,9 +119,25 @@ Recommended merge order (safe → decision-needed):
 
 Merge-order recommendation stands as §S4 tiers 1→4; nothing here blocks harness (T1/T2) work.
 
-## Standing advisory-red context
+## Standing advisory-red context — ⚠ WITHDRAWN 2026-07-27, ALL THREE ARE GREEN
 
-`Full Test Suite (advisory)`, `Integration Tests (advisory)` and `Security Audit` are inherited
-baseline reds on staging (predate current PRs). For any PR, prove identical-to-base rather than
-treating them as PR-caused. Getting these lanes green is a separate CI-rehab workstream, not part
-of this register.
+This section used to read: *"`Full Test Suite (advisory)`, `Integration Tests (advisory)` and
+`Security Audit` are inherited baseline reds on staging (predate current PRs). For any PR, prove
+identical-to-base rather than treating them as PR-caused."*
+
+**Every one of those three is now `success`.** Measured at staging tip `8b46f2a0` by reading the
+check-run conclusions directly (`gh api repos/Talchain/olumi-assistants-service/commits/<sha>/check-runs`):
+**all 16 checks pass**, with only `Dependency Review` and `Security Scan Summary` skipped. The
+full suite is green locally too — `pnpm test` → **1303 files / 21894 tests passed, 0 failed**.
+
+**So the guidance has inverted.** These are no longer alarms to discount as pre-existing; they
+are working alarms, and a red in any of them is now **evidence about your PR**. Do not carry the
+old "prove identical-to-base" reflex forward — it was written when the baseline was genuinely
+red, it outlived that baseline, and left in place it would have taught lanes to dismiss three
+functioning gates.
+
+**The durable lesson, which is why this section survives instead of being deleted:** a
+known-reds register is a hand-maintained mirror of CI, and this one drifted in the *dangerous*
+direction — it kept excusing failures that had already been fixed. A register can only ever be a
+pointer. **Derive the current state from the check-runs API at the SHA you are on; never
+re-state a red from this file.**

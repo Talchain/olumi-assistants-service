@@ -130,7 +130,16 @@ export interface ValidationIssue {
   severity: ValidationSeverity;
   /** Human-readable message */
   message: string;
-  /** JSON path to the issue location (e.g., 'edges[17]', 'nodesById.fac_price') */
+  /**
+   * JSON path to the issue location (e.g., 'edges[17]', 'nodesById.fac_price').
+   *
+   * Node-scoped paths are minted in TWO shapes — `nodesById.<id>` by this
+   * validator, `nodes[<id>]` by the repair sweep. Build them with
+   * `validatorNodePath` / `sweepNodePath` and compare them with `pathsNameNode`
+   * (`./violation-paths.ts`); do not hand-write either literal. The two once
+   * drifted apart inside a comparison, silently disabling a duplicate-suppression
+   * guard.
+   */
   path?: string;
   /** Additional context for debugging */
   context?: Record<string, unknown>;

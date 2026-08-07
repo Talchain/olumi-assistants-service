@@ -124,9 +124,13 @@ import type { ContextPack } from '../context/context-pack-assembler.js';
 
 import {
   buildOlumiActionTool,
+  buildForcedPillTool,
   OLUMI_ACTION_TOOL_NAME,
   ToolCallParseError,
   parseToolCallResponse,
+  sanitiseLoggedKeyName,
+  type ForcedPillHandlerId,
+  type ParseTelemetryContext,
   type ToolCallResponse,
 } from './tool-schema.js';
 import {
@@ -537,6 +541,25 @@ export interface RouteWithToolUseOptions {
    * routing docs — use sparingly and only in tests.
    */
   readonly systemPromptOverride?: string;
+  /**
+   * F2 CHANGE A — FORCED explanation intent for a typed analytical pill
+   * (`explain_results` / `what_would_flip`). Set by TurnExecutor when route-v2
+   * detected a `source==='chip_click'` turn whose typed `chip.action_type` is
+   * an explanation intent (`chipClickForcedIntent`). When present this call:
+   *   1. DISABLES thinking on this routing turn (reuses the existing
+   *      `{ thinking: { type: 'disabled' } }` mechanism — ~9s median vs ~26s —
+   *      NOT a new flag; per-call, unconditional for the pill path), and
+   *   2. FORCES the model to emit the `olumi_action` tool (`tool_choice: tool`),
+   *      appends a forced-intent directive to the user turn, and
+   *   3. PINS the resulting proposal's `handler_id` to this value at interpret
+   *      time so the coach AUTHORS the answer (with full conversation sight)
+   *      but CANNOT re-route the typed pill to a different handler.
+   * The coach still sees the verbatim conversation window (it rides on the
+   * ContextPack serialised by `buildUserMessage`), so the pill answer references
+   * what the user just said; the deterministic explanation fallback stays in
+   * place downstream when the authored `answer_text` is invalid.
+   */
+  readonly forcedExplanationHandlerId?: ForcedPillHandlerId;
 }
 
 export async function routeWithToolUse(
@@ -562,7 +585,16 @@ export async function routeWithToolUse(
     recordModelResolution(options.requestId, options.sessionId, resolution);
   }
 
-  const userMessage = buildUserMessage(contextPack, message);
+  // F2 CHANGE A — forced explanation intent for a typed analytical pill. The
+  // directive is APPENDED after the pure `buildUserMessage` output (kept pure so
+  // the budget re-measurement and the byte-golden tests are unaffected) and only
+  // when a forced handler is set, so every non-pill routing turn is byte-
+  // identical to today.
+  const forcedHandlerId = options.forcedExplanationHandlerId;
+  const base = buildUserMessage(contextPack, message);
+  const userMessage = forcedHandlerId
+    ? `${base}\n\n${buildForcedIntentDirective(forcedHandlerId)}`
+    : base;
 
   // PMS-backed routing prompt snapshot. Built once at startup; this call is
   // a cheap cached read on every routing turn after boot. The snapshot's
@@ -581,11 +613,25 @@ export async function routeWithToolUse(
   let firstCallArgs: ChatWithToolsArgs = {
     ...initialSystem.fields,
     messages: [{ role: 'user', content: userMessage }],
-    // ROADMAP 1.132 (F2): flag OFF returns the exact pre-flag
-    // buildOlumiActionTool() unconditionally advertises `answer_shape`
-    // (ROADMAP 1.132, F2 — F1 flag deletion).
-    tools: [buildOlumiActionTool()],
-    tool_choice: { type: 'auto' },
+    // Codex F3 — a FORCED analytical pill advertises the DEDICATED, constrained
+    // tool (`buildForcedPillTool`): a single execute intent + the single pinned
+    // handler enum, so the model is guided to author the answer inside an
+    // execute envelope and cannot be advertised the coach/converse surfaces that
+    // slipped past the pin. Same tool NAME, so the `tool_choice` force and the
+    // downstream `toolUse.name` check are unchanged. Every non-pill turn keeps
+    // the full `buildOlumiActionTool()` advert (`answer_shape` included —
+    // ROADMAP 1.132, F2, F1 flag deletion). The hard bypass guarantee is the
+    // assert-execute-after-parse (`enforceForcedExecute`) below.
+    tools: [forcedHandlerId ? buildForcedPillTool(forcedHandlerId) : buildOlumiActionTool()],
+    // F2 CHANGE A — a forced explanation pill FORCES the `olumi_action` tool so
+    // the coach ALWAYS emits a structured proposal (with a graph-resolved entity
+    // + authored `answer_text`) rather than free text; the handler_id is then
+    // pinned at interpret time. Anthropic requires thinking OFF whenever
+    // tool_choice forces a specific tool — satisfied below (the pill path always
+    // disables thinking). Every non-pill turn keeps `{ type: 'auto' }`.
+    tool_choice: forcedHandlerId
+      ? { type: 'tool' as const, name: OLUMI_ACTION_TOOL_NAME }
+      : { type: 'auto' as const },
     temperature: 0,
     maxTokens: V5_ROUTING_MAX_OUTPUT_TOKENS,
     // CEE_COACH_THINKING_DISABLED (POC-BOARD item 9) — latency lever. Flag OFF
@@ -595,7 +641,12 @@ export async function routeWithToolUse(
     // the N=5 staging spike). This spread propagates to the max_tokens-retry and
     // REPAIR_ONCE calls, which reuse firstCallArgs. Enablement is Paul-gated
     // behind the coaching-quality verdict — see the flag's config/index.ts note.
-    ...(config.features.coachThinkingDisabled
+    //
+    // F2 CHANGE A — a forced explanation pill ALSO disables thinking on this
+    // path unconditionally (reuses the SAME mechanism, not a new flag): the pill
+    // needs the ~9s latency and forced tool_choice is incompatible with adaptive
+    // thinking. OR-ed with the global lever so either route disables it.
+    ...(config.features.coachThinkingDisabled || forcedHandlerId
       ? { thinking: { type: 'disabled' as const } }
       : {}),
   };
@@ -759,8 +810,26 @@ export async function routeWithToolUse(
     llmCallsUsed = 2;
   }
 
-  const parsedOrError = tryInterpret(firstResult, llmCallsUsed);
-  if (parsedOrError.kind === 'ok') return parsedOrError.result;
+  const parseTelemetry: ParseTelemetryContext = {
+    requestId: options.requestId,
+    sessionId: options.sessionId ?? null,
+    llmCall: 1,
+    // Thread the forced-pill signal to the coercion site so class (e) (the
+    // missing/invalid-type intent_class default) fires on forced turns only.
+    // repairTelemetry below spreads this, so it carries to the repair pass too.
+    ...(forcedHandlerId ? { forcedHandlerId } : {}),
+  };
+  // Codex F3 — assert-execute-after-parse: a forced-pill result that is not an
+  // execute tool_call is downgraded to `parse_failed` here so the REPAIR_ONCE
+  // path below (and, failing that, the terminal schema_repair_failed) closes the
+  // coach/converse bypass hole. No-op on non-pill turns.
+  const parsedOrError = enforceForcedExecute(
+    tryInterpret(firstResult, llmCallsUsed, parseTelemetry),
+    forcedHandlerId,
+    parseTelemetry,
+  );
+  if (parsedOrError.kind === 'ok')
+    return applyForcedExplanationHandler(parsedOrError.result, forcedHandlerId);
   if (parsedOrError.kind === 'non_repairable') throw parsedOrError.error;
 
   // REPAIR_ONCE — parse failed. Build protocol-compliant retry messages
@@ -824,8 +893,14 @@ export async function routeWithToolUse(
     stablePrefixBytes,
   });
 
-  const secondAttempt = tryInterpret(repairResult, llmCallsUsed + 1);
-  if (secondAttempt.kind === 'ok') return secondAttempt.result;
+  const repairTelemetry: ParseTelemetryContext = { ...parseTelemetry, llmCall: 2 };
+  const secondAttempt = enforceForcedExecute(
+    tryInterpret(repairResult, llmCallsUsed + 1, repairTelemetry),
+    forcedHandlerId,
+    repairTelemetry,
+  );
+  if (secondAttempt.kind === 'ok')
+    return applyForcedExplanationHandler(secondAttempt.result, forcedHandlerId);
   throw new RoutingError(
     'schema_repair_failed',
     `Routing tool-call repair attempt failed: ${secondAttempt.kind === 'non_repairable' ? secondAttempt.error.message : secondAttempt.detail}`,
@@ -837,9 +912,30 @@ export async function routeWithToolUse(
 // Interpreting a ChatWithToolsResult
 // -----------------------------------------------------------------------
 
+/**
+ * A sanitised routing validation issue for attributability logging (Codex F3,
+ * R-004): the Zod issue `code` + dotted `path` ONLY — never the message text
+ * (which can echo model-authored fragments) and never any value.
+ */
+interface SanitisedRoutingIssue {
+  readonly code: string;
+  readonly path: string;
+  /**
+   * For `unrecognized_keys` issues only: the offending top-level key NAMES.
+   * These are MODEL-AUTHORED strings — by definition keys NOT in the schema,
+   * so untrusted (possibly reflected user content, unbounded length), NOT
+   * structural identifiers. Each is sanitised + capped via
+   * {@link sanitiseLoggedKeyName} before it lands here, so any FUTURE
+   * un-coerced stray-top-level-key class SELF-NAMES in the
+   * `forced_pill_parse_failed` log (safely) instead of leaving only
+   * `code @ ""`. Absent for every other issue code.
+   */
+  readonly keys?: readonly string[];
+}
+
 type Interpretation =
   | { kind: 'ok'; result: RoutingResult }
-  | { kind: 'parse_failed'; detail: string }
+  | { kind: 'parse_failed'; detail: string; issues?: readonly SanitisedRoutingIssue[] }
   | { kind: 'non_repairable'; error: RoutingError };
 
 /**
@@ -869,7 +965,11 @@ function summariseDroppedAction(
   return { handler_id: null, label: null };
 }
 
-function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interpretation {
+function tryInterpret(
+  result: ChatWithToolsResult,
+  llmCallCount: number,
+  telemetry?: ParseTelemetryContext,
+): Interpretation {
   if (result.stop_reason === 'max_tokens') {
     return {
       kind: 'non_repairable',
@@ -907,7 +1007,7 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
       };
     }
     try {
-      const proposal = parseToolCallResponse(toolUse.input);
+      const proposal = parseToolCallResponse(toolUse.input, telemetry);
       return {
         kind: 'ok',
         result: {
@@ -921,7 +1021,31 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
       };
     } catch (err) {
       const detail = err instanceof ToolCallParseError ? err.message : String(err);
-      return { kind: 'parse_failed', detail };
+      // Codex F3 — carry the sanitised {code, path} of every Zod issue (no
+      // message, no value — R-004) so a residual forced-pill repair is
+      // attributable from logs. Populated only for ToolCallParseError (the
+      // schema-violation path); a non-Zod throw has no issues.
+      const issues: SanitisedRoutingIssue[] | undefined =
+        err instanceof ToolCallParseError
+          ? err.issues.map((issue) => {
+              const base: SanitisedRoutingIssue = {
+                code: String(issue.code),
+                path: issue.path.join('.'),
+              };
+              // Companion (repair-tax fourth-class PR): carry the offending key
+              // NAMES for a root/nested `unrecognized_keys` issue so a future
+              // un-coerced stray-key class self-names. These are MODEL-AUTHORED
+              // strings (keys NOT in the schema) — untrusted, unbounded — NOT
+              // structural identifiers: each is sanitised + capped per R-004 via
+              // sanitiseLoggedKeyName so a raw model string (a 5014-char key was
+              // observed) can never be emitted verbatim.
+              if (issue.code === 'unrecognized_keys' && Array.isArray(issue.keys)) {
+                return { ...base, keys: issue.keys.map(sanitiseLoggedKeyName) };
+              }
+              return base;
+            })
+          : undefined;
+      return { kind: 'parse_failed', detail, ...(issues ? { issues } : {}) };
     }
   }
 
@@ -945,6 +1069,94 @@ function tryInterpret(result: ChatWithToolsResult, llmCallCount: number): Interp
       rawResult: result,
       llmCallCount,
     },
+  };
+}
+
+/**
+ * Codex F3 — assert-execute-after-parse for a FORCED analytical pill.
+ *
+ * THE HOLE the review proved at the bytes: a schema-valid coach/converse tool
+ * call PARSES fine, then `applyForcedExplanationHandler` returns it UNCHANGED (it
+ * only pins an *execute* proposal), so a forced pill could silently emit a
+ * coaching/conversational turn — the declared "guarantee" bypassed. This guard
+ * FAILS LOUD: any forced-pill interpretation that is not an execute tool_call is
+ * downgraded to `parse_failed`, so the caller's EXISTING machinery takes over —
+ * REPAIR_ONCE on the first attempt, then a terminal `schema_repair_failed` if the
+ * repair also strays. A non-execute intent is therefore never served.
+ *
+ * No-op for every non-pill turn (`forcedHandlerId` undefined); once the result IS
+ * an execute tool_call it is a byte-identical passthrough (the downstream pin +
+ * side-band are unchanged, so parity with the current forced path holds). Emits
+ * `V5RoutingForcedPillOutcome` once per attempt (first-pass-valid rate is
+ * measurable) and logs the sanitised issue {code,path} of a strayed/failed result
+ * for attributability. No user text on either surface (R-004).
+ */
+function enforceForcedExecute(
+  interp: Interpretation,
+  forcedHandlerId: ForcedPillHandlerId | undefined,
+  telemetry: ParseTelemetryContext,
+): Interpretation {
+  if (forcedHandlerId === undefined) return interp;
+
+  // A schema failure (or hard interpreter error) is left for the caller's
+  // existing repair / bounded-fallback paths; log the sanitised issues so any
+  // residual forced-pill repair is attributable.
+  if (interp.kind === 'parse_failed') {
+    log.warn(
+      {
+        event: 'v5.routing.forced_pill_parse_failed',
+        request_id: telemetry.requestId,
+        v5_journey_id: telemetry.sessionId,
+        forced_handler_id: forcedHandlerId,
+        llm_call: telemetry.llmCall,
+        issues: interp.issues ?? [],
+      },
+      'V5 forced-pill routing call failed schema — repair / bounded fallback will handle',
+    );
+    return interp;
+  }
+  if (interp.kind !== 'ok') return interp;
+
+  const result = interp.result;
+  const isForcedExecute =
+    result.type === 'tool_call' && result.proposal.intent_class === 'execute';
+  const returnedIntent =
+    result.type === 'tool_call' ? result.proposal.intent_class : 'text_only';
+
+  emit(TelemetryEvents.V5RoutingForcedPillOutcome, {
+    request_id: telemetry.requestId,
+    turn_id: telemetry.requestId,
+    v5_journey_id: telemetry.sessionId,
+    scenario_id: telemetry.sessionId,
+    llm_call: telemetry.llmCall,
+    forced_handler_id: forcedHandlerId,
+    returned_intent: returnedIntent,
+    first_pass_execute: isForcedExecute,
+  });
+
+  if (isForcedExecute) return interp;
+
+  // The bypass: a schema-valid non-execute slipped past the parser. Fail loud by
+  // downgrading to `parse_failed` so REPAIR_ONCE (attempt 1) or the terminal
+  // schema_repair_failed (attempt 2) fires — never a silently-served coach turn.
+  // The detail is a generic re-emit instruction, no user text.
+  log.warn(
+    {
+      event: 'v5.routing.forced_pill_bypass_blocked',
+      request_id: telemetry.requestId,
+      v5_journey_id: telemetry.sessionId,
+      forced_handler_id: forcedHandlerId,
+      llm_call: telemetry.llmCall,
+      returned_intent: returnedIntent,
+    },
+    'V5 forced-pill routing returned a non-execute intent — blocking the bypass',
+  );
+  return {
+    kind: 'parse_failed',
+    detail:
+      'Forced analytical pill must route as intent_class "execute" with handler ' +
+      `"${forcedHandlerId}", but the model returned "${returnedIntent}". Re-emit an ` +
+      'execute olumi_action proposal with your answer in action.explanation.answer_text.',
   };
 }
 
@@ -1015,8 +1227,91 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (conversation_summary !== undefined) {
     parts.push('', SUMMARY_PRECEDENCE_INSTRUCTION);
   }
+  // Decision records — CODE-OWNED, a sibling of the two instructions above,
+  // gated by the same condition that put the section on the pack. It replaces
+  // a hand-typed clause in the PMS-served orchestrator prompt that asserted
+  // the OPPOSITE of what the section says about itself; see
+  // OLDER_RELEVANT_FACTS_INSTRUCTION for the archaeology.
+  if (contextPack.older_relevant_facts !== undefined) {
+    parts.push('', OLDER_RELEVANT_FACTS_INSTRUCTION);
+  }
   parts.push('', '## User turn', message);
   return parts.join('\n');
+}
+
+// -----------------------------------------------------------------------
+// F2 CHANGE A — forced explanation intent (typed analytical pill)
+// -----------------------------------------------------------------------
+
+/**
+ * Human-readable label for a forced explanation handler, used only inside the
+ * forced-intent directive prose (never a wire value).
+ */
+const FORCED_INTENT_QUESTION: Record<'explain_results' | 'what_would_flip', string> = {
+  explain_results: 'explain the current analysis results',
+  what_would_flip: 'explain what would change (flip) the current analysis result',
+};
+
+/**
+ * Directive appended to the user turn when a typed analytical pill forces the
+ * intent. It tells the coach WHICH question the user clicked (so its authored
+ * `answer_text` addresses that specific question, grounded in the conversation
+ * window + analysis already in the ContextPack above) and to route via the
+ * matching handler. The hard guarantee is the interpret-time handler_id pin in
+ * {@link applyForcedExplanationHandler}; this directive keeps the AUTHORED prose
+ * on-topic. British English, no internal field names leaked to the model.
+ */
+export function buildForcedIntentDirective(
+  handlerId: 'explain_results' | 'what_would_flip',
+): string {
+  return [
+    '## Requested action (explicit)',
+    `The user clicked a button to ${FORCED_INTENT_QUESTION[handlerId]}. Answer THAT specific question directly, using the conversation above and the analysis context. Call the olumi_action tool with handler_id "${handlerId}" and put your complete, plain-language answer in the explanation.answer_text field.`,
+  ].join('\n');
+}
+
+/**
+ * F2 CHANGE A — PIN the routed proposal to the typed pill intent. When a pill
+ * forced the intent, the coach authored the prose (with conversation sight) but
+ * must NOT be free to re-route the typed pill to a different handler. We take
+ * the model's real, graph-resolved execute proposal and override ONLY its
+ * `handler_id` to the forced value, preserving the model's `entity` (so
+ * downstream validation still checks a real target) and its authored
+ * `explanation`. If the model omitted `explanation` (bare tool_use), we lift the
+ * orientation text into `answer_text` so the side-band validator can judge it;
+ * an empty result falls through unchanged and the deterministic explanation
+ * fallback serves the user (honesty guarantee intact).
+ *
+ * No-op for every non-pill turn (`forcedHandlerId` undefined) and for any result
+ * that is not an execute tool_call — byte-identical to today on those paths.
+ */
+export function applyForcedExplanationHandler(
+  result: RoutingResult,
+  forcedHandlerId: 'explain_results' | 'what_would_flip' | undefined,
+): RoutingResult {
+  if (forcedHandlerId === undefined) return result;
+  if (result.type !== 'tool_call') return result;
+  if (result.proposal.intent_class !== 'execute') return result;
+  const action = result.proposal.action;
+  if (action.handler_id === forcedHandlerId && action.explanation !== undefined) {
+    return result;
+  }
+  const authored = action.explanation?.answer_text ?? result.orientationText;
+  const explanation =
+    authored.trim().length > 0
+      ? { ...(action.explanation ?? {}), answer_text: authored }
+      : action.explanation;
+  return {
+    ...result,
+    proposal: {
+      ...result.proposal,
+      action: {
+        ...action,
+        handler_id: forcedHandlerId,
+        ...(explanation !== undefined ? { explanation } : {}),
+      },
+    },
+  };
 }
 
 /**
@@ -1059,6 +1354,42 @@ export const SUMMARY_PRECEDENCE_INSTRUCTION = [
   '- Treat CONSTRAINTS & PREFERENCES and OPEN entries as the user’s standing context; do not relitigate RESOLVED threads unless the user reopens them.',
   '- Never echo the [t:…] provenance stamps, turn identifiers, or the slot labels into user-facing text.',
   '- If the summary carries a staleness note, prefer the verbatim conversation turns for anything recent.',
+].join('\n');
+
+/**
+ * Decision-record semantics — CODE-OWNED at this locus, a sibling of
+ * {@link SUMMARY_PRECEDENCE_INSTRUCTION}, appended to the routing user message
+ * only when the `older_relevant_facts` section is on the pack. British English.
+ *
+ * **Why it lives in code.** The same sanction was hand-typed into the
+ * PMS-served orchestrator prompt, and on 2026-07-25 it drifted from the field
+ * it describes inside TWENTY MINUTES: at 14:31 (#690) `older_relevant_facts`
+ * gained an `[INCOMPLETE — N decisions are on record … Do not describe this
+ * list as complete]` line whenever the store's cap hides records; at ~15:00 a
+ * separately-authored prompt version (v120) shipped, still saying of that same
+ * field *"it is the complete set you hold"*. Two lanes, neither aware of the
+ * other, and both live on the same turn. Worse, v120's acceptance evidence
+ * (438 offline replays) predated the disclosure entirely, so the completeness
+ * clause was never measured against the field it describes.
+ *
+ * A sanction that must be kept in step BY HAND, in a different system, on a
+ * different release cadence, is the estate's dominant defect shape. Here it is
+ * emitted by the same condition that puts the section on the pack, from the
+ * same repo and the same commit as the projection that writes the section —
+ * so the two cannot drift.
+ *
+ * The section's own `[INCOMPLETE …]` line remains the authority on the numbers;
+ * this block only says how to READ the section, and never states a count of its
+ * own (a count here would be a second owner of the same number — the very
+ * failure mode being removed). Exported for the byte-level serialisation tests.
+ */
+export const OLDER_RELEVANT_FACTS_INSTRUCTION = [
+  '## Decision records (durable storage — authoritative, and possibly partial)',
+  'The `older_relevant_facts` block above is the scenario’s stored decision records, retrieved from durable storage. Treat what it contains as established fact rather than conversational memory, and never describe a listed record as unverified, ungrounded or fabricated.',
+  '- The block states its own completeness. If it carries an `[INCOMPLETE …]` line, that line is authoritative: more records exist than are shown, and the total it gives is the true total. Do not describe the visible list as complete, and do not answer a "how many" question by counting the entries you can see.',
+  '- With no such line, the entries shown are all the records held for this scenario, so if a decision is not listed say plainly that it is not among your records rather than inferring one.',
+  '- Records that exist but are not shown must not be reconstructed, guessed at, or described by content. Say that an earlier record exists and is not in view.',
+  '- Never quote the `[INCOMPLETE …]` line, the block’s internal field names, or record identifiers into user-facing text — state the substance in plain language.',
 ].join('\n');
 
 // -----------------------------------------------------------------------

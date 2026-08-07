@@ -1,7 +1,22 @@
 /**
- * ContextPack v1 — Deterministic Context Identity
+ * DraftProvenanceDescriptor — Deterministic Context IDENTITY (NOT a model pack)
  *
- * Captures all inputs that affect CEE output into a single, hashable pack.
+ * ⚠ NAMESAKE-TWIN KILL (ROADMAP 1.199, P4): this builder was named
+ * `assembleContextPack` and produced a `ContextPackV1`, colliding by NAME with
+ * the V5 model-facing assembler `assembleContextPack`
+ * (orchestrator-v5/context/context-pack-assembler.ts). They are NOT the same
+ * KIND of object: the V5 one builds the ContextPack the LLM SEES; THIS one
+ * builds a provenance/identity descriptor (hashes, seed, model_route,
+ * config_hash) assembled in the POST-parse draft `package` stage for caching /
+ * lineage / replay — the draft model never sees it. The shared name was pure
+ * nomenclature debt (the `generateGraphHash`-twins class, platform CLAUDE.md
+ * trap #10/#12/#16): a symbol grep landed on whichever twin the searcher hit
+ * and inferred the wrong thing about what the draft model reads. It is renamed
+ * to what it IS, and a conformance assertion (context-policy.conformance.test)
+ * pins that exactly ONE exported `assembleContextPack` symbol exists repo-wide
+ * so the twin can never recur.
+ *
+ * Captures all inputs that affect CEE output into a single, hashable descriptor.
  * Used for:
  *  - Cache key generation (cache_prefix_key + dynamic_suffix_key)
  *  - Lineage propagation (context_hash in provenance)
@@ -31,7 +46,7 @@ export type Capability =
 
 export type RetrievalMode = "none" | "memory" | "evidence" | "both";
 
-export interface ContextPackV1 {
+export interface DraftProvenanceDescriptor {
   context_pack_version: "1";
 
   // Call type (different endpoints must not share hash)
@@ -164,7 +179,7 @@ export interface CacheBoundary {
  * Static prefix: prompt + config (shared across requests with same system setup)
  * Dynamic suffix: brief + graph + clarifications + retrieval (per-request)
  */
-export function computeCacheBoundary(pack: ContextPackV1): CacheBoundary {
+export function computeCacheBoundary(pack: DraftProvenanceDescriptor): CacheBoundary {
   // Static prefix: system prompt, taxonomy, rules
   const staticBlocks = {
     prompt_hash: pack.prompt_hash,
@@ -192,7 +207,13 @@ export function computeCacheBoundary(pack: ContextPackV1): CacheBoundary {
 /** Default seed when none provided by request or config */
 const DEFAULT_SEED = 0;
 
-export interface AssembleContextPackInput {
+// egress-F4 (2026-07-24): DISAMBIGUATED from the V5 model-facing
+// `AssembleContextPackInput` (context-pack-assembler.ts). Two same-named exported
+// interfaces with different shapes are the generateGraphHash-twins conflation
+// class — the draft-provenance input carries its own name so the wrong-import
+// trap the namesake-twin kill (#662 P4) closed for the function is closed for the
+// input type too.
+export interface AssembleDraftProvenanceInput {
   capability: Capability;
   brief: string;
   seedGraph?: unknown;
@@ -224,17 +245,17 @@ export interface AssembleContextPackInput {
 }
 
 /**
- * Assemble a complete ContextPackV1 from request inputs.
+ * Assemble a complete DraftProvenanceDescriptor from request inputs.
  *
  * The context_hash is computed last, covering the entire pack.
  * Deterministic: same inputs always produce the same context_hash.
  */
-export function assembleContextPack(input: AssembleContextPackInput): ContextPackV1 {
+export function assembleDraftProvenanceDescriptor(input: AssembleDraftProvenanceInput): DraftProvenanceDescriptor {
   const clarificationHash = input.clarificationAnswers && input.clarificationAnswers.length > 0
     ? hashClarificationAnswers(input.clarificationAnswers)
     : undefined;
 
-  const pack: Omit<ContextPackV1, "context_hash"> = {
+  const pack: Omit<DraftProvenanceDescriptor, "context_hash"> = {
     context_pack_version: "1",
     capability: input.capability,
     brief: input.brief,

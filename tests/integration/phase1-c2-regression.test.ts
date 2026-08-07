@@ -194,11 +194,31 @@ describe('phase 1 C2 regression — run_analysis via tool-use produces same Hand
     // run_analysis. Strip those coaching fields before the byte-for-byte
     // equality check so this regression guard (PLoT → enrichment
     // passthrough) still holds without mis-firing on coaching-signal noise.
-    const { coaching_signal_id, coaching_signal_turn_id, coaching_signal_produced_at, ...enrichmentWithoutCoaching } =
-      write.handler_facts[0]!.result.enrichment as Record<string, unknown>;
-    void coaching_signal_id;  
+    // T1 claim safety (@talchain/schemas 0.25.0): the constraint verdict —
+    // "may a leading option be named" — is a FIRST-CLASS field on
+    // `result.constraint_verdict` now, so it is NO LONGER STRIPPED HERE. It
+    // used to ride `enrichment.__cee_claim_safety` and had to be excluded from
+    // this byte-for-byte check, which is precisely the breach of the
+    // PLoT-passthrough invariant the release retires. The strip below is back
+    // to the coaching-signal fields alone.
+    const {
+      coaching_signal_id,
+      coaching_signal_turn_id,
+      coaching_signal_produced_at,
+      ...enrichmentWithoutCoaching
+    } = write.handler_facts[0]!.result.enrichment as Record<string, unknown>;
+    void coaching_signal_id;
     void coaching_signal_turn_id;
     void coaching_signal_produced_at;
+    // Asserted (not merely assumed) so this test cannot hide an ABSENT verdict:
+    // a missing one fails the read side CLOSED and would silently suppress
+    // every leader-presuming block on a healthy run.
+    expect(
+      (write.handler_facts[0]!.result as unknown as Record<string, unknown>).constraint_verdict,
+    ).toEqual({
+      may_name_leading_option: true,
+      constraint_verdict_state: 'not_applicable',
+    });
     expect(enrichmentWithoutCoaching).toEqual(plotResponse);
   });
 });

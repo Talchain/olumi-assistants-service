@@ -7,14 +7,29 @@
  * unmasked and got re-claimed by a LOWER-FIDELITY substitute, which emitted
  * a DIFFERENT NUMBER with full confidence and normal `source`. Measured:
  *
- *   "increase by about 10%"  0.1        -> 10          (100x)   P6  -> P6b
+ *   "reduce to 5%"           set        -> decrement   (op flip) P12 -> P6b
+ *   "from £50k to £70k"      [50k..70k] -> 50k, 70k    (collapse) P11 -> P8
  *   "USD 1.2bn"              1200000000 -> 1.2         (1e-9x)  P8  -> compromise
  *
- * Note the two substitution paths differ: the first is a lower-priority CQE
- * RULE taking the span (source stays 'cqe'), the second is the compromise
- * backstop. Neither is visible to a guard keyed on quantity COUNT or on
- * `source` — for THESE TWO cases the count is unchanged and the first never
- * leaves 'cqe'.
+ * Note the substitution paths differ: the first two are lower-priority CQE
+ * RULES taking the span (source stays 'cqe'), the third is the compromise
+ * backstop. Neither kind is reliably visible to a guard keyed on quantity
+ * COUNT or on `source`: the operator-flip case changes neither (nor even the
+ * value), and the collapse case never leaves 'cqe'.
+ *
+ * ⚠ HISTORY — the first row used to read
+ *     "increase by about 10%"  0.1 -> 10  (100x)  P6 -> P6b
+ * and that row was retired (ROADMAP 1.235), NOT because the degradation
+ * class went away but because the 100x was never a property of degradation
+ * at all. It was a defect in P6b, which assigned `unit: 'percentage'` and
+ * never applied the `/100` every sibling applies — so P6b returned 5 for
+ * "5%" on the HEALTHY path too, with every rule running and
+ * `degraded === false`. This file framing it as degraded-only is what let it
+ * survive: the number looked like evidence FOR the degradation pin, so
+ * nobody asked whether P6b was simply wrong. Fixed at source; pinned on the
+ * healthy path in extract-quantities.p6b-percentage.test.ts. The arm was
+ * re-pointed at a substitution that still corrupts, never relaxed to match
+ * the new value.
  *
  * The class is wider than the two cases pinned here. Adversarial review
  * found 6-9 rules affected across at least four corruption modes, and they
@@ -27,6 +42,14 @@
  * DETERMINISM: these tests never depend on real CPU load. A fake clock is
  * advanced from inside a wrapped rule's own `apply()`, so exactly the
  * targeted rule appears slow. There is no race.
+ *
+ * CLOCK — UPDATED FOR ROADMAP 1.232. The guards under test used to read
+ * `performance.now()` (wall time) and now read `process.cpuUsage()` (CPU time
+ * consumed), because wall time made the extractor's OUTPUT depend on host
+ * contention. The fakes below moved with the mechanism: they stub
+ * `process.cpuUsage`, so each test still drives exactly the fork it names.
+ * See `extract-quantities.load-determinism.test.ts` for the pin on the
+ * load-independence property itself.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,32 +63,48 @@ import {
 import { PATTERN_RULES, type PatternRule } from '../rules.js';
 import { log } from '../../../../utils/telemetry.js';
 
+/** Present `ms` of consumed CPU time to `cpuMs()` in extract-quantities.ts. */
+function cpuUsageAt(ms: number): NodeJS.CpuUsage {
+  return { user: Math.round(ms * 1000), system: 0 };
+}
+
 /**
- * Install a fake monotonic clock and return rules in which exactly
- * `slowRuleId` burns `burnMs` of fake time inside its own apply(). Because
- * the orchestrator samples the clock immediately before and after apply(),
- * only that rule's measured duration moves — deterministically.
- */
-/**
- * Freeze the clock so NO wall-clock budget can trip. Required for the
- * "undisturbed run" assertions: on a cold JIT or a loaded machine a real
- * `runExtraction` genuinely exceeds CQE_TOTAL_BUDGET_MS (observed at 86ms
- * for a single rule on first call, and >200ms total), so asserting
- * `degraded === false` against the real clock is a race, not a pin. This
- * is also direct evidence that the caps are tight enough to fire in
- * ordinary conditions, not only under pathological input.
+ * Freeze the clock so NO budget can trip, keeping the "undisturbed run"
+ * assertions hermetic rather than merely likely.
+ *
+ * HISTORY, because the reason changed and a stale reason is a false label.
+ * This helper originally froze `performance.now()`, and its comment recorded
+ * WHY: "on a cold JIT or a loaded machine a real `runExtraction` genuinely
+ * exceeds CQE_TOTAL_BUDGET_MS (observed at 86ms for a single rule on first
+ * call, and >200ms total), so asserting `degraded === false` against the real
+ * clock is a race, not a pin."
+ *
+ * That observation was correct, and it was the defect — not a fact of life to
+ * be worked around in test helpers. It was a wall clock counting time this
+ * process spent DESCHEDULED, and it leaked out of the tests into production
+ * and into `tests/integration/cqe-end-to-end.test.ts`, which flaked ~1 run in
+ * 2 (ROADMAP 1.232). The guards now measure CPU time, so a real extraction
+ * (~0.3ms of CPU, ~30ms cold) no longer approaches the 200ms budget however
+ * loaded the host is. The freeze is kept for hermeticity, not to dodge a
+ * race.
  */
 function withFrozenClock(): { restore: () => void } {
-  const spy = vi.spyOn(globalThis.performance, 'now').mockImplementation(() => 1000);
+  const spy = vi.spyOn(process, 'cpuUsage').mockImplementation(() => cpuUsageAt(1000));
   return { restore: () => spy.mockRestore() };
 }
 
+/**
+ * Install a fake CPU clock and return rules in which exactly `slowRuleId`
+ * burns `burnMs` of fake CPU time inside its own apply(). Because the
+ * orchestrator samples the clock immediately before and after apply(), only
+ * that rule's measured duration moves — deterministically.
+ */
 function withFakeClock(slowRuleId: string, burnMs: number): {
   rules: PatternRule[];
   restore: () => void;
 } {
   let t = 1000;
-  const spy = vi.spyOn(globalThis.performance, 'now').mockImplementation(() => t);
+  const spy = vi.spyOn(process, 'cpuUsage').mockImplementation(() => cpuUsageAt(t));
   const rules = PATTERN_RULES.map((rule) =>
     rule.id === slowRuleId
       ? ({
@@ -124,22 +163,65 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
       // budget can trip and confound the comparison.
       const { restore } = withFrozenClock();
       try {
-        const pct = __runExtractionForTesting('increase by about 10%', {
-          forceTimeoutPatterns: new Set(['P6']),
-        });
-        expect(pct.results.map((r) => r.value)).toEqual([10]); // 100x wrong
-        expect(pct.results[0]!.source).toBe('cqe'); // NOT compromise — a rule did this
-        // Count UNCHANGED *in this mode* — which is why an arity guard is
-        // blind here. (Other modes DO change it; see the file header.)
-        expect(pct.results).toHaveLength(1);
-        expect(pct.summary.degraded).toBe(true); // ...but provenance sees it
-
         const bn = __runExtractionForTesting('USD 1.2bn', {
           forceTimeoutPatterns: new Set(['P8']),
         });
         expect(bn.results.map((r) => r.value)).toEqual([1.2]); // 1e-9x wrong
         expect(bn.results[0]!.source).toBe('compromise');
         expect(bn.summary.degraded).toBe(true);
+
+        // RANGE COLLAPSE, and note `source` never leaves 'cqe' — one range
+        // quantity becomes two point quantities, both claimed by a
+        // lower-priority RULE. A `source` guard is blind to this.
+        const range = __runExtractionForTesting('from £50k to £70k', {
+          forceTimeoutPatterns: new Set(['P11']),
+        });
+        expect(range.results.map((r) => r.value)).toEqual([50_000, 70_000]);
+        expect(range.results.map((r) => r.source)).toEqual(['cqe', 'cqe']);
+        expect(range.summary.degraded).toBe(true);
+      } finally {
+        restore();
+      }
+    });
+
+    it('OPERATOR FLIP: count, value and source ALL unchanged — only provenance sees it', () => {
+      // ---------------------------------------------------------------
+      // This arm replaces the "increase by about 10%" P6 -> P6b arm, which
+      // used to assert `[10]` — a 100x substitute. That number was NOT a
+      // property of degradation; it was a defect IN P6b, which assigned
+      // `unit: 'percentage'` and never divided by 100. P6b was wrong on the
+      // HEALTHY path too, with every rule running (ROADMAP 1.235, pinned in
+      // extract-quantities.p6b-percentage.test.ts). Fixing it at source
+      // makes P6b a faithful substitute for P6 on that string — measured
+      // byte-identical — so keeping the arm and merely relaxing `[10]` to
+      // `[0.1]` would have left a control that asserts the substitute
+      // agrees with the original, i.e. a control that can no longer fail
+      // for the reason it exists. It is re-pointed rather than relaxed.
+      //
+      // The replacement is strictly STRONGER than the arm it replaces. It
+      // keeps every property that made the old arm worth having — count
+      // unchanged, `source` still 'cqe' — and adds one: the VALUE is
+      // byte-identical too, so a magnitude heuristic is blind as well.
+      // Only `summary.degraded` distinguishes it.
+      // ---------------------------------------------------------------
+      const { restore } = withFrozenClock();
+      try {
+        const undisturbed = runExtraction('reduce to 5%');
+        expect(undisturbed.results.map((r) => r.operator)).toEqual(['set']);
+        expect(undisturbed.summary.degraded).toBe(false);
+
+        const flipped = __runExtractionForTesting('reduce to 5%', {
+          forceTimeoutPatterns: new Set(['P12']),
+        });
+        // Same count, same value, same source, same unit...
+        expect(flipped.results).toHaveLength(undisturbed.results.length);
+        expect(flipped.results.map((r) => r.value)).toEqual([0.05]);
+        expect(flipped.results.map((r) => r.source)).toEqual(['cqe']);
+        expect(flipped.results.map((r) => r.unit)).toEqual(['percentage']);
+        // ...but "set it to 5%" has silently become "reduce it BY 5%".
+        expect(flipped.results.map((r) => r.operator)).toEqual(['decrement']);
+        // The one signal that catches it.
+        expect(flipped.summary.degraded).toBe(true);
       } finally {
         restore();
       }
@@ -147,13 +229,13 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
   });
 
   // ---------------------------------------------------------------------
-  // THE CRITICAL CLASS: the per-rule wall-clock fork (L140) is the one
-  // measured firing under real load. A rule that ran to COMPLETION but
+  // THE CRITICAL CLASS: the per-rule cap fork (L140) is the one measured
+  // firing under real load. A rule that ran to COMPLETION but
   // slowly must keep its result — the regex already finished, so its
   // output is exactly as correct as an in-budget run.
   // ---------------------------------------------------------------------
-  describe('a SLOW but COMPLETED rule keeps its result (per-rule wall-clock fork)', () => {
-    it('"increase by about 10%" stays 0.1 when P6 exceeds its wall-clock cap', () => {
+  describe('a SLOW but COMPLETED rule keeps its result (per-rule cpu-time fork)', () => {
+    it('"increase by about 10%" stays 0.1 when P6 exceeds its cpu-time cap', () => {
       const { rules, restore } = withFakeClock('P6', CQE_REGEX_TIMEOUT_MS + 10);
       try {
         const { results, summary } = __runExtractionForTesting(
@@ -176,7 +258,7 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
           return (
             p.event === 'cqe.pattern_timeout' &&
             p.pattern_id === 'P6' &&
-            p.reason === 'wall_clock_exceeded'
+            p.reason === 'cpu_time_exceeded'
           );
         });
         expect(slowCalls).toHaveLength(1);
@@ -185,7 +267,7 @@ describe('CQE degraded-extraction pin (P0: silent value substitution)', () => {
       }
     });
 
-    it('"USD 1.2bn" stays 1200000000 when P8 exceeds its wall-clock cap', () => {
+    it('"USD 1.2bn" stays 1200000000 when P8 exceeds its cpu-time cap', () => {
       const { rules, restore } = withFakeClock('P8', CQE_REGEX_TIMEOUT_MS + 10);
       try {
         const { results, summary } = __runExtractionForTesting('USD 1.2bn', {

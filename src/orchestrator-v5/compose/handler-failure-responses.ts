@@ -199,6 +199,25 @@ export function composeHandlerFailureBody(
         chip_type: 'action',
       };
 
+    // ROADMAP 2.202 fix ③ — the analysis engine is at its CONCURRENCY LIMIT
+    // (downstream HTTP 429). Say the true thing: busy, not broken, model
+    // untouched, and a retry shortly is expected to work. This branch must
+    // exist for the cause to recover at all — a cause on
+    // RECOVERABLE_HANDLER_CAUSES with no branch here hits the exhaustive
+    // default, produces `template_id: 'fallback'`, and both the TurnExecutor
+    // and the chip path deliberately fail it loud back to a 500.
+    case 'analysis_engine_busy':
+      return {
+        body: {
+          assistant_text:
+            'The analysis engine is busy right now — several analyses are running at once. '
+            + 'Nothing is wrong with your model. Try again in a few seconds.',
+          suggested_actions: [retryActionChip()],
+        },
+        template_id: 'analysis_engine_busy',
+        chip_type: 'action',
+      };
+
     case 'analysis_not_ready': {
       // EP2 (V5 Edit Safety Core): the read-boundary guard blocked an
       // un-analysable persisted graph. Surface the honest, user-safe next step

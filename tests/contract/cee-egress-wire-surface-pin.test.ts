@@ -93,6 +93,11 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
       // 0.19.0-new: explicit producer framing question (wave-2 ask 4,
       // UI-SEM-078 — retires the UI's client-side derivation).
       'framing_question',
+      // 0.22.0-new (S1 batch): optional top-level graph hash for the
+      // freshness / GRAPH_DIVERGED handshake. DECLARED here by the re-vendor;
+      // CEE does not yet EMIT it (emission is the S1 egress lane, later). The
+      // field is optional, so its declaration is additive to the wire surface.
+      'graph_hash',
       'insights',
       // 0.15.0-new: optional top-level reasoning (formalises the _reasoning
       // wire sidecar). Approved surface change — 0.15.0 contract wave.
@@ -111,6 +116,7 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
     expect(optionality('framing_question')).toBe(true)
     expect(optionality('decision_classification')).toBe(true)
     expect(optionality('framing_quality')).toBe(true)
+    expect(optionality('graph_hash')).toBe(true)
     expect(optionality('assistant_text')).toBe(false)
     expect(optionality('blocks')).toBe(false)
   })
@@ -176,6 +182,15 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
     expect(shapeKeys(CoachingBlockSchema)).toEqual([
       'action_intent',
       'action_label',
+      // schemas 0.31.0 (ROADMAP 2.225): the producer-authored turn text a chip
+      // dispatches VERBATIM. Bounded at 300 (PHASE3_ACTION_PROMPT_MAX). CEE is
+      // the declared PRODUCER, and as of this PR it IS one: `assumption_check`,
+      // `calibration_prompt` and the stale-rerun `orientation` block each
+      // author a prompt (phase3-blocks.ts), pinned in
+      // `compose/__tests__/phase3-action-prompt.test.ts`. The lens/`strengthen`
+      // producer deliberately still emits none — it has no action fields at
+      // all under the no-inert-chips rule.
+      'action_prompt',
       'block_id',
       'body',
       // 0.19.0-new (wave-2 ask 1, UI-SEM-085): producer-owned guidance
@@ -266,6 +281,10 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'category',
       'counter_case',
       'created_at',
+      // 0.37.0-new (ROADMAP 2.490 slice 2) — the atomic DSK protocol triple.
+      // Additive + optional, so a consumer on an older pin simply does not see
+      // it; the merge order schemas -> UI -> CEE keeps that window closed.
+      'dsk_provenance',
       'exercise_kind',
       'failure_scenario',
       'freshness',
@@ -284,6 +303,31 @@ describe('Phase-3 block field pins (0.13.0-new, dropped by a 0.8.1 consumer)', (
       'type',
       'warning_signs',
     ])
+  })
+
+  it('pins signal_code + signal as optional wire fields on all four guidance blocks', () => {
+    // 0.20.0/0.21.0 (ROADMAP 1.120 residual, UI-SEM-085): the producer now
+    // populates signal_code (+ signal where deterministic) — see
+    // compose/guidance-signals.ts. On the wire both are additive/optional so a
+    // pre-0.20.0 or un-re-vendored consumer fails closed. This asserts the
+    // wire SURFACE (optionality) at each guidance block point; the producer
+    // EMISSION is pinned in compose/__tests__/phase3-blocks.test.ts.
+    const guidanceBlockSchemas: Array<[string, unknown]> = [
+      ['ReviewCardBlock', ReviewCardBlockSchema],
+      ['CoachingBlock', CoachingBlockSchema],
+      ['EvidenceBlock', EvidenceBlockSchema],
+      ['ExerciseBlock', ExerciseBlockSchema],
+    ]
+    for (const [name, schema] of guidanceBlockSchemas) {
+      const shape = unwrapToObject(schema).shape
+      for (const field of ['signal_code', 'signal']) {
+        expect(shape[field], `${name}.${field} exists on the wire`).toBeDefined()
+        expect(
+          (shape[field] as { isOptional(): boolean }).isOptional(),
+          `${name}.${field} is optional (consumers fail closed on absence)`,
+        ).toBe(true)
+      }
+    }
   })
 })
 

@@ -2,10 +2,15 @@
  * V5 analysis_ready contract — edit-graph-dispatch coverage.
  *
  * Pins the CEE-1.5 wire fix: an applied edit ships analysis_ready computed
- * from editResult.appliedGraph, and a rejected edit (no applied graph) ships
- * no analysis_ready. Without this the UI's wire-driven readiness path would
- * stay stale across edit turns and the legacy fallback would mis-fire on
- * every edit follow-up.
+ * from editResult.appliedGraph. Without this the UI's wire-driven readiness
+ * path would stay stale across edit turns and the legacy fallback would
+ * mis-fire on every edit follow-up.
+ *
+ * ⚠ The second case's claim was NARROWED by L16 — it now pins only the
+ * non-canonical (structural-fallback) arm. A rejected edit against a strictly
+ * canonical graph DOES surface readiness, derived from the unchanged pre-edit
+ * graph; see `edit-graph-dispatch-gate-reason-integrity.test.ts` and the
+ * comment on the case itself.
  */
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
@@ -169,7 +174,24 @@ describe('edit-graph-dispatch — analysisReady surfacing (response-finaliser br
     expect((ar as { computed_at?: string }).computed_at).toBeUndefined();
   });
 
-  it('rejected edit surfaces no analysisReady — UI retains prior store value', async () => {
+  // ⚠ L16 SCOPE CORRECTION — read the title, it is narrower than it was.
+  //
+  // This case used to be titled "rejected edit surfaces no analysisReady — UI
+  // retains prior store value", asserting a GENERAL rule. That rule is now
+  // false, and the 3 Aug walk is why: dropping the block is exactly what made
+  // the run-gate copy degrade from the specific reason to the generic one on
+  // the two turns that took this branch (see
+  // `edit-graph-dispatch-gate-reason-integrity.test.ts` for the wire
+  // evidence). A rejected edit against a STRICTLY CANONICAL graph now DOES
+  // surface readiness, derived from the unchanged pre-edit graph.
+  //
+  // What still holds — and is all this case ever actually exercised — is the
+  // NON-canonical arm: `INGRESS_GRAPH` above has bare `{from,to}` edges, so it
+  // fails the strict GraphV3 parse, `graphStrictlyCanonical` is false, and the
+  // dispatcher declines to stamp readiness from a structural-fallback graph.
+  // The title now says that, rather than a general rule this fixture never had
+  // the power to prove.
+  it('rejected edit against a NON-canonical (structural-fallback) graph surfaces no analysisReady', async () => {
     (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(rejectedResult());
     (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockResolvedValue(
       { response: {}, performed: true as const, persisted_row_id: 'row-2', graphPersisted: false } as Awaited<

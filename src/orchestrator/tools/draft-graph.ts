@@ -11,6 +11,7 @@
 import type { FastifyRequest } from "fastify";
 import { log } from "../../utils/telemetry.js";
 import { runUnifiedPipeline } from "../../cee/unified-pipeline/index.js";
+import { currentStageEmitter } from "../../cee/unified-pipeline/stage-stream-context.js";
 import type { DraftInputWithCeeExtras, UnifiedPipelineOpts, PipelineOutcome } from "../../cee/unified-pipeline/types.js";
 import type { TypedConversationBlock, GraphPatchBlockData, PatchOperation, OrchestratorError, GraphV3T, RepairEntry, DraftCoachingStrengthenItem, DraftCoachingWideningLog } from "../types.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
@@ -18,6 +19,7 @@ import { buildPatchSummary } from "../patch-summary.js";
 import { AnalysisReadyPayload } from "../../schemas/analysis-ready.js";
 import { computeStructuralReadiness } from "./analysis-ready-helper.js";
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
+import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import type { CurrencySignal } from "../../cee/signals/currency-signal.js";
 
 /**
@@ -173,6 +175,29 @@ export async function handleDraftGraph(
     currencyInstruction: buildCurrencyInstruction(currencySignal),
   };
 
+  // ROADMAP 2.122 / 1.204 M1 (CEE lane 2) — the staged-emission seam, wired for
+  // the TURN path.
+  //
+  // Lane 1 (#745) built `onStage` and gave it exactly one caller: the staged
+  // ASSIST route, which calls `runUnifiedPipeline` directly. The product's cold
+  // draft does NOT go that way — it is a V5 turn, and it arrives here. This is
+  // the line that lets a streamed turn observe the same stage boundaries the
+  // staged assist route already observes. It GENERALISES lane 1's emitter; it
+  // does not duplicate the pipeline.
+  //
+  // ABSENT BY DEFAULT, AND THAT IS THE WHOLE SAFETY ARGUMENT. `currentStageEmitter()`
+  // reads an async-context store that only `/orchestrate/v2/turn/stream` ever
+  // sets. Every other caller of this tool — the buffered `/orchestrate/v2/turn`,
+  // every test, every internal draft — runs outside that context and gets
+  // `undefined`, so the key is not spread and `opts` is the object it was
+  // before. The buffered turn is untouched by construction rather than by flag.
+  //
+  // The emitter is a PURE OBSERVER (see unified-pipeline/index.ts
+  // `emitStageEvent`): synchronous, un-awaited, throw-swallowing, unable to
+  // reach `ctx` or the response body. So a streamed draft and a buffered draft
+  // execute the same pipeline and commit the same graph.
+  const stageEmitter = currentStageEmitter();
+
   const opts: UnifiedPipelineOpts = {
     schemaVersion: 'v3',
     signal: draftOpts?.signal,
@@ -181,6 +206,7 @@ export async function handleDraftGraph(
     // request start, not LLM start. Omitted (not defaulted) when absent —
     // parse.ts owns the documented LLM-start fallback for legacy callers.
     ...(draftOpts?.requestStartMs !== undefined ? { requestStartMs: draftOpts.requestStartMs } : {}),
+    ...(stageEmitter ? { onStage: stageEmitter } : {}),
   };
 
   log.info({ brief_length: brief.length, turn_id: turnId }, "draft_graph: starting unified pipeline");
@@ -256,6 +282,19 @@ export async function handleDraftGraph(
       pipelineRecoveryRaw && typeof pipelineRecoveryRaw === 'object'
         ? (pipelineRecoveryRaw as Record<string, unknown>)
         : null;
+    // The PRODUCER's own retryability declaration (ROADMAP 2.718).
+    // `buildCeeErrorResponse` emits `retryable` at the body top level on
+    // every CEE error body; emitters that mean "retry is the honest lever"
+    // set it TRUE deliberately (the post-enforcement gate's stochastic-
+    // topology 422, the OPTIONS_IDENTICAL bypass). Dropping it here forced
+    // route-v2 to re-derive retryability from a static per-code map, which
+    // flipped those producers' `true` to `false` on the wire — beside
+    // recovery copy that says "Try again" (witnessed 2026-08-06, runs
+    // de79da/39cf53). Strict boolean guard: any other shape → null, and the
+    // route treats null as "producer silent" (static map decides alone).
+    const pipelineRetryableRaw = (body as { retryable?: unknown }).retryable;
+    const pipelineRetryable: boolean | null =
+      typeof pipelineRetryableRaw === 'boolean' ? pipelineRetryableRaw : null;
     // Pipeline-side `body.details` may carry diagnostic fields the route
     // boundary needs to surface on the wire (e.g. OPTIONS_IDENTICAL bypass
     // attaches `violation_code`, `identical_option_ids`,
@@ -281,6 +320,16 @@ export async function handleDraftGraph(
       'identical_option_ids',    // OPTIONS_IDENTICAL bypass diagnostic — internal graph IDs
       'intervention_signature',  // OPTIONS_IDENTICAL bypass diagnostic — internal factor:value fingerprint
       'repair_skip_reason',      // OPTIONS_IDENTICAL bypass diagnostic
+      // ROADMAP 2.718 (2026-08-06): the two graph-validation emitters now
+      // ship a codes-only mirror of their blocking errors. Codes are fixed
+      // validator enum strings (MISSING_BRIDGE, NO_PATH_TO_GOAL, …) — no
+      // user content. The full `validation_errors` objects remain
+      // NON-allowlisted: their `message` strings embed node labels drafted
+      // from user input. Without the codes on the wire, diagnosing a
+      // CEE_GRAPH_INVALID 500 requires a Render-logs round-trip (which is
+      // exactly what the de79da/39cf53 diagnosis cost).
+      'validation_error_codes',  // codes-only blocking-error mirror — fixed validator enums
+      'last_phase',              // which validation emitter fired — fixed pipeline-phase string
     ]);
     const rawDetails = (body as { details?: unknown }).details;
     const pipelineDetails: Record<string, unknown> | null =
@@ -295,11 +344,23 @@ export async function handleDraftGraph(
             return Object.keys(filtered).length > 0 ? filtered : null;
           })()
         : null;
+    // The pipeline body's typed `details.reason` (e.g. `llm_truncated_max_tokens`)
+    // distinguishes sub-cases that share one CEE code. route-v2 uses it to make a
+    // truncation (transient over-generation) RETRYABLE even though the parent
+    // code CEE_LLM_VALIDATION_FAILED is otherwise not (2026-07-23 firefight).
+    // It is a fixed enum string, not user content — pattern-guarded before use.
+    const rawReason = (rawDetails && typeof rawDetails === 'object' && !Array.isArray(rawDetails)
+      ? (rawDetails as Record<string, unknown>).reason
+      : undefined);
+    const pipelineReason: string | null =
+      typeof rawReason === 'string' && /^[a-z][a-z0-9_]{1,63}$/.test(rawReason) ? rawReason : null;
     const failureError = Object.assign(new Error(message), {
       orchestratorError: err,
       toolLLMTelemetry: failureTelemetry,
       pipelineStatusCode: pipelineResult.statusCode,
       pipelineErrorCode,
+      pipelineReason,
+      pipelineRetryable,
       pipelineRecovery,
       pipelineDetails,
     });
@@ -839,6 +900,12 @@ export function extractAnalysisReady(
     blockers: Array.isArray(ar.blockers) ? ar.blockers : undefined,
     model_adjustments: Array.isArray(ar.model_adjustments) ? ar.model_adjustments : undefined,
     goal_threshold: typeof ar.goal_threshold === 'number' ? ar.goal_threshold : undefined,
+    // ROADMAP 2.315(a) — the raw target trio. This function is a NAMED-FIELD
+    // RE-PROJECTION (it rebuilds the payload key by key rather than spreading),
+    // so an additive field carried at the builder would be silently dropped
+    // here on the draft path alone unless it is also named. RAW-ANCHORED via
+    // the shared rule; carried verbatim, never re-derived.
+    ...pickGoalThresholdTrio(ar),
     bias_findings: Array.isArray(ar.bias_findings)
       ? ar.bias_findings as NonNullable<GraphPatchBlockData['analysis_ready']>['bias_findings']
       : [],

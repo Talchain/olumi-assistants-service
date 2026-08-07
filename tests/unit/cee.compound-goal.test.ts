@@ -1558,15 +1558,21 @@ describe("reduction-framed ('by') constraint extraction — ROADMAP 1.52", () =>
     const brief = "Reduce cost of living to £40k.";
     const result = extractCompoundGoals(brief);
 
+    // ROADMAP 2.653: bound by SHAPE (a reduction is the only `<=` carrying a
+    // negative value), not by a label substring. The old predicate keyed on the
+    // machine-suffix label "… reduction target"; that name is gone, and a
+    // predicate on display copy would have gone quietly vacuous the moment it
+    // changed — passing while a reduction constraint really was emitted.
     const flippedMatch = result.constraints.find(
-      (c) => c.label.includes("reduction target") && c.value < 0
+      (c) => c.operator === "<=" && c.value < 0
     );
     expect(flippedMatch).toBeUndefined();
   });
 
   it("bare form 'reduce by N%' (no named target) still flips sign, targetName unspecified", () => {
     const result = extractCompoundGoals("Reduce by 15% please.");
-    const c = result.constraints.find((c) => c.label.includes("reduction target"));
+    // ROADMAP 2.653: same re-binding as above — shape, not display copy.
+    const c = result.constraints.find((c) => c.operator === "<=" && c.value < 0);
     expect(c).toBeDefined();
     expect(c?.targetName).toBe("unspecified");
     expect(c?.operator).toBe("<=");

@@ -234,6 +234,75 @@ describe("buildAppliedChanges — edge changes trigger rerun", () => {
 });
 
 // ============================================================================
+// Label edit that carries a CHANGED quantitative value → divergence disclosure
+// (P0: a label-only rename that changes an embedded number on a node with a
+//  modelled value must NOT read as a completed value change / bare rename.)
+// ============================================================================
+
+describe("buildAppliedChanges — label edit diverges from modelled value", () => {
+  function optionGraph(label: string): GraphV3T {
+    return {
+      nodes: [
+        { id: "fac_price", kind: "factor", label: "Price", observed_state: { value: 0.49, cap: 100 } },
+        {
+          id: "opt_raise",
+          kind: "option",
+          label,
+          interventions: {
+            fac_price: {
+              value: 0.49,
+              raw_value: 49,
+              source: "user_specified",
+              target_match: { node_id: "fac_price", match_type: "exact_id", confidence: "high" },
+            },
+          },
+        },
+      ],
+      edges: [],
+      options: [],
+      goal_node_id: null,
+    } as unknown as GraphV3T;
+  }
+
+  it("summary and description disclose the divergence instead of a bare rename", () => {
+    const ops: PatchOperation[] = [
+      {
+        op: "update_node",
+        path: "opt_raise",
+        value: { label: "Raise price to $39" },
+        old_value: { label: "Raise price to $49" },
+      },
+    ];
+    const pre = optionGraph("Raise price to $49");
+    const post = optionGraph("Raise price to $39");
+    const result = buildAppliedChanges(ops, post, false, pre);
+
+    // The leak was a bare `Renamed "Raise price to $49" to "Raise price to $39"`.
+    expect(result.summary).not.toMatch(/^Renamed "/);
+    expect(result.summary.toLowerCase()).toMatch(/display text only|modelled value/);
+    expect(result.changes[0].description.toLowerCase()).toMatch(/display text only|modelled value/);
+    // Nothing modelled changed → no rerun.
+    expect(result.rerun_recommended).toBe(false);
+  });
+
+  it("a plain rename with no numeric change keeps the ordinary rename phrasing", () => {
+    const ops: PatchOperation[] = [
+      {
+        op: "update_node",
+        path: "opt_raise",
+        value: { label: "The aggressive raise" },
+        old_value: { label: "Raise price to $49" },
+      },
+    ];
+    const pre = optionGraph("Raise price to $49");
+    const post = optionGraph("The aggressive raise");
+    const result = buildAppliedChanges(ops, post, false, pre);
+    expect(result.changes[0].description).toMatch(/Renamed/);
+    expect(result.summary.toLowerCase()).not.toMatch(/display text only/);
+  });
+});
+
+// ============================================================================
 // No internal IDs in summary or description
 // ============================================================================
 

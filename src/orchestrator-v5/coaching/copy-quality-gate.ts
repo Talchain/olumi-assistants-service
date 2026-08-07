@@ -328,6 +328,48 @@ export function gateAssumptionFragment(text: string): GateResult {
 }
 
 /**
+ * CONTENT-ONLY gate for a standalone coaching CARD BODY (P1, 2026-07-27).
+ *
+ * WHY THIS IS NOT {@link gateAssumptionFragment}. `bias_signals[].detail` was
+ * the one LLM-authored string reaching a user-visible surface
+ * (`blocks[].body`, via buildDraftBiasSignalBlocks) with no content gate at
+ * all — only an entity-ID scrub. The obvious fix, "just run
+ * gateAssumptionFragment over it", is wrong, and measurably so: that gate is
+ * shaped for the tail of the sentence "One assumption worth checking: …", so
+ * it rejects trailing punctuation and caps at 150 chars. Measured against the
+ * REAL bias details in this repo's own fixtures (the two wire-shape signals in
+ * draft-bias-signal-blocks.test.ts, the overconfidence signal, and the
+ * recorded frozen-graph.json signal) it rejects 4 of 4 — three
+ * `trailing_punctuation`, one `too_long`. NONE of those is a content offence.
+ * Wiring it here would have silently destroyed the entire bias-card surface —
+ * precisely the "silent coaching loss" failure this module already records
+ * having suffered once (the 2026-07-15 em-dash incident, above).
+ *
+ * A card body is a complete sentence in its own box, not a sentence fragment
+ * spliced into a lead-in. So this gate keeps the SHARED CONTENT rules — the
+ * premature-recommendation lexicon, internal-id leaks, schema terms,
+ * graph-shape language — and drops only the fragment-splicing presentation
+ * rules that do not apply. One lexicon, one source of truth, no second mirror.
+ *
+ * PREDICATE ONLY — the caller ships its own original bytes. A trip DROPS the
+ * card (mirroring the estate's rule that an unnameable bias is dropped, never
+ * re-labelled: a bias claim is a claim about a real person). Nothing is
+ * rewritten in place here.
+ */
+const CARD_BODY_MIN_CHARS = 5;
+/** CoachingBlockSchema's body cap; callers truncate to this before gating. */
+const CARD_BODY_MAX_CHARS = 300;
+
+export function gateCoachingCardBody(text: string): GateResult {
+  const shared = checkShared(text);
+  if (shared.failure) return shared.failure;
+  const trimmed = shared.text;
+  if (trimmed.length < CARD_BODY_MIN_CHARS) return reject('too_short');
+  if (trimmed.length > CARD_BODY_MAX_CHARS) return reject('too_long');
+  return { accept: true, text: trimmed, styleRewritten: shared.styleRewritten };
+}
+
+/**
  * Strict whole-response gate. Accepts only when the candidate is
  * a complete coaching paragraph that frames a decision, surfaces
  * a trade-off / gap / assumption, points at a next step, and is

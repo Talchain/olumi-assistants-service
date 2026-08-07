@@ -2,8 +2,23 @@
  * CEE_GRAPH_MANAGEMENT_MODE — Graph Management live-wiring mode flag
  * (createEnvEnforcedGraphManagementMode; mirrors the A3 CAS-mode pins).
  *
+ * ⚠ THE DEFAULT MOVED 'off' → 'live' (ROADMAP 2.474 / amendment A10, Paul's
+ * Option A ruling). This file's pins are updated at the SOURCE rather than
+ * relaxed: the default assertions below now assert the NEW default, and the
+ * prod-lockdown / kill-switch / tolerance pins are UNCHANGED, because those are
+ * the properties that must survive the promotion.
+ *
+ * Why the default moved, recorded here so the next reader does not "restore"
+ * it: every hold the Graph Management design relies on exists only while the
+ * mode resolves to 'live', and the resume path re-reads the mode AT RESUME
+ * TIME. With the repo default 'off' and staging supplying 'live' from the
+ * Render dashboard, one env reset silently bypassed every consent hold
+ * (ARCH-REVIEW-2 S2S3 R-7) and nothing in this codebase would have failed.
+ * Doctrine: no env-var gates, no dark launches, rollback = code revert.
+ *
  * Pins:
- *  - code default 'off' in every environment;
+ *  - code default 'live' outside prod, and 'shadow' in prod (the lockdown
+ *    below applies to the default exactly as it applies to an explicit value);
  *  - 'shadow' honoured everywhere (including prod);
  *  - 'live' honoured in staging/local/test, AUTO-DOWNGRADED to 'shadow'
  *    in prod with an [AUDIT] warning + a production_lockdown override event;
@@ -35,10 +50,32 @@ describe("CEE_GRAPH_MANAGEMENT_MODE (Graph Management live wiring)", () => {
     emitSpy.mockRestore();
   });
 
-  describe("default: 'off' everywhere", () => {
-    it.each(["prod", "staging", "test", "local"])("defaults to 'off' in %s", (env) => {
+  describe("default: 'live' outside prod, 'shadow' in prod", () => {
+    it.each(["staging", "test", "local"])("defaults to 'live' in %s", (env) => {
       process.env.OLUMI_ENV = env;
       delete process.env.CEE_GRAPH_MANAGEMENT_MODE;
+      _resetConfigCache();
+      expect(config.features.graphManagementMode).toBe("live");
+    });
+
+    it("defaults to 'shadow' in prod — the lockdown governs the DEFAULT too", () => {
+      // The stated consequence of the promotion, asserted rather than
+      // discovered: an unconfigured prod boot used to resolve 'off' (no referee
+      // calls) and now resolves 'shadow' (the referee evaluates and emits
+      // telemetry, and by the mode's definition never blocks). Added
+      // observability, not a production behaviour change — and 'live' remains
+      // unreachable in prod, which is the property that matters.
+      process.env.OLUMI_ENV = "prod";
+      delete process.env.CEE_GRAPH_MANAGEMENT_MODE;
+      _resetConfigCache();
+      expect(config.features.graphManagementMode).toBe("shadow");
+    });
+
+    it("THE KILL-SWITCH SURVIVES — an explicit 'off' still wins over the new default", () => {
+      // A default that could not be turned off would be a worse gate than the
+      // one it replaced.
+      process.env.OLUMI_ENV = "staging";
+      process.env.CEE_GRAPH_MANAGEMENT_MODE = "off";
       _resetConfigCache();
       expect(config.features.graphManagementMode).toBe("off");
     });
@@ -100,21 +137,23 @@ describe("CEE_GRAPH_MANAGEMENT_MODE (Graph Management live wiring)", () => {
   });
 
   describe("invalid / degenerate values never fail boot", () => {
-    it("invalid value → default 'off' with a console warning", () => {
+    it("invalid value → the code default with a console warning naming it", () => {
       process.env.OLUMI_ENV = "staging";
       process.env.CEE_GRAPH_MANAGEMENT_MODE = "banana";
       _resetConfigCache();
-      expect(config.features.graphManagementMode).toBe("off");
+      expect(config.features.graphManagementMode).toBe("live");
+      // The warning must name the fallback it actually took — a warning that
+      // says "off" while resolving "live" is a broken alarm.
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/CEE_GRAPH_MANAGEMENT_MODE.*invalid value "banana".*off/),
+        expect.stringMatching(/CEE_GRAPH_MANAGEMENT_MODE.*invalid value "banana".*live/),
       );
     });
 
-    it("empty string → default 'off' without warning noise", () => {
+    it("empty string → the code default without warning noise", () => {
       process.env.OLUMI_ENV = "local";
       process.env.CEE_GRAPH_MANAGEMENT_MODE = "";
       _resetConfigCache();
-      expect(config.features.graphManagementMode).toBe("off");
+      expect(config.features.graphManagementMode).toBe("live");
     });
 
     it("values are lowercased and trimmed ('  LIVE  ' → live outside prod)", () => {
@@ -124,11 +163,11 @@ describe("CEE_GRAPH_MANAGEMENT_MODE (Graph Management live wiring)", () => {
       expect(config.features.graphManagementMode).toBe("live");
     });
 
-    it("'observe' (the CAS vocabulary) is invalid here → default 'off', not shadow", () => {
+    it("'observe' (the CAS vocabulary) is invalid here → the code default, not shadow", () => {
       process.env.OLUMI_ENV = "staging";
       process.env.CEE_GRAPH_MANAGEMENT_MODE = "observe";
       _resetConfigCache();
-      expect(config.features.graphManagementMode).toBe("off");
+      expect(config.features.graphManagementMode).toBe("live");
     });
   });
 });

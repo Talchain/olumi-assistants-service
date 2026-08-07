@@ -96,10 +96,36 @@ The two paths share the same registered `run_analysis` handler and commit logic 
 > remains the authoritative *cause-kind* taxonomy; only the summary
 > below has been updated to reflect what landed.
 
+> **⚠ Update — 2026-07-31. This list had gone STALE, and the runtime is the
+> source of truth.** `recoverable-handler-causes.ts` carried **eight** entries
+> while this section still said seven: `analysis_not_ready` (EP2, V5 Edit Safety
+> Core) was added to the runtime set and never recorded here. That is the
+> hand-maintained-mirror defect this document exists to prevent, occurring
+> inside the document itself. Both the missing entry and the new one are added
+> below, and the runtime set is now **nine**.
+>
+> New this round: **`analysis_engine_busy`** — a DOWNSTREAM HTTP 429 (ISL's
+> compute governor rejecting a concurrent run, or PLoT's own limiter rejecting
+> CEE). Classification: **user-recoverable**. Rationale: this is *capacity
+> contention, not breakage* — nothing is wrong with the user's model and a retry
+> in a few seconds plausibly succeeds, so a 500 INTERNAL_ERROR was a false claim
+> about the system's health. CEE had already accepted the identical principle
+> for its OWN ingress limiter (`41d5ecf0`, "429 RATE_LIMITED, not 500
+> INTERNAL"); this applies it to the downstream 429. Evidence:
+> `PHASE0-EVIDENCE-2026-07-28/diagnosis-run-analysis-500s.md` §1/§7 (four
+> staging failures, 4/4 the same cause). **Deliberately narrow: ONLY a 429
+> recovers.** A downstream 500 in the identical envelope, a status-less typed
+> failure, a `blocked` envelope, and a non-429 transport error all stay FATAL —
+> a carve-out that recovered every typed failure would hide genuine breakage.
+> The size assertion in `recoverable-handler-response.test.ts` is the fail-loud
+> guard on this set; it REDDED on the addition, as designed.
+
 - **user-recoverable — clean direct_answer 200 with coaching chip (canonical contract since P1.1):**
   - `args_validation_failed`
   - `options_not_configured`
   - `analysis_blocked`
+  - `analysis_not_ready` *(EP2 V5 Edit Safety Core — read-boundary guard found the persisted graph un-analysable; recorded retrospectively 2026-07-31)*
+  - `analysis_engine_busy` *(ROADMAP 2.202 fix ③ — downstream HTTP 429; see the update note above)*
   - `parameter_invalid_at_execute` *(D1 mutation handler, P1.1 follow-up: text-prompt chip, no chip-derived pending action)*
   - `entity_not_found_in_graph` *(D1 mutation handler, same)*
   - `entity_kind_mismatch_at_execute` *(D1 mutation handler, same)*

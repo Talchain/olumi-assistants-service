@@ -48,11 +48,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         LegacySSEPath: "assist.draft.legacy_sse_path",
 
         ValidationFailed: "assist.draft.validation_failed",
-        RepairAttempted: "assist.draft.repair_attempted",
-        RepairStart: "assist.draft.repair_start",
-        RepairSuccess: "assist.draft.repair_success",
-        RepairPartial: "assist.draft.repair_partial",
-        RepairFallback: "assist.draft.repair_fallback",
+        // assist.draft.repair_* quintet DELETED with the draft path's LLM
+        // repair (ROADMAP 2.731/2.732) — see the negative assertions below.
 
         ClarifierRoundStart: "assist.clarifier.round_start",
         ClarifierRoundComplete: "assist.clarifier.round_complete",
@@ -212,7 +209,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         NodeKindNormalized: "llm.normalization.node_kind_mapped",
 
         // LLM Repair events (large graph handling)
-        RepairPromptTruncated: "llm.repair_prompt.truncated",
 
         // Goal generation tracking (prompt tuning)
         GoalGeneration: "cee.goal_generation",
@@ -296,11 +292,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeGraphReadinessCompleted: "cee.graph_readiness.completed",
         CeeGraphReadinessFailed: "cee.graph_readiness.failed",
 
-        // Key Insight events (v2.4)
-        CeeKeyInsightRequested: "cee.key_insight.requested",
-        CeeKeyInsightSucceeded: "cee.key_insight.succeeded",
-        CeeKeyInsightFailed: "cee.key_insight.failed",
-
         // Elicit Belief events (v2.5)
         CeeElicitBeliefRequested: "cee.elicit_belief.requested",
         CeeElicitBeliefSucceeded: "cee.elicit_belief.succeeded",
@@ -326,10 +317,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         EdgeDirectionValidationPassed: "cee.edge_direction.validation_passed",
 
         // Phase 4: Recommendation Narratives events
-        CeeGenerateRecommendationRequested: "cee.generate_recommendation.requested",
-        CeeGenerateRecommendationCompleted: "cee.generate_recommendation.completed",
-        CeeGenerateRecommendationFailed: "cee.generate_recommendation.failed",
-
         CeeNarrateConditionsRequested: "cee.narrate_conditions.requested",
         CeeNarrateConditionsCompleted: "cee.narrate_conditions.completed",
         CeeNarrateConditionsFailed: "cee.narrate_conditions.failed",
@@ -441,6 +428,17 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Log-only (see debugOnlyEvents); telemetry-additive, no flag.
         V5ContextBudget: "v5.context_budget",
         V5ContextTruncation: "v5.context_truncation",
+        // Capability layer P0 (ROADMAP 1.183) — log-only (see debugOnlyEvents).
+        V5LensSuggestionEmitted: "v5.capability.lens_suggestion_emitted",
+        // Capability layer P1 (ROADMAP 1.183) — the structured lens companion
+        // that reached the wire, and the producer-drift truncation signal.
+        // Log-only (see debugOnlyEvents).
+        V5LensCompanionEmitted: "v5.capability.lens_companion_emitted",
+        V5LensCompanionTruncated: "v5.capability.lens_companion_truncated",
+        // Capability layer (ROADMAP 2.211) — the no-immediate-repeat tie-break
+        // displaced the head lens. Log-only (see debugOnlyEvents).
+        V5LensNoRepeatDisplaced: "v5.capability.lens_no_repeat_displaced",
+        V5ClaimCageFieldEvaluated: "v5.claim_cage.field_evaluated",
         // Context Architecture v2 S6 — enrichment shadow validation.
         V5EnrichmentSchemaMismatch: "v5.enrichment.schema_mismatch",
         // Context Architecture v2 S4 — rolling conversation summary (log-only).
@@ -471,6 +469,18 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5GraphCasEvaluated: "v5.graph_cas.evaluated",
         V5GraphCasWriteBlocked: "v5.graph_cas.write_blocked",
         V5GraphCasRpcConflict: "v5.graph_cas.rpc_conflict",
+
+        // V5 TURN FENCE (Codex P0, 2026-07-31) — Stop tombstone + per-scenario
+        // generation fence at the graph-write chokepoint. Ids + closed-enum
+        // verdict + two integers only.
+        V5TurnFenceEvaluated: "v5.turn_fence.evaluated",
+        V5TurnFenceGraphWriteRefused: "v5.turn_fence.graph_write_refused",
+        V5TurnStopRequested: "v5.turn_fence.stop_requested",
+        // ROADMAP 2.709 — first-write exemption + the draft-loss trace/notice.
+        V5TurnFenceFirstWriteExemption: "v5.turn_fence.first_write_exemption",
+        V5TurnFenceGraphWriteFailureMarked: "v5.turn_fence.graph_write_failure_marked",
+        V5TurnFenceDraftLossResolved: "v5.turn_fence.draft_loss_resolved",
+        V5DraftLossNoticeSurfaced: "v5.turn_fence.draft_loss_notice_surfaced",
         // Lane 8 — Graph Management referee live wiring (CEE_GRAPH_MANAGEMENT_MODE)
         V5CandidateMutationWouldApply: "v5.candidate_mutation.would_apply",
         V5CandidateMutationHeld: "v5.candidate_mutation.held",
@@ -505,6 +515,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5EditGraphGraphStatePresent: "v5.edit_graph.graph_state_present",
         V5EditGraphGraphStateReloaded: "v5.edit_graph.graph_state_reloaded",
         V5EditGraphGraphStateUnavailable: "v5.edit_graph.graph_state_unavailable",
+        // ROADMAP 2.388 — the empty-canvas fall-through counter that replaces
+        // `graph_state_unavailable{reason:'no_persisted_graph'}` at frame stage.
+        V5EditGraphNoPersistedGraphFallthrough:
+          "v5.edit_graph.no_persisted_graph_fallthrough",
         V5ExplanationAnswerVerdict: "v5.explanation.answer_verdict",
         V5ExplanationEvidence: "v5.explanation.evidence",
         // V5-LANE-B-STRUCTURAL-01 — "what to validate" beat mechanism record.
@@ -560,6 +574,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V6DualDraftM2Outcome: "v6.dual_draft.m2_outcome",
         V6DualDraftMergeReport: "v6.dual_draft.merge_report",
         V6DualDraftDegraded: "v6.dual_draft.degraded",
+        // ROADMAP 2.474 — the coach's structural editing tool. Both are
+        // diagnostic-only (see debugOnlyEvents): the composed event carries the
+        // grounding validator's structural rejection CODE and counts, never the
+        // reason prose (which quotes node ids and labels); the entry event
+        // carries which gate stopped the tool engaging.
+        V5StructuralEditToolComposed: "v5.structural_edit_tool.composed",
+        V5StructuralEditToolEntry: "v5.structural_edit_tool.entry",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites.
         EditGraphNoOperations: "edit_graph.no_operations",
         StreamingGeneratorPreflightFailure: "streaming.generator_preflight_failure",
@@ -574,6 +595,16 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // relative-delta resolution at the set_factor_value dispatch seam.
         EditGraphBareSingleOpWrapped: "edit_graph.bare_single_op_wrapped",
         V5RelativeDeltaResolved: "v5.turn_executor.relative_delta_resolved",
+        // ⭐ Calibration consent boundary (2026-08-05) — the action layer
+        // refused to apply a mutation the user asked to see first, at the
+        // STEP 2 gate or (should be unreachable) at the commit backstop.
+        V5CalibrationConsentWithheld: "v5.turn_executor.calibration_consent_withheld",
+        // ⭐⭐ Mutation warrant (INV-1, ROADMAP 2.652, 2026-08-07) — the
+        // AFFIRMATIVE twin of the event above: a graph-mutating proposal
+        // arrived on a turn that asked for no change, and was demoted to the
+        // propose-confirm channel at the STEP 2 gate, or (should be
+        // unreachable) stripped at the commit backstop.
+        V5MutationWarrantAbsent: "v5.turn_executor.mutation_warrant_absent",
         // PR #414 review — F3 fail-open fallback made dashboard-visible
         V5CommittedGraphReprojectionFailed:
           "v5.turn_executor.committed_graph_reprojection_failed",
@@ -590,16 +621,34 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeOptionsIdenticalDroppedDuplicate: "cee.options_identical.dropped_duplicate",
         CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
         V5DecisionReviewCompleted: "v5.decision_review.completed",
+        V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
         V5EditGraphAnalyticalQuestionSuppressed: "v5.edit_graph.analytical_question_suppressed",
         V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
         V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
         V5EditGraphConfigureOptionRouted: "v5.edit_graph.configure_option_intent_routed",
+        V5ConfigureOptionClarifyIntercept:
+          "v5.edit_graph.configure_option_clarify_intercept",
+        V5EditGraphConfigureOptionLabelsLoaded:
+          "v5.edit_graph.configure_option_labels_loaded",
+        V5EditGraphStructuralRestructureRouted:
+          "v5.edit_graph.structural_restructure_intent_routed",
         V5ContinuationGuardApplied: "v5.continuation.guard_applied",
         V5EditGraphAppliedGraphMissingWithOperations: "v5.edit_graph.applied_graph_missing_with_operations",
         V5EditGraphAppliedGraphSynthesizedLocally: "v5.edit_graph.applied_graph_synthesized_locally",
         V5EditGraphFalseSuccessRewritten: "v5.edit_graph.false_success_rewritten",
         V5InterceptedChipClarify: "v5.edit_graph.intercepted_chip_clarify",
         V5InterceptedVagueEdit: "v5.edit_graph.intercepted_vague_edit",
+        // T1 layer 3 — a turn that WITHHELD the leading-option claim shipped copy
+        // asserting one anyway, caught at the V5 egress chokepoint. Ships
+        // OBSERVE-ONLY; the `dropped` boolean tag separates detection from
+        // enforcement (same contract as V5DecisionReviewContractViolation).
+        V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
+        V5WithheldExplanationAnswerProjected: "v5.explanation.withheld_answer_projected",
+        V5WithheldLeaderClaimNeutralisedAtFinalise: "v5.egress.leading_option_claim_neutralised_at_finalise",
+        // ROADMAP 2.149 — the third member of the family. Covers the eighteen
+        // `sendFinalised200` exits that return BEFORE `runTurnExecutor` and so
+        // never reach the finalise guard above.
+        V5WithheldLeaderClaimNeutralisedAtWire: "v5.egress.leading_option_claim_neutralised_at_wire",
         V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
         V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
@@ -613,9 +662,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ClarifyV2QuestionsEmitted: "v5.clarify_v2.questions_emitted",
         V5ClarifyV2Proceeded: "v5.clarify_v2.proceeded",
         V5ClarifyV2Deflected: "v5.clarify_v2.deflected",
-        V5FreshAnalysisFollowupGuard: "v5.fresh_analysis_followup_guard",
         V5ProcessMetaIntakeGuard: "v5.process_meta_intake_guard",
         V5ReadinessIntakeArm: "v5.readiness_intake",
+        V5TypedChipMutationRoute: "v5.typed_chip_mutation_route",
+        V5AddOptionTransaction: "v5.add_option_transaction",
         V5Phase3BlockLifecycle: "v5.phase3.block_lifecycle",
         V5Phase3LifecycleIndexMismatch: "v5.phase3.lifecycle_index_mismatch",
         V5PostAnalysisAdviceGate: "v5.post_analysis_advice_gate",
@@ -625,11 +675,21 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5ProposalContinuationInvalidated: "v5.proposal_continuation.invalidated",
         V5ProposalContinuationResumed: "v5.proposal_continuation.resumed",
         V5RoutingBoundedFallback: "v5.routing_bounded_fallback",
+        V5RoutingFirstPassCoerced: "v5.routing.first_pass_coerced",
+        V5RoutingForcedPillOutcome: "v5.routing.forced_pill_outcome",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+        V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
+        V5RunAnalysisConstraintUnevaluated: "v5.run_analysis.constraint_unevaluated",
+        V5RunAnalysisConstraintIdentityUnresolved:
+          "v5.run_analysis.constraint_identity_unresolved",
         V5GraphPersistInterceptRepair: "v5.graph_persist.intercept_repair",
         V5RunAnalysisTimings: "v5.run_analysis.timings",
         V5TurnStageTimings: "v5.turn_executor.stage_timings",
+        // Wave-4 δ2 (ROADMAP 1.202) — "AI points at the graph" directive
+        // emit/suppress observability (log-only; see debugOnlyEvents).
+        V5UiDirectiveEmitted: "v5.ui_directive.emitted",
+        V5UiDirectiveSuppressed: "v5.ui_directive.suppressed",
       };
 
       // Ensure TelemetryEvents matches the snapshot exactly
@@ -657,7 +717,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // v5-maintenance (2026-04-21): added turn_executor.*, cqe.*,
       // session.*, and v5.* namespaces for V5 additions.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|key_insight|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|generate_recommendation|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|session|summary)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|capability|claim_cage|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|session|structural_edit_tool|summary)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -702,13 +762,25 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       expect(TelemetryEvents.LegacySSEPath).toBe("assist.draft.legacy_sse_path");
     });
 
-    it("has validation and repair events for quality tracking", () => {
+    it("has validation events for quality tracking", () => {
       expect(TelemetryEvents.ValidationFailed).toBe("assist.draft.validation_failed");
-      expect(TelemetryEvents.RepairAttempted).toBe("assist.draft.repair_attempted");
-      expect(TelemetryEvents.RepairStart).toBe("assist.draft.repair_start");
-      expect(TelemetryEvents.RepairSuccess).toBe("assist.draft.repair_success");
-      expect(TelemetryEvents.RepairPartial).toBe("assist.draft.repair_partial");
-      expect(TelemetryEvents.RepairFallback).toBe("assist.draft.repair_fallback");
+    });
+
+    it("2.732: the orphaned assist.draft.repair_* events are DELETED, not left constant-wrong", () => {
+      // The draft path's LLM repair was removed (ROADMAP 2.731); its
+      // telemetry went with it. Re-adding any of these keys without a live
+      // emitter would recreate the broken-alarm class this estate hunts.
+      expect((TelemetryEvents as Record<string, unknown>).RepairAttempted).toBeUndefined();
+      expect((TelemetryEvents as Record<string, unknown>).RepairStart).toBeUndefined();
+      expect((TelemetryEvents as Record<string, unknown>).RepairSuccess).toBeUndefined();
+      expect((TelemetryEvents as Record<string, unknown>).RepairPartial).toBeUndefined();
+      expect((TelemetryEvents as Record<string, unknown>).RepairFallback).toBeUndefined();
+      // ROADMAP 2.763 — the adapter-level truncation event NO LONGER survives.
+      // Its 2.731-era exemption ("gated/legacy consumers of adapter.repairGraph
+      // still exist") died with `LLMAdapter.repairGraph`: its only two emitters
+      // were the Anthropic and OpenAI repair-prompt builders, both deleted.
+      // It is now the SIXTH member of the quintet.
+      expect((TelemetryEvents as Record<string, unknown>).RepairPromptTruncated).toBeUndefined();
     });
 
     it("has deprecation tracking events", () => {
@@ -728,10 +800,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "draft.sse.completed": [TelemetryEvents.SSECompleted],
         "draft.sse.errors": [TelemetryEvents.SSEError],
         "draft.validation.failed": [TelemetryEvents.ValidationFailed],
-        "draft.repair.attempted": [TelemetryEvents.RepairAttempted, TelemetryEvents.RepairStart],
-        "draft.repair.success": [TelemetryEvents.RepairSuccess],
-        "draft.repair.partial": [TelemetryEvents.RepairPartial],
-        "draft.repair.fallback": [TelemetryEvents.RepairFallback],
+        // draft.repair.* counters removed with the assist.draft.repair_*
+        // events (ROADMAP 2.731/2.732) — dashboards querying them now read a
+        // legitimately-ended series.
         "draft.legacy_provenance.occurrences": [TelemetryEvents.LegacyProvenance],
         "draft.sse.legacy_path": [TelemetryEvents.LegacySSEPath],
         "draft.fixture.shown": [TelemetryEvents.FixtureShown],
@@ -913,16 +984,21 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.json_extracted": [TelemetryEvents.CeeDecisionReviewJsonExtracted],
         "cee.decision_review.shape_check_failed": [TelemetryEvents.CeeDecisionReviewShapeCheckFailed],
         "cee.decision_review.shape_check_warnings": [TelemetryEvents.CeeDecisionReviewShapeCheckWarnings],
+        // POST-parse contract gate — reason-tagged counter (primary rule code).
+        "v5.decision_review.contract_violation": [TelemetryEvents.V5DecisionReviewContractViolation],
+        "v5.egress.leading_option_claim_withheld_violated": [TelemetryEvents.V5LeadingOptionClaimAtEgress],
+        "v5.egress.leading_option_claim_neutralised_at_finalise": [
+          TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise,
+        ],
+        "v5.egress.leading_option_claim_neutralised_at_wire": [
+          TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+        ],
+        "v5.explanation.withheld_answer_projected": [TelemetryEvents.V5WithheldExplanationAnswerProjected],
 
         // Graph Readiness events (v2.3)
         "cee.graph_readiness.requested": [TelemetryEvents.CeeGraphReadinessRequested],
         "cee.graph_readiness.completed": [TelemetryEvents.CeeGraphReadinessCompleted],
         "cee.graph_readiness.failed": [TelemetryEvents.CeeGraphReadinessFailed],
-
-        // Key Insight events (v2.4)
-        "cee.key_insight.requested": [TelemetryEvents.CeeKeyInsightRequested],
-        "cee.key_insight.succeeded": [TelemetryEvents.CeeKeyInsightSucceeded],
-        "cee.key_insight.failed": [TelemetryEvents.CeeKeyInsightFailed],
 
         // Elicit Belief events (v2.5)
         "cee.elicit_belief.requested": [TelemetryEvents.CeeElicitBeliefRequested],
@@ -949,10 +1025,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_direction.validation_passed": [TelemetryEvents.EdgeDirectionValidationPassed],
 
         // Phase 4: Recommendation Narratives events
-        "cee.generate_recommendation.requested": [TelemetryEvents.CeeGenerateRecommendationRequested],
-        "cee.generate_recommendation.completed": [TelemetryEvents.CeeGenerateRecommendationCompleted],
-        "cee.generate_recommendation.failed": [TelemetryEvents.CeeGenerateRecommendationFailed],
-
         "cee.narrate_conditions.requested": [TelemetryEvents.CeeNarrateConditionsRequested],
         "cee.narrate_conditions.completed": [TelemetryEvents.CeeNarrateConditionsCompleted],
         "cee.narrate_conditions.failed": [TelemetryEvents.CeeNarrateConditionsFailed],
@@ -1098,7 +1170,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Options interventions defaulting (diagnostic only)
         TelemetryEvents.InterventionsMissingDefaulted,
         // Repair prompt truncation (diagnostic only - large graph handling)
-        TelemetryEvents.RepairPromptTruncated,
         // Orchestrator events (Track C - diagnostic only during PoC)
         TelemetryEvents.OrchestratorTurnStarted,
         TelemetryEvents.OrchestratorTurnCompleted,
@@ -1147,6 +1218,20 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // capture layer is the consumer, not Datadog.
         TelemetryEvents.V5ContextBudget,
         TelemetryEvents.V5ContextTruncation,
+        // Capability layer P0 (ROADMAP 1.183): content-free lens-suggestion
+        // signal — log-only, no Datadog mapping.
+        TelemetryEvents.V5LensSuggestionEmitted,
+        // Capability layer P1 (ROADMAP 1.183): content-free lens-companion
+        // wire-arrival + producer-drift truncation signals — log-only, no
+        // Datadog mapping.
+        TelemetryEvents.V5LensCompanionEmitted,
+        TelemetryEvents.V5LensCompanionTruncated,
+        // Capability layer (ROADMAP 2.211): content-free displaced/chosen lens
+        // pair — log-only, no Datadog mapping.
+        TelemetryEvents.V5LensNoRepeatDisplaced,
+        // Wave-3 σ (ROADMAP 1.203): field-level claim-safety cage decision —
+        // content-free (field name + decision + reason tag), log-only.
+        TelemetryEvents.V5ClaimCageFieldEvaluated,
         TelemetryEvents.V5EnrichmentSchemaMismatch,
         // Context Architecture v2 S4 — rolling summary: log-only (harness 1.70
         // v1 consumes them, not Datadog).
@@ -1173,6 +1258,24 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // in-transaction OLGC1 conflict — closed enums + hash prefixes + rpc_code
         // only, no Datadog metric until activation dashboards exist.
         TelemetryEvents.V5GraphCasRpcConflict,
+        // Calibration consent boundary: diagnostic-only for now — the
+        // operational signal is `layer === 'commit_backstop'` appearing at
+        // all, which is a defect alarm rather than a rate to dashboard.
+        TelemetryEvents.V5CalibrationConsentWithheld,
+        TelemetryEvents.V5MutationWarrantAbsent,
+        // V5 turn fence: diagnostic-only (structured logs are the operational
+        // signal; no Datadog metric mapping until dashboards exist).
+        TelemetryEvents.V5TurnFenceEvaluated,
+        TelemetryEvents.V5TurnFenceGraphWriteRefused,
+        TelemetryEvents.V5TurnStopRequested,
+        // ROADMAP 2.709 first-write exemption family: diagnostic-only
+        // (structured logs are the operational signal; no Datadog metric
+        // mapping until dashboards exist).
+        TelemetryEvents.V5TurnFenceFirstWriteExemption,
+        TelemetryEvents.V5TurnFenceGraphWriteFailureMarked,
+        // ROADMAP 2.735 — same family, same posture.
+        TelemetryEvents.V5TurnFenceDraftLossResolved,
+        TelemetryEvents.V5DraftLossNoticeSurfaced,
         // Lane 8 — Graph Management referee verdict events + Model Management
         // version hook: diagnostic-only (structured logs are the operational
         // signal; no Datadog metric mapping until activation dashboards exist).
@@ -1182,6 +1285,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5CandidateMutationRejected,
         TelemetryEvents.V5CandidateMutationClarifyRequired,
         TelemetryEvents.V5ModelVersionCreated,
+        // ROADMAP 2.474 — the structural edit tool's entry decision + grounding
+        // verdict: diagnostic-only, same posture as the referee verdicts above
+        // (structured logs are the operational signal; no Datadog metric until
+        // activation dashboards exist).
+        TelemetryEvents.V5StructuralEditToolComposed,
+        TelemetryEvents.V5StructuralEditToolEntry,
         // ROADMAP 3.1 — Decision Records capture hook: diagnostic-only,
         // flag-gated DARK (structured logs are the operational signal; no
         // Datadog metric mapping until the flag flips + dashboards exist).
@@ -1247,6 +1356,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5EditGraphGraphStatePresent,
         TelemetryEvents.V5EditGraphGraphStateReloaded,
         TelemetryEvents.V5EditGraphGraphStateUnavailable,
+        // ROADMAP 2.388 — same family, same classification: an edit verb on an
+        // empty canvas at frame stage. Diagnostic-only (no Datadog metric in
+        // emit()); routing keys + message_length only, never message text.
+        TelemetryEvents.V5EditGraphNoPersistedGraphFallthrough,
         // V5 Phase 1 brief persistence — diagnostic signal that the
         // user-supplied brief exceeded MAX_BRIEF_TEXT_LENGTH and was
         // truncated by normaliseBriefText. Operators can alert on a
@@ -1332,6 +1445,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ROADMAP 2.11 / P0-2 — deterministic configure-option routing gate.
         // Diagnostic-only, same posture as its route-suppressor siblings.
         TelemetryEvents.V5EditGraphConfigureOptionRouted,
+        // L16 / N16 — the bare-configure deterministic remedy intercept.
+        // Diagnostic-only, same posture as its configure-option sibling.
+        TelemetryEvents.V5ConfigureOptionClarifyIntercept,
+        // Structural-restructure routing gate (LATENCY-RECAPTURE finding 3).
+        // Diagnostic-only, same posture as its configure-option sibling.
+        TelemetryEvents.V5EditGraphStructuralRestructureRouted,
         TelemetryEvents.V5ContinuationGuardApplied,
         TelemetryEvents.V5EditGraphAppliedGraphMissingWithOperations,
         TelemetryEvents.V5EditGraphAppliedGraphSynthesizedLocally,
@@ -1353,7 +1472,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5ClarifyV2QuestionsEmitted,
         TelemetryEvents.V5ClarifyV2Proceeded,
         TelemetryEvents.V5ClarifyV2Deflected,
-        TelemetryEvents.V5FreshAnalysisFollowupGuard,
         // META-DECISION-DIAGNOSIS-2026-07-20 (#575) — round-1 process-meta
         // intake guard. Diagnostic-only, same rationale as the sibling
         // frame-stage guards: the structured log is the operational signal;
@@ -1364,6 +1482,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // the operational signal; no Datadog metric mapping until a dashboard
         // consumes it.
         TelemetryEvents.V5ReadinessIntakeArm,
+        TelemetryEvents.V5TypedChipMutationRoute,
+        TelemetryEvents.V5AddOptionTransaction,
         TelemetryEvents.V5Phase3BlockLifecycle,
         TelemetryEvents.V5Phase3LifecycleIndexMismatch,
         TelemetryEvents.V5PostAnalysisAdviceGate,
@@ -1391,10 +1511,26 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Track S 0.13c-1 — run_analysis intercept guard summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5RunAnalysisInterceptGuard,
+        // ROADMAP 2.229 fix 4 — deterministic imperative re-run pre-route.
+        // Diagnostic-only; the structured log is the operational signal (it is
+        // the only way a DECLINE is visible at all).
+        TelemetryEvents.V5RunAnalysisImperativePreRoute,
         // D-ask-1 (2.11 P0-1) — run_analysis scaffolded-placeholder disclosure
         // summary (diagnostic-only, no Datadog metric; redacted option ids +
         // factor counts). Live emit site: run-analysis.ts step 2.55.
         TelemetryEvents.V5RunAnalysisOptionsScaffolded,
+        // T1 — a user-ratified hard constraint was applied and never evaluated
+        // to decision grade (diagnostic-only, no Datadog metric; redacted
+        // constraint ids + producer codes, no labels/thresholds/units).
+        // Live emit site: run-analysis.ts, alongside the headline input.
+        TelemetryEvents.V5RunAnalysisConstraintUnevaluated,
+        // T1 fail-loud — the producer scored constraints under ids that
+        // reconciled with NOTHING we ratified, so the leading option was
+        // withheld without either confident verdict being asserted
+        // (diagnostic-only, no Datadog metric; redacted ratified constraint ids
+        // + count, no labels/thresholds/units).
+        // Live emit site: run-analysis.ts, beside the unevaluated emit.
+        TelemetryEvents.V5RunAnalysisConstraintIdentityUnresolved,
         // Track S 0.13c-4 — persist-site intercept repair summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5GraphPersistInterceptRepair,
@@ -1419,6 +1555,16 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5AnswerShapeEmitted,
         // Same family — stale-sidecar drop signal; diagnostic-only.
         TelemetryEvents.V5AnswerShapeDroppedStale,
+        // Repair-tax fix (2026-07-22) — first-pass coercion drift alarm.
+        // Diagnostic-only structured logs (reason tag + drop count, no user
+        // text); the operational signal is the log-based rate, no Datadog
+        // metric mapping.
+        TelemetryEvents.V5RoutingFirstPassCoerced,
+        // Codex F3 — forced-pill first-pass-valid / bypass-blocked counter.
+        // Diagnostic-only structured logs (forced handler id + returned intent
+        // tag + attempt number, no user text); the operational signal is the
+        // log-based first-pass-valid rate, no Datadog metric mapping.
+        TelemetryEvents.V5RoutingForcedPillOutcome,
         // V6 dual-draft (flag default OFF) — diagnostic-only: m2 outcome,
         // merge accounting histogram, and degrade reasons; no Datadog metric
         // until activation dashboards exist.
@@ -1437,6 +1583,17 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // label). Measures how much invalid persisted zero-sigma state exists
         // in the wild; no Datadog metric mapping until a dashboard consumes it.
         TelemetryEvents.ComputeSigmaFloor,
+        // Wave-4 δ2 (ROADMAP 1.202) — ui_directive emit/suppress observability:
+        // content-free structured logs (verb + target_kind / reason tag only),
+        // no Datadog metric mapping until a canvas-directive dashboard exists.
+        TelemetryEvents.V5UiDirectiveEmitted,
+        TelemetryEvents.V5UiDirectiveSuppressed,
+        // ROADMAP 2.308 / S1 — configure-option persisted-label read meter:
+        // content-free structured log (request_id + scenario_id + whether the
+        // labels flipped the verdict). Diagnostic-only; it exists to measure
+        // how often the added Supabase read is taken, and there is no Datadog
+        // metric mapping until a dashboard consumes it.
+        TelemetryEvents.V5EditGraphConfigureOptionLabelsLoaded,
       ];
 
       for (const event of allEvents) {
@@ -1464,11 +1621,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "assist.draft.fixture_replaced",
         "assist.draft.legacy_sse_path",
         "assist.draft.validation_failed",
-        "assist.draft.repair_attempted",
-        "assist.draft.repair_start",
-        "assist.draft.repair_success",
-        "assist.draft.repair_partial",
-        "assist.draft.repair_fallback",
+        // assist.draft.repair_* quintet deleted — ROADMAP 2.731/2.732
         "assist.draft.guard_violation",
         "assist.draft.legacy_provenance",
         "assist.draft.stage",
@@ -1606,7 +1759,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "llm.normalization.node_kind_mapped",
 
         // LLM Repair events (large graph handling)
-        "llm.repair_prompt.truncated",
 
         // CEE Clarification enforcement events (Phase 5)
         "cee.clarification.required",
@@ -1704,11 +1856,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.graph_readiness.completed",
         "cee.graph_readiness.failed",
 
-        // Key Insight events (v2.4)
-        "cee.key_insight.requested",
-        "cee.key_insight.succeeded",
-        "cee.key_insight.failed",
-
         // Elicit Belief events (v2.5)
         "cee.elicit_belief.requested",
         "cee.elicit_belief.succeeded",
@@ -1733,14 +1880,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.edge_direction.violation_detected",
         "cee.edge_direction.validation_passed",
 
-        // Phase 4: Recommendation Narratives events
-        "cee.generate_recommendation.requested",
-        "cee.generate_recommendation.completed",
-        "cee.generate_recommendation.failed",
-
         // Goal generation tracking (prompt tuning)
         "cee.goal_generation",
 
+        // Phase 4: Recommendation Narratives events
         "cee.narrate_conditions.requested",
         "cee.narrate_conditions.completed",
         "cee.narrate_conditions.failed",
@@ -1858,6 +2001,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching.answer_source",
         "v5.answer_shape.emitted",
         "v5.answer_shape.dropped_stale",
+        "v5.decision_review.contract_violation",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",
@@ -1866,6 +2010,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.graph_state_present",
         "v5.edit_graph.graph_state_reloaded",
         "v5.edit_graph.graph_state_unavailable",
+        // ROADMAP 2.388 — empty-canvas fall-through (frame stage).
+        "v5.edit_graph.no_persisted_graph_fallthrough",
         // V5 alpha hardening Phase 2.5: primary lifecycle events.
         "v5.analysis_freshness.derived",
         "v5.analysis_freshness.fact_selected",
@@ -1933,10 +2079,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v6.dual_draft.m2_outcome",
         "v6.dual_draft.merge_report",
         "v6.dual_draft.degraded",
+        "v5.structural_edit_tool.composed",
+        "v5.structural_edit_tool.entry",
         // Lane CEE-D (edit-loop reliability) — parse-shape recovery +
         // relative-delta resolution at the set_factor_value dispatch seam
         "edit_graph.bare_single_op_wrapped",
         "v5.turn_executor.relative_delta_resolved",
+        "v5.turn_executor.calibration_consent_withheld",
+        "v5.turn_executor.mutation_warrant_absent",
         // PR #414 review — F3 fail-open re-projection fallback visibility
         "v5.turn_executor.committed_graph_reprojection_failed",
         // Lane 8 — GM referee live wiring + MM commit-seam version hook
@@ -1974,12 +2124,26 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.edit_graph.applied_graph_missing_with_operations",
         "v5.edit_graph.proposal_confirm_resolved",
         "v5.edit_graph.state_query_suppressed",
+        "v5.edit_graph.configure_option_clarify_intercept",
         "v5.edit_graph.configure_option_intent_routed",
+        "v5.edit_graph.configure_option_labels_loaded",
+        "v5.edit_graph.structural_restructure_intent_routed",
         "v5.edit_graph.applied_graph_synthesized_locally",
         "v5.edit_graph.false_success_rewritten",
         "v5.edit_graph.intercepted_chip_clarify",
         "v5.edit_graph.intercepted_vague_edit",
         "v5.egress.forbidden_phrase_detected",
+        "v5.egress.leading_option_claim_withheld_violated",
+        // The ENFORCING sibling of the line above: same subject, same
+        // namespace, opposite posture. The `..._withheld_violated` alarm
+        // observes and changes nothing; this one is emitted by the third
+        // `finalizeRun` guard when the claim was actually replaced.
+        "v5.egress.leading_option_claim_neutralised_at_finalise",
+        // ROADMAP 2.149 — the ROUTE-SEAM sibling. Same subject and namespace
+        // again; the population is the eighteen `sendFinalised200` exits that
+        // structurally cannot reach `finalizeRun`.
+        "v5.egress.leading_option_claim_neutralised_at_wire",
+        "v5.explanation.withheld_answer_projected",
         "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
         "v5.explicit_generate_received",
@@ -1990,7 +2154,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.clarify_v2.questions_emitted",
         "v5.clarify_v2.proceeded",
         "v5.clarify_v2.deflected",
-        "v5.fresh_analysis_followup_guard",
         "v5.phase3.block_lifecycle",
         "v5.phase3.lifecycle_index_mismatch",
         "v5.post_analysis_advice_gate",
@@ -1999,9 +2162,14 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.proposal_continuation.captured",
         "v5.proposal_continuation.invalidated",
         "v5.proposal_continuation.resumed",
+        "v5.routing.first_pass_coerced",
+        "v5.routing.forced_pill_outcome",
         "v5.routing_bounded_fallback",
+        "v5.run_analysis.imperative_pre_route",
         "v5.run_analysis.intercept_guard",
         "v5.run_analysis.options_scaffolded",
+        "v5.run_analysis.constraint_unevaluated",
+        "v5.run_analysis.constraint_identity_unresolved",
         "v5.graph_persist.intercept_repair",
         "v5.run_analysis.timings",
         "v5.turn_executor.stage_timings",
@@ -2010,6 +2178,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Context Architecture v2 S0 (ROADMAP 1.73) — measure-first events.
         "v5.context_budget",
         "v5.context_truncation",
+        // Capability layer P0 (ROADMAP 1.183) — deterministic lens suggestion.
+        "v5.capability.lens_suggestion_emitted",
+        // Capability layer P1 (ROADMAP 1.183) — structured lens companion,
+        // fired from the compose funnel's PERMITTED branch only.
+        "v5.capability.lens_companion_emitted",
+        // Capability layer P1 — producer returned more warning_signs than its
+        // own prompt contract declares; composer truncated and disclosed.
+        "v5.capability.lens_companion_truncated",
+        // Capability layer (ROADMAP 2.211) — the no-immediate-repeat tie-break
+        // displaced the head lens; carries the (displaced, chosen) pair.
+        "v5.capability.lens_no_repeat_displaced",
+        // Wave-3 σ (ROADMAP 1.203) — field-level claim-safety cage decision.
+        "v5.claim_cage.field_evaluated",
         // Context Architecture v2 S6 — enrichment shadow validation.
         "v5.enrichment.schema_mismatch",
         // Context Architecture v2 S4 — rolling conversation summary.
@@ -2030,6 +2211,32 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // the readiness/coaching answer instead of the string mirror.
         // Deliberate frozen-registry addition per the registry discipline.
         "v5.readiness_intake",
+        // S2-L3 — typed-chip mutation route: a typed mutation chip
+        // (set_factor_value / adjust_edge_strength / add_constraint) carrying a
+        // pre-resolved chip.parameters spec is routed on its type into the
+        // validated-proposal path. Deliberate frozen-registry addition.
+        "v5.typed_chip_mutation_route",
+        // S3 §5 / Lane C3 — add-option compound transaction: a typed
+        // add_option intent refereed into an atomic held proposal (option node
+        // + edges + effect values). Deliberate frozen-registry addition.
+        "v5.add_option_transaction",
+        // Wave-4 δ2 (ROADMAP 1.202) — "AI points at the graph": the ui_directive
+        // emit + reason-tagged suppress observability. Deliberate frozen-registry
+        // addition per the registry discipline.
+        "v5.ui_directive.emitted",
+        "v5.ui_directive.suppressed",
+        // V5 turn fence (Codex P0, 2026-07-31) — the Stop tombstone + the
+        // per-scenario generation fence. Deliberate frozen-registry addition.
+        "v5.turn_fence.evaluated",
+        "v5.turn_fence.graph_write_refused",
+        "v5.turn_fence.stop_requested",
+        // ROADMAP 2.709 (fresh-journey P0) — first-write exemption, the
+        // graph-write failure trace, and the draft-loss notice surface.
+        // Deliberate frozen-registry addition per the registry discipline.
+        "v5.turn_fence.first_write_exemption",
+        "v5.turn_fence.graph_write_failure_marked",
+        "v5.turn_fence.draft_loss_resolved",
+        "v5.turn_fence.draft_loss_notice_surfaced",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();

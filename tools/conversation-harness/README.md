@@ -57,6 +57,10 @@ scorer/unsupported-claim-adapter.ts  G5's checker — imports the PRODUCTION
 scorer/llm-judge.ts      OPT-IN rubric LLM-judge (1.70 v1): specificity/actionability/
                          depth/no-filler, N reruns, mean+variance delta (live model)
 scorer/localize.ts       localization reporter v0
+scorer/memory-retention.ts  MEMORY-RETENTION EVAL engine (rec 8) — drives the REAL
+                         rolling-summary chain (maintainer -> gates -> assemble ->
+                         store -> injector -> prompt) and reports per-fact
+                         retention. See "Memory-retention eval" below
 journeys/                journey-v2 + frozen journeys (proven) + scenarios s1–s5 (new)
 fixtures/                frozen-graph.json + frozen-brief.txt (deterministic analysed state)
 arm/                     hermetic-arm boot: boot-arm.sh, pms-file-shim.mjs, build-stores.py,
@@ -705,6 +709,59 @@ script here.
   suite if any `*.test.ts` / `*.spec.ts` appears here. If a repo-root-gate test is
   ever genuinely wanted, add an explicit path exclusion to
   `vitest.required.config.ts` from a lane that owns the repo root.
+
+## Memory-retention eval (POC-STATE-ASSESSMENT rec 8)
+
+`__tests__/memory-retention-floors.harness-test.ts` + `fixtures/memory-retention-cases.json`
++ `scorer/memory-retention.ts`.
+
+**The question.** A scenario's entire durable conversational memory is the rolling
+summary: `SUMMARY_HARD_CAP_CHARS` 1,600 (hard reject → keep prior),
+`SUMMARY_TARGET_MAX_CHARS` 1,200 quoted into the summariser prompt with *"Never
+exceed the length — drop the least important detail instead."* Every gate in
+`rolling-summary/` defends against a slot being EMPTIED, MIS-ATTRIBUTED, STALE or
+ABSENT. **Nothing defends against — or notices — a slot losing one stated fact
+among several**, because `findErasedSlots` fires only on a slot that is *entirely*
+empty, and `assembleSummaryFromParsed` stores AT MOST ONE ENTRY PER SLOT, so no
+count in the system could see a statement go missing.
+
+**What it runs.** The real chain, seam for seam: `maintainRollingSummaryForCommit`
+once per turn → `buildSummariserInput` / `shouldRegenerate` → the injected
+`SummariserModel` port → `parseSummaryOutput` → `retention.ts` gates →
+`assembleSummaryFromParsed` → a monotonic in-memory store →
+`loadConversationSummaryForInjection` → `assembleContextPackWithSummary` →
+`buildUserMessage`. Only the MODEL is substituted.
+
+**Read this before quoting a number.** There is no record/replay seam for LLM
+responses in this repo, so the deterministic arms use a compressor that DERIVES
+its slots from the input it is actually shown (never a hardcoded probe string —
+the `activation-acceptance.test.ts` anti-theatre pattern):
+
+| arm | what it is | what its number means |
+|---|---|---|
+| **A faithful** | never drops | whether the PIPELINE can carry a turn-1 fact to turn 19. A loss here is a code defect — this is what the floors gate. |
+| **B1/B2 budget** | drops at 1,200 chars, oldest-/newest-first | what a drop costs, and **whether anything in the system notices**. The drop is supplied by the fixture; the measurement is the system's silence. |
+| **C erasure** | empties CONSTRAINTS on the measurement pass | reproduces the estate's own measured 57/57 doubt-turn erasure, so the floor's green DEPENDS on `assemble.ts`'s carry-forward. |
+| **live** | the real haiku summariser | **NOT MEASURED.** `runRetentionEval` takes any `SummariserModel`, so `new AnthropicSummariserModel()` produces the live table — deliberately not wired to CI and deliberately not shipped as a `skipIf` test (a skipping control tests nothing). Needs `ANTHROPIC_API_KEY` and costs money; the lexical detector also reads a paraphrase as a loss, so a live run is a TABLE, never a gate. |
+
+**Floors** (`MEM-FLOOR 1`/`2` RED the build; 3/4/5 protect the measurement):
+the DECISION GOAL and a USER CORRECTION must survive; a SUPERSEDED value must
+never outlive its correction; the detector must discriminate both ways; no
+measured fact may sit in the verbatim window at the measurement turn (with a
+positive control proving that channel can report a presence); and the fixture's
+verbatim size must sit between the real 1,200 target and the real 1,600 cap, so
+the budget pressure is produced by production constants rather than by padding.
+
+```bash
+pnpm harness:test   # includes the eval; the report prints even on a green run
+MEMORY_RETENTION_REPORT_PATH=/tmp/retention.md pnpm harness:test   # + write the table
+```
+
+**ADVISORY, not required.** `staging`'s only required check is
+`Lint, TypeCheck, Unit Tests`; this suite runs in
+`Conversation Harness Gates (advisory)`, which triggers on
+`tools/conversation-harness/**` and `src/orchestrator-v5/**` — so it executes on
+every PR that can move the memory path, it just does not block.
 
 ## Residuals for v1
 

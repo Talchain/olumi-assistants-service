@@ -69,6 +69,7 @@ import {
 import { config, isProduction, isTest } from '../../config/index.js';
 import {
   CONTEXT_PACK_BRIEF_CHAR_CAP,
+  CONTEXT_PACK_RECENT_TURNS_CAP,
   ContextPackSchema,
 } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
@@ -82,9 +83,12 @@ import {
   type CoachingStatePack,
 } from './canonical-analysis-state.js';
 
-// Recent turns cap for the conversation projection. Spec §10 bounds this at
-// five for token budget. Any trim beyond is caller's concern.
-export const CONTEXT_PACK_RECENT_TURNS_CAP = 5;
+// Recent turns cap for the conversation projection — the verbatim memory window.
+// SINGLE SOURCE is now `context-pack-schema.ts` (FINAL-SWEEP F4); re-exported here
+// so existing importers (context-pack-assembler.test.ts, context-budget-
+// enforcement.test.ts) keep their import path, and POLICY_VERBATIM_TURNS derives
+// from the same constant — no hand-mirror to move in lockstep.
+export { CONTEXT_PACK_RECENT_TURNS_CAP } from './context-pack-schema.js';
 
 /**
  * Context v2 S1: mirror of commit.ts `CONVERSATION_TEXT_CAP` (the persist-
@@ -178,6 +182,22 @@ export interface ContextPackAnalysisFlipThreshold {
   readonly flip_value: number | null;
   readonly unit: string | null;
   readonly no_flip_within_bounds: boolean;
+  /**
+   * ROADMAP 2.205 practical resolution (2026-07-31) — the DISPLAY LICENCE.
+   * The producer's own display strings for this factor's current/flip values,
+   * present exactly when those digits are already on the user's screen for
+   * this analysis (chain traced at
+   * `./analysis-signals.ts` → {@link deriveFlipDisplayLicences}). Both keys or
+   * neither. ABSENT when unlicensed — key-absence doctrine, so an unlicensed
+   * pack stays byte-identical to today's.
+   *
+   * Strings, never floats: `"40000 GBP"`, not `0.4`. The float cage is
+   * enforced downstream at `../format/format-analysis-for-context.ts`, which
+   * is the boundary that owns it, using the SAME `looksLikeRawDecimal`
+   * predicate the display-graph projection applies to `display_value`.
+   */
+  readonly current_display?: string;
+  readonly flip_display?: string;
 }
 
 /** Lane 21 — raw evidence-gap (VOI) projection entry. `voi_score` ∈ [0,1]. */
@@ -330,8 +350,24 @@ export interface ContextPackConversation {
    */
   readonly window?: {
     readonly shown: number;
+    /**
+     * How many turns the conversation ACTUALLY has — the store's pre-cap
+     * count, not the length of the read window. Until 2026-07-25 this was
+     * `priorTurns.length`, i.e. the window's own size, so a 78-turn
+     * conversation reported `available: 20` and the coach told the user its
+     * total was 20.
+     */
     readonly available: number;
     readonly summarised?: number;
+    /**
+     * The one in-band disclosure line, present IFF turns exist that this pack
+     * does not show verbatim. Code-owned and emitted by the same function that
+     * computes the numbers, so it cannot drift from them (the estate's
+     * `HISTORY_CAP_DISCLOSURE` / decision-record `[INCOMPLETE …]` pattern).
+     * A number alone leaves the coach free to describe the visible turns as
+     * the whole conversation; this says not to, in words.
+     */
+    readonly notice?: string;
   };
   /**
    * Boolean flag indicating that the next user turn is expected to confirm
@@ -426,6 +462,17 @@ export interface ContextPack {
    */
   readonly conversation_summary?: ContextPackConversationSummary;
   /**
+   * Knowledge-over-time (ROADMAP 1.199, P6): a bounded, disclosed projection of
+   * the scenario's prior DECISION RECORDS (not just prior turns) — one line per
+   * recorded decision `[date] Chose "<option>": <rationale>`. Populated by the
+   * turn-executor's fire-safe decision-records loader and bounded to
+   * {@link POLICY_OLDER_RELEVANT_FACTS_CHAR_BUDGET}. The key is ABSENT when the
+   * scenario has no records (byte-identity for record-less scenarios). Placed
+   * among hard structured state (above the rolling summary) so durable facts
+   * beat the summary — the CONTEXT_POLICY declares it `enforced`/model-facing.
+   */
+  readonly older_relevant_facts?: string;
+  /**
    * Curated summary of the most recent successful mutations from
    * `prior_facts`, in newest-first order. Capped at three entries with
    * each summary truncated to 80 chars. Non-mutation facts and noop
@@ -518,6 +565,17 @@ export interface AssembleContextPackInput {
   // projectConversation can surface user_message / assistant_message to the
   // LLM. SessionTurnWithContent ⊇ SessionTurn.
   readonly priorTurns: readonly SessionTurnWithContent[];
+  /**
+   * How many turns the scenario ACTUALLY has (`EnrichedTurnContext.
+   * prior_turns_total`) — the store's pre-cap count. `priorTurns` above is a
+   * window capped at `SESSION_READ_WINDOW_TURNS` (default 20), so its length
+   * is NOT the conversation's length.
+   *
+   * `null`/absent = unknown (count read failed, or a legacy/test store). The
+   * projection then states the shortfall WITHOUT a number instead of falling
+   * back to the window length — that fallback is the defect.
+   */
+  readonly priorTurnsTotal?: number | null;
   /**
    * Prior handler facts (newest-first), used to project the
    * `recent_changes` summary into the LLM-facing ContextPack. Optional
@@ -628,6 +686,15 @@ export interface AssembleContextPackInput {
    * that discloses nothing). Null/undefined → marker unchanged.
    */
   readonly summarisedTurns?: number | null;
+  /**
+   * Knowledge-over-time (P6): the pre-projected `older_relevant_facts` section
+   * text, built by the turn-executor's fire-safe decision-records loader
+   * (loadOlderRelevantFactsSection) — mirroring how `conversationSummary` is
+   * pre-loaded. The assembler stays synchronous and only PLACES it. Omitted
+   * (undefined) when the scenario has no records or the read failed → the pack
+   * key is absent → byte-identity for record-less scenarios.
+   */
+  readonly olderRelevantFacts?: string;
 }
 
 /**
@@ -814,6 +881,7 @@ export function assembleContextPackWithSummary(
   const projectedConversation = projectConversation(
     input.priorTurns,
     input.pendingConfirmation ?? false,
+    input.priorTurnsTotal,
   );
   const conversation =
     input.conversationSummary !== undefined &&
@@ -834,7 +902,16 @@ export function assembleContextPackWithSummary(
     // Display-safe analysis projection — what Sonnet actually sees.
     // Sources structured fragile-edge labels off the raw projection
     // (no longer needs the upstream summary as a second argument).
-    display_analysis: formatAnalysisForContext(rawAnalysis),
+    // AMENDMENT A1(a) — thread the live freshness verdict so the flip-point
+    // display licence can fail closed on a stale turn, where compose ships NO
+    // review cards and the digits are therefore on no screen.
+    // No `?? null` default here, deliberately: the option is optional and the
+    // formatter treats undefined and null IDENTICALLY (both fail closed), so a
+    // coalescing default would add a science-field fallback the
+    // forbidden-boundary gate rightly flags, while changing nothing.
+    display_analysis: formatAnalysisForContext(rawAnalysis, {
+      analysisFreshness: input.coachingContext?.freshness,
+    }),
     // Display-safe graph projection — what Sonnet actually sees in
     // place of the raw graph. Edge `strength` floats become decision-
     // language `relationship` phrases; `exists` and `plain_interpretation`
@@ -850,6 +927,14 @@ export function assembleContextPackWithSummary(
       ? { conversation_summary: input.conversationSummary }
       : {}),
     recent_changes: projectRecentChanges(input.priorFacts),
+    // Knowledge-over-time (P6): the decision-records read slice. Placed with the
+    // hard structured state (above the rolling summary, which buildUserMessage
+    // re-appends LAST) so durable prior DECISIONS beat the summary. Conditional
+    // spread — key ABSENT when the loader supplied nothing (no records / read
+    // failed) so record-less scenarios serialise byte-identically to pre-P6.
+    ...(input.olderRelevantFacts !== undefined
+      ? { older_relevant_facts: input.olderRelevantFacts }
+      : {}),
     coaching: input.coaching ?? EMPTY_COACHING_CACHE,
     compound_detected: compound.detected,
     compound_pattern_matched: compound.telemetry.pattern_matched,
@@ -1205,12 +1290,26 @@ function tippingFromFlipThreshold(entry: FlipThreshold): ContextPackAnalysisFlip
 }
 
 function tippingFromSignal(entry: TippingPointSignal): ContextPackAnalysisFlipThreshold {
+  // ROADMAP 2.205 — carry the display licence through, both keys or neither.
+  // `factor_id` is still stripped here (internal match key only); the licence
+  // was already resolved against it upstream.
+  const currentDisplay =
+    typeof entry.current_display === 'string' && entry.current_display.length > 0
+      ? entry.current_display
+      : null;
+  const flipDisplay =
+    typeof entry.flip_display === 'string' && entry.flip_display.length > 0
+      ? entry.flip_display
+      : null;
   return {
     factor_label: entry.factor_label,
     current_value: entry.current_value,
     flip_value: entry.flip_value,
     unit: entry.unit,
     no_flip_within_bounds: entry.no_flip_within_bounds,
+    ...(currentDisplay !== null && flipDisplay !== null
+      ? { current_display: currentDisplay, flip_display: flipDisplay }
+      : {}),
   };
 }
 
@@ -1515,6 +1614,17 @@ function isFiniteSensitivity(value: unknown): value is number {
 export function projectConversation(
   priorTurns: readonly SessionTurnWithContent[],
   pendingConfirmation: boolean,
+  /**
+   * The scenario's PRE-CAP turn total. `priorTurns` is a read window
+   * (`SESSION_READ_WINDOW_TURNS`, default 20) — its length is the window's
+   * size, never the conversation's. Omitted/`null` = unknown; the disclosure
+   * then states the shortfall without a number rather than substituting the
+   * window length, which is the falsehood this parameter removes.
+   *
+   * Optional so the edit-graph dispatch call site (which reads only
+   * `recent_turns`) is unchanged.
+   */
+  totalStored?: number | null,
 ): ContextPackConversation {
   // Context v2 (02 §Disclosure fix 2): window + per-turn `truncated`
   // disclosure is now UNCONDITIONAL — the pack always tells the LLM how much
@@ -1583,13 +1693,79 @@ export function projectConversation(
   }
 
   // Window disclosure (02 §Disclosure fix 2, now unconditional): the LLM
-  // learns history exists beyond the window, so "earlier in this
+  // learns how much history exists beyond the window, so "earlier in this
   // conversation" can be said honestly instead of hallucinating certainty.
+  //
+  // `available` and `turn_count` are the CONVERSATION's length, from the
+  // store's pre-cap count. They used to be `priorTurns.length` — the READ
+  // WINDOW's length — which made both numbers false past the window and made
+  // them false CONSISTENTLY (shown + summarised summed to them exactly), so
+  // no cross-field check could catch it. Live on build `f00b8ef`, a 78-turn
+  // scenario produced "Total turn count on record for this conversation is
+  // 20". Unknown total ⇒ fall back to the window length for the numbers but
+  // NEVER let the disclosure claim it is the whole conversation.
+  const totalKnown =
+    typeof totalStored === 'number' && Number.isFinite(totalStored) && totalStored >= 0;
+  // A total below the window length is incoherent (rows cannot vanish between
+  // the two reads in a way that shrinks history) — most likely a stale or
+  // wrong count. Take the larger: never report FEWER turns than are visibly
+  // present in this very pack.
+  const total = totalKnown ? Math.max(totalStored as number, priorTurns.length) : priorTurns.length;
+  const notice = conversationWindowNotice({
+    shown: recent.length,
+    total,
+    totalKnown,
+    windowCapped: priorTurns.length > recent.length,
+  });
   return {
     recent_turns: recent,
-    turn_count: priorTurns.length,
+    turn_count: total,
     last_tool_used: lastTool?.handler_id ?? null,
     pending_confirmation: pendingConfirmation,
-    window: { shown: recent.length, available: priorTurns.length },
+    window: {
+      shown: recent.length,
+      available: total,
+      ...(notice !== null ? { notice } : {}),
+    },
   };
+}
+
+/**
+ * The one in-band conversation-window disclosure, or `null` when this pack
+ * genuinely shows the whole conversation.
+ *
+ * Code-owned and computed by the same call that computes `shown`/`available`,
+ * so the sentence and the numbers cannot drift apart — the estate's
+ * `HISTORY_CAP_DISCLOSURE` / decision-record `[INCOMPLETE …]` pattern, applied
+ * to the cap that did not disclose. It states BOTH numbers for the same reason
+ * the decision-record line does: a disclosure that only says "some turns are
+ * not shown" still leaves the coach free to count the visible turns and assert
+ * that as the total, which is the failure it replaces.
+ */
+function conversationWindowNotice(args: {
+  readonly shown: number;
+  readonly total: number;
+  readonly totalKnown: boolean;
+  readonly windowCapped: boolean;
+}): string | null {
+  const { shown, total, totalKnown, windowCapped } = args;
+  if (!totalKnown) {
+    // The count read failed. We still know history was cut whenever the read
+    // window itself over-ran the projected slice — say so WITHOUT a number
+    // rather than passing off the window length as the total.
+    if (!windowCapped) return null;
+    return (
+      `[INCOMPLETE — the ${shown} most recent turns are shown above and earlier turns exist that ` +
+      `are not shown. The true total could not be read this turn. Do not describe the turns above ` +
+      `as the whole conversation, and do not state a total number of turns or exchanges.]`
+    );
+  }
+  if (total <= shown) return null;
+  const notShown = total - shown;
+  return (
+    `[INCOMPLETE — ${total} turns are on record for this conversation; the ${shown} most recent ` +
+    `are shown above and ${notShown} earlier ${notShown === 1 ? 'one is' : 'ones are'} not shown. ` +
+    `Do not describe the turns above as the whole conversation; if asked how many turns or ` +
+    `exchanges are on record, the true total is ${total}.]`
+  );
 }

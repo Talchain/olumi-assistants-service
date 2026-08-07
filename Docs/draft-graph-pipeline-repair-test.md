@@ -4,11 +4,27 @@
 **Scope:** Test production repair pipeline against 7 failed v2 challenger graphs
 **Test script:** `tools/graph-evaluator/scripts/repair-test.ts`
 
+> ⚠ **THE PIPELINE THIS REPORT TESTED NO LONGER EXISTS. Read Section 1 as
+> current; read every RESULT below it as a 2026-03-13 historical measurement.**
+>
+> Both LLM repair calls have since been removed — the draft-path/substep-2 call
+> (ROADMAP 2.731) and substep 1b's orchestrator-validation limb (ROADMAP
+> 2.740a). **Stage 4 is now deterministic end-to-end: there is no LLM repair
+> attempt anywhere in it, and no `RepairOnlyAdapter`.** Section 1's trace was
+> rewritten on 2026-08-06 (ROADMAP 2.754) to describe the pipeline as it
+> actually runs today. The measured repair outcomes in the later sections were
+> produced by the old LLM-bearing pipeline and are **not** predictive of
+> current behaviour — they are retained as the efficacy record that justified
+> the removals.
+
 ---
 
 ## Section 1: Production Repair Pipeline Trace
 
-The production draft graph pipeline processes raw LLM output through a multi-stage repair chain before delivering a validated graph to the user.
+The production draft graph pipeline processes raw LLM output through a multi-stage
+**deterministic** repair chain before delivering a validated graph to the user.
+Nothing in this chain calls an LLM: violations the deterministic steps cannot
+resolve fail closed rather than being handed to a model.
 
 ### Pipeline stages (Stage 4: Repair)
 
@@ -25,29 +41,41 @@ Substep 1: Deterministic Sweep
   └── Sets: ctx.llmRepairNeeded (true if Bucket C violations remain)
   │
   ▼
-Substep 1b: Orchestrator Validation [GATED: config.cee.orchestratorValidationEnabled]
-  ├── validateAndRepairGraph() with RepairOnlyAdapter
-  ├── Up to 2 attempts (draft + 1 LLM repair)
-  └── 422 if Bucket C violations remain and llmRepairNeeded=false
+Substep 1.5: OPTIONS_IDENTICAL fail-fast gate
   │
   ▼
-Substep 2: PLoT Validation + LLM Repair
+Substep 1b: Orchestrator Validation [GATED: config.cee.orchestratorValidationEnabled]
+  ├── validateAndRepairGraph() — DETERMINISTIC, single pass, NO adapter
+  │   (Zod → structural-edge normalisation → validateGraph → normalise →
+  │    validateGraphPostNormalisation); repairUsed always false, attempts 0
+  ├── If it fails and llmRepairNeeded=true → defer to substep 2 + gate 9b
+  └── 422 CEE_GRAPH_INVALID if violations remain and llmRepairNeeded=false
+  │
+  ▼
+Substep 2: PLoT Validation + deterministic normalisation
   ├── External PLoT engine validation
-  ├── LLM repair if llmRepairNeeded=true and budget allows
-  ├── simpleRepair() as final fallback (never early-returns)
+  ├── simpleRepair() deterministic normalisation (never early-returns)
   └── Graph stabilisation (DAG enforcement, pruning)
+  │   [the LLM repair that used to sit here was removed — ROADMAP 2.731]
   │
   ▼
 Substeps 3–10: Post-repair transforms
   ├── 3: Edge ID stabilisation
-  ├── 4: Goal merge (enforceSingleGoal)
+  ├── 4: Goal merge (enforceSingleGoal, ONCE)
   ├── 5: Compound goals (constraint edges)
   ├── 6: Late STRP (constraint label fuzzy match, controllable data fill)
   ├── 7: Edge field restoration (V4 fields)
-  ├── 8: Connectivity (wire orphans to goal)
-  ├── 9: Clarifier [GATED]
+  ├── 8: Connectivity + goal repair (wire orphans to goal; writes validationSummary)
+  ├── 9b: Deterministic enforcement (budget rescale + bridge chain repair);
+  │       unfixable violations FAIL CLOSED here with retryable:true
   └── 10: Structural parse (Zod safety net)
+      [Substep 9, the multi-turn clarifier, was RETIRED 2026-07-16 — ROADMAP 1.94]
 ```
+
+**No LLM repair attempt exists at any substep.** `ctx.llmRepairNeeded` keeps its
+historical name but now only selects between *"defer to the deterministic path
+and fail closed at 9b"* and *"422 immediately at 1b"* — it never causes a model
+call.
 
 ### Key repair functions
 
@@ -57,8 +85,15 @@ Substeps 3–10: Post-repair transforms
 | `simpleRepair` | `src/services/repair.ts` | Lightweight fallback: cap trimming, orphan wiring, pruning |
 | `validateGraph` | `src/validators/graph-validator.ts` | Deterministic structural validation (pre/post sweep) |
 | `reconcileStructuralTruth` | `src/validators/structural-reconciliation.ts` | STRP: metadata reconciliation (category override, constraint fuzzy match) |
-| `repairGraphWithAnthropic` | `src/adapters/llm/anthropic.ts` | LLM-based repair (violations + graph → repaired graph) |
-| `validateAndRepairGraph` | `src/cee/graph-orchestrator.ts` | Validation + repair loop with retry |
+| `validateAndRepairGraph` | `src/cee/graph-orchestrator.ts` | Deterministic single-pass validation + normalisation. **No retry loop, no LLM** — `repairUsed` is always `false`, `repairAttempts` always `0` |
+
+> `repairGraphWithAnthropic` (`src/adapters/llm/anthropic.ts`) used to appear in
+> this table as *"LLM-based repair (violations + graph → repaired graph)"*. The
+> function still exists on the LLM adapter interface, **but no pipeline code
+> calls it** — the only remaining `src/` references are the failover, caching
+> and usage-tracking decorators delegating to each other. It is dormant
+> capability, not part of the repair chain. Do not wire it back in without
+> reading the efficacy evidence that removed it (ROADMAP 2.731 / 2.740a).
 
 ### Repair classification (Bucket system)
 

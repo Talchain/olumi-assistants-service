@@ -10,6 +10,7 @@ import {
 describe('composeDirectAnswerResponse', () => {
   it('produces an OlumiResponseSchema-valid success envelope', () => {
     const env = composeDirectAnswerResponse({
+      answerKind: 'functional',
       assistant_text: 'hello world',
       stage: 'frame',
     });
@@ -23,7 +24,8 @@ describe('composeDirectAnswerResponse', () => {
   });
 
   it('omits any session state / lineage fields not on the schema (constraint 6)', () => {
-    const env = composeDirectAnswerResponse({ assistant_text: 'x', stage: 'frame' });
+    const env = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'x', stage: 'frame' });
     // .strict() rejects extra fields; verify none leaked.
     expect(Object.keys(env).sort()).toEqual(
       [
@@ -41,6 +43,7 @@ describe('composeDirectAnswerResponse', () => {
 describe('composeClarifyResponse (A2)', () => {
   it('produces an OlumiResponseSchema-valid clarify envelope', () => {
     const env = composeClarifyResponse({
+      answerKind: 'functional',
       assistant_text: 'What decision are you weighing?',
       stage: 'frame',
     });
@@ -54,8 +57,10 @@ describe('composeClarifyResponse (A2)', () => {
   });
 
   it('produces the same field set as direct_answer (structural parity)', () => {
-    const ans = composeDirectAnswerResponse({ assistant_text: 'a', stage: 'frame' });
-    const clar = composeClarifyResponse({ assistant_text: 'c', stage: 'frame' });
+    const ans = composeDirectAnswerResponse({
+    answerKind: 'functional', assistant_text: 'a', stage: 'frame' });
+    const clar = composeClarifyResponse({
+    answerKind: 'functional', assistant_text: 'c', stage: 'frame' });
     expect(Object.keys(ans).sort()).toEqual(Object.keys(clar).sort());
   });
 });
@@ -66,7 +71,31 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
     confirmation: 'Ran analysis on your current scenario.',
     coaching: null as string | null,
     stage: 'analyse' as const,
+    answerKind: 'functional' as const,
   };
+
+  /**
+   * T1 claim safety — the persisted constraint verdict every production
+   * run_analysis fact carries (`stampClaimSafetyOnEnrichment`, the single call
+   * site in run-analysis.ts stamps unconditionally).
+   *
+   * Stamped on EVERY fixture below because since ROADMAP 1.218 the
+   * `analysis_result` block itself is gated on it: an unstamped fact FAILS
+   * CLOSED to `leading_option_id: null` with `decision_review` and the three
+   * leader-ranking `decision_brief` members dropped. These are TRANSPORT-shape
+   * tests, so they must reach the licensed branch or they would be asserting
+   * the withheld projection while claiming to describe the normal one
+   * (TESTING-DISCIPLINE rule 1).
+   *
+   * It does not disturb the "thin content" case: `__cee_claim_safety` is
+   * deliberately absent from `P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP`, so an
+   * enrichment carrying only the stamp still projects to `undefined` and the
+   * block still omits the key.
+   */
+  const CLAIM_SAFETY_STAMP = {
+    may_name_leading_option: true,
+    constraint_verdict_state: 'evaluated_feasible',
+  } as const;
 
   function runAnalysisFact(enrichment?: Record<string, unknown>): HandlerFact {
     return {
@@ -77,7 +106,7 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
         scenario_id: 'scen-a',
         leading_option_id: 'opt-1',
         summary: 'Ran analysis on your current scenario.',
-        ...(enrichment !== undefined ? { enrichment } : {}),
+        enrichment: { ...(enrichment ?? {}), __cee_claim_safety: CLAIM_SAFETY_STAMP },
       },
     };
   }
@@ -170,9 +199,16 @@ describe('composeToolCallResponse (V5 Group 1 Task B)', () => {
 // `enrichment.decision_review` carries a representative slice of v11 LLM
 // output fields, plus `graph_hash_at_run` and `enrichment.graph.nodes[]`,
 // is decomposed into typed Phase 3 blocks per Analysis tab data
-// contract v1.3 §1.1–§1.3. ExerciseBlock is NOT auto-emitted from this
-// path (handler-only per §1.4); the case exists in output-safety for
-// exhaustiveness but no composer builds it from decision_review.
+// contract v1.3 §1.1-§1.3.
+//
+// ⚠ AMENDED 2026-07-31 (capability P1, CEE #770). This header read
+// "ExerciseBlock is NOT auto-emitted from this path (handler-only per §1.4);
+// the case exists in output-safety for exhaustiveness but no composer builds it
+// from decision_review." Both halves are now FALSE: a composer DOES build one
+// from `decision_review.pre_mortem`, on this path. What is still true — and is
+// now pinned explicitly rather than left to hold by accident, see the
+// `no ExerciseBlocks` test below — is that THIS FIXTURE does not produce one,
+// because its enrichment does not select the `pre_mortem` lens.
 // ============================================================================
 
 describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
@@ -181,6 +217,7 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     confirmation: 'Ran analysis on your current scenario.',
     coaching: null as string | null,
     stage: 'analyse' as const,
+    answerKind: 'functional' as const,
   };
 
   const PHASE3_GRAPH_HASH = 'gh_phase3a_test_0001';
@@ -285,6 +322,15 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
           graph: STANDARD_GRAPH,
           factor_sensitivity: STANDARD_FACTOR_SENSITIVITY,
           decision_review: { ...RICH_DECISION_REVIEW, produced_at: '2026-05-16T15:00:00.000Z' },
+          // T1 claim safety — the fixture must DECLARE its constraint verdict.
+          // `rebuildPhase3BlocksFresh` reads this stamp and FAILS CLOSED without
+          // it, dropping every leader-presuming block. `evaluated_feasible` is the branch
+          // this fixture must reach: the per-card_kind COUNTS asserted below are a
+          // statement about block CONSTRUCTION, so the leader must be nameable.
+          __cee_claim_safety: {
+            may_name_leading_option: true,
+            constraint_verdict_state: 'evaluated_feasible',
+          },
         },
         graph_hash_at_run: PHASE3_GRAPH_HASH,
         computed_at: '2026-05-16T14:59:00.000Z',
@@ -304,8 +350,57 @@ describe('composeToolCallResponse — V5 Phase 3A block extraction', () => {
     expect(byType('review_card').length).toBeGreaterThan(0);
     expect(byType('coaching').length).toBeGreaterThan(0);
     expect(byType('evidence').length).toBeGreaterThan(0);
-    // ExerciseBlock is handler-only per v1.3 §1.4 — never auto-emitted.
+    // ⚠ AMENDED 2026-07-31 (capability P1, CEE #770). This assertion used to
+    // carry the comment "ExerciseBlock is handler-only per v1.3 §1.4 — never
+    // auto-emitted", which is now FALSE — and, worse, the assertion had started
+    // passing INCIDENTALLY: #770 emits an ExerciseBlock companion, just not for
+    // THIS fixture. A pin that holds by accident is a pin that stops meaning
+    // anything the moment the accident changes.
+    //
+    // The invariant it now states explicitly: the companion is LENS-KEYED, and
+    // this fixture selects NO lens at all (its `factor_sensitivity` rows carry
+    // only `factor_id` + `confidence` — no `flip_risk_category`, no
+    // `influence_score`, no `influence_rank`; and the enrichment has no
+    // `confidence_tier`, no `option_comparison`, no EVPI — so every `selectLens`
+    // rule misses and it returns its load-bearing `null`).
+    //
+    // The precondition is asserted, not assumed: no lens suggestion block ⇒ no
+    // companion. The POSITIVE CONTROL that this file can still see an exercise
+    // when one is due lives in
+    // `compose/__tests__/lens-companion-blocks.test.ts` (arm 1 + the arm-3
+    // control), which drives the same `composeToolCallResponse` funnel.
+    expect(
+      parsed.blocks.some((b) => b.type === 'coaching' && b.signal_id.startsWith('coach:lens:')),
+      'precondition: this fixture must select NO lens — otherwise the exercise absence below is about the wrong thing',
+    ).toBe(false);
     expect(byType('exercise')).toHaveLength(0);
+  });
+
+  it('emits an ExerciseBlock companion once the SAME funnel selects the pre_mortem lens (positive control)', () => {
+    // The control for the assertion above: identical composer, identical
+    // fixture, ONE added enrichment key (`confidence_tier: 'needs_work'`, which
+    // is `selectLens` rule 2a) plus the pre_mortem prose the builder reads. If
+    // this ever stops emitting, the absence assertion above is measuring a dead
+    // funnel rather than a lens decision.
+    const fact = phase3Fact();
+    const enrichment = (fact.result as Record<string, unknown>)
+      .enrichment as Record<string, unknown>;
+    enrichment.confidence_tier = 'needs_work';
+    (enrichment.decision_review as Record<string, unknown>).pre_mortem = {
+      failure_scenario:
+        'Delivery risk was underestimated and the rollout slipped past the planned window.',
+      warning_signs: ['Sprint burndown flattens for two consecutive weeks.'],
+      mitigation: 'Book a mid-point checkpoint before committing budget.',
+      grounded_in: ['fac_delivery_risk'],
+    };
+
+    const parsed = OlumiResponseSchema.parse(
+      composeToolCallResponse({ ...baseInput, handlerFacts: [fact] }),
+    );
+    expect(
+      parsed.blocks.some((b) => b.type === 'coaching' && b.signal_id.includes('coach:lens:pre_mortem')),
+    ).toBe(true);
+    expect(parsed.blocks.filter((b) => b.type === 'exercise')).toHaveLength(1);
   });
 
   it('emits expected counts per card_kind from the rich-fixture decision_review', () => {

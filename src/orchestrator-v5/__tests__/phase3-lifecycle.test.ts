@@ -165,6 +165,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   it('FRESH: rebuilds Phase 3 blocks from prior run_analysis fact when current turn has none', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Explained.',
       coaching: null,
@@ -232,6 +233,20 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
           // `flip_value: null` that must survive verbatim, not be coerced.
           flip_thresholds: [{ factor_id: 'fac_x', flip_value: null }],
         };
+    // T1 claim safety — the persisted constraint verdict the run_analysis
+    // handler stamps on EVERY fact it writes. Stamped here (including on the
+    // `onlyLeak` fixture) because since ROADMAP 1.218 the transport projection
+    // is gated on it: an unstamped fact FAILS CLOSED, dropping
+    // `decision_review` whole and the three leader-ranking `decision_brief`
+    // members, so this keep-list fixture would silently measure the WITHHELD
+    // projection instead of the transport keep-list it exists to pin
+    // (TESTING-DISCIPLINE rule 1). `__cee_claim_safety` is not itself
+    // keep-listed, so it never reaches the wire and the `onlyLeak` case still
+    // projects to `undefined`.
+    enrichment.__cee_claim_safety = {
+      may_name_leading_option: true,
+      constraint_verdict_state: 'evaluated_feasible',
+    };
     if (!opts?.onlyLeak && opts?.withDecisionReview !== false) {
       enrichment.decision_review = { narrative_summary: 'ok' };
     }
@@ -274,6 +289,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
 
   function analysisResultBlockFor(fact: RunAnalysisHandlerFact, opts: { currentTurn: boolean }) {
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '', confirmation: 'x', coaching: null, stage: 'decide',
       handlerFacts: opts.currentTurn ? [fact] : [],
       lifecycle: opts.currentTurn
@@ -692,10 +708,12 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
       scenarioId: SCENARIO_ID,
     } as const;
     const r1 = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '', confirmation: '', coaching: null,
       stage: 'decide', handlerFacts: [], lifecycle,
     });
     const r2 = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '', confirmation: '', coaching: null,
       stage: 'decide', handlerFacts: [], lifecycle,
     });
@@ -713,6 +731,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   it('STALE: emits EXACTLY one rerun CoachingBlock (priority_rank:1, action_intent:rerun_analysis) and ZERO other Phase 3 blocks', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Explained.',
       coaching: null,
@@ -763,6 +782,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   it('UNKNOWN: suppresses Phase 3 emission and logs lifecycle_state=skipped_unknown (no pending block)', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Explained.',
       coaching: null,
@@ -792,6 +812,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   // NONE freshness — sibling case for completeness.
   it('NONE: suppresses Phase 3 emission and logs lifecycle_state=skipped_none', () => {
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Explained.',
       coaching: null,
@@ -820,6 +841,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);  // stale
     const newFact = makeRunAnalysisFact(DIVERGED_GRAPH_HASH);  // current-turn rerun
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Re-ran.',
       coaching: null,
@@ -865,6 +887,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   it('telemetry payload contains structural fields only (no prose, no labels, no scenario text, no decision_review content)', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
     composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: '',
       coaching: null,
@@ -927,6 +950,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   it('output-safety: stale rerun coaching copy passes the wire-side ban list', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '', confirmation: '', coaching: null,
       stage: 'decide', handlerFacts: [],
       lifecycle: {
@@ -963,6 +987,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   // Defensive: no lifecycle context supplied → preserve PR #178/180 behaviour.
   it('no lifecycle context: preserves PR #178/180 behaviour — no Phase 3 emission, no telemetry', () => {
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Explained.',
       coaching: null,
@@ -990,6 +1015,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   it('FIX1 REGRESSION: resolves the prior fact by content even when selected_fact_index is shifted', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '',
       confirmation: 'Explained.',
       coaching: null,
@@ -1031,6 +1057,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
   it('FIX1: no index-mismatch event when the passed index already matches content position', () => {
     const priorFact = makeRunAnalysisFact(SOURCE_GRAPH_HASH);
     composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '', confirmation: 'Explained.', coaching: null,
       stage: 'decide', handlerFacts: [],
       lifecycle: {
@@ -1051,6 +1078,7 @@ describe('Phase 3 lifecycle composer — branch 2 (no current-turn run_analysis 
     // The verdict claims a selected fact, but prior_facts genuinely has none.
     // Content selection returns null → the honest rebuild_failed path fires.
     const response = composeToolCallResponse({
+      answerKind: 'functional',
       orientation: '', confirmation: 'Explained.', coaching: null,
       stage: 'decide', handlerFacts: [],
       lifecycle: {

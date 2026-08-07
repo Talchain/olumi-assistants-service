@@ -32,9 +32,12 @@ import {
   type BlockBuildCtx,
 } from '../phase3-blocks.js';
 import {
+  GUIDANCE_SIGNAL_CODES,
   PRIORITY_BY_CATEGORY,
+  evidenceSignals,
   guidanceSignalsForCoachingKind,
   guidanceSignalsForSeverity,
+  reviewCardSignals,
 } from '../guidance-signals.js';
 
 // ============================================================================
@@ -2040,17 +2043,29 @@ describe('Finding 1 — lever-naming guard on all free-text surfaces', () => {
     ).toBeDefined();
   });
 
-  it('pre_mortem whose failure prose names the lever is dropped', () => {
+  // ⚠ INVERTED BY RULING (2026-07-31). This test used to assert the pre_mortem
+  // card was DROPPED when its failure prose named a lever, and it was correct
+  // for the doctrine as then scoped. The guard was then MEASURED against the
+  // walk's real captured bytes (fix-2211-lens-emission.md §1.1-1.4) and found
+  // to be eating 2 of the 4 turns where the producer emitted anything — a 50%
+  // loss rate on this card from a guard written for a different surface.
+  //
+  // RULING: a pre-mortem names the lever as a failure WATCH-POINT ("imagine the
+  // option you chose did not pay off"), which is coaching, not steering. The
+  // ban is scoped out of THIS surface only; every sibling assertion in this
+  // describe block is unchanged and still passing, which is what keeps the
+  // ruling narrow. Full scope pins live in `pre-mortem-lever-ruling.test.ts`.
+  it('pre_mortem whose failure prose names the lever now SHIPS (lever ban scoped out of this surface)', () => {
     const fact = makeFact({
       decisionReview: {
         pre_mortem: { failure_scenario: 'The project fails because Delivery risk was mismanaged.' },
       },
       graphNodes: STANDARD_GRAPH_NODES,
     });
-    expect(
-      buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
-        .find((b) => b.card_kind === 'pre_mortem'),
-    ).toBeUndefined();
+    const card = buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS)
+      .find((b) => b.card_kind === 'pre_mortem');
+    expect(card).toBeDefined();
+    expect(card?.body).toContain('Delivery risk');
   });
 
   it('scenario_context whose trigger/consequence names the lever is skipped', () => {
@@ -2254,6 +2269,149 @@ describe('wave-2 guidance signals — every emitted block carries coherent categ
     for (const b of [...review, ...coaching, ...evidence, stale!]) {
       expect(b.category).toBeDefined();
       expect(b.priority).toBe(PRIORITY_BY_CATEGORY[b.category!]);
+    }
+  });
+});
+
+// ============================================================================
+// ROADMAP 1.120 residual (UI-SEM-085, @talchain/schemas 0.20.0/0.21.0):
+// producer-owned `signal_code` (+ `signal` where deterministic) on EVERY
+// guidance block. Before this, the UI INVENTED signal_code from `block.type`
+// on 10/10 live blocks — matching no real detector code. The pins below run
+// the REAL builders over the rich fixture and assert (a) presence on every
+// block, (b) the code is derived from the block's OWN kind via the single
+// guidance-signals source, (c) the exact vocabulary values (the mutation
+// target — flipping a code in the map turns these red), and (d) the negative
+// control: no block ever re-invents its code from its `type`.
+// ============================================================================
+
+describe('1.120 signal provenance — every emitted block carries a coherent signal_code', () => {
+  const fact = makeFact({
+    decisionReview: RICH_DR,
+    graphNodes: STANDARD_GRAPH_NODES,
+    factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
+  });
+  const lookup = buildGraphNodeLookup(fact);
+  const conf = buildFactorConfidenceLookup(fact);
+
+  const review = buildReviewCardBlocks(fact, lookup, CTX);
+  const coaching = buildCoachingBlocks(fact, lookup, CTX);
+  const evidence = buildEvidenceBlocks(fact, lookup, conf, CTX);
+  const stale = buildStaleRerunCoachingBlock(CTX);
+  const all = [...review, ...coaching, ...evidence, stale!];
+
+  // Positive control: the absence/negative assertions below are only
+  // meaningful if the fixture actually produces blocks to inspect.
+  it('positive control: the fixture produces review, coaching and evidence blocks', () => {
+    expect(review.length).toBeGreaterThan(0);
+    expect(coaching.length).toBeGreaterThan(0);
+    expect(evidence.length).toBeGreaterThan(0);
+    expect(stale).not.toBeNull();
+  });
+
+  it('every emitted block carries a non-empty signal_code', () => {
+    for (const b of all) {
+      expect(b.signal_code, `${b.type} signal_code present`).toBeDefined();
+      expect(typeof b.signal_code).toBe('string');
+      expect((b.signal_code ?? '').length).toBeGreaterThan(0);
+    }
+  });
+
+  it('every ReviewCard signal_code is derived from ITS card_kind (single source)', () => {
+    for (const b of review) {
+      const expected = reviewCardSignals(b.card_kind, b.severity).signal_code;
+      expect(b.signal_code, `${b.card_kind} signal_code`).toBe(expected);
+    }
+  });
+
+  it('every CoachingBlock signal_code is derived from ITS coaching_kind (single source)', () => {
+    for (const b of [...coaching, stale!]) {
+      const expected = guidanceSignalsForCoachingKind(b.coaching_kind).signal_code;
+      expect(b.signal_code, `${b.coaching_kind} signal_code`).toBe(expected);
+    }
+  });
+
+  it('every EvidenceBlock signal_code is derived from the evidence detector (single source)', () => {
+    for (const b of evidence) {
+      expect(b.signal_code).toBe(evidenceSignals(b.severity).signal_code);
+    }
+  });
+
+  // The vocabulary pin — the mutation target. Flipping any entry in the
+  // guidance-signals code maps turns exactly this test red.
+  it('pins the exact signal_code vocabulary per card_kind', () => {
+    const expectedByCardKind: Record<string, string> = {
+      narrative: GUIDANCE_SIGNAL_CODES.ANALYSIS_NARRATIVE,
+      pre_mortem: GUIDANCE_SIGNAL_CODES.PRE_MORTEM,
+      flip_threshold: GUIDANCE_SIGNAL_CODES.FLIP_THRESHOLD,
+      bias: GUIDANCE_SIGNAL_CODES.COGNITIVE_BIAS,
+      robustness: GUIDANCE_SIGNAL_CODES.FRAGILE_RESULT,
+      evidence_priority: GUIDANCE_SIGNAL_CODES.EVIDENCE_GAP,
+      assumption: GUIDANCE_SIGNAL_CODES.ASSUMPTION_CHECK,
+      scenario_context: GUIDANCE_SIGNAL_CODES.SCENARIO_CONTEXT,
+    };
+    for (const b of review) {
+      expect(b.signal_code, `${b.card_kind} → code`).toBe(expectedByCardKind[b.card_kind]);
+    }
+  });
+
+  it('pins the exact signal_code vocabulary per coaching_kind + the evidence code', () => {
+    const expectedByCoachingKind: Record<string, string> = {
+      orientation: GUIDANCE_SIGNAL_CODES.STALE_ANALYSIS,
+      bias_signal: GUIDANCE_SIGNAL_CODES.COGNITIVE_BIAS,
+      assumption_check: GUIDANCE_SIGNAL_CODES.ASSUMPTION_CHECK,
+      calibration_prompt: GUIDANCE_SIGNAL_CODES.CALIBRATION_PROMPT,
+    };
+    for (const b of [...coaching, stale!]) {
+      expect(b.signal_code, `${b.coaching_kind} → code`).toBe(
+        expectedByCoachingKind[b.coaching_kind],
+      );
+    }
+    for (const b of evidence) {
+      expect(b.signal_code).toBe(GUIDANCE_SIGNAL_CODES.EVIDENCE_GAP);
+    }
+  });
+
+  // The card `assumption` and the coaching `assumption_check` read the SAME
+  // decision_review source (key_assumptions), so they MUST share one code — a
+  // deliberate unification (never two names for one meaning).
+  it('unifies the two assumption surfaces under one code', () => {
+    const cardAssumption = review.find((b) => b.card_kind === 'assumption');
+    const coachAssumption = coaching.find((b) => b.coaching_kind === 'assumption_check');
+    expect(cardAssumption).toBeDefined();
+    expect(coachAssumption).toBeDefined();
+    expect(cardAssumption!.signal_code).toBe(GUIDANCE_SIGNAL_CODES.ASSUMPTION_CHECK);
+    expect(coachAssumption!.signal_code).toBe(cardAssumption!.signal_code);
+  });
+
+  // Negative control: the ORIGINAL defect was signal_code invented from
+  // block.type ('review_card' / 'coaching' / 'evidence'). Prove no block
+  // reproduces that, and that every code is a known registry member.
+  it('never re-invents signal_code from block.type, and every code is a known registry member', () => {
+    const known = new Set<string>(Object.values(GUIDANCE_SIGNAL_CODES));
+    for (const b of all) {
+      expect(b.signal_code).not.toBe(b.type);
+      expect(known.has(b.signal_code as string), `${b.signal_code} is a registry code`).toBe(true);
+    }
+  });
+
+  // `signal` (display line) is emitted only where deterministic: the
+  // stale-rerun nudge. Everything else is code-only (NEVER fabricate).
+  it('emits the deterministic signal line on the stale-rerun nudge, code-only elsewhere', () => {
+    expect(stale!.signal_code).toBe(GUIDANCE_SIGNAL_CODES.STALE_ANALYSIS);
+    expect(stale!.signal).toBe('Graph changed since the last analysis');
+    for (const b of [...review, ...coaching, ...evidence]) {
+      expect(b.signal, `${b.type} is code-only`).toBeUndefined();
+    }
+  });
+
+  // Any emitted signal line respects the 140-char wire bound and is non-empty.
+  it('every emitted signal line is within the wire bound', () => {
+    for (const b of all) {
+      if (b.signal !== undefined) {
+        expect(b.signal.length).toBeGreaterThan(0);
+        expect(b.signal.length).toBeLessThanOrEqual(140);
+      }
     }
   });
 });

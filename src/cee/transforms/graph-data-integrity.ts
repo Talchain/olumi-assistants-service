@@ -598,6 +598,29 @@ export function repairObservedRootIntercepts(v3Body: any, requestId?: string): I
 export function runGraphDataIntegrityChecks(
   v3Body: any,
   requestId?: string,
+  /**
+   * ⚠ DELIBERATELY INERT, AND DELIBERATELY STILL HERE (ROADMAP 2.714 reverted,
+   * 8 Aug 2026). No integrity check may read the brief.
+   *
+   * #853 added a rule on this seam that read a number out of the free-text
+   * brief, wrote it into `observed_state`, and stamped it
+   * `source: "user_override"` — presenting the system's own reading back to the
+   * user as THEIR stated number. Post-merge adversarial review measured it
+   * committing values that were 10^6x wrong (a decimal point truncated the
+   * binding window before the magnitude guard could see the magnitude word),
+   * values the user had explicitly NEGATED, values they had RETRACTED, and
+   * values bound to the WRONG NODE — every one of them with an empty skip list.
+   * The capability was removed rather than narrowed: its input space had been
+   * modelled from its author's own corpus, so any narrower guard would simply
+   * have had a different blind spot.
+   *
+   * The parameter stays so the guard suite can pass a brief through the real
+   * production seam and prove it has NO effect. Deleting it would delete the
+   * only place that property can be asserted.
+   * See `__tests__/no-brief-derived-user-override.test.ts` (measured corpus)
+   * and `.writers.test.ts` (derived writer manifest).
+   */
+  _brief?: string,
 ): IntegrityRepairSummary {
   const summary: IntegrityRepairSummary = {
     scale_consistency_repairs: [],

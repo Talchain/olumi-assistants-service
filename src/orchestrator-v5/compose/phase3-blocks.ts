@@ -70,31 +70,96 @@ import {
   ReviewCardBlockSchema,
   CoachingBlockSchema,
   EvidenceBlockSchema,
+  ExerciseBlockSchema,
   type ActionIntentLiteral,
   type CoachingBlock,
   type EvidenceBlock,
+  type ExerciseBlock,
   type Phase3BlockSeverityLiteral,
   type ReviewCardBlock,
   type TargetRef,
   type TargetRefKindLiteral,
 } from '@talchain/schemas/boundary';
 
-import { log } from '../../utils/telemetry.js';
+import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
-import { findForbiddenPhraseHit } from './forbidden-user-facing-phrases.js';
+import {
+  LENS_DSK_PROVENANCE,
+  selectLens,
+  whatIfSuggestionExecutorAvailable,
+  type LensId,
+  type LensSelection,
+  type LensSelectorOptions,
+} from './lens-selector.js';
+import { resolveDskProtocolProvenance } from './dsk-protocol-record.js';
+import { config } from '../../config/index.js';
+import {
+  classifyClaimUsable,
+  TIER2_ACTIVATION_ENABLED,
+  type ClaimUsableInput,
+} from './claim-safety-cage.js';
+import {
+  flipThresholdCardBody,
+  flipThresholdFallbackBody,
+  readFlipThresholdCardRow,
+} from './flip-threshold-card-row.js';
+// ROADMAP 2.267 (D-2) — the ONE owner of the top-level `enrichment.flip_thresholds[]`
+// parse. The option guard below needs the row's ATTESTED alternative winner, and it
+// reads it through the same module the decision_review prompt projection reads, so
+// the guard and the prompt can never disagree about what the producer said. That
+// module imports nothing, so this edge cannot create a compose ⇄ context cycle.
+import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
+import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
+  evidenceSignals,
   guidanceSignalsForCoachingKind,
-  severityWithSignals,
+  reviewCardSignals,
 } from './guidance-signals.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
 
 const TITLE_MAX = 80;
+/**
+ * Capability P1 — the composer's cap on `pre_mortem.warning_signs`.
+ *
+ * ⚠ THIS IS A HAND-KEPT MIRROR, NOT A DERIVATION — say so plainly, because the
+ * first version of this comment said the cap was "READ FROM the producer's
+ * contract" and that was FALSE (CEE #770 review F1). It is a bare literal. The
+ * authority it mirrors is the decision_review prompt's own declared bound,
+ * `src/cee/decision-review/decompose-prompts.ts` —
+ * `"warning_signs": ["string"],   // up to 3, observable and actionable`.
+ *
+ * Why a mirror at all, rather than parsing the prompt at runtime: a production
+ * composer that reads a number out of a prompt STRING to decide how much user
+ * content to keep is a worse failure mode than a guarded constant — one prompt
+ * reword and the composer silently changes what users see, with no review.
+ *
+ * So the mirror is made FAIL-LOUD instead (CLAUDE.md trap 12; same shape as
+ * `scripts/ci/assert-pnpm-overrides-readable.mjs`):
+ * `warning-signs-cap-derivation.test.ts` parses the bound OUT of the prompt
+ * source and asserts equality with this constant, and fails just as loudly if
+ * the anchor it parses ever disappears. If the prompt moves to "up to 5", that
+ * test REDs — instead of this composer quietly truncating conforming output and
+ * firing a producer-drift alarm at a producer that did nothing wrong.
+ *
+ * `ExerciseBlockSchema` sets no maximum, so without this an over-long model
+ * return rides to the renderer unbounded. Exceeding it is DISCLOSED via
+ * `v5.capability.lens_companion_truncated`, never silently swallowed.
+ */
+export const WARNING_SIGNS_MAX = 3;
 const BODY_MAX = 300;
 const ACTION_LABEL_MAX = 40;
+/**
+ * Contract max for `action_prompt` (`PHASE3_ACTION_PROMPT_MAX`, schemas
+ * 0.31.0). Equal to `BODY_MAX` by derivation, not by definition — the contract
+ * declares them as separate named constants, so they are kept separate here
+ * too rather than aliased.
+ */
+const ACTION_PROMPT_MAX = 300;
 const TECHNIQUE_MAX = 300;
 
 // Round-4 review: defence-in-depth prose guard. Each Phase 3 block carries
@@ -115,12 +180,18 @@ const TECHNIQUE_MAX = 300;
 // only. "v1.3", "1.5x", "10.5%" do NOT match (no leading zero/dot
 // pattern).
 //
+// ⭐ MOVED to `forbidden-user-facing-phrases.ts` (ROADMAP 2.688 slice 1)
+// and IMPORTED here rather than declared locally. It had become a second
+// prose-guard lexicon living apart from the canonical one, and the
+// reference-class exercise builder needs the SAME rule — copying the
+// regex into a second builder is precisely the hand-maintained mirror
+// (CLAUDE.md trap 12). One definition site, both consumers derive.
+//
 // Banned recommendation/winner language is sourced from the central
 // `FORBIDDEN_USER_FACING_PHRASES` list via `findForbiddenPhraseHit`.
 // RC4: for the REWRITABLE prescriptive-lexicon subset the remedy is a
 // deterministic terminology substitution, not a drop — see
 // `validateProseAndSchemaOrDrop`.
-const RAW_DECIMAL_RE = /(?:^|[\s(=,])(?:0\.\d|\.\d)/;
 
 // ============================================================================
 // Doctrine D-U F2 — option-set lever suppression on "investigate this" surfaces
@@ -366,6 +437,23 @@ export function buildGraphNodeLookup(
 }
 
 /**
+ * Wave-4 δ2 — build a `GraphNodeLookup` directly from a raw graph record
+ * (`{nodes[], edges[]}`), for the mutation / what_would_flip directive branches
+ * that have NO run_analysis fact to read an enrichment graph from. Consumes the
+ * persisted-snapshot graph the compose caller already holds. Absent / non-record
+ * input ⇒ empty lookup ⇒ every consumer fails closed. Same node-kind gate + edge
+ * handling as `buildGraphNodeLookup`'s fallback pass.
+ */
+export function buildGraphNodeLookupFromGraph(graph: unknown): GraphNodeLookup {
+  const lookup = new Map<string, GraphNodeRef>();
+  const record = readRecord(graph);
+  if (record !== null) {
+    populateGraphNodeLookup(lookup, record);
+  }
+  return lookup;
+}
+
+/**
  * Populate `lookup` from a `{nodes[], edges[]}` graph record. Shared by
  * the enrichment source and the persisted-snapshot fallback — the two
  * shapes differ only in the edge endpoint field names, which are read
@@ -433,6 +521,105 @@ function populateGraphNodeLookup(
   }
 }
 
+// ============================================================================
+// Wave-4 δ1 — the ONE shared entity→node-id resolver (ROADMAP 1.202 + 1.135).
+//
+// DERIVED (not mirrored, trap-12) from the forward `GraphNodeLookup` above: the
+// reverse `label → id` index is a pure O(nodes) derivation of the SAME map, so it
+// cannot desync — it has no independent source. Two consumers share it:
+//   - 1.202 (the ui_directive emitter, δ2) uses the FORWARD path (id → ref) it
+//     already has — every deterministic fact names its subject by id;
+//   - 1.135 (clickable coach copy) uses this REVERSE path (label → id) to link
+//     entity NAMES inside LLM-authored prose to their nodes.
+// Fail-closed everywhere: a duplicate normalised label is AMBIGUOUS → never
+// linked (we do not guess which node the prose meant); a too-short / bare-generic
+// label is not linked in prose (reusing the shipped over-match rails); a miss is
+// unlinked. Reuses `normaliseForPhraseMatch` + `containsWholePhrase` +
+// `LEVER_LABEL_MIN_LEN` + `GENERIC_LEVER_TOKENS` — the exact matching rails the
+// lever-naming guard already ships, so a producer label change or new node kind
+// flows through automatically (one input, no second list to maintain).
+// ============================================================================
+
+/**
+ * Sentinel: a normalised label shared by TWO OR MORE nodes. Such a label resolves
+ * to nothing (fail-closed unlinked) — the required ambiguity ruling. A unique
+ * `symbol` so it can never collide with a real string id.
+ */
+export const AMBIGUOUS_LABEL: unique symbol = Symbol('AMBIGUOUS_LABEL');
+
+/** Reverse index: normalised label → the single node id that owns it, or
+ *  `AMBIGUOUS_LABEL` when two+ nodes share the normalised label. */
+export type LabelIndex = ReadonlyMap<string, string | typeof AMBIGUOUS_LABEL>;
+
+/**
+ * Build the reverse `label → id` index from a forward `GraphNodeLookup`. One
+ * pass; duplicate normalised label → `AMBIGUOUS_LABEL`. Pure + deterministic;
+ * derived every build from the forward map (no hand-maintained mirror).
+ */
+export function buildLabelIndex(lookup: GraphNodeLookup): LabelIndex {
+  const index = new Map<string, string | typeof AMBIGUOUS_LABEL>();
+  for (const ref of lookup.values()) {
+    const key = normaliseForPhraseMatch(ref.label);
+    if (key.length === 0) continue;
+    // First writer wins the id slot; the SECOND collision flips the key to
+    // AMBIGUOUS and it never reverts (fail-closed on duplicate labels).
+    index.set(key, index.has(key) ? AMBIGUOUS_LABEL : ref.id);
+  }
+  return index;
+}
+
+/**
+ * Resolve a single candidate label token to its node id, or `null`. Fail-closed
+ * on: too-short / bare-generic label (would over-match), ambiguous (duplicate)
+ * label, or a miss. Reuses the shipped normalisation + over-match rails so a lone
+ * "Cost" / "AI" / "C#" never links.
+ */
+export function resolveLabelToId(index: LabelIndex, rawLabel: string): string | null {
+  const key = normaliseForPhraseMatch(rawLabel);
+  if (key.length < LEVER_LABEL_MIN_LEN) return null;
+  if (!key.includes(' ') && GENERIC_LEVER_TOKENS.has(key)) return null;
+  const resolved = index.get(key);
+  if (resolved === undefined || resolved === AMBIGUOUS_LABEL) return null;
+  return resolved;
+}
+
+/**
+ * 1.135 — scan LLM-authored prose for the graph node labels it NAMES and return
+ * one deduped `TargetRef` per unambiguously-resolved node, in lookup order.
+ * Whole-phrase, both-ends-bounded matching (reusing `containsWholePhrase`, which
+ * already encodes the "Equity Offered to CTO" vs bare "CTO" over-match lesson);
+ * too-short / bare-generic single-word labels are skipped; a label shared by two
+ * nodes (`AMBIGUOUS_LABEL`) links to NEITHER. Pure; no producer value is read —
+ * only the node's own display label. Byte-inert until a builder calls it.
+ */
+export function resolveProseEntityRefs(
+  lookup: GraphNodeLookup,
+  index: LabelIndex,
+  prose: string,
+): readonly TargetRef[] {
+  const hay = normaliseForPhraseMatch(prose);
+  if (hay.length === 0) return [];
+  const refs: TargetRef[] = [];
+  const seen = new Set<string>();
+  for (const ref of lookup.values()) {
+    const needle = normaliseForPhraseMatch(ref.label);
+    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
+    // A bare generic single word ("cost") over-matches ordinary decision prose —
+    // require a distinctive single word or a multi-word phrase (same rule as the
+    // lever-naming guard's Finding-5 tempering).
+    if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
+    if (!containsWholePhrase(hay, needle)) continue;
+    // Fail-closed on ambiguity: a duplicate normalised label resolves to
+    // AMBIGUOUS_LABEL → link to neither node.
+    const resolved = index.get(needle);
+    if (resolved === undefined || resolved === AMBIGUOUS_LABEL) continue;
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+    refs.push({ id: ref.id, label: ref.label, kind: ref.kind });
+  }
+  return refs;
+}
+
 /**
  * Build a factor_id → confidence-band lookup from
  * `enrichment.factor_sensitivity[].confidence` (the PLoT-provided
@@ -476,16 +663,15 @@ export function buildFactorConfidenceLookup(
       : typeof e.id === 'string' ? e.id
       : null;
     if (factorId === null) continue;
-    const c = e.confidence;
-    if (typeof c !== 'number' || !Number.isFinite(c)) {
-      // Omit — caller treats missing as "confidence unknown" and drops
-      // the EvidenceBlock entirely. NEVER silently default to a band
-      // that would mislabel severity.
-      continue;
-    }
-    if (c >= 0.7) out.set(factorId, 'high');
-    else if (c >= 0.3) out.set(factorId, 'medium');
-    else out.set(factorId, 'low');
+    // Banding is derived from the SHARED `bandConfidence` (confidence-bands.ts)
+    // so the evidence-block band and the lens selector's `'low confidence'`
+    // trigger can never silently diverge (anti-mirror). A non-finite / absent
+    // confidence returns null → omit: the caller treats missing as "confidence
+    // unknown" and drops the EvidenceBlock entirely. NEVER silently default to
+    // a band that would mislabel severity.
+    const band = bandConfidence(e.confidence);
+    if (band === null) continue;
+    out.set(factorId, band);
   }
   return out;
 }
@@ -500,6 +686,26 @@ export function readDecisionReview(
   );
   if (enrichment === null) return null;
   return readRecord(enrichment.decision_review);
+}
+
+/**
+ * ROADMAP 2.267 — factor_id → the option id the PRODUCER attests would take
+ * over once that factor crosses its flip value.
+ *
+ * Read through {@link readTopLevelFlipRows}, the single owner of this parse, so
+ * the card guard and the decision_review prompt projection can never disagree
+ * about what PLoT said. Rows with no attested identity contribute no entry —
+ * a MISS therefore means "nothing attested", which is the state in which the
+ * card may name no option at all.
+ */
+function readAttestedFlipWinners(fact: RunAnalysisHandlerFact): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  const enrichment = readRecord((fact.result as Record<string, unknown>).enrichment);
+  if (enrichment === null) return out;
+  for (const row of readTopLevelFlipRows(enrichment)) {
+    if (row.alternative_winner_id !== null) out.set(row.factor_id, row.alternative_winner_id);
+  }
+  return out;
 }
 
 /**
@@ -527,11 +733,30 @@ export function buildReviewCardBlocks(
   if (narrative !== null) blocks.push(narrative);
 
   // pre_mortem (rank 2) — optional in the LLM output; free-text failure prose.
-  const preMortem = buildPreMortemCard(dr, lookup, ctx, leverLabels);
+  // `leverLabels` is deliberately NOT passed: the D-U F2 lever-naming ban is
+  // scoped OUT of this one surface by ruling (a pre-mortem names the lever as a
+  // failure WATCH-POINT, which is coaching, not steering). See the block
+  // comment on buildPreMortemCard for the measurement and the reasoning. Every
+  // other surface in this file still receives it.
+  const preMortem = buildPreMortemCard(dr, lookup, ctx);
   if (preMortem !== null) blocks.push(preMortem);
 
-  // flip_threshold (rank 3) — one per entry; within-kind sub-rank by order
-  blocks.push(...buildFlipThresholdCards(dr, lookup, ctx));
+  // flip_threshold (rank 3) — one per entry; within-kind sub-rank by order.
+  // ROADMAP 2.267 — the card's option guard needs the two things THIS FACT
+  // attests about option identity: which option the flip row itself says would
+  // take over, and which option is leading. Both read from the fact, never from
+  // the LLM's output.
+  blocks.push(
+    ...buildFlipThresholdCards(
+      dr,
+      lookup,
+      ctx,
+      readAttestedFlipWinners(fact),
+      typeof fact.result.leading_option_id === 'string' && fact.result.leading_option_id.length > 0
+        ? fact.result.leading_option_id
+        : null,
+    ),
+  );
 
   // bias (rank 4) — one per finding
   blocks.push(...buildBiasCards(dr, lookup, ctx));
@@ -585,6 +810,13 @@ export function buildCoachingBlocks(
   // calibration_prompt branches so a lever is never NAMED as an assumption to
   // confirm nor as a calibration question to answer.
   const leverLabels = collectLeverLabels(interventionControlledFactorIds, lookup);
+  // Wave-4 δ2 / 1.135 — the shared reverse index for clickable-copy linking. One
+  // derivation of the forward lookup (trap-12); reused by BOTH coaching kinds so
+  // an entity NAMED in the surviving coach prose carries a `target_ref` the UI
+  // renders as a link. Fail-closed inside `resolveProseEntityRefs` (ambiguous /
+  // generic / too-short labels are not linked); a lever-naming assumption is
+  // already dropped upstream, so only non-lever entities can link.
+  const labelIndex = buildLabelIndex(lookup);
 
   // assumption_check — one per key_assumptions entry, ranked by order.
   if (Array.isArray(dr.key_assumptions)) {
@@ -604,12 +836,23 @@ export function buildCoachingBlocks(
         title: truncate('An assumption to check', TITLE_MAX),
         body: truncate(text, BODY_MAX),
         source: 'decision_review' as const,
-        target_refs: [] as readonly TargetRef[],
+        // 1.135: link entity names in the (surviving, pre-truncation) prose.
+        target_refs: resolveProseEntityRefs(lookup, labelIndex, text),
         priority_rank: 100 + idx, // coaching ranks deprioritised vs review cards
         // Wave-2 ask 1 (0.19.0): producer-owned guidance signals.
         ...guidanceSignalsForCoachingKind('assumption_check'),
         action_intent: 'confirm_factor' as ActionIntentLiteral,
         action_label: truncate('Confirm this assumption', ACTION_LABEL_MAX),
+        // ROADMAP 2.225 — PRODUCER-AUTHORED, dispatched VERBATIM as the user's
+        // next turn (UI #554). A hardcoded literal like every label above: the
+        // contract forbids the consumer composing one, and forbids falling
+        // back to `action_intent`/`action_label`, so the pill is dark until
+        // this string exists. Imperative and self-contained, because the user
+        // sees it become their own message.
+        action_prompt: truncate(
+          'Help me pressure-test this assumption before I rely on it.',
+          ACTION_PROMPT_MAX,
+        ),
       };
       const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
         block_type: 'coaching',
@@ -618,6 +861,7 @@ export function buildCoachingBlocks(
           { name: 'title', value: candidate.title },
           { name: 'body', value: candidate.body },
           { name: 'action_label', value: candidate.action_label },
+          { name: 'action_prompt', value: candidate.action_prompt },
         ],
       });
       if (block !== null) blocks.push(block);
@@ -649,11 +893,20 @@ export function buildCoachingBlocks(
         title: truncate(titleText, TITLE_MAX),
         body: truncate(question, BODY_MAX),
         source: 'decision_review' as const,
-        target_refs: [] as readonly TargetRef[],
+        // 1.135: link entity names in the calibration question prose.
+        target_refs: resolveProseEntityRefs(lookup, labelIndex, question),
         priority_rank: 200 + idx,
         ...guidanceSignalsForCoachingKind('calibration_prompt'),
         action_intent: 'start_guided_chat' as ActionIntentLiteral,
         action_label: truncate('Try this prompt', ACTION_LABEL_MAX),
+        // ROADMAP 2.225 — the ONE producer whose prompt is not a fixed
+        // literal, deliberately: the card's whole proposition is "Try THIS
+        // prompt", and the calibration question IS the prompt. Dispatching a
+        // generic stand-in would send something the user never saw, while the
+        // question they DID see sat one line above it. Still
+        // producer-authored (the model wrote it, this producer chose it), and
+        // still verbatim — no templating, no interpolation.
+        action_prompt: truncate(question, ACTION_PROMPT_MAX),
       };
       const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
         block_type: 'coaching',
@@ -662,6 +915,7 @@ export function buildCoachingBlocks(
           { name: 'title', value: candidate.title },
           { name: 'body', value: candidate.body },
           { name: 'action_label', value: candidate.action_label },
+          { name: 'action_prompt', value: candidate.action_prompt },
         ],
       });
       if (block !== null) blocks.push(block);
@@ -775,9 +1029,10 @@ export function buildEvidenceBlocks(
       suggested_technique: suggestedTechnique,
       impact_if_gathered: truncate(impact, BODY_MAX),
       priority_rank: rank,
-      // Wave-2 ask 1 (0.19.0): severity + derived category/priority from one
-      // argument, so they can never disagree.
-      ...severityWithSignals(severity),
+      // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): severity + derived
+      // category/priority + the evidence signal_code from one argument, so they
+      // can never disagree.
+      ...evidenceSignals(severity),
       action_intent: 'gather_evidence' as ActionIntentLiteral,
       action_label: truncate('Strengthen this evidence', ACTION_LABEL_MAX),
     };
@@ -836,6 +1091,11 @@ export function buildStaleRerunCoachingBlock(
     ...guidanceSignalsForCoachingKind('orientation'),
     action_intent: 'rerun_analysis' as ActionIntentLiteral,
     action_label: truncate('Re-run analysis', ACTION_LABEL_MAX),
+    // ROADMAP 2.225 — producer-authored, dispatched verbatim (UI #554).
+    action_prompt: truncate(
+      'Re-run the analysis so the insights match my current decision graph.',
+      ACTION_PROMPT_MAX,
+    ),
   };
   return validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
     block_type: 'coaching',
@@ -844,8 +1104,719 @@ export function buildStaleRerunCoachingBlock(
       { name: 'title', value: candidate.title },
       { name: 'body', value: candidate.body },
       { name: 'action_label', value: candidate.action_label },
+      { name: 'action_prompt', value: candidate.action_prompt },
     ],
   });
+}
+
+/**
+ * Capability layer P0 (ROADMAP 1.183) — the deterministic lens SUGGESTION.
+ *
+ * Rides the EXISTING coaching-block surface (the "Strengthen your model" class
+ * — `coaching_kind: 'strengthen'`, whose guidance signals already exist but
+ * which had no live V5 emitter until now). It is NOT a new block kind and NOT a
+ * new recommendation home.
+ *
+ * The lens is chosen by the deterministic selector (`lens-selector.ts`) from
+ * REAL analysis signals — no LLM call. When the selector returns nothing
+ * (`selectLens === null`, the load-bearing negative), NO block is emitted.
+ *
+ * `source: 'deterministic_signal'` is the honest provenance: this suggestion is
+ * derived from the analysis SIGNALS (option/factor sensitivity, EVPI,
+ * confidence tier), NOT from the LLM `decision_review` pass.
+ *
+ * NO `action_intent` chip: the on-card action_intent affordance is inert on the
+ * live UI today (V5CoachingBlock renders it display-only). Per the
+ * capability-layer brief Revision-1 item 3 ("no inert chips, ever"), the P0
+ * suggestion ships as coach TEXT + rationale only — the body names the live
+ * action (what-would-flip / pre-mortem / gather-evidence) in prose. Wiring the
+ * chip to a typed dispatch is S2 work.
+ *
+ * `priority_rank: 15` places it just below the narrative summary (rank 10) and
+ * above the review cards (pre_mortem 20+): the proactive lens call-to-action.
+ * The selector returns AT MOST ONE lens, so the "one proactive suggestion per
+ * turn" frequency cap holds by construction. `signal_id` keys on
+ * (lens, graph_hash) so re-emissions for the same graph hash carry identical
+ * identity for UI dedupe (don't re-offer the same lens until the graph
+ * changes).
+ *
+ * Telemetry: exactly ONE frozen-manifest-registered event
+ * (`v5.capability.lens_suggestion_emitted`) fires when the block SURVIVES the
+ * prose/schema gate and is returned — never on a drop, never twice. Payload is
+ * the lens id + rationale CODE only (both closed enums); no user text.
+ */
+/**
+ * Wave-3 σ (ROADMAP 1.203) — THE field-level claim-safety chokepoint for the
+ * Phase-3 value-surfacing path. Every builder that would surface a
+ * science-bearing enrichment field's VALUE must pass it through here first: the
+ * cage (`classifyClaimUsable`, compose/claim-safety-cage.ts) decides whether this
+ * surface may claim about `field`. On a PASS the value is returned unchanged; on
+ * a DENY the field is OMITTED (returns `null` — fail-closed to silence, never
+ * rewrite, never a "suppressed" caption) and a reason-tagged
+ * `v5.claim_cage.field_evaluated` event fires so the deny is observable, never a
+ * silent no-op (the broken-alarm class). Content-free: the event carries the
+ * field NAME + decision + reason tag, never the value.
+ *
+ * Today no live lens surfaces a value (every lens is claim-safe by omission), so
+ * routing through here is BYTE-INERT on the current wire — it stands ready for
+ * the first value-surfacing λ / P1 increment, which will do
+ * `const v = composeCagedField(field, realValue, gate); if (v !== null) attach(v)`.
+ *
+ * Scope-honest: the cage keys on the field NAME. It gates WHETHER a surface may
+ * claim about a field / an uncomputed-or-stale field — NOT whether a value under
+ * the right name was sourced from the WRONG field (the win%-as-target-fit
+ * MISLABEL class; that is builder-grounding + the ζ conformance harness).
+ */
+export function composeCagedField<T>(
+  field: string,
+  value: T,
+  gateInput: ClaimUsableInput,
+): T | null {
+  const decision = classifyClaimUsable(field, gateInput);
+  if (decision.usable) {
+    emit(TelemetryEvents.V5ClaimCageFieldEvaluated, { field, decision: 'allowed' });
+    return value;
+  }
+  emit(TelemetryEvents.V5ClaimCageFieldEvaluated, {
+    field,
+    decision: 'denied',
+    reason: decision.reason,
+  });
+  return null;
+}
+
+/**
+ * Companion-status claim-safety input for `field` (Brief 5 §10), derived from the
+ * fact enrichment. Claim-safe when the field's explicit `<field>_status` reads
+ * `'computed'`; for a field with no separate status key, when the field itself is
+ * present as a non-empty computed structure. Defensive + fail-closed: absent or
+ * non-`'computed'` ⇒ false.
+ */
+/**
+ * F9 (2026-07-24): strict per-field value schemas for the three allow-listed
+ * companion fields ({@link TIER2_CANDIDATE_FIELDS}). When the explicit
+ * `<field>_status` is ABSENT, the OLD heuristic admitted ANY non-null scalar/object
+ * or non-empty array as claim-safe — so `confidence_tier: ""`, `robustness: {}`,
+ * `confidence_tier: false`, `confidence_tier: 0` and `factor_sensitivity: [{}]` all
+ * passed. These validate the VALUE strictly instead.
+ *
+ * DERIVED from the real PLoT enrichment shape (a factor_id-bearing sensitivity row,
+ * a non-empty tier LABEL, a non-empty robustness object) — deliberately NOT the
+ * ENRICH_FACTORS *input* namesake `FactorSensitivityInput` ({factor_id, elasticity,
+ * rank}), which the live `enrichment.factor_sensitivity` does not carry (it uses
+ * influence_score/influence_rank/confidence) — binding to it would over-block a
+ * legitimately-computed value. A NEW allow-listed field with no entry here fails
+ * CLOSED (deny), the safe default for a claim-safety cage.
+ */
+const COMPANION_VALUE_SCHEMAS: Readonly<Record<string, (value: unknown) => boolean>> = Object.freeze({
+  // A confidence tier LABEL — a non-empty, non-whitespace string.
+  confidence_tier: (value) => typeof value === 'string' && value.trim().length > 0,
+  // A non-empty array of factor-sensitivity rows, each an object bearing a
+  // non-empty string `factor_id`. Rejects `[]` and `[{}]`.
+  factor_sensitivity: (value) =>
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((row) => {
+      const r = readRecord(row);
+      return r !== null && typeof r.factor_id === 'string' && r.factor_id.length > 0;
+    }),
+  // A non-empty object. Rejects `{}`, scalars and arrays.
+  robustness: (value) => {
+    const r = readRecord(value);
+    return r !== null && Object.keys(r).length > 0;
+  },
+});
+
+export function deriveCompanionClaimSafe(fact: RunAnalysisHandlerFact, field: string): boolean {
+  const enrichment = readRecord((fact.result as Record<string, unknown>).enrichment);
+  if (enrichment === null) return false;
+  const status = enrichment[`${field}_status`];
+  // Fail CLOSED on ANY present status, not only a string one (egress-F2,
+  // 2026-07-24). A present-but-malformed `<field>_status` (object/number/bool —
+  // e.g. an upstream enrichment drift to `{state:'computed'}`) must DENY, not
+  // fall through to the value branch and read as claim-safe. Only a genuinely
+  // absent status defers to the strict per-field value schema below.
+  if (status !== undefined) return status === 'computed';
+  // F9: absent status ⇒ validate the VALUE against its strict field schema
+  // (never the old loose non-null/non-empty-array heuristic).
+  const validate = COMPANION_VALUE_SCHEMAS[field];
+  return validate !== undefined && validate(enrichment[field]);
+}
+
+/**
+ * Capability layer P1 — the lens surface for one fact: the suggestion block
+ * that reached the wire AND the selection that produced it, together.
+ *
+ * WHY THE PAIR IS RETURNED RATHER THAN RE-DERIVED. The P1 companion block
+ * (`buildLensCompanionBlocks`) must accompany EXACTLY the lens the suggestion
+ * announced. Calling `selectLens` a second time at the companion site would be
+ * two derivations of one fact over inputs that a future refactor can let
+ * diverge — the same shape as the two `generateGraphHash` twins and the
+ * re-derived constraint verdict this funnel's own comment refuses (CLAUDE.md
+ * trap 12/16). One selection, threaded.
+ */
+export interface LensSurface {
+  /** The coaching block that SURVIVED the prose/schema gate. */
+  readonly suggestion: CoachingBlock;
+  /** The selection that produced it — the companion's only key. */
+  readonly selection: LensSelection;
+}
+
+/**
+ * ⚠ TEST-ONLY as of ROADMAP 2.211. Complete caller manifest at this tip
+ * (`rg -a` over the whole repo excluding `node_modules`): this definition, one
+ * prose mention in `lens-selector.ts`, and three spec files
+ * (`lens-suggestion-block`, `claim-cage-wiring`, `ui-directive-focus`).
+ * **Zero production callers.** The live path goes through
+ * {@link buildLensSurface}, which `compose.ts` calls with the turn's lens
+ * history.
+ *
+ * `previousAnalysisLens` is REQUIRED rather than optional on purpose. This
+ * function is a second, live-LOOKING door into lens selection, and an optional
+ * parameter is exactly how a future caller wires one up while silently
+ * defaulting the history away — shipping a lens that ignores the
+ * no-immediate-repeat rule with nothing going red. Required, the compiler makes
+ * that a decision: pass the turn's history, or pass `null` and mean it.
+ */
+export function buildLensSuggestionCoachingBlock(
+  fact: RunAnalysisHandlerFact,
+  ctx: BlockBuildCtx,
+  previousAnalysisLens: LensId | null,
+): CoachingBlock | null {
+  return buildLensSurface(fact, ctx, previousAnalysisLens)?.suggestion ?? null;
+}
+
+/**
+ * Wave-3 λ (ROADMAP 1.203): the what-if lens's executor availability —
+ * the ROADMAP 1.195 enable-gate (a code constant, CLEARED 2026-08-03 — see
+ * `lens-selector.ts::WHATIF_SUGGESTION_GATE_CLEARED` for the derivation of why a
+ * number-free offer is not what items 2/3/4 protect) AND the ISL transport being
+ * configured (item 1: `config.isl.baseUrl` set ≡ `createCounterfactualClient() !== null`).
+ * The transport leg is now the LIVE one: with `ISL_BASE_URL` unset this is still
+ * `false` and the proactive what-if suggestion cannot fire.
+ *
+ * EXPORTED and shared (ROADMAP 2.211) because there are now THREE `selectLens`
+ * call sites for one turn — the suggestion block, the `focus` ui_directive, and
+ * the prior-lens replay — and they must be handed the SAME availability. Three
+ * copies of this literal is the two-derivations-of-one-fact shape the funnel's
+ * own comments refuse (CLAUDE.md trap 12/16); the env read still happens at the
+ * compose layer, keeping `lens-selector.ts` env-free.
+ */
+export function liveLensExecutorAvailability(): LensSelectorOptions {
+  return {
+    executorAvailable: {
+      what_if_counterfactual: whatIfSuggestionExecutorAvailable(Boolean(config.isl.baseUrl)),
+    },
+  };
+}
+
+export function buildLensSurface(
+  fact: RunAnalysisHandlerFact,
+  ctx: BlockBuildCtx,
+  previousAnalysisLens?: LensId | null,
+): LensSurface | null {
+  const selection = selectLens(fact, {
+    ...liveLensExecutorAvailability(),
+    // ROADMAP 2.211 — the no-immediate-repeat tie-break's ONE input. Omitted /
+    // null ⇒ byte-identical to the pre-amendment selection.
+    previousAnalysisLens: previousAnalysisLens ?? null,
+  });
+  if (selection === null) return null;
+
+  const candidate = {
+    ...commonMetadata(`coach:lens:${selection.lens}`, selection.lens, ctx),
+    type: 'coaching' as const,
+    coaching_kind: 'strengthen' as const,
+    title: truncate(selection.title, TITLE_MAX),
+    body: truncate(selection.body, BODY_MAX),
+    source: 'deterministic_signal' as const,
+    target_refs: [] as readonly TargetRef[],
+    priority_rank: 15,
+    // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): producer-owned guidance
+    // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM).
+    ...guidanceSignalsForCoachingKind('strengthen'),
+  };
+  const block = validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
+    block_type: 'coaching',
+    kind: 'strengthen',
+    prose: [
+      { name: 'title', value: candidate.title },
+      { name: 'body', value: candidate.body },
+    ],
+  });
+  if (block === null) return null;
+
+  // Wave-3 σ (ROADMAP 1.203): route the field this lens grounds its claim in
+  // through the claim-safety cage BEFORE the lens ever surfaces that field's
+  // value. Today the lens ships prose-only (claim-safe by omission), so no value
+  // is passed and the block above is emitted UNCHANGED regardless of the
+  // verdict — this is BYTE-INERT on the wire. Its purpose is to make the cage a
+  // LIVE caller on the exact field a lens claims about and its verdict
+  // staging-observable (`v5.claim_cage.field_evaluated`), so the first
+  // value-surfacing increment finds the gate already wired + proven. The return
+  // is intentionally discarded (`void`): there is no value to attach yet — the
+  // observable side-effect (the cage telemetry) is the whole point of wiring the
+  // precondition before the payload.
+  void composeCagedField(selection.groundingField, undefined, {
+    tier2Enabled: TIER2_ACTIVATION_ENABLED,
+    companionStatusClaimSafe: deriveCompanionClaimSafe(fact, selection.groundingField),
+    // F8 (2026-07-24): pass ctx.freshness UNCHANGED. The cage denies absent
+    // freshness (not_fresh) by design — the removed `?? 'fresh'` default turned
+    // an OMITTED verdict into a claim-usable one, defeating the deny-by-default
+    // freshness lock at the live caller. Deny-by-default now holds end-to-end.
+    freshness: ctx.freshness,
+  });
+
+  // ⚠ KNOWN SKEW, PRE-EXISTING, DELIBERATELY NOT FIXED HERE (CEE #770 review B4).
+  // This event fires when the block survives CONSTRUCTION. It does NOT mean the
+  // block reached the wire: every lens suggestion is `coaching_kind:'strengthen'`,
+  // which is in `LEADER_PRESUMING_COACHING_KINDS`, so the compose funnel DROPS it
+  // on a withheld turn — after this line has already fired. So
+  // `v5.capability.lens_suggestion_emitted` OVER-REPORTS by exactly the withheld
+  // rate, and has since #632.
+  //
+  // The P1 companion's own event (`V5LensCompanionEmitted`) is fired from the
+  // funnel instead, for exactly this reason — so the two events are NOT
+  // comparable one-to-one: companion < suggestion partly by gating, partly by
+  // this skew. Anyone sizing P1 uptake from that ratio must account for it.
+  //
+  // Not fixed in #770: moving it changes the semantics of a shipped P0
+  // observability surface and rewrites its existing unit assertion
+  // (`lens-suggestion-block.test.ts` drives this builder directly). That is a
+  // reviewable behaviour change in its own right, not a drive-by. ROWED.
+  // DSK slice 1 — provenance rides TELEMETRY, not the wire: the ExerciseBlock
+  // schema at 0.32.0 is `.strict()` with no dsk field, so the protocol/trigger
+  // ids a DSK lens was derived from are stamped here (attested against the
+  // bundle bytes by `dsk-provenance-attestation.test.ts`). Keys are ABSENT for
+  // the non-DSK lenses — absence is the honest default, never an empty string.
+  const dskProvenance = LENS_DSK_PROVENANCE[selection.lens];
+  emit(TelemetryEvents.V5LensSuggestionEmitted, {
+    lens_id: selection.lens,
+    rationale_code: selection.rationaleCode,
+    graph_hash_at_generation: ctx.graph_hash_at_generation,
+    ...(dskProvenance !== undefined
+      ? {
+          dsk_protocol_id: dskProvenance.protocolId,
+          dsk_trigger_id: dskProvenance.triggerId,
+        }
+      : {}),
+  });
+
+  // ROADMAP 2.211 — the displaced/chosen PAIR, emitted only when the
+  // no-immediate-repeat tie-break actually moved the slot. Fired here rather
+  // than inside `selectLens` so the selector stays a pure function, and AFTER
+  // the prose/schema gate so it counts displacements that produced a real block
+  // rather than displacements that were then discarded. It carries the same
+  // known construction-vs-wire skew as the suggestion event above (both fire
+  // before the withheld-arm filter) — sized identically, so the RATIO of
+  // displaced to suggested is unaffected by it.
+  if (selection.displacedLens !== undefined) {
+    emit(TelemetryEvents.V5LensNoRepeatDisplaced, {
+      displaced_lens_id: selection.displacedLens,
+      chosen_lens_id: selection.lens,
+      rationale_code: selection.rationaleCode,
+      graph_hash_at_generation: ctx.graph_hash_at_generation,
+    });
+  }
+  return { suggestion: block, selection };
+}
+
+// ============================================================================
+// Capability layer P1 — structured lens COMPANION blocks (ROADMAP 1.183 P1).
+// ============================================================================
+
+/**
+ * The structured artefact that accompanies the P0 lens suggestion.
+ *
+ * P0 ships the lens as coach TEXT. P1 attaches, for the lens `selectLens`
+ * actually chose, the structured block the contract already carries and the UI
+ * already renders — so the user gets the decision-science artefact, not only a
+ * sentence about it.
+ *
+ * ── WHAT IS BUILT, AND — MORE IMPORTANTLY — WHAT IS NOT ─────────────────────
+ * Exactly ONE companion is buildable at this tip, and the other two are blocked
+ * by the claim-safety cage, not by effort. Recording the derivation here because
+ * the next reader's first instinct will be to "finish the set":
+ *
+ *   pre_mortem            → ExerciseBlock (built — see below). Carries no
+ *                           CEE-AUTHORED numeric fields (the emitted key set is
+ *                           pinned by spec); the PROSE is the producer's, and
+ *                           producer-authored numbers inside it are guarded only
+ *                           against leading-decimal form. See the scope note on
+ *                           `buildPreMortemExerciseBlock` — an earlier revision
+ *                           of this line said "carries NO numbers at all: pure
+ *                           producer prose", which was FALSE and is exactly the
+ *                           label that teaches the next reader to stop looking.
+ *
+ *   sensitivity_flip_risk → FlipAnalysisBlock: NOT BUILT. The block's payload is
+ *                           `flip_scenarios[].{current_value, flip_threshold}`,
+ *                           whose only real source is `enrichment.flip_thresholds`
+ *                           — a RATIFIED TIER-3 CLAIM-DENY key
+ *                           (claim-safety-cage.ts TIER3_LEAK_BLOCK_FIELDS, whose
+ *                           own header names this field as the canonical
+ *                           "transport-clean, claim-denied" case). Surfacing it
+ *                           is denied at the first fork of `classifyClaimUsable`,
+ *                           both locks notwithstanding. The residual — a block
+ *                           whose every numeric field is `null` — renders in the
+ *                           live UI as "Factor: — → —" (V5FlipAnalysisBlock's
+ *                           `formatValue` returns an em-dash for null). That is a
+ *                           card that reads as an analysis and contains none:
+ *                           the guarantee-theatre class this programme exists to
+ *                           refuse. Unblocking it is a Tier-3 ratification
+ *                           decision, not a builder.
+ *
+ *   evpi_evidence_priority→ ComparisonBlock: NOT BUILT. Its payload is
+ *                           `option_comparison[].win_probability`, and
+ *                           `option_comparison` is deliberately NOT in Lock 2
+ *                           (`TIER2_COACHING_ALLOWLIST`) — lens-selector.ts's
+ *                           `GROUNDING_FIELD_BY_RATIONALE` comment states the
+ *                           omission is intentional and serves as a live cage
+ *                           DENIAL control. Adding it is Brief 4 gate G2: a
+ *                           per-field decision with science sign-off, not a
+ *                           build-lane edit. (The EVPI lens's evidence is already
+ *                           surfaced first-class by the EvidenceBlocks.)
+ *
+ *   consider_opposite     → ExerciseBlock (DSK slice 1, deterministic): fixed
+ *                           instruction copy in `counter_case`, target_ref =
+ *                           the leading option via the shared lookup. No
+ *                           producer-content dependency, so no review-card
+ *                           coupling — the permission derivation that matters
+ *                           here is the SELECTION itself (deterministic) plus
+ *                           the permitted-arm positional gate.
+ *
+ *   devils_advocacy       → ExerciseBlock (DSK slice 1, deterministic): same
+ *                           shape, target_ref = the dominant factor the
+ *                           selection named (identity-threaded subjectRef).
+ *
+ *   what_if_counterfactual→ nothing, and this is now LOAD-BEARING rather than
+ *                           incidental. Before 2026-08-03 the lens could not
+ *                           fire at all (WHATIF_SUGGESTION_GATE_CLEARED === false),
+ *                           so "no companion" cost nothing. The gate is now
+ *                           cleared and the empty return is what keeps the
+ *                           activated suggestion NUMBER-FREE: adding a companion
+ *                           here would put an executed counterfactual's values in
+ *                           front of a user while ROADMAP 1.195 items 2/3/4 (ISL
+ *                           model-fidelity probe · owner-placement ·
+ *                           target-semantics) are still open. Do not "finish the
+ *                           set" until those close.
+ *
+ * ── WITHHELD-VERDICT DISCIPLINE ────────────────────────────────────────────
+ * Companions are appended by `rebuildPhase3BlocksFresh` on the PERMITTED arm
+ * only. That is not belt-and-braces, it is required: every lens suggestion is
+ * `coaching_kind: 'strengthen'`, which is in `LEADER_PRESUMING_COACHING_KINDS`,
+ * so on a withheld turn the suggestion itself is dropped. A companion surviving
+ * that drop would be an orphan structured artefact on precisely the turn the
+ * disclosure withholds — the R3-M2 shape. It also cannot be caught by the
+ * existing `presumesLeadingOption` predicate, which keys on
+ * `card_kind`/`coaching_kind`: an ExerciseBlock has neither, and
+ * comparison/flip_analysis are `.strict()` with no metadata at all, so no wire
+ * tag could ever carry the verdict. Placement inside the permitted branch is
+ * the only gate that cannot rot into a hand-kept type list (trap 12).
+ */
+export function buildLensCompanionBlocks(
+  fact: RunAnalysisHandlerFact,
+  ctx: BlockBuildCtx,
+  selection: LensSelection,
+  reviewCards: readonly ReviewCardBlock[],
+  lookup: GraphNodeLookup,
+): readonly ExerciseBlock[] {
+  // Compile-exhaustive over `LensId`: a NEW lens fails the build here until it
+  // declares its companion (or declares that it has none). Fail-loud on drift,
+  // never a silent default.
+  switch (selection.lens) {
+    case 'pre_mortem': {
+      const block = buildPreMortemExerciseBlock(fact, ctx, reviewCards);
+      return block === null ? [] : [block];
+    }
+    case 'consider_opposite': {
+      // Subject: the leading option the disconfirmation argues against —
+      // resolved through the shared lookup, fail-closed to [] on miss.
+      const leadingOptionId =
+        typeof fact.result.leading_option_id === 'string' &&
+        fact.result.leading_option_id.length > 0
+          ? fact.result.leading_option_id
+          : null;
+      const block = buildDskExerciseBlock(
+        'consider_opposite',
+        CONSIDER_OPPOSITE_COUNTER_CASE,
+        leadingOptionId,
+        ctx,
+        lookup,
+      );
+      return block === null ? [] : [block];
+    }
+    case 'devils_advocacy': {
+      // Subject: the dominant factor the selection named (identity-threaded
+      // from the SAME selectLens hit — never a re-derivation).
+      const block = buildDskExerciseBlock(
+        'devils_advocacy',
+        DEVILS_ADVOCACY_COUNTER_CASE,
+        selection.subjectRef?.id ?? null,
+        ctx,
+        lookup,
+      );
+      return block === null ? [] : [block];
+    }
+    case 'sensitivity_flip_risk':
+    case 'evpi_evidence_priority':
+    case 'what_if_counterfactual':
+      return [];
+    default: {
+      // Exhaustiveness is kept by the `never` binding (a new LensId fails the
+      // BUILD here). But the RUNTIME value must be a typed empty, not the
+      // narrowed variable: `return exhaustive` returns whatever unexpected value
+      // actually arrived — at runtime a string, where the caller spreads a
+      // `readonly ExerciseBlock[]`. Compile-safe, runtime-nonsense. Fail closed
+      // to "no companion" instead, which is this module's safe direction
+      // everywhere else.
+      const exhaustive: never = selection.lens;
+      void exhaustive;
+      return [];
+    }
+  }
+}
+
+// ============================================================================
+// DSK slice 1 — deterministic exercise companions (consider_opposite /
+// devils_advocacy)
+// ============================================================================
+
+/**
+ * Fixed exercise copy for the two DSK lenses. DETERMINISTIC BY DESIGN, and the
+ * difference from the pre_mortem companion is the point, not an economy:
+ * the decision_review completion carries NO disconfirmation / devil's-advocate
+ * object (`composeFragments` — `decompose.ts` — is the complete field set), so
+ * there is no producer prose to carry verbatim, and inventing case-specific
+ * prose here would be fabrication. What CAN be authored deterministically is
+ * the exercise INSTRUCTION itself — the same class of fixed, prose-guard-clean
+ * copy as `TITLE_BY_LENS` / `BODY_BY_RATIONALE`. The card's specificity comes
+ * from its `target_refs` (the leading option / the dominant factor, resolved
+ * by identity through the shared lookup), never from interpolated prose — no
+ * label, number, or id ever rides these strings.
+ *
+ * `counter_case` is the carrier for BOTH kinds: it is the contract's
+ * argue-the-other-side prose slot, the live UI renders it as the card body
+ * (`V5ExerciseBlock.tsx`, testid `v5-exercise-counter-case`, verified at DGAI
+ * staging `dae8908f`), and the UI drops a prose-less exercise — so the fixed
+ * instruction is also what keeps the card renderable.
+ */
+const CONSIDER_OPPOSITE_COUNTER_CASE =
+  'Take the opposite view for a moment: assume the option in front turns out to be the wrong choice. What would have to be true for that to happen? Write down the strongest argument against it, and note what evidence would confirm or rule out that argument.';
+
+const DEVILS_ADVOCACY_COUNTER_CASE =
+  'Argue against the factor this result leans on most: make the case that it is overstated, that it could move against you, or that something outside the model matters more. If the dissent uncovers a real weakness, adjust the model; if it does not, the result has earned more trust.';
+
+/**
+ * Build the deterministic ExerciseBlock companion for a DSK lens.
+ *
+ * - `subjectId` → `target_refs` through the shared {@link GraphNodeLookup},
+ *   FAIL-CLOSED: an unresolvable subject yields `target_refs: []` (the card
+ *   still renders on its prose), never a fabricated label (the same rule the
+ *   `focus` directive follows on lookup miss).
+ * - Routed through {@link validateProseAndSchemaOrDrop} like every Phase-3
+ *   block — the strict `ExerciseBlockSchema` parse plus the prose guard, so a
+ *   future edit to the copy banks above that introduces banned vocabulary, a
+ *   raw decimal, or an id-shaped token drops the block rather than shipping it.
+ * - At most ONE exercise per turn holds by construction (one lens per turn →
+ *   one companion) — which is also the UI pacing contract: `phase3Pacing.ts`
+ *   reserves exactly one default-expanded slot for the turn's exercise.
+ */
+function buildDskExerciseBlock(
+  kind: 'consider_opposite' | 'devils_advocacy',
+  counterCase: string,
+  subjectId: string | null,
+  ctx: BlockBuildCtx,
+  lookup: GraphNodeLookup,
+): ExerciseBlock | null {
+  const subject = subjectId !== null ? lookup.get(subjectId) : undefined;
+  // 0.37.0 / ROADMAP 2.490 slice 2 — the DSK attribution now reaches the USER,
+  // not only telemetry. The id comes from `LENS_DSK_PROVENANCE` (the same
+  // hand-written map `dsk-provenance-attestation.test.ts` attests against the
+  // bundle bytes); the TITLE and STRENGTH are read from the bundle record
+  // itself, never typed here. That asymmetry is the point: a title written in
+  // this file could drift from the science it names and nothing would notice —
+  // which is CEE #830's defect, where a badge printed prose that no record
+  // backed. Resolution is fail-closed, so an unverifiable bundle costs the
+  // badge and never the card.
+  const provenanceId = LENS_DSK_PROVENANCE[kind]?.protocolId;
+  const dskProvenance =
+    provenanceId !== undefined ? resolveDskProtocolProvenance(provenanceId) : null;
+  const candidate = {
+    ...commonMetadata(`exercise:${kind}`, '', ctx),
+    type: 'exercise' as const,
+    exercise_kind: kind,
+    counter_case: counterCase,
+    target_refs: subject !== undefined ? [subject] : ([] as readonly GraphNodeRef[]),
+    ...(dskProvenance !== null ? { dsk_provenance: dskProvenance } : {}),
+  };
+  return validateProseAndSchemaOrDrop(ExerciseBlockSchema, candidate, {
+    block_type: 'exercise',
+    kind,
+    prose: [{ name: 'counter_case', value: counterCase }],
+  });
+}
+
+/**
+ * The pre-mortem lens's structured form: an `ExerciseBlock`
+ * (`exercise_kind: 'pre_mortem'`) carrying the producer's `warning_signs`,
+ * `mitigation` and `review_trigger`.
+ *
+ * WHY THOSE THREE FIELDS AND NOT `failure_scenario`. The v11 producer emits
+ * `pre_mortem: { failure_scenario, warning_signs[], mitigation, grounded_in[],
+ * review_trigger? }`. `buildPreMortemCard` renders ONLY `failure_scenario`
+ * (as the "If things go wrong" review card body) and throws the other three
+ * away: an `rg` over `src/` (non-test) finds no producer of `warning_signs` /
+ * `mitigation` / `review_trigger` on any wire surface — the sole hits are
+ * `output-safety.ts`'s defensive scrub arms for a block kind nothing emitted.
+ * They are computed on every analysis and discarded. So this block is NEW
+ * content, not a second rendering of the card above it — and it fabricates
+ * nothing: every string is the producer's own, verbatim.
+ *
+ * ⚠ WHAT "NO FABRICATION" DOES AND DOES NOT MEAN HERE — the honest scope, after
+ * CEE #770's adversarial review (B2) found the first wording overstated.
+ *
+ *   TRUE, and enforced: this builder authors NO numeric field of its own. The
+ *   emitted key set is pinned exactly by `lens-companion-blocks.test.ts`, so a
+ *   builder that invents any field — numeric or prose — REDs; and every emitted
+ *   string is asserted byte-identical to a member of the producer's own
+ *   `pre_mortem` object, so interpolation REDs too.
+ *
+ *   NOT TRUE, and NOT claimed: that the block carries no numbers. These strings
+ *   are authored by the R3 decision_review completion, whose PROMPT INPUT
+ *   includes the Tier-3-denied `flip_thresholds` values and fragile-edge
+ *   probabilities, and which is taught a verbatim `'16000 GBP'` value format.
+ *   `scanProse`'s `RAW_DECIMAL_RE` catches LEADING-DECIMAL form only — `'16000
+ *   GBP'`, `'55%'` and `'~0.55'` all pass it (probe: 4/4). So a producer-authored
+ *   number CAN ride these fields.
+ *
+ *   WHY THAT IS NOT A BLOCKER FOR THIS INCREMENT, stated rather than assumed:
+ *   the identical channel already ships at base. `buildPreMortemCard` surfaces
+ *   `failure_scenario` from the SAME completion, and `buildFlipThresholdCards`
+ *   ships narratives the prompt ORDERS to restate unrounded flip values. This
+ *   block adds no new defect class — it adds three more fields to a carrier that
+ *   already exists. The open question (is the Tier-3 deny composition-only by
+ *   design, or do LLM prose echoes need a numeric-token scan?) is ROADMAP 2.205:
+ *   a design ruling with its own lane, because a blanket numeric block would gut
+ *   legitimate prose ("review in 3 months").
+ *
+ * WHY IT IS COUPLED TO THE SURVIVING REVIEW CARD. The same prose object is
+ * already governed by four independent drop rules inside `buildPreMortemCard`
+ * (lever-named, grounding lookup-miss, context-unanchored, prose guard/schema).
+ * Restating any of them here would be a second hand-kept copy of a safety rule
+ * — the dominant defect class. Instead this builder DERIVES its permission:
+ * the exercise ships only when the pre_mortem review card built from the same
+ * object survived, and it reuses that card's already-resolved `target_refs`.
+ * Every present and future rule the card gains is inherited for free; a rule
+ * that starts dropping the card automatically stops the exercise.
+ */
+function buildPreMortemExerciseBlock(
+  fact: RunAnalysisHandlerFact,
+  ctx: BlockBuildCtx,
+  reviewCards: readonly ReviewCardBlock[],
+): ExerciseBlock | null {
+  const card = reviewCards.find((c) => c.card_kind === 'pre_mortem');
+  if (card === undefined) return null;
+
+  const dr = readDecisionReview(fact);
+  if (dr === null) return null;
+  const pm = readRecord(dr.pre_mortem);
+  if (pm === null) return null;
+
+  const allWarningSigns = (Array.isArray(pm.warning_signs) ? pm.warning_signs : []).flatMap(
+    (raw) => {
+      if (typeof raw !== 'string') return [];
+      const trimmed = raw.trim();
+      return trimmed.length > 0 ? [truncate(trimmed, BODY_MAX)] : [];
+    },
+  );
+  // Bound to `WARNING_SIGNS_MAX` — a hand-kept mirror of the decision_review
+  // prompt's own declared bound ("up to 3"), NOT a value read from it at
+  // runtime. See the constant's docstring for why it is a mirror and for the
+  // fail-loud derivation guard that REDs if the prompt and the constant drift.
+  // The ExerciseBlock schema sets no max, so without this an over-long model
+  // return rides to the UI as an unbounded bullet list. Truncation is DISCLOSED
+  // (never silent): a producer exceeding its own declared bound is a drift
+  // signal worth seeing, not noise to swallow.
+  const warningSigns = allWarningSigns.slice(0, WARNING_SIGNS_MAX);
+  if (allWarningSigns.length > warningSigns.length) {
+    emit(TelemetryEvents.V5LensCompanionTruncated, {
+      lens_id: 'pre_mortem',
+      field: 'warning_signs',
+      received: allWarningSigns.length,
+      kept: warningSigns.length,
+    });
+  }
+  const mitigation =
+    typeof pm.mitigation === 'string' && pm.mitigation.trim().length > 0
+      ? truncate(pm.mitigation.trim(), BODY_MAX)
+      : undefined;
+  const reviewTrigger =
+    typeof pm.review_trigger === 'string' && pm.review_trigger.trim().length > 0
+      ? truncate(pm.review_trigger.trim(), BODY_MAX)
+      : undefined;
+
+  // Fail closed on a content-less card. This is not defensive padding: the live
+  // UI adapter (`src/v5/phase3TypedBlocks.ts::adaptTypedExerciseBlock`) drops a
+  // schema-valid exercise carrying no producer prose, so a content-less block
+  // would ARRIVE and never render — the arrived-unrendered class, invisible from
+  // this side. Refuse to emit it here instead.
+  if (warningSigns.length === 0 && mitigation === undefined && reviewTrigger === undefined) {
+    emitDrop({
+      block_type: 'exercise',
+      kind: 'pre_mortem',
+      reason: 'no_producer_content',
+      field: 'warning_signs|mitigation|review_trigger',
+    });
+    return null;
+  }
+
+  // `warning_signs` is an ARRAY, and `validateProseAndSchemaOrDrop`'s
+  // terminology-rewrite patch is keyed by top-level field NAME — an indexed
+  // pseudo-name would write a bogus key onto a `.strict()` candidate. So the
+  // signs get the prose scan WITHOUT the rewrite fallback: any hit drops the
+  // whole block. Strictly more conservative than the scalar path, deliberately.
+  const signsHit = scanProse(
+    warningSigns.map((value, i) => ({ name: `warning_signs[${i}]`, value })),
+  );
+  if (signsHit !== null) {
+    emitDrop({
+      block_type: 'exercise',
+      kind: 'pre_mortem',
+      reason: `prose_guard_${signsHit.reason}`,
+      field: signsHit.field,
+      sample: signsHit.sample,
+    });
+    return null;
+  }
+
+  const candidate = {
+    ...commonMetadata('exercise:pre_mortem', '', ctx),
+    type: 'exercise' as const,
+    exercise_kind: 'pre_mortem' as const,
+    ...(warningSigns.length > 0 ? { warning_signs: warningSigns } : {}),
+    ...(mitigation !== undefined ? { mitigation } : {}),
+    ...(reviewTrigger !== undefined ? { review_trigger: reviewTrigger } : {}),
+    // Derived, not re-resolved: the card already turned `grounded_in` into
+    // canonical refs and DROPPED itself when that resolution failed.
+    target_refs: card.target_refs,
+  };
+
+  const block = validateProseAndSchemaOrDrop(ExerciseBlockSchema, candidate, {
+    block_type: 'exercise',
+    kind: 'pre_mortem',
+    prose: [
+      { name: 'mitigation', value: mitigation },
+      { name: 'review_trigger', value: reviewTrigger },
+    ],
+  });
+  // NOTE — no telemetry here, deliberately. Surviving this builder is NOT the
+  // same event as reaching the wire: the funnel drops every companion on the
+  // withheld arm AFTER this point. An "emitted" event fired here would report a
+  // block the user never saw, on exactly the turns that matter most — a broken
+  // alarm of the kind this estate has been bitten by. `V5LensCompanionEmitted`
+  // fires at the funnel, from the permitted branch, where the wire decision is
+  // actually made.
+  return block;
 }
 
 // ============================================================================
@@ -879,7 +1850,7 @@ function buildNarrativeCard(
     card_kind: 'narrative' as const,
     title: truncate('How the analysis reads', TITLE_MAX),
     body,
-    ...severityWithSignals('info'),
+    ...reviewCardSignals('narrative', 'info'),
     target_refs: [] as readonly TargetRef[],
     priority_rank: 10,
   };
@@ -930,25 +1901,62 @@ function proseNamesGraphNode(text: string, lookup: GraphNodeLookup): boolean {
   return false;
 }
 
+/**
+ * ⚠ NOTE THE ABSENT PARAMETER: this builder takes NO `leverLabels`, and that is
+ * a RULING, not an oversight.
+ *
+ * Doctrine D-U F2 bans NAMING an option-set lever as an uncertainty, and it is
+ * applied on every other free-text decision-review surface (narrative,
+ * scenario_context, calibration, assumption) plus the structural
+ * `isLeverFactor` skip on the evidence surfaces. It used to be applied here
+ * too — and it was eating the card.
+ *
+ * MEASURED (fix-2211-lens-emission.md §1.1–1.4, replayed over the walk's real
+ * captured wire bytes): of the 4 turns where the producer emitted a
+ * `pre_mortem` object, the `lever_named` guard dropped **2** — a 50% loss rate
+ * on this card, from a guard written for a different surface. The attribution
+ * was witnessed, not assumed (the discriminating a3/a5 pair).
+ *
+ * RULING (orchestrator, with the no-recommendations doctrine as the frame): a
+ * pre-mortem is a different SPEECH ACT from the surfaces the ban protects. It
+ * says "imagine the option you chose did not pay off — what broke?". Naming the
+ * chosen lever as the thing that FAILED is a failure watch-point: coaching, not
+ * steering. The ban stays, unchanged, everywhere naming a lever would steer a
+ * choice; it is scoped out of THIS path only.
+ *
+ * Everything else on this path is untouched and still enforced — BIND (the
+ * hypothetical frame) and ANCHOR (`context_unanchored`) both still drop. Do not
+ * read this ruling as "ship anything".
+ */
 function buildPreMortemCard(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
-  leverLabels: readonly string[] = [],
 ): ReviewCardBlock | null {
   const pm = readRecord(dr.pre_mortem);
-  if (pm === null) return null;
-  const failure = typeof pm.failure_scenario === 'string'
-    ? pm.failure_scenario.trim()
-    : '';
-  if (failure.length === 0) return null;
-  // Doctrine D-U F2 / Finding 1: drop the pre-mortem when its failure prose
-  // NAMES an option-set lever as an uncertainty. Empty labels ⇒ no suppression.
-  if (proseNamesLever(failure, leverLabels)) {
+  // Previously a SILENT `return null`. On the walk this exit and the one below
+  // accounted for 2 of 6 turns — so the two commonest causes of "no card" were
+  // exactly the two the drop dashboard could not see, and it under-counted the
+  // true drop rate by precisely the producer-absent rate. A counter that reads
+  // healthy because it is blind is a broken alarm (CLAUDE.md trap 7).
+  if (pm === null) {
     emitDrop({
       block_type: 'review_card',
       kind: 'pre_mortem',
-      reason: 'lever_named',
+      reason: 'producer_absent',
+      field: 'pre_mortem',
+    });
+    return null;
+  }
+  const failure = typeof pm.failure_scenario === 'string'
+    ? pm.failure_scenario.trim()
+    : '';
+  // Also previously silent — see the note above.
+  if (failure.length === 0) {
+    emitDrop({
+      block_type: 'review_card',
+      kind: 'pre_mortem',
+      reason: 'failure_scenario_empty',
       field: 'failure_scenario',
     });
     return null;
@@ -1001,7 +2009,7 @@ function buildPreMortemCard(
     card_kind: 'pre_mortem' as const,
     title: truncate('If things go wrong', TITLE_MAX),
     body: truncate(standaloneBody, BODY_MAX),
-    ...severityWithSignals('warning'),
+    ...reviewCardSignals('pre_mortem', 'warning'),
     target_refs: targetRefs,
     priority_rank: 20,
     action_intent: 'run_pre_mortem' as ActionIntentLiteral,
@@ -1018,27 +2026,134 @@ function buildPreMortemCard(
   });
 }
 
+/**
+ * ROADMAP 2.267 (D-2) — the smallest phrase that can stand for an option's
+ * identity in prose. A single shared token cannot: the estate's own
+ * "Equity Offered to CTO" vs bare "CTO" lesson (see {@link containsWholePhrase})
+ * is the same over-match, and the witnessed narrative names the FACTOR
+ * "Leeds Site Activation" in a graph that also has an option
+ * "Open Second Warehouse in Leeds" — a one-token rule would read that as naming
+ * the option.
+ */
+const OPTION_ALIAS_MIN_TOKENS = 2;
+
+/**
+ * ROADMAP 2.267 (D-2) — per-option, the phrases that IDENTIFY it in free text.
+ *
+ * ⚠ WHY WHOLE-LABEL MATCHING IS NOT ENOUGH, and why this exists rather than
+ * reusing {@link resolveProseEntityRefs} unchanged. On the witnessed turn the
+ * card read *"…the leading option changes between Leeds and the Status Quo"* and
+ * the option's canonical label is **"Continue at Current Capacity (Status Quo)"**.
+ * A whole-label scan returns ZERO hits on that sentence. A guard built on it
+ * would pass the exact card it was written to stop — guarantee theatre, in the
+ * house style. Measured, not assumed: the fixture in
+ * `__tests__/flip-threshold-option-naming-guard.test.ts` pins both readings.
+ *
+ * So an option is also identified by any CONTIGUOUS RUN of ≥
+ * {@link OPTION_ALIAS_MIN_TOKENS} tokens of its label — how people actually
+ * shorten a name.
+ *
+ * ⚠ AND THE OVER-MATCH RAIL IS DERIVED FROM THE GRAPH, NOT HAND-LISTED
+ * (CLAUDE.md trap 12). A candidate phrase is DISCARDED when it also occurs in
+ * any other node's label, because then it does not distinguish this option from
+ * that node. No stop-word list is maintained anywhere; add a node to the graph
+ * and the rail moves with it.
+ *
+ * WHICH RAIL DOES WHAT, stated exactly rather than impressively — the two are
+ * easy to conflate and only one of them is load-bearing per case:
+ *   - a BARE token shared with a factor (`"leeds"`, also in the factor "Leeds
+ *     Site Activation") never becomes a candidate at all, because a single
+ *     token is below {@link OPTION_ALIAS_MIN_TOKENS}. The distinctiveness rail
+ *     is not what saves that case.
+ *   - a MULTI-token phrase shared with another node is what the rail is for.
+ *     Its witnessed instance is run C: the option "Buy Vendor Platform" and the
+ *     factor "Vendor Platform Approach" share `"vendor platform"`, and the
+ *     narrative names the FACTOR. Without the rail that card is suppressed on
+ *     any turn where that option is not already permitted — which is why the
+ *     test for it deliberately moves `leading_option_id` off it, or it would
+ *     pass while testing nothing.
+ *
+ * The shipped {@link LEVER_LABEL_MIN_LEN} / {@link GENERIC_LEVER_TOKENS} rails
+ * still apply on top, so a one-word option called "Cost" never matches.
+ */
+function buildOptionIdentityNeedles(lookup: GraphNodeLookup): Map<string, readonly string[]> {
+  const options: { readonly id: string; readonly norm: string }[] = [];
+  const otherLabelNorms: string[] = [];
+  for (const ref of lookup.values()) {
+    const norm = normaliseForPhraseMatch(ref.label);
+    if (norm.length === 0) continue;
+    if (ref.kind === 'option') options.push({ id: ref.id, norm });
+    else otherLabelNorms.push(norm);
+  }
+
+  const out = new Map<string, readonly string[]>();
+  for (const option of options) {
+    const tokens = option.norm.split(' ').filter((t) => t.length > 0);
+    const candidates = new Set<string>([option.norm]);
+    for (let i = 0; i < tokens.length; i++) {
+      for (let j = i + OPTION_ALIAS_MIN_TOKENS; j <= tokens.length; j++) {
+        candidates.add(tokens.slice(i, j).join(' '));
+      }
+    }
+    const needles: string[] = [];
+    for (const needle of candidates) {
+      if (needle.length < LEVER_LABEL_MIN_LEN) continue;
+      if (!needle.includes(' ') && GENERIC_LEVER_TOKENS.has(needle)) continue;
+      // Derived distinctiveness — see the ⚠ above.
+      if (options.some((o) => o.id !== option.id && containsWholePhrase(o.norm, needle))) continue;
+      if (otherLabelNorms.some((n) => containsWholePhrase(n, needle))) continue;
+      needles.push(needle);
+    }
+    out.set(option.id, needles);
+  }
+  return out;
+}
+
+/** Which options does this prose NAME? Ids, in lookup order; `[]` when none. */
+function optionsNamedInProse(
+  prose: string,
+  needlesByOptionId: ReadonlyMap<string, readonly string[]>,
+): readonly string[] {
+  const hay = normaliseForPhraseMatch(prose);
+  if (hay.length === 0) return [];
+  const named: string[] = [];
+  for (const [optionId, needles] of needlesByOptionId) {
+    if (needles.some((needle) => containsWholePhrase(hay, needle))) named.push(optionId);
+  }
+  return named;
+}
+
 function buildFlipThresholdCards(
   dr: Record<string, unknown>,
   lookup: GraphNodeLookup,
   ctx: BlockBuildCtx,
+  attestedWinnerIdByFactorId: ReadonlyMap<string, string>,
+  leadingOptionId: string | null,
 ): readonly ReviewCardBlock[] {
   if (!Array.isArray(dr.flip_thresholds)) return [];
+  // Derived once per fact, and only when there is a card to guard.
+  const optionNeedles =
+    dr.flip_thresholds.length > 0
+      ? buildOptionIdentityNeedles(lookup)
+      : new Map<string, readonly string[]>();
   const out: ReviewCardBlock[] = [];
   let idx = 0;
+  /**
+   * How many bodies this fact swapped. Counted separately from the per-card
+   * warning so the OVER-MATCH RATE is measurable before anyone tunes the
+   * matcher: the per-card line says a phrase matched, this says how often, and
+   * `card_count` gives it a denominator. Tuning the matcher on a guess about
+   * its own hit rate is how a fix becomes an outage — the reasoning
+   * `leading-option-egress-guard.ts` already applies to its observe-only mode.
+   */
+  let swappedCount = 0;
   for (const raw of dr.flip_thresholds) {
-    const entry = readRecord(raw);
-    if (entry === null) continue;
-    const factorId = typeof entry.factor_id === 'string'
-      ? entry.factor_id
-      : '';
-    const factorLabel = typeof entry.factor_label === 'string'
-      ? entry.factor_label.trim()
-      : '';
-    const narrative = typeof entry.narrative === 'string'
-      ? entry.narrative.trim()
-      : '';
-    if (factorId.length === 0 || factorLabel.length === 0 || narrative.length === 0) continue;
+    // Amendment A1 — the row-shape gate now lives in ONE place, shared with the
+    // ContextPack display licence (./flip-threshold-card-row.ts). The licence
+    // must be the CARD's predicate, not a near-copy of it.
+    const row = readFlipThresholdCardRow(raw);
+    if (row === null) continue;
+    const { factor_id: factorId, narrative } = row;
     // Round-3 review correction: drop when the LLM-claimed factor isn't
     // in the canonical graph lookup. Prior behaviour fell back to the
     // LLM-provided factor_label, but we have no proof the LLM honoured
@@ -1057,13 +2172,76 @@ function buildFlipThresholdCards(
       continue;
     }
     idx++;
+    // ────────────────────────────────────────────────────────────────────────
+    // ROADMAP 2.267 — THE OPTION GUARD (defect D-2).
+    //
+    // The lookup gate above fail-closes on an LLM-invented FACTOR. There was no
+    // equivalent for the OPTION, and on 2026-08-01 that cost us a false card:
+    // the row attested `opt_bristol` / "Expand Existing Bristol Site" and the
+    // shipped body said the leader changes to *"the Status Quo"* — an option
+    // whose slope in that factor is zero, so it cannot take over at any value
+    // (`witness-2265-targeted-flip.md` §4, §13). The Analysis tab renders the
+    // CORRECT winner from the same field on the same turn, so the two surfaces
+    // contradicted each other.
+    //
+    // WHAT MAY BE NAMED: only an option this fact ATTESTS — the row's own
+    // alternative winner, or the run's `leading_option_id`. Anything else is
+    // the model asserting an identity nothing gave it.
+    //
+    // WHY A BODY SWAP AND NOT A DROP. Dropping is what the factor gate does,
+    // but a factor miss makes the whole card unanchored, whereas here the
+    // factor, the direction and the two display values are all attested and
+    // correct — only the NAME is invented. Dropping would delete the dock's
+    // only flip surface to remove one clause. The fallback keeps the honest
+    // card and loses the clause.
+    //
+    // MONOTONE BY CONSTRUCTION: this branch can only REMOVE a name that the
+    // pre-2.267 code shipped verbatim. It never introduces prose that names an
+    // option, so it cannot widen what the claim-safety cage permits — the cage
+    // stays the sole authority on WHETHER a leader may be named; this guard
+    // only answers WHICH.
+    // ────────────────────────────────────────────────────────────────────────
+    const attestedWinnerId = attestedWinnerIdByFactorId.get(factorId) ?? null;
+    const unattestedNamedOptions = optionsNamedInProse(narrative, optionNeedles).filter(
+      (optionId) => optionId !== attestedWinnerId && optionId !== leadingOptionId,
+    );
+    const namesUnattestedOption = unattestedNamedOptions.length > 0;
+    if (namesUnattestedOption) {
+      swappedCount++;
+      log.warn(
+        {
+          event: 'v5.phase3.flip_option_naming_withheld',
+          block_type: 'review_card',
+          block_kind: 'flip_threshold',
+          // Structural only — no prose, no labels, no graph ids.
+          matched_option_count: unattestedNamedOptions.length,
+          attested_winner_present: attestedWinnerId !== null,
+          fallback_carries_displays: row.current_display !== null && row.flip_display !== null,
+        },
+        // ⚠ THIS MESSAGE DESCRIBES THE MECHANISM, NOT A VERDICT, AND THE
+        // DIFFERENCE IS THE WHOLE POINT. Its first wording said the card "named
+        // an option this run does not attest" — a claim the guard cannot
+        // support. Adversarial review demonstrated the over-match directly: the
+        // innocent aside *"relative to the status quo."* false-swaps 2 of the 3
+        // live witness captures. A swap therefore means A PHRASE MATCHED, which
+        // is sometimes a real wrong name and sometimes an aside. Writing the verdict
+        // into the log would teach every future reader to stop looking — the
+        // known-red-registry defect (CLAUDE.md trap 7b) planted at the source.
+        'V5 Phase 3 flip card matched an option-identifying phrase it cannot attest; body replaced with the non-naming form',
+      );
+    }
     const candidate = {
       ...commonMetadata('review:flip', factorId, ctx),
       type: 'review_card' as const,
       card_kind: 'flip_threshold' as const,
       title: truncate(`What would flip the result on ${ref.label}`, TITLE_MAX),
-      body: truncate(narrative, BODY_MAX),
-      ...severityWithSignals('warning'),
+      // Amendment A1(b) / exit 4 — the emitted body is now produced by the
+      // SHARED function the display licence checks the digits against, so the
+      // licence can never believe digits survived a cut they did not.
+      body: namesUnattestedOption
+        ? flipThresholdFallbackBody(ref.label, row.current_display, row.flip_display)
+        : flipThresholdCardBody(narrative),
+      ...reviewCardSignals('flip_threshold', 'warning'),
       target_refs: [ref] as readonly TargetRef[],
       priority_rank: 30 + idx,
       action_intent: 'what_would_flip' as ActionIntentLiteral,
@@ -1079,6 +2257,16 @@ function buildFlipThresholdCards(
       ],
     });
     if (block !== null) out.push(block);
+  }
+  if (swappedCount > 0) {
+    log.info(
+      {
+        event: 'v5.phase3.flip_option_naming_swap_count',
+        swapped_count: swappedCount,
+        card_count: out.length,
+      },
+      'V5 Phase 3 flip cards with a swapped body on this fact',
+    );
   }
   return out;
 }
@@ -1115,7 +2303,7 @@ function buildBiasCards(
       card_kind: 'bias' as const,
       title: truncate(`Something to check: ${humaniseBiasType(biasType)}`, TITLE_MAX),
       body: truncate(description, BODY_MAX),
-      ...severityWithSignals('warning'),
+      ...reviewCardSignals('bias', 'warning'),
       target_refs: targetRefs,
       priority_rank: 40 + idx,
       action_intent: 'gather_evidence' as ActionIntentLiteral,
@@ -1152,7 +2340,7 @@ function buildRobustnessCard(
     card_kind: 'robustness' as const,
     title: truncate('How robust is this?', TITLE_MAX),
     body: truncate(summary, BODY_MAX),
-    ...severityWithSignals(primaryRisk.length > 0 ? 'warning' : 'info'),
+    ...reviewCardSignals('robustness', primaryRisk.length > 0 ? 'warning' : 'info'),
     target_refs: [] as readonly TargetRef[],
     priority_rank: 50,
   };
@@ -1197,7 +2385,7 @@ function buildEvidencePriorityCard(
       card_kind: 'evidence_priority' as const,
       title: truncate(`Highest-leverage evidence gap: ${ref.label}`, TITLE_MAX),
       body: truncate(rationale, BODY_MAX),
-      ...severityWithSignals('info'),
+      ...reviewCardSignals('evidence_priority', 'info'),
       target_refs: [ref],
       priority_rank: 60,
       action_intent: 'gather_evidence' as ActionIntentLiteral,
@@ -1240,7 +2428,7 @@ function buildAssumptionCards(
       card_kind: 'assumption' as const,
       title: truncate('A load-bearing assumption', TITLE_MAX),
       body: truncate(text, BODY_MAX),
-      ...severityWithSignals('info'),
+      ...reviewCardSignals('assumption', 'info'),
       target_refs: [] as readonly TargetRef[],
       priority_rank: 70 + idx,
     };
@@ -1315,7 +2503,7 @@ function buildScenarioContextCards(
       card_kind: 'scenario_context' as const,
       title: truncate('A scenario worth considering', TITLE_MAX),
       body: truncate(body, BODY_MAX),
-      ...severityWithSignals('info'),
+      ...reviewCardSignals('scenario_context', 'info'),
       target_refs: [ref] as readonly TargetRef[],
       priority_rank: 80 + idx,
     };

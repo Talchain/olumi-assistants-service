@@ -230,6 +230,13 @@ export function preflightCompoundBatch(
     }
 
     // (b) The full validator — structural + graph checks + value predicate.
+    //
+    // VERDICT ONLY. `validation.proposal` (the validator's kind/label-repaired
+    // copy) is deliberately not read: preflight approves the caller's own
+    // `CompoundUpdatePart`, and every downstream consumer re-resolves the
+    // target from `part.candidate.id` against the graph. There is no proposal
+    // object on this path for a repaired one to replace, so discarding it
+    // loses nothing — unlike the turn-executor path, which rebinds to it.
     const proposal = buildCompoundPartProposal(part, message);
     const validation = validateToolCall(proposal, graphLookup, validationRegistry);
     if (!validation.valid) {

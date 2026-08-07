@@ -9,6 +9,7 @@
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import { RateLimitedError, retryAfterSecondsFromRateLimitContext } from '../utils/errors.js';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -18,7 +19,7 @@ import { getPromptStore, isPromptStoreHealthy } from '../prompts/store.js';
 import { interpolatePrompt } from '../prompts/schema.js';
 import { log, emit, TelemetryEvents } from '../utils/telemetry.js';
 import { getRequestId } from '../utils/request-id.js';
-import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking } from '../config/models.js';
+import { MODEL_REGISTRY, getModelConfig, getModelProvider, isReasoningModel, supportsExtendedThinking, anthropicTemperatureFor } from '../config/models.js';
 import { getDefaultModelForTask, isValidCeeTask } from '../config/model-routing.js';
 import { checkModelAvailability, getModelErrorSummary, recordModelError, fetchOpenAIModels, getAnthropicModels } from '../services/model-availability.js';
 import { verifyAdminKey } from '../middleware/admin-auth.js';
@@ -312,8 +313,20 @@ async function callAnthropicWithPrompt(
   const timeoutId = setTimeout(() => abortController.abort(), effectiveTimeout);
 
   // Effective temperature: default to 0 if null (deterministic for testing)
-  // Note: Extended thinking mode requires temperature=1
-  const effectiveTemperature = hasExtendedThinking ? 1 : (temperature ?? 0);
+  // Note: Extended thinking mode requires temperature=1.
+  //
+  // RIDER-A / D-60 (2026-07-24): models that REJECT explicit sampling params
+  // (Sonnet 5, Opus 4.7+, Fable 5) 400 on ANY temperature — this admin harness
+  // was the 5th #651-family call site missing the gate, so a decision_review A/B
+  // arm on claude-sonnet-5 could not even be measured. The temperature policy is
+  // now single-sourced in anthropicTemperatureFor (FINAL-SWEEP F2) so a call site
+  // physically cannot omit the gate again.
+  const effectiveTemperature: number | undefined = anthropicTemperatureFor(model, {
+    requested: temperature,
+    thinking: hasExtendedThinking,
+  });
+  // Reported value on the result envelope (number | null contract).
+  const reportedTemperature: number | null = effectiveTemperature ?? null;
 
   try {
     // Build request params - add thinking block for extended thinking models
@@ -357,7 +370,7 @@ async function callAnthropicWithPrompt(
           success: false,
           error: `No text content in response. Content types: ${response.content.map(c => c.type).join(', ')}`,
           duration_ms: Date.now() - startTime,
-          temperature: effectiveTemperature,
+          temperature: reportedTemperature,
           max_tokens: maxTokens,
           model,
           provider: 'anthropic',
@@ -393,7 +406,7 @@ async function callAnthropicWithPrompt(
           success: false,
           error: `No text content in response. Content types: ${response.content.map(c => c.type).join(', ')}`,
           duration_ms: Date.now() - startTime,
-          temperature: effectiveTemperature,
+          temperature: reportedTemperature,
           max_tokens: maxTokens,
           model,
           provider: 'anthropic',
@@ -422,7 +435,7 @@ async function callAnthropicWithPrompt(
         total: inputTokens + outputTokens,
       },
       finish_reason: stopReason,
-      temperature: effectiveTemperature,
+      temperature: reportedTemperature,
       max_tokens: maxTokens,
       model,
       provider: 'anthropic',
@@ -462,7 +475,7 @@ async function callAnthropicWithPrompt(
       success: false,
       error: isTimeout ? `LLM request timed out after ${timeoutMinutes} minutes` : sanitizeErrorMessage(error),
       duration_ms,
-      temperature: effectiveTemperature,
+      temperature: reportedTemperature,
       max_tokens: maxTokens,
       model,
       provider: 'anthropic',
@@ -877,14 +890,13 @@ export async function adminTestRoutes(app: FastifyInstance): Promise<void> {
       const adminKey = request.headers['x-admin-key'] as string ?? '';
       return `admin_test:${adminKey.slice(0, 8)}:${request.ip}`;
     },
-    errorResponseBuilder: (_request, context) => {
-      const retryAfter = Math.ceil(context.ttl / 1000);
-      return {
-        error: 'rate_limit_exceeded',
-        message: 'Too many test requests. Please wait before running more tests.',
-        retry_after_seconds: retryAfter,
-      };
-    },
+    // ROADMAP 2.181 — @fastify/rate-limit THROWS this return value, so it MUST
+    // be an Error; a plain object is answered 500 INTERNAL. See RateLimitedError.
+    errorResponseBuilder: (_request, context) =>
+      new RateLimitedError(
+        retryAfterSecondsFromRateLimitContext(context),
+        'Too many test requests. Please wait before running more tests.',
+      ),
     addHeadersOnExceeding: {
       'x-ratelimit-limit': true,
       'x-ratelimit-remaining': true,

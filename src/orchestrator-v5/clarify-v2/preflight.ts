@@ -40,7 +40,14 @@
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 
-import { DRAFT_GRAPH_MAX_BRIEF_LENGTH } from '../../schemas/assist.js';
+import {
+  DRAFT_GRAPH_MAX_BRIEF_LENGTH,
+  INTERROGATIVE_QUESTION_PATTERN,
+} from '../../schemas/assist.js';
+import {
+  EDIT_GRAPH_POSITIVE_REGEX,
+  EDIT_GRAPH_NEGATIVE_REGEX,
+} from '../../orchestrator/routing/edit-graph-intent-regex.js';
 import type { SuggestedAction } from '../compose/types.js';
 import {
   assessBriefCompleteness,
@@ -200,9 +207,145 @@ export const CLARIFY_V2_HEDGED_PROCEED_PATTERN =
  * question TO the assistant (interrogative opener + trailing '?'). Never
  * folded into the working brief; re-offered once per round, then treated
  * as a decline.
+ *
+ * ROADMAP 2.715: the pattern itself now lives in `schemas/assist.ts` as
+ * `INTERROGATIVE_QUESTION_PATTERN`, so round-1 INTAKE can consult the same
+ * discriminator this resume path has always used (the asymmetry named in
+ * `process-meta-intake.ts`). Re-exported here under the historical name —
+ * this IS that object, not a copy of it.
  */
-export const CLARIFY_V2_QUESTION_REPLY_PATTERN =
-  /^\s*(?:what|why|how|who|whom|whose|when|where|which|can|could|do|does|did|is|are|was|were|will|would|should|shall|whether)\b[\s\S]*\?\s*$/i;
+export const CLARIFY_V2_QUESTION_REPLY_PATTERN = INTERROGATIVE_QUESTION_PATTERN;
+
+/**
+ * INV-M (ROADMAP 2.716) — a mutation COMMAND is an IMPERATIVE, and the
+ * imperative position is what separates it from an ANSWER.
+ *
+ * ⚠ THIS ANCHOR IS THE PRECISION TERM, AND IT WAS DERIVED FROM THE ESTATE'S
+ * OWN TESTS, NOT FROM A HAND-WRITTEN CORPUS. The first cut of this predicate
+ * used `EDIT_GRAPH_POSITIVE_REGEX` unanchored and passed a negative corpus
+ * this lane wrote itself. Running the full required gate then turned four
+ * existing suites RED on real clarify answers — `"The goal is to increase
+ * revenue."` (`clarify-v2.preflight.test.ts`) and `"Yes, add the churn-risk
+ * factor."` (a proposal chip's canned message) — because a perfectly ordinary
+ * answer mentions an edit verb inside a clause. A self-authored negative
+ * corpus could not see that; the suite could.
+ *
+ * So the verb must be in COMMAND position: at the head of the message, after
+ * at most a leading discourse marker. `"Change the price to 90,000"` is an
+ * instruction; `"The goal is to increase revenue"` is a statement that
+ * happens to contain `increase`.
+ *
+ * The verb alphabet is NOT re-spelled here — the pattern is composed from
+ * `EDIT_GRAPH_POSITIVE_REGEX.source`, so the route's list stays the single
+ * source and this anchor cannot drift from it.
+ *
+ * The marker list is deliberately TINY. It is a recall widener only: a marker
+ * this list lacks means the command folds, i.e. today's behaviour, never a new
+ * failure mode. `yes`/`ok`/`no` are deliberately absent — `"Yes, add the
+ * churn-risk factor."` is a CONSENT chip replay, and claiming it here would
+ * break the proposal flow next door.
+ */
+const MUTATION_IMPERATIVE_PREAMBLE = String.raw`^\s*(?:(?:actually|please|sorry)\b[\s,.:;—–-]*)*`;
+
+const CLARIFY_V2_MUTATION_IMPERATIVE_PATTERN = new RegExp(
+  MUTATION_IMPERATIVE_PREAMBLE + EDIT_GRAPH_POSITIVE_REGEX.source,
+  'i',
+);
+
+/**
+ * The correction frame the estate-wide positive regex does not carry.
+ *
+ * Measured at `8c316b5e`: of the eight mutation commands proven to fold,
+ * "Actually, make HubSpot's licence cost 90,000 instead" matches NEITHER
+ * `EDIT_GRAPH_POSITIVE_REGEX` (`make` is not a listed edit verb) NOR
+ * `isValueUpdatePhrasing`. The derivation's own §3.2 table records it as
+ * `edit-lane: no` while its §5.2 asks for 8/8; this closes that gap without
+ * widening ESTATE-WIDE edit-dispatch recall, which is rowed separately (§6 R1)
+ * precisely because it needs its own precision controls at every edit surface.
+ *
+ * Same imperative anchor, for the same reason: "we could make the switch
+ * instead of waiting" is an answer, not a command.
+ */
+const CLARIFY_V2_MUTATION_CORRECTION_PATTERN = new RegExp(
+  MUTATION_IMPERATIVE_PREAMBLE + String.raw`make\b[^?]*\b(?:instead|rather\s+than)\b`,
+  'i',
+);
+
+/**
+ * INV-M (ROADMAP 2.716) — does this reply read as a command to MUTATE the
+ * graph rather than as an answer to the pending clarify question?
+ *
+ * Uses the route's OWN edit-dispatch gates (`edit-graph-intent-regex.ts`,
+ * extracted under ROADMAP 2.308/S2 to be import-clean for exactly this kind of
+ * consumer), in imperative position. The negative regex is load-bearing: it is
+ * what keeps "Can you explain why you added that factor?" an ordinary question
+ * rather than a mutation command.
+ *
+ * ⚠ NOT `containsMutationLanguage` (`routing/mutation-language.ts`). That
+ * module detects the ASSISTANT's own first-person claims ("I'll add…",
+ * "Proposing to set…") and matches none of these user imperatives — the row's
+ * named instrument is the wrong machine.
+ */
+export function isGraphMutationCommand(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  if (EDIT_GRAPH_NEGATIVE_REGEX.test(message)) return false;
+  return (
+    CLARIFY_V2_MUTATION_IMPERATIVE_PATTERN.test(message) ||
+    CLARIFY_V2_MUTATION_CORRECTION_PATTERN.test(message)
+  );
+}
+
+/**
+ * ROADMAP 2.171 (Paul-ratified) — the post-explicit-Stop choice.
+ *
+ * When a user STOPS a draft and types a NEW brief on the same scenario, the
+ * live clarify round claims it as an answer and FOLDS it into the ORIGINAL
+ * working brief — correct fence semantics, but the plain ack ("Thanks — I
+ * have folded that in") reads as "my stop didn't take" (stop-fence
+ * acceptance probe, arm 1). The ratified fix KEEPS the fold and makes it
+ * explicit with an escape: the reply in exactly this state disclosures the
+ * original topic and offers "fold this in, or start over?".
+ *
+ * "Start over" routes to the EXISTING new-draft path, no new machinery: the
+ * resume re-runs `decideClarifyV2Round1` over the message the disclosure was
+ * issued for (persisted as `startOverBrief`, armed for exactly one round —
+ * a later ordinary fold rebuilds the state without it, because by then
+ * "start over" has no unambiguous referent).
+ *
+ * The chip's canned message must stay inside the typed pattern — pinned in
+ * clarify-v2.post-stop.test.ts the same way A10 pins the proceed constant.
+ */
+export const CLARIFY_V2_START_OVER_CHIP_ID = 'cv2_start_over';
+export const CLARIFY_V2_START_OVER_MESSAGE = 'Start over with my new brief.';
+export const CLARIFY_V2_START_OVER_PATTERN =
+  /^\s*(?:start\s+(?:over|again|fresh|afresh)(?:\s+with\s+(?:my|the)\s+new\s+(?:brief|decision|topic))?|start\s+a\s+new\s+decision|new\s+decision)\s*[.!]?\s*$/i;
+
+/**
+ * 2.171 — consent to the fold, offered as the FIRST arm of the post-Stop
+ * choice. The words must never be folded into the working brief as if they
+ * were decision content, and they are not consent to draft immediately —
+ * so they take the bare-ack calibration (one direct yes/no re-offer, after
+ * which an ack proceeds). Recognised only while the post-Stop choice is
+ * armed (`startOverBrief` present); in any other round these words fold as
+ * an ordinary answer, unchanged.
+ */
+export const CLARIFY_V2_FOLD_IN_PATTERN =
+  /^\s*(?:yes[,\s]+)?(?:please\s+)?fold\s+(?:it|this|that)\s+in\s*[,.!]?\s*(?:please|thanks|thank\s+you)?\s*[.!]?\s*$/i;
+
+/**
+ * 2.171 — render the original decision as a short quotable topic for the
+ * disclosure copy: first sentence, flattened whitespace, word-boundary cut.
+ */
+export const CLARIFY_V2_TOPIC_MAX_LENGTH = 90;
+export function renderDecisionTopic(brief: string): string {
+  const flattened = brief.trim().replace(/\s+/g, ' ');
+  const firstSentence = /^[^.?!]*[.?!]/.exec(flattened)?.[0] ?? flattened;
+  const base = firstSentence.trim();
+  if (base.length <= CLARIFY_V2_TOPIC_MAX_LENGTH) return base;
+  const cut = base.slice(0, CLARIFY_V2_TOPIC_MAX_LENGTH);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
 
 /**
  * Review fix A2 (1.152) — the REPLACEMENT bar. Wholesale brief
@@ -251,6 +394,13 @@ export interface ClarifyV2RoundState {
    * before 1.152 parse as not-reoffered.
    */
   readonly reoffered?: boolean;
+  /**
+   * 2.171: the NEW brief the post-Stop disclosure was issued for, verbatim
+   * (trimmed, draft-max capped). Present exactly while the "fold this in, or
+   * start over?" choice is live; "start over" re-runs round 1 over THIS.
+   * A later ordinary fold rebuilds the state without it (one-round arming).
+   */
+  readonly startOverBrief?: string;
 }
 
 export type ClarifyV2ProceedReason =
@@ -265,7 +415,14 @@ export type ClarifyV2DeflectionCue =
   | 'bare_ack'
   | 'question_reply'
   | 'decline'
-  | 'hedged_proceed';
+  | 'hedged_proceed'
+  /**
+   * ROADMAP 2.716 (INV-M): the reply is a command to change the MODEL, not an
+   * answer to the pending question. Never folded, never silently routed —
+   * routing is frequently not even executable here, because the clarify gate
+   * only runs when the ingress graph is unpopulated.
+   */
+  | 'mutation_intent';
 
 export type ClarifyV2Decision =
   | {
@@ -280,6 +437,25 @@ export type ClarifyV2Decision =
       /** The state to persist for the next turn's resume. */
       readonly state: ClarifyV2RoundState;
       readonly phase: 'initial' | 'follow_up';
+      /**
+       * 2.171: present when this ask must carry the post-explicit-Stop
+       * disclosure — the fold happened right after a user Stop, so the copy
+       * names the ORIGINAL decision (the pre-fold working brief) and offers
+       * the fold-in / start-over choice. Derived from the SAME branch that
+       * decided fold-vs-replace (30 Jul live-probe fix): post-Stop the
+       * silent replacement is disabled, so every post-Stop resume ask is a
+       * fold and carries this by construction.
+       */
+      readonly postStop?: { readonly originalBrief: string };
+      /**
+       * 30 Jul live-probe fix — HOW the resume incorporated the message,
+       * from the one fold-vs-replace branch. The composer derives its ack
+       * from this: the replace arm must never claim a fold (the probe
+       * caught "Thanks — I have folded that in" on a replacement, live —
+       * the exact confound copy 2.171 exists to kill). Absent on round-1
+       * asks (nothing was incorporated).
+       */
+      readonly incorporation?: 'fold' | 'replace';
     }
   | {
       /**
@@ -416,6 +592,14 @@ export interface DecideClarifyV2ResumeInput {
    * message typed alongside the Generate click) rather than discarded.
    */
   readonly explicitGenerateBrief: string | null;
+  /**
+   * 2.171: true when the scenario is in the post-explicit-Stop state (the
+   * newest PRIOR fence row carries a Stop tombstone — read server-side by the
+   * dispatch). Optional with a false default: an omitted argument fails
+   * toward the ordinary copy, the same fail-safe direction as
+   * `explicitGenerateBrief`'s `?? null`.
+   */
+  readonly postExplicitStop?: boolean;
 }
 
 /**
@@ -458,6 +642,25 @@ export function decideClarifyV2Resume(
       reason: 'explicit_generate',
     };
   }
+  // ── 2.171: the post-Stop choice, while armed ─────────────────────────────
+  // "Start over" routes to the EXISTING new-draft path: round 1 over the new
+  // brief the disclosure was issued for. The old frame (and its asked
+  // history) is discarded WITH the user's explicit consent — that is the
+  // point of the choice. Checked before every other cue so the decline set
+  // ("stop", "cancel") can never claim it.
+  if (state.startOverBrief !== undefined && CLARIFY_V2_START_OVER_PATTERN.test(message)) {
+    return decideClarifyV2Round1(state.startOverBrief);
+  }
+  // "Fold this in" consents to the fold (already incorporated) without
+  // consenting to draft — bare-ack calibration, and the literal words must
+  // never pollute the working brief. `{...state}` preserves the armed
+  // choice, so "start over" still works after an intervening "fold it in".
+  if (state.startOverBrief !== undefined && CLARIFY_V2_FOLD_IN_PATTERN.test(message)) {
+    if (state.reoffered === true) {
+      return { kind: 'proceed', brief: state.brief, reason: 'user_proceed' };
+    }
+    return { kind: 'reoffer', state: { ...state, reoffered: true }, cue: 'bare_ack' };
+  }
   // Review fix A10: the exact-constant check was dead code — the pattern's
   // 'go ahead…' alternation matches CLARIFY_V2_PROCEED_MESSAGE exactly
   // (pinned in clarify-v2.preflight.test.ts so a pattern edit that breaks
@@ -497,9 +700,14 @@ export function decideClarifyV2Resume(
   // Review fix A2 (1.152): replacement only for a genuinely standalone
   // restatement; the bar is checked BEFORE the not-an-answer guard so a
   // standalone decision QUESTION ("Should we focus on France instead?")
-  // replaces rather than deflects.
-  const replaces = isStandaloneBriefRestatement(message, input.messageIsDraftShaped);
-  if (!replaces && CLARIFY_V2_QUESTION_REPLY_PATTERN.test(message)) {
+  // replaces rather than deflects. (Keyed on the RESTATEMENT verdict, not on
+  // `replaces`: post-Stop the restatement folds instead of replacing — see
+  // below — but it is still never a question TO us.)
+  const standaloneRestatement = isStandaloneBriefRestatement(
+    message,
+    input.messageIsDraftShaped,
+  );
+  if (!standaloneRestatement && CLARIFY_V2_QUESTION_REPLY_PATTERN.test(message)) {
     // Review fix A1 (1.152), not-an-answer guard: a question back to us is
     // never folded into the brief. One re-offer per round, then decline.
     if (state.reoffered === true) {
@@ -512,30 +720,85 @@ export function decideClarifyV2Resume(
     };
   }
 
+  // ── ROADMAP 2.716 (INV-M) — a mutation command is never an ANSWER ────────
+  // The defect this closes is an ABSENT BRANCH, not a wrong predicate: eight
+  // anchored guards decline the message and the ninth position is the raw
+  // concatenation below, so "Change the price to 90,000" became part of the
+  // working brief verbatim and the WHOLE MODEL was redrafted from the run-on
+  // string (measured 8/8 at 8c316b5e). The edit lane never gets a say — this
+  // seam claims the turn ~800 lines before `editIntentDetected` is computed.
+  //
+  // ASK, do not route. The clarify gate is entered only when the ingress graph
+  // is UNPOPULATED, so there is frequently nothing to route an edit to; asking
+  // is the only move correct in both the phantom-model and the genuinely-empty
+  // state, and 2.171 ratified this disclose-and-offer shape next door.
+  //
+  // Placed AFTER the standalone-restatement bar, deliberately and by the same
+  // `!standaloneRestatement` term the question guard uses: a genuine new brief
+  // that happens to carry an edit verb ("…or add a second warehouse in
+  // Poland?") must still REPLACE. Calibration is the ladder's existing one:
+  // one re-offer per round, then decline.
+  if (!standaloneRestatement && isGraphMutationCommand(message)) {
+    if (state.reoffered === true) {
+      return { kind: 'decline', brief: state.brief, cue: 'mutation_intent' };
+    }
+    return {
+      kind: 'reoffer',
+      state: { ...state, reoffered: true },
+      cue: 'mutation_intent',
+    };
+  }
+
+  // ── 2.171 live-probe fix (30 Jul) — ONE branch, and everything derives ──
+  // from it. The acceptance probe (liveproof-post-stop-disclosure.md, Arm
+  // 2/3) proved the old shape deterministic-wrong at the copy: post-Stop, a
+  // new brief that cleared the A2 bar was SILENTLY REPLACED while the
+  // composer claimed a fold ("Thanks — I have folded that in") and the
+  // disclosure was suppressed — the exact tester confound 2.171 exists to
+  // kill, reproduced by the fix's own replace arm. And which arm a new
+  // brief landed on was textual noise: "Completely different question: …"
+  // folded (the word "question" trips the meta-reference guard) while
+  // "Different topic: …" replaced.
+  //
+  // Post-Stop, the destructive silent replacement is therefore DISABLED:
+  // the restatement FOLDS, discloses, and arms the choice — "start over"
+  // IS the consented replacement. Replacement survives post-Stop in exactly
+  // one shape (below): nothing left to ask, where the immediate draft of
+  // the NEW brief is itself the visible proof the stop took. The disclosure
+  // and the ask copy both derive from this ONE `replaces` value — a second
+  // authority that could disagree with the branch is the defect class the
+  // probe caught.
+  const postStopArmed = input.postExplicitStop === true;
+  const replaces = standaloneRestatement && !postStopArmed;
+  const newBrief = message.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH);
+
   const workingBrief = replaces
-    ? message.trim().slice(0, DRAFT_GRAPH_MAX_BRIEF_LENGTH)
+    ? newBrief
     : incorporateAnswerIntoBrief(state.brief, message);
 
   const assessment = assessBriefCompleteness(workingBrief);
-  if (assessment.complete) {
-    return { kind: 'proceed', brief: workingBrief, reason: 'complete' };
-  }
-
   // NO-REPEAT: a dimension is asked at most once per scenario.
-  const askable = assessment.missing.filter((d) => !state.asked.includes(d));
-  if (askable.length === 0) {
-    return {
-      kind: 'proceed',
-      brief: workingBrief,
-      reason: 'all_missing_already_asked',
-    };
-  }
+  const askable = assessment.complete
+    ? []
+    : assessment.missing.filter((d) => !state.asked.includes(d));
   // STOP RULE: bounded rounds, then draft with what we have.
-  if (state.round >= CLARIFY_V2_MAX_ROUNDS) {
+  const canAsk = askable.length > 0 && state.round < CLARIFY_V2_MAX_ROUNDS;
+
+  if (!canAsk) {
+    // 2.171 (30 Jul): a post-Stop standalone restatement whose fold has
+    // nothing left to ask gets the REPLACEMENT it asked for — the NEW brief
+    // alone, never a merged-topic draft. The disclosure has no ask to ride
+    // on, and the streaming new-topic draft says the stop took better than
+    // any copy could.
+    const brief = standaloneRestatement && postStopArmed ? newBrief : workingBrief;
     return {
       kind: 'proceed',
-      brief: workingBrief,
-      reason: 'round_budget_exhausted',
+      brief,
+      reason: assessment.complete
+        ? 'complete'
+        : askable.length === 0
+          ? 'all_missing_already_asked'
+          : 'round_budget_exhausted',
     };
   }
 
@@ -543,6 +806,13 @@ export function decideClarifyV2Resume(
     askable,
     CLARIFY_V2_MAX_QUESTIONS_PER_ROUND,
   );
+  // 2.171: a post-Stop FOLD must disclose and arm the choice. With the
+  // silent replacement disabled above, `!replaces` holds for EVERY post-Stop
+  // ask — the disclosure is emitted by construction whenever the fold
+  // happens, from the same branch that decided the fold. The armed brief is
+  // the user's message verbatim under the draft cap: what "start over"
+  // would draft from.
+  const disclosePostStop = postStopArmed && !replaces && newBrief.length > 0;
   return {
     kind: 'ask',
     questions,
@@ -550,8 +820,13 @@ export function decideClarifyV2Resume(
       brief: workingBrief,
       asked: [...state.asked, ...questions.map((q) => q.dimension)],
       round: state.round + 1,
+      ...(disclosePostStop ? { startOverBrief: newBrief } : {}),
     },
     phase: 'follow_up',
+    // The composer derives its ack from the SAME branch — the replace arm
+    // must never claim a fold (the probe's confound copy, live).
+    incorporation: replaces ? 'replace' : 'fold',
+    ...(disclosePostStop ? { postStop: { originalBrief: state.brief } } : {}),
   };
 }
 
@@ -577,16 +852,33 @@ export function decideClarifyV2Resume(
 export function composeClarifyV2Response(
   questions: readonly ClarifyQuestion[],
   phase: 'initial' | 'follow_up',
+  postStop?: { readonly originalBrief: string },
+  incorporation?: 'fold' | 'replace',
 ): OlumiResponse {
   const singular = questions.length === 1;
-  const lead =
-    phase === 'initial'
+  // 2.171: in the post-explicit-Stop state the plain fold ack is the exact
+  // copy the acceptance probe caught reading as "my stop didn't take" — the
+  // lead instead disclosures the ORIGINAL decision and offers the choice
+  // (ratified wording). Ordinary rounds keep the pre-2.171 leads verbatim,
+  // EXCEPT the replace arm (30 Jul live-probe fix): claiming a fold on a
+  // replacement is a false statement — the ack derives from the branch.
+  const followUpAck =
+    incorporation === 'replace'
       ? singular
-        ? 'Before I draft the model, one quick question will make it sharper.'
-        : 'Before I draft the model, a few quick questions will make it sharper.'
+        ? "Thanks — I've switched to your new decision. One more thing would sharpen the draft."
+        : "Thanks — I've switched to your new decision. A couple more things would sharpen the draft."
       : singular
         ? 'Thanks — I have folded that in. One more thing would sharpen the draft.'
         : 'Thanks — I have folded that in. A couple more things would sharpen the draft.';
+  const lead =
+    postStop !== undefined
+      ? `Still working on your original decision — “${renderDecisionTopic(postStop.originalBrief)}”. ` +
+        'Want me to fold this in, or start over?'
+      : phase === 'initial'
+        ? singular
+          ? 'Before I draft the model, one quick question will make it sharper.'
+          : 'Before I draft the model, a few quick questions will make it sharper.'
+        : followUpAck;
   const numbered = questions
     .map((q, i) => `${i + 1}. ${q.text} (${q.impact})`)
     .join(' ');
@@ -600,6 +892,15 @@ export function composeClarifyV2Response(
     label: 'Use sensible defaults',
     message: CLARIFY_V2_PROCEED_MESSAGE,
   };
+  // 2.171: the choice is tappable. The start-over chip takes one candidate
+  // slot (never the escape hatch's), and its canned message is inside
+  // CLARIFY_V2_START_OVER_PATTERN so a tap routes exactly like the typed
+  // phrase (pinned).
+  const startOverChip: SuggestedAction = {
+    id: CLARIFY_V2_START_OVER_CHIP_ID,
+    label: 'Start over',
+    message: CLARIFY_V2_START_OVER_MESSAGE,
+  };
 
   return {
     response_version: 2,
@@ -610,7 +911,13 @@ export function composeClarifyV2Response(
       // of one or more preserves it, so the escape hatch stops depending
       // on the consumer's cap being exactly the number we assumed.
       proceedChip,
-      ...selectCandidateChips(questions, CLARIFY_V2_CANDIDATE_CHIP_BUDGET),
+      ...(postStop !== undefined ? [startOverChip] : []),
+      ...selectCandidateChips(
+        questions,
+        postStop !== undefined
+          ? CLARIFY_V2_CANDIDATE_CHIP_BUDGET - 1
+          : CLARIFY_V2_CANDIDATE_CHIP_BUDGET,
+      ),
     ]),
     insights: [],
     stage_indicator: 'frame',
@@ -712,7 +1019,15 @@ export function composeClarifyV2ReofferResponse(
   const assistantText =
     cue === 'question_reply'
       ? "Happy to clarify — the questions are optional and each one just sharpens the draft. Answer whichever you like above, or say 'go ahead' and I'll draft with sensible defaults."
-      : 'Just to check — shall I draft with sensible defaults, or would you like to answer any of the questions above first?';
+      : cue === 'mutation_intent'
+        // ROADMAP 2.716 (INV-M). DISCLOSE, then offer both ways forward. The
+        // message is NOT folded, so the copy must tell the user what became of
+        // it — a silent drop is the same class of lie as the silent fold. No
+        // "change the model" chip: there is no model on this state, and a chip
+        // whose consent cannot resume is guarantee-theatre (the same rule that
+        // keeps a proceed chip off the decline response).
+        ? "That reads like a change to the model, but I have not built the model yet — I am still asking about the decision itself, so I have left your message out of the brief rather than guess. Answer any of the questions above, or say 'go ahead' and I'll draft with sensible defaults; once it is on the canvas you can change any value on it."
+        : 'Just to check — shall I draft with sensible defaults, or would you like to answer any of the questions above first?';
   const proceedChip: SuggestedAction = {
     id: CLARIFY_V2_PROCEED_CHIP_ID,
     label: 'Use sensible defaults',

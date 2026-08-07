@@ -26,7 +26,8 @@
  *   - the response is grounded qualitative evidence-guidance prose;
  *   - NO `apply_proposed_change` proposal is emitted (out of scope, science-gated);
  *   - NO new numeric claims (raw decimals / EVPI / confidence wording);
- *   - the genuinely-data-absent case still falls back to the recap copy
+ *   - ⚠ ROADMAP 2.229: the genuinely-data-absent case NO LONGER falls back to
+ *     the recap copy — that guard is retired; it reaches the coach
  *     (the catch-net stays correct where it IS correct).
  *
  * Harness mirrors `turn-executor-fresh-analysis-followup.integration.test.ts`.
@@ -201,6 +202,29 @@ function makeFreshRunAnalysisFact(): Record<string, unknown> {
       scenario_id: SCENARIO_ID,
       leading_option_id: 'opt_hire_local',
       summary: 'Prior analysis result',
+      // T1 claim safety (ROADMAP 1.233). REQUIRED on any fixture that expects
+      // leader-naming prose, and this is a re-point at source, not a baseline
+      // bump (TESTING-DISCIPLINE rule 5).
+      //
+      // The fixture models a COMPLETED analysis, but omitted the field that
+      // records whether the user's ratified constraints were checked against
+      // it. `readMayNameLeadingOptionFromResult` treats a completed analysis
+      // with no verdict as UNKNOWN and fails CLOSED — "unknown" and "verified
+      // feasible" are different claims and only the second licenses naming a
+      // leader. That default has been in force on the EXECUTE path since #710;
+      // 1.233 hoists the read to turn entry, so it now governs the
+      // deterministic non-execute composers too (advice gate, run comparison,
+      // bounded fallback), which is where this fixture's expectations live.
+      //
+      // Adding the stamp makes the fixture model what it always meant: a real,
+      // constraint-checked, feasible run. Its previous silence was under-
+      // specification, and the fact that removing this line turns the
+      // leader-naming assertions below red is the mutation check on the 1.233
+      // gates — proof they bite, delivered by the pre-existing suite.
+      constraint_verdict: {
+        may_name_leading_option: true,
+        constraint_verdict_state: 'evaluated_feasible' as const,
+      },
       graph_hash_at_run: READY_GRAPH_HASH,
       computed_at: new Date(Date.now() - 60_000).toISOString(),
       enrichment: { analysis_status: 'completed' },
@@ -246,6 +270,24 @@ function throwingRoutingAdapter() {
           'Routing adapter must NOT be called on the deterministic post-analysis path',
         );
       }),
+  };
+}
+
+/**
+ * ROADMAP 2.229 — for the data-absent case, which no longer short-circuits.
+ * Records the call and answers with plain text rather than throwing.
+ */
+function recordingRoutingAdapter() {
+  return {
+    chatWithTools: vi
+      .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+      .mockImplementation(async () => ({
+        content: [{ type: 'text', text: 'Routed coaching answer.' }],
+        stop_reason: 'end_turn' as const,
+        usage: { input_tokens: 5, output_tokens: 5 },
+        model: 'mock-routing',
+        latencyMs: 0,
+      })),
   };
 }
 
@@ -339,8 +381,24 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(freshnessEvent!.data.fragile_edge_source).toBe('top_level');
   });
 
-  it('genuinely data-absent body analysis_state (no drivers anywhere) still falls back to the recap copy', async () => {
-    const adapter = throwingRoutingAdapter();
+  it('genuinely data-absent body analysis_state (no drivers anywhere) now reaches the coach instead of the recap stub', async () => {
+    // ⚠ ROADMAP 2.229 — INVERTED, NOT DELETED. This case used to assert the
+    // OPPOSITE: `not.toHaveBeenCalled()` on the adapter and
+    // `toContain(RECAP_STUB_PREFIX)`, on the reasoning that "with no driver
+    // data the needs_top_driver class cannot compose, and the deterministic
+    // recap + chip is the honest fallback".
+    //
+    // That reasoning is exactly what the founder ruling overturned. The recap
+    // is a string constant with ZERO inputs; it is not "honest fallback", it
+    // is the absence of an answer. Data-absent is precisely the case where the
+    // coach — which sees the conversation and the graph, not just the analysis
+    // projection — has the best chance of saying something true. The guard
+    // that emitted the constant is retired and its module deleted, so this
+    // turn now falls through to `routeWithToolUse`.
+    //
+    // The part of the original claim that was about SAFETY is kept verbatim:
+    // no proposal is fabricated on a data-absent turn.
+    const adapter = recordingRoutingAdapter();
     const thin = stagingShapedAnalysisState();
     delete thin.factor_sensitivity;
     const result = await runTurnExecutor(
@@ -353,11 +411,8 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       },
     );
 
-    // The catch-net stays correct where it IS correct: with no driver data
-    // the needs_top_driver class cannot compose, and the deterministic
-    // recap + chip is the honest fallback (still no LLM call, no proposal).
-    expect(adapter.chatWithTools).not.toHaveBeenCalled();
-    expect(result.response.assistant_text).toContain(RECAP_STUB_PREFIX);
+    expect(adapter.chatWithTools, 'a data-absent post-analysis turn must reach the coach').toHaveBeenCalled();
+    expect(result.response.assistant_text ?? '').not.toContain(RECAP_STUB_PREFIX);
     expect(JSON.stringify(result.response)).not.toContain('apply_proposed_change');
   });
 });
