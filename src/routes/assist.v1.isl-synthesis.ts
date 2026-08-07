@@ -155,8 +155,12 @@ export default async function route(app: FastifyInstance) {
         httpStatus: 200,
       });
 
-      // ROADMAP 2.725 — doctrine coverage at route egress (see the review
-      // route for the full rationale; non-mutating by design).
+      // ROADMAP 2.725 — doctrine coverage at route egress (see the review route
+      // for the full rationale; non-mutating by design). ⚠ 1 of 2 mounts on a
+      // 31-path family — see the SCOPE block in route-egress-doctrine-scan.ts.
+      // The MOUNT is pinned by
+      // tests/integration/cee.route-egress-doctrine-mount.test.ts — delete this
+      // block and that spec REDs.
       const doctrineHits = scanPayloadForDoctrineHits(response);
       if (doctrineHits.length > 0) {
         log.warn(

@@ -641,13 +641,16 @@ export default async function route(app: FastifyInstance) {
       });
 
       // ROADMAP 2.725 — doctrine coverage at route egress. The V5 guard scans
-      // only `assistant_text` on the turn path; this route family never passed
-      // through it, and every producer-side verdict string the 2026-08-06 audit
-      // found in CEE sat behind one of these routes. NON-MUTATING by design —
-      // see route-egress-doctrine-scan.ts for why importing the turn path's
-      // remedy would corrupt user-authored graph labels. The enforcement that
-      // stops a regression shipping is the fail-loud producer spec; this is the
-      // runtime observability half.
+      // only `assistant_text` on the turn path; no `assist.v1.*` route passes
+      // through it. ⚠ THIS IS 1 OF 2 MOUNTS ON A 31-PATH FAMILY (~6%) — read the
+      // SCOPE block in route-egress-doctrine-scan.ts, which names the 14 strings
+      // still surviving on 12 uncovered registered routes, before treating this
+      // route family as covered. NON-MUTATING by design — see that module for why
+      // importing the turn path's remedy would corrupt user-authored graph labels.
+      // The enforcement that stops a regression shipping is the fail-loud producer
+      // spec; this is the runtime observability half. The MOUNT itself is pinned by
+      // tests/integration/cee.route-egress-doctrine-mount.test.ts — delete this
+      // block and that spec REDs.
       const doctrineHits = scanPayloadForDoctrineHits(response);
       if (doctrineHits.length > 0) {
         log.warn(

@@ -4,11 +4,66 @@
  * ## What this closes
  *
  * The V5 egress guard (`orchestrator-v5/compose/forbidden-user-facing-phrases.ts`,
- * ROADMAP 2.213) scans exactly one thing: `assistant_text` on the turn path. The
- * registered routes `/assist/v1/review`, `/assist/v1/isl-synthesis`,
- * `/assist/v1/elicit-risk-tolerance`, `/assist/v1/suggest-edge-function` and
- * `/assist/v1/narrate-conditions` never pass through it — and every producer-side
- * verdict string the 2026-08-06 audit found in CEE sat behind one of them.
+ * ROADMAP 2.213) scans exactly one thing: `assistant_text` on the turn path. No
+ * route in the `assist.v1.*` family passes through it.
+ *
+ * ## ⚠ SCOPE — read the DENOMINATOR before you read this module as "done"
+ *
+ * This module is mounted on **2 routes**. The `assist.v1.*` family has **31
+ * registered paths across 30 route modules** (30 paths unconditional;
+ * `/assist/v1/decision-review/example` is gated on
+ * `CEE_DECISION_REVIEW_EXAMPLE_ENABLED`). So coverage is **2 of 31 ≈ 6%**, not the
+ * "2 of 5 = 40%" an earlier revision of this header implied by naming five routes as
+ * though they were the family.
+ *
+ * DERIVE the denominator, never restate it from here or from any later document —
+ * this header is itself a hand-maintained mirror (CLAUDE.md trap 12), and the figure
+ * moves every time a route is added:
+ *
+ *   for each `await <sym>(app)` in `src/server.ts`, resolve `<sym>`'s module and
+ *   count the distinct `"/assist/v1/…"` path literals it declares.
+ *
+ * **Why the wrong denominator is a defect and not a typo.** A lane that reads "2 of
+ * 5" computes 40% done and closes the row; the doctrine then stays open on ~29
+ * registered routes. That is CLAUDE.md trap 7b exactly — a one-line description that
+ * overstates an alarm's coverage teaches every later lane to stop looking, and this
+ * estate has already nearly lost a live security fix that way.
+ *
+ * ## What is still UNCOVERED and still emits the banned register
+ *
+ * A string-literal sweep of `src/` (comments stripped, so header prose that merely
+ * *names* the banned register is not counted) under this module's own pattern set,
+ * with each producer traced to the registered routes whose import closure reaches it:
+ *
+ * | Producer (file:line) | Registered route(s) still uncovered |
+ * |---|---|
+ * | `preference-elicitation/contextual-framer.ts:123` | `/assist/v1/elicit/preferences` — **traced end to end**: route `:207` calls `frameQuestionsInContext`, whose output is the 200 body's `questions` |
+ * | `preference-elicitation/answer-processor.ts:213,246` | `/assist/v1/elicit/preferences/answer` |
+ * | `preference-elicitation/tradeoff-explainer.ts:185` | `/assist/v1/explain/tradeoff` |
+ * | `graph-readiness/goal-conflict.ts:564,639` | `/assist/v1/graph-readiness` |
+ * | `graph-readiness/domain-completeness.ts:455` | `/assist/v1/graph-readiness` (also `/assist/v1/review`, which IS covered) |
+ * | `edge-function-suggestions/index.ts:759,764` | `/assist/v1/suggest-edge-function` |
+ * | `risk-tolerance-elicitation/index.ts:519` | `/assist/v1/elicit-risk-tolerance` |
+ * | `verification/generators/weight-suggestion-generator.ts:198,204` and `verification/validators/weight-suggestion-validator.ts:223,233` | the six routes that send `verificationPipeline`'s output in their 200 body — `/assist/v1/bias-check`, `/assist/v1/options`, `/assist/v1/team-perspectives`, `/assist/v1/sensitivity-coach`, `/assist/v1/explain-graph`, `/assist/v1/evidence-helper` |
+ *
+ * **14 surviving strings across 12 uncovered registered routes** — not the three an
+ * earlier revision of this header listed. Rowed as ROADMAP 2.725-followup.
+ *
+ * **Epistemics, stated so the next lane does not over-read this table.** Exactly ONE
+ * row is traced producer → 200 body (`/assist/v1/elicit/preferences`). The rest are
+ * IMPORT-CLOSURE reachable with their producer's output sent in the route's 200 body
+ * (e.g. `assist.v1.bias-check.ts:257→330`), but the individual string's branch
+ * condition is not proven reachable here. Import reachability is not wire presence
+ * (CLAUDE.md trap 16 and its inverse) — settle a row by capture before claiming it.
+ *
+ * **Two corrections to the 2026-08-06 audit's map, derived at this tip rather than
+ * inherited:** (a) `/assist/v1/suggest-utility-weights` is **CLEAN** — its producer
+ * is `cee/utility-weight-suggestions/`, which has zero hits; the weight-suggestion
+ * strings above belong to `cee/verification/`, a different module reached by
+ * different routes. (b) `cee/decision-review/templates.ts`'s three strings reach
+ * **no registered route** — their only importer is
+ * `routes/assist.v1.enhanced-decision-review.ts`, which `src/server.ts` never
+ * registers.
  *
  * ## Why this module DETECTS but does not REMEDY — the reasoned half of the brief
  *

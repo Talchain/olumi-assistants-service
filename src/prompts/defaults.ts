@@ -1626,7 +1626,7 @@ Explain critical thresholds:
   "robustness_narrative": "The leading option ([option]) is robust across most scenarios...",
   "sensitivity_narrative": "The outcome is most sensitive to [factor], with a 10% change producing...",
   "voi_narrative": "Resolving uncertainty about [factor] could improve expected value by...",
-  "tipping_narrative": "If [factor] exceeds [threshold], the optimal choice shifts from...",
+  "tipping_narrative": "If [factor] exceeds [threshold], the leading option changes from...",
   "executive_summary": "One-paragraph synthesis for busy executives"
 }
 

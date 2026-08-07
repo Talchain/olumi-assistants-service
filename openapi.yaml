@@ -5573,7 +5573,7 @@ components:
         robustness_narrative:
           type: string
           description: Narrative explaining robustness analysis
-          example: The recommendation to raise price to £59 is highly robust with a 78% confidence score across 100 tested scenarios.
+          example: The leading option (Raise price to £59) is highly robust with a 78% confidence score across most of 100 tested scenarios. The ranking remains stable even with significant parameter variations.
         sensitivity_narrative:
           type: string
           description: Narrative explaining sensitivity analysis
@@ -5585,11 +5585,11 @@ components:
         tipping_narrative:
           type: string
           description: Narrative explaining tipping points
-          example: If Churn Rate exceeds 8%, the optimal choice shifts from Raise price to Maintain price.
+          example: 'Critical threshold detected: if Churn Rate exceeds 8.00, the leading option changes from Raise price to Maintain price.'
         executive_summary:
           type: string
           description: One-paragraph executive summary
-          example: "Goal: Maximize revenue. Recommended action: Raise price to £59. Robustness: 78%."
+          example: "Goal: Maximize revenue. Leading option: Raise price to £59. Robustness: 78%."
         trace:
           $ref: '#/components/schemas/CEETraceMeta'
         quality:
