@@ -386,6 +386,7 @@ describe("ROADMAP 2.322 — the display ladders reach every parseable magnitude"
         sourceQuote: "q",
         confidence: 0.9,
         provenance: "explicit",
+        valueFrame: "level",
       },
     ])[0]!.label;
 

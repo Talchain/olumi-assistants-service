@@ -22,6 +22,7 @@ function makeConstraint(overrides: Partial<ExtractedGoalConstraint> = {}): Extra
     sourceQuote: "keeping churn under 4%",
     confidence: 0.85,
     provenance: "explicit",
+    valueFrame: "level",
     ...overrides,
   };
 }

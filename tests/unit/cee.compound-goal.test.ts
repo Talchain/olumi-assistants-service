@@ -261,6 +261,7 @@ describe("toGoalConstraints", () => {
       sourceQuote: "keeping churn under 5%",
       confidence: 0.85,
       provenance: "explicit",
+      valueFrame: "level",
     }];
 
     const result = toGoalConstraints(extracted);
@@ -276,6 +277,7 @@ describe("toGoalConstraints", () => {
       source_quote: "keeping churn under 5%",
       confidence: 0.85,
       provenance: "explicit",
+      value_frame: "level",
       deadline_metadata: undefined,
     });
   });
@@ -291,6 +293,7 @@ describe("toGoalConstraints", () => {
       sourceQuote: "within 6 months",
       confidence: 0.95,
       provenance: "explicit",
+      valueFrame: "level",
       deadlineMetadata: {
         deadline_date: "2025-08-01",
         reference_date: "2025-02-01",
@@ -324,6 +327,7 @@ describe("generateConstraintNodes", () => {
       sourceQuote: "keeping churn under 5%",
       confidence: 0.85,
       provenance: "explicit",
+      valueFrame: "level",
     }];
 
     const nodes = generateConstraintNodes(constraints);
@@ -359,6 +363,7 @@ describe("generateConstraintNodes", () => {
       sourceQuote: "retention above 85%",
       confidence: 0.85,
       provenance: "explicit",
+      valueFrame: "level",
     }];
 
     const nodes = generateConstraintNodes(constraints);
@@ -378,6 +383,7 @@ describe("generateConstraintNodes", () => {
       sourceQuote: "cost under £50k",
       confidence: 0.85,
       provenance: "explicit",
+      valueFrame: "level",
     }];
 
     const nodes = generateConstraintNodes(constraints);
@@ -397,6 +403,7 @@ describe("generateConstraintNodes", () => {
       sourceQuote: "within 6 months",
       confidence: 0.95,
       provenance: "explicit",
+      valueFrame: "level",
       deadlineMetadata: {
         deadline_date: "2025-08-01",
         reference_date: "2025-02-01",
@@ -423,6 +430,7 @@ describe("generateConstraintNodes", () => {
         sourceQuote: "quote 1",
         confidence: 0.85,
         provenance: "explicit",
+        valueFrame: "level",
       },
       {
         targetName: "churn",
@@ -434,6 +442,7 @@ describe("generateConstraintNodes", () => {
         sourceQuote: "quote 2",
         confidence: 0.9,
         provenance: "explicit",
+        valueFrame: "level",
       },
     ];
 
@@ -454,6 +463,7 @@ describe("generateConstraintNodes", () => {
       sourceQuote: "cost under £50k",
       confidence: 0.85,
       provenance: "explicit",
+      valueFrame: "level",
     }];
 
     const nodes = generateConstraintNodes(constraints);
@@ -500,6 +510,7 @@ describe("generateConstraintEdges", () => {
         sourceQuote: "quote",
         confidence: 0.85,
         provenance: "explicit",
+        valueFrame: "level",
       },
       {
         targetName: "retention",
@@ -511,6 +522,7 @@ describe("generateConstraintEdges", () => {
         sourceQuote: "quote",
         confidence: 0.85,
         provenance: "explicit",
+        valueFrame: "level",
       },
     ];
 
@@ -564,6 +576,7 @@ describe("constraintNodesToGraphNodes", () => {
       sourceQuote: "quote",
       confidence: 0.85,
       provenance: "explicit",
+      valueFrame: "level",
     }]);
 
     const graphNodes = constraintNodesToGraphNodes(constraintNodes);
@@ -926,6 +939,7 @@ describe("remapConstraintTargets", () => {
       sourceQuote: overrides.sourceQuote ?? "test quote",
       confidence: overrides.confidence ?? 0.85,
       provenance: overrides.provenance ?? "explicit",
+      valueFrame: "level",
     };
   }
 
