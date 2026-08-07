@@ -304,9 +304,11 @@ describe('coaching slot on the A/B divergence path (ROADMAP 2.804)', () => {
   });
 
   it('SUPPRESSES the first-analysis nudge when B withholds (no prior run_analysis fact)', () => {
-    // The FIRST_ANALYSIS arm of the same gate. `hasPriorSuccessfulRunAnalysis`
-    // tests only `fact_type === 'run_analysis'`, so the divergence has to be
-    // produced by the scenario-scoped fact instead of a prior-window fact.
+    // The FIRST_ANALYSIS arm of the same gate. `hasAnyPriorRunAnalysisFact`
+    // (renamed from `hasPriorSuccessfulRunAnalysis` in ROADMAP 2.842 — the old
+    // name claimed a success test it does not perform) tests only
+    // `fact_type === 'run_analysis'`, so the divergence has to be produced by
+    // the scenario-scoped fact instead of a prior-window fact.
     const current = runFact({
       analysisStatus: 'partial',
       computedAt: '2026-08-01T00:00:00.000Z',

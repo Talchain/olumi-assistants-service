@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
+import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
 import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
 
@@ -199,6 +200,45 @@ function priorRunAnalysisFact(): HandlerFact {
       scenario_id: 'scen-a',
       leading_option_id: 'opt-1',
       summary: 'prior',
+    },
+  };
+}
+
+/**
+ * ROADMAP 2.842 — a prior `run_analysis` fact carrying a NON-SUCCESS status.
+ *
+ * `partial` is the status PLoT's `determineTopLevelStatus` returns when options
+ * are usable but robustness or drivers degraded, so this is a real wire shape,
+ * not an invented one. `isSuccessfulRunAnalysisFact` excludes it
+ * (`normaliseAnalysisStatus('partial')` falls through to `default: return
+ * null`), while the coaching layer's own predicates count it. That divergence
+ * is the whole point of the fixture.
+ */
+function partialPriorRunAnalysisFact(): HandlerFact {
+  return {
+    fact_type: 'run_analysis',
+    fact_version: 1,
+    noop: false,
+    result: {
+      scenario_id: 'scen-a',
+      leading_option_id: 'opt-1',
+      summary: 'prior, degraded',
+      enrichment: { analysis_status: 'partial' },
+    },
+  } as unknown as HandlerFact;
+}
+
+/** A prior fact that is NOT a run_analysis — decoy padding for position tests. */
+function priorEditFact(targetId: string): HandlerFact {
+  return {
+    fact_type: 'set_factor_value',
+    fact_version: 1,
+    noop: false,
+    result: {
+      target_id: targetId,
+      status: 'applied',
+      before: { value: 1 },
+      after: { value: 2 },
     },
   };
 }
@@ -629,6 +669,167 @@ describe('detectCoachingSignal', () => {
       });
       expect(detection?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
       expect(detection?.coaching_text).toContain('This change affects the model');
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ROADMAP 2.842 — the two coaching predicates, asserted rather than
+  // remembered.
+  //
+  // Neither of these blocks was RED at pristine, and that is the honest
+  // situation: 2.842 is a NAMING defect with no observable behaviour (the
+  // ordering was unobservable because its only consumer read truthiness; the
+  // "Successful" looseness is deliberate and already shipped). There was no
+  // failing behaviour to pin first. What proves these tests bite is the mutant
+  // kit, recorded in the PR body — each assertion below has a named mutant that
+  // turns it RED, including a DISCRIMINATING PAIR for the position claim.
+  // ══════════════════════════════════════════════════════════════════════
+  describe('the coaching layer’s predicate is DELIBERATELY broader than the freshness authority’s', () => {
+    /**
+     * The distinction 2.842 exists to stop being folklore: `partial` /
+     * `degraded` run_analysis facts count for the coaching layer and do NOT
+     * count for `isSuccessfulRunAnalysisFact`. Three predicates over one fact
+     * type is exactly the drift class this estate keeps paying for, so the
+     * divergence is pinned at both ends — the authority's verdict AND the
+     * product behaviour that depends on the coaching layer disagreeing with it.
+     */
+    it('the freshness authority REJECTS a partial fact that the coaching layer COUNTS', () => {
+      const partial = partialPriorRunAnalysisFact();
+
+      // End A — the freshness authority excludes it.
+      expect(isSuccessfulRunAnalysisFact(partial)).toBe(false);
+
+      // End B — the run_analysis branch counts it, so this reads as a RE-RUN.
+      // If the coaching predicate were tightened to the freshness authority's,
+      // this would be FIRST_ANALYSIS_COMPLETE and the user would be told their
+      // first analysis is ready on their second one.
+      const rerun = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [partial],
+      });
+      expect(rerun?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(rerun?.signal_id).not.toBe('FIRST_ANALYSIS_COMPLETE');
+
+      // End B again, edit branch — a degraded analysis is still an analysis an
+      // edit can stale.
+      const stale = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-cost'),
+        contextPack: makeContextPack(),
+        priorFacts: [partial],
+      });
+      expect(stale?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+
+    /**
+     * The two coaching predicates are byte-identical today and kept separate on
+     * purpose (CLAUDE.md trap #21 — two authorities answering different
+     * questions must not be collapsed just because they agree). Their agreement
+     * is therefore itself an invariant: pin it, so tightening one without the
+     * other is LOUD instead of silent.
+     *
+     * Observed end-to-end rather than by exporting the private helpers: the
+     * edit branch fires STALE exactly when the run_analysis branch does NOT fire
+     * FIRST_ANALYSIS.
+     */
+    it('the edit-branch and run_analysis-branch predicates agree on every fixture', () => {
+      const cases: ReadonlyArray<{ label: string; priorFacts: HandlerFact[] }> = [
+        { label: 'no prior facts', priorFacts: [] },
+        { label: 'only a non-analysis prior fact', priorFacts: [priorEditFact('f-cost')] },
+        { label: 'a successful prior analysis', priorFacts: [priorRunAnalysisFact()] },
+        { label: 'a PARTIAL prior analysis', priorFacts: [partialPriorRunAnalysisFact()] },
+      ];
+
+      for (const { label, priorFacts } of cases) {
+        const editBranchSawAnalysis =
+          detectCoachingSignal({
+            proposedHandlerId: 'set_factor_value',
+            mayNameLeadingOption: true,
+            // A target that is NOT a top driver, so HIGH_SENSITIVITY cannot
+            // fire and mask the STALE verdict.
+            outcome: setFactorOutcome('f-not-a-driver'),
+            contextPack: makeContextPack(),
+            priorFacts,
+          })?.signal_id === 'STALE_ANALYSIS_AFTER_EDIT';
+
+        const runBranchSawAnalysis =
+          detectCoachingSignal({
+            proposedHandlerId: 'run_analysis',
+            mayNameLeadingOption: true,
+            outcome: runAnalysisOutcome(),
+            contextPack: makeContextPack(),
+            priorFacts,
+          })?.signal_id !== 'FIRST_ANALYSIS_COMPLETE';
+
+        expect(
+          { case: label, editBranchSawAnalysis },
+          `the two coaching predicates disagreed on: ${label}`,
+        ).toEqual({ case: label, editBranchSawAnalysis: runBranchSawAnalysis });
+      }
+    });
+  });
+
+  describe('ROADMAP 2.842 — the edit branch reads EXISTENCE, not array position', () => {
+    /**
+     * `findMostRecentSuccessfulAnalysisFact` walked the array from its LAST
+     * index and returned the first hit, while `prior_facts` arrives
+     * NEWEST-FIRST — so it returned the OLDEST run_analysis fact under a name
+     * promising the newest. The replacement makes no ordering claim at all, and
+     * these two cases are what hold it to that: the same single analysis fact,
+     * once at the NEWEST end and once at the OLDEST end of an otherwise
+     * identical array, must produce the same verdict.
+     *
+     * They are a DISCRIMINATING PAIR, not two samples of one property. A
+     * position-0-only read passes the first and fails the second; a
+     * last-index-only read (the old behaviour's shape) does the reverse.
+     * Neither case alone can tell a position-independent predicate from a
+     * position-dependent one.
+     */
+    it('fires STALE when the analysis fact is NEWEST (index 0)', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-not-a-driver'),
+        contextPack: makeContextPack(),
+        priorFacts: [
+          priorRunAnalysisFact(),
+          priorEditFact('f-a'),
+          priorEditFact('f-b'),
+        ],
+      });
+      expect(detection?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+
+    it('fires STALE when the analysis fact is OLDEST (last index)', () => {
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-not-a-driver'),
+        contextPack: makeContextPack(),
+        priorFacts: [
+          priorEditFact('f-a'),
+          priorEditFact('f-b'),
+          priorRunAnalysisFact(),
+        ],
+      });
+      expect(detection?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+
+    it('NEGATIVE CONTROL: no analysis fact at any position ⇒ no STALE', () => {
+      // Without this, a predicate hardcoded to `true` would pass both cases
+      // above.
+      const detection = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
+        outcome: setFactorOutcome('f-not-a-driver'),
+        contextPack: makeContextPack(),
+        priorFacts: [priorEditFact('f-a'), priorEditFact('f-b')],
+      });
+      expect(detection).toBeNull();
     });
   });
 
