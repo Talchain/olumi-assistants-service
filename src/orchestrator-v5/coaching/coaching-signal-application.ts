@@ -20,6 +20,10 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  readMayNameLeadingOptionVerdict,
+  type ClaimSafetyScenarioScope,
+} from '../context/claim-safety-read.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
 import { detectCoachingSignal } from '../signals/coaching-signals.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
@@ -53,6 +57,17 @@ export interface ApplyCoachingSignalInput {
    * suppression.
    */
   readonly interventionControlledFactorIds?: ReadonlySet<string>;
+  /**
+   * ⭐ ROADMAP 2.804 — the scenario scope for the leader-claim permission.
+   *
+   * REQUIRED, and required on purpose: it is the forcing function that makes
+   * every dispatch path state, in the type system, which scenario's claim
+   * safety governs its coaching. A new caller cannot inherit a permission by
+   * omission, which is exactly how the defect below shipped.
+   *
+   * Never client-supplied — build it with `claimSafetyScopeFromContext`.
+   */
+  readonly claimSafetyScope: ClaimSafetyScenarioScope;
 }
 
 export interface AppliedCoachingSignal {
@@ -74,11 +89,57 @@ export interface AppliedCoachingSignal {
 export function applyCoachingSignal(
   input: ApplyCoachingSignalInput,
 ): AppliedCoachingSignal {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ⭐ ROADMAP 2.804 — THE LEADER-CLAIM PERMISSION IS DERIVED HERE, ONCE.
+  //
+  // WHAT THIS REPLACED. The detector used to read a second authority: an
+  // internal `__leading_option_claim_withheld` channel that `run_analysis` set
+  // on its own outcome, absent meaning permitted. That answered a DIFFERENT
+  // QUESTION — "did THIS RUN's constraint verdict withhold?" — while the
+  // coaching slot needs "may THIS TURN name a leading option on screen?".
+  //
+  // The two came apart when #737 gave the turn-level verdict a second conjunct
+  // (`narrowToProjectedAnalysis`: the DISPLAYED analysis must also permit), one
+  // day after #709 introduced the outcome channel to close this very harm. The
+  // outcome channel structurally cannot carry that conjunct, because it never
+  // sees the fact array. So on a turn whose newest CLAIM-BEARING fact is not a
+  // canonical success (PLoT emits `analysis_status: 'partial'` with a full
+  // option comparison whenever options are usable but robustness or drivers
+  // degraded) while an older PROJECTABLE fact reads withheld — every unstamped
+  // pre-#710 fact, for which there is no data migration — the channel PERMITTED
+  // and the turn verdict WITHHELD. The confirmation withheld the leader and the
+  // coaching sentence directly beneath it named one.
+  //
+  // WHY THE READ LIVES INSIDE THIS HELPER RATHER THAN BEING PASSED IN.
+  // In `turn-executor.ts` the STEP-5 coaching call runs BEFORE the post-handler
+  // re-read of the turn verdict. A threaded boolean would therefore be sourced,
+  // by default, from the TURN-ENTRY hoist — computed over `context.prior_facts`,
+  // i.e. the state before this turn's analysis existed. That is a NEW split in
+  // the opposite direction: a scenario whose prior fact withheld and whose
+  // current analysis permits would have honest coaching suppressed, on the most
+  // common turn shape in the product. Deriving it here, from the facts this
+  // helper already holds, means there is no path from a caller to the stale
+  // value — the ordering hazard is removed rather than navigated. Callers
+  // supply only the SCOPE, which is a property of the scenario, not of a moment
+  // in the turn.
+  //
+  // ONE DERIVATION, TWO READ POINTS. This is the same
+  // `readMayNameLeadingOptionVerdict` over the same union shape (this turn's
+  // facts ∪ the window) and the same scope that the executor's post-handler
+  // re-read and the chip-click exit use. Not a second derivation: one function,
+  // one selector pair, one leaf reader (CLAUDE.md trap #12).
+  // ═══════════════════════════════════════════════════════════════════════════
+  const mayNameLeadingOption = readMayNameLeadingOptionVerdict(
+    [...input.handlerFacts, ...input.priorFacts],
+    input.claimSafetyScope,
+  ).may_name_leading_option;
+
   const detection = detectCoachingSignal({
     proposedHandlerId: input.proposedHandlerId,
     outcome: input.outcome,
     contextPack: input.contextPack,
     priorFacts: input.priorFacts,
+    mayNameLeadingOption,
     ...(input.interventionControlledFactorIds !== undefined
       ? { interventionControlledFactorIds: input.interventionControlledFactorIds }
       : {}),

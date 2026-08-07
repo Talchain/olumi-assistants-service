@@ -389,28 +389,25 @@ export interface HandlerOutcome {
   readonly __scaffolded_options?: ReadonlyArray<
     import('../coaching/scaffold-disclosure.js').ScaffoldedOptionRecord
   >;
-  /**
-   * T1 — set by `run_analysis` when the constraint verdict forbids naming a
-   * leading option (`!ConstraintVerdict.mayNameLeadingOption`: the
-   * `unevaluated`, `identity_unresolved` and `evaluated_infeasible` states).
-   * Internal channel on the same pattern as `__plot_timings` above.
-   *
-   * WHY IT EXISTS. The egress allowlist
-   * (`isAllowedRunAnalysisAssistantText`) governs only the CONFIRMATION
-   * segment of `assistant_text`. The STEP-5 coaching piece is a separate
-   * compose slot that never passes through it, and its copy bank presumes a
-   * leader — "explore the leading option", and on a re-run "{label} still
-   * leads". So a turn could withhold the leading-option claim in the
-   * confirmation and then assert it, by name, in the sentence directly
-   * underneath. Every defence built for the headline was bypassed one line
-   * later.
-   *
-   * The flag carries the verdict's OWN declaration to the coaching detector
-   * rather than having it re-derive one (CLAUDE.md trap #12) — there is one
-   * owner of "may a leading option be named", and it is
-   * `deriveConstraintVerdict`.
-   */
-  readonly __leading_option_claim_withheld?: boolean;
+  // ⚠ ROADMAP 2.804 — `__leading_option_claim_withheld` WAS DECLARED HERE AND
+  // IS DELETED. DO NOT REINSTATE IT.
+  //
+  // It was an internal channel by which `run_analysis` told the STEP-5 coaching
+  // detector that THIS RUN's constraint verdict forbade naming a leading
+  // option. The problem was never its default (absent ⇒ permitted is the only
+  // default that keeps every other handler byte-identical); it was that the
+  // coaching slot consumed it AS THE PERMISSION. The slot's question is
+  // "may this TURN name a leading option on screen?", which since #737 is a
+  // conjunction including the DISPLAYED analysis's verdict — and a
+  // `HandlerOutcome` never sees the fact array, so this channel could not carry
+  // that conjunct at any price. The result was a turn that withheld the leader
+  // in the confirmation and named it in the coaching sentence directly beneath.
+  //
+  // The permission is now read from the fact chain in `applyCoachingSignal`
+  // (`readMayNameLeadingOptionVerdict`), which is the same derivation the
+  // headline gate, the bounded fallback and the chip-click exit already use.
+  // A handler that wants to influence the leader claim must go through the
+  // persisted `constraint_verdict` on its own fact — the one channel.
 }
 
 export type HandlerFn = (invocation: HandlerInvocation) => Promise<HandlerOutcome>;

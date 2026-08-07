@@ -4,7 +4,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
-import { detectCoachingSignal } from '../coaching-signals.js';
+import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
 
 function makeContextPack(overrides: {
   topDrivers?: readonly string[];
@@ -204,10 +204,85 @@ function priorRunAnalysisFact(): HandlerFact {
 }
 
 describe('detectCoachingSignal', () => {
+  /**
+   * ROADMAP 2.804 — the detector's contract for the new REQUIRED
+   * `mayNameLeadingOption` input, pinned directly at this level.
+   *
+   * The wider property (that this boolean is the TURN-level, display-bound
+   * permission and not the per-run one) is proven against real fact chains in
+   * `coaching/__tests__/coaching-signal-leader-permission.test.ts`. What is
+   * pinned HERE is narrower and complementary: given the permission, the
+   * detector does the right thing with it — and it does so on the SAME
+   * fixtures every other test in this file uses, so a change to the fixtures
+   * moves both arms together.
+   */
+  describe('the leader-claim permission governs both run_analysis signals', () => {
+    it('withheld ⇒ FIRST_ANALYSIS_COMPLETE is SUPPRESSED, not reworded', () => {
+      const permitted = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [],
+      });
+      const withheld = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: false,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [],
+      });
+      // The pair is the point: one input flipped, opposite outcomes. Asserting
+      // only the withheld arm would pass on a detector that had stopped firing
+      // this signal altogether.
+      expect(permitted?.signal_id).toBe('FIRST_ANALYSIS_COMPLETE');
+      expect(withheld).toBeNull();
+    });
+
+    it('withheld ⇒ RERUN_ANALYSIS_COMPLETE degrades to the comparison-free copy, keeping its id', () => {
+      const permitted = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      const withheld = detectCoachingSignal({
+        proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: false,
+        outcome: runAnalysisOutcome(),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      // Same id both ways — the telemetry series must not go dark on a
+      // withheld turn — but different copy, bound to the production bank.
+      expect(permitted?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(withheld?.signal_id).toBe('RERUN_ANALYSIS_COMPLETE');
+      expect(withheld?.coaching_text).toBe(
+        COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({ runDelta: null }),
+      );
+    });
+
+    it('the permission governs run_analysis ONLY — an edit-handler signal is untouched by it', () => {
+      // The gate sits inside `if (proposedHandlerId === 'run_analysis')`. If it
+      // ever escaped that branch, every edit turn would lose its coaching on a
+      // withheld scenario — a silent, wide regression. Pinned by a control.
+      const withheldEdit = detectCoachingSignal({
+        proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: false,
+        outcome: setFactorOutcome('Customer Churn'),
+        contextPack: makeContextPack(),
+        priorFacts: [priorRunAnalysisFact()],
+      });
+      expect(withheldEdit?.signal_id).toBe('STALE_ANALYSIS_AFTER_EDIT');
+    });
+  });
+
   describe('FIRST_ANALYSIS_COMPLETE', () => {
     it('fires on the first successful run_analysis (no prior facts)', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [],
@@ -221,6 +296,7 @@ describe('detectCoachingSignal', () => {
       // coaching prose by construction.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -234,6 +310,7 @@ describe('detectCoachingSignal', () => {
       // priorFacts array and fire FIRST_ANALYSIS_COMPLETE.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [], // prior failed attempt produced no fact
@@ -248,6 +325,7 @@ describe('detectCoachingSignal', () => {
       // returns null → the copy acknowledges the rerun without a comparison.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -266,6 +344,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(env),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(env)],
@@ -290,6 +369,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
@@ -320,6 +400,7 @@ describe('detectCoachingSignal', () => {
       // the canonical ordering says the previous run already led with Onshore.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(onshoreLeads),
         contextPack: makeContextPack(),
         priorFacts: [
@@ -348,6 +429,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
@@ -377,6 +459,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(labelOnlyEnv)],
@@ -408,6 +491,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(env),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(env)],
@@ -418,6 +502,7 @@ describe('detectCoachingSignal', () => {
     it('fires with a NULL contextPack (chip-click path assembles no pack)', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: null,
         priorFacts: [priorRunAnalysisFact()],
@@ -429,6 +514,7 @@ describe('detectCoachingSignal', () => {
     it('FIRST_ANALYSIS_COMPLETE still wins when no prior run fact exists (first-run behaviour unchanged)', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: null,
         priorFacts: [],
@@ -451,6 +537,7 @@ describe('detectCoachingSignal', () => {
       });
       const detection = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcomeWithEnvelope(currentEnv),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFactWithEnvelope(priorEnv)],
@@ -466,6 +553,7 @@ describe('detectCoachingSignal', () => {
     it('fires on an edit handler when a prior run_analysis fact exists', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('f-cost'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -476,6 +564,7 @@ describe('detectCoachingSignal', () => {
     it('does not fire on an edit handler when no prior analysis exists', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ analysisPresent: false }),
         priorFacts: [],
@@ -493,6 +582,7 @@ describe('detectCoachingSignal', () => {
     it('does NOT fire on a NO-OP set_factor_value even with a prior analysis', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: noopSetFactorOutcome('f-cost'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -503,6 +593,7 @@ describe('detectCoachingSignal', () => {
     it('does NOT fire on a NO-OP adjust_edge_strength even with a prior analysis', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'adjust_edge_strength',
+        mayNameLeadingOption: true,
         outcome: noopEdgeOutcome('f-budget→g-revenue'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -517,6 +608,7 @@ describe('detectCoachingSignal', () => {
       // three edit handlers, not just the two whose narration was wrong.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'add_constraint',
+        mayNameLeadingOption: true,
         outcome: noopAddConstraintOutcome('f-churn'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -530,6 +622,7 @@ describe('detectCoachingSignal', () => {
       // analysis. Without this, `return null` would pass the tests above.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('f-cost'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
@@ -545,6 +638,7 @@ describe('detectCoachingSignal', () => {
       // carries top_drivers. The edit target matches a driver label.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn', 'Ad Spend'] }),
         priorFacts: [],
@@ -556,6 +650,7 @@ describe('detectCoachingSignal', () => {
     it('does not fire when the edit target is not among top drivers', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Unrelated Factor'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn'] }),
         priorFacts: [],
@@ -570,6 +665,7 @@ describe('detectCoachingSignal', () => {
       // presuppose an actual edit, so the gate sits on the branch.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: noopSetFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn', 'Ad Spend'] }),
         priorFacts: [],
@@ -583,6 +679,7 @@ describe('detectCoachingSignal', () => {
       // Edit a top driver AND a prior analysis exists in facts. STALE wins.
       const detection = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn'] }),
         priorFacts: [priorRunAnalysisFact()],
@@ -595,6 +692,7 @@ describe('detectCoachingSignal', () => {
     it('returns null for an unknown handler_id', () => {
       const detection = detectCoachingSignal({
         proposedHandlerId: 'explain_result',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [],
@@ -607,18 +705,21 @@ describe('detectCoachingSignal', () => {
     it('never emits em-dashes in any signal text', () => {
       const firstAnalysis = detectCoachingSignal({
         proposedHandlerId: 'run_analysis',
+        mayNameLeadingOption: true,
         outcome: runAnalysisOutcome(),
         contextPack: makeContextPack(),
         priorFacts: [],
       });
       const stale = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack(),
         priorFacts: [priorRunAnalysisFact()],
       });
       const high = detectCoachingSignal({
         proposedHandlerId: 'set_factor_value',
+        mayNameLeadingOption: true,
         outcome: setFactorOutcome('Customer Churn'),
         contextPack: makeContextPack({ topDrivers: ['Customer Churn'] }),
         priorFacts: [],

@@ -734,6 +734,12 @@ export async function dispatchChipClickRunAnalysis(
       handlerFacts: enrichedFacts,
       requestId,
       scenarioId: context.session_id,
+      // ROADMAP 2.804 — the SAME scope builder this path's own claim-safety
+      // exit uses below, so the coaching slot and the response's
+      // `mayNameLeadingOption` cannot describe different scenarios. The helper
+      // derives the permission from `enrichedFacts ∪ prior_facts`, which is the
+      // same union the exit builds — one derivation, two read points.
+      claimSafetyScope: claimSafetyScopeFromContext(context),
       // Same collector + raw-graph source the freshness derivation below
       // uses (snapshot first, turn-context fallback on the test path).
       interventionControlledFactorIds: collectInterventionControlledFactorIds(

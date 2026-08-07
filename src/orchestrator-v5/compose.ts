@@ -1145,8 +1145,11 @@ function rebuildPhase3BlocksFresh(
   // contradicting itself (CLAUDE.md trap #12).
   //
   // WHY NOT A THREADED BOOLEAN: the prior-fact branch runs no handler, so it has
-  // no `HandlerOutcome` and no `__leading_option_claim_withheld` to thread — a
-  // flag would have left half the paths ungated.
+  // no `HandlerOutcome` to thread a flag off — a flag would have left half the
+  // paths ungated. (The outcome channel that argument referred to,
+  // `__leading_option_claim_withheld`, has since been deleted outright for a
+  // related reason: it could not carry the displayed-analysis conjunct either.
+  // ROADMAP 2.804.)
   //
   // FAILS CLOSED. An unstamped fact (every fact written before this change) is
   // treated as WITHHELD — see `readMayNameLeadingOptionFromResult` for why "unknown" must
