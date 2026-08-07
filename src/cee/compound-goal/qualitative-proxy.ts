@@ -245,12 +245,27 @@ export function mapQualitativeToProxy(brief: string): QualitativeProxyResult {
         sourceQuote: match[0].slice(0, 200),
         confidence: mapping.confidence,
         provenance: "proxy",
-        // Every `ProxyMapping.defaultValue` in the table above is a THRESHOLD
-        // ON THE PROXY METRIC'S OWN SCALE (NPS >= 50, defect rate <= 0.02,
-        // cost reduction >= 0.10) — an absolute level, never a change applied
-        // to the node's current position. Pinned by a table-wide guard in
-        // `__tests__/constraint-value-frame-stamp.test.ts` rather than left to
-        // this comment, so a future mapping minting a delta reddens.
+        // ROADMAP 2.855 — the one frame stamp in this channel that is a
+        // JUDGEMENT rather than a derivation: the value is a TABLE CONSTANT,
+        // not a number parsed out of the user's own sentence, so no arithmetic
+        // at this site forces the answer. Every `ProxyMapping.defaultValue` in
+        // the table above is read as a threshold ON THE PROXY METRIC'S OWN
+        // SCALE (NPS >= 50, defect rate <= 0.02) — an absolute level, never a
+        // change applied to the node's current position.
+        //
+        // ⚠ ONE ENTRY IS CONTESTED, and saying so here is the point:
+        // `fac_cost_reduction` ("reduce operating costs" -> `>= 0.10`) reads as
+        // a REDUCTION AMOUNT, i.e. arguably a DELTA (raised in the PR #862
+        // review). It is not a live defect only because this whole path is
+        // DARK — the sole production call site,
+        // `unified-pipeline/stages/repair/compound-goals.ts`, passes
+        // `includeProxies: false`.
+        //
+        // Both facts are pinned by machinery rather than by this comment, in
+        // `__tests__/constraint-value-frame-stamp.test.ts`: a table-wide guard
+        // driving EVERY mapping through the real matcher (a new mapping minting
+        // a delta, or a negative default, reddens), plus a darkness pin so
+        // lighting the proxy path reddens until the contested frame is settled.
         valueFrame: "level",
       });
 
