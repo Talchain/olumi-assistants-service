@@ -44,6 +44,11 @@
 import { log } from "../../utils/telemetry.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { isLegalStructuralEdge } from "../utils/structural-edge-classifier.js";
+import {
+  honourStatedValues,
+  type StatedValueHonourRepair,
+  type StatedValueHonourSkip,
+} from "./stated-value-honour.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -83,6 +88,14 @@ export interface IntegrityRepairSummary {
   scale_consistency_repairs: ScaleConsistencyRepair[];
   edge_field_repairs: EdgeFieldRepair[];
   intercept_population_repairs: InterceptPopulationRepair[];
+  /** ROADMAP 2.714 (INV-HONOUR) — values restored to what the user stated. */
+  stated_value_honour_repairs: StatedValueHonourRepair[];
+  /**
+   * ROADMAP 2.714 (INV-HONOUR) — bindings the rule REFUSED. Recorded, not
+   * silent: an honour rule that skips and an honour rule that found nothing
+   * are indistinguishable otherwise, and only one of them is a decision.
+   */
+  stated_value_honour_skips: StatedValueHonourSkip[];
 }
 
 // ---------------------------------------------------------------------------
@@ -598,12 +611,49 @@ export function repairObservedRootIntercepts(v3Body: any, requestId?: string): I
 export function runGraphDataIntegrityChecks(
   v3Body: any,
   requestId?: string,
+  brief?: string,
 ): IntegrityRepairSummary {
   const summary: IntegrityRepairSummary = {
     scale_consistency_repairs: [],
     edge_field_repairs: [],
     intercept_population_repairs: [],
+    stated_value_honour_repairs: [],
+    stated_value_honour_skips: [],
   };
+
+  // ROADMAP 2.714 (INV-HONOUR) — FIRST, deliberately. It writes the
+  // human-scale `raw_value` and recomputes `value` on the same convention the
+  // scale-consistency repair below enforces, so the two can never disagree;
+  // running it after would leave the sibling repair correcting a value the
+  // user themselves stated.
+  try {
+    const honour = honourStatedValues(v3Body, brief);
+    summary.stated_value_honour_repairs = honour.repairs;
+    summary.stated_value_honour_skips = honour.skips;
+    for (const repair of honour.repairs) {
+      // Redacted log: IDs only, no numeric magnitudes — the contracted
+      // before/after values live in the in-payload repair record.
+      log.info({
+        event: "cee.graph_integrity.stated_value_honoured",
+        request_id: requestId,
+        node_id: repair.node_id,
+        field: repair.field,
+      }, `[graph-data-integrity] Stated value honoured: ${repair.node_id}`);
+    }
+    for (const skip of honour.skips) {
+      log.info({
+        event: "cee.graph_integrity.stated_value_skipped",
+        request_id: requestId,
+        node_id: skip.node_id,
+        reason: skip.reason,
+      }, `[graph-data-integrity] Stated-value binding refused: ${skip.node_id} (${skip.reason})`);
+    }
+  } catch (err) {
+    log.warn(
+      { error: err, request_id: requestId },
+      "[graph-data-integrity] Stated-value honour rule failed (non-blocking)",
+    );
+  }
 
   try {
     summary.scale_consistency_repairs = repairFactorScaleConsistency(v3Body, requestId);
@@ -632,7 +682,7 @@ export function runGraphDataIntegrityChecks(
     );
   }
 
-  const totalRepairs = summary.scale_consistency_repairs.length + summary.edge_field_repairs.length + summary.intercept_population_repairs.length;
+  const totalRepairs = summary.scale_consistency_repairs.length + summary.edge_field_repairs.length + summary.intercept_population_repairs.length + summary.stated_value_honour_repairs.length;
   if (totalRepairs > 0) {
     log.info({
       event: "cee.graph_integrity.summary",
@@ -640,6 +690,7 @@ export function runGraphDataIntegrityChecks(
       scale_consistency_repairs: summary.scale_consistency_repairs.length,
       edge_field_repairs: summary.edge_field_repairs.length,
       intercept_population_repairs: summary.intercept_population_repairs.length,
+      stated_value_honour_repairs: summary.stated_value_honour_repairs.length,
       total_repairs: totalRepairs,
     }, `[graph-data-integrity] Applied ${totalRepairs} correction(s)`);
   }

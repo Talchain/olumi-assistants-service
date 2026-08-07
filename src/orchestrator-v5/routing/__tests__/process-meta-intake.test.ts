@@ -145,11 +145,46 @@ describe('shape relationship with the draft heuristic', () => {
   // The misroute class: sparks that ALSO satisfy isDraftShapedText — these
   // are exactly the prompts that drafted meta-graphs before the guard.
   const DRAFT_SHAPED_SPARKS = UI_SPARK_PROMPTS.filter((p) => isDraftShapedText(p));
-  it('at least the six known draft-shaped sparks overlap the draft heuristic', () => {
-    expect(DRAFT_SHAPED_SPARKS.length).toBeGreaterThanOrEqual(6);
-    expect(DRAFT_SHAPED_SPARKS).toContain(
-      'What should I check before running the first analysis?',
+
+  /**
+   * ⚠ THIS ASSERTION MOVED WITH ROADMAP 2.715, AND THE DIRECTION IS THE POINT.
+   *
+   * It used to read `>= 6`, including 'What should I check before running the
+   * first analysis?'. Five of those six overlapped ONLY through the draft
+   * regex's `\?$` arm — the arm 2.715 exists to invert. `isDraftShapedText`
+   * now refuses a question TO the assistant outright, so the misroute class
+   * this mirror has to catch has SHRUNK from six to three: the string mirror
+   * is no longer the only thing standing between a typed coaching question
+   * and a meta-graph.
+   *
+   * It is not weakened to nothing, and it must not be: the three below are
+   * imperative or declarative sparks that carry a decision verb, so the shape
+   * predicate cannot see them and the mirror is still load-bearing for them.
+   * Pinned as an EXACT set, not a floor, so a further shrink is visible
+   * rather than silently tolerated.
+   */
+  it('exactly the three NON-interrogative sparks still overlap the draft heuristic', () => {
+    expect([...DRAFT_SHAPED_SPARKS].sort()).toEqual(
+      [
+        'Compare my view of this decision with yours. Where do we differ, and why?',
+        'Run a pre-mortem with me: imagine this choice failed a year from now. What went wrong?',
+        'Take the outside view on this decision: what do similar decisions and base rates suggest?',
+      ].sort(),
     );
+  });
+
+  it('2.715: the interrogative sparks are now refused by the SHAPE predicate, '
+    + 'not only by the string mirror', () => {
+    for (const prompt of [
+      'What should I check before running the first analysis?',
+      'What risks and best-case upsides are missing from my model?',
+      'Is this the right question to be asking, and does it fit my wider goals?',
+    ]) {
+      expect(isDraftShapedText(prompt)).toBe(false);
+      // ...and the mirror still claims them, so the deterministic answer branch
+      // (which keys on isProcessMetaIntake, not on the shape) is unaffected.
+      expect(isProcessMetaIntake(prompt)).toBe(true);
+    }
   });
 
   it('the typed pattern requires a single interrogative sentence', () => {

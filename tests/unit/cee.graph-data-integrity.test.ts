@@ -591,6 +591,11 @@ describe("Task 2: Edge field boundary safety net", () => {
         scale_consistency_repairs: [],
         edge_field_repairs: [],
         intercept_population_repairs: [],
+        // ROADMAP 2.714 (INV-HONOUR) — the fourth deterministic repair. Both
+        // arrays are always present so a consumer can read `.length` without
+        // a shape check; a null body simply binds nothing.
+        stated_value_honour_repairs: [],
+        stated_value_honour_skips: [],
       });
     });
 
