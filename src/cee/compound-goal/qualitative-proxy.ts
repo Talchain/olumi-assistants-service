@@ -264,8 +264,21 @@ export function mapQualitativeToProxy(brief: string): QualitativeProxyResult {
         // Both facts are pinned by machinery rather than by this comment, in
         // `__tests__/constraint-value-frame-stamp.test.ts`: a table-wide guard
         // driving EVERY mapping through the real matcher (a new mapping minting
-        // a delta, or a negative default, reddens), plus a darkness pin so
-        // lighting the proxy path reddens until the contested frame is settled.
+        // a delta, or a negative default, reddens), plus a darkness pin.
+        //
+        // WHAT THE DARKNESS PIN ACTUALLY GUARANTEES — stated narrowly, because
+        // its first version claimed more than it could deliver and was refuted
+        // by measurement (re-review of PR #862): it was bound to the
+        // EXTRACTOR'S DEFAULT, so flipping the call site above to `true` left
+        // the whole affected suite GREEN. It now reddens on exactly two
+        // things, and only those: (1) the REAL repair stage emitting a
+        // `fac_cost_reduction` constraint, driven through `runCompoundGoals`
+        // on a graph that contains that target node; and (2) the literal
+        // argument at that call site ceasing to be `includeProxies: false`,
+        // read from disk and bound by identity to that call. Both fire on the
+        // flip; measured RED-then-GREEN as a pair. It does NOT guarantee that
+        // every conceivable future route to the proxy path reddens — a NEW
+        // call site would have to be caught by review, or by adding it here.
         valueFrame: "level",
       });
 

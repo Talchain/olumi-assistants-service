@@ -35,8 +35,14 @@
  * a value predicate another constraint could satisfy (trap 19).
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, it, expect } from 'vitest';
 import { GoalThresholdFrame } from '@talchain/schemas';
+
+import { runCompoundGoals } from '../../unified-pipeline/stages/repair/compound-goals.js';
 
 import {
   extractCompoundGoals,
@@ -240,27 +246,125 @@ describe('2.855 — the qualitative-proxy TABLE mints levels, table-wide', () =>
     expect(asserted).toBe(QUALITATIVE_PROXY_MAPPINGS.length);
   });
 
-  it('the proxy path is OFF by default, and the pair proves the gate is what does it', () => {
-    // The proxy stamp is a judgement, and one mapping's level reading is
-    // genuinely contested — `fac_cost_reduction` ("reduce operating costs" ->
-    // `>= 0.10`) reads as a REDUCTION AMOUNT, i.e. arguably a delta. It is not
-    // a live defect only because the sole production call site
-    // (`stages/repair/compound-goals.ts`) passes `includeProxies: false`. That
-    // darkness is load-bearing, so it is pinned here rather than left to a
-    // comment: lighting the proxy path reddens this test, and the contested
-    // frame has to be settled at that point rather than shipped by default.
-    const brief = 'We want to reduce operating costs.';
+  /**
+   * THE DARKNESS PIN — and why it is bound to the PRODUCTION MOUNT PATH.
+   *
+   * The proxy stamp is a judgement, and one mapping's level reading is
+   * genuinely contested: `fac_cost_reduction` ("reduce operating costs" ->
+   * `>= 0.10`) reads as a REDUCTION AMOUNT, i.e. arguably a DELTA. It is not a
+   * live defect only because the path is DARK, and that darkness is decided at
+   * ONE place — `unified-pipeline/stages/repair/compound-goals.ts`, which calls
+   * `extractCompoundGoals(ctx.effectiveBrief, { includeProxies: false })`.
+   *
+   * ⚠ AN EARLIER VERSION OF THIS PIN WAS BOUND TO THE EXTRACTOR'S DEFAULT
+   * INSTEAD, AND IT WAS REFUTED BY MEASUREMENT (re-review of PR #862): flipping
+   * that call site to `true` left the whole affected suite — this pin included
+   * — GREEN. The pin asserted a property of an argument NOBODY IN PRODUCTION
+   * PASSES, so the sentence "lighting the proxy path reddens this test" was
+   * false for the only route that lights it. That is trap 3b at the seam rather
+   * than the surface: a guard bound to something the deployed wiring does not
+   * mount agrees with itself forever.
+   *
+   * So it is now pinned TWICE, from opposite directions, and the flip reddens
+   * both: through the REAL STAGE (behavioural), and at the CALL SITE'S OWN
+   * ARGUMENT (structural, bound by identity to that call).
+   */
+  describe('the contested proxy frame stays dark ON THE PRODUCTION MOUNT PATH', () => {
+    const PROXY_BRIEF = 'We want to reduce operating costs.';
 
-    const off = extractCompoundGoals(brief);
-    expect(off.constraints.filter((c) => c.targetNodeId === 'fac_cost_reduction')).toEqual([]);
+    /**
+     * A graph that CONTAINS the proxy's target node. This is load-bearing:
+     * `remapConstraintTargets` drops a constraint whose target matches no node
+     * ("Constraint target dropped (no match)"), so on a graph without
+     * `fac_cost_reduction` the constraint would vanish for a reason that has
+     * nothing to do with the gate — and the pin would go quiet again, one layer
+     * lower down. Measured: with the gate flipped ON and this graph, the proxy
+     * constraint DOES survive remap and reach `ctx.goalConstraints`.
+     */
+    function stageCtx(brief: string): any {
+      return {
+        requestId: 'test-2855-proxy-darkness',
+        effectiveBrief: brief,
+        graph: {
+          nodes: [
+            { id: 'goal_margin', kind: 'goal', label: 'Operating margin' },
+            { id: 'opt_a', kind: 'option', label: 'Option A' },
+            { id: 'fac_cost_reduction', kind: 'factor', label: 'Cost reduction' },
+            { id: 'fac_churn', kind: 'factor', label: 'Churn' },
+          ],
+          edges: [],
+        },
+        goalConstraints: undefined,
+      };
+    }
 
-    // The discriminating half: the SAME brief DOES mint it when proxies are
-    // on, so the absence above is the GATE's doing and not the brief failing to
-    // match (trap 13b — an absence assertion must pin its own precondition).
-    const on = extractCompoundGoals(brief, { includeProxies: true });
-    const minted = on.constraints.filter((c) => c.targetNodeId === 'fac_cost_reduction');
-    expect(minted, 'the proxy brief matches nothing even with proxies ON — the ' +
-      'absence assertion above proves nothing').toHaveLength(1);
-    expect(minted[0]!.valueFrame).toBe('level');
+    it('the REAL repair stage emits no proxy constraint, and the preconditions pin it', () => {
+      // PRECONDITION 1 — the brief really does mint the contested proxy when
+      // proxies are on, so "nothing matched" cannot explain the absence.
+      const withProxies = extractCompoundGoals(PROXY_BRIEF, { includeProxies: true });
+      const minted = withProxies.constraints.filter((c) => c.targetNodeId === 'fac_cost_reduction');
+      expect(
+        minted,
+        'the proxy brief matches nothing even with proxies ON — the absence ' +
+          'assertion below would prove nothing',
+      ).toHaveLength(1);
+      expect(minted[0]!.valueFrame).toBe('level');
+
+      // PRECONDITION 2 — the stage's EMIT path and this graph's remap both work:
+      // an ordinary (non-proxy) constraint on a node in the same graph reaches
+      // `ctx.goalConstraints`. Without this, a stage that emitted nothing at all
+      // would satisfy the assertion below (trap 13).
+      const control = stageCtx('Keep churn under 5% this year.');
+      runCompoundGoals(control);
+      expect(
+        (control.goalConstraints ?? []).map((c: any) => c.node_id),
+        'the stage emitted nothing even for an ordinary constraint — the ' +
+          'absence assertion below would be vacuous',
+      ).toContain('fac_churn');
+
+      // THE PIN: the production stage, as wired, emits no proxy constraint.
+      // Bound by node IDENTITY, never by a value predicate (trap 19).
+      const ctx = stageCtx(PROXY_BRIEF);
+      runCompoundGoals(ctx);
+      const emitted: any[] = ctx.goalConstraints ?? [];
+      expect(
+        emitted.filter((c) => c.node_id === 'fac_cost_reduction'),
+        'the repair stage emitted the CONTESTED proxy constraint. Its "level" ' +
+          'frame is a judgement that has not been settled — "reduce operating ' +
+          'costs >= 0.10" reads as a delta. Settle the frame before lighting ' +
+          'the proxy path.',
+      ).toEqual([]);
+    });
+
+    it("the call site's own argument is `includeProxies: false`, bound by identity", () => {
+      // The structural half. The behavioural pin above proves the CURRENT
+      // wiring is dark; this one names WHICH ARGUMENT AT WHICH CALL makes it
+      // so, so the flip cannot be smuggled past a fixture that happens to stop
+      // discriminating. Read from disk rather than restated here, so it cannot
+      // become a mirror of the call site (trap 12).
+      const callSite = readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'unified-pipeline', 'stages', 'repair', 'compound-goals.ts'),
+        'utf8',
+      );
+
+      const call = /extractCompoundGoals\(\s*ctx\.effectiveBrief\s*,\s*\{([^}]*)\}\s*\)/.exec(callSite);
+      // PRECONDITION: the call itself is still there and still shaped this way.
+      // A renamed or restructured call site must RED here rather than silently
+      // match nothing — an absence assertion over a regex that stopped matching
+      // is the purest form of a guard agreeing with itself (trap 13b).
+      expect(
+        call,
+        'the extractCompoundGoals(ctx.effectiveBrief, {...}) call site was not ' +
+          'found in stages/repair/compound-goals.ts — this guard has come ' +
+          'unbound from the thing it guards',
+      ).not.toBeNull();
+
+      expect(
+        call![1]!.replace(/\s+/g, ' ').trim(),
+        'the production repair stage no longer passes includeProxies: false. ' +
+          'That lights the qualitative-proxy path, including the CONTESTED ' +
+          "`fac_cost_reduction` level stamp. Settle that frame first.",
+      ).toBe('includeProxies: false');
+    });
   });
 });
