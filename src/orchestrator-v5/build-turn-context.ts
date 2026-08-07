@@ -30,6 +30,7 @@ import type {
 } from '@talchain/schemas/orchestrator';
 import type { HandlerFactWithTurn } from './types/handler-fact.js';
 import type { SessionTurnWithContent } from './session/conversation-content.js';
+import type { GraphWriteFailureDisclosure } from './session/store.js';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import { GraphV3, type GraphV3T } from '../schemas/cee-v3.js';
@@ -927,17 +928,26 @@ export async function loadDraftLossStands(
  * lack the method (legacy mocks): the turn is already failing; the trace
  * must never change the response. `turnId` is the INGRESS identity
  * (payload.turn_id — the fence row's key).
+ *
+ * ROADMAP 2.735 — `disclosure` is a REQUIRED argument, deliberately. It says
+ * whether this failure destroyed something the USER had (`draft_loss`) or
+ * merely killed a turn that never got as far as producing a graph
+ * (`turn_dead_only`). Only the former is disclosed to the user on their next
+ * turn. Making it required means a future marking site cannot become a
+ * disclosure by accident — which is exactly how the false claim shipped: one
+ * catch block covering every failure class, marking them all identically.
  */
 export async function markDraftGraphWriteFailed(
   scenarioId: string,
   turnId: string,
   reason: string,
   requestId: string,
+  disclosure: GraphWriteFailureDisclosure,
 ): Promise<void> {
   const store = tryGetSessionStore(requestId, scenarioId);
   if (!store?.markGraphWriteFailed) return;
   try {
-    await store.markGraphWriteFailed(scenarioId, turnId, reason);
+    await store.markGraphWriteFailed(scenarioId, turnId, reason, disclosure);
   } catch (e) {
     log.warn(
       {

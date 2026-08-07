@@ -240,6 +240,9 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
       SCENARIO_ID,
       TURN_ID,
       expect.stringContaining('draft'),
+      // ROADMAP 2.735 — an ATTEMPTED COMMIT is a real loss: the pipeline had
+      // produced a graph and the append was tried. Disclosed.
+      'draft_loss',
     );
   });
 
@@ -255,6 +258,13 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
       SCENARIO_ID,
       TURN_ID,
       expect.stringContaining('draft'),
+      // ROADMAP 2.735 — this harness injects into the BUFFERED
+      // /orchestrate/v2/turn, which emits no stage frames at all, so no client
+      // was ever shown a graph. The turn is marked dead (continuation
+      // detection must stop counting it) and NOTHING is disclosed. The
+      // post-GRAPH_READY twin — same throw, `draft_loss` — is pinned in
+      // route-v2-draft-loss-disclosure.test.ts, which drives the streamed seam.
+      'turn_dead_only',
     );
   });
 
@@ -287,6 +297,13 @@ describe('POST /orchestrate/v2/turn — draft-loss P0 wiring (2.709)', () => {
       SCENARIO_ID,
       TURN_ID,
       expect.stringContaining('draft'),
+      // ROADMAP 2.735 — this harness injects into the BUFFERED
+      // /orchestrate/v2/turn, which emits no stage frames at all, so no client
+      // was ever shown a graph. The turn is marked dead (continuation
+      // detection must stop counting it) and NOTHING is disclosed. The
+      // post-GRAPH_READY twin — same throw, `draft_loss` — is pinned in
+      // route-v2-draft-loss-disclosure.test.ts, which drives the streamed seam.
+      'turn_dead_only',
     );
     const body = JSON.parse(res.body);
     expect(body.details.reason).toBe('draft_graph_cee_graph_invalid');

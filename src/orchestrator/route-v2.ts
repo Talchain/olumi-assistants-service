@@ -125,6 +125,9 @@ import { validateEgress } from '../validators/b1.js';
 import { runTurnExecutor } from '../orchestrator-v5/turn-executor.js';
 import { dispatchSystemEvent } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
+// ROADMAP 2.735 — did THIS turn hand the client a graph to render? The one
+// fact that separates a lost model from a draft that never existed.
+import { graphPreviewEmitted } from '../cee/unified-pipeline/stage-stream-context.js';
 import { dispatchEditGraph } from '../orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { finaliseV5Response, isFinalisedV5Response, type FinalisedV5Response } from '../orchestrator-v5/response-finaliser.js';
 import { sanitiseOlumiResponseForEgress } from '../orchestrator-v5/compose/output-safety.js';
@@ -340,20 +343,28 @@ export const DRAFT_OFFER_CHIP_MESSAGE = 'Yes, build the model from what I have s
 /**
  * ROADMAP 2.709 invariant 6 — the draft-loss disclosure. Prepended by
  * `sendFinalised200` to any graph-less 200 on a scenario whose draft loss
- * STANDS (a failure-marked fence row + no committed graph), because the
- * client that lost the draft may be gone — this is the receipt channel that
- * does not depend on the socket the client aborted. Two sentences, both
- * true by construction of the gate that fires them: the loss is proven by
- * the trace, the emptiness by the graph read, and the redraft promise is
- * kept by the draft-shortcut unstranding term. Exported for the route test
- * and for the UI, which may key on this copy arriving as ordinary
- * assistant text (no wire-shape change — schema-skew hazard 1 avoided by
- * construction).
+ * STANDS (an UNRESOLVED, DISCLOSABLE loss mark + no committed graph), because
+ * the client that lost the draft may be gone — this is the receipt channel
+ * that does not depend on the socket the client aborted. Every clause is true
+ * by construction of the gate that fires it: the loss is proven by the trace,
+ * the emptiness by the graph read, and the redraft promise is kept by the
+ * draft-shortcut unstranding term. Exported for the route test and for the
+ * UI, which may key on this copy arriving as ordinary assistant text (no
+ * wire-shape change — schema-skew hazard 1 avoided by construction).
+ *
+ * ⚠ 2.735 REMOVED the clause "— the graph you saw was never saved", and the
+ *   reason is the second half of the same defect. Even with the marking gate
+ *   fixed, a `draft_loss` can be marked on a turn whose commit was attempted
+ *   WITHOUT any preview ever reaching a client (a buffered turn streams no
+ *   GRAPH_READY frame at all). "The graph you saw" was therefore false for a
+ *   whole class of genuine losses. Gating the marking and softening the copy
+ *   are not alternatives: the first stops us disclosing non-events, the
+ *   second stops us describing real events wrongly. What remains asserts only
+ *   what the gate proves — a draft did not save, and nothing is stored.
  */
 export const DRAFT_LOSS_NOTICE =
   "Heads-up: your last draft didn't save, so no model is stored for this " +
-  'conversation yet — the graph you saw was never saved. Send your decision ' +
-  "brief again and I'll redraft it.";
+  "conversation yet. Send your decision brief again and I'll redraft it.";
 /**
  * C3 — appended to the frame-guard copy ONLY when a usable brief seed was
  * captured (so the offer is never made with nothing to build from). The
@@ -3656,11 +3667,20 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // (the streamed-preempt path delivers this 500 to a closed
           // connection), so the loss must be readable by the scenario's
           // NEXT turn, whichever client sends it.
+          //
+          // 2.735 disclosure — `draft_loss`, and it is DERIVED from the
+          // dispatcher's contract rather than assumed: `commitPerformed:
+          // false` is returned only from the catch that wraps the commit
+          // block, i.e. the pipeline had produced its result and the append
+          // was attempted. A model existed and was being saved when it was
+          // lost, so the user is owed the disclosure whether or not they had
+          // been shown a preview.
           await markDraftGraphWriteFailed(
             ingress.scenario_id,
             ingress.turn_id,
             'draft_graph_commit_failed',
             requestId,
+            'draft_loss',
           );
           const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
             validator: 'turn_commit',
@@ -3743,15 +3763,40 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           },
           'V5 draft_graph pipeline threw — returning 500 BoundaryError',
         );
-        // ROADMAP 2.709 invariant 6 — the second draft-500 entry fault (e.g.
-        // CEE_GRAPH_INVALID after GRAPH_READY has already streamed). Same
-        // trace, same reason class: the next turn on this scenario surfaces
-        // the loss to the user whichever client sends it.
+        // ROADMAP 2.709 invariant 6, CORRECTED BY 2.735 — the second
+        // draft-500 entry fault.
+        //
+        // ⚠ THIS SITE SHIPPED A FALSE CLAIM TO THE USER, and the shape of the
+        //   mistake is worth keeping visible. `dispatchDraftGraph` rethrows
+        //   EVERY unified-pipeline failure through here: a provider rate
+        //   limit, an LLM timeout, a parse failure, a brief that never
+        //   reached the model — as well as the case this comment used to name
+        //   (CEE_GRAPH_INVALID after GRAPH_READY has already streamed). One
+        //   `catch`, one mark, one disclosure. So the scenario's next turn
+        //   greeted a user whose draft had died at the FIRST LLM call with
+        //   "your last draft didn't save … the graph you saw was never
+        //   saved" — a graph they had never been shown, described as lost.
+        //   Found by an external audit (Codex, 2026-08-08) after our own
+        //   review passed it; it was dark only because the migration that
+        //   creates the columns has not executed.
+        //
+        // The disclosure is now DERIVED FROM WHAT THE CLIENT ACTUALLY
+        // RECEIVED: `graphPreviewEmitted()` is true iff this turn streamed a
+        // GRAPH_READY frame, recorded at the emission itself (see
+        // stage-stream-context.ts). Not an allowlist of "late" error codes —
+        // that would be a hand-maintained mirror (trap 12) whose first stale
+        // entry re-opens exactly this defect. A buffered turn streams no
+        // frames at all, so it reads false, which is the honest answer: no
+        // client saw a preview from it.
+        const previewWasStreamed = graphPreviewEmitted();
         await markDraftGraphWriteFailed(
           ingress.scenario_id,
           ingress.turn_id,
-          'draft_graph_pipeline_threw',
+          previewWasStreamed
+            ? 'draft_graph_pipeline_threw_after_preview'
+            : 'draft_graph_pipeline_threw_before_preview',
           requestId,
+          previewWasStreamed ? 'draft_loss' : 'turn_dead_only',
         );
         const { reason, retryable } = pipelineStatusCode != null && pipelineErrorCode != null
           ? mapDraftGraphPipelineReason(

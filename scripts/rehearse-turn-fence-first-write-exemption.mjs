@@ -441,6 +441,51 @@ async function main() {
     const replay = await callV4({ scenarioId: s, turnId: 'browser-draft-turn', fenceGeneration: draftGen });
     record('idempotent replay returns the same row id', first.ok && replay.ok && first.id === replay.id);
   }
+  // (g) ROADMAP 2.738(a) — commit → Stop → identical retry.
+  //     The replay check now runs BEFORE OLTF1, so an already-committed turn
+  //     replays instead of being told it was stopped. The audit's case.
+  {
+    const s = await newScenario();
+    const gA = await claim(s, 'retry-after-stop');
+    const first = await callV4({ scenarioId: s, turnId: 'retry-after-stop', fenceGeneration: gA });
+    record('control: the turn commits', first.ok === true, `code=${first.code ?? 'ok'}`);
+    await stop(s, 'retry-after-stop');
+    const replay = await callV4({ scenarioId: s, turnId: 'retry-after-stop', fenceGeneration: gA });
+    record('2.738(a): commit → Stop → identical retry REPLAYS (was: OLTF1 for a persisted turn)',
+      replay.ok === true && replay.id === first.id, `code=${replay.code ?? 'ok'}`);
+  }
+  // (h) 2.738(a) DISCRIMINATOR — OLTF1 must still refuse a turn that was
+  //     stopped and never committed. Without this pair, (g) could be passing
+  //     because the Stop check was removed altogether rather than reordered.
+  {
+    const s = await newScenario();
+    const gA = await claim(s, 'stopped-uncommitted');
+    await stop(s, 'stopped-uncommitted');
+    const res = await callV4({ scenarioId: s, turnId: 'stopped-uncommitted', fenceGeneration: gA });
+    record('2.738(a) DISCRIMINATOR: stopped-and-UNCOMMITTED still → OLTF1',
+      res.ok === false && res.code === 'OLTF1', `code=${res.code}`);
+    const g = await scenarioGraph(s);
+    record('…and the stopped turn wrote no graph', g === null);
+  }
+  // (i) 2.738(a) — the replay path writes NOTHING, so it cannot resurrect a
+  //     graph. Commit a graph, overwrite it with a newer turn, Stop the old
+  //     turn, then replay the old turn: the newer graph must survive.
+  {
+    const s = await newScenario();
+    const gA = await claim(s, 'replay-no-write-old');
+    await callV4({ scenarioId: s, turnId: 'replay-no-write-old', fenceGeneration: gA });
+    const gB = await claim(s, 'replay-no-write-new');
+    await callV4({
+      scenarioId: s, turnId: 'replay-no-write-new', fenceGeneration: gB,
+      graph: { nodes: [{ id: 'newer' }], edges: [] },
+    });
+    await stop(s, 'replay-no-write-old');
+    const replay = await callV4({ scenarioId: s, turnId: 'replay-no-write-old', fenceGeneration: gA });
+    record('2.738(a): the replay answer is read-only (returns an id)', replay.ok === true);
+    const g = await scenarioGraph(s);
+    record('…and the NEWER graph is untouched by the replay',
+      JSON.stringify(g?.nodes) === JSON.stringify([{ id: 'newer' }]));
+  }
 
   console.log('\n── Phase 3: the trace columns accept the app’s mark + reads');
   {
@@ -460,6 +505,79 @@ async function main() {
       WHERE scenario_id = ${s}::uuid AND turn_id <> 'browser-interrupt-turn' AND graph_write_failed_at IS NULL
     `;
     record('the continuation read excludes the failure-marked row', live[0].n === 0);
+  }
+
+  // ── ROADMAP 2.735 — the DISCLOSURE columns, and the predicate split ──────
+  {
+    const { s } = await phantomShape();
+    const cols = await sql`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'v5_turn_fence'
+        AND column_name IN ('graph_loss_disclosable_at', 'graph_loss_resolved_at')
+      ORDER BY column_name
+    `;
+    record('2.735: both disclosure columns exist', cols.length === 2,
+      cols.map((c) => c.column_name).join(','));
+
+    // A turn_dead_only mark: failed, NOT disclosable.
+    await sql`
+      UPDATE v5_turn_fence
+        SET graph_write_failed_at = now(),
+            graph_write_failure_reason = 'draft_graph_pipeline_threw_before_preview'
+      WHERE scenario_id = ${s}::uuid AND turn_id = 'browser-draft-turn'
+    `;
+    const notice1 = await sql`
+      SELECT count(*)::int AS n FROM v5_turn_fence
+      WHERE scenario_id = ${s}::uuid
+        AND graph_loss_disclosable_at IS NOT NULL AND graph_loss_resolved_at IS NULL
+    `;
+    record('2.735: a turn_dead_only mark does NOT satisfy the notice predicate', notice1[0].n === 0);
+
+    // …and the SAME row, marked disclosable, does.
+    await sql`
+      UPDATE v5_turn_fence SET graph_loss_disclosable_at = now()
+      WHERE scenario_id = ${s}::uuid AND turn_id = 'browser-draft-turn'
+    `;
+    const notice2 = await sql`
+      SELECT count(*)::int AS n FROM v5_turn_fence
+      WHERE scenario_id = ${s}::uuid
+        AND graph_loss_disclosable_at IS NOT NULL AND graph_loss_resolved_at IS NULL
+    `;
+    record('2.735 DISCRIMINATOR: the same row marked draft_loss DOES satisfy it', notice2[0].n === 1);
+
+    // …and a resolution stamp takes it back out, permanently.
+    await sql`
+      UPDATE v5_turn_fence SET graph_loss_resolved_at = now()
+      WHERE scenario_id = ${s}::uuid
+        AND graph_loss_disclosable_at IS NOT NULL AND graph_loss_resolved_at IS NULL
+    `;
+    const notice3 = await sql`
+      SELECT count(*)::int AS n FROM v5_turn_fence
+      WHERE scenario_id = ${s}::uuid
+        AND graph_loss_disclosable_at IS NOT NULL AND graph_loss_resolved_at IS NULL
+    `;
+    record('2.735: an explicit resolution ends the notice (survives the graph going away)',
+      notice3[0].n === 0);
+  }
+
+  // ── ROADMAP 2.738(b) — the continuation read must exclude STOPPED rows ───
+  {
+    const s = await newScenario();
+    await claim(s, 'stopped-live-check');
+    await claim(s, 'asking-turn');
+    const before = await sql`
+      SELECT count(*)::int AS n FROM v5_turn_fence
+      WHERE scenario_id = ${s}::uuid AND turn_id <> 'asking-turn'
+        AND stopped_at IS NULL AND graph_write_failed_at IS NULL
+    `;
+    record('control: an unstopped, unmarked claim reads LIVE', before[0].n === 1);
+    await stop(s, 'stopped-live-check');
+    const after = await sql`
+      SELECT count(*)::int AS n FROM v5_turn_fence
+      WHERE scenario_id = ${s}::uuid AND turn_id <> 'asking-turn'
+        AND stopped_at IS NULL AND graph_write_failed_at IS NULL
+    `;
+    record('2.738(b): a STOPPED (never failure-marked) claim reads NOT live', after[0].n === 0);
   }
 
   console.log('\n── Phase 4: rollback rehearsal');

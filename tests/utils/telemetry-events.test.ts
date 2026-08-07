@@ -480,6 +480,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ROADMAP 2.709 — first-write exemption + the draft-loss trace/notice.
         V5TurnFenceFirstWriteExemption: "v5.turn_fence.first_write_exemption",
         V5TurnFenceGraphWriteFailureMarked: "v5.turn_fence.graph_write_failure_marked",
+        V5TurnFenceDraftLossResolved: "v5.turn_fence.draft_loss_resolved",
         V5DraftLossNoticeSurfaced: "v5.turn_fence.draft_loss_notice_surfaced",
         // Lane 8 — Graph Management referee live wiring (CEE_GRAPH_MANAGEMENT_MODE)
         V5CandidateMutationWouldApply: "v5.candidate_mutation.would_apply",
@@ -1271,6 +1272,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // mapping until dashboards exist).
         TelemetryEvents.V5TurnFenceFirstWriteExemption,
         TelemetryEvents.V5TurnFenceGraphWriteFailureMarked,
+        // ROADMAP 2.735 — same family, same posture.
+        TelemetryEvents.V5TurnFenceDraftLossResolved,
         TelemetryEvents.V5DraftLossNoticeSurfaced,
         // Lane 8 — Graph Management referee verdict events + Model Management
         // version hook: diagnostic-only (structured logs are the operational
@@ -2232,6 +2235,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Deliberate frozen-registry addition per the registry discipline.
         "v5.turn_fence.first_write_exemption",
         "v5.turn_fence.graph_write_failure_marked",
+        "v5.turn_fence.draft_loss_resolved",
         "v5.turn_fence.draft_loss_notice_surfaced",
       ];
 

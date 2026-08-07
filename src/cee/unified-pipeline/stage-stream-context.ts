@@ -35,20 +35,41 @@
  * See the lane evidence file for the recorded output.
  *
  * ── SAFETY ──────────────────────────────────────────────────────────────────
- * The store holds ONE field, a `void`-returning emitter. It cannot be read by
- * anything that does not import this module (complete consumer manifest:
- * `orchestrator/tools/draft-graph.ts`). It is set only for the duration of one
- * streamed turn, so a concurrent buffered turn — which runs in its own async
- * context — reads `undefined` and behaves exactly as it did before this lane.
- * That is the mechanism behind "the buffered route is regression-untouched":
- * not a flag, not a URL check, but the absence of a store to read.
+ * The store holds a `void`-returning emitter plus a read-only-to-consumers
+ * observation record (ROADMAP 2.735 — whether a GRAPH_READY frame was emitted).
+ * It cannot be read by anything that does not import this module. Complete
+ * consumer manifest, derived by grep at 2026-08-06:
+ *   · `orchestrator/tools/draft-graph.ts`      → `currentStageEmitter()`
+ *   · `orchestrator/route-v2.ts`               → `graphPreviewEmitted()`
+ * It is set only for the duration of one streamed turn, so a concurrent
+ * buffered turn — which runs in its own async context — reads `undefined` and
+ * behaves exactly as it did before this lane. That is the mechanism behind
+ * "the buffered route is regression-untouched": not a flag, not a URL check,
+ * but the absence of a store to read.
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { PipelineStageEmitter } from "./types.js";
 
+interface StageStreamObservations {
+  /**
+   * Set the instant a `GRAPH_READY` event passes through the ambient emitter —
+   * i.e. the instant this turn handed the client a graph to render.
+   *
+   * ROADMAP 2.735. This is the ONE fact that separates "the user was shown a
+   * model and it was then lost" from "the draft failed before there was
+   * anything to show", and the draft-loss disclosure turns on it. It is
+   * RECORDED AT THE EMISSION, not inferred from an error code: an allowlist of
+   * "post-preview failure codes" would be a hand-maintained mirror (CLAUDE.md
+   * trap 12) that goes stale the first time a new failure class lands after
+   * GRAPH_READY.
+   */
+  graphReadyEmitted: boolean;
+}
+
 interface StageStreamContext {
   readonly emit: PipelineStageEmitter;
+  readonly observed: StageStreamObservations;
 }
 
 const stageStreamStore = new AsyncLocalStorage<StageStreamContext>();
@@ -58,12 +79,38 @@ const stageStreamStore = new AsyncLocalStorage<StageStreamContext>();
  *
  * Everything `fn` awaits — including a full `app.inject()` round trip through
  * the Fastify hook chain — observes the emitter via {@link currentStageEmitter}.
+ *
+ * ROADMAP 2.735: the installed emitter is a RECORDING WRAPPER around the
+ * caller's. Because `currentStageEmitter()` is the only way to reach the
+ * ambient emitter (complete consumer manifest: `orchestrator/tools/draft-graph.ts`),
+ * every stage event the pipeline emits on a streamed turn passes through this
+ * wrapper — so {@link graphPreviewEmitted} is DERIVED from the emissions
+ * themselves and cannot drift from them. The flag is set BEFORE delegating, so
+ * a throwing downstream emitter cannot lose the observation.
  */
 export function runWithStageStream<T>(
   emit: PipelineStageEmitter,
   fn: () => Promise<T>,
 ): Promise<T> {
-  return stageStreamStore.run({ emit }, fn);
+  const observed: StageStreamObservations = { graphReadyEmitted: false };
+  const recording: PipelineStageEmitter = (event) => {
+    if (event.kind === 'GRAPH_READY') observed.graphReadyEmitted = true;
+    emit(event);
+  };
+  return stageStreamStore.run({ emit: recording, observed }, fn);
+}
+
+/**
+ * Did THIS turn stream a `GRAPH_READY` frame — i.e. did the client receive a
+ * graph to render?
+ *
+ * `false` outside a streamed turn, and that is the honest answer rather than a
+ * degraded one: a buffered `/orchestrate/v2/turn` emits no stage frames at all,
+ * so no client saw a preview from it. Callers use this to decide whether a
+ * failed draft LOST something the user was looking at.
+ */
+export function graphPreviewEmitted(): boolean {
+  return stageStreamStore.getStore()?.observed.graphReadyEmitted ?? false;
 }
 
 /**

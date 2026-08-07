@@ -523,10 +523,22 @@ export interface SessionStore {
 
   /**
    * ROADMAP 2.709 invariant 6 — does a draft loss STAND on this scenario?
-   * True iff some fence row carries a graph-write failure mark AND the
-   * scenario holds no committed graph. Self-healing: any successful graph
-   * commit turns it false with no clearing write. Throws on read failure;
-   * callers degrade to "no notice". Optional for mock tolerance.
+   * True iff some fence row carries an UNRESOLVED, DISCLOSABLE loss mark AND
+   * the scenario holds no committed graph.
+   *
+   * ⚠ 2.735 narrowed both halves of this, and the narrowing is the point:
+   *   · DISCLOSABLE — a turn that died BEFORE it had a graph to lose is
+   *     marked dead (so continuation detection stops counting it) but is NOT
+   *     disclosable; telling that user "your last draft didn't save" is a
+   *     false claim about an event that never happened.
+   *   · UNRESOLVED — a later successful graph commit RESOLVES outstanding
+   *     marks explicitly. The previous shape ("mark present AND graph now
+   *     null") only ever MASKED a historical mark, so deleting a graph months
+   *     later re-fired a notice about a draft the user had long since
+   *     replaced.
+   *
+   * Throws on read failure; callers degrade to "no notice". Optional for mock
+   * tolerance.
    */
   scenarioDraftLossStands?(scenarioId: string): Promise<boolean>;
 
@@ -538,9 +550,45 @@ export interface SessionStore {
    * `turnId` is the ADMISSION identity (the fence row's key), never the
    * commit metadata's write identity (2.301 lesson). Optional for mock
    * tolerance.
+   *
+   * ROADMAP 2.735 — `disclosure` is REQUIRED, and required on purpose: it is
+   * the forcing function that makes every marking site state, in the type
+   * system, whether this failure is something the USER lost. A new call site
+   * cannot inherit "disclosable" by omission, which is exactly how the false
+   * claim shipped.
    */
-  markGraphWriteFailed?(scenarioId: string, turnId: string, reason: string): Promise<void>;
+  markGraphWriteFailed?(
+    scenarioId: string,
+    turnId: string,
+    reason: string,
+    disclosure: GraphWriteFailureDisclosure,
+  ): Promise<void>;
+
+  /**
+   * ROADMAP 2.735 — record that any outstanding draft loss on this scenario is
+   * RESOLVED, because a graph has now committed. Best-effort (log-only on
+   * failure): the commit has already landed and a failed resolution write must
+   * never turn a success into an error. Optional for mock tolerance.
+   */
+  resolveScenarioDraftLoss?(scenarioId: string): Promise<void>;
 }
+
+/**
+ * ROADMAP 2.735 — what a graph-write failure mark CLAIMS.
+ *
+ * `draft_loss`      — a drafted model was lost: either the client had already
+ *                     been handed a GRAPH_READY preview, or a commit was
+ *                     actually attempted with a graph in hand. The user has
+ *                     something to be told about, so the next turn discloses.
+ * `turn_dead_only`  — the turn failed before there was a graph: an upstream
+ *                     error, a rate limit, a timeout, a validation failure at
+ *                     parse. The turn is dead (continuation detection must
+ *                     stop counting it as live) but NOTHING WAS LOST, so no
+ *                     disclosure is owed and none is made. These users already
+ *                     received a synchronous 500 carrying the failure and its
+ *                     recovery suggestion on the turn itself.
+ */
+export type GraphWriteFailureDisclosure = 'draft_loss' | 'turn_dead_only';
 
 /**
  * Thrown by commit stage when the Supabase RPC or any underlying DB operation
