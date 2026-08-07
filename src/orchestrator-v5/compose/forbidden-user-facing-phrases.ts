@@ -74,14 +74,38 @@ export const DOCTRINE_FATAL_PATTERNS: readonly RegExp[] = [
   // 1. The superlative-choice crowning: "<X> is/remains/looks like/appears to
   //    be [the|your|clearly the|…] <superlative> <choice-noun>". The copula
   //    anchor is what keeps legitimate coaching sayable — "what would make
-  //    Option B the better choice?" (adapters/llm/router.ts) and "the optimal
-  //    choice shifts from A to B" (assist.v1.isl-synthesis.ts) carry no
-  //    copula and do not match. The negation lookahead keeps the product able
+  //    Option B the better choice?" (adapters/llm/router.ts) carries no copula
+  //    and does not match. The negation lookahead keeps the product able
   //    to DE-recommend: "the status quo is not always the safest choice"
   //    (cee/validation/pre-decision-checks.ts) must survive, and does.
   //    `become` is deliberately absent from the copula set so conditional
   //    flip readings ("X could become the better choice") stay sayable.
-  /\b(?:is|are|was|were|remains?|looks?\s+like|seems?|appears?\s+to\s+be)\s+(?!not\b|never\b|no\b|rarely\b|seldom\b)(?:\w+\s+){0,2}(?:best|better|optimal|right|obvious|clear|clearest|smartest|safest|sensible|superior|preferable)\s+(?:choice|option|bet|path|route)\b/i,
+  //
+  //    ⚠ ROADMAP 2.725 — `strongest|most promising` ADDED, closing a MEASURED
+  //    evasion. `src/services/review/blockBuilders.ts:459` shipped
+  //    `"{label}" appears to be the strongest option.` and passed this pattern
+  //    clean, because `strongest` was absent from an alternation that already
+  //    carried `best|better|optimal|right|obvious|clear|clearest|smartest|
+  //    safest|sensible|superior|preferable`. Two sibling layers in this same
+  //    estate ALREADY treat it as a crowning word — the decision-review
+  //    validator's WIN_CUE (`decompose.ts`) and the unified-pipeline coaching
+  //    instructions (`coaching-pass.ts:172-173`, which ban "strongest or most
+  //    promising option" verbatim). The wire guard was the one that did not
+  //    know it. `most promising` rides along because the sibling that already
+  //    bans `strongest` bans it in the same breath, and leaving it out would
+  //    recreate the same one-word hole one synonym over.
+  //
+  //    FALSE-POSITIVE SWEEP (2.725, at 8c316b5e, 2,991 string-bearing files
+  //    across src/ Prompts/ data/ tools/ tests/ contracts/ config/ +
+  //    openapi.yaml + package.json): the extended alternation matches 12 lines
+  //    the current one does not. ONE is production source — the evasion above,
+  //    fixed in the same change. The other ELEVEN are all ADVERSARIAL fixtures
+  //    and negative-assertion strings (validator-explanation, validation-
+  //    registry `adversarial`, journey-classifiers, coaching-output-postcheck,
+  //    critiques-leader-claim-scan, the orchestrator-eval vocabulary fixture),
+  //    i.e. strings that exist precisely BECAUSE this register is banned.
+  //    Zero legitimate-prose false positives.
+  /\b(?:is|are|was|were|remains?|looks?\s+like|seems?|appears?\s+to\s+be)\s+(?!not\b|never\b|no\b|rarely\b|seldom\b)(?:\w+\s+){0,2}(?:best|better|optimal|right|obvious|clear|clearest|smartest|safest|sensible|superior|preferable|strongest|most\s+promising)\s+(?:choice|option|bet|path|route)\b/i,
   // 2. "your/the best bet" without a copula ("Your best bet: X").
   /\b(?:your|the)\s+best\s+bet\b/i,
   // 3. "advisable" — the ruling's exact prohibited verb. Bare-word safe: the
@@ -104,6 +128,34 @@ export const DOCTRINE_FATAL_PATTERNS: readonly RegExp[] = [
   //    with caution"), and the user's own quoted question ("Should I go with
   //    A or B?"). Banning them bare would erase real responses.
   /\b(?:you|i)\s+(?:should|would)\s+(?:choose|pick|go\s+with|select)\b/i,
+];
+
+/**
+ * ROADMAP 2.725 — the recommendation-NOUN class, extracted so a SECOND surface
+ * can share this exact definition instead of copying it.
+ *
+ * These four patterns lived inline in {@link FORBIDDEN_USER_FACING_PHRASES}
+ * until 2.725 needed them on the `assist.v1.*` route family too (see
+ * `src/services/doctrine/route-egress-doctrine-scan.ts`). Copying four regexes
+ * into a second module would have been the estate's dominant defect — a
+ * hand-maintained mirror that reads green while it drifts (CLAUDE.md trap 12).
+ * Naming the set is what makes both consumers spread ONE definition, and lets
+ * a spec assert set-membership by IDENTITY (`toContain(pattern)` on the regex
+ * object, not on its source string) so adding a fifth pattern here
+ * automatically covers both paths and cannot silently cover only one.
+ *
+ * Remedy class differs BY CONSUMER and that is deliberate:
+ *   - turn path: rewritable — `applyTerminologyRewrite` maps every one of these
+ *     ("recommendation" → "leading option", "recommended" → "suggested",
+ *     "the winner" → "the leading option", "winning <X>" → "leading <X>").
+ *   - route family: detection only. See that module's header for why importing
+ *     the turn path's remedy would corrupt user-authored content.
+ */
+export const DOCTRINE_VERDICT_PATTERNS: readonly RegExp[] = [
+  /\brecommendations?\b/i,
+  /\brecommended\b/i,
+  /\bthe\s+winners?\b/i,
+  /\bwinning\s+(?:option|probability|side|choice|outcome)\b/i,
 ];
 
 export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
@@ -205,10 +257,11 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // fallback. The narrowed forms target the prescriptive uses
   // ("the winner", "winning option / probability / side / choice")
   // without catching label-quotes.
-  /\brecommendations?\b/i,
-  /\brecommended\b/i,
-  /\bthe\s+winners?\b/i,
-  /\bwinning\s+(?:option|probability|side|choice|outcome)\b/i,
+  // Declared above as DOCTRINE_VERDICT_PATTERNS (2.725) and spread in here, so
+  // the `assist.v1.*` route scanner and this turn-path guard share ONE
+  // definition rather than two copies that drift. Full rationale on that
+  // constant.
+  ...DOCTRINE_VERDICT_PATTERNS,
   // ROADMAP 2.213 — the no-recommendations doctrine (the six choice-directive
   // frames). Declared above as DOCTRINE_FATAL_PATTERNS and spread in here, so
   // the fatal-remedy class has a symbol the spec can iterate; full rationale

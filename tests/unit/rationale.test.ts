@@ -101,7 +101,7 @@ describe("generateRationale", () => {
 
       expect(result?.summary).toContain("Enterprise");
       expect(result?.summary).toContain("92%");
-      expect(result?.summary).toContain("best choice");
+      expect(result?.summary).toContain("stays in front");
     });
 
     it("uses goal only template when only goal available", () => {
@@ -114,7 +114,7 @@ describe("generateRationale", () => {
 
       expect(result?.summary).toContain("Growth Plan");
       expect(result?.summary).toContain("Increase Market Share");
-      expect(result?.summary).toContain("best achieves");
+      expect(result?.summary).toContain("scores highest");
     });
 
     it("uses minimal template as fallback", () => {
