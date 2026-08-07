@@ -111,6 +111,13 @@ export function createMockSessionStore(
     hasOtherAdmittedLiveTurn: async () => false,
     scenarioDraftLossStands: async () => false,
     markGraphWriteFailed: async () => undefined,
+    // ROADMAP 2.735 — the drift alarm fired again here, as designed (#848 added
+    // this method to the interface and this helper was not updated, reddening
+    // BOTH test-file typecheck watchers — see the header). Benign default =
+    // the resolution write succeeds and reports nothing, matching production's
+    // best-effort/log-only contract. Consistent with `scenarioDraftLossStands`
+    // above returning `false`: no outstanding loss, so resolving is a no-op.
+    resolveScenarioDraftLoss: async () => undefined,
   };
   return { ...complete, ...overrides };
 }

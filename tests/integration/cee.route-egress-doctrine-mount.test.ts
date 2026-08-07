@@ -86,9 +86,15 @@ describe("route-egress doctrine scan — MOUNT coverage (ROADMAP 2.725 / review 
    */
   const doctrineEvents = (): DoctrineLogPayload[] =>
     warnSpy.mock.calls
-      .map((call) => call[0])
+      // `ReturnType<typeof vi.spyOn>` (unparameterised) resolves `mock.calls` to
+      // `any`, so these two callbacks had no contextual type and tripped
+      // `noImplicitAny` in the FULL typecheck (tsconfig.json), which
+      // `tsconfig.build.json` excludes tests from and therefore cannot see.
+      // Annotating here keeps the narrowing below honest — `unknown` forces the
+      // type predicate to do the work rather than inheriting `any`.
+      .map((call: unknown[]) => call[0])
       .filter(
-        (arg): arg is DoctrineLogPayload =>
+        (arg: unknown): arg is DoctrineLogPayload =>
           typeof arg === "object" &&
           arg !== null &&
           (arg as { event?: unknown }).event === DOCTRINE_EVENT,
