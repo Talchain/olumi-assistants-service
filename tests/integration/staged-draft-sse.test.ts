@@ -18,12 +18,26 @@
  * ids, durations). A pin that hand-listed those fields would be a maintained
  * mirror, and would silently grow to cover a REAL divergence the day one
  * appeared (CLAUDE.md trap 12). So the volatile set is DERIVED, not listed:
- * the test runs the BUFFERED route three times and unions the pairwise diffs,
- * and whatever differs between runs of the SAME route is by definition
- * volatile. The staged-vs-buffered comparison then ignores exactly that derived
- * set and nothing else — and a further assertion fails the test if the derived
- * set ever grows to include a structural key, which is the only way this
- * normalisation could hide a real difference.
+ * the test runs each route several times and unions the pairwise diffs, and
+ * whatever differs between runs of the SAME route is by definition volatile.
+ * The staged-vs-buffered comparison then ignores exactly that derived set and
+ * nothing else — and a further assertion fails the test if the derived set ever
+ * grows to include a structural key, which is the only way this normalisation
+ * could hide a real difference.
+ *
+ * ⚠ SAMPLING ALONE WAS NOT ENOUGH, AND THIS WAS MEASURED, NOT ARGUED. Sampling
+ * classifies a field volatile only if it HAPPENS to differ in the sample. Ids
+ * always differ, so they are always caught. Sub-millisecond durations do not:
+ * `trace.pipeline.threshold_sweep.duration_ms` read 0 on all 60 sampled runs of
+ * a local census, so it was never classified volatile — and then a run that took
+ * 1 ms reported it as a divergence. At commit bfb2cb5f the SAME
+ * `Integration Tests (advisory)` job ran twice on an identical tree and
+ * disagreed on exactly that path (job 92755069551 PASSED, 92755076632 FAILED).
+ * Wall-clock readings are therefore NORMALISED BY CONSTRUCTION before the
+ * comparison — not excluded — by `tests/helpers/payload-equivalence.ts`, whose
+ * header carries the full rationale and whose sibling unit spec pins the
+ * properties with no clock in the loop. Sampling keeps its job (ids); the two
+ * mechanisms are complementary and neither supersedes the other.
  *
  * `app.inject()` buffers the whole SSE response and resolves on `raw.end()`, so
  * these tests prove frame ORDER and CONTENT. They cannot prove wall-clock
@@ -71,6 +85,11 @@ vi.mock("../../src/services/validateClient.js", () => ({
 import { build } from "../../src/server.js";
 import { cleanBaseUrl } from "../helpers/env-setup.js";
 import { STAGED_FRAME_CLASSES } from "../../src/routes/assist.v1.draft-graph-staged.js";
+import {
+  deriveVolatility,
+  equivalenceDivergences,
+  normaliseWallClockTimings,
+} from "../helpers/payload-equivalence.js";
 
 const BRIEF = "A sufficiently long decision brief to pass validation and exercise the pipeline.";
 const PAYLOAD = { brief: BRIEF };
@@ -92,23 +111,6 @@ function parseStageFrames(body: string): StageFrame[] {
     frames.push(JSON.parse(dataLine.slice(6)) as StageFrame);
   }
   return frames;
-}
-
-/** Every differing path between two JSON values, as dotted paths. */
-function diffPaths(a: unknown, b: unknown, path = ""): string[] {
-  if (a === b) return [];
-  const bothObjects =
-    typeof a === "object" && a !== null && typeof b === "object" && b !== null;
-  if (!bothObjects) return [path];
-  if (Array.isArray(a) !== Array.isArray(b)) return [path];
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return [path];
-    return a.flatMap((v, i) => diffPaths(v, (b as unknown[])[i], `${path}[${i}]`));
-  }
-  const ao = a as Record<string, unknown>;
-  const bo = b as Record<string, unknown>;
-  const keys = new Set([...Object.keys(ao), ...Object.keys(bo)]);
-  return [...keys].flatMap((k) => diffPaths(ao[k], bo[k], path ? `${path}.${k}` : k));
 }
 
 /** Collect every object KEY appearing anywhere in a JSON value. */
@@ -330,28 +332,21 @@ describe("staged SSE draft delivery (ROADMAP 1.204 M1)", () => {
   // ── 4. THE EQUIVALENCE PIN ───────────────────────────────────────────────
 
   it("terminal payload is equivalent to the buffered route's body", async () => {
-    // CONTROL: the SAME route, several times. Whatever differs between two runs
-    // of one route is volatile by construction (ids, clocks) — derived, never
-    // hand-listed.
+    // Two independent mechanisms decide what may differ, and they cover
+    // different things. NEITHER replaces the other.
     //
-    // SAMPLED, and sampled from BOTH routes — for a measured reason. A single
-    // buffered pair is not enough: under the fixtures adapter a draft completes
-    // so fast that `trace.pipeline.total_duration_ms` lands on the SAME integer
-    // millisecond in consecutive runs, so the path is never classified volatile
-    // — and then any run whose duration does differ reds the test for no real
-    // reason. (Observed: this exact path, ~1 run in 10.) A flaky pin is worse
-    // than no pin; an alarm that cries wolf gets ignored.
+    //  (a) NORMALISATION BY CONSTRUCTION — a wall-clock reading is volatile
+    //      because of what it IS, not because a sample happened to catch it
+    //      varying. Every numeric leaf under a timing-named key collapses to one
+    //      sentinel before the comparison. Presence, type and every non-timing
+    //      field still compare exactly (see payload-equivalence.ts).
     //
-    // So volatility is derived from repeated runs of EACH route against ITSELF
-    // — never across the two, which would be circular (it would use the very
-    // equality under test to decide what may be ignored). Staged runs carry the
-    // extra jitter of SSE writes, which is what actually surfaces the duration
-    // fields.
-    //
-    // BE HONEST ABOUT THE RESIDUAL: this is sampling, not a proof. Measured
-    // 0 failures in 20 runs here against ~1 in 10 before. If it ever reds on a
-    // pure timing path again, the fix is another sample — NOT a hand-written
-    // ignore list, which is the failure mode this derivation exists to avoid.
+    //  (b) SAMPLING — the SAME route, several times. Whatever differs between
+    //      two runs of one route is volatile by construction: ids, plan ids.
+    //      Derived, never hand-listed (CLAUDE.md trap 12). Sampled from BOTH
+    //      routes and only ever WITHIN a route, never across the two — across
+    //      would be circular, using the very equality under test to decide what
+    //      may be ignored.
     const bufferedBodies = [
       JSON.parse((await injectBuffered()).body),
       JSON.parse((await injectBuffered()).body),
@@ -367,19 +362,32 @@ describe("staged SSE draft delivery (ROADMAP 1.204 M1)", () => {
       (await stagedTerminal()).payload,
     ];
 
-    const volatilePaths = new Set<string>();
-    for (const sameRouteBodies of [bufferedBodies, stagedBodies]) {
-      for (let i = 0; i < sameRouteBodies.length; i++) {
-        for (let j = i + 1; j < sameRouteBodies.length; j++) {
-          for (const p of diffPaths(sameRouteBodies[i], sameRouteBodies[j])) volatilePaths.add(p);
-        }
-      }
-    }
+    const { volatilePaths, unnamedNumericVolatilePaths } = deriveVolatility([
+      bufferedBodies,
+      stagedBodies,
+    ]);
     const controlBodies = bufferedBodies;
 
-    // Guard the guard: the derived volatile set must never include a
-    // structural or claim-bearing path, because that is the only way the
-    // normalisation below could conceal a genuine divergence.
+    // ── FAIL LOUD WHEN A NEW TIMING FIELD APPEARS ────────────────────────────
+    // (a) is a NAME rule, so deriving guards from it moves the risk onto the
+    // rule rather than removing it (trap 12d). This is the check that is NOT
+    // derived from the rule: a number that changes between two runs of one route
+    // under an identical input is either a wall-clock reading whose key the rule
+    // does not recognise, or genuine non-determinism in the pipeline. Both are
+    // findings, and both get named here instead of resurfacing as a mystery
+    // flake once every ten runs — which is exactly how this test failed before.
+    expect(
+      unnamedNumericVolatilePaths,
+      `a NUMBER varies between runs of the same route at: ${unnamedNumericVolatilePaths.join(", ")}. ` +
+        `If these are wall-clock readings, teach TIMING_KEY_RE their name shape ` +
+        `(tests/helpers/payload-equivalence.ts). If they are not, the draft pipeline ` +
+        `is non-deterministic under an identical input and THAT is the finding.`,
+    ).toEqual([]);
+
+    // Guard the guards: neither mechanism may touch a structural or
+    // claim-bearing path, because that is the only way either could conceal a
+    // genuine divergence. Checked for the sampled set AND for every path the
+    // wall-clock normaliser actually rewrote.
     const STRUCTURAL_PREFIXES = [
       "nodes",
       "edges",
@@ -392,14 +400,30 @@ describe("staged SSE draft delivery (ROADMAP 1.204 M1)", () => {
       "quality",
       "_pipeline_outcome",
     ];
-    for (const p of volatilePaths) {
+    // Both ROUTES, not just the control: a timing-named key that appeared under
+    // `nodes` on the staged side only would otherwise be rewritten without this
+    // guard ever seeing it.
+    const touchedEitherRoute = [...bufferedBodies, ...stagedBodies].flatMap(
+      (b) => normaliseWallClockTimings(b).touched,
+    );
+    const suppressed = [...volatilePaths, ...touchedEitherRoute];
+    for (const p of suppressed) {
       for (const prefix of STRUCTURAL_PREFIXES) {
         expect(
           p === prefix || p.startsWith(`${prefix}.`) || p.startsWith(`${prefix}[`),
-          `volatile-path derivation captured a structural path "${p}" — the equivalence pin would be hollow`,
+          `a suppressed path "${p}" is structural — the equivalence pin would be hollow`,
         ).toBe(false);
       }
     }
+
+    // Positive control: the normaliser must actually have engaged. If the trace
+    // ever stops carrying wall-clock fields, `touched` goes empty and mechanism
+    // (a) becomes a silent no-op — an absence assertion that cannot see a
+    // presence proves nothing (trap 13).
+    expect(
+      touchedEitherRoute.length,
+      "wall-clock normalisation touched nothing — mechanism (a) is inert and this pin is back to its flaky shape",
+    ).toBeGreaterThan(0);
 
     // The real comparison.
     const staged = await injectStaged();
@@ -408,9 +432,9 @@ describe("staged SSE draft delivery (ROADMAP 1.204 M1)", () => {
     expect(terminal.stage).toBe("COMPLETE");
     expect(terminal.status_code).toBe(200);
 
-    const differing = diffPaths(controlBodies[0], terminal.payload).filter(
-      (p) => !volatilePaths.has(p),
-    );
+    const differing = equivalenceDivergences(controlBodies[0], terminal.payload, {
+      ignorePaths: volatilePaths,
+    });
 
     expect(
       differing,
